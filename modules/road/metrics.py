@@ -4,6 +4,8 @@ import bisect
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from .geometry import haversine_m, safe_round
+
 
 def select_metric_columns(fieldnames: List[str], metric_key: str, radius_label_from_header) -> Dict[str, str]:
     chosen: Dict[str, str] = {}
@@ -277,3 +279,74 @@ def sample_scatter_points(
     if len(sampled) > max_points:
         sampled = sampled[:max_points]
     return sampled
+
+
+_ORIENTATION_LABELS = {
+    "east_west": "东西向",
+    "north_south": "南北向",
+    "northeast_southwest": "东北-西南向",
+    "northwest_southeast": "西北-东南向",
+}
+
+
+def classify_axis_orientation(lon1: float, lat1: float, lon2: float, lat2: float) -> str:
+    dx = float(lon2) - float(lon1)
+    dy = float(lat2) - float(lat1)
+    if abs(dx) <= 1e-12 and abs(dy) <= 1e-12:
+        return ""
+    angle = (math.degrees(math.atan2(dy, dx)) + 180.0) % 180.0
+    if angle < 22.5 or angle >= 157.5:
+        return "east_west"
+    if angle < 67.5:
+        return "northeast_southwest"
+    if angle < 112.5:
+        return "north_south"
+    return "northwest_southeast"
+
+
+def build_road_orientation_analysis(features: List[Dict[str, Any]]) -> Dict[str, Any]:
+    buckets = {
+        key: {
+            "key": key,
+            "label": label,
+            "length_km": 0.0,
+            "length_share": 0.0,
+            "edge_count": 0,
+        }
+        for key, label in _ORIENTATION_LABELS.items()
+    }
+    for feature in features or []:
+        geometry = (feature or {}).get("geometry") or {}
+        if geometry.get("type") != "LineString":
+            continue
+        coords = geometry.get("coordinates") or []
+        clean: List[List[float]] = []
+        for point in coords:
+            if isinstance(point, (list, tuple)) and len(point) >= 2:
+                try:
+                    clean.append([float(point[0]), float(point[1])])
+                except (TypeError, ValueError):
+                    continue
+        for a, b in zip(clean, clean[1:]):
+            key = classify_axis_orientation(a[0], a[1], b[0], b[1])
+            if not key:
+                continue
+            length_km = haversine_m(a[0], a[1], b[0], b[1]) / 1000.0
+            buckets[key]["length_km"] += max(0.0, float(length_km))
+            buckets[key]["edge_count"] += 1
+
+    total_length = sum(float(item["length_km"]) for item in buckets.values())
+    for item in buckets.values():
+        item["length_km"] = safe_round(float(item["length_km"]), 4)
+        item["length_share"] = safe_round(float(item["length_km"]) / total_length, 6) if total_length > 1e-9 else 0.0
+    rows = list(buckets.values())
+    ranked = sorted(rows, key=lambda item: (float(item["length_km"]), int(item["edge_count"])), reverse=True)
+    dominant = ranked[0] if ranked and float(ranked[0]["length_km"]) > 0 else {}
+    secondary = ranked[1] if len(ranked) > 1 and float(ranked[1]["length_km"]) > 0 else {}
+    return {
+        "dominant_orientation": str(dominant.get("label") or ""),
+        "secondary_orientation": str(secondary.get("label") or ""),
+        "dominant_share": float(dominant.get("length_share") or 0.0),
+        "secondary_share": float(secondary.get("length_share") or 0.0),
+        "orientation_rows": rows,
+    }

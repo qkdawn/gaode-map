@@ -7,7 +7,11 @@ from typing import Any
 
 from core.config import settings
 
-from .analysis import build_gradient_layer_cells, build_hotspot_layer_cells
+from .analysis import (
+    build_gradient_layer_cells,
+    build_hotspot_layer_cells,
+    enrich_economic_activity_analysis,
+)
 from .aggregate import aggregate_clip_to_target_cells
 from .common import (
     GRADIENT_VIEW,
@@ -89,6 +93,29 @@ def _empty_layer_payload(
     }
 
 
+def _polygon_center_gcj02(polygon: list) -> list[float]:
+    points: list[list[float]] = []
+
+    def _collect(value: Any) -> None:
+        if not isinstance(value, list):
+            return
+        if len(value) >= 2 and isinstance(value[0], (int, float)) and isinstance(value[1], (int, float)):
+            points.append([float(value[0]), float(value[1])])
+            return
+        for item in value:
+            _collect(item)
+
+    _collect(polygon)
+    if len(points) >= 2 and points[0] == points[-1]:
+        points = points[:-1]
+    if not points:
+        return []
+    return [
+        sum(point[0] for point in points) / len(points),
+        sum(point[1] for point in points) / len(points),
+    ]
+
+
 def _empty_raster_payload(scope_id: str, year: int, unit: str) -> dict[str, Any]:
     return {
         "scope_id": scope_id,
@@ -167,6 +194,18 @@ def get_nightlight_layer(
     else:
         cells, legend = build_layer_cells(aggregated_cells, str(dataset.unit))
         analysis = {}
+    summary = summarize_masked_values(clip.array)
+    hotspot_cell_ids = set()
+    raw_hotspot_ids = analysis.pop("_hotspot_cell_ids", set()) if isinstance(analysis, dict) else set()
+    if isinstance(raw_hotspot_ids, set):
+        hotspot_cell_ids = {str(item) for item in raw_hotspot_ids}
+    analysis = enrich_economic_activity_analysis(
+        summary,
+        analysis,
+        aggregated_cells,
+        center_gcj02=_polygon_center_gcj02(polygon),
+        hotspot_cell_ids=hotspot_cell_ids,
+    )
     return {
         "scope_id": resolved_scope_id,
         "year": int(dataset.year),
@@ -176,7 +215,7 @@ def get_nightlight_layer(
             view=safe_view,
             view_label=view_label,
         ),
-        "summary": summarize_masked_values(clip.array),
+        "summary": summary,
         "analysis": analysis,
         "legend": legend,
         "cells": cells,

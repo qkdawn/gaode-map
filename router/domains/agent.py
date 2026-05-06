@@ -8,6 +8,8 @@ from modules.agent.runtime import process_agent_turn, stream_agent_turn
 from modules.agent.schemas import (
     AgentIterationNightlightRequest,
     AgentIterationNightlightResponse,
+    AgentIterationPoiBuildRequest,
+    AgentIterationPoiBuildResponse,
     AgentIterationPoiRequest,
     AgentIterationPoiResponse,
     AgentSummaryStreamEvent,
@@ -23,6 +25,7 @@ from modules.agent.schemas import (
     AgentTurnResponse,
 )
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
+from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload
 from modules.agent.summary_service import evaluate_summary_readiness, stream_generate_summary_pack
 from modules.agent.session_service import (
     delete_agent_session,
@@ -34,6 +37,7 @@ from modules.agent.session_service import (
 )
 from modules.agent.tools import get_tool_registry
 from store.agent_session_repo import agent_session_repo
+from store.history_repo import history_repo
 
 router = APIRouter()
 
@@ -183,6 +187,14 @@ async def post_agent_iteration_nightlight_interpret(payload: AgentIterationNight
 )
 async def post_agent_iteration_poi_interpret(payload: AgentIterationPoiRequest):
     return await generate_poi_iteration_analysis(payload.evidence)
+
+
+@router.post(
+    "/api/v1/analysis/agent/iteration/poi/build",
+    response_model=AgentIterationPoiBuildResponse,
+)
+async def post_agent_iteration_poi_build(payload: AgentIterationPoiBuildRequest):
+    return await build_agent_poi_iteration_payload(payload, history_repo)
 
 
 @router.get("/api/v1/analysis/agent/sessions/{session_id}", response_model=AgentSessionDetail)

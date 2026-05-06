@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import OperationalError
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -97,3 +98,20 @@ def test_get_history_detail_and_pois_raise_404_when_record_missing(monkeypatch):
 
     assert detail_exc.value.status_code == 404
     assert pois_exc.value.status_code == 404
+
+
+def test_get_history_pois_reports_database_sort_memory_error(monkeypatch):
+    def _raise_sort_memory(history_id, year=None):
+        raise OperationalError(
+            "select poi_results",
+            {"history_id": history_id},
+            Exception("1038 Out of sort memory, consider increasing server sort buffer size"),
+        )
+
+    monkeypatch.setattr(history_module.history_repo, "get_pois", _raise_sort_memory)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(history_module.get_history_pois("history-oos"))
+
+    assert exc.value.status_code == 500
+    assert "数据库排序内存不足" in exc.value.detail

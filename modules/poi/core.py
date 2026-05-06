@@ -253,7 +253,7 @@ async def fetch_pois_by_polygon(
     polygon: list,
     keywords: str,
     types: str = "",
-    max_count: int = 1000
+    max_count: int = 0
 ) -> List[Dict]:
     all_pois: List[Dict] = []
     polygon_rings = _normalize_polygon_rings_input(polygon)
@@ -277,7 +277,7 @@ async def fetch_local_pois_by_polygon(
     polygon: list,
     types: str = "",
     year: Optional[int] = None,
-    max_count: int = 1000,
+    max_count: int = 0,
 ) -> List[Dict]:
     normalized: List[Dict] = []
     polygon_rings = _normalize_polygon_rings_input(polygon)
@@ -506,7 +506,7 @@ async def _fetch_remaining_pages(
     poly_str = ";".join([f"{p[0]:.6f},{p[1]:.6f}" for p in polygon])
     all_pois = []
     page_size = 25
-    max_pages = (min(total_count, 900) // page_size) + 1
+    max_pages = _calculate_amap_page_count(total_count, page_size)
     
     # Start from page 2
     for page in range(2, max_pages + 1):
@@ -553,6 +553,15 @@ async def _fetch_remaining_pages(
             
     return all_pois
 
+
+def _calculate_amap_page_count(total_count, page_size: int = 25) -> int:
+    try:
+        total = max(0, int(total_count or 0))
+    except (TypeError, ValueError):
+        total = 0
+    page_size = max(1, int(page_size or 1))
+    return max(1, math.ceil(total / page_size))
+
 def _normalize_pois(raw_list: List[Dict]) -> List[Dict]:
     results = []
     for p in raw_list:
@@ -580,11 +589,21 @@ def _normalize_pois(raw_list: List[Dict]) -> List[Dict]:
                 "address": str(address),
                 "type": str(p_type),
                 "adname": str(p.get("adname", "")),
+                "year": _safe_int(p.get("year")),
                 "lines": lines
             })
         except:
             continue
     return results
+
+
+def _safe_int(value) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _dedupe_polygon_pois(pois: List[Dict]) -> List[Dict]:

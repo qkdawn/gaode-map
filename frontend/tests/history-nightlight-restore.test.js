@@ -218,6 +218,35 @@ test('loadHistoryDetail keeps restored history id and history scope source', asy
   assert.deepEqual(ctx.allPoisDetails, [{ id: 'history-poi' }])
 })
 
+test('_restoreHistoryPoisAsync includes backend detail in failure message', async () => {
+  const originalFetch = global.fetch
+  const ctx = Object.assign(createHistoryRestoreContext(), historyMethods, {
+    historyDetailLoadToken: 1,
+  })
+  global.fetch = async () => ({
+    ok: false,
+    status: 500,
+    clone() {
+      return this
+    },
+    async json() {
+      return { detail: '数据库排序内存不足，POI 明细未恢复' }
+    },
+    async text() {
+      return ''
+    },
+  })
+
+  try {
+    await assert.rejects(
+      () => ctx._restoreHistoryPoisAsync('history-1', 1, new AbortController().signal),
+      /数据库排序内存不足/,
+    )
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
 test('ensureNightlightPanelEntryState recomputes after history reset cleared previous results', async () => {
   const ctx = Object.assign(
     createAnalysisNightlightInitialState(),

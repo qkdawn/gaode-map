@@ -7,7 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal
-from .models import AgentSession, AnalysisHistory
+from .models import AgentSession
 
 
 def _clone_json_payload(payload: Any) -> Any:
@@ -32,96 +32,43 @@ def _extract_snapshot_meta(snapshot: Any) -> Dict[str, Any]:
     return meta if isinstance(meta, dict) else {}
 
 
-def _normalize_session_kind(value: Any) -> str:
-    kind = str(value or "").strip().lower()
-    if kind in {"summary", "followup"}:
-        return kind
-    return ""
+def _normalize_panel_kind(value: Any) -> str:
+    return str(value or "").strip().lower()
 
 
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    text = str(value or "").strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off", "null", ""}:
-        return False
-    return bool(text)
+def _require_panel_identity(history_id: Any, panel_kind: Any) -> tuple[str, str]:
+    normalized_history_id = str(history_id or "").strip()
+    normalized_panel_kind = _normalize_panel_kind(panel_kind)
+    if not normalized_history_id:
+        raise ValueError("agent_sessions.history_id is required")
+    if not normalized_panel_kind:
+        raise ValueError("agent_sessions.panel_kind is required")
+    return normalized_history_id, normalized_panel_kind
 
-
-def _extract_snapshot_session_flags(snapshot: Any) -> tuple[str, bool, bool]:
-    if not isinstance(snapshot, dict):
-        return "", False, False
-    meta = _extract_snapshot_meta(snapshot)
-    session_kind = _normalize_session_kind(meta.get("session_kind"))
-    output = snapshot.get("output") if isinstance(snapshot.get("output"), dict) else {}
-    panel_payloads = output.get("panel_payloads") if isinstance(output.get("panel_payloads"), dict) else {}
-    summary_pack = panel_payloads.get("summary_pack") if isinstance(panel_payloads.get("summary_pack"), dict) else {}
-    has_summary_pack = bool(summary_pack)
-    messages = snapshot.get("messages")
-    has_followup_messages = False
-    if isinstance(messages, list):
-        for row in messages:
-            if not isinstance(row, dict):
-                continue
-            if str(row.get("role") or "").strip() != "user":
-                continue
-            if str(row.get("content") or "").strip():
-                has_followup_messages = True
-                break
-    if not session_kind:
-        if has_summary_pack and not has_followup_messages:
-            session_kind = "summary"
-        elif has_followup_messages:
-            session_kind = "followup"
-    return session_kind, has_summary_pack, has_followup_messages
 
 class AgentSessionRepo:
     @staticmethod
-    def _resolve_history_id(snapshot: Any) -> str:
-        if not isinstance(snapshot, dict):
-            return ""
-        meta = _extract_snapshot_meta(snapshot)
-        return str(meta.get("history_id") or "").strip()
-
-    @staticmethod
-    def _resolve_summary_flags(payload: Dict[str, Any]) -> Dict[str, Any]:
-        session_kind = _normalize_session_kind(payload.get("session_kind"))
-        has_summary_pack = _coerce_bool(payload.get("has_summary_pack"))
-        has_followup_messages = _coerce_bool(payload.get("has_followup_messages"))
-        if not session_kind:
-            if has_summary_pack and not has_followup_messages:
-                session_kind = "summary"
-            elif has_followup_messages:
-                session_kind = "followup"
+    def _resolve_summary_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {
             **payload,
             "title_source": _normalize_title_source(payload.get("title_source")),
             "history_id": str(payload.get("history_id") or "").strip(),
-            "session_kind": session_kind,
-            "has_summary_pack": has_summary_pack,
-            "has_followup_messages": has_followup_messages,
+            "panel_kind": _normalize_panel_kind(payload.get("panel_kind")),
         }
 
     @staticmethod
     def _build_summary_payload(record: AgentSession) -> Dict[str, Any]:
         snapshot = record.snapshot if isinstance(record.snapshot, dict) else {}
         meta = _extract_snapshot_meta(snapshot)
-        session_kind, has_summary_pack, has_followup_messages = _extract_snapshot_session_flags(snapshot)
-        return AgentSessionRepo._resolve_summary_flags({
+        return AgentSessionRepo._resolve_summary_payload({
             "id": str(record.id or ""),
             "title": str(record.title or ""),
             "preview": str(record.preview or ""),
             "status": str(record.status or "idle"),
-            "history_id": AgentSessionRepo._resolve_history_id(snapshot),
+            "history_id": str(record.history_id or ""),
+            "panel_kind": str(record.panel_kind or ""),
             "is_pinned": bool(record.is_pinned),
             "title_source": _normalize_title_source(meta.get("title_source")),
-            "session_kind": session_kind,
-            "has_summary_pack": has_summary_pack,
-            "has_followup_messages": has_followup_messages,
             "created_at": record.created_at,
             "updated_at": record.updated_at,
             "pinned_at": record.pinned_at,
@@ -141,6 +88,8 @@ class AgentSessionRepo:
                     AgentSession.title.label("title"),
                     AgentSession.preview.label("preview"),
                     AgentSession.status.label("status"),
+                    AgentSession.history_id.label("history_id"),
+                    AgentSession.panel_kind.label("panel_kind"),
                     AgentSession.is_pinned.label("is_pinned"),
                     AgentSession.created_at.label("created_at"),
                     AgentSession.updated_at.label("updated_at"),
@@ -154,33 +103,10 @@ class AgentSessionRepo:
                     desc(AgentSession.created_at),
                 )
             ).mappings().all()
-            session_ids = [str(row["id"] or "") for row in rows if row.get("id")]
-            snapshot_rows = session.execute(
-                select(
-                    AgentSession.id.label("id"),
-                    AgentSession.snapshot.label("snapshot"),
-                )
-                .select_from(AgentSession)
-                .where(AgentSession.id.in_(session_ids))
-            ).mappings().all() if session_ids else []
-            snapshot_by_id = {
-                str(row["id"] or ""): row.get("snapshot") if isinstance(row.get("snapshot"), dict) else {}
-                for row in snapshot_rows
-            }
             payloads: List[Dict[str, Any]] = []
             for row in rows:
                 payload = dict(row)
-                snapshot = snapshot_by_id.get(str(payload.get("id") or ""), {})
-                meta = _extract_snapshot_meta(snapshot)
-                session_kind, has_summary_pack, has_followup_messages = _extract_snapshot_session_flags(snapshot)
-                payloads.append(self._resolve_summary_flags({
-                    **payload,
-                    "history_id": self._resolve_history_id(snapshot),
-                    "title_source": meta.get("title_source"),
-                    "session_kind": session_kind,
-                    "has_summary_pack": has_summary_pack,
-                    "has_followup_messages": has_followup_messages,
-                }))
+                payloads.append(self._resolve_summary_payload(payload))
             return payloads
         finally:
             session.close()
@@ -202,6 +128,8 @@ class AgentSessionRepo:
         title: str,
         preview: str,
         status: str,
+        history_id: str,
+        panel_kind: str,
         snapshot: Dict[str, Any],
         is_pinned: Optional[bool] = None,
         title_source: Optional[str] = None,
@@ -229,10 +157,13 @@ class AgentSessionRepo:
             record.title = title
             record.preview = preview
             record.status = status
+            record.history_id, record.panel_kind = _require_panel_identity(history_id, panel_kind)
             next_snapshot = _clone_json_payload(snapshot if isinstance(snapshot, dict) else {})
             next_meta = {
                 **_extract_snapshot_meta(record.snapshot),
                 **_extract_snapshot_meta(next_snapshot),
+                "history_id": record.history_id,
+                "panel_kind": record.panel_kind,
             }
             if title_source is not None:
                 next_meta["title_source"] = _normalize_title_source(title_source)

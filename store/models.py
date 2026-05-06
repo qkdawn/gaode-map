@@ -12,6 +12,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -82,6 +83,8 @@ class PoiResult(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     history_id = Column(String(64), ForeignKey("analysis_history.id", ondelete="CASCADE"), nullable=False, index=True)
+    source = Column(String(32), nullable=True, index=True)
+    year = Column(Integer, nullable=True, index=True)
     
     # 完整的 POI 数据列表
     poi_data = Column(JSON, nullable=False)
@@ -91,10 +94,14 @@ class PoiResult(Base):
     
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
+    __table_args__ = (
+        UniqueConstraint("history_id", "source", "year", name="uq_poi_results_history_source_year"),
+    )
+
 
 class AgentSession(Base):
     """
-    AI 会话历史记录
+    AI 面板历史记录
     """
     __tablename__ = "agent_sessions"
 
@@ -102,8 +109,14 @@ class AgentSession(Base):
     title = Column(String(255), nullable=False, default="")
     preview = Column(Text, nullable=False, default="")
     status = Column(String(64), nullable=False, default="idle")
+    history_id = Column(String(64), nullable=False, index=True)
+    panel_kind = Column(String(64), nullable=False, index=True)
     is_pinned = Column(Boolean, nullable=False, default=False, index=True)
     pinned_at = Column(DateTime, nullable=True)
     snapshot = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_agent_sessions_history_panel", "history_id", "panel_kind"),
+    )

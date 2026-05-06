@@ -34,7 +34,7 @@ async def fetch_pois_in_scope(
         source = "local"
     types = str(arguments.get("types") or "")
     keywords = str(arguments.get("keywords") or "")
-    max_count = int(arguments.get("max_count") or 500)
+    max_count = int(arguments.get("max_count") or 0)
 
     if source == "gaode":
         pois = await fetch_pois_by_polygon(

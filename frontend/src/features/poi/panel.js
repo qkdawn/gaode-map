@@ -18,6 +18,7 @@
             poiKdeEnabled: false,
             poiKdeRadius: 28,
             poiKdeStats: createEmptyPoiKdeStats(),
+            poiCategorySummary: [],
         };
     }
 
@@ -170,6 +171,60 @@
                 return (this.markerManager && typeof this.markerManager.getVisiblePoints === 'function')
                     ? this.markerManager.getVisiblePoints()
                     : [];
+            },
+            getPoiYearSourceOptions() {
+                const historyYears = Array.isArray(this.currentHistoryAvailablePoiYears)
+                    ? this.currentHistoryAvailablePoiYears
+                        .map((item) => Number(item))
+                        .filter((item) => Number.isFinite(item))
+                        .sort((a, b) => a - b)
+                    : [];
+                const source = String(this.scopeSource || '').trim().toLowerCase();
+                if (source === 'history' && historyYears.length) {
+                    return historyYears.map((year) => ({
+                        value: String(year),
+                        label: year === 2026 ? '2026 高德' : `${year} 本地`,
+                    }));
+                }
+                return [
+                    { value: '2020', label: '2020 本地' },
+                    { value: '2022', label: '2022 本地' },
+                    { value: '2024', label: '2024 本地' },
+                    { value: '2026', label: '2026 高德' },
+                ];
+            },
+            getPoiMultiYearOptions() {
+                return [
+                    { value: 2020, label: '2020 本地' },
+                    { value: 2022, label: '2022 本地' },
+                    { value: 2024, label: '2024 本地' },
+                    { value: 2026, label: '2026 高德' },
+                ];
+            },
+            getSelectedPoiYears() {
+                const years = Array.isArray(this.poiYearSelections)
+                    ? this.poiYearSelections
+                    : [];
+                const normalized = Array.from(new Set(
+                    years
+                        .map((item) => Number(item))
+                        .filter((item) => [2020, 2022, 2024, 2026].includes(item))
+                )).sort((a, b) => a - b);
+                return normalized.length ? normalized : [2020, 2022, 2024];
+            },
+            isPoiYearSelected(year) {
+                return this.getSelectedPoiYears().includes(Number(year));
+            },
+            togglePoiYearSelection(year, checked) {
+                const value = Number(year);
+                if (![2020, 2022, 2024, 2026].includes(value)) return;
+                const next = new Set(this.getSelectedPoiYears());
+                if (checked) {
+                    next.add(value);
+                } else if (next.size > 1) {
+                    next.delete(value);
+                }
+                this.poiYearSelections = Array.from(next).sort((a, b) => a - b);
             },
             _buildPoiKdeTopCategoryRows(limit = 5) {
                 const stats = this.computePoiStats(this._getPoiKdeStatsSourcePois());

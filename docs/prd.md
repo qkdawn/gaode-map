@@ -43,12 +43,12 @@
 *   **定位**：`gaode-map/modules/poi` (数据管家)
 *   **职责**：负责数据的获取、清洗、**双重落库**。
 *   **工作流 (Workflow)**：
-    1.  **Check Cache**: 查询 SQLite 是否有该不同参数(hash)的分析记录。如有，直接返回统计结果。
+    1.  **Check Cache**: 查询 MySQL 是否有该不同参数(hash)的分析记录。如有，直接返回统计结果。
     2.  **Fetch & Transform**: 调高德 API -> 获 GCJ02 -> 转 **WGS84** 存库。
     3.  **Fast Return**: 优先返回 **GCJ02** 数据给前端渲染。
     4.  **Async Persistence**: **异步**将 POI 存入 MySQL。
         *   **Rule**: 使用 `amap_id` 进行**去重 (Upsert)**，防止数据冗余。
-    5.  **Save Cache**: 计算统计指标 -> 存入 SQLite。
+    5.  **Save Cache**: 计算统计指标 -> 存入 MySQL。
 
 #### E) 分析服务层 (Spatial Analysis Layer)
 *   **定位**：`gaode-map/modules/h3`、`gaode-map/modules/road`、`gaode-map/modules/export`
@@ -97,4 +97,4 @@
     *   **空间分析**: **`PySAL`** (`esda`, `mgwr` - 空间计量/GWR).
 *   **数据存储**:
     *   **MySQL**: 存储高德原始 POI 数据 (每次请求强制落库).
-    *   **SQLite**: 存储分析缓存、Hash 签名与统计结果.
+    *   **MySQL**: 存储分析缓存、Hash 签名与统计结果.

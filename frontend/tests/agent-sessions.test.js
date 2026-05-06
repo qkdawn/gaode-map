@@ -298,6 +298,85 @@ test('agent tool detail dialog reads current tool without mutating sessions or t
   assert.equal(ctx.getAgentToolDetail(), null)
 })
 
+test('basis drawer state opens and closes with normalized payload', () => {
+  const ctx = createAgentContext()
+  ctx.openBasisDrawer({
+    title: '经济活动强度依据',
+    currentConclusion: '基于夜间灯光亮度，等时圈内经济活动强度呈现中等偏上。',
+    fields: [{ key: 'mean_radiance', label: '平均辐亮', value: 12.3 }],
+  })
+  assert.equal(ctx.basisDrawerOpen, true)
+  assert.equal(ctx.basisDrawerActiveTab, 'basic')
+  assert.equal(ctx.getBasisDrawerPayload().title, '经济活动强度依据')
+  assert.equal(ctx.getBasisDrawerPayload().aiPrompt, '该结论由规则模板生成，未调用 AI')
+  ctx.setBasisDrawerTab('raw')
+  assert.equal(ctx.basisDrawerActiveTab, 'raw')
+  ctx.closeBasisDrawer()
+  assert.equal(ctx.basisDrawerOpen, false)
+  assert.equal(ctx.basisDrawerPayload, null)
+})
+
+test('nightlight basis payload includes economic activity evidence fields', () => {
+  const ctx = createAgentContext({
+    nightlightOverview: {
+      summary: {
+        total_radiance: 100,
+        mean_radiance: 8.5,
+        p90_radiance: 18,
+        lit_pixel_ratio: 0.72,
+        economic_activity_intensity_level: 'medium_high',
+        sector_direction_analysis: { top_direction: '东' },
+      },
+    },
+    nightlightLayer: {
+      analysis: {
+        economic_activity_summary_text: '基于夜间灯光亮度，等时圈内经济活动强度呈现中等偏上。',
+        core_hotspot_count: 4,
+        peak_to_edge_ratio: 2.1,
+      },
+    },
+  })
+  const payload = ctx.buildNightlightBasisPayload()
+  assert.equal(payload.sourceType, 'rule')
+  assert.match(payload.currentConclusion, /夜间灯光亮度/)
+  assert.ok(payload.fields.some((field) => field.key === 'economic_activity_intensity_level'))
+  assert.ok(payload.fields.some((field) => field.key === 'sector_direction_analysis'))
+})
+
+test('agent economic activity basis payload combines nightlight and road orientation evidence', () => {
+  const ctx = createAgentContext({
+    agentPanelPayloads: {
+      summary_pack: {
+        headline_judgment: { summary: '区域总结' },
+        user_profile: { headline: '画像' },
+        behavior_inference: { headline: '行为' },
+        consumption_vitality: {
+          title: '经济活动强度',
+          reasoning: '高值主要集中在东侧，路网以东西向为主。',
+          dimensions: [],
+        },
+        spatial_structure: { title: '空间结构', reasoning: '空间结构稳定。' },
+        poi_structure: { title: 'POI结构', reasoning: 'POI结构稳定。' },
+        business_support: { title: '业态承接', reasoning: '承接稳定。' },
+      },
+      current_nightlight_pattern_analysis: {
+        economic_activity_intensity_level: 'medium_high',
+        total_radiance: 100,
+        sector_direction_analysis: { top_direction: '东' },
+      },
+      road_syntax_summary: {
+        road_orientation_analysis: { dominant_orientation: '东西向' },
+      },
+    },
+  })
+  const item = ctx.getAgentSummaryAreaJudgments()[2]
+  const payload = ctx.buildAgentSummaryBasisPayload(item)
+  assert.equal(payload.sourceType, 'ai_checked')
+  assert.match(payload.template, /夜间经济活动/)
+  assert.ok(payload.fields.some((field) => field.key === 'sector_direction_analysis'))
+  assert.ok(payload.fields.some((field) => field.key === 'road_orientation_analysis'))
+})
+
 test('analysis task registry maps backend tool traces to left panel tasks', () => {
   assert.equal(getAnalysisTaskDefinition('poi_grid').panelId, 'poi')
   assert.equal(resolveAnalysisTaskKeyFromTrace({
@@ -2663,6 +2742,8 @@ test('createAgentSummaryTab opens a new summary window instead of reusing the de
   assert.notEqual(firstId, secondId)
   assert.equal(ctx.agentTabs.summaryTabs.length, 3)
   assert.equal(ctx.agentTabs.summaryTabs[0].id, 'summary-current')
+  assert.equal(ctx.agentTabs.summaryTabs.find((item) => item.id === firstId).title, '区域总结')
+  assert.equal(ctx.agentTabs.summaryTabs.find((item) => item.id === secondId).title, '区域总结')
   assert.equal(ctx.agentTabs.activeTabId, secondId)
 })
 
@@ -2765,8 +2846,8 @@ test('createAgentIterationChangeTab opens independent iteration tab', () => {
   assert.ok(tabId.startsWith('iteration-change-'))
   assert.equal(ctx.getAgentActiveTopTab().kind, 'iteration_change')
   assert.equal(ctx.isAgentIterationChangeTabActive(), true)
-  assert.equal(ctx.agentIterationActiveKind, 'nightlight')
-  assert.ok(ctx.getAgentTopTabs().some((item) => item.kind === 'iteration_change' && item.title.includes('多年迭代变化')))
+  assert.equal(ctx.agentIterationActiveKind, 'poi')
+  assert.equal(ctx.getAgentTopTabs().find((item) => item.id === tabId).title, '多年迭代变化')
 })
 
 test('ensureAgentIterationNightlight loads three snapshots without mutating nightlight panel state', async () => {
@@ -2882,6 +2963,84 @@ test('ensureAgentIterationNightlight loads three snapshots without mutating nigh
   assert.equal(calls.filter((item) => item.url === '/api/v1/analysis/nightlight/layer').length, 3)
 })
 
+test('copyAgentIterationSnapshotImage writes png snapshot to clipboard', async () => {
+  const ctx = createAgentContext()
+  const writes = []
+  const originalNavigator = global.navigator
+  const originalClipboardItem = global.ClipboardItem
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: {
+      clipboard: {
+        write: async (items) => writes.push(items),
+      },
+    },
+  })
+  global.ClipboardItem = class ClipboardItem {
+    constructor(items) {
+      this.items = items
+    }
+  }
+  try {
+    await ctx.copyAgentIterationSnapshotImage({
+      year: 2025,
+      image_url: 'data:image/png;base64,iVBORw0KGgo=',
+      summary: { total_radiance: 1 },
+    })
+
+    assert.equal(writes.length, 1)
+    assert.equal(writes[0][0].items['image/png'].type, 'image/png')
+    assert.equal(ctx.agentIterationSnapshotCopyStatus, '图片已复制')
+    assert.equal(ctx.agentIterationSnapshotDetailOpen, false)
+  } finally {
+    Object.defineProperty(global, 'navigator', {
+      configurable: true,
+      value: originalNavigator,
+    })
+    global.ClipboardItem = originalClipboardItem
+  }
+})
+
+test('buildAgentIterationSnapshotSvgMarkupFromNode serializes displayed svg', () => {
+  const ctx = createAgentContext()
+  const svgNode = {
+    cloneNode() {
+      return {
+        attrs: {},
+        setAttribute(name, value) {
+          this.attrs[name] = value
+        },
+        querySelectorAll(selector) {
+          assert.equal(selector, 'polygon')
+          return [{
+            attrs: {},
+            getAttribute(name) {
+              return this.attrs[name] || ''
+            },
+            setAttribute(name, value) {
+              this.attrs[name] = value
+            },
+          }]
+        },
+      }
+    },
+  }
+  const originalSerializer = global.XMLSerializer
+  global.XMLSerializer = class XMLSerializer {
+    serializeToString(node) {
+      assert.equal(node.attrs.xmlns, 'http://www.w3.org/2000/svg')
+      assert.equal(node.attrs.width, '360')
+      assert.equal(node.attrs.height, '260')
+      return '<svg data-source="dom"></svg>'
+    }
+  }
+  try {
+    assert.equal(ctx.buildAgentIterationSnapshotSvgMarkupFromNode(svgNode), '<svg data-source="dom"></svg>')
+  } finally {
+    global.XMLSerializer = originalSerializer
+  }
+})
+
 test('ensureAgentIterationPopulation stores summary features', async () => {
   const ctx = createAgentContext()
   ctx.createAgentIterationChangeTab({ autoload: false })
@@ -2928,17 +3087,77 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
   const ctx = createAgentContext({
     currentHistoryRecordId: 'history-1',
     currentHistoryAvailablePoiYears: [2023, 2024, 2025],
+    selectedPoint: { lng: 112.93, lat: 28.13 },
+    typeIdToGroupId: {
+      'type-050100': 'group-7',
+      'type-050500': 'group-7',
+      'type-060100': 'group-6',
+    },
+    typeIdToLabel: {
+      'type-050100': '中餐厅',
+      'type-050500': '咖啡厅',
+      'type-060100': '商场',
+    },
+    categoryById: {
+      'group-7': { id: 'group-7', name: '餐饮' },
+      'group-6': { id: 'group-6', name: '购物' },
+    },
+    resolvePoiTypeId(typeText) {
+      const raw = String(typeText || '')
+      if (this.typeIdToGroupId[raw]) return raw
+      if (raw.includes('咖啡厅')) return 'type-050500'
+      if (raw.includes('中餐厅')) return 'type-050100'
+      if (raw.includes('商场') || raw.includes('专卖店')) return 'type-060100'
+      return ''
+    },
+    resolvePoiCategory(typeText) {
+      const typeId = this.resolvePoiTypeId(typeText)
+      const groupId = this.typeIdToGroupId[typeId]
+      return groupId ? this.categoryById[groupId] : null
+    },
+    getPoiTypeLabel(typeId) {
+      return this.typeIdToLabel[String(typeId || '')] || String(typeId || '')
+    },
   })
   ctx.createAgentIterationChangeTab({ autoload: false })
   global.fetch = async (url, options = {}) => {
-    if (String(url).includes('/api/v1/analysis/agent/iteration/poi/interpret')) {
+    if (String(url).includes('/api/v1/analysis/agent/iteration/poi/build')) {
       const body = JSON.parse(options.body || '{}')
-      assert.equal(body.evidence.years.length, 3)
-      assert.equal(body.evidence.total_series.length, 3)
+      assert.equal(body.history_id, 'history-1')
+      assert.deepEqual(body.years, [2023, 2024, 2025])
+      assert.deepEqual(body.center, [112.93, 28.13])
       return {
         ok: true,
         json: async () => ({
           status: 'ready',
+          source: 'history',
+          years: [2023, 2024, 2025],
+          summaries: [
+            { year: 2023, count: 2, category_count: 2, subcategory_count: 2, category_counts: { 餐饮: 1, 购物: 1 }, subcategory_counts: { 咖啡厅: 1, 商场: 1 }, top_categories: [{ name: '餐饮', count: 1 }], top_subcategories: [{ name: '咖啡厅', parent: '餐饮', count: 1 }], top_areas: [{ name: '一区', count: 2 }] },
+            { year: 2024, count: 3, category_count: 2, subcategory_count: 3, category_counts: { 餐饮: 2, 购物: 1 }, subcategory_counts: { 咖啡厅: 1, 中餐厅: 1, 商场: 1 }, top_categories: [{ name: '餐饮', count: 2 }], top_subcategories: [{ name: '咖啡厅', parent: '餐饮', count: 1 }], top_areas: [{ name: '一区', count: 2 }] },
+            { year: 2025, count: 4, category_count: 3, subcategory_count: 4, category_counts: { 餐饮: 3, 购物: 0, 住宿服务: 1 }, subcategory_counts: { 咖啡厅: 2, 中餐厅: 1, 酒店: 1 }, top_categories: [{ name: '餐饮', count: 3 }], top_subcategories: [{ name: '咖啡厅', parent: '餐饮', count: 2 }], top_areas: [{ name: '一区', count: 2 }] },
+          ],
+          trend_rows: [
+            { key: 'total_delta', label: 'POI 首尾变化', value: '+2' },
+            { key: 'top_increase', label: '增长最明显业态', value: '餐饮 +2' },
+          ],
+          total_series: [{ year: 2023, value: 2 }, { year: 2024, value: 3 }, { year: 2025, value: 4 }],
+          category_stack: [{ year: 2023, total: 2, segments: [{ name: '餐饮', count: 1 }] }, { year: 2024, total: 3, segments: [{ name: '餐饮', count: 2 }] }, { year: 2025, total: 4, segments: [{ name: '餐饮', count: 3 }] }],
+          subcategory_stack: [{ year: 2023, total: 2, segments: [{ name: '咖啡厅', parent: '餐饮', count: 1 }] }, { year: 2024, total: 3, segments: [{ name: '咖啡厅', parent: '餐饮', count: 1 }] }, { year: 2025, total: 4, segments: [{ name: '咖啡厅', parent: '餐饮', count: 2 }] }],
+          subcategory_trend_rows: [
+            { key: 'subcategory_delta', label: '小类类型变化', value: '+2' },
+            { key: 'top_subcategory_increase', label: '增长最明显小类', value: '咖啡厅（餐饮） +1' },
+            { key: 'top_subcategory_decrease', label: '减少最明显小类', value: '商场（购物） -1' },
+            { key: 'latest_top_subcategory', label: '末年第一小类', value: '咖啡厅（餐饮）' },
+          ],
+          area_heatmaps: [{ year: 2023, points: [{ x: 5, y: 5 }], point_count: 2, top_area: '一区' }, { year: 2024, points: [{ x: 10, y: 10 }], point_count: 3, top_area: '一区' }, { year: 2025, points: [{ x: 20, y: 20 }], point_count: 4, top_area: '一区' }],
+          rule_summary: ['当前POI规模为 4，一级主导业态为餐饮。'],
+          rule_insights: {
+            fastest_growth: '餐饮大类增长较快；小类增长最快为咖啡厅',
+            declining_category: '未发现明显衰退行业。',
+            emerging_area: '二区',
+            structure_judgement: '一级结构偏向餐饮主导。',
+          },
           ai_summary: ['当前POI规模处于中等水平，餐饮为主导业态。', '一区为核心聚集区。'],
           ai_insights: {
             fastest_growth: '咖啡 +120%',
@@ -2946,30 +3165,29 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
             emerging_area: '二区',
             structure_judgement: '业态结构偏消费型。',
           },
+          spatial_factors: {
+            geometry_mode: 'point',
+            direction_factor: { dominant_direction: '东北' },
+          },
+          subcategory_spatial_trend_rows: [{
+            name: '咖啡厅',
+            parent: '餐饮',
+            delta: 1,
+            dominant_direction: '东北',
+            secondary_direction: '东',
+            dominant_ring: '中圈层',
+            centroid_shift_direction: '东北',
+            centroid_shift_m: 420,
+            hotspot_grid_count: 1,
+            hotspot_grid_count_delta: 1,
+            top_area: '一区',
+          }],
+          subcategory_spatial_summary: ['咖啡厅新增主要集中在东北方向。'],
           error: '',
         }),
       }
     }
-    const year = Number(String(url).split('year=')[1])
-    const poisByYear = {
-      2023: [
-        { id: 'a', name: '咖啡 A', type: '餐饮服务;咖啡厅', adname: '一区', location: [112.9, 28.1] },
-        { id: 'b', name: '商场 B', type: '购物服务;商场', adname: '一区', location: [112.91, 28.11] },
-      ],
-      2024: [
-        { id: 'c', name: '咖啡 C', type: '餐饮服务;咖啡厅', adname: '一区', location: [112.92, 28.12] },
-        { id: 'd', name: '咖啡 D', type: '餐饮服务;咖啡厅', adname: '二区', location: [112.96, 28.16] },
-        { id: 'e', name: '商场 E', type: '购物服务;商场', adname: '一区', location: [112.93, 28.13] },
-      ],
-      2025: [
-        { id: 'f', name: '咖啡 F', type: '餐饮服务;咖啡厅', adname: '一区', location: [112.94, 28.14] },
-        { id: 'g', name: '咖啡 G', type: '餐饮服务;咖啡厅', adname: '一区', location: [112.95, 28.15] },
-        { id: 'h', name: '书店 H', type: '购物服务;专卖店', adname: '二区', location: [112.97, 28.17] },
-        { id: 'i', name: '酒店 I', type: '住宿服务;酒店', adname: '二区', location: [112.98, 28.18] },
-      ],
-    }
-    assert.match(url, /\/api\/v1\/analysis\/history\/history-1\/pois\?year=/)
-    return { ok: true, json: async () => ({ pois: poisByYear[year] || [], selected_year: year }) }
+    throw new Error(`unexpected fetch ${url}`)
   }
 
   const payload = await ctx.ensureAgentIterationPoi(true)
@@ -2979,18 +3197,160 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
   assert.equal(payload.status, 'ready')
   assert.deepEqual(payload.years, [2023, 2024, 2025])
   assert.equal(payload.summaries.length, 3)
+  assert.equal(payload.summaries[2].category_counts['餐饮'], 3)
+  assert.equal(payload.summaries[2].subcategory_counts['咖啡厅'], 2)
+  assert.equal(payload.summaries[2].top_subcategories[0].parent, '餐饮')
   assert.equal(payload.ai_summary[0], '当前POI规模处于中等水平，餐饮为主导业态。')
   assert.equal(payload.ai_insights.emerging_area, '二区')
   assert.equal(ctx.getAgentIterationPoiAiSummaryRows().length, 2)
   assert.equal(ctx.getAgentIterationPoiAiInsightRows().find((item) => item.key === 'fastest_growth').value, '咖啡 +120%')
   assert.equal(ctx.getAgentIterationPoiTotalLineChart().length, 3)
   assert.equal(ctx.getAgentIterationPoiCategoryStackChart().length, 3)
+  assert.equal(ctx.getAgentIterationPoiSubcategoryStackChart().length, 3)
+  assert.equal(payload.spatial_factors.direction_factor.dominant_direction, '东北')
+  assert.equal(payload.subcategory_spatial_trend_rows[0].name, '咖啡厅')
+  assert.match(ctx.formatAgentIterationPoiSpatialTrend(ctx.getAgentIterationPoiSpatialTrendRows()[0]), /主导方位 东北/)
   assert.equal(ctx.getAgentIterationPoiAreaHeatmaps().length, 3)
   assert.match(ctx.getAgentIterationPoiLineChartPolyline(), /,/)
   assert.equal(featureRows.find((item) => item.key === 'total').value, '4')
+  assert.equal(featureRows.find((item) => item.key === 'top_subcategory').value, '咖啡厅')
   assert.equal(trendRows.find((item) => item.key === 'total_delta').value, '+2')
-  assert.match(trendRows.find((item) => item.key === 'top_increase').value, /餐饮服务/)
+  assert.match(trendRows.find((item) => item.key === 'top_increase').value, /餐饮/)
+  assert.notEqual(trendRows.find((item) => item.key === 'top_subcategory_increase').value, '-')
+  assert.equal(payload.subcategory_trend_rows.length, 4)
   assert.equal(ctx.getAgentIterationKinds().find((item) => item.key === 'poi').disabled, false)
+})
+
+test('iteration change ready payloads are reused unless force refresh is requested', async () => {
+  const ctx = createAgentContext({
+    currentHistoryRecordId: 'history-1',
+    currentHistoryAvailablePoiYears: [2023, 2024],
+  })
+  ctx.createAgentIterationChangeTab({ autoload: false })
+  ctx.commitAgentIterationPoiPayload({ status: 'ready', years: [2023, 2024], summaries: [{ year: 2024, count: 2 }] })
+  ctx.commitAgentIterationPopulationPayload({ status: 'ready', period: '2024-2026', series: [{ year: 2024 }] })
+  ctx.commitAgentIterationNightlightPayload({ status: 'ready', years: [2023, 2024, 2025], snapshots: [{ year: 2025, image_url: 'data:image/png;base64,2025' }] })
+
+  const calls = []
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, body: options.body ? JSON.parse(options.body) : null })
+    if (String(url).includes('/api/v1/analysis/agent/iteration/poi/build')) {
+      return { ok: true, json: async () => ({ status: 'ready', source: 'history', years: [2023, 2024], summaries: [{ year: 2024, count: 1 }], ai_summary: [], ai_insights: {}, error: '' }) }
+    }
+    throw new Error(`unexpected fetch ${url}`)
+  }
+
+  await ctx.ensureAgentIterationKind('poi')
+  await ctx.ensureAgentIterationKind('population')
+  await ctx.ensureAgentIterationKind('nightlight')
+  assert.equal(calls.length, 0)
+
+  await ctx.ensureAgentIterationKind('poi', true)
+  assert.equal(calls.filter((item) => String(item.url).includes('/api/v1/analysis/agent/iteration/poi/build')).length, 1)
+  assert.equal(calls.filter((item) => String(item.url).includes('/api/v1/analysis/history/history-1/pois')).length, 0)
+  assert.equal(calls.filter((item) => String(item.url).includes('/api/v1/analysis/agent/iteration/poi/interpret')).length, 0)
+})
+
+test('iteration async result is saved to its tab after switching away', async () => {
+  const ctx = createAgentContext({
+    currentHistoryRecordId: 'history-1',
+    currentHistoryAvailablePoiYears: [2023, 2024],
+  })
+  const iterationTabId = ctx.createAgentIterationChangeTab({ autoload: false })
+  const summaryTabId = ctx.createAgentSummaryTab()
+  ctx.switchAgentTopTab(iterationTabId)
+
+  let resolveFirstPoi = null
+  const calls = []
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, body: options.body ? JSON.parse(options.body) : null })
+    if (String(url).includes('/api/v1/analysis/agent/iteration/poi/build')) {
+      await new Promise((resolve) => { resolveFirstPoi = resolve })
+      return { ok: true, json: async () => ({ status: 'ready', source: 'history', years: [2023, 2024], summaries: [{ year: 2024, count: 1 }], ai_summary: [], ai_insights: {}, error: '' }) }
+    }
+    throw new Error(`unexpected fetch ${url}`)
+  }
+
+  const loading = ctx.ensureAgentIterationPoi(true)
+  await Promise.resolve()
+  ctx.switchAgentTopTab(summaryTabId)
+  resolveFirstPoi()
+  await loading
+  ctx.switchAgentTopTab(iterationTabId)
+
+  assert.equal(ctx.getAgentIterationPoiPayload().status, 'ready')
+  assert.equal(ctx.agentIterationPoiLoading, false)
+  const iterationTab = ctx.agentTabs.iterationChangeTabs.find((item) => item.id === iterationTabId)
+  assert.equal(((iterationTab.panelPayloads.iteration_change || {}).poi || {}).status, 'ready')
+  calls.length = 0
+  await ctx.ensureAgentIterationPoi()
+  assert.equal(calls.length, 0)
+})
+
+test('history switch resets iteration payloads without touching summary payloads or fetching', async () => {
+  const ctx = createAgentContext({
+    currentHistoryRecordId: 'history-a',
+    agentPanelPayloads: {
+      summary_pack: buildSummaryPack('历史 A 总结'),
+      iteration_change: {
+        poi: { status: 'ready', years: [2023, 2024], summaries: [{ year: 2024, count: 8 }] },
+        population: { status: 'ready', period: '2024-2026', series: [{ year: 2026 }] },
+        nightlight: { status: 'ready', years: [2023, 2024, 2025], snapshots: [{ year: 2025 }] },
+      },
+    },
+  })
+  ctx.createAgentIterationChangeTab({ autoload: false })
+  ctx.agentIterationPoiLoading = true
+  ctx.agentIterationPoiError = 'old poi error'
+  ctx.agentIterationPopulationLoading = true
+  ctx.agentIterationPopulationError = 'old population error'
+  ctx.agentIterationNightlightLoading = true
+  ctx.agentIterationNightlightError = 'old nightlight error'
+  let fetchCalled = false
+  global.fetch = async () => {
+    fetchCalled = true
+    throw new Error('reset should not fetch')
+  }
+
+  const changed = ctx.resetAgentIterationChangeForHistorySwitch('history-b', { previousHistoryId: 'history-a' })
+
+  assert.equal(changed, true)
+  assert.equal(fetchCalled, false)
+  assert.equal(ctx.agentPanelPayloads.summary_pack.headline_judgment.summary, '历史 A 总结')
+  assert.equal(ctx.getAgentIterationPoiPayload().status, 'idle')
+  assert.equal(ctx.getAgentIterationPoiPayload().historyId, 'history-b')
+  assert.equal(ctx.getAgentIterationPoiPayload().notice, '已切换历史记录，请重新生成多年迭代变化。')
+  assert.equal(ctx.getAgentIterationPopulationPayload().status, 'idle')
+  assert.equal(ctx.getAgentIterationNightlightPayload().status, 'idle')
+  assert.equal(ctx.agentIterationPoiLoading, false)
+  assert.equal(ctx.agentIterationPoiError, '')
+  assert.equal(ctx.agentIterationPopulationLoading, false)
+  assert.equal(ctx.agentIterationPopulationError, '')
+  assert.equal(ctx.agentIterationNightlightLoading, false)
+  assert.equal(ctx.agentIterationNightlightError, '')
+  const iterationTab = ctx.agentTabs.iterationChangeTabs[0]
+  assert.equal(iterationTab.panelPayloads.iteration_change.poi.status, 'idle')
+  assert.equal(iterationTab.panelPayloads.iteration_change.nightlight.history_id, 'history-b')
+})
+
+test('history switch keeps iteration payload when history id is unchanged', () => {
+  const ctx = createAgentContext({
+    currentHistoryRecordId: 'history-a',
+    agentPanelPayloads: {
+      summary_pack: buildSummaryPack('历史 A 总结'),
+      iteration_change: {
+        poi: { status: 'ready', years: [2023, 2024], summaries: [{ year: 2024, count: 8 }] },
+      },
+    },
+  })
+  ctx.createAgentIterationChangeTab({ autoload: false })
+
+  const changed = ctx.resetAgentIterationChangeForHistorySwitch('history-a', { previousHistoryId: 'history-a' })
+  const iterationTab = ctx.agentTabs.iterationChangeTabs[0]
+
+  assert.equal(changed, false)
+  assert.equal(iterationTab.panelPayloads.iteration_change.poi.status, 'ready')
+  assert.deepEqual(iterationTab.panelPayloads.iteration_change.poi.years, [2023, 2024])
 })
 
 test('iteration change payload survives agent tab ui state restore', () => {
@@ -3003,6 +3363,8 @@ test('iteration change payload survives agent tab ui state restore', () => {
     snapshots: [{ year: 2025, image_url: 'data:image/png;base64,2025' }],
   })
   const uiState = ctx.buildAgentTabsUiState()
+  delete uiState.iteration_change_tabs[0].activeKind
+  delete uiState.iteration_change_tabs[0].active_kind
 
   const restored = createAgentContext({
     agentPanelPayloads: {
@@ -3016,6 +3378,18 @@ test('iteration change payload survives agent tab ui state restore', () => {
   assert.equal(restored.isAgentIterationChangeTabActive(), true)
   assert.deepEqual(restored.getAgentIterationNightlightPayload().years, [2023, 2024, 2025])
   assert.equal(restored.getAgentIterationNightlightPayload().snapshots[0].year, 2025)
+  assert.equal(restored.agentIterationActiveKind, 'poi')
+
+  uiState.iteration_change_tabs[0].activeKind = 'nightlight'
+  const restoredWithKind = createAgentContext({
+    agentPanelPayloads: {
+      agent_tabs: uiState,
+      iteration_change: ctx.agentPanelPayloads.iteration_change,
+    },
+  })
+  restoredWithKind.restoreAgentTabsFromSession({ panelPayloads: restoredWithKind.agentPanelPayloads })
+  restoredWithKind.switchAgentTopTab(uiState.iteration_change_tabs[0].id)
+  assert.equal(restoredWithKind.agentIterationActiveKind, 'nightlight')
 })
 
 function ctxSessionBase(id, title) {

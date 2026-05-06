@@ -1,11 +1,101 @@
 function createAnalysisPoiFlowOrchestratorMethods() {
   return {
+    async fetchPoisForYear(polygon, selectedCats, poiSelection, options = {}) {
+      const batchSize = Number(options.batchSize) || 4
+      const yearIndex = Number(options.yearIndex || 0)
+      const yearCount = Number(options.yearCount || 1)
+      const totalCats = selectedCats.length
+      const fetchErrors = []
+      const sourceLabel = this.getPoiSourceLabel(poiSelection.source, poiSelection.year)
+      const pois = []
+      if (selectedCats[0]) {
+        this.updateFetchSubtypeProgressDisplay(selectedCats[0])
+      }
+
+      const fetchOneCategory = async (cat) => {
+        const payload = {
+          polygon,
+          keywords: '',
+          types: String(cat.types || ''),
+          source: poiSelection.source,
+          year: poiSelection.year,
+          save_history: false,
+          center: [this.selectedPoint.lng, this.selectedPoint.lat],
+          time_min: parseInt(this.timeHorizon),
+          mode: this.transportMode,
+          location_name: this.selectedPoint.name || (this.selectedPoint.lng.toFixed(4) + ',' + this.selectedPoint.lat.toFixed(4)),
+        }
+
+        try {
+          const res = await fetch('/api/v1/analysis/pois', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: this.abortController.signal,
+          })
+          if (!res.ok) {
+            let detail = ''
+            try {
+              detail = await res.text()
+            } catch (_) { }
+            return {
+              list: [],
+              error: `HTTP ${res.status}${detail ? ` ${detail.slice(0, 240)}` : ''}`,
+            }
+          }
+          const data = await res.json()
+          return { list: data.pois || [], error: '' }
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            console.warn(`Failed to fetch category ${cat.name}`, err)
+          }
+          return {
+            list: [],
+            error: err && err.message ? String(err.message) : String(err),
+          }
+        }
+      }
+
+      for (let i = 0; i < selectedCats.length; i += batchSize) {
+        if (this.abortController.signal.aborted) return { pois, errors: fetchErrors, aborted: true }
+        const batch = selectedCats.slice(i, i + batchSize)
+        const resultsArray = await Promise.all(batch.map(fetchOneCategory))
+        resultsArray.forEach((result, index) => {
+          const list = Array.isArray(result && result.list) ? result.list : []
+          if (list && list.length) pois.push(...list)
+          const cat = batch[index]
+          if (cat && result && result.error) {
+            fetchErrors.push({
+              year: poiSelection.year,
+              category: cat.name || cat.id || `cat_${i + index + 1}`,
+              error: result.error,
+            })
+          }
+          if (cat) {
+            this.accumulateFetchSubtypeHits(cat, list || [])
+          }
+        })
+
+        const done = Math.min(i + batch.length, totalCats)
+        const completedUnits = yearIndex * totalCats + done
+        const totalUnits = Math.max(1, yearCount * totalCats)
+        this.fetchProgress = Math.round((completedUnits / totalUnits) * 100)
+        this.poiStatus = `Fetching ${sourceLabel}: ${done}/${totalCats} categories, ${pois.length} POIs`
+      }
+
+      return {
+        pois: this.deduplicateFetchedPois(pois),
+        errors: fetchErrors,
+        aborted: false,
+      }
+    },
+
     async fetchPois(options = {}) {
       if (!this.lastIsochroneGeoJSON) return
       const preserveCurrentPanel = !!(options && options.preserveCurrentPanel)
       this.isFetchingPois = true
       this.fetchProgress = 0
-      this.poiStatus = '准备抓取...'
+      this.poiStatus = 'Preparing POI fetch...'
       this.resetRoadSyntaxState()
       this.resetFetchSubtypeProgress()
 
@@ -16,116 +106,94 @@ function createAnalysisPoiFlowOrchestratorMethods() {
         resetFilterPanel: true,
       })
       this.allPoisDetails = []
+      this.poiCategorySummary = []
 
       try {
         const polygon = this.getIsochronePolygonPayload()
-
-        // Get selected categories (derived from selected subtypes).
         const selectedCats = this.buildSelectedCategoryBuckets()
         if (selectedCats.length === 0) {
-          alert('请至少选择一个分类')
+          alert('Please select at least one POI category')
           this.isFetchingPois = false
           return
         }
 
-        let totalFetched = 0
-        const totalCats = selectedCats.length
-        const fetchErrors = []
-        if (selectedCats[0]) {
-          this.updateFetchSubtypeProgressDisplay(selectedCats[0])
-        }
-
-        // Parallel Fetching: process in batches.
+        const selectedYears = this.getSelectedPoiYears()
         this.abortController = new AbortController()
-        const batchSize = 4
-        const sourceLabel = this.getPoiSourceLabel(this.poiDataSource)
-        this.poiStatus = `正在并行抓取 ${totalCats} 个分类（每批 ${batchSize} 个，${sourceLabel}）...`
-        this.resultDataSource = this.normalizePoiSource(this.poiDataSource, 'local')
-
-        const fetchOneCategory = async (cat) => {
-          const payload = {
-            polygon,
-            keywords: '',
+        this.poiStatus = `Fetching ${selectedYears.join(' / ')} POI years...`
+        const payload = {
+          polygon,
+          categories: selectedCats.map((cat) => ({
+            id: String(cat.id || ''),
+            name: String(cat.name || cat.id || ''),
             types: String(cat.types || ''),
-            source: this.poiDataSource,
-            save_history: false, // Don't save individual batches
-            center: [this.selectedPoint.lng, this.selectedPoint.lat],
-            time_min: parseInt(this.timeHorizon),
-            mode: this.transportMode,
-            location_name: this.selectedPoint.name || (this.selectedPoint.lng.toFixed(4) + ',' + this.selectedPoint.lat.toFixed(4)),
-          }
-
-          try {
-            const res = await fetch('/api/v1/analysis/pois', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-              signal: this.abortController.signal,
-            })
-            if (!res.ok) {
-              let detail = ''
-              try {
-                detail = await res.text()
-              } catch (_) { }
-              return {
-                list: [],
-                error: `HTTP ${res.status}${detail ? ` ${detail.slice(0, 240)}` : ''}`,
-              }
-            }
-            const data = await res.json()
-            return { list: data.pois || [], error: '' }
-          } catch (err) {
-            if (err.name !== 'AbortError') {
-              console.warn(`Failed to fetch category ${cat.name}`, err)
-            }
-            return {
-              list: [],
-              error: err && err.message ? String(err.message) : String(err),
-            }
-          }
-        }
-
-        for (let i = 0; i < selectedCats.length; i += batchSize) {
-          if (this.abortController.signal.aborted) return
-          const batch = selectedCats.slice(i, i + batchSize)
-          const resultsArray = await Promise.all(batch.map(fetchOneCategory))
-          resultsArray.forEach((result, index) => {
-            const list = Array.isArray(result && result.list) ? result.list : []
-            if (list && list.length) this.allPoisDetails.push(...list)
-            const cat = batch[index]
-            if (cat && result && result.error) {
-              fetchErrors.push({
-                category: cat.name || cat.id || `cat_${i + index + 1}`,
-                error: result.error,
-              })
-            }
-            if (cat) {
-              this.accumulateFetchSubtypeHits(cat, list || [])
-            }
-          })
-
-          totalFetched = this.allPoisDetails.length
-          const done = Math.min(i + batch.length, totalCats)
-          this.fetchProgress = Math.round((done / totalCats) * 100)
-          this.poiStatus = `已完成 ${done}/${totalCats} 分类，累计 ${totalFetched} 个结果`
+          })).filter((cat) => cat.id && cat.types),
+          years: selectedYears,
+          save_history: true,
+          history_id: String(this.currentHistoryRecordId || '').trim() || null,
+          center: [this.selectedPoint.lng, this.selectedPoint.lat],
+          time_min: parseInt(this.timeHorizon),
+          mode: this.transportMode,
+          location_name: this.selectedPoint.name || (this.selectedPoint.lng.toFixed(4) + ',' + this.selectedPoint.lat.toFixed(4)),
         }
 
         if (this.abortController.signal.aborted) return
+        const res = await fetch('/api/v1/analysis/pois/multi-year', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: this.abortController.signal,
+        })
+        if (!res.ok) {
+          let detail = ''
+          try {
+            const errJson = await res.json()
+            detail = errJson && typeof errJson === 'object'
+              ? (errJson.detail || JSON.stringify(errJson))
+              : String(errJson || '')
+          } catch (_) {
+            try { detail = await res.text() } catch (__){ }
+          }
+          throw new Error(detail || `HTTP ${res.status}`)
+        }
 
-        this.allPoisDetails = this.deduplicateFetchedPois(this.allPoisDetails)
-        totalFetched = this.allPoisDetails.length
+        const data = await res.json()
+        const yearlyResults = Array.isArray(data && data.results_by_year) ? data.results_by_year : []
+        if (!yearlyResults.length) {
+          throw new Error('POI fetch returned no usable data')
+        }
+
+        const successfulYears = (Array.isArray(data.years) && data.years.length ? data.years : yearlyResults.map((item) => item.year))
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item))
+          .sort((a, b) => a - b)
+        const selectedYearRaw = Number(data.selected_year)
+        const selectedYear = Number.isFinite(selectedYearRaw)
+          ? selectedYearRaw
+          : (successfulYears.length ? successfulYears[successfulYears.length - 1] : null)
+        const displayResult = yearlyResults.find((item) => Number(item.year) === Number(selectedYear)) || yearlyResults[yearlyResults.length - 1]
+        const displaySelection = this.resolvePoiYearSourceSelection(displayResult.year)
+        this.allPoisDetails = this.deduplicateFetchedPois(Array.isArray(data.display_pois) ? data.display_pois : displayResult.pois)
+        this.poiCategorySummary = Array.isArray(data.category_summary) ? data.category_summary : []
+        this.poiResultsByYear = yearlyResults
         this.fetchProgress = 100
-        if (totalFetched === 0 && fetchErrors.length > 0) {
-          const first = fetchErrors[0]
-          throw new Error(`本地源请求失败（${fetchErrors.length}/${totalCats} 分类）。示例：${first.category} -> ${first.error}`)
+        this.poiDataSource = displaySelection.source
+        this.resultDataSource = displaySelection.source
+        this.resultPoiYear = displaySelection.year
+        this.poiYearSource = String(displaySelection.year)
+        this.currentHistorySelectedPoiYear = displaySelection.year
+        this.currentHistoryAvailablePoiYears = successfulYears
+        const historyId = String((data && data.history_id) || '').trim()
+        if (historyId) {
+          this.currentHistoryRecordId = historyId
+          this.scopeSource = 'history'
         }
         this.poiStatus = ''
+        const fetchErrors = Array.isArray(data.errors) ? data.errors : []
         if (fetchErrors.length > 0) {
           console.warn('[poi-fetch] partial category failures', fetchErrors)
-          this.poiStatus = `抓取完成，但有 ${fetchErrors.length} 个分类失败（详见控制台）`
+          this.poiStatus = `POI partial category fetch failures: ${fetchErrors.length}`
         }
 
-        // Integration with Legacy Filter Panel (single render path).
         this.rebuildPoiRuntimeSystem(this.allPoisDetails)
 
         if (preserveCurrentPanel) {
@@ -143,11 +211,10 @@ function createAnalysisPoiFlowOrchestratorMethods() {
             this.resizePoiChart()
           }, 120)
         }
-        this.saveAnalysisHistoryAsync(polygon, selectedCats, this.allPoisDetails)
       } catch (e) {
         if (e.name !== 'AbortError') {
           console.error(e)
-          this.poiStatus = `失败: ${e.message}`
+          this.poiStatus = `Failed: ${e.message}`
         }
       } finally {
         this.isFetchingPois = false
@@ -155,10 +222,50 @@ function createAnalysisPoiFlowOrchestratorMethods() {
         this.resetFetchSubtypeProgress()
       }
     },
+
+    resolvePoiYearSourceSelection(value) {
+      const year = Number(value || 2020)
+      if (year === 2026) {
+        return { source: 'gaode', year: 2026 }
+      }
+      if (year === 2022 || year === 2024) {
+        return { source: 'local', year }
+      }
+      return { source: 'local', year: 2020 }
+    },
+
+    async onPoiYearSourceChange() {
+      const nextYear = String(this.poiYearSource || '').trim()
+      const scopeSource = String(this.scopeSource || '').trim().toLowerCase()
+      if (scopeSource === 'history' && String(this.currentHistoryRecordId || '').trim()) {
+        await this.loadCurrentHistoryPoiYear(nextYear)
+        return
+      }
+      const poiSelection = this.resolvePoiYearSourceSelection(nextYear)
+      this.resultDataSource = poiSelection.source
+      this.poiDataSource = poiSelection.source
+      this.resultPoiYear = poiSelection.year
+    },
+
     computePoiStats(points) {
       const labels = this.poiCategories.map((c) => c.name)
       const colors = this.poiCategories.map((c) => c.color || '#888')
       const values = this.poiCategories.map(() => 0)
+      const shouldUseBackendSummary = points === this.allPoisDetails
+        && Array.isArray(this.poiCategorySummary)
+        && this.poiCategorySummary.length > 0
+      if (shouldUseBackendSummary) {
+        const countById = {}
+        this.poiCategorySummary.forEach((item) => {
+          if (!item) return
+          countById[String(item.id || '')] = Number(item.count) || 0
+        })
+        this.poiCategories.forEach((cat, idx) => {
+          values[idx] = countById[String(cat.id || '')] || 0
+        })
+        return { labels, colors, values }
+      }
+
       const indexMap = {}
       this.poiCategories.forEach((c, idx) => {
         indexMap[c.id] = idx
@@ -171,6 +278,7 @@ function createAnalysisPoiFlowOrchestratorMethods() {
       })
       return { labels, colors, values }
     },
+
     getPoiCategoryChartStats() {
       const source = Array.isArray(this.allPoisDetails) && this.allPoisDetails.length
         ? this.allPoisDetails
@@ -179,6 +287,7 @@ function createAnalysisPoiFlowOrchestratorMethods() {
             : [])
       return this.computePoiStats(source)
     },
+
     updatePoiCharts() {
       if (!Array.isArray(this.allPoisDetails) || !this.allPoisDetails.length) return
       if (this.activeStep3Panel === 'poi' && this.poiSubTab !== 'category') {
@@ -189,7 +298,6 @@ function createAnalysisPoiFlowOrchestratorMethods() {
       const el = document.getElementById('poiChart')
       if (!el || !window.echarts) return
 
-      // If chart already exists and is visible, update immediately for smooth animation (restores transition)
       const existingChart = echarts.getInstanceByDom(el)
       if (existingChart && el.clientWidth > 0) {
         this.poiChart = existingChart
@@ -209,12 +317,11 @@ function createAnalysisPoiFlowOrchestratorMethods() {
             },
           }],
         }
-        existingChart.setOption(option, false) // Merge for animation
+        existingChart.setOption(option, false)
         this.refreshPoiKdeOverlay()
         return
       }
 
-      // Otherwise, delay slightly for initial rendering (result panels use v-show)
       setTimeout(() => {
         const chart = this.initPoiChart()
         if (!chart) return

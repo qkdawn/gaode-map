@@ -14,7 +14,7 @@ def gate_system_prompt() -> str:
         "2. 如果问题不清晰，只问最关键的 1 到 3 个问题；"
         "3. 澄清问题要具体，不要泛泛而谈；"
         "4. 不要编造 scope、结果或用户意图；"
-        "5. clarification_questions 最多 3 条。"
+        "5. clarification_questions 最多 3 条；"
         "6. 当 status=clarify 时，clarification_options 必须提供 1 到 3 条可直接点击的建议回答，使用用户口吻，避免和 clarification_question 重复。"
     )
 
@@ -36,7 +36,7 @@ def planner_system_prompt() -> str:
         "4. 开店、选址、补位、目标业态建议默认优先 run_site_selection_pack；"
         "5. 用户只问单项人口、夜光、路网时，才直接规划对应单维基础工具；"
         "6. 只有审计反馈要求补局部证据，或场景工具明显过重时，才下钻到能力工具或基础工具；"
-        "7. frontend_analysis 中键存在不等于有可用分析，analysis_readiness=false 时不能把空结果当证据；"
+        "7. frontend_analysis 中键存在不等于有可用分析，analysis_readiness=false 时不能把空结构当证据；"
         "8. 所有场景工具优先带 policy_key 或 analysis_mode，不要让模型自由发明细粒度 GIS 参数；"
         "9. 如果 audit_feedback 提供 missing_evidence，本轮优先只补这些缺口；"
         "10. steps 必须按执行顺序输出，reason、evidence_goal、expected_artifacts 必须具体；"
@@ -55,7 +55,7 @@ def auditor_system_prompt() -> str:
         "\"replan_instructions\":\"...\",\"should_answer\":true}"
         "规则："
         "1. 不要只看是否执行了工具，要看是否真正覆盖了问题维度；"
-        "2. 证据不足时返回 replan，并明确缺什么、为什么缺；"
+        "2. 证据不够时返回 replan，并明确缺什么、为什么缺；"
         "3. 无法可靠回答时返回 fail；"
         "4. 不要把 GIS 指标推断成客流、消费能力、营业额或收益。"
     )
@@ -78,9 +78,9 @@ def synthesizer_system_prompt() -> str:
         "1. decision 必须先回答当前能下什么判断，以及是否适合立刻行动；"
         "2. support 最多 3 条，每条都要能支撑主判断，不允许只列指标清单；"
         "3. counterpoints 必须覆盖冲突证据、缺失证据或解释边界，不能只给正向总结；"
-        "4. actions 必须是可执行的下一步，不要写“建议继续分析”这种泛建议；"
+        "4. actions 必须是可执行的下一步，不要写“建议继续分析”这类泛建议；"
         "5. boundary 必须明确哪些结论不能直接推出，尤其不能把 GIS 指标翻译成客流、消费能力、营业额或经营收益；"
-        "6. cards 仍需输出三类卡片，summary 标题为“核心判断”，evidence 标题为“证据依据”，recommendation 标题为“下一步建议”；"
+        "6. cards 仍需输出三类卡片：summary 标题为“核心判断”，evidence 标题为“证据依据”，recommendation 标题为“下一步建议”；"
         "7. 只能使用给定证据，不要编造不存在的数据。"
     )
 

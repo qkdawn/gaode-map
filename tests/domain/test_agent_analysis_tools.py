@@ -16,12 +16,6 @@ from modules.agent.tool_adapters.analysis_tools import (
 def _snapshot() -> AnalysisSnapshot:
     return AnalysisSnapshot(
         poi_summary={"total": 120},
-        scope={"center": [112.98, 28.19]},
-        pois=[
-            {"lng": 112.99, "lat": 28.20, "category": "餐饮", "subcategory": "咖啡厅", "adname": "一区"},
-            {"lng": 112.991, "lat": 28.201, "category": "餐饮", "subcategory": "咖啡厅", "adname": "一区"},
-            {"lng": 112.97, "lat": 28.18, "category": "购物", "subcategory": "商场", "adname": "二区"},
-        ],
         h3={"summary": {"grid_count": 12, "avg_density_poi_per_km2": 18.6}},
         road={"summary": {"node_count": 3682, "edge_count": 4089}},
         population={"summary": {"total_population": 54326.544, "male_ratio": 0.49, "female_ratio": 0.51}},
@@ -78,7 +72,16 @@ def _snapshot() -> AnalysisSnapshot:
             },
             "nightlight": {
                 "analysis_view": "hotspot",
-                "analysis": {"core_hotspot_count": 4, "hotspot_cell_ratio": 0.33, "peak_radiance": 9.8, "max_distance_km": 1.8, "peak_to_edge_ratio": 2.6},
+                "analysis": {
+                    "core_hotspot_count": 4,
+                    "hotspot_cell_ratio": 0.33,
+                    "peak_radiance": 9.8,
+                    "max_distance_km": 1.8,
+                    "peak_to_edge_ratio": 2.6,
+                    "economic_activity_intensity_level": "medium_high",
+                    "economic_activity_summary_text": "基于夜间灯光亮度，等时圈内经济活动强度呈现中等偏上水平，亮度高值主要集中在东北与东扇区。",
+                    "sector_direction_analysis": {"dominant_direction": "东北", "secondary_direction": "东"},
+                },
                 "legend_note": "地图轮廓仅表示热点边界",
             },
         },
@@ -95,13 +98,6 @@ def test_read_tools_extract_structured_analysis_from_snapshot():
     nightlight = asyncio.run(read_nightlight_pattern_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
 
     assert poi.result["dominant_categories"][0] == "餐饮"
-    assert poi.result["spatial_factors"]["geometry_mode"] == "point"
-    assert poi.result["spatial_factors"]["direction_factor"]["dominant_direction"]
-    assert poi.result["spatial_factors"]["ring_factor"]["ring_rows"]
-    assert poi.result["spatial_factors"]["hotspot_factor"]["hotspot_grid_count"] >= 1
-    assert poi.result["subcategory_spatial_rows"][0]["name"] == "咖啡厅"
-    assert poi.result["subcategory_spatial_rows"][0]["dominant_direction"]
-    assert poi.result["subcategory_spatial_summary"]
     assert poi.result["evidence_ready"] is True
     assert h3.result["distribution_pattern"] in {"single_core", "multi_core", "corridor"}
     assert h3.result["evidence_ready"] is True
@@ -110,6 +106,10 @@ def test_read_tools_extract_structured_analysis_from_snapshot():
     assert population.result["top_age_band"] == "25-34岁"
     assert population.result["evidence_ready"] is True
     assert nightlight.result["core_hotspot_count"] == 4
+    assert nightlight.result["economic_activity_intensity_level"] == "medium_high"
+    assert "消费能力" not in nightlight.result["summary_text"]
+    assert "客流" not in nightlight.result["summary_text"]
+    assert "白天" not in nightlight.result["summary_text"]
     assert nightlight.result["evidence_ready"] is True
 
 
@@ -182,9 +182,6 @@ def test_read_tools_degrade_gracefully_when_frontend_analysis_missing():
     assert poi.result["summary_text"]
     assert poi.result["data_status"] == "empty"
     assert poi.result["evidence_ready"] is False
-    assert poi.result["spatial_factors"]["geometry_mode"] == "point"
-    assert poi.result["spatial_factors"]["count"] == 0
-    assert poi.result["subcategory_spatial_rows"] == []
     assert h3.result["distribution_pattern"] == "weak_signal"
     assert h3.result["data_status"] == "empty"
     assert h3.result["evidence_ready"] is False

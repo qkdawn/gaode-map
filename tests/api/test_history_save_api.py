@@ -5,18 +5,19 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import router.domains.history as history_module
-from modules.poi.schemas import HistorySaveRequest
+from modules.poi.schemas import HistoryPoiYearResult, HistorySaveRequest
 
 
 def test_save_history_ignores_h3_and_road_snapshots(monkeypatch):
     captured = {}
 
-    def fake_create_record(params, polygon, pois, desc, *, preferred_history_id=""):
+    def fake_create_record(params, polygon, pois, desc, *, preferred_history_id="", poi_results_by_year=None):
         captured["params"] = params
         captured["polygon"] = polygon
         captured["pois"] = pois
         captured["desc"] = desc
         captured["preferred_history_id"] = preferred_history_id
+        captured["poi_results_by_year"] = poi_results_by_year
         return 42
 
     monkeypatch.setattr(history_module.history_repo, "create_record", fake_create_record)
@@ -42,14 +43,16 @@ def test_save_history_ignores_h3_and_road_snapshots(monkeypatch):
     assert "h3_result" not in captured["params"]
     assert "road_result" not in captured["params"]
     assert captured["preferred_history_id"] == ""
+    assert captured["poi_results_by_year"] == [{"source": "local", "year": None, "pois": []}]
 
 
 def test_save_history_prefers_original_wgs84_polygon_when_reusing_history(monkeypatch):
     captured = {}
 
-    def fake_create_record(params, polygon, pois, desc, *, preferred_history_id=""):
+    def fake_create_record(params, polygon, pois, desc, *, preferred_history_id="", poi_results_by_year=None):
         captured["polygon"] = polygon
         captured["preferred_history_id"] = preferred_history_id
+        captured["poi_results_by_year"] = poi_results_by_year
         return preferred_history_id or "unexpected"
 
     monkeypatch.setattr(history_module.history_repo, "create_record", fake_create_record)
@@ -72,3 +75,38 @@ def test_save_history_prefers_original_wgs84_polygon_when_reusing_history(monkey
     assert response["history_id"] == "history-fixed"
     assert captured["preferred_history_id"] == "history-fixed"
     assert captured["polygon"] == [[120.1, 30.1], [120.2, 30.2], [120.1, 30.1]]
+
+
+def test_save_history_passes_multi_year_snapshots(monkeypatch):
+    captured = {}
+
+    def fake_create_record(params, polygon, pois, desc, *, preferred_history_id="", poi_results_by_year=None):
+        captured["params"] = params
+        captured["poi_results_by_year"] = poi_results_by_year
+        return "history-multi"
+
+    monkeypatch.setattr(history_module.history_repo, "create_record", fake_create_record)
+
+    payload = HistorySaveRequest(
+        history_id="history-multi",
+        center=[112.0, 28.0],
+        polygon=[[112.1, 28.1], [112.2, 28.2], [112.1, 28.1]],
+        pois=[],
+        keywords="餐饮",
+        mode="walking",
+        time_min=15,
+        location_name="test",
+        source="local",
+        year=2024,
+        years=[2022, 2024],
+        poi_results_by_year=[
+            HistoryPoiYearResult(year=2022, source="local", pois=[]),
+            HistoryPoiYearResult(year=2024, source="local", pois=[]),
+        ],
+    )
+
+    response = asyncio.run(history_module.save_history_manually(payload))
+
+    assert response["history_id"] == "history-multi"
+    assert captured["params"]["years"] == [2022, 2024]
+    assert [item["year"] for item in captured["poi_results_by_year"]] == [2022, 2024]

@@ -60,7 +60,7 @@ test('normalizeAgentSessionSummary keeps persisted metadata and existing snapsho
       status: 'answered',
       title_source: 'user',
       history_id: 'history-123',
-      session_kind: 'summary',
+      panel_kind: 'commercial_summary',
       is_pinned: true,
     },
     { snapshotLoaded: true },
@@ -73,5 +73,5 @@ test('normalizeAgentSessionSummary keeps persisted metadata and existing snapsho
   assert.equal(summary.snapshotLoaded, true)
   assert.equal(summary.isPinned, true)
   assert.equal(summary.historyId, 'history-123')
-  assert.equal(summary.sessionKind, 'summary')
+  assert.equal(summary.panelKind, 'commercial_summary')
 })

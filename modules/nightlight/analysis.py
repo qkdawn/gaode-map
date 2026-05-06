@@ -28,6 +28,17 @@ _GRADIENT_CLASSES = [
     ("fringe_dark", "边缘暗区", "#334155"),
 ]
 
+_SECTOR_DIRECTIONS = [
+    ("north", "北"),
+    ("northeast", "东北"),
+    ("east", "东"),
+    ("southeast", "东南"),
+    ("south", "南"),
+    ("southwest", "西南"),
+    ("west", "西"),
+    ("northwest", "西北"),
+]
+
 
 def _categorical_legend(title: str, items: list[tuple[str, str, str]], unit: str) -> dict[str, Any]:
     return {
@@ -63,6 +74,9 @@ def _empty_analysis_payload() -> dict[str, Any]:
         "middle_band_count": 0,
         "fringe_band_count": 0,
         "peak_to_edge_ratio": 0.0,
+        "economic_activity_intensity_level": "low",
+        "economic_activity_summary_text": "当前缺少可直接利用的夜间经济活动强度证据。",
+        "sector_direction_analysis": _empty_sector_direction_analysis(),
     }
 
 
@@ -72,6 +86,172 @@ def _cell_value(cell: AggregatedNightlightCell) -> float:
 
 def _valid_cells(aggregated_cells: list[AggregatedNightlightCell]) -> list[AggregatedNightlightCell]:
     return [cell for cell in aggregated_cells if int(cell.valid_pixel_count) > 0]
+
+
+def _empty_sector_direction_analysis() -> dict[str, Any]:
+    return {
+        "center_gcj02": [],
+        "dominant_direction": "",
+        "secondary_direction": "",
+        "dominant_share": 0.0,
+        "secondary_share": 0.0,
+        "sectors": [
+            {
+                "key": key,
+                "label": label,
+                "total_radiance": 0.0,
+                "mean_radiance": 0.0,
+                "cell_count": 0,
+                "hotspot_count": 0,
+                "radiance_share": 0.0,
+            }
+            for key, label in _SECTOR_DIRECTIONS
+        ],
+    }
+
+
+def _sector_key_for_point(point: list[float], center: list[float]) -> str:
+    if len(point) < 2 or len(center) < 2:
+        return ""
+    dx = float(point[0]) - float(center[0])
+    dy = float(point[1]) - float(center[1])
+    if abs(dx) <= 1e-12 and abs(dy) <= 1e-12:
+        return "north"
+    # Bearing in degrees clockwise from north.
+    bearing = (math.degrees(math.atan2(dx, dy)) + 360.0) % 360.0
+    idx = int(((bearing + 22.5) % 360.0) // 45.0)
+    return _SECTOR_DIRECTIONS[idx][0]
+
+
+def build_sector_direction_analysis(
+    aggregated_cells: list[AggregatedNightlightCell],
+    center_gcj02: list[float] | None = None,
+    hotspot_cell_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    valid_cells = _valid_cells(aggregated_cells)
+    if not valid_cells:
+        return _empty_sector_direction_analysis()
+
+    center = list(center_gcj02 or [])
+    if len(center) < 2:
+        center = [
+            float(sum(float(cell.centroid_gcj02[0]) for cell in valid_cells) / len(valid_cells)),
+            float(sum(float(cell.centroid_gcj02[1]) for cell in valid_cells) / len(valid_cells)),
+        ]
+    hotspot_ids = {str(item) for item in (hotspot_cell_ids or set())}
+    rows = {
+        key: {
+            "key": key,
+            "label": label,
+            "total_radiance": 0.0,
+            "mean_radiance": 0.0,
+            "cell_count": 0,
+            "hotspot_count": 0,
+            "radiance_share": 0.0,
+        }
+        for key, label in _SECTOR_DIRECTIONS
+    }
+    for cell in valid_cells:
+        key = _sector_key_for_point(list(cell.centroid_gcj02), center)
+        if not key:
+            continue
+        row = rows[key]
+        value = _cell_value(cell)
+        row["total_radiance"] += value
+        row["cell_count"] += 1
+        if str(cell.cell_id) in hotspot_ids:
+            row["hotspot_count"] += 1
+
+    total = sum(float(row["total_radiance"]) for row in rows.values())
+    for row in rows.values():
+        count = int(row["cell_count"])
+        row["total_radiance"] = round_float(float(row["total_radiance"]), 3)
+        row["mean_radiance"] = round_float(float(row["total_radiance"]) / count, 3) if count > 0 else 0.0
+        row["radiance_share"] = round_float(float(row["total_radiance"]) / total, 6) if total > 1e-9 else 0.0
+
+    sectors = list(rows.values())
+    ranked = sorted(sectors, key=lambda item: (float(item["total_radiance"]), int(item["cell_count"])), reverse=True)
+    dominant = ranked[0] if ranked else {}
+    secondary = ranked[1] if len(ranked) > 1 else {}
+    return {
+        "center_gcj02": [round_float(float(center[0]), 6), round_float(float(center[1]), 6)] if len(center) >= 2 else [],
+        "dominant_direction": str(dominant.get("label") or ""),
+        "secondary_direction": str(secondary.get("label") or ""),
+        "dominant_share": float(dominant.get("radiance_share") or 0.0),
+        "secondary_share": float(secondary.get("radiance_share") or 0.0),
+        "sectors": sectors,
+    }
+
+
+def classify_economic_activity_intensity(
+    summary: dict[str, Any],
+    analysis: dict[str, Any],
+) -> str:
+    mean_radiance = float(summary.get("mean_radiance") or 0.0)
+    p90_radiance = float(summary.get("p90_radiance") or 0.0)
+    lit_pixel_ratio = float(summary.get("lit_pixel_ratio") or 0.0)
+    hotspot_cell_ratio = float(analysis.get("hotspot_cell_ratio") or 0.0)
+    peak_to_edge_ratio = float(analysis.get("peak_to_edge_ratio") or 0.0)
+    score = 0.0
+    if mean_radiance >= 8.0:
+        score += 2.0
+    elif mean_radiance >= 3.0:
+        score += 1.0
+    if p90_radiance >= 12.0:
+        score += 1.0
+    if lit_pixel_ratio >= 0.8:
+        score += 1.0
+    elif lit_pixel_ratio >= 0.4:
+        score += 0.5
+    if hotspot_cell_ratio >= 0.3:
+        score += 1.0
+    if peak_to_edge_ratio >= 2.0:
+        score += 1.0
+    if score >= 5.0:
+        return "high"
+    if score >= 3.5:
+        return "medium_high"
+    if score >= 1.5:
+        return "medium"
+    return "low"
+
+
+def economic_activity_level_label(level: str) -> str:
+    return {
+        "high": "高",
+        "medium_high": "中等偏上",
+        "medium": "中等",
+        "low": "偏低",
+    }.get(str(level or ""), "偏低")
+
+
+def enrich_economic_activity_analysis(
+    summary: dict[str, Any],
+    analysis: dict[str, Any],
+    aggregated_cells: list[AggregatedNightlightCell],
+    center_gcj02: list[float] | None = None,
+    hotspot_cell_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    payload = dict(analysis or {})
+    sector_analysis = build_sector_direction_analysis(
+        aggregated_cells,
+        center_gcj02=center_gcj02,
+        hotspot_cell_ids=hotspot_cell_ids,
+    )
+    level = classify_economic_activity_intensity(summary or {}, payload)
+    dominant = str(sector_analysis.get("dominant_direction") or "")
+    secondary = str(sector_analysis.get("secondary_direction") or "")
+    direction_text = f"，亮度高值主要集中在{dominant}" + (f"与{secondary}扇区" if secondary else "扇区") if dominant else ""
+    payload.update(
+        {
+            "economic_activity_intensity_level": level,
+            "economic_activity_summary_text": (
+                f"基于夜间灯光亮度，等时圈内经济活动强度呈现{economic_activity_level_label(level)}水平{direction_text}。"
+            ),
+            "sector_direction_analysis": sector_analysis,
+        }
+    )
+    return payload
 
 
 def _descending_quantiles(values: np.ndarray, quantiles: list[float]) -> list[float]:
@@ -106,6 +286,7 @@ def build_hotspot_layer_cells(
     class_counts = {key: 0 for key, _, _ in _HOTSPOT_CLASSES}
     peak_cell = max(valid_cells, key=_cell_value)
     hotspot_total = 0
+    hotspot_cell_ids: set[str] = set()
     cells = []
     for cell in aggregated_cells:
         raw_value = _cell_value(cell)
@@ -128,6 +309,7 @@ def build_hotspot_layer_cells(
         class_counts[key] += 1
         if key in {"core_hotspot", "secondary_hotspot", "emerging_hotspot"}:
             hotspot_total += 1
+            hotspot_cell_ids.add(str(cell.cell_id))
         cells.append(
             {
                 "cell_id": str(cell.cell_id),
@@ -153,6 +335,7 @@ def build_hotspot_layer_cells(
             "hotspot_cell_ratio": round_float(hotspot_total / max(1, len(valid_cells)), 6),
             "peak_radiance": round_float(_cell_value(peak_cell), 3),
             "peak_cell_id": str(peak_cell.cell_id),
+            "_hotspot_cell_ids": hotspot_cell_ids,
         }
     )
     return cells, legend, analysis

@@ -31,11 +31,11 @@ function createAgentSessionStoreMethods() {
   return {
     createAgentSession(seedTitle = '') {
       return createAgentSessionRecord({
-        title: String(seedTitle || '').trim() || '新聊天',
+        title: String(seedTitle || '').trim() || '新对话',
         preview: '开始一段新的分析对话',
         historyId: this.getCurrentAgentHistoryId(),
         status: 'idle',
-        sessionKind: 'followup',
+        panelKind: 'followup',
         persisted: false,
         snapshotLoaded: true,
         titleSource: 'fallback',
@@ -45,7 +45,6 @@ function createAgentSessionStoreMethods() {
       return this.agentSessions.filter((item) => !!(item && item.persisted))
     },
     getCurrentAgentHistoryId() {
-      if (asText(this.scopeSource) !== 'history') return ''
       return asText(this.currentHistoryRecordId)
     },
     getAgentCurrentRangeSessions() {
@@ -62,26 +61,11 @@ function createAgentSessionStoreMethods() {
     },
     isAgentSummaryHistorySession(session = null) {
       if (!session || typeof session !== 'object') return false
-      if (asText(session.sessionKind) === 'summary') return true
-      if (asText(session.sessionKind) === 'followup') return false
-      if (Object.prototype.hasOwnProperty.call(session, 'hasSummaryPack')) {
-        return !!session.hasSummaryPack
-      }
-      const payloads = cloneObject(session.panelPayloads)
-      const pack = cloneObject(payloads.summary_pack)
-      return !!(
-        asText((pack.headline_judgment || {}).summary)
-        || (Array.isArray(pack.secondary_conclusions) && pack.secondary_conclusions.length > 0)
-      )
+      return asText(session.panelKind) === 'commercial_summary'
     },
     isAgentFollowupHistorySession(session = null) {
       if (!session || typeof session !== 'object') return false
-      if (asText(session.sessionKind) === 'followup') return true
-      if (asText(session.sessionKind) === 'summary') return false
-      if (Object.prototype.hasOwnProperty.call(session, 'hasFollowupMessages')) {
-        return !!session.hasFollowupMessages
-      }
-      return cloneArray(session.messages).some((item) => asText(item && item.role) === 'user' && asText(item && item.content))
+      return asText(session.panelKind) === 'followup'
     },
     splitAgentHistorySessionsByPanel(sessions = []) {
       const summary = []
@@ -112,16 +96,16 @@ function createAgentSessionStoreMethods() {
           panels: [
             {
               id: 'summary',
-              title: '总结历史',
+              title: '区域总结历史',
               count: currentSplit.summary.length,
-              emptyText: '当前范围暂无总结历史',
+              emptyText: '当前范围暂无区域总结历史',
               sessions: currentSplit.summary,
             },
             {
               id: 'followup',
-              title: '追问历史',
+              title: '追问解释历史',
               count: currentSplit.followup.length,
-              emptyText: '当前范围暂无追问历史',
+              emptyText: '当前范围暂无追问解释历史',
               sessions: currentSplit.followup,
             },
           ],
@@ -135,16 +119,16 @@ function createAgentSessionStoreMethods() {
           panels: [
             {
               id: 'summary',
-              title: '总结历史',
+              title: '区域总结历史',
               count: otherSplit.summary.length,
-              emptyText: '其他范围暂无总结历史',
+              emptyText: '其他范围暂无区域总结历史',
               sessions: otherSplit.summary,
             },
             {
               id: 'followup',
-              title: '追问历史',
+              title: '追问解释历史',
               count: otherSplit.followup.length,
-              emptyText: '其他范围暂无追问历史',
+              emptyText: '其他范围暂无追问解释历史',
               sessions: otherSplit.followup,
             },
           ],
@@ -335,9 +319,7 @@ function createAgentSessionStoreMethods() {
         persisted: true,
         snapshotLoaded: true,
         titleSource: detail && detail.title_source,
-        sessionKind: detail && detail.session_kind,
-        hasSummaryPack: !!(detail && detail.has_summary_pack),
-        hasFollowupMessages: !!(detail && detail.has_followup_messages),
+        panelKind: detail && detail.panel_kind,
         createdAt: detail && detail.created_at,
         updatedAt: detail && detail.updated_at,
         pinnedAt: detail && detail.pinned_at,
@@ -379,7 +361,7 @@ function createAgentSessionStoreMethods() {
         id: activeId,
         title: shouldPreserveTitle
           ? existing.title
-          : (messages.length ? fallbackTitle : clampText(existing && existing.title, 60) || '新聊天'),
+          : (messages.length ? fallbackTitle : clampText(existing && existing.title, 60) || '新对话'),
         preview: deriveAgentSessionPreview({
           error: this.agentError,
           riskPrompt: this.agentRiskPrompt,
@@ -393,9 +375,9 @@ function createAgentSessionStoreMethods() {
         historyId: Object.prototype.hasOwnProperty.call(options || {}, 'historyId')
           ? asText(options.historyId)
           : (asText(existing && existing.historyId) || this.getCurrentAgentHistoryId()),
-        sessionKind: Object.prototype.hasOwnProperty.call(options || {}, 'sessionKind')
-          ? asText(options.sessionKind)
-          : asText(existing && existing.sessionKind),
+        panelKind: Object.prototype.hasOwnProperty.call(options || {}, 'panelKind')
+          ? asText(options.panelKind)
+          : asText(existing && existing.panelKind),
         status: String(this.agentStatus || 'idle'),
         stage: String(this.agentStage || 'gating'),
         input: String(this.agentInput || ''),

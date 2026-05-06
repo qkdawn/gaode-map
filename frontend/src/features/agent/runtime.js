@@ -599,7 +599,6 @@ function createAgentRuntimeMethods() {
       }
     },
     getCurrentAgentHistoryId() {
-      if (asText(this.scopeSource) !== 'history') return ''
       return asText(this.currentHistoryRecordId)
     },
     buildAgentAnalysisSnapshot() {
@@ -678,7 +677,7 @@ function createAgentRuntimeMethods() {
       return {
         title,
         history_id: asText(merged.historyId) || this.getCurrentAgentHistoryId(),
-        session_kind: asText(merged.sessionKind),
+        panel_kind: asText(merged.panelKind),
         preview: clampText(merged.preview, 120) || deriveAgentSessionPreview(merged),
         status: asText(merged.status || 'idle') || 'idle',
         stage: asText(merged.stage || 'gating') || 'gating',
@@ -866,7 +865,7 @@ function createAgentRuntimeMethods() {
       } = turnContext
       this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
         ...session,
-        sessionKind: 'followup',
+        panelKind: 'followup',
         persisted: wasPersisted,
         snapshotLoaded: true,
         historyId,
@@ -1100,7 +1099,7 @@ function createAgentRuntimeMethods() {
           }
           this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
             ...session,
-            sessionKind: 'followup',
+            panelKind: 'followup',
             persisted: true,
             snapshotLoaded: true,
             status: nextStatus,

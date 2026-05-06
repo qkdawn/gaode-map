@@ -21,6 +21,12 @@ services:
     environment:
       - VALHALLA_BASE_URL=http://valhalla:8002
       - AMAP_WEB_SERVICE_KEY
+      - DB_URL
+      - DB_HOST=${DB_HOST:-175.0.72.152}
+      - DB_PORT=${DB_PORT:-13306}
+      - DB_USER=${DB_USER:-map_app}
+      - DB_PASSWORD
+      - DB_NAME=${DB_NAME:-gaode_deploy}
       # Default only for same compose network; override LOCAL_QUERY_BASE_URL in .env for split deployment.
       - LOCAL_QUERY_BASE_URL=${LOCAL_QUERY_BASE_URL:-http://search:8001}
       - LOCAL_QUERY_COORD_SYSTEM=${LOCAL_QUERY_COORD_SYSTEM:-gcj02}
@@ -39,7 +45,6 @@ services:
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - .:/app
-      - ./data:/app/data
       - "${CITY_BOUNDARY_HOST_DIR:-D:/MapData/boundaries}:/mapdata/boundaries:ro"
       - "${POPULATION_DATA_HOST_DIR:-E:/PeopleData}:/mapdata/population:ro"
       - "${NIGHTLIGHT_DATA_HOST_DIR:-E:/NightlightData}:/mapdata/nightlight:ro"

@@ -4,7 +4,8 @@
 """
 
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List, Literal
+from urllib.parse import quote_plus, urlsplit, urlunsplit
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -43,14 +44,49 @@ class Settings(BaseSettings):
         validation_alias="CLEANUP_INTERVAL_HOURS",
         description="Background cleanup interval in hours",
     )
-    db_path: str = str(Path(__file__).resolve().parent.parent / "data" / "map.db")  # SQLite 数据文件路径
-    db_url: Optional[str] = Field(None, validation_alias="DB_URL", description="数据库连接字符串")
+    db_url: str = Field("", validation_alias="DB_URL", description="Database connection string")
+    db_host: str = Field("", validation_alias="DB_HOST", description="Database host override")
+    db_port: int = Field(13306, validation_alias="DB_PORT", description="Database port")
+    db_user: str = Field("map_app", validation_alias="DB_USER", description="Database user")
+    db_password: str = Field("", validation_alias="DB_PASSWORD", description="Database password")
+    db_name: str = Field("gaode_deploy", validation_alias="DB_NAME", description="Database name")
+    db_driver: str = Field("mysql+pymysql", validation_alias="DB_DRIVER", description="SQLAlchemy database driver")
+    db_query: str = Field("charset=utf8mb4", validation_alias="DB_QUERY", description="Database URL query string")
 
     @property
     def sqlalchemy_database_uri(self) -> str:
-        if self.db_url:
-            return self.db_url
-        return f"sqlite:///{self.db_path}"
+        db_url = str(self.db_url or "").strip()
+        db_host = str(self.db_host or "").strip()
+        if db_host and db_url:
+            db_url = self._replace_database_url_host(db_url, db_host, self.db_port)
+        elif db_host:
+            db_url = self._build_database_url_from_parts(db_host)
+        if not db_url:
+            raise ValueError("DB_URL is required, or configure DB_HOST with DB_USER/DB_PASSWORD/DB_NAME.")
+        if db_url.lower().startswith("sqlite"):
+            raise ValueError("SQLite is no longer supported. Configure DB_URL with mysql+pymysql://...")
+        return db_url
+
+    def _build_database_url_from_parts(self, host: str) -> str:
+        if not str(self.db_password or "").strip():
+            raise ValueError("DB_PASSWORD is required when DB_HOST is used without DB_URL.")
+        user = quote_plus(str(self.db_user or ""))
+        password = quote_plus(str(self.db_password or ""))
+        database = str(self.db_name or "").strip().lstrip("/")
+        query = str(self.db_query or "").strip().lstrip("?")
+        url = f"{self.db_driver}://{user}:{password}@{host}:{int(self.db_port)}/{database}"
+        return f"{url}?{query}" if query else url
+
+    @staticmethod
+    def _replace_database_url_host(db_url: str, host: str, port: int) -> str:
+        parts = urlsplit(db_url)
+        userinfo, sep, hostport = parts.netloc.rpartition("@")
+        current_port = str(port or "")
+        if not current_port and ":" in hostport:
+            current_port = hostport.rsplit(":", 1)[1]
+        next_hostport = f"{host}:{current_port}" if current_port else host
+        next_netloc = f"{userinfo}{sep}{next_hostport}" if sep else next_hostport
+        return urlunsplit((parts.scheme, next_netloc, parts.path, parts.query, parts.fragment))
 
     # 高德地图API配置
     amap_web_service_key: str = Field(
@@ -59,7 +95,8 @@ class Settings(BaseSettings):
         description="高德 Web 服务（Web API）Key，支持多个Key用英文逗号分隔",
     )
     amap_js_api_key: str = Field(
-        validation_alias= "AMAP_JS_API_KEY",
+        "",
+        validation_alias="AMAP_JS_API_KEY",
         description="高德 Web JS API Key",
     )
     amap_js_security_code: str = Field(
@@ -72,6 +109,10 @@ class Settings(BaseSettings):
         validation_alias="TIANDITU_KEY",
         description="天地图 Web 瓦片服务 Key（tk）",
     )
+
+    def model_post_init(self, __context) -> None:
+        if not str(self.amap_js_api_key or "").strip() and str(self.amap_web_service_key or "").strip():
+            self.amap_js_api_key = str(self.amap_web_service_key or "").split(",", 1)[0].strip()
 
     # AI Agent provider 配置
     ai_enabled: bool = Field(
@@ -87,7 +128,7 @@ class Settings(BaseSettings):
     ai_base_url: str = Field(
         "",
         validation_alias="AI_BASE_URL",
-        description="LLM provider API 基础地址，例如 https://api.deepseek.com/v1",
+        description="LLM provider API 基础地址，例如 https://api.deepseek.com",
     )
     ai_api_key: str = Field(
         "",
@@ -97,7 +138,7 @@ class Settings(BaseSettings):
     ai_model: str = Field(
         "",
         validation_alias="AI_MODEL",
-        description="Agent 使用的模型名，例如 deepseek-chat",
+        description="Agent 使用的模型名，例如 deepseek-v4-flash",
     )
     ai_thinking_enabled: bool = Field(
         True,

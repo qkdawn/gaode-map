@@ -54,7 +54,7 @@ def test_agent_session_crud_api(monkeypatch):
                 "preview": "开始一段新的分析对话",
                 "status": "idle",
                 "history_id": "history-current",
-                "session_kind": "summary",
+                "panel_kind": "commercial_summary",
                 "is_pinned": False,
                 "input": "",
                 "messages": [{"role": "user", "content": "总结这个区域"}],
@@ -75,7 +75,7 @@ def test_agent_session_crud_api(monkeypatch):
         assert put_resp.status_code == 200
         assert put_resp.json()["title"] == "商业分析"
         assert put_resp.json()["history_id"] == "history-current"
-        assert put_resp.json()["session_kind"] == "summary"
+        assert put_resp.json()["panel_kind"] == "commercial_summary"
         assert put_resp.json()["title_source"] == "user"
 
         patch_resp = client.patch(
@@ -93,7 +93,7 @@ def test_agent_session_crud_api(monkeypatch):
         assert len(list_resp.json()) == 1
         assert list_resp.json()[0]["id"] == "agent-1"
         assert list_resp.json()[0]["history_id"] == "history-current"
-        assert list_resp.json()[0]["session_kind"] == "summary"
+        assert list_resp.json()[0]["panel_kind"] == "commercial_summary"
 
         detail_resp = client.get("/api/v1/analysis/agent/sessions/agent-1")
         assert detail_resp.status_code == 200
@@ -145,10 +145,12 @@ def test_agent_turn_persists_multiple_statuses(monkeypatch):
         assert list_resp.status_code == 200
         assert len(list_resp.json()) == 4
         assert {item["history_id"] for item in list_resp.json()} == {"history-1", "history-2", "history-3", "history-4"}
+        assert {item["panel_kind"] for item in list_resp.json()} == {"followup"}
 
         answered_detail = client.get("/api/v1/analysis/agent/sessions/agent-1")
         assert answered_detail.status_code == 200
         assert answered_detail.json()["history_id"] == "history-1"
+        assert answered_detail.json()["panel_kind"] == "followup"
         assert answered_detail.json()["messages"][-1]["role"] == "assistant"
         assert answered_detail.json()["diagnostics"]["thinking_timeline"][0]["id"] == "thinking-answer"
 
@@ -236,6 +238,8 @@ def test_agent_turn_keeps_user_title_without_auto_override(monkeypatch):
                 "title": "手动标题",
                 "preview": "开始一段新的分析对话",
                 "status": "idle",
+                "history_id": "history-1",
+                "panel_kind": "followup",
                 "input": "",
                 "messages": [],
                 "cards": [],

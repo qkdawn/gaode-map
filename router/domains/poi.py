@@ -5,8 +5,8 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from core.spatial import transform_polygon_payload_coords
-from modules.poi.core import fetch_local_pois_by_polygon, fetch_pois_by_polygon
-from modules.poi.schemas import PoiRequest, PoiResponse
+from modules.poi import service as poi_service
+from modules.poi.schemas import PoiMultiYearRequest, PoiMultiYearResponse, PoiRequest, PoiResponse
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84
 from store.history_repo import history_repo
 
@@ -18,20 +18,7 @@ logger = logging.getLogger(__name__)
 async def fetch_pois_analysis(payload: PoiRequest):
     source = (payload.source or "local").strip().lower()
     try:
-        if source == "local":
-            results = await fetch_local_pois_by_polygon(
-                payload.polygon,
-                types=payload.types,
-                year=payload.year,
-                max_count=payload.max_count,
-            )
-        else:
-            results = await fetch_pois_by_polygon(
-                payload.polygon,
-                payload.keywords,
-                payload.types,
-                max_count=payload.max_count,
-            )
+        results = await poi_service.fetch_single_year_pois(payload)
     except Exception as exc:
         logger.exception("POI fetch failed: source=%s", source)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -66,10 +53,23 @@ async def fetch_pois_analysis(payload: PoiRequest):
                 "keywords": payload.keywords,
                 "mode": payload.mode,
                 "source": source,
+                "year": payload.year,
+                "years": [int(payload.year)] if payload.year is not None else [],
             },
             s_poly,
             s_pois,
             desc,
+            poi_results_by_year=[{"source": source, "year": payload.year, "pois": s_pois}],
         )
 
     return {"pois": results, "count": len(results)}
+
+
+@router.post("/api/v1/analysis/pois/multi-year", response_model=PoiMultiYearResponse)
+async def fetch_multi_year_pois_analysis(payload: PoiMultiYearRequest):
+    try:
+        result = await poi_service.fetch_multi_year_pois(payload)
+    except Exception as exc:
+        logger.exception("Multi-year POI fetch failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return result

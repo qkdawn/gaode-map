@@ -74,7 +74,7 @@ docker compose up --build
 - 路网/等时圈：`DEPTHMAPX_CLI_PATH`、`OVERPASS_ENDPOINT`、`VALHALLA_BASE_URL`
 - 人口分析：`POPULATION_DATA_DIR`、`POPULATION_PREVIEW_MAX_SIZE`
 - 夜光分析：`NIGHTLIGHT_DATA_DIR`、`NIGHTLIGHT_PREVIEW_MAX_SIZE`
-- 数据库：`DB_URL`（可选；未配置时走 SQLite）
+- ????`DB_URL` ? `DB_HOST` + `DB_URL`??? IP ?????????????????????? `.env` ? `DB_URL`??? `DB_HOST=175.0.72.152`?`DB_HOST` ??? `DB_URL` ???????
 - 图表输出目录覆盖：`CHART_OUTPUT_DIR`（可选，默认 `runtime/generated_charts/`）
 
 ### 人口数据目录

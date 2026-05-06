@@ -27,11 +27,12 @@ def test_upsert_and_get_agent_session_record(monkeypatch):
         title="商业分析",
         preview="开始一段新的分析对话",
         status="answered",
+        history_id="history-current",
+        panel_kind="commercial_summary",
         snapshot={
             "input": "",
             "messages": [{"role": "user", "content": "总结这个区域"}],
             "cards": [{"type": "summary", "title": "概览", "content": "已完成分析", "items": []}],
-            "_meta": {"history_id": "history-current", "session_kind": "summary"},
         },
         title_source="fallback",
     )
@@ -44,8 +45,10 @@ def test_upsert_and_get_agent_session_record(monkeypatch):
     assert record["preview"] == "开始一段新的分析对话"
     assert record["status"] == "answered"
     assert record["history_id"] == "history-current"
-    assert record["session_kind"] == "summary"
+    assert record["panel_kind"] == "commercial_summary"
     assert record["title_source"] == "fallback"
+    assert record["snapshot"]["_meta"]["history_id"] == "history-current"
+    assert record["snapshot"]["_meta"]["panel_kind"] == "commercial_summary"
     assert record["snapshot"]["messages"][0]["content"] == "总结这个区域"
 
 
@@ -57,6 +60,8 @@ def test_list_records_orders_pinned_before_recent(monkeypatch):
         title="旧会话",
         preview="old",
         status="answered",
+        history_id="history-1",
+        panel_kind="followup",
         snapshot={"messages": []},
     )
     repo.upsert_record(
@@ -64,6 +69,8 @@ def test_list_records_orders_pinned_before_recent(monkeypatch):
         title="新会话",
         preview="new",
         status="answered",
+        history_id="history-2",
+        panel_kind="followup",
         snapshot={"messages": []},
     )
     repo.update_metadata("agent-1", is_pinned=True)
@@ -88,6 +95,8 @@ def test_update_metadata_unpins_session(monkeypatch):
         title="原始标题",
         preview="preview",
         status="idle",
+        history_id="history-1",
+        panel_kind="followup",
         snapshot={"messages": []},
         is_pinned=True,
     )
@@ -101,23 +110,26 @@ def test_update_metadata_unpins_session(monkeypatch):
     assert updated["title_source"] == "user"
 
 
-def test_missing_agent_session_history_id_defaults_empty(monkeypatch):
+def test_missing_agent_panel_identity_is_rejected(monkeypatch):
     repo, _ = _install_repo(monkeypatch)
 
-    repo.upsert_record(
-        "agent-legacy",
-        title="旧会话",
-        preview="legacy",
-        status="answered",
-        snapshot={"messages": []},
-    )
+    try:
+        repo.upsert_record(
+            "agent-missing",
+            title="缺少字段",
+            preview="missing",
+            status="answered",
+            history_id="",
+            panel_kind="",
+            snapshot={"messages": []},
+        )
+    except ValueError as exc:
+        assert "history_id" in str(exc)
+    else:
+        raise AssertionError("missing history_id/panel_kind should be rejected")
 
-    records = repo.list_records()
 
-    assert records[0]["history_id"] == ""
-
-
-def test_list_records_exposes_summary_and_followup_flags(monkeypatch):
+def test_list_records_exposes_panel_kind(monkeypatch):
     repo, _ = _install_repo(monkeypatch)
 
     repo.upsert_record(
@@ -125,6 +137,8 @@ def test_list_records_exposes_summary_and_followup_flags(monkeypatch):
         title="总结会话",
         preview="summary",
         status="answered",
+        history_id="history-current",
+        panel_kind="commercial_summary",
         snapshot={
             "messages": [],
             "output": {
@@ -141,6 +155,8 @@ def test_list_records_exposes_summary_and_followup_flags(monkeypatch):
         title="追问会话",
         preview="followup",
         status="answered",
+        history_id="history-current",
+        panel_kind="followup",
         snapshot={
             "messages": [{"role": "user", "content": "为什么这里路网较弱"}],
             "output": {"panel_payloads": {}},
@@ -148,9 +164,7 @@ def test_list_records_exposes_summary_and_followup_flags(monkeypatch):
     )
 
     by_id = {item["id"]: item for item in repo.list_records()}
-    assert by_id["agent-summary"]["session_kind"] == "summary"
-    assert by_id["agent-summary"]["has_summary_pack"] is True
-    assert by_id["agent-summary"]["has_followup_messages"] is False
-    assert by_id["agent-followup"]["session_kind"] == "followup"
-    assert by_id["agent-followup"]["has_summary_pack"] is False
-    assert by_id["agent-followup"]["has_followup_messages"] is True
+    assert by_id["agent-summary"]["panel_kind"] == "commercial_summary"
+    assert by_id["agent-followup"]["panel_kind"] == "followup"
+    assert by_id["agent-summary"]["history_id"] == "history-current"
+    assert by_id["agent-followup"]["history_id"] == "history-current"

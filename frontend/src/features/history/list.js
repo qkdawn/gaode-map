@@ -96,10 +96,11 @@
                 if (raw === 'gaode' || raw === 'amap') return 'gaode';
                 return fallback;
             },
-            getPoiSourceLabel(source) {
+            getPoiSourceLabel(source, year = null) {
                 const normalized = this.normalizePoiSource(source, 'unknown');
-                if (normalized === 'local') return '本地源（2018年）';
-                if (normalized === 'gaode') return '高德源';
+                const yearValue = Number.isFinite(Number(year)) ? Number(year) : null;
+                if (normalized === 'local') return `本地源（${yearValue || 2020}年）`;
+                if (normalized === 'gaode') return `高德源（${yearValue || 2026}年）`;
                 return '未标记';
             },
             normalizeHistoryRecord(item) {
@@ -119,7 +120,7 @@
                 const rawSource = record && record.params ? record.params.source : '';
                 const normalizedSource = this.normalizePoiSource(rawSource, 'unknown');
                 record._source = normalizedSource;
-                record._sourceLabel = this.getPoiSourceLabel(normalizedSource);
+                record._sourceLabel = this.getPoiSourceLabel(normalizedSource, record && record.params ? record.params.year : null);
                 return record;
             },
             progressiveRenderHistory(sessionId) {
@@ -185,11 +186,21 @@
                     this.historyLoadedCount = 0;
                 }
                 this.historyFetchAbortController = new AbortController();
+                const timerHost = (typeof window !== 'undefined' && typeof window.setTimeout === 'function')
+                    ? window
+                    : globalThis;
+                const historyLoadTimeoutMs = 15000;
+                const historyLoadTimeoutId = timerHost.setTimeout(() => {
+                    if (sessionId === this.historyRenderSessionId && this.historyFetchAbortController) {
+                        this.historyFetchAbortController.abort();
+                    }
+                }, historyLoadTimeoutMs);
 
                 try {
+                    const historyPath = '/api/v1/analysis/history?limit=100';
                     const historyUrl = hardRefresh
-                        ? `/api/v1/analysis/history?_ts=${Date.now()}`
-                        : '/api/v1/analysis/history';
+                        ? `${historyPath}&_ts=${Date.now()}`
+                        : historyPath;
                     const res = await fetch(historyUrl, {
                         signal: this.historyFetchAbortController.signal,
                         cache: hardRefresh ? 'no-store' : 'default'
@@ -209,7 +220,13 @@
                     this.historyRenderRafId = null;
                     this.historyHasLoadedOnce = true;
                 } catch (e) {
-                    if (e && e.name === 'AbortError') return;
+                    if (e && e.name === 'AbortError') {
+                        if (sessionId === this.historyRenderSessionId) {
+                            console.warn('History load timed out or was cancelled');
+                            this.historyLoading = false;
+                        }
+                        return;
+                    }
                     console.error('History Load Error:', e);
                     if (sessionId !== this.historyRenderSessionId) return;
                     this.historyLoading = false;
@@ -219,6 +236,7 @@
                         this.historyLoadedCount = 0;
                     }
                 } finally {
+                    timerHost.clearTimeout(historyLoadTimeoutId);
                     if (sessionId === this.historyRenderSessionId) {
                         this.historyFetchAbortController = null;
                     }

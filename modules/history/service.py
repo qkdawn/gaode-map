@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 
 from core.spatial import transform_geojson_coordinates, transform_nested_coords, transform_polygon_payload_coords
 from modules.poi.schemas import HistorySaveRequest
@@ -23,13 +24,26 @@ def coerce_extracted_json_value(value: Any) -> Any:
         return value
 
 
+def _normalize_years(values: Any) -> List[int]:
+    result: List[int] = []
+    for item in values or []:
+        try:
+            result.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return sorted({item for item in result})
+
+
 def build_lightweight_list_params(row: Any) -> Dict[str, Any]:
+    years = coerce_extracted_json_value(getattr(row, "years", None))
     return {
         "center": coerce_extracted_json_value(getattr(row, "center", None)),
         "time_min": coerce_extracted_json_value(getattr(row, "time_min", None)),
         "keywords": coerce_extracted_json_value(getattr(row, "keywords", None)),
         "mode": coerce_extracted_json_value(getattr(row, "mode", None)),
         "source": coerce_extracted_json_value(getattr(row, "source", None)),
+        "year": coerce_extracted_json_value(getattr(row, "year", None)),
+        "years": _normalize_years(years),
     }
 
 
@@ -41,7 +55,17 @@ def build_list_params_from_params(raw_params: Dict[str, Any]) -> Dict[str, Any]:
         "keywords": params.get("keywords"),
         "mode": params.get("mode"),
         "source": params.get("source"),
+        "year": params.get("year"),
+        "years": _normalize_years(params.get("years")),
     }
+
+
+def _build_year_key(params: Dict[str, Any]) -> str:
+    years = _normalize_years(params.get("years"))
+    if years:
+        return ",".join(str(item) for item in years)
+    year = params.get("year")
+    return str(year if year is not None else "")
 
 
 def build_history_list_dedupe_key(description: str, params: Dict[str, Any]) -> str:
@@ -57,9 +81,10 @@ def build_history_list_dedupe_key(description: str, params: Dict[str, Any]) -> s
     time_min = str(params.get("time_min") if params.get("time_min") is not None else "")
     mode = str(params.get("mode") or "").strip().lower()
     source = str(params.get("source") or "").strip().lower()
+    year = _build_year_key(params)
     keywords = str(params.get("keywords") or "").strip()
     desc_key = str(description or "").strip()
-    return "||".join([center_key, time_min, mode, source, keywords, desc_key])
+    return "||".join([center_key, time_min, mode, source, year, keywords, desc_key])
 
 
 def build_history_overwrite_key(params: Dict[str, Any]) -> str:
@@ -75,8 +100,9 @@ def build_history_overwrite_key(params: Dict[str, Any]) -> str:
     time_min = str(params.get("time_min") if params.get("time_min") is not None else "")
     mode = str(params.get("mode") or "").strip().lower()
     source = str(params.get("source") or "").strip().lower()
+    year = _build_year_key(params)
     keywords = str(params.get("keywords") or "").strip()
-    return "||".join([center_key, time_min, mode, source, keywords])
+    return "||".join([center_key, time_min, mode, source, year, keywords])
 
 
 def serialize_created_at(value: datetime) -> str:
@@ -92,6 +118,9 @@ def build_detail_payload(
     pois: Optional[List[Dict[str, Any]]] = None,
     poi_summary: Optional[Dict[str, Any]] = None,
     poi_count: Optional[int] = None,
+    available_years: Optional[List[int]] = None,
+    selected_year: Optional[int] = None,
+    pois_by_year: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     payload = {
         "id": str(history.id or ""),
@@ -101,6 +130,9 @@ def build_detail_payload(
         "polygon": history.result_polygon,
         "polygon_wgs84": history.result_polygon,
         "poi_summary": poi_summary or {},
+        "available_years": list(available_years or []),
+        "selected_year": int(selected_year) if selected_year is not None else None,
+        "pois_by_year": list(pois_by_year or []),
     }
     if poi_count is not None:
         payload["poi_count"] = int(max(0, poi_count))
@@ -114,12 +146,18 @@ def _build_history_params_payload(payload: HistorySaveRequest) -> Dict[str, Any]
     if center:
         wx, wy = gcj02_to_wgs84(center[0], center[1])
         center = [wx, wy]
+    normalized_years = _normalize_years(payload.years)
+    if payload.year is not None:
+        normalized_years = _normalize_years(normalized_years + [payload.year])
+
     params_payload: Dict[str, Any] = {
         "center": center,
         "time_min": payload.time_min,
         "keywords": payload.keywords,
         "mode": payload.mode,
         "source": ((payload.source or "local").strip().lower() if payload.source else "local"),
+        "year": payload.year,
+        "years": normalized_years,
     }
     if params_payload["source"] not in ("gaode", "local"):
         params_payload["source"] = "local"
@@ -141,6 +179,36 @@ def _build_history_description(payload: HistorySaveRequest, params_payload: Dict
     return desc
 
 
+def _normalize_poi_snapshot_rows(payload: HistorySaveRequest, params_payload: Dict[str, Any], pois: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if payload.poi_results_by_year:
+        result: List[Dict[str, Any]] = []
+        for row in payload.poi_results_by_year:
+            row_pois: List[Dict[str, Any]] = []
+            for poi in row.pois:
+                item = dict(poi or {})
+                if item.get("location"):
+                    lx, ly = item["location"]
+                    wx, wy = gcj02_to_wgs84(lx, ly)
+                    item["location"] = [wx, wy]
+                row_pois.append(item)
+            result.append(
+                {
+                    "source": str(row.source or params_payload["source"]).strip().lower(),
+                    "year": int(row.year) if row.year is not None else None,
+                    "pois": row_pois,
+                }
+            )
+        return result
+
+    return [
+        {
+            "source": params_payload["source"],
+            "year": payload.year,
+            "pois": pois,
+        }
+    ]
+
+
 def save_history_request(payload: HistorySaveRequest, repo) -> Dict[str, Any]:
     params_payload = _build_history_params_payload(payload)
     preferred_history_id = str(payload.history_id or "").strip()
@@ -159,6 +227,7 @@ def save_history_request(payload: HistorySaveRequest, repo) -> Dict[str, Any]:
             item["location"] = [wx, wy]
         pois.append(item)
 
+    snapshots = _normalize_poi_snapshot_rows(payload, params_payload, pois)
     desc = _build_history_description(payload, params_payload, len(pois))
     try:
         history_id = repo.create_record(
@@ -167,6 +236,7 @@ def save_history_request(payload: HistorySaveRequest, repo) -> Dict[str, Any]:
             pois,
             desc,
             preferred_history_id=preferred_history_id,
+            poi_results_by_year=snapshots,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"保存历史失败: {exc}") from exc
@@ -225,15 +295,45 @@ def convert_history_pois_to_gcj02(res: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
+def _build_history_database_error_detail(exc: Exception) -> str:
+    message = str(exc)
+    normalized = message.lower()
+    if "1038" in normalized or "sort memory" in normalized:
+        return "数据库排序内存不足，POI 明细未恢复；已避免排序大字段后仍失败，请检查 MySQL sort_buffer_size"
+    return f"历史数据库查询失败: {message[:300]}"
+
+
 def get_history_detail_payload(history_id: str, include_pois: bool, repo) -> Dict[str, Any]:
-    res = repo.get_detail(history_id, include_pois=include_pois)
+    try:
+        res = repo.get_detail(history_id, include_pois=include_pois)
+    except SQLAlchemyError as exc:
+        raise HTTPException(500, _build_history_database_error_detail(exc)) from exc
     if not res:
         raise HTTPException(404, "Record not found")
     return convert_history_detail_to_gcj02(res, include_pois=include_pois)
 
 
-def get_history_pois_payload(history_id: str, repo) -> Dict[str, Any]:
-    res = repo.get_pois(history_id)
+def get_history_detail_payload_for_year(history_id: str, include_pois: bool, year: Optional[int], repo) -> Dict[str, Any]:
+    try:
+        if year is None:
+            res = repo.get_detail(history_id, include_pois=include_pois)
+        else:
+            res = repo.get_detail(history_id, include_pois=include_pois, year=year)
+    except SQLAlchemyError as exc:
+        raise HTTPException(500, _build_history_database_error_detail(exc)) from exc
+    if not res:
+        raise HTTPException(404, "Record not found")
+    return convert_history_detail_to_gcj02(res, include_pois=include_pois)
+
+
+def get_history_pois_payload(history_id: str, repo, year: Optional[int] = None) -> Dict[str, Any]:
+    try:
+        if year is None:
+            res = repo.get_pois(history_id)
+        else:
+            res = repo.get_pois(history_id, year=year)
+    except SQLAlchemyError as exc:
+        raise HTTPException(500, _build_history_database_error_detail(exc)) from exc
     if not res:
         raise HTTPException(404, "Record not found")
     return convert_history_pois_to_gcj02(res)

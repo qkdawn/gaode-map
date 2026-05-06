@@ -92,6 +92,9 @@ class NightlightLayerAnalysis(BaseModel):
     middle_band_count: int = 0
     fringe_band_count: int = 0
     peak_to_edge_ratio: float = 0.0
+    economic_activity_intensity_level: Literal["low", "medium", "medium_high", "high"] = "low"
+    economic_activity_summary_text: str = ""
+    sector_direction_analysis: Dict[str, Any] = Field(default_factory=dict)
 
 
 class NightlightGridResponse(BaseModel):

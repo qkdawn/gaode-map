@@ -12,6 +12,7 @@ from modules.providers.amap.utils.transform_posi import wgs84_to_gcj02
 from .arcgis_bridge import ArcGISRoadSyntaxBridgeError, run_arcgis_road_syntax_webgl
 from .geometry import clip_line_to_polygon_segment, haversine_m, safe_round
 from .metrics import (
+    build_road_orientation_analysis,
     column_numeric_stats,
     linear_regression,
     metric_bounds,
@@ -302,6 +303,7 @@ def empty_result(
             "default_metric": metric,
             "default_radius_label": default_radius_label,
             "analysis_engine": str(analysis_engine or "depthmapxcli"),
+            "road_orientation_analysis": build_road_orientation_analysis([]),
         },
         "top_nodes": [],
         "roads": {"type": "FeatureCollection", "features": [], "count": 0},
@@ -743,12 +745,14 @@ def build_road_analysis_result(
             }
         )
 
+    all_scored_features = [item["feature"] for item in scored_edges]
     max_features = len(scored_edges) if max_edge_features is None else max(100, int(max_edge_features))
-    features_out = [item["feature"] for item in scored_edges[:max_features]] if include_geojson else []
+    features_out = all_scored_features[:max_features] if include_geojson else []
     pre_merge_feature_count = len(features_out)
     if include_geojson and merge_geojson_edges and len(features_out) >= 2:
         features_out = merge_linestring_features(features_out, bucket_step=merge_bucket_step, angle_cos_min=0.92)
     rendered_edge_count = len(features_out) if include_geojson else 0
+    road_orientation_analysis = build_road_orientation_analysis(all_scored_features)
     raw_edge_count = int(len(parsed_edges))
     edge_merge_ratio = 1.0 if pre_merge_feature_count <= 0 else max(0.0, min(1.0, float(rendered_edge_count) / float(pre_merge_feature_count)))
 
@@ -863,6 +867,7 @@ def build_road_analysis_result(
             "default_metric": render_metric,
             "default_radius_label": default_radius_label,
             "analysis_engine": analysis_engine_label,
+            "road_orientation_analysis": road_orientation_analysis,
         },
         "top_nodes": [],
         "roads": {"type": "FeatureCollection", "features": features_out, "count": len(features_out)},

@@ -76,13 +76,9 @@ function createAnalysisHistoryOrchestratorMethods() {
         },
       }
     },
-    saveAnalysisHistoryAsync(polygon, selectedCats, pois) {
+    saveAnalysisHistoryAsync(polygon, selectedCats, pois, options = {}) {
       if (!this.selectedPoint) return
       const currentHistoryId = String(this.currentHistoryRecordId || '').trim()
-      if (String(this.scopeSource || '').trim().toLowerCase() === 'history' && currentHistoryId) {
-        this.poiStatus = '当前历史记录已保存，无需重复保存'
-        return
-      }
       const selectedCatsSafe = Array.isArray(selectedCats)
         ? selectedCats
         : (typeof this.buildSelectedCategoryBuckets === 'function' ? this.buildSelectedCategoryBuckets() : [])
@@ -99,13 +95,37 @@ function createAnalysisHistoryOrchestratorMethods() {
         : (Array.isArray(this.allPoisDetails) ? this.allPoisDetails : [])
       const compactPois = poiList.map((p) => ({
         id: p && p.id ? String(p.id) : '',
-        name: p && p.name ? String(p.name) : '未命名',
+        name: p && p.name ? String(p.name) : 'unknown',
         location: Array.isArray(p && p.location) ? [p.location[0], p.location[1]] : null,
         address: p && p.address ? String(p.address) : '',
         type: p && p.type ? String(p.type) : '',
         adname: p && p.adname ? String(p.adname) : '',
+        year: Number.isFinite(Number(p && p.year)) ? Number(p.year) : null,
         lines: Array.isArray(p && p.lines) ? p.lines : [],
       })).filter((p) => Array.isArray(p.location) && p.location.length === 2)
+      const rawPoiResultsByYear = Array.isArray(options && options.poiResultsByYear)
+        ? options.poiResultsByYear
+        : []
+      const poiResultsByYear = rawPoiResultsByYear.map((item) => {
+        const source = this.normalizePoiSource(item && item.source, 'local')
+        const year = Number.isFinite(Number(item && item.year)) ? Number(item.year) : null
+        const poisForYear = Array.isArray(item && item.pois) ? item.pois : []
+        const compactYearPois = poisForYear.map((p) => ({
+          id: p && p.id ? String(p.id) : '',
+          name: p && p.name ? String(p.name) : 'unknown',
+          location: Array.isArray(p && p.location) ? [p.location[0], p.location[1]] : null,
+          address: p && p.address ? String(p.address) : '',
+          type: p && p.type ? String(p.type) : '',
+          adname: p && p.adname ? String(p.adname) : '',
+          year: Number.isFinite(Number(p && p.year)) ? Number(p.year) : year,
+          lines: Array.isArray(p && p.lines) ? p.lines : [],
+        })).filter((p) => Array.isArray(p.location) && p.location.length === 2)
+        return {
+          source,
+          year,
+          pois: compactYearPois,
+        }
+      }).filter((item) => item.year !== null && item.pois.length)
       const resolvedPolygon = Array.isArray(polygon) && polygon.length
         ? polygon
         : this.getIsochronePolygonPayload()
@@ -116,6 +136,38 @@ function createAnalysisHistoryOrchestratorMethods() {
       )
         ? JSON.parse(JSON.stringify(this.currentHistoryPolygonWgs84))
         : null
+      const selectedYear = Number.isFinite(Number(options && options.selectedYear))
+        ? Number(options.selectedYear)
+        : (Number.isFinite(Number(this.resultPoiYear || this.poiYearSource))
+          ? Number(this.resultPoiYear || this.poiYearSource)
+          : null)
+      const requestedYears = Array.isArray(options && options.years)
+        ? options.years.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+        : []
+      const yearsForSave = Array.from(new Set([
+        ...(Array.isArray(this.currentHistoryAvailablePoiYears) ? this.currentHistoryAvailablePoiYears : []),
+        ...requestedYears,
+        ...(selectedYear !== null ? [selectedYear] : []),
+      ].map((item) => Number(item)).filter((item) => Number.isFinite(item)))).sort((a, b) => a - b)
+      if (
+        String(this.scopeSource || '').trim().toLowerCase() === 'history'
+        && currentHistoryId
+        && !poiResultsByYear.length
+        && (
+          selectedYear === null
+          || Number(this.currentHistorySelectedPoiYear) === selectedYear
+          || (
+            Array.isArray(this.currentHistoryAvailablePoiYears)
+            && (
+              this.currentHistoryAvailablePoiYears.length === 0
+              || this.currentHistoryAvailablePoiYears.map((item) => Number(item)).includes(selectedYear)
+            )
+          )
+        )
+      ) {
+        this.poiStatus = '当前历史年份已保存，无需重复保存'
+        return
+      }
       const payload = {
         history_id: currentHistoryId || null,
         center: [this.selectedPoint.lng, this.selectedPoint.lat],
@@ -130,6 +182,15 @@ function createAnalysisHistoryOrchestratorMethods() {
         mode: this.transportMode,
         time_min: parseInt(this.timeHorizon),
         source: this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local'),
+        year: selectedYear,
+        years: yearsForSave.length ? yearsForSave : (selectedYear !== null ? [selectedYear] : []),
+        poi_results_by_year: poiResultsByYear.length
+          ? poiResultsByYear
+          : [{
+            source: this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local'),
+            year: selectedYear,
+            pois: compactPois,
+          }],
       }
       setTimeout(() => {
         fetch('/api/v1/analysis/history/save', {
@@ -151,6 +212,17 @@ function createAnalysisHistoryOrchestratorMethods() {
             const historyId = String((data && data.history_id) || '').trim()
             if (historyId) {
               this.currentHistoryRecordId = historyId
+              if (selectedYear !== null || yearsForSave.length) {
+                const yearSet = new Set(
+                  (Array.isArray(this.currentHistoryAvailablePoiYears) ? this.currentHistoryAvailablePoiYears : [])
+                    .map((item) => Number(item))
+                    .filter((item) => Number.isFinite(item))
+                )
+                yearsForSave.forEach((item) => yearSet.add(item))
+                if (selectedYear !== null) yearSet.add(selectedYear)
+                this.currentHistoryAvailablePoiYears = Array.from(yearSet).sort((a, b) => a - b)
+                if (selectedYear !== null) this.currentHistorySelectedPoiYear = selectedYear
+              }
               if (Array.isArray(payload.polygon_wgs84) && payload.polygon_wgs84.length) {
                 this.currentHistoryPolygonWgs84 = JSON.parse(JSON.stringify(payload.polygon_wgs84))
               }

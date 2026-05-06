@@ -44,7 +44,48 @@ test('saveAnalysisHistoryAsync skips network save for restored history', async (
     ctx.saveAnalysisHistoryAsync()
     await new Promise((resolve) => setTimeout(resolve, 10))
     assert.equal(fetchCalled, false)
-    assert.equal(ctx.poiStatus, '当前历史记录已保存，无需重复保存')
+    assert.equal(ctx.poiStatus, '当前历史年份已保存，无需重复保存')
+  } finally {
+    global.fetch = previousFetch
+  }
+})
+
+test('saveAnalysisHistoryAsync sends multi-year poi snapshots', async () => {
+  const ctx = createContext({
+    scopeSource: '',
+    currentHistoryRecordId: '',
+    currentHistoryAvailablePoiYears: [],
+    resultPoiYear: 2024,
+    poiYearSource: '2024',
+  })
+  const previousFetch = global.fetch
+  let requestBody = null
+  global.fetch = async (_url, options = {}) => {
+    requestBody = JSON.parse(options.body || '{}')
+    return {
+      ok: true,
+      json: async () => ({ history_id: 'history-multi' }),
+    }
+  }
+
+  try {
+    ctx.saveAnalysisHistoryAsync([[1, 1], [1, 2], [2, 2], [1, 1]], [{ name: '餐饮' }], [{ id: 'display', name: 'D', location: [1, 2] }], {
+      selectedYear: 2024,
+      years: [2020, 2022, 2024],
+      poiResultsByYear: [
+        { source: 'local', year: 2020, pois: [{ id: 'a', name: 'A', location: [1, 1], type: '餐饮' }] },
+        { source: 'local', year: 2022, pois: [{ id: 'b', name: 'B', location: [2, 2], type: '购物' }] },
+        { source: 'local', year: 2024, pois: [{ id: 'c', name: 'C', location: [3, 3], type: '住宿' }] },
+      ],
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    assert.deepEqual(requestBody.years, [2020, 2022, 2024])
+    assert.equal(requestBody.year, 2024)
+    assert.equal(requestBody.poi_results_by_year.length, 3)
+    assert.deepEqual(requestBody.poi_results_by_year.map((item) => item.year), [2020, 2022, 2024])
+    assert.deepEqual(ctx.currentHistoryAvailablePoiYears, [2020, 2022, 2024])
+    assert.equal(ctx.currentHistorySelectedPoiYear, 2024)
   } finally {
     global.fetch = previousFetch
   }

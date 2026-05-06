@@ -124,6 +124,7 @@ class RoadSyntaxSummary(BaseModel):
     default_metric: str = "choice"
     default_radius_label: str = "global"
     analysis_engine: str = "depthmapxcli"
+    road_orientation_analysis: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RoadSyntaxFeatureCollection(BaseModel):

@@ -44,7 +44,7 @@ _PHASE_ORDER = ["precheck", "fetch_missing", "derive_analysis", "analysis_starte
 _SUMMARY_SECTION_SPECS = [
     ("spatial_structure", "空间结构"),
     ("poi_structure", "POI结构"),
-    ("consumption_vitality", "消费活力"),
+    ("consumption_vitality", "经济活动强度"),
     ("business_support", "业态承接"),
 ]
 _SPATIAL_DIMENSION_SPECS = [
@@ -254,6 +254,8 @@ def _normalize_summary_section_key(value: Any) -> str:
         "consumption_vitality": "consumption_vitality",
         "消费活力": "consumption_vitality",
         "商业活力": "consumption_vitality",
+        "经济活动强度": "consumption_vitality",
+        "夜间经济活动强度": "consumption_vitality",
         "business_support": "business_support",
         "业态承接": "business_support",
         "业态支撑": "business_support",
@@ -302,9 +304,14 @@ def _should_rewrite_section_reasoning(key: str, text: str) -> bool:
     content = _clean_text(text)
     if not content:
         return True
+    if key == "consumption_vitality" and any(
+        token in content
+        for token in ("消费能力", "客流", "营业额", "白天活跃", "日间消费", "消费强度", "消费活力", "全天候经济活动")
+    ):
+        return True
     descriptive_openers = {
         "poi_structure": ("POI构成", "POI结构"),
-        "consumption_vitality": ("夜光模式", "夜间灯光", "消费活力"),
+        "consumption_vitality": ("夜光模式", "夜间灯光", "经济活动强度", "夜间经济活动强度", "消费活力"),
         "business_support": ("路网条件", "路网结构", "空间条件"),
     }
     if any(content.startswith(prefix) for prefix in descriptive_openers.get(key, ())):
@@ -313,6 +320,94 @@ def _should_rewrite_section_reasoning(key: str, text: str) -> bool:
         judgment_tokens = ("主导", "偏", "较强", "较弱", "明显", "有限", "集中", "分散", "承接", "活跃", "不足", "更像", "适合")
         return not any(token in content for token in judgment_tokens)
     return False
+
+
+_ECONOMIC_ACTIVITY_LEVEL_LABELS = {
+    "high": "高",
+    "medium_high": "中等偏上",
+    "medium": "中等",
+    "low": "偏低",
+}
+
+_DIRECTION_TO_ROAD_AXES = {
+    "东": {"东西向"},
+    "西": {"东西向"},
+    "北": {"南北向"},
+    "南": {"南北向"},
+    "东北": {"东北-西南向"},
+    "西南": {"东北-西南向"},
+    "西北": {"西北-东南向"},
+    "东南": {"西北-东南向"},
+}
+
+
+def _economic_activity_level_label(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return "偏低"
+    return _ECONOMIC_ACTIVITY_LEVEL_LABELS.get(text, text)
+
+
+def _direction_phrase(dominant: str, secondary: str) -> str:
+    if dominant and secondary:
+        return f"{dominant}及{secondary}"
+    return dominant or secondary
+
+
+def _orientation_phrase(dominant: str, secondary: str) -> str:
+    if dominant and secondary:
+        return f"区域道路以{dominant}为主，{secondary}为辅。"
+    if dominant:
+        return f"区域道路以{dominant}为主。"
+    if secondary:
+        return f"区域道路以{secondary}为辅。"
+    return ""
+
+
+def _direction_matches_orientation(direction: str, orientation: str) -> bool:
+    return bool(direction and orientation and orientation in _DIRECTION_TO_ROAD_AXES.get(direction, set()))
+
+
+def _classify_direction_orientation_consistency(
+    dominant_direction: str,
+    secondary_direction: str,
+    dominant_orientation: str,
+    secondary_orientation: str,
+) -> tuple[str, str]:
+    orientations = [item for item in [dominant_orientation, secondary_orientation] if item]
+    if dominant_direction and any(_direction_matches_orientation(dominant_direction, item) for item in orientations):
+        return "高度一致", "较明显"
+    if secondary_direction and any(_direction_matches_orientation(secondary_direction, item) for item in orientations):
+        return "部分一致", "具有一定支撑"
+    return "一致性较弱", "相对有限"
+
+
+def _build_economic_activity_direction_judgment(source_payload: Dict[str, Any]) -> str:
+    nightlight = source_payload.get("nightlight_pattern") if isinstance(source_payload.get("nightlight_pattern"), dict) else {}
+    road = source_payload.get("road_pattern") if isinstance(source_payload.get("road_pattern"), dict) else {}
+    sector = nightlight.get("sector_direction_analysis") if isinstance(nightlight.get("sector_direction_analysis"), dict) else {}
+    orientation = road.get("road_orientation_analysis") if isinstance(road.get("road_orientation_analysis"), dict) else {}
+
+    level = _economic_activity_level_label(nightlight.get("economic_activity_intensity_level"))
+    dominant_direction = _clean_text(sector.get("dominant_direction"))
+    secondary_direction = _clean_text(sector.get("secondary_direction"))
+    dominant_orientation = _clean_text(orientation.get("dominant_orientation"))
+    secondary_orientation = _clean_text(orientation.get("secondary_orientation"))
+    direction_text = _direction_phrase(dominant_direction, secondary_direction)
+
+    if not direction_text:
+        return ""
+    first = f"从空间分布来看，等时圈内夜间经济活动整体处于{level}水平，高值区域主要集中在{direction_text}方向。"
+    road_text = _orientation_phrase(dominant_orientation, secondary_orientation)
+    if not road_text:
+        return first
+    consistency, influence = _classify_direction_orientation_consistency(
+        dominant_direction,
+        secondary_direction,
+        dominant_orientation,
+        secondary_orientation,
+    )
+    return f"{first}{road_text}两者在空间上呈现{consistency}关系，表明交通廊道对夜间经济活动的空间引导作用{influence}。"
 
 
 def _build_poi_structure_judgment(source_payload: Dict[str, Any]) -> str:
@@ -337,27 +432,31 @@ def _build_poi_structure_judgment(source_payload: Dict[str, Any]) -> str:
         second = ""
     extras = [item for item in tags if item not in {business_label, "生活消费主导"}]
     third = f"{extras[0]}进一步强化了功能定位" if extras else ""
-    spatial_summary = [str(item).strip("。 ") for item in (poi.get("subcategory_spatial_summary") or []) if str(item).strip()]
-    spatial = spatial_summary[0] if spatial_summary else ""
-    return "，".join(part for part in [first, second, third, spatial] if part) + "。"
+    return "，".join(part for part in [first, second, third] if part) + "。"
 
 
 def _build_consumption_vitality_judgment(source_payload: Dict[str, Any]) -> str:
     nightlight = source_payload.get("nightlight_pattern") if isinstance(source_payload.get("nightlight_pattern"), dict) else {}
+    direction_judgment = _build_economic_activity_direction_judgment(source_payload)
+    if direction_judgment:
+        return direction_judgment
+    summary_text = _clean_text(nightlight.get("economic_activity_summary_text"))
+    if summary_text:
+        return summary_text
     pattern_tags = [str(item).strip() for item in (nightlight.get("pattern_tags") or []) if str(item).strip()]
     core_hotspot_count = int(nightlight.get("core_hotspot_count") or 0)
     if core_hotspot_count > 0:
-        first = "夜间活力存在明确热点"
+        first = "夜间经济活动存在明确热点"
     elif any("亮灯覆盖高" in item for item in pattern_tags):
-        first = "夜间活力覆盖较广但强核心不足"
+        first = "夜间灯光覆盖较广但强核心不足"
     else:
-        first = "夜间消费活力整体偏弱"
+        first = "夜间经济活动强度整体偏弱"
     if any("中心亮度突出" in item for item in pattern_tags):
-        second = "消费强度更容易集中在少数核心点位"
+        second = "经济活动强度更容易集中在少数核心点位"
     elif core_hotspot_count > 0:
-        second = "消费高峰更可能集中在傍晚到夜间"
+        second = "高值区主要体现为夜间活动与照明强度信号"
     else:
-        second = "更像日间与傍晚主导的日常消费场景"
+        second = "夜光证据不足时不推断白天经济活动表现"
     return "，".join(part for part in [first, second] if part) + "。"
 
 
@@ -396,15 +495,12 @@ def _build_business_support_judgment(source_payload: Dict[str, Any]) -> str:
     return "。".join(part for part in [connectivity_sentence, access_sentence, readability_sentence] if part) + f"。{closing}"
 
 
-def _normalize_secondary_reasoning_with_judgment(pack: Dict[str, Any], source_payload: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_area_judgment_reasoning(pack: Dict[str, Any], source_payload: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(pack or {})
-    rows = normalized.get("secondary_conclusions")
-    if not isinstance(rows, list):
-        return normalized
-    rewritten: List[Dict[str, Any]] = []
-    for item in rows:
-        row = dict(item or {})
-        key = _clean_text(row.get("section_key"))
+    for key, _ in _SUMMARY_SECTION_SPECS:
+        row = dict(normalized.get(key) or {}) if isinstance(normalized.get(key), dict) else {}
+        if not row:
+            continue
         reasoning = _clean_text(row.get("reasoning"))
         if key == "poi_structure" and _should_rewrite_section_reasoning(key, reasoning):
             row["reasoning"] = _build_poi_structure_judgment(source_payload)
@@ -412,16 +508,19 @@ def _normalize_secondary_reasoning_with_judgment(pack: Dict[str, Any], source_pa
             row["reasoning"] = _build_consumption_vitality_judgment(source_payload)
         elif key == "business_support" and _should_rewrite_section_reasoning(key, reasoning):
             row["reasoning"] = _build_business_support_judgment(source_payload)
-        rewritten.append(row)
-    normalized["secondary_conclusions"] = rewritten
+        normalized[key] = row
     return normalized
+
+
+def _normalize_secondary_reasoning_with_judgment(pack: Dict[str, Any], source_payload: Dict[str, Any]) -> Dict[str, Any]:
+    return _normalize_area_judgment_reasoning(pack, source_payload)
 
 
 def _build_section_generation_prompt(section_key: str) -> str:
     title = _section_title_for(section_key)
     base = (
         "你是 gaode-map 的商业总结撰写器。"
-        "现在只生成一个二级结论卡片，必须输出 JSON，不要输出 markdown。"
+        "现在只生成一个区域判断卡片，必须输出 JSON，不要输出 markdown。"
     )
     if section_key == "spatial_structure":
         return (
@@ -439,7 +538,15 @@ def _build_section_generation_prompt(section_key: str) -> str:
         )
     focus_rules = {
         "poi_structure": "只写主导业态、占比结构和功能特征，要写成判断句，不要写成“反映了/体现了”。",
-        "consumption_vitality": "只写活跃时段、夜间强弱和消费强度，要写成判断句，不要写成说明句。",
+        "consumption_vitality": (
+            "只写夜间经济活动强度，不写消费能力、客流、营业额、白天活跃或日间消费。"
+            "优先使用 nightlight_pattern.sector_direction_analysis 与 road_pattern.road_orientation_analysis，"
+            "按“夜光高值方位 × 路网走向一致性”写判断："
+            "从空间分布来看，等时圈内夜间经济活动整体处于{强度水平}，高值区域主要集中在{夜光主导方位}及{夜光次主导方位}方向。"
+            "区域道路以{路网主导走向}为主，{路网次主导走向}为辅。"
+            "两者在空间上呈现{一致性等级}关系，表明交通廊道对夜间经济活动的空间引导作用{影响强度}。"
+            "缺少路网或夜光方位时只描述可用夜光证据，不要硬凑一致性。"
+        ),
         "business_support": "只写路网与空间条件对现有业态的承接。必须先写连通性，再写通达效率，再写认知可读性，最后落到承接判断。",
     }
     return (
@@ -477,6 +584,7 @@ def _build_section_generation_payload(section_key: str, source_payload: Dict[str
         return {
             **common,
             "nightlight_pattern": dict(source_payload.get("nightlight_pattern") or {}),
+            "road_pattern": dict(source_payload.get("road_pattern") or {}),
             "business_profile": dict(source_payload.get("business_profile") or {}),
         }
     if section_key == "business_support":
@@ -511,22 +619,57 @@ def _validate_secondary_section_payload(section_key: str, raw: Dict[str, Any]) -
     return payload
 
 
+async def _generate_summary_section_with_llm(
+    section_key: str,
+    section_title: str,
+    source_payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    raw = await _invoke_json_role(
+        system_prompt=_build_section_generation_prompt(section_key),
+        user_payload=_build_section_generation_payload(section_key, source_payload),
+        emit=None,
+        phase=f"summary_section_{section_key}",
+        title=f"生成{section_title}判断",
+        reasoning_id=f"summary-section-{section_key}",
+    )
+    return _validate_secondary_section_payload(section_key, raw)
+
+
 async def _generate_secondary_sections_with_llm(source_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     sections: List[Dict[str, Any]] = []
     for section_key, section_title in _SUMMARY_SECTION_SPECS:
-        raw = await _invoke_json_role(
-            system_prompt=_build_section_generation_prompt(section_key),
-            user_payload=_build_section_generation_payload(section_key, source_payload),
-            emit=None,
-            phase=f"summary_section_{section_key}",
-            title=f"生成{section_title}结论",
-            reasoning_id=f"summary-section-{section_key}",
-        )
-        validated = _validate_secondary_section_payload(section_key, raw)
+        validated = await _generate_summary_section_with_llm(section_key, section_title, source_payload)
         if not validated:
             return []
         sections.append(validated)
     return sections
+
+
+def _normalize_area_judgments(raw: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return {}
+    rows_by_key: Dict[str, Dict[str, Any]] = {}
+    for section_key, _ in _SUMMARY_SECTION_SPECS:
+        item = raw.get(section_key)
+        if not isinstance(item, dict):
+            continue
+        payload = _validate_secondary_section_payload(section_key, item)
+        if payload:
+            rows_by_key[section_key] = payload
+    if len(rows_by_key) == len(_SUMMARY_SECTION_SPECS):
+        return rows_by_key
+
+    legacy_rows = raw.get("secondary_conclusions") if isinstance(raw.get("secondary_conclusions"), list) else []
+    for item in legacy_rows:
+        if not isinstance(item, dict):
+            continue
+        section_key = _normalize_summary_section_key(item.get("section_key") or item.get("title"))
+        if not section_key:
+            continue
+        payload = _validate_secondary_section_payload(section_key, item)
+        if payload:
+            rows_by_key[section_key] = payload
+    return rows_by_key
 
 
 def _top_poi_mix(snapshot: Any) -> List[Dict[str, Any]]:
@@ -706,36 +849,17 @@ def _summary_pack_system_prompt() -> str:
         "必须只输出 JSON，不要输出 markdown。"
         "JSON 结构固定为："
         "{\"headline_judgment\":{\"summary\":\"...\",\"supporting_clause\":\"...\"},"
-        "\"secondary_conclusions\":["
-        "{\"section_key\":\"spatial_structure\",\"title\":\"空间结构\",\"reasoning\":\"...\",\"dimensions\":["
-        "{\"key\":\"aggregation\",\"label\":\"集聚性\",\"conclusion\":\"...\"},"
-        "{\"key\":\"mixing\",\"label\":\"混合性\",\"conclusion\":\"...\"},"
-        "{\"key\":\"morphology\",\"label\":\"形态性\",\"conclusion\":\"...\"}"
-        "]},"
-        "{\"section_key\":\"poi_structure\",\"title\":\"POI结构\",\"reasoning\":\"...\"},"
-        "{\"section_key\":\"consumption_vitality\",\"title\":\"消费活力\",\"reasoning\":\"...\"},"
-        "{\"section_key\":\"business_support\",\"title\":\"业态承接\",\"reasoning\":\"...\"}"
-        "],"
         "\"user_profile\":{\"headline\":\"...\",\"traits\":[\"...\"]},"
         "\"behavior_inference\":{\"headline\":\"...\",\"traits\":[\"...\"]}}"
         "规则："
-        "1. secondary_conclusions 必须固定输出 4 段，section_key 只能是 spatial_structure、poi_structure、consumption_vitality、business_support。"
-        "2. spatial_structure 只写空间组织，不要写人口、夜光或消费人群判断。"
-        "3. spatial_structure.dimensions 固定输出 3 条：aggregation、mixing、morphology；每条都写一句结构判断。"
-        "4. poi_structure 只写 POI 占比、主导业态和结构特征，主证据是 poi_structure 与 business_profile。"
-        "5. consumption_vitality 只写活跃时段、夜间强弱、全天候特征，主证据是夜光。"
-        "6. business_support 只写当前业态供给是否被路网和空间条件承接，主证据是 POI 结构、business profile、road。"
-        "7. business_support 必须优先按三层顺序组织：先写连通性，再写通达效率，再写认知可读性，最后落到业态承接判断。"
-        "8. 连通性只回答内部是否顺、节点是否容易互达；通达效率只回答是否容易被经过、是否形成主路径；认知可读性只回答动线是否清晰、是否利于识别与组织商业活动。"
-        "9. business_support 至少覆盖三层中的两层，不要只写成一句笼统的'路网连接充分但效率一般'。"
-        "10. poi_structure、consumption_vitality、business_support 的 reasoning 必须是'判断句'，不要写成'反映了/揭示了/提供了'这类说明句。"
-        "11. 这些段落推荐直接使用'以…为主''偏…''较强/较弱''明显/有限''更适合…'这类判定表达开头。"
-        "12. 不要把原始指标、百分比、样本量直接写成主句；不要做数据播报。"
-        "13. 允许引用强/中/弱、清晰/一般/有限这类业务化判断，但不要罗列原始数值。"
-        "14. user_profile 必须写消费者是谁，不能写成区域类型或商业区描述。"
-        "15. behavior_inference 必须写消费行为、频次、时段或跨区吸引力，不能重复 user_profile 或 headline_judgment。"
-        "16. 如果证据不足，也只能基于已给证据做保守判断，不能虚构。"
-        "17. 不要输出 ICSC 标签，这部分会由系统注入。"
+        "1. headline_judgment.summary 必须是一句话商业判断，直接回答这个区域是什么级别或类型的商业。"
+        "2. 不要输出 spatial_structure、poi_structure、consumption_vitality、business_support；这些区域判断由独立任务生成。"
+        "3. 不要输出 secondary_conclusions。"
+        "4. 不要把原始指标、百分比、样本量直接写成主句；不要做数据播报。"
+        "5. user_profile 必须写消费者是谁，不能写成区域类型或商业区描述。"
+        "6. behavior_inference 必须写消费行为、频次、时段或跨区吸引力，不能重复 user_profile 或 headline_judgment。"
+        "7. 如果证据不足，也只能基于已给证据做保守判断，不能虚构。"
+        "8. 不要输出 ICSC 标签，这部分会由系统注入。"
     )
 
 
@@ -813,7 +937,13 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
         "nightlight_pattern": {
             "summary_text": _clean_text(nightlight_pattern.get("summary_text")),
             "total_radiance": nightlight_pattern.get("total_radiance"),
+            "mean_radiance": nightlight_pattern.get("mean_radiance"),
+            "p90_radiance": nightlight_pattern.get("p90_radiance"),
+            "lit_pixel_ratio": nightlight_pattern.get("lit_pixel_ratio"),
             "core_hotspot_count": nightlight_pattern.get("core_hotspot_count"),
+            "economic_activity_intensity_level": _clean_text(nightlight_pattern.get("economic_activity_intensity_level")),
+            "economic_activity_summary_text": _clean_text(nightlight_pattern.get("economic_activity_summary_text")),
+            "sector_direction_analysis": dict(nightlight_pattern.get("sector_direction_analysis") or {}),
             "pattern_tags": list(nightlight_pattern.get("pattern_tags") or []),
         },
         "road_pattern": {
@@ -844,6 +974,7 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
                 "avg_intelligibility": road_pattern.get("avg_intelligibility"),
                 "avg_intelligibility_r2": road_pattern.get("avg_intelligibility_r2"),
             },
+            "road_orientation_analysis": dict(road_pattern.get("road_orientation_analysis") or {}),
             "pattern_tags": list(road_pattern.get("pattern_tags") or []),
         },
         "area_labels": list(area_labels.get("character_tags") or []),
@@ -852,8 +983,8 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
             "no_raw_metric_recital_as_headline": True,
             "user_profile_must_describe_people": True,
             "behavior_inference_must_describe_usage": True,
-            "secondary_conclusions_are_fixed_sections": True,
-            "customer_profile_is_not_a_secondary_conclusion": True,
+            "area_judgments_are_independent_sections": True,
+            "customer_profile_is_not_an_area_judgment": True,
             "business_support_should_cover_road_layers": True,
         },
     }
@@ -863,40 +994,55 @@ def _validate_summary_pack_payload(raw: Dict[str, Any], *, icsc_tags: List[str],
     if not isinstance(raw, dict):
         return {}
     headline = raw.get("headline_judgment") if isinstance(raw.get("headline_judgment"), dict) else {}
-    secondary_raw = raw.get("secondary_conclusions") if isinstance(raw.get("secondary_conclusions"), list) else []
     user_profile = raw.get("user_profile") if isinstance(raw.get("user_profile"), dict) else {}
     behavior = raw.get("behavior_inference") if isinstance(raw.get("behavior_inference"), dict) else {}
-    secondary_by_key: Dict[str, Dict[str, Any]] = {}
-    for item in secondary_raw:
-        if not isinstance(item, dict):
-            continue
-        key = _normalize_summary_section_key(item.get("section_key") or item.get("title"))
-        reasoning = _clean_text(item.get("reasoning"))
-        if not key or not reasoning:
-            continue
-        payload: Dict[str, Any] = {
-            "section_key": key,
-            "title": _section_title_for(key),
-            "reasoning": reasoning,
-        }
-        if key == "spatial_structure":
-            payload["dimensions"] = _normalize_spatial_dimensions(item.get("dimensions"))
-        secondary_by_key[key] = payload
-    secondary: List[Dict[str, Any]] = []
+    area_judgments = _normalize_area_judgments(raw)
     for key, _ in _SUMMARY_SECTION_SPECS:
-        item = secondary_by_key.get(key)
+        item = area_judgments.get(key)
         if not item:
             return {}
         if key == "spatial_structure" and not item.get("dimensions"):
             return {}
-        secondary.append(item)
     normalized = {
         "headline_judgment": {
             "summary": _clean_text(headline.get("summary")),
             "supporting_clause": _clean_text(headline.get("supporting_clause")),
         },
         "icsc_tags": list(icsc_tags),
-        "secondary_conclusions": secondary,
+        "user_profile": {
+            "headline": _clean_text(user_profile.get("headline")),
+            "traits": _normalize_trait_list(user_profile.get("traits")),
+        },
+        "behavior_inference": {
+            "headline": _clean_text(behavior.get("headline")),
+            "traits": _normalize_trait_list(behavior.get("traits")),
+        },
+        "evidence_refs": list(evidence_refs),
+        "confidence": "moderate" if len(evidence_refs) >= 2 else "weak",
+    }
+    for key, _ in _SUMMARY_SECTION_SPECS:
+        normalized[key] = dict(area_judgments[key])
+    if not normalized["headline_judgment"]["summary"]:
+        return {}
+    if not normalized["user_profile"]["headline"] or not normalized["user_profile"]["traits"]:
+        return {}
+    if not normalized["behavior_inference"]["headline"] or not normalized["behavior_inference"]["traits"]:
+        return {}
+    return normalized
+
+
+def _validate_summary_base_payload(raw: Dict[str, Any], *, icsc_tags: List[str], evidence_refs: List[str]) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    headline = raw.get("headline_judgment") if isinstance(raw.get("headline_judgment"), dict) else {}
+    user_profile = raw.get("user_profile") if isinstance(raw.get("user_profile"), dict) else {}
+    behavior = raw.get("behavior_inference") if isinstance(raw.get("behavior_inference"), dict) else {}
+    normalized = {
+        "headline_judgment": {
+            "summary": _clean_text(headline.get("summary")),
+            "supporting_clause": _clean_text(headline.get("supporting_clause")),
+        },
+        "icsc_tags": list(icsc_tags),
         "user_profile": {
             "headline": _clean_text(user_profile.get("headline")),
             "traits": _normalize_trait_list(user_profile.get("traits")),
@@ -956,18 +1102,18 @@ async def _generate_summary_pack_with_llm(snapshot: Any, artifacts: Dict[str, An
     )
     icsc_tags = _derive_icsc_tags(snapshot, artifacts)
     evidence_refs = build_citations(snapshot, artifacts)
-    validated = _validate_summary_pack_payload(payload, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
-    normalized = _normalize_secondary_reasoning_with_judgment(validated, source_payload)
+    normalized = _validate_summary_base_payload(payload, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
     if not normalized:
         return {}
-    try:
-        secondary_sections = await _generate_secondary_sections_with_llm(source_payload)
-    except Exception:
-        secondary_sections = []
-    if len(secondary_sections) == len(_SUMMARY_SECTION_SPECS):
-        normalized["secondary_conclusions"] = secondary_sections
-        normalized = _normalize_secondary_reasoning_with_judgment(normalized, source_payload)
-    return normalized
+    for section_key, section_title in _SUMMARY_SECTION_SPECS:
+        try:
+            section = await _generate_summary_section_with_llm(section_key, section_title, source_payload)
+        except Exception:
+            section = {}
+        if section:
+            normalized[section_key] = section
+    normalized = _normalize_area_judgment_reasoning(normalized, source_payload)
+    return _validate_summary_pack_payload(normalized, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
 
 
 def _build_stream_event(event_type: str, payload: Dict[str, Any]) -> AgentSummaryStreamEvent:
@@ -1053,10 +1199,15 @@ def _build_profile_section_payload(section_key: str, source_payload: Dict[str, A
 
 
 def _build_followup_questions_payload(source_payload: Dict[str, Any], summary_pack: Dict[str, Any]) -> Dict[str, Any]:
+    area_judgments = {
+        key: dict(summary_pack.get(key) or {})
+        for key, _ in _SUMMARY_SECTION_SPECS
+        if isinstance(summary_pack.get(key), dict)
+    }
     return {
         "task": "summary_followup_generation",
         "headline_judgment": dict(summary_pack.get("headline_judgment") or {}),
-        "secondary_conclusions": list(summary_pack.get("secondary_conclusions") or []),
+        "area_judgments": area_judgments,
         "user_profile": dict(summary_pack.get("user_profile") or {}),
         "behavior_inference": dict(summary_pack.get("behavior_inference") or {}),
         "icsc_tags": list(summary_pack.get("icsc_tags") or []),
@@ -1208,7 +1359,6 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                 evidence_refs = build_citations(payload.analysis_snapshot, artifacts)
                 summary_pack = {
                     "icsc_tags": _derive_icsc_tags(payload.analysis_snapshot, artifacts),
-                    "secondary_conclusions": [],
                     "evidence_refs": list(evidence_refs),
                     "confidence": "moderate" if len(evidence_refs) >= 2 else "weak",
                 }
@@ -1239,37 +1389,23 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                     {"key": "tags", "status": "ready", "payload": {"icsc_tags": list(summary_pack.get("icsc_tags") or [])}},
                 )
 
-                secondary_sections: List[Dict[str, Any]] = []
-                yield _build_stream_event("section_start", {"key": "secondary", "title": "二级结论"})
-                for section_key, _section_title in _SUMMARY_SECTION_SPECS:
+                for section_key, section_title in _SUMMARY_SECTION_SPECS:
                     try:
-                        generated = await _generate_secondary_sections_with_llm(source_payload)
-                        secondary_sections = generated
-                        break
-                    except Exception as exc:
-                        warnings.append(f"secondary_generation_failed:{exc}")
-                        secondary_sections = []
-                        break
-                for item in secondary_sections:
-                    for chunk in _chunk_text_for_stream(_clean_text(item.get("reasoning"))):
+                        yield _build_stream_event("section_start", {"key": section_key, "title": section_title})
+                        section_payload = await _generate_summary_section_with_llm(section_key, section_title, source_payload)
+                        section_pack = _normalize_area_judgment_reasoning({section_key: section_payload}, source_payload)
+                        section_payload = dict(section_pack.get(section_key) or section_payload)
+                        for chunk in _chunk_text_for_stream(_clean_text(section_payload.get("reasoning"))):
+                            yield _build_stream_event("section_delta", {"key": section_key, "delta": chunk})
+                        summary_pack[section_key] = section_payload
                         yield _build_stream_event(
-                            "section_delta",
-                            {
-                                "key": "secondary",
-                                "delta": chunk,
-                                "section_key": item.get("section_key"),
-                                "title": item.get("title"),
-                            },
+                            "section_complete",
+                            {"key": section_key, "status": "ready", "payload": dict(section_payload)},
                         )
-                if secondary_sections:
-                    summary_pack["secondary_conclusions"] = secondary_sections
-                    yield _build_stream_event(
-                        "section_complete",
-                        {"key": "secondary", "status": "ready", "payload": {"secondary_conclusions": secondary_sections}},
-                    )
-                else:
-                    yield _build_stream_event("error", {"key": "secondary", "message": "二级结论生成失败"})
-                    yield _build_stream_event("section_complete", {"key": "secondary", "status": "failed"})
+                    except Exception as exc:
+                        warnings.append(f"{section_key}_generation_failed:{exc}")
+                        yield _build_stream_event("error", {"key": section_key, "message": str(exc)})
+                        yield _build_stream_event("section_complete", {"key": section_key, "status": "failed"})
 
                 for section_key, stream_key, title in [
                     ("user_profile", "user_profile", "用户画像"),
@@ -1316,7 +1452,7 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                     icsc_tags=list(summary_pack.get("icsc_tags") or []),
                     evidence_refs=list(summary_pack.get("evidence_refs") or []),
                 )
-                normalized_pack = _normalize_secondary_reasoning_with_judgment(validated, source_payload) if validated else {}
+                normalized_pack = _normalize_area_judgment_reasoning(validated, source_payload) if validated else {}
                 if normalized_pack:
                     if summary_pack.get("followup_questions"):
                         normalized_pack["followup_questions"] = list(summary_pack.get("followup_questions") or [])

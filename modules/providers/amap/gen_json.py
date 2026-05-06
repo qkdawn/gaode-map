@@ -153,6 +153,10 @@ def generate_map_json(
     else:
         raise ValueError("search_type must be 'around' or 'city'")
 
+    if year is not None:
+        for point in points:
+            point.setdefault("year", int(year))
+
     body = {"center": center, "points": points, "radius": radius}
 
     # city 模式附带 adcode 方便前端绘制行政边界

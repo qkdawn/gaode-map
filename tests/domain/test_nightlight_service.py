@@ -10,7 +10,8 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from core.config import settings  # noqa: E402
 from modules.nightlight.aggregate import aggregate_clip_to_target_cells  # noqa: E402
-from modules.nightlight.types import NightlightClip, TargetGridCell  # noqa: E402
+from modules.nightlight.analysis import build_sector_direction_analysis  # noqa: E402
+from modules.nightlight.types import AggregatedNightlightCell, NightlightClip, TargetGridCell  # noqa: E402
 from modules.nightlight.service import (  # noqa: E402
     build_nightlight_meta_payload,
     get_nightlight_grid,
@@ -133,6 +134,9 @@ def test_nightlight_hotspot_layer_builds_categorical_classes(tmp_path):
     assert layer["analysis"]["emerging_hotspot_count"] == 3
     assert abs(float(layer["analysis"]["hotspot_cell_ratio"]) - 0.4375) < 1e-6
     assert float(layer["analysis"]["peak_radiance"]) == 16.0
+    assert layer["analysis"]["economic_activity_intensity_level"] in {"medium_high", "high"}
+    assert layer["analysis"]["economic_activity_summary_text"].startswith("基于夜间灯光亮度")
+    assert layer["analysis"]["sector_direction_analysis"]["sectors"]
     assert all(cell.get("class_key") in {"core_hotspot", "secondary_hotspot", "emerging_hotspot", "transition", "low_light"} for cell in layer["cells"])
     assert any(str(cell["label"]).startswith("核心热点") for cell in layer["cells"])
 
@@ -145,7 +149,7 @@ def test_nightlight_gradient_layer_builds_decay_bands(tmp_path):
     layer = get_nightlight_layer(polygon, "gcj02", scope_id=grid["scope_id"], year=2025, view="gradient")
 
     assert layer["selected"]["view"] == "gradient"
-    assert layer["selected"]["view_label"] == "梯度/衰减"
+    assert layer["selected"]["view_label"] == "梯度衰减"
     assert layer["legend"]["kind"] == "categorical"
     assert len(layer["cells"]) == grid["cell_count"]
     assert float(layer["analysis"]["peak_radiance"]) == 16.0
@@ -177,6 +181,34 @@ def test_nightlight_clip_aggregation_maps_one_large_pixel_to_multiple_population
     assert all(float(row.raw_value) > 0.0 for row in rows)
     assert all(float(row.raw_value) == 10.0 for row in rows)
     assert all(int(row.valid_pixel_count) == 1 for row in rows)
+
+
+def test_nightlight_sector_direction_analysis_sorts_by_radiance():
+    cells = [
+        _target_cell("east", 0, 0, 1.0, -0.1, 1.2, 0.1),
+        _target_cell("north", 0, 1, -0.1, 1.0, 0.1, 1.2),
+        _target_cell("west", 1, 0, -1.2, -0.1, -1.0, 0.1),
+    ]
+    aggregated = [
+        AggregatedNightlightCell(
+            cell_id=row.cell_id,
+            row=row.row,
+            col=row.col,
+            raw_value=value,
+            valid_pixel_count=1,
+            centroid_gcj02=row.centroid_gcj02,
+            geometry_gcj02=row.geometry_gcj02,
+        )
+        for row, value in zip(cells, [20.0, 10.0, 5.0])
+    ]
+
+    analysis = build_sector_direction_analysis(aggregated, center_gcj02=[0.0, 0.0], hotspot_cell_ids={"east"})
+
+    assert analysis["dominant_direction"] == "东"
+    assert analysis["secondary_direction"] == "北"
+    east = next(item for item in analysis["sectors"] if item["label"] == "东")
+    assert east["hotspot_count"] == 1
+    assert abs(float(east["radiance_share"]) - (20.0 / 35.0)) < 1e-5
 
 
 def test_nightlight_clip_aggregation_uses_area_weighted_mean():

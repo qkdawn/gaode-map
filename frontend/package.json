@@ -15,7 +15,6 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.59.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "typescript": "^5.7.3",
     "vite": "^6.1.0"

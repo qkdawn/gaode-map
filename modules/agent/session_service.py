@@ -26,8 +26,7 @@ from .schemas import (
 TITLE_SOURCE_USER = "user"
 TITLE_SOURCE_AI = "ai"
 TITLE_SOURCE_FALLBACK = "fallback"
-SESSION_KIND_SUMMARY = "summary"
-SESSION_KIND_FOLLOWUP = "followup"
+PANEL_KIND_FOLLOWUP = "followup"
 
 
 def serialize_datetime(value: Any) -> str:
@@ -58,11 +57,18 @@ def normalize_agent_session_title_source(value: Any) -> str:
     return TITLE_SOURCE_FALLBACK
 
 
-def normalize_agent_session_kind(value: Any) -> str:
-    kind = _normalize_text(value, max_length=16).lower()
-    if kind in {SESSION_KIND_SUMMARY, SESSION_KIND_FOLLOWUP}:
-        return kind
-    return ""
+def normalize_agent_panel_kind(value: Any) -> str:
+    return _normalize_text(value, max_length=64).lower()
+
+
+def _require_agent_panel_identity(history_id: str, panel_kind: str) -> tuple[str, str]:
+    normalized_history_id = _normalize_text(history_id, max_length=128)
+    normalized_panel_kind = normalize_agent_panel_kind(panel_kind)
+    if not normalized_history_id:
+        raise HTTPException(status_code=422, detail="AI 面板历史必须提供 history_id")
+    if not normalized_panel_kind:
+        raise HTTPException(status_code=422, detail="AI 面板历史必须提供 panel_kind")
+    return normalized_history_id, normalized_panel_kind
 
 
 def derive_agent_session_title(messages: List[Dict[str, Any]] | List[AgentMessage] | None) -> str:
@@ -127,27 +133,13 @@ def _get_record_title_source(record: Optional[Dict[str, Any]]) -> str:
 def _get_record_history_id(record: Optional[Dict[str, Any]]) -> str:
     if not isinstance(record, dict):
         return ""
-    direct = _normalize_text(record.get("history_id"), max_length=128)
-    if direct:
-        return direct
-    snapshot = record.get("snapshot") if isinstance(record.get("snapshot"), dict) else {}
-    meta = snapshot.get("_meta") if isinstance(snapshot, dict) else {}
-    if isinstance(meta, dict):
-        return _normalize_text(meta.get("history_id"), max_length=128)
-    return ""
+    return _normalize_text(record.get("history_id"), max_length=128)
 
 
-def _get_record_session_kind(record: Optional[Dict[str, Any]]) -> str:
+def _get_record_panel_kind(record: Optional[Dict[str, Any]]) -> str:
     if not isinstance(record, dict):
         return ""
-    direct = normalize_agent_session_kind(record.get("session_kind"))
-    if direct:
-        return direct
-    snapshot = record.get("snapshot") if isinstance(record.get("snapshot"), dict) else {}
-    meta = snapshot.get("_meta") if isinstance(snapshot, dict) else {}
-    if isinstance(meta, dict):
-        return normalize_agent_session_kind(meta.get("session_kind"))
-    return ""
+    return normalize_agent_panel_kind(record.get("panel_kind"))
 
 
 def _resolve_upsert_title(
@@ -213,13 +205,11 @@ def build_snapshot_payload(request: AgentSessionSnapshotRequest) -> Dict[str, An
         "risk_confirmations": [str(item) for item in request.risk_confirmations],
     }
     history_id = _normalize_text(request.history_id, max_length=128)
-    session_kind = normalize_agent_session_kind(request.session_kind)
-    if history_id or session_kind:
-        payload["_meta"] = {}
-        if history_id:
-            payload["_meta"]["history_id"] = history_id
-        if session_kind:
-            payload["_meta"]["session_kind"] = session_kind
+    panel_kind = normalize_agent_panel_kind(request.panel_kind)
+    payload["_meta"] = {
+        "history_id": history_id,
+        "panel_kind": panel_kind,
+    }
     return payload
 
 
@@ -239,7 +229,7 @@ def build_turn_persist_payload(payload: AgentTurnRequest, response: AgentTurnRes
         status=response.status,
         stage=response.stage,
         history_id=_normalize_text(payload.history_id, max_length=128),
-        session_kind=SESSION_KIND_FOLLOWUP,
+        panel_kind=PANEL_KIND_FOLLOWUP,
         input="" if response.status == "answered" else str(payload.messages[-1].content if payload.messages else ""),
         messages=[AgentMessage(**item) for item in messages],
         output=response.output,
@@ -298,9 +288,7 @@ def _build_summary_model(record: Dict[str, Any]) -> AgentSessionSummary:
         history_id=_get_record_history_id(record),
         is_pinned=bool(record.get("is_pinned")),
         title_source=_get_record_title_source(record),
-        session_kind=_get_record_session_kind(record),
-        has_summary_pack=bool(record.get("has_summary_pack")),
-        has_followup_messages=bool(record.get("has_followup_messages")),
+        panel_kind=_get_record_panel_kind(record),
         created_at=serialize_datetime(record.get("created_at")),
         updated_at=serialize_datetime(record.get("updated_at")),
         pinned_at=serialize_datetime(record.get("pinned_at")) if record.get("pinned_at") else None,
@@ -340,8 +328,9 @@ def upsert_agent_session(session_id: str, request: AgentSessionSnapshotRequest, 
     existing_record = repo.get_record(session_id)
     if not _normalize_text(request.history_id):
         request.history_id = _get_record_history_id(existing_record)
-    if not normalize_agent_session_kind(request.session_kind):
-        request.session_kind = _get_record_session_kind(existing_record)
+    if not normalize_agent_panel_kind(request.panel_kind):
+        request.panel_kind = _get_record_panel_kind(existing_record)
+    history_id, panel_kind = _require_agent_panel_identity(request.history_id, request.panel_kind)
     title, title_source = _resolve_upsert_title(request, existing_record)
     preview = _normalize_text(request.preview, max_length=120) or derive_agent_session_preview(build_snapshot_payload(request))
     record = repo.upsert_record(
@@ -349,6 +338,8 @@ def upsert_agent_session(session_id: str, request: AgentSessionSnapshotRequest, 
         title=title,
         preview=preview,
         status=str(request.status or "idle"),
+        history_id=history_id,
+        panel_kind=panel_kind,
         snapshot=build_snapshot_payload(request),
         is_pinned=request.is_pinned,
         title_source=title_source,
@@ -385,12 +376,15 @@ async def persist_agent_turn(payload: AgentTurnRequest, response: AgentTurnRespo
     request = build_turn_persist_payload(payload, response)
     title, title_source = _resolve_upsert_title(request, existing_record)
     request.title = title
+    history_id, panel_kind = _require_agent_panel_identity(request.history_id, request.panel_kind)
     preview = _normalize_text(request.preview, max_length=120) or derive_agent_session_preview(build_snapshot_payload(request))
     repo.upsert_record(
         session_id,
         title=title,
         preview=preview,
         status=str(request.status or "idle"),
+        history_id=history_id,
+        panel_kind=panel_kind,
         snapshot=build_snapshot_payload(request),
         title_source=title_source,
     )

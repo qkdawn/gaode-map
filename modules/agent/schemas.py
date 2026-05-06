@@ -185,6 +185,43 @@ class AgentIterationPoiResponse(BaseModel):
     status: str = "failed"
     ai_summary: List[str] = Field(default_factory=list)
     ai_insights: Dict[str, str] = Field(default_factory=dict)
+    spatial_factors: Dict[str, Any] = Field(default_factory=dict)
+    subcategory_spatial_trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    subcategory_spatial_summary: List[str] = Field(default_factory=list)
+    error: str = ""
+
+
+class AgentIterationPoiBuildRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    history_id: str = ""
+    years: List[int] = Field(default_factory=list)
+    center: List[float] = Field(default_factory=list)
+
+
+class AgentIterationPoiBuildResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    status: str = "failed"
+    source: str = ""
+    historyId: str = ""
+    years: List[int] = Field(default_factory=list)
+    center: List[float] = Field(default_factory=list)
+    summaries: List[Dict[str, Any]] = Field(default_factory=list)
+    trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    total_series: List[Dict[str, Any]] = Field(default_factory=list)
+    category_stack: List[Dict[str, Any]] = Field(default_factory=list)
+    subcategory_stack: List[Dict[str, Any]] = Field(default_factory=list)
+    subcategory_trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    area_heatmaps: List[Dict[str, Any]] = Field(default_factory=list)
+    spatial_factors: Dict[str, Any] = Field(default_factory=dict)
+    subcategory_spatial_trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    subcategory_spatial_summary: List[str] = Field(default_factory=list)
+    rule_summary: List[str] = Field(default_factory=list)
+    rule_insights: Dict[str, str] = Field(default_factory=dict)
+    ai_summary: List[str] = Field(default_factory=list)
+    ai_insights: Dict[str, str] = Field(default_factory=dict)
+    ai_error: str = ""
     error: str = ""
 
 

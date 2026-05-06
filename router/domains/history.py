@@ -13,18 +13,18 @@ async def save_history_manually(payload: HistorySaveRequest):
 
 
 @router.get("/api/v1/analysis/history")
-async def get_history_list(limit: int = Query(0, ge=0)):
+async def get_history_list(limit: int = Query(100, ge=0, le=500)):
     return history_service.get_history_list_payload(limit, history_repo)
 
 
 @router.get("/api/v1/analysis/history/{id}/pois")
-async def get_history_pois(id: str):
-    return history_service.get_history_pois_payload(id, history_repo)
+async def get_history_pois(id: str, year: int | None = None):
+    return history_service.get_history_pois_payload(id, history_repo, year=year)
 
 
 @router.get("/api/v1/analysis/history/{id}")
-async def get_history_detail(id: str, include_pois: bool = Query(True)):
-    return history_service.get_history_detail_payload(id, include_pois, history_repo)
+async def get_history_detail(id: str, include_pois: bool = Query(True), year: int | None = None):
+    return history_service.get_history_detail_payload_for_year(id, include_pois, year, history_repo)
 
 
 @router.delete("/api/v1/analysis/history/{id}")

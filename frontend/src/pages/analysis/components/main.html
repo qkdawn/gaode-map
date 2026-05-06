@@ -134,6 +134,72 @@
                                 </div>
                             </section>
                         </div>
+                        <div
+                            v-if="basisDrawerOpen && getBasisDrawerPayload()"
+                            class="basis-drawer-mask"
+                            @click.self="closeBasisDrawer">
+                            <aside class="basis-drawer" role="dialog" aria-modal="true" aria-labelledby="basis-drawer-title">
+                                <div class="basis-drawer-head">
+                                    <div>
+                                        <div class="basis-drawer-eyebrow">依据</div>
+                                        <h3 id="basis-drawer-title">{{ getBasisDrawerPayload().title || '生成依据' }}</h3>
+                                    </div>
+                                    <button type="button" class="basis-drawer-close" aria-label="关闭生成依据" @click="closeBasisDrawer">×</button>
+                                </div>
+                                <div class="basis-drawer-tabs" role="tablist" aria-label="生成依据">
+                                    <button
+                                        v-for="tab in getBasisDrawerTabs()"
+                                        :key="`basis-tab-${tab.key}`"
+                                        type="button"
+                                        :class="{ active: basisDrawerActiveTab === tab.key }"
+                                        @click="setBasisDrawerTab(tab.key)">
+                                        {{ tab.label }}
+                                    </button>
+                                </div>
+                                <div v-if="basisDrawerActiveTab === 'basic'" class="basis-drawer-body">
+                                    <section class="basis-drawer-section">
+                                        <h4>当前结论</h4>
+                                        <p>{{ getBasisDrawerPayload().currentConclusion || '暂无结论文本。' }}</p>
+                                    </section>
+                                    <section class="basis-drawer-section">
+                                        <h4>使用字段</h4>
+                                        <div v-if="getBasisDrawerPayload().fields.length" class="basis-field-list">
+                                            <div
+                                                v-for="field in getBasisDrawerPayload().fields"
+                                                :key="`basis-field-${field.key || field.label}`"
+                                                class="basis-field-row">
+                                                <span>{{ field.label || field.key }}</span>
+                                                <strong>{{ formatBasisFieldValue(field.value) }}</strong>
+                                            </div>
+                                        </div>
+                                        <p v-else>暂无结构化字段。</p>
+                                    </section>
+                                    <section class="basis-drawer-section">
+                                        <h4>AI 提示词</h4>
+                                        <p>{{ getBasisDrawerPayload().aiPrompt }}</p>
+                                    </section>
+                                </div>
+                                <div v-else-if="basisDrawerActiveTab === 'template'" class="basis-drawer-body">
+                                    <section class="basis-drawer-section">
+                                        <h4>判断规则</h4>
+                                        <ul v-if="getBasisDrawerPayload().rules.length" class="basis-rule-list">
+                                            <li v-for="(rule, idx) in getBasisDrawerPayload().rules" :key="`basis-rule-${idx}`">{{ rule }}</li>
+                                        </ul>
+                                        <p v-else>暂无规则说明。</p>
+                                    </section>
+                                    <section class="basis-drawer-section">
+                                        <h4>规则模板</h4>
+                                        <p>{{ getBasisDrawerPayload().template || '暂无模板。' }}</p>
+                                    </section>
+                                </div>
+                                <div v-else class="basis-drawer-body">
+                                    <section class="basis-drawer-section">
+                                        <h4>原始输入</h4>
+                                        <pre class="basis-json-block">{{ formatBasisRawInput(getBasisDrawerPayload().rawInput) }}</pre>
+                                    </section>
+                                </div>
+                            </aside>
+                        </div>
                     </div>
                     <div
                         v-else
@@ -184,7 +250,7 @@
                                     <button
                                         type="button"
                                         class="agent-top-tab-add-menu-item"
-                                        @click="createAgentIterationChangeTab({ title: '夜光近三年' })">
+                                        @click="createAgentIterationChangeTab()">
                                         新建多年迭代变化
                                     </button>
                                     <button
@@ -303,7 +369,12 @@
                             </div>
                             <div v-else-if="shouldShowAgentSummaryGeneratedState()" class="agent-summary-grid">
                                 <section class="agent-summary-card">
-                                    <div class="agent-summary-card-title">一句话结论</div>
+                                    <div class="agent-summary-card-head">
+                                        <div class="agent-summary-card-title">一句话结论</div>
+                                        <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentSummaryBasisPayload({ sectionKey: 'headline', title: '一句话结论', reasoning: ((getAgentSummaryPack().headline_judgment || {}).summary) || '-' }), $event)">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                        </button>
+                                    </div>
                                     <div class="agent-summary-line">{{ ((getAgentSummaryPack().headline_judgment || {}).summary) || '-' }}</div>
                                     <div v-if="((getAgentSummaryPack().headline_judgment || {}).supporting_clause)" class="agent-summary-line">
                                         {{ (getAgentSummaryPack().headline_judgment || {}).supporting_clause }}
@@ -319,7 +390,12 @@
                                     v-for="(item, idx) in getAgentSummaryAreaJudgments()"
                                     :key="`summary-area-judgment-${item.sectionKey || idx}`"
                                     class="agent-summary-card">
-                                    <div class="agent-summary-card-title">{{ item.title || '-' }}</div>
+                                    <div class="agent-summary-card-head">
+                                        <div class="agent-summary-card-title">{{ item.title || '-' }}</div>
+                                        <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentSummaryBasisPayload(item), $event)">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                        </button>
+                                    </div>
                                     <div class="agent-summary-line">{{ item.reasoning || '-' }}</div>
                                     <div
                                         v-for="(dimension, dimIdx) in (item.dimensions || [])"
@@ -329,7 +405,12 @@
                                     </div>
                                 </section>
                                 <section class="agent-summary-card">
-                                    <div class="agent-summary-card-title">用户画像</div>
+                                    <div class="agent-summary-card-head">
+                                        <div class="agent-summary-card-title">用户画像</div>
+                                        <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentSummaryBasisPayload({ sectionKey: 'user_profile', title: '用户画像', reasoning: ((getAgentSummaryPack().user_profile || {}).headline) || '-' }), $event)">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                        </button>
+                                    </div>
                                     <div class="agent-summary-kv">
                                         <div><strong>{{ ((getAgentSummaryPack().user_profile || {}).headline) || '-' }}</strong></div>
                                         <div v-for="(item, idx) in ((getAgentSummaryPack().user_profile || {}).traits || [])" :key="`summary-user-trait-${idx}`">
@@ -338,7 +419,12 @@
                                     </div>
                                 </section>
                                 <section class="agent-summary-card">
-                                    <div class="agent-summary-card-title">商业行为推断</div>
+                                    <div class="agent-summary-card-head">
+                                        <div class="agent-summary-card-title">商业行为推断</div>
+                                        <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentSummaryBasisPayload({ sectionKey: 'behavior_inference', title: '商业行为推断', reasoning: ((getAgentSummaryPack().behavior_inference || {}).headline) || '-' }), $event)">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                        </button>
+                                    </div>
                                     <div class="agent-summary-kv">
                                         <div><strong>{{ ((getAgentSummaryPack().behavior_inference || {}).headline) || '-' }}</strong></div>
                                         <div v-for="(item, idx) in ((getAgentSummaryPack().behavior_inference || {}).traits || [])" :key="`summary-behavior-trait-${idx}`">
@@ -520,13 +606,18 @@
                                         <div class="agent-summary-card-title">生成失败</div>
                                         <div class="agent-summary-line">{{ agentIterationPoiError || getAgentIterationPoiPayload().error }}</div>
                                     </div>
-                                    <div v-else-if="!getAgentIterationPoiPayload().status" class="agent-summary-card">
+                                    <div v-else-if="isAgentIterationPayloadEmpty(getAgentIterationPoiPayload())" class="agent-summary-card">
                                         <div class="agent-summary-card-title">POI 特征与多年趋势</div>
-                                        <div class="agent-summary-line">点击重新生成，查看当前历史 POI 的业态特征和年份变化。</div>
+                                        <div class="agent-summary-line">{{ getAgentIterationEmptyNotice('poi') }}</div>
                                     </div>
 
                                     <section v-if="getAgentIterationPoiPayload().status === 'ready'" class="agent-summary-card">
-                                        <div class="agent-summary-card-title">📊 AI分析</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">📊 AI分析</div>
+                                            <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('poi'), $event)">
+                                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                            </button>
+                                        </div>
                                         <div v-if="getAgentIterationPoiPayload().notice" class="agent-summary-line agent-iteration-note">
                                             {{ getAgentIterationPoiPayload().notice }}
                                         </div>
@@ -612,6 +703,32 @@
                                                 </div>
                                             </div>
 
+                                            <div class="agent-iteration-chart-card" v-if="getAgentIterationPoiTopSubcategoryRows().length">
+                                                <div class="agent-iteration-chart-title">小类结构排行</div>
+                                                <div class="agent-iteration-insight-list">
+                                                    <div
+                                                        v-for="item in getAgentIterationPoiTopSubcategoryRows(6)"
+                                                        :key="`poi-subcategory-rank-${item.name}`"
+                                                        class="agent-iteration-insight-row">
+                                                        <strong>{{ item.name }}</strong>
+                                                        <span>{{ item.parent || '未分类' }} · {{ formatAgentIterationMetric(item.count, 0) }} · {{ formatAgentIterationPercent(item.ratio) }}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="agent-iteration-chart-card" v-if="getAgentIterationPoiSpatialTrendRows().length">
+                                                <div class="agent-iteration-chart-title">小类空间变化</div>
+                                                <div class="agent-iteration-insight-list">
+                                                    <div
+                                                        v-for="row in getAgentIterationPoiSpatialTrendRows(6)"
+                                                        :key="`poi-spatial-trend-${row.name}`"
+                                                        class="agent-iteration-insight-row">
+                                                        <strong>{{ row.name }}<span v-if="row.parent">（{{ row.parent }}）</span></strong>
+                                                        <span>{{ formatAgentIterationPoiSpatialTrend(row) }}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <div class="agent-iteration-chart-card agent-iteration-chart-card-wide">
                                                 <div class="agent-iteration-chart-title">区域分布变化</div>
                                                 <div class="agent-iteration-heatmap-grid">
@@ -651,7 +768,12 @@
                                     </section>
 
                                     <section v-if="getAgentIterationPoiAiInsightRows().length" class="agent-summary-card">
-                                        <div class="agent-summary-card-title">🔎 AI洞察</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">🔎 AI洞察</div>
+                                            <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('poi'), $event)">
+                                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                            </button>
+                                        </div>
                                         <div class="agent-iteration-insight-list">
                                             <div
                                                 v-for="row in getAgentIterationPoiAiInsightRows()"
@@ -688,9 +810,9 @@
                                         <div class="agent-summary-card-title">生成失败</div>
                                         <div class="agent-summary-line">{{ agentIterationPopulationError || getAgentIterationPopulationPayload().error }}</div>
                                     </div>
-                                    <div v-else-if="!getAgentIterationPopulationPayload().status" class="agent-summary-card">
+                                    <div v-else-if="isAgentIterationPayloadEmpty(getAgentIterationPopulationPayload())" class="agent-summary-card">
                                         <div class="agent-summary-card-title">人口总结特征</div>
-                                        <div class="agent-summary-line">点击重新生成，查看人口变化的结构化总结指标。</div>
+                                        <div class="agent-summary-line">{{ getAgentIterationEmptyNotice('population') }}</div>
                                     </div>
 
                                     <section v-if="getAgentIterationPopulationPayload().status === 'ready'" class="agent-summary-card">
@@ -716,9 +838,9 @@
                                         <div class="agent-summary-card-title">生成失败</div>
                                         <div class="agent-summary-line">{{ agentIterationNightlightError || getAgentIterationNightlightPayload().error }}</div>
                                     </div>
-                                    <div v-else-if="!getAgentIterationNightlightPayload().status" class="agent-summary-card">
+                                    <div v-else-if="isAgentIterationPayloadEmpty(getAgentIterationNightlightPayload())" class="agent-summary-card">
                                         <div class="agent-summary-card-title">夜光近三年变化</div>
-                                        <div class="agent-summary-line">点击重新生成，查看近三年夜光快照和热点迁移趋势。</div>
+                                        <div class="agent-summary-line">{{ getAgentIterationEmptyNotice('nightlight') }}</div>
                                     </div>
 
                                     <section v-if="(getAgentIterationNightlightPayload().snapshots || []).length" class="agent-summary-card agent-iteration-snapshot-section">
@@ -731,13 +853,15 @@
                                                 :class="{ 'is-clickable': !snapshot.error && (getAgentIterationSnapshotCells(snapshot).length || snapshot.image_url) }"
                                                 tabindex="0"
                                                 role="button"
-                                                :aria-label="`${snapshot.year} 夜光快照详情，可复制指标`"
-                                                @click="openAgentIterationSnapshotDetail(snapshot)"
-                                                @keyup.enter="openAgentIterationSnapshotDetail(snapshot)"
-                                                @keyup.space.prevent="openAgentIterationSnapshotDetail(snapshot)">
+                                                :aria-label="`${snapshot.year} 夜光快照，点击复制图片`"
+                                                @click="openAgentIterationSnapshotDetail(snapshot, $event)"
+                                                @keyup.enter="openAgentIterationSnapshotDetail(snapshot, $event)"
+                                                @keyup.space.prevent="openAgentIterationSnapshotDetail(snapshot, $event)">
                                                 <div class="agent-iteration-snapshot-head">
                                                     <div class="agent-iteration-snapshot-year">{{ snapshot.year }}</div>
-                                                    <span v-if="!snapshot.error && (getAgentIterationSnapshotCells(snapshot).length || snapshot.image_url)" class="agent-iteration-snapshot-action">点击复制</span>
+                                                    <span v-if="!snapshot.error && (getAgentIterationSnapshotCells(snapshot).length || snapshot.image_url)" class="agent-iteration-snapshot-action">
+                                                        {{ agentIterationSnapshotCopyKey === String(snapshot.year || '') && agentIterationSnapshotCopyStatus ? agentIterationSnapshotCopyStatus : '点击复制' }}
+                                                    </span>
                                                 </div>
                                                 <div v-if="snapshot.error" class="agent-iteration-snapshot-error">{{ snapshot.error }}</div>
                                                 <svg
@@ -785,8 +909,8 @@
                                             <div class="agent-iteration-snapshot-detail-dialog" @click.stop>
                                                 <div class="agent-iteration-snapshot-detail-head">
                                                     <div>
-                                                        <div class="agent-iteration-snapshot-detail-title">{{ (agentIterationSnapshotDetail || {}).year }} 夜光快照指标</div>
-                                                        <div class="agent-iteration-snapshot-detail-subtitle">可复制年度快照的核心夜光指标</div>
+                                                        <div class="agent-iteration-snapshot-detail-title">{{ (agentIterationSnapshotDetail || {}).year }} 夜光快照复制失败</div>
+                                                        <div class="agent-iteration-snapshot-detail-subtitle">浏览器不支持复制图片时，可复制年度快照指标文本</div>
                                                     </div>
                                                     <button type="button" class="agent-iteration-snapshot-detail-close" @click="closeAgentIterationSnapshotDetail">×</button>
                                                 </div>
@@ -795,7 +919,7 @@
                                                     readonly
                                                     :value="buildAgentIterationSnapshotCopyText(agentIterationSnapshotDetail || {})"></textarea>
                                                 <div class="agent-iteration-snapshot-detail-actions">
-                                                    <button type="button" class="agent-iteration-snapshot-copy-btn" @click="copyAgentIterationSnapshotDetail">复制快照指标</button>
+                                                    <button type="button" class="agent-iteration-snapshot-copy-btn" @click="copyAgentIterationSnapshotDetail">复制指标文本</button>
                                                     <span v-if="agentIterationSnapshotCopyStatus" class="agent-iteration-snapshot-copy-status">{{ agentIterationSnapshotCopyStatus }}</span>
                                                 </div>
                                             </div>
@@ -803,7 +927,12 @@
                                     </section>
 
                                     <section v-if="getAgentIterationNightlightPayload().status" class="agent-summary-card agent-iteration-analysis-card">
-                                        <div class="agent-summary-card-title">AI 热点变化解析</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">AI 热点变化解析</div>
+                                            <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('nightlight'), $event)">
+                                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                            </button>
+                                        </div>
                                         <div v-if="getAgentIterationNightlightAnalysisRows().length" class="agent-iteration-analysis-list">
                                             <div
                                                 v-for="row in getAgentIterationNightlightAnalysisRows()"
@@ -1442,6 +1571,72 @@
             </div>
             <div v-else-if="basemapSource === 'tianditu'" style="position:absolute; right:8px; bottom:6px; z-index:2; background:rgba(255,255,255,0.9); border:1px solid #e5e7eb; border-radius:6px; padding:2px 6px; font-size:10px; color:#4b5563;">
                 © 天地图
+            </div>
+            <div
+                v-if="basisDrawerOpen && getBasisDrawerPayload() && agentWorkspaceView !== 'tools'"
+                class="basis-drawer-mask"
+                @click.self="closeBasisDrawer">
+                <aside class="basis-drawer" role="dialog" aria-modal="true" aria-labelledby="basis-drawer-title-shared">
+                    <div class="basis-drawer-head">
+                        <div>
+                            <div class="basis-drawer-eyebrow">依据</div>
+                            <h3 id="basis-drawer-title-shared">{{ getBasisDrawerPayload().title || '生成依据' }}</h3>
+                        </div>
+                        <button type="button" class="basis-drawer-close" aria-label="关闭生成依据" @click="closeBasisDrawer">×</button>
+                    </div>
+                    <div class="basis-drawer-tabs" role="tablist" aria-label="生成依据">
+                        <button
+                            v-for="tab in getBasisDrawerTabs()"
+                            :key="`basis-shared-tab-${tab.key}`"
+                            type="button"
+                            :class="{ active: basisDrawerActiveTab === tab.key }"
+                            @click="setBasisDrawerTab(tab.key)">
+                            {{ tab.label }}
+                        </button>
+                    </div>
+                    <div v-if="basisDrawerActiveTab === 'basic'" class="basis-drawer-body">
+                        <section class="basis-drawer-section">
+                            <h4>当前结论</h4>
+                            <p>{{ getBasisDrawerPayload().currentConclusion || '暂无结论文本。' }}</p>
+                        </section>
+                        <section class="basis-drawer-section">
+                            <h4>使用字段</h4>
+                            <div v-if="getBasisDrawerPayload().fields.length" class="basis-field-list">
+                                <div
+                                    v-for="field in getBasisDrawerPayload().fields"
+                                    :key="`basis-shared-field-${field.key || field.label}`"
+                                    class="basis-field-row">
+                                    <span>{{ field.label || field.key }}</span>
+                                    <strong>{{ formatBasisFieldValue(field.value) }}</strong>
+                                </div>
+                            </div>
+                            <p v-else>暂无结构化字段。</p>
+                        </section>
+                        <section class="basis-drawer-section">
+                            <h4>AI 提示词</h4>
+                            <p>{{ getBasisDrawerPayload().aiPrompt }}</p>
+                        </section>
+                    </div>
+                    <div v-else-if="basisDrawerActiveTab === 'template'" class="basis-drawer-body">
+                        <section class="basis-drawer-section">
+                            <h4>判断规则</h4>
+                            <ul v-if="getBasisDrawerPayload().rules.length" class="basis-rule-list">
+                                <li v-for="(rule, idx) in getBasisDrawerPayload().rules" :key="`basis-shared-rule-${idx}`">{{ rule }}</li>
+                            </ul>
+                            <p v-else>暂无规则说明。</p>
+                        </section>
+                        <section class="basis-drawer-section">
+                            <h4>规则模板</h4>
+                            <p>{{ getBasisDrawerPayload().template || '暂无模板。' }}</p>
+                        </section>
+                    </div>
+                    <div v-else class="basis-drawer-body">
+                        <section class="basis-drawer-section">
+                            <h4>原始输入</h4>
+                            <pre class="basis-json-block">{{ formatBasisRawInput(getBasisDrawerPayload().rawInput) }}</pre>
+                        </section>
+                    </div>
+                </aside>
             </div>
             </div>
         </main>

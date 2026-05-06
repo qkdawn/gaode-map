@@ -27,9 +27,8 @@ function cloneRecordMap(value) {
   }, {})
 }
 
-function normalizeAgentSessionKind(value) {
-  const kind = asText(value).toLowerCase()
-  return ['summary', 'followup'].includes(kind) ? kind : ''
+function normalizeAgentPanelKind(value) {
+  return asText(value).toLowerCase()
 }
 
 function stableAgentHash(value) {
@@ -583,7 +582,7 @@ function createAgentSessionRecord(seed = {}) {
   const turn = normalizeAgentTurnPayload(seed)
   const messages = stripMirroredSummaryAssistantMessage(seed.messages, turn.output.cards)
   const titleSource = asText(seed.titleSource || seed.title_source || 'fallback') || 'fallback'
-  const sessionKind = normalizeAgentSessionKind(seed.sessionKind || seed.session_kind)
+  const panelKind = normalizeAgentPanelKind(seed.panelKind || seed.panel_kind)
   const session = {
     id: asText(seed.id),
     title: clampText(seed.title, 60) || deriveAgentSessionTitle(messages),
@@ -626,9 +625,7 @@ function createAgentSessionRecord(seed = {}) {
     persisted: !!seed.persisted,
     snapshotLoaded: !!seed.snapshotLoaded,
     titleSource,
-    sessionKind,
-    hasSummaryPack: !!seed.hasSummaryPack,
-    hasFollowupMessages: !!seed.hasFollowupMessages || cloneArray(messages).some((item) => asText(item && item.role) === 'user' && asText(item && item.content)),
+    panelKind,
   }
   if (!session.preview) {
     session.preview = deriveAgentSessionPreview(session)
@@ -712,14 +709,8 @@ function normalizeAgentSessionSummary(item = {}, existing = null) {
     persisted: true,
     snapshotLoaded: !!base.snapshotLoaded,
     titleSource: item.title_source || base.titleSource || 'fallback',
-    sessionKind: item.session_kind || base.sessionKind || '',
     historyId: item.history_id || base.historyId || '',
-    hasSummaryPack: Object.prototype.hasOwnProperty.call(item, 'has_summary_pack')
-      ? !!item.has_summary_pack
-      : !!base.hasSummaryPack,
-    hasFollowupMessages: Object.prototype.hasOwnProperty.call(item, 'has_followup_messages')
-      ? !!item.has_followup_messages
-      : !!base.hasFollowupMessages,
+    panelKind: item.panel_kind || base.panelKind || '',
   })
   return session
 }

@@ -27,7 +27,7 @@
 | | 几何计算 | **Shapely** | 稳健的多边形/几何运算库。 |
 | | 空间分析 | **PySAL** (`esda`, `mgwr`) | 科学严谨的空间计量经济学库。 |
 | **数据** | 主存储 | **MySQL 8.0** | 持久化存储 POI 数据 (WGS84)。 |
-| | 缓存/历史 | **SQLite** | 存储分析历史、去重 Hash、统计结果。 |
+| | 缓存/历史 | **MySQL** | 存储分析历史、去重 Hash、统计结果。 |
 
 ## 3. 模块设计 (Python Packages)
 
@@ -55,13 +55,13 @@
 ### 3.3 `modules.poi` (POI 数据服务)
 *   **职责**：数据编排与流转。
 *   **工作流**：
-    1.  **查缓存**: 检查 SQLite 是否有该参数 Hash 的统计结果。
+    1.  **查缓存**: 检查 MySQL 是否有该参数 Hash 的统计结果。
     2.  **Fetch & Transform**: 若未命中，调高德 API -> 获 GCJ02 -> **转 WGS84** 存库。
     3.  **Fast Return**: 优先将 **GCJ02 POI** 返回给前端（保证用户体验）。
     4.  **Background Task (异步落库)**:
         *   启动后台任务调用 `dao.save_pois_async(pois)`。
         *   **策略**: MySQL `UPSERT` (Insert on Duplicate Key Update)，使用 `amap_id` 作为唯一键进行**去重**。
-    5.  **Save Stats**: 计算统计指标 -> 存入 SQLite。
+    5.  **Save Stats**: 计算统计指标 -> 存入 MySQL。
 
 ### 3.4 `modules.road` / `modules.export` (空间分析与导出服务)
 *   **职责**：科学计算。
@@ -81,7 +81,7 @@
 *   `location`: Point (WGS84, 空间索引)
 *   `properties`: JSON (存储额外属性)
 
-### 4.2 SQLite (缓存层)
+### 4.2 MySQL (缓存/历史层)
 表名: `analysis_history`
 *   `hash`: String (参数 Hash: MD5 of center+time+mode)
 *   `created_at`: Datetime

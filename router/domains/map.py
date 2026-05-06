@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
 from io import BytesIO
 from urllib.parse import urlencode
 
@@ -34,6 +33,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _default_poi_year(source: str) -> int:
+    return 2020 if source == "local" else 2026
+
+
 @router.post("/api/v1/generate-map", response_model=MapResponse, summary="生成地图数据")
 async def generate_map(
     request: MapGenerateRequest,
@@ -45,14 +48,14 @@ async def generate_map(
         def pre_points_hook(center, search_type, place_types=None):
             normalized_pt = tuple(sorted({item for item in (place_types or []) if item}))
             src = request.source or "gaode"
-            y = request.year or datetime.now().year
+            y = request.year or _default_poi_year(src)
             existing = find_map_by_center_and_type(center, search_type, normalized_pt, src, y)
             if existing:
                 return existing[0], existing[1]
             return None
 
         src = request.source or "gaode"
-        y = request.year or datetime.now().year
+        y = request.year or _default_poi_year(src)
 
         map_payload, cached_id = generate_map_json(
             place=request.place,

@@ -3,8 +3,6 @@ from __future__ import annotations
 from math import asin, cos, radians, sin, sqrt
 from typing import Any, Dict, List, Tuple
 
-from modules.spatial_factor_engine import build_spatial_factors, build_subcategory_spatial_snapshot
-
 from .schemas import AnalysisSnapshot
 
 
@@ -398,58 +396,6 @@ def _top_category_pairs(category_stats: Dict[str, Any], *, fallback_total: int =
     return pairs
 
 
-def _resolve_poi_spatial_center(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> List[float] | None:
-    candidates = [
-        _safe_dict(snapshot.scope).get("center"),
-        _safe_dict(snapshot.context).get("center"),
-        artifacts.get("current_center"),
-    ]
-    for candidate in candidates:
-        if isinstance(candidate, (list, tuple)) and len(candidate) >= 2:
-            lng = _to_float(candidate[0], None)
-            lat = _to_float(candidate[1], None)
-            if lng is not None and lat is not None:
-                return [lng, lat]
-    return None
-
-
-def _poi_type_labels(point: Dict[str, Any]) -> Tuple[str, str]:
-    category = str(point.get("category") or point.get("parent") or "").strip()
-    subcategory = str(point.get("subcategory") or "").strip()
-    raw_type = str(point.get("type") or point.get("typecode") or point.get("type_code") or "").strip()
-    if raw_type and (not category or not subcategory):
-        labels = [part.strip() for part in raw_type.replace("，", ";").replace(",", ";").replace("/", ";").split(";") if part.strip()]
-        if not category and labels:
-            category = labels[0]
-        if not subcategory and labels:
-            subcategory = labels[1] if len(labels) > 1 else labels[0]
-    return category or "未分类", subcategory or category or "未分类小类"
-
-
-def _normalize_poi_spatial_points(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    for point in _current_points(snapshot, artifacts):
-        lng = _to_float(point.get("lng"), None)
-        lat = _to_float(point.get("lat"), None)
-        location = point.get("location")
-        if (lng is None or lat is None) and isinstance(location, (list, tuple)) and len(location) >= 2:
-            lng = _to_float(location[0], None)
-            lat = _to_float(location[1], None)
-        if lng is None or lat is None:
-            continue
-        category, subcategory = _poi_type_labels(point)
-        rows.append(
-            {
-                "lng": lng,
-                "lat": lat,
-                "category": category,
-                "subcategory": subcategory,
-                "area": str(point.get("area") or point.get("adname") or point.get("cityname") or point.get("pname") or "").strip() or "未知区域",
-            }
-        )
-    return rows
-
-
 def build_poi_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
     panel = _current_frontend_panel(snapshot, artifacts, "poi")
     poi_summary = artifacts.get("current_poi_summary") if isinstance(artifacts.get("current_poi_summary"), dict) else snapshot.poi_summary
@@ -484,10 +430,6 @@ def build_poi_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str
         if pairs
         else "当前缺少可直接利用的 POI 类别结构结果。"
     )
-    poi_points = _normalize_poi_spatial_points(snapshot, artifacts)
-    center = _resolve_poi_spatial_center(snapshot, artifacts)
-    spatial_factors = build_spatial_factors(poi_points, mode="point", center=center)
-    subcategory_spatial = build_subcategory_spatial_snapshot(poi_points, center=spatial_factors.get("center") or center)
     payload = {
         "top_categories": pairs[:8],
         "dominant_categories": dominant_categories,
@@ -498,11 +440,8 @@ def build_poi_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str
         "culture_ratio": round(culture_ratio, 4),
         "structure_tags": structure_tags,
         "summary_text": summary_text,
-        "spatial_factors": spatial_factors,
-        "subcategory_spatial_rows": subcategory_spatial.get("subcategory_spatial_rows") or [],
-        "subcategory_spatial_summary": subcategory_spatial.get("subcategory_spatial_summary") or [],
     }
-    return _with_analysis_status(payload, ready=bool(pairs or dominant_categories or poi_points))
+    return _with_analysis_status(payload, ready=bool(pairs or dominant_categories))
 
 
 def build_h3_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
@@ -584,6 +523,7 @@ def build_road_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str,
         road_summary.get("avg_intelligibility_r2"),
         regression_r2,
     )
+    road_orientation_analysis = _safe_dict(road_summary.get("road_orientation_analysis"))
     default_radius_label = str(road_summary.get("default_radius_label") or "").strip()
     radius_labels = [str(item).strip() for item in _safe_list(road_summary.get("radius_labels")) if str(item).strip()]
     connectivity_signal = _combine_signal(
@@ -649,6 +589,7 @@ def build_road_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str,
         "avg_integration_local": avg_integration_local,
         "avg_intelligibility": avg_intelligibility,
         "avg_intelligibility_r2": avg_intelligibility_r2,
+        "road_orientation_analysis": road_orientation_analysis,
         "default_radius_label": default_radius_label,
         "radius_labels": radius_labels,
         "connectivity_signal": connectivity_signal,
@@ -740,6 +681,10 @@ def build_nightlight_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
     hotspot_cell_ratio = _to_float(analysis.get("hotspot_cell_ratio"), None)
     max_distance_km = _to_float(analysis.get("max_distance_km"), None)
     peak_to_edge_ratio = _to_float(analysis.get("peak_to_edge_ratio"), None)
+    p90_radiance = _to_float(summary.get("p90_radiance"), None)
+    economic_activity_intensity_level = str(analysis.get("economic_activity_intensity_level") or "").strip()
+    economic_activity_summary_text = str(analysis.get("economic_activity_summary_text") or "").strip()
+    sector_direction_analysis = _safe_dict(analysis.get("sector_direction_analysis"))
     pattern_tags: List[str] = []
     if lit_pixel_ratio is not None and lit_pixel_ratio >= 0.8:
         pattern_tags.append("亮灯覆盖高")
@@ -750,19 +695,23 @@ def build_nightlight_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
     if total_radiance is not None or core_hotspot_count > 0:
         total_text = f"{total_radiance:.1f}" if total_radiance is not None else "-"
         mean_text = f"{mean_radiance:.2f}" if mean_radiance is not None else "-"
-        summary_text = f"夜光总辐亮 {total_text}，均值 {mean_text}，热点核心 {core_hotspot_count} 个。"
+        summary_text = economic_activity_summary_text or f"基于夜间灯光亮度，等时圈内经济活动强度总辐亮 {total_text}，均值 {mean_text}，热点核心 {core_hotspot_count} 个。"
     else:
         summary_text = "当前缺少可直接利用的夜光结构结果。"
     payload = {
         "view": str(panel.get("analysis_view") or snapshot.current_filters.get("nightlight_view") or "").strip(),
         "total_radiance": total_radiance,
         "mean_radiance": mean_radiance,
+        "p90_radiance": p90_radiance,
         "peak_radiance": peak_radiance,
         "lit_pixel_ratio": lit_pixel_ratio,
         "core_hotspot_count": core_hotspot_count,
         "hotspot_cell_ratio": hotspot_cell_ratio,
         "max_distance_km": max_distance_km,
         "peak_to_edge_ratio": peak_to_edge_ratio,
+        "economic_activity_intensity_level": economic_activity_intensity_level,
+        "economic_activity_summary_text": economic_activity_summary_text,
+        "sector_direction_analysis": sector_direction_analysis,
         "pattern_tags": pattern_tags,
         "summary_text": summary_text,
         "legend_note": str(panel.get("legend_note") or "").strip(),
@@ -985,13 +934,13 @@ def infer_area_character_labels(
     if dining_ratio >= 0.28 and core_hotspot_count >= 1 and ((peak_to_edge_ratio or 0.0) >= 2.0 or (total_radiance or 0.0) >= 1000):
         _append_rule_hit(
             rule_hits,
-            rule_id="night_consumer_cluster",
-            label="夜间消费型片区",
+            rule_id="night_economic_activity_cluster",
+            label="夜间经济活动活跃片区",
             evidence_metrics=["poi.dining_ratio", "nightlight.core_hotspot_count", "nightlight.peak_to_edge_ratio"],
             threshold_hit=f"餐饮占比 {dining_ratio:.2f}，夜间热点 {core_hotspot_count} 个，中心亮度比 {peak_to_edge_ratio or 0.0:.2f}",
             confidence="strong",
         )
-        character_tags.append("夜间消费型片区")
+        character_tags.append("夜间经济活动活跃片区")
 
     if culture_ratio >= 0.08 and (total_population or 0.0) >= 20000 and node_count >= 1500 and edge_count >= node_count:
         _append_rule_hit(
@@ -1027,12 +976,12 @@ def infer_area_character_labels(
     if density_level in {"high", "medium"}:
         crowd_traits.append(f"居住密度 {density_level}")
 
-    if core_hotspot_count >= 1 or dining_ratio >= 0.28:
-        activity_period = "晚间活跃"
-    elif office_ratio >= 0.12:
-        activity_period = "日间活跃"
+    if core_hotspot_count >= 1 or (total_radiance or 0.0) >= 800:
+        activity_period = "夜间经济活动信号较强"
+    elif (total_radiance or 0.0) > 0 or (peak_to_edge_ratio or 0.0) > 0:
+        activity_period = "夜间经济活动信号中等"
     else:
-        activity_period = "全天均衡"
+        activity_period = "夜间经济活动信号较弱"
 
     if node_count >= 2000 and edge_count >= node_count:
         spatial_temperament = "路网细密、可达性较强"

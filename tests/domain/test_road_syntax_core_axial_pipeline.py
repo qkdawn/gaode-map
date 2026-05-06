@@ -6,6 +6,7 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 os.environ.setdefault("AMAP_JS_API_KEY", "test-key")
 
 from modules.road import core
+from modules.road.metrics import build_road_orientation_analysis
 
 
 def _sample_polygon():
@@ -89,6 +90,34 @@ def test_axial_pipeline_sequence_and_flags(monkeypatch):
         assert bad_flag not in axial_args
 
     assert result.get("summary", {}).get("analysis_engine") == "depthmapxcli-axial"
+    orientation = result.get("summary", {}).get("road_orientation_analysis") or {}
+    assert orientation.get("dominant_orientation") == "东西向"
+
+
+def test_road_orientation_analysis_is_length_weighted():
+    features = [
+        {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [2.0, 0.0]]},
+            "properties": {},
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [0.0, 0.5]]},
+            "properties": {},
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [0.5, 0.5]]},
+            "properties": {},
+        },
+    ]
+
+    analysis = build_road_orientation_analysis(features)
+
+    assert analysis["dominant_orientation"] == "东西向"
+    assert analysis["secondary_orientation"] in {"南北向", "东北-西南向"}
+    assert float(analysis["dominant_share"]) > 0.5
 
 
 def test_axial_failure_raises_without_segment_fallback(monkeypatch):
@@ -114,4 +143,3 @@ def test_axial_failure_raises_without_segment_fallback(monkeypatch):
     modes = [entry["mode"] for entry in call_log]
     assert modes[:3] == ["IMPORT", "MAPCONVERT", "AXIAL"]
     assert "SEGMENT" not in modes
-

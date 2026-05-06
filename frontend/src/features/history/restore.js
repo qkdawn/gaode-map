@@ -4,6 +4,8 @@
             historyDetailLoadToken: 0,
             currentHistoryRecordId: '',
             currentHistoryPolygonWgs84: [],
+            currentHistoryAvailablePoiYears: [],
+            currentHistorySelectedPoiYear: null,
         };
     }
 
@@ -237,6 +239,15 @@
                 this.resetPopulationAnalysisState({ keepMeta: true, keepYear: true });
                 this.resetNightlightAnalysisState({ keepMeta: true, keepYear: true });
                 this.allPoisDetails = [];
+                this.currentHistoryAvailablePoiYears = Array.isArray(data && data.available_years)
+                    ? data.available_years.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+                    : [];
+                if (this.currentHistoryAvailablePoiYears.length) {
+                    this.poiYearSelections = this.currentHistoryAvailablePoiYears.slice();
+                }
+                this.currentHistorySelectedPoiYear = Number.isFinite(Number(data && data.selected_year))
+                    ? Number(data.selected_year)
+                    : null;
 
                 if (data.params && data.params.center) {
                     this.selectedPoint = { lng: data.params.center[0], lat: data.params.center[1] };
@@ -250,6 +261,13 @@
                     data && data.params ? data.params.source : '',
                     'unknown'
                 );
+                this.poiDataSource = this.resultDataSource;
+                this.resultPoiYear = Number.isFinite(Number(data && data.selected_year))
+                    ? Number(data.selected_year)
+                    : (Number.isFinite(Number(data && data.params ? data.params.year : null))
+                        ? Number(data.params.year)
+                        : (this.resultDataSource === 'gaode' ? 2026 : 2020));
+                this.poiYearSource = String(this.resultPoiYear || 2020);
                 const historyDrawnPolygon = this._closePolygonRing(this.normalizePath(
                     data && data.params ? data.params.drawn_polygon : [],
                     3,
@@ -298,16 +316,39 @@
                 }
                 this.applySimplifyConfig();
             },
-            async _restoreHistoryPoisAsync(id, token, signal, poiCountHint = 0) {
-                const res = await fetch(`/api/v1/analysis/history/${id}/pois`, { signal });
+            async _restoreHistoryPoisAsync(id, token, signal, poiCountHint = 0, year = null) {
+                const qs = Number.isFinite(Number(year)) ? `?year=${Number(year)}` : '';
+                const res = await fetch(`/api/v1/analysis/history/${id}/pois${qs}`, { signal });
                 if (!res.ok) {
-                    throw new Error(`历史 POI 请求失败(${res.status})`);
+                    let detail = '';
+                    try {
+                        const payload = await res.clone().json();
+                        detail = String((payload && payload.detail) || '').trim();
+                    } catch (_) {
+                        try {
+                            detail = String(await res.text() || '').trim();
+                        } catch (_) {}
+                    }
+                    throw new Error(`历史 POI 请求失败(${res.status})${detail ? `: ${detail}` : ''}`);
                 }
                 const data = await res.json();
                 if (token !== this.historyDetailLoadToken) return;
 
                 const pois = Array.isArray(data && data.pois) ? data.pois : [];
                 this.allPoisDetails = pois;
+                this.currentHistoryAvailablePoiYears = Array.isArray(data && data.available_years)
+                    ? data.available_years.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+                    : this.currentHistoryAvailablePoiYears;
+                if (this.currentHistoryAvailablePoiYears.length) {
+                    this.poiYearSelections = this.currentHistoryAvailablePoiYears.slice();
+                }
+                this.currentHistorySelectedPoiYear = Number.isFinite(Number(data && data.selected_year))
+                    ? Number(data.selected_year)
+                    : this.currentHistorySelectedPoiYear;
+                if (Number.isFinite(Number(this.currentHistorySelectedPoiYear))) {
+                    this.resultPoiYear = Number(this.currentHistorySelectedPoiYear);
+                    this.poiYearSource = String(this.currentHistorySelectedPoiYear);
+                }
 
                 if (!pois.length) {
                     this.poiStatus = poiCountHint > 0
@@ -323,14 +364,32 @@
                 this.applySimplifyConfig();
                 setTimeout(() => this.resizePoiChart(), 0);
             },
+            async loadCurrentHistoryPoiYear(year) {
+                const historyId = String(this.currentHistoryRecordId || '').trim();
+                if (!historyId) return;
+                if (!this.historyDetailAbortController) {
+                    this.historyDetailAbortController = new AbortController();
+                }
+                const token = this.historyDetailLoadToken;
+                const targetYear = Number.isFinite(Number(year)) ? Number(year) : null;
+                this.poiStatus = targetYear
+                    ? `正在切换历史 POI 年份：${targetYear} 年`
+                    : '正在切换历史 POI 年份';
+                await this._restoreHistoryPoisAsync(historyId, token, this.historyDetailAbortController.signal, 0, targetYear);
+                this.poiStatus = '';
+            },
             async loadHistoryDetail(id) {
                 const historyId = String(id || '').trim();
                 if (!historyId) return;
                 let controller = null;
                 let baseRestored = false;
+                let historyDetailTimeoutId = null;
+                const previousHistoryId = String(this.currentHistoryRecordId || '').trim();
                 try {
                     this.currentHistoryRecordId = historyId;
                     this.currentHistoryPolygonWgs84 = [];
+                    this.currentHistoryAvailablePoiYears = [];
+                    this.currentHistorySelectedPoiYear = null;
                     this.cancelHistoryLoading();
                     this.cancelHistoryDetailLoading();
                     this.stopScopeDrawing();
@@ -357,6 +416,15 @@
                     const token = this.historyDetailLoadToken + 1;
                     this.historyDetailLoadToken = token;
                     this.historyDetailAbortController = controller;
+                    const timerHost = (typeof window !== 'undefined' && typeof window.setTimeout === 'function')
+                        ? window
+                        : globalThis;
+                    historyDetailTimeoutId = timerHost.setTimeout(() => {
+                        if (token === this.historyDetailLoadToken && this.historyDetailAbortController === controller) {
+                            controller.abort();
+                        }
+                    }, 30000);
+                    historyDetailTimeoutId = { host: timerHost, id: historyDetailTimeoutId };
 
                     const res = await fetch(`/api/v1/analysis/history/${historyId}?include_pois=false`, {
                         signal: controller.signal
@@ -371,6 +439,9 @@
                     this.currentHistoryRecordId = historyId;
                     if (this.lastIsochroneGeoJSON) {
                         this.scopeSource = 'history';
+                    }
+                    if (typeof this.resetAgentIterationChangeForHistorySwitch === 'function') {
+                        this.resetAgentIterationChangeForHistorySwitch(historyId, { previousHistoryId });
                     }
                     baseRestored = true;
                     const restoredSnapshots = await this._restoreHistoryAnalysisSnapshotsAsync(data, token);
@@ -395,14 +466,28 @@
                     await this._restoreHistoryPoisAsync(historyId, token, controller.signal, poiCountHint);
 
                 } catch (e) {
-                    if (e && e.name === 'AbortError') return;
+                    if (e && e.name === 'AbortError') {
+                        if (baseRestored && this.step === 2 && this.lastIsochroneGeoJSON) {
+                            this.poiStatus = '历史主结果已恢复，但 POI 加载超时，可稍后重试';
+                        } else {
+                            this.poiStatus = '';
+                            this.errorMessage = '加载历史超时，请检查远端数据库连接或稍后重试';
+                        }
+                        return;
+                    }
                     console.error(e);
+                    const message = (e && e.message) ? e.message : String(e || '');
                     if (baseRestored && this.step === 2 && this.lastIsochroneGeoJSON) {
-                        this.poiStatus = '历史主结果已恢复，但 POI 恢复失败，可稍后重试';
+                        this.poiStatus = message
+                            ? `历史主结果已恢复，但 POI 恢复失败：${message}`
+                            : '历史主结果已恢复，但 POI 恢复失败，可稍后重试';
                     } else {
-                        this.errorMessage = `加载历史失败: ${(e && e.message) || e}`;
+                        this.errorMessage = `加载历史失败: ${message || e}`;
                     }
                 } finally {
+                    if (historyDetailTimeoutId !== null) {
+                        historyDetailTimeoutId.host.clearTimeout(historyDetailTimeoutId.id);
+                    }
                     if (baseRestored) {
                         this.currentHistoryRecordId = historyId;
                         if (this.lastIsochroneGeoJSON) {

@@ -191,14 +191,14 @@ def test_run_area_character_pack_returns_tags_and_evidence_chain(monkeypatch):
             tool_name="infer_area_labels",
             status="success",
             result={
-                "character_tags": ["夜间消费型片区"],
+                "character_tags": ["夜间经济活动活跃片区"],
                 "dominant_functions": ["餐饮", "购物"],
-                "activity_period": "晚间活跃",
+                "activity_period": "夜间经济活动信号较强",
                 "crowd_traits": ["年龄主段 25-34岁"],
                 "spatial_temperament": "路网细密、可达性较强",
-                "rule_hits": [{"rule_id": "night_consumer_cluster"}],
+                "rule_hits": [{"rule_id": "night_economic_activity_cluster"}],
                 "confidence": "strong",
-                "summary_text": "区域标签为夜间消费型片区。",
+                "summary_text": "区域标签为夜间经济活动活跃片区。",
             },
         )
 
@@ -235,14 +235,14 @@ def test_run_area_character_pack_returns_tags_and_evidence_chain(monkeypatch):
         scenario_tools,
         "infer_area_character_labels",
         lambda snapshot, artifacts, **kwargs: {
-            "character_tags": ["夜间消费型片区"],
+            "character_tags": ["夜间经济活动活跃片区"],
             "dominant_functions": ["餐饮", "购物"],
-            "activity_period": "晚间活跃",
+            "activity_period": "夜间经济活动信号较强",
             "crowd_traits": ["年龄主段 25-34岁"],
             "spatial_temperament": "路网细密、可达性较强",
-            "rule_hits": [{"rule_id": "night_consumer_cluster"}],
+            "rule_hits": [{"rule_id": "night_economic_activity_cluster"}],
             "confidence": "strong",
-            "summary_text": "区域标签为夜间消费型片区。",
+            "summary_text": "区域标签为夜间经济活动活跃片区。",
         },
     )
 
@@ -256,7 +256,7 @@ def test_run_area_character_pack_returns_tags_and_evidence_chain(monkeypatch):
     )
 
     assert result.status == "success"
-    assert result.result["character_tags"] == ["夜间消费型片区"]
+    assert result.result["character_tags"] == ["夜间经济活动活跃片区"]
     assert result.result["dominant_functions"] == ["餐饮", "购物"]
     assert result.result["evidence_chain"]
 
@@ -276,7 +276,7 @@ def test_run_site_selection_pack_returns_ranking(monkeypatch):
         return ToolResult(
             tool_name="analyze_target_supply_gap",
             status="success",
-            result={"place_type": "咖啡厅", "candidate_zones": [{"display_title": "候选1：人民路附近", "approx_address": "人民路附近"}]},
+            result={"place_type": "咖啡厅", "candidate_zones": [{"display_title": "候选：人民路附近", "approx_address": "人民路附近"}]},
         )
 
     monkeypatch.setattr(scenario_tools, "run_business_site_advice", fake_business)
@@ -300,8 +300,8 @@ def test_run_site_selection_pack_returns_ranking(monkeypatch):
         scenario_tools,
         "score_site_candidates",
         lambda snapshot, artifacts, **kwargs: {
-            "candidate_sites": [{"rank": 1, "display_title": "候选1：人民路附近", "total_score": 81.0, "strengths": ["供给缺口明显"], "risks": ["需复核租金"]}],
-            "ranking": [{"rank": 1, "title": "候选1：人民路附近", "total_score": 81.0}],
+            "candidate_sites": [{"rank": 1, "display_title": "候选：人民路附近", "total_score": 81.0, "strengths": ["供给缺口明显"], "risks": ["需复核租金"]}],
+            "ranking": [{"rank": 1, "title": "候选：人民路附近", "total_score": 81.0}],
             "strengths": ["供给缺口明显"],
             "risks": ["需复核租金"],
             "not_recommended_reason": "低排名点位在可达性或活力上偏弱。",
@@ -320,5 +320,5 @@ def test_run_site_selection_pack_returns_ranking(monkeypatch):
     )
 
     assert result.status == "success"
-    assert result.result["ranking"][0]["title"] == "候选1：人民路附近"
+    assert result.result["ranking"][0]["title"] == "候选：人民路附近"
     assert result.result["candidate_sites"][0]["total_score"] == 81.0

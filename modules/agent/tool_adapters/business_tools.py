@@ -99,9 +99,10 @@ async def run_business_site_advice(
         "source": str(arguments.get("source") or snapshot.current_filters.get("poi_source") or snapshot.context.get("source") or "local"),
         "types": target_types,
         "keywords": target_keywords,
-        "max_count": int(arguments.get("max_count") or 1000),
         "year": arguments.get("year"),
     }
+    if arguments.get("max_count") is not None:
+        poi_arguments["max_count"] = int(arguments.get("max_count") or 0)
     poi_result = await _run_child_tool(
         runner=fetch_pois_in_scope,
         tool_name="fetch_pois_in_scope",
