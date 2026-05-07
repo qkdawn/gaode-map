@@ -287,6 +287,17 @@ def convert_history_detail_to_gcj02(res: Dict[str, Any], *, include_pois: bool) 
 
 def convert_history_pois_to_gcj02(res: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(res or {})
+    if payload.get("polygon"):
+        polygon = payload["polygon"]
+
+        def _convert_ring(ring):
+            return [list(wgs84_to_gcj02(point[0], point[1])) for point in ring]
+
+        if polygon and len(polygon) > 0:
+            if isinstance(polygon[0][0], list):
+                payload["polygon"] = [_convert_ring(ring) for ring in polygon]
+            else:
+                payload["polygon"] = _convert_ring(polygon)
     for poi in payload.get("pois") or []:
         if poi.get("location"):
             lx, ly = poi["location"]

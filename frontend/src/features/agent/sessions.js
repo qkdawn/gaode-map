@@ -105,6 +105,13 @@ function createAnalysisAgentInitialState() {
     agentIterationActiveKind: 'poi',
     agentIterationPoiLoading: false,
     agentIterationPoiError: '',
+    agentIterationPoiSnapshotCache: {},
+    agentIterationPoiSnapshotGeneratingKey: '',
+    agentIterationPoiStructureSpatialView: {
+      category: '',
+      sortBy: 'count',
+      spatialOnly: false,
+    },
     agentIterationPopulationLoading: false,
     agentIterationPopulationError: '',
     agentIterationNightlightLoading: false,

@@ -477,6 +477,7 @@ class HistoryRepo:
             poi_summary = selected_row.summary if selected_row and isinstance(selected_row.summary, dict) else {}
             return {
                 "history_id": history_id,
+                "polygon": history.result_polygon,
                 "pois": pois,
                 "poi_summary": poi_summary,
                 "count": len(pois),

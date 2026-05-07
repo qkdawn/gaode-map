@@ -652,7 +652,8 @@
 
                                     <section v-if="getAgentIterationPoiTotalLineChart().length >= 2" class="agent-summary-card agent-iteration-poi-chart-section">
                                         <div class="agent-summary-card-title">📈 趋势分析</div>
-                                        <div class="agent-iteration-chart-grid">
+                                        <div class="agent-iteration-chart-grid agent-iteration-poi-dashboard">
+                                            <div class="agent-iteration-poi-dashboard-top">
                                             <div class="agent-iteration-chart-card">
                                                 <div class="agent-iteration-chart-title">POI总量变化</div>
                                                 <svg viewBox="0 0 320 140" class="agent-iteration-line-chart" role="img" aria-label="POI总量变化折线图">
@@ -702,29 +703,86 @@
                                                     </span>
                                                 </div>
                                             </div>
-
-                                            <div class="agent-iteration-chart-card" v-if="getAgentIterationPoiTopSubcategoryRows().length">
-                                                <div class="agent-iteration-chart-title">小类结构排行</div>
-                                                <div class="agent-iteration-insight-list">
-                                                    <div
-                                                        v-for="item in getAgentIterationPoiTopSubcategoryRows(6)"
-                                                        :key="`poi-subcategory-rank-${item.name}`"
-                                                        class="agent-iteration-insight-row">
-                                                        <strong>{{ item.name }}</strong>
-                                                        <span>{{ item.parent || '未分类' }} · {{ formatAgentIterationMetric(item.count, 0) }} · {{ formatAgentIterationPercent(item.ratio) }}</span>
-                                                    </div>
-                                                </div>
                                             </div>
 
-                                            <div class="agent-iteration-chart-card" v-if="getAgentIterationPoiSpatialTrendRows().length">
-                                                <div class="agent-iteration-chart-title">小类空间变化</div>
-                                                <div class="agent-iteration-insight-list">
+                                            <div class="agent-iteration-chart-card agent-iteration-chart-card-wide agent-iteration-poi-structure-spatial-card" v-if="getAgentIterationPoiStructureSpatialRows().length">
+                                                <div class="agent-iteration-chart-title">小类结构与空间变化 · 全部 {{ getAgentIterationPoiSubcategoryTotal() }} 类</div>
+                                                <div class="agent-iteration-structure-spatial-toolbar">
+                                                    <label>
+                                                        <span>大类</span>
+                                                        <select
+                                                            :value="agentIterationPoiStructureSpatialView.category"
+                                                            @change="setAgentIterationPoiStructureSpatialViewPatch({ category: $event.target.value })">
+                                                            <option value="">全部大类</option>
+                                                            <option
+                                                                v-for="item in getAgentIterationPoiStructureSpatialCategories()"
+                                                                :key="`poi-structure-spatial-category-${item.category}`"
+                                                                :value="item.category">
+                                                                {{ item.category }}（{{ item.subcategoryCount }}类）
+                                                            </option>
+                                                        </select>
+                                                    </label>
+                                                    <label>
+                                                        <span>排序</span>
+                                                        <select
+                                                            :value="agentIterationPoiStructureSpatialView.sortBy"
+                                                            @change="setAgentIterationPoiStructureSpatialViewPatch({ sortBy: $event.target.value })">
+                                                            <option value="count">数量</option>
+                                                            <option value="ratio">占比</option>
+                                                            <option value="abs_delta">变化绝对值</option>
+                                                            <option value="growth">增长</option>
+                                                            <option value="decrease">减少</option>
+                                                        </select>
+                                                    </label>
+                                                    <label class="agent-iteration-structure-spatial-toggle">
+                                                        <input
+                                                            type="checkbox"
+                                                            :checked="agentIterationPoiStructureSpatialView.spatialOnly"
+                                                            @change="setAgentIterationPoiStructureSpatialViewPatch({ spatialOnly: $event.target.checked })">
+                                                        <span>只看有空间变化</span>
+                                                    </label>
+                                                </div>
+                                                <div class="agent-iteration-structure-spatial-table">
+                                                    <div class="agent-iteration-structure-spatial-head">
+                                                        <span>小类</span>
+                                                        <span>数量</span>
+                                                        <span>占比</span>
+                                                        <span>变化</span>
+                                                        <span>空间信号</span>
+                                                    </div>
                                                     <div
-                                                        v-for="row in getAgentIterationPoiSpatialTrendRows(6)"
-                                                        :key="`poi-spatial-trend-${row.name}`"
-                                                        class="agent-iteration-insight-row">
-                                                        <strong>{{ row.name }}<span v-if="row.parent">（{{ row.parent }}）</span></strong>
-                                                        <span>{{ formatAgentIterationPoiSpatialTrend(row) }}</span>
+                                                        v-for="group in getAgentIterationPoiStructureSpatialGroups()"
+                                                        :key="`poi-structure-spatial-group-${group.category}`"
+                                                        class="agent-iteration-structure-spatial-group">
+                                                        <div class="agent-iteration-structure-spatial-group-title">
+                                                            <strong>{{ group.category }}</strong>
+                                                            <span>{{ group.subcategoryCount }}类 · {{ formatAgentIterationMetric(group.total, 0) }}</span>
+                                                        </div>
+                                                        <div
+                                                            v-for="row in group.rows"
+                                                            :key="`poi-structure-spatial-row-${group.category}-${row.name}`"
+                                                            class="agent-iteration-structure-spatial-row"
+                                                            :class="{ 'has-spatial-signal': row.hasSpatialSignal }">
+                                                            <div class="agent-iteration-structure-spatial-name">
+                                                                <strong>{{ row.name }}</strong>
+                                                                <span>{{ row.parent || '未分类' }}</span>
+                                                            </div>
+                                                            <span class="agent-iteration-structure-spatial-number">{{ formatAgentIterationMetric(row.count, 0) }}</span>
+                                                            <span class="agent-iteration-structure-spatial-number">{{ formatAgentIterationPercent(row.ratio) }}</span>
+                                                            <span
+                                                                class="agent-iteration-structure-spatial-delta"
+                                                                :class="{ positive: row.delta > 0, negative: row.delta < 0 }">
+                                                                {{ row.delta > 0 ? '+' : '' }}{{ formatAgentIterationMetric(row.delta, 0) }}
+                                                            </span>
+                                                            <div class="agent-iteration-structure-spatial-signals" v-if="row.hasSpatialSignal">
+                                                                <span v-if="row.dominantDirection">方位 {{ row.dominantDirection }}{{ row.secondaryDirection ? `/${row.secondaryDirection}` : '' }}</span>
+                                                                <span v-if="row.dominantRing">圈层 {{ row.dominantRing }}</span>
+                                                                <span v-if="row.centroidShiftDirection">重心 {{ row.centroidShiftDirection }} {{ formatAgentIterationMetric(row.centroidShiftM, 0) }}米</span>
+                                                                <span v-if="row.hotspotGridCount">热点 {{ formatAgentIterationMetric(row.hotspotGridCount, 0) }}格{{ row.hotspotGridCountDelta ? ` ${row.hotspotGridCountDelta > 0 ? '+' : ''}${row.hotspotGridCountDelta}` : '' }}</span>
+                                                                <span v-if="row.topArea">区域 {{ row.topArea }}</span>
+                                                            </div>
+                                                            <div class="agent-iteration-structure-spatial-empty" v-else>暂无空间变化信号</div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -737,16 +795,48 @@
                                                         :key="`poi-heatmap-${heatmap.year}`"
                                                         class="agent-iteration-heatmap-card">
                                                         <div class="agent-iteration-heatmap-year">{{ heatmap.year }}</div>
-                                                        <svg viewBox="0 0 100 100" class="agent-iteration-heatmap-svg" role="img" :aria-label="`${heatmap.year} POI区域分布热力`">
-                                                            <circle
-                                                                v-for="(point, idx) in heatmap.points"
-                                                                :key="`poi-heatmap-${heatmap.year}-${idx}`"
-                                                                :cx="point.x"
-                                                                :cy="point.y"
-                                                                r="2.2"
-                                                                fill="#f97316"
-                                                                fill-opacity="0.38"></circle>
-                                                        </svg>
+                                                        <div class="agent-iteration-heatmap-viewport" :style="getAgentIterationPoiAreaHeatmapAspectStyle()">
+                                                            <svg :viewBox="getAgentIterationPoiAreaHeatmapViewBox()" class="agent-iteration-heatmap-svg" :class="{ 'has-basemap': getAgentIterationPoiAreaHeatmapBasemap().url }" role="img" :aria-label="`${heatmap.year} POI??????`">
+                                                                <defs v-if="getAgentIterationPoiAreaHeatmapBoundaryPoints()">
+                                                                    <clipPath :id="`poi-heatmap-clip-${heatmap.year}`">
+                                                                        <polygon :points="getAgentIterationPoiAreaHeatmapBoundaryPoints()"></polygon>
+                                                                    </clipPath>
+                                                                </defs>
+                                                                <image
+                                                                    v-if="getAgentIterationPoiAreaHeatmapBasemap().url"
+                                                                    :href="getAgentIterationPoiAreaHeatmapBasemap().url"
+                                                                    x="0"
+                                                                    y="0"
+                                                                    :width="getAgentIterationPoiAreaHeatmapViewSize().width"
+                                                                    :height="getAgentIterationPoiAreaHeatmapViewSize().height"
+                                                                    preserveAspectRatio="none"></image>
+                                                                <g
+                                                                    v-if="heatmap.cells && heatmap.cells.length"
+                                                                    :clip-path="getAgentIterationPoiAreaHeatmapBoundaryPoints() ? `url(#poi-heatmap-clip-${heatmap.year})` : null">
+                                                                    <rect
+                                                                        v-for="(cell, cellIdx) in heatmap.cells"
+                                                                        :key="`poi-heatmap-cell-${heatmap.year}-${cellIdx}`"
+                                                                        :x="cell.x"
+                                                                        :y="cell.y"
+                                                                        :width="cell.width"
+                                                                        :height="cell.height"
+                                                                        :fill-opacity="getAgentIterationPoiAreaHeatmapCellOpacity(cell)"
+                                                                        class="agent-iteration-heatmap-cell"></rect>
+                                                                </g>
+                                                                <polygon
+                                                                    v-if="getAgentIterationPoiAreaHeatmapBoundaryPoints()"
+                                                                    :points="getAgentIterationPoiAreaHeatmapBoundaryPoints()"
+                                                                    class="agent-iteration-heatmap-boundary"></polygon>
+                                                                <circle
+                                                                    v-for="(point, idx) in heatmap.points"
+                                                                    :key="`poi-heatmap-${heatmap.year}-${idx}`"
+                                                                    :cx="point.x"
+                                                                    :cy="point.y"
+                                                                    r="2.35"
+                                                                    :clip-path="getAgentIterationPoiAreaHeatmapBoundaryPoints() ? `url(#poi-heatmap-clip-${heatmap.year})` : null"
+                                                                    class="agent-iteration-heatmap-point"></circle>
+                                                            </svg>
+                                                        </div>
                                                         <div class="agent-iteration-heatmap-caption">{{ heatmap.top_area || '区域分布' }} · {{ heatmap.point_count }}点</div>
                                                     </div>
                                                 </div>

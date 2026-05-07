@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlencode
 
 from fastapi import HTTPException
 
+from core.config import settings
 from modules.history.service import get_history_pois_payload
 
 
 _TYPE_MAP_PATH = Path(__file__).resolve().parents[2] / "share" / "type_map.json"
 _TYPE_CONFIG: Dict[str, Any] = json.loads(_TYPE_MAP_PATH.read_text(encoding="utf-8"))
+_HEATMAP_VIEW_WIDTH = 100.0
+_STATICMAP_WIDTH = 640
+_STATICMAP_MIN_HEIGHT = 260
+_STATICMAP_MAX_HEIGHT = 860
+_STATICMAP_PADDING_PX = 28
+_HEATMAP_BOUNDS_PADDING_RATIO = 0.08
 
 
 def _as_text(value: Any) -> str:
@@ -24,6 +33,359 @@ def _to_number(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return number
+
+
+def _valid_lng_lat(point: Dict[str, Any]) -> Optional[tuple[float, float]]:
+    lng = _to_number(point.get("lng"))
+    lat = _to_number(point.get("lat"))
+    if lng is None or lat is None:
+        location = point.get("location")
+        if isinstance(location, (list, tuple)) and len(location) >= 2:
+            lng = _to_number(location[0])
+            lat = _to_number(location[1])
+    if lng is None or lat is None:
+        return None
+    if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+        return None
+    return lng, lat
+
+
+def _mercator_unit(lng: float, lat: float) -> tuple[float, float]:
+    clamped_lat = max(-85.05112878, min(85.05112878, float(lat)))
+    sin_lat = math.sin(math.radians(clamped_lat))
+    x = (float(lng) + 180.0) / 360.0
+    y = 0.5 - math.log((1 + sin_lat) / (1 - sin_lat)) / (4 * math.pi)
+    return x, y
+
+
+def _mercator_pixel(lng: float, lat: float, zoom: int) -> tuple[float, float]:
+    unit_x, unit_y = _mercator_unit(lng, lat)
+    world_size = 256 * (2 ** int(zoom))
+    return unit_x * world_size, unit_y * world_size
+
+
+def _lng_lat_from_mercator_pixel(x: float, y: float, zoom: int) -> tuple[float, float]:
+    world_size = 256 * (2 ** int(zoom))
+    unit_x = float(x) / world_size
+    unit_y = float(y) / world_size
+    lng = unit_x * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * unit_y)))
+    return lng, math.degrees(lat_rad)
+
+
+def _lng_lat_from_mercator_unit(x: float, y: float) -> tuple[float, float]:
+    lng = float(x) * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * float(y))))
+    return lng, math.degrees(lat_rad)
+
+
+def _mercator_bounds_from_pairs(pairs: List[tuple[float, float]]) -> Optional[Dict[str, float]]:
+    units = [_mercator_unit(lng, lat) for lng, lat in pairs if lng is not None and lat is not None]
+    if not units:
+        return None
+    xs = [item[0] for item in units]
+    ys = [item[1] for item in units]
+    return {"min_x": min(xs), "min_y": min(ys), "max_x": max(xs), "max_y": max(ys)}
+
+
+def _round_float(value: Any, digits: int = 6) -> float:
+    number = _to_number(value)
+    return round(float(number or 0), digits)
+
+
+def _build_heatmap_view_bounds(pairs: List[tuple[float, float]]) -> Optional[Dict[str, Any]]:
+    clean_pairs = [pair for pair in pairs if pair is not None]
+    if not clean_pairs:
+        return None
+
+    unit_bounds = _mercator_bounds_from_pairs(clean_pairs)
+    if not unit_bounds:
+        return None
+
+    raw_span_x = max(unit_bounds["max_x"] - unit_bounds["min_x"], 1e-9)
+    raw_span_y = max(unit_bounds["max_y"] - unit_bounds["min_y"], 1e-9)
+    pad_x = max(raw_span_x * _HEATMAP_BOUNDS_PADDING_RATIO, 1e-7)
+    pad_y = max(raw_span_y * _HEATMAP_BOUNDS_PADDING_RATIO, 1e-7)
+    min_x = max(0.0, unit_bounds["min_x"] - pad_x)
+    max_x = min(1.0, unit_bounds["max_x"] + pad_x)
+    min_y = max(0.0, unit_bounds["min_y"] - pad_y)
+    max_y = min(1.0, unit_bounds["max_y"] + pad_y)
+    span_x = max(max_x - min_x, 1e-9)
+    span_y = max(max_y - min_y, 1e-9)
+
+    static_height = int(round(_STATICMAP_WIDTH * span_y / span_x))
+    static_height = max(_STATICMAP_MIN_HEIGHT, min(_STATICMAP_MAX_HEIGHT, static_height))
+    view_width = _HEATMAP_VIEW_WIDTH
+    view_height = max(1.0, view_width * static_height / _STATICMAP_WIDTH)
+
+    available_width = max(1, _STATICMAP_WIDTH - _STATICMAP_PADDING_PX * 2)
+    available_height = max(1, static_height - _STATICMAP_PADDING_PX * 2)
+    zoom_x = math.log2(available_width / (256 * span_x))
+    zoom_y = math.log2(available_height / (256 * span_y))
+    zoom = max(3, min(17, int(math.floor(min(zoom_x, zoom_y)))))
+
+    center_unit_x = (min_x + max_x) / 2
+    center_unit_y = (min_y + max_y) / 2
+    center_lng, center_lat = _lng_lat_from_mercator_unit(center_unit_x, center_unit_y)
+    center_px, center_py = _mercator_pixel(center_lng, center_lat, zoom)
+    left_px = center_px - (_STATICMAP_WIDTH / 2)
+    top_px = center_py - (static_height / 2)
+
+    min_lng, max_lat = _lng_lat_from_mercator_unit(min_x, min_y)
+    max_lng, min_lat = _lng_lat_from_mercator_unit(max_x, max_y)
+    viewport = {
+        "left_px": left_px,
+        "top_px": top_px,
+        "width": float(_STATICMAP_WIDTH),
+        "height": float(static_height),
+        "zoom": zoom,
+    }
+    view = {"width": view_width, "height": view_height}
+
+    return {
+        "min_lng": min_lng,
+        "min_lat": min_lat,
+        "max_lng": max_lng,
+        "max_lat": max_lat,
+        "ref_lat": center_lat,
+        "mercator_bounds": {"min_x": min_x, "min_y": min_y, "max_x": max_x, "max_y": max_y},
+        "view": view,
+        "view_box": f"0 0 {_round_float(view_width, 3):g} {_round_float(view_height, 3):g}",
+        "aspect_ratio": f"{_round_float(view_width, 3):g} / {_round_float(view_height, 3):g}",
+        "staticmap_viewport": viewport,
+        "staticmap_size": {"width": _STATICMAP_WIDTH, "height": static_height},
+        "staticmap_center": [round(center_lng, 6), round(center_lat, 6)],
+        "staticmap_zoom": zoom,
+    }
+
+
+def _project_lng_lat(lng: float, lat: float, bounds: Dict[str, float]) -> Dict[str, float]:
+    viewport = bounds.get("staticmap_viewport") if isinstance(bounds, dict) else None
+    view = bounds.get("view") if isinstance(bounds, dict) else None
+    if isinstance(viewport, dict):
+        zoom = int(viewport.get("zoom") or 0)
+        width = max(1.0, float(viewport.get("width") or 1))
+        height = max(1.0, float(viewport.get("height") or 1))
+        left = float(viewport.get("left_px") or 0)
+        top = float(viewport.get("top_px") or 0)
+        view_width = float((view or {}).get("width") or _HEATMAP_VIEW_WIDTH)
+        view_height = float((view or {}).get("height") or _HEATMAP_VIEW_WIDTH)
+        px, py = _mercator_pixel(float(lng), float(lat), zoom)
+        return {
+            "x": max(0, min(view_width, ((px - left) / width) * view_width)),
+            "y": max(0, min(view_height, ((py - top) / height) * view_height)),
+        }
+
+    mercator_bounds = _mercator_bounds_from_pairs(
+        [
+            (float(bounds["min_lng"]), float(bounds["min_lat"])),
+            (float(bounds["max_lng"]), float(bounds["max_lat"])),
+        ]
+    )
+    if not mercator_bounds:
+        return {"x": 0.0, "y": 0.0}
+    min_x = mercator_bounds["min_x"]
+    max_x = mercator_bounds["max_x"]
+    min_y = mercator_bounds["min_y"]
+    max_y = mercator_bounds["max_y"]
+    x, y = _mercator_unit(float(lng), float(lat))
+    span_x = max(max_x - min_x, 1e-12)
+    span_y = max(max_y - min_y, 1e-12)
+    scale_span = max(span_x, span_y)
+    center_x = (min_x + max_x) / 2
+    center_y = (min_y + max_y) / 2
+    return {
+        "x": max(0, min(100, 50 + ((x - center_x) / scale_span) * 100)),
+        "y": max(0, min(100, 50 + ((y - center_y) / scale_span) * 100)),
+    }
+
+
+def _pad_bounds(min_lng: float, min_lat: float, max_lng: float, max_lat: float) -> Dict[str, float]:
+    pad_lng = max((max_lng - min_lng) * 0.12, 0.003)
+    pad_lat = max((max_lat - min_lat) * 0.12, 0.003)
+    ref_lat = (min_lat + max_lat) / 2
+    return {
+        "min_lng": min_lng - pad_lng,
+        "min_lat": min_lat - pad_lat,
+        "max_lng": max_lng + pad_lng,
+        "max_lat": max_lat + pad_lat,
+        "ref_lat": ref_lat,
+    }
+
+
+def _bounds_from_pairs(pairs: List[tuple[float, float]]) -> Optional[Dict[str, Any]]:
+    pairs = [pair for pair in pairs if pair is not None]
+    if not pairs:
+        return None
+    return _build_heatmap_view_bounds(pairs)
+
+
+def _bounds_from_points(points: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    pairs = [_valid_lng_lat(point) for point in points]
+    return _bounds_from_pairs([pair for pair in pairs if pair is not None])
+
+
+def _normalize_polygon_rings(polygon: Any) -> List[List[tuple[float, float]]]:
+    if not isinstance(polygon, list) or not polygon:
+        return []
+
+    def as_pair(value: Any) -> Optional[tuple[float, float]]:
+        if not isinstance(value, (list, tuple)) or len(value) < 2:
+            return None
+        lng = _to_number(value[0])
+        lat = _to_number(value[1])
+        if lng is None or lat is None:
+            return None
+        if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+            return None
+        return lng, lat
+
+    def as_ring(value: Any) -> List[tuple[float, float]]:
+        if not isinstance(value, list):
+            return []
+        ring = [pair for pair in (as_pair(point) for point in value) if pair is not None]
+        return ring if len(ring) >= 3 else []
+
+    if as_pair(polygon[0]):
+        ring = as_ring(polygon)
+        return [ring] if ring else []
+
+    rings: List[List[tuple[float, float]]] = []
+    for item in polygon:
+        if not isinstance(item, list) or not item:
+            continue
+        if as_pair(item[0]):
+            ring = as_ring(item)
+            if ring:
+                rings.append(ring)
+        elif isinstance(item[0], list):
+            for nested in item:
+                ring = as_ring(nested)
+                if ring:
+                    rings.append(ring)
+    return rings
+
+
+def _bounds_from_polygon(polygon: Any) -> Optional[Dict[str, Any]]:
+    pairs = [point for ring in _normalize_polygon_rings(polygon) for point in ring]
+    return _bounds_from_pairs(pairs)
+
+
+def _point_in_ring(lng: float, lat: float, ring: List[tuple[float, float]]) -> bool:
+    inside = False
+    j = len(ring) - 1
+    for i, point in enumerate(ring):
+        xi, yi = point
+        xj, yj = ring[j]
+        if (abs((yi - lat) * (xj - lng) - (xi - lng) * (yj - lat)) < 1e-10
+                and min(xi, xj) - 1e-10 <= lng <= max(xi, xj) + 1e-10
+                and min(yi, yj) - 1e-10 <= lat <= max(yi, yj) + 1e-10):
+            return True
+        intersects = ((yi > lat) != (yj > lat)) and (
+            lng < (xj - xi) * (lat - yi) / ((yj - yi) or 1e-12) + xi
+        )
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _point_in_polygon(lng: float, lat: float, polygon: Any) -> bool:
+    rings = _normalize_polygon_rings(polygon)
+    if not rings:
+        return True
+    return any(_point_in_ring(lng, lat, ring) for ring in rings)
+
+
+def _estimate_staticmap_zoom(bounds: Dict[str, float], width: int, height: int) -> int:
+    lng_span = max(float(bounds["max_lng"]) - float(bounds["min_lng"]), 1e-9)
+    lat_span = max(float(bounds["max_lat"]) - float(bounds["min_lat"]), 1e-9)
+    center_lat = (float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2
+    lng_zoom = math.log2((360 * width) / (256 * lng_span))
+    lat_zoom = math.log2((170.1022 * height * max(math.cos(math.radians(center_lat)), 0.2)) / (256 * lat_span))
+    return max(3, min(17, int(math.floor(min(lng_zoom, lat_zoom)))))
+
+
+def _public_heatmap_bounds(bounds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not bounds:
+        return {}
+    result: Dict[str, Any] = {}
+    for key, value in bounds.items():
+        if key in {"staticmap_viewport", "view", "staticmap_size", "staticmap_center", "staticmap_zoom", "view_box", "aspect_ratio"}:
+            continue
+        if isinstance(value, dict):
+            result[key] = {nested_key: _round_float(nested_value, 8) for nested_key, nested_value in value.items()}
+        elif isinstance(value, (int, float)):
+            result[key] = _round_float(value, 8)
+        else:
+            result[key] = value
+    return result
+
+
+def _heatmap_view_meta(bounds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    view = dict((bounds or {}).get("view") or {"width": _HEATMAP_VIEW_WIDTH, "height": _HEATMAP_VIEW_WIDTH})
+    view_width = max(1.0, float(view.get("width") or _HEATMAP_VIEW_WIDTH))
+    view_height = max(1.0, float(view.get("height") or _HEATMAP_VIEW_WIDTH))
+    return {
+        "view": {"width": _round_float(view_width, 3), "height": _round_float(view_height, 3)},
+        "view_box": (bounds or {}).get("view_box") or f"0 0 {_round_float(view_width, 3):g} {_round_float(view_height, 3):g}",
+        "aspect_ratio": (bounds or {}).get("aspect_ratio") or f"{_round_float(view_width, 3):g} / {_round_float(view_height, 3):g}",
+        "viewport": {
+            key: _round_float(value, 3) if key != "zoom" else int(value)
+            for key, value in dict((bounds or {}).get("staticmap_viewport") or {}).items()
+        },
+    }
+
+
+def build_area_heatmap_basemap(bounds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    size = dict((bounds or {}).get("staticmap_size") or {"width": 640, "height": 420})
+    meta = _heatmap_view_meta(bounds)
+    empty = {
+        "url": "",
+        "bounds": _public_heatmap_bounds(bounds),
+        "center": list((bounds or {}).get("staticmap_center") or []),
+        "zoom": (bounds or {}).get("staticmap_zoom"),
+        "size": size,
+        "source": "none",
+        **meta,
+    }
+    key = _as_text(settings.amap_web_service_key).split(",", 1)[0].strip()
+    if not key or not bounds:
+        return empty
+    center = list(bounds.get("staticmap_center") or [
+        round((float(bounds["min_lng"]) + float(bounds["max_lng"])) / 2, 6),
+        round((float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2, 6),
+    ])
+    zoom = int(bounds.get("staticmap_zoom") or _estimate_staticmap_zoom(bounds, int(size["width"]), int(size["height"])))
+    params = {
+        "location": f"{center[0]:.6f},{center[1]:.6f}",
+        "zoom": zoom,
+        "size": f"{size['width']}*{size['height']}",
+        "scale": 2,
+        "key": key,
+    }
+    return {
+        "url": f"https://restapi.amap.com/v3/staticmap?{urlencode(params)}",
+        "bounds": _public_heatmap_bounds(bounds),
+        "center": center,
+        "zoom": zoom,
+        "size": size,
+        "source": "amap_static_url",
+        **meta,
+    }
+
+
+def build_area_heatmap_boundary(polygon: Any, bounds: Optional[Dict[str, float]]) -> List[Dict[str, float]]:
+    if not bounds:
+        return []
+    rings = _normalize_polygon_rings(polygon)
+    if not rings:
+        return []
+    ring = rings[0]
+    result = []
+    for lng, lat in ring:
+        result.append(_project_lng_lat(lng, lat, bounds))
+    return result
 
 
 def _normalize_type_code(value: Any) -> str:
@@ -127,7 +489,7 @@ def summarize_iteration_pois(pois: Iterable[Dict[str, Any]], year: Optional[int]
                 for name, count in child_counter.items()
             ],
             key=lambda item: (-int(item["count"]), _as_text(item["name"])),
-        )[:6]
+        )
 
     return {
         "year": int(year) if year is not None else None,
@@ -139,7 +501,7 @@ def summarize_iteration_pois(pois: Iterable[Dict[str, Any]], year: Optional[int]
             subcategory_counts,
             total,
             lambda name, _count: {"parent": subcategory_parent.get(name) or "未分类"},
-        )[:8],
+        ),
         "top_areas": _sort_count_rows(area_counts, total)[:5],
         "category_counts": dict(category_counts),
         "subcategory_counts": dict(subcategory_counts),
@@ -203,38 +565,65 @@ def build_subcategory_stack(summaries: List[Dict[str, Any]]) -> List[Dict[str, A
     return rows
 
 
-def build_area_heatmaps(summaries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def build_area_heatmaps(
+    summaries: List[Dict[str, Any]],
+    bounds: Optional[Dict[str, float]] = None,
+    polygon: Any = None,
+) -> List[Dict[str, Any]]:
     sorted_summaries = sorted([item for item in summaries if item.get("points")], key=lambda item: int(item.get("year") or 0))
-    all_points = [point for summary in sorted_summaries for point in (summary.get("points") or [])]
-    lngs = [float(point["lng"]) for point in all_points if _to_number(point.get("lng")) is not None]
-    lats = [float(point["lat"]) for point in all_points if _to_number(point.get("lat")) is not None]
-    if not lngs or not lats:
+    if not bounds:
+        all_points = [point for summary in sorted_summaries for point in (summary.get("points") or [])]
+        bounds = _bounds_from_points(all_points)
+    if not bounds:
         return []
-    min_lng, max_lng = min(lngs), max(lngs)
-    min_lat, max_lat = min(lats), max(lats)
-    span_lng = max(max_lng - min_lng, 1e-9)
-    span_lat = max(max_lat - min_lat, 1e-9)
+    view = dict(bounds.get("view") or {})
+    view_width = max(1.0, float(view.get("width") or _HEATMAP_VIEW_WIDTH))
+    view_height = max(1.0, float(view.get("height") or _HEATMAP_VIEW_WIDTH))
     rows = []
     for summary in sorted_summaries:
         points = []
         for point in summary.get("points") or []:
-            lng = _to_number(point.get("lng"))
-            lat = _to_number(point.get("lat"))
-            if lng is None or lat is None:
+            pair = _valid_lng_lat(point)
+            if pair is None:
                 continue
+            lng, lat = pair
+            if polygon and not _point_in_polygon(lng, lat, polygon):
+                continue
+            projected = _project_lng_lat(lng, lat, bounds)
             points.append(
                 {
-                    "x": max(4, min(96, 4 + ((lng - min_lng) / span_lng) * 92)),
-                    "y": max(4, min(96, 96 - ((lat - min_lat) / span_lat) * 92)),
+                    "x": projected["x"],
+                    "y": projected["y"],
                     "area": _as_text(point.get("area")),
                     "category": _as_text(point.get("category")),
                     "subcategory": _as_text(point.get("subcategory")),
                 }
             )
+        cell_counts: Counter[tuple[int, int]] = Counter()
+        grid_size = 12
+        cell_width = view_width / grid_size
+        cell_height = view_height / grid_size
+        for point in points:
+            col = max(0, min(grid_size - 1, int(float(point["x"]) / cell_width)))
+            row = max(0, min(grid_size - 1, int(float(point["y"]) / cell_height)))
+            cell_counts[(col, row)] += 1
+        max_cell_count = max(cell_counts.values(), default=1)
+        cells = [
+            {
+                "x": round(col * cell_width, 3),
+                "y": round(row * cell_height, 3),
+                "width": round(cell_width, 3),
+                "height": round(cell_height, 3),
+                "count": count,
+                "intensity": round(count / max_cell_count, 4),
+            }
+            for (col, row), count in sorted(cell_counts.items(), key=lambda item: (item[0][1], item[0][0]))
+        ]
         rows.append(
             {
                 "year": summary.get("year"),
                 "points": points[:260],
+                "cells": cells,
                 "point_count": len(points),
                 "top_area": ((summary.get("top_areas") or [{}])[0] or {}).get("name") or "",
             }
@@ -412,13 +801,20 @@ async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any
         raise HTTPException(status_code=400, detail="at least two years are required")
 
     summaries: List[Dict[str, Any]] = []
+    polygon = []
     for year in years:
         history_payload = get_history_pois_payload(history_id, repo, year=year)
+        if not polygon and isinstance(history_payload.get("polygon"), list):
+            polygon = history_payload.get("polygon") or []
         summaries.append(summarize_iteration_pois(history_payload.get("pois") or [], year))
 
     if not any(int(summary.get("count") or 0) > 0 for summary in summaries):
         raise HTTPException(status_code=404, detail="no POI data for requested years")
 
+    all_points = [point for summary in summaries for point in (summary.get("points") or [])]
+    area_heatmap_bounds = _bounds_from_polygon(polygon) or _bounds_from_points(all_points)
+    area_heatmap_basemap = build_area_heatmap_basemap(area_heatmap_bounds)
+    area_heatmap_boundary = build_area_heatmap_boundary(polygon, area_heatmap_bounds)
     rule = build_rule_insights(summaries)
     base_payload: Dict[str, Any] = {
         "status": "ready",
@@ -432,7 +828,10 @@ async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any
         "category_stack": build_category_stack(summaries),
         "subcategory_stack": build_subcategory_stack(summaries),
         "subcategory_trend_rows": build_subcategory_trend_rows(summaries),
-        "area_heatmaps": build_area_heatmaps(summaries),
+        "area_heatmaps": build_area_heatmaps(summaries, area_heatmap_bounds, polygon),
+        "area_heatmap_basemap": area_heatmap_basemap,
+        "area_heatmap_boundary": area_heatmap_boundary,
+        "area_heatmap_polygon": polygon,
         "rule_summary": rule["summary"],
         "rule_insights": rule["insights"],
         "ai_summary": [],

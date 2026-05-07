@@ -282,7 +282,7 @@ def _shift_factor(first_points: List[Dict[str, Any]], last_points: List[Dict[str
 def build_subcategory_spatial_trends(
     year_summaries: Iterable[Dict[str, Any]],
     center: Optional[List[float]] = None,
-    top_n: int = 6,
+    top_n: Optional[int] = None,
 ) -> Dict[str, Any]:
     summaries = sorted(
         [item for item in year_summaries or [] if isinstance(item, dict)],
@@ -317,7 +317,9 @@ def build_subcategory_spatial_trends(
         ],
         key=lambda item: (abs(int(item["delta"])), int(item["end_count"])),
         reverse=True,
-    )[: max(1, int(top_n or 6))]
+    )
+    if top_n is not None and int(top_n or 0) > 0:
+        ranked = ranked[: max(1, int(top_n))]
 
     first_points_by_subcategory: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     last_points_by_subcategory: Dict[str, List[Dict[str, Any]]] = defaultdict(list)

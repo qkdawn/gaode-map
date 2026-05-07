@@ -545,6 +545,7 @@ def test_get_pois_reads_large_poi_json_only_after_selecting_target_row(monkeypat
         event.remove(engine, "before_cursor_execute", _record_statement)
 
     assert result["count"] == 2
+    assert result["polygon"] == [[112.9, 28.2], [113.0, 28.3], [112.9, 28.2]]
     assert [poi["id"] for poi in result["pois"]] == ["poi-2024", "poi-2024-b"]
     poi_data_selects = [
         statement

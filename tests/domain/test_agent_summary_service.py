@@ -2,6 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from modules.agent.schemas import AgentSummaryRequest, AnalysisSnapshot
+from modules.agent.schemas import AgentIterationPoiBuildResponse
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload, summarize_iteration_pois
 from modules.agent.summary_service import (
@@ -12,6 +13,7 @@ from modules.agent.summary_service import (
     generate_summary_pack,
     stream_generate_summary_pack,
 )
+from modules.spatial_factor_engine import build_subcategory_spatial_trends
 
 
 def _ready_payload():
@@ -255,7 +257,50 @@ def test_summarize_iteration_pois_resolves_type_map_category_and_subcategory():
     assert result["points"][0]["subcategory"] == "咖啡厅"
 
 
+def test_summarize_iteration_pois_keeps_all_subcategories_and_group_mix():
+    pois = [
+        {"id": f"poi-{index}", "type": f"Food/Sub{index:02d}", "adname": "Area", "location": [112.0 + index * 0.001, 28.0]}
+        for index in range(10)
+    ]
+
+    result = summarize_iteration_pois(pois, 2025)
+
+    assert result["subcategory_count"] == 10
+    assert len(result["top_subcategories"]) == 10
+    assert len(result["category_to_subcategory_mix"]["Food"]) == 10
+
+
+def test_subcategory_spatial_trends_keep_all_changed_subcategories():
+    first_points = []
+    last_points = []
+    first_counts = {}
+    last_counts = {}
+    top_subcategories = []
+    for index in range(8):
+        name = f"Sub{index:02d}"
+        first_counts[name] = 1
+        last_counts[name] = 2
+        top_subcategories.append({"name": name, "parent": "Food"})
+        first_points.append({"lng": 112.0 + index * 0.001, "lat": 28.0, "subcategory": name, "category": "Food", "area": "A"})
+        last_points.extend([
+            {"lng": 112.02 + index * 0.001, "lat": 28.02, "subcategory": name, "category": "Food", "area": "B"},
+            {"lng": 112.021 + index * 0.001, "lat": 28.021, "subcategory": name, "category": "Food", "area": "B"},
+        ])
+
+    result = build_subcategory_spatial_trends(
+        [
+            {"year": 2023, "subcategory_counts": first_counts, "top_subcategories": top_subcategories, "points": first_points},
+            {"year": 2025, "subcategory_counts": last_counts, "top_subcategories": top_subcategories, "points": last_points},
+        ],
+        center=[112.0, 28.0],
+    )
+
+    assert len(result["subcategory_spatial_trend_rows"]) == 8
+
+
 def test_build_agent_poi_iteration_payload_aggregates_history_and_spatial_fields(monkeypatch):
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "test-amap-key")
+
     class FakeRepo:
         def get_pois(self, history_id, year=None):
             pois_by_year = {
@@ -271,6 +316,7 @@ def test_build_agent_poi_iteration_payload_aggregates_history_and_spatial_fields
             }
             return {
                 "history_id": history_id,
+                "polygon": [[112.89, 28.09], [112.97, 28.09], [112.97, 28.17], [112.89, 28.17], [112.89, 28.09]],
                 "pois": pois_by_year.get(int(year), []),
                 "poi_summary": {"total": len(pois_by_year.get(int(year), []))},
                 "count": len(pois_by_year.get(int(year), [])),
@@ -303,6 +349,128 @@ def test_build_agent_poi_iteration_payload_aggregates_history_and_spatial_fields
     assert result["spatial_factors"]["geometry_mode"] == "point"
     assert result["subcategory_spatial_trend_rows"][0]["name"] == "咖啡厅"
     assert result["ai_error"] == "llm_unavailable"
+    assert result["area_heatmap_basemap"]["source"] == "amap_static_url"
+    assert "restapi.amap.com/v3/staticmap" in result["area_heatmap_basemap"]["url"]
+    assert result["area_heatmap_basemap"]["bounds"]["min_lng"] < result["area_heatmap_basemap"]["bounds"]["max_lng"]
+    assert result["area_heatmap_basemap"]["center"]
+    assert result["area_heatmap_basemap"]["zoom"]
+    assert result["area_heatmap_basemap"]["size"]["width"] == 640
+    assert result["area_heatmap_boundary"]
+    assert result["area_heatmap_polygon"]
+    assert all(0 <= point["x"] <= 100 and 0 <= point["y"] <= 100 for point in result["area_heatmap_boundary"])
+    response_payload = AgentIterationPoiBuildResponse.model_validate(result).model_dump()
+    assert response_payload["area_heatmap_basemap"]["source"] == "amap_static_url"
+    assert response_payload["area_heatmap_boundary"]
+    assert response_payload["area_heatmap_polygon"]
+
+
+def test_build_agent_poi_iteration_payload_static_basemap_falls_back_without_key(monkeypatch):
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "")
+
+    class FakeRepo:
+        def get_pois(self, history_id, year=None):
+            year = int(year)
+            return {
+                "history_id": history_id,
+                "polygon": [[112.0, 28.0], [112.1, 28.0], [112.1, 28.1], [112.0, 28.1], [112.0, 28.0]],
+                "pois": [{"id": f"poi-{year}", "type": "type-050500", "adname": "A", "location": [112.0 + year * 0.00001, 28.0]}],
+                "poi_summary": {"total": 1},
+                "count": 1,
+                "available_years": [2023, 2025],
+                "selected_year": year,
+            }
+
+    async def fake_generate(evidence):
+        return {"status": "failed", "ai_summary": [], "ai_insights": {}, "error": "llm_unavailable"}
+
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service._generate_poi_iteration_analysis", fake_generate)
+
+    result = asyncio.run(build_agent_poi_iteration_payload(
+        {"history_id": "history-1", "years": [2023, 2025], "center": [112.0, 28.0]},
+        FakeRepo(),
+    ))
+
+    assert result["area_heatmaps"]
+    assert result["area_heatmap_basemap"]["source"] == "none"
+    assert result["area_heatmap_basemap"]["url"] == ""
+    assert result["area_heatmap_polygon"]
+
+
+def test_build_agent_poi_iteration_payload_area_heatmap_uses_polygon_bounds_and_filters_outside_points(monkeypatch):
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "test-amap-key")
+
+    class FakeRepo:
+        def get_pois(self, history_id, year=None):
+            year = int(year)
+            pois_by_year = {
+                2023: [
+                    {"id": "inside-2023", "type": "type-050500", "adname": "A", "location": [112.91, 28.11]},
+                ],
+                2025: [
+                    {"id": "inside-2025", "type": "type-050500", "adname": "A", "location": [112.92, 28.12]},
+                    {"id": "outside-2025", "type": "type-050500", "adname": "B", "location": [113.5, 29.0]},
+                ],
+            }
+            return {
+                "history_id": history_id,
+                "polygon": [[112.89, 28.09], [112.97, 28.09], [112.97, 28.17], [112.89, 28.17], [112.89, 28.09]],
+                "pois": pois_by_year.get(year, []),
+                "poi_summary": {"total": len(pois_by_year.get(year, []))},
+                "count": len(pois_by_year.get(year, [])),
+                "available_years": [2023, 2025],
+                "selected_year": year,
+            }
+
+    async def fake_generate(evidence):
+        return {"status": "failed", "ai_summary": [], "ai_insights": {}, "error": "llm_unavailable"}
+
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service._generate_poi_iteration_analysis", fake_generate)
+
+    result = asyncio.run(build_agent_poi_iteration_payload(
+        {"history_id": "history-1", "years": [2023, 2025], "center": [112.93, 28.13]},
+        FakeRepo(),
+    ))
+
+    bounds = result["area_heatmap_basemap"]["bounds"]
+    assert bounds["min_lng"] < 112.89
+    assert bounds["max_lng"] > 112.97
+    assert bounds["max_lng"] < 113.5
+    assert result["area_heatmaps"][1]["point_count"] == 1
+    assert result["area_heatmap_boundary"]
+    assert all(0 <= point["x"] <= 100 and 0 <= point["y"] <= 100 for point in result["area_heatmap_boundary"])
+
+
+def test_build_agent_poi_iteration_payload_area_heatmap_falls_back_to_poi_bounds_without_polygon(monkeypatch):
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "")
+
+    class FakeRepo:
+        def get_pois(self, history_id, year=None):
+            year = int(year)
+            return {
+                "history_id": history_id,
+                "polygon": [],
+                "pois": [{"id": f"poi-{year}", "type": "type-050500", "adname": "A", "location": [112.0 + (year - 2023) * 0.01, 28.0]}],
+                "poi_summary": {"total": 1},
+                "count": 1,
+                "available_years": [2023, 2025],
+                "selected_year": year,
+            }
+
+    async def fake_generate(evidence):
+        return {"status": "failed", "ai_summary": [], "ai_insights": {}, "error": "llm_unavailable"}
+
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service._generate_poi_iteration_analysis", fake_generate)
+
+    result = asyncio.run(build_agent_poi_iteration_payload(
+        {"history_id": "history-1", "years": [2023, 2025], "center": [112.0, 28.0]},
+        FakeRepo(),
+    ))
+
+    assert result["area_heatmaps"]
+    assert result["area_heatmap_basemap"]["bounds"]["min_lng"] < result["area_heatmap_basemap"]["bounds"]["max_lng"]
+    assert result["area_heatmap_basemap"]["bounds"]["min_lat"] < result["area_heatmap_basemap"]["bounds"]["max_lat"]
+    assert result["area_heatmap_boundary"] == []
+    assert result["area_heatmap_polygon"] == []
 
 
 def _valid_summary_pack_new_schema():

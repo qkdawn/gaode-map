@@ -2639,8 +2639,8 @@ function createAgentUiMethods() {
         { key: 'structure_judgement', label: '结构判断', value: formatInsightValue(insights.structure_judgement || fallback.structure_judgement) },
       ].filter((item) => item.value)
     },
-    getAgentIterationPoiSpatialTrendRows(limit = 6) {
-      return cloneArray(this.getAgentIterationPoiPayload().subcategory_spatial_trend_rows)
+    getAgentIterationPoiSpatialTrendRows(limit = undefined) {
+      const rows = cloneArray(this.getAgentIterationPoiPayload().subcategory_spatial_trend_rows)
         .map((row) => ({
           name: asText(row.name),
           parent: asText(row.parent),
@@ -2656,7 +2656,8 @@ function createAgentUiMethods() {
           topArea: asText(row.top_area),
         }))
         .filter((row) => row.name)
-        .slice(0, Number(limit || 6))
+      const safeLimit = Number(limit)
+      return Number.isFinite(safeLimit) && safeLimit > 0 ? rows.slice(0, safeLimit) : rows
     },
     formatAgentIterationPoiSpatialTrend(row = {}) {
       const delta = Number(row.delta || 0)
@@ -2692,14 +2693,462 @@ function createAgentUiMethods() {
     getAgentIterationPoiSubcategoryStackChart() {
       return cloneArray(this.getAgentIterationPoiPayload().subcategory_stack)
     },
-    getAgentIterationPoiTopSubcategoryRows(limit = 8) {
+    getAgentIterationPoiSubcategoryGroups() {
       const payload = this.getAgentIterationPoiPayload()
       const summaries = cloneArray(payload.summaries)
       const latest = summaries[summaries.length - 1] || {}
-      return cloneArray(latest.top_subcategories).slice(0, limit)
+      const latestTotal = Math.max(1, Number(latest.count || 0))
+      const categoryCounts = cloneObject(latest.category_counts)
+      const mix = cloneObject(latest.category_to_subcategory_mix)
+      const groupMap = new Map()
+      Object.entries(mix).forEach(([category, rows]) => {
+        const items = cloneArray(rows)
+          .map((item) => ({
+            name: asText(item.name),
+            parent: asText(item.parent || category),
+            count: Number(item.count || 0),
+            ratio: Number(item.count || 0) / latestTotal,
+          }))
+          .filter((item) => item.name)
+          .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN'))
+        if (items.length) {
+          const total = Number(categoryCounts[category] || 0) || items.reduce((sum, item) => sum + Number(item.count || 0), 0)
+          groupMap.set(category, { category, total, subcategoryCount: items.length, items })
+        }
+      })
+      if (!groupMap.size) {
+        cloneArray(latest.top_subcategories).forEach((item) => {
+          const category = asText(item.parent) || '未分类'
+          if (!groupMap.has(category)) groupMap.set(category, { category, total: 0, subcategoryCount: 0, items: [] })
+          const group = groupMap.get(category)
+          const count = Number(item.count || 0)
+          group.total += count
+          group.items.push({
+            name: asText(item.name),
+            parent: category,
+            count,
+            ratio: Number(item.ratio || 0) || count / latestTotal,
+          })
+          group.subcategoryCount = group.items.length
+        })
+      }
+      return Array.from(groupMap.values())
+        .map((group) => ({
+          ...group,
+          items: cloneArray(group.items).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN')),
+        }))
+        .sort((a, b) => Number(b.total || 0) - Number(a.total || 0) || a.category.localeCompare(b.category, 'zh-CN'))
+    },
+    getAgentIterationPoiSubcategoryTotal() {
+      const payload = this.getAgentIterationPoiPayload()
+      const summaries = cloneArray(payload.summaries)
+      const latest = summaries[summaries.length - 1] || {}
+      const count = Number(latest.subcategory_count)
+      if (Number.isFinite(count) && count >= 0) return count
+      return this.getAgentIterationPoiSubcategoryGroups().reduce((sum, group) => sum + cloneArray(group.items).length, 0)
+    },
+    getAgentIterationPoiTopSubcategoryRows(limit = undefined) {
+      const payload = this.getAgentIterationPoiPayload()
+      const summaries = cloneArray(payload.summaries)
+      const latest = summaries[summaries.length - 1] || {}
+      const rows = cloneArray(latest.top_subcategories)
+      const safeLimit = Number(limit)
+      return Number.isFinite(safeLimit) && safeLimit > 0 ? rows.slice(0, safeLimit) : rows
+    },
+    getAgentIterationPoiStructureSpatialCategories() {
+      return this.getAgentIterationPoiSubcategoryGroups()
+        .map((group) => ({ category: asText(group.category), total: Number(group.total || 0), subcategoryCount: Number(group.subcategoryCount || 0) }))
+        .filter((item) => item.category)
+    },
+    getAgentIterationPoiStructureSpatialRows() {
+      const trendMap = new Map(this.getAgentIterationPoiSpatialTrendRows().map((row) => [row.name, row]))
+      const rowMap = new Map()
+      this.getAgentIterationPoiSubcategoryGroups().forEach((group) => {
+        cloneArray(group.items).forEach((item) => {
+          const name = asText(item.name)
+          if (!name) return
+          const trend = trendMap.get(name) || {}
+          const hasSpatialSignal = Boolean(trendMap.has(name))
+          rowMap.set(name, {
+            name,
+            parent: asText(item.parent || group.category || trend.parent) || '未分类',
+            count: Number(item.count || 0),
+            ratio: Number(item.ratio || 0),
+            delta: Number(trend.delta || 0),
+            dominantDirection: asText(trend.dominantDirection),
+            secondaryDirection: asText(trend.secondaryDirection),
+            dominantRing: asText(trend.dominantRing),
+            centroidShiftDirection: asText(trend.centroidShiftDirection),
+            centroidShiftM: Number(trend.centroidShiftM || 0),
+            hotspotGridCount: Number(trend.hotspotGridCount || 0),
+            hotspotGridCountDelta: Number(trend.hotspotGridCountDelta || 0),
+            hotspotPattern: asText(trend.hotspotPattern),
+            topArea: asText(trend.topArea),
+            hasSpatialSignal,
+          })
+        })
+      })
+      this.getAgentIterationPoiSpatialTrendRows().forEach((trend) => {
+        if (rowMap.has(trend.name)) return
+        rowMap.set(trend.name, {
+          name: trend.name,
+          parent: asText(trend.parent) || '未分类',
+          count: 0,
+          ratio: 0,
+          delta: Number(trend.delta || 0),
+          dominantDirection: asText(trend.dominantDirection),
+          secondaryDirection: asText(trend.secondaryDirection),
+          dominantRing: asText(trend.dominantRing),
+          centroidShiftDirection: asText(trend.centroidShiftDirection),
+          centroidShiftM: Number(trend.centroidShiftM || 0),
+          hotspotGridCount: Number(trend.hotspotGridCount || 0),
+          hotspotGridCountDelta: Number(trend.hotspotGridCountDelta || 0),
+          hotspotPattern: asText(trend.hotspotPattern),
+          topArea: asText(trend.topArea),
+          hasSpatialSignal: true,
+        })
+      })
+      return Array.from(rowMap.values())
+    },
+    getAgentIterationPoiStructureSpatialGroups() {
+      const state = cloneObject(this.agentIterationPoiStructureSpatialView)
+      const category = asText(state.category)
+      const sortBy = asText(state.sortBy) || 'count'
+      const spatialOnly = Boolean(state.spatialOnly)
+      const compare = (a, b) => {
+        if (sortBy === 'ratio') return Number(b.ratio || 0) - Number(a.ratio || 0) || Number(b.count || 0) - Number(a.count || 0)
+        if (sortBy === 'abs_delta') return Math.abs(Number(b.delta || 0)) - Math.abs(Number(a.delta || 0)) || Number(b.count || 0) - Number(a.count || 0)
+        if (sortBy === 'growth') return Number(b.delta || 0) - Number(a.delta || 0) || Number(b.count || 0) - Number(a.count || 0)
+        if (sortBy === 'decrease') return Number(a.delta || 0) - Number(b.delta || 0) || Number(b.count || 0) - Number(a.count || 0)
+        return Number(b.count || 0) - Number(a.count || 0) || Number(b.ratio || 0) - Number(a.ratio || 0)
+      }
+      const groups = new Map()
+      this.getAgentIterationPoiStructureSpatialRows()
+        .filter((row) => (!category || row.parent === category) && (!spatialOnly || row.hasSpatialSignal))
+        .sort((a, b) => compare(a, b) || a.name.localeCompare(b.name, 'zh-CN'))
+        .forEach((row) => {
+          const parent = asText(row.parent) || '未分类'
+          if (!groups.has(parent)) groups.set(parent, { category: parent, total: 0, subcategoryCount: 0, rows: [] })
+          const group = groups.get(parent)
+          group.total += Number(row.count || 0)
+          group.rows.push(row)
+          group.subcategoryCount = group.rows.length
+        })
+      return Array.from(groups.values())
+        .sort((a, b) => Number(b.total || 0) - Number(a.total || 0) || a.category.localeCompare(b.category, 'zh-CN'))
+    },
+    setAgentIterationPoiStructureSpatialViewPatch(patch = {}) {
+      const current = cloneObject(this.agentIterationPoiStructureSpatialView)
+      const next = { ...current, ...cloneObject(patch) }
+      const validSorts = new Set(['count', 'ratio', 'abs_delta', 'growth', 'decrease'])
+      const categories = this.getAgentIterationPoiStructureSpatialCategories().map((item) => item.category)
+      this.agentIterationPoiStructureSpatialView = {
+        category: categories.includes(asText(next.category)) ? asText(next.category) : '',
+        sortBy: validSorts.has(asText(next.sortBy)) ? asText(next.sortBy) : 'count',
+        spatialOnly: Boolean(next.spatialOnly),
+      }
+      return this.agentIterationPoiStructureSpatialView
     },
     getAgentIterationPoiAreaHeatmaps() {
-      return cloneArray(this.getAgentIterationPoiPayload().area_heatmaps)
+      const rows = cloneArray(this.getAgentIterationPoiPayload().area_heatmaps)
+        .filter((row) => row && asText(row.year))
+        .sort((a, b) => Number(a.year || 0) - Number(b.year || 0))
+      if (!rows.length) return []
+      const counts = rows.map((row) => Number(row.point_count || cloneArray(row.points).length || 0))
+      const minCount = Math.min(...counts)
+      const maxCount = Math.max(...counts)
+      const span = Math.max(1, maxCount - minCount)
+      let previous = null
+      return rows.map((row) => {
+        const count = Number(row.point_count || cloneArray(row.points).length || 0)
+        const delta = previous ? count - Number(previous.point_count || cloneArray(previous.points).length || 0) : 0
+        const ratio = previous && Number(previous.point_count || 0)
+          ? delta / Math.max(1, Number(previous.point_count || 0))
+          : 0
+        previous = row
+        return {
+          ...row,
+          cells: cloneArray(row.cells),
+          points: cloneArray(row.points),
+          point_count: count,
+          delta_from_previous: delta,
+          delta_ratio_from_previous: ratio,
+          count_level: (count - minCount) / span,
+        }
+      })
+    },
+    getAgentIterationPoiAreaHeatmapBasemap() {
+      return cloneObject(this.getAgentIterationPoiPayload().area_heatmap_basemap)
+    },
+    getAgentIterationPoiAreaHeatmapViewSize() {
+      const basemap = this.getAgentIterationPoiAreaHeatmapBasemap()
+      const view = cloneObject(basemap.view)
+      const width = Number(view.width || 0)
+      const height = Number(view.height || 0)
+      if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+        return { width, height }
+      }
+      const parts = asText(basemap.view_box).split(/\s+/).map((part) => Number(part)).filter((part) => Number.isFinite(part))
+      if (parts.length >= 4 && parts[2] > 0 && parts[3] > 0) {
+        return { width: parts[2], height: parts[3] }
+      }
+      return { width: 100, height: 100 }
+    },
+    getAgentIterationPoiAreaHeatmapViewBox() {
+      const basemap = this.getAgentIterationPoiAreaHeatmapBasemap()
+      const viewBox = asText(basemap.view_box)
+      if (viewBox) return viewBox
+      const size = this.getAgentIterationPoiAreaHeatmapViewSize()
+      return `0 0 ${size.width} ${size.height}`
+    },
+    getAgentIterationPoiAreaHeatmapAspectStyle() {
+      const basemap = this.getAgentIterationPoiAreaHeatmapBasemap()
+      const aspectRatio = asText(basemap.aspect_ratio)
+      if (aspectRatio) return { aspectRatio }
+      const size = this.getAgentIterationPoiAreaHeatmapViewSize()
+      return { aspectRatio: `${size.width} / ${size.height}` }
+    },
+    getAgentIterationPoiAreaHeatmapBoundary() {
+      return cloneArray(this.getAgentIterationPoiPayload().area_heatmap_boundary)
+    },
+    getAgentIterationPoiAreaHeatmapBoundaryPoints() {
+      return this.getAgentIterationPoiAreaHeatmapBoundary()
+        .map((point) => `${Number(point.x || 0).toFixed(2)},${Number(point.y || 0).toFixed(2)}`)
+        .join(' ')
+    },
+    getAgentIterationPoiAreaHeatmapPolygon() {
+      return cloneArray(this.getAgentIterationPoiPayload().area_heatmap_polygon)
+    },
+    getAgentIterationPoiAreaHeatmapSnapshots() {
+      const payload = this.getAgentIterationPoiPayload()
+      const byYear = new Map(cloneArray(payload.area_heatmaps).map((row) => [String(row.year), row]))
+      return cloneArray(payload.area_heatmap_snapshots).map((snapshot) => {
+        const fallback = byYear.get(String(snapshot.year)) || {}
+        return {
+          year: snapshot.year,
+          image_url: asText(snapshot.image_url),
+          point_count: Number(snapshot.point_count ?? fallback.point_count ?? 0),
+          top_area: asText(snapshot.top_area || fallback.top_area),
+          status: asText(snapshot.status) || 'pending',
+          error: asText(snapshot.error),
+        }
+      })
+    },
+    getAgentIterationPoiAreaHeatmapSnapshot(year) {
+      const key = String(year || '')
+      return this.getAgentIterationPoiAreaHeatmapSnapshots().find((item) => String(item.year || '') === key) || {}
+    },
+    getAgentIterationPoiAreaHeatmapCellOpacity(cell = {}) {
+      const intensity = Math.max(0, Math.min(1, Number(cell.intensity || 0)))
+      return (0.12 + intensity * 0.52).toFixed(3)
+    },
+    getAgentIterationPoiAreaHeatmapDeltaText(heatmap = {}) {
+      const delta = Number(heatmap.delta_from_previous || 0)
+      if (!Number.isFinite(delta) || delta === 0) return '首期/持平'
+      const ratio = Number(heatmap.delta_ratio_from_previous || 0)
+      const ratioText = Number.isFinite(ratio) && ratio
+        ? `，${ratio > 0 ? '+' : ''}${Math.round(ratio * 100)}%`
+        : ''
+      return `${delta > 0 ? '+' : ''}${this.formatAgentIterationMetric(delta, 0)}点${ratioText}`
+    },
+    getAgentIterationPoiAreaHeatmapDeltaClass(heatmap = {}) {
+      const delta = Number(heatmap.delta_from_previous || 0)
+      if (delta > 0) return 'positive'
+      if (delta < 0) return 'negative'
+      return ''
+    },
+    getAgentIterationPoiAreaHeatmapTrendStyle(heatmap = {}) {
+      const level = Math.max(0, Math.min(1, Number(heatmap.count_level || 0)))
+      return { width: `${Math.max(8, Math.round(level * 100))}%` }
+    },
+    buildAgentPoiAreaHeatmapSnapshotPlaceholders(payload = {}) {
+      const heatmapByYear = new Map(cloneArray(payload.area_heatmaps).map((row) => [String(row.year), row]))
+      return cloneArray(payload.summaries).map((summary) => {
+        const fallback = heatmapByYear.get(String(summary.year)) || {}
+        return {
+          year: summary.year,
+          image_url: '',
+          point_count: Number(cloneArray(summary.points).length || fallback.point_count || 0),
+          top_area: asText((((cloneArray(summary.top_areas)[0] || {})).name) || fallback.top_area),
+          status: 'pending',
+          error: '',
+        }
+      })
+    },
+    getAgentPoiAreaSnapshotCacheKey(payload = {}) {
+      const years = cloneArray(payload.years).join(',')
+      const polygon = JSON.stringify(cloneArray(payload.area_heatmap_polygon).slice(0, 160))
+      const counts = cloneArray(payload.summaries).map((summary) => `${summary.year}:${cloneArray(summary.points).length}`).join(',')
+      return `${asText(payload.historyId || payload.history_id)}|${years}|${counts}|${polygon.length}:${polygon.slice(0, 80)}`
+    },
+    async ensureAgentIterationPoiAreaHeatmapSnapshots(payloadArg = null) {
+      const payload = payloadArg || this.getAgentIterationPoiPayload()
+      if (asText(payload.status) !== 'ready') return payload
+      const years = cloneArray(payload.summaries).map((summary) => summary.year).filter((year) => asText(year))
+      if (!years.length) return payload
+      const cacheKey = this.getAgentPoiAreaSnapshotCacheKey(payload)
+      if (asText(this.agentIterationPoiSnapshotGeneratingKey) === cacheKey) return payload
+      const cached = cloneArray((this.agentIterationPoiSnapshotCache || {})[cacheKey])
+      if (cached.length && cached.every((item) => asText(item.status) === 'ready' || asText(item.status) === 'failed')) {
+        return this.commitAgentIterationPoiPayload({ area_heatmap_snapshots: cached })
+      }
+
+      const placeholders = cloneArray(payload.area_heatmap_snapshots).length
+        ? cloneArray(payload.area_heatmap_snapshots)
+        : this.buildAgentPoiAreaHeatmapSnapshotPlaceholders(payload)
+      this.commitAgentIterationPoiPayload({
+        area_heatmap_snapshots: placeholders.map((item) => ({
+          ...item,
+          status: asText(item.image_url) ? 'ready' : 'loading',
+          error: '',
+        })),
+      })
+
+      this.agentIterationPoiSnapshotGeneratingKey = cacheKey
+      try {
+        const snapshots = []
+        for (const summary of cloneArray(payload.summaries)) {
+          const year = summary.year
+          const base = placeholders.find((item) => String(item.year) === String(year)) || {}
+          try {
+            const imageUrl = await this.renderAgentIterationPoiAreaSnapshot(summary, payload)
+            snapshots.push({
+              ...base,
+              year,
+              image_url: imageUrl,
+              point_count: cloneArray(summary.points).length,
+              top_area: asText((((cloneArray(summary.top_areas)[0] || {})).name) || base.top_area),
+              status: imageUrl ? 'ready' : 'failed',
+              error: imageUrl ? '' : 'snapshot_unavailable',
+            })
+          } catch (err) {
+            snapshots.push({
+              ...base,
+              year,
+              image_url: '',
+              point_count: cloneArray(summary.points).length,
+              top_area: asText((((cloneArray(summary.top_areas)[0] || {})).name) || base.top_area),
+              status: 'failed',
+              error: asText(err && err.message) || 'snapshot_failed',
+            })
+          }
+          this.commitAgentIterationPoiPayload({ area_heatmap_snapshots: cloneArray(snapshots).concat(
+            placeholders.filter((item) => !snapshots.some((snapshot) => String(snapshot.year) === String(item.year)))
+          ) })
+        }
+        this.agentIterationPoiSnapshotCache = {
+          ...cloneObject(this.agentIterationPoiSnapshotCache),
+          [cacheKey]: snapshots,
+        }
+        return this.commitAgentIterationPoiPayload({ area_heatmap_snapshots: snapshots })
+      } finally {
+        if (asText(this.agentIterationPoiSnapshotGeneratingKey) === cacheKey) {
+          this.agentIterationPoiSnapshotGeneratingKey = ''
+        }
+      }
+    },
+    normalizeAgentIterationSnapshotPolygon(polygon = []) {
+      const source = cloneArray(polygon)
+      const ring = Array.isArray(source[0]) && Array.isArray(source[0][0]) ? source[0] : source
+      return cloneArray(ring)
+        .map((point) => [Number(point && point[0]), Number(point && point[1])])
+        .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+    },
+    getOrCreateAgentIterationPoiSnapshotHost() {
+      let host = document.getElementById('agentIterationPoiSnapshotHost')
+      if (host) return host
+      host = document.createElement('div')
+      host.id = 'agentIterationPoiSnapshotHost'
+      host.style.cssText = 'position:fixed;left:-20000px;top:0;width:760px;height:420px;background:#fff;z-index:-1;pointer-events:none;overflow:hidden;'
+      document.body.appendChild(host)
+      return host
+    },
+    waitForAgentPoiSnapshotPaint(ms = 650) {
+      return new Promise((resolve) => window.setTimeout(resolve, Math.max(0, Number(ms) || 0)))
+    },
+    isAgentPoiSnapshotIgnoredElement(element = null) {
+      if (!element || typeof element.matches !== 'function') return false
+      return element.matches('.amap-logo, .amap-copyright, .amap-control, [class^="amap-control"], [class*=" amap-control"]')
+    },
+    cleanAgentPoiSnapshotMapChrome(root = null) {
+      if (!root || typeof root.querySelectorAll !== 'function') return
+      root.querySelectorAll('.amap-logo, .amap-copyright, .amap-control, [class^="amap-control"], [class*=" amap-control"]').forEach((node) => {
+        if (node && node.style) {
+          node.style.display = 'none'
+          node.style.visibility = 'hidden'
+          node.style.opacity = '0'
+        }
+      })
+    },
+    async renderAgentIterationPoiAreaSnapshot(summary = {}, payload = {}) {
+      if (!window.AMap || typeof AMap.Map !== 'function') throw new Error('amap_unavailable')
+      if (typeof html2canvas !== 'function') throw new Error('html2canvas_unavailable')
+      const points = cloneArray(summary.points).filter((point) => Number.isFinite(Number(point.lng)) && Number.isFinite(Number(point.lat)))
+      if (!points.length) throw new Error('no_points')
+      const polygonPath = this.normalizeAgentIterationSnapshotPolygon(payload.area_heatmap_polygon)
+      const host = this.getOrCreateAgentIterationPoiSnapshotHost()
+      host.innerHTML = ''
+      const mapEl = document.createElement('div')
+      mapEl.style.cssText = 'width:760px;height:420px;position:relative;background:#fff;overflow:hidden;'
+      host.appendChild(mapEl)
+
+      const overlays = []
+      let map = null
+      try {
+        map = new AMap.Map(mapEl, {
+          zoom: 13,
+          viewMode: '2D',
+          resizeEnable: false,
+          features: ['bg', 'point', 'road', 'building'],
+        })
+        let polygonOverlay = null
+        if (polygonPath.length >= 3 && typeof AMap.Polygon === 'function') {
+          polygonOverlay = new AMap.Polygon({
+            path: polygonPath,
+            strokeColor: '#2563eb',
+            strokeWeight: 1.5,
+            strokeOpacity: 0.95,
+            fillColor: '#2563eb',
+            fillOpacity: 0.05,
+            zIndex: 20,
+          })
+          polygonOverlay.setMap(map)
+          overlays.push(polygonOverlay)
+        }
+        points.slice(0, 1200).forEach((point, index) => {
+          const marker = new AMap.Marker({
+            position: [Number(point.lng), Number(point.lat)],
+            title: asText(point.subcategory || point.category || `POI ${index + 1}`),
+            content: '<div class="marker-dot marker-restaurant"></div>',
+            offset: new AMap.Pixel(-8, -8),
+            zIndex: 30,
+          })
+          marker.setMap(map)
+          overlays.push(marker)
+        })
+        if (polygonOverlay && typeof map.setFitView === 'function') {
+          map.setFitView([polygonOverlay], false, [28, 28, 28, 28])
+        } else if (typeof map.setFitView === 'function') {
+          map.setFitView(overlays, false, [28, 28, 28, 28])
+        }
+        await this.waitForAgentPoiSnapshotPaint()
+        this.cleanAgentPoiSnapshotMapChrome(mapEl)
+        const canvas = await html2canvas(mapEl, {
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          scale: 1,
+          logging: false,
+          ignoreElements: (element) => this.isAgentPoiSnapshotIgnoredElement(element),
+        })
+        const dataUrl = canvas && typeof canvas.toDataURL === 'function' ? canvas.toDataURL('image/png') : ''
+        return asText(dataUrl).startsWith('data:image/png') ? dataUrl : ''
+      } finally {
+        overlays.forEach((overlay) => {
+          try { if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null) } catch (_) {}
+        })
+        try { if (map && typeof map.destroy === 'function') map.destroy() } catch (_) {}
+        host.innerHTML = ''
+      }
     },
     getAgentIterationPoiLineChartPoints() {
       const series = this.getAgentIterationPoiTotalLineChart()
@@ -2999,7 +3448,6 @@ function createAgentUiMethods() {
             ratio: Number(count || 0) / categoryTotal,
           }))
           .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'zh-CN'))
-          .slice(0, 6)
       })
       return {
         year: Number.isFinite(Number(year)) ? Number(year) : null,
@@ -3007,7 +3455,7 @@ function createAgentUiMethods() {
         category_count: categoryCounts.size,
         subcategory_count: subcategoryCounts.size,
         top_categories: sortCounts(categoryCounts).slice(0, 5),
-        top_subcategories: sortCounts(subcategoryCounts, (name) => ({ parent: subcategoryParentMap.get(name) || '未分类' })).slice(0, 8),
+        top_subcategories: sortCounts(subcategoryCounts, (name) => ({ parent: subcategoryParentMap.get(name) || '未分类' })),
         top_areas: sortCounts(areaCounts).slice(0, 5),
         category_counts: Object.fromEntries(categoryCounts.entries()),
         subcategory_counts: Object.fromEntries(subcategoryCounts.entries()),
@@ -3097,19 +3545,50 @@ function createAgentUiMethods() {
       const maxLng = Math.max(...lngs)
       const minLat = Math.min(...lats)
       const maxLat = Math.max(...lats)
-      const spanLng = Math.max(maxLng - minLng, 1e-9)
-      const spanLat = Math.max(maxLat - minLat, 1e-9)
+      const refLat = (minLat + maxLat) / 2
+      const metersPerLon = Math.max(1000, 111320 * Math.abs(Math.cos((refLat * Math.PI) / 180)))
+      const projectPoint = (lng, lat) => ({
+        x: Number(lng) * metersPerLon,
+        y: Number(lat) * 111320,
+      })
+      const minProjected = projectPoint(minLng, minLat)
+      const maxProjected = projectPoint(maxLng, maxLat)
+      const spanX = Math.max(maxProjected.x - minProjected.x, 1e-9)
+      const spanY = Math.max(maxProjected.y - minProjected.y, 1e-9)
       return sorted.map((summary) => {
         const points = cloneArray(summary.points).map((point) => ({
-          x: Math.max(4, Math.min(96, 4 + ((Number(point.lng) - minLng) / spanLng) * 92)),
-          y: Math.max(4, Math.min(96, 96 - ((Number(point.lat) - minLat) / spanLat) * 92)),
+          x: Math.max(4, Math.min(96, 4 + ((projectPoint(point.lng, point.lat).x - minProjected.x) / spanX) * 92)),
+          y: Math.max(4, Math.min(96, 96 - ((projectPoint(point.lng, point.lat).y - minProjected.y) / spanY) * 92)),
           area: asText(point.area),
           category: asText(point.category),
           subcategory: asText(point.subcategory),
         }))
+        const gridSize = 12
+        const cellCounts = new Map()
+        points.forEach((point) => {
+          const col = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.x || 0) / (100 / gridSize))))
+          const row = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.y || 0) / (100 / gridSize))))
+          const key = `${col}:${row}`
+          cellCounts.set(key, (cellCounts.get(key) || 0) + 1)
+        })
+        const maxCellCount = Math.max(1, ...Array.from(cellCounts.values()))
+        const cells = Array.from(cellCounts.entries())
+          .map(([key, count]) => {
+            const [col, row] = key.split(':').map((item) => Number(item))
+            return {
+              x: Number(((col * 100) / gridSize).toFixed(3)),
+              y: Number(((row * 100) / gridSize).toFixed(3)),
+              width: Number((100 / gridSize).toFixed(3)),
+              height: Number((100 / gridSize).toFixed(3)),
+              count,
+              intensity: Number((count / maxCellCount).toFixed(4)),
+            }
+          })
+          .sort((a, b) => Number(a.y || 0) - Number(b.y || 0) || Number(a.x || 0) - Number(b.x || 0))
         return {
           year: summary.year,
           points: points.slice(0, 260),
+          cells,
           point_count: points.length,
           top_area: ((cloneArray(summary.top_areas)[0] || {}).name) || '',
         }
@@ -3260,7 +3739,13 @@ function createAgentUiMethods() {
           year: row.year,
           point_count: row.point_count,
           top_area: row.top_area,
+          points: cloneArray(row.points),
+          cells: cloneArray(row.cells),
         })),
+        area_heatmap_basemap: cloneObject(payload.area_heatmap_basemap),
+        area_heatmap_boundary: cloneArray(payload.area_heatmap_boundary),
+        area_heatmap_polygon: cloneArray(payload.area_heatmap_polygon),
+        area_heatmap_snapshots: cloneArray(payload.area_heatmap_snapshots),
         rule_insights: cloneObject(payload.rule_insights),
       }
     },
@@ -3379,7 +3864,7 @@ function createAgentUiMethods() {
             ? [centerLng, centerLat]
             : undefined
           const builtPayload = await this.requestAgentPoiIterationBuild({ historyId, years: historyYears, center })
-          return this.commitAgentIterationPoiPayload({
+          const committed = this.commitAgentIterationPoiPayload({
             status: asText(builtPayload.status) || 'ready',
             source: asText(builtPayload.source) || 'history',
             historyId,
@@ -3391,6 +3876,10 @@ function createAgentUiMethods() {
             subcategory_stack: cloneArray(builtPayload.subcategory_stack),
             subcategory_trend_rows: cloneArray(builtPayload.subcategory_trend_rows),
             area_heatmaps: cloneArray(builtPayload.area_heatmaps),
+            area_heatmap_basemap: cloneObject(builtPayload.area_heatmap_basemap),
+            area_heatmap_boundary: cloneArray(builtPayload.area_heatmap_boundary),
+            area_heatmap_polygon: cloneArray(builtPayload.area_heatmap_polygon),
+            area_heatmap_snapshots: this.buildAgentPoiAreaHeatmapSnapshotPlaceholders(builtPayload),
             spatial_factors: cloneObject(builtPayload.spatial_factors),
             subcategory_spatial_trend_rows: cloneArray(builtPayload.subcategory_spatial_trend_rows),
             subcategory_spatial_summary: cloneArray(builtPayload.subcategory_spatial_summary),
@@ -3401,6 +3890,10 @@ function createAgentUiMethods() {
             ai_error: asText(builtPayload.ai_error),
             error: asText(builtPayload.error),
           }, { tabId: targetTabId })
+          this.ensureAgentIterationPoiAreaHeatmapSnapshots(committed).catch((err) => {
+            console.warn('[agent-iteration-poi] area snapshot generation failed', err)
+          })
+          return committed
         }
         const pois = cloneArray(this.allPoisDetails)
         if (pois.length) {
@@ -3409,7 +3902,7 @@ function createAgentUiMethods() {
             : null
           const summary = this.summarizeAgentIterationPois(pois, year)
           const rule = this.buildAgentPoiRuleInsights([summary])
-          return this.commitAgentIterationPoiPayload({
+          const committed = this.commitAgentIterationPoiPayload({
             status: 'ready',
             source: 'current',
             years: year ? [year] : [],
@@ -3420,6 +3913,11 @@ function createAgentUiMethods() {
             subcategory_stack: [],
             subcategory_trend_rows: [],
             area_heatmaps: this.buildAgentPoiAreaHeatmaps([summary]),
+            area_heatmap_polygon: this.getIsochronePolygonPayload ? cloneArray(this.getIsochronePolygonPayload()) : [],
+            area_heatmap_snapshots: this.buildAgentPoiAreaHeatmapSnapshotPlaceholders({
+              summaries: [summary],
+              area_heatmaps: this.buildAgentPoiAreaHeatmaps([summary]),
+            }),
             spatial_factors: {},
             subcategory_spatial_trend_rows: [],
             subcategory_spatial_summary: [],
@@ -3431,6 +3929,10 @@ function createAgentUiMethods() {
             notice: '当前只有一个年份 POI，只展示特征；多年趋势需要从包含多个年份的历史记录恢复。',
             error: '',
           }, { tabId: targetTabId })
+          this.ensureAgentIterationPoiAreaHeatmapSnapshots(committed).catch((err) => {
+            console.warn('[agent-iteration-poi] area snapshot generation failed', err)
+          })
+          return committed
         }
         throw new Error('当前没有可分析的 POI 明细')
       } catch (err) {
