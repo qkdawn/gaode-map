@@ -3,7 +3,12 @@ from types import SimpleNamespace
 
 from modules.agent.schemas import AgentSummaryRequest, AnalysisSnapshot
 from modules.agent.schemas import AgentIterationPoiBuildResponse
-from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
+from modules.agent.iteration_change_service import (
+    build_poi_iteration_evidence_pack_v1,
+    build_poi_iteration_llm_evidence,
+    generate_nightlight_iteration_analysis,
+    generate_poi_iteration_analysis,
+)
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload, summarize_iteration_pois
 from modules.agent.summary_service import (
     _build_summary_llm_payload,
@@ -169,13 +174,15 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
     async def fake_invoke(**kwargs):
         assert kwargs["user_payload"]["task"] == "poi_iteration_change"
         assert kwargs["user_payload"]["evidence"]["years"] == [2023, 2024, 2025]
+        assert kwargs["user_payload"]["evidence"]["evidence_version"] == "poi_iteration_v1"
         assert kwargs["user_payload"]["evidence"]["spatial_factors"]["geometry_mode"] == "point"
-        assert kwargs["user_payload"]["evidence"]["subcategory_spatial_trend_rows"][0]["name"]
+        assert kwargs["user_payload"]["evidence"]["subcategory_spatial_trends"][0]["name"]
+        assert kwargs["user_payload"]["evidence"]["growth_area_signal"]["growth_rows"][0]["name"] == "咖啡厅"
         return {
             "summary_points": ["POI规模中等", "餐饮为主导业态", "岳麓区为核心区域"],
             "fastest_growth": "咖啡 +120%",
             "declining_category": "传统零售 -35%",
-            "emerging_area": "大学城片区",
+            "emerging_area": "咖啡厅新增偏东北、中圈层补点",
             "structure_judgement": "业态结构偏消费型",
         }
 
@@ -206,7 +213,133 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
     assert result["spatial_factors"]["geometry_mode"] == "point"
     assert result["subcategory_spatial_trend_rows"]
     assert result["ai_summary"][0] == "POI规模中等"
-    assert result["ai_insights"]["emerging_area"] == "大学城片区"
+    assert result["ai_insights"]["emerging_area"] == "咖啡厅新增偏东北、中圈层补点"
+    assert "poi_iteration_v1" in result["ai_prompt"]
+    assert "growth_area_signal" in result["ai_prompt"]
+    assert "User payload" in result["ai_prompt_payload_note"]
+
+
+def test_generate_poi_iteration_analysis_sends_compact_llm_evidence(monkeypatch):
+    monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
+    captured = {}
+
+    async def fake_invoke(**kwargs):
+        captured.update(kwargs["user_payload"]["evidence"])
+        return {
+            "summary_points": ["POI规模下降", "餐饮仍为主导"],
+            "fastest_growth": "餐饮增长较快",
+            "declining_category": "购物减少",
+            "emerging_area": "咖啡厅新增偏东北、中圈层补点",
+            "structure_judgement": "生活消费主导",
+        }
+
+    monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
+    points = [
+        {"lng": 112.0 + idx * 0.001, "lat": 28.0 + idx * 0.001, "subcategory": "咖啡厅", "category": "餐饮", "area": "一区"}
+        for idx in range(40)
+    ]
+
+    result = asyncio.run(generate_poi_iteration_analysis({
+        "years": [2020, 2022, 2024],
+        "summaries": [
+            {"year": 2020, "count": 20, "subcategory_counts": {"咖啡厅": 20}, "top_subcategories": [{"name": "咖啡厅", "parent": "餐饮"}], "points": points[:20]},
+            {"year": 2024, "count": 40, "subcategory_counts": {"咖啡厅": 40}, "top_subcategories": [{"name": "咖啡厅", "parent": "餐饮"}], "points": points},
+        ],
+        "area_heatmaps": [{"year": 2024, "point_count": 40, "points": points, "cells": [{"intensity": idx} for idx in range(30)]}],
+        "area_heatmap_snapshots": [{"year": 2024, "image_url": "data:image/png;base64,large"}],
+    }))
+
+    assert result["status"] == "ready"
+    assert captured["evidence_version"] == "poi_iteration_v1"
+    assert captured["year_summaries"][0]["poi_count"] == 20
+    assert "points" not in captured["year_summaries"][0]
+    assert captured["area_distribution"][0]["hotspot_cell_count"] == 30
+    assert len(captured["area_distribution"][0]["top_cells"]) == 12
+    assert captured["growth_area_signal"]["growth_rows"][0]["name"] == "咖啡厅"
+    assert captured["constraints"]["no_coordinate_reasoning"] is True
+    assert "area_heatmap_snapshots" not in captured
+    assert "data:image/png" not in str(captured)
+
+
+def test_build_poi_iteration_evidence_pack_v1_omits_images_and_full_points():
+    points = [{"lng": 112 + idx, "lat": 28, "category": "餐饮", "subcategory": "咖啡厅"} for idx in range(20)]
+    evidence = build_poi_iteration_evidence_pack_v1({
+        "years": [2020, 2024],
+        "summaries": [{"year": 2024, "count": 20, "points": points, "top_subcategories": [], "top_areas": [{"name": "岳麓区"}]}],
+        "area_heatmaps": [{"year": 2024, "point_count": 20, "points": points, "cells": [{"intensity": idx} for idx in range(20)]}],
+        "area_heatmap_snapshots": [{"image_url": "data:image/png;base64,large"}],
+        "area_heatmap_boundary": [{"x": 1, "y": 2}],
+        "area_heatmap_polygon": [[112, 28]],
+    })
+
+    assert evidence["task"] == "poi_iteration_change"
+    assert evidence["evidence_version"] == "poi_iteration_v1"
+    assert evidence["scope"]["area_name"] == "岳麓区"
+    assert evidence["scope"]["polygon_point_count"] == 1
+    assert evidence["year_summaries"][0]["poi_count"] == 20
+    assert "points" not in evidence["year_summaries"][0]
+    assert evidence["area_distribution"][0]["hotspot_cell_count"] == 20
+    assert len(evidence["area_distribution"][0]["top_cells"]) == 12
+    assert "area_heatmap_snapshots" not in evidence
+    assert "data:image/png" not in str(evidence)
+
+
+def test_build_poi_iteration_evidence_pack_v1_ranks_subcategory_changes():
+    evidence = build_poi_iteration_evidence_pack_v1({
+        "years": [2020, 2024],
+        "summaries": [
+            {
+                "year": 2020,
+                "count": 100,
+                "category_counts": {"餐饮": 60, "购物": 40},
+                "subcategory_counts": {"中餐厅": 50, "咖啡厅": 1, "商场": 40},
+                "top_subcategories": [{"name": "中餐厅", "parent": "餐饮"}, {"name": "咖啡厅", "parent": "餐饮"}],
+            },
+            {
+                "year": 2024,
+                "count": 100,
+                "category_counts": {"餐饮": 50, "购物": 50},
+                "subcategory_counts": {"中餐厅": 30, "咖啡厅": 2, "商场": 50},
+                "top_subcategories": [{"name": "中餐厅", "parent": "餐饮"}, {"name": "咖啡厅", "parent": "餐饮"}],
+            },
+        ],
+        "subcategory_spatial_trend_rows": [{"name": "咖啡厅", "dominant_direction": "东北", "delta": 1}],
+    })
+
+    assert {row["name"] for row in evidence["category_changes"][:2]} == {"餐饮", "购物"}
+    assert evidence["subcategory_changes"][0]["name"] == "咖啡厅"
+    assert evidence["subcategory_changes"][0]["has_spatial_signal"] is True
+    assert evidence["subcategory_changes"][1]["name"] == "中餐厅"
+    assert evidence["subcategory_spatial_trends"][0]["name"] == "咖啡厅"
+    assert evidence["growth_area_signal"]["growth_rows"][0]["name"] == "咖啡厅"
+    assert build_poi_iteration_llm_evidence(evidence)["evidence_version"] == "poi_iteration_v1"
+
+
+def test_build_poi_iteration_evidence_pack_v1_separates_low_base_rate_growth():
+    evidence = build_poi_iteration_evidence_pack_v1({
+        "years": [2020, 2024],
+        "summaries": [
+            {
+                "year": 2020,
+                "count": 5000,
+                "category_counts": {"自然": 2, "公司": 180, "餐饮": 1200},
+                "subcategory_counts": {"博物馆": 1, "快餐厅": 220, "中餐厅": 800},
+            },
+            {
+                "year": 2024,
+                "count": 5000,
+                "category_counts": {"自然": 5, "公司": 225, "餐饮": 1360},
+                "subcategory_counts": {"博物馆": 4, "快餐厅": 375, "中餐厅": 624},
+            },
+        ],
+    })
+
+    highlights = evidence["material_change_highlights"]
+    assert highlights["category_growth"][0]["name"] == "餐饮"
+    assert highlights["category_growth"][1]["name"] == "公司"
+    assert highlights["subcategory_growth"][0]["name"] == "快餐厅"
+    assert highlights["low_base_growth_watchlist"][0]["name"] in {"自然", "博物馆"}
+    assert evidence["constraints"]["no_low_base_rate_as_primary"] is True
 
 
 def test_generate_poi_iteration_analysis_formats_object_insights(monkeypatch):
@@ -229,6 +362,8 @@ def test_generate_poi_iteration_analysis_formats_object_insights(monkeypatch):
     assert "{'category'" not in result["ai_insights"]["fastest_growth"]
     assert "大类：公司" in result["ai_insights"]["fastest_growth"]
     assert "小类：快餐厅" in result["ai_insights"]["fastest_growth"]
+    assert result["ai_insights"]["emerging_area"] == "未形成可命名增长片区；当前空间增量信号有限。"
+    assert "新兴区域" not in result["ai_insights"]["emerging_area"]
 
 
 def test_generate_poi_iteration_analysis_returns_llm_unavailable(monkeypatch):
@@ -238,6 +373,8 @@ def test_generate_poi_iteration_analysis_returns_llm_unavailable(monkeypatch):
 
     assert result["status"] == "failed"
     assert result["error"] == "llm_unavailable"
+    assert "poi_iteration_v1" in result["ai_prompt"]
+    assert "不包含全量 POI 点" in result["ai_prompt_payload_note"]
 
 
 def test_summarize_iteration_pois_resolves_type_map_category_and_subcategory():
@@ -346,9 +483,10 @@ def test_build_agent_poi_iteration_payload_aggregates_history_and_spatial_fields
     assert result["years"] == [2023, 2025]
     assert result["summaries"][1]["subcategory_counts"]["咖啡厅"] == 2
     assert result["subcategory_trend_rows"]
-    assert result["spatial_factors"]["geometry_mode"] == "point"
-    assert result["subcategory_spatial_trend_rows"][0]["name"] == "咖啡厅"
-    assert result["ai_error"] == "llm_unavailable"
+    assert result["spatial_factors"] == {}
+    assert result["subcategory_spatial_trend_rows"] == []
+    assert result["ai_status"] == "pending"
+    assert result["ai_error"] == ""
     assert result["area_heatmap_basemap"]["source"] == "amap_static_url"
     assert "restapi.amap.com/v3/staticmap" in result["area_heatmap_basemap"]["url"]
     assert result["area_heatmap_basemap"]["bounds"]["min_lng"] < result["area_heatmap_basemap"]["bounds"]["max_lng"]
@@ -359,12 +497,13 @@ def test_build_agent_poi_iteration_payload_aggregates_history_and_spatial_fields
     assert result["area_heatmap_polygon"]
     assert all(0 <= point["x"] <= 100 and 0 <= point["y"] <= 100 for point in result["area_heatmap_boundary"])
     response_payload = AgentIterationPoiBuildResponse.model_validate(result).model_dump()
+    assert response_payload["ai_status"] == "pending"
     assert response_payload["area_heatmap_basemap"]["source"] == "amap_static_url"
     assert response_payload["area_heatmap_boundary"]
     assert response_payload["area_heatmap_polygon"]
 
 
-def test_build_agent_poi_iteration_payload_static_basemap_falls_back_without_key(monkeypatch):
+def test_build_agent_poi_iteration_payload_area_heatmap_basemap_is_pure_svg_metadata(monkeypatch):
     monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "")
 
     class FakeRepo:
@@ -393,12 +532,53 @@ def test_build_agent_poi_iteration_payload_static_basemap_falls_back_without_key
     assert result["area_heatmaps"]
     assert result["area_heatmap_basemap"]["source"] == "none"
     assert result["area_heatmap_basemap"]["url"] == ""
+    assert result["area_heatmap_basemap"]["zoom"] is None
+    assert result["area_heatmap_basemap"]["size"] == result["area_heatmap_basemap"]["view"]
     assert result["area_heatmap_polygon"]
 
 
-def test_build_agent_poi_iteration_payload_area_heatmap_uses_polygon_bounds_and_filters_outside_points(monkeypatch):
-    monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "test-amap-key")
+def test_build_agent_poi_iteration_payload_returns_base_payload_before_ai(monkeypatch):
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "")
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service._POI_ITERATION_AI_TIMEOUT_S", 0.01)
 
+    class FakeRepo:
+        def get_pois(self, history_id, year=None):
+            year = int(year)
+            return {
+                "history_id": history_id,
+                "polygon": [[112.0, 28.0], [112.1, 28.0], [112.1, 28.1], [112.0, 28.1], [112.0, 28.0]],
+                "pois": [{"id": f"poi-{year}", "type": "type-050500", "adname": "A", "location": [112.02, 28.02]}],
+                "poi_summary": {"total": 1},
+                "count": 1,
+                "available_years": [2023, 2025],
+                "selected_year": year,
+            }
+
+    called = False
+
+    async def slow_generate(evidence):
+        nonlocal called
+        called = True
+        await asyncio.sleep(1)
+        return {"status": "ready", "ai_summary": ["late"], "ai_insights": {}, "error": ""}
+
+    monkeypatch.setattr("modules.agent.poi_iteration_build_service._generate_poi_iteration_analysis", slow_generate)
+
+    result = asyncio.run(build_agent_poi_iteration_payload(
+        {"history_id": "history-1", "years": [2023, 2025], "center": [112.0, 28.0]},
+        FakeRepo(),
+    ))
+
+    assert result["status"] == "ready"
+    assert result["area_heatmaps"]
+    assert result["area_heatmap_boundary"]
+    assert result["ai_status"] == "pending"
+    assert result["ai_summary"] == []
+    assert result["ai_error"] == ""
+    assert called is False
+
+
+def test_build_agent_poi_iteration_payload_area_heatmap_uses_polygon_bounds_and_filters_outside_points(monkeypatch):
     class FakeRepo:
         def get_pois(self, history_id, year=None):
             year = int(year)
@@ -438,11 +618,17 @@ def test_build_agent_poi_iteration_payload_area_heatmap_uses_polygon_bounds_and_
     assert result["area_heatmaps"][1]["point_count"] == 1
     assert result["area_heatmap_boundary"]
     assert all(0 <= point["x"] <= 100 and 0 <= point["y"] <= 100 for point in result["area_heatmap_boundary"])
+    xs = [point["x"] for point in result["area_heatmap_boundary"]]
+    ys = [point["y"] for point in result["area_heatmap_boundary"]]
+    view = result["area_heatmap_basemap"]["view"]
+    assert min(xs) <= 15
+    assert max(xs) >= view["width"] - 15
+    assert min(ys) <= 16
+    assert max(ys) >= view["height"] - 16
+    assert "svg_viewport" not in result["area_heatmap_basemap"]["bounds"]
 
 
 def test_build_agent_poi_iteration_payload_area_heatmap_falls_back_to_poi_bounds_without_polygon(monkeypatch):
-    monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "")
-
     class FakeRepo:
         def get_pois(self, history_id, year=None):
             year = int(year)

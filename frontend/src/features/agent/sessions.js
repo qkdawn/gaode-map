@@ -103,10 +103,17 @@ function createAnalysisAgentInitialState() {
     },
     agentCreateTabMenuOpen: false,
     agentIterationActiveKind: 'poi',
+    agentIterationSecondaryView: {
+      poi: 'ai',
+      population: 'metrics',
+      nightlight: 'snapshots',
+    },
     agentIterationPoiLoading: false,
     agentIterationPoiError: '',
     agentIterationPoiSnapshotCache: {},
     agentIterationPoiSnapshotGeneratingKey: '',
+    agentIterationPoiAreaHeatmapCalibrationCache: {},
+    agentIterationPoiAreaHeatmapCalibrationGeneratingKey: '',
     agentIterationPoiStructureSpatialView: {
       category: '',
       sortBy: 'count',

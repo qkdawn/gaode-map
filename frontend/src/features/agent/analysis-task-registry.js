@@ -27,6 +27,10 @@ const ANALYSIS_TASKS = Object.freeze({
       if (typeof ctx.fetchPois !== 'function') {
         throw new Error('POI 抓取入口不可用')
       }
+      const year = Number(ctx && (ctx.poiYearSource || ctx.resultPoiYear))
+      if (Number.isFinite(year) && year > 0) {
+        ctx.poiYearSelections = [year]
+      }
       await ctx.fetchPois({
         preserveCurrentPanel: options.focus === false,
       })
@@ -200,12 +204,16 @@ function getAnalysisTaskParameterSummary(ctx, taskKey = '') {
   if (!task) return ''
   if (task.key === 'poi_fetch') {
     const source = ctx && (ctx.resultDataSource || ctx.poiDataSource) ? `数据源 ${ctx.resultDataSource || ctx.poiDataSource}` : '当前 POI 数据源'
-    return source
+    const year = Number(ctx && (ctx.poiYearSource || ctx.resultPoiYear))
+    const yearText = Number.isFinite(year) && year > 0 ? `年份 ${year}` : '当前 POI 年份'
+    return `${yearText}，${source}`
   }
   if (task.key === 'poi_grid') {
     const resolution = ctx && ctx.h3GridResolution ? `res=${ctx.h3GridResolution}` : '默认网格级别'
     const source = ctx && (ctx.resultDataSource || ctx.poiDataSource) ? `数据源 ${ctx.resultDataSource || ctx.poiDataSource}` : '当前 POI 数据'
-    return `${resolution}, ${source}`
+    const poiYear = Number(ctx && (ctx.poiYearSource || ctx.resultPoiYear))
+    const yearText = Number.isFinite(poiYear) ? `POI年份 ${poiYear}` : '当前 POI 年份'
+    return `${resolution}, ${yearText}, ${source}`
   }
   if (task.key === 'population') {
     const year = ctx && typeof ctx.getPopulationSelectedYearLabel === 'function'

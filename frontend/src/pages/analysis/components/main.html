@@ -176,7 +176,8 @@
                                     </section>
                                     <section class="basis-drawer-section">
                                         <h4>AI 提示词</h4>
-                                        <p>{{ getBasisDrawerPayload().aiPrompt }}</p>
+                                        <pre class="basis-prompt-text">{{ getBasisDrawerPayload().aiPrompt }}</pre>
+                                        <p v-if="getBasisDrawerPayload().aiPromptPayloadNote" class="basis-prompt-note">{{ getBasisDrawerPayload().aiPromptPayloadNote }}</p>
                                     </section>
                                 </div>
                                 <div v-else-if="basisDrawerActiveTab === 'template'" class="basis-drawer-body">
@@ -494,7 +495,32 @@
                                                 </div>
                                             </div>
 
+                                            <div v-if="task.key === 'poi_fetch'" class="agent-summary-task-params">
+                                                <label class="agent-summary-task-field">
+                                                    <span>分析年份</span>
+                                                    <select
+                                                        v-model="poiYearSource"
+                                                        :disabled="task.status === 'running' || agentSummaryGenerating"
+                                                        @change="onSummaryTaskPoiAnalysisYearChange">
+                                                        <option v-for="item in getSummaryTaskPoiYearOptions()" :key="`summary-poi-fetch-year-${item.value}`" :value="item.value">
+                                                            {{ item.label }}
+                                                        </option>
+                                                    </select>
+                                                </label>
+                                            </div>
+
                                             <div v-if="task.key === 'poi_grid'" class="agent-summary-task-params">
+                                                <label class="agent-summary-task-field">
+                                                    <span>POI年份</span>
+                                                    <select
+                                                        v-model="poiYearSource"
+                                                        :disabled="task.status === 'running' || agentSummaryGenerating"
+                                                        @change="onSummaryTaskPoiGridYearChange">
+                                                        <option v-for="item in getSummaryTaskPoiYearOptions()" :key="`summary-grid-poi-year-${item.value}`" :value="item.value">
+                                                            {{ item.label }}
+                                                        </option>
+                                                    </select>
+                                                </label>
                                                 <label class="agent-summary-task-field">
                                                     <span>网格级别</span>
                                                     <select
@@ -596,8 +622,28 @@
                                         {{ kind.label }}
                                     </button>
                                 </div>
+                                <div class="agent-iteration-subnav" aria-label="多年迭代变化内容分组">
+                                    <button
+                                        v-for="item in getAgentIterationSecondaryNavItems()"
+                                        :key="`agent-iteration-subnav-${agentIterationActiveKind}-${item.key}`"
+                                        type="button"
+                                        class="agent-iteration-subnav-btn"
+                                        :class="{ active: isAgentIterationSecondaryView(item.key), 'is-pending': !item.available }"
+                                        @click="setAgentIterationSecondaryView(item.key)">
+                                        {{ item.label }}
+                                    </button>
+                                </div>
 
                                 <div v-if="agentIterationActiveKind === 'poi'" class="agent-iteration-poi">
+                                    <section v-if="shouldShowAgentIterationSecondaryPlaceholder('poi')" class="agent-summary-card agent-iteration-panel-placeholder">
+                                        <div class="agent-summary-card-title">{{ getAgentIterationSecondaryPlaceholderTitle('poi') }}</div>
+                                        <div class="agent-summary-line">该模块正在生成，完成后会自动显示在这里。</div>
+                                        <div class="agent-iteration-ai-placeholder" aria-hidden="true">
+                                            <div class="agent-summary-skeleton-line is-wide"></div>
+                                            <div class="agent-summary-skeleton-line is-medium"></div>
+                                            <div class="agent-summary-skeleton-panel"></div>
+                                        </div>
+                                    </section>
                                     <div v-if="agentIterationPoiLoading" class="agent-summary-card">
                                         <div class="agent-summary-card-title">正在生成 POI 多年变化</div>
                                         <div class="agent-summary-line">正在按历史年份读取 POI 快照并汇总业态结构。</div>
@@ -611,7 +657,7 @@
                                         <div class="agent-summary-line">{{ getAgentIterationEmptyNotice('poi') }}</div>
                                     </div>
 
-                                    <section v-if="getAgentIterationPoiPayload().status === 'ready'" class="agent-summary-card">
+                                    <section v-if="getAgentIterationPoiPayload().status === 'ready' && isAgentIterationSecondaryView('ai')" class="agent-summary-card">
                                         <div class="agent-summary-card-head">
                                             <div class="agent-summary-card-title">📊 AI分析</div>
                                             <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('poi'), $event)">
@@ -621,10 +667,18 @@
                                         <div v-if="getAgentIterationPoiPayload().notice" class="agent-summary-line agent-iteration-note">
                                             {{ getAgentIterationPoiPayload().notice }}
                                         </div>
-                                        <div v-if="getAgentIterationPoiPayload().ai_error" class="agent-summary-line agent-iteration-error">
+                                        <div v-if="getAgentIterationPoiPayload().ai_error && !isAgentIterationAiTimeout(getAgentIterationPoiPayload().ai_error)" class="agent-summary-line agent-iteration-error">
                                             {{ getAgentIterationAiErrorLabel(getAgentIterationPoiPayload().ai_error) }}
                                         </div>
+                                        <div v-else class="agent-summary-line agent-iteration-note">
+                                            {{ getAgentIterationPoiAiStatusText() }}
+                                        </div>
                                         <div class="agent-iteration-analysis-list">
+                                            <div v-if="shouldShowAgentIterationPoiAiPlaceholder()" class="agent-iteration-ai-placeholder" aria-hidden="true">
+                                                <div class="agent-summary-skeleton-line is-wide"></div>
+                                                <div class="agent-summary-skeleton-line is-medium"></div>
+                                                <div class="agent-summary-skeleton-line"></div>
+                                            </div>
                                             <div
                                                 v-for="(line, idx) in getAgentIterationPoiAiSummaryRows()"
                                                 :key="`agent-iteration-poi-ai-summary-${idx}`"
@@ -634,7 +688,7 @@
                                         </div>
                                     </section>
 
-                                    <section v-if="getAgentIterationPoiPayload().status === 'ready'" class="agent-summary-card">
+                                    <section v-if="getAgentIterationPoiPayload().status === 'ready' && isAgentIterationSecondaryView('metrics')" class="agent-summary-card">
                                         <div class="agent-summary-card-title">POI 特征</div>
                                         <div v-if="getAgentIterationPoiPayload().notice" class="agent-summary-line agent-iteration-note">
                                             {{ getAgentIterationPoiPayload().notice }}
@@ -650,10 +704,10 @@
                                         </div>
                                     </section>
 
-                                    <section v-if="getAgentIterationPoiTotalLineChart().length >= 2" class="agent-summary-card agent-iteration-poi-chart-section">
+                                    <section v-if="getAgentIterationPoiTotalLineChart().length >= 2 && (isAgentIterationSecondaryView('trend') || isAgentIterationSecondaryView('space'))" class="agent-summary-card agent-iteration-poi-chart-section">
                                         <div class="agent-summary-card-title">📈 趋势分析</div>
                                         <div class="agent-iteration-chart-grid agent-iteration-poi-dashboard">
-                                            <div class="agent-iteration-poi-dashboard-top">
+                                            <div v-if="isAgentIterationSecondaryView('trend')" class="agent-iteration-poi-dashboard-top">
                                             <div class="agent-iteration-chart-card">
                                                 <div class="agent-iteration-chart-title">POI总量变化</div>
                                                 <svg viewBox="0 0 320 140" class="agent-iteration-line-chart" role="img" aria-label="POI总量变化折线图">
@@ -705,8 +759,87 @@
                                             </div>
                                             </div>
 
-                                            <div class="agent-iteration-chart-card agent-iteration-chart-card-wide agent-iteration-poi-structure-spatial-card" v-if="getAgentIterationPoiStructureSpatialRows().length">
-                                                <div class="agent-iteration-chart-title">小类结构与空间变化 · 全部 {{ getAgentIterationPoiSubcategoryTotal() }} 类</div>
+                                            <div v-if="isAgentIterationSecondaryView('space')" class="agent-iteration-chart-card agent-iteration-chart-card-wide">
+                                                <div class="agent-iteration-chart-head">
+                                                    <div>
+                                                        <div class="agent-iteration-chart-title">全部 POI 区域分布变化</div>
+                                                        <div class="agent-iteration-chart-subtitle">{{ getAgentIterationPoiAreaHeatmapChangeSummary() }}</div>
+                                                    </div>
+                                                    <div class="agent-iteration-heatmap-copy-hint">点击图卡复制图片</div>
+                                                </div>
+                                                <div class="agent-iteration-heatmap-grid">
+                                                    <div
+                                                        v-for="heatmap in getAgentIterationPoiAreaHeatmaps()"
+                                                        :key="`poi-heatmap-${heatmap.year}`"
+                                                        class="agent-iteration-heatmap-card">
+                                                        <div class="agent-iteration-heatmap-year">{{ heatmap.year }}</div>
+                                                        <div
+                                                            v-if="getAgentIterationPoiAreaHeatmapSnapshot(heatmap.year).image_url"
+                                                            class="agent-iteration-heatmap-viewport agent-iteration-heatmap-viewport--snapshot">
+                                                            <img
+                                                                :src="getAgentIterationPoiAreaHeatmapSnapshot(heatmap.year).image_url"
+                                                                class="agent-iteration-heatmap-img"
+                                                                :alt="`${heatmap.year} POI区域分布快照`">
+                                                        </div>
+                                                        <div
+                                                            v-else-if="getAgentIterationPoiAreaHeatmapSnapshot(heatmap.year).status === 'loading'"
+                                                            class="agent-iteration-heatmap-viewport agent-iteration-heatmap-loading">
+                                                            {{ getAgentIterationPoiAreaHeatmapSnapshotStatusText(getAgentIterationPoiAreaHeatmapSnapshot(heatmap.year)) }}
+                                                        </div>
+                                                        <div v-else class="agent-iteration-heatmap-viewport" :style="getAgentIterationPoiAreaHeatmapAspectStyle()">
+                                                            <svg v-bind="getAgentIterationPoiAreaHeatmapSvgAttrs()" class="agent-iteration-heatmap-svg" :class="{ 'has-basemap': hasAgentIterationPoiAreaHeatmapBasemapImage() }" role="img" :aria-label="`${heatmap.year} POI区域分布`">
+                                                                <defs v-if="getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints()">
+                                                                    <clipPath :id="`poi-heatmap-clip-${heatmap.year}`">
+                                                                        <polygon :points="getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints()"></polygon>
+                                                                    </clipPath>
+                                                                </defs>
+                                                                <image
+                                                                    v-if="hasAgentIterationPoiAreaHeatmapBasemapImage()"
+                                                                    :href="getAgentIterationPoiAreaHeatmapBasemap().url"
+                                                                    x="0"
+                                                                    y="0"
+                                                                    :width="getAgentIterationPoiAreaHeatmapViewSize().width"
+                                                                    :height="getAgentIterationPoiAreaHeatmapViewSize().height"
+                                                                    preserveAspectRatio="none"
+                                                                    class="agent-iteration-heatmap-basemap"></image>
+                                                                <g
+                                                                    v-if="heatmap.cells && heatmap.cells.length"
+                                                                    :clip-path="getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints() ? `url(#poi-heatmap-clip-${heatmap.year})` : null">
+                                                                    <rect
+                                                                        v-for="(cell, cellIdx) in getAgentIterationPoiAreaHeatmapDisplayCells(heatmap)"
+                                                                        :key="`poi-heatmap-cell-${heatmap.year}-${cellIdx}`"
+                                                                        :x="cell.x"
+                                                                        :y="cell.y"
+                                                                        :width="cell.width"
+                                                                        :height="cell.height"
+                                                                        :fill-opacity="getAgentIterationPoiAreaHeatmapCellOpacity(cell)"
+                                                                        class="agent-iteration-heatmap-cell"></rect>
+                                                                </g>
+                                                                <polygon
+                                                                    v-if="getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints()"
+                                                                    :points="getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints()"
+                                                                    class="agent-iteration-heatmap-boundary"></polygon>
+                                                                <circle
+                                                                    v-for="(point, idx) in getAgentIterationPoiAreaHeatmapDisplayPoints(heatmap)"
+                                                                    :key="`poi-heatmap-${heatmap.year}-${idx}`"
+                                                                    :cx="point.x"
+                                                                    :cy="point.y"
+                                                                    r="2.35"
+                                                                    :clip-path="getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints() ? `url(#poi-heatmap-clip-${heatmap.year})` : null"
+                                                                    class="agent-iteration-heatmap-point"></circle>
+                                                            </svg>
+                                                        </div>
+                                                        <div class="agent-iteration-heatmap-change-strip">
+                                                            <span :class="getAgentIterationPoiAreaHeatmapDeltaStateClass(heatmap.delta_from_previous)">较上一期 {{ formatAgentIterationPoiAreaHeatmapDelta(heatmap.delta_from_previous) }}</span>
+                                                            <span :class="getAgentIterationPoiAreaHeatmapDeltaStateClass(heatmap.delta_from_first)">较首年 {{ formatAgentIterationPoiAreaHeatmapDelta(heatmap.delta_from_first) }}</span>
+                                                        </div>
+                                                        <div class="agent-iteration-heatmap-caption">全部 POI · {{ heatmap.top_area || '区域分布' }} · 热点 {{ getAgentIterationPoiAreaHeatmapHotspotCount(heatmap) }} 格</div>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div class="agent-iteration-chart-card agent-iteration-chart-card-wide agent-iteration-poi-structure-spatial-card" v-if="isAgentIterationSecondaryView('space') && getAgentIterationPoiStructureSpatialRows().length">
+                                                <div class="agent-iteration-chart-title">小类空间变化 · 全部 {{ getAgentIterationPoiSubcategoryTotal() }} 类</div>
                                                 <div class="agent-iteration-structure-spatial-toolbar">
                                                     <label>
                                                         <span>大类</span>
@@ -786,65 +919,21 @@
                                                     </div>
                                                 </div>
                                             </div>
-
-                                            <div class="agent-iteration-chart-card agent-iteration-chart-card-wide">
-                                                <div class="agent-iteration-chart-title">区域分布变化</div>
-                                                <div class="agent-iteration-heatmap-grid">
-                                                    <div
-                                                        v-for="heatmap in getAgentIterationPoiAreaHeatmaps()"
-                                                        :key="`poi-heatmap-${heatmap.year}`"
-                                                        class="agent-iteration-heatmap-card">
-                                                        <div class="agent-iteration-heatmap-year">{{ heatmap.year }}</div>
-                                                        <div class="agent-iteration-heatmap-viewport" :style="getAgentIterationPoiAreaHeatmapAspectStyle()">
-                                                            <svg :viewBox="getAgentIterationPoiAreaHeatmapViewBox()" class="agent-iteration-heatmap-svg" :class="{ 'has-basemap': getAgentIterationPoiAreaHeatmapBasemap().url }" role="img" :aria-label="`${heatmap.year} POI??????`">
-                                                                <defs v-if="getAgentIterationPoiAreaHeatmapBoundaryPoints()">
-                                                                    <clipPath :id="`poi-heatmap-clip-${heatmap.year}`">
-                                                                        <polygon :points="getAgentIterationPoiAreaHeatmapBoundaryPoints()"></polygon>
-                                                                    </clipPath>
-                                                                </defs>
-                                                                <image
-                                                                    v-if="getAgentIterationPoiAreaHeatmapBasemap().url"
-                                                                    :href="getAgentIterationPoiAreaHeatmapBasemap().url"
-                                                                    x="0"
-                                                                    y="0"
-                                                                    :width="getAgentIterationPoiAreaHeatmapViewSize().width"
-                                                                    :height="getAgentIterationPoiAreaHeatmapViewSize().height"
-                                                                    preserveAspectRatio="none"></image>
-                                                                <g
-                                                                    v-if="heatmap.cells && heatmap.cells.length"
-                                                                    :clip-path="getAgentIterationPoiAreaHeatmapBoundaryPoints() ? `url(#poi-heatmap-clip-${heatmap.year})` : null">
-                                                                    <rect
-                                                                        v-for="(cell, cellIdx) in heatmap.cells"
-                                                                        :key="`poi-heatmap-cell-${heatmap.year}-${cellIdx}`"
-                                                                        :x="cell.x"
-                                                                        :y="cell.y"
-                                                                        :width="cell.width"
-                                                                        :height="cell.height"
-                                                                        :fill-opacity="getAgentIterationPoiAreaHeatmapCellOpacity(cell)"
-                                                                        class="agent-iteration-heatmap-cell"></rect>
-                                                                </g>
-                                                                <polygon
-                                                                    v-if="getAgentIterationPoiAreaHeatmapBoundaryPoints()"
-                                                                    :points="getAgentIterationPoiAreaHeatmapBoundaryPoints()"
-                                                                    class="agent-iteration-heatmap-boundary"></polygon>
-                                                                <circle
-                                                                    v-for="(point, idx) in heatmap.points"
-                                                                    :key="`poi-heatmap-${heatmap.year}-${idx}`"
-                                                                    :cx="point.x"
-                                                                    :cy="point.y"
-                                                                    r="2.35"
-                                                                    :clip-path="getAgentIterationPoiAreaHeatmapBoundaryPoints() ? `url(#poi-heatmap-clip-${heatmap.year})` : null"
-                                                                    class="agent-iteration-heatmap-point"></circle>
-                                                            </svg>
-                                                        </div>
-                                                        <div class="agent-iteration-heatmap-caption">{{ heatmap.top_area || '区域分布' }} · {{ heatmap.point_count }}点</div>
-                                                    </div>
+                                            <div class="agent-iteration-chart-card agent-iteration-chart-card-wide agent-iteration-poi-structure-spatial-card agent-iteration-structure-spatial-skeleton" v-else-if="isAgentIterationSecondaryView('space') && isAgentIterationPoiSpatialSignalLoading()">
+                                                <div class="agent-iteration-chart-title">小类空间变化</div>
+                                                <div class="agent-summary-skeleton-line is-wide"></div>
+                                                <div class="agent-summary-skeleton-line is-medium"></div>
+                                                <div class="agent-iteration-structure-spatial-skeleton-table" aria-hidden="true">
+                                                    <div class="agent-summary-skeleton-line"></div>
+                                                    <div class="agent-summary-skeleton-line is-medium"></div>
+                                                    <div class="agent-summary-skeleton-line is-wide"></div>
+                                                    <div class="agent-summary-skeleton-line"></div>
                                                 </div>
                                             </div>
                                         </div>
                                     </section>
 
-                                    <section v-if="getAgentIterationPoiTrendRows().length" class="agent-summary-card">
+                                    <section v-if="getAgentIterationPoiTrendRows().length && isAgentIterationSecondaryView('trend')" class="agent-summary-card">
                                         <div class="agent-summary-card-title">POI 多年趋势</div>
                                         <div class="agent-iteration-metric-grid">
                                             <div
@@ -857,12 +946,22 @@
                                         </div>
                                     </section>
 
-                                    <section v-if="getAgentIterationPoiAiInsightRows().length" class="agent-summary-card">
+                                    <section v-if="getAgentIterationPoiPayload().status === 'ready' && isAgentIterationSecondaryView('ai')" class="agent-summary-card">
                                         <div class="agent-summary-card-head">
                                             <div class="agent-summary-card-title">🔎 AI洞察</div>
                                             <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('poi'), $event)">
                                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
                                             </button>
+                                        </div>
+                                        <div v-if="shouldShowAgentIterationPoiInsightPlaceholder()" class="agent-iteration-ai-placeholder" aria-hidden="true">
+                                            <div class="agent-summary-skeleton-panel">
+                                                <div class="agent-summary-skeleton-line short"></div>
+                                                <div class="agent-summary-skeleton-line"></div>
+                                            </div>
+                                            <div class="agent-summary-skeleton-panel">
+                                                <div class="agent-summary-skeleton-line short"></div>
+                                                <div class="agent-summary-skeleton-line is-medium"></div>
+                                            </div>
                                         </div>
                                         <div class="agent-iteration-insight-list">
                                             <div
@@ -875,7 +974,7 @@
                                         </div>
                                     </section>
 
-                                    <section v-if="getAgentIterationPoiSnapshotRows().length" class="agent-summary-card">
+                                    <section v-if="getAgentIterationPoiSnapshotRows().length && isAgentIterationSecondaryView('detail')" class="agent-summary-card">
                                         <div class="agent-summary-card-title">年度快照</div>
                                         <div class="agent-iteration-year-list">
                                             <div
@@ -892,6 +991,15 @@
                                 </div>
 
                                 <div v-else-if="agentIterationActiveKind === 'population'" class="agent-iteration-population">
+                                    <section v-if="shouldShowAgentIterationSecondaryPlaceholder('population')" class="agent-summary-card agent-iteration-panel-placeholder">
+                                        <div class="agent-summary-card-title">{{ getAgentIterationSecondaryPlaceholderTitle('population') }}</div>
+                                        <div class="agent-summary-line">人口数据正在读取与汇总，完成后会自动显示。</div>
+                                        <div class="agent-iteration-ai-placeholder" aria-hidden="true">
+                                            <div class="agent-summary-skeleton-line is-wide"></div>
+                                            <div class="agent-summary-skeleton-line is-medium"></div>
+                                            <div class="agent-summary-skeleton-panel"></div>
+                                        </div>
+                                    </section>
                                     <div v-if="agentIterationPopulationLoading" class="agent-summary-card">
                                         <div class="agent-summary-card-title">正在生成人口总结特征</div>
                                         <div class="agent-summary-line">正在读取人口时序数据并汇总增长、下降和密度变化。</div>
@@ -905,7 +1013,7 @@
                                         <div class="agent-summary-line">{{ getAgentIterationEmptyNotice('population') }}</div>
                                     </div>
 
-                                    <section v-if="getAgentIterationPopulationPayload().status === 'ready'" class="agent-summary-card">
+                                    <section v-if="getAgentIterationPopulationPayload().status === 'ready' && isAgentIterationSecondaryView('metrics')" class="agent-summary-card">
                                         <div class="agent-summary-card-title">人口总结特征</div>
                                         <div class="agent-iteration-metric-grid">
                                             <div
@@ -920,6 +1028,15 @@
                                 </div>
 
                                 <div v-else class="agent-iteration-nightlight">
+                                    <section v-if="shouldShowAgentIterationSecondaryPlaceholder('nightlight')" class="agent-summary-card agent-iteration-panel-placeholder">
+                                        <div class="agent-summary-card-title">{{ getAgentIterationSecondaryPlaceholderTitle('nightlight') }}</div>
+                                        <div class="agent-summary-line">夜光模块正在生成，完成后会自动显示。</div>
+                                        <div class="agent-iteration-ai-placeholder" aria-hidden="true">
+                                            <div class="agent-summary-skeleton-line is-wide"></div>
+                                            <div class="agent-summary-skeleton-line is-medium"></div>
+                                            <div class="agent-summary-skeleton-panel"></div>
+                                        </div>
+                                    </section>
                                     <div v-if="agentIterationNightlightLoading" class="agent-summary-card">
                                         <div class="agent-summary-card-title">正在生成夜光多年变化</div>
                                         <div class="agent-summary-line">正在加载近三年快照、热点迁移层，并请求 AI 解析。</div>
@@ -933,7 +1050,7 @@
                                         <div class="agent-summary-line">{{ getAgentIterationEmptyNotice('nightlight') }}</div>
                                     </div>
 
-                                    <section v-if="(getAgentIterationNightlightPayload().snapshots || []).length" class="agent-summary-card agent-iteration-snapshot-section">
+                                    <section v-if="(getAgentIterationNightlightPayload().snapshots || []).length && isAgentIterationSecondaryView('snapshots')" class="agent-summary-card agent-iteration-snapshot-section">
                                         <div class="agent-summary-card-title">近三年夜光快照</div>
                                         <div class="agent-iteration-snapshot-grid">
                                             <article
@@ -1016,7 +1133,7 @@
                                         </div>
                                     </section>
 
-                                    <section v-if="getAgentIterationNightlightPayload().status" class="agent-summary-card agent-iteration-analysis-card">
+                                    <section v-if="getAgentIterationNightlightPayload().status && isAgentIterationSecondaryView('ai')" class="agent-summary-card agent-iteration-analysis-card">
                                         <div class="agent-summary-card-head">
                                             <div class="agent-summary-card-title">AI 热点变化解析</div>
                                             <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('nightlight'), $event)">
@@ -1040,7 +1157,7 @@
                                         </div>
                                     </section>
 
-                                    <section v-if="getAgentIterationNightlightPayload().status" class="agent-summary-card">
+                                    <section v-if="getAgentIterationNightlightPayload().status && isAgentIterationSecondaryView('trend')" class="agent-summary-card">
                                         <div class="agent-summary-card-title">三年趋势指标</div>
                                         <div class="agent-iteration-metric-grid">
                                             <div
@@ -1419,9 +1536,9 @@
                                     placeholder="有问题，尽管问"
                                     @keydown.enter.exact.prevent="submitAgentTurn()"
                                 ></textarea>
-                                <div class="agent-composer-actions">
-                                    <button
-                                        type="button"
+                            <div class="agent-composer-actions">
+                                <button
+                                    type="button"
                                         class="agent-composer-send"
                                         :class="{ 'is-loading': agentLoading }"
                                         :disabled="agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
@@ -1431,12 +1548,79 @@
                                         <span v-else class="agent-composer-send-loading" aria-hidden="true">
                                             <span class="agent-composer-send-stop"></span>
                                         </span>
-                                    </button>
-                                </div>
+                                </button>
                             </div>
                         </div>
                     </div>
+                    <div
+                        v-if="basisDrawerOpen && getBasisDrawerPayload() && agentWorkspaceView !== 'tools'"
+                        class="basis-drawer-mask"
+                        @click.self="closeBasisDrawer">
+                        <aside class="basis-drawer" role="dialog" aria-modal="true" aria-labelledby="basis-drawer-title-agent">
+                            <div class="basis-drawer-head">
+                                <div>
+                                    <div class="basis-drawer-eyebrow">依据</div>
+                                    <h3 id="basis-drawer-title-agent">{{ getBasisDrawerPayload().title || '生成依据' }}</h3>
+                                </div>
+                                <button type="button" class="basis-drawer-close" aria-label="关闭生成依据" @click="closeBasisDrawer">×</button>
+                            </div>
+                            <div class="basis-drawer-tabs" role="tablist" aria-label="生成依据">
+                                <button
+                                    v-for="tab in getBasisDrawerTabs()"
+                                    :key="`basis-agent-tab-${tab.key}`"
+                                    type="button"
+                                    :class="{ active: basisDrawerActiveTab === tab.key }"
+                                    @click="setBasisDrawerTab(tab.key)">
+                                    {{ tab.label }}
+                                </button>
+                            </div>
+                            <div v-if="basisDrawerActiveTab === 'basic'" class="basis-drawer-body">
+                                <section class="basis-drawer-section">
+                                    <h4>当前结论</h4>
+                                    <p>{{ getBasisDrawerPayload().currentConclusion || '暂无结论文本。' }}</p>
+                                </section>
+                                <section class="basis-drawer-section">
+                                    <h4>使用字段</h4>
+                                    <div v-if="getBasisDrawerPayload().fields.length" class="basis-field-list">
+                                        <div
+                                            v-for="field in getBasisDrawerPayload().fields"
+                                            :key="`basis-agent-field-${field.key || field.label}`"
+                                            class="basis-field-row">
+                                            <span>{{ field.label || field.key }}</span>
+                                            <strong>{{ formatBasisFieldValue(field.value) }}</strong>
+                                        </div>
+                                    </div>
+                                    <p v-else>暂无结构化字段。</p>
+                                </section>
+                                <section class="basis-drawer-section">
+                                    <h4>AI 提示词</h4>
+                                    <pre class="basis-prompt-text">{{ getBasisDrawerPayload().aiPrompt }}</pre>
+                                    <p v-if="getBasisDrawerPayload().aiPromptPayloadNote" class="basis-prompt-note">{{ getBasisDrawerPayload().aiPromptPayloadNote }}</p>
+                                </section>
+                            </div>
+                            <div v-else-if="basisDrawerActiveTab === 'template'" class="basis-drawer-body">
+                                <section class="basis-drawer-section">
+                                    <h4>判断规则</h4>
+                                    <ul v-if="getBasisDrawerPayload().rules.length" class="basis-rule-list">
+                                        <li v-for="(rule, idx) in getBasisDrawerPayload().rules" :key="`basis-agent-rule-${idx}`">{{ rule }}</li>
+                                    </ul>
+                                    <p v-else>暂无规则说明。</p>
+                                </section>
+                                <section class="basis-drawer-section">
+                                    <h4>规则模板</h4>
+                                    <p>{{ getBasisDrawerPayload().template || '暂无模板。' }}</p>
+                                </section>
+                            </div>
+                            <div v-else class="basis-drawer-body">
+                                <section class="basis-drawer-section">
+                                    <h4>原始输入</h4>
+                                    <pre class="basis-json-block">{{ formatBasisRawInput(getBasisDrawerPayload().rawInput) }}</pre>
+                                </section>
+                            </div>
+                        </aside>
+                    </div>
                 </div>
+            </div>
             </div>
 
             <div v-show="!isAgentWorkspaceActive()" class="analysis-map-stage">
@@ -1704,7 +1888,8 @@
                         </section>
                         <section class="basis-drawer-section">
                             <h4>AI 提示词</h4>
-                            <p>{{ getBasisDrawerPayload().aiPrompt }}</p>
+                            <pre class="basis-prompt-text">{{ getBasisDrawerPayload().aiPrompt }}</pre>
+                            <p v-if="getBasisDrawerPayload().aiPromptPayloadNote" class="basis-prompt-note">{{ getBasisDrawerPayload().aiPromptPayloadNote }}</p>
                         </section>
                     </div>
                     <div v-else-if="basisDrawerActiveTab === 'template'" class="basis-drawer-body">

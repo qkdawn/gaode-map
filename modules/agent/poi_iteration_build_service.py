@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from collections import Counter, defaultdict
@@ -16,11 +17,12 @@ from modules.history.service import get_history_pois_payload
 _TYPE_MAP_PATH = Path(__file__).resolve().parents[2] / "share" / "type_map.json"
 _TYPE_CONFIG: Dict[str, Any] = json.loads(_TYPE_MAP_PATH.read_text(encoding="utf-8"))
 _HEATMAP_VIEW_WIDTH = 100.0
+_HEATMAP_BOUNDS_PADDING_RATIO = 0.08
 _STATICMAP_WIDTH = 640
-_STATICMAP_MIN_HEIGHT = 260
+_STATICMAP_MIN_HEIGHT = 320
 _STATICMAP_MAX_HEIGHT = 860
 _STATICMAP_PADDING_PX = 28
-_HEATMAP_BOUNDS_PADDING_RATIO = 0.08
+_POI_ITERATION_AI_TIMEOUT_S = 2.0
 
 
 def _as_text(value: Any) -> str:
@@ -64,15 +66,6 @@ def _mercator_pixel(lng: float, lat: float, zoom: int) -> tuple[float, float]:
     return unit_x * world_size, unit_y * world_size
 
 
-def _lng_lat_from_mercator_pixel(x: float, y: float, zoom: int) -> tuple[float, float]:
-    world_size = 256 * (2 ** int(zoom))
-    unit_x = float(x) / world_size
-    unit_y = float(y) / world_size
-    lng = unit_x * 360.0 - 180.0
-    lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * unit_y)))
-    return lng, math.degrees(lat_rad)
-
-
 def _lng_lat_from_mercator_unit(x: float, y: float) -> tuple[float, float]:
     lng = float(x) * 360.0 - 180.0
     lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * float(y))))
@@ -112,36 +105,26 @@ def _build_heatmap_view_bounds(pairs: List[tuple[float, float]]) -> Optional[Dic
     max_y = min(1.0, unit_bounds["max_y"] + pad_y)
     span_x = max(max_x - min_x, 1e-9)
     span_y = max(max_y - min_y, 1e-9)
-
     static_height = int(round(_STATICMAP_WIDTH * span_y / span_x))
     static_height = max(_STATICMAP_MIN_HEIGHT, min(_STATICMAP_MAX_HEIGHT, static_height))
     view_width = _HEATMAP_VIEW_WIDTH
     view_height = max(1.0, view_width * static_height / _STATICMAP_WIDTH)
 
+    center_unit_x = (min_x + max_x) / 2
+    center_unit_y = (min_y + max_y) / 2
+    center_lng, center_lat = _lng_lat_from_mercator_unit(center_unit_x, center_unit_y)
     available_width = max(1, _STATICMAP_WIDTH - _STATICMAP_PADDING_PX * 2)
     available_height = max(1, static_height - _STATICMAP_PADDING_PX * 2)
     zoom_x = math.log2(available_width / (256 * span_x))
     zoom_y = math.log2(available_height / (256 * span_y))
     zoom = max(3, min(17, int(math.floor(min(zoom_x, zoom_y)))))
-
-    center_unit_x = (min_x + max_x) / 2
-    center_unit_y = (min_y + max_y) / 2
-    center_lng, center_lat = _lng_lat_from_mercator_unit(center_unit_x, center_unit_y)
     center_px, center_py = _mercator_pixel(center_lng, center_lat, zoom)
     left_px = center_px - (_STATICMAP_WIDTH / 2)
     top_px = center_py - (static_height / 2)
 
     min_lng, max_lat = _lng_lat_from_mercator_unit(min_x, min_y)
     max_lng, min_lat = _lng_lat_from_mercator_unit(max_x, max_y)
-    viewport = {
-        "left_px": left_px,
-        "top_px": top_px,
-        "width": float(_STATICMAP_WIDTH),
-        "height": float(static_height),
-        "zoom": zoom,
-    }
-    view = {"width": view_width, "height": view_height}
-
+    svg_view = {"width": view_width, "height": view_height}
     return {
         "min_lng": min_lng,
         "min_lat": min_lat,
@@ -149,13 +132,33 @@ def _build_heatmap_view_bounds(pairs: List[tuple[float, float]]) -> Optional[Dic
         "max_lat": max_lat,
         "ref_lat": center_lat,
         "mercator_bounds": {"min_x": min_x, "min_y": min_y, "max_x": max_x, "max_y": max_y},
-        "view": view,
-        "view_box": f"0 0 {_round_float(view_width, 3):g} {_round_float(view_height, 3):g}",
-        "aspect_ratio": f"{_round_float(view_width, 3):g} / {_round_float(view_height, 3):g}",
-        "staticmap_viewport": viewport,
+        "view": svg_view,
+        "view_box": f"0 0 {_round_float(svg_view['width'], 3):g} {_round_float(svg_view['height'], 3):g}",
+        "aspect_ratio": f"{_round_float(svg_view['width'], 3):g} / {_round_float(svg_view['height'], 3):g}",
+        "svg_viewport": {
+            "min_lng": min_lng,
+            "min_lat": min_lat,
+            "max_lng": max_lng,
+            "max_lat": max_lat,
+            "min_x": min_x,
+            "min_y": min_y,
+            "max_x": max_x,
+            "max_y": max_y,
+            "width": svg_view["width"],
+            "height": svg_view["height"],
+        },
+        "staticmap_viewport": {
+            "left_px": left_px,
+            "top_px": top_px,
+            "width": float(_STATICMAP_WIDTH),
+            "height": float(static_height),
+            "zoom": zoom,
+        },
         "staticmap_size": {"width": _STATICMAP_WIDTH, "height": static_height},
         "staticmap_center": [round(center_lng, 6), round(center_lat, 6)],
         "staticmap_zoom": zoom,
+        "center": [round(center_lng, 6), round(center_lat, 6)],
+        "size": {"width": _round_float(svg_view["width"], 3), "height": _round_float(svg_view["height"], 3)},
     }
 
 
@@ -174,6 +177,21 @@ def _project_lng_lat(lng: float, lat: float, bounds: Dict[str, float]) -> Dict[s
         return {
             "x": max(0, min(view_width, ((px - left) / width) * view_width)),
             "y": max(0, min(view_height, ((py - top) / height) * view_height)),
+        }
+
+    svg_viewport = bounds.get("svg_viewport") if isinstance(bounds, dict) else None
+    if isinstance(svg_viewport, dict):
+        min_lng = float(svg_viewport.get("min_lng") or bounds.get("min_lng") or 0)
+        max_lng = float(svg_viewport.get("max_lng") or bounds.get("max_lng") or min_lng)
+        min_lat = float(svg_viewport.get("min_lat") or bounds.get("min_lat") or 0)
+        max_lat = float(svg_viewport.get("max_lat") or bounds.get("max_lat") or min_lat)
+        view_width = max(1.0, float(svg_viewport.get("width") or _HEATMAP_VIEW_WIDTH))
+        view_height = max(1.0, float(svg_viewport.get("height") or _HEATMAP_VIEW_WIDTH))
+        span_lng = max(max_lng - min_lng, 1e-12)
+        span_lat = max(max_lat - min_lat, 1e-12)
+        return {
+            "x": max(0, min(view_width, ((float(lng) - min_lng) / span_lng) * view_width)),
+            "y": max(0, min(view_height, ((max_lat - float(lat)) / span_lat) * view_height)),
         }
 
     mercator_bounds = _mercator_bounds_from_pairs(
@@ -297,21 +315,23 @@ def _point_in_polygon(lng: float, lat: float, polygon: Any) -> bool:
     return any(_point_in_ring(lng, lat, ring) for ring in rings)
 
 
-def _estimate_staticmap_zoom(bounds: Dict[str, float], width: int, height: int) -> int:
-    lng_span = max(float(bounds["max_lng"]) - float(bounds["min_lng"]), 1e-9)
-    lat_span = max(float(bounds["max_lat"]) - float(bounds["min_lat"]), 1e-9)
-    center_lat = (float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2
-    lng_zoom = math.log2((360 * width) / (256 * lng_span))
-    lat_zoom = math.log2((170.1022 * height * max(math.cos(math.radians(center_lat)), 0.2)) / (256 * lat_span))
-    return max(3, min(17, int(math.floor(min(lng_zoom, lat_zoom)))))
-
-
 def _public_heatmap_bounds(bounds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not bounds:
         return {}
     result: Dict[str, Any] = {}
     for key, value in bounds.items():
-        if key in {"staticmap_viewport", "view", "staticmap_size", "staticmap_center", "staticmap_zoom", "view_box", "aspect_ratio"}:
+        if key in {
+            "svg_viewport",
+            "staticmap_viewport",
+            "staticmap_size",
+            "staticmap_center",
+            "staticmap_zoom",
+            "view",
+            "size",
+            "center",
+            "view_box",
+            "aspect_ratio",
+        }:
             continue
         if isinstance(value, dict):
             result[key] = {nested_key: _round_float(nested_value, 8) for nested_key, nested_value in value.items()}
@@ -330,48 +350,42 @@ def _heatmap_view_meta(bounds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "view": {"width": _round_float(view_width, 3), "height": _round_float(view_height, 3)},
         "view_box": (bounds or {}).get("view_box") or f"0 0 {_round_float(view_width, 3):g} {_round_float(view_height, 3):g}",
         "aspect_ratio": (bounds or {}).get("aspect_ratio") or f"{_round_float(view_width, 3):g} / {_round_float(view_height, 3):g}",
-        "viewport": {
-            key: _round_float(value, 3) if key != "zoom" else int(value)
-            for key, value in dict((bounds or {}).get("staticmap_viewport") or {}).items()
-        },
     }
 
 
 def build_area_heatmap_basemap(bounds: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    size = dict((bounds or {}).get("staticmap_size") or {"width": 640, "height": 420})
+    view_size = dict((bounds or {}).get("size") or {"width": _HEATMAP_VIEW_WIDTH, "height": _HEATMAP_VIEW_WIDTH})
     meta = _heatmap_view_meta(bounds)
     empty = {
         "url": "",
         "bounds": _public_heatmap_bounds(bounds),
-        "center": list((bounds or {}).get("staticmap_center") or []),
-        "zoom": (bounds or {}).get("staticmap_zoom"),
-        "size": size,
+        "center": list((bounds or {}).get("staticmap_center") or (bounds or {}).get("center") or []),
+        "zoom": None,
+        "size": view_size,
         "source": "none",
         **meta,
     }
     key = _as_text(settings.amap_web_service_key).split(",", 1)[0].strip()
     if not key or not bounds:
         return empty
-    center = list(bounds.get("staticmap_center") or [
-        round((float(bounds["min_lng"]) + float(bounds["max_lng"])) / 2, 6),
-        round((float(bounds["min_lat"]) + float(bounds["max_lat"])) / 2, 6),
-    ])
-    zoom = int(bounds.get("staticmap_zoom") or _estimate_staticmap_zoom(bounds, int(size["width"]), int(size["height"])))
+    center = list(bounds.get("staticmap_center") or bounds.get("center") or [])
+    zoom = int(bounds.get("staticmap_zoom") or 0)
+    if not center or not zoom:
+        return empty
+    static_size = dict(bounds.get("staticmap_size") or view_size)
     params = {
         "location": f"{center[0]:.6f},{center[1]:.6f}",
         "zoom": zoom,
-        "size": f"{size['width']}*{size['height']}",
+        "size": f"{int(static_size['width'])}*{int(static_size['height'])}",
         "scale": 2,
         "key": key,
     }
     return {
+        **empty,
         "url": f"https://restapi.amap.com/v3/staticmap?{urlencode(params)}",
-        "bounds": _public_heatmap_bounds(bounds),
-        "center": center,
         "zoom": zoom,
-        "size": size,
+        "size": static_size,
         "source": "amap_static_url",
-        **meta,
     }
 
 
@@ -724,7 +738,7 @@ def build_rule_insights(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
             "insights": {
                 "fastest_growth": "当前只有一个年份，暂无法判断增长最快行业。",
                 "declining_category": "当前只有一个年份，暂无法判断衰退行业。",
-                "emerging_area": f"当前核心聚集区：{top_area.get('name')}" if top_area.get("name") else "当前缺少可识别的新兴区域信号。",
+                "emerging_area": f"当前核心承载片区：{top_area.get('name')}" if top_area.get("name") else "当前缺少可识别的增长片区信号。",
                 "structure_judgement": f"一级业态以{top_category.get('name')}为主{single_structure_detail}。" if top_category.get("name") else "业态结构信号有限。",
             },
         }
@@ -740,13 +754,18 @@ def build_rule_insights(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
     declining_sub = next((item for item in sorted(subcategory_changes, key=lambda item: (item["rate"], item["delta"])) if item["delta"] < 0), None)
     growth_sub_detail = f"；小类增长最快为{fastest_sub['name']}，+{fastest_sub['delta']}" if fastest_sub else ""
     decline_sub_detail = f"；小类下降明显为{declining_sub['name']}，{declining_sub['delta']}" if declining_sub else ""
-    emerging_area = next(
+    growth_area = next(
         (
             item
             for item in sorted(_change_rows(first.get("area_counts") or {}, last.get("area_counts") or {}), key=lambda item: -item["delta"])
             if item["delta"] > 0
         ),
         None,
+    )
+    growth_area_text = (
+        f"{growth_area['name']}内部 POI 增量较明显（+{growth_area['delta']}）。"
+        if growth_area
+        else "未形成可命名增长片区；需结合小类空间信号判断具体增量方向。"
     )
     return {
         "summary": [
@@ -759,7 +778,7 @@ def build_rule_insights(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
         "insights": {
             "fastest_growth": f"{fastest['name']}大类增长较快（+{fastest['delta']}，+{fastest['rate'] * 100:.1f}%）{growth_sub_detail}" if fastest else "未发现明显增长行业。",
             "declining_category": f"{declining['name']}大类下降明显（{declining['delta']}，{declining['rate'] * 100:.1f}%）{decline_sub_detail}" if declining else "未发现明显衰退行业。",
-            "emerging_area": f"{emerging_area['name']}（+{emerging_area['delta']}）" if emerging_area else "未发现明显新兴区域。",
+            "emerging_area": growth_area_text,
             "structure_judgement": f"一级结构偏向{top_category.get('name')}主导{structure_detail}，需结合目标业态判断消费型/生产型属性。" if top_category.get("name") else "结构判断信号有限。",
         },
     }
@@ -789,6 +808,16 @@ async def _generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str
     from modules.agent.iteration_change_service import generate_poi_iteration_analysis
 
     return await generate_poi_iteration_analysis(evidence)
+
+
+async def _generate_poi_iteration_analysis_with_timeout(evidence: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        return await asyncio.wait_for(
+            _generate_poi_iteration_analysis(evidence),
+            timeout=max(0.1, float(_POI_ITERATION_AI_TIMEOUT_S)),
+        )
+    except asyncio.TimeoutError:
+        return {"status": "failed", "ai_summary": [], "ai_insights": {}, "error": "ai_timeout"}
 
 
 async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any]:
@@ -832,21 +861,15 @@ async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any
         "area_heatmap_basemap": area_heatmap_basemap,
         "area_heatmap_boundary": area_heatmap_boundary,
         "area_heatmap_polygon": polygon,
+        "spatial_factors": {},
+        "subcategory_spatial_trend_rows": [],
+        "subcategory_spatial_summary": [],
         "rule_summary": rule["summary"],
         "rule_insights": rule["insights"],
         "ai_summary": [],
         "ai_insights": {},
+        "ai_status": "pending",
         "ai_error": "",
         "error": "",
     }
-
-    ai_result = await _generate_poi_iteration_analysis(base_payload)
-    return {
-        **base_payload,
-        "ai_summary": list(ai_result.get("ai_summary") or []),
-        "ai_insights": dict(ai_result.get("ai_insights") or {}),
-        "spatial_factors": dict(ai_result.get("spatial_factors") or {}),
-        "subcategory_spatial_trend_rows": list(ai_result.get("subcategory_spatial_trend_rows") or []),
-        "subcategory_spatial_summary": list(ai_result.get("subcategory_spatial_summary") or []),
-        "ai_error": "" if ai_result.get("status") == "ready" else _as_text(ai_result.get("error")),
-    }
+    return base_payload

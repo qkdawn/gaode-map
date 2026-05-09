@@ -15,17 +15,22 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('/vue/') || id.includes('/pinia/')) return 'vendor-vue'
+          const normalizedId = id.replace(/\\/g, '/')
+          if (normalizedId.includes('node_modules')) {
+            if (normalizedId.includes('/vue/') || normalizedId.includes('/pinia/')) return 'vendor-vue'
             return 'vendor'
           }
-          if (id.includes('/src/features/road/') || id.includes('/src/map/')) return 'feature-road-map'
-          if (id.includes('/src/features/h3/')) return 'feature-h3'
-          if (id.includes('/src/features/history/')) return 'feature-history'
-          if (id.includes('/src/features/export/')) return 'feature-export'
-          if (id.includes('/src/features/poi/')) return 'feature-poi'
-          if (id.includes('/src/features/isochrone/')) return 'feature-isochrone'
-          if (id.includes('/src/stores/')) return 'feature-stores'
+          if (normalizedId.includes('/src/pages/analysis/analysis-template')) return 'analysis-template'
+          if (normalizedId.includes('/src/pages/analysis/components/')) return 'analysis-template'
+          if (normalizedId.includes('/src/pages/analysis/orchestrators/')) return 'analysis-runtime'
+          if (normalizedId.includes('/src/features/agent/')) return 'feature-agent'
+          if (normalizedId.includes('/src/features/road/') || normalizedId.includes('/src/map/')) return 'feature-road-map'
+          if (normalizedId.includes('/src/features/h3/')) return 'feature-h3'
+          if (normalizedId.includes('/src/features/history/')) return 'feature-history'
+          if (normalizedId.includes('/src/features/export/')) return 'feature-export'
+          if (normalizedId.includes('/src/features/poi/')) return 'feature-poi'
+          if (normalizedId.includes('/src/features/isochrone/')) return 'feature-isochrone'
+          if (normalizedId.includes('/src/stores/')) return 'feature-stores'
           return undefined
         },
       },

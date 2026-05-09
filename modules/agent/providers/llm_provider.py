@@ -411,6 +411,7 @@ async def _invoke_json_role(
     }
     request_body = {
         "model": settings.ai_model,
+        "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},

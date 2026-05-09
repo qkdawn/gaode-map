@@ -5,7 +5,7 @@ import httpx
 
 from core.config import settings
 from modules.agent.context_builder import build_context_bundle
-from modules.agent.providers.llm_provider import generate_answer_output_with_llm, plan_with_llm, run_gate_with_llm, run_llm_tool_loop
+from modules.agent.providers.llm_provider import _invoke_json_role, generate_answer_output_with_llm, plan_with_llm, run_gate_with_llm, run_llm_tool_loop
 from modules.agent.schemas import AgentMessage, AnalysisSnapshot, GateDecision, PlanStep, ToolResult, ToolSpec, WorkingMemory
 from modules.agent.tools import RegisteredTool, get_tool_registry
 
@@ -315,6 +315,37 @@ def test_generate_answer_output_with_llm_parses_cards(monkeypatch):
     assert "decision_strength" in system_prompt
     assert "evidence_matrix" in system_prompt
     assert "不建议直接推断" in system_prompt
+
+
+def test_invoke_json_role_requests_json_object_response(monkeypatch):
+    requests = []
+    monkeypatch.setattr(settings, "ai_base_url", "https://example.test/v1")
+    monkeypatch.setattr(settings, "ai_api_key", "test-key")
+    monkeypatch.setattr(settings, "ai_model", "test-model")
+    monkeypatch.setattr(settings, "ai_thinking_enabled", False)
+    monkeypatch.setattr(settings, "ai_timeout_s", 5)
+    _mock_streams(
+        monkeypatch,
+        requests,
+        [
+            _completion_stream(
+                response_id="resp-json-1",
+                content='{"ok":true}',
+            )
+        ],
+    )
+
+    result = asyncio.run(_invoke_json_role(
+        system_prompt="只输出 json",
+        user_payload={"task": "unit_test"},
+        emit=None,
+        phase="unit",
+        title="JSON unit",
+        reasoning_id="json-unit",
+    ))
+
+    assert result == {"ok": True}
+    assert requests[0]["json"]["response_format"] == {"type": "json_object"}
 
 
 def test_plan_with_llm_sends_planner_specific_prompt_and_payload(monkeypatch):

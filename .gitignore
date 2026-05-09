@@ -38,3 +38,4 @@ docker/valhalla_custom_files/*.pbf
 *.osrm
 *.gph
 **/__pycache__/
+.gstack/

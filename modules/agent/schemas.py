@@ -188,6 +188,8 @@ class AgentIterationPoiResponse(BaseModel):
     spatial_factors: Dict[str, Any] = Field(default_factory=dict)
     subcategory_spatial_trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
     subcategory_spatial_summary: List[str] = Field(default_factory=list)
+    ai_prompt: str = ""
+    ai_prompt_payload_note: str = ""
     error: str = ""
 
 
@@ -224,6 +226,9 @@ class AgentIterationPoiBuildResponse(BaseModel):
     rule_insights: Dict[str, str] = Field(default_factory=dict)
     ai_summary: List[str] = Field(default_factory=list)
     ai_insights: Dict[str, str] = Field(default_factory=dict)
+    ai_status: str = "pending"
+    ai_prompt: str = ""
+    ai_prompt_payload_note: str = ""
     ai_error: str = ""
     error: str = ""
 

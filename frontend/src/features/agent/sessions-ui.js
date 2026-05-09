@@ -409,6 +409,7 @@ function createAgentUiMethods() {
         rules: cloneArray(source.rules).map((item) => asText(item)).filter(Boolean),
         template: asText(source.template),
         aiPrompt: asText(source.aiPrompt || source.ai_prompt) || '该结论由规则模板生成，未调用 AI',
+        aiPromptPayloadNote: asText(source.aiPromptPayloadNote || source.ai_prompt_payload_note),
         rawInput: cloneObject(source.rawInput || source.raw_input || {}),
         sourceType: asText(source.sourceType || source.source_type || 'rule'),
       }
@@ -417,11 +418,29 @@ function createAgentUiMethods() {
       if (value === undefined || value === null || value === '') return '-'
       if (Array.isArray(value)) {
         return value.map((item) => {
-          if (item && typeof item === 'object') return JSON.stringify(item)
+          if (item && typeof item === 'object') {
+            const label = asText(item.label || item.name || item.key || item.title)
+            const itemValue = item.value ?? item.count ?? item.delta ?? item.poi_count ?? ''
+            if (label && itemValue !== '') return `${label}：${this.formatBasisFieldValue(itemValue)}`
+            const compactParts = [
+              asText(item.name),
+              asText(item.parent),
+              item.delta !== undefined && item.delta !== null ? `变化 ${item.delta}` : '',
+              item.last_count !== undefined && item.last_count !== null ? `末年 ${item.last_count}` : '',
+              item.poi_count !== undefined && item.poi_count !== null ? `${item.poi_count}点` : '',
+            ].filter(Boolean)
+            return compactParts.join('，') || JSON.stringify(item)
+          }
           return asText(item)
-        }).filter(Boolean).join('、') || '-'
+        }).filter(Boolean).join('；') || '-'
       }
-      if (typeof value === 'object') return JSON.stringify(value)
+      if (typeof value === 'object') {
+        const entries = Object.entries(value)
+          .filter(([, itemValue]) => itemValue !== undefined && itemValue !== null && itemValue !== '')
+          .slice(0, 8)
+          .map(([key, itemValue]) => `${key}：${this.formatBasisFieldValue(itemValue)}`)
+        return entries.join('；') || '-'
+      }
       return asText(value)
     },
     formatBasisRawInput(value = null) {
@@ -432,45 +451,225 @@ function createAgentUiMethods() {
         return '{}'
       }
     },
-    buildAgentSummaryBasisPayload(item = null) {
-      const section = item && typeof item === 'object' ? item : {}
-      const key = asText(section.sectionKey || section.section_key)
-      const panelPayloads = this.getAgentActiveSummaryPanelPayloads()
-      const pack = this.getAgentSummaryPack(panelPayloads)
+    getAgentIterationPoiSystemPrompt() {
+      return [
+        '你是商业地理与 POI 多年变化分析助手。',
+        '请基于 poi_iteration_v1 证据包中的 year_summaries、trend_metrics、category_changes、subcategory_changes、area_distribution、spatial_factors、subcategory_spatial_trends 和 growth_area_signal 生成解释。',
+        '必须先概括 POI 总量、一级业态和关键小类数量变化，再使用 spatial_factors 与 subcategory_spatial_trends 说明小类位置变化。',
+        '位置判断只能来自 spatial_factors、subcategory_spatial_trends、area_distribution 和 evidence 中已有区域字段，不得凭坐标或想象地图编造方向、商圈、道路名、地标或百分比。',
+        'emerging_area 字段表示增长片区/空间增量方向，不是行政区新区域；优先使用 growth_area_signal，说明增长小类、方位、圈层、重心迁移和热点格。如果没有可命名片区，不要写“未发现明显新兴区域”，应写“未形成可命名片区，但新增 POI 主要表现为...方向/...圈层补点”。',
+        'fastest_growth 和 declining_category 必须优先使用 material_change_highlights；排序按绝对增减量、末年占比、末年数量，百分比增速只能作为补充。',
+        'first_count/last_count 均小于 10 的低基数项不得作为主导增长行业，只能作为小基数提示。',
+        '只输出 JSON 对象，字段必须为 summary_points, fastest_growth, declining_category, emerging_area, structure_judgement。',
+        'summary_points 必须是 2 到 4 条中文短句；其余字段必须是中文字符串，不要返回对象或数组。',
+        '不要把小类当成独立大类，不要编造 evidence 中没有出现的行业、小类、区域、商圈或道路。',
+        '证据不足时明确说明趋势信号有限。不要输出 markdown。',
+      ].join('')
+    },
+    getAgentIterationPoiPromptPayloadNote() {
+      return 'User payload: {"task":"poi_iteration_change","evidence": poi_iteration_v1 证据包}。evidence 只包含年摘要、趋势指标、业态/小类变化、空间因子、小类空间信号、增长片区信号和区域分布摘要；不包含全量 POI 点、图片 base64、底图、完整热力格或前端 UI 状态。'
+    },
+    hasBasisFieldValue(value) {
+      if (value === undefined || value === null || value === '') return false
+      if (Array.isArray(value)) return value.length > 0
+      if (typeof value === 'object') return Object.keys(value).length > 0
+      return true
+    },
+    appendBasisField(fields, key, label, value) {
+      if (!Array.isArray(fields) || !this.hasBasisFieldValue(value)) return
+      fields.push({ key, label, value })
+    },
+    buildAgentSummaryEvidencePack(panelPayloads = null) {
+      const payloads = panelPayloads && typeof panelPayloads === 'object'
+        ? cloneObject(panelPayloads)
+        : this.getAgentActiveSummaryPanelPayloads()
+      const pack = this.getAgentSummaryPack(payloads)
+      const businessProfile = cloneObject(payloads.current_business_profile || {})
+      const poiStructure = cloneObject(payloads.current_poi_structure_analysis || {})
+      const h3Structure = cloneObject(payloads.current_h3_structure_analysis || {})
+      const commercialHotspots = cloneObject(payloads.current_commercial_hotspots || {})
+      const populationProfile = cloneObject(payloads.current_population_profile_analysis || {})
       const nightlightPattern = cloneObject(
-        panelPayloads.current_nightlight_pattern_analysis
-        || panelPayloads.nightlight_pattern
-        || panelPayloads.nightlight
+        payloads.current_nightlight_pattern_analysis
+        || payloads.nightlight_pattern
+        || payloads.nightlight
         || {},
       )
       const nightlightSummary = cloneObject(
-        panelPayloads.current_nightlight_summary
-        || ((panelPayloads.nightlight_overview || {}).summary)
+        payloads.current_nightlight_summary
+        || ((payloads.nightlight_overview || {}).summary)
         || ((this.nightlightOverview || {}).summary)
         || {},
       )
+      const roadPattern = cloneObject(payloads.current_road_pattern_analysis || {})
       const roadSummary = cloneObject(
-        panelPayloads.road_syntax_summary
-        || ((panelPayloads.road || {}).summary)
+        payloads.road_syntax_summary
+        || ((payloads.road || {}).summary)
         || this.roadSyntaxSummary
         || {},
       )
+      const areaLabels = cloneObject(payloads.current_area_character_labels || {})
+      return {
+        task: 'summary_pack_generation',
+        evidence_version: 'summary_pack_v1',
+        generated_sections: {
+          headline_judgment: cloneObject(pack.headline_judgment || {}),
+          user_profile: cloneObject(pack.user_profile || {}),
+          behavior_inference: cloneObject(pack.behavior_inference || {}),
+        },
+        business_profile: {
+          label: businessProfile.business_profile,
+          portrait: businessProfile.portrait,
+          summary_text: businessProfile.summary_text,
+          functional_mix_score: businessProfile.functional_mix_score,
+        },
+        poi_structure: {
+          summary_text: poiStructure.summary_text,
+          dominant_categories: cloneArray(poiStructure.dominant_categories),
+          structure_tags: cloneArray(poiStructure.structure_tags),
+          top_category_mix: cloneArray(poiStructure.top_category_mix || poiStructure.top_categories),
+        },
+        spatial_structure: {
+          distribution_pattern: h3Structure.distribution_pattern,
+          summary_text: h3Structure.summary_text,
+          hotspot_mode: commercialHotspots.hotspot_mode || h3Structure.hotspot_mode,
+          hotspot_summary: commercialHotspots.summary_text,
+          core_zone_count: commercialHotspots.core_zone_count ?? h3Structure.core_zone_count,
+          opportunity_zone_count: commercialHotspots.opportunity_zone_count ?? h3Structure.opportunity_count,
+          hotspot_count: h3Structure.hotspot_count,
+          structure_signal_count: h3Structure.structure_signal_count,
+        },
+        population_profile: {
+          summary_text: populationProfile.summary_text,
+          total_population: populationProfile.total_population,
+          top_age_band: populationProfile.top_age_band,
+          dominant_age_band: populationProfile.dominant_age_band,
+        },
+        nightlight_pattern: {
+          summary_text: nightlightPattern.summary_text || nightlightSummary.summary_text,
+          economic_activity_summary_text: nightlightPattern.economic_activity_summary_text || nightlightSummary.economic_activity_summary_text,
+          economic_activity_intensity_level: nightlightPattern.economic_activity_intensity_level || nightlightSummary.economic_activity_intensity_level,
+          total_radiance: nightlightPattern.total_radiance ?? nightlightSummary.total_radiance,
+          mean_radiance: nightlightPattern.mean_radiance ?? nightlightSummary.mean_radiance,
+          p90_radiance: nightlightPattern.p90_radiance ?? nightlightSummary.p90_radiance,
+          lit_pixel_ratio: nightlightPattern.lit_pixel_ratio ?? nightlightSummary.lit_pixel_ratio,
+          core_hotspot_count: nightlightPattern.core_hotspot_count ?? nightlightSummary.core_hotspot_count,
+          sector_direction_analysis: cloneObject(nightlightPattern.sector_direction_analysis || nightlightSummary.sector_direction_analysis || {}),
+        },
+        road_pattern: {
+          summary_text: roadPattern.summary_text || roadSummary.summary_text,
+          connectivity_signal: roadPattern.connectivity_signal || roadSummary.connectivity_signal,
+          access_signal: roadPattern.access_signal || roadSummary.access_signal,
+          readability_signal: roadPattern.readability_signal || roadSummary.readability_signal,
+          road_orientation_analysis: cloneObject(roadPattern.road_orientation_analysis || roadSummary.road_orientation_analysis || {}),
+        },
+        area_labels: cloneArray(areaLabels.character_tags || areaLabels.area_labels || []),
+        guardrails: {
+          write_business_judgment_not_data_description: true,
+          no_raw_metric_recital_as_headline: true,
+          user_profile_must_describe_people: true,
+          behavior_inference_must_describe_usage: true,
+          no_invented_facts: true,
+        },
+      }
+    },
+    getAgentSummarySectionPrompt(sectionKey = '') {
+      const key = asText(sectionKey)
+      if (key === 'headline') {
+        return [
+          '你是 gaode-map 的商业总结撰写器。',
+          '请基于给定结构化证据，输出 JSON：{"summary":"...","supporting_clause":"..."}。',
+          '要求：summary 必须是一句话商业判断；supporting_clause 必须补一句解释，不要复述 summary；不能编造新事实，不能罗列原始数值。',
+        ].join('')
+      }
+      if (key === 'user_profile' || key === 'behavior_inference') {
+        const taskLine = key === 'user_profile'
+          ? 'headline 必须写消费者是谁，traits 写 2 到 4 条稳定画像特征。'
+          : 'headline 必须写消费行为或使用方式，traits 写 2 到 4 条行为特征。'
+        return [
+          '你是 gaode-map 的商业总结撰写器。',
+          '请基于给定结构化证据，输出 JSON：{"headline":"...","traits":["...","..."]}。',
+          taskLine,
+          '不能编造新事实，不能输出 markdown。',
+        ].join('')
+      }
+      return [
+        '你是 gaode-map 的商业总结撰写器。',
+        '你只负责把已给定的结构化证据整理成商业判断，不得创造新的事实。',
+        '区域判断必须引用对应 section 的结构化维度，不要把原始指标、百分比、样本量直接写成主句。',
+        '输出由后端校验，证据不足时只能做保守判断。',
+      ].join('')
+    },
+    getAgentSummaryPromptPayloadNote(sectionKey = '') {
+      const key = asText(sectionKey)
+      const task = key === 'headline'
+        ? 'summary_headline_generation'
+        : (key === 'user_profile' || key === 'behavior_inference' ? `summary_${key}_generation` : 'summary_pack_generation')
+      return `User payload: {"task":"${task}","evidence": summary_pack_v1 证据包}。evidence 只包含 POI 结构、空间结构、人口画像、夜光、路网、区域标签与已生成分段结论；不包含图片/base64、全量 POI 点、完整网格或前端 UI 状态。`
+    },
+    buildAgentSummaryEvidenceFields(section = {}, evidence = {}) {
+      const key = asText(section.sectionKey || section.section_key)
+      const generated = evidence.generated_sections || {}
       const fields = cloneArray(section.dimensions).map((dimension) => ({
         key: asText(dimension.key),
         label: asText(dimension.label),
         value: asText(dimension.conclusion),
       }))
-      if (key === 'consumption_vitality') {
-        fields.push(
-          { key: 'economic_activity_intensity_level', label: '经济活动强度等级', value: nightlightPattern.economic_activity_intensity_level || nightlightSummary.economic_activity_intensity_level },
-          { key: 'total_radiance', label: '总辐亮', value: nightlightPattern.total_radiance ?? nightlightSummary.total_radiance },
-          { key: 'mean_radiance', label: '平均辐亮', value: nightlightPattern.mean_radiance ?? nightlightSummary.mean_radiance },
-          { key: 'p90_radiance', label: 'P90 辐亮', value: nightlightPattern.p90_radiance ?? nightlightSummary.p90_radiance },
-          { key: 'lit_pixel_ratio', label: '点亮占比', value: nightlightPattern.lit_pixel_ratio ?? nightlightSummary.lit_pixel_ratio },
-          { key: 'sector_direction_analysis', label: '夜光扇区方位', value: nightlightPattern.sector_direction_analysis || nightlightSummary.sector_direction_analysis },
-          { key: 'road_orientation_analysis', label: '路网方位', value: roadSummary.road_orientation_analysis },
-        )
+      this.appendBasisField(fields, 'evidence_version', '证据包版本', evidence.evidence_version)
+      this.appendBasisField(fields, 'task', '生成任务', evidence.task)
+      const headline = generated.headline_judgment || {}
+      const userProfile = generated.user_profile || {}
+      const behavior = generated.behavior_inference || {}
+      if (key === 'headline') {
+        this.appendBasisField(fields, 'headline_summary', '一句话结论', headline.summary)
+        this.appendBasisField(fields, 'supporting_clause', '支撑解释', headline.supporting_clause)
       }
+      if (key === 'user_profile') {
+        this.appendBasisField(fields, 'user_profile_headline', '用户画像结论', userProfile.headline)
+        this.appendBasisField(fields, 'user_profile_traits', '画像特征', userProfile.traits)
+      }
+      if (key === 'behavior_inference') {
+        this.appendBasisField(fields, 'behavior_headline', '行为推断结论', behavior.headline)
+        this.appendBasisField(fields, 'behavior_traits', '行为特征', behavior.traits)
+      }
+      if (key === 'headline' || key === 'poi_structure' || key === 'business_support') {
+        this.appendBasisField(fields, 'business_profile', '商业画像', evidence.business_profile)
+        this.appendBasisField(fields, 'poi_structure_summary', 'POI 结构摘要', (evidence.poi_structure || {}).summary_text)
+        this.appendBasisField(fields, 'dominant_categories', '主导业态', (evidence.poi_structure || {}).dominant_categories)
+        this.appendBasisField(fields, 'structure_tags', '结构标签', (evidence.poi_structure || {}).structure_tags)
+      }
+      if (key === 'headline' || key === 'spatial_structure') {
+        this.appendBasisField(fields, 'spatial_structure_summary', '空间结构摘要', (evidence.spatial_structure || {}).summary_text)
+        this.appendBasisField(fields, 'hotspot_mode', '热点模式', (evidence.spatial_structure || {}).hotspot_mode)
+        this.appendBasisField(fields, 'core_zone_count', '核心区数量', (evidence.spatial_structure || {}).core_zone_count)
+        this.appendBasisField(fields, 'opportunity_zone_count', '机会区数量', (evidence.spatial_structure || {}).opportunity_zone_count)
+      }
+      if (key === 'headline' || key === 'user_profile' || key === 'behavior_inference') {
+        this.appendBasisField(fields, 'population_profile', '人口画像摘要', (evidence.population_profile || {}).summary_text)
+        this.appendBasisField(fields, 'top_age_band', '主要年龄段', (evidence.population_profile || {}).top_age_band || (evidence.population_profile || {}).dominant_age_band)
+      }
+      if (key === 'headline' || key === 'consumption_vitality' || key === 'behavior_inference' || key === 'business_support') {
+        const nightlight = evidence.nightlight_pattern || {}
+        const road = evidence.road_pattern || {}
+        this.appendBasisField(fields, 'economic_activity_intensity_level', '经济活动强度等级', nightlight.economic_activity_intensity_level)
+        this.appendBasisField(fields, 'total_radiance', '总辐亮', nightlight.total_radiance)
+        this.appendBasisField(fields, 'mean_radiance', '平均辐亮', nightlight.mean_radiance)
+        this.appendBasisField(fields, 'p90_radiance', 'P90 辐亮', nightlight.p90_radiance)
+        this.appendBasisField(fields, 'lit_pixel_ratio', '点亮占比', nightlight.lit_pixel_ratio)
+        this.appendBasisField(fields, 'sector_direction_analysis', '夜光扇区方位', nightlight.sector_direction_analysis)
+        this.appendBasisField(fields, 'road_orientation_analysis', '路网方位', road.road_orientation_analysis)
+        this.appendBasisField(fields, 'road_pattern_summary', '路网摘要', road.summary_text)
+      }
+      this.appendBasisField(fields, 'area_labels', '区域标签', evidence.area_labels)
+      return fields.filter((field) => this.hasBasisFieldValue(field.value))
+    },
+    buildAgentSummaryBasisPayload(item = null) {
+      const section = item && typeof item === 'object' ? item : {}
+      const key = asText(section.sectionKey || section.section_key)
+      const panelPayloads = this.getAgentActiveSummaryPanelPayloads()
+      const pack = this.getAgentSummaryPack(panelPayloads)
+      const evidence = this.buildAgentSummaryEvidencePack(panelPayloads)
+      const fields = this.buildAgentSummaryEvidenceFields(section, evidence)
       return {
         title: `${asText(section.title) || '区域总结'}依据`,
         currentConclusion: asText(section.reasoning),
@@ -489,13 +688,14 @@ function createAgentUiMethods() {
         template: key === 'consumption_vitality'
           ? '从空间分布来看，等时圈内夜间经济活动整体处于{强度水平}，高值区域主要集中在{夜光高值方向/区域}。区域道路以{主导路网走向}为主，{次主导路网走向}为辅。两者在空间上呈现{一致性关系}，表明交通对经济活动分布具有{影响程度}。'
           : '根据{面板结构化字段}生成{结论标题}，并将主要证据压缩为一段可汇报文字。',
-        aiPrompt: '区域总结由 AI 生成后经后端校验/规则重写；涉及经济活动强度时仅允许使用夜光和路网等结构化证据。',
+        aiPrompt: this.getAgentSummarySectionPrompt(key),
+        aiPromptPayloadNote: this.getAgentSummaryPromptPayloadNote(key),
         rawInput: {
           section,
-          summary_pack: pack,
-          nightlight_pattern: nightlightPattern,
-          nightlight_summary: nightlightSummary,
-          road_summary: roadSummary,
+          generated_section: key === 'headline'
+            ? cloneObject((pack.headline_judgment || {}))
+            : cloneObject((pack[key] || pack[`${key}`] || {})),
+          evidence,
         },
         sourceType: 'ai_checked',
       }
@@ -525,10 +725,10 @@ function createAgentUiMethods() {
           '扇形方位按等时圈中心划分 8 个方向，统计各方向总辐亮、均值、热点数量和占比。',
         ],
         template: '基于夜间灯光亮度，等时圈内经济活动强度呈现{强度水平}，高值区域主要集中在{主要方位}，热点集中度为{集中度描述}。',
-        aiPrompt: '该面板为算法指标说明，未调用 AI',
+        aiPrompt: '未调用 AI。该抽屉展示夜光算法指标说明：总辐亮、均值、P90、点亮占比、热点核心、峰值边缘比与 8 扇区方位统计均来自前端/后端结构化计算结果。',
         rawInput: {
-          overview: this.nightlightOverview || {},
-          layer: this.nightlightLayer || {},
+          summary,
+          analysis,
           active_view: this.nightlightAnalysisView,
         },
         sourceType: 'rule',
@@ -554,21 +754,82 @@ function createAgentUiMethods() {
           '长度占比最高的是主导方位，第二高的是次主导方位，用于和夜光高值方向做空间一致性对照。',
         ],
         template: '区域道路以{主导路网走向}为主，{次主导路网走向}为辅；与夜光高值方向呈现{一致性关系}。',
-        aiPrompt: '该面板为算法指标说明，未调用 AI',
+        aiPrompt: '未调用 AI。该抽屉展示路网算法指标说明：节点、边、道路长度、空间句法指标与长度加权道路方位均来自结构化计算结果。',
         rawInput: {
           summary,
-          diagnostics: this.roadSyntaxDiagnostics || {},
+          diagnostics: {
+            status: (this.roadSyntaxDiagnostics || {}).status,
+            warning: (this.roadSyntaxDiagnostics || {}).warning,
+            error: (this.roadSyntaxDiagnostics || {}).error,
+          },
           metric: this.roadSyntaxMetric,
           radius: this.roadSyntaxRadius,
         },
         sourceType: 'rule',
       }
     },
+    getAgentIterationNightlightSystemPrompt() {
+      return [
+        '你是商业地理与夜光遥感分析助手。',
+        '请基于 nightlight_iteration_v1 证据包中的 years、series、hotspot_shift、insights 和 snapshot_refs 判断区域夜间经济活动的热点变化和迁移趋势。',
+        '只输出 JSON 对象，字段必须为 headline, trend_summary, hotspot_migration, risk_or_opportunity。',
+        'headline 必须是一句话趋势判断；trend_summary 说明总辐亮、均值、P90 或点亮占比的主要变化；hotspot_migration 只能使用 hotspot_shift 和 insights 中已有信号；risk_or_opportunity 说明机会或风险。',
+        '不要编造未给出的方向、道路、商圈名称或地标；证据不足时明确说明趋势信号有限。不要输出 markdown。',
+      ].join('')
+    },
+    getAgentIterationNightlightPromptPayloadNote() {
+      return 'User payload: {"task":"nightlight_iteration_change","evidence": nightlight_iteration_v1 证据包}。evidence 只包含年度夜光统计、热点迁移摘要、规则洞察和快照引用状态；不包含图片 base64、完整栅格、地图底图或前端 UI 状态。'
+    },
     buildAgentIterationBasisPayload(kind = 'poi') {
       const safeKind = asText(kind) || 'poi'
       const payload = this.getAgentIterationPayload(safeKind)
       const isNightlight = safeKind === 'nightlight'
       const isPoi = safeKind === 'poi'
+      const rawInput = isPoi
+        ? this.buildAgentPoiIterationAiEvidencePreview(payload)
+        : this.buildAgentNightlightIterationEvidence(payload)
+      const evidenceYears = cloneArray(rawInput.years)
+      const evidenceYearSummaries = cloneArray(rawInput.year_summaries)
+      const latestEvidenceYear = evidenceYearSummaries[evidenceYearSummaries.length - 1] || {}
+      const evidenceTrendMetrics = cloneArray(rawInput.trend_metrics)
+      const evidenceCategoryChanges = cloneArray(rawInput.category_changes)
+      const evidenceSubcategoryChanges = cloneArray(rawInput.subcategory_changes)
+      const evidenceSpatialTrends = cloneArray(rawInput.subcategory_spatial_trends)
+      const evidenceAreaDistribution = cloneArray(rawInput.area_distribution)
+      const nightlightSeries = cloneArray(rawInput.series)
+      const nightlightHotspot = cloneObject(rawInput.hotspot_shift)
+      const nightlightSnapshotRefs = cloneArray(rawInput.snapshot_refs)
+      const findMetricValue = (key, fallbackLabel = '') => {
+        const row = evidenceTrendMetrics.find((item) => asText(item && item.key) === key)
+          || evidenceTrendMetrics.find((item) => fallbackLabel && asText(item && item.label).includes(fallbackLabel))
+        return row ? row.value : ''
+      }
+      const formatChangeName = (row = null) => {
+        if (!row || typeof row !== 'object') return ''
+        const name = asText(row.name)
+        const parent = asText(row.parent)
+        const delta = Number(row.delta || 0)
+        return `${name}${parent ? `（${parent}）` : ''} ${delta >= 0 ? '+' : ''}${delta}`
+      }
+      const strongestGrowth = (rows) => cloneArray(rows)
+        .filter((row) => Number(row && row.delta) > 0)
+        .sort((a, b) => Number(b.delta || 0) - Number(a.delta || 0))[0]
+      const strongestDecline = (rows) => cloneArray(rows)
+        .filter((row) => Number(row && row.delta) < 0)
+        .sort((a, b) => Number(a.delta || 0) - Number(b.delta || 0))[0]
+      const poiEvidenceFields = [
+        { key: 'evidence_version', label: '证据包版本', value: rawInput.evidence_version },
+        { key: 'period', label: '分析周期', value: evidenceYears.length ? `${evidenceYears[0]}-${evidenceYears[evidenceYears.length - 1]}` : payload.period },
+        { key: 'scope', label: '分析范围', value: `${asText((rawInput.scope || {}).area_name) || '未命名区域'} · ${asText((rawInput.scope || {}).scope_type) || '-'}` },
+        { key: 'latest_total', label: '末年 POI 数量', value: latestEvidenceYear.poi_count },
+        { key: 'total_delta', label: 'POI 首尾变化', value: findMetricValue('total_delta', 'POI 首尾变化') },
+        { key: 'category_growth', label: '增长最明显业态', value: findMetricValue('top_increase') || formatChangeName(strongestGrowth(evidenceCategoryChanges)) },
+        { key: 'category_decline', label: '减少最明显业态', value: findMetricValue('top_decrease') || formatChangeName(strongestDecline(evidenceCategoryChanges)) },
+        { key: 'subcategory_growth', label: '增长最明显小类', value: findMetricValue('top_subcategory_increase') || formatChangeName(strongestGrowth(evidenceSubcategoryChanges)) },
+        { key: 'subcategory_decline', label: '减少最明显小类', value: findMetricValue('top_subcategory_decrease') || formatChangeName(strongestDecline(evidenceSubcategoryChanges)) },
+        { key: 'spatial_signal_count', label: '小类空间信号', value: evidenceSpatialTrends.length ? `${evidenceSpatialTrends.length} 条` : '暂无，可能仍在生成或后端未返回' },
+        { key: 'area_distribution', label: '年度区域分布', value: evidenceAreaDistribution.map((row) => `${row.year || '-'}：${row.point_count ?? '-'}点，热点${row.hotspot_cell_count ?? 0}格`) },
+      ].filter((item) => item.value !== undefined && item.value !== null && item.value !== '')
       const conclusionRows = isNightlight
         ? this.getAgentIterationNightlightAnalysisRows().map((row) => `${row.label}：${row.value}`)
         : this.getAgentIterationPoiAiSummaryRows()
@@ -577,18 +838,16 @@ function createAgentUiMethods() {
         currentConclusion: conclusionRows.join('\n') || '当前暂无可展示结论。',
         fields: isNightlight
           ? [
+            { key: 'evidence_version', label: '证据包版本', value: rawInput.evidence_version },
             { key: 'period', label: '分析周期', value: payload.period },
+            { key: 'years', label: '覆盖年份', value: cloneArray(rawInput.years).join('-') },
+            { key: 'series_count', label: '年度统计条数', value: nightlightSeries.length },
             { key: 'trend_rows', label: '趋势指标', value: this.getAgentIterationNightlightTrendRows() },
             { key: 'hotspot_rows', label: '热点变化', value: this.getAgentIterationNightlightHotspotRows() },
-          ]
-          : [
-            { key: 'period', label: '分析周期', value: payload.period },
-            { key: 'feature_rows', label: 'POI 特征', value: this.getAgentIterationPoiFeatureRows() },
-            { key: 'trend_rows', label: '趋势指标', value: this.getAgentIterationPoiTrendRows() },
-            { key: 'spatial_factors', label: '空间因子', value: payload.spatial_factors },
-            { key: 'subcategory_spatial_trend_rows', label: '小类空间变化', value: payload.subcategory_spatial_trend_rows },
-            { key: 'insight_rows', label: 'AI 洞察', value: this.getAgentIterationPoiAiInsightRows() },
-          ],
+            { key: 'hotspot_shift', label: '热点迁移摘要', value: nightlightHotspot },
+            { key: 'snapshot_refs', label: '快照引用', value: nightlightSnapshotRefs.map((item) => `${item.year || '-'}：${item.has_image ? '有快照' : '无快照'}，${item.has_vector ? '有矢量' : '无矢量'}`) },
+          ].filter((item) => item.value !== undefined && item.value !== null && item.value !== '')
+          : poiEvidenceFields,
         rules: [
           '多年迭代先抽取年度快照和结构化指标，再生成趋势判断。',
           'AI 输出会被后端要求按固定 JSON 字段返回，前端只展示通过校验的字段。',
@@ -597,8 +856,11 @@ function createAgentUiMethods() {
         template: isPoi
           ? '基于{年份序列}的 POI 总量、业态结构和区域分布变化，概括{趋势判断}、{结构变化}与{机会风险}。'
           : '基于近三年夜光快照，概括{趋势判断}、{总体变化}、{热点迁移}与{机会风险}。',
-        aiPrompt: 'AI 生成 + 后端校验/重写：将多年快照、趋势指标和关键结构字段喂给模型，要求返回固定 JSON 字段，缺失或不合规内容由规则摘要兜底。',
-        rawInput: payload,
+        aiPrompt: asText(payload.ai_prompt) || (isPoi
+          ? this.getAgentIterationPoiSystemPrompt()
+          : this.getAgentIterationNightlightSystemPrompt()),
+        aiPromptPayloadNote: asText(payload.ai_prompt_payload_note) || (isPoi ? this.getAgentIterationPoiPromptPayloadNote() : this.getAgentIterationNightlightPromptPayloadNote()),
+        rawInput,
         sourceType: 'ai_checked',
       }
     },
@@ -1085,15 +1347,21 @@ function createAgentUiMethods() {
     captureSummaryTaskParams(taskKey = '') {
       const key = asText(taskKey)
       if (key === 'poi_fetch') {
+        const year = Number(this.poiYearSource || this.resultPoiYear || 0) || null
         return {
           source: asText(this.poiDataSource || this.resultDataSource || ''),
+          year,
+          years: year ? [year] : [],
         }
       }
       if (key === 'poi_grid') {
+        const year = Number(this.poiYearSource || this.resultPoiYear || 0) || null
         return {
           resolution: Number(this.h3GridResolution || 0) || 10,
           neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
           include_mode: asText(this.h3GridIncludeMode || ''),
+          poi_year: year,
+          poi_years: year ? [year] : [],
         }
       }
       if (key === 'population') {
@@ -1115,6 +1383,50 @@ function createAgentUiMethods() {
         }
       }
       return {}
+    },
+    getSummaryTaskPoiYearLabel() {
+      const year = Number(this.poiYearSource || this.resultPoiYear || 0)
+      return Number.isFinite(year) && year > 0 ? String(year) : '-'
+    },
+    getSummaryTaskPoiSourceLabel() {
+      return asText(this.resultDataSource || this.poiDataSource || '') || '当前数据源'
+    },
+    getSummaryTaskFetchedPoiYears() {
+      const years = new Set()
+      cloneArray(this.poiResultsByYear).forEach((item) => {
+        const year = Number(item && item.year)
+        if (Number.isFinite(year) && (cloneArray(item && item.pois).length || Number(item && item.count) > 0)) years.add(year)
+      })
+      cloneArray(this.currentHistoryAvailablePoiYears).forEach((item) => {
+        const year = Number(item)
+        if (Number.isFinite(year)) years.add(year)
+      })
+      const currentYear = Number(this.resultPoiYear || this.currentHistorySelectedPoiYear || 0)
+      if (Number.isFinite(currentYear) && cloneArray(this.allPoisDetails).length) years.add(currentYear)
+      return Array.from(years).sort((a, b) => a - b)
+    },
+    getSummaryTaskPoiYearOptions() {
+      const fetched = new Set(this.getSummaryTaskFetchedPoiYears().map((item) => Number(item)))
+      const baseOptions = typeof this.getPoiMultiYearOptions === 'function'
+        ? this.getPoiMultiYearOptions()
+        : [
+          { value: 2020, label: '2020 本地' },
+          { value: 2022, label: '2022 本地' },
+          { value: 2024, label: '2024 本地' },
+          { value: 2026, label: '2026 高德' },
+        ]
+      return cloneArray(baseOptions).map((item) => {
+        const value = Number(item && item.value)
+        const isFetched = fetched.has(value)
+        const label = asText(item && item.label) || String(value || '')
+        return {
+          ...cloneObject(item),
+          value: String(value),
+          year: value,
+          fetched: isFetched,
+          label: isFetched ? `${label} · 已抓取` : label,
+        }
+      })
     },
     stringifySummaryTaskParams(params = {}) {
       const normalize = (value) => {
@@ -1182,6 +1494,42 @@ function createAgentUiMethods() {
         },
       }
       this.syncCurrentAgentSession()
+    },
+    async onSummaryTaskPoiAnalysisYearChange() {
+      const targetYear = Number(this.poiYearSource || this.resultPoiYear || 0)
+      if (Number.isFinite(targetYear) && targetYear > 0) {
+        this.poiYearSelections = [targetYear]
+        await this.selectAgentPoiYearForGrid(targetYear)
+      }
+      this.onSummaryTaskParameterChange('poi_fetch')
+    },
+    async onSummaryTaskPoiGridYearChange() {
+      await this.onSummaryTaskPoiAnalysisYearChange()
+      this.onSummaryTaskParameterChange('poi_grid')
+    },
+    async selectAgentPoiYearForGrid(year = '') {
+      const targetYear = Number(year)
+      if (!Number.isFinite(targetYear)) return
+      const existing = cloneArray(this.poiResultsByYear)
+        .find((item) => Number(item && item.year) === targetYear && cloneArray(item && item.pois).length)
+      if (existing) {
+        this.allPoisDetails = this.deduplicateFetchedPois
+          ? this.deduplicateFetchedPois(cloneArray(existing.pois))
+          : cloneArray(existing.pois)
+        this.resultPoiYear = targetYear
+        this.currentHistorySelectedPoiYear = targetYear
+        this.poiYearSource = String(targetYear)
+        this.poiDataSource = asText(existing.source || this.poiDataSource || this.resultDataSource)
+        this.resultDataSource = this.poiDataSource
+        this.poiCategorySummary = cloneArray(existing.category_summary || this.poiCategorySummary)
+        if (typeof this.rebuildPoiRuntimeSystem === 'function') this.rebuildPoiRuntimeSystem(this.allPoisDetails)
+        if (typeof this.updatePoiCharts === 'function') this.updatePoiCharts()
+        return
+      }
+      if (String(this.scopeSource || '').trim().toLowerCase() === 'history' && String(this.currentHistoryRecordId || '').trim() && typeof this.loadCurrentHistoryPoiYear === 'function') {
+        await this.loadCurrentHistoryPoiYear(targetYear)
+        return
+      }
     },
     isSummaryTaskRunning(taskKey = '') {
       const task = this.getSummaryTaskByKey(taskKey)
@@ -2469,6 +2817,73 @@ function createAgentUiMethods() {
         { key: 'nightlight', label: '夜光', disabled: false },
       ]
     },
+    getAgentIterationSecondaryView(kind = '') {
+      const currentKind = asText(kind || this.agentIterationActiveKind) || 'poi'
+      const view = cloneObject(this.agentIterationSecondaryView)
+      const defaultItem = this.getAgentIterationSecondaryNavItems(currentKind)[0] || {}
+      return asText(view[currentKind]) || asText(defaultItem.key)
+    },
+    isAgentIterationSecondaryView(key = '', kind = '') {
+      return this.getAgentIterationSecondaryView(kind) === asText(key)
+    },
+    setAgentIterationSecondaryView(key = '', kind = '') {
+      const currentKind = asText(kind || this.agentIterationActiveKind) || 'poi'
+      const target = asText(key)
+      const items = this.getAgentIterationSecondaryNavItems(currentKind)
+      if (!items.some((item) => item.key === target)) return
+      this.agentIterationSecondaryView = {
+        ...cloneObject(this.agentIterationSecondaryView),
+        [currentKind]: target,
+      }
+    },
+    getAgentIterationSelectedSecondaryItem(kind = '') {
+      const currentKind = asText(kind || this.agentIterationActiveKind) || 'poi'
+      const key = this.getAgentIterationSecondaryView(currentKind)
+      return this.getAgentIterationSecondaryNavItems(currentKind).find((item) => item.key === key) || {}
+    },
+    getAgentIterationSecondaryPlaceholderTitle(kind = '') {
+      const item = this.getAgentIterationSelectedSecondaryItem(kind)
+      return `${asText(item.label) || '模块'}生成中`
+    },
+    shouldShowAgentIterationSecondaryPlaceholder(kind = '') {
+      const currentKind = asText(kind || this.agentIterationActiveKind) || 'poi'
+      const item = this.getAgentIterationSelectedSecondaryItem(currentKind)
+      if (!asText(item.key)) return false
+      if (currentKind === 'poi') {
+        if (this.agentIterationPoiError || this.getAgentIterationPoiPayload().error) return false
+        if (item.key === 'ai' && asText(this.getAgentIterationPoiPayload().status) === 'ready') return false
+        return !item.available
+      }
+      if (currentKind === 'population') {
+        if (this.agentIterationPopulationError || this.getAgentIterationPopulationPayload().error) return false
+        return !item.available
+      }
+      if (this.agentIterationNightlightError || this.getAgentIterationNightlightPayload().error) return false
+      return !item.available
+    },
+    getAgentIterationSecondaryNavItems() {
+      const activeKind = asText(arguments[0] || this.agentIterationActiveKind) || 'poi'
+      if (activeKind === 'poi') {
+        const poiReady = asText(this.getAgentIterationPoiPayload().status) === 'ready'
+        return [
+          { key: 'ai', label: 'AI解读', available: poiReady },
+          { key: 'metrics', label: '核心指标', available: poiReady },
+          { key: 'trend', label: '趋势结构', available: this.getAgentIterationPoiTotalLineChart().length >= 2 },
+          { key: 'space', label: '空间分布', available: this.getAgentIterationPoiAreaHeatmaps().length > 0 },
+          { key: 'detail', label: '年度明细', available: this.getAgentIterationPoiSnapshotRows().length > 0 },
+        ]
+      }
+      if (activeKind === 'population') {
+        return [
+          { key: 'metrics', label: '核心指标', available: asText(this.getAgentIterationPopulationPayload().status) === 'ready' },
+        ]
+      }
+      return [
+        { key: 'snapshots', label: '年度快照', available: cloneArray(this.getAgentIterationNightlightPayload().snapshots).length > 0 },
+        { key: 'ai', label: 'AI解读', available: !!asText(this.getAgentIterationNightlightPayload().status) },
+        { key: 'trend', label: '趋势指标', available: !!asText(this.getAgentIterationNightlightPayload().status) },
+      ]
+    },
     getAgentIterationPayload(kind = 'nightlight') {
       const payloads = cloneObject(this.agentPanelPayloads)
       const root = payloads.iteration_change && typeof payloads.iteration_change === 'object'
@@ -2608,12 +3023,40 @@ function createAgentUiMethods() {
       const payload = this.getAgentIterationPoiPayload()
       const rows = cloneArray(payload.ai_summary).map((item) => asText(item)).filter(Boolean)
       if (rows.length) return rows
+      if (!asText(payload.ai_error)) return []
       return cloneArray(payload.rule_summary).map((item) => asText(item)).filter(Boolean)
+    },
+    isAgentIterationAiTimeout(error = '') {
+      return /ai_timeout/i.test(asText(error))
+    },
+    getAgentIterationPoiAiStatusText() {
+      const payload = this.getAgentIterationPoiPayload()
+      if (cloneArray(payload.ai_summary).length) return 'AI 深度解读已完成。'
+      if (asText(payload.ai_status) === 'loading') return '基础统计已完成，AI 深度解读正在生成。'
+      if (this.isAgentIterationAiTimeout(payload.ai_error)) return '基础统计和快照已完成，AI 深度解读仍在补充。'
+      if (payload.ai_error) return this.getAgentIterationAiErrorLabel(payload.ai_error)
+      return '基础统计已完成，等待 AI 深度解读。'
+    },
+    shouldShowAgentIterationPoiAiPlaceholder() {
+      const payload = this.getAgentIterationPoiPayload()
+      return asText(payload.status) === 'ready'
+        && !cloneArray(payload.ai_summary).length
+        && !asText(payload.ai_error)
     },
     getAgentIterationPoiAiInsightRows() {
       const payload = this.getAgentIterationPoiPayload()
       const insights = cloneObject(payload.ai_insights)
       const fallback = cloneObject(payload.rule_insights)
+      const allowFallback = asText(payload.ai_status) !== 'loading' && !this.shouldShowAgentIterationPoiAiPlaceholder()
+      const normalizeGrowthAreaValue = (value) => {
+        const text = formatInsightValue(value)
+        if (!text) return ''
+        const hasOldAreaTerm = text.includes('新兴区域') || text.includes('新兴片区')
+        const weakNegative = text.includes('未发现明显') || text.includes('没有明显') || text.includes('暂无明显')
+        if (!hasOldAreaTerm) return text
+        if (weakNegative) return allowFallback ? this.buildAgentIterationPoiGrowthAreaFallback() : ''
+        return text.replaceAll('新兴区域', '增长片区').replaceAll('新兴片区', '增长片区')
+      }
       const formatInsightValue = (value) => {
         if (value && typeof value === 'object' && !Array.isArray(value)) {
           const category = asText(value.category)
@@ -2635,9 +3078,41 @@ function createAgentUiMethods() {
       return [
         { key: 'fastest_growth', label: '增长最快行业', value: formatInsightValue(insights.fastest_growth || fallback.fastest_growth) },
         { key: 'declining_category', label: '衰退行业', value: formatInsightValue(insights.declining_category || fallback.declining_category) },
-        { key: 'emerging_area', label: '新兴区域', value: formatInsightValue(insights.emerging_area || fallback.emerging_area) },
+        { key: 'emerging_area', label: '增长片区', value: normalizeGrowthAreaValue(insights.emerging_area || fallback.emerging_area || (allowFallback ? this.buildAgentIterationPoiGrowthAreaFallback() : '')) },
         { key: 'structure_judgement', label: '结构判断', value: formatInsightValue(insights.structure_judgement || fallback.structure_judgement) },
       ].filter((item) => item.value)
+    },
+    buildAgentIterationPoiGrowthAreaFallback() {
+      const rows = this.getAgentIterationPoiSpatialTrendRows()
+        .filter((row) => Number(row.delta || 0) > 0)
+        .sort((a, b) => Number(b.delta || 0) - Number(a.delta || 0)
+          || Number(b.centroidShiftM || 0) - Number(a.centroidShiftM || 0)
+          || Number(b.hotspotGridCount || 0) - Number(a.hotspotGridCount || 0))
+        .slice(0, 3)
+      if (!rows.length) return '未形成可命名增长片区；当前空间增量信号有限。'
+      const parts = rows.map((row) => {
+        const name = asText(row.name)
+        const direction = asText(row.dominantDirection || row.centroidShiftDirection)
+        const ring = asText(row.dominantRing)
+        const hotspot = Number(row.hotspotGridCount || 0)
+        const delta = Number(row.delta || 0)
+        return `${name}${delta > 0 ? ` +${delta}` : ''}${direction ? `，偏${direction}` : ''}${ring ? `，${ring}` : ''}${hotspot ? `，热点${hotspot}格` : ''}`
+      })
+      return `未形成可命名增长片区；新增 POI 主要表现为${parts.join('；')}。`
+    },
+    shouldShowAgentIterationPoiInsightPlaceholder() {
+      const payload = this.getAgentIterationPoiPayload()
+      return asText(payload.status) === 'ready'
+        && !this.getAgentIterationPoiAiInsightRows().length
+        && !asText(payload.ai_error)
+    },
+    isAgentIterationPoiSpatialSignalLoading() {
+      const payload = this.getAgentIterationPoiPayload()
+      const aiStatus = asText(payload.ai_status)
+      return asText(payload.status) === 'ready'
+        && ['pending', 'loading'].includes(aiStatus)
+        && !cloneArray(payload.subcategory_spatial_trend_rows).length
+        && !asText(payload.ai_error)
     },
     getAgentIterationPoiSpatialTrendRows(limit = undefined) {
       const rows = cloneArray(this.getAgentIterationPoiPayload().subcategory_spatial_trend_rows)
@@ -2837,6 +3312,9 @@ function createAgentUiMethods() {
       return Array.from(groups.values())
         .sort((a, b) => Number(b.total || 0) - Number(a.total || 0) || a.category.localeCompare(b.category, 'zh-CN'))
     },
+    getAgentIterationPoiAreaHeatmapCalibratedPayload() {
+      return this.getAgentIterationPoiPayload()
+    },
     setAgentIterationPoiStructureSpatialViewPatch(patch = {}) {
       const current = cloneObject(this.agentIterationPoiStructureSpatialView)
       const next = { ...current, ...cloneObject(patch) }
@@ -2850,7 +3328,7 @@ function createAgentUiMethods() {
       return this.agentIterationPoiStructureSpatialView
     },
     getAgentIterationPoiAreaHeatmaps() {
-      const rows = cloneArray(this.getAgentIterationPoiPayload().area_heatmaps)
+      const rows = cloneArray(this.getAgentIterationPoiAreaHeatmapCalibratedPayload().area_heatmaps)
         .filter((row) => row && asText(row.year))
         .sort((a, b) => Number(a.year || 0) - Number(b.year || 0))
       if (!rows.length) return []
@@ -2859,6 +3337,7 @@ function createAgentUiMethods() {
       const maxCount = Math.max(...counts)
       const span = Math.max(1, maxCount - minCount)
       let previous = null
+      const firstCount = counts[0] || 0
       return rows.map((row) => {
         const count = Number(row.point_count || cloneArray(row.points).length || 0)
         const delta = previous ? count - Number(previous.point_count || cloneArray(previous.points).length || 0) : 0
@@ -2872,13 +3351,61 @@ function createAgentUiMethods() {
           points: cloneArray(row.points),
           point_count: count,
           delta_from_previous: delta,
+          delta_from_first: count - firstCount,
           delta_ratio_from_previous: ratio,
           count_level: (count - minCount) / span,
         }
       })
     },
+    getAgentIterationPoiAreaHeatmapChangeSummary() {
+      const rows = this.getAgentIterationPoiAreaHeatmaps()
+      if (rows.length < 2) return '展示当前区域全部 POI 的年度空间分布。'
+      const first = rows[0]
+      const last = rows[rows.length - 1]
+      const deltas = rows.slice(1).map((row) => Number(row.delta_from_previous || 0))
+      const totalDelta = Number(last.point_count || 0) - Number(first.point_count || 0)
+      const trend = deltas.every((delta) => delta > 0)
+        ? '持续增长'
+        : deltas.every((delta) => delta < 0)
+          ? '持续下降'
+          : (deltas[0] < 0 && deltas[deltas.length - 1] > 0 ? '先降后回升' : '波动变化')
+      return `${first.year}-${last.year} 全部 POI ${trend}，净变化 ${this.formatAgentIterationPoiAreaHeatmapDelta(totalDelta)}。`
+    },
+    formatAgentIterationPoiAreaHeatmapDelta(value = 0) {
+      const number = Number(value || 0)
+      if (!Number.isFinite(number) || number === 0) return '持平'
+      return `${number > 0 ? '+' : ''}${this.formatAgentIterationMetric(number, 0)}`
+    },
+    getAgentIterationPoiAreaHeatmapDeltaStateClass(value = 0) {
+      const number = Number(value || 0)
+      return {
+        'is-positive': number > 0,
+        'is-negative': number < 0,
+        'is-flat': !number,
+      }
+    },
+    getAgentIterationPoiAreaHeatmapHotspotCount(heatmap = {}) {
+      return cloneArray(heatmap.cells).length
+    },
+    isAgentIterationPoiAreaHeatmapCopying(heatmap = {}) {
+      return asText(this.agentIterationSnapshotCopyKey) === `poi-area-${asText(heatmap.year)}`
+        && /正在复制/.test(asText(this.agentIterationSnapshotCopyStatus))
+    },
+    isAgentIterationPoiAreaHeatmapCopied(heatmap = {}) {
+      return asText(this.agentIterationSnapshotCopyKey) === `poi-area-${asText(heatmap.year)}`
+        && /已复制/.test(asText(this.agentIterationSnapshotCopyStatus))
+    },
+    getAgentIterationPoiAreaHeatmapCopyLabel(heatmap = {}) {
+      if (this.isAgentIterationPoiAreaHeatmapCopying(heatmap)) return '复制中'
+      if (this.isAgentIterationPoiAreaHeatmapCopied(heatmap)) return '已复制'
+      return '点击复制'
+    },
     getAgentIterationPoiAreaHeatmapBasemap() {
-      return cloneObject(this.getAgentIterationPoiPayload().area_heatmap_basemap)
+      return cloneObject(this.getAgentIterationPoiAreaHeatmapCalibratedPayload().area_heatmap_basemap)
+    },
+    hasAgentIterationPoiAreaHeatmapBasemapImage() {
+      const basemap = this.getAgentIterationPoiAreaHeatmapBasemap()
+      return !!asText(basemap.url)
     },
     getAgentIterationPoiAreaHeatmapViewSize() {
       const basemap = this.getAgentIterationPoiAreaHeatmapBasemap()
@@ -2901,6 +3428,11 @@ function createAgentUiMethods() {
       const size = this.getAgentIterationPoiAreaHeatmapViewSize()
       return `0 0 ${size.width} ${size.height}`
     },
+    getAgentIterationPoiAreaHeatmapSvgAttrs() {
+      return {
+        viewBox: this.getAgentIterationPoiAreaHeatmapViewBox(),
+      }
+    },
     getAgentIterationPoiAreaHeatmapAspectStyle() {
       const basemap = this.getAgentIterationPoiAreaHeatmapBasemap()
       const aspectRatio = asText(basemap.aspect_ratio)
@@ -2909,7 +3441,118 @@ function createAgentUiMethods() {
       return { aspectRatio: `${size.width} / ${size.height}` }
     },
     getAgentIterationPoiAreaHeatmapBoundary() {
-      return cloneArray(this.getAgentIterationPoiPayload().area_heatmap_boundary)
+      return cloneArray(this.getAgentIterationPoiAreaHeatmapCalibratedPayload().area_heatmap_boundary)
+    },
+    getAgentIterationPoiAreaHeatmapFittedViewBox() {
+      const boundary = this.getAgentIterationPoiAreaHeatmapBoundary()
+        .map((point) => ({ x: Number(point && point.x), y: Number(point && point.y) }))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      if (boundary.length < 2) {
+        const basemap = this.getAgentIterationPoiAreaHeatmapBasemap()
+        return asText(basemap.view_box)
+      }
+      const xs = boundary.map((point) => point.x)
+      const ys = boundary.map((point) => point.y)
+      const minX = Math.min(...xs)
+      const maxX = Math.max(...xs)
+      const minY = Math.min(...ys)
+      const maxY = Math.max(...ys)
+      const width = Math.max(maxX - minX, 1e-6)
+      const height = Math.max(maxY - minY, 1e-6)
+      const pad = Math.max(width, height) * 0.08
+      return [
+        Number((minX - pad).toFixed(3)),
+        Number((minY - pad).toFixed(3)),
+        Number((width + pad * 2).toFixed(3)),
+        Number((height + pad * 2).toFixed(3)),
+      ].join(' ')
+    },
+    getAgentIterationPoiAreaHeatmapBoundaryBox() {
+      const boundary = this.getAgentIterationPoiAreaHeatmapBoundary()
+        .map((point) => ({ x: Number(point && point.x), y: Number(point && point.y) }))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      if (boundary.length < 2) return null
+      const xs = boundary.map((point) => point.x)
+      const ys = boundary.map((point) => point.y)
+      const minX = Math.min(...xs)
+      const maxX = Math.max(...xs)
+      const minY = Math.min(...ys)
+      const maxY = Math.max(...ys)
+      return {
+        minX,
+        maxX,
+        minY,
+        maxY,
+        width: Math.max(maxX - minX, 1e-6),
+        height: Math.max(maxY - minY, 1e-6),
+      }
+    },
+    getAgentIterationPoiAreaHeatmapDisplayFrame() {
+      return this.getAgentIterationPoiAreaHeatmapViewSize()
+    },
+    getAgentIterationPoiAreaHeatmapDisplayTransform() {
+      if (this.hasAgentIterationPoiAreaHeatmapBasemapImage()) return null
+      const box = this.getAgentIterationPoiAreaHeatmapBoundaryBox()
+      if (!box) return null
+      const frame = this.getAgentIterationPoiAreaHeatmapDisplayFrame()
+      const frameWidth = Math.max(1, Number(frame.width || 100))
+      const frameHeight = Math.max(1, Number(frame.height || 100))
+      const fillRatio = 0.88
+      const scale = Math.min(
+        Math.max(1e-6, frameWidth * fillRatio) / box.width,
+        Math.max(1e-6, frameHeight * fillRatio) / box.height,
+      )
+      const fittedWidth = box.width * scale
+      const fittedHeight = box.height * scale
+      return {
+        minX: box.minX,
+        minY: box.minY,
+        scale,
+        offsetX: (frameWidth - fittedWidth) / 2,
+        offsetY: (frameHeight - fittedHeight) / 2,
+      }
+    },
+    projectAgentIterationPoiAreaHeatmapDisplayPoint(point = {}, transform = null) {
+      const x = Number(point && point.x)
+      const y = Number(point && point.y)
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return { x: 0, y: 0 }
+      if (!transform) return { x, y }
+      return {
+        x: Number((Number(transform.offsetX || 0) + (x - Number(transform.minX || 0)) * Number(transform.scale || 1)).toFixed(3)),
+        y: Number((Number(transform.offsetY || 0) + (y - Number(transform.minY || 0)) * Number(transform.scale || 1)).toFixed(3)),
+      }
+    },
+    getAgentIterationPoiAreaHeatmapDisplayBoundary() {
+      const transform = this.getAgentIterationPoiAreaHeatmapDisplayTransform()
+      return this.getAgentIterationPoiAreaHeatmapBoundary()
+        .map((point) => this.projectAgentIterationPoiAreaHeatmapDisplayPoint(point, transform))
+    },
+    getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints() {
+      return this.getAgentIterationPoiAreaHeatmapDisplayBoundary()
+        .map((point) => `${Number(point.x || 0).toFixed(2)},${Number(point.y || 0).toFixed(2)}`)
+        .join(' ')
+    },
+    getAgentIterationPoiAreaHeatmapDisplayPoints(heatmap = {}) {
+      const transform = this.getAgentIterationPoiAreaHeatmapDisplayTransform()
+      return cloneArray(heatmap.points)
+        .map((point) => ({
+          ...point,
+          ...this.projectAgentIterationPoiAreaHeatmapDisplayPoint(point, transform),
+        }))
+    },
+    getAgentIterationPoiAreaHeatmapDisplayCells(heatmap = {}) {
+      const transform = this.getAgentIterationPoiAreaHeatmapDisplayTransform()
+      if (!transform) return cloneArray(heatmap.cells)
+      return cloneArray(heatmap.cells).map((cell) => {
+        const topLeft = this.projectAgentIterationPoiAreaHeatmapDisplayPoint({ x: cell.x, y: cell.y }, transform)
+        return {
+          ...cell,
+          x: topLeft.x,
+          y: topLeft.y,
+          width: Number((Number(cell.width || 0) * Number(transform.scale || 1)).toFixed(3)),
+          height: Number((Number(cell.height || 0) * Number(transform.scale || 1)).toFixed(3)),
+        }
+      })
     },
     getAgentIterationPoiAreaHeatmapBoundaryPoints() {
       return this.getAgentIterationPoiAreaHeatmapBoundary()
@@ -2917,7 +3560,130 @@ function createAgentUiMethods() {
         .join(' ')
     },
     getAgentIterationPoiAreaHeatmapPolygon() {
-      return cloneArray(this.getAgentIterationPoiPayload().area_heatmap_polygon)
+      return cloneArray(this.getAgentIterationPoiAreaHeatmapCalibratedPayload().area_heatmap_polygon)
+    },
+    normalizeAgentPoiAreaHeatmapPolygon(polygon = []) {
+      return this.normalizeAgentIterationSnapshotPolygon(polygon)
+    },
+    getAgentPoiAreaHeatmapSourcePairs(summaries = [], polygon = []) {
+      const polygonPairs = this.normalizeAgentPoiAreaHeatmapPolygon(polygon)
+      if (polygonPairs.length >= 3) return polygonPairs
+      return cloneArray(summaries)
+        .flatMap((summary) => cloneArray(summary.points))
+        .map((point) => [Number(point && point.lng), Number(point && point.lat)])
+        .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+    },
+    buildAgentPoiAreaHeatmapViewport(summaries = [], polygon = []) {
+      const pairs = this.getAgentPoiAreaHeatmapSourcePairs(summaries, polygon)
+      if (!pairs.length) return null
+      const lngs = pairs.map((point) => Number(point[0])).filter(Number.isFinite)
+      const lats = pairs.map((point) => Number(point[1])).filter(Number.isFinite)
+      if (!lngs.length || !lats.length) return null
+      const minLng = Math.min(...lngs)
+      const maxLng = Math.max(...lngs)
+      const minLat = Math.min(...lats)
+      const maxLat = Math.max(...lats)
+      const refLat = (minLat + maxLat) / 2
+      const metersPerLon = Math.max(1000, 111320 * Math.abs(Math.cos((refLat * Math.PI) / 180)))
+      const projectRaw = (lng, lat) => ({
+        x: Number(lng) * metersPerLon,
+        y: Number(lat) * 111320,
+      })
+      const minProjected = projectRaw(minLng, minLat)
+      const maxProjected = projectRaw(maxLng, maxLat)
+      const rawSpanX = Math.max(maxProjected.x - minProjected.x, 1e-9)
+      const rawSpanY = Math.max(maxProjected.y - minProjected.y, 1e-9)
+      const viewWidth = 100
+      const viewHeight = Math.max(50, Math.min(100, Number((viewWidth * rawSpanY / rawSpanX).toFixed(3))))
+      const padding = 6
+      const usableWidth = Math.max(1, viewWidth - padding * 2)
+      const usableHeight = Math.max(1, viewHeight - padding * 2)
+      const scale = Math.min(usableWidth / rawSpanX, usableHeight / rawSpanY)
+      const contentWidth = rawSpanX * scale
+      const contentHeight = rawSpanY * scale
+      return {
+        minLng,
+        minLat,
+        maxLng,
+        maxLat,
+        refLat,
+        metersPerLon,
+        minProjected,
+        maxProjected,
+        rawSpanX,
+        rawSpanY,
+        view: { width: viewWidth, height: viewHeight },
+        padding,
+        scale,
+        offsetX: (viewWidth - contentWidth) / 2,
+        offsetY: (viewHeight - contentHeight) / 2,
+      }
+    },
+    projectAgentPoiAreaHeatmapPoint(lng, lat, viewport = null) {
+      if (!viewport) return { x: 0, y: 0 }
+      const projected = {
+        x: Number(lng) * Number(viewport.metersPerLon || 1),
+        y: Number(lat) * 111320,
+      }
+      const x = Number(viewport.offsetX || 0) + ((projected.x - Number((viewport.minProjected || {}).x || 0)) * Number(viewport.scale || 1))
+      const y = Number((viewport.view || {}).height || 100)
+        - Number(viewport.offsetY || 0)
+        - ((projected.y - Number((viewport.minProjected || {}).y || 0)) * Number(viewport.scale || 1))
+      const viewWidth = Math.max(1, Number((viewport.view || {}).width || 100))
+      const viewHeight = Math.max(1, Number((viewport.view || {}).height || 100))
+      return {
+        x: Number(Math.max(0, Math.min(viewWidth, x)).toFixed(3)),
+        y: Number(Math.max(0, Math.min(viewHeight, y)).toFixed(3)),
+      }
+    },
+    isAgentPoiAreaHeatmapPointInPolygon(lng, lat, polygon = []) {
+      const ring = this.normalizeAgentPoiAreaHeatmapPolygon(polygon)
+      if (ring.length < 3) return true
+      const x = Number(lng)
+      const y = Number(lat)
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return false
+      let inside = false
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+        const xi = Number(ring[i][0])
+        const yi = Number(ring[i][1])
+        const xj = Number(ring[j][0])
+        const yj = Number(ring[j][1])
+        const intersects = ((yi > y) !== (yj > y))
+          && (x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-12) + xi)
+        if (intersects) inside = !inside
+      }
+      return inside
+    },
+    buildAgentPoiAreaHeatmapBoundary(polygon = [], viewport = null) {
+      return this.normalizeAgentPoiAreaHeatmapPolygon(polygon)
+        .map((point) => this.projectAgentPoiAreaHeatmapPoint(point[0], point[1], viewport))
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    },
+    buildAgentPoiAreaHeatmapBasemap(viewport = null) {
+      const view = cloneObject(viewport && viewport.view, { width: 100, height: 100 })
+      const width = Math.max(1, Number(view.width || 100))
+      const height = Math.max(1, Number(view.height || 100))
+      const bounds = viewport
+        ? {
+            min_lng: Number(Number(viewport.minLng).toFixed(6)),
+            min_lat: Number(Number(viewport.minLat).toFixed(6)),
+            max_lng: Number(Number(viewport.maxLng).toFixed(6)),
+            max_lat: Number(Number(viewport.maxLat).toFixed(6)),
+            ref_lat: Number(Number(viewport.refLat).toFixed(6)),
+          }
+        : {}
+      return {
+        url: '',
+        bounds,
+        center: viewport ? [Number(((Number(viewport.minLng) + Number(viewport.maxLng)) / 2).toFixed(6)), Number(((Number(viewport.minLat) + Number(viewport.maxLat)) / 2).toFixed(6))] : [],
+        zoom: null,
+        size: { width: 640, height: Math.max(320, Math.round(640 * height / width)) },
+        source: 'none',
+        view: { width, height },
+        view_box: `0 0 ${width} ${height}`,
+        aspect_ratio: `${width} / ${height}`,
+        viewport: {},
+      }
     },
     getAgentIterationPoiAreaHeatmapSnapshots() {
       const payload = this.getAgentIterationPoiPayload()
@@ -2937,6 +3703,13 @@ function createAgentUiMethods() {
     getAgentIterationPoiAreaHeatmapSnapshot(year) {
       const key = String(year || '')
       return this.getAgentIterationPoiAreaHeatmapSnapshots().find((item) => String(item.year || '') === key) || {}
+    },
+    getAgentIterationPoiAreaHeatmapSnapshotStatusText(snapshot = {}) {
+      const status = asText(snapshot.status)
+      if (status === 'ready') return '快照已生成'
+      if (status === 'loading') return `${asText(snapshot.year) || '该年份'} 快照生成中`
+      if (status === 'failed') return '快照生成失败，已显示矢量兜底'
+      return `${asText(snapshot.year) || '该年份'} 等待生成快照`
     },
     getAgentIterationPoiAreaHeatmapCellOpacity(cell = {}) {
       const intensity = Math.max(0, Math.min(1, Number(cell.intensity || 0)))
@@ -2981,6 +3754,217 @@ function createAgentUiMethods() {
       const counts = cloneArray(payload.summaries).map((summary) => `${summary.year}:${cloneArray(summary.points).length}`).join(',')
       return `${asText(payload.historyId || payload.history_id)}|${years}|${counts}|${polygon.length}:${polygon.slice(0, 80)}`
     },
+    getAgentPoiAreaHeatmapCalibrationCacheKey(payload = {}) {
+      const years = cloneArray(payload.years).join(',')
+      const polygon = JSON.stringify(cloneArray(payload.area_heatmap_polygon).slice(0, 220))
+      const counts = cloneArray(payload.summaries).map((summary) => `${summary.year}:${cloneArray(summary.points).length}`).join(',')
+      return `${asText(payload.historyId || payload.history_id || payload.source)}|${years}|${counts}|${polygon.length}:${polygon.slice(0, 120)}`
+    },
+    buildAgentPoiAreaHeatmapBasemapFromImage(imageUrl = '', size = {}) {
+      const width = Math.max(1, Number(size.width || 760))
+      const height = Math.max(1, Number(size.height || 760))
+      return {
+        url: asText(imageUrl),
+        bounds: {},
+        center: [],
+        zoom: null,
+        size: { width, height },
+        source: asText(imageUrl) ? 'amap_js_snapshot' : 'none',
+        view: { width, height },
+        view_box: `0 0 ${width} ${height}`,
+        aspect_ratio: `${width} / ${height}`,
+        viewport: {},
+      }
+    },
+    projectAgentPoiAreaHeatmapLngLatWithMap(map = null, lng, lat) {
+      if (!map || typeof map.lngLatToContainer !== 'function' || !window.AMap || typeof AMap.LngLat !== 'function') return null
+      const point = map.lngLatToContainer(new AMap.LngLat(Number(lng), Number(lat)))
+      const x = Number(point && (point.x ?? point.getX?.()))
+      const y = Number(point && (point.y ?? point.getY?.()))
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+      return { x: Number(x.toFixed(3)), y: Number(y.toFixed(3)) }
+    },
+    buildAgentPoiAreaHeatmapRowsFromProjectedSummaries(summaries = [], polygon = [], map = null, size = {}) {
+      const width = Math.max(1, Number(size.width || 760))
+      const height = Math.max(1, Number(size.height || 760))
+      const gridSize = 12
+      const cellWidth = width / gridSize
+      const cellHeight = height / gridSize
+      return cloneArray(summaries)
+        .filter((summary) => cloneArray(summary.points).length)
+        .sort((a, b) => Number(a.year || 0) - Number(b.year || 0))
+        .map((summary) => {
+          const points = cloneArray(summary.points)
+            .filter((point) => this.isAgentPoiAreaHeatmapPointInPolygon(point && point.lng, point && point.lat, polygon))
+            .map((point) => {
+              const projected = this.projectAgentPoiAreaHeatmapLngLatWithMap(map, point && point.lng, point && point.lat)
+              if (!projected) return null
+              return {
+                x: Math.max(0, Math.min(width, projected.x)),
+                y: Math.max(0, Math.min(height, projected.y)),
+                area: asText(point.area),
+                category: asText(point.category),
+                subcategory: asText(point.subcategory),
+              }
+            })
+            .filter(Boolean)
+          const cellCounts = new Map()
+          points.forEach((point) => {
+            const col = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.x || 0) / cellWidth)))
+            const row = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.y || 0) / cellHeight)))
+            const key = `${col}:${row}`
+            cellCounts.set(key, (cellCounts.get(key) || 0) + 1)
+          })
+          const maxCellCount = Math.max(1, ...Array.from(cellCounts.values()))
+          const cells = Array.from(cellCounts.entries())
+            .sort(([a], [b]) => {
+              const [aCol, aRow] = a.split(':').map((item) => Number(item))
+              const [bCol, bRow] = b.split(':').map((item) => Number(item))
+              return aRow - bRow || aCol - bCol
+            })
+            .map(([key, count]) => {
+              const [col, row] = key.split(':').map((item) => Number(item))
+              return {
+                x: Number((col * cellWidth).toFixed(3)),
+                y: Number((row * cellHeight).toFixed(3)),
+                width: Number(cellWidth.toFixed(3)),
+                height: Number(cellHeight.toFixed(3)),
+                count,
+                intensity: Number((count / maxCellCount).toFixed(4)),
+              }
+            })
+          return {
+            year: summary.year,
+            points: points.slice(0, 260),
+            cells,
+            point_count: points.length,
+            top_area: asText(((cloneArray(summary.top_areas)[0] || {}).name)),
+          }
+        })
+    },
+    buildAgentPoiAreaHeatmapBoundaryFromMap(polygon = [], map = null, size = {}) {
+      const width = Math.max(1, Number(size.width || 760))
+      const height = Math.max(1, Number(size.height || 760))
+      return this.normalizeAgentPoiAreaHeatmapPolygon(polygon)
+        .map((point) => this.projectAgentPoiAreaHeatmapLngLatWithMap(map, point[0], point[1]))
+        .filter(Boolean)
+        .map((point) => ({
+          x: Math.max(0, Math.min(width, point.x)),
+          y: Math.max(0, Math.min(height, point.y)),
+        }))
+    },
+    async renderAgentIterationPoiAreaHeatmapCalibration(payload = {}) {
+      if (!window.AMap || typeof AMap.Map !== 'function') throw new Error('amap_unavailable')
+      if (typeof html2canvas !== 'function') throw new Error('html2canvas_unavailable')
+      const summaries = cloneArray(payload.summaries)
+      if (!summaries.length) throw new Error('no_summaries')
+      const polygonPath = this.normalizeAgentIterationSnapshotPolygon(payload.area_heatmap_polygon)
+      const allPoints = summaries.flatMap((summary) => cloneArray(summary.points))
+        .filter((point) => Number.isFinite(Number(point && point.lng)) && Number.isFinite(Number(point && point.lat)))
+      if (polygonPath.length < 3 && !allPoints.length) throw new Error('no_geometry')
+      const size = { width: 760, height: 760 }
+      const host = this.getOrCreateAgentIterationPoiSnapshotHost()
+      host.innerHTML = ''
+      const mapEl = document.createElement('div')
+      mapEl.style.cssText = `width:${size.width}px;height:${size.height}px;position:relative;background:#fff;overflow:hidden;`
+      host.appendChild(mapEl)
+
+      const overlays = []
+      let map = null
+      try {
+        map = new AMap.Map(mapEl, {
+          zoom: 13,
+          viewMode: '2D',
+          resizeEnable: false,
+          features: ['bg', 'point', 'road', 'building'],
+        })
+        let polygonOverlay = null
+        if (polygonPath.length >= 3 && typeof AMap.Polygon === 'function') {
+          polygonOverlay = new AMap.Polygon({
+            path: polygonPath,
+            strokeOpacity: 0,
+            fillOpacity: 0,
+            zIndex: 1,
+          })
+          polygonOverlay.setMap(map)
+          overlays.push(polygonOverlay)
+        }
+        const fitMarkers = []
+        if (!polygonOverlay && typeof AMap.Marker === 'function') {
+          allPoints.slice(0, 1200).forEach((point) => {
+            const marker = new AMap.Marker({
+              position: [Number(point.lng), Number(point.lat)],
+              opacity: 0,
+              zIndex: 1,
+            })
+            marker.setMap(map)
+            overlays.push(marker)
+            fitMarkers.push(marker)
+          })
+        }
+        if (polygonOverlay && typeof map.setFitView === 'function') {
+          map.setFitView([polygonOverlay], false, [32, 32, 32, 32])
+        } else if (fitMarkers.length && typeof map.setFitView === 'function') {
+          map.setFitView(fitMarkers, false, [32, 32, 32, 32])
+        }
+        await this.waitForAgentPoiSnapshotPaint(900)
+        const boundary = this.buildAgentPoiAreaHeatmapBoundaryFromMap(polygonPath, map, size)
+        const rows = this.buildAgentPoiAreaHeatmapRowsFromProjectedSummaries(summaries, polygonPath, map, size)
+        overlays.forEach((overlay) => {
+          try { if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null) } catch (_) {}
+        })
+        this.cleanAgentPoiSnapshotMapChrome(mapEl)
+        const canvas = await html2canvas(mapEl, {
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          scale: 1,
+          logging: false,
+          ignoreElements: (element) => this.isAgentPoiSnapshotIgnoredElement(element),
+        })
+        const imageUrl = canvas && typeof canvas.toDataURL === 'function' ? canvas.toDataURL('image/png') : ''
+        if (!asText(imageUrl).startsWith('data:image/png')) throw new Error('snapshot_unavailable')
+        if (polygonPath.length >= 3 && boundary.length < 3) throw new Error('boundary_projection_unavailable')
+        if (asText(imageUrl).length < 50000) throw new Error('basemap_snapshot_too_small')
+        return {
+          status: 'ready',
+          area_heatmaps: rows,
+          area_heatmap_basemap: this.buildAgentPoiAreaHeatmapBasemapFromImage(imageUrl, size),
+          area_heatmap_boundary: boundary,
+          area_heatmap_polygon: polygonPath,
+        }
+      } finally {
+        overlays.forEach((overlay) => {
+          try { if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null) } catch (_) {}
+        })
+        try { if (map && typeof map.destroy === 'function') map.destroy() } catch (_) {}
+        host.innerHTML = ''
+      }
+    },
+    async ensureAgentIterationPoiAreaHeatmapCalibration(payloadArg = null) {
+      const payload = payloadArg || this.getAgentIterationPoiPayload()
+      if (asText(payload.status) !== 'ready') return payload
+      const cacheKey = this.getAgentPoiAreaHeatmapCalibrationCacheKey(payload)
+      if (!cacheKey || asText(this.agentIterationPoiAreaHeatmapCalibrationGeneratingKey) === cacheKey) return payload
+      const cached = cloneObject((this.agentIterationPoiAreaHeatmapCalibrationCache || {})[cacheKey])
+      if (asText(cached.status) === 'ready') return payload
+      this.agentIterationPoiAreaHeatmapCalibrationGeneratingKey = cacheKey
+      try {
+        const calibrated = await this.renderAgentIterationPoiAreaHeatmapCalibration(payload)
+        this.agentIterationPoiAreaHeatmapCalibrationCache = {
+          ...cloneObject(this.agentIterationPoiAreaHeatmapCalibrationCache),
+          [cacheKey]: calibrated,
+        }
+      } catch (err) {
+        const nextCache = cloneObject(this.agentIterationPoiAreaHeatmapCalibrationCache)
+        delete nextCache[cacheKey]
+        this.agentIterationPoiAreaHeatmapCalibrationCache = nextCache
+      } finally {
+        if (asText(this.agentIterationPoiAreaHeatmapCalibrationGeneratingKey) === cacheKey) {
+          this.agentIterationPoiAreaHeatmapCalibrationGeneratingKey = ''
+        }
+      }
+      return payload
+    },
     async ensureAgentIterationPoiAreaHeatmapSnapshots(payloadArg = null) {
       const payload = payloadArg || this.getAgentIterationPoiPayload()
       if (asText(payload.status) !== 'ready') return payload
@@ -2993,15 +3977,16 @@ function createAgentUiMethods() {
         return this.commitAgentIterationPoiPayload({ area_heatmap_snapshots: cached })
       }
 
-      const placeholders = cloneArray(payload.area_heatmap_snapshots).length
+      const placeholders = (cloneArray(payload.area_heatmap_snapshots).length
         ? cloneArray(payload.area_heatmap_snapshots)
-        : this.buildAgentPoiAreaHeatmapSnapshotPlaceholders(payload)
-      this.commitAgentIterationPoiPayload({
-        area_heatmap_snapshots: placeholders.map((item) => ({
+        : this.buildAgentPoiAreaHeatmapSnapshotPlaceholders(payload))
+        .map((item) => ({
           ...item,
-          status: asText(item.image_url) ? 'ready' : 'loading',
+          status: asText(item.image_url) ? 'ready' : 'pending',
           error: '',
-        })),
+        }))
+      this.commitAgentIterationPoiPayload({
+        area_heatmap_snapshots: placeholders,
       })
 
       this.agentIterationPoiSnapshotGeneratingKey = cacheKey
@@ -3010,6 +3995,14 @@ function createAgentUiMethods() {
         for (const summary of cloneArray(payload.summaries)) {
           const year = summary.year
           const base = placeholders.find((item) => String(item.year) === String(year)) || {}
+          const currentSnapshots = this.getAgentIterationPoiAreaHeatmapSnapshots().length
+            ? this.getAgentIterationPoiAreaHeatmapSnapshots()
+            : placeholders
+          this.commitAgentIterationPoiPayload({ area_heatmap_snapshots: currentSnapshots.map((item) => (
+            String(item.year) === String(year) && !asText(item.image_url)
+              ? { ...item, status: 'loading', error: '' }
+              : item
+          )) })
           try {
             const imageUrl = await this.renderAgentIterationPoiAreaSnapshot(summary, payload)
             snapshots.push({
@@ -3059,7 +4052,7 @@ function createAgentUiMethods() {
       if (host) return host
       host = document.createElement('div')
       host.id = 'agentIterationPoiSnapshotHost'
-      host.style.cssText = 'position:fixed;left:-20000px;top:0;width:760px;height:420px;background:#fff;z-index:-1;pointer-events:none;overflow:hidden;'
+      host.style.cssText = 'position:fixed;left:0;top:0;width:760px;height:760px;background:#fff;z-index:-1;pointer-events:none;overflow:hidden;'
       document.body.appendChild(host)
       return host
     },
@@ -3080,6 +4073,43 @@ function createAgentUiMethods() {
         }
       })
     },
+    applyAgentPoiSnapshotBasemap(mapEl = null, payload = {}) {
+      if (!mapEl || !mapEl.style) return false
+      const url = asText((payload.area_heatmap_basemap || {}).url)
+      if (!url) return false
+      mapEl.style.backgroundImage = `url("${url}")`
+      mapEl.style.backgroundSize = '100% 100%'
+      mapEl.style.backgroundPosition = 'center'
+      mapEl.style.backgroundRepeat = 'no-repeat'
+      return true
+    },
+    buildAgentPoiSnapshotOverlaySvg(map = null, summary = {}, payload = {}) {
+      if (!map || typeof map.lngLatToContainer !== 'function') return ''
+      const size = { width: 760, height: 420 }
+      const polygonPath = this.normalizeAgentIterationSnapshotPolygon(payload.area_heatmap_polygon)
+      const boundary = this.buildAgentPoiAreaHeatmapBoundaryFromMap(polygonPath, map, size)
+      const row = this.buildAgentPoiAreaHeatmapRowsFromProjectedSummaries([summary], polygonPath, map, size)[0] || {}
+      const boundaryPoints = boundary.map((point) => `${Number(point.x || 0).toFixed(1)},${Number(point.y || 0).toFixed(1)}`).join(' ')
+      const clipId = `poi-snapshot-clip-${asText(summary.year) || 'year'}`
+      const cells = cloneArray(row.cells).map((cell) => (
+        `<rect x="${Number(cell.x || 0).toFixed(1)}" y="${Number(cell.y || 0).toFixed(1)}" width="${Number(cell.width || 0).toFixed(1)}" height="${Number(cell.height || 0).toFixed(1)}" fill="#f97316" fill-opacity="${(0.14 + Math.max(0, Math.min(1, Number(cell.intensity || 0))) * 0.34).toFixed(3)}" stroke="rgba(255,255,255,0.28)" stroke-width="0.5"></rect>`
+      )).join('')
+      const points = cloneArray(row.points).slice(0, 900).map((point) => (
+        `<circle cx="${Number(point.x || 0).toFixed(1)}" cy="${Number(point.y || 0).toFixed(1)}" r="1.45" fill="#17324d" fill-opacity="0.72" stroke="rgba(255,255,255,0.75)" stroke-width="0.45"></circle>`
+      )).join('')
+      const clipOpen = boundaryPoints ? `<g clip-path="url(#${clipId})">` : '<g>'
+      const defs = boundaryPoints ? `<defs><clipPath id="${clipId}"><polygon points="${boundaryPoints}"></polygon></clipPath></defs>` : ''
+      const polygon = boundaryPoints
+        ? `<polygon points="${boundaryPoints}" fill="rgba(37,99,235,0.08)" stroke="#2563eb" stroke-width="2.4" stroke-linejoin="round"></polygon>`
+        : ''
+      return `
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size.width} ${size.height}" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+          ${defs}
+          ${clipOpen}${cells}${points}</g>
+          ${polygon}
+        </svg>
+      `
+    },
     async renderAgentIterationPoiAreaSnapshot(summary = {}, payload = {}) {
       if (!window.AMap || typeof AMap.Map !== 'function') throw new Error('amap_unavailable')
       if (typeof html2canvas !== 'function') throw new Error('html2canvas_unavailable')
@@ -3090,6 +4120,7 @@ function createAgentUiMethods() {
       host.innerHTML = ''
       const mapEl = document.createElement('div')
       mapEl.style.cssText = 'width:760px;height:420px;position:relative;background:#fff;overflow:hidden;'
+      this.applyAgentPoiSnapshotBasemap(mapEl, payload)
       host.appendChild(mapEl)
 
       const overlays = []
@@ -3115,23 +4146,16 @@ function createAgentUiMethods() {
           polygonOverlay.setMap(map)
           overlays.push(polygonOverlay)
         }
-        points.slice(0, 1200).forEach((point, index) => {
-          const marker = new AMap.Marker({
-            position: [Number(point.lng), Number(point.lat)],
-            title: asText(point.subcategory || point.category || `POI ${index + 1}`),
-            content: '<div class="marker-dot marker-restaurant"></div>',
-            offset: new AMap.Pixel(-8, -8),
-            zIndex: 30,
-          })
-          marker.setMap(map)
-          overlays.push(marker)
-        })
         if (polygonOverlay && typeof map.setFitView === 'function') {
           map.setFitView([polygonOverlay], false, [28, 28, 28, 28])
         } else if (typeof map.setFitView === 'function') {
           map.setFitView(overlays, false, [28, 28, 28, 28])
         }
         await this.waitForAgentPoiSnapshotPaint()
+        const overlayHost = document.createElement('div')
+        overlayHost.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:50;'
+        overlayHost.innerHTML = this.buildAgentPoiSnapshotOverlaySvg(map, summary, payload)
+        mapEl.appendChild(overlayHost)
         this.cleanAgentPoiSnapshotMapChrome(mapEl)
         const canvas = await html2canvas(mapEl, {
           useCORS: true,
@@ -3194,6 +4218,8 @@ function createAgentUiMethods() {
       const next = asText(kind) || 'nightlight'
       if (!this.getAgentIterationKinds().some((item) => item.key === next && !item.disabled)) return
       this.agentIterationActiveKind = next
+      const nextSecondary = this.getAgentIterationSecondaryView(next)
+      if (!nextSecondary) this.setAgentIterationSecondaryView((this.getAgentIterationSecondaryNavItems(next)[0] || {}).key, next)
       const tabs = this.ensureAgentTabs(true)
       const activeId = asText(tabs.activeTabId)
       tabs.iterationChangeTabs = cloneArray(tabs.iterationChangeTabs).map((item) => (
@@ -3534,40 +4560,30 @@ function createAgentUiMethods() {
         return { year: summary.year, total: Number(summary.count || 0), segments }
       })
     },
-    buildAgentPoiAreaHeatmaps(summaries = []) {
+    buildAgentPoiAreaHeatmaps(summaries = [], polygon = []) {
       const sorted = cloneArray(summaries).filter((item) => cloneArray(item.points).length).sort((a, b) => Number(a.year || 0) - Number(b.year || 0))
       if (!sorted.length) return []
-      const allPoints = sorted.flatMap((summary) => cloneArray(summary.points))
-      const lngs = allPoints.map((point) => Number(point.lng)).filter(Number.isFinite)
-      const lats = allPoints.map((point) => Number(point.lat)).filter(Number.isFinite)
-      if (!lngs.length || !lats.length) return []
-      const minLng = Math.min(...lngs)
-      const maxLng = Math.max(...lngs)
-      const minLat = Math.min(...lats)
-      const maxLat = Math.max(...lats)
-      const refLat = (minLat + maxLat) / 2
-      const metersPerLon = Math.max(1000, 111320 * Math.abs(Math.cos((refLat * Math.PI) / 180)))
-      const projectPoint = (lng, lat) => ({
-        x: Number(lng) * metersPerLon,
-        y: Number(lat) * 111320,
-      })
-      const minProjected = projectPoint(minLng, minLat)
-      const maxProjected = projectPoint(maxLng, maxLat)
-      const spanX = Math.max(maxProjected.x - minProjected.x, 1e-9)
-      const spanY = Math.max(maxProjected.y - minProjected.y, 1e-9)
+      const viewport = this.buildAgentPoiAreaHeatmapViewport(sorted, polygon)
+      if (!viewport) return []
+      const view = cloneObject(viewport.view, { width: 100, height: 100 })
+      const viewWidth = Math.max(1, Number(view.width || 100))
+      const viewHeight = Math.max(1, Number(view.height || 100))
       return sorted.map((summary) => {
-        const points = cloneArray(summary.points).map((point) => ({
-          x: Math.max(4, Math.min(96, 4 + ((projectPoint(point.lng, point.lat).x - minProjected.x) / spanX) * 92)),
-          y: Math.max(4, Math.min(96, 96 - ((projectPoint(point.lng, point.lat).y - minProjected.y) / spanY) * 92)),
-          area: asText(point.area),
-          category: asText(point.category),
-          subcategory: asText(point.subcategory),
-        }))
+        const points = cloneArray(summary.points)
+          .filter((point) => this.isAgentPoiAreaHeatmapPointInPolygon(point && point.lng, point && point.lat, polygon))
+          .map((point) => ({
+            ...this.projectAgentPoiAreaHeatmapPoint(point.lng, point.lat, viewport),
+            area: asText(point.area),
+            category: asText(point.category),
+            subcategory: asText(point.subcategory),
+          }))
         const gridSize = 12
         const cellCounts = new Map()
+        const cellWidth = viewWidth / gridSize
+        const cellHeight = viewHeight / gridSize
         points.forEach((point) => {
-          const col = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.x || 0) / (100 / gridSize))))
-          const row = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.y || 0) / (100 / gridSize))))
+          const col = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.x || 0) / cellWidth)))
+          const row = Math.max(0, Math.min(gridSize - 1, Math.floor(Number(point.y || 0) / cellHeight)))
           const key = `${col}:${row}`
           cellCounts.set(key, (cellCounts.get(key) || 0) + 1)
         })
@@ -3576,10 +4592,10 @@ function createAgentUiMethods() {
           .map(([key, count]) => {
             const [col, row] = key.split(':').map((item) => Number(item))
             return {
-              x: Number(((col * 100) / gridSize).toFixed(3)),
-              y: Number(((row * 100) / gridSize).toFixed(3)),
-              width: Number((100 / gridSize).toFixed(3)),
-              height: Number((100 / gridSize).toFixed(3)),
+              x: Number((col * cellWidth).toFixed(3)),
+              y: Number((row * cellHeight).toFixed(3)),
+              width: Number(cellWidth.toFixed(3)),
+              height: Number(cellHeight.toFixed(3)),
               count,
               intensity: Number((count / maxCellCount).toFixed(4)),
             }
@@ -3593,6 +4609,16 @@ function createAgentUiMethods() {
           top_area: ((cloneArray(summary.top_areas)[0] || {}).name) || '',
         }
       })
+    },
+    buildAgentPoiAreaHeatmapBundle(summaries = [], polygon = []) {
+      const normalizedPolygon = this.normalizeAgentPoiAreaHeatmapPolygon(polygon)
+      const viewport = this.buildAgentPoiAreaHeatmapViewport(summaries, normalizedPolygon)
+      return {
+        area_heatmaps: this.buildAgentPoiAreaHeatmaps(summaries, normalizedPolygon),
+        area_heatmap_basemap: this.buildAgentPoiAreaHeatmapBasemap(viewport),
+        area_heatmap_boundary: normalizedPolygon.length >= 3 ? this.buildAgentPoiAreaHeatmapBoundary(normalizedPolygon, viewport) : [],
+        area_heatmap_polygon: normalizedPolygon,
+      }
     },
     buildAgentPoiRuleInsights(summaries = []) {
       const sorted = cloneArray(summaries).filter((item) => item && item.count !== undefined).sort((a, b) => Number(a.year || 0) - Number(b.year || 0))
@@ -3615,7 +4641,7 @@ function createAgentUiMethods() {
           insights: {
             fastest_growth: '当前只有一个年份，暂无法判断增长最快行业。',
             declining_category: '当前只有一个年份，暂无法判断衰退行业。',
-            emerging_area: topArea.name ? `当前核心聚集区：${topArea.name}` : '当前缺少可识别的新兴区域信号。',
+            emerging_area: topArea.name ? `当前核心承载片区：${topArea.name}` : '当前缺少可识别的增长片区信号。',
             structure_judgement: topCategory.name ? `一级业态以${topCategory.name}为主${topSubcategory.name ? `，内部小类以${topSubcategory.name}较突出` : ''}。` : '业态结构信号有限。',
           },
         }
@@ -3659,12 +4685,15 @@ function createAgentUiMethods() {
       const firstAreas = cloneObject(first.area_counts)
       const lastAreas = cloneObject(last.area_counts)
       const areaNames = Array.from(new Set([...Object.keys(firstAreas), ...Object.keys(lastAreas)]))
-      const emergingArea = areaNames.map((name) => ({
+      const growthArea = areaNames.map((name) => ({
         name,
         before: Number(firstAreas[name] || 0),
         after: Number(lastAreas[name] || 0),
         delta: Number(lastAreas[name] || 0) - Number(firstAreas[name] || 0),
       })).filter((item) => item.delta > 0).sort((a, b) => b.delta - a.delta)[0]
+      const growthAreaText = growthArea
+        ? `${growthArea.name}内部 POI 增量较明显（+${growthArea.delta}）。`
+        : '未形成可命名增长片区；需结合小类空间信号判断具体增量方向。'
       const topCategory = (cloneArray(last.top_categories)[0] || {})
       const topSubcategory = (cloneArray(last.top_subcategories)[0] || {})
       const topArea = (cloneArray(last.top_areas)[0] || {})
@@ -3682,7 +4711,7 @@ function createAgentUiMethods() {
         insights: {
           fastest_growth: fastest ? `${fastest.name}大类增长较快（${fastest.delta >= 0 ? '+' : ''}${fastest.delta}，${fastest.rate >= 0 ? '+' : ''}${(fastest.rate * 100).toFixed(1)}%）${fastestSubcategory ? `；小类增长最快为${fastestSubcategory.name}${fastestSubcategory.parent ? `（${fastestSubcategory.parent}）` : ''}，+${fastestSubcategory.delta}` : ''}` : '未发现明显增长行业。',
           declining_category: declining ? `${declining.name}大类下降明显（${declining.delta}，${(declining.rate * 100).toFixed(1)}%）${decliningSubcategory ? `；小类下降明显为${decliningSubcategory.name}${decliningSubcategory.parent ? `（${decliningSubcategory.parent}）` : ''}，${decliningSubcategory.delta}` : ''}` : '未发现明显衰退行业。',
-          emerging_area: emergingArea ? `${emergingArea.name}（+${emergingArea.delta}）` : '未发现明显新兴区域。',
+          emerging_area: growthAreaText,
           structure_judgement: topCategory.name ? `一级结构偏向${topCategory.name}主导${topSubcategory.name ? `，其下小类${topSubcategory.name}表现突出` : ''}，需结合目标业态判断消费型/生产型属性。` : '结构判断信号有限。',
         },
       }
@@ -3749,6 +4778,175 @@ function createAgentUiMethods() {
         rule_insights: cloneObject(payload.rule_insights),
       }
     },
+    buildAgentPoiIterationAiEvidencePreview(payload = {}) {
+      const evidence = this.buildAgentPoiIterationEvidence(payload)
+      const summaries = cloneArray(evidence.summaries)
+      const first = summaries[0] || {}
+      const last = summaries[summaries.length - 1] || {}
+      const getCounts = (summary, key) => cloneObject(summary && summary[key])
+      const ratio = (count, total) => {
+        const safeTotal = Math.max(0, Number(total || 0))
+        return safeTotal > 0 ? Number((Number(count || 0) / safeTotal).toFixed(6)) : 0
+      }
+      const spatialRows = cloneArray(payload.subcategory_spatial_trend_rows)
+      const spatialNames = new Set(spatialRows.map((row) => asText(row && row.name)).filter(Boolean))
+      const parentLookup = new Map()
+      summaries.forEach((summary) => {
+        cloneArray(summary.top_subcategories).forEach((item) => {
+          const name = asText(item && item.name)
+          const parent = asText(item && item.parent)
+          if (name && parent && !parentLookup.has(name)) parentLookup.set(name, parent)
+        })
+        Object.entries(cloneObject(summary.category_to_subcategory_mix)).forEach(([category, rows]) => {
+          cloneArray(rows).forEach((item) => {
+            const name = asText(item && item.name)
+            const parent = asText((item && item.parent) || category)
+            if (name && parent && !parentLookup.has(name)) parentLookup.set(name, parent)
+          })
+        })
+      })
+      const buildChanges = (key, limit, includeParent = false) => {
+        const firstCounts = getCounts(first, key)
+        const lastCounts = getCounts(last, key)
+        const names = Array.from(new Set(Object.keys(firstCounts).concat(Object.keys(lastCounts)))).filter(Boolean)
+        return names.map((name) => {
+          const firstCount = Number(firstCounts[name] || 0)
+          const lastCount = Number(lastCounts[name] || 0)
+          const row = {
+            name,
+            first_count: firstCount,
+            last_count: lastCount,
+            delta: lastCount - firstCount,
+            rate: firstCount > 0 ? Number(((lastCount - firstCount) / firstCount).toFixed(6)) : null,
+            first_ratio: ratio(firstCount, first.count),
+            last_ratio: ratio(lastCount, last.count),
+            is_low_base: Math.max(firstCount, lastCount) < 10,
+          }
+          if (includeParent && parentLookup.get(name)) row.parent = parentLookup.get(name)
+          if (includeParent && spatialNames.has(name)) row.has_spatial_signal = true
+          return row
+        }).sort((a, b) => {
+          if (includeParent) {
+            const spatialDelta = Number(!!b.has_spatial_signal) - Number(!!a.has_spatial_signal)
+            if (spatialDelta) return spatialDelta
+          }
+          return Math.abs(Number(b.delta || 0)) - Math.abs(Number(a.delta || 0))
+            || Number(b.last_ratio || 0) - Number(a.last_ratio || 0)
+            || Number(b.last_count || 0) - Number(a.last_count || 0)
+        }).slice(0, limit)
+      }
+      const materialChangeRows = (rows, direction, limit = 5) => {
+        const sign = direction === 'growth' ? 1 : -1
+        return cloneArray(rows)
+          .filter((row) => Number(row && row.delta) * sign > 0)
+          .sort((a, b) => Math.abs(Number(b.delta || 0)) - Math.abs(Number(a.delta || 0))
+            || Number(!!a.is_low_base) - Number(!!b.is_low_base)
+            || Number(b.last_ratio || 0) - Number(a.last_ratio || 0)
+            || Number(b.last_count || 0) - Number(a.last_count || 0))
+          .slice(0, limit)
+      }
+      const lowBaseGrowthRows = (rows, limit = 8) => cloneArray(rows)
+        .filter((row) => row && row.is_low_base && Number(row.delta) > 0)
+        .sort((a, b) => Number(b.rate || 0) - Number(a.rate || 0)
+          || Math.abs(Number(b.delta || 0)) - Math.abs(Number(a.delta || 0)))
+        .slice(0, limit)
+      const growthAreaSignalRows = cloneArray(spatialRows)
+        .filter((row) => Number(row && row.delta) > 0)
+        .sort((a, b) => Number(b.delta || 0) - Number(a.delta || 0)
+          || Number(b.centroid_shift_m || 0) - Number(a.centroid_shift_m || 0)
+          || Number(b.hotspot_grid_count || 0) - Number(a.hotspot_grid_count || 0))
+        .slice(0, 5)
+        .map((row) => ({
+          name: row.name,
+          parent: row.parent,
+          delta: row.delta,
+          dominant_direction: row.dominant_direction,
+          secondary_direction: row.secondary_direction,
+          dominant_ring: row.dominant_ring,
+          centroid_shift_direction: row.centroid_shift_direction,
+          centroid_shift_m: row.centroid_shift_m,
+          hotspot_grid_count: row.hotspot_grid_count,
+          hotspot_grid_count_delta: row.hotspot_grid_count_delta,
+          top_area: row.top_area,
+        }))
+      const areaName = cloneArray(last.top_areas)[0] && asText(cloneArray(last.top_areas)[0].name)
+      const categoryChanges = buildChanges('category_counts', 12, false)
+      const subcategoryChanges = buildChanges('subcategory_counts', 24, true)
+      return {
+        task: 'poi_iteration_change',
+        evidence_version: 'poi_iteration_v1',
+        years: cloneArray(evidence.years),
+        scope: {
+          center: evidence.center,
+          area_name: areaName || '',
+          scope_type: cloneArray(evidence.area_heatmap_polygon).length ? 'history_polygon' : 'point_bounds',
+          polygon_point_count: cloneArray(evidence.area_heatmap_polygon).length,
+        },
+        year_summaries: summaries.map((summary) => ({
+          year: summary.year,
+          poi_count: summary.count,
+          category_count: summary.category_count,
+          top_categories: cloneArray(summary.top_categories).slice(0, 8),
+          subcategory_count: summary.subcategory_count,
+          top_subcategories: cloneArray(summary.top_subcategories).slice(0, 12),
+          top_areas: cloneArray(summary.top_areas).slice(0, 8),
+        })),
+        trend_metrics: cloneArray(evidence.trend_rows),
+        category_changes: categoryChanges,
+        subcategory_changes: subcategoryChanges,
+        material_change_highlights: {
+          ranking_policy: 'primary_rank_by_absolute_delta_then_last_ratio_and_last_count; percentage_rate_is_secondary',
+          category_growth: materialChangeRows(categoryChanges, 'growth', 5),
+          category_decline: materialChangeRows(categoryChanges, 'decline', 5),
+          subcategory_growth: materialChangeRows(subcategoryChanges, 'growth', 8),
+          subcategory_decline: materialChangeRows(subcategoryChanges, 'decline', 8),
+          low_base_growth_watchlist: lowBaseGrowthRows(categoryChanges.concat(subcategoryChanges), 8),
+        },
+        spatial_factors: cloneObject(payload.spatial_factors),
+        subcategory_spatial_trends: spatialRows.slice(0, 30).map((row) => ({
+          name: row.name,
+          parent: row.parent,
+          delta: row.delta,
+          dominant_direction: row.dominant_direction,
+          secondary_direction: row.secondary_direction,
+          dominant_ring: row.dominant_ring,
+          centroid_shift_direction: row.centroid_shift_direction,
+          centroid_shift_m: row.centroid_shift_m,
+          hotspot_grid_count: row.hotspot_grid_count,
+          hotspot_grid_count_delta: row.hotspot_grid_count_delta,
+          top_area: row.top_area,
+        })),
+        growth_area_signal: {
+          label: 'growth_area_direction',
+          interpretation_policy: 'describe internal growth direction/ring/hotspots inside the isochrone; do not require an administrative new area name',
+          has_named_area: false,
+          growth_rows: growthAreaSignalRows,
+        },
+        area_distribution: cloneArray(evidence.area_heatmaps).map((row) => ({
+          year: row.year,
+          point_count: row.point_count,
+          top_area: row.top_area,
+          hotspot_cell_count: cloneArray(row.cells).length,
+          top_cells: cloneArray(row.cells)
+            .slice()
+            .sort((a, b) => Number(b.intensity || 0) - Number(a.intensity || 0))
+            .slice(0, 12)
+            .map((cell, index) => ({
+              rank: index + 1,
+              intensity: cell.intensity,
+              poi_count: cell.count || cell.poi_count || cell.point_count,
+            })),
+        })),
+        rule_insights: cloneObject(evidence.rule_insights),
+        constraints: {
+          no_invented_places: true,
+          no_coordinate_reasoning: true,
+          no_low_base_rate_as_primary: true,
+          growth_ranking_policy: 'use material_change_highlights; rank by absolute delta before percentage rate',
+          output_language: 'zh-CN',
+        },
+      }
+    },
     async requestAgentPoiIterationAnalysis(payload = {}) {
       const res = await fetch('/api/v1/analysis/agent/iteration/poi/interpret', {
         method: 'POST',
@@ -3778,6 +4976,33 @@ function createAgentUiMethods() {
         throw new Error(detail || 'POI 多年迭代聚合失败')
       }
       return res.json()
+    },
+    async ensureAgentIterationPoiAiAnalysis(payloadArg = null, options = {}) {
+      const payload = payloadArg || this.getAgentIterationPoiPayload()
+      if (asText(payload.status) !== 'ready') return payload
+      if (cloneArray(payload.ai_summary).length || asText(payload.ai_status) === 'loading') return payload
+      const tabId = asText(options.tabId)
+      this.commitAgentIterationPoiPayload({ ai_status: 'loading', ai_error: '' }, tabId ? { tabId } : {})
+      try {
+        const aiResult = await this.requestAgentPoiIterationAnalysis(payload)
+        return this.commitAgentIterationPoiPayload({
+          ai_status: aiResult.status === 'ready' ? 'ready' : 'failed',
+          ai_summary: cloneArray(aiResult.ai_summary),
+          ai_insights: cloneObject(aiResult.ai_insights),
+          spatial_factors: cloneObject(aiResult.spatial_factors),
+          subcategory_spatial_trend_rows: cloneArray(aiResult.subcategory_spatial_trend_rows),
+          subcategory_spatial_summary: cloneArray(aiResult.subcategory_spatial_summary),
+          ai_prompt: asText(aiResult.ai_prompt),
+          ai_prompt_payload_note: asText(aiResult.ai_prompt_payload_note),
+          ai_error: aiResult.status === 'ready' ? '' : asText(aiResult.error),
+        }, tabId ? { tabId } : {})
+      } catch (err) {
+        const message = asText(err && err.message) || String(err)
+        return this.commitAgentIterationPoiPayload({
+          ai_status: 'failed',
+          ai_error: message,
+        }, tabId ? { tabId } : {})
+      }
     },
     buildAgentPoiTrendRows(summaries = []) {
       const sorted = cloneArray(summaries).filter((item) => item && item.count !== undefined)
@@ -3843,7 +5068,12 @@ function createAgentUiMethods() {
     },
     async ensureAgentIterationPoi(force = false) {
       const existing = this.getAgentIterationPoiPayload()
-      if (!force && asText(existing.status) === 'ready') return existing
+      if (!force && asText(existing.status) === 'ready') {
+        this.ensureAgentIterationPoiAreaHeatmapSnapshots(existing).catch((err) => {
+          console.warn('[agent-iteration-poi] area snapshot generation failed', err)
+        })
+        return existing
+      }
       if (this.agentIterationPoiLoading) return existing
       const targetTabId = asText(this.getAgentActiveTopTab().kind) === 'iteration_change'
         ? asText(this.getAgentActiveTopTab().id)
@@ -3887,11 +5117,15 @@ function createAgentUiMethods() {
             rule_insights: cloneObject(builtPayload.rule_insights),
             ai_summary: cloneArray(builtPayload.ai_summary),
             ai_insights: cloneObject(builtPayload.ai_insights),
+            ai_status: asText(builtPayload.ai_status) || (cloneArray(builtPayload.ai_summary).length ? 'ready' : 'pending'),
             ai_error: asText(builtPayload.ai_error),
             error: asText(builtPayload.error),
           }, { tabId: targetTabId })
           this.ensureAgentIterationPoiAreaHeatmapSnapshots(committed).catch((err) => {
             console.warn('[agent-iteration-poi] area snapshot generation failed', err)
+          })
+          this.ensureAgentIterationPoiAiAnalysis(committed, { tabId: targetTabId }).catch((err) => {
+            console.warn('[agent-iteration-poi] ai analysis failed', err)
           })
           return committed
         }
@@ -3902,6 +5136,10 @@ function createAgentUiMethods() {
             : null
           const summary = this.summarizeAgentIterationPois(pois, year)
           const rule = this.buildAgentPoiRuleInsights([summary])
+          const areaHeatmapBundle = this.buildAgentPoiAreaHeatmapBundle(
+            [summary],
+            this.getIsochronePolygonPayload ? cloneArray(this.getIsochronePolygonPayload()) : [],
+          )
           const committed = this.commitAgentIterationPoiPayload({
             status: 'ready',
             source: 'current',
@@ -3912,11 +5150,13 @@ function createAgentUiMethods() {
             category_stack: [],
             subcategory_stack: [],
             subcategory_trend_rows: [],
-            area_heatmaps: this.buildAgentPoiAreaHeatmaps([summary]),
-            area_heatmap_polygon: this.getIsochronePolygonPayload ? cloneArray(this.getIsochronePolygonPayload()) : [],
+            area_heatmaps: cloneArray(areaHeatmapBundle.area_heatmaps),
+            area_heatmap_basemap: cloneObject(areaHeatmapBundle.area_heatmap_basemap),
+            area_heatmap_boundary: cloneArray(areaHeatmapBundle.area_heatmap_boundary),
+            area_heatmap_polygon: cloneArray(areaHeatmapBundle.area_heatmap_polygon),
             area_heatmap_snapshots: this.buildAgentPoiAreaHeatmapSnapshotPlaceholders({
               summaries: [summary],
-              area_heatmaps: this.buildAgentPoiAreaHeatmaps([summary]),
+              area_heatmaps: cloneArray(areaHeatmapBundle.area_heatmaps),
             }),
             spatial_factors: {},
             subcategory_spatial_trend_rows: [],
@@ -3925,6 +5165,7 @@ function createAgentUiMethods() {
             rule_insights: rule.insights,
             ai_summary: [],
             ai_insights: {},
+            ai_status: 'pending',
             ai_error: '',
             notice: '当前只有一个年份 POI，只展示特征；多年趋势需要从包含多个年份的历史记录恢复。',
             error: '',
@@ -4032,6 +5273,8 @@ function createAgentUiMethods() {
       }))
       const timeseries = cloneObject(payload.timeseries)
       return {
+        task: 'nightlight_iteration_change',
+        evidence_version: 'nightlight_iteration_v1',
         years: cloneArray(payload.years),
         period: asText(payload.period),
         series: cloneArray(payload.series || timeseries.series),
@@ -4326,6 +5569,32 @@ function createAgentUiMethods() {
         this.agentIterationSnapshotCopyStatus = '图片复制失败，可复制下方指标文本'
       }
     },
+    async copyAgentIterationPoiAreaHeatmapImage(heatmap = {}, event = null) {
+      const year = asText(heatmap && heatmap.year)
+      if (!year) return
+      const snapshot = {
+        ...cloneObject(this.getAgentIterationPoiAreaHeatmapSnapshot(year)),
+        year,
+        image_url: asText((this.getAgentIterationPoiAreaHeatmapSnapshot(year) || {}).image_url),
+        point_count: heatmap.point_count,
+        top_area: heatmap.top_area,
+      }
+      this.agentIterationSnapshotCopyKey = `poi-area-${year}`
+      this.agentIterationSnapshotCopyStatus = '正在复制图片…'
+      try {
+        if (typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.write !== 'function' || typeof ClipboardItem === 'undefined') {
+          throw new Error('clipboard_image_unavailable')
+        }
+        const blob = await this.renderAgentIterationSnapshotPngBlob(snapshot, event && event.currentTarget ? event.currentTarget.querySelector('svg') : null)
+        if (!blob) throw new Error('snapshot_image_unavailable')
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type || 'image/png']: blob })])
+        this.agentIterationSnapshotCopyKey = `poi-area-${year}`
+        this.agentIterationSnapshotCopyStatus = '图片已复制'
+      } catch (_) {
+        this.agentIterationSnapshotCopyKey = `poi-area-${year}`
+        this.agentIterationSnapshotCopyStatus = '图片复制失败'
+      }
+    },
     openAgentIterationSnapshotDetail(snapshot = {}, event = null) {
       if (!snapshot || typeof snapshot !== 'object' || asText(snapshot.error)) return
       const hasVector = this.getAgentIterationSnapshotCells(snapshot).length > 0
@@ -4359,6 +5628,7 @@ function createAgentUiMethods() {
     getAgentIterationAiErrorLabel(error = '') {
       const raw = asText(error)
       if (!raw) return ''
+      if (/ai_timeout/i.test(raw)) return '基础统计和快照已完成，AI 深度解读仍在补充。'
       if (/llm_unavailable/i.test(raw)) return 'AI 服务暂未启用，当前先展示结构化变化指标与年度快照。'
       if (/invalid_ai_analysis/i.test(raw)) return 'AI 解析结果格式异常，当前先展示结构化变化指标与年度快照。'
       return raw

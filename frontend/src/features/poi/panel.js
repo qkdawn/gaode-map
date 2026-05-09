@@ -226,6 +226,11 @@
                 }
                 this.poiYearSelections = Array.from(next).sort((a, b) => a - b);
             },
+            getPoiYearOptionLabel(year) {
+                const value = Number(year);
+                const match = this.getPoiMultiYearOptions().find((item) => Number(item.value) === value);
+                return match ? String(match.label || value) : (Number.isFinite(value) ? `${value} 年` : '-');
+            },
             _buildPoiKdeTopCategoryRows(limit = 5) {
                 const stats = this.computePoiStats(this._getPoiKdeStatsSourcePois());
                 const rows = (stats.labels || []).map((label, index) => ({

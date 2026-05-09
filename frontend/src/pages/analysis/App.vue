@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { mountAnalysisWorkbench } from "./mount-analysis";
 
 const loading = ref(true)
 const error = ref("")
@@ -12,6 +11,7 @@ onMounted(async () => {
       throw new Error(`/api/v1/config 请求失败(${res.status})`)
     }
     const data = await res.json()
+    const { mountAnalysisWorkbench } = await import("./mount-analysis")
     await mountAnalysisWorkbench({
       config: {
         amap_js_api_key: String(data?.amap_js_api_key || ""),
