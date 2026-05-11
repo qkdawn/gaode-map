@@ -70,6 +70,7 @@ function createAnalysisAgentInitialState() {
     agentSessionHydrating: false,
     agentSessionDetailLoadingId: '',
     agentSessionDetailRequestToken: 0,
+    agentHistoryCollapsedGroups: {},
     agentTurnAbortController: null,
     agentRunRegistry: {},
     agentSessionMenuId: '',
@@ -85,6 +86,12 @@ function createAnalysisAgentInitialState() {
     basisDrawerOpen: false,
     basisDrawerPayload: null,
     basisDrawerActiveTab: 'basic',
+    basisPromptEditMode: false,
+    basisPromptDraft: { system_prompt: '', payload_note: '', output_schema_text: '' },
+    basisPromptSaving: false,
+    basisPromptError: '',
+    basisPromptNotice: '',
+    agentPromptConfigs: {},
     agentTabs: {
       summaryTab: {
         id: 'summary',
@@ -114,6 +121,11 @@ function createAnalysisAgentInitialState() {
     agentIterationPoiSnapshotGeneratingKey: '',
     agentIterationPoiAreaHeatmapCalibrationCache: {},
     agentIterationPoiAreaHeatmapCalibrationGeneratingKey: '',
+    agentIterationPoiAreaHeatmapLayers: {
+      mode: 'points',
+      cells: false,
+      points: true,
+    },
     agentIterationPoiStructureSpatialView: {
       category: '',
       sortBy: 'count',

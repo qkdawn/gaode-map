@@ -340,22 +340,87 @@
                                                     v-for="group in getAgentRangeSessionGroups()"
                                                     :key="`agent-history-group-${group.id}`"
                                                     class="agent-sidebar-history-group">
-                                                    <div class="agent-sidebar-history-folder agent-sidebar-history-folder--primary">
+                                                    <button
+                                                        v-if="group.collapsible"
+                                                        type="button"
+                                                        class="agent-sidebar-history-folder agent-sidebar-history-folder--primary agent-sidebar-history-folder--button"
+                                                        :class="{ 'is-collapsed': isAgentHistoryGroupCollapsed(group.id) }"
+                                                        @click="toggleAgentHistoryGroup(group.id, $event)">
                                                         <span class="agent-sidebar-history-folder-icon agent-sidebar-history-folder-icon--primary"></span>
                                                         <span class="agent-sidebar-history-folder-title agent-sidebar-history-folder-title--primary">{{ group.title }}</span>
                                                         <span class="agent-sidebar-history-folder-count agent-sidebar-history-folder-count--primary">{{ group.count }}</span>
+                                                    </button>
+                                                    <div
+                                                        v-else
+                                                        class="agent-sidebar-history-folder agent-sidebar-history-folder--primary"
+                                                        :class="{ 'is-heading-only': group.headingOnly }">
+                                                        <span class="agent-sidebar-history-folder-icon agent-sidebar-history-folder-icon--primary"></span>
+                                                        <span class="agent-sidebar-history-folder-title agent-sidebar-history-folder-title--primary">{{ group.title }}</span>
+                                                        <span class="agent-sidebar-history-folder-count agent-sidebar-history-folder-count--primary">{{ group.count }}</span>
+                                                    </div>
+                                                    <div v-if="group.sessions && group.sessions.length && !isAgentHistoryGroupCollapsed(group.id)" class="agent-sidebar-history-group-list">
+                                                        <div
+                                                            v-for="session in group.sessions"
+                                                            :key="session.id"
+                                                            class="agent-sidebar-history-item"
+                                                            :class="{
+                                                                active: activeAgentSessionId === session.id || isAgentHistorySessionTabActive(session.id),
+                                                                'is-loading': agentSessionDetailLoadingId === session.id,
+                                                                'menu-open': agentSessionMenuId === session.id
+                                                            }"
+                                                            @click.stop>
+                                                            <button
+                                                                type="button"
+                                                                class="agent-sidebar-history-main"
+                                                                @click="openAgentHistorySessionTab(session.id)">
+                                                                <div class="agent-sidebar-history-head">
+                                                                    <div class="agent-sidebar-history-title">{{ getAgentSessionTitle(session) }}</div>
+                                                                    <span v-if="isAgentSessionRunning(session.id)" class="agent-sidebar-history-running">执行中</span>
+                                                                    <span v-if="session.isPinned" class="agent-sidebar-history-pin">置顶</span>
+                                                                </div>
+                                                                <div class="agent-sidebar-history-preview">{{ getAgentSessionPreview(session) }}</div>
+                                                            </button>
+                                                            <div class="agent-sidebar-history-actions">
+                                                                <button
+                                                                    type="button"
+                                                                    class="agent-sidebar-history-menu-btn"
+                                                                    :title="agentSessionMenuId === session.id ? '关闭操作菜单' : '打开操作菜单'"
+                                                                    @click="toggleAgentSessionMenu(session.id, $event)">
+                                                                    <span></span>
+                                                                    <span></span>
+                                                                    <span></span>
+                                                                </button>
+                                                                <div
+                                                                    v-if="agentSessionMenuId === session.id"
+                                                                    class="agent-sidebar-history-menu"
+                                                                    @click.stop>
+                                                                    <button type="button" @click="openAgentRenameDialog(session.id, $event)">重命名</button>
+                                                                    <button type="button" @click="toggleAgentSessionPinned(session.id, $event)">
+                                                                        {{ session.isPinned ? '取消置顶' : '置顶' }}
+                                                                    </button>
+                                                                    <button type="button" class="is-danger" @click="deleteAgentSession(session.id, $event)">删除</button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div v-else-if="!group.headingOnly && !isAgentHistoryGroupCollapsed(group.id) && (!group.panels || !group.panels.length)" class="agent-sidebar-history-empty">
+                                                        {{ group.emptyText }}
                                                     </div>
                                                     <div v-if="group.panels && group.panels.length" class="agent-sidebar-history-group-list">
                                                         <div
                                                             v-for="panel in group.panels"
                                                             :key="`agent-history-panel-${group.id}-${panel.id}`"
                                                             class="agent-sidebar-history-subgroup">
-                                                            <div class="agent-sidebar-history-folder agent-sidebar-history-folder--secondary">
+                                                            <button
+                                                                type="button"
+                                                                class="agent-sidebar-history-folder agent-sidebar-history-folder--secondary agent-sidebar-history-folder--button"
+                                                                :class="{ 'is-collapsed': isAgentHistoryGroupCollapsed(`${group.id}-${panel.id}`) }"
+                                                                @click="toggleAgentHistoryGroup(`${group.id}-${panel.id}`, $event)">
                                                                 <span class="agent-sidebar-history-folder-icon agent-sidebar-history-folder-icon--secondary"></span>
                                                                 <span class="agent-sidebar-history-folder-title agent-sidebar-history-folder-title--secondary">{{ panel.title }}</span>
                                                                 <span class="agent-sidebar-history-folder-count agent-sidebar-history-folder-count--secondary">{{ panel.count }}</span>
-                                                            </div>
-                                                            <div v-if="panel.sessions && panel.sessions.length" class="agent-sidebar-history-group-list">
+                                                            </button>
+                                                            <div v-if="panel.sessions && panel.sessions.length && !isAgentHistoryGroupCollapsed(`${group.id}-${panel.id}`)" class="agent-sidebar-history-group-list">
                                                                 <div
                                                                     v-for="session in panel.sessions"
                                                                     :key="session.id"
@@ -400,12 +465,12 @@
                                                                     </div>
                                                                 </div>
                                                             </div>
-                                                            <div v-else class="agent-sidebar-history-empty">
+                                                            <div v-else-if="!isAgentHistoryGroupCollapsed(`${group.id}-${panel.id}`)" class="agent-sidebar-history-empty">
                                                                 {{ panel.emptyText }}
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div v-else class="agent-sidebar-history-empty">
+                                                    <div v-else-if="!isAgentHistoryGroupCollapsed(group.id)" class="agent-sidebar-history-empty">
                                                         {{ group.emptyText }}
                                                     </div>
                                                 </div>

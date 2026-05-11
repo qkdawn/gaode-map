@@ -170,6 +170,10 @@ class AgentIterationNightlightResponse(BaseModel):
 
     status: str = "failed"
     ai_analysis: Dict[str, str] = Field(default_factory=dict)
+    ai_prompt: str = ""
+    ai_prompt_payload_note: str = ""
+    prompt_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    prompt_snapshots: Dict[str, Any] = Field(default_factory=dict)
     error: str = ""
 
 
@@ -190,6 +194,8 @@ class AgentIterationPoiResponse(BaseModel):
     subcategory_spatial_summary: List[str] = Field(default_factory=list)
     ai_prompt: str = ""
     ai_prompt_payload_note: str = ""
+    prompt_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    prompt_snapshots: Dict[str, Any] = Field(default_factory=dict)
     error: str = ""
 
 

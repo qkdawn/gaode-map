@@ -91,49 +91,59 @@ function createAgentSessionStoreMethods() {
           id: 'current',
           title: '当前范围',
           count: currentSplit.summary.length + currentSplit.followup.length,
-          emptyText: '当前范围暂无历史对话',
+          emptyText: '当前范围暂无历史',
           sessions: [],
-          panels: [
-            {
-              id: 'summary',
-              title: '区域总结历史',
-              count: currentSplit.summary.length,
-              emptyText: '当前范围暂无区域总结历史',
-              sessions: currentSplit.summary,
-            },
-            {
-              id: 'followup',
-              title: '追问解释历史',
-              count: currentSplit.followup.length,
-              emptyText: '当前范围暂无追问解释历史',
-              sessions: currentSplit.followup,
-            },
-          ],
+          panels: [],
+          headingOnly: true,
+        },
+        {
+          id: 'current-summary',
+          title: '总结',
+          count: currentSplit.summary.length,
+          emptyText: '当前范围暂无总结历史',
+          sessions: currentSplit.summary,
+          collapsible: true,
+        },
+        {
+          id: 'current-followup',
+          title: '追问',
+          count: currentSplit.followup.length,
+          emptyText: '当前范围暂无追问历史',
+          sessions: currentSplit.followup,
+          collapsible: true,
         },
         {
           id: 'other',
           title: '其他范围',
           count: otherSplit.summary.length + otherSplit.followup.length,
-          emptyText: '其他范围暂无历史对话',
+          emptyText: '其他范围暂无历史',
           sessions: [],
           panels: [
             {
               id: 'summary',
-              title: '区域总结历史',
+              title: '总结',
               count: otherSplit.summary.length,
-              emptyText: '其他范围暂无区域总结历史',
+              emptyText: '其他范围暂无总结历史',
               sessions: otherSplit.summary,
+              collapsible: true,
             },
             {
               id: 'followup',
-              title: '追问解释历史',
+              title: '追问',
               count: otherSplit.followup.length,
-              emptyText: '其他范围暂无追问解释历史',
+              emptyText: '其他范围暂无追问历史',
               sessions: otherSplit.followup,
+              collapsible: true,
             },
           ],
         },
-      ]
+      ].filter((group) => group.count > 0 || group.headingOnly)
+    },
+    isAgentHistorySessionInCurrentRange(session = null) {
+      if (!session || typeof session !== 'object') return false
+      const currentHistoryId = this.getCurrentAgentHistoryId()
+      const sessionHistoryId = asText(session.historyId)
+      return Boolean(currentHistoryId && sessionHistoryId && currentHistoryId === sessionHistoryId)
     },
     findAgentSession(sessionId = '') {
       const nextId = asText(sessionId)
@@ -300,6 +310,8 @@ function createAgentSessionStoreMethods() {
     },
     mergeAgentSessionDetail(detail) {
       const existing = this.findAgentSession(detail && detail.id)
+      const detailOutput = detail && detail.output && typeof detail.output === 'object' ? detail.output : {}
+      const detailPanelPayloads = cloneObject(detailOutput.panel_payloads || detailOutput.panelPayloads || (existing && existing.panelPayloads))
       const session = createAgentSessionRecord({
         ...existing,
         id: detail && detail.id,
@@ -310,6 +322,7 @@ function createAgentSessionStoreMethods() {
         stage: detail && detail.stage,
         input: detail && detail.input,
         output: detail && detail.output,
+        panelPayloads: detailPanelPayloads,
         diagnostics: detail && detail.diagnostics,
         contextSummary: detail && detail.context_summary,
         plan: detail && detail.plan,
@@ -456,10 +469,35 @@ function createAgentSessionStoreMethods() {
         })
         const localDrafts = this.agentSessions.filter((item) => !item.persisted && !persistedIds.has(asText(item && item.id)))
         this.updateAgentSessions([...persistedSessions, ...localPersisted, ...localDrafts], { loaded: true })
+        if (typeof this.hydrateAgentSummaryHistoryDetails === 'function') {
+          this.agentSummaryHistoryHydrationPromise = this.hydrateAgentSummaryHistoryDetails().catch((err) => {
+            console.warn('Agent summary history detail hydration failed', err)
+            return []
+          })
+        }
         return this.agentSessions
       } finally {
         this.agentSessionsLoading = false
       }
+    },
+    async hydrateAgentSummaryHistoryDetails(limit = 12) {
+      const maxCount = Math.max(0, Number(limit || 0)) || 0
+      const targets = this.agentSessions.filter((session) => {
+        if (!session || !session.persisted || session.snapshotLoaded) return false
+        if (!this.isAgentSummaryHistorySession(session)) return false
+        const payloads = session.panelPayloads && typeof session.panelPayloads === 'object' ? session.panelPayloads : {}
+        return !(payloads.summary_pack && typeof payloads.summary_pack === 'object')
+      }).slice(0, maxCount)
+      if (!targets.length) return []
+      const details = await Promise.all(targets.map(async (session) => {
+        try {
+          return await this.loadAgentSessionDetail(session.id)
+        } catch (err) {
+          console.warn('Agent summary history detail load failed', session.id, err)
+          return null
+        }
+      }))
+      return details.filter(Boolean)
     },
     async loadAgentSessionDetail(sessionId = '') {
       const nextId = asText(sessionId)

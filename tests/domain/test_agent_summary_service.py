@@ -9,6 +9,7 @@ from modules.agent.iteration_change_service import (
     generate_nightlight_iteration_analysis,
     generate_poi_iteration_analysis,
 )
+from modules.agent.prompt_registry import get_prompt_config
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload, summarize_iteration_pois
 from modules.agent.summary_service import (
     _build_summary_llm_payload,
@@ -145,12 +146,17 @@ def test_generate_nightlight_iteration_analysis_returns_llm_unavailable(monkeypa
 
     assert result["status"] == "failed"
     assert result["error"] == "llm_unavailable"
+    config = get_prompt_config("nightlight_iteration")
+    assert result["prompt_snapshot"]["system_prompt"] == config.system_prompt
+    assert result["prompt_snapshots"]["nightlight_iteration"]["system_prompt"] == config.system_prompt
 
 
 def test_generate_nightlight_iteration_analysis_validates_llm_payload(monkeypatch):
     monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
 
     async def fake_invoke(**kwargs):
+        config = get_prompt_config("nightlight_iteration")
+        assert kwargs["system_prompt"] == config.system_prompt
         assert kwargs["user_payload"]["task"] == "nightlight_iteration_change"
         assert kwargs["user_payload"]["evidence"]["period"] == "2023-2025"
         return {
@@ -165,6 +171,9 @@ def test_generate_nightlight_iteration_analysis_validates_llm_payload(monkeypatc
     result = asyncio.run(generate_nightlight_iteration_analysis({"period": "2023-2025"}))
 
     assert result["status"] == "ready"
+    config = get_prompt_config("nightlight_iteration")
+    assert result["prompt_snapshot"]["system_prompt"] == config.system_prompt
+    assert result["prompt_snapshots"]["nightlight_iteration"]["system_prompt"] == config.system_prompt
     assert result["ai_analysis"]["headline"] == "热点增强"
 
 
@@ -172,6 +181,8 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
     monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
 
     async def fake_invoke(**kwargs):
+        config = get_prompt_config("poi_iteration")
+        assert kwargs["system_prompt"] == config.system_prompt
         assert kwargs["user_payload"]["task"] == "poi_iteration_change"
         assert kwargs["user_payload"]["evidence"]["years"] == [2023, 2024, 2025]
         assert kwargs["user_payload"]["evidence"]["evidence_version"] == "poi_iteration_v1"
@@ -217,6 +228,9 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
     assert "poi_iteration_v1" in result["ai_prompt"]
     assert "growth_area_signal" in result["ai_prompt"]
     assert "User payload" in result["ai_prompt_payload_note"]
+    config = get_prompt_config("poi_iteration")
+    assert result["prompt_snapshot"]["system_prompt"] == config.system_prompt
+    assert result["prompt_snapshots"]["poi_iteration"]["system_prompt"] == config.system_prompt
 
 
 def test_generate_poi_iteration_analysis_sends_compact_llm_evidence(monkeypatch):

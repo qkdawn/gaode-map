@@ -1,7 +1,7 @@
 import json
 from typing import List
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from modules.agent.runtime import process_agent_turn, stream_agent_turn
@@ -26,6 +26,13 @@ from modules.agent.schemas import (
 )
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload
+from modules.agent.prompt_registry import (
+    PromptConfig,
+    PromptUpdateRequest,
+    get_prompt_config,
+    list_prompt_configs,
+    update_prompt_config,
+)
 from modules.agent.summary_service import evaluate_summary_readiness, stream_generate_summary_pack
 from modules.agent.session_service import (
     delete_agent_session,
@@ -144,6 +151,27 @@ async def get_agent_tools():
             )
         )
     return tools
+
+
+@router.get("/api/v1/analysis/agent/prompts", response_model=List[PromptConfig])
+async def get_agent_prompts():
+    return list_prompt_configs()
+
+
+@router.get("/api/v1/analysis/agent/prompts/{prompt_key}", response_model=PromptConfig)
+async def get_agent_prompt(prompt_key: str):
+    try:
+        return get_prompt_config(prompt_key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="prompt_not_found")
+
+
+@router.put("/api/v1/analysis/agent/prompts/{prompt_key}", response_model=PromptConfig)
+async def put_agent_prompt(prompt_key: str, payload: PromptUpdateRequest):
+    try:
+        return update_prompt_config(prompt_key, payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="prompt_not_found")
 
 
 @router.post("/api/v1/analysis/agent/summary/readiness", response_model=AgentSummaryReadinessResponse)

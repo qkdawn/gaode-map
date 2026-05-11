@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from modules.spatial_factor_engine import build_subcategory_spatial_trends
 
 from .providers.llm_provider import _invoke_json_role, is_llm_enabled
+from .prompt_registry import build_prompt_snapshot, get_prompt_config
 
 
 _REQUIRED_FIELDS = ("headline", "trend_summary", "hotspot_migration", "risk_or_opportunity")
@@ -515,11 +516,21 @@ def _poi_iteration_prompt_payload_note() -> str:
 
 
 async def generate_nightlight_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str, Any]:
+    config = get_prompt_config("nightlight_iteration")
+    snapshot = build_prompt_snapshot(config)
     if not is_llm_enabled():
-        return {"status": "failed", "ai_analysis": {}, "error": "llm_unavailable"}
+        return {
+            "status": "failed",
+            "ai_analysis": {},
+            "error": "llm_unavailable",
+            "ai_prompt": config.system_prompt,
+            "ai_prompt_payload_note": config.payload_note,
+            "prompt_snapshot": snapshot,
+            "prompt_snapshots": {"nightlight_iteration": snapshot},
+        }
     try:
         raw = await _invoke_json_role(
-            system_prompt=_nightlight_iteration_prompt(),
+            system_prompt=config.system_prompt,
             user_payload={"task": "nightlight_iteration_change", "evidence": evidence or {}},
             emit=None,
             phase="nightlight_iteration_change",
@@ -528,10 +539,34 @@ async def generate_nightlight_iteration_analysis(evidence: Dict[str, Any]) -> Di
         )
         analysis = _validate_ai_analysis(raw)
         if not analysis:
-            return {"status": "failed", "ai_analysis": {}, "error": "invalid_ai_analysis"}
-        return {"status": "ready", "ai_analysis": analysis, "error": ""}
+            return {
+                "status": "failed",
+                "ai_analysis": {},
+                "error": "invalid_ai_analysis",
+                "ai_prompt": config.system_prompt,
+                "ai_prompt_payload_note": config.payload_note,
+                "prompt_snapshot": snapshot,
+                "prompt_snapshots": {"nightlight_iteration": snapshot},
+            }
+        return {
+            "status": "ready",
+            "ai_analysis": analysis,
+            "error": "",
+            "ai_prompt": config.system_prompt,
+            "ai_prompt_payload_note": config.payload_note,
+            "prompt_snapshot": snapshot,
+            "prompt_snapshots": {"nightlight_iteration": snapshot},
+        }
     except Exception as exc:
-        return {"status": "failed", "ai_analysis": {}, "error": f"{exc.__class__.__name__}: {exc}"}
+        return {
+            "status": "failed",
+            "ai_analysis": {},
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "ai_prompt": config.system_prompt,
+            "ai_prompt_payload_note": config.payload_note,
+            "prompt_snapshot": snapshot,
+            "prompt_snapshots": {"nightlight_iteration": snapshot},
+        }
 
 
 def _poi_spatial_response_fields(enriched_evidence: Dict[str, Any]) -> Dict[str, Any]:
@@ -546,8 +581,10 @@ async def generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str,
     enriched_evidence = enrich_poi_iteration_spatial_evidence(evidence or {})
     spatial_fields = _poi_spatial_response_fields(enriched_evidence)
     llm_evidence = build_poi_iteration_llm_evidence(enriched_evidence)
-    prompt = _poi_iteration_prompt()
-    prompt_note = _poi_iteration_prompt_payload_note()
+    config = get_prompt_config("poi_iteration")
+    prompt = config.system_prompt
+    prompt_note = config.payload_note
+    prompt_snapshot = build_prompt_snapshot(config)
     if not is_llm_enabled():
         return {
             "status": "failed",
@@ -556,6 +593,8 @@ async def generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str,
             "error": "llm_unavailable",
             "ai_prompt": prompt,
             "ai_prompt_payload_note": prompt_note,
+            "prompt_snapshot": prompt_snapshot,
+            "prompt_snapshots": {"poi_iteration": prompt_snapshot},
             **spatial_fields,
         }
     try:
@@ -576,6 +615,8 @@ async def generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str,
                 "error": "invalid_ai_analysis",
                 "ai_prompt": prompt,
                 "ai_prompt_payload_note": prompt_note,
+                "prompt_snapshot": prompt_snapshot,
+                "prompt_snapshots": {"poi_iteration": prompt_snapshot},
                 **spatial_fields,
             }
         growth_area = _normalize_growth_area_insight(
@@ -593,6 +634,8 @@ async def generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str,
             },
             "ai_prompt": prompt,
             "ai_prompt_payload_note": prompt_note,
+            "prompt_snapshot": prompt_snapshot,
+            "prompt_snapshots": {"poi_iteration": prompt_snapshot},
             "error": "",
             **spatial_fields,
         }
@@ -603,6 +646,8 @@ async def generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str,
             "ai_insights": {},
             "ai_prompt": prompt,
             "ai_prompt_payload_note": prompt_note,
+            "prompt_snapshot": prompt_snapshot,
+            "prompt_snapshots": {"poi_iteration": prompt_snapshot},
             "error": f"{exc.__class__.__name__}: {exc}",
             **spatial_fields,
         }

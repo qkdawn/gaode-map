@@ -27,6 +27,7 @@ from .schemas import (
     AgentSummaryStreamEvent,
 )
 from .providers.llm_provider import _invoke_json_role, is_llm_enabled
+from .prompt_registry import build_prompt_snapshot, get_prompt_config
 from .synthesizer import build_citations, build_summary_panel_payloads
 from .tool_adapters.capability_tools import ensure_area_data_readiness
 from .tool_adapters.scenario_tools import run_area_character_pack
@@ -519,9 +520,10 @@ def _normalize_secondary_reasoning_with_judgment(pack: Dict[str, Any], source_pa
 def _build_section_generation_prompt(section_key: str) -> str:
     title = _section_title_for(section_key)
     base = (
-        "你是 gaode-map 的商业总结撰写器。"
+        "你是一名商业地理与城市空间分析师。"
         "现在只生成一个区域判断卡片，必须输出 JSON，不要输出 markdown。"
     )
+
     if section_key == "spatial_structure":
         return (
             base
@@ -557,6 +559,25 @@ def _build_section_generation_prompt(section_key: str) -> str:
         + focus_rules.get(section_key, "只写当前段落对应的商业判断。")
         + " reasoning 必须直接下判断，推荐使用“以…为主”“偏…”“较强/较弱”“明显/有限”“更适合…”等表达。"
     )
+
+
+def _prompt_config_for(prompt_key: str):
+    return get_prompt_config(prompt_key)
+
+
+def _attach_prompt_snapshot(payload: Dict[str, Any], prompt_key: str) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return payload
+    config = _prompt_config_for(prompt_key)
+    payload["_prompt_snapshot"] = build_prompt_snapshot(config)
+    return payload
+
+
+def _pop_prompt_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    snapshot = payload.pop("_prompt_snapshot", {})
+    return snapshot if isinstance(snapshot, dict) else {}
 
 
 def _build_section_generation_payload(section_key: str, source_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -624,15 +645,16 @@ async def _generate_summary_section_with_llm(
     section_title: str,
     source_payload: Dict[str, Any],
 ) -> Dict[str, Any]:
+    config = _prompt_config_for(section_key)
     raw = await _invoke_json_role(
-        system_prompt=_build_section_generation_prompt(section_key),
+        system_prompt=config.system_prompt,
         user_payload=_build_section_generation_payload(section_key, source_payload),
         emit=None,
         phase=f"summary_section_{section_key}",
         title=f"生成{section_title}判断",
         reasoning_id=f"summary-section-{section_key}",
     )
-    return _validate_secondary_section_payload(section_key, raw)
+    return _attach_prompt_snapshot(_validate_secondary_section_payload(section_key, raw), section_key)
 
 
 async def _generate_secondary_sections_with_llm(source_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -711,7 +733,7 @@ def _derive_icsc_tags(snapshot: Any, artifacts: Dict[str, Any]) -> List[str]:
 
 def _legacy_summary_pack_system_prompt() -> str:
     return (
-        "你是 gaode-map 的商业总结撰写器。"
+        "你是一名商业地理与城市空间分析师。"
         "你只负责把已给定的结构化证据整理成商业判断，不得创造新的事实。"
         "必须只输出 JSON，不要输出 markdown。"
         "JSON 结构固定为："
@@ -844,7 +866,7 @@ def _legacy_validate_summary_pack_payload(raw: Dict[str, Any], *, icsc_tags: Lis
 
 def _summary_pack_system_prompt() -> str:
     return (
-        "你是 gaode-map 的商业总结撰写器。"
+        "你是一名商业地理与城市空间分析师。"
         "你只负责把已给定的结构化证据整理成商业判断，不得创造新的事实。"
         "必须只输出 JSON，不要输出 markdown。"
         "JSON 结构固定为："
@@ -1105,15 +1127,22 @@ async def _generate_summary_pack_with_llm(snapshot: Any, artifacts: Dict[str, An
     normalized = _validate_summary_base_payload(payload, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
     if not normalized:
         return {}
+    prompt_snapshots: Dict[str, Any] = {}
     for section_key, section_title in _SUMMARY_SECTION_SPECS:
         try:
             section = await _generate_summary_section_with_llm(section_key, section_title, source_payload)
+            snapshot_payload = _pop_prompt_snapshot(section)
+            if snapshot_payload:
+                prompt_snapshots[section_key] = snapshot_payload
         except Exception:
             section = {}
         if section:
             normalized[section_key] = section
     normalized = _normalize_area_judgment_reasoning(normalized, source_payload)
-    return _validate_summary_pack_payload(normalized, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
+    validated = _validate_summary_pack_payload(normalized, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
+    if validated and prompt_snapshots:
+        validated["prompt_snapshots"] = prompt_snapshots
+    return validated
 
 
 def _build_stream_event(event_type: str, payload: Dict[str, Any]) -> AgentSummaryStreamEvent:
@@ -1134,7 +1163,7 @@ def _chunk_text_for_stream(text: str, *, chunk_size: int = 24) -> List[str]:
 
 def _build_headline_section_prompt() -> str:
     return (
-        "你是 gaode-map 的商业总结撰写器。"
+        "你是一名商业地理与城市空间分析师。"
         "请基于给定结构化证据，输出 JSON："
         "{\"summary\":\"...\",\"supporting_clause\":\"...\"}"
         "要求："
@@ -1150,7 +1179,7 @@ def _build_profile_section_prompt(section_key: str) -> str:
     else:
         task_line = "headline 必须写消费行为或使用方式，traits 写 2 到 4 条行为特征。"
     return (
-        "你是 gaode-map 的商业总结撰写器。"
+        "你是一名商业地理与城市空间分析师。"
         "请基于给定结构化证据，输出 JSON："
         "{\"headline\":\"...\",\"traits\":[\"...\",\"...\"]}"
         f"{task_line}"
@@ -1160,7 +1189,7 @@ def _build_profile_section_prompt(section_key: str) -> str:
 
 def _build_followup_questions_prompt() -> str:
     return (
-        "你是 gaode-map 的商业分析助手。"
+        "你是一名商业地理与城市空间分析师。"
         "请基于当前总结证据，输出 JSON："
         "{\"questions\":[\"...\",\"...\",\"...\"]}"
         "要求："
@@ -1254,32 +1283,35 @@ def _validate_followup_questions_payload(raw: Dict[str, Any]) -> List[str]:
 
 
 async def _generate_headline_section_with_llm(source_payload: Dict[str, Any]) -> Dict[str, str]:
+    config = _prompt_config_for("headline")
     payload = await _invoke_json_role(
-        system_prompt=_build_headline_section_prompt(),
+        system_prompt=config.system_prompt,
         user_payload=_build_headline_section_payload(source_payload),
         emit=None,
         phase="summary_headline",
-        title="生成一句话结论",
+        title="生成核心判断",
         reasoning_id="summary-headline-reasoning",
     )
-    return _validate_headline_section_payload(payload)
+    return _attach_prompt_snapshot(_validate_headline_section_payload(payload), "headline")
 
 
 async def _generate_profile_section_with_llm(section_key: str, source_payload: Dict[str, Any]) -> Dict[str, Any]:
+    config = _prompt_config_for(section_key)
     payload = await _invoke_json_role(
-        system_prompt=_build_profile_section_prompt(section_key),
+        system_prompt=config.system_prompt,
         user_payload=_build_profile_section_payload(section_key, source_payload),
         emit=None,
         phase=f"summary_{section_key}",
         title="生成用户画像" if section_key == "user_profile" else "生成商业行为推断",
         reasoning_id=f"summary-{section_key}-reasoning",
     )
-    return _validate_profile_section_payload(payload)
+    return _attach_prompt_snapshot(_validate_profile_section_payload(payload), section_key)
 
 
 async def _generate_followup_questions_with_llm(source_payload: Dict[str, Any], summary_pack: Dict[str, Any]) -> List[str]:
+    config = _prompt_config_for("followups")
     payload = await _invoke_json_role(
-        system_prompt=_build_followup_questions_prompt(),
+        system_prompt=config.system_prompt,
         user_payload=_build_followup_questions_payload(source_payload, summary_pack),
         emit=None,
         phase="summary_followups",
@@ -1306,6 +1338,7 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
         artifacts = dict(readiness_payload.get("artifacts") or {})
         normalized = _normalize_data_readiness(readiness_payload)
         summary_pack: Dict[str, Any] = {}
+        prompt_snapshots: Dict[str, Any] = {}
         summary_status = _build_summary_status(
             status="data_incomplete",
             llm_available=is_llm_enabled(),
@@ -1365,7 +1398,10 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
 
                 try:
                     headline_payload = await _generate_headline_section_with_llm(source_payload)
-                    yield _build_stream_event("section_start", {"key": "headline", "title": "一句话结论"})
+                    snapshot = _pop_prompt_snapshot(headline_payload)
+                    if snapshot:
+                        prompt_snapshots["headline"] = snapshot
+                    yield _build_stream_event("section_start", {"key": "headline", "title": "核心判断"})
                     headline_text = " ".join([headline_payload.get("summary", ""), headline_payload.get("supporting_clause", "")]).strip()
                     for chunk in _chunk_text_for_stream(headline_text):
                         yield _build_stream_event("section_delta", {"key": "headline", "delta": chunk})
@@ -1393,6 +1429,9 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                     try:
                         yield _build_stream_event("section_start", {"key": section_key, "title": section_title})
                         section_payload = await _generate_summary_section_with_llm(section_key, section_title, source_payload)
+                        snapshot = _pop_prompt_snapshot(section_payload)
+                        if snapshot:
+                            prompt_snapshots[section_key] = snapshot
                         section_pack = _normalize_area_judgment_reasoning({section_key: section_payload}, source_payload)
                         section_payload = dict(section_pack.get(section_key) or section_payload)
                         for chunk in _chunk_text_for_stream(_clean_text(section_payload.get("reasoning"))):
@@ -1413,6 +1452,9 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                 ]:
                     try:
                         section_payload = await _generate_profile_section_with_llm(section_key, source_payload)
+                        snapshot = _pop_prompt_snapshot(section_payload)
+                        if snapshot:
+                            prompt_snapshots[section_key] = snapshot
                         yield _build_stream_event("section_start", {"key": stream_key, "title": title})
                         section_text = "\n".join([section_payload.get("headline", ""), *(section_payload.get("traits") or [])]).strip()
                         for chunk in _chunk_text_for_stream(section_text):
@@ -1429,6 +1471,7 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
 
                 try:
                     followup_questions = await _generate_followup_questions_with_llm(source_payload, summary_pack)
+                    prompt_snapshots["followups"] = build_prompt_snapshot(_prompt_config_for("followups"))
                 except Exception as exc:
                     warnings.append(f"followup_generation_failed:{exc}")
                     followup_questions = []
@@ -1456,6 +1499,8 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                 if normalized_pack:
                     if summary_pack.get("followup_questions"):
                         normalized_pack["followup_questions"] = list(summary_pack.get("followup_questions") or [])
+                    if prompt_snapshots:
+                        normalized_pack["prompt_snapshots"] = dict(prompt_snapshots)
                     summary_pack = normalized_pack
                     summary_status = _build_summary_status(
                         status="ready",
@@ -1499,6 +1544,8 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
         )
         if summary_pack.get("followup_questions"):
             panel_payloads["summary_followup_questions"] = list(summary_pack.get("followup_questions") or [])
+        if prompt_snapshots:
+            panel_payloads["prompt_snapshots"] = dict(prompt_snapshots)
         panel_payloads["data_readiness"] = dict(normalized)
         phases.append("completed")
         yield _build_stream_event(
@@ -1712,6 +1759,8 @@ async def generate_summary_pack(payload: AgentSummaryRequest) -> AgentSummaryGen
             summary_pack=summary_pack,
             summary_status=summary_status,
         )
+        if isinstance(summary_pack.get("prompt_snapshots"), dict):
+            panel_payloads["prompt_snapshots"] = dict(summary_pack.get("prompt_snapshots") or {})
         panel_payloads["data_readiness"] = dict(normalized)
 
         return AgentSummaryGenerateResponse(

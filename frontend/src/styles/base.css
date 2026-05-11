@@ -228,6 +228,62 @@ body,
   font-size: 12px;
 }
 
+.basis-prompt-note.is-error {
+  color: #b91c1c;
+}
+
+.basis-edit-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.basis-edit-form label {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.basis-edit-form textarea {
+  width: 100%;
+  min-height: 84px;
+  resize: vertical;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  padding: 9px;
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #0f172a;
+  background: #fff;
+}
+
+.basis-edit-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.basis-action-btn {
+  min-height: 32px;
+  border: 1px solid #0f172a;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #fff;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.basis-action-btn.is-secondary {
+  background: #fff;
+  color: #0f172a;
+}
+
+.basis-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .agent-summary-task-params-readonly {
   display: flex;
   flex-wrap: wrap;
@@ -1239,8 +1295,7 @@ body,
   font-weight: 700;
 }
 
-.agent-iteration-heatmap-copy-pill,
-.agent-iteration-heatmap-copy-hint {
+.agent-iteration-heatmap-copy-pill {
   border: 1px solid #dbe4f0;
   border-radius: 999px;
   background: #f8fafc;
@@ -1249,6 +1304,61 @@ body,
   font-size: 11px;
   font-weight: 800;
   white-space: nowrap;
+}
+
+.agent-iteration-heatmap-layer-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 10px;
+}
+
+.agent-iteration-heatmap-layer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid #dbe4f0;
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.agent-iteration-heatmap-layer-toggle:hover,
+.agent-iteration-heatmap-layer-toggle:focus-visible {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  outline: none;
+}
+
+.agent-iteration-heatmap-layer-toggle.is-active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.08);
+}
+
+.agent-iteration-heatmap-layer-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+}
+
+.agent-iteration-heatmap-layer-swatch--cells {
+  background: rgba(249, 115, 22, 0.62);
+}
+
+.agent-iteration-heatmap-layer-swatch--points {
+  border-radius: 999px;
+  background: #0891b2;
 }
 
 .agent-iteration-heatmap-card:hover .agent-iteration-heatmap-copy-pill,
@@ -1311,6 +1421,7 @@ body,
 }
 
 .agent-iteration-heatmap-viewport--snapshot {
+  position: relative;
   background: #ffffff;
 }
 
@@ -1318,7 +1429,13 @@ body,
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: fill;
+}
+
+.agent-iteration-heatmap-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .agent-iteration-heatmap-loading {
@@ -1341,14 +1458,15 @@ body,
 
 .agent-iteration-heatmap-svg.has-basemap .agent-iteration-heatmap-cell {
   fill: #f97316;
-  mix-blend-mode: multiply;
-  stroke: rgba(255, 255, 255, 0.42);
+  fill-opacity: 0.34;
+  stroke: rgba(127, 29, 29, 0.5);
+  stroke-width: 0.16;
 }
 
 .agent-iteration-heatmap-svg.has-basemap .agent-iteration-heatmap-point {
-  fill: #102033;
-  fill-opacity: 0.58;
-  stroke: rgba(255, 255, 255, 0.92);
+  fill: #0891b2;
+  stroke: rgba(240, 253, 250, 0.94);
+  stroke-width: 0.74;
 }
 
 .agent-iteration-heatmap-boundary {
@@ -1361,15 +1479,16 @@ body,
 
 .agent-iteration-heatmap-cell {
   fill: #f97316;
-  stroke: rgba(255, 255, 255, 0.22);
-  stroke-width: 0.08;
+  stroke: rgba(127, 29, 29, 0.36);
+  stroke-width: 0.14;
 }
 
 .agent-iteration-heatmap-point {
-  fill: #0f172a;
-  fill-opacity: 0.42;
-  stroke: rgba(255, 255, 255, 0.86);
-  stroke-width: 0.42;
+  fill: #0891b2;
+  stroke: rgba(240, 253, 250, 0.94);
+  stroke-width: 0.68;
+  paint-order: stroke fill;
+  vector-effect: non-scaling-stroke;
 }
 
 .agent-iteration-heatmap-trend {

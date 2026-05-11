@@ -671,7 +671,7 @@ label {
 .agent-sidebar-history-group {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 7px;
     overflow: visible;
 }
 
@@ -692,10 +692,14 @@ label {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
+    border: 0;
     padding: 0 2px;
+    background: transparent;
     font-size: 12px;
     font-weight: 800;
     color: #334155;
+    text-align: left;
 }
 
 .agent-sidebar-history-folder--primary {
@@ -705,10 +709,38 @@ label {
 }
 
 .agent-sidebar-history-folder--secondary {
-    padding-left: 18px;
+    padding-left: 2px;
     font-size: 11px;
     font-weight: 700;
     color: #64748b;
+}
+
+.agent-sidebar-history-folder--button {
+    cursor: pointer;
+    border-radius: 8px;
+}
+
+.agent-sidebar-history-folder--button:hover {
+    background: #f8fafc;
+}
+
+.agent-sidebar-history-folder--button::after {
+    content: "";
+    width: 6px;
+    height: 6px;
+    margin-left: 2px;
+    border-right: 2px solid #94a3b8;
+    border-bottom: 2px solid #94a3b8;
+    transform: rotate(45deg);
+    transition: transform 0.16s ease;
+}
+
+.agent-sidebar-history-folder--button.is-collapsed::after {
+    transform: rotate(-45deg);
+}
+
+.agent-sidebar-history-folder.is-heading-only {
+    margin-top: 2px;
 }
 
 .agent-sidebar-history-folder-icon {

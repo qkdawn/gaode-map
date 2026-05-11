@@ -1,0 +1,372 @@
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, List
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class PromptConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    prompt_key: str
+    title: str = ""
+    system_prompt: str = ""
+    payload_note: str = ""
+    output_schema: Dict[str, Any] = Field(default_factory=dict)
+    evidence_version: str = ""
+    updated_at: str = ""
+
+
+class PromptUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    system_prompt: str = ""
+    payload_note: str = ""
+    output_schema: Dict[str, Any] = Field(default_factory=dict)
+
+
+_REGISTRY_PATH = Path("runtime") / "agent_prompt_registry.json"
+_DEFAULT_BUILDERS: Dict[str, Callable[[], PromptConfig]] = {}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _schema(properties: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+def _register_default(prompt_key: str, builder: Callable[[], PromptConfig]) -> None:
+    _DEFAULT_BUILDERS[prompt_key] = builder
+
+
+def register_prompt_default(prompt_key: str, builder: Callable[[], PromptConfig]) -> None:
+    _register_default(prompt_key, builder)
+
+
+def _default_payload_note(task: str, evidence_version: str) -> str:
+    return (
+        f'User payload: {{"task":"{task}","evidence": {evidence_version} 证据包}}。'
+        "evidence 只包含后端构造的结构化字段；不包含图片/base64、全量点位、完整网格或前端 UI 状态。"
+    )
+
+
+def _make_default_configs() -> Dict[str, PromptConfig]:
+    updated_at = "2026-05-10T00:00:00Z"
+    defaults: Dict[str, PromptConfig] = {
+        "headline": PromptConfig(
+            prompt_key="headline",
+            title="核心判断",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。"
+                "请基于给定结构化证据，输出 JSON：{\"summary\":\"...\",\"supporting_clause\":\"...\"}。"
+                "要求：summary 必须是一句话商业判断；supporting_clause 必须补一句解释，不要复述 summary；"
+                "不能编造新事实，不能罗列原始数值。"
+            ),
+            payload_note=_default_payload_note("summary_headline_generation", "summary_pack_v1"),
+            output_schema=_schema(
+                {
+                    "summary": {"type": "string"},
+                    "supporting_clause": {"type": "string"},
+                },
+                ["summary"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "spatial_structure": PromptConfig(
+            prompt_key="spatial_structure",
+            title="空间结构",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。现在只生成空间结构判断卡片，必须输出 JSON，不要输出 markdown。"
+                "JSON 结构固定为：{\"section_key\":\"spatial_structure\",\"title\":\"空间结构\",\"reasoning\":\"...\","
+                "\"dimensions\":[{\"key\":\"aggregation\",\"label\":\"聚集性\",\"conclusion\":\"...\"},"
+                "{\"key\":\"mixing\",\"label\":\"混合性\",\"conclusion\":\"...\"},"
+                "{\"key\":\"morphology\",\"label\":\"形态性\",\"conclusion\":\"...\"}]}。"
+                "只回答空间组织，不写人口、夜光或用户画像；reasoning 必须是商业判断句，不要写成指标描述。"
+            ),
+            payload_note=_default_payload_note("summary_section_spatial_structure", "summary_pack_v1"),
+            output_schema=_schema(
+                {
+                    "section_key": {"type": "string"},
+                    "title": {"type": "string"},
+                    "reasoning": {"type": "string"},
+                    "dimensions": {"type": "array", "items": {"type": "object"}},
+                },
+                ["section_key", "title", "reasoning", "dimensions"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "poi_structure": PromptConfig(
+            prompt_key="poi_structure",
+            title="POI结构",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。现在只生成 POI 结构判断卡片，必须输出 JSON，不要输出 markdown。"
+                "JSON 结构固定为：{\"section_key\":\"poi_structure\",\"title\":\"POI结构\",\"reasoning\":\"...\"}。"
+                "只写主导业态、占比结构和功能特征，要写成判断句，不要写成“反映了/体现了”的指标播报。"
+            ),
+            payload_note=_default_payload_note("summary_section_poi_structure", "summary_pack_v1"),
+            output_schema=_schema(
+                {
+                    "section_key": {"type": "string"},
+                    "title": {"type": "string"},
+                    "reasoning": {"type": "string"},
+                },
+                ["section_key", "title", "reasoning"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "consumption_vitality": PromptConfig(
+            prompt_key="consumption_vitality",
+            title="经济活动强度",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。现在只生成经济活动强度判断卡片，必须输出 JSON，不要输出 markdown。"
+                "JSON 结构固定为：{\"section_key\":\"consumption_vitality\",\"title\":\"经济活动强度\",\"reasoning\":\"...\"}。"
+                "只写夜间经济活动强度，不写消费能力、客流、营业额或白天活跃；优先使用夜光方位与路网走向的一致性形成判断。"
+            ),
+            payload_note=_default_payload_note("summary_section_consumption_vitality", "summary_pack_v1"),
+            output_schema=_schema(
+                {
+                    "section_key": {"type": "string"},
+                    "title": {"type": "string"},
+                    "reasoning": {"type": "string"},
+                },
+                ["section_key", "title", "reasoning"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "business_support": PromptConfig(
+            prompt_key="business_support",
+            title="业态承接",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。现在只生成业态承接判断卡片，必须输出 JSON，不要输出 markdown。"
+                "JSON 结构固定为：{\"section_key\":\"business_support\",\"title\":\"业态承接\",\"reasoning\":\"...\"}。"
+                "只写路网与空间条件对现有业态的承接；先写连通性，再写通达效率，再写认知可读性，最后落到承接判断。"
+            ),
+            payload_note=_default_payload_note("summary_section_business_support", "summary_pack_v1"),
+            output_schema=_schema(
+                {
+                    "section_key": {"type": "string"},
+                    "title": {"type": "string"},
+                    "reasoning": {"type": "string"},
+                },
+                ["section_key", "title", "reasoning"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "user_profile": PromptConfig(
+            prompt_key="user_profile",
+            title="用户画像",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。请基于给定结构化证据，输出 JSON："
+                "{\"headline\":\"...\",\"traits\":[\"...\",\"...\"]}。"
+                "headline 必须写消费者是谁，traits 写 2 到 4 条稳定画像特征。不能编造新事实，不能输出 markdown。"
+            ),
+            payload_note=_default_payload_note("summary_user_profile_generation", "summary_pack_v1"),
+            output_schema=_schema(
+                {
+                    "headline": {"type": "string"},
+                    "traits": {"type": "array", "items": {"type": "string"}},
+                },
+                ["headline", "traits"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "behavior_inference": PromptConfig(
+            prompt_key="behavior_inference",
+            title="商业行为推断",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。请基于给定结构化证据，输出 JSON："
+                "{\"headline\":\"...\",\"traits\":[\"...\",\"...\"]}。"
+                "headline 必须写消费行为或使用方式，traits 写 2 到 4 条行为特征。不能编造新事实，不能输出 markdown。"
+            ),
+            payload_note=_default_payload_note("summary_behavior_inference_generation", "summary_pack_v1"),
+            output_schema=_schema(
+                {
+                    "headline": {"type": "string"},
+                    "traits": {"type": "array", "items": {"type": "string"}},
+                },
+                ["headline", "traits"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "followups": PromptConfig(
+            prompt_key="followups",
+            title="快捷追问",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师。请基于当前总结证据，输出 JSON：{\"questions\":[\"...\",\"...\",\"...\"]}。"
+                "questions 固定输出 3 条；每条都要是下一步值得继续追问的问题；不要输出解释和 markdown。"
+            ),
+            payload_note=_default_payload_note("summary_followup_generation", "summary_pack_v1"),
+            output_schema=_schema(
+                {"questions": {"type": "array", "items": {"type": "string"}}},
+                ["questions"],
+            ),
+            evidence_version="summary_pack_v1",
+            updated_at=updated_at,
+        ),
+        "poi_iteration": PromptConfig(
+            prompt_key="poi_iteration",
+            title="POI 多年迭代",
+            system_prompt=(
+                "你是一名商业地理与城市空间分析师，负责用同一份 poi_iteration_v1 证据包完成 POI 多年变化解读。"
+                "本提示词分为三层：基础证据约束、AI分析任务、AI洞察任务；三层属于同一次 AI 调用，不要拆成互相矛盾的两套结论。"
+                "基础证据约束：只能使用 year_summaries、trend_metrics、category_changes、subcategory_changes、area_distribution、"
+                "spatial_factors、subcategory_spatial_trends、growth_area_signal 和 material_change_highlights 中已有信息。"
+                "位置判断只能来自证据中已有字段，不得凭坐标或想象地图编造方向、商圈、道路名、地标或百分比；证据不足时明确说明趋势信号有限。"
+                "AI分析任务：生成 summary_points，必须先概括 POI 总量、一级业态和关键小类数量变化，再说明空间或区域分布变化；"
+                "summary_points 必须是 2 到 4 条中文短句，用于前端“AI分析”卡片。"
+                "AI洞察任务：生成 fastest_growth、declining_category、emerging_area、structure_judgement，用于前端“AI洞察”卡片；"
+                "fastest_growth 和 declining_category 必须优先使用 material_change_highlights，排序按绝对增减量、末年占比、末年数量，百分比增速只能作为补充；"
+                "emerging_area 表示增长片区或空间增量方向，不是行政区新区域；优先使用 growth_area_signal。"
+                "只输出 JSON 对象，字段必须为 summary_points, fastest_growth, declining_category, emerging_area, structure_judgement。不要输出 markdown。"
+            ),
+            payload_note=(
+                'User payload: {"task":"poi_iteration_change","evidence": poi_iteration_v1 证据包}。'
+                "evidence 只包含年摘要、趋势指标、业态/小类变化、空间因子、小类空间信号、增长片区信号和区域分布摘要；"
+                "不包含全量 POI 点、图片 base64、底图、完整热力格或前端 UI 状态。"
+            ),
+            output_schema=_schema(
+                {
+                    "summary_points": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "AI分析卡片使用的总体解读，2 到 4 条中文短句。",
+                    },
+                    "fastest_growth": {"type": "string", "description": "AI洞察卡片使用的增长最快行业判断。"},
+                    "declining_category": {"type": "string", "description": "AI洞察卡片使用的衰退行业判断。"},
+                    "emerging_area": {"type": "string", "description": "AI洞察卡片使用的增长片区或空间增量方向判断。"},
+                    "structure_judgement": {"type": "string", "description": "AI洞察卡片使用的业态结构判断。"},
+                },
+                ["summary_points", "fastest_growth", "declining_category", "emerging_area", "structure_judgement"],
+            ),
+            evidence_version="poi_iteration_v1",
+            updated_at=updated_at,
+        ),
+        "nightlight_iteration": PromptConfig(
+            prompt_key="nightlight_iteration",
+            title="夜光多年迭代",
+            system_prompt=(
+                "你是商业地理与夜光遥感分析助手。请基于 nightlight_iteration_v1 证据包中的 years、series、hotspot_shift、"
+                "insights 和 snapshot_refs 判断区域夜间经济活动的热点变化和迁移趋势。"
+                "只输出 JSON 对象，字段必须为 headline, trend_summary, hotspot_migration, risk_or_opportunity。"
+                "headline 必须是一句话趋势判断；trend_summary 说明总辐亮、均值、P90 或点亮占比的主要变化；"
+                "hotspot_migration 只能使用 hotspot_shift 和 insights 中已有信号；risk_or_opportunity 说明机会或风险。不要输出 markdown。"
+            ),
+            payload_note=(
+                'User payload: {"task":"nightlight_iteration_change","evidence": nightlight_iteration_v1 证据包}。'
+                "evidence 只包含年度夜光统计、热点迁移摘要、规则洞察和快照引用状态；不包含图片 base64、完整栅格、地图底图或前端 UI 状态。"
+            ),
+            output_schema=_schema(
+                {
+                    "headline": {"type": "string"},
+                    "trend_summary": {"type": "string"},
+                    "hotspot_migration": {"type": "string"},
+                    "risk_or_opportunity": {"type": "string"},
+                },
+                ["headline", "trend_summary", "hotspot_migration", "risk_or_opportunity"],
+            ),
+            evidence_version="nightlight_iteration_v1",
+            updated_at=updated_at,
+        ),
+    }
+    for prompt_key, builder in _DEFAULT_BUILDERS.items():
+        defaults[prompt_key] = builder()
+    return defaults
+
+
+def _read_registry_file() -> Dict[str, Any]:
+    if not _REGISTRY_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_REGISTRY_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_registry_file(configs: Dict[str, PromptConfig]) -> None:
+    _REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        key: config.model_dump(mode="json")
+        for key, config in sorted(configs.items())
+    }
+    _REGISTRY_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_configs() -> Dict[str, PromptConfig]:
+    configs = _make_default_configs()
+    stored = _read_registry_file()
+    changed = not _REGISTRY_PATH.exists()
+    for key, value in stored.items():
+        if not isinstance(value, dict):
+            continue
+        try:
+            config = PromptConfig(**{**value, "prompt_key": str(value.get("prompt_key") or key)})
+        except Exception:
+            continue
+        configs[config.prompt_key] = config
+    for key, config in list(configs.items()):
+        if not config.updated_at:
+            configs[key] = config.model_copy(update={"updated_at": _now_iso()})
+            changed = True
+    if changed:
+        _write_registry_file(configs)
+    return configs
+
+
+def list_prompt_configs() -> List[PromptConfig]:
+    return list(_load_configs().values())
+
+
+def get_prompt_config(prompt_key: str) -> PromptConfig:
+    key = str(prompt_key or "").strip()
+    configs = _load_configs()
+    if key not in configs:
+        raise KeyError(key)
+    return configs[key]
+
+
+def update_prompt_config(prompt_key: str, update: PromptUpdateRequest) -> PromptConfig:
+    key = str(prompt_key or "").strip()
+    configs = _load_configs()
+    if key not in configs:
+        raise KeyError(key)
+    current = configs[key]
+    next_config = current.model_copy(update={
+        "system_prompt": str(update.system_prompt or ""),
+        "payload_note": str(update.payload_note or ""),
+        "output_schema": deepcopy(update.output_schema or {}),
+        "updated_at": _now_iso(),
+    })
+    configs[key] = next_config
+    _write_registry_file(configs)
+    return next_config
+
+
+def build_prompt_snapshot(config: PromptConfig) -> Dict[str, Any]:
+    return {
+        "prompt_key": config.prompt_key,
+        "title": config.title,
+        "system_prompt": config.system_prompt,
+        "payload_note": config.payload_note,
+        "output_schema": deepcopy(config.output_schema or {}),
+        "evidence_version": config.evidence_version,
+        "updated_at": config.updated_at,
+    }

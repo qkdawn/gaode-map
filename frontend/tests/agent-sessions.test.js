@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+﻿import fs from 'node:fs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -378,6 +378,67 @@ test('agent economic activity basis payload combines nightlight and road orienta
   assert.ok(payload.fields.some((field) => field.key === 'road_orientation_analysis'))
 })
 
+test('agent summary section basis prompts are section-specific', () => {
+  const ctx = createAgentContext()
+  const prompts = [
+    'spatial_structure',
+    'poi_structure',
+    'consumption_vitality',
+    'business_support',
+  ].map((sectionKey) => ctx.getAgentSummarySectionPrompt(sectionKey))
+
+  assert.equal(new Set(prompts).size, 4)
+  assert.match(prompts[0], /没有本次 AI 调用 prompt 快照/)
+  assert.match(prompts[1], /没有本次 AI 调用 prompt 快照/)
+  assert.match(prompts[2], /没有本次 AI 调用 prompt 快照/)
+  assert.match(prompts[3], /没有本次 AI 调用 prompt 快照/)
+  assert.doesNotMatch(prompts.join('\n'), /你是一名商业地理/)
+})
+
+test('agent summary basis formats road orientation as readable summary', () => {
+  const ctx = createAgentContext({
+    agentPanelPayloads: {
+      summary_pack: {
+        headline_judgment: { summary: 'Area summary' },
+        user_profile: { headline: 'Users' },
+        behavior_inference: { headline: 'Behavior' },
+        consumption_vitality: {
+          title: 'Economic activity',
+          reasoning: 'Nightlight and roads align.',
+          dimensions: [],
+        },
+        spatial_structure: { title: 'Spatial structure', reasoning: 'Stable.' },
+        poi_structure: { title: 'POI structure', reasoning: 'Stable.' },
+        business_support: { title: 'Business support', reasoning: 'Stable.' },
+      },
+      current_nightlight_pattern_analysis: {
+        economic_activity_intensity_level: 'medium_high',
+      },
+      road_syntax_summary: {
+        road_orientation_analysis: {
+          dominant_orientation: 'north-south',
+          secondary_orientation: 'east-west',
+          dominant_share: 0.37229,
+          secondary_share: 0.372109,
+          orientation_rows: [
+            { label: 'east-west', length_share: 0.372109 },
+            { label: 'north-south', length_share: 0.37229 },
+          ],
+        },
+      },
+    },
+  })
+  const item = ctx.getAgentSummaryAreaJudgments()[2]
+  const payload = ctx.buildAgentSummaryBasisPayload(item)
+  const roadField = payload.fields.find((field) => field.key === 'road_orientation_analysis')
+
+  assert.ok(roadField)
+  assert.match(roadField.value, /主导/)
+  assert.match(roadField.value, /37\.2%/)
+  assert.doesNotMatch(roadField.value, /dominant_orientation/)
+  assert.doesNotMatch(roadField.value, /orientation_rows/)
+})
+
 test('agent summary headline basis payload exposes structured evidence and real prompt contract', () => {
   const ctx = createAgentContext({
     agentPanelPayloads: {
@@ -388,6 +449,15 @@ test('agent summary headline basis payload exposes structured evidence and real 
         },
         user_profile: { headline: 'Young nearby consumers', traits: ['young', 'daily consumption'] },
         behavior_inference: { headline: 'Frequent short-stay consumption', traits: ['dining', 'evening activity'] },
+        prompt_snapshots: {
+          headline: {
+            prompt_key: 'headline',
+            system_prompt: 'REAL headline system prompt',
+            payload_note: 'REAL headline payload note',
+            output_schema: { required: ['summary'] },
+            evidence_version: 'summary_pack_v1',
+          },
+        },
       },
       current_business_profile: {
         business_profile: 'food-led district',
@@ -438,9 +508,10 @@ test('agent summary headline basis payload exposes structured evidence and real 
   assert.ok(payload.fields.some((field) => field.key === 'poi_structure_summary'))
   assert.ok(payload.fields.some((field) => field.key === 'spatial_structure_summary'))
   assert.ok(payload.fields.some((field) => field.key === 'population_profile'))
-  assert.match(payload.aiPrompt, /summary/)
-  assert.match(payload.aiPrompt, /supporting_clause/)
-  assert.match(payload.aiPromptPayloadNote, /summary_pack_v1/)
+  assert.equal(payload.aiPrompt, 'REAL headline system prompt')
+  assert.equal(payload.aiPromptPayloadNote, 'REAL headline payload note')
+  assert.equal(payload.promptSourceLabel, '本次生成实际使用的提示词快照')
+  assert.deepEqual(payload.outputSchema, { required: ['summary'] })
   assert.equal(payload.rawInput.evidence.task, 'summary_pack_generation')
 })
 
@@ -461,7 +532,9 @@ test('agent summary basis payload includes baseline fields even with sparse sect
   })
   assert.ok(payload.fields.some((field) => field.key === 'evidence_version'))
   assert.ok(payload.fields.some((field) => field.key === 'task'))
-  assert.match(payload.aiPromptPayloadNote, /summary_pack_v1/)
+  assert.equal(payload.aiPromptPayloadNote, '')
+  assert.match(payload.aiPrompt, /没有本次 AI 调用 prompt 快照/)
+  assert.equal(payload.promptSourceLabel, '无本次调用快照')
   assert.equal(payload.fields.length >= 2, true)
 })
 
@@ -494,6 +567,13 @@ test('agent nightlight iteration basis payload uses evidence pack prompt and non
       trend_summary: 'Total radiance increased.',
       hotspot_migration: 'Hotspots moved east.',
       risk_or_opportunity: 'More evening activity opportunity.',
+    },
+    prompt_snapshot: {
+      prompt_key: 'nightlight_iteration',
+      system_prompt: '真实夜光 system prompt with headline and hotspot_migration',
+      payload_note: '真实夜光 payload note nightlight_iteration_v1',
+      output_schema: { required: ['headline', 'hotspot_migration'] },
+      evidence_version: 'nightlight_iteration_v1',
     },
   })
 
@@ -784,7 +864,23 @@ test('agent history sessions are grouped by current history id', () => {
 
   assert.deepEqual(ctx.getAgentCurrentRangeSessions().map((item) => item.id), ['agent-current'])
   assert.deepEqual(ctx.getAgentOtherRangeSessions().map((item) => item.id), ['agent-other', 'agent-legacy'])
-  assert.deepEqual(ctx.getAgentRangeSessionGroups().map((item) => item.title), ['当前范围', '其他范围'])
+  assert.deepEqual(ctx.getAgentRangeSessionGroups().map((item) => item.title), ['当前范围', '追问', '其他范围'])
+})
+
+test('summary history titles use generic summary label', () => {
+  const ctx = createAgentContext()
+  const session = {
+    ...ctxSessionBase('summary-a', '该区域是一个以年轻人群日常消费和科教文化配套为主的多核商业区。'),
+    panelKind: 'commercial_summary',
+    panelPayloads: {
+      summary_pack: buildSummaryPack('该区域是一个以年轻人群日常消费和科教文化配套为主的多核商业区。'),
+    },
+  }
+
+  assert.equal(ctx.getAgentSessionTitle(session), '总结')
+  assert.equal(ctx.getAgentSummaryWindowTitle(session.panelPayloads, session.title), '总结')
+  ctx.toggleAgentHistoryGroup('current-summary')
+  assert.equal(ctx.isAgentHistoryGroupCollapsed('current-summary'), true)
 })
 
 test('agent history puts all sessions into other range when current history id is missing', () => {
@@ -2906,8 +3002,8 @@ test('createAgentSummaryTab opens a new summary window instead of reusing the de
   assert.notEqual(firstId, secondId)
   assert.equal(ctx.agentTabs.summaryTabs.length, 3)
   assert.equal(ctx.agentTabs.summaryTabs[0].id, 'summary-current')
-  assert.equal(ctx.agentTabs.summaryTabs.find((item) => item.id === firstId).title, '区域总结')
-  assert.equal(ctx.agentTabs.summaryTabs.find((item) => item.id === secondId).title, '区域总结')
+  assert.equal(ctx.agentTabs.summaryTabs.find((item) => item.id === firstId).title, '总结')
+  assert.equal(ctx.agentTabs.summaryTabs.find((item) => item.id === secondId).title, '总结')
   assert.equal(ctx.agentTabs.activeTabId, secondId)
 })
 
@@ -3224,7 +3320,7 @@ test('buildAgentIterationSnapshotSvgMarkupFromNode serializes displayed svg', ()
           this.attrs[name] = value
         },
         querySelectorAll(selector) {
-          assert.equal(selector, 'polygon')
+          if (selector !== 'polygon') return []
           return [{
             attrs: {},
             getAttribute(name) {
@@ -3249,6 +3345,36 @@ test('buildAgentIterationSnapshotSvgMarkupFromNode serializes displayed svg', ()
   }
   try {
     assert.equal(ctx.buildAgentIterationSnapshotSvgMarkupFromNode(svgNode), '<svg data-source="dom"></svg>')
+  } finally {
+    global.XMLSerializer = originalSerializer
+  }
+})
+
+test('buildAgentIterationSnapshotSvgMarkupFromNode uses viewport export size when provided', () => {
+  const ctx = createAgentContext()
+  const svgNode = {
+    cloneNode() {
+      return {
+        attrs: {},
+        setAttribute(name, value) {
+          this.attrs[name] = value
+        },
+        querySelectorAll() {
+          return []
+        },
+      }
+    },
+  }
+  const originalSerializer = global.XMLSerializer
+  global.XMLSerializer = class XMLSerializer {
+    serializeToString(node) {
+      return JSON.stringify(node.attrs)
+    }
+  }
+  try {
+    const markup = ctx.buildAgentIterationSnapshotSvgMarkupFromNode(svgNode, { width: 940, height: 520 })
+    assert.match(markup, /"width":"940"/)
+    assert.match(markup, /"height":"520"/)
   } finally {
     global.XMLSerializer = originalSerializer
   }
@@ -3508,6 +3634,13 @@ test('agent iteration poi exposes area heatmap basemap and boundary metadata', (
     area_heatmap_boundary: [{ x: 10, y: 90 }, { x: 90, y: 90 }, { x: 90, y: 10 }],
     area_heatmap_polygon: [[112.8, 28.0], [113.0, 28.0], [113.0, 28.2]],
     area_heatmap_snapshots: [{ year: 2025, image_url: 'data:image/png;base64,test', point_count: 1, top_area: '一区', status: 'ready' }],
+    prompt_snapshot: {
+      prompt_key: 'poi_iteration',
+      system_prompt: '真实 POI system prompt poi_iteration_v1 growth_area_signal',
+      payload_note: '真实 POI payload note User payload',
+      output_schema: { required: ['summary_points'] },
+      evidence_version: 'poi_iteration_v1',
+    },
   })
 
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapBasemap().source, 'none')
@@ -3559,7 +3692,137 @@ test('agent iteration poi exposes area heatmap basemap and boundary metadata', (
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapBoundaryPoints(), '')
 })
 
-test('agent iteration poi growth area insight uses internal spatial growth signal', () => {
+test('buildAgentIterationSnapshotSvgMarkupFromNode inlines poi heatmap overlay styles', () => {
+  const ctx = createAgentContext()
+  const nodes = []
+  const makeNode = (className) => {
+    const attrs = { class: className }
+    const node = {
+      attrs,
+      setAttribute(key, value) {
+        attrs[key] = value
+      },
+      getAttribute(key) {
+        return attrs[key] || ''
+      },
+    }
+    nodes.push(node)
+    return node
+  }
+  const boundary = makeNode('agent-iteration-heatmap-boundary')
+  const cell = makeNode('agent-iteration-heatmap-cell')
+  const point = makeNode('agent-iteration-heatmap-point')
+  const originalSerializer = global.XMLSerializer
+  global.XMLSerializer = class XMLSerializer {
+    serializeToString() {
+      return JSON.stringify(nodes.map((node) => node.attrs))
+    }
+  }
+  try {
+    const markup = ctx.buildAgentIterationSnapshotSvgMarkupFromNode({
+      cloneNode() {
+        return {
+          setAttribute() {},
+          querySelectorAll(selector) {
+            if (selector === '.agent-iteration-heatmap-boundary') return [boundary]
+            if (selector === '.agent-iteration-heatmap-cell') return [cell]
+            if (selector === '.agent-iteration-heatmap-point') return [point]
+            if (selector === 'polygon') return [boundary]
+            return []
+          },
+        }
+      },
+    })
+
+    assert.match(markup, /#1d4ed8/)
+    assert.match(markup, /#f97316/)
+    assert.match(markup, /#0891b2/)
+    assert.doesNotMatch(markup, /"fill":""/)
+  } finally {
+    global.XMLSerializer = originalSerializer
+  }
+})
+
+test('agent iteration poi basis keeps real prompt while splitting analysis and insight fields', () => {
+  const ctx = createAgentContext()
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    years: [2020, 2024],
+    summaries: [
+      { year: 2020, count: 10, category_count: 2, subcategory_count: 3, top_areas: [{ name: 'A' }] },
+      { year: 2024, count: 18, category_count: 3, subcategory_count: 4, top_areas: [{ name: 'A' }] },
+    ],
+    trend_rows: [{ key: 'total_delta', label: 'POI 首尾变化', value: '+8' }],
+    category_trend_rows: [
+      { name: '餐饮', delta: 6, first_count: 4, last_count: 10 },
+      { name: '购物', delta: -2, first_count: 4, last_count: 2 },
+    ],
+    subcategory_trend_rows: [
+      { name: '咖啡厅', parent: '餐饮', delta: 5, first_count: 1, last_count: 6 },
+    ],
+    subcategory_spatial_trend_rows: [
+      { name: '咖啡厅', parent: '餐饮', delta: 5, dominant_direction: '东北', dominant_ring: '中圈层', hotspot_grid_count: 2 },
+    ],
+    area_distribution: [{ year: 2024, point_count: 18, hotspot_cell_count: 2 }],
+    ai_summary: ['总量上升，餐饮增强。'],
+    ai_insights: {
+      fastest_growth: '餐饮增长最快',
+      declining_category: '购物减少',
+      emerging_area: '咖啡厅向东北补点',
+      structure_judgement: '结构更偏日常消费',
+    },
+    ai_prompt: '真实 POI 多年调用 system prompt',
+    ai_prompt_payload_note: '真实 POI 多年调用 user payload note',
+    prompt_snapshot: {
+      prompt_key: 'poi_iteration',
+      system_prompt: '真实 POI 多年调用 system prompt',
+      payload_note: '真实 POI 多年调用 user payload note',
+      output_schema: { required: ['summary_points'] },
+      evidence_version: 'poi_iteration_v1',
+    },
+  })
+
+  const analysisBasis = ctx.buildAgentIterationBasisPayload('poi', 'analysis')
+  const insightBasis = ctx.buildAgentIterationBasisPayload('poi', 'insight')
+
+  assert.equal(analysisBasis.aiPrompt, '真实 POI 多年调用 system prompt')
+  assert.equal(insightBasis.aiPrompt, '真实 POI 多年调用 system prompt')
+  assert.equal(analysisBasis.aiPromptPayloadNote, '真实 POI 多年调用 user payload note')
+  assert.equal(insightBasis.aiPromptPayloadNote, '真实 POI 多年调用 user payload note')
+  assert.equal(analysisBasis.promptSourceLabel, '本次生成实际使用的提示词快照')
+  assert.notEqual(analysisBasis.title, insightBasis.title)
+  assert.equal(analysisBasis.currentConclusion, '总量上升，餐饮增强。')
+  assert.match(insightBasis.currentConclusion, /增长最快行业：餐饮增长最快/)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && field.value === 'summary_points'), true)
+  assert.equal(insightBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('fastest_growth')), true)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'prompt_structure' && String(field.value).includes('同一基础提示词')), true)
+  assert.equal(insightBasis.fields.some((field) => field.key === 'prompt_structure' && String(field.value).includes('AI洞察任务')), true)
+  assert.equal(insightBasis.rules.some((rule) => String(rule).includes('不是重复调用')), true)
+  assert.equal(JSON.stringify(analysisBasis.rawInput).includes('data:image/png'), false)
+  assert.equal(analysisBasis.rawInput.evidence_version, 'poi_iteration_v1')
+})
+
+test('agent iteration poi insight keeps skeleton while ai is pending even with rule fallback', () => {
+  const ctx = createAgentContext()
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    ai_status: 'pending',
+    ai_summary: [],
+    ai_insights: {},
+    ai_error: '',
+    rule_insights: {
+      fastest_growth: '规则增长行业',
+      declining_category: '规则衰退行业',
+      emerging_area: '规则增长片区',
+      structure_judgement: '规则结构判断',
+    },
+  })
+
+  assert.deepEqual(ctx.getAgentIterationPoiAiInsightRows(), [])
+  assert.equal(ctx.shouldShowAgentIterationPoiInsightPlaceholder(), true)
+})
+
+test('agent iteration poi insight does not synthesize fallback after ai timeout', () => {
   const ctx = createAgentContext()
   ctx.commitAgentIterationPoiPayload({
     status: 'ready',
@@ -3589,17 +3852,11 @@ test('agent iteration poi growth area insight uses internal spatial growth signa
   })
 
   const rows = ctx.getAgentIterationPoiAiInsightRows()
-  const growthArea = rows.find((item) => item.key === 'emerging_area')
 
-  assert.equal(growthArea.label, '增长片区')
-  assert.match(growthArea.value, /快餐厅 \+155/)
-  assert.match(growthArea.value, /偏西南/)
-  assert.match(growthArea.value, /中圈层/)
-  assert.match(growthArea.value, /热点5格/)
-  assert.equal(growthArea.value.includes('未发现明显新兴区域'), false)
+  assert.deepEqual(rows, [])
 })
 
-test('agent iteration poi normalizes legacy emerging area wording', () => {
+test('agent iteration poi normalizes legacy emerging area wording without fallback synthesis', () => {
   const ctx = createAgentContext()
   ctx.commitAgentIterationPoiPayload({
     status: 'ready',
@@ -3619,9 +3876,8 @@ test('agent iteration poi normalizes legacy emerging area wording', () => {
   const growthArea = ctx.getAgentIterationPoiAiInsightRows().find((item) => item.key === 'emerging_area')
 
   assert.equal(growthArea.label, '增长片区')
-  assert.match(growthArea.value, /快餐厅 \+155/)
+  assert.equal(growthArea.value, '未发现明显增长片区')
   assert.equal(growthArea.value.includes('新兴区域'), false)
-  assert.equal(growthArea.value.includes('未发现明显'), false)
 })
 
 test('agent iteration poi ai timeout is treated as progressive status', () => {
@@ -3635,7 +3891,7 @@ test('agent iteration poi ai timeout is treated as progressive status', () => {
 
   assert.equal(ctx.isAgentIterationAiTimeout(ctx.getAgentIterationPoiPayload().ai_error), true)
   assert.equal(ctx.getAgentIterationPoiAiStatusText(), '基础统计和快照已完成，AI 深度解读仍在补充。')
-  assert.deepEqual(ctx.getAgentIterationPoiAiSummaryRows(), ['基础规则分析已完成。'])
+  assert.deepEqual(ctx.getAgentIterationPoiAiSummaryRows(), [])
 })
 
 test('agent iteration poi area heatmap explains count changes', () => {
@@ -3654,8 +3910,36 @@ test('agent iteration poi area heatmap explains count changes', () => {
   assert.equal(rows[1].delta_from_previous, -1031)
   assert.equal(rows[2].delta_from_previous, 236)
   assert.equal(rows[2].delta_from_first, -795)
+  assert.equal(rows[0].is_first_year, true)
+  assert.equal(rows[1].is_first_year, false)
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapChangeSummary(), '2020-2024 全部 POI 先降后回升，净变化 -795。')
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapHotspotCount(rows[1]), 2)
+})
+
+test('agent iteration poi heatmap layers switch between cells and points', () => {
+  const ctx = createAgentContext()
+
+  assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapLayerState(), { cells: false, points: true })
+  assert.equal(ctx.isAgentIterationPoiAreaHeatmapLayerVisible('cells'), false)
+  assert.equal(ctx.isAgentIterationPoiAreaHeatmapLayerVisible('points'), true)
+  assert.equal(ctx.getAgentIterationPoiAreaHeatmapLayerLabel('cells'), '格网')
+  assert.equal(ctx.getAgentIterationPoiAreaHeatmapLayerLabel('points'), '点位')
+
+  const eventCalls = []
+  ctx.toggleAgentIterationPoiAreaHeatmapLayer('cells', {
+    preventDefault: () => eventCalls.push('prevent'),
+    stopPropagation: () => eventCalls.push('stop'),
+  })
+
+  assert.deepEqual(eventCalls, ['prevent', 'stop'])
+  assert.equal(ctx.isAgentIterationPoiAreaHeatmapLayerVisible('cells'), true)
+  assert.equal(ctx.isAgentIterationPoiAreaHeatmapLayerVisible('points'), false)
+
+  ctx.toggleAgentIterationPoiAreaHeatmapLayer('points')
+
+  assert.equal(ctx.isAgentIterationPoiAreaHeatmapLayerVisible('cells'), false)
+  assert.equal(ctx.isAgentIterationPoiAreaHeatmapLayerVisible('points'), true)
+  assert.deepEqual(ctx.agentIterationPoiAreaHeatmapLayers, { mode: 'points', cells: false, points: true })
 })
 
 test('agent iteration poi shows placeholders until async ai interpretation lands', async () => {
@@ -3713,6 +3997,13 @@ test('agent iteration poi shows placeholders until async ai interpretation lands
           subcategory_spatial_summary: ['咖啡厅向东北聚集'],
           ai_prompt: '真实 POI system prompt',
           ai_prompt_payload_note: '真实 user payload note',
+          prompt_snapshot: {
+            prompt_key: 'poi_iteration',
+            system_prompt: '真实 POI system prompt',
+            payload_note: '真实 user payload note',
+            output_schema: { required: ['summary_points'] },
+            evidence_version: 'poi_iteration_v1',
+          },
           error: '',
         }),
       }
@@ -3763,7 +4054,7 @@ test('agent iteration poi heatmap keeps raw coordinates over basemap image', () 
 
   assert.equal(ctx.hasAgentIterationPoiAreaHeatmapBasemapImage(), true)
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints(), '10.00,60.00 90.00,60.00 90.00,6.00 10.00,6.00')
-  assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapDisplayPoints(ctx.getAgentIterationPoiAreaHeatmaps()[0])[0], { x: 50, y: 40 })
+  assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapDisplayPoints(ctx.getAgentIterationPoiAreaHeatmaps()[0])[0], { x: 50, y: 40, count: 1, radius: 2, opacity: 0.68 })
   assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapDisplayCells(ctx.getAgentIterationPoiAreaHeatmaps()[0])[0], { x: 10, y: 20, width: 8, height: 6, intensity: 1 })
 })
 
@@ -3787,7 +4078,7 @@ test('agent iteration poi heatmap display transform fits boundary into basemap v
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapViewBox(), '0 0 100 65.625')
   assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapAspectStyle(), { aspectRatio: '100 / 65.625' })
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapDisplayBoundaryPoints(), '6.00,10.81 94.00,10.81 94.00,54.81 6.00,54.81')
-  assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapDisplayPoints(ctx.getAgentIterationPoiAreaHeatmaps()[0])[0], { x: 50, y: 32.813 })
+  assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapDisplayPoints(ctx.getAgentIterationPoiAreaHeatmaps()[0])[0], { x: 50, y: 32.813, count: 1, radius: 2, opacity: 0.68 })
   assert.deepEqual(ctx.getAgentIterationPoiAreaHeatmapDisplayCells(ctx.getAgentIterationPoiAreaHeatmaps()[0])[0], {
     x: 6,
     y: 10.813,
@@ -3848,13 +4139,22 @@ test('ensureAgentIterationPoi current fallback commits polygon heatmap metadata'
 
 test('agent iteration poi heatmap template prefers snapshot image and falls back to svg', async () => {
   const html = await fs.promises.readFile(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8')
-  const heatmapStart = html.indexOf('agent-iteration-heatmap-grid')
+  const heatmapStart = html.indexOf('agent-iteration-heatmap-layer-controls')
   const heatmapEnd = html.indexOf('agent-iteration-heatmap-caption', heatmapStart)
   const heatmapBlock = html.slice(heatmapStart, heatmapEnd)
   assert.match(heatmapBlock, /getAgentIterationPoiAreaHeatmapSnapshot\(heatmap\.year\)\.image_url/)
   assert.match(heatmapBlock, /agent-iteration-heatmap-img/)
+  assert.match(heatmapBlock, /agent-iteration-heatmap-overlay/)
+  assert.match(heatmapBlock, /agent-iteration-heatmap-layer-controls/)
+  assert.match(heatmapBlock, /getAgentIterationPoiAreaHeatmapCopyLabel\(heatmap\)/)
+  assert.match(heatmapBlock, /toggleAgentIterationPoiAreaHeatmapLayer\(layer, \$event\)/)
+  assert.match(heatmapBlock, /isAgentIterationPoiAreaHeatmapLayerVisible\('cells'\)/)
+  assert.match(heatmapBlock, /isAgentIterationPoiAreaHeatmapLayerVisible\('points'\)/)
+  assert.match(heatmapBlock, /@click="copyAgentIterationPoiAreaHeatmapImage\(heatmap, \$event\)"/)
+  assert.match(heatmapBlock, /v-if="!heatmap\.is_first_year" class="agent-iteration-heatmap-change-strip"/)
   assert.match(heatmapBlock, /getAgentIterationPoiAreaHeatmapSnapshotStatusText/)
   assert.match(heatmapBlock, /:style="getAgentIterationPoiAreaHeatmapAspectStyle\(\)"/)
+  assert.match(heatmapBlock, /agent-iteration-heatmap-viewport--snapshot"[\s\S]*:style="getAgentIterationPoiAreaHeatmapAspectStyle\(\)"/)
   assert.match(heatmapBlock, /<svg v-bind="getAgentIterationPoiAreaHeatmapSvgAttrs\(\)"/)
   assert.doesNotMatch(heatmapBlock, /:viewBox=/)
   assert.match(heatmapBlock, /<image/)
@@ -3867,17 +4167,504 @@ test('agent iteration poi heatmap template prefers snapshot image and falls back
   assert.match(heatmapBlock, /agent-iteration-heatmap-point/)
 })
 
+test('agent history template hides empty text while folders are collapsed', async () => {
+  const html = await fs.promises.readFile(new URL('../src/pages/analysis/components/sidebar.html', import.meta.url), 'utf8')
+  assert.match(html, /!isAgentHistoryGroupCollapsed\(group\.id\) && \(!group\.panels \|\| !group\.panels\.length\)/)
+  assert.match(html, /v-else-if="!isAgentHistoryGroupCollapsed\(`\$\{group\.id\}-\$\{panel\.id\}`\)"/)
+  assert.match(html, /v-else-if="!isAgentHistoryGroupCollapsed\(group\.id\)"/)
+})
+
+test('agent iteration poi heatmap clusters dense display points', () => {
+  const ctx = createAgentContext()
+  const points = Array.from({ length: 90 }, (_, idx) => ({
+    x: 20 + (idx % 10) * 0.35,
+    y: 30 + Math.floor(idx / 10) * 0.35,
+  })).concat(Array.from({ length: 20 }, (_, idx) => ({
+    x: 70 + (idx % 5) * 0.3,
+    y: 18 + Math.floor(idx / 5) * 0.3,
+  })))
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    area_heatmaps: [{ year: 2025, points }],
+  })
+
+  const clustered = ctx.getAgentIterationPoiAreaHeatmapDisplayPoints(ctx.getAgentIterationPoiAreaHeatmaps()[0])
+
+  assert.equal(clustered.length < points.length, true)
+  assert.equal(clustered.some((point) => point.count > 1), true)
+  assert.equal(clustered.some((point) => point.radius > 2), true)
+})
+
+test('agent iteration poi snapshot image keeps small points without baking heatmap cells or boundary', () => {
+  const ctx = createAgentContext()
+  ctx.buildAgentPoiAreaHeatmapRowsFromProjectedSummaries = () => [{
+    points: [{ x: 120, y: 140 }],
+    cells: [{ x: 100, y: 120, width: 20, height: 20, intensity: 1 }],
+  }]
+  const svg = ctx.buildAgentPoiSnapshotOverlaySvg({
+    lngLatToContainer(lngLat) {
+      const lng = Number(lngLat.lng)
+      const lat = Number(lngLat.lat)
+      return { x: lng * 10, y: lat * 10 }
+    },
+  }, {
+    year: 2025,
+    points: [{ lng: 112.9, lat: 28.1 }],
+  }, {
+    area_heatmap_polygon: [[112.8, 28.0], [113.0, 28.0], [113.0, 28.2], [112.8, 28.2]],
+  })
+
+  assert.doesNotMatch(svg, /#f97316/)
+  assert.doesNotMatch(svg, /<rect\b/)
+  assert.match(svg, /<circle\b/)
+  assert.doesNotMatch(svg, /stroke="#2563eb"/)
+  assert.match(svg, /viewBox="0 0 760 760"/)
+  assert.match(ctx.getAgentPoiAreaSnapshotCacheKey({ years: [2025], summaries: [], area_heatmap_polygon: [] }), /^basemap-points-v4\|760x760\|/)
+})
+
+test('basis drawer fetches current registry config only when history snapshot is missing', async () => {
+  const ctx = createAgentContext()
+  const calls = []
+  global.fetch = async (url) => {
+    calls.push(String(url))
+    return {
+      ok: true,
+      json: async () => ({
+        prompt_key: 'business_support',
+        system_prompt: '当前 registry prompt',
+        payload_note: '当前 registry note',
+        output_schema: { required: ['reasoning'] },
+        evidence_version: 'summary_pack_v1',
+      }),
+    }
+  }
+
+  ctx.openBasisDrawer({
+    title: '业态承接依据',
+    sourceType: 'ai_checked',
+    promptKey: 'business_support',
+    aiPrompt: '当前结果没有本次 AI 调用 prompt 快照',
+  })
+  await Promise.resolve()
+  await Promise.resolve()
+  await Promise.resolve()
+
+  assert.equal(calls.length, 1)
+  assert.equal(ctx.getBasisDrawerPayload().aiPrompt, '当前 registry prompt')
+  assert.equal(ctx.getBasisDrawerPayload().aiPromptPayloadNote, '当前 registry note')
+  assert.equal(ctx.getBasisDrawerPayload().promptSourceLabel, '当前配置，非历史快照')
+})
+
+test('basis drawer does not fetch registry when history prompt snapshot exists', async () => {
+  const ctx = createAgentContext()
+  let called = false
+  global.fetch = async () => {
+    called = true
+    throw new Error('should not fetch')
+  }
+
+  ctx.openBasisDrawer({
+    title: '空间结构依据',
+    sourceType: 'ai_checked',
+    promptKey: 'spatial_structure',
+    promptSnapshot: {
+      prompt_key: 'spatial_structure',
+      system_prompt: '历史真实 prompt',
+      payload_note: '历史真实 note',
+      output_schema: { required: ['reasoning'] },
+    },
+    aiPrompt: '历史真实 prompt',
+    aiPromptPayloadNote: '历史真实 note',
+  })
+  await Promise.resolve()
+
+  assert.equal(called, false)
+  assert.equal(ctx.getBasisDrawerPayload().aiPrompt, '历史真实 prompt')
+  assert.equal(ctx.getBasisDrawerPayload().promptSourceLabel, '')
+})
+
+test('iteration basis no longer treats legacy ai_prompt as real prompt without snapshot', () => {
+  const ctx = createAgentContext()
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    ai_summary: ['总量上升。'],
+    ai_prompt: '旧字段 system prompt 不应作为真实 prompt',
+    ai_prompt_payload_note: '旧字段 note 不应作为真实 note',
+  })
+
+  const basis = ctx.buildAgentIterationBasisPayload('poi')
+
+  assert.notEqual(basis.aiPrompt, '旧字段 system prompt 不应作为真实 prompt')
+  assert.match(basis.aiPrompt, /没有本次 AI 调用 prompt 快照/)
+  assert.equal(basis.aiPromptPayloadNote, '')
+  assert.equal(basis.promptSourceLabel, '无本次调用快照')
+})
+
+test('copyAgentIterationPoiAreaHeatmapImage composites viewport before ready snapshot', async () => {
+  const ctx = createAgentContext()
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    area_heatmaps: [{ year: 2025, point_count: 8, top_area: '一区' }],
+    area_heatmap_snapshots: [{ year: 2025, image_url: 'data:image/png;base64,ZGF0YQ==', status: 'ready' }],
+  })
+  const writes = []
+  const drawCalls = []
+  const originalNavigator = global.navigator
+  const originalClipboardItem = global.ClipboardItem
+  const originalDocument = global.document
+  const originalImage = global.Image
+  const originalURL = global.URL
+  const originalSerializer = global.XMLSerializer
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: {
+      clipboard: {
+        write: async (items) => writes.push(items),
+      },
+    },
+  })
+  global.ClipboardItem = class ClipboardItem {
+    constructor(items) {
+      this.items = items
+    }
+  }
+  global.Image = class Image {
+    set src(value) {
+      this._src = value
+      if (typeof this.onload === 'function') this.onload()
+    }
+    get src() {
+      return this._src
+    }
+  }
+  global.document = {
+    createElement(tag) {
+      if (tag === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext() {
+            return {
+              fillStyle: '',
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: '',
+              fillRect() {},
+              drawImage(image) {
+                drawCalls.push(image && image.src)
+              },
+            }
+          },
+          toBlob(callback) {
+            callback(new Blob(['composited-first'], { type: 'image/png' }))
+          },
+        }
+      }
+      return {}
+    },
+  }
+  global.URL = {
+    ...global.URL,
+    createObjectURL() {
+      return 'blob:overlay-first'
+    },
+    revokeObjectURL() {},
+  }
+  global.XMLSerializer = class XMLSerializer {
+    serializeToString() {
+      return '<svg xmlns="http://www.w3.org/2000/svg"><rect class="agent-iteration-heatmap-cell"></rect></svg>'
+    }
+  }
+  const cardNode = {
+    querySelector(selector) {
+      if (selector === '.agent-iteration-heatmap-viewport') {
+        return {
+          className: 'agent-iteration-heatmap-viewport',
+          clientWidth: 320,
+          clientHeight: 180,
+          getBoundingClientRect() {
+            return { width: 320, height: 180 }
+          },
+          querySelector(innerSelector) {
+            if (innerSelector === 'img.agent-iteration-heatmap-img') {
+              return { getAttribute: () => 'data:image/png;base64,ZGF0YQ==' }
+            }
+            if (innerSelector === 'svg.agent-iteration-heatmap-svg') {
+              return {
+                cloneNode() {
+                  return {
+                    setAttribute() {},
+                    querySelectorAll() { return [] },
+                  }
+                },
+              }
+            }
+            return null
+          },
+        }
+      }
+      return null
+    },
+  }
+  try {
+    await ctx.copyAgentIterationPoiAreaHeatmapImage({ year: 2025, point_count: 8, top_area: '一区' }, { currentTarget: cardNode })
+
+    assert.equal(writes.length, 1)
+    assert.equal(await writes[0][0].items['image/png'].then((blob) => blob.type), 'image/png')
+    assert.equal(drawCalls.length, 2)
+    assert.equal(drawCalls[1], 'blob:overlay-first')
+    assert.equal(ctx.agentIterationSnapshotCopyStatus, '图片已复制')
+  } finally {
+    Object.defineProperty(global, 'navigator', {
+      configurable: true,
+      value: originalNavigator,
+    })
+    global.ClipboardItem = originalClipboardItem
+    global.document = originalDocument
+    global.Image = originalImage
+    global.URL = originalURL
+    global.XMLSerializer = originalSerializer
+  }
+})
+
+test('copyAgentIterationPoiAreaHeatmapImage uses ready snapshot when card node is unavailable', async () => {
+  const ctx = createAgentContext()
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    area_heatmaps: [{ year: 2025, point_count: 8, top_area: '一区' }],
+    area_heatmap_snapshots: [{ year: 2025, image_url: 'data:image/png;base64,ZGF0YQ==', status: 'ready' }],
+  })
+  const writes = []
+  const originalNavigator = global.navigator
+  const originalClipboardItem = global.ClipboardItem
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: {
+      clipboard: {
+        write: async (items) => writes.push(items),
+      },
+    },
+  })
+  global.ClipboardItem = class ClipboardItem {
+    constructor(items) {
+      this.items = items
+    }
+  }
+  try {
+    await ctx.copyAgentIterationPoiAreaHeatmapImage({ year: 2025, point_count: 8, top_area: '一区' }, { currentTarget: null })
+
+    assert.equal(writes.length, 1)
+    assert.equal(await writes[0][0].items['image/png'].then((blob) => blob.type), 'image/png')
+    assert.equal(ctx.agentIterationSnapshotCopyStatus, '图片已复制')
+  } finally {
+    Object.defineProperty(global, 'navigator', {
+      configurable: true,
+      value: originalNavigator,
+    })
+    global.ClipboardItem = originalClipboardItem
+  }
+})
+
+test('agent iteration poi heatmap copy label shows failure state', () => {
+  const ctx = createAgentContext()
+  ctx.agentIterationSnapshotCopyKey = 'poi-area-2025'
+  ctx.agentIterationSnapshotCopyStatus = '图片复制失败，请重试'
+
+  assert.equal(ctx.isAgentIterationPoiAreaHeatmapCopyFailed({ year: 2025 }), true)
+  assert.equal(ctx.getAgentIterationPoiAreaHeatmapCopyLabel({ year: 2025 }), '复制失败')
+})
+
+test('copyAgentIterationPoiAreaHeatmapImage falls back when viewport composition is unavailable', async () => {
+  const ctx = createAgentContext()
+  const writes = []
+  const originalNavigator = global.navigator
+  const originalClipboardItem = global.ClipboardItem
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: {
+      clipboard: {
+        write: async (items) => writes.push(items),
+      },
+    },
+  })
+  global.ClipboardItem = class ClipboardItem {
+    constructor(items) {
+      this.items = items
+    }
+  }
+  let fallbackCalled = false
+  ctx.renderAgentIterationSnapshotPngBlob = async () => {
+    fallbackCalled = true
+    return new Blob(['fallback-image'], { type: 'image/png' })
+  }
+  const cardNode = {
+    querySelector(selector) {
+      if (selector === '.agent-iteration-heatmap-viewport') {
+        return {
+          querySelector() {
+            return null
+          },
+        }
+      }
+      return null
+    },
+  }
+  try {
+    await ctx.copyAgentIterationPoiAreaHeatmapImage({ year: 2025, point_count: 8, top_area: '一区' }, { currentTarget: cardNode })
+
+    assert.equal(fallbackCalled, true)
+    assert.equal(writes.length, 1)
+    assert.equal(await writes[0][0].items['image/png'].then((blob) => blob.type), 'image/png')
+    assert.equal(ctx.agentIterationSnapshotCopyStatus, '图片已复制')
+  } finally {
+    Object.defineProperty(global, 'navigator', {
+      configurable: true,
+      value: originalNavigator,
+    })
+    global.ClipboardItem = originalClipboardItem
+  }
+})
+
+test('copyAgentIterationPoiAreaHeatmapImage composites visible img and svg', async () => {
+  const ctx = createAgentContext()
+  const writes = []
+  const drawCalls = []
+  const originalNavigator = global.navigator
+  const originalClipboardItem = global.ClipboardItem
+  const originalDocument = global.document
+  const originalImage = global.Image
+  const originalURL = global.URL
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: {
+      clipboard: {
+        write: async (items) => writes.push(items),
+      },
+    },
+  })
+  global.ClipboardItem = class ClipboardItem {
+    constructor(items) {
+      this.items = items
+    }
+  }
+  global.Image = class Image {
+    set src(value) {
+      this._src = value
+      if (typeof this.onload === 'function') this.onload()
+    }
+    get src() {
+      return this._src
+    }
+  }
+  global.document = {
+    createElement(tag) {
+      if (tag === 'canvas') {
+        return {
+          width: 0,
+          height: 0,
+          getContext() {
+            return {
+              fillStyle: '',
+              imageSmoothingEnabled: false,
+              imageSmoothingQuality: '',
+              fillRect() {},
+              drawImage(image) {
+                drawCalls.push(image && image.src)
+              },
+            }
+          },
+          toBlob(callback) {
+            callback(new Blob(['composited'], { type: 'image/png' }))
+          },
+        }
+      }
+      return {}
+    },
+  }
+  global.URL = {
+    ...global.URL,
+    createObjectURL() {
+      return 'blob:overlay-svg'
+    },
+    revokeObjectURL() {},
+  }
+  let fallbackCalled = false
+  ctx.renderAgentIterationSnapshotPngBlob = async () => {
+    fallbackCalled = true
+    return null
+  }
+  const cardNode = {
+    querySelector(selector) {
+      if (selector === '.agent-iteration-heatmap-viewport') {
+        return {
+          clientWidth: 320,
+          clientHeight: 180,
+          getBoundingClientRect() {
+            return { width: 320, height: 180 }
+          },
+          querySelector(innerSelector) {
+            if (innerSelector === 'img.agent-iteration-heatmap-img') {
+              return { getAttribute: () => 'data:image/png;base64,ZGF0YQ==' }
+            }
+            if (innerSelector === 'svg.agent-iteration-heatmap-svg') {
+              return {
+                cloneNode() {
+                  return {
+                    setAttribute() {},
+                    querySelectorAll() { return [] },
+                  }
+                },
+              }
+            }
+            return null
+          },
+        }
+      }
+      return null
+    },
+  }
+  const originalSerializer = global.XMLSerializer
+  global.XMLSerializer = class XMLSerializer {
+    serializeToString() {
+      return '<svg xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="4"></circle></svg>'
+    }
+  }
+  try {
+    await ctx.copyAgentIterationPoiAreaHeatmapImage({ year: 2025, point_count: 8 }, { currentTarget: cardNode })
+
+    assert.equal(writes.length, 1)
+    assert.equal(await writes[0][0].items['image/png'].then((blob) => blob.type), 'image/png')
+    assert.equal(drawCalls.length, 2)
+    assert.equal(drawCalls[1], 'blob:overlay-svg')
+    assert.equal(fallbackCalled, false)
+  } finally {
+    Object.defineProperty(global, 'navigator', {
+      configurable: true,
+      value: originalNavigator,
+    })
+    global.ClipboardItem = originalClipboardItem
+    global.document = originalDocument
+    global.Image = originalImage
+    global.URL = originalURL
+    global.XMLSerializer = originalSerializer
+  }
+})
+
 test('agent iteration poi heatmap css lets svg viewport use dynamic aspect', async () => {
   const css = await fs.promises.readFile(new URL('../src/styles/base.css', import.meta.url), 'utf8')
   const cardBlock = css.slice(css.indexOf('.agent-iteration-heatmap-card'), css.indexOf('.agent-iteration-heatmap-head'))
   const viewportBlock = css.slice(css.indexOf('.agent-iteration-heatmap-viewport'), css.indexOf('.agent-iteration-heatmap-svg'))
   const svgBlock = css.slice(css.indexOf('.agent-iteration-heatmap-svg'), css.indexOf('.agent-iteration-heatmap-boundary'))
+  const pointBlock = css.slice(css.indexOf('.agent-iteration-heatmap-point'), css.indexOf('.agent-iteration-heatmap-trend'))
   assert.match(cardBlock, /display:\s*flex/)
   assert.match(cardBlock, /flex-direction:\s*column/)
   assert.doesNotMatch(cardBlock, /grid-template-rows/)
   assert.match(viewportBlock, /flex:\s*0\s+0\s+auto/)
   assert.match(svgBlock, /width:\s*100%/)
   assert.match(svgBlock, /height:\s*100%/)
+  assert.match(css, /\.agent-iteration-heatmap-img\s*{[\s\S]*object-fit:\s*fill/)
+  assert.match(pointBlock, /#0891b2/)
+  assert.doesNotMatch(pointBlock, /#ef4444/)
+  assert.match(pointBlock, /stroke-width:\s*0\.68/)
 })
 
 test('agent iteration poi area snapshots use tight map framing and hide map chrome', async () => {
@@ -3975,7 +4762,10 @@ test('agent iteration poi area snapshots use tight map framing and hide map chro
     const imageUrl = await ctx.renderAgentIterationPoiAreaSnapshot(
       { year: 2025, points: [{ lng: 112.9, lat: 28.1, category: '餐饮', subcategory: '咖啡厅' }] },
       {
-        area_heatmap_basemap: { url: 'https://restapi.amap.com/v3/staticmap?test=1' },
+        area_heatmap_basemap: {
+          url: 'https://restapi.amap.com/v3/staticmap?test=1',
+          size: { width: 760, height: 760 },
+        },
         area_heatmap_polygon: [[112.8, 28.0], [113.0, 28.0], [113.0, 28.2], [112.8, 28.2], [112.8, 28.0]],
       },
     )
@@ -3984,7 +4774,7 @@ test('agent iteration poi area snapshots use tight map framing and hide map chro
     assert.deepEqual(calls.fitPadding, [28, 28, 28, 28])
     assert.equal(calls.zoom, null)
     assert.match(calls.capturedCss, /width:760px/)
-    assert.match(calls.capturedCss, /height:420px/)
+    assert.match(calls.capturedCss, /height:760px/)
     assert.match(calls.capturedBackgroundImage, /staticmap/)
     assert.equal(calls.ignoredLogo, true)
     assert.equal(calls.ignoredCopyright, true)
@@ -3994,6 +4784,74 @@ test('agent iteration poi area snapshots use tight map framing and hide map chro
     global.AMap = originalAMap
     global.html2canvas = originalHtml2canvas
   }
+})
+
+test('agent iteration poi snapshot waits for basemap images before capture', async () => {
+  const ctx = createAgentContext()
+  const originalImage = global.Image
+  const loaded = []
+  global.Image = class {
+    set crossOrigin(value) {
+      this._crossOrigin = value
+    }
+    set src(value) {
+      this._src = value
+      loaded.push(value)
+      setTimeout(() => this.onload && this.onload(), 0)
+    }
+    decode() {
+      return Promise.resolve()
+    }
+  }
+
+  try {
+    const root = {
+      tagName: 'DIV',
+      style: { backgroundImage: 'url("https://tiles.example/base.png")' },
+      querySelectorAll() {
+        return [{
+          tagName: 'IMG',
+          currentSrc: 'https://tiles.example/tile.png',
+          style: { backgroundImage: '' },
+        }]
+      },
+    }
+    const ready = await ctx.waitForAgentPoiSnapshotImages(root, 1000)
+
+    assert.equal(ready, true)
+    assert.deepEqual(loaded, ['https://tiles.example/base.png', 'https://tiles.example/tile.png'])
+  } finally {
+    global.Image = originalImage
+  }
+})
+
+test('agent iteration poi snapshot marks failed when fallback basemap image cannot load', async () => {
+  const ctx = createAgentContext()
+  ctx.renderAgentIterationPoiAreaSnapshot = async () => {
+    throw new Error('basemap_image_load_failed')
+  }
+
+  const payload = await ctx.ensureAgentIterationPoiAreaHeatmapSnapshots({
+    status: 'ready',
+    historyId: 'history-basemap-failure',
+    years: [2020],
+    summaries: [
+      { year: 2020, points: [{ lng: 112.9, lat: 28.1 }], top_areas: [{ name: 'A' }] },
+    ],
+    area_heatmaps: [
+      { year: 2020, point_count: 1 },
+    ],
+    area_heatmap_basemap: {
+      url: 'https://tiles.example/basemap.png',
+      size: { width: 760, height: 760 },
+    },
+    area_heatmap_polygon: [[112.8, 28.0], [113.0, 28.0], [113.0, 28.2], [112.8, 28.2], [112.8, 28.0]],
+  })
+
+  const snapshot = payload.area_heatmap_snapshots[0]
+  assert.equal(snapshot.status, 'failed')
+  assert.equal(snapshot.image_url, '')
+  assert.equal(snapshot.error, 'basemap_image_load_failed')
 })
 
 test('agent iteration poi area snapshots are committed progressively', async () => {
@@ -4138,11 +4996,10 @@ test('agent iteration poi space template shows all poi heatmap before subcategor
   const spaceStart = html.indexOf("isAgentIterationSecondaryView('space')")
   const detailStart = html.indexOf("isAgentIterationSecondaryView('detail')", spaceStart)
   const block = html.slice(spaceStart, detailStart)
-  const heatmapIndex = block.indexOf('全部 POI 区域分布变化')
-  const subcategoryIndex = block.indexOf('小类空间变化')
+  const heatmapIndex = block.indexOf('agent-iteration-heatmap-grid')
+  const subcategoryIndex = block.indexOf('agent-iteration-poi-structure-spatial-card')
   assert.ok(heatmapIndex >= 0)
   assert.ok(subcategoryIndex > heatmapIndex)
-  assert.match(block, /全部 POI ·/)
   assert.match(block, /agent-iteration-poi-structure-spatial-card/)
   assert.match(block, /isAgentIterationPoiSpatialSignalLoading\(\)/)
 })
@@ -4324,6 +5181,127 @@ test('iteration change payload survives agent tab ui state restore', () => {
   restoredWithKind.restoreAgentTabsFromSession({ panelPayloads: restoredWithKind.agentPanelPayloads })
   restoredWithKind.switchAgentTopTab(uiState.iteration_change_tabs[0].id)
   assert.equal(restoredWithKind.agentIterationActiveKind, 'nightlight')
+})
+
+test('summary history opens directly into that historical summary tab', async () => {
+  const currentPack = buildSummaryPack('当前范围总结')
+  const historyPack = buildSummaryPack('历史 A 总结')
+  const ctx = createAgentContext({
+    currentHistoryRecordId: 'history-current',
+    agentPanelPayloads: { summary_pack: currentPack },
+    agentSessions: [
+      {
+        ...ctxSessionBase('summary-history-a', '旧标题'),
+        persisted: true,
+        snapshotLoaded: false,
+        historyId: 'history-current',
+        panelKind: 'commercial_summary',
+      },
+    ],
+    agentSessionsLoaded: true,
+  })
+
+  global.fetch = async (url) => {
+    if (String(url).includes('/api/v1/analysis/agent/sessions/summary-history-a')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            id: 'summary-history-a',
+            title: '旧标题',
+            preview: '旧预览',
+            history_id: 'history-current',
+            panel_kind: 'commercial_summary',
+            status: 'answered',
+            output: {
+              panel_payloads: {
+                summary_pack: historyPack,
+                summary_status: { status: 'ready', generated: true, title: '区域总结' },
+              },
+            },
+            diagnostics: {},
+            messages: [],
+            created_at: '2026-04-05T00:00:00Z',
+            updated_at: '2026-04-05T01:00:00Z',
+          }
+        },
+      }
+    }
+    return { ok: true, async json() { return { data_readiness: { checked: true, ready: true, missing_tasks: [] } } } }
+  }
+
+  const activeTabId = await ctx.openAgentHistorySessionTab('summary-history-a')
+
+  assert.equal(activeTabId, 'summary-history-summary-history-a')
+  assert.equal(ctx.isAgentSummaryTabActive(), true)
+  assert.equal(ctx.agentPanelPayloads.summary_pack.headline_judgment.summary, '历史 A 总结')
+  assert.equal(ctx.getAgentActiveSummaryPanelPayloads().summary_pack.headline_judgment.summary, '历史 A 总结')
+  assert.equal(ctx.getAgentActiveTopTab().source, 'history')
+  assert.equal(ctx.getAgentSessionTitle(ctx.findAgentSession('summary-history-a')), '总结')
+})
+
+test('summary history list hydrates detail payloads for compact titles and previews', async () => {
+  const historyPack = buildSummaryPack('该区域是一个以年轻人群日常消费和科教文化配套为主的多核商业区。')
+  historyPack.headline_judgment.supporting_clause = '餐饮、科教和日常消费共同支撑多核结构。'
+  const ctx = createAgentContext()
+  const calls = []
+  global.fetch = async (url) => {
+    calls.push(String(url))
+    if (String(url) === '/api/v1/analysis/agent/sessions') {
+      return {
+        ok: true,
+        async json() {
+          return [
+            {
+              id: 'summary-history-a',
+              title: '该区域是一个以年轻人群日常消费和科教文化配套为主的多核商业区。',
+              preview: '开始一段新的分析对话',
+              history_id: 'history-current',
+              panel_kind: 'commercial_summary',
+              status: 'answered',
+              title_source: 'fallback',
+              created_at: '2026-04-05T00:00:00Z',
+              updated_at: '2026-04-05T01:00:00Z',
+            },
+          ]
+        },
+      }
+    }
+    if (String(url).includes('/api/v1/analysis/agent/sessions/summary-history-a')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            id: 'summary-history-a',
+            title: '该区域是一个以年轻人群日常消费和科教文化配套为主的多核商业区。',
+            preview: '开始一段新的分析对话',
+            history_id: 'history-current',
+            panel_kind: 'commercial_summary',
+            status: 'answered',
+            output: {
+              panel_payloads: {
+                summary_pack: historyPack,
+                summary_status: { status: 'ready', generated: true },
+              },
+            },
+            diagnostics: {},
+            messages: [],
+            created_at: '2026-04-05T00:00:00Z',
+            updated_at: '2026-04-05T01:00:00Z',
+          }
+        },
+      }
+    }
+    throw new Error(`unexpected fetch ${url}`)
+  }
+
+  await ctx.loadAgentSessionSummaries(true)
+  await ctx.agentSummaryHistoryHydrationPromise
+
+  const session = ctx.findAgentSession('summary-history-a')
+  assert.equal(ctx.getAgentSessionTitle(session), '总结')
+  assert.equal(ctx.getAgentSessionPreview(session), '餐饮、科教和日常消费共同支撑多核结构。')
+  assert.ok(calls.some((url) => url.includes('/summary-history-a')))
 })
 
 function ctxSessionBase(id, title) {

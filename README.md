@@ -74,7 +74,7 @@ docker compose up --build
 - 路网/等时圈：`DEPTHMAPX_CLI_PATH`、`OVERPASS_ENDPOINT`、`VALHALLA_BASE_URL`
 - 人口分析：`POPULATION_DATA_DIR`、`POPULATION_PREVIEW_MAX_SIZE`
 - 夜光分析：`NIGHTLIGHT_DATA_DIR`、`NIGHTLIGHT_PREVIEW_MAX_SIZE`
-- ????`DB_URL` ? `DB_HOST` + `DB_URL`??? IP ?????????????????????? `.env` ? `DB_URL`??? `DB_HOST=175.0.72.152`?`DB_HOST` ??? `DB_URL` ???????
+- 数据库：`DB_URL` 保存账号、密码、库名等稳定信息；`DB_HOST` 用于覆盖 `DB_URL` 中的主机地址。数据库公网 IP 是动态地址，启动前按当前可用 IP 更新 `.env` 里的 `DB_HOST`，不要在文档中写死具体 IP。
 - 图表输出目录覆盖：`CHART_OUTPUT_DIR`（可选，默认 `runtime/generated_charts/`）
 
 ### 人口数据目录
