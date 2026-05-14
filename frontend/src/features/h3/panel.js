@@ -21,6 +21,7 @@
             h3AnalysisSummary: null,
             h3AnalysisCharts: null,
             h3AnalysisGridFeatures: [],
+            h3AnalysisProgress: null,
             h3MainStage: 'params',
             h3MainStageLabels: {
                 params: '参数',
@@ -2132,25 +2133,61 @@
             async computeH3Analysis() {
                 const rawRing = this.getIsochronePolygonRing();
                 if (!rawRing || this.isComputingH3Analysis) return;
-                const progressTotal = 5;
-                const startedAt = Date.now();
-                const engineName = 'ArcGIS';
-                let progressStep = 0;
-                let progressLabel = '准备中';
+                const progressRunId = `h3-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                const stageLabelMap = {
+                    queued: '排队中',
+                    build_grid: '生成网格中',
+                    aggregate_poi: '聚合 POI 中',
+                    compute_metrics: '计算指标中',
+                    arcgis_prepare: '准备 ArcGIS 中',
+                    arcgis_running: 'ArcGIS 热点分析中',
+                    finalize: '整理结果中',
+                    completed: '已完成',
+                    failed: '失败',
+                };
                 let progressTimer = null;
-                const setProgress = (step, label) => {
-                    progressStep = step;
-                    progressLabel = label;
-                    const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-                    this.h3GridStatus = `网格分析进度 ${progressStep}/${progressTotal}：${progressLabel}（${sec}s）`;
+                let latestProgress = {
+                    run_id: progressRunId,
+                    status: 'running',
+                    stage: 'queued',
+                    message: '已接收请求，等待开始计算',
+                    step: 0,
+                    total: 7,
+                    elapsed_sec: 0,
+                    extra: {},
+                };
+                const applyProgress = (snapshot = {}) => {
+                    latestProgress = {
+                        ...latestProgress,
+                        ...snapshot,
+                        extra: snapshot && typeof snapshot.extra === 'object' ? { ...snapshot.extra } : { ...latestProgress.extra },
+                    };
+                    const stage = String(latestProgress.stage || 'queued');
+                    const label = stageLabelMap[stage] || String(latestProgress.message || '计算中');
+                    const total = Number(latestProgress.total || 0) || 7;
+                    const step = Math.max(0, Math.min(total, Number(latestProgress.step || 0) || 0));
+                    const sec = Math.max(0, Math.floor(Number(latestProgress.elapsed_sec || 0) || 0));
+                    const detail = String(latestProgress.message || '').trim();
+                    this.h3GridStatus = `网格分析进度 ${step}/${total}：${label}${detail && detail !== label ? ` · ${detail}` : ''}（${sec}s）`;
+                    this.h3AnalysisProgress = { ...latestProgress };
+                };
+                const pollProgress = async () => {
+                    try {
+                        const resp = await fetch(`/api/v1/analysis/h3-metrics/progress?run_id=${encodeURIComponent(progressRunId)}`, {
+                            cache: 'no-store',
+                        });
+                        if (!resp.ok) return;
+                        const data = await resp.json();
+                        applyProgress(data || {});
+                    } catch (_) {
+                    }
                 };
                 this.isComputingH3Analysis = true;
-                setProgress(1, '准备分析参数');
+                applyProgress(latestProgress);
                 progressTimer = window.setInterval(() => {
                     if (!this.isComputingH3Analysis) return;
-                    const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-                    this.h3GridStatus = `网格分析进度 ${progressStep}/${progressTotal}：${progressLabel}（${sec}s）`;
-                }, 1000);
+                    pollProgress();
+                }, 800);
                 try {
                     const polygon = this.getIsochronePolygonPayload();
                     const neighborRing = Math.max(1, Math.min(3, Math.round(this._toNumber(this.h3NeighborRing, 1))));
@@ -2172,10 +2209,9 @@
                         use_arcgis: true,
                         arcgis_neighbor_ring: neighborRing,
                         arcgis_export_image: false,
-                        arcgis_timeout_sec: 240
+                        arcgis_timeout_sec: 240,
+                        run_id: progressRunId,
                     };
-
-                    setProgress(2, `请求已发送，后端计算中（${engineName}）`);
                     const res = await fetch('/api/v1/analysis/h3-metrics', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -2195,8 +2231,7 @@
                         }
                         throw new Error(detail || '网格分析失败');
                     }
-
-                    setProgress(3, '结果已返回，正在解析数据');
+                    await pollProgress();
                     const data = await res.json();
                     const grid = data.grid || {};
                     this.h3AnalysisGridFeatures = grid.features || [];
@@ -2209,13 +2244,13 @@
                     this.h3SubTab = this.getH3DefaultSubTabByStage('analysis');
                     this.h3ArcgisSnapshotLoadError = false;
                     this.h3ArcgisImageVersion = Date.now();
-                    setProgress(4, '正在计算衍生指标');
                     this.computeH3DerivedStats();
                     const baseStatus = this.h3GridCount > 0
                         ? `分析完成：${this.h3GridCount} 个网格，${(this.h3AnalysisSummary && this.h3AnalysisSummary.poi_count) || 0} 个POI`
                         : '分析完成，但当前范围无可用网格';
+                    await pollProgress();
+                    applyProgress({ status: 'success', stage: 'completed', message: 'H3 网格分析计算完成' });
                     if (this.isH3DisplayActive()) {
-                        setProgress(5, '正在渲染图层与图表');
                         this.renderH3BySubTab();
                         if (this.isH3PanelActive()) {
                             await this.$nextTick();
@@ -2234,9 +2269,15 @@
                             this.allPoisDetails
                         );
                     }
+                    if (typeof this.commitCurrentPoiGridResult === 'function') {
+                        this.commitCurrentPoiGridResult('h3', Number(this.poiYearSource || this.resultPoiYear || 0) || null);
+                    }
+                    return { progress: { ...latestProgress } };
                 } catch (e) {
                     console.error(e);
+                    applyProgress({ status: 'failed', stage: 'failed', message: String((e && e.message) || e || '网格分析失败') });
                     this.h3GridStatus = '网格分析失败: ' + e.message;
+                    throw e;
                 } finally {
                     if (progressTimer) {
                         window.clearInterval(progressTimer);
@@ -2324,6 +2365,9 @@
                     } else {
                         this.clearH3GridDisplayOnLeave();
                         this.h3GridStatus = `ArcGIS 结构快照已生成（${sec}s），切换到“网格”查看`;
+                    }
+                    if (typeof this.commitCurrentPoiGridResult === 'function') {
+                        this.commitCurrentPoiGridResult('h3', Number(this.poiYearSource || this.resultPoiYear || 0) || null);
                     }
                 } catch (e) {
                     console.error(e);

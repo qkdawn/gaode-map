@@ -779,8 +779,33 @@ body,
 
 .agent-iteration-report-title {
   color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.agent-iteration-report-body,
+.agent-iteration-report-section {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-iteration-report-section {
+  padding-top: 8px;
+}
+
+.agent-iteration-report-section h4 {
+  margin: 0;
+  color: #0f172a;
   font-size: 15px;
   font-weight: 700;
+  line-height: 1.45;
+}
+
+.agent-iteration-report-section p {
+  margin: 0;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.8;
 }
 
 .agent-iteration-report-paragraph {

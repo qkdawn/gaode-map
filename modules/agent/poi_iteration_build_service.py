@@ -916,7 +916,7 @@ async def _generate_poi_iteration_analysis_with_timeout(evidence: Dict[str, Any]
             timeout=max(0.1, float(_POI_ITERATION_AI_TIMEOUT_S)),
         )
     except asyncio.TimeoutError:
-        return {"status": "failed", "ai_summary": [], "ai_insights": {}, "error": "ai_timeout"}
+        return {"status": "failed", "report_title": "", "report_sections": [], "report_content": "", "error": "ai_timeout"}
 
 
 async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any]:
@@ -980,6 +980,7 @@ async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any
         "driver_analysis": [],
         "planning_implications": [],
         "report_title": "",
+        "report_sections": [],
         "report_content": "",
         "ai_status": "pending",
         "ai_error": "",

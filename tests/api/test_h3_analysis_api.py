@@ -48,7 +48,35 @@ def _sample_pois_gcj02():
     return pois
 
 
-def test_h3_metrics_api_shape():
+def _mock_arcgis_success(monkeypatch):
+    def _fake_arcgis_analysis(**kwargs):
+        cells = []
+        for index, feature in enumerate(kwargs.get("features") or []):
+            h3_id = str((feature.get("properties") or {}).get("h3_id") or "")
+            if not h3_id:
+                continue
+            cells.append(
+                {
+                    "h3_id": h3_id,
+                    "gi_z_score": 1.25 + index,
+                    "lisa_i": 0.1 + (index * 0.01),
+                    "lisa_z_score": 0.5 + (index * 0.01),
+                }
+            )
+        return {
+            "status": "ArcGIS test double completed",
+            "global_moran": {"i": 0.397161, "z_score": 2.4},
+            "cells": cells,
+            "image_url": None,
+            "image_url_gi": None,
+            "image_url_lisa": None,
+        }
+
+    monkeypatch.setattr("modules.h3.analysis.run_h3_arcgis_analysis", _fake_arcgis_analysis)
+
+
+def test_h3_metrics_api_shape(monkeypatch):
+    _mock_arcgis_success(monkeypatch)
     client = TestClient(app)
     payload = {
         "polygon": _sample_gcj02_polygon(),
@@ -76,7 +104,48 @@ def test_h3_metrics_api_shape():
     assert "arcgis_image_url_lisa" in data["summary"]
 
 
-def test_h3_metrics_poi_count_consistency():
+def test_h3_metrics_progress_api_roundtrip(monkeypatch):
+    _mock_arcgis_success(monkeypatch)
+    client = TestClient(app)
+    run_id = "test-h3-progress"
+    payload = {
+        "polygon": _sample_gcj02_polygon(),
+        "resolution": 10,
+        "coord_type": "gcj02",
+        "include_mode": "intersects",
+        "min_overlap_ratio": 0.0,
+        "pois": _sample_pois_gcj02(),
+        "poi_coord_type": "gcj02",
+        "neighbor_ring": 1,
+        "run_id": run_id,
+    }
+    resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
+    assert resp.status_code == 200
+
+    progress_resp = client.get(f"/api/v1/analysis/h3-metrics/progress?run_id={run_id}")
+    assert progress_resp.status_code == 200
+    progress = progress_resp.json()
+    assert progress["run_id"] == run_id
+    assert progress["status"] == "success"
+    assert progress["stage"] == "completed"
+    assert progress["step"] == 7
+    assert progress["total"] == 7
+    assert progress["extra"]["resolution"] == 10
+
+
+def test_h3_metrics_progress_api_returns_queued_fallback():
+    client = TestClient(app)
+    progress_resp = client.get("/api/v1/analysis/h3-metrics/progress?run_id=missing-run")
+    assert progress_resp.status_code == 200
+    progress = progress_resp.json()
+    assert progress["status"] == "running"
+    assert progress["stage"] == "queued"
+    assert progress["step"] == 0
+    assert progress["total"] == 7
+
+
+def test_h3_metrics_poi_count_consistency(monkeypatch):
+    _mock_arcgis_success(monkeypatch)
     client = TestClient(app)
     payload = {
         "polygon": _sample_gcj02_polygon(),
@@ -95,7 +164,8 @@ def test_h3_metrics_poi_count_consistency():
     assert assigned == data["summary"]["poi_count"]
 
 
-def test_h3_metrics_grid_count_changes_with_threshold():
+def test_h3_metrics_grid_count_changes_with_threshold(monkeypatch):
+    _mock_arcgis_success(monkeypatch)
     client = TestClient(app)
     base_payload = {
         "polygon": _sample_gcj02_polygon(),
@@ -115,7 +185,8 @@ def test_h3_metrics_grid_count_changes_with_threshold():
     assert strict_count <= loose_count
 
 
-def test_h3_metrics_spatial_structure_fields():
+def test_h3_metrics_spatial_structure_fields(monkeypatch):
+    _mock_arcgis_success(monkeypatch)
     client = TestClient(app)
     payload = {
         "polygon": _sample_gcj02_polygon(),
@@ -147,7 +218,8 @@ def test_h3_metrics_spatial_structure_fields():
     assert summary.get("lisa_render_meta", {}).get("mode") == "stddev"
 
 
-def test_h3_metrics_legacy_significance_payload_is_ignored():
+def test_h3_metrics_legacy_significance_payload_is_ignored(monkeypatch):
+    _mock_arcgis_success(monkeypatch)
     client = TestClient(app)
     payload = {
         "polygon": _sample_gcj02_polygon(),
@@ -170,6 +242,28 @@ def test_h3_metrics_legacy_significance_payload_is_ignored():
     props_list = [f.get("properties", {}) for f in data["grid"]["features"]]
     assert props_list
     assert all("spatial_structure_type" not in p for p in props_list)
+
+
+def test_h3_metrics_arcgis_failure_returns_502_without_native_fallback(monkeypatch):
+    def _fail_arcgis(**kwargs):
+        raise RuntimeError("ArcGIS bridge unavailable")
+
+    monkeypatch.setattr("modules.h3.analysis.run_h3_arcgis_analysis", _fail_arcgis)
+    client = TestClient(app)
+    payload = {
+        "polygon": _sample_gcj02_polygon(),
+        "resolution": 10,
+        "coord_type": "gcj02",
+        "include_mode": "intersects",
+        "min_overlap_ratio": 0.0,
+        "pois": _sample_pois_gcj02(),
+        "poi_coord_type": "gcj02",
+        "neighbor_ring": 1,
+    }
+    resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
+    assert resp.status_code == 502
+    assert "ArcGIS" in resp.json()["detail"]
+    assert "已降级" not in resp.text
 
 
 def test_h3_export_api_stream(monkeypatch):

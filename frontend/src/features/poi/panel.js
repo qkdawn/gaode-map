@@ -7,6 +7,25 @@
         };
     }
 
+    function clonePoiGridValue(value) {
+        if (value === undefined || value === null) return Array.isArray(value) ? [] : {};
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (_) {
+            return Array.isArray(value) ? value.slice() : Object.assign({}, value);
+        }
+    }
+
+    function createEmptyH3DerivedStats() {
+        return {
+            structureSummary: null,
+            typingSummary: null,
+            lqSummary: null,
+            gapSummary: null,
+            topCells: {},
+        };
+    }
+
     function createAnalysisPoiInitialState() {
         return {
             poiMarkers: [],
@@ -21,6 +40,9 @@
             poiGridStatus: '',
             poiGridFeatures: [],
             poiGridSummary: null,
+            poiGridResultsByYearType: {},
+            activePoiGridResultKey: '',
+            selectedPoiGridCellId: null,
             poiKdeEnabled: false,
             poiKdeRadius: 28,
             poiKdeStats: createEmptyPoiKdeStats(),
@@ -66,15 +88,260 @@
             getPoiGridTypeLabel() {
                 return this.isPoiRasterGridMode() ? '栅格' : '六边形格子';
             },
+            normalizePoiGridType(type) {
+                const normalized = String(type || '').trim().toLowerCase();
+                return normalized === 'h3' || normalized === 'hex' ? 'h3' : 'raster';
+            },
+            poiGridTypeToUiValue(type) {
+                return this.normalizePoiGridType(type) === 'h3' ? 'hex' : 'raster';
+            },
+            getActivePoiGridYear() {
+                const year = Number(this.poiYearSource || this.resultPoiYear || this.currentHistorySelectedPoiYear || 0);
+                return Number.isFinite(year) && year > 0 ? year : null;
+            },
+            makePoiGridResultKey(year, gridType) {
+                const safeYear = Number(year);
+                const type = this.normalizePoiGridType(gridType);
+                return `${Number.isFinite(safeYear) && safeYear > 0 ? safeYear : 'current'}:${type}`;
+            },
+            getPoiGridResult(year, gridType) {
+                const key = this.makePoiGridResultKey(year, gridType);
+                const source = this.poiGridResultsByYearType && typeof this.poiGridResultsByYearType === 'object'
+                    ? this.poiGridResultsByYearType[key]
+                    : null;
+                return source && typeof source === 'object' ? clonePoiGridValue(source) : null;
+            },
+            commitPoiGridResult(year, gridType, patch = {}) {
+                const type = this.normalizePoiGridType(gridType);
+                const safeYear = Number(year);
+                const normalizedYear = Number.isFinite(safeYear) && safeYear > 0 ? safeYear : this.getActivePoiGridYear();
+                const key = this.makePoiGridResultKey(normalizedYear, type);
+                const current = this.poiGridResultsByYearType && typeof this.poiGridResultsByYearType === 'object'
+                    ? this.poiGridResultsByYearType
+                    : {};
+                const existing = current[key] && typeof current[key] === 'object' ? current[key] : {};
+                const next = Object.assign({}, clonePoiGridValue(existing), clonePoiGridValue(patch), {
+                    key,
+                    year: normalizedYear,
+                    gridType: type,
+                    updatedAt: new Date().toISOString(),
+                });
+                this.poiGridResultsByYearType = Object.assign({}, current, { [key]: next });
+                if (this.makePoiGridResultKey(this.getActivePoiGridYear(), this.normalizePoiGridType(this.poiGridType)) === key) {
+                    this.activePoiGridResultKey = key;
+                }
+                return clonePoiGridValue(next);
+            },
+            buildCurrentPoiGridResult(gridType = null, year = null) {
+                const type = this.normalizePoiGridType(gridType || this.poiGridType);
+                const safeYear = Number(year || this.getActivePoiGridYear());
+                if (type === 'h3') {
+                    return {
+                        status: (Array.isArray(this.h3AnalysisGridFeatures) && this.h3AnalysisGridFeatures.length) || this.h3AnalysisSummary ? 'ready' : 'empty',
+                        features: clonePoiGridValue(this.h3AnalysisGridFeatures || []),
+                        summary: clonePoiGridValue(this.h3AnalysisSummary || {}),
+                        charts: clonePoiGridValue(this.h3AnalysisCharts || {}),
+                        progress: clonePoiGridValue(this.h3AnalysisProgress || {}),
+                        derivedStats: clonePoiGridValue(this.h3DerivedStats || createEmptyH3DerivedStats()),
+                        params: {
+                            h3_resolution: Number(this.h3GridResolution || 0) || null,
+                            include_mode: String(this.h3GridIncludeMode || ''),
+                            min_overlap_ratio: Number(this.h3GridMinOverlapRatio || 0),
+                            neighbor_ring: Number(this.h3NeighborRing || 0) || null,
+                        },
+                        evidence: typeof this.buildAgentPoiH3Evidence === 'function' ? this.buildAgentPoiH3Evidence() : {},
+                        error: '',
+                        year: Number.isFinite(safeYear) && safeYear > 0 ? safeYear : null,
+                        gridType: type,
+                    };
+                }
+                return {
+                    status: (Array.isArray(this.poiGridFeatures) && this.poiGridFeatures.length) || this.poiGridSummary ? 'ready' : 'empty',
+                    features: clonePoiGridValue(this.poiGridFeatures || []),
+                    summary: clonePoiGridValue(this.poiGridSummary || {}),
+                    charts: {},
+                    derivedStats: {},
+                    params: {
+                        poi_year: Number.isFinite(safeYear) && safeYear > 0 ? safeYear : null,
+                        raster: {},
+                    },
+                    evidence: typeof this.buildAgentPoiRasterGridEvidence === 'function' ? this.buildAgentPoiRasterGridEvidence() : {},
+                    error: '',
+                    year: Number.isFinite(safeYear) && safeYear > 0 ? safeYear : null,
+                    gridType: type,
+                };
+            },
+            commitCurrentPoiGridResult(gridType = null, year = null) {
+                const type = this.normalizePoiGridType(gridType || this.poiGridType);
+                const safeYear = Number(year || this.getActivePoiGridYear());
+                return this.commitPoiGridResult(safeYear, type, this.buildCurrentPoiGridResult(type, safeYear));
+            },
+            applyPoiGridResultToProjection(result = {}) {
+                const type = this.normalizePoiGridType(result.gridType || result.grid_type || this.poiGridType);
+                this.poiGridType = this.poiGridTypeToUiValue(type);
+                this.activePoiGridResultKey = String(result.key || this.makePoiGridResultKey(result.year, type));
+                if (Number.isFinite(Number(result.year))) {
+                    this.poiYearSource = String(Number(result.year));
+                    this.resultPoiYear = Number(result.year);
+                    this.currentHistorySelectedPoiYear = Number(result.year);
+                }
+                if (type === 'h3') {
+                    this.h3AnalysisGridFeatures = clonePoiGridValue(result.features || []);
+                    this.h3GridFeatures = this.h3AnalysisGridFeatures;
+                    this.h3GridCount = Number((result.summary && result.summary.grid_count) || this.h3AnalysisGridFeatures.length || 0);
+                    this.h3AnalysisSummary = clonePoiGridValue(result.summary || {});
+                    this.h3AnalysisCharts = clonePoiGridValue(result.charts || {});
+                    this.h3DerivedStats = clonePoiGridValue(result.derivedStats || createEmptyH3DerivedStats());
+                    this.selectedH3Id = null;
+                    if (this.poiSubTab === 'grid') {
+                        if (typeof this.restoreH3GridDisplayOnEnter === 'function') this.restoreH3GridDisplayOnEnter();
+                        if (typeof this.updateH3Charts === 'function') this.$nextTick(() => this.updateH3Charts());
+                        if (typeof this.updateDecisionCards === 'function') this.$nextTick(() => this.updateDecisionCards());
+                    }
+                    return;
+                }
+                this.poiGridFeatures = clonePoiGridValue(result.features || []);
+                this.poiGridSummary = clonePoiGridValue(result.summary || {});
+                this.selectedPoiGridCellId = null;
+                this.selectedH3Id = null;
+                if (this.poiSubTab === 'grid') {
+                    if (typeof this.clearH3GridDisplayOnLeave === 'function') this.clearH3GridDisplayOnLeave();
+                    this.restorePoiRasterGridDisplayOnEnter();
+                }
+            },
+            async activatePoiGridResult(year, gridType) {
+                const type = this.normalizePoiGridType(gridType);
+                const result = this.getPoiGridResult(year, type);
+                this.poiGridType = this.poiGridTypeToUiValue(type);
+                if (result && String(result.status || '') === 'ready') {
+                    this.applyPoiGridResultToProjection(result);
+                    return result;
+                }
+                if (Number.isFinite(Number(year)) && typeof this.selectAgentPoiYearForGrid === 'function') {
+                    await this.selectAgentPoiYearForGrid(Number(year));
+                }
+                return null;
+            },
+            async ensurePoiGridResult({ year = null, gridType = null, force = false } = {}) {
+                const type = this.normalizePoiGridType(gridType || this.poiGridType);
+                const targetYear = Number(year || this.getActivePoiGridYear());
+                const existing = this.getPoiGridResult(targetYear, type);
+                this.poiGridType = this.poiGridTypeToUiValue(type);
+                if (!force && existing && String(existing.status || '') === 'ready') {
+                    this.applyPoiGridResultToProjection(existing);
+                    return existing;
+                }
+                    this.commitPoiGridResult(targetYear, type, { status: 'running', error: '' });
+                try {
+                    if (Number.isFinite(targetYear) && targetYear > 0 && typeof this.selectAgentPoiYearForGrid === 'function') {
+                        await this.selectAgentPoiYearForGrid(targetYear);
+                    }
+                    let data = null;
+                    if (type === 'h3') {
+                        if (typeof this.syncH3PoiFilterSelection === 'function') this.syncH3PoiFilterSelection(false);
+                        if (typeof this.computeH3Analysis !== 'function') throw new Error('POI H3 网格计算入口不可用');
+                        const h3Run = await this.computeH3Analysis();
+                        data = this.buildCurrentPoiGridResult('h3', targetYear);
+                        if (h3Run && h3Run.progress) data.progress = clonePoiGridValue(h3Run.progress);
+                        if (!data.features.length && !Object.keys(data.summary || {}).length) {
+                            throw new Error(this.h3GridStatus || 'H3 网格计算未返回结果');
+                        }
+                    } else {
+                        data = await this.ensurePoiRasterGrid(true);
+                        if (!data) throw new Error(this.poiGridStatus || 'POI 栅格生成失败');
+                        data = this.buildCurrentPoiGridResult('raster', targetYear);
+                    }
+                    data.status = 'ready';
+                    data.error = '';
+                    const committed = this.commitPoiGridResult(targetYear, type, data);
+                    this.applyPoiGridResultToProjection(committed);
+                    return committed;
+                } catch (err) {
+                    const message = err && err.message ? err.message : String(err);
+                    this.commitPoiGridResult(targetYear, type, { status: 'failed', error: message });
+                    if (type === 'h3') this.h3GridStatus = `H3 网格生成失败: ${message}`;
+                    else this.poiGridStatus = `POI 栅格生成失败: ${message}`;
+                    throw err;
+                }
+            },
+            async ensureActivePoiGridResult(force = false) {
+                return this.ensurePoiGridResult({
+                    year: this.getActivePoiGridYear(),
+                    gridType: this.normalizePoiGridType(this.poiGridType),
+                    force,
+                });
+            },
+            getPoiGridMatrixYears() {
+                const historyYears = Array.isArray(this.currentHistoryAvailablePoiYears)
+                    ? this.currentHistoryAvailablePoiYears
+                    : [];
+                const selectedYears = Array.isArray(this.poiYearSelections) ? this.poiYearSelections : [];
+                const years = Array.from(new Set(historyYears.concat(selectedYears)
+                    .map((item) => Number(item))
+                    .filter((item) => Number.isFinite(item) && item > 0)))
+                    .sort((a, b) => a - b);
+                if (years.length) return years;
+                const active = this.getActivePoiGridYear();
+                return active ? [active] : [2020, 2022, 2024];
+            },
+            getPoiGridResultStatus(year, gridType) {
+                const result = this.getPoiGridResult(year, gridType);
+                return result ? String(result.status || 'ready') : 'pending';
+            },
+            getPoiGridMatrixRows() {
+                const labels = { raster: '栅格', h3: 'H3' };
+                return this.getPoiGridMatrixYears().flatMap((year) => ['raster', 'h3'].map((type) => {
+                    const result = this.getPoiGridResult(year, type);
+                    const status = result ? String(result.status || 'ready') : 'pending';
+                    const count = type === 'h3'
+                        ? Number((result && result.summary && result.summary.grid_count) || (result && result.features && result.features.length) || 0)
+                        : Number((result && result.summary && result.summary.grid_count) || (result && result.features && result.features.length) || 0);
+                    return {
+                        key: this.makePoiGridResultKey(year, type),
+                        year,
+                        gridType: type,
+                        label: labels[type],
+                        status,
+                        count,
+                        error: result && result.error ? String(result.error) : '',
+                        active: this.activePoiGridResultKey === this.makePoiGridResultKey(year, type),
+                    };
+                }));
+            },
+            getPoiGridResultStatusLabel(status) {
+                const normalized = String(status || '').toLowerCase();
+                if (normalized === 'ready') return '已就绪';
+                if (normalized === 'running') return '生成中';
+                if (normalized === 'failed') return '失败';
+                return '待生成';
+            },
+            async onPoiGridMatrixSelect(row = {}) {
+                await this.activatePoiGridResult(row.year, row.gridType);
+            },
+            async generatePoiGridMatrixCell(row = {}, force = true) {
+                await this.ensurePoiGridResult({ year: row.year, gridType: row.gridType, force });
+            },
+            async ensureAllPoiGridMatrixResults(force = false) {
+                const years = this.getPoiGridMatrixYears();
+                for (const year of years) {
+                    await this.ensurePoiGridResult({ year, gridType: 'raster', force });
+                    await this.ensurePoiGridResult({ year, gridType: 'h3', force });
+                }
+            },
             togglePoiGridConfig() {
                 this.poiGridConfigExpanded = !this.poiGridConfigExpanded;
             },
             async setPoiGridType(type) {
-                const normalized = String(type || '').trim().toLowerCase() === 'hex' ? 'hex' : 'raster';
+                const normalized = this.poiGridTypeToUiValue(type);
                 if (this.poiGridType === normalized) return;
                 this.poiGridType = normalized;
                 if (this.poiSubTab !== 'grid') return;
                 if (normalized === 'hex') {
+                    const cached = this.getPoiGridResult(this.getActivePoiGridYear(), 'h3');
+                    if (cached && String(cached.status || '') === 'ready') {
+                        this.applyPoiGridResultToProjection(cached);
+                        return;
+                    }
                     if (typeof this.syncH3PoiFilterSelection === 'function') {
                         this.syncH3PoiFilterSelection(false);
                     }
@@ -92,6 +359,11 @@
                     }
                     return;
                 }
+                const cached = this.getPoiGridResult(this.getActivePoiGridYear(), 'raster');
+                if (cached && String(cached.status || '') === 'ready') {
+                    this.applyPoiGridResultToProjection(cached);
+                    return;
+                }
                 this.h3MainStage = 'params';
                 if (typeof this.clearH3GridDisplayOnLeave === 'function') {
                     this.clearH3GridDisplayOnLeave();
@@ -99,10 +371,7 @@
                 this.restorePoiRasterGridDisplayOnEnter();
             },
             async startPoiGridAnalysis() {
-                if (this.isPoiRasterGridMode()) {
-                    return this.ensurePoiRasterGrid(true);
-                }
-                return this.computeH3Analysis();
+                return this.ensureActivePoiGridResult(true);
             },
             setPoiSubTab(tab) {
                 const normalized = String(tab || '').trim().toLowerCase();
@@ -308,6 +577,8 @@
                 this.poiGridFeatures = [];
                 this.poiGridSummary = null;
                 this.poiGridStatus = '';
+                this.selectedPoiGridCellId = null;
+                this.selectedH3Id = null;
                 this.clearPoiRasterGridDisplayOnLeave();
             },
             async ensurePoiRasterGrid(force = false) {
@@ -323,6 +594,7 @@
                 if (force) {
                     this.poiGridFeatures = [];
                     this.poiGridSummary = null;
+                    this.selectedPoiGridCellId = null;
                     this.selectedH3Id = null;
                     this.clearPoiRasterGridDisplayOnLeave();
                 }
@@ -360,6 +632,7 @@
                     if (this.poiSubTab === 'grid' && this.isPoiRasterGridMode()) {
                         this.restorePoiRasterGridDisplayOnEnter();
                     }
+                    this.commitCurrentPoiGridResult('raster', this.getPoiRasterGridYear());
                     return data;
                 } catch (err) {
                     console.error(err);
@@ -512,7 +785,7 @@
             focusPoiRasterGridCell(cellId) {
                 const id = String(cellId || '');
                 if (!id || !this.mapCore || typeof this.mapCore.focusGridCellById !== 'function') return;
-                this.selectedH3Id = id;
+                this.selectedPoiGridCellId = id;
                 const found = this.mapCore.focusGridCellById(id, {
                     fitView: true,
                     zoomMin: 16,

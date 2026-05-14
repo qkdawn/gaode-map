@@ -11,6 +11,7 @@ from core.config import settings
 from modules.h3.analysis import analyze_h3_grid
 from modules.h3.analysis_schemas import H3MetricsRequest, H3MetricsResponse
 from modules.h3.core import build_h3_grid_feature_collection
+from modules.h3.progress import get_h3_progress, update_h3_progress
 from modules.h3.schemas import GridRequest, GridResponse
 
 router = APIRouter()
@@ -153,6 +154,34 @@ async def get_city_boundary(city: str = Query("长沙市", description="城市�
 
 @router.post("/api/v1/analysis/h3-metrics", response_model=H3MetricsResponse)
 async def analyze_h3_metrics(payload: H3MetricsRequest):
+    run_id = str(payload.run_id or "").strip()
+    if run_id:
+        update_h3_progress(
+            run_id,
+            status="running",
+            stage="queued",
+            message="已接收请求，等待开始计算",
+            step=0,
+            total=7,
+            extra={
+                "resolution": int(payload.resolution),
+                "arcgis_enabled": True,
+            },
+        )
+
+    def _progress_callback(snapshot: Dict[str, Any]) -> None:
+        if not run_id:
+            return
+        update_h3_progress(
+            run_id,
+            status="running" if str(snapshot.get("stage") or "") != "completed" else "success",
+            stage=str(snapshot.get("stage") or ""),
+            message=str(snapshot.get("message") or ""),
+            step=snapshot.get("step"),
+            total=snapshot.get("total"),
+            extra=snapshot.get("extra") if isinstance(snapshot.get("extra"), dict) else {},
+        )
+
     poi_payload = [
         p.model_dump() if hasattr(p, "model_dump") else p.dict()
         for p in payload.pois
@@ -173,7 +202,42 @@ async def analyze_h3_metrics(payload: H3MetricsRequest):
             arcgis_knn_neighbors=None,
             arcgis_export_image=payload.arcgis_export_image,
             arcgis_timeout_sec=payload.arcgis_timeout_sec,
+            progress_callback=_progress_callback,
         )
     except RuntimeError as exc:
+        if run_id:
+            update_h3_progress(
+                run_id,
+                status="failed",
+                stage="failed",
+                message=str(exc),
+                step=7,
+                total=7,
+                extra={
+                    "resolution": int(payload.resolution),
+                    "arcgis_enabled": True,
+                },
+            )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return result
+
+
+@router.get("/api/v1/analysis/h3-metrics/progress")
+async def get_h3_metrics_progress(run_id: str = Query(..., description="H3 metrics run id")):
+    payload = get_h3_progress(run_id)
+    if not payload:
+        return {
+            "run_id": str(run_id or "").strip(),
+            "status": "running",
+            "stage": "queued",
+            "message": "任务已提交，等待进度同步",
+            "step": 0,
+            "total": 7,
+            "started_at": 0.0,
+            "updated_at": 0.0,
+            "elapsed_sec": 0.0,
+            "extra": {
+                "missing_progress_record": True,
+            },
+        }
+    return payload

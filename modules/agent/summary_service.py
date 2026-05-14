@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import math
 import re
 from numbers import Real
@@ -54,6 +56,12 @@ _SPATIAL_DIMENSION_SPECS = [
     ("mixing", "混合性"),
     ("morphology", "形态性"),
 ]
+_TOURISM_PROMPT_BUDGET_BYTES = 300_000
+_TOURISM_H3_REPRESENTATIVE_CELL_LIMIT = 40
+_TOURISM_H3_DERIVED_ROW_LIMIT = 12
+_TOURISM_SHARED_GRID_CELL_LIMIT = 20
+
+logger = logging.getLogger(__name__)
 
 
 def _json_safe(value: Any) -> Any:
@@ -1233,15 +1241,19 @@ async def _generate_summary_pack_with_llm(snapshot: Any, artifacts: Dict[str, An
             snapshot_payload = _pop_prompt_snapshot(tourism_payload)
             if snapshot_payload:
                 prompt_snapshots["tourism_cross_analysis"] = snapshot_payload
-            if tourism_payload:
+            if tourism_payload and not tourism_payload.get("error"):
                 validated["tourism_cross_analysis"] = tourism_payload
                 validation_results["tourism_cross_analysis"] = _build_output_validation_result(
                     "tourism_cross_analysis",
                     tourism_payload,
                     checks=_tourism_validation_checks(tourism_payload),
                 )
-        except Exception:
-            pass
+            elif tourism_payload:
+                validation_results["tourism_cross_analysis"] = _tourism_error_validation(tourism_payload)
+        except Exception as exc:
+            validation_results["tourism_cross_analysis"] = _tourism_error_validation(
+                _tourism_error_payload(f"{exc.__class__.__name__}: {exc}")
+            )
     if validated and prompt_snapshots:
         validated["prompt_snapshots"] = prompt_snapshots
     if validated and validation_results:
@@ -1349,12 +1361,218 @@ def _build_followup_questions_payload(source_payload: Dict[str, Any], summary_pa
     }
 
 
+def _json_size_bytes(value: Any) -> int:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    except (TypeError, ValueError):
+        return len(str(value or "").encode("utf-8"))
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _tourism_h3_id(row: Dict[str, Any]) -> str:
+    for key in ("h3_id", "cell_id", "id"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _tourism_compact_lq_map(value: Any, limit: int = 5) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    rows = sorted(value.items(), key=lambda item: abs(_safe_float(item[1]) or 0.0), reverse=True)
+    return {str(key): val for key, val in rows[:limit]}
+
+
+def _tourism_top_rows_by_metric(rows: Any, metrics: tuple[str, ...], limit: int) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    valid_rows = [row for row in rows if isinstance(row, dict)]
+    valid_rows.sort(
+        key=lambda row: max(abs(_safe_float(row.get(metric)) or 0.0) for metric in metrics),
+        reverse=True,
+    )
+    return valid_rows[:limit]
+
+
+def _tourism_compact_derived_rows(rows: Any, section_key: str, limit: int) -> List[Dict[str, Any]]:
+    if section_key == "structure_rows":
+        ranked = _tourism_top_rows_by_metric(rows, ("structure_signal", "density_poi_per_km2", "local_entropy"), limit)
+    elif section_key == "typing_rows":
+        ranked = _tourism_top_rows_by_metric(rows, ("density_poi_per_km2", "local_entropy", "poi_count"), limit)
+    elif section_key == "lq_rows":
+        ranked = _tourism_top_rows_by_metric(rows, ("lq_target", "max_lq", "lq"), limit)
+    elif section_key == "gap_rows":
+        ranked = _tourism_top_rows_by_metric(rows, ("gap_score", "missing_score", "demand_gap"), limit)
+    else:
+        ranked = [row for row in (rows if isinstance(rows, list) else []) if isinstance(row, dict)][:limit]
+    allowed = {
+        "h3_id",
+        "type_key",
+        "label",
+        "structure_signal",
+        "density_poi_per_km2",
+        "local_entropy",
+        "poi_count",
+        "lq_target",
+        "gap_score",
+        "dominant_category",
+        "missing_category",
+        "rank",
+    }
+    compact: List[Dict[str, Any]] = []
+    for row in ranked:
+        item = {key: val for key, val in row.items() if key in allowed and val not in (None, "", {})}
+        if "lq_map" in row:
+            item["top_lq_map"] = _tourism_compact_lq_map(row.get("lq_map"))
+        if item:
+            compact.append(item)
+    return compact
+
+
+def _tourism_compact_h3_cell(cell: Dict[str, Any]) -> Dict[str, Any]:
+    row: Dict[str, Any] = {
+        "h3_id": cell.get("h3_id"),
+        "poi_count": cell.get("poi_count"),
+        "density_poi_per_km2": cell.get("density_poi_per_km2"),
+        "local_entropy": cell.get("local_entropy"),
+        "neighbor_mean_density": cell.get("neighbor_mean_density"),
+        "neighbor_mean_entropy": cell.get("neighbor_mean_entropy"),
+        "neighbor_count": cell.get("neighbor_count"),
+        "gi_star_z_score": cell.get("gi_star_z_score"),
+        "gi_star_value": cell.get("gi_star_value"),
+        "lisa_i": cell.get("lisa_i"),
+        "lisa_z_score": cell.get("lisa_z_score"),
+    }
+    category_counts = cell.get("category_counts") if isinstance(cell.get("category_counts"), dict) else {}
+    if category_counts:
+        row["top_category_counts"] = {
+            str(name): count
+            for name, count in sorted(category_counts.items(), key=lambda item: _as_int(item[1], 0), reverse=True)[:5]
+        }
+    return {key: val for key, val in row.items() if val not in (None, "", {})}
+
+
+def _tourism_score_h3_cell(cell: Dict[str, Any]) -> tuple[float, float, float, float]:
+    density = abs(_safe_float(cell.get("density_poi_per_km2")) or 0.0)
+    poi_count = abs(_safe_float(cell.get("poi_count")) or 0.0)
+    gi_score = abs(_safe_float(cell.get("gi_star_z_score")) or 0.0)
+    lisa_score = abs(_safe_float(cell.get("lisa_z_score")) or _safe_float(cell.get("lisa_i")) or 0.0)
+    entropy = abs(_safe_float(cell.get("local_entropy")) or 0.0)
+    return (max(density, gi_score, lisa_score, entropy), density, poi_count, entropy)
+
+
+def _tourism_select_representative_h3_cells(cells: Any, limit: int, preferred_ids: set[str] | None = None) -> List[Dict[str, Any]]:
+    source = []
+    for cell in cells if isinstance(cells, list) else []:
+        if not isinstance(cell, dict):
+            continue
+        h3_id = str(cell.get("h3_id") or "").strip()
+        if h3_id:
+            source.append({**cell, "h3_id": h3_id})
+    if not source:
+        return []
+    preferred_ids = preferred_ids or set()
+    selected: Dict[str, Dict[str, Any]] = {}
+
+    def add_rows(rows: List[Dict[str, Any]], per_group_limit: int) -> None:
+        for row in rows[:per_group_limit]:
+            if len(selected) >= limit:
+                break
+            h3_id = str(row.get("h3_id") or "").strip()
+            if h3_id and h3_id not in selected:
+                selected[h3_id] = row
+
+    group_limit = max(4, limit // 5)
+    add_rows([row for row in source if str(row.get("h3_id") or "").strip() in preferred_ids], limit)
+    add_rows(sorted(source, key=lambda row: _safe_float(row.get("density_poi_per_km2")) or 0.0, reverse=True), group_limit)
+    add_rows(sorted(source, key=lambda row: _safe_float(row.get("gi_star_z_score")) or 0.0, reverse=True), group_limit)
+    add_rows(sorted(source, key=lambda row: _safe_float(row.get("gi_star_z_score")) or 0.0), group_limit)
+    add_rows(sorted(source, key=lambda row: abs(_safe_float(row.get("lisa_z_score")) or _safe_float(row.get("lisa_i")) or 0.0), reverse=True), group_limit)
+    add_rows(sorted(source, key=_tourism_score_h3_cell, reverse=True), limit)
+    return [_tourism_compact_h3_cell(row) for row in selected.values()]
+
+
+def _compact_tourism_h3_evidence(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    cells = value.get("cells") if isinstance(value.get("cells"), list) else []
+    derived = value.get("derived_stats") if isinstance(value.get("derived_stats"), dict) else {}
+    preferred_ids = {
+        _tourism_h3_id(row)
+        for section_key in ("lq_rows", "gap_rows")
+        for row in _tourism_compact_derived_rows(derived.get(section_key), section_key, 6)
+        if _tourism_h3_id(row)
+    }
+    compact_cells = _tourism_select_representative_h3_cells(cells, _TOURISM_H3_REPRESENTATIVE_CELL_LIMIT, preferred_ids)
+    return {
+        "evidence_version": value.get("evidence_version") or "poi_h3_evidence_v1",
+        "grid_type": value.get("grid_type") or "h3",
+        "usage": value.get("usage") or "POI H3 spatial evidence compacted for tourism cross analysis",
+        "params": value.get("params") or {},
+        "counts": value.get("counts") or {},
+        "metrics": value.get("metrics") or {},
+        "summary": value.get("summary") or {},
+        "cells": compact_cells,
+        "derived_stats": {
+            "structure_rows": _tourism_compact_derived_rows(derived.get("structure_rows"), "structure_rows", _TOURISM_H3_DERIVED_ROW_LIMIT),
+            "typing_rows": _tourism_compact_derived_rows(derived.get("typing_rows"), "typing_rows", _TOURISM_H3_DERIVED_ROW_LIMIT),
+            "lq_rows": _tourism_compact_derived_rows(derived.get("lq_rows"), "lq_rows", _TOURISM_H3_DERIVED_ROW_LIMIT),
+            "gap_rows": _tourism_compact_derived_rows(derived.get("gap_rows"), "gap_rows", _TOURISM_H3_DERIVED_ROW_LIMIT),
+        },
+        "omitted": {
+            "cells_total": ((value.get("counts") or {}).get("cell_count") if isinstance(value.get("counts"), dict) else len(cells)),
+            "cells_included": len(compact_cells),
+            "geometry_removed": True,
+            "charts_removed": True,
+            "ui_removed": True,
+            "category_meta_removed": True,
+        },
+    }
+
+
+def _compact_shared_grid_evidence(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    result = {
+        key: val
+        for key, val in value.items()
+        if key not in {"top_overlap_cells", "top_coupled_cells", "cells", "grid_cells", "features"}
+    }
+    for key in ("top_coupled_cells", "top_overlap_cells", "cells"):
+        rows = value.get(key)
+        if isinstance(rows, list):
+            result[key] = rows[:_TOURISM_SHARED_GRID_CELL_LIMIT]
+            break
+    result["omitted"] = {
+        **(result.get("omitted") if isinstance(result.get("omitted"), dict) else {}),
+        "shared_grid_compacted": True,
+    }
+    return result
+
+
 def _build_tourism_cross_analysis_payload(source_payload: Dict[str, Any], summary_pack: Dict[str, Any]) -> Dict[str, Any]:
     area_judgments = {
         key: dict(summary_pack.get(key) or {})
         for key, _ in _SUMMARY_SECTION_SPECS
         if isinstance(summary_pack.get(key), dict)
     }
+    raw_evidence = source_payload.get("raw_evidence") if isinstance(source_payload.get("raw_evidence"), dict) else {}
+    compact_h3 = _compact_tourism_h3_evidence(raw_evidence.get("poi_h3_evidence"))
+    compact_shared_grid = _compact_shared_grid_evidence(raw_evidence.get("shared_grid"))
     return {
         "task": "tourism_cross_analysis",
         "evidence_version": "tourism_cross_analysis_v1",
@@ -1370,9 +1588,9 @@ def _build_tourism_cross_analysis_payload(source_payload: Dict[str, Any], summar
         },
         "poi_evidence": {
             "structure": dict(source_payload.get("poi_structure") or {}),
-            "h3_evidence": dict((source_payload.get("raw_evidence") or {}).get("poi_h3_evidence") or {}),
+            "h3_evidence": compact_h3,
             "business_profile": dict(source_payload.get("business_profile") or {}),
-            "frontend_analysis": dict((source_payload.get("raw_evidence") or {}).get("poi_frontend_analysis") or {}),
+            "frontend_analysis": dict(raw_evidence.get("poi_frontend_analysis") or {}),
         },
         "nightlight_evidence": {
             "pattern": dict(source_payload.get("nightlight_pattern") or {}),
@@ -1381,8 +1599,7 @@ def _build_tourism_cross_analysis_payload(source_payload: Dict[str, Any], summar
             "spatial_structure": dict(source_payload.get("spatial_structure") or {}),
             "road_pattern": dict(source_payload.get("road_pattern") or {}),
             "area_labels": list(source_payload.get("area_labels") or []),
-            "shared_grid": dict((source_payload.get("raw_evidence") or {}).get("shared_grid") or {}),
-            "poi_h3_evidence": dict((source_payload.get("raw_evidence") or {}).get("poi_h3_evidence") or {}),
+            "shared_grid": compact_shared_grid,
         },
         "guardrails": {
             "no_external_facts": True,
@@ -1486,6 +1703,81 @@ def _tourism_validation_checks(output: Dict[str, Any]) -> List[Dict[str, Any]]:
     ]
 
 
+def _count_tourism_h3_cells(value: Any) -> int:
+    if not isinstance(value, dict):
+        return 0
+    cells = value.get("cells")
+    return len(cells) if isinstance(cells, list) else 0
+
+
+def _count_shared_grid_cells(value: Any) -> int:
+    if not isinstance(value, dict):
+        return 0
+    for key in ("top_coupled_cells", "top_overlap_cells", "cells"):
+        rows = value.get(key)
+        if isinstance(rows, list):
+            return len(rows)
+    return 0
+
+
+def _tourism_payload_size_summary(system_prompt: str, user_payload: Dict[str, Any]) -> Dict[str, Any]:
+    prompt_bytes = _json_size_bytes({
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+        ],
+    })
+    field_bytes = {
+        key: _json_size_bytes(value)
+        for key, value in (user_payload or {}).items()
+        if key not in {"guardrails"}
+    }
+    largest_fields = sorted(
+        [{"field": key, "bytes": value} for key, value in field_bytes.items()],
+        key=lambda item: item["bytes"],
+        reverse=True,
+    )[:8]
+    poi_evidence = user_payload.get("poi_evidence") if isinstance(user_payload.get("poi_evidence"), dict) else {}
+    spatial_evidence = user_payload.get("spatial_evidence") if isinstance(user_payload.get("spatial_evidence"), dict) else {}
+    return {
+        "prompt_bytes": prompt_bytes,
+        "budget_bytes": _TOURISM_PROMPT_BUDGET_BYTES,
+        "largest_fields": largest_fields,
+        "h3_cell_count": _count_tourism_h3_cells(poi_evidence.get("h3_evidence")),
+        "shared_grid_cell_count": _count_shared_grid_cells(spatial_evidence.get("shared_grid")),
+    }
+
+
+def _tourism_error_payload(error: str, *, size_summary: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "error": str(error or "tourism_cross_analysis_failed"),
+    }
+    if size_summary:
+        payload["context_size_summary"] = size_summary
+    return payload
+
+
+def _tourism_error_validation(error_payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "source": "backend",
+        "prompt_key": "tourism_cross_analysis",
+        "evidence_version": "tourism_cross_analysis_v1",
+        "status": "failed",
+        "output_schema": get_prompt_config("tourism_cross_analysis").output_schema or {},
+        "validated_output": {},
+        "error": str((error_payload or {}).get("error") or "tourism_cross_analysis_failed"),
+        "context_size_summary": dict((error_payload or {}).get("context_size_summary") or {}),
+        "checks": [
+            {
+                "key": "generation.tourism_cross_analysis",
+                "label": "文旅交叉分析生成成功",
+                "passed": False,
+            }
+        ],
+        "note": "文旅交叉分析本次未生成，错误由后端记录，其他总结内容仍可展示。",
+    }
+
+
 async def _generate_headline_section_with_llm(source_payload: Dict[str, Any]) -> Dict[str, str]:
     config = _prompt_config_for("headline")
     payload = await _invoke_json_role(
@@ -1527,15 +1819,36 @@ async def _generate_followup_questions_with_llm(source_payload: Dict[str, Any], 
 
 async def _generate_tourism_cross_analysis_with_llm(source_payload: Dict[str, Any], summary_pack: Dict[str, Any]) -> Dict[str, str]:
     config = _prompt_config_for("tourism_cross_analysis")
+    user_payload = _build_tourism_cross_analysis_payload(source_payload, summary_pack)
+    size_summary = _tourism_payload_size_summary(config.system_prompt, user_payload)
+    logger.info(
+        "tourism_cross_analysis_context_size prompt_bytes=%s budget_bytes=%s h3_cells=%s shared_grid_cells=%s largest_fields=%s",
+        size_summary["prompt_bytes"],
+        size_summary["budget_bytes"],
+        size_summary["h3_cell_count"],
+        size_summary["shared_grid_cell_count"],
+        size_summary["largest_fields"],
+    )
+    if int(size_summary["prompt_bytes"]) > int(size_summary["budget_bytes"]):
+        logger.warning(
+            "tourism_cross_analysis_context_too_large prompt_bytes=%s budget_bytes=%s largest_fields=%s",
+            size_summary["prompt_bytes"],
+            size_summary["budget_bytes"],
+            size_summary["largest_fields"],
+        )
+        return _tourism_error_payload("tourism_cross_analysis_context_too_large", size_summary=size_summary)
     payload = await _invoke_json_role(
         system_prompt=config.system_prompt,
-        user_payload=_build_tourism_cross_analysis_payload(source_payload, summary_pack),
+        user_payload=user_payload,
         emit=None,
         phase="summary_tourism_cross_analysis",
         title="生成文旅交叉策划分析",
         reasoning_id="summary-tourism-cross-analysis-reasoning",
     )
-    return _attach_prompt_snapshot(_validate_tourism_cross_analysis_payload(payload), "tourism_cross_analysis")
+    validated = _validate_tourism_cross_analysis_payload(payload)
+    if not validated:
+        return _tourism_error_payload("tourism_cross_analysis_invalid_payload", size_summary=size_summary)
+    return _attach_prompt_snapshot(validated, "tourism_cross_analysis")
 
 
 async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIterator[AgentSummaryStreamEvent]:
@@ -1708,21 +2021,34 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                     if snapshot:
                         prompt_snapshots["tourism_cross_analysis"] = snapshot
                     yield _build_stream_event("section_start", {"key": "tourism_cross_analysis", "title": "文旅交叉策划分析"})
-                    for chunk in _chunk_text_for_stream(_clean_text(tourism_payload.get("content")), chunk_size=48):
-                        yield _build_stream_event("section_delta", {"key": "tourism_cross_analysis", "delta": chunk})
-                    if tourism_payload:
+                    if tourism_payload and not tourism_payload.get("error"):
+                        for chunk in _chunk_text_for_stream(_clean_text(tourism_payload.get("content")), chunk_size=48):
+                            yield _build_stream_event("section_delta", {"key": "tourism_cross_analysis", "delta": chunk})
                         summary_pack["tourism_cross_analysis"] = tourism_payload
                         validation_results["tourism_cross_analysis"] = _build_output_validation_result(
                             "tourism_cross_analysis",
                             tourism_payload,
                             checks=_tourism_validation_checks(tourism_payload),
                         )
-                    yield _build_stream_event(
-                        "section_complete",
-                        {"key": "tourism_cross_analysis", "status": "ready", "payload": dict(tourism_payload)},
-                    )
+                        yield _build_stream_event(
+                            "section_complete",
+                            {"key": "tourism_cross_analysis", "status": "ready", "payload": dict(tourism_payload)},
+                        )
+                    else:
+                        validation_results["tourism_cross_analysis"] = _tourism_error_validation(tourism_payload)
+                        yield _build_stream_event(
+                            "error",
+                            {"key": "tourism_cross_analysis", "message": str((tourism_payload or {}).get("error") or "文旅交叉分析生成失败")},
+                        )
+                        yield _build_stream_event(
+                            "section_complete",
+                            {"key": "tourism_cross_analysis", "status": "failed", "payload": dict(tourism_payload or {})},
+                        )
                 except Exception as exc:
                     warnings.append(f"tourism_cross_analysis_generation_failed:{exc}")
+                    validation_results["tourism_cross_analysis"] = _tourism_error_validation(
+                        _tourism_error_payload(f"{exc.__class__.__name__}: {exc}")
+                    )
                     yield _build_stream_event("error", {"key": "tourism_cross_analysis", "message": str(exc)})
                     yield _build_stream_event("section_complete", {"key": "tourism_cross_analysis", "status": "failed"})
 

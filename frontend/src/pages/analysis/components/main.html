@@ -775,7 +775,7 @@
                                             </button>
                                         </div>
                                         <div class="agent-summary-line agent-iteration-note">
-                                            多年 POI 迭代需要多年 POI 和每年网格证据；已有结果会直接复用。
+                                            多年 POI 迭代需要多年 POI 和每年 H3 证据；已有结果会直接复用。
                                         </div>
                                         <div class="agent-summary-task-grid">
                                             <section
@@ -816,7 +816,10 @@
                                                         <em>{{ item.fetched ? '已抓取' : '待抓取' }}</em>
                                                     </label>
                                                 </div>
-                                                <div v-if="task.key === 'poi_grid'" class="agent-summary-task-params">
+                                                <div v-if="false" class="agent-summary-task-params">
+                                                    <div class="agent-summary-line">按 shared cell_id 生成每年 POI 栅格，用于人口、POI、夜光耦合。</div>
+                                                </div>
+                                                <div v-if="task.key === 'poi_h3_grid'" class="agent-summary-task-params">
                                                     <label class="agent-summary-task-field">
                                                         <span>网格级别</span>
                                                         <select
@@ -847,10 +850,31 @@
                                                     <span>{{ row.label }} · {{ row.source }} · {{ row.reuse }}</span>
                                                 </div>
                                             </section>
+                                            <section v-if="false" class="agent-summary-task-card">
+                                                <div class="agent-summary-task-head">
+                                                    <div class="agent-summary-task-title">迭代栅格状态</div>
+                                                    <div class="agent-summary-task-status">shared cell_id · {{ getAgentIterationPoiRasterGridYearRows().filter((row) => row.status === 'ready').length }}/{{ getAgentIterationPoiRasterGridYearRows().length }}</div>
+                                                </div>
+                                                <div
+                                                    v-for="row in getAgentIterationPoiRasterGridYearRows()"
+                                                    :key="`iteration-poi-raster-status-${row.year}`"
+                                                    class="agent-iteration-year-status-row"
+                                                    :class="`is-${row.status}`">
+                                                    <span class="agent-iteration-year-status-dot"></span>
+                                                    <strong>{{ row.year }} 年</strong>
+                                                    <span>{{ row.label }} · 栅格 {{ row.resolution }}</span>
+                                                </div>
+                                                <div
+                                                    v-for="row in getAgentIterationPoiRasterGridYearRows().filter((item) => item.error)"
+                                                    :key="`iteration-poi-raster-error-${row.year}`"
+                                                    class="agent-summary-task-error">
+                                                    {{ row.year }} 年：{{ row.error }}
+                                                </div>
+                                            </section>
                                             <section class="agent-summary-task-card">
                                                 <div class="agent-summary-task-head">
-                                                    <div class="agent-summary-task-title">迭代 H3 网格状态</div>
-                                                    <div class="agent-summary-task-status">resolution {{ h3GridResolution || '-' }} · 最新 {{ getAgentIterationPoiLatestH3YearLabel() }}</div>
+                                                    <div class="agent-summary-task-title">迭代 H3 状态</div>
+                                                    <div class="agent-summary-task-status">最新 {{ getAgentIterationPoiLatestH3YearLabel() }} · {{ getAgentIterationPoiGridYearRows().filter((row) => row.status === 'ready').length }}/{{ getAgentIterationPoiGridYearRows().length }} 完成</div>
                                                 </div>
                                                 <div
                                                     v-for="row in getAgentIterationPoiGridYearRows()"
@@ -859,7 +883,7 @@
                                                     :class="`is-${row.status}`">
                                                     <span class="agent-iteration-year-status-dot"></span>
                                                     <strong>{{ row.year }} 年</strong>
-                                                    <span>{{ row.label }} · H3 {{ row.resolution }}</span>
+                                                    <span>{{ row.stageLabel || row.label }} · H3 {{ row.resolution }}<template v-if="row.detailLabel"> · {{ row.detailLabel }}</template></span>
                                                 </div>
                                                 <div
                                                     v-for="row in getAgentIterationPoiGridYearRows().filter((item) => item.error)"
@@ -908,46 +932,27 @@
                                         <div v-else class="agent-summary-line agent-iteration-note">
                                             {{ getAgentIterationPoiAiStatusText() }}
                                         </div>
-                                        <div class="agent-iteration-analysis-list">
+                                        <div class="agent-iteration-report">
                                             <div v-if="shouldShowAgentIterationPoiAiPlaceholder()" class="agent-iteration-ai-placeholder" aria-hidden="true">
                                                 <div class="agent-summary-skeleton-line is-wide"></div>
                                                 <div class="agent-summary-skeleton-line is-medium"></div>
                                                 <div class="agent-summary-skeleton-line"></div>
                                             </div>
-                                            <div
-                                                v-for="(line, idx) in getAgentIterationPoiAiSummaryRows()"
-                                                :key="`agent-iteration-poi-ai-summary-${idx}`"
-                                                class="agent-iteration-analysis-row">
-                                                <span>{{ line }}</span>
-                                            </div>
-                                        </div>
-                                        <div class="agent-iteration-insight-list">
-                                            <div
-                                                v-for="row in getAgentIterationPoiAiInsightRows()"
-                                                :key="`agent-iteration-poi-foundation-${row.key}`"
-                                                class="agent-iteration-insight-row">
-                                                <strong>{{ row.label }}</strong>
-                                                <span>{{ row.value }}</span>
-                                            </div>
-                                        </div>
-                                        <div v-if="getAgentIterationPoiDriverRows().length" class="agent-iteration-insight-list agent-iteration-insight-list-secondary">
-                                            <div class="agent-iteration-section-kicker">变化原因</div>
-                                            <div
-                                                v-for="row in getAgentIterationPoiDriverRows()"
-                                                :key="`agent-iteration-poi-driver-${row.key}`"
-                                                class="agent-iteration-insight-row">
-                                                <strong>{{ row.label }}</strong>
-                                                <span>{{ row.value }}</span>
-                                            </div>
-                                        </div>
-                                        <div v-if="getAgentIterationPoiPlanningRows().length" class="agent-iteration-insight-list agent-iteration-insight-list-secondary">
-                                            <div class="agent-iteration-section-kicker">策划启示</div>
-                                            <div
-                                                v-for="row in getAgentIterationPoiPlanningRows()"
-                                                :key="`agent-iteration-poi-planning-${row.key}`"
-                                                class="agent-iteration-insight-row">
-                                                <strong>{{ row.label }}</strong>
-                                                <span>{{ row.value }}</span>
+                                            <div v-if="hasAgentIterationPoiReport()" class="agent-iteration-report-body">
+                                                <div v-if="getAgentIterationPoiPayload().report_title" class="agent-iteration-report-title">
+                                                    {{ getAgentIterationPoiPayload().report_title }}
+                                                </div>
+                                                <section
+                                                    v-for="section in getAgentIterationPoiReportSections()"
+                                                    :key="section.key"
+                                                    class="agent-iteration-report-section">
+                                                    <h4>{{ section.heading }}</h4>
+                                                    <p
+                                                        v-for="(paragraph, idx) in section.paragraphs"
+                                                        :key="`${section.key}-paragraph-${idx}`">
+                                                        {{ paragraph }}
+                                                    </p>
+                                                </section>
                                             </div>
                                         </div>
                                     </section>

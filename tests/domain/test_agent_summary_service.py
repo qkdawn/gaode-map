@@ -13,6 +13,8 @@ from modules.agent.prompt_registry import get_prompt_config
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload, summarize_iteration_pois
 from modules.agent.summary_service import (
     _build_tourism_cross_analysis_payload,
+    _generate_summary_pack_with_llm,
+    _tourism_payload_size_summary,
     _build_summary_llm_payload,
     _normalize_area_judgment_reasoning,
     _validate_summary_pack_payload,
@@ -164,10 +166,88 @@ def test_tourism_cross_analysis_payload_includes_shared_grid_evidence():
     assert "grid" not in payload["poi_evidence"]
     assert payload["poi_evidence"]["h3_evidence"]["evidence_version"] == "poi_h3_evidence_v1"
     assert payload["poi_evidence"]["h3_evidence"]["params"]["h3_resolution"] == 9
-    assert payload["spatial_evidence"]["poi_h3_evidence"]["counts"]["grid_count"] == 5
+    assert "poi_h3_evidence" not in payload["spatial_evidence"]
     assert "param_bundle" not in payload["poi_evidence"]
     assert "param_bundle" not in payload["nightlight_evidence"]
     assert "param_bundles" not in payload["spatial_evidence"]
+
+
+def test_tourism_cross_analysis_payload_compacts_large_h3_and_shared_grid():
+    cells = [
+        {
+            "h3_id": f"h3-{idx}",
+            "poi_count": idx,
+            "density_poi_per_km2": idx * 1.5,
+            "local_entropy": idx / 100,
+            "category_counts": {f"cat-{cat}": cat for cat in range(20)},
+            "gi_star_z_score": -8 if idx == 5 else (9 if idx == 499 else idx / 100),
+            "lisa_i": idx / 50,
+            "geometry": {"type": "Polygon", "coordinates": [[[idx, idx]]]},
+        }
+        for idx in range(500)
+    ]
+    source_payload = {
+        "population_profile": {"summary_text": "人口基础稳定", "total_population": 10000, "top_age_band": "25-34"},
+        "nightlight_pattern": {"summary_text": "夜间活力中等", "core_hotspot_count": 3},
+        "poi_structure": {"summary_text": "餐饮主导", "dominant_categories": ["餐饮"]},
+        "business_profile": {"summary_text": "生活消费型"},
+        "spatial_structure": {"summary_text": "多核"},
+        "road_pattern": {"summary_text": "路网可达"},
+        "raw_evidence": {
+            "poi_h3_evidence": {
+                "evidence_version": "poi_h3_evidence_v1",
+                "counts": {"grid_count": 500, "cell_count": 500},
+                "charts": {"large": "x" * 1000},
+                "ui": {"large": "x" * 1000},
+                "category_meta": [{"name": f"cat-{idx}"} for idx in range(100)],
+                "cells": cells,
+                "derived_stats": {
+                    "lq_rows": [{"h3_id": "h3-7", "lq_target": 4.2, "lq_map": {f"cat-{idx}": idx for idx in range(20)}}],
+                    "gap_rows": [{"h3_id": "h3-9", "gap_score": 0.9}],
+                },
+            },
+            "shared_grid": {
+                "evidence_version": "shared_grid_evidence_v1",
+                "counts": {"complete_overlap_cells": 50},
+                "top_coupled_cells": [{"cell_id": f"c-{idx}", "composite_score": idx} for idx in range(50)],
+            },
+        },
+    }
+
+    payload = _build_tourism_cross_analysis_payload(source_payload, _valid_summary_pack())
+    h3 = payload["poi_evidence"]["h3_evidence"]
+    selected_ids = {cell["h3_id"] for cell in h3["cells"]}
+
+    assert "poi_h3_evidence" not in payload["spatial_evidence"]
+    assert len(h3["cells"]) <= 40
+    assert {"h3-7", "h3-9", "h3-499", "h3-5"}.issubset(selected_ids)
+    assert "charts" not in h3
+    assert "ui" not in h3
+    assert "category_meta" not in h3
+    assert "geometry" not in h3["cells"][0]
+    assert "category_counts" not in h3["cells"][0]
+    assert len(h3["cells"][0].get("top_category_counts", {})) <= 5
+    assert len(payload["spatial_evidence"]["shared_grid"]["top_coupled_cells"]) == 20
+
+
+def test_tourism_cross_analysis_payload_size_summary():
+    payload = _build_tourism_cross_analysis_payload(
+        {
+            "raw_evidence": {
+                "poi_h3_evidence": {
+                    "cells": [{"h3_id": "h3-1", "poi_count": 10, "density_poi_per_km2": 20}],
+                },
+                "shared_grid": {"top_coupled_cells": [{"cell_id": "c-1"}]},
+            }
+        },
+        _valid_summary_pack(),
+    )
+    summary = _tourism_payload_size_summary("system prompt", payload)
+
+    assert summary["prompt_bytes"] > 0
+    assert summary["largest_fields"]
+    assert summary["h3_cell_count"] == 1
+    assert summary["shared_grid_cell_count"] == 1
 
 
 def _valid_summary_pack():
@@ -303,17 +383,18 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
         assert kwargs["user_payload"]["evidence"]["subcategory_spatial_trends"][0]["name"]
         assert kwargs["user_payload"]["evidence"]["growth_area_signal"]["growth_rows"][0]["name"] == "咖啡厅"
         return {
-            "summary_points": ["POI规模中等", "餐饮为主导业态", "岳麓区为核心区域"],
-            "fastest_growth": "咖啡 +120%",
-            "declining_category": "传统零售 -35%",
-            "emerging_area": "咖啡厅新增偏东北、中圈层补点",
-            "structure_judgement": "业态结构偏消费型",
-            "driver_analysis": [
-                {"driver": "餐饮补充型增长", "evidence": "咖啡厅增加", "confidence": "中", "explanation": "小类增量支撑日常消费。"}
+            "report_title": "业态基础分析总结报告",
+            "report_sections": [
+                {
+                    "heading": "一、总体判断：区域业态处于温和扩张阶段",
+                    "paragraphs": ["从 POI 变化看，区域总量保持增长，餐饮与咖啡厅小类提供主要增量。"],
+                },
+                {
+                    "heading": "二、空间特征：中圈层补点明显",
+                    "paragraphs": ["空间信号显示咖啡厅新增偏东北与中圈层，说明增长更偏内部加密。"],
+                },
             ],
-            "planning_implications": [
-                {"implication": "强化日常消费底盘", "evidence": "餐饮主导", "suggested_direction": "轻餐饮与社交消费。"}
-            ],
+            "report_content": "业态基础分析总结报告\n\n一、总体判断：区域业态处于温和扩张阶段\n\n从 POI 变化看，区域总量保持增长，餐饮与咖啡厅小类提供主要增量。",
         }
 
     monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
@@ -342,8 +423,9 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
     assert result["status"] == "ready"
     assert result["spatial_factors"]["geometry_mode"] == "point"
     assert result["subcategory_spatial_trend_rows"]
-    assert result["ai_summary"][0] == "POI规模中等"
-    assert result["ai_insights"]["emerging_area"]["interpretation"]
+    assert result["report_title"] == "业态基础分析总结报告"
+    assert result["report_sections"][0]["heading"].startswith("一、总体判断")
+    assert "区域总量保持增长" in result["report_content"]
     assert "poi_iteration_v1" in result["ai_prompt"]
     assert "growth_area_signal" in result["ai_prompt"]
     assert "User payload" in result["ai_prompt_payload_note"]
@@ -351,7 +433,7 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
     assert result["prompt_snapshot"]["system_prompt"] == config.system_prompt
     assert result["prompt_snapshots"]["poi_iteration"]["system_prompt"] == config.system_prompt
     assert result["validation_results"]["poi_iteration"]["source"] == "backend"
-    assert result["validation_results"]["poi_iteration"]["validated_output"]["summary_points"][0] == "POI规模中等"
+    assert result["validation_results"]["poi_iteration"]["validated_output"]["report_title"] == "业态基础分析总结报告"
 
 
 def test_generate_poi_iteration_analysis_sends_compact_llm_evidence(monkeypatch):
@@ -361,17 +443,14 @@ def test_generate_poi_iteration_analysis_sends_compact_llm_evidence(monkeypatch)
     async def fake_invoke(**kwargs):
         captured.update(kwargs["user_payload"]["evidence"])
         return {
-            "summary_points": ["POI规模下降", "餐饮仍为主导"],
-            "fastest_growth": "餐饮增长较快",
-            "declining_category": "购物减少",
-            "emerging_area": "咖啡厅新增偏东北、中圈层补点",
-            "structure_judgement": "生活消费主导",
-            "driver_analysis": [
-                {"driver": "餐饮配套增强", "evidence": "餐饮增长较快", "confidence": "中", "explanation": "餐饮增长解释生活消费底盘增强。"}
+            "report_title": "业态基础分析总结报告",
+            "report_sections": [
+                {
+                    "heading": "一、总体判断：区域业态变化可读",
+                    "paragraphs": ["POI 多年证据已被压缩传入，可用于判断总量、结构和空间变化。"],
+                }
             ],
-            "planning_implications": [
-                {"implication": "强化餐饮承接", "evidence": "餐饮仍为主导", "suggested_direction": "餐饮与日常服务。"}
-            ],
+            "report_content": "业态基础分析总结报告\n\n一、总体判断：区域业态变化可读\n\nPOI 多年证据已被压缩传入，可用于判断总量、结构和空间变化。",
         }
 
     monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
@@ -511,8 +590,69 @@ def test_build_poi_iteration_evidence_pack_v1_includes_yearly_grid_evidence():
     assert yearly["evidence_version"] == "poi_iteration_yearly_grid_evidence_v1"
     assert yearly["grid_scope"] == "poi_iteration_h3_per_year"
     assert yearly["items"][0]["year"] == 2025
-    assert yearly["items"][0]["h3_evidence"]["cells"][0]["h3_id"] == "h3-2025"
+    assert yearly["items"][0]["h3_summary"]["representative_cells"][0]["h3_id"] == "h3-2025"
     assert "raster_grid_evidence" not in yearly["items"][0]
+    assert "h3_evidence" not in yearly["items"][0]
+
+
+def test_build_poi_iteration_evidence_pack_v1_compacts_large_h3_context():
+    cells = [
+        {
+            "h3_id": f"h3-{idx}",
+            "poi_count": idx,
+            "density_poi_per_km2": idx * 1.5,
+            "local_entropy": idx / 100,
+            "category_counts": {f"cat-{cat}": cat for cat in range(20)},
+            "gi_star_z_score": -8 if idx == 5 else (9 if idx == 499 else idx / 100),
+            "lisa_i": idx / 50,
+            "geometry": {"type": "Polygon", "coordinates": [[[idx, idx]]]},
+        }
+        for idx in range(500)
+    ]
+    yearly_items = [
+        {
+            "year": 2018 + year_idx,
+            "h3_evidence": {
+                "counts": {"cell_count": 500},
+                "metrics": {"avg_density_poi_per_km2": year_idx},
+                "cells": cells,
+                "derived_stats": {
+                    "lq_rows": [{"h3_id": "h3-7", "lq_target": 4.2, "lq_map": {f"cat-{idx}": idx for idx in range(20)}}],
+                    "gap_rows": [{"h3_id": "h3-9", "gap_score": 0.9}],
+                },
+            },
+        }
+        for year_idx in range(8)
+    ]
+
+    evidence = build_poi_iteration_evidence_pack_v1({
+        "years": list(range(2018, 2026)),
+        "summaries": [{"year": 2018, "count": 10}, {"year": 2025, "count": 20}],
+        "h3_evidence": {
+            "counts": {"cell_count": 500},
+            "charts": {"large": "x" * 1000},
+            "ui": {"large": "x" * 1000},
+            "category_meta": [{"name": f"cat-{idx}"} for idx in range(100)],
+            "cells": cells,
+            "derived_stats": {
+                "lq_rows": [{"h3_id": "h3-7", "lq_target": 4.2, "lq_map": {f"cat-{idx}": idx for idx in range(20)}}],
+                "gap_rows": [{"h3_id": "h3-9", "gap_score": 0.9}],
+            },
+        },
+        "yearly_grid_evidence": {"items": yearly_items},
+    })
+
+    h3 = evidence["h3_evidence"]
+    selected_ids = {cell["h3_id"] for cell in h3["cells"]}
+    assert len(h3["cells"]) <= 40
+    assert {"h3-7", "h3-9", "h3-499", "h3-5"}.issubset(selected_ids)
+    assert "charts" not in h3
+    assert "ui" not in h3
+    assert "category_meta" not in h3
+    assert "category_counts" not in h3["cells"][0]
+    assert len(h3["cells"][0].get("top_category_counts", {})) <= 5
+    assert len(evidence["yearly_grid_evidence"]["items"]) == 8
+    assert len(evidence["yearly_grid_evidence"]["items"][0]["h3_summary"]["representative_cells"]) <= 12
 
 
 def test_build_poi_iteration_evidence_pack_v1_ranks_subcategory_changes():
@@ -573,22 +713,23 @@ def test_build_poi_iteration_evidence_pack_v1_separates_low_base_rate_growth():
     assert evidence["constraints"]["no_low_base_rate_as_primary"] is True
 
 
-def test_generate_poi_iteration_analysis_formats_object_insights(monkeypatch):
+def test_generate_poi_iteration_analysis_accepts_report_payload(monkeypatch):
     monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
 
     async def fake_invoke(**kwargs):
         return {
-            "summary_points": ["一级业态以餐饮为主", "小类以快餐厅增长较快"],
-            "fastest_growth": {"category": "公司", "delta": "+29", "subcategory": "快餐厅", "change": "+106"},
-            "declining_category": {"category": "购物", "delta": "-330", "subcategory": "购物相关场所", "change": "-153"},
-            "emerging_area": "未发现明显新兴区域",
-            "structure_judgement": "餐饮内部快餐厅占比上升",
-            "driver_analysis": [
-                {"driver": "快餐厅小类拉动", "evidence": "快餐厅变化 +106", "confidence": "中", "explanation": "小类增长推动餐饮内部结构变化。"}
+            "report_title": "业态基础分析总结报告",
+            "report_sections": [
+                {
+                    "heading": "一、总体判断：餐饮内部结构增强",
+                    "paragraphs": ["快餐厅等小类增长说明餐饮内部结构存在便捷消费增强信号。"],
+                },
+                {
+                    "heading": "二、策划启示：关注便捷消费",
+                    "paragraphs": ["后续可以围绕快餐、轻餐和社交消费组织业态承接。"],
+                },
             ],
-            "planning_implications": [
-                {"implication": "关注快餐与便捷消费", "evidence": "快餐厅增长较快", "suggested_direction": "便捷餐饮配套。"}
-            ],
+            "report_content": "业态基础分析总结报告\n\n一、总体判断：餐饮内部结构增强\n\n快餐厅等小类增长说明餐饮内部结构存在便捷消费增强信号。",
         }
 
     monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
@@ -596,14 +737,11 @@ def test_generate_poi_iteration_analysis_formats_object_insights(monkeypatch):
     result = asyncio.run(generate_poi_iteration_analysis({"years": [2023, 2024, 2025]}))
 
     assert result["status"] == "ready"
-    assert result["ai_insights"]["fastest_growth"]["category"]
-    assert result["ai_insights"]["fastest_growth"]["subcategory"]
-    assert "interpretation" in result["ai_insights"]["emerging_area"]
-    assert result["ai_insights"]["emerging_area"]["interpretation"]
-    assert "????" not in result["ai_insights"]["emerging_area"]["interpretation"]
+    assert result["report_sections"][0]["heading"] == "一、总体判断：餐饮内部结构增强"
+    assert "summary_points" not in result
 
 
-def test_generate_poi_iteration_analysis_accepts_seven_field_payload(monkeypatch):
+def test_generate_poi_iteration_analysis_rejects_legacy_seven_field_payload(monkeypatch):
     monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
 
     async def fake_invoke(**kwargs):
@@ -625,22 +763,17 @@ def test_generate_poi_iteration_analysis_accepts_seven_field_payload(monkeypatch
 
     result = asyncio.run(generate_poi_iteration_analysis({"years": [2022, 2024]}))
 
-    assert result["status"] == "ready"
-    assert result["driver_analysis"][0]["driver"] == "生活消费需求支撑"
-    assert "report_title" not in result
-    assert "report_content" not in result
+    assert result["status"] == "failed"
+    assert result["error"] == "invalid_ai_analysis"
 
 
-def test_generate_poi_iteration_analysis_rejects_missing_driver_or_planning(monkeypatch):
+def test_generate_poi_iteration_analysis_rejects_missing_report_sections(monkeypatch):
     monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
 
     async def fake_invoke(**kwargs):
         return {
-            "summary_points": ["POI 总量温和增长。", "餐饮保持主导。"],
-            "fastest_growth": "餐饮增长最快。",
-            "declining_category": "未发现明显衰退。",
-            "emerging_area": "北向中圈层加密。",
-            "structure_judgement": "生活消费型复合结构。",
+            "report_title": "业态基础分析总结报告",
+            "report_content": "只有正文但没有结构化章节。",
         }
 
     monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
@@ -652,6 +785,43 @@ def test_generate_poi_iteration_analysis_rejects_missing_driver_or_planning(monk
 
     assert result["status"] == "failed"
     assert result["error"] == "invalid_ai_analysis"
+
+
+def test_generate_poi_iteration_analysis_returns_context_too_large_without_llm_call(monkeypatch):
+    monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
+    monkeypatch.setattr("modules.agent.iteration_change_service._POI_ITERATION_PROMPT_BUDGET_BYTES", 100)
+
+    async def fail_invoke(**kwargs):
+        raise AssertionError("LLM should not be called when POI iteration context is over budget")
+
+    monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fail_invoke)
+
+    result = asyncio.run(generate_poi_iteration_analysis({
+        "years": [2022, 2024],
+        "summaries": [
+            {
+                "year": 2022,
+                "count": 10,
+                "category_counts": {"餐饮": 10},
+                "subcategory_counts": {"中餐厅": 10},
+            },
+            {
+                "year": 2024,
+                "count": 12,
+                "category_counts": {"餐饮": 12},
+                "subcategory_counts": {"中餐厅": 12},
+            },
+        ],
+        "h3_evidence": {
+            "cells": [{"h3_id": "h3-1", "poi_count": 12, "density_poi_per_km2": 20}],
+        },
+    }))
+
+    assert result["status"] == "failed"
+    assert result["error"] == "poi_iteration_context_too_large"
+    assert result["context_size_summary"]["prompt_bytes"] > result["context_size_summary"]["budget_bytes"]
+    assert result["context_size_summary"]["largest_fields"]
+    assert result["context_size_summary"]["h3_cell_count"] == 1
 
 
 def test_generate_poi_iteration_analysis_returns_llm_unavailable(monkeypatch):
@@ -1153,6 +1323,64 @@ def test_generate_summary_pack_returns_new_schema(monkeypatch):
     assert result.summary_pack["validation_results"]["tourism_cross_analysis"]["source"] == "backend"
     assert result.summary_pack["validation_results"]["tourism_cross_analysis"]["validated_output"]["title"] == "文旅交叉策划分析"
     assert result.panel_payloads["summary_status"]["status"] == "ready"
+
+
+def test_generate_summary_pack_records_tourism_context_too_large(monkeypatch):
+    calls = []
+
+    async def fake_invoke(**kwargs):
+        calls.append(kwargs["phase"])
+        if kwargs["phase"] == "summary_pack":
+            return {
+                "headline_judgment": {"summary": "社区型生活消费商业区", "supporting_clause": "餐饮主导。"},
+                "user_profile": {"headline": "本地居民为主", "traits": ["高频餐饮", "就近消费"]},
+                "behavior_inference": {"headline": "日常消费", "traits": ["晚间消费", "小额高频"]},
+            }
+        if kwargs["phase"].startswith("summary_section_"):
+            section_key = kwargs["phase"].replace("summary_section_", "")
+            return dict(_valid_summary_pack_new_schema()[section_key])
+        if kwargs["phase"] == "summary_tourism_cross_analysis":
+            raise AssertionError("tourism LLM call should be skipped when context is over budget")
+        raise AssertionError(f"unexpected phase {kwargs['phase']}")
+
+    monkeypatch.setattr("modules.agent.summary_service.is_llm_enabled", lambda: True)
+    monkeypatch.setattr("modules.agent.summary_service._invoke_json_role", fake_invoke)
+    monkeypatch.setattr("modules.agent.summary_service._TOURISM_PROMPT_BUDGET_BYTES", 100)
+
+    result = asyncio.run(_generate_summary_pack_with_llm(_request().analysis_snapshot, _structured_artifacts()))
+
+    validation = result["validation_results"]["tourism_cross_analysis"]
+    assert "summary_tourism_cross_analysis" not in calls
+    assert validation["status"] == "failed"
+    assert validation["error"] == "tourism_cross_analysis_context_too_large"
+    assert validation["context_size_summary"]["prompt_bytes"] > validation["context_size_summary"]["budget_bytes"]
+
+
+def test_generate_summary_pack_records_tourism_exception(monkeypatch):
+    async def fake_invoke(**kwargs):
+        if kwargs["phase"] == "summary_pack":
+            return {
+                "headline_judgment": {"summary": "社区型生活消费商业区", "supporting_clause": "餐饮主导。"},
+                "user_profile": {"headline": "本地居民为主", "traits": ["高频餐饮", "就近消费"]},
+                "behavior_inference": {"headline": "日常消费", "traits": ["晚间消费", "小额高频"]},
+            }
+        if kwargs["phase"].startswith("summary_section_"):
+            section_key = kwargs["phase"].replace("summary_section_", "")
+            return dict(_valid_summary_pack_new_schema()[section_key])
+        if kwargs["phase"] == "summary_tourism_cross_analysis":
+            raise RuntimeError("CSU 400 context length exceeded")
+        raise AssertionError(f"unexpected phase {kwargs['phase']}")
+
+    monkeypatch.setattr("modules.agent.summary_service.is_llm_enabled", lambda: True)
+    monkeypatch.setattr("modules.agent.summary_service._invoke_json_role", fake_invoke)
+
+    result = asyncio.run(_generate_summary_pack_with_llm(_request().analysis_snapshot, _structured_artifacts()))
+
+    assert result["headline_judgment"]["summary"].startswith("社区型")
+    validation = result["validation_results"]["tourism_cross_analysis"]
+    assert validation["status"] == "failed"
+    assert "RuntimeError" in validation["error"]
+    assert "tourism_cross_analysis" not in result
 
 
 def test_consumption_vitality_rewrites_to_direction_orientation_template():

@@ -219,6 +219,7 @@ class AgentIterationPoiResponse(BaseModel):
     driver_analysis: List[Dict[str, Any]] = Field(default_factory=list)
     planning_implications: List[Dict[str, Any]] = Field(default_factory=list)
     report_title: str = ""
+    report_sections: List[Dict[str, Any]] = Field(default_factory=list)
     report_content: str = ""
     spatial_factors: Dict[str, Any] = Field(default_factory=dict)
     subcategory_spatial_trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
@@ -270,6 +271,7 @@ class AgentIterationPoiBuildResponse(BaseModel):
     driver_analysis: List[Dict[str, Any]] = Field(default_factory=list)
     planning_implications: List[Dict[str, Any]] = Field(default_factory=list)
     report_title: str = ""
+    report_sections: List[Dict[str, Any]] = Field(default_factory=list)
     report_content: str = ""
     ai_status: str = "pending"
     ai_prompt: str = ""

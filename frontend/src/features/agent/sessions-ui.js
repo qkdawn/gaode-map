@@ -1088,8 +1088,8 @@ function createAgentUiMethods() {
           'yearly_grid_evidence',
         ].includes(field.key))
         .concat([
-          { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取业态基础分析 7 个字段，并结合 H3 与年度网格证据。' },
-          { key: 'output_fields', label: '本块使用输出字段', value: 'summary_points, fastest_growth, declining_category, emerging_area, structure_judgement, driver_analysis, planning_implications' },
+          { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取业态基础分析长文报告，并结合 H3 与年度网格证据。' },
+          { key: 'output_fields', label: '本块使用输出字段', value: 'report_title, report_sections, report_content' },
         ])
       const poiInsightFields = [
         { key: 'evidence_version', label: '证据包版本', value: rawInput.evidence_version },
@@ -1101,18 +1101,15 @@ function createAgentUiMethods() {
         { key: 'area_distribution', label: '年度区域分布', value: evidenceAreaDistribution.map((row) => `${row.year || '-'}：${row.point_count ?? '-'}点，热点${row.hotspot_cell_count ?? 0}格`) },
         { key: 'h3_evidence', label: '末年 H3 网格证据', value: h3Evidence },
         { key: 'yearly_grid_evidence', label: '年度网格证据', value: yearlyGridEvidence },
-        { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取业态基础分析 7 个字段，并结合 H3 与年度网格证据。' },
-        { key: 'output_fields', label: '本块使用输出字段', value: 'summary_points, fastest_growth, declining_category, emerging_area, structure_judgement, driver_analysis, planning_implications' },
+        { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取业态基础分析长文报告，并结合 H3 与年度网格证据。' },
+        { key: 'output_fields', label: '本块使用输出字段', value: 'report_title, report_sections, report_content' },
       ].filter((item) => item.value !== undefined && item.value !== null && item.value !== '')
       const conclusionRows = isNightlight
         ? this.getAgentIterationNightlightAnalysisRows().map((row) => `${row.label}：${row.value}`)
         : isPoiInsight
-          ? this.getAgentIterationPoiAiInsightRows().map((row) => `${row.label}：${row.value}`)
+          ? this.getAgentIterationPoiReportSections().flatMap((section) => [section.heading, ...section.paragraphs])
           : [
-              ...this.getAgentIterationPoiAiSummaryRows(),
-              ...this.getAgentIterationPoiAiInsightRows().map((row) => `${row.label}：${row.value}`),
-              ...this.getAgentIterationPoiDriverRows().map((row) => `${row.label}：${row.value}`),
-              ...this.getAgentIterationPoiPlanningRows().map((row) => `${row.label}：${row.value}`),
+              ...this.getAgentIterationPoiReportSections().flatMap((section) => [section.heading, ...section.paragraphs]),
             ]
       return {
         title: isNightlight ? '夜光多年变化依据' : isPoiInsight ? 'POI 多年洞察依据' : isPoiAnalysis ? 'POI 多年分析依据' : 'POI 多年变化依据',
@@ -1134,17 +1131,17 @@ function createAgentUiMethods() {
           'AI 输出会被后端要求按固定 JSON 字段返回，前端只展示通过校验的字段。',
           isPoi
             ? isPoiInsight
-              ? '这是同一轮 POI 多年解读中的结构化字段，不是重复调用；本块展示业态变化、空间增长、原因诊断和策划启示。'
+              ? '这是同一轮 POI 多年解读中的报告字段，不是重复调用；本块展示业态基础分析总结报告。'
               : isPoiAnalysis
-                ? '这是同一轮 POI 多年解读中的业态基础分析字段，不是重复调用；本块展示摘要、结构判断、原因诊断和策划启示。'
+                ? '这是同一轮 POI 多年解读中的业态基础分析报告字段，不是重复调用；本块展示完整章节正文。'
                 : 'POI 分析关注总量、业态结构、区域分布与增长/衰退方向。'
             : '夜光分析关注总辐亮、均值、P90、点亮占比和热点迁移。',
         ],
         template: isPoi
           ? isPoiInsight
-            ? '从同一轮 POI 多年解读结果中读取{业态变化}、{增长片区}、{原因诊断}与{策划启示}。'
+            ? '从同一轮 POI 多年解读结果中读取{报告标题}、{章节正文}与{完整报告文本}。'
             : isPoiAnalysis
-              ? '从同一轮 POI 多年解读结果中读取 7 个结构化字段，组织业态基础分析。'
+              ? '从同一轮 POI 多年解读结果中读取 report_sections，组织业态基础分析长文报告。'
               : '基于{年份序列}的 POI 总量、业态结构和区域分布变化，概括{趋势判断}、{结构变化}与{机会风险}。'
           : '基于近三年夜光快照，概括{趋势判断}、{总体变化}、{热点迁移}与{机会风险}。',
         aiPrompt: promptDisplay.aiPrompt,
@@ -3804,21 +3801,21 @@ function createAgentUiMethods() {
       const hasReadableHistory = !!asText(this.currentHistoryRecordId)
       const hasMultiYearPoi = hasReadableHistory && historyYears.length >= 2
       const yearly = this.getAgentIterationPoiYearlyGridEvidence()
-      const readyYears = new Set(cloneArray(yearly.items)
+      const readyH3Years = new Set(cloneArray(yearly.h3_items || yearly.items)
         .filter((item) => asText(item && item.status || 'ready') === 'ready')
         .map((item) => Number(item && item.year))
         .filter((item) => Number.isFinite(item)))
-      const hasYearlyGrid = years.length >= 2 && years.every((year) => readyYears.has(Number(year)))
+      const hasYearlyH3Grid = years.length >= 2 && years.every((year) => readyH3Years.has(Number(year)))
       const missingTasks = []
       if (!hasMultiYearPoi) missingTasks.push('poi_fetch')
-      if (!hasYearlyGrid) missingTasks.push('poi_grid')
+      if (!hasYearlyH3Grid) missingTasks.push('poi_h3_grid')
       return {
         checked: true,
         ready: missingTasks.length === 0,
         missingTasks,
         reused: [
           hasMultiYearPoi ? 'poi_fetch' : '',
-          hasYearlyGrid ? 'poi_grid' : '',
+          hasYearlyH3Grid ? 'poi_h3_grid' : '',
         ].filter(Boolean),
         fetched: [],
         years,
@@ -3828,7 +3825,7 @@ function createAgentUiMethods() {
       const readiness = this.getAgentIterationPoiReadiness()
       const board = this.getAgentIterationPoiPayload().task_board || {}
       const taskMap = new Map(cloneArray(board.tasks).map((item) => [asText(item && item.key), item]))
-      return ['poi_fetch', 'poi_grid'].map((key) => {
+      return ['poi_fetch', 'poi_h3_grid'].map((key) => {
         const existing = cloneObject(taskMap.get(key))
         const isMissing = readiness.missingTasks.includes(key)
         const isReused = readiness.reused.includes(key)
@@ -3853,7 +3850,7 @@ function createAgentUiMethods() {
     },
     getAgentIterationPoiPrimaryActionLabel() {
       if (this.isAgentIterationPoiTaskBoardRunning()) return '补齐中'
-      return this.getAgentIterationPoiTaskKeysToFill().length ? '补齐缺失' : '进入分析'
+      return this.getAgentIterationPoiTaskKeysToFill().length ? '补齐缺失' : '重新抓取/重算'
     },
     getAgentIterationPoiDataCompletionYears() {
       return this.getAgentIterationPoiTargetYears()
@@ -3938,11 +3935,24 @@ function createAgentUiMethods() {
       const years = this.getAgentIterationPoiDataCompletionYears()
       const yearly = this.getAgentIterationPoiYearlyGridEvidence()
       const itemMap = new Map(cloneArray(yearly.items).map((item) => [Number(item && item.year), cloneObject(item)]))
-      const task = this.getAgentIterationPoiTaskBoardTasks().find((item) => item.key === 'poi_grid') || {}
+      const task = this.getAgentIterationPoiTaskBoardTasks().find((item) => item.key === 'poi_h3_grid') || {}
       const taskStatus = asText(task.status)
+      const stageLabelMap = {
+        queued: '排队中',
+        build_grid: '生成网格中',
+        aggregate_poi: '聚合 POI 中',
+        compute_metrics: '计算指标中',
+        arcgis_prepare: '准备 ArcGIS 中',
+        arcgis_running: 'ArcGIS 热点分析中',
+        finalize: '整理结果中',
+        completed: '已完成',
+        failed: '失败',
+      }
       return years.map((year) => {
         const item = itemMap.get(Number(year)) || {}
         const itemStatus = asText(item.status)
+        const progress = cloneObject(item.progress || {})
+        const stage = asText(progress.stage || '')
         const hasH3 = !!Object.keys(cloneObject(item.h3_evidence)).length
         const status = itemStatus === 'running'
           ? 'running'
@@ -3951,12 +3961,53 @@ function createAgentUiMethods() {
             : (itemStatus === 'ready' || hasH3
               ? 'ready'
               : (taskStatus === 'running' ? 'queued' : 'missing')))
+        const total = Number(progress.total || 0) || 7
+        const step = Math.max(0, Math.min(total, Number(progress.step || 0) || 0))
+        const elapsedSec = Math.max(0, Math.floor(Number(progress.elapsed_sec || 0) || 0))
+        const extra = cloneObject(progress.extra || {})
+        const gridCount = Number(extra.grid_count || (((item.h3_evidence || {}).summary || {}).grid_count) || 0) || 0
+        const poiCount = Number(extra.poi_count || (((item.h3_evidence || {}).summary || {}).poi_count) || 0) || 0
         return {
           year,
           status,
           label: this.getAgentIterationPoiYearStatusLabel(status),
+          stageLabel: stageLabelMap[stage] || (status === 'ready' ? '已完成' : (status === 'failed' ? '失败' : (status === 'running' ? '运行中' : '缺失'))),
+          detailLabel: status === 'running'
+            ? `${step}/${total} · ${elapsedSec}s${gridCount ? ` · ${gridCount}格` : ''}${poiCount ? ` · ${poiCount}POI` : ''}`
+            : (status === 'ready'
+              ? `${gridCount || Number((((item.h3_evidence || {}).summary || {}).grid_count) || 0) || 0}格 · ${poiCount || Number((((item.h3_evidence || {}).summary || {}).poi_count) || 0) || 0}POI`
+              : ''),
           resolution: (((item.h3_evidence || {}).params || {}).h3_resolution) || this.h3GridResolution || '-',
           scope: asText(item.grid_scope || yearly.grid_scope) || 'poi_iteration_h3_per_year',
+          error: asText(item.error) || (status === 'failed' ? asText(task.error) : ''),
+          runId: asText(item.run_id),
+          progress,
+        }
+      })
+    },
+    getAgentIterationPoiRasterGridYearRows() {
+      const years = this.getAgentIterationPoiDataCompletionYears()
+      const yearly = this.getAgentIterationPoiYearlyGridEvidence()
+      const itemMap = new Map(cloneArray(yearly.raster_items).map((item) => [Number(item && item.year), cloneObject(item)]))
+      const task = this.getAgentIterationPoiTaskBoardTasks().find((item) => item.key === 'poi_raster_grid') || {}
+      const taskStatus = asText(task.status)
+      return years.map((year) => {
+        const item = itemMap.get(Number(year)) || {}
+        const itemStatus = asText(item.status)
+        const hasRaster = !!Object.keys(cloneObject(item.raster_evidence)).length
+        const status = itemStatus === 'running'
+          ? 'running'
+          : (itemStatus === 'failed'
+            ? 'failed'
+            : (itemStatus === 'ready' || hasRaster
+              ? 'ready'
+              : (taskStatus === 'running' ? 'queued' : 'missing')))
+        return {
+          year,
+          status,
+          label: this.getAgentIterationPoiYearStatusLabel(status),
+          resolution: 'cell_id',
+          scope: asText(item.grid_scope || yearly.raster_grid_scope) || 'poi_iteration_raster_per_year',
           error: asText(item.error) || (status === 'failed' ? asText(task.error) : ''),
         }
       })
@@ -3971,12 +4022,31 @@ function createAgentUiMethods() {
       if (rows.length) return rows
       return []
     },
+    getAgentIterationPoiReportSections() {
+      const payload = this.getAgentIterationPoiPayload()
+      const sections = cloneArray(payload.report_sections).map((item, idx) => {
+        const heading = asText(item && item.heading) || `章节${idx + 1}`
+        const paragraphs = cloneArray(item && item.paragraphs).map((paragraph) => asText(paragraph)).filter(Boolean)
+        return { key: `report-section-${idx}`, heading, paragraphs }
+      }).filter((item) => item.paragraphs.length)
+      if (sections.length) return sections
+      const content = asText(payload.report_content)
+      if (!content) return []
+      return [{
+        key: 'report-content',
+        heading: asText(payload.report_title) || '业态基础分析总结报告',
+        paragraphs: content.split(/\n{2,}/).map((item) => asText(item)).filter(Boolean),
+      }]
+    },
+    hasAgentIterationPoiReport() {
+      return !!(this.getAgentIterationPoiReportSections().length || asText(this.getAgentIterationPoiPayload().report_content))
+    },
     isAgentIterationAiTimeout(error = '') {
       return /ai_timeout/i.test(asText(error))
     },
     getAgentIterationPoiAiStatusText() {
       const payload = this.getAgentIterationPoiPayload()
-      if (cloneArray(payload.ai_summary).length || this.getAgentIterationPoiAiInsightRows().length || this.getAgentIterationPoiDriverRows().length || this.getAgentIterationPoiPlanningRows().length) return '业态基础分析已完成。'
+      if (this.hasAgentIterationPoiReport()) return ''
       if (asText(payload.ai_status) === 'loading') return '基础统计已完成，AI 深度解读正在生成。'
       if (this.isAgentIterationAiTimeout(payload.ai_error)) return '基础统计和快照已完成，AI 深度解读仍在补充。'
       if (payload.ai_error) return this.getAgentIterationAiErrorLabel(payload.ai_error)
@@ -3986,9 +4056,7 @@ function createAgentUiMethods() {
       const payload = this.getAgentIterationPoiPayload()
       return asText(payload.status) === 'ready'
         && !cloneArray(payload.ai_summary).length
-        && !this.getAgentIterationPoiAiInsightRows().length
-        && !this.getAgentIterationPoiDriverRows().length
-        && !this.getAgentIterationPoiPlanningRows().length
+        && !this.hasAgentIterationPoiReport()
         && !asText(payload.ai_error)
     },
     getAgentIterationPoiAiInsightRows() {
@@ -5903,20 +5971,47 @@ function createAgentUiMethods() {
     },
     compactAgentPoiIterationYearlyGridEvidence(value = {}) {
       const source = cloneObject(value || {})
+      const compactRaster = (item = {}) => ({
+        year: item && item.year,
+        status: asText(item && item.status) || 'ready',
+        error: asText(item && item.error),
+        grid_scope: asText((item && item.grid_scope) || source.raster_grid_scope) || 'poi_iteration_raster_per_year',
+        raster_evidence: this.compactAgentPoiIterationRasterEvidence((item && item.raster_evidence) || {}, 20),
+      })
+      const compactH3 = (item = {}) => ({
+        year: item && item.year,
+        status: asText(item && item.status) || 'ready',
+        error: asText(item && item.error),
+        grid_scope: asText((item && item.grid_scope) || source.grid_scope) || 'poi_iteration_h3_per_year',
+        h3_evidence: this.compactAgentPoiIterationH3Evidence((item && item.h3_evidence) || {}, 20, 12),
+      })
+      const h3Items = cloneArray(source.h3_items || source.items).map(compactH3)
       return {
         evidence_version: asText(source.evidence_version) || 'poi_iteration_yearly_grid_evidence_v1',
         years: cloneArray(source.years),
         grid_scope: asText(source.grid_scope) || 'poi_iteration_h3_per_year',
         grid_type: asText(source.grid_type) || 'h3',
+        raster_grid_scope: asText(source.raster_grid_scope) || 'poi_iteration_raster_per_year',
         latest_year: source.latest_year || null,
         latest_h3_evidence: this.compactAgentPoiIterationH3Evidence(source.latest_h3_evidence || {}, 20, 12),
-        items: cloneArray(source.items).map((item) => ({
-          year: item && item.year,
-          status: asText(item && item.status) || 'ready',
-          error: asText(item && item.error),
-          grid_scope: asText((item && item.grid_scope) || source.grid_scope) || 'poi_iteration_h3_per_year',
-          h3_evidence: this.compactAgentPoiIterationH3Evidence((item && item.h3_evidence) || {}, 20, 12),
-        })),
+        items: h3Items,
+        h3_items: h3Items,
+        raster_items: cloneArray(source.raster_items).map(compactRaster),
+      }
+    },
+    compactAgentPoiIterationRasterEvidence(value = {}, cellLimit = 40) {
+      const source = cloneObject(value || {})
+      return {
+        evidence_version: asText(source.evidence_version) || 'poi_raster_grid_evidence_v1',
+        grid_type: asText(source.grid_type) || 'raster',
+        params: cloneObject(source.params),
+        summary: cloneObject(source.summary),
+        counts: cloneObject(source.counts),
+        cells: cloneArray(source.cells).slice(0, cellLimit),
+        constraints: {
+          shared_cell_id: true,
+          use_for_population_nightlight_coupling: true,
+        },
       }
     },
     buildAgentPoiIterationEvidence(payload = {}) {
@@ -6189,17 +6284,20 @@ function createAgentUiMethods() {
     async ensureAgentIterationPoiAiAnalysis(payloadArg = null, options = {}) {
       const payload = payloadArg || this.getAgentIterationPoiPayload()
       if (asText(payload.status) !== 'ready') return payload
-      if (cloneArray(payload.ai_summary).length || asText(payload.ai_status) === 'loading') return payload
+      if (this.hasAgentIterationPoiReport() || asText(payload.ai_status) === 'loading') return payload
       const tabId = asText(options.tabId)
       this.commitAgentIterationPoiPayload({ ai_status: 'loading', ai_error: '' }, tabId ? { tabId } : {})
       try {
         const aiResult = await this.requestAgentPoiIterationAnalysis(payload)
         return this.commitAgentIterationPoiPayload({
           ai_status: aiResult.status === 'ready' ? 'ready' : 'failed',
-          ai_summary: cloneArray(aiResult.ai_summary),
-          ai_insights: cloneObject(aiResult.ai_insights),
-          driver_analysis: cloneArray(aiResult.driver_analysis),
-          planning_implications: cloneArray(aiResult.planning_implications),
+          ai_summary: [],
+          ai_insights: {},
+          driver_analysis: [],
+          planning_implications: [],
+          report_title: asText(aiResult.report_title),
+          report_sections: cloneArray(aiResult.report_sections),
+          report_content: asText(aiResult.report_content),
           spatial_factors: cloneObject(aiResult.spatial_factors),
           subcategory_spatial_trend_rows: cloneArray(aiResult.subcategory_spatial_trend_rows),
           subcategory_spatial_summary: cloneArray(aiResult.subcategory_spatial_summary),
@@ -6312,25 +6410,24 @@ function createAgentUiMethods() {
           active_cell_count: Number(this.poiGridSummary && this.poiGridSummary.active_cell_count || 0) || 0,
           assigned_poi_count: Number(this.poiGridSummary && this.poiGridSummary.assigned_poi_count || 0) || 0,
         },
+        cells: cloneArray(this.poiGridFeatures).map((feature) => {
+          const props = cloneObject(feature && feature.properties)
+          return {
+            cell_id: asText(props.cell_id || props.h3_id),
+            poi_count: Number(props.poi_count || 0) || 0,
+            density_poi_per_km2: Number(props.density_poi_per_km2 || 0) || 0,
+            dominant_category: asText(props.dominant_category),
+            dominant_category_name: asText(props.dominant_category_name),
+            category_counts: cloneObject(props.category_counts),
+          }
+        }).filter((cell) => cell.cell_id).slice(0, 80),
       }
     },
     async buildAgentPoiYearlyGridEvidence(years = []) {
       const targetYears = cloneArray(years).map((item) => Number(item)).filter((item) => Number.isFinite(item)).sort((a, b) => a - b)
-      const existing = this.getAgentIterationPoiYearlyGridEvidence()
-      const existingItems = new Map(cloneArray(existing.items).map((item) => [Number(item && item.year), cloneObject(item)]))
-      const original = {
-        allPoisDetails: cloneArray(this.allPoisDetails),
-        poiYearSource: asText(this.poiYearSource),
-        resultPoiYear: this.resultPoiYear,
-        currentHistorySelectedPoiYear: this.currentHistorySelectedPoiYear,
-        h3AnalysisSummary: cloneObject(this.h3AnalysisSummary),
-        h3AnalysisCharts: cloneObject(this.h3AnalysisCharts),
-        h3AnalysisGridFeatures: cloneArray(this.h3AnalysisGridFeatures),
-        h3DerivedStats: cloneObject(this.h3DerivedStats),
-      }
-      const items = []
+      const h3Items = []
       const publishProgress = () => {
-        const readyItems = items.filter((item) => asText(item.status) === 'ready')
+        const readyItems = h3Items.filter((item) => asText(item.status) === 'ready')
         const latest = readyItems.slice().sort((a, b) => Number(a.year || 0) - Number(b.year || 0)).slice(-1)[0] || {}
         this.commitAgentIterationPoiPayload({
           yearly_grid_evidence: {
@@ -6338,61 +6435,76 @@ function createAgentUiMethods() {
             years: targetYears,
             grid_scope: 'poi_iteration_h3_per_year',
             grid_type: 'h3',
-            items: cloneArray(items),
+            items: cloneArray(h3Items),
+            h3_items: cloneArray(h3Items),
             latest_year: latest.year || null,
             latest_h3_evidence: cloneObject(latest.h3_evidence || {}),
           },
           h3_evidence: cloneObject(latest.h3_evidence || {}),
         })
       }
-      try {
-        for (const year of targetYears) {
-          const cached = existingItems.get(Number(year))
-          if (cached && asText(cached.status || 'ready') === 'ready') {
-            items.push(cached)
-            publishProgress()
-            continue
-          }
-          items.push({ year, status: 'running', error: '', grid_scope: 'poi_iteration_h3_per_year', h3_evidence: {} })
-          publishProgress()
-          try {
+      for (const year of targetYears) {
+        h3Items.push({
+          year,
+          status: 'running',
+          error: '',
+          grid_scope: 'poi_iteration_h3_per_year',
+          h3_evidence: {},
+          run_id: '',
+          progress: { status: 'running', stage: 'queued', message: '已接收请求，等待开始计算', step: 0, total: 7, elapsed_sec: 0, extra: { year } },
+        })
+        publishProgress()
+        try {
+          let h3 = null
+          if (typeof this.ensurePoiGridResult === 'function') {
+            h3 = await this.ensurePoiGridResult({ year, gridType: 'h3', force: false })
+          } else {
             await this.selectAgentPoiYearForGrid(year)
             if (typeof this.selectAllH3PoiFilters === 'function') this.selectAllH3PoiFilters()
-            if (typeof this.computeH3Analysis === 'function') await this.computeH3Analysis()
-            const h3Evidence = typeof this.buildAgentPoiH3Evidence === 'function' ? this.buildAgentPoiH3Evidence() : {}
-            items[items.length - 1] = { year, status: 'ready', error: '', grid_scope: 'poi_iteration_h3_per_year', h3_evidence: h3Evidence }
-          } catch (err) {
-            const message = asText(err && err.message) || String(err)
-            items[items.length - 1] = { year, status: 'failed', error: message, grid_scope: 'poi_iteration_h3_per_year', h3_evidence: {} }
+            const h3Run = typeof this.computeH3Analysis === 'function' ? await this.computeH3Analysis() : null
+            h3 = {
+              evidence: typeof this.buildAgentPoiH3Evidence === 'function' ? this.buildAgentPoiH3Evidence() : {},
+              progress: cloneObject((h3Run && h3Run.progress) || this.h3AnalysisProgress || {}),
+            }
           }
-          publishProgress()
+          h3Items[h3Items.length - 1] = {
+            year,
+            status: 'ready',
+            error: '',
+            grid_scope: 'poi_iteration_h3_per_year',
+            h3_evidence: cloneObject(h3.evidence || {}),
+            run_id: asText(((h3.progress || {}).run_id)),
+            progress: cloneObject(h3.progress || {}),
+          }
+        } catch (err) {
+          h3Items[h3Items.length - 1] = {
+            year,
+            status: 'failed',
+            error: asText(err && err.message) || String(err),
+            grid_scope: 'poi_iteration_h3_per_year',
+            h3_evidence: {},
+            run_id: '',
+            progress: { status: 'failed', stage: 'failed', message: asText(err && err.message) || String(err), step: 7, total: 7, elapsed_sec: 0, extra: { year } },
+          }
         }
-      } finally {
-        this.allPoisDetails = original.allPoisDetails
-        this.poiYearSource = original.poiYearSource
-        this.resultPoiYear = original.resultPoiYear
-        this.currentHistorySelectedPoiYear = original.currentHistorySelectedPoiYear
-        this.h3AnalysisSummary = original.h3AnalysisSummary
-        this.h3AnalysisCharts = original.h3AnalysisCharts
-        this.h3AnalysisGridFeatures = original.h3AnalysisGridFeatures
-        this.h3DerivedStats = original.h3DerivedStats
-        if (typeof this.rebuildPoiRuntimeSystem === 'function') this.rebuildPoiRuntimeSystem(this.allPoisDetails)
+        publishProgress()
       }
-      const readyItems = items.filter((item) => asText(item.status) === 'ready')
+      const readyItems = h3Items.filter((item) => asText(item.status) === 'ready')
       const latest = readyItems.slice().sort((a, b) => Number(a.year || 0) - Number(b.year || 0)).slice(-1)[0] || {}
       return {
         evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
         years: targetYears,
         grid_scope: 'poi_iteration_h3_per_year',
         grid_type: 'h3',
-        items,
+        items: h3Items,
+        h3_items: h3Items,
         latest_year: latest.year || null,
         latest_h3_evidence: cloneObject(latest.h3_evidence || {}),
       }
     },
     async runAgentIterationPoiTask(taskKey = '') {
       const key = asText(taskKey)
-      if (!['poi_fetch', 'poi_grid'].includes(key)) return
+      if (!['poi_fetch', 'poi_h3_grid'].includes(key)) return
       const startedAt = new Date().toISOString()
       this.commitAgentIterationPoiTaskBoardPatch(key, { status: 'running', startedAt, endedAt: '', error: '' })
       try {
@@ -6402,9 +6514,20 @@ function createAgentUiMethods() {
           if (typeof this.fetchPois !== 'function') throw new Error('POI 抓取入口不可用')
           await this.fetchPois({ preserveCurrentPanel: true })
         } else {
-          const evidence = await this.buildAgentPoiYearlyGridEvidence(this.getAgentIterationPoiTargetYears())
-          const failed = cloneArray(evidence.items).find((item) => asText(item.status) === 'failed')
-          if (failed) throw new Error(`${failed.year || ''} 年网格计算失败：${asText(failed.error)}`)
+          const years = this.getAgentIterationPoiTargetYears()
+          for (const year of years) {
+            if (typeof this.ensurePoiGridResult === 'function') {
+              await this.ensurePoiGridResult({ year, gridType: 'h3', force: false })
+            } else {
+              await this.selectAgentPoiYearForGrid(year)
+              if (typeof this.selectAllH3PoiFilters === 'function') this.selectAllH3PoiFilters()
+              if (typeof this.computeH3Analysis === 'function') await this.computeH3Analysis()
+            }
+          }
+          const evidence = await this.buildAgentPoiYearlyGridEvidence(years)
+          const failedRows = cloneArray(evidence.h3_items || evidence.items)
+          const failed = failedRows.find((item) => asText(item.status) === 'failed')
+          if (failed) throw new Error(`${failed.year || ''} 年H3计算失败：${asText(failed.error)}`)
           this.commitAgentIterationPoiPayload({
             yearly_grid_evidence: evidence,
             h3_evidence: cloneObject(evidence.latest_h3_evidence || {}),
@@ -6424,9 +6547,9 @@ function createAgentUiMethods() {
         for (const key of missing) {
           await this.runAgentIterationPoiTask(key)
         }
-      } else if (asText(this.getAgentIterationPoiPayload().status) === 'ready') {
-        this.setAgentIterationSecondaryView('ai', 'poi')
-        return this.getAgentIterationPoiPayload()
+      } else {
+        await this.runAgentIterationPoiTask('poi_fetch')
+        await this.runAgentIterationPoiTask('poi_h3_grid')
       }
       const payload = await this.ensureAgentIterationPoi(true)
       if (asText(payload.status) === 'ready') this.setAgentIterationSecondaryView('ai', 'poi')
@@ -6497,11 +6620,14 @@ function createAgentUiMethods() {
             yearly_grid_evidence: cloneObject(builtPayload.yearly_grid_evidence || yearlyGridEvidence),
             rule_summary: cloneArray(builtPayload.rule_summary),
             rule_insights: cloneObject(builtPayload.rule_insights),
-            ai_summary: cloneArray(builtPayload.ai_summary),
-            ai_insights: cloneObject(builtPayload.ai_insights),
-            driver_analysis: cloneArray(builtPayload.driver_analysis),
-            planning_implications: cloneArray(builtPayload.planning_implications),
-            ai_status: asText(builtPayload.ai_status) || (cloneArray(builtPayload.ai_summary).length ? 'ready' : 'pending'),
+            ai_summary: [],
+            ai_insights: {},
+            driver_analysis: [],
+            planning_implications: [],
+            report_title: asText(builtPayload.report_title),
+            report_sections: cloneArray(builtPayload.report_sections),
+            report_content: asText(builtPayload.report_content),
+            ai_status: asText(builtPayload.ai_status) || (cloneArray(builtPayload.report_sections).length || asText(builtPayload.report_content) ? 'ready' : 'pending'),
             ai_error: asText(builtPayload.ai_error),
             error: asText(builtPayload.error),
             notice: '',

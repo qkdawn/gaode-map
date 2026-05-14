@@ -725,6 +725,35 @@
                                                 </select>
                                             </label>
                                         </div>
+                                        <div class="h3-analysis-hint" style="margin-top:8px;">
+                                            多年 POI 网格按年份和类型独立保存；栅格用于同源 cell_id 耦合，H3 用于六边形空间结构。
+                                        </div>
+                                        <div class="h3-params-actions" style="margin-top:8px;">
+                                            <button class="h3-btn h3-btn-ghost"
+                                                :disabled="isLoadingPoiGrid || isComputingH3Analysis"
+                                                @click="ensureAllPoiGridMatrixResults(false)">
+                                                补齐多年栅格/H3
+                                            </button>
+                                        </div>
+                                        <div class="poi-fetch-error-list" style="margin-top:8px;">
+                                            <div
+                                                v-for="row in getPoiGridMatrixRows()"
+                                                :key="`poi-grid-matrix-${row.key}`"
+                                                class="poi-fetch-error-row"
+                                                :class="{ 'h3-row-active': row.active }">
+                                                <div class="poi-fetch-error-meta">
+                                                    <strong>{{ row.year }} · {{ row.label }}</strong>
+                                                    <span>{{ getPoiGridResultStatusLabel(row.status) }} · {{ row.count || 0 }} 格</span>
+                                                </div>
+                                                <div class="poi-fetch-error-message">
+                                                    <button type="button" class="btn-outline btn-compact" @click="onPoiGridMatrixSelect(row)">查看</button>
+                                                    <button type="button" class="btn-outline btn-compact" :disabled="row.status === 'running'" @click="generatePoiGridMatrixCell(row, true)">
+                                                        {{ row.status === 'ready' ? '重算' : '生成' }}
+                                                    </button>
+                                                </div>
+                                                <div v-if="row.error" class="poi-fetch-error-message">{{ row.error }}</div>
+                                            </div>
+                                        </div>
                                         <div class="h3-params-chips" v-if="isPoiRasterGridMode()">
                                             <span class="count-badge">栅格数 {{ (poiGridSummary && poiGridSummary.grid_count) || poiGridFeatures.length || 0 }}</span>
                                             <span class="count-badge">含POI {{ (poiGridSummary && poiGridSummary.active_cell_count) || 0 }}</span>
@@ -884,7 +913,7 @@
                                             </thead>
                                             <tbody>
                                                 <tr v-for="row in getPoiRasterGridTopRows()" :key="`poi-raster-top-${row.cell_id}`"
-                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedPoiGridCellId }">
                                                     <td>
                                                         <button type="button" class="h3-id-btn" :title="row.cell_id"
                                                             @click="focusPoiRasterGridCell(row.cell_id)">
@@ -936,7 +965,7 @@
                                             <thead><tr><th>栅格</th><th>POI</th><th>主导业态</th><th>业态数</th><th>诊断</th></tr></thead>
                                             <tbody>
                                                 <tr v-for="row in getPoiRasterGridSingleCategoryRows()" :key="`poi-raster-single-${row.cell_id}`"
-                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedPoiGridCellId }">
                                                     <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
                                                     <td>{{ row.poi_count }}</td>
                                                     <td>{{ row.dominant_category_name || '未分类' }}</td>
@@ -950,7 +979,7 @@
                                             <thead><tr><th>栅格</th><th>POI</th><th>业态数</th><th>复合度</th><th>主导业态</th></tr></thead>
                                             <tbody>
                                                 <tr v-for="row in getPoiRasterGridMixedRows()" :key="`poi-raster-mixed-${row.cell_id}`"
-                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedPoiGridCellId }">
                                                     <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
                                                     <td>{{ row.poi_count }}</td>
                                                     <td>{{ row.category_count }}</td>
@@ -983,7 +1012,7 @@
                                             <thead><tr><th>栅格</th><th>POI</th><th>目标业态</th><th>占比</th><th>提示</th></tr></thead>
                                             <tbody>
                                                 <tr v-for="row in getPoiRasterTargetLowSupplyRows()" :key="`poi-raster-target-gap-${row.cell_id}`"
-                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedPoiGridCellId }">
                                                     <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
                                                     <td>{{ row.poi_count }}</td>
                                                     <td>{{ row.target_count }}</td>
@@ -997,7 +1026,7 @@
                                             <thead><tr><th>栅格</th><th>POI</th><th>密度</th><th>主导业态</th><th>评估</th></tr></thead>
                                             <tbody>
                                                 <tr v-for="row in getPoiRasterGridSparseRows()" :key="`poi-raster-sparse-${row.cell_id}`"
-                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedPoiGridCellId }">
                                                     <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
                                                     <td>{{ row.poi_count }}</td>
                                                     <td>{{ row.density_poi_per_km2.toFixed(2) }}</td>
@@ -1011,7 +1040,7 @@
                                             <thead><tr><th>栅格</th><th>POI</th><th>主导业态</th><th>可信度</th><th>说明</th></tr></thead>
                                             <tbody>
                                                 <tr v-for="row in getPoiRasterGridLowSampleRows()" :key="`poi-raster-low-sample-${row.cell_id}`"
-                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedPoiGridCellId }">
                                                     <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
                                                     <td>{{ row.poi_count }}</td>
                                                     <td>{{ row.dominant_category_name || '未分类' }}</td>

@@ -48,6 +48,16 @@ const defaultYearlyGridEvidence = {
       { year: 2024, status: 'ready', h3_evidence: {} },
       { year: 2025, status: 'ready', h3_evidence: {} },
   ],
+  h3_items: [
+      { year: 2023, status: 'ready', h3_evidence: {} },
+      { year: 2024, status: 'ready', h3_evidence: {} },
+      { year: 2025, status: 'ready', h3_evidence: {} },
+  ],
+  raster_items: [
+      { year: 2023, status: 'ready', raster_evidence: {} },
+      { year: 2024, status: 'ready', raster_evidence: {} },
+      { year: 2025, status: 'ready', raster_evidence: {} },
+  ],
 }
   const basePayloads = {
     ...state.agentPanelPayloads,
@@ -3589,6 +3599,16 @@ test('poi iteration secondary nav starts at data and gates analysis until ready'
         { year: 2024, status: 'ready', h3_evidence: {} },
         { year: 2025, status: 'ready', h3_evidence: {} },
       ],
+      h3_items: [
+        { year: 2023, status: 'ready', h3_evidence: {} },
+        { year: 2024, status: 'ready', h3_evidence: {} },
+        { year: 2025, status: 'ready', h3_evidence: {} },
+      ],
+      raster_items: [
+        { year: 2023, status: 'ready', raster_evidence: {} },
+        { year: 2024, status: 'ready', raster_evidence: {} },
+        { year: 2025, status: 'ready', raster_evidence: {} },
+      ],
     },
   })
   const readyItems = ctx.getAgentIterationSecondaryNavItems('poi')
@@ -3596,7 +3616,7 @@ test('poi iteration secondary nav starts at data and gates analysis until ready'
   assert.equal(readyItems.find((item) => item.key === 'ai').label, '业态基础分析')
 })
 
-test('poi iteration yearly grid evidence computes h3 only', async () => {
+test('poi iteration yearly grid evidence stores h3 per year without raster', async () => {
   const calls = []
   const ctx = createAgentContext({
     currentHistoryRecordId: 'history-1',
@@ -3609,9 +3629,13 @@ test('poi iteration yearly grid evidence computes h3 only', async () => {
     },
   })
   ctx.selectAgentPoiYearForGrid = async (year) => { calls.push({ task: 'select', year }) }
-  ctx.ensurePoiRasterGrid = async () => { calls.push({ task: 'raster' }) }
   ctx.selectAllH3PoiFilters = () => { calls.push({ task: 'h3_filters' }) }
-  ctx.computeH3Analysis = async () => { calls.push({ task: 'h3' }) }
+  ctx.computeH3Analysis = async () => {
+    calls.push({ task: 'h3' })
+    const selectedYear = calls.filter((call) => call.task === 'select').slice(-1)[0]?.year
+    ctx.h3AnalysisProgress = { run_id: `run-${selectedYear}`, stage: 'completed', step: 7, total: 7, elapsed_sec: 5, extra: { grid_count: 1, poi_count: 1 } }
+    return { progress: ctx.h3AnalysisProgress }
+  }
   ctx.buildAgentPoiH3Evidence = () => ({
     evidence_version: 'poi_h3_evidence_v1',
     params: { h3_resolution: ctx.h3GridResolution },
@@ -3624,8 +3648,42 @@ test('poi iteration yearly grid evidence computes h3 only', async () => {
   assert.equal(evidence.grid_type, 'h3')
   assert.deepEqual(calls.map((call) => call.task), ['select', 'h3_filters', 'h3', 'select', 'h3_filters', 'h3'])
   assert.equal(evidence.items.length, 2)
+  assert.equal(evidence.h3_items.length, 2)
   assert.equal(evidence.items.every((item) => item.status === 'ready'), true)
-  assert.equal(evidence.items.some((item) => Object.prototype.hasOwnProperty.call(item, 'raster_grid_evidence')), false)
+  assert.equal(evidence.items[0].run_id, 'run-2023')
+  assert.equal(evidence.items[0].progress.stage, 'completed')
+  assert.equal('raster_items' in evidence, false)
+})
+
+test('poi iteration h3 year rows expose progress stage and detail labels', async () => {
+  const ctx = createAgentContext({
+    h3GridResolution: 10,
+    currentHistoryAvailablePoiYears: [2020, 2022, 2024],
+    agentPanelPayloads: {
+      iteration_change: {
+        poi: {
+          yearly_grid_evidence: {
+            evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
+            years: [2020, 2022, 2024],
+            grid_scope: 'poi_iteration_h3_per_year',
+            items: [
+              { year: 2020, status: 'running', run_id: 'run-2020', progress: { stage: 'aggregate_poi', step: 2, total: 7, elapsed_sec: 6, extra: { grid_count: 500, poi_count: 3179 } }, h3_evidence: {} },
+              { year: 2022, status: 'queued', h3_evidence: {} },
+              { year: 2024, status: 'ready', h3_evidence: { summary: { grid_count: 420, poi_count: 2500 }, params: { h3_resolution: 10 } } },
+            ],
+          },
+        },
+      },
+    },
+  })
+
+  const rows = ctx.getAgentIterationPoiGridYearRows()
+  assert.equal(rows[0].stageLabel, '聚合 POI 中')
+  assert.match(rows[0].detailLabel, /2\/7/)
+  assert.match(rows[0].detailLabel, /500格/)
+  assert.match(rows[0].detailLabel, /3179POI/)
+  assert.equal(rows[2].stageLabel, '已完成')
+  assert.match(rows[2].detailLabel, /420格/)
 })
 
 test('poi iteration grid completion clears stale missing notice', async () => {
@@ -3653,13 +3711,40 @@ test('poi iteration grid completion clears stale missing notice', async () => {
     cells: [{ h3_id: 'h3-1', poi_count: 3 }],
   })
 
-  await ctx.runAgentIterationPoiTask('poi_grid')
+  await ctx.runAgentIterationPoiTask('poi_h3_grid')
 
   assert.equal(ctx.getAgentIterationPoiReadiness().ready, true)
   assert.equal(ctx.getAgentIterationPoiTaskKeysToFill().length, 0)
   assert.equal(ctx.getAgentIterationPoiPayload().notice, '')
   assert.equal(ctx.getAgentIterationPoiPayload().error, '')
-  assert.equal(ctx.getAgentIterationPoiPrimaryActionLabel(), '进入分析')
+  assert.equal(ctx.getAgentIterationPoiPrimaryActionLabel(), '重新抓取/重算')
+})
+
+test('poi iteration primary action recomputes all poi data when already ready', async () => {
+  const calls = []
+  const ctx = createAgentContext()
+  ctx.getAgentIterationPoiTaskBoardTasks = () => []
+  ctx.getAgentIterationPoiTaskKeysToFill = () => []
+  ctx.runAgentIterationPoiTask = async (key) => {
+    calls.push(key)
+  }
+  ctx.ensureAgentIterationPoi = async (force) => {
+    calls.push(`ensure:${force}`)
+    return { status: 'ready' }
+  }
+  ctx.setAgentIterationSecondaryView = (view, kind) => {
+    calls.push(`nav:${kind}:${view}`)
+  }
+
+  assert.equal(ctx.getAgentIterationPoiPrimaryActionLabel(), '重新抓取/重算')
+  await ctx.runAgentIterationPoiPrimaryAction()
+
+  assert.deepEqual(calls, [
+    'poi_fetch',
+    'poi_h3_grid',
+    'ensure:true',
+    'nav:poi:ai',
+  ])
 })
 
 test('summary primary action reuses available results instead of full recompute', async () => {
@@ -4167,15 +4252,18 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
             emerging_area: '咖啡厅新增偏东北、中圈层补点',
             structure_judgement: '一级结构偏向餐饮主导。',
           },
-          ai_summary: ['当前POI规模处于中等水平，餐饮为主导业态。', '一区为核心聚集区。'],
-          ai_insights: {
-            fastest_growth: '咖啡 +120%',
-            declining_category: '传统零售 -35%',
-            emerging_area: '咖啡厅新增偏东北、中圈层补点',
-            structure_judgement: '业态结构偏消费型。',
-          },
-          driver_analysis: [{ driver: '餐饮补充型增长', evidence: '咖啡厅增加', confidence: '中', explanation: '小类增量支撑日常消费。' }],
-          planning_implications: [{ implication: '强化日常消费底盘', evidence: '餐饮主导', suggested_direction: '轻餐饮与社交消费。' }],
+          report_title: '业态基础分析总结报告',
+          report_sections: [
+            {
+              heading: '一、总体判断：区域业态处于温和扩张阶段',
+              paragraphs: ['从 POI 变化看，区域总量持续增长，餐饮为主导业态。'],
+            },
+            {
+              heading: '二、空间特征：中圈层补点明显',
+              paragraphs: ['咖啡厅新增主要集中在东北方向，说明增长更偏内部加密。'],
+            },
+          ],
+          report_content: '业态基础分析总结报告\n\n一、总体判断：区域业态处于温和扩张阶段\n\n从 POI 变化看，区域总量持续增长，餐饮为主导业态。',
           spatial_factors: {
             geometry_mode: 'point',
             direction_factor: { dominant_direction: '东北' },
@@ -4212,14 +4300,13 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
   assert.equal(payload.summaries[2].category_counts['餐饮'], 3)
   assert.equal(payload.summaries[2].subcategory_counts['咖啡厅'], 2)
   assert.equal(payload.summaries[2].top_subcategories[0].parent, '餐饮')
-  assert.equal(payload.ai_summary[0], '当前POI规模处于中等水平，餐饮为主导业态。')
-  assert.equal(payload.ai_insights.emerging_area, '咖啡厅新增偏东北、中圈层补点')
-  assert.equal(payload.report_title, undefined)
-  assert.equal(payload.report_content, undefined)
-  assert.equal(ctx.getAgentIterationPoiAiSummaryRows().length, 2)
-  assert.equal(ctx.getAgentIterationPoiAiInsightRows().find((item) => item.key === 'fastest_growth').value, '咖啡 +120%')
-  assert.equal(ctx.getAgentIterationPoiDriverRows()[0].label, '餐饮补充型增长')
-  assert.equal(ctx.getAgentIterationPoiPlanningRows()[0].label, '强化日常消费底盘')
+  assert.equal(payload.ai_summary.length, 0)
+  assert.equal(Object.keys(payload.ai_insights).length, 0)
+  assert.equal(payload.report_title, '业态基础分析总结报告')
+  assert.equal(payload.report_sections[0].heading, '一、总体判断：区域业态处于温和扩张阶段')
+  assert.match(payload.report_content, /区域总量持续增长/)
+  assert.equal(ctx.hasAgentIterationPoiReport(), true)
+  assert.equal(ctx.getAgentIterationPoiReportSections().length, 2)
   assert.equal(ctx.getAgentIterationPoiTotalLineChart().length, 3)
   assert.equal(ctx.getAgentIterationPoiCategoryStackChart().length, 3)
   assert.equal(ctx.getAgentIterationPoiSubcategoryStackChart().length, 3)
@@ -4311,7 +4398,7 @@ test('agent iteration poi exposes area heatmap basemap and boundary metadata', (
       prompt_key: 'poi_iteration',
       system_prompt: '真实 POI system prompt poi_iteration_v1 growth_area_signal',
       payload_note: '真实 POI payload note User payload',
-      output_schema: { required: ['summary_points'] },
+      output_schema: { required: ['report_title', 'report_sections', 'report_content'] },
       evidence_version: 'poi_iteration_v1',
     },
   })
@@ -4493,15 +4580,14 @@ test('agent iteration poi basis keeps real prompt while splitting analysis and i
       { name: '咖啡厅', parent: '餐饮', delta: 5, dominant_direction: '东北', dominant_ring: '中圈层', hotspot_grid_count: 2 },
     ],
     area_distribution: [{ year: 2024, point_count: 18, hotspot_cell_count: 2 }],
-    ai_summary: ['总量上升，餐饮增强。'],
-    ai_insights: {
-      fastest_growth: '餐饮增长最快',
-      declining_category: '购物减少',
-      emerging_area: '咖啡厅向东北补点',
-      structure_judgement: '结构更偏日常消费',
-    },
-    driver_analysis: [{ driver: '餐饮补充型增长', evidence: '餐饮增加', confidence: '中', explanation: '主导消费业态增强。' }],
-    planning_implications: [{ implication: '强化消费底盘', evidence: '餐饮增加', suggested_direction: '餐饮与社交消费。' }],
+    report_title: '业态基础分析总结报告',
+    report_sections: [
+      {
+        heading: '一、总体判断：区域业态温和增长',
+        paragraphs: ['从 POI 总量和餐饮增量看，区域生活消费基础增强。'],
+      },
+    ],
+    report_content: '业态基础分析总结报告\n\n一、总体判断：区域业态温和增长\n\n从 POI 总量和餐饮增量看，区域生活消费基础增强。',
     h3_evidence: { evidence_version: 'poi_h3_evidence_v1', counts: { grid_count: 4 } },
     yearly_grid_evidence: { evidence_version: 'poi_iteration_yearly_grid_evidence_v1', items: [{ year: 2024, status: 'ready' }] },
     ai_prompt: '真实 POI 多年调用 system prompt',
@@ -4510,7 +4596,7 @@ test('agent iteration poi basis keeps real prompt while splitting analysis and i
       prompt_key: 'poi_iteration',
       system_prompt: '真实 POI 多年调用 system prompt',
       payload_note: '真实 POI 多年调用 user payload note',
-      output_schema: { required: ['summary_points'] },
+      output_schema: { required: ['report_title', 'report_sections', 'report_content'] },
       evidence_version: 'poi_iteration_v1',
     },
   })
@@ -4524,18 +4610,33 @@ test('agent iteration poi basis keeps real prompt while splitting analysis and i
   assert.equal(insightBasis.aiPromptPayloadNote, '真实 POI 多年调用 user payload note')
   assert.equal(analysisBasis.promptSourceLabel, '本次生成实际使用的提示词快照')
   assert.notEqual(analysisBasis.title, insightBasis.title)
-  assert.match(analysisBasis.currentConclusion, /总量上升，餐饮增强。/)
-  assert.match(insightBasis.currentConclusion, /增长最快行业：餐饮增长最快/)
-  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('summary_points')), true)
-  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('report_content')), false)
+  assert.match(analysisBasis.currentConclusion, /区域生活消费基础增强/)
+  assert.match(insightBasis.currentConclusion, /区域生活消费基础增强/)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('summary_points')), false)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('report_content')), true)
   assert.equal(analysisBasis.fields.some((field) => field.key === 'h3_evidence'), true)
   assert.equal(analysisBasis.fields.some((field) => field.key === 'yearly_grid_evidence'), true)
-  assert.equal(insightBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('fastest_growth')), true)
+  assert.equal(insightBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('fastest_growth')), false)
   assert.equal(analysisBasis.fields.some((field) => field.key === 'prompt_structure' && String(field.value).includes('同一基础提示词')), true)
   assert.equal(insightBasis.fields.some((field) => field.key === 'prompt_structure' && String(field.value).includes('业态基础分析')), true)
   assert.equal(insightBasis.rules.some((rule) => String(rule).includes('不是重复调用')), true)
   assert.equal(JSON.stringify(analysisBasis.rawInput).includes('data:image/png'), false)
   assert.equal(analysisBasis.rawInput.evidence_version, 'poi_iteration_v1')
+})
+
+test('agent iteration poi analysis template renders report sections instead of insight cards', async () => {
+  const html = await fs.promises.readFile(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8')
+  const start = html.indexOf('<div class="agent-summary-card-title">业态基础分析</div>')
+  const end = html.indexOf('<section v-if="getAgentIterationPoiPayload().status === \'ready\' && isAgentIterationSecondaryView(\'metrics\')"', start)
+  const block = html.slice(start, end)
+
+  assert.match(block, /getAgentIterationPoiReportSections\(\)/)
+  assert.match(block, /agent-iteration-report-section/)
+  assert.doesNotMatch(block, /getAgentIterationPoiAiInsightRows\(\)/)
+  assert.doesNotMatch(block, /增长最快行业/)
+  assert.doesNotMatch(block, /衰退行业/)
+  assert.doesNotMatch(block, /增长片区/)
+  assert.doesNotMatch(block, /结构判断/)
 })
 
 test('agent iteration poi insight keeps skeleton while ai is pending even with rule fallback', () => {
@@ -4726,8 +4827,11 @@ test('agent iteration poi shows placeholders until async ai interpretation lands
         ok: true,
         json: async () => ({
           status: 'ready',
-          ai_summary: ['AI 解释完成'],
-          ai_insights: { fastest_growth: '餐饮增长最快' },
+          report_title: '业态基础分析总结报告',
+          report_sections: [
+            { heading: '一、总体判断：AI 解释完成', paragraphs: ['餐饮增长最快，区域业态基础增强。'] },
+          ],
+          report_content: '业态基础分析总结报告\n\n一、总体判断：AI 解释完成\n\n餐饮增长最快，区域业态基础增强。',
           spatial_factors: { geometry_mode: 'point' },
           subcategory_spatial_trend_rows: [{ name: '咖啡厅', parent: '餐饮', delta: 2, dominant_direction: '东北' }],
           subcategory_spatial_summary: ['咖啡厅向东北聚集'],
@@ -4737,7 +4841,7 @@ test('agent iteration poi shows placeholders until async ai interpretation lands
             prompt_key: 'poi_iteration',
             system_prompt: '真实 POI system prompt',
             payload_note: '真实 user payload note',
-            output_schema: { required: ['summary_points'] },
+            output_schema: { required: ['report_title', 'report_sections', 'report_content'] },
             evidence_version: 'poi_iteration_v1',
           },
           error: '',
@@ -4760,10 +4864,11 @@ test('agent iteration poi shows placeholders until async ai interpretation lands
   await new Promise((resolve) => setTimeout(resolve, 0))
 
   assert.equal(ctx.getAgentIterationPoiPayload().ai_status, 'ready')
-  assert.deepEqual(ctx.getAgentIterationPoiAiSummaryRows(), ['AI 解释完成'])
+  assert.equal(ctx.getAgentIterationPoiPayload().report_title, '业态基础分析总结报告')
+  assert.equal(ctx.getAgentIterationPoiReportSections()[0].heading, '一、总体判断：AI 解释完成')
   assert.equal(ctx.buildAgentIterationBasisPayload('poi').aiPrompt, '真实 POI system prompt')
   assert.equal(ctx.buildAgentIterationBasisPayload('poi').aiPromptPayloadNote, '真实 user payload note')
-  assert.equal(ctx.getAgentIterationPoiAiInsightRows()[0].value, '餐饮增长最快')
+  assert.match(ctx.getAgentIterationPoiReportSections()[0].paragraphs[0], /餐饮增长最快/)
   assert.equal(ctx.shouldShowAgentIterationPoiAiPlaceholder(), false)
   assert.equal(calls.filter((item) => String(item.url).includes('/api/v1/analysis/agent/iteration/poi/build')).length, 1)
   assert.equal(calls.filter((item) => String(item.url).includes('/api/v1/analysis/agent/iteration/poi/interpret')).length, 1)
@@ -4867,7 +4972,7 @@ test('ensureAgentIterationPoi without multi-year data asks for poi/grid fill', a
   const payload = await ctx.ensureAgentIterationPoi(true)
 
   assert.equal(payload.status, 'needs_data')
-  assert.deepEqual(ctx.getAgentIterationPoiTaskKeysToFill(), ['poi_fetch', 'poi_grid'])
+  assert.deepEqual(ctx.getAgentIterationPoiTaskKeysToFill(), ['poi_fetch', 'poi_h3_grid'])
   assert.match(payload.notice, /POI/)
 })
 
@@ -5021,7 +5126,9 @@ test('iteration basis no longer treats legacy ai_prompt as real prompt without s
   const ctx = createAgentContext()
   ctx.commitAgentIterationPoiPayload({
     status: 'ready',
-    ai_summary: ['总量上升。'],
+    report_title: '业态基础分析总结报告',
+    report_sections: [{ heading: '一、总体判断：总量上升', paragraphs: ['总量上升。'] }],
+    report_content: '业态基础分析总结报告\n\n一、总体判断：总量上升\n\n总量上升。',
     ai_prompt: '旧字段 system prompt 不应作为真实 prompt',
     ai_prompt_payload_note: '旧字段 note 不应作为真实 note',
   })
@@ -5756,10 +5863,10 @@ test('iteration change ready payloads are reused unless force refresh is request
   global.fetch = async (url, options = {}) => {
     calls.push({ url, body: options.body ? JSON.parse(options.body) : null })
     if (String(url).includes('/api/v1/analysis/agent/iteration/poi/build')) {
-      return { ok: true, json: async () => ({ status: 'ready', source: 'history', years: [2023, 2024], summaries: [{ year: 2024, count: 1 }], ai_summary: [], ai_insights: {}, error: '' }) }
+      return { ok: true, json: async () => ({ status: 'ready', source: 'history', years: [2023, 2024], summaries: [{ year: 2024, count: 1 }], report_sections: [], report_content: '', error: '' }) }
     }
     if (String(url).includes('/api/v1/analysis/agent/iteration/poi/interpret')) {
-      return { ok: true, json: async () => ({ status: 'ready', ai_summary: [], ai_insights: {}, error: '' }) }
+      return { ok: true, json: async () => ({ status: 'ready', report_title: '业态基础分析总结报告', report_sections: [{ heading: '一、总体判断', paragraphs: ['报告完成。'] }], report_content: '报告完成。', error: '' }) }
     }
     throw new Error(`unexpected fetch ${url}`)
   }
@@ -5791,7 +5898,7 @@ test('iteration async result is saved to its tab after switching away', async ()
     calls.push({ url, body: options.body ? JSON.parse(options.body) : null })
     if (String(url).includes('/api/v1/analysis/agent/iteration/poi/build')) {
       await new Promise((resolve) => { resolveFirstPoi = resolve })
-      return { ok: true, json: async () => ({ status: 'ready', source: 'history', years: [2023, 2024], summaries: [{ year: 2024, count: 1 }], ai_summary: [], ai_insights: {}, error: '' }) }
+      return { ok: true, json: async () => ({ status: 'ready', source: 'history', years: [2023, 2024], summaries: [{ year: 2024, count: 1 }], report_sections: [], report_content: '', error: '' }) }
     }
     throw new Error(`unexpected fetch ${url}`)
   }

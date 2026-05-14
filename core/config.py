@@ -120,10 +120,10 @@ class Settings(BaseSettings):
         validation_alias="AI_ENABLED",
         description="是否启用 LLM provider（未启用时 Agent tool loop 不可用）",
     )
-    ai_provider: Literal["deepseek"] = Field(
+    ai_provider: Literal["deepseek", "openai_compatible"] = Field(
         "deepseek",
         validation_alias="AI_PROVIDER",
-        description="Agent 使用的 AI provider 类型",
+        description="Agent 使用的 AI provider 类型，支持 deepseek 或 openai_compatible",
     )
     ai_base_url: str = Field(
         "",

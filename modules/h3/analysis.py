@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from .arcgis_facade import run_h3_arcgis_analysis
 from .category_rules import empty_category_counts
@@ -38,7 +38,23 @@ def analyze_h3_grid(
     arcgis_knn_neighbors: Optional[int] = None,
     arcgis_export_image: bool = True,
     arcgis_timeout_sec: int = 240,
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
+    def report(stage: str, message: str, step: int, total: int, extra: Optional[Dict[str, Any]] = None) -> None:
+        if progress_callback is None:
+            return
+        progress_callback(
+            {
+                "stage": stage,
+                "message": message,
+                "step": step,
+                "total": total,
+                "extra": dict(extra or {}),
+            }
+        )
+
+    total_steps = 7
+    report("build_grid", "正在生成 H3 网格", 1, total_steps, {"resolution": resolution, "arcgis_enabled": bool(use_arcgis)})
     grid = build_h3_grid_feature_collection(
         polygon_coords=polygon,
         resolution=resolution,
@@ -74,11 +90,24 @@ def analyze_h3_grid(
             "charts": empty_charts,
         }
 
+    report("aggregate_poi", "正在聚合 POI 到网格", 2, total_steps, {"resolution": resolution, "grid_count": len(grid_ids), "arcgis_enabled": bool(use_arcgis)})
     stats_by_cell, assigned_poi_count, global_category_counts = aggregate_pois_to_h3(
         grid_ids=grid_ids,
         pois=pois or [],
         resolution=resolution,
         poi_coord_type=poi_coord_type,
+    )
+    report(
+        "compute_metrics",
+        "正在计算密度、熵和邻域指标",
+        3,
+        total_steps,
+        {
+            "resolution": resolution,
+            "grid_count": len(grid_ids),
+            "poi_count": assigned_poi_count,
+            "arcgis_enabled": bool(use_arcgis),
+        },
     )
     compute_cell_metrics(stats_by_cell, resolution=resolution)
     neighbor_ring = normalize_neighbor_ring(neighbor_ring, default=1)
@@ -106,7 +135,32 @@ def analyze_h3_grid(
     elif has_density_variance(stats_by_cell):
         arcgis_ring = normalize_neighbor_ring(arcgis_neighbor_ring, default=neighbor_ring)
         arcgis_knn = int(arcgis_knn_neighbors or ring_to_arcgis_knn(arcgis_ring))
+        report(
+            "arcgis_prepare",
+            "正在准备 ArcGIS 空间统计",
+            4,
+            total_steps,
+            {
+                "resolution": resolution,
+                "grid_count": len(grid_ids),
+                "poi_count": assigned_poi_count,
+                "arcgis_enabled": True,
+            },
+        )
         try:
+            report(
+                "arcgis_running",
+                "正在计算热点、LISA 和 Moran",
+                5,
+                total_steps,
+                {
+                    "resolution": resolution,
+                    "grid_count": len(grid_ids),
+                    "poi_count": assigned_poi_count,
+                    "arcgis_enabled": True,
+                    "arcgis_status": "running",
+                },
+            )
             arcgis_result = run_h3_arcgis_analysis(
                 features=features,
                 stats_by_cell=stats_by_cell,
@@ -114,17 +168,8 @@ def analyze_h3_grid(
                 timeout_sec=arcgis_timeout_sec,
                 export_image=arcgis_export_image,
             )
-        except RuntimeError:
-            for stat in local_spatial_stats.values():
-                stat.update(
-                    {
-                        "lisa_i": 0.0,
-                        "lisa_z_score": 0.0,
-                        "gi_star_value": 0.0,
-                        "gi_star_z_score": 0.0,
-                    }
-                )
-            arcgis_status = "ArcGIS不可用，已降级到原生统计"
+        except RuntimeError as exc:
+            raise RuntimeError(f"ArcGIS不可用，H3 空间结构分析已停止：{exc}") from exc
         else:
             global_moran = arcgis_result.get("global_moran") or {}
             global_moran_i = safe_round(safe_float(global_moran.get("i")), 6)
@@ -149,6 +194,19 @@ def analyze_h3_grid(
             )
         arcgis_status = "ArcGIS已跳过：密度无差异"
 
+    report(
+        "finalize",
+        "正在整理 H3 分析结果",
+        6,
+        total_steps,
+        {
+            "resolution": resolution,
+            "grid_count": len(grid_ids),
+            "poi_count": assigned_poi_count,
+            "arcgis_enabled": bool(use_arcgis),
+            "arcgis_status": arcgis_status,
+        },
+    )
     density_values: List[float] = []
     entropy_values: List[float] = []
     gi_z_values: List[Optional[float]] = []
@@ -187,7 +245,7 @@ def analyze_h3_grid(
     avg_entropy = (sum(entropy_values) / grid_count) if grid_count else 0.0
     gi_z_stats = calc_continuous_stats(gi_z_values)
     lisa_i_stats = calc_continuous_stats(lisa_i_values)
-    return {
+    result = {
         "grid": {"type": "FeatureCollection", "features": features, "count": grid_count},
         "summary": {
             "grid_count": grid_count,
@@ -208,3 +266,17 @@ def analyze_h3_grid(
         },
         "charts": build_chart_payload(global_category_counts, density_values),
     }
+    report(
+        "completed",
+        "H3 网格分析计算完成",
+        7,
+        total_steps,
+        {
+            "resolution": resolution,
+            "grid_count": grid_count,
+            "poi_count": assigned_poi_count,
+            "arcgis_enabled": bool(use_arcgis),
+            "arcgis_status": arcgis_status,
+        },
+    )
+    return result

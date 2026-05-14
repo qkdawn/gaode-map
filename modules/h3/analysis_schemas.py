@@ -65,6 +65,10 @@ class H3MetricsRequest(BaseModel):
         le=1800,
         description="ArcGIS bridge timeout in seconds",
     )
+    run_id: Optional[str] = Field(
+        None,
+        description="Optional progress run id for polling real-time H3 analysis progress",
+    )
 
 
 class H3AnalysisSummary(BaseModel):
