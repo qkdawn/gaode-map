@@ -10,6 +10,11 @@ import { createAgentSessionStoreMethods } from './session-store.js'
 import { createAgentRuntimeMethods } from './runtime.js'
 import { createAgentUiMethods } from './sessions-ui.js'
 export {
+  buildAnalysisTaskParamBundle,
+  buildAnalysisTaskParamBundles,
+} from './analysis-task-params.js'
+
+export {
   buildAnalysisTaskConfirmation,
   focusAnalysisTaskPanel,
   getAnalysisTaskDefinition,
@@ -81,6 +86,7 @@ function createAnalysisAgentInitialState() {
     agentToolsLoaded: false,
     agentToolsLoading: false,
     agentToolsError: '',
+    agentToolsViewMode: 'tools',
     agentToolDetailDialogOpen: false,
     agentActiveToolDetailName: '',
     basisDrawerOpen: false,

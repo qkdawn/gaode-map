@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException
 
 from core.spatial import transform_polygon_payload_coords
 from modules.poi import service as poi_service
-from modules.poi.schemas import PoiMultiYearRequest, PoiMultiYearResponse, PoiRequest, PoiResponse
+from modules.poi.aggregation import build_poi_shared_grid
+from modules.poi.schemas import PoiGridRequest, PoiGridResponse, PoiMultiYearRequest, PoiMultiYearResponse, PoiRequest, PoiResponse
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84
 from store.history_repo import history_repo
 
@@ -73,3 +74,19 @@ async def fetch_multi_year_pois_analysis(payload: PoiMultiYearRequest):
         logger.exception("Multi-year POI fetch failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return result
+
+
+@router.post("/api/v1/analysis/pois/grid", response_model=PoiGridResponse)
+async def build_poi_grid_analysis(payload: PoiGridRequest):
+    try:
+        return build_poi_shared_grid(
+            polygon=payload.polygon,
+            coord_type=payload.coord_type,
+            pois=payload.pois,
+            poi_coord_type=payload.poi_coord_type,
+            categories=payload.categories,
+            year=payload.year,
+        )
+    except Exception as exc:
+        logger.exception("POI shared grid aggregation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

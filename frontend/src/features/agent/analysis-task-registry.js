@@ -1,5 +1,7 @@
 ﻿import { asText, cloneArray, cloneObject } from './normalizers.js'
 
+import { buildAnalysisTaskParamBundle } from './analysis-task-params.js'
+
 const ANALYSIS_TASKS = Object.freeze({
   poi_fetch: {
     key: 'poi_fetch',
@@ -36,14 +38,54 @@ const ANALYSIS_TASKS = Object.freeze({
       })
     },
   },
-  poi_grid: {
-    key: 'poi_grid',
-    label: 'POI 网格计算',
+  poi_raster_grid: {
+    key: 'poi_raster_grid',
+    label: 'POI 栅格计算',
     panelId: 'poi',
-    subPanelLabel: 'POI 网格/H3',
+    subPanelLabel: 'POI 栅格',
     estimate: '约 1-3 分钟',
-    description: '使用当前分析范围和 POI 数据生成 H3 网格指标，补齐空间分布证据。',
-    resultUsage: '完成后会写入当前 Agent 会话，并用于后续商业特征总结。',
+    description: '使用当前分析范围和 POI 数据生成同源 cell_id 栅格，补齐 POI 与人口/夜光耦合证据。',
+    resultUsage: '完成后会用于人口、POI、夜光共享网格交叉诊断。',
+    toolNames: ['aggregate_pois_to_shared_grid'],
+    producedArtifacts: ['current_poi_grid'],
+    runningFlag: 'isLoadingPoiGrid',
+    hasResult(ctx) {
+      return !!(
+        ctx
+        && (
+          ctx.poiGridSummary
+          || (Array.isArray(ctx.poiGridFeatures) && ctx.poiGridFeatures.length)
+        )
+      )
+    },
+    focus(ctx) {
+      focusStep2Panel(ctx, 'poi')
+      if (typeof ctx.setPoiSubTab === 'function') {
+        ctx.setPoiSubTab('grid')
+      } else {
+        ctx.poiSubTab = 'grid'
+      }
+      if (typeof ctx.setPoiGridType === 'function') {
+        ctx.setPoiGridType('raster')
+      } else {
+        ctx.poiGridType = 'raster'
+      }
+    },
+    async run(ctx) {
+      if (typeof ctx.ensurePoiRasterGrid !== 'function') {
+        throw new Error('POI 栅格计算入口不可用')
+      }
+      await ctx.ensurePoiRasterGrid(true)
+    },
+  },
+  poi_h3_grid: {
+    key: 'poi_h3_grid',
+    label: 'POI H3 网格计算',
+    panelId: 'poi',
+    subPanelLabel: 'POI H3 网格',
+    estimate: '约 1-3 分钟',
+    description: '使用当前分析范围和 POI 数据生成 H3 六边形指标，补齐空间结构、热点和缺口证据。',
+    resultUsage: '完成后会用于 POI 空间结构、热点、LISA、Gi*、LQ 和缺口分析。',
     toolNames: ['compute_h3_metrics_from_scope_and_pois', 'build_h3_grid_from_scope', 'read_h3_structure_analysis'],
     producedArtifacts: ['current_h3', 'current_h3_grid', 'current_h3_summary', 'current_h3_metrics'],
     runningFlag: 'isComputingH3Analysis',
@@ -64,13 +106,18 @@ const ANALYSIS_TASKS = Object.freeze({
       } else {
         ctx.poiSubTab = 'grid'
       }
+      if (typeof ctx.setPoiGridType === 'function') {
+        ctx.setPoiGridType('hex')
+      } else {
+        ctx.poiGridType = 'hex'
+      }
       if (typeof ctx.ensureH3PanelEntryState === 'function') {
         ctx.ensureH3PanelEntryState()
       }
     },
     async run(ctx) {
       if (typeof ctx.computeH3Analysis !== 'function') {
-        throw new Error('POI 网格计算入口不可用')
+        throw new Error('POI 六边形格子计算入口不可用')
       }
       await ctx.computeH3Analysis()
     },
@@ -202,38 +249,8 @@ function hasAnalysisTaskScope(ctx) {
 function getAnalysisTaskParameterSummary(ctx, taskKey = '') {
   const task = getAnalysisTaskDefinition(taskKey)
   if (!task) return ''
-  if (task.key === 'poi_fetch') {
-    const source = ctx && (ctx.resultDataSource || ctx.poiDataSource) ? `数据源 ${ctx.resultDataSource || ctx.poiDataSource}` : '当前 POI 数据源'
-    const year = Number(ctx && (ctx.poiYearSource || ctx.resultPoiYear))
-    const yearText = Number.isFinite(year) && year > 0 ? `年份 ${year}` : '当前 POI 年份'
-    return `${yearText}，${source}`
-  }
-  if (task.key === 'poi_grid') {
-    const resolution = ctx && ctx.h3GridResolution ? `res=${ctx.h3GridResolution}` : '默认网格级别'
-    const source = ctx && (ctx.resultDataSource || ctx.poiDataSource) ? `数据源 ${ctx.resultDataSource || ctx.poiDataSource}` : '当前 POI 数据'
-    const poiYear = Number(ctx && (ctx.poiYearSource || ctx.resultPoiYear))
-    const yearText = Number.isFinite(poiYear) ? `POI年份 ${poiYear}` : '当前 POI 年份'
-    return `${resolution}, ${yearText}, ${source}`
-  }
-  if (task.key === 'population') {
-    const year = ctx && typeof ctx.getPopulationSelectedYearLabel === 'function'
-      ? ctx.getPopulationSelectedYearLabel()
-      : asText(ctx && ctx.populationSelectedYear)
-    return year ? `年份 ${year}` : '当前人口默认年份'
-  }
-  if (task.key === 'nightlight') {
-    const year = ctx && typeof ctx.getNightlightSelectedYearLabel === 'function'
-      ? ctx.getNightlightSelectedYearLabel()
-      : asText(ctx && ctx.nightlightSelectedYear)
-    return year ? `年份 ${year}` : '当前夜光默认年份'
-  }
-  if (task.key === 'road_syntax') {
-    const model = ctx && typeof ctx.roadSyntaxGraphModelLabel === 'function'
-      ? ctx.roadSyntaxGraphModelLabel()
-      : asText(ctx && ctx.roadSyntaxGraphModel) || 'segment'
-    return `图模型 ${model}`
-  }
-  return '当前面板参数'
+  const bundle = buildAnalysisTaskParamBundle(ctx || {}, task.key)
+  return bundle.display_label || '当前面板参数'
 }
 
 function normalizeAnalysisTaskConfirmation(seed = {}) {

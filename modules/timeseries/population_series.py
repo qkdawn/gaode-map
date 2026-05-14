@@ -30,6 +30,56 @@ def top_age_label(overview: dict[str, Any]) -> str:
     return str(top.get("age_band_label") or top.get("age_band") or "-")
 
 
+def _age_band_start(age_band: str) -> int | None:
+    if age_band == "00":
+        return 0
+    try:
+        return int(age_band)
+    except (TypeError, ValueError):
+        return None
+
+
+def summarize_age_structure(overview: dict[str, Any]) -> dict[str, Any]:
+    items = overview.get("age_distribution") or []
+    summary = overview.get("summary") or {}
+    total_population = float(summary.get("total_population") or 0.0)
+    groups = {"child_0_14": 0.0, "working_15_64": 0.0, "senior_65_plus": 0.0}
+    compact_items = []
+    for item in items:
+        total = float(item.get("total") or 0.0)
+        age_band = str(item.get("age_band") or "")
+        start = _age_band_start(age_band)
+        if start is not None:
+            if start < 15:
+                groups["child_0_14"] += total
+            elif start < 65:
+                groups["working_15_64"] += total
+            else:
+                groups["senior_65_plus"] += total
+        compact_items.append(
+            {
+                "age_band": age_band,
+                "age_band_label": item.get("age_band_label") or age_band,
+                "total": round_metric(total, 3),
+                "male": round_metric(item.get("male"), 3),
+                "female": round_metric(item.get("female"), 3),
+                "ratio": round_metric(total / total_population, 6) if total_population > 0 else 0.0,
+            }
+        )
+    top = max(compact_items, key=lambda item: float(item.get("total") or 0.0), default={})
+    return {
+        "age_distribution": compact_items,
+        "age_group_totals": {key: round_metric(value, 3) for key, value in groups.items()},
+        "age_group_ratios": {
+            key: round_metric(value / total_population, 6) if total_population > 0 else 0.0
+            for key, value in groups.items()
+        },
+        "top_age_band": top.get("age_band") or None,
+        "top_age_band_label": top.get("age_band_label") or None,
+        "top_age_band_ratio": round_metric(top.get("ratio"), 6),
+    }
+
+
 def build_population_series(polygon: list, coord_type: str) -> list[dict[str, Any]]:
     series = []
     for year in POPULATION_YEARS:
@@ -37,14 +87,23 @@ def build_population_series(polygon: list, coord_type: str) -> list[dict[str, An
         density = get_population_layer(polygon, coord_type, year=year, view="density")
         summary = overview.get("summary") or {}
         density_summary = density.get("summary") or {}
+        age_structure = summarize_age_structure(overview)
         series.append(
             {
                 "year": year,
                 "total_population": round_metric(summary.get("total_population"), 3),
                 "male_total": round_metric(summary.get("male_total"), 3),
                 "female_total": round_metric(summary.get("female_total"), 3),
+                "male_ratio": round_metric(summary.get("male_ratio"), 6),
+                "female_ratio": round_metric(summary.get("female_ratio"), 6),
                 "average_density": round_metric(density_summary.get("average_value"), 3),
-                "dominant_age_band": top_age_label(overview),
+                "dominant_age_band": age_structure["top_age_band_label"] or top_age_label(overview),
+                "age_distribution": age_structure["age_distribution"],
+                "age_group_totals": age_structure["age_group_totals"],
+                "age_group_ratios": age_structure["age_group_ratios"],
+                "top_age_band": age_structure["top_age_band"],
+                "top_age_band_label": age_structure["top_age_band_label"],
+                "top_age_band_ratio": age_structure["top_age_band_ratio"],
             }
         )
     return series

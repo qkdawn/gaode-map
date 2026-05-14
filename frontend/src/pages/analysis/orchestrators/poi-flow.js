@@ -107,6 +107,7 @@ function createAnalysisPoiFlowOrchestratorMethods() {
       })
       this.allPoisDetails = []
       this.poiCategorySummary = []
+      this.poiFetchErrors = []
 
       try {
         const polygon = this.getIsochronePolygonPayload()
@@ -189,9 +190,10 @@ function createAnalysisPoiFlowOrchestratorMethods() {
         }
         this.poiStatus = ''
         const fetchErrors = Array.isArray(data.errors) ? data.errors : []
+        this.poiFetchErrors = fetchErrors
         if (fetchErrors.length > 0) {
           console.warn('[poi-fetch] partial category failures', fetchErrors)
-          this.poiStatus = `POI partial category fetch failures: ${fetchErrors.length}`
+          this.poiStatus = `POI 部分分类抓取失败：${fetchErrors.length} 条，详见抓取面板`
         }
 
         this.rebuildPoiRuntimeSystem(this.allPoisDetails)

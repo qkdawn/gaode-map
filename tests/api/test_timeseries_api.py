@@ -177,6 +177,11 @@ def test_population_timeseries_api_returns_series_and_layer(tmp_path):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["series"]) == 3
+    assert len(data["series"][-1]["age_distribution"]) == 20
+    assert data["series"][-1]["male_ratio"] > 0
+    assert data["series"][-1]["female_ratio"] > 0
+    assert data["series"][-1]["age_group_ratios"]["working_15_64"] > 0
+    assert data["series"][-1]["top_age_band_label"]
     assert data["layer"]["view"] == "population_rate"
     assert data["layer"]["cells"]
     assert data["layer"]["summary"]["increase_count"] > 0

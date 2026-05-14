@@ -308,6 +308,12 @@
                 this.mapCore.clearGridPolygons();
             },
             restoreH3GridDisplayOnEnter() {
+                if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()) {
+                    if (typeof this.restorePoiRasterGridDisplayOnEnter === 'function') {
+                        this.restorePoiRasterGridDisplayOnEnter();
+                    }
+                    return;
+                }
                 if (!this.isH3DisplayActive()) return;
                 if (!this.mapCore) return;
                 const shouldRenderAnalysis = this.h3MainStage !== 'params'
@@ -336,6 +342,9 @@
                 }
             },
             ensureH3PanelEntryState() {
+                if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()) {
+                    return;
+                }
                 this._ensureH3CategoryState();
                 const hasAnalysis = Array.isArray(this.h3AnalysisGridFeatures)
                     && this.h3AnalysisGridFeatures.length > 0
@@ -567,26 +576,34 @@
                 const showTimeseries = this.step === 2 && normalizedTargets.indexOf('timeseries') >= 0;
                 const showSyntax = this.step === 2 && normalizedTargets.indexOf('syntax') >= 0;
 
+                const clearGridDisplay = () => {
+                    if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()) {
+                        if (typeof this.clearPoiRasterGridDisplayOnLeave === 'function') this.clearPoiRasterGridDisplayOnLeave();
+                    } else {
+                        this.clearH3GridDisplayOnLeave();
+                    }
+                };
+
                 if (showPopulation) {
-                    this.clearH3GridDisplayOnLeave();
+                    clearGridDisplay();
                     this.clearNightlightDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
                     this.restorePopulationRasterDisplayOnEnter();
                 } else if (showNightlight) {
-                    this.clearH3GridDisplayOnLeave();
+                    clearGridDisplay();
                     this.clearPopulationRasterDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
                     this.restoreNightlightDisplayOnEnter();
                 } else if (showGwr) {
-                    this.clearH3GridDisplayOnLeave();
+                    clearGridDisplay();
                     this.clearPopulationRasterDisplayOnLeave();
                     this.clearNightlightDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
                     if (typeof this.restoreGwrDisplayOnEnter === 'function') this.restoreGwrDisplayOnEnter();
                 } else if (showTimeseries) {
-                    this.clearH3GridDisplayOnLeave();
+                    clearGridDisplay();
                     this.clearPopulationRasterDisplayOnLeave();
                     this.clearNightlightDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
@@ -598,7 +615,7 @@
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
                     this.restoreH3GridDisplayOnEnter();
                 } else {
-                    this.clearH3GridDisplayOnLeave();
+                    clearGridDisplay();
                     this.clearPopulationRasterDisplayOnLeave();
                     this.clearNightlightDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();

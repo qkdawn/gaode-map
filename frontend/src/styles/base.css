@@ -41,6 +41,17 @@ body,
   gap: 12px;
 }
 
+.agent-summary-card-wide {
+  grid-column: 1 / -1;
+}
+
+.agent-summary-longtext {
+  white-space: pre-line;
+  font-size: 13px;
+  line-height: 1.85;
+  color: #2f3b52;
+}
+
 .panel-title-row {
   display: flex;
   align-items: center;
@@ -306,6 +317,96 @@ body,
 .agent-summary-task-param-chip strong {
   color: #0f172a;
   font-weight: 650;
+}
+
+.agent-iteration-data-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 132px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.26);
+}
+
+.agent-iteration-data-primary-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px rgba(37, 99, 235, 0.32);
+}
+
+.agent-iteration-data-primary-btn:disabled {
+  opacity: 0.72;
+  transform: none;
+  box-shadow: none;
+}
+
+.agent-iteration-data-primary-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.agent-iteration-year-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.agent-iteration-year-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  padding: 4px 10px 4px 6px;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  user-select: none;
+}
+
+.agent-iteration-year-chip input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #2563eb;
+}
+
+.agent-iteration-year-chip span {
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.agent-iteration-year-chip em {
+  font-style: normal;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.agent-iteration-year-chip.selected {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.agent-iteration-year-chip.fetched em {
+  color: #047857;
+}
+
+.agent-iteration-year-chip:has(input:disabled) {
+  opacity: 0.72;
+  cursor: not-allowed;
 }
 
 .basis-field-list {
@@ -666,6 +767,28 @@ body,
 .agent-iteration-analysis-row strong {
   color: #0f172a;
   font-size: 13px;
+}
+
+.agent-iteration-report {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.agent-iteration-report-title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.agent-iteration-report-paragraph {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.72;
+  white-space: pre-wrap;
 }
 
 .agent-iteration-error {
@@ -1549,6 +1672,16 @@ body,
   gap: 8px;
 }
 
+.agent-iteration-insight-list-secondary {
+  margin-top: 12px;
+}
+
+.agent-iteration-section-kicker {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .agent-iteration-insight-row {
   display: grid;
   gap: 4px;
@@ -1567,4 +1700,57 @@ body,
   color: #334155;
   line-height: 1.5;
   font-size: 13px;
+}
+
+.agent-iteration-year-status-row {
+  display: grid;
+  grid-template-columns: 10px 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+}
+
+.agent-iteration-year-status-row + .agent-iteration-year-status-row {
+  margin-top: 8px;
+}
+
+.agent-iteration-year-status-row strong {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.agent-iteration-year-status-row span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-iteration-year-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.agent-iteration-year-status-row.is-ready .agent-iteration-year-status-dot {
+  background: #10b981;
+}
+
+.agent-iteration-year-status-row.is-running .agent-iteration-year-status-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
+}
+
+.agent-iteration-year-status-row.is-queued .agent-iteration-year-status-dot {
+  background: #f59e0b;
+}
+
+.agent-iteration-year-status-row.is-failed .agent-iteration-year-status-dot {
+  background: #ef4444;
 }

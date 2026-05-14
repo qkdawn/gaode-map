@@ -15,10 +15,17 @@
             poiChartResizeHandler: null,
             poiSubTab: 'category',
             poiAnalysisSubTab: 'kde',
+            poiGridType: 'raster',
+            poiGridConfigExpanded: false,
+            isLoadingPoiGrid: false,
+            poiGridStatus: '',
+            poiGridFeatures: [],
+            poiGridSummary: null,
             poiKdeEnabled: false,
             poiKdeRadius: 28,
             poiKdeStats: createEmptyPoiKdeStats(),
             poiCategorySummary: [],
+            poiFetchErrors: [],
         };
     }
 
@@ -52,6 +59,50 @@
                     window.removeEventListener('resize', this.poiChartResizeHandler);
                     this.poiChartResizeHandler = null;
                 }
+            },
+            isPoiRasterGridMode() {
+                return String(this.poiGridType || 'raster').trim().toLowerCase() !== 'hex';
+            },
+            getPoiGridTypeLabel() {
+                return this.isPoiRasterGridMode() ? '栅格' : '六边形格子';
+            },
+            togglePoiGridConfig() {
+                this.poiGridConfigExpanded = !this.poiGridConfigExpanded;
+            },
+            async setPoiGridType(type) {
+                const normalized = String(type || '').trim().toLowerCase() === 'hex' ? 'hex' : 'raster';
+                if (this.poiGridType === normalized) return;
+                this.poiGridType = normalized;
+                if (this.poiSubTab !== 'grid') return;
+                if (normalized === 'hex') {
+                    if (typeof this.syncH3PoiFilterSelection === 'function') {
+                        this.syncH3PoiFilterSelection(false);
+                    }
+                    if (typeof this.ensureH3PanelEntryState === 'function') {
+                        this.ensureH3PanelEntryState();
+                    }
+                    if (typeof this.restoreH3GridDisplayOnEnter === 'function') {
+                        this.restoreH3GridDisplayOnEnter();
+                    }
+                    if (typeof this.updateH3Charts === 'function') {
+                        this.updateH3Charts();
+                    }
+                    if (typeof this.updateDecisionCards === 'function') {
+                        this.updateDecisionCards();
+                    }
+                    return;
+                }
+                this.h3MainStage = 'params';
+                if (typeof this.clearH3GridDisplayOnLeave === 'function') {
+                    this.clearH3GridDisplayOnLeave();
+                }
+                this.restorePoiRasterGridDisplayOnEnter();
+            },
+            async startPoiGridAnalysis() {
+                if (this.isPoiRasterGridMode()) {
+                    return this.ensurePoiRasterGrid(true);
+                }
+                return this.computeH3Analysis();
             },
             setPoiSubTab(tab) {
                 const normalized = String(tab || '').trim().toLowerCase();
@@ -93,20 +144,24 @@
                         }
                         this.recomputePoiKdeStats();
                     } else if (nextTab === 'grid') {
-                        if (typeof this.syncH3PoiFilterSelection === 'function') {
-                            this.syncH3PoiFilterSelection(false);
-                        }
-                        if (typeof this.ensureH3PanelEntryState === 'function') {
-                            this.ensureH3PanelEntryState();
-                        }
-                        if (typeof this.restoreH3GridDisplayOnEnter === 'function') {
-                            this.restoreH3GridDisplayOnEnter();
-                        }
-                        if (typeof this.updateH3Charts === 'function') {
-                            this.updateH3Charts();
-                        }
-                        if (typeof this.updateDecisionCards === 'function') {
-                            this.updateDecisionCards();
+                        if (this.isPoiRasterGridMode()) {
+                            this.restorePoiRasterGridDisplayOnEnter();
+                        } else {
+                            if (typeof this.syncH3PoiFilterSelection === 'function') {
+                                this.syncH3PoiFilterSelection(false);
+                            }
+                            if (typeof this.ensureH3PanelEntryState === 'function') {
+                                this.ensureH3PanelEntryState();
+                            }
+                            if (typeof this.restoreH3GridDisplayOnEnter === 'function') {
+                                this.restoreH3GridDisplayOnEnter();
+                            }
+                            if (typeof this.updateH3Charts === 'function') {
+                                this.updateH3Charts();
+                            }
+                            if (typeof this.updateDecisionCards === 'function') {
+                                this.updateDecisionCards();
+                            }
                         }
                     } else if (
                         prevTab === 'grid'
@@ -145,6 +200,33 @@
                 if (text.indexOf('已加载历史:') === 0) return '';
                 return text;
             },
+            getPoiFetchErrorRows(limit = 8) {
+                const rows = Array.isArray(this.poiFetchErrors) ? this.poiFetchErrors : [];
+                const max = Math.max(1, Number(limit) || 8);
+                return rows.slice(0, max).map((item, index) => ({
+                    key: [
+                        item && item.year,
+                        item && item.source,
+                        item && item.category,
+                        index,
+                    ].join('-'),
+                    year: item && item.year ? String(item.year) : '-',
+                    source: this.formatPoiFetchErrorSource(item && item.source),
+                    category: item && item.category ? String(item.category) : '未命名分类',
+                    error: item && item.error ? String(item.error) : '未知错误',
+                }));
+            },
+            getPoiFetchErrorHiddenCount(limit = 8) {
+                const rows = Array.isArray(this.poiFetchErrors) ? this.poiFetchErrors : [];
+                const max = Math.max(1, Number(limit) || 8);
+                return Math.max(0, rows.length - max);
+            },
+            formatPoiFetchErrorSource(source) {
+                const value = String(source || '').trim().toLowerCase();
+                if (value === 'gaode') return '高德';
+                if (value === 'local') return '本地';
+                return source ? String(source) : '-';
+            },
             isHistoryPoiRestoring() {
                 const text = String(this.poiStatus || '');
                 return !!this.historyDetailAbortController && text.indexOf('正在加载历史 POI') >= 0;
@@ -152,6 +234,295 @@
             clearPoiKdeOverlay() {
                 if (!this.mapCore || typeof this.mapCore.clearPoiHeatmap !== 'function') return;
                 this.mapCore.clearPoiHeatmap();
+            },
+            getPoiRasterGridSourcePois() {
+                if (Array.isArray(this.allPoisDetails) && this.allPoisDetails.length) {
+                    return this.allPoisDetails;
+                }
+                return (this.markerManager && typeof this.markerManager.getVisiblePoints === 'function')
+                    ? this.markerManager.getVisiblePoints()
+                    : [];
+            },
+            getPoiGridCategoryPayload() {
+                return (this.poiCategories || []).map((cat) => ({
+                    id: String((cat && cat.id) || ''),
+                    name: String((cat && cat.name) || (cat && cat.title) || (cat && cat.id) || ''),
+                    types: String((cat && cat.types) || ''),
+                })).filter((cat) => cat.id);
+            },
+            getPoiRasterGridYear() {
+                const year = Number(this.poiYearSource);
+                return Number.isFinite(year) ? year : null;
+            },
+            clearPoiRasterGridDisplayOnLeave() {
+                if (!this.mapCore || typeof this.mapCore.clearGridPolygons !== 'function') return;
+                this.mapCore.clearGridPolygons();
+            },
+            buildPoiRasterGridStyledFeatures() {
+                const features = Array.isArray(this.poiGridFeatures) ? this.poiGridFeatures : [];
+                const maxCount = Math.max(1, Number((this.poiGridSummary && this.poiGridSummary.max_poi_count) || 0));
+                return features.map((feature) => {
+                    const props = Object.assign({}, (feature && feature.properties) || {});
+                    const cellId = String(props.cell_id || props.h3_id || '');
+                    const count = Number(props.poi_count || 0);
+                    const ratio = maxCount > 0 ? Math.max(0, Math.min(1, count / maxCount)) : 0;
+                    props.cell_id = cellId;
+                    props.h3_id = cellId;
+                    props.fillColor = this._getPoiRasterGridColor(count, ratio);
+                    props.fillOpacity = count > 0 ? 0.34 : 0.10;
+                    props.strokeColor = count > 0 ? '#64748b' : '#cbd5e1';
+                    props.strokeWeight = count > 0 ? 1 : 0.75;
+                    return {
+                        type: (feature && feature.type) || 'Feature',
+                        geometry: feature && feature.geometry,
+                        properties: props,
+                    };
+                });
+            },
+            _getPoiRasterGridColor(count, ratio = 0) {
+                const value = Number(count || 0);
+                if (value <= 0) return '#f8fafc';
+                const normalized = Math.max(0, Math.min(1, Number(ratio) || 0));
+                if (normalized <= 0.33) return '#dbeafe';
+                if (normalized <= 0.66) return '#60a5fa';
+                return '#1d4ed8';
+            },
+            restorePoiRasterGridDisplayOnEnter() {
+                if (!this.isPoiRasterGridMode()) return;
+                if (!this.mapCore || typeof this.mapCore.setGridFeatures !== 'function') return;
+                const styled = this.buildPoiRasterGridStyledFeatures();
+                if (!styled.length) {
+                    this.clearPoiRasterGridDisplayOnLeave();
+                    return;
+                }
+                this.mapCore.setGridFeatures(styled, {
+                    strokeColor: '#64748b',
+                    strokeWeight: 0.85,
+                    fillColor: '#dbeafe',
+                    fillOpacity: 0.20,
+                    clickable: true,
+                    webglBatch: false,
+                });
+            },
+            clearPoiRasterGrid() {
+                this.poiGridFeatures = [];
+                this.poiGridSummary = null;
+                this.poiGridStatus = '';
+                this.clearPoiRasterGridDisplayOnLeave();
+            },
+            async ensurePoiRasterGrid(force = false) {
+                if (!this.getIsochronePolygonRing || !this.getIsochronePolygonRing()) {
+                    this.poiGridStatus = '请先生成分析范围';
+                    return null;
+                }
+                if (this.isLoadingPoiGrid) return null;
+                if (!force && Array.isArray(this.poiGridFeatures) && this.poiGridFeatures.length) {
+                    return { features: this.poiGridFeatures, summary: this.poiGridSummary };
+                }
+                this.isLoadingPoiGrid = true;
+                if (force) {
+                    this.poiGridFeatures = [];
+                    this.poiGridSummary = null;
+                    this.selectedH3Id = null;
+                    this.clearPoiRasterGridDisplayOnLeave();
+                }
+                this.poiGridStatus = '正在生成 POI 栅格...';
+                try {
+                    const polygon = this.getIsochronePolygonPayload();
+                    const res = await fetch('/api/v1/analysis/pois/grid', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            polygon,
+                            coord_type: 'gcj02',
+                            pois: this.getPoiRasterGridSourcePois(),
+                            poi_coord_type: 'gcj02',
+                            categories: this.getPoiGridCategoryPayload(),
+                            year: this.getPoiRasterGridYear(),
+                        }),
+                    });
+                    if (!res.ok) {
+                        let detail = '';
+                        try {
+                            detail = await res.text();
+                        } catch (_) {}
+                        throw new Error(detail || 'POI 栅格生成失败');
+                    }
+                    const data = await res.json();
+                    this.poiGridFeatures = Array.isArray(data.features) ? data.features : [];
+                    this.poiGridSummary = data.summary || null;
+                    const count = Number((this.poiGridSummary && this.poiGridSummary.grid_count) || this.poiGridFeatures.length || 0);
+                    const activeCount = Number((this.poiGridSummary && this.poiGridSummary.active_cell_count) || 0);
+                    const assigned = Number((this.poiGridSummary && this.poiGridSummary.assigned_poi_count) || 0);
+                    this.poiGridStatus = count > 0
+                        ? `已生成 ${count} 个栅格，${activeCount} 个栅格含 POI，已匹配 ${assigned} 个 POI`
+                        : '当前范围没有可用栅格';
+                    if (this.poiSubTab === 'grid' && this.isPoiRasterGridMode()) {
+                        this.restorePoiRasterGridDisplayOnEnter();
+                    }
+                    return data;
+                } catch (err) {
+                    console.error(err);
+                    this.poiGridStatus = 'POI 栅格生成失败: ' + (err && err.message ? err.message : String(err));
+                    return null;
+                } finally {
+                    this.isLoadingPoiGrid = false;
+                }
+            },
+            getPoiRasterGridTopCells(limit = 5) {
+                const rows = (this.poiGridSummary && Array.isArray(this.poiGridSummary.top_cells))
+                    ? this.poiGridSummary.top_cells
+                    : [];
+                return rows.slice(0, Math.max(1, Number(limit) || 5));
+            },
+            _getPoiRasterGridCategoryName(categoryId) {
+                const id = String(categoryId || '');
+                if (!id) return '未分类';
+                const fromH3 = (this.h3CategoryMeta || []).find((item) => String(item.key || '') === id);
+                if (fromH3 && fromH3.label) return String(fromH3.label);
+                const fromPoi = (this.poiCategories || []).find((item) => String(item.id || '') === id);
+                return fromPoi ? String(fromPoi.name || fromPoi.title || fromPoi.id || id) : id;
+            },
+            _getPoiRasterTargetCategoryLabel() {
+                return this._getPoiRasterGridCategoryName(this.h3TargetCategory);
+            },
+            getPoiRasterTargetCategoryLabel() {
+                return this._getPoiRasterTargetCategoryLabel();
+            },
+            _normalizePoiRasterGridRow(feature) {
+                const props = Object.assign({}, (feature && feature.properties) || {});
+                const categoryCounts = Object.assign({}, props.category_counts || {});
+                const positiveCategories = Object.entries(categoryCounts)
+                    .map(([key, value]) => ({ key, count: Number(value || 0) }))
+                    .filter((item) => item.count > 0)
+                    .sort((a, b) => b.count - a.count);
+                const poiCount = Number(props.poi_count || 0);
+                const density = Number(props.density_poi_per_km2 || 0);
+                const dominantCategory = String(props.dominant_category || (positiveCategories[0] && positiveCategories[0].key) || '');
+                const targetCategory = String(this.h3TargetCategory || '');
+                const targetCount = targetCategory ? Number(categoryCounts[targetCategory] || 0) : 0;
+                const topCategoryCount = positiveCategories.length ? positiveCategories[0].count : 0;
+                const mixScore = poiCount > 0 ? Math.max(0, Math.min(1, 1 - (topCategoryCount / poiCount))) : 0;
+                return {
+                    cell_id: String(props.cell_id || props.h3_id || ''),
+                    poi_count: poiCount,
+                    density_poi_per_km2: density,
+                    category_counts: categoryCounts,
+                    category_count: positiveCategories.length,
+                    dominant_category: dominantCategory,
+                    dominant_category_name: String(props.dominant_category_name || this._getPoiRasterGridCategoryName(dominantCategory)),
+                    target_category: targetCategory,
+                    target_category_name: this._getPoiRasterGridCategoryName(targetCategory),
+                    target_count: targetCount,
+                    target_share: poiCount > 0 ? targetCount / poiCount : 0,
+                    mix_score: mixScore,
+                    confidence: this._getConfidenceInfo ? this._getConfidenceInfo(poiCount) : { label: poiCount >= 5 ? '中' : '低' },
+                };
+            },
+            getPoiRasterGridRows() {
+                return (Array.isArray(this.poiGridFeatures) ? this.poiGridFeatures : [])
+                    .map((feature) => this._normalizePoiRasterGridRow(feature))
+                    .filter((row) => row.cell_id);
+            },
+            getPoiRasterGridTopRows(limit = null) {
+                const max = Math.max(1, Number(limit || this.h3DecisionTopN || 10) || 10);
+                return this.getPoiRasterGridRows()
+                    .filter((row) => row.poi_count > 0)
+                    .sort((a, b) => (b.poi_count - a.poi_count) || (b.density_poi_per_km2 - a.density_poi_per_km2))
+                    .slice(0, max);
+            },
+            getPoiRasterGridSparseRows(limit = null) {
+                const max = Math.max(1, Number(limit || this.h3DecisionTopN || 10) || 10);
+                return this.getPoiRasterGridRows()
+                    .sort((a, b) => (a.poi_count - b.poi_count) || (a.density_poi_per_km2 - b.density_poi_per_km2))
+                    .slice(0, max);
+            },
+            getPoiRasterGridSingleCategoryRows(limit = null) {
+                const max = Math.max(1, Number(limit || this.h3DecisionTopN || 10) || 10);
+                return this.getPoiRasterGridRows()
+                    .filter((row) => row.poi_count >= 3 && row.category_count <= 1)
+                    .sort((a, b) => b.poi_count - a.poi_count)
+                    .slice(0, max);
+            },
+            getPoiRasterGridMixedRows(limit = null) {
+                const max = Math.max(1, Number(limit || this.h3DecisionTopN || 10) || 10);
+                return this.getPoiRasterGridRows()
+                    .filter((row) => row.poi_count >= 3 && row.category_count >= 2)
+                    .sort((a, b) => (b.mix_score - a.mix_score) || (b.poi_count - a.poi_count))
+                    .slice(0, max);
+            },
+            getPoiRasterTargetLowSupplyRows(limit = null) {
+                const max = Math.max(1, Number(limit || this.h3DecisionTopN || 10) || 10);
+                const target = String(this.h3TargetCategory || '');
+                if (!target) return [];
+                return this.getPoiRasterGridRows()
+                    .filter((row) => row.poi_count > 0)
+                    .sort((a, b) => (a.target_count - b.target_count) || (b.poi_count - a.poi_count))
+                    .slice(0, max);
+            },
+            getPoiRasterGridLowSampleRows(limit = null) {
+                const max = Math.max(1, Number(limit || this.h3DecisionTopN || 10) || 10);
+                return this.getPoiRasterGridRows()
+                    .filter((row) => row.poi_count > 0 && row.poi_count < 3)
+                    .sort((a, b) => a.poi_count - b.poi_count)
+                    .slice(0, max);
+            },
+            getPoiRasterGridDerivedSummary() {
+                const rows = this.getPoiRasterGridRows();
+                const activeRows = rows.filter((row) => row.poi_count > 0);
+                const densities = rows.map((row) => row.density_poi_per_km2).filter((value) => Number.isFinite(value));
+                const avgDensity = Number((this.poiGridSummary && this.poiGridSummary.avg_density_poi_per_km2) || 0);
+                const maxDensity = densities.length ? Math.max(...densities) : 0;
+                const maxPoi = rows.length ? Math.max(...rows.map((row) => row.poi_count)) : 0;
+                const mixedRows = this.getPoiRasterGridMixedRows(9999);
+                const singleRows = this.getPoiRasterGridSingleCategoryRows(9999);
+                const lowSupplyRows = this.getPoiRasterTargetLowSupplyRows(9999).filter((row) => row.target_count === 0);
+                return {
+                    grid_count: Number((this.poiGridSummary && this.poiGridSummary.grid_count) || rows.length || 0),
+                    active_cell_count: Number((this.poiGridSummary && this.poiGridSummary.active_cell_count) || activeRows.length || 0),
+                    assigned_poi_count: Number((this.poiGridSummary && this.poiGridSummary.assigned_poi_count) || activeRows.reduce((sum, row) => sum + row.poi_count, 0)),
+                    max_poi_count: Number((this.poiGridSummary && this.poiGridSummary.max_poi_count) || maxPoi || 0),
+                    avg_density_poi_per_km2: avgDensity,
+                    max_density_poi_per_km2: maxDensity,
+                    mixed_cell_count: mixedRows.length,
+                    single_category_cell_count: singleRows.length,
+                    target_low_supply_count: lowSupplyRows.length,
+                    low_sample_count: this.getPoiRasterGridLowSampleRows(9999).length,
+                };
+            },
+            getPoiRasterGridLegend() {
+                const rows = this.getPoiRasterGridRows();
+                if (!rows.length) return null;
+                const maxCount = Math.max(1, ...rows.map((row) => row.poi_count));
+                const lowMax = Math.max(1, Math.ceil(maxCount / 3));
+                const midMax = Math.max(lowMax + 1, Math.ceil(maxCount * 2 / 3));
+                return {
+                    title: 'POI栅格密度',
+                    unit: 'POI数/格',
+                    items: [
+                        { color: '#f8fafc', label: '0' },
+                        { color: '#dbeafe', label: `1 ~ ${lowMax}` },
+                        { color: '#60a5fa', label: `${lowMax + 1} ~ ${midMax}` },
+                        { color: '#1d4ed8', label: `${midMax + 1} ~ ${maxCount}` },
+                    ],
+                    noDataLabel: '无POI',
+                    noDataColor: '#f8fafc',
+                };
+            },
+            focusPoiRasterGridCell(cellId) {
+                const id = String(cellId || '');
+                if (!id || !this.mapCore || typeof this.mapCore.focusGridCellById !== 'function') return;
+                this.selectedH3Id = id;
+                const found = this.mapCore.focusGridCellById(id, {
+                    fitView: true,
+                    zoomMin: 16,
+                    animate: true,
+                    preserveFill: true,
+                    animateFill: false,
+                    strokeColor: '#1d4ed8',
+                    pulseColor: '#bfdbfe',
+                });
+                this.poiGridStatus = found ? `已定位栅格：${id}` : `未找到对应栅格：${id}`;
             },
             _getPoiKdeSourcePoints() {
                 if (this.markerManager && typeof this.markerManager.getVisiblePointsData === 'function') {

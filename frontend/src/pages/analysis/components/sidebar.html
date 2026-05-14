@@ -608,6 +608,28 @@
                                                 </template>
                                             </div>
                                         </div>
+                                        <div v-if="Array.isArray(poiFetchErrors) && poiFetchErrors.length" class="poi-fetch-error-panel">
+                                            <div class="poi-fetch-error-head">
+                                                <strong>分类抓取异常</strong>
+                                                <span>{{ poiFetchErrors.length }} 条</span>
+                                            </div>
+                                            <div class="poi-fetch-error-hint">
+                                                以下分类本次未完整返回，可据此判断是高德限流、配额、接口异常，还是本地数据查询异常。
+                                            </div>
+                                            <div class="poi-fetch-error-list">
+                                                <div v-for="row in getPoiFetchErrorRows(8)" :key="row.key" class="poi-fetch-error-row">
+                                                    <div class="poi-fetch-error-meta">
+                                                        <span>{{ row.year }}</span>
+                                                        <span>{{ row.source }}</span>
+                                                        <strong>{{ row.category }}</strong>
+                                                    </div>
+                                                    <div class="poi-fetch-error-message">{{ row.error }}</div>
+                                                </div>
+                                            </div>
+                                            <div v-if="getPoiFetchErrorHiddenCount(8) > 0" class="poi-fetch-error-more">
+                                                还有 {{ getPoiFetchErrorHiddenCount(8) }} 条未展开，请查看控制台或接口返回 errors。
+                                            </div>
+                                        </div>
                                     </div>
 
                                     <div v-show="poiSubTab === 'category'" class="poi-subpanel">
@@ -695,57 +717,313 @@
                                     </div>
                                     <div v-if="h3MainStage === 'params'" class="h3-params-card">
                                         <div class="h3-params-grid">
-                                            <label class="h3-params-field">
-                                                <span class="h3-params-label">网格级别</span>
-                                                <select v-model.number="h3GridResolution" @change="onH3ResolutionChange" class="h3-params-select">
-                                                    <option :value="8">8</option>
-                                                    <option :value="9">9</option>
-                                                    <option :value="10">10</option>
-                                                    <option :value="11">11</option>
-                                                </select>
-                                            </label>
-                                            <label class="h3-params-field">
-                                                <span class="h3-params-label">邻域圈层</span>
-                                                <select v-model.number="h3NeighborRing" class="h3-params-select">
-                                                    <option :value="1">ring=1</option>
-                                                    <option :value="2">ring=2</option>
-                                                    <option :value="3">ring=3</option>
-                                                </select>
-                                            </label>
                                             <label class="h3-params-field h3-params-field-wide">
-                                                <span class="h3-params-label">包含模式</span>
-                                                <select v-model="h3GridIncludeMode" @change="onH3GridSettingsChange" class="h3-params-select">
-                                                    <option value="intersects">相交优先（边缘保留）</option>
-                                                    <option value="inside">完全包含（严格）</option>
+                                                <span class="h3-params-label">网格类型</span>
+                                                <select v-model="poiGridType" @change="setPoiGridType(poiGridType)" class="h3-params-select">
+                                                    <option value="raster">栅格</option>
+                                                    <option value="hex">六边形格子</option>
                                                 </select>
                                             </label>
-                                            <div class="h3-params-field h3-params-field-wide">
-                                                <span class="h3-params-label">最小重叠比例</span>
-                                                <div class="h3-params-range-row">
-                                                    <input type="range" min="0" max="0.9" step="0.05"
-                                                        v-model.number="h3GridMinOverlapRatio" @change="onH3GridSettingsChange"
-                                                        class="minimal-range h3-params-range">
-                                                    <span class="range-value">{{ h3GridMinOverlapRatio.toFixed(2) }}</span>
+                                        </div>
+                                        <div class="h3-params-chips" v-if="isPoiRasterGridMode()">
+                                            <span class="count-badge">栅格数 {{ (poiGridSummary && poiGridSummary.grid_count) || poiGridFeatures.length || 0 }}</span>
+                                            <span class="count-badge">含POI {{ (poiGridSummary && poiGridSummary.active_cell_count) || 0 }}</span>
+                                            <span class="count-badge">POI {{ (poiGridSummary && poiGridSummary.assigned_poi_count) || 0 }}</span>
+                                        </div>
+                                        <div class="h3-params-chips" v-else>
+                                            <span class="count-badge">网格数 {{ h3GridCount }}</span>
+                                        </div>
+                                        <div v-if="isPoiRasterGridMode() && poiGridStatus" class="h3-analysis-hint" style="margin-top:8px;">
+                                            {{ poiGridStatus }}
+                                        </div>
+                                        <div v-if="isPoiRasterGridMode() && !poiGridFeatures.length && !isLoadingPoiGrid" class="panel-placeholder" style="margin-top:8px;">
+                                            当前尚未生成 POI 栅格，请点击“开始分析”后查看分析、诊断和评估。
+                                        </div>
+                                        <div v-if="!isPoiRasterGridMode() && h3GridCount === 0 && !isComputingH3Analysis" class="panel-placeholder" style="margin-top:8px;">
+                                            当前尚未生成 POI 六边形格子，请点击“开始分析”后查看分析、诊断和评估。
+                                        </div>
+                                        <div v-if="isPoiRasterGridMode() && poiGridSummary" style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                                            <div class="count-badge">最高POI {{ poiGridSummary.max_poi_count || 0 }}</div>
+                                            <div class="count-badge">平均密度 {{ Number(poiGridSummary.avg_density_poi_per_km2 || 0).toFixed(2) }}</div>
+                                        </div>
+                                        <div v-if="isPoiRasterGridMode() && getPoiRasterGridTopCells().length" style="margin-top:10px;">
+                                            <div class="h3-analysis-hint">POI栅格密度 Top</div>
+                                            <div class="poi-fetch-error-list" style="margin-top:6px;">
+                                                <div v-for="row in getPoiRasterGridTopCells()" :key="`poi-grid-top-${row.cell_id}`" class="poi-fetch-error-row">
+                                                    <div class="poi-fetch-error-meta">
+                                                        <strong>{{ row.cell_id }}</strong>
+                                                        <span>{{ row.dominant_category_name || '未分类' }}</span>
+                                                    </div>
+                                                    <div class="poi-fetch-error-message">POI {{ row.poi_count }}，密度 {{ Number(row.density_poi_per_km2 || 0).toFixed(2) }}</div>
                                                 </div>
                                             </div>
                                         </div>
-                                        <div class="h3-params-chips">
-                                            <span class="count-badge">网格数 {{ h3GridCount }}</span>
-                                        </div>
                                         <div class="h3-params-actions">
                                             <button class="h3-btn h3-btn-ghost"
-                                                :disabled="h3GridCount === 0" @click="clearH3Grid">
-                                                清空网络
+                                                :disabled="isPoiRasterGridMode() ? poiGridFeatures.length === 0 : h3GridCount === 0"
+                                                @click="isPoiRasterGridMode() ? clearPoiRasterGrid() : clearH3Grid()">
+                                                清空网格
+                                            </button>
+                                            <button class="h3-btn h3-btn-ghost"
+                                                @click="togglePoiGridConfig">
+                                                {{ poiGridConfigExpanded ? '收起配置' : '配置' }}
                                             </button>
                                             <button class="h3-btn h3-btn-primary h3-params-compute-btn"
-                                                :disabled="isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON"
-                                                @click="computeH3Analysis">
-                                                {{ isComputingH3Analysis ? '分析中...' : '计算分析' }}
+                                                :disabled="isPoiRasterGridMode() ? (isLoadingPoiGrid || !lastIsochroneGeoJSON) : (isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON)"
+                                                @click="startPoiGridAnalysis">
+                                                {{ (isPoiRasterGridMode() ? isLoadingPoiGrid : isComputingH3Analysis) ? '分析中...' : '开始分析' }}
                                             </button>
                                         </div>
+                                        <div v-if="poiGridConfigExpanded" class="poi-grid-config-panel">
+                                            <div v-if="isPoiRasterGridMode()" class="poi-grid-config-notes">
+                                                <div class="h3-analysis-hint">栅格口径</div>
+                                                <div class="count-badge">同源 cell_id：人口/夜光栅格</div>
+                                                <div class="count-badge">POI 坐标：GCJ02 匹配</div>
+                                                <div class="count-badge">年份 {{ getPoiRasterGridYear() || '当前' }}</div>
+                                            </div>
+                                            <div v-else class="h3-params-grid">
+                                                <label class="h3-params-field">
+                                                    <span class="h3-params-label">网格级别</span>
+                                                    <select v-model.number="h3GridResolution" @change="onH3ResolutionChange" class="h3-params-select">
+                                                        <option :value="8">8</option>
+                                                        <option :value="9">9</option>
+                                                        <option :value="10">10</option>
+                                                        <option :value="11">11</option>
+                                                    </select>
+                                                </label>
+                                                <label class="h3-params-field">
+                                                    <span class="h3-params-label">邻域圈层</span>
+                                                    <select v-model.number="h3NeighborRing" class="h3-params-select">
+                                                        <option :value="1">ring=1</option>
+                                                        <option :value="2">ring=2</option>
+                                                        <option :value="3">ring=3</option>
+                                                    </select>
+                                                </label>
+                                                <label class="h3-params-field h3-params-field-wide">
+                                                    <span class="h3-params-label">包含模式</span>
+                                                    <select v-model="h3GridIncludeMode" @change="onH3GridSettingsChange" class="h3-params-select">
+                                                        <option value="intersects">相交优先（边缘保留）</option>
+                                                        <option value="inside">完全包含（严格）</option>
+                                                    </select>
+                                                </label>
+                                                <div class="h3-params-field h3-params-field-wide">
+                                                    <span class="h3-params-label">最小重叠比例</span>
+                                                    <div class="h3-params-range-row">
+                                                        <input type="range" min="0" max="0.9" step="0.05"
+                                                            v-model.number="h3GridMinOverlapRatio" @change="onH3GridSettingsChange"
+                                                            class="minimal-range h3-params-range">
+                                                        <span class="range-value">{{ h3GridMinOverlapRatio.toFixed(2) }}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
+                                    <div v-if="isPoiRasterGridMode() && h3MainStage !== 'params' && !poiGridFeatures.length" class="panel-placeholder" style="margin-top:10px;">
+                                        当前还没有 POI 栅格结果。请先回到“参数”页点击“生成栅格”。
+                                    </div>
+                                    <div class="filter-section h3-control-row h3-control-row-tight"
+                                        v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && (h3MainStage === 'diagnosis' || h3MainStage === 'evaluate')"
+                                        style="margin-top:8px;">
+                                        <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666;">
+                                            TopN
+                                            <input type="number" min="3" max="30" step="1"
+                                                v-model.number="h3DecisionTopN"
+                                                style="width:68px; padding:4px 6px; border:1px solid #ddd; border-radius:6px; font-size:12px;">
+                                        </label>
+                                        <label v-if="h3MainStage === 'evaluate'"
+                                            style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666;">
+                                            目标业态
+                                            <select v-model="h3TargetCategory"
+                                                style="padding:4px 6px; border:1px solid #ddd; border-radius:6px; font-size:12px;">
+                                                <option v-for="item in h3CategoryMeta" :key="`poi-raster-target-${item.key}`" :value="item.key">
+                                                    {{ item.label }}
+                                                </option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && h3MainStage === 'analysis'" style="margin-top:10px;">
+                                        <div class="h3-analysis-hint">
+                                            POI 栅格按人口/夜光同源 cell_id 聚合，仅用于判断 POI 供给分布、密度和主导业态。
+                                        </div>
+                                        <div class="h3-decision-cards">
+                                            <div class="h3-decision-card">
+                                                <div class="label">栅格数</div>
+                                                <div class="value">{{ getPoiRasterGridDerivedSummary().grid_count }}</div>
+                                            </div>
+                                            <div class="h3-decision-card">
+                                                <div class="label">含POI格</div>
+                                                <div class="value">{{ getPoiRasterGridDerivedSummary().active_cell_count }}</div>
+                                            </div>
+                                            <div class="h3-decision-card">
+                                                <div class="label">最高POI</div>
+                                                <div class="value">{{ getPoiRasterGridDerivedSummary().max_poi_count }}</div>
+                                            </div>
+                                            <div class="h3-decision-card">
+                                                <div class="label">平均密度</div>
+                                                <div class="value">{{ Number(getPoiRasterGridDerivedSummary().avg_density_poi_per_km2 || 0).toFixed(2) }}</div>
+                                            </div>
+                                        </div>
+                                        <div v-if="getPoiRasterGridLegend()" style="margin-top:10px; border:1px solid #eef1f4; border-radius:8px; padding:8px 10px; background:#fafbfc;">
+                                            <div style="font-size:12px; color:#374151; font-weight:600; margin-bottom:6px;">
+                                                {{ getPoiRasterGridLegend().title }}
+                                                <span style="color:#6b7280; font-weight:400;">（{{ getPoiRasterGridLegend().unit }}）</span>
+                                            </div>
+                                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px 10px;">
+                                                <div v-for="(item, idx) in getPoiRasterGridLegend().items" :key="`poi-raster-legend-${idx}`"
+                                                    style="display:flex; align-items:center; gap:6px; font-size:11px; color:#4b5563;">
+                                                    <span :style="{display:'inline-block', width:'12px', height:'12px', borderRadius:'2px', background:item.color, border:'1px solid #d1d5db'}"></span>
+                                                    <span>{{ item.label }}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <table class="h3-mini-table" style="margin-top:8px;">
+                                            <thead>
+                                                <tr>
+                                                    <th>栅格</th><th>POI</th><th>密度</th><th>主导业态</th><th>业态数</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr v-for="row in getPoiRasterGridTopRows()" :key="`poi-raster-top-${row.cell_id}`"
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    <td>
+                                                        <button type="button" class="h3-id-btn" :title="row.cell_id"
+                                                            @click="focusPoiRasterGridCell(row.cell_id)">
+                                                            {{ row.cell_id }}
+                                                        </button>
+                                                    </td>
+                                                    <td>{{ row.poi_count }}</td>
+                                                    <td>{{ row.density_poi_per_km2.toFixed(2) }}</td>
+                                                    <td>{{ row.dominant_category_name || '未分类' }}</td>
+                                                    <td>{{ row.category_count }}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && h3MainStage === 'diagnosis'" style="margin-top:10px;">
+                                        <div class="h3-analysis-hint">
+                                            栅格诊断只解释 POI 供给结构：高密代表供给集中，低密代表供给较弱；不直接等同于真实客流或消费。
+                                        </div>
+                                        <div class="h3-decision-cards">
+                                            <div class="h3-decision-card">
+                                                <div class="label">高密集聚格</div>
+                                                <div class="value">{{ getPoiRasterGridTopRows(9999).length }}</div>
+                                            </div>
+                                            <div class="h3-decision-card">
+                                                <div class="label">单一业态格</div>
+                                                <div class="value">{{ getPoiRasterGridDerivedSummary().single_category_cell_count }}</div>
+                                            </div>
+                                            <div class="h3-decision-card">
+                                                <div class="label">复合业态格</div>
+                                                <div class="value">{{ getPoiRasterGridDerivedSummary().mixed_cell_count }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="h3-analysis-hint" style="margin-top:8px;">高密集聚格</div>
+                                        <table class="h3-mini-table">
+                                            <thead><tr><th>栅格</th><th>POI</th><th>密度</th><th>主导业态</th><th>可信度</th></tr></thead>
+                                            <tbody>
+                                                <tr v-for="row in getPoiRasterGridTopRows()" :key="`poi-raster-dense-${row.cell_id}`"
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
+                                                    <td>{{ row.poi_count }}</td>
+                                                    <td>{{ row.density_poi_per_km2.toFixed(2) }}</td>
+                                                    <td>{{ row.dominant_category_name || '未分类' }}</td>
+                                                    <td>{{ (row.confidence && row.confidence.label) || '低' }}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                        <div class="h3-analysis-hint" style="margin-top:10px;">业态单一格</div>
+                                        <table class="h3-mini-table">
+                                            <thead><tr><th>栅格</th><th>POI</th><th>主导业态</th><th>业态数</th><th>诊断</th></tr></thead>
+                                            <tbody>
+                                                <tr v-for="row in getPoiRasterGridSingleCategoryRows()" :key="`poi-raster-single-${row.cell_id}`"
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
+                                                    <td>{{ row.poi_count }}</td>
+                                                    <td>{{ row.dominant_category_name || '未分类' }}</td>
+                                                    <td>{{ row.category_count }}</td>
+                                                    <td>供给集中，需结合经营质量验证</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                        <div class="h3-analysis-hint" style="margin-top:10px;">复合度较高格</div>
+                                        <table class="h3-mini-table">
+                                            <thead><tr><th>栅格</th><th>POI</th><th>业态数</th><th>复合度</th><th>主导业态</th></tr></thead>
+                                            <tbody>
+                                                <tr v-for="row in getPoiRasterGridMixedRows()" :key="`poi-raster-mixed-${row.cell_id}`"
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
+                                                    <td>{{ row.poi_count }}</td>
+                                                    <td>{{ row.category_count }}</td>
+                                                    <td>{{ row.mix_score.toFixed(2) }}</td>
+                                                    <td>{{ row.dominant_category_name || '未分类' }}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && h3MainStage === 'evaluate'" style="margin-top:10px;">
+                                        <div class="h3-analysis-hint">
+                                            栅格评估为 POI 供给侧判断。目标业态低供给不代表真实需求高，需要后续叠加人口、夜光、客流和经营数据验证。
+                                        </div>
+                                        <div class="h3-decision-cards">
+                                            <div class="h3-decision-card">
+                                                <div class="label">目标业态</div>
+                                                <div class="value small">{{ getPoiRasterTargetCategoryLabel() }}</div>
+                                            </div>
+                                            <div class="h3-decision-card">
+                                                <div class="label">目标低供给格</div>
+                                                <div class="value">{{ getPoiRasterGridDerivedSummary().target_low_supply_count }}</div>
+                                            </div>
+                                            <div class="h3-decision-card">
+                                                <div class="label">低样本格</div>
+                                                <div class="value">{{ getPoiRasterGridDerivedSummary().low_sample_count }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="h3-analysis-hint" style="margin-top:8px;">目标业态低供给格</div>
+                                        <table class="h3-mini-table">
+                                            <thead><tr><th>栅格</th><th>POI</th><th>目标业态</th><th>占比</th><th>提示</th></tr></thead>
+                                            <tbody>
+                                                <tr v-for="row in getPoiRasterTargetLowSupplyRows()" :key="`poi-raster-target-gap-${row.cell_id}`"
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
+                                                    <td>{{ row.poi_count }}</td>
+                                                    <td>{{ row.target_count }}</td>
+                                                    <td>{{ Math.round((row.target_share || 0) * 100) }}%</td>
+                                                    <td>{{ row.target_count === 0 ? '可作为补位候选' : '供给占比较低' }}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                        <div class="h3-analysis-hint" style="margin-top:10px;">整体低供给格</div>
+                                        <table class="h3-mini-table">
+                                            <thead><tr><th>栅格</th><th>POI</th><th>密度</th><th>主导业态</th><th>评估</th></tr></thead>
+                                            <tbody>
+                                                <tr v-for="row in getPoiRasterGridSparseRows()" :key="`poi-raster-sparse-${row.cell_id}`"
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
+                                                    <td>{{ row.poi_count }}</td>
+                                                    <td>{{ row.density_poi_per_km2.toFixed(2) }}</td>
+                                                    <td>{{ row.dominant_category_name || '未分类' }}</td>
+                                                    <td>{{ row.poi_count === 0 ? 'POI空白，适合先验证承载条件' : '供给较弱，适合小规模补位验证' }}</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                        <div class="h3-analysis-hint" style="margin-top:10px;">需谨慎解释的低样本格</div>
+                                        <table class="h3-mini-table">
+                                            <thead><tr><th>栅格</th><th>POI</th><th>主导业态</th><th>可信度</th><th>说明</th></tr></thead>
+                                            <tbody>
+                                                <tr v-for="row in getPoiRasterGridLowSampleRows()" :key="`poi-raster-low-sample-${row.cell_id}`"
+                                                    :class="{ 'h3-row-active': row.cell_id === selectedH3Id }">
+                                                    <td><button type="button" class="h3-id-btn" :title="row.cell_id" @click="focusPoiRasterGridCell(row.cell_id)">{{ row.cell_id }}</button></td>
+                                                    <td>{{ row.poi_count }}</td>
+                                                    <td>{{ row.dominant_category_name || '未分类' }}</td>
+                                                    <td>{{ (row.confidence && row.confidence.label) || '低' }}</td>
+                                                    <td>样本少，不宜单独作为决策依据</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <template v-if="!isPoiRasterGridMode()">
                                     <div class="h3-subtabs"
-                                        v-if="h3MainStage !== 'params' && h3AnalysisGridFeatures.length > 0 && getH3CurrentStageTabs().length > 1"
+                                        v-if="!isPoiRasterGridMode() && h3MainStage !== 'params' && h3AnalysisGridFeatures.length > 0 && getH3CurrentStageTabs().length > 1"
                                         style="margin-top:6px; grid-template-columns: repeat(2, minmax(0, 1fr));">
                                         <button type="button" class="h3-subtab-pill"
                                             v-for="tab in getH3CurrentStageTabs()"
@@ -1074,7 +1352,8 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <div v-if="h3GridStatus" class="status-text"
+                                    </template>
+                                    <div v-if="!isPoiRasterGridMode() && h3GridStatus" class="status-text"
                                         style="margin-top:10px; display:flex; align-items:center; gap:8px; justify-content:flex-start;">
                                         <span>{{ h3GridStatus }}</span>
                                         <button v-if="selectedH3Id" type="button"

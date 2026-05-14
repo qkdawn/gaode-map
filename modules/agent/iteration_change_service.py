@@ -55,6 +55,31 @@ def _validate_ai_analysis(raw: Dict[str, Any]) -> Dict[str, str]:
     return normalized
 
 
+def _build_output_validation_result(config: Any, output: Any, *, checks: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+    return {
+        "source": "backend",
+        "prompt_key": getattr(config, "prompt_key", ""),
+        "evidence_version": getattr(config, "evidence_version", ""),
+        "status": "passed" if output else "failed",
+        "output_schema": getattr(config, "output_schema", {}) or {},
+        "validated_output": output or {},
+        "checks": checks or [],
+        "note": "该验证结果由后端本次生成链路写入，展示内容与实际采用的输出一致。",
+    }
+
+
+def _required_field_checks(output: Dict[str, Any], required: List[str]) -> List[Dict[str, Any]]:
+    source = output if isinstance(output, dict) else {}
+    return [
+        {
+            "key": f"required.{field}",
+            "label": f"必填字段 {field}",
+            "passed": bool(source.get(field)),
+        }
+        for field in required
+    ]
+
+
 def _clean_text_list(value: Any, *, max_items: int = 4, max_len: int = 180) -> List[str]:
     source = value if isinstance(value, list) else [value]
     rows: List[str] = []
@@ -67,19 +92,91 @@ def _clean_text_list(value: Any, *, max_items: int = 4, max_len: int = 180) -> L
     return rows
 
 
+def _clean_long_text(value: Any, *, max_len: int = 12000) -> str:
+    if isinstance(value, (dict, list)):
+        return ""
+    text = str(value or "").strip()
+    return text[:max_len] if text else ""
+
+
+def _clean_string_map(value: Any, *, allowed_keys: List[str] | None = None, max_len: int = 360) -> Dict[str, str]:
+    source = value if isinstance(value, dict) else {"interpretation": value}
+    result: Dict[str, str] = {}
+    for key in allowed_keys or list(source.keys()):
+        text = _clean_text(source.get(key), max_len=max_len)
+        if text:
+            result[key] = text
+    return result
+
+
+def _clean_string_map_list(value: Any, *, allowed_keys: List[str], max_items: int = 5, max_len: int = 360) -> List[Dict[str, str]]:
+    rows = value if isinstance(value, list) else []
+    result: List[Dict[str, str]] = []
+    for item in rows:
+        row = _clean_string_map(item, allowed_keys=allowed_keys, max_len=max_len)
+        if row:
+            result.append(row)
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _insight_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return "；".join(str(item) for item in value.values() if item)
+    if isinstance(value, list):
+        return "；".join(_insight_text(item) for item in value if item)
+    return str(value or "")
+
+
 def _validate_poi_ai_analysis(raw: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         return {}
-    summary_points = _clean_text_list(raw.get("summary_points"), max_items=4, max_len=180)
+    summary_points = _clean_text_list(raw.get("summary_points"), max_items=5, max_len=80)
     insights = {
-        "fastest_growth": _clean_text(raw.get("fastest_growth"), max_len=160),
-        "declining_category": _clean_text(raw.get("declining_category"), max_len=160),
-        "emerging_area": _clean_text(raw.get("emerging_area"), max_len=160),
-        "structure_judgement": _clean_text(raw.get("structure_judgement"), max_len=220),
+        "fastest_growth": _clean_string_map(
+            raw.get("fastest_growth"),
+            allowed_keys=["name", "evidence", "interpretation", "category", "subcategory", "delta", "change", "count"],
+            max_len=360,
+        ),
+        "declining_category": _clean_string_map(
+            raw.get("declining_category"),
+            allowed_keys=["name", "evidence", "interpretation", "category", "subcategory", "delta", "change", "count"],
+            max_len=360,
+        ),
+        "emerging_area": _clean_string_map(
+            raw.get("emerging_area"),
+            allowed_keys=["area_signal", "evidence", "interpretation", "area", "region", "direction", "ring"],
+            max_len=360,
+        ),
+        "structure_judgement": _clean_string_map(
+            raw.get("structure_judgement"),
+            allowed_keys=["current_structure", "trend", "reason", "interpretation"],
+            max_len=420,
+        ),
     }
-    if not summary_points or not all(insights.values()):
+    if not summary_points or not all(_insight_text(value) for value in insights.values()):
         return {}
-    return {"summary_points": summary_points, **insights}
+    driver_analysis = _clean_string_map_list(
+        raw.get("driver_analysis"),
+        allowed_keys=["driver", "evidence", "confidence", "explanation"],
+        max_items=4,
+        max_len=420,
+    )
+    planning_implications = _clean_string_map_list(
+        raw.get("planning_implications"),
+        allowed_keys=["implication", "evidence", "suggested_direction"],
+        max_items=5,
+        max_len=420,
+    )
+    if not driver_analysis or not planning_implications:
+        return {}
+    return {
+        "summary_points": summary_points,
+        **insights,
+        "driver_analysis": driver_analysis,
+        "planning_implications": planning_implications,
+    }
 
 
 def _growth_area_fallback_text(growth_signal: Dict[str, Any] | None) -> str:
@@ -119,6 +216,17 @@ def _normalize_growth_area_insight(text: str, growth_signal: Dict[str, Any] | No
             return fallback
         value = value.replace("新兴区域", "增长片区").replace("新兴片区", "增长片区")
     return value
+
+
+def _normalize_growth_area_value(value: Any, growth_signal: Dict[str, Any] | None) -> Any:
+    if not isinstance(value, dict):
+        return _normalize_growth_area_insight(value, growth_signal)
+    result = dict(value)
+    target_key = "area_signal" if _clean_text(result.get("area_signal"), max_len=180) else "interpretation"
+    normalized = _normalize_growth_area_insight(result.get(target_key), growth_signal)
+    if normalized:
+        result[target_key] = normalized
+    return result
 
 
 def enrich_poi_iteration_spatial_evidence(evidence: Dict[str, Any]) -> Dict[str, Any]:
@@ -423,6 +531,131 @@ def _compact_spatial_trends(rows: Any, limit: int = 30) -> List[Dict[str, Any]]:
     return compact
 
 
+def _compact_h3_evidence(value: Any, cell_limit: int = 240, row_limit: int = 40) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    cells = value.get("cells") if isinstance(value.get("cells"), list) else []
+    compact_cells: List[Dict[str, Any]] = []
+    for cell in cells[:cell_limit]:
+        if not isinstance(cell, dict):
+            continue
+        h3_id = str(cell.get("h3_id") or "").strip()
+        if not h3_id:
+            continue
+        compact_cells.append(
+            {
+                "h3_id": h3_id,
+                "poi_count": cell.get("poi_count"),
+                "density_poi_per_km2": cell.get("density_poi_per_km2"),
+                "local_entropy": cell.get("local_entropy"),
+                "neighbor_mean_density": cell.get("neighbor_mean_density"),
+                "neighbor_mean_entropy": cell.get("neighbor_mean_entropy"),
+                "neighbor_count": cell.get("neighbor_count"),
+                "category_counts": cell.get("category_counts") or {},
+                "gi_star_z_score": cell.get("gi_star_z_score"),
+                "gi_star_value": cell.get("gi_star_value"),
+                "lisa_i": cell.get("lisa_i"),
+                "lisa_z_score": cell.get("lisa_z_score"),
+            }
+        )
+
+    derived = value.get("derived_stats") if isinstance(value.get("derived_stats"), dict) else {}
+
+    def compact_rows(section_key: str) -> List[Dict[str, Any]]:
+        rows = derived.get(section_key)
+        if isinstance(rows, list):
+            return _limit_list(rows, row_limit)
+        return []
+
+    def compact_summary(section_key: str) -> Dict[str, Any]:
+        source = derived.get(section_key)
+        if isinstance(source, dict):
+            return source
+        return {}
+
+    return {
+        "evidence_version": value.get("evidence_version") or "poi_h3_evidence_v1",
+        "grid_type": value.get("grid_type") or "h3",
+        "usage": value.get("usage") or "POI-only H3 spatial structure evidence",
+        "params": value.get("params") or {},
+        "counts": value.get("counts") or {},
+        "metrics": value.get("metrics") or {},
+        "summary": value.get("summary") or {},
+        "charts": value.get("charts") or {},
+        "ui": value.get("ui") or {},
+        "category_meta": _limit_list(value.get("category_meta"), 80),
+        "cells": compact_cells,
+        "omitted": value.get("omitted") or {
+            "cells_total": ((value.get("counts") or {}).get("cell_count") if isinstance(value.get("counts"), dict) else len(cells)),
+            "cells_included": len(compact_cells),
+            "geometry_removed": True,
+        },
+        "derived_stats": {
+            "structure_rows": compact_rows("structure_rows"),
+            "typing_rows": compact_rows("typing_rows"),
+            "lq_rows": compact_rows("lq_rows"),
+            "gap_rows": compact_rows("gap_rows"),
+            "structure_summary": compact_summary("structure_summary"),
+            "typing_summary": compact_summary("typing_summary"),
+            "lq_summary": compact_summary("lq_summary"),
+            "gap_summary": compact_summary("gap_summary"),
+        },
+        "constraints": {
+            "poi_only": True,
+            "do_not_use_for_population_nightlight_coupling": True,
+        },
+    }
+
+
+def _compact_raster_grid_evidence(value: Any, row_limit: int = 24) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    summary = value.get("summary") if isinstance(value.get("summary"), dict) else {}
+    counts = value.get("counts") if isinstance(value.get("counts"), dict) else {}
+    top_cells = summary.get("top_cells") if isinstance(summary.get("top_cells"), list) else value.get("top_cells")
+    return {
+        "evidence_version": value.get("evidence_version") or "poi_raster_grid_evidence_v1",
+        "grid_type": value.get("grid_type") or "raster",
+        "params": value.get("params") or {},
+        "counts": counts,
+        "summary": {
+            key: val
+            for key, val in summary.items()
+            if key != "top_cells"
+        },
+        "top_cells": _limit_list(top_cells, row_limit),
+    }
+
+
+def _compact_yearly_grid_evidence(value: Any, year_limit: int = 8) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    items = []
+    for item in _limit_list(value.get("items"), year_limit):
+        if not isinstance(item, dict):
+            continue
+        items.append({
+            "year": item.get("year"),
+            "status": item.get("status") or "ready",
+            "error": item.get("error") or "",
+            "grid_scope": item.get("grid_scope") or value.get("grid_scope") or "poi_iteration_h3_per_year",
+            "h3_evidence": _compact_h3_evidence(item.get("h3_evidence"), cell_limit=80, row_limit=20),
+        })
+    return {
+        "evidence_version": value.get("evidence_version") or "poi_iteration_yearly_grid_evidence_v1",
+        "grid_scope": value.get("grid_scope") or "poi_iteration_h3_per_year",
+        "grid_type": value.get("grid_type") or "h3",
+        "years": _limit_list(value.get("years"), year_limit),
+        "latest_year": value.get("latest_year"),
+        "latest_h3_evidence": _compact_h3_evidence(value.get("latest_h3_evidence"), cell_limit=80, row_limit=20),
+        "items": items,
+        "constraints": {
+            "per_year_grid": True,
+            "use_for_spatial_evolution": True,
+        },
+    }
+
+
 def build_poi_iteration_evidence_pack_v1(enriched_evidence: Dict[str, Any]) -> Dict[str, Any]:
     evidence = enriched_evidence if isinstance(enriched_evidence, dict) else {}
     summaries = [
@@ -462,6 +695,8 @@ def build_poi_iteration_evidence_pack_v1(enriched_evidence: Dict[str, Any]) -> D
         "spatial_factors": evidence.get("spatial_factors") or {},
         "subcategory_spatial_trends": spatial_trends,
         "growth_area_signal": _growth_area_signal(spatial_trends),
+        "h3_evidence": _compact_h3_evidence(evidence.get("h3_evidence")),
+        "yearly_grid_evidence": _compact_yearly_grid_evidence(evidence.get("yearly_grid_evidence")),
         "area_distribution": [
             row for row in (_compact_area_distribution(heatmap) for heatmap in _limit_list(evidence.get("area_heatmaps"), 8)) if row
         ],
@@ -556,6 +791,13 @@ async def generate_nightlight_iteration_analysis(evidence: Dict[str, Any]) -> Di
             "ai_prompt_payload_note": config.payload_note,
             "prompt_snapshot": snapshot,
             "prompt_snapshots": {"nightlight_iteration": snapshot},
+            "validation_results": {
+                "nightlight_iteration": _build_output_validation_result(
+                    config,
+                    analysis,
+                    checks=_required_field_checks(analysis, list(_REQUIRED_FIELDS)),
+                ),
+            },
         }
     except Exception as exc:
         return {
@@ -619,23 +861,51 @@ async def generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str,
                 "prompt_snapshots": {"poi_iteration": prompt_snapshot},
                 **spatial_fields,
             }
-        growth_area = _normalize_growth_area_insight(
+        growth_area = _normalize_growth_area_value(
             analysis["emerging_area"],
             llm_evidence.get("growth_area_signal"),
         )
+        ai_insights = {
+            "fastest_growth": analysis["fastest_growth"],
+            "declining_category": analysis["declining_category"],
+            "emerging_area": growth_area,
+            "structure_judgement": analysis["structure_judgement"],
+            "driver_analysis": analysis.get("driver_analysis") or [],
+            "planning_implications": analysis.get("planning_implications") or [],
+        }
         return {
             "status": "ready",
             "ai_summary": analysis["summary_points"],
-            "ai_insights": {
-                "fastest_growth": analysis["fastest_growth"],
-                "declining_category": analysis["declining_category"],
-                "emerging_area": growth_area,
-                "structure_judgement": analysis["structure_judgement"],
-            },
+            "ai_insights": ai_insights,
+            "driver_analysis": analysis.get("driver_analysis") or [],
+            "planning_implications": analysis.get("planning_implications") or [],
             "ai_prompt": prompt,
             "ai_prompt_payload_note": prompt_note,
             "prompt_snapshot": prompt_snapshot,
             "prompt_snapshots": {"poi_iteration": prompt_snapshot},
+            "validation_results": {
+                "poi_iteration": _build_output_validation_result(
+                    config,
+                    {
+                        "summary_points": analysis["summary_points"],
+                        "fastest_growth": analysis["fastest_growth"],
+                        "declining_category": analysis["declining_category"],
+                        "emerging_area": growth_area,
+                        "structure_judgement": analysis["structure_judgement"],
+                        "driver_analysis": analysis.get("driver_analysis") or [],
+                        "planning_implications": analysis.get("planning_implications") or [],
+                    },
+                    checks=_required_field_checks(analysis, [
+                        "summary_points",
+                        "fastest_growth",
+                        "declining_category",
+                        "emerging_area",
+                        "structure_judgement",
+                        "driver_analysis",
+                        "planning_implications",
+                    ]),
+                ),
+            },
             "error": "",
             **spatial_fields,
         }

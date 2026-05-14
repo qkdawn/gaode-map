@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from numbers import Real
 from typing import Any, AsyncIterator, Dict, List
 
@@ -573,6 +574,73 @@ def _attach_prompt_snapshot(payload: Dict[str, Any], prompt_key: str) -> Dict[st
     return payload
 
 
+def _build_output_validation_result(prompt_key: str, output: Any, *, checks: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+    config = _prompt_config_for(prompt_key)
+    return {
+        "source": "backend",
+        "prompt_key": config.prompt_key,
+        "evidence_version": config.evidence_version,
+        "status": "passed" if output else "failed",
+        "output_schema": _json_safe(config.output_schema or {}),
+        "validated_output": _json_safe(output or {}),
+        "checks": _json_safe(checks or []),
+        "note": "该验证结果由后端本次生成链路写入，展示内容与实际采用的输出一致。",
+    }
+
+
+def _build_summary_output_validation_results(summary_pack: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(summary_pack, dict):
+        return {}
+    existing = summary_pack.get("validation_results")
+    results: Dict[str, Any] = dict(existing) if isinstance(existing, dict) else {}
+    headline = summary_pack.get("headline_judgment")
+    if isinstance(headline, dict) and "headline" not in results:
+        results["headline"] = _build_output_validation_result(
+            "headline",
+            headline,
+            checks=_required_field_checks(headline, ["summary", "supporting_clause"]),
+        )
+    for section_key, _ in _SUMMARY_SECTION_SPECS:
+        section = summary_pack.get(section_key)
+        if isinstance(section, dict) and section_key not in results:
+            required = ["section_key", "title", "reasoning"]
+            if section_key == "spatial_structure":
+                required.append("dimensions")
+            results[section_key] = _build_output_validation_result(
+                section_key,
+                section,
+                checks=_required_field_checks(section, required),
+            )
+    for section_key in ["user_profile", "behavior_inference"]:
+        section = summary_pack.get(section_key)
+        if isinstance(section, dict) and section_key not in results:
+            results[section_key] = _build_output_validation_result(
+                section_key,
+                section,
+                checks=_required_field_checks(section, ["headline", "traits"]),
+            )
+    tourism = summary_pack.get("tourism_cross_analysis")
+    if isinstance(tourism, dict) and "tourism_cross_analysis" not in results:
+        results["tourism_cross_analysis"] = _build_output_validation_result(
+            "tourism_cross_analysis",
+            tourism,
+            checks=_tourism_validation_checks(tourism),
+        )
+    return results
+
+
+def _required_field_checks(output: Dict[str, Any], required: List[str]) -> List[Dict[str, Any]]:
+    source = output if isinstance(output, dict) else {}
+    return [
+        {
+            "key": f"required.{field}",
+            "label": f"必填字段 {field}",
+            "passed": bool(source.get(field)),
+        }
+        for field in required
+    ]
+
+
 def _pop_prompt_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(payload, dict):
         return {}
@@ -895,6 +963,12 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
     area_labels = artifacts.get("current_area_character_labels") if isinstance(artifacts.get("current_area_character_labels"), dict) else {}
     commercial_hotspots = _current_commercial_hotspots(snapshot, artifacts, h3_structure)
     h3_summary = _current_summary(snapshot, artifacts, "h3")
+    h3_raw = dict(snapshot.h3 or {}) if isinstance(getattr(snapshot, "h3", {}), dict) else {}
+    poi_h3_evidence = h3_raw.get("poi_h3_evidence") if isinstance(h3_raw.get("poi_h3_evidence"), dict) else {}
+    frontend = snapshot.frontend_analysis if isinstance(snapshot.frontend_analysis, dict) else {}
+    shared_grid = snapshot.shared_grid if isinstance(getattr(snapshot, "shared_grid", {}), dict) else {}
+    population_raw = dict(snapshot.population or {}) if isinstance(getattr(snapshot, "population", {}), dict) else {}
+    poi_summary_raw = dict(snapshot.poi_summary or {}) if isinstance(getattr(snapshot, "poi_summary", {}), dict) else {}
     return {
         "task": "summary_pack_generation",
         "required_sections": [{"section_key": key, "title": title} for key, title in _SUMMARY_SECTION_SPECS],
@@ -1000,6 +1074,13 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
             "pattern_tags": list(road_pattern.get("pattern_tags") or []),
         },
         "area_labels": list(area_labels.get("character_tags") or []),
+        "raw_evidence": {
+            "poi_frontend_analysis": dict(frontend.get("poi") or {}),
+            "population": population_raw,
+            "nightlight": dict(snapshot.nightlight or {}),
+            "shared_grid": dict(shared_grid or {}),
+            "poi_h3_evidence": dict(poi_h3_evidence or {}),
+        },
         "guardrails": {
             "write_business_judgment_not_data_description": True,
             "no_raw_metric_recital_as_headline": True,
@@ -1128,6 +1209,7 @@ async def _generate_summary_pack_with_llm(snapshot: Any, artifacts: Dict[str, An
     if not normalized:
         return {}
     prompt_snapshots: Dict[str, Any] = {}
+    validation_results: Dict[str, Any] = {}
     for section_key, section_title in _SUMMARY_SECTION_SPECS:
         try:
             section = await _generate_summary_section_with_llm(section_key, section_title, source_payload)
@@ -1138,10 +1220,32 @@ async def _generate_summary_pack_with_llm(snapshot: Any, artifacts: Dict[str, An
             section = {}
         if section:
             normalized[section_key] = section
+            validation_results[section_key] = _build_output_validation_result(
+                section_key,
+                section,
+                checks=_required_field_checks(section, ["section_key", "title", "reasoning"]),
+            )
     normalized = _normalize_area_judgment_reasoning(normalized, source_payload)
     validated = _validate_summary_pack_payload(normalized, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
+    if validated:
+        try:
+            tourism_payload = await _generate_tourism_cross_analysis_with_llm(source_payload, validated)
+            snapshot_payload = _pop_prompt_snapshot(tourism_payload)
+            if snapshot_payload:
+                prompt_snapshots["tourism_cross_analysis"] = snapshot_payload
+            if tourism_payload:
+                validated["tourism_cross_analysis"] = tourism_payload
+                validation_results["tourism_cross_analysis"] = _build_output_validation_result(
+                    "tourism_cross_analysis",
+                    tourism_payload,
+                    checks=_tourism_validation_checks(tourism_payload),
+                )
+        except Exception:
+            pass
     if validated and prompt_snapshots:
         validated["prompt_snapshots"] = prompt_snapshots
+    if validated and validation_results:
+        validated["validation_results"] = validation_results
     return validated
 
 
@@ -1245,6 +1349,52 @@ def _build_followup_questions_payload(source_payload: Dict[str, Any], summary_pa
     }
 
 
+def _build_tourism_cross_analysis_payload(source_payload: Dict[str, Any], summary_pack: Dict[str, Any]) -> Dict[str, Any]:
+    area_judgments = {
+        key: dict(summary_pack.get(key) or {})
+        for key, _ in _SUMMARY_SECTION_SPECS
+        if isinstance(summary_pack.get(key), dict)
+    }
+    return {
+        "task": "tourism_cross_analysis",
+        "evidence_version": "tourism_cross_analysis_v1",
+        "generated_summary": {
+            "headline_judgment": dict(summary_pack.get("headline_judgment") or {}),
+            "area_judgments": area_judgments,
+            "user_profile": dict(summary_pack.get("user_profile") or {}),
+            "behavior_inference": dict(summary_pack.get("behavior_inference") or {}),
+            "icsc_tags": list(summary_pack.get("icsc_tags") or []),
+        },
+        "population_evidence": {
+            "profile": dict(source_payload.get("population_profile") or {}),
+        },
+        "poi_evidence": {
+            "structure": dict(source_payload.get("poi_structure") or {}),
+            "h3_evidence": dict((source_payload.get("raw_evidence") or {}).get("poi_h3_evidence") or {}),
+            "business_profile": dict(source_payload.get("business_profile") or {}),
+            "frontend_analysis": dict((source_payload.get("raw_evidence") or {}).get("poi_frontend_analysis") or {}),
+        },
+        "nightlight_evidence": {
+            "pattern": dict(source_payload.get("nightlight_pattern") or {}),
+        },
+        "spatial_evidence": {
+            "spatial_structure": dict(source_payload.get("spatial_structure") or {}),
+            "road_pattern": dict(source_payload.get("road_pattern") or {}),
+            "area_labels": list(source_payload.get("area_labels") or []),
+            "shared_grid": dict((source_payload.get("raw_evidence") or {}).get("shared_grid") or {}),
+            "poi_h3_evidence": dict((source_payload.get("raw_evidence") or {}).get("poi_h3_evidence") or {}),
+        },
+        "guardrails": {
+            "no_external_facts": True,
+            "population_is_not_consumption_power": True,
+            "poi_is_not_business_quality_or_real_traffic": True,
+            "nightlight_is_not_consumption_revenue_or_real_traffic": True,
+            "sex_and_age_are_not_stereotype_shortcuts": True,
+            "state_evidence_limits_when_needed": True,
+        },
+    }
+
+
 def _validate_headline_section_payload(raw: Dict[str, Any]) -> Dict[str, str]:
     if not isinstance(raw, dict):
         return {}
@@ -1280,6 +1430,60 @@ def _validate_followup_questions_payload(raw: Dict[str, Any]) -> List[str]:
         if text and text not in questions:
             questions.append(text)
     return questions[:3]
+
+
+def _validate_tourism_cross_analysis_payload(raw: Dict[str, Any]) -> Dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    title = _clean_text(raw.get("title")) or "文旅交叉策划分析"
+    content = _clean_text(raw.get("content"))
+    if not content:
+        return {}
+    compact_content = re.sub(r"\s+", "", content).replace("x", "×").replace("X", "×").replace("Ｘ", "×")
+    cross_start = compact_content.find("五、")
+    cross_segment = compact_content[cross_start:cross_start + 80] if cross_start >= 0 else ""
+    has_cross_section = (
+        "人口" in cross_segment
+        and "POI" in cross_segment
+        and ("夜光" in cross_segment or "夜间灯光" in cross_segment or ("夜间" in cross_segment and "灯光" in cross_segment))
+        and "交叉" in cross_segment
+        and ("诊断" in cross_segment or "分析" in cross_segment)
+    )
+    required_markers_ready = (
+        "一、综合判断" in compact_content
+        and "九、策划结论" in compact_content
+        and has_cross_section
+    )
+    if not required_markers_ready:
+        return {}
+    return {
+        "title": title,
+        "content": content,
+    }
+
+
+def _tourism_validation_checks(output: Dict[str, Any]) -> List[Dict[str, Any]]:
+    content = _clean_text((output or {}).get("content"))
+    compact_content = re.sub(r"\s+", "", content).replace("x", "×").replace("X", "×").replace("Ｘ", "×")
+    cross_start = compact_content.find("五、")
+    cross_segment = compact_content[cross_start:cross_start + 80] if cross_start >= 0 else ""
+    return [
+        {"key": "required.title", "label": "必填字段 title", "passed": bool((output or {}).get("title"))},
+        {"key": "required.content", "label": "必填字段 content", "passed": bool(content)},
+        {"key": "section.1", "label": "包含一、综合判断", "passed": "一、综合判断" in compact_content},
+        {
+            "key": "section.5",
+            "label": "第五节包含人口 / POI / 夜光交叉诊断语义",
+            "passed": (
+                "人口" in cross_segment
+                and "POI" in cross_segment
+                and ("夜光" in cross_segment or "夜间灯光" in cross_segment or ("夜间" in cross_segment and "灯光" in cross_segment))
+                and "交叉" in cross_segment
+                and ("诊断" in cross_segment or "分析" in cross_segment)
+            ),
+        },
+        {"key": "section.9", "label": "包含九、策划结论", "passed": "九、策划结论" in compact_content},
+    ]
 
 
 async def _generate_headline_section_with_llm(source_payload: Dict[str, Any]) -> Dict[str, str]:
@@ -1321,6 +1525,19 @@ async def _generate_followup_questions_with_llm(source_payload: Dict[str, Any], 
     return _validate_followup_questions_payload(payload)
 
 
+async def _generate_tourism_cross_analysis_with_llm(source_payload: Dict[str, Any], summary_pack: Dict[str, Any]) -> Dict[str, str]:
+    config = _prompt_config_for("tourism_cross_analysis")
+    payload = await _invoke_json_role(
+        system_prompt=config.system_prompt,
+        user_payload=_build_tourism_cross_analysis_payload(source_payload, summary_pack),
+        emit=None,
+        phase="summary_tourism_cross_analysis",
+        title="生成文旅交叉策划分析",
+        reasoning_id="summary-tourism-cross-analysis-reasoning",
+    )
+    return _attach_prompt_snapshot(_validate_tourism_cross_analysis_payload(payload), "tourism_cross_analysis")
+
+
 async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIterator[AgentSummaryStreamEvent]:
     try:
         phases = ["precheck"]
@@ -1339,6 +1556,7 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
         normalized = _normalize_data_readiness(readiness_payload)
         summary_pack: Dict[str, Any] = {}
         prompt_snapshots: Dict[str, Any] = {}
+        validation_results: Dict[str, Any] = {}
         summary_status = _build_summary_status(
             status="data_incomplete",
             llm_available=is_llm_enabled(),
@@ -1406,6 +1624,11 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                     for chunk in _chunk_text_for_stream(headline_text):
                         yield _build_stream_event("section_delta", {"key": "headline", "delta": chunk})
                     summary_pack["headline_judgment"] = headline_payload
+                    validation_results["headline"] = _build_output_validation_result(
+                        "headline",
+                        headline_payload,
+                        checks=_required_field_checks(headline_payload, ["summary", "supporting_clause"]),
+                    )
                     yield _build_stream_event(
                         "section_complete",
                         {"key": "headline", "status": "ready", "payload": dict(headline_payload)},
@@ -1437,6 +1660,11 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                         for chunk in _chunk_text_for_stream(_clean_text(section_payload.get("reasoning"))):
                             yield _build_stream_event("section_delta", {"key": section_key, "delta": chunk})
                         summary_pack[section_key] = section_payload
+                        validation_results[section_key] = _build_output_validation_result(
+                            section_key,
+                            section_payload,
+                            checks=_required_field_checks(section_payload, ["section_key", "title", "reasoning"]),
+                        )
                         yield _build_stream_event(
                             "section_complete",
                             {"key": section_key, "status": "ready", "payload": dict(section_payload)},
@@ -1460,6 +1688,11 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                         for chunk in _chunk_text_for_stream(section_text):
                             yield _build_stream_event("section_delta", {"key": stream_key, "delta": chunk})
                         summary_pack[section_key] = section_payload
+                        validation_results[section_key] = _build_output_validation_result(
+                            section_key,
+                            section_payload,
+                            checks=_required_field_checks(section_payload, ["headline", "traits"]),
+                        )
                         yield _build_stream_event(
                             "section_complete",
                             {"key": stream_key, "status": "ready", "payload": dict(section_payload)},
@@ -1468,6 +1701,30 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                         warnings.append(f"{section_key}_generation_failed:{exc}")
                         yield _build_stream_event("error", {"key": stream_key, "message": str(exc)})
                         yield _build_stream_event("section_complete", {"key": stream_key, "status": "failed"})
+
+                try:
+                    tourism_payload = await _generate_tourism_cross_analysis_with_llm(source_payload, summary_pack)
+                    snapshot = _pop_prompt_snapshot(tourism_payload)
+                    if snapshot:
+                        prompt_snapshots["tourism_cross_analysis"] = snapshot
+                    yield _build_stream_event("section_start", {"key": "tourism_cross_analysis", "title": "文旅交叉策划分析"})
+                    for chunk in _chunk_text_for_stream(_clean_text(tourism_payload.get("content")), chunk_size=48):
+                        yield _build_stream_event("section_delta", {"key": "tourism_cross_analysis", "delta": chunk})
+                    if tourism_payload:
+                        summary_pack["tourism_cross_analysis"] = tourism_payload
+                        validation_results["tourism_cross_analysis"] = _build_output_validation_result(
+                            "tourism_cross_analysis",
+                            tourism_payload,
+                            checks=_tourism_validation_checks(tourism_payload),
+                        )
+                    yield _build_stream_event(
+                        "section_complete",
+                        {"key": "tourism_cross_analysis", "status": "ready", "payload": dict(tourism_payload)},
+                    )
+                except Exception as exc:
+                    warnings.append(f"tourism_cross_analysis_generation_failed:{exc}")
+                    yield _build_stream_event("error", {"key": "tourism_cross_analysis", "message": str(exc)})
+                    yield _build_stream_event("section_complete", {"key": "tourism_cross_analysis", "status": "failed"})
 
                 try:
                     followup_questions = await _generate_followup_questions_with_llm(source_payload, summary_pack)
@@ -1499,8 +1756,12 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                 if normalized_pack:
                     if summary_pack.get("followup_questions"):
                         normalized_pack["followup_questions"] = list(summary_pack.get("followup_questions") or [])
+                    if summary_pack.get("tourism_cross_analysis"):
+                        normalized_pack["tourism_cross_analysis"] = dict(summary_pack.get("tourism_cross_analysis") or {})
                     if prompt_snapshots:
                         normalized_pack["prompt_snapshots"] = dict(prompt_snapshots)
+                    if validation_results:
+                        normalized_pack["validation_results"] = dict(validation_results)
                     summary_pack = normalized_pack
                     summary_status = _build_summary_status(
                         status="ready",
@@ -1546,6 +1807,8 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
             panel_payloads["summary_followup_questions"] = list(summary_pack.get("followup_questions") or [])
         if prompt_snapshots:
             panel_payloads["prompt_snapshots"] = dict(prompt_snapshots)
+        if validation_results:
+            panel_payloads["validation_results"] = dict(validation_results)
         panel_payloads["data_readiness"] = dict(normalized)
         phases.append("completed")
         yield _build_stream_event(
@@ -1704,6 +1967,9 @@ async def generate_summary_pack(payload: AgentSummaryRequest) -> AgentSummaryGen
                         warnings.append(str(exc))
                         summary_pack = {}
                     if summary_pack:
+                        validation_results = _build_summary_output_validation_results(summary_pack)
+                        if validation_results:
+                            summary_pack["validation_results"] = validation_results
                         summary_status = _build_summary_status(
                             status="ready",
                             llm_available=True,
@@ -1761,6 +2027,8 @@ async def generate_summary_pack(payload: AgentSummaryRequest) -> AgentSummaryGen
         )
         if isinstance(summary_pack.get("prompt_snapshots"), dict):
             panel_payloads["prompt_snapshots"] = dict(summary_pack.get("prompt_snapshots") or {})
+        if isinstance(summary_pack.get("validation_results"), dict):
+            panel_payloads["validation_results"] = dict(summary_pack.get("validation_results") or {})
         panel_payloads["data_readiness"] = dict(normalized)
 
         return AgentSummaryGenerateResponse(

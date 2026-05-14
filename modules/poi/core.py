@@ -27,6 +27,24 @@ POI_ENTRY_EXIT_SUFFIX_RE = re.compile(
     r"(停车场)?(出入口|入口|出口|东门|西门|南门|北门|[A-Za-z]口|[0-9]+号口)$"
 )
 
+class AmapPoiFetchError(RuntimeError):
+    """Raised when AMap returns an explicit failed response for a POI query."""
+
+
+def _format_amap_error(data: Dict, fallback: str = "AMap polygon query failed") -> str:
+    status = data.get("status")
+    info = data.get("info")
+    infocode = data.get("infocode")
+    details = []
+    if status is not None:
+        details.append(f"status={status}")
+    if info:
+        details.append(f"info={info}")
+    if infocode:
+        details.append(f"infocode={infocode}")
+    return f"{fallback} ({', '.join(details)})" if details else fallback
+
+
 class KeyManager:
     """Manages multiple API keys with rotation and exhaustion tracking"""
     def __init__(self, key_string: str):
@@ -440,13 +458,14 @@ def _to_local_query_polygon(polygon_gcj02: List[List[float]]) -> List[List[float
 async def _fetch_amap_page_one(polygon, keywords, types, key_manager, limiter, session):
     """Fetch page 1 to get total count and first batch"""
     poly_str = ";".join([f"{p[0]:.6f},{p[1]:.6f}" for p in polygon])
+    last_error = ""
     
     # Retry loop for key rotation
     for key_attempt in range(len(key_manager.keys) + 1):
         current_key = key_manager.get_current_key()
         if not current_key:
              logger.error("All API keys exhausted!")
-             return 0, []
+             raise AmapPoiFetchError("AMap API keys exhausted or unavailable")
 
         params = {
             "key": current_key, "polygon": poly_str, "keywords": keywords, "types": types,
@@ -459,7 +478,8 @@ async def _fetch_amap_page_one(polygon, keywords, types, key_manager, limiter, s
             try:
                 async with session.get(AMAP_POLYGON_URL, params=params, timeout=5) as resp:
                     if resp.status != 200:
-                        logger.warning(f"HTTP {resp.status}")
+                        last_error = f"HTTP {resp.status}"
+                        logger.warning(last_error)
                         continue
                     
                     data = await resp.json()
@@ -472,18 +492,23 @@ async def _fetch_amap_page_one(polygon, keywords, types, key_manager, limiter, s
                         return count, pois
                     elif status == "0" and data.get("infocode") == "10003":
                         # QPS Limit
+                        last_error = _format_amap_error(data, "AMap QPS limit")
                         await limiter.trigger_backoff(2.0 + random.random())
                         continue # Retry same key
                     elif status == "0" and data.get("infocode") == "10044":
                         # DAILY LIMIT - Switch Key!
+                        last_error = _format_amap_error(data, "AMap daily quota limit")
                         logger.warning(f"Daily limit reached for key {current_key[:6]}... Switching...")
                         await key_manager.report_limit_reached()
                         break # Break retry loop to outer key loop
                     else:
-                        logger.warning(f"Key {current_key[:6]}... Error: status={status}, info={data.get('info')}, infocode={data.get('infocode')}")
-                        # If invalid key (10001), maybe also switch? keeping simple for now
-                        return 0, []
+                        last_error = _format_amap_error(data)
+                        logger.warning(f"Key {current_key[:6]}... Error: {last_error}")
+                        raise AmapPoiFetchError(last_error)
             except Exception as e:
+                if isinstance(e, AmapPoiFetchError):
+                    raise
+                last_error = str(e)
                 logger.warning(f"Fetch page 1 error: {e}")
                 await asyncio.sleep(0.5)
         else:
@@ -491,7 +516,7 @@ async def _fetch_amap_page_one(polygon, keywords, types, key_manager, limiter, s
             # But if we broke out due to 10044, we continue to next key
             pass
 
-    return 0, []
+    raise AmapPoiFetchError(last_error or "AMap page 1 fetch failed after retries")
 
 async def _fetch_remaining_pages(
     polygon,
@@ -507,6 +532,7 @@ async def _fetch_remaining_pages(
     all_pois = []
     page_size = 25
     max_pages = _calculate_amap_page_count(total_count, page_size)
+    last_error = ""
     
     # Start from page 2
     for page in range(2, max_pages + 1):
@@ -514,7 +540,9 @@ async def _fetch_remaining_pages(
         success = False
         for key_attempt in range(len(key_manager.keys) + 1):
             current_key = key_manager.get_current_key()
-            if not current_key: break
+            if not current_key:
+                last_error = "AMap API keys exhausted or unavailable"
+                break
 
             params = {
                 "key": current_key, "polygon": poly_str, "keywords": keywords, "types": types,
@@ -537,19 +565,31 @@ async def _fetch_remaining_pages(
                                 success = True
                                 break
                             elif data.get("infocode") == "10003":
+                                last_error = _format_amap_error(data, "AMap QPS limit")
                                 await limiter.trigger_backoff(2.0)
                             elif data.get("infocode") == "10044":
+                                 last_error = _format_amap_error(data, "AMap daily quota limit")
                                  logger.warning(f"Daily limit (page fetch) for key {current_key[:6]}... Switching...")
                                  await key_manager.report_limit_reached()
                                  break # Break network loop, retry with new key
-                except:
-                    pass
+                            else:
+                                last_error = _format_amap_error(data)
+                        else:
+                            last_error = f"HTTP {resp.status}"
+                except Exception as exc:
+                    last_error = str(exc)
             
             if success: break # Page fetched, move to next page
         
         if not success:
-            logger.warning(f"Failed to fetch page {page}")
-            break
+            message = (
+                f"AMap page {page} fetch failed after retries"
+                f"; fetched {len(all_pois)} of estimated {total_count}"
+            )
+            if last_error:
+                message = f"{message}; last_error={last_error}"
+            logger.warning(message)
+            raise AmapPoiFetchError(message)
             
     return all_pois
 

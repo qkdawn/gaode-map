@@ -104,3 +104,106 @@ test('fetchPois sends one multi-year request and applies backend aggregation pay
     global.fetch = previousFetch
   }
 })
+
+test('poi raster grid exposes public target label for templates', () => {
+  const ctx = createContext({
+    h3TargetCategory: 'food',
+    h3CategoryMeta: [{ key: 'food', label: '餐饮' }],
+  })
+
+  assert.equal(ctx.getPoiRasterTargetCategoryLabel(), '餐饮')
+})
+
+test('ensurePoiRasterGrid force refreshes raster features from grid API', async () => {
+  const ctx = createContext({
+    poiSubTab: 'grid',
+    poiGridType: 'raster',
+    poiGridFeatures: [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [] },
+      properties: { cell_id: 'old-cell', h3_id: 'old-cell', poi_count: 9 },
+    }],
+    poiGridSummary: { grid_count: 1, max_poi_count: 9 },
+    selectedH3Id: 'old-cell',
+    getIsochronePolygonRing() {
+      return [[1, 1], [1, 2], [2, 2], [1, 1]]
+    },
+    mapCore: {
+      cleared: 0,
+      rendered: null,
+      clearGridPolygons() {
+        this.cleared += 1
+      },
+      setGridFeatures(features, options) {
+        this.rendered = { features, options }
+      },
+    },
+  })
+  const previousFetch = global.fetch
+  const requests = []
+  global.fetch = async (url, options = {}) => {
+    requests.push({ url, body: JSON.parse(options.body || '{}') })
+    return {
+      ok: true,
+      json: async () => ({
+        features: [{
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+          properties: { cell_id: 'new-cell', poi_count: 3 },
+        }],
+        summary: { grid_count: 1, active_cell_count: 1, assigned_poi_count: 3, max_poi_count: 3 },
+      }),
+    }
+  }
+
+  try {
+    const data = await ctx.ensurePoiRasterGrid(true)
+
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].url, '/api/v1/analysis/pois/grid')
+    assert.equal(requests[0].body.year, 2020)
+    assert.equal(ctx.poiGridFeatures[0].properties.cell_id, 'new-cell')
+    assert.equal(ctx.poiGridSummary.grid_count, 1)
+    assert.equal(ctx.selectedH3Id, null)
+    assert.equal(ctx.mapCore.cleared, 1)
+    assert.equal(data.summary.assigned_poi_count, 3)
+  } finally {
+    global.fetch = previousFetch
+  }
+})
+
+test('restorePoiRasterGridDisplayOnEnter renders clickable styled raster features', () => {
+  const ctx = createContext({
+    poiSubTab: 'grid',
+    poiGridType: 'raster',
+    poiGridSummary: { max_poi_count: 6 },
+    poiGridFeatures: [
+      {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+        properties: { cell_id: 'r0_c0', poi_count: 0 },
+      },
+      {
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [[[1, 0], [2, 0], [2, 1], [1, 0]]] },
+        properties: { cell_id: 'r0_c1', poi_count: 6 },
+      },
+    ],
+    mapCore: {
+      rendered: null,
+      clearGridPolygons() {},
+      setGridFeatures(features, options) {
+        this.rendered = { features, options }
+      },
+    },
+  })
+
+  ctx.restorePoiRasterGridDisplayOnEnter()
+
+  assert.equal(ctx.mapCore.rendered.options.clickable, true)
+  assert.equal(ctx.mapCore.rendered.options.webglBatch, false)
+  assert.equal(ctx.mapCore.rendered.features[0].properties.h3_id, 'r0_c0')
+  assert.equal(ctx.mapCore.rendered.features[1].properties.h3_id, 'r0_c1')
+  assert.equal(ctx.mapCore.rendered.features[0].properties.fillColor, '#f8fafc')
+  assert.equal(ctx.mapCore.rendered.features[1].properties.fillColor, '#1d4ed8')
+})

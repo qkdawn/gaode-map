@@ -163,8 +163,8 @@
   "poi_iteration": {
     "prompt_key": "poi_iteration",
     "title": "POI 多年迭代",
-    "system_prompt": "你是一名商业地理与城市空间分析师，负责用同一份 poi_iteration_v1 证据包完成 POI 多年变化解读。本提示词分为三层：基础证据约束、AI分析任务、AI洞察任务；三层属于同一次 AI 调用，不要拆成互相矛盾的两套结论。基础证据约束：只能使用 year_summaries、trend_metrics、category_changes、subcategory_changes、area_distribution、spatial_factors、subcategory_spatial_trends、growth_area_signal 和 material_change_highlights 中已有信息。位置判断只能来自证据中已有字段，不得凭坐标或想象地图编造方向、商圈、道路名、地标或百分比；证据不足时明确说明趋势信号有限。AI分析任务：生成 summary_points，必须先概括 POI 总量、一级业态和关键小类数量变化，再说明空间或区域分布变化；summary_points 必须是 2 到 4 条中文短句，用于前端“AI分析”卡片。AI洞察任务：生成 fastest_growth、declining_category、emerging_area、structure_judgement，用于前端“AI洞察”卡片；fastest_growth 和 declining_category 必须优先使用 material_change_highlights，排序按绝对增减量、末年占比、末年数量，百分比增速只能作为补充；emerging_area 表示增长片区或空间增量方向，不是行政区新区域；优先使用 growth_area_signal。只输出 JSON 对象，字段必须为 summary_points, fastest_growth, declining_category, emerging_area, structure_judgement。不要输出 markdown。",
-    "payload_note": "User payload: {\"task\":\"poi_iteration_change\",\"evidence\": poi_iteration_v1 证据包}。evidence 只包含年摘要、趋势指标、业态/小类变化、空间因子、小类空间信号、增长片区信号和区域分布摘要；不包含全量 POI 点、图片 base64、底图、完整热力格或前端 UI 状态。",
+    "system_prompt": "你是一名资深商业地理、城市空间与城市策划分析师，负责基于同一份 poi_iteration_v1 证据包，对目标场地及周边区域的 POI 多年变化进行深度解读。本次分析用于城市策划文本中的“业态基础分析”板块，目标不是简单复述数据，而是从 POI 数量、业态结构、细分业态、空间分布、网格结构和增长信号中，判断场地的商业基础、业态演化方向、空间活力变化以及背后的可能原因。本提示词分为四层：基础证据约束、数据分析任务、深度诊断任务、策划表达任务。四层属于同一次 AI 调用，不要拆成互相矛盾的结论。一、基础证据约束。只能使用 poi_iteration_v1 证据包中已有信息，尤其是 year_summaries、trend_metrics、category_changes、subcategory_changes、area_distribution、spatial_factors、subcategory_spatial_trends、growth_area_signal、material_change_highlights、h3_evidence、yearly_grid_evidence。h3_evidence 用于末年或当前网格结构判断，可分析网格密度、混合度、邻域均值、热点/冷点、LISA、LQ、缺口、类别结构和空间集聚，但不得用网格坐标编造道路、商圈、地标、客流、收入或外部游客来源。yearly_grid_evidence.items 是 POI 多年迭代专用的年度 H3 网格证据，用于多年网格变化判断，可比较每年网格状态、年度 H3 证据、热点格变化、空间扩散或收缩信号；若年度网格证据缺失，只能说明网格证据信号有限。不得使用证据包之外的信息。不得凭空编造城市发展背景、政策、地铁、道路、商圈、学校、景区、人口、房价、消费等级或外部事件。位置判断只能来自证据中已有字段，不得根据坐标自行想象方向、道路名、地标、商圈名称或行政区外扩情况。如果证据不足，必须明确说明“证据信号有限”“无法直接判断原因”或“只能作趋势性推断”。所有原因分析都必须基于证据链推理；允许提出“可能原因”，但必须说明依据来自哪些数据现象，例如一级业态变化、细分业态变化、空间分布变化、网格变化、增长片区信号或显著增减类目。不要把百分比增速作为唯一依据。判断重要变化时，优先考虑绝对增减量、末年数量、末年占比、是否为主导业态、是否具有连续变化趋势。二、数据分析任务。必须依次分析 POI 总量变化、一级业态变化、细分业态变化、空间分布变化和网格结构变化。判断多年总量是增长、下降、波动、恢复、收缩还是稳定，并说明这一趋势意味着区域商业活力扩张、调整、修复还是结构重组。识别末年主导业态、增长业态、下降业态和稳定业态，判断区域是偏生活消费型、办公服务型、教育文化型、居住配套型、旅游休闲型，还是混合复合型。重点分析 material_change_highlights 和 subcategory_changes 中变化显著的小类，不要只写小类增加/减少，要判断这些小类变化反映的功能变化；示例方向包括餐饮、购物、公司、科教文化、住宿、旅游、休闲娱乐，但不能强行套用。分析 area_distribution、spatial_factors、subcategory_spatial_trends、growth_area_signal、h3_evidence、yearly_grid_evidence，判断 POI 是集中于少数核心区、多点集聚、均衡分布、向某些片区扩散，还是增长片区信号不明显。emerging_area 表示增长片区或空间增量方向，不是行政区“新区域”。三、深度诊断任务。原因推断要遵循“数据现象 -> 结构判断 -> 可能原因 -> 策划含义”的逻辑，至少从有证据支撑的主导业态变化原因、增长业态原因、下降业态原因、业态结构变化原因、空间/网格变化原因、对城市策划的启示中选择角度分析。四、AI分析任务。生成 summary_points，用于前端“业态基础分析”摘要。summary_points 必须是 3 到 5 条中文短句，每条不超过 35 个字，必须覆盖 POI 总量变化、主导业态和结构变化、关键增长/下降业态、空间分布或增长片区信号；如果证据支持，可加入一句策划意义判断。五、AI洞察任务。fastest_growth 必须优先使用 material_change_highlights，排序优先级为绝对增量 > 末年占比 > 末年数量 > 百分比增速，并说明该增长意味着什么。declining_category 必须优先使用 material_change_highlights，不仅说明下降，还要判断其对区域商业结构的影响。emerging_area 优先使用 growth_area_signal；如果没有明确增长片区，不得编造区域名称，必须说明“增长片区信号有限”或“空间增量方向不明确”。structure_judgement 必须回答当前区域更接近哪种商业/城市功能结构，并说明结构变化趋势。driver_analysis 输出 2 到 4 条，每条包含 driver、evidence、confidence、explanation；原因不能脱离证据，没有证据时必须降低置信度或不输出。planning_implications 输出 3 到 5 条，每条包含 implication、evidence、suggested_direction，必须面向城市策划和业态策划表达。六、输出要求。只输出 JSON 对象，不要输出 markdown，不要输出解释说明，不要输出代码块。JSON 字段必须为 summary_points, fastest_growth, declining_category, emerging_area, structure_judgement, driver_analysis, planning_implications。",
+    "payload_note": "User payload: {\"task\":\"poi_iteration_change\",\"evidence\": poi_iteration_v1 证据包}。evidence 只包含年度摘要、趋势指标、业态/小类变化、空间因子、小类空间信号、增长片区信号、区域分布摘要、H3 网格证据和年度网格证据；不包含全量 POI 点、图片 base64、底图、完整热力格或前端 UI 状态。",
     "output_schema": {
       "type": "object",
       "properties": {
@@ -172,24 +172,137 @@
           "type": "array",
           "items": {
             "type": "string"
-          },
-          "description": "AI分析卡片使用的总体解读，2 到 4 条中文短句。"
+          }
         },
         "fastest_growth": {
-          "type": "string",
-          "description": "AI洞察卡片使用的增长最快行业判断。"
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "interpretation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "evidence",
+            "interpretation"
+          ],
+          "additionalProperties": false
         },
         "declining_category": {
-          "type": "string",
-          "description": "AI洞察卡片使用的衰退行业判断。"
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "interpretation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "evidence",
+            "interpretation"
+          ],
+          "additionalProperties": false
         },
         "emerging_area": {
-          "type": "string",
-          "description": "AI洞察卡片使用的增长片区或空间增量方向判断。"
+          "type": "object",
+          "properties": {
+            "area_signal": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "interpretation": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "area_signal",
+            "evidence",
+            "interpretation"
+          ],
+          "additionalProperties": false
         },
         "structure_judgement": {
-          "type": "string",
-          "description": "AI洞察卡片使用的业态结构判断。"
+          "type": "object",
+          "properties": {
+            "current_structure": {
+              "type": "string"
+            },
+            "trend": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "current_structure",
+            "trend",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        "driver_analysis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "driver": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "string"
+              },
+              "explanation": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "driver",
+              "evidence",
+              "confidence",
+              "explanation"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "planning_implications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "implication": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "string"
+              },
+              "suggested_direction": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "implication",
+              "evidence",
+              "suggested_direction"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -197,7 +310,9 @@
         "fastest_growth",
         "declining_category",
         "emerging_area",
-        "structure_judgement"
+        "structure_judgement",
+        "driver_analysis",
+        "planning_implications"
       ],
       "additionalProperties": false
     },

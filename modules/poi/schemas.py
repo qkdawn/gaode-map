@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 from pydantic import BaseModel, Field
 
 class PoiRequest(BaseModel):
@@ -35,6 +35,41 @@ class PoiCategoryRequest(BaseModel):
     id: str = Field(..., description="Frontend category id")
     name: str = Field(default="", description="Category display name")
     types: str = Field(default="", description="Pipe-separated POI type codes")
+
+
+class PoiGridRequest(BaseModel):
+    polygon: list = Field(..., description="Polygon or multi-ring polygon payload")
+    coord_type: Literal["gcj02", "wgs84"] = Field(default="gcj02", description="Polygon coordinate type")
+    pois: List[dict] = Field(default_factory=list, description="POI records to aggregate")
+    poi_coord_type: Literal["gcj02", "wgs84"] = Field(default="gcj02", description="POI coordinate type")
+    categories: List[PoiCategoryRequest] = Field(default_factory=list, description="Selected POI categories")
+    year: Optional[int] = Field(default=None, description="Optional POI data year")
+
+
+class PoiGridCategoryRow(BaseModel):
+    id: str
+    name: str
+    count: int = 0
+
+
+class PoiGridSummary(BaseModel):
+    grid_count: int = 0
+    active_cell_count: int = 0
+    poi_count: int = 0
+    assigned_poi_count: int = 0
+    max_poi_count: int = 0
+    avg_density_poi_per_km2: float = 0.0
+    top_cells: List[Dict[str, Any]] = Field(default_factory=list)
+    category_counts: List[PoiGridCategoryRow] = Field(default_factory=list)
+
+
+class PoiGridResponse(BaseModel):
+    type: str = "FeatureCollection"
+    grid_type: str = "raster"
+    count: int = 0
+    cell_count: int = 0
+    features: List[dict] = Field(default_factory=list)
+    summary: PoiGridSummary = Field(default_factory=PoiGridSummary)
 
 
 class PoiMultiYearRequest(BaseModel):

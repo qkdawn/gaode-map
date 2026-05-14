@@ -195,7 +195,11 @@
                     && nextPanelId !== STEP3_PANEL_IDS.POI
                     && !(typeof this.hasSimplifyDisplayTarget === 'function' && this.hasSimplifyDisplayTarget('h3'))
                 ) {
-                    this.clearH3GridDisplayOnLeave();
+                    if (typeof this.isPoiRasterGridMode === 'function' && this.isPoiRasterGridMode()) {
+                        if (typeof this.clearPoiRasterGridDisplayOnLeave === 'function') this.clearPoiRasterGridDisplayOnLeave();
+                    } else {
+                        this.clearH3GridDisplayOnLeave();
+                    }
                 }
                 const nextPoiSubTab = openPoiGrid ? 'grid' : String(this.poiSubTab || '').trim().toLowerCase();
                 const nextShowsH3Panel = nextPanelId === STEP3_PANEL_IDS.POI && nextPoiSubTab === 'grid';
@@ -213,11 +217,16 @@
                             this.updatePoiCharts();
                             setTimeout(() => this.resizePoiChart(), 0);
                         } else if (poiTab === 'grid') {
-                            this.syncH3PoiFilterSelection(false);
-                            this.ensureH3PanelEntryState();
-                            this.restoreH3GridDisplayOnEnter();
-                            if (typeof this.updateH3Charts === 'function') this.updateH3Charts();
-                            if (typeof this.updateDecisionCards === 'function') this.updateDecisionCards();
+                            if (typeof this.isPoiRasterGridMode === 'function' && this.isPoiRasterGridMode()) {
+                                if (typeof this.ensurePoiRasterGrid === 'function') this.ensurePoiRasterGrid();
+                                if (typeof this.restorePoiRasterGridDisplayOnEnter === 'function') this.restorePoiRasterGridDisplayOnEnter();
+                            } else {
+                                this.syncH3PoiFilterSelection(false);
+                                this.ensureH3PanelEntryState();
+                                this.restoreH3GridDisplayOnEnter();
+                                if (typeof this.updateH3Charts === 'function') this.updateH3Charts();
+                                if (typeof this.updateDecisionCards === 'function') this.updateDecisionCards();
+                            }
                         } else {
                             this.clearPoiKdeOverlay();
                         }

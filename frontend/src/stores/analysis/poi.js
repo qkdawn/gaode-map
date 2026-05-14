@@ -23,6 +23,7 @@ export const useAnalysisPoiStore = defineStore('analysis_poi', {
     isFetchingPois: false,
     fetchProgress: 0,
     poiStatus: '',
+    poiFetchErrors: [],
     pointSimplifyEnabled: false,
     pointLayersSuspendedForSyntax: false,
     poiSystemSuspendedForSyntax: false,

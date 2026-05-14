@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import {
   createAnalysisAgentInitialState,
   createAnalysisAgentSessionMethods,
+  buildAnalysisTaskParamBundle,
   deriveAgentSessionPreview,
   getAnalysisTaskDefinition,
   resolveAnalysisTaskKeyFromTrace,
@@ -35,9 +36,33 @@ function createSseResponse(events = []) {
 
 function createAgentContext(overrides = {}) {
   const state = createAnalysisAgentInitialState()
+const defaultYearlyGridEvidence = {
+  evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
+  years: [2023, 2024, 2025],
+  grid_scope: 'poi_iteration_h3_per_year',
+  grid_type: 'h3',
+  latest_year: 2025,
+  latest_h3_evidence: { evidence_version: 'poi_h3_evidence_v1' },
+  items: [
+      { year: 2023, status: 'ready', h3_evidence: {} },
+      { year: 2024, status: 'ready', h3_evidence: {} },
+      { year: 2025, status: 'ready', h3_evidence: {} },
+  ],
+}
+  const basePayloads = {
+    ...state.agentPanelPayloads,
+    iteration_change: {
+      ...(state.agentPanelPayloads.iteration_change || {}),
+      poi: {
+        ...((state.agentPanelPayloads.iteration_change || {}).poi || {}),
+        yearly_grid_evidence: defaultYearlyGridEvidence,
+      },
+    },
+  }
   const ctx = {
     ...state,
     ...agentMethods,
+    agentPanelPayloads: basePayloads,
     sidebarView: 'wizard',
     step: 2,
     activeStep3Panel: 'agent',
@@ -61,6 +86,15 @@ function createAgentContext(overrides = {}) {
     isComputingNightlight: false,
     isComputingRoadSyntax: false,
     h3NeighborRing: 1,
+    h3GridMinOverlapRatio: 0.15,
+    h3MetricView: 'density',
+    h3StructureFillMode: 'gi_z',
+    h3OnlySignificant: false,
+    h3EntropyMinPoi: 3,
+    h3LqSmoothingAlpha: 0.5,
+    h3TargetCategory: '',
+    h3CategoryMeta: [],
+    h3DerivedStats: {},
     roadSyntaxMetric: 'connectivity',
     roadSyntaxMainTab: 'params',
     populationAnalysisView: 'analysis',
@@ -238,6 +272,63 @@ test('openAgentToolsPanel switches to tools view and loads tools once', async ()
   await Promise.resolve()
 
   assert.equal(fetchCount, 1)
+})
+
+test('agent tools panel exposes categorized input packages', () => {
+  const ctx = createAgentContext({
+    poiGridType: 'raster',
+    poiDataSource: 'local',
+    resultDataSource: 'local',
+    poiYearSource: '2024',
+    h3GridResolution: 9,
+    h3NeighborRing: 2,
+    h3GridIncludeMode: 'intersects',
+    h3GridMinOverlapRatio: 0.35,
+    poiGridSummary: {
+      grid_count: 2,
+      active_cell_count: 1,
+      assigned_poi_count: 5,
+      max_poi_count: 5,
+      avg_density_poi_per_km2: 12,
+    },
+    poiGridFeatures: [
+      { type: 'Feature', properties: { cell_id: 'r0_c0', poi_count: 5, density_poi_per_km2: 12, dominant_category_name: '餐饮' } },
+    ],
+    h3AnalysisSummary: {
+      grid_count: 8,
+      poi_count: 5,
+      avg_density_poi_per_km2: 8,
+      avg_local_entropy: 0.42,
+    },
+    populationLayer: {
+      cells: [{ cell_id: 'r0_c0', value: 100 }],
+    },
+    nightlightLayer: {
+      cells: [{ cell_id: 'r0_c0', value: 20, class_label: '高亮' }],
+    },
+    populationOverview: { summary: { total_population: 100 } },
+    nightlightOverview: { summary: { mean_radiance: 20 } },
+  })
+
+  assert.equal(ctx.agentToolsViewMode, 'tools')
+  ctx.setAgentToolsViewMode('input_packages')
+  assert.equal(ctx.agentToolsViewMode, 'input_packages')
+
+  const groups = ctx.buildAgentInputPackageGroups()
+  assert.deepEqual(groups.map((group) => group.key), ['param_bundles', 'shared_grid', 'poi_spatial', 'summary_evidence'])
+  assert.equal(groups[0].items.length, 6)
+  assert.equal(groups[1].items[0].rawInput.evidence_version, 'shared_grid_evidence_v1')
+  assert.equal(groups[1].items[0].rawInput.top_coupled_cells[0].cell_id, 'r0_c0')
+  assert.equal(groups[1].items[0].rawInput.poi_h3_evidence, undefined)
+
+  const poiSpatial = groups[2].items
+  assert.equal(poiSpatial.find((item) => item.key === 'poi_raster'), undefined)
+  assert.equal(poiSpatial.find((item) => item.key === 'poi_h3').rawInput.evidence_version, 'poi_h3_evidence_v1')
+
+  const h3Payload = ctx.buildAgentInputPackageBasisPayload(poiSpatial.find((item) => item.key === 'poi_h3'))
+  assert.equal(h3Payload.rawInput.evidence_version, 'poi_h3_evidence_v1')
+  assert.equal(h3Payload.rawInput.params.h3_resolution, 9)
+  assert.equal(h3Payload.fields.some((field) => field.key === 'source_path' && field.value === 'h3.poi_h3_evidence'), true)
 })
 
 test('backToAgentChat keeps conversation state and cached tools', () => {
@@ -458,6 +549,16 @@ test('agent summary headline basis payload exposes structured evidence and real 
             evidence_version: 'summary_pack_v1',
           },
         },
+        validation_results: {
+          headline: {
+            source: 'backend',
+            prompt_key: 'headline',
+            status: 'passed',
+            output_schema: { required: ['summary'] },
+            validated_output: { summary: 'This is a food-led young consumer district.' },
+            checks: [{ key: 'required.summary', label: '必填字段 summary', passed: true }],
+          },
+        },
       },
       current_business_profile: {
         business_profile: 'food-led district',
@@ -512,6 +613,9 @@ test('agent summary headline basis payload exposes structured evidence and real 
   assert.equal(payload.aiPromptPayloadNote, 'REAL headline payload note')
   assert.equal(payload.promptSourceLabel, '本次生成实际使用的提示词快照')
   assert.deepEqual(payload.outputSchema, { required: ['summary'] })
+  assert.equal(payload.validationResults.headline.source, 'backend')
+  assert.deepEqual(payload.validationResults.headline.validated_output, { summary: 'This is a food-led young consumer district.' })
+  assert.equal(ctx.getBasisDrawerTabs().some((item) => item.key === 'validation'), true)
   assert.equal(payload.rawInput.evidence.task, 'summary_pack_generation')
 })
 
@@ -575,6 +679,16 @@ test('agent nightlight iteration basis payload uses evidence pack prompt and non
       output_schema: { required: ['headline', 'hotspot_migration'] },
       evidence_version: 'nightlight_iteration_v1',
     },
+    validation_results: {
+      nightlight_iteration: {
+        source: 'backend',
+        prompt_key: 'nightlight_iteration',
+        status: 'passed',
+        output_schema: { required: ['headline', 'hotspot_migration'] },
+        validated_output: { headline: 'Nightlight is increasing.', hotspot_migration: 'Hotspots moved east.' },
+        checks: [{ key: 'required.headline', label: '必填字段 headline', passed: true }],
+      },
+    },
   })
 
   const payload = ctx.buildAgentIterationBasisPayload('nightlight')
@@ -584,6 +698,8 @@ test('agent nightlight iteration basis payload uses evidence pack prompt and non
   assert.match(payload.aiPrompt, /headline/)
   assert.match(payload.aiPrompt, /hotspot_migration/)
   assert.match(payload.aiPromptPayloadNote, /nightlight_iteration_v1/)
+  assert.equal(payload.validationResults.nightlight_iteration.source, 'backend')
+  assert.equal(payload.validationResults.nightlight_iteration.validated_output.headline, 'Nightlight is increasing.')
   assert.equal(JSON.stringify(payload.rawInput).includes('data:image'), false)
 })
 
@@ -622,11 +738,16 @@ test('rule basis payloads expose algorithm fields and clearly state no ai call',
 })
 
 test('analysis task registry maps backend tool traces to left panel tasks', () => {
-  assert.equal(getAnalysisTaskDefinition('poi_grid').panelId, 'poi')
+  assert.equal(getAnalysisTaskDefinition('poi_raster_grid').panelId, 'poi')
+  assert.equal(getAnalysisTaskDefinition('poi_h3_grid').panelId, 'poi')
+  assert.equal(resolveAnalysisTaskKeyFromTrace({
+    tool_name: 'aggregate_pois_to_shared_grid',
+    status: 'success',
+  }), 'poi_raster_grid')
   assert.equal(resolveAnalysisTaskKeyFromTrace({
     tool_name: 'compute_h3_metrics_from_scope_and_pois',
     status: 'success',
-  }), 'poi_grid')
+  }), 'poi_h3_grid')
   assert.equal(resolveAnalysisTaskKeyFromTrace({
     tool_name: 'compute_population_overview_from_scope',
     status: 'success',
@@ -644,7 +765,7 @@ test('analysis task registry maps backend tool traces to left panel tasks', () =
 test('agent task adjustment focuses the correct first and second level panels', () => {
   const ctx = createAgentContext({
     agentPendingTaskConfirmation: {
-      taskKey: 'poi_grid',
+      taskKey: 'poi_h3_grid',
       status: 'ready',
     },
   })
@@ -2680,6 +2801,178 @@ test('onAgentCardItemClick switches to result panel and focuses target h3 cell',
   assert.equal(focusedH3Id, '8928308280fffff')
 })
 
+test('site selection tab exposes target readiness and blocks missing target', () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentChat()
+  const tabId = ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+
+  assert.equal(ctx.agentTabs.activeTabId, tabId)
+  assert.equal(ctx.isAgentSiteSelectionTabActive(), true)
+  assert.equal(ctx.getAgentTopTabs().find((item) => item.id === tabId).kind, 'site_selection')
+  assert.equal(ctx.canRunAgentSiteSelection(), false)
+
+  ctx.setAgentSiteSelectionTargetType('咖啡店')
+
+  assert.equal(ctx.inferAgentSiteSelectionTargetType(), '咖啡店')
+  assert.equal(ctx.getAgentSiteSelectionBlockingItems().length, 0)
+  assert.equal(ctx.canRunAgentSiteSelection(), true)
+})
+
+test('site selection analysis calls direct API instead of agent stream', async () => {
+  const calls = []
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.currentHistoryRecordId = 'history-1'
+  ctx.startNewAgentChat()
+  const tabId = ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.setAgentSiteSelectionTargetType('咖啡店')
+  ctx.setAgentSiteSelectionStrategy('supply_gap')
+  ctx.setAgentSiteSelectionScenario('commuter')
+
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, options })
+    assert.equal(url, '/api/v1/analysis/agent/site-selection')
+    const body = JSON.parse(options.body)
+    assert.equal(body.place_type, '咖啡店')
+    assert.equal(body.policy_key, 'business_catchment_1km')
+    assert.equal(body.strategy, 'supply_gap')
+    assert.equal(body.scenario, 'commuter')
+    assert.equal(body.source, 'local')
+    return {
+      ok: true,
+      async json() {
+        return {
+          status: 'success',
+          site_selection_pack: {
+            summary_text: '已形成候选格。',
+            overall_verdict: 'suitable',
+            verdict_text: '当前范围可优先验证咖啡店。',
+            candidate_sites: [{
+              rank: 1,
+              h3_id: '8928308280fffff',
+              display_title: '候选1',
+              total_score: 80,
+              positioning: '通勤快取型咖啡店',
+              why_suitable: ['供给缺口明显'],
+              next_validation_steps: ['观察早高峰人流'],
+            }],
+            ranking: [{ rank: 1, title: '候选1', total_score: 80 }],
+            avoid_areas: [{ title: '低活力网格', reason: '夜间活力弱', score: 42 }],
+          },
+          current_target_supply_gap: { place_type: '咖啡店' },
+          current_site_candidate_scores: { confidence: 'moderate' },
+          warnings: ['人口数据缺失，已降级。'],
+        }
+      },
+    }
+  }
+
+  await ctx.generateAgentSiteSelection()
+
+  const siteSelectionCalls = calls.filter((call) => call.url === '/api/v1/analysis/agent/site-selection')
+  assert.equal(siteSelectionCalls.length, 1)
+  assert.equal(calls.some((call) => call.url.includes('/agent/turn/stream')), false)
+  assert.equal(ctx.agentTabs.activeTabId, tabId)
+  assert.equal(ctx.isAgentSiteSelectionTabActive(), true)
+  assert.equal(ctx.getAgentSiteSelectionPack().summary_text, '已形成候选格。')
+  assert.equal(ctx.getAgentSiteSelectionState().warnings[0], '人口数据缺失，已降级。')
+  assert.equal(ctx.getAgentSiteSelectionCandidates()[0].title, '候选1')
+  assert.equal(ctx.getAgentSiteSelectionCandidates()[0].positioning, '通勤快取型咖啡店')
+  assert.equal(ctx.getAgentSiteSelectionSelectedWhySuitable()[0], '供给缺口明显')
+  assert.equal(ctx.getAgentSiteSelectionSelectedValidationSteps()[0], '观察早高峰人流')
+  assert.equal(ctx.getAgentSiteSelectionAvoidAreas()[0].title, '低活力网格')
+  assert.equal(ctx.getAgentSiteSelectionVerdict().label, '适合优先验证')
+})
+
+test('site selection payload normalizes candidates, evidence, and h3 focus action', async () => {
+  let focusedH3Id = ''
+  const ctx = createAgentContext({
+    async ensureH3ReadyForAgentTarget() {
+      return true
+    },
+    focusGridByH3Id(h3Id) {
+      focusedH3Id = h3Id
+    },
+  })
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentChat()
+  ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.commitAgentSiteSelectionPayload({
+    panelPayloads: {
+      site_selection_pack: {
+        summary_text: '候选1综合支撑较好。',
+        confidence: 'moderate',
+        candidate_sites: [{
+          rank: 1,
+          h3_id: '8928308280fffff',
+          display_title: '候选1：人民路附近',
+          approx_address: '人民路附近',
+          total_score: 86.4,
+          gap_score: 0.62,
+          scores: { population: 72, vitality: 66, road: 58 },
+          reason_summary: '需求分位较高，供给分位较低',
+        }],
+        evidence_chain: [{
+          tool_name: 'score_site_candidates',
+          value: [{ rank: 1 }],
+          rule_or_reason: '程序化评分排序',
+          confidence: 'moderate',
+        }],
+      },
+    },
+    ui: { target_type: '咖啡店', status: 'ready' },
+  })
+
+  const candidates = ctx.getAgentSiteSelectionCandidates()
+  assert.equal(candidates.length, 1)
+  assert.equal(candidates[0].title, '候选1：人民路附近')
+  assert.equal(ctx.formatAgentSiteSelectionScore(candidates[0].totalScore), '86')
+  assert.equal(ctx.getAgentSiteSelectionEvidenceChain()[0].value, '1 项')
+  assert.equal(candidates[0].positioning, '通勤快取型咖啡店 · 综合评估')
+  assert.ok(ctx.getAgentSiteSelectionSelectedValidationSteps().length > 0)
+
+  await ctx.onAgentSiteSelectionCandidateClick(candidates[0])
+
+  assert.equal(ctx.activeStep3Panel, 'poi')
+  assert.equal(ctx.poiSubTab, 'grid')
+  assert.equal(focusedH3Id, '8928308280fffff')
+})
+
+test('site selection tabs persist and restore with panel payloads', () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentChat()
+  const tabId = ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.commitAgentSiteSelectionPayload({
+    panelPayloads: {
+      site_selection_pack: { summary_text: '已形成候选格。' },
+    },
+    ui: { target_type: '便利店', strategy: 'avoid_competition', scenario: 'community', status: 'ready' },
+  })
+  const uiState = ctx.buildAgentTabsUiState()
+
+  assert.equal(uiState.site_selection_tabs.length, 1)
+  assert.equal(uiState.site_selection_tabs[0].id, tabId)
+
+  const restored = createAgentContext()
+  restored.restoreAgentTabsFromSession({
+    id: 'session-1',
+    panelPayloads: {
+      agent_tabs: {
+        ...uiState,
+        active_tab_id: tabId,
+      },
+    },
+  })
+
+  assert.equal(restored.isAgentSiteSelectionTabActive(), true)
+  assert.equal(restored.inferAgentSiteSelectionTargetType(), '便利店')
+  assert.equal(restored.getAgentSiteSelectionState().strategy, 'avoid_competition')
+  assert.equal(restored.getAgentSiteSelectionState().scenario, 'community')
+  assert.equal(restored.getAgentSiteSelectionPack().summary_text, '已形成候选格。')
+})
+
 test('submitAgentTurn keeps failed thinking timeline expanded after final response', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
@@ -3007,6 +3300,81 @@ test('createAgentSummaryTab opens a new summary window instead of reusing the de
   assert.equal(ctx.agentTabs.activeTabId, secondId)
 })
 
+test('summary session history persists tourism cross analysis in summary pack and tabs', () => {
+  const tourismCrossAnalysis = {
+    title: '文旅交叉策划分析',
+    content: '该地块适合以年轻客群为核心，以餐饮业态为底盘，打造青年社交型城市文旅消费场景。',
+  }
+  const summaryPack = buildSummaryPack('当前范围总结')
+  summaryPack.tourism_cross_analysis = tourismCrossAnalysis
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentChat()
+  ctx.agentPanelPayloads = {
+    summary_pack: summaryPack,
+    summary_status: { status: 'ready', generated: true, title: '区域总结' },
+  }
+
+  ctx.commitAgentSummaryPayloadsToActiveTab()
+  const activeSummaryPayloads = ctx.getAgentActiveSummaryPanelPayloads()
+  const uiState = ctx.buildAgentTabsUiState()
+  const requestPayload = ctx.buildAgentSessionRequestPayload()
+
+  assert.equal(ctx.getAgentSummaryTourismCrossAnalysis().content, tourismCrossAnalysis.content)
+  assert.equal(ctx.getAgentActiveTopTab().content.tourism_cross_analysis.content, tourismCrossAnalysis.content)
+  assert.equal(activeSummaryPayloads.summary_pack.tourism_cross_analysis.content, tourismCrossAnalysis.content)
+  assert.equal(uiState.summary_tabs[0].content.tourism_cross_analysis.content, tourismCrossAnalysis.content)
+  assert.equal(uiState.summary_tabs[0].panel_payloads.summary_pack.tourism_cross_analysis.content, tourismCrossAnalysis.content)
+  assert.equal(requestPayload.output.panel_payloads.summary_pack.tourism_cross_analysis.content, tourismCrossAnalysis.content)
+  assert.equal(requestPayload.output.panel_payloads.agent_tabs.summary_tabs[0].content.tourism_cross_analysis.content, tourismCrossAnalysis.content)
+})
+
+test('summary stream completion fills tourism content from payload', async () => {
+  const tourismCrossAnalysis = {
+    title: '文旅交叉策划分析',
+    content: '一、综合判断\n适合做复合文旅消费场景。\n五、人口 x POI x 夜光交叉诊断\n三类信号基本匹配。\n九、策划结论\n该地块适合以年轻客群为核心客群。',
+  }
+  const summaryPack = buildSummaryPack('当前范围总结')
+  summaryPack.tourism_cross_analysis = tourismCrossAnalysis
+  const ctx = createAgentContext({
+    agentSummaryReadiness: {
+      checked: true,
+      ready: true,
+      missingTasks: [],
+      reused: [],
+      fetched: [],
+    },
+  })
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentChat()
+  ctx.refreshAgentSummaryReadiness = async () => {}
+  ctx.canGenerateSummaryAfterTasks = () => true
+
+  global.fetch = async (url) => {
+    assert.equal(url, '/api/v1/analysis/agent/summary/generate')
+    return createSseResponse([
+      { type: 'section_start', payload: { key: 'tourism_cross_analysis', title: tourismCrossAnalysis.title } },
+      { type: 'section_complete', payload: { key: 'tourism_cross_analysis', status: 'ready', payload: tourismCrossAnalysis } },
+      {
+        type: 'final',
+        payload: {
+          data_readiness: { checked: true, ready: true, missing_tasks: [], reused: [], fetched: [] },
+          panel_payloads: { summary_status: { status: 'ready', generated: true } },
+          summary_pack: summaryPack,
+          warnings: [],
+          error: '',
+          phases: ['completed'],
+        },
+      },
+    ])
+  }
+
+  await ctx.generateAgentSummaryPanel()
+
+  assert.equal(ctx.agentSummaryStreamSections.tourism_cross_analysis.content, tourismCrossAnalysis.content)
+  assert.equal(ctx.getAgentSummaryTourismCrossAnalysis().content, tourismCrossAnalysis.content)
+})
+
 test('getAgentSummaryGateProgressText only shows readiness checking while loading', () => {
   const ctx = createAgentContext()
   ctx.agentSummaryLoading = false
@@ -3031,14 +3399,14 @@ test('getSummaryTaskKeysToFill skips tasks that are already reusable', () => {
     agentSummaryReadiness: {
       checked: true,
       ready: false,
-      missingTasks: ['poi_grid', 'nightlight', 'road_syntax'],
+      missingTasks: ['h3', 'nightlight', 'road_syntax'],
       reused: ['nightlight'],
       fetched: [],
     },
   })
   ctx.summaryTaskHasReusableResult = (taskKey) => taskKey === 'nightlight'
 
-  assert.deepEqual(ctx.getSummaryTaskKeysToFill(), ['poi_grid', 'road_syntax'])
+  assert.deepEqual(ctx.getSummaryTaskKeysToFill(), ['poi_h3_grid', 'road_syntax'])
 })
 
 test('summary poi fetch task uses one analysis year and marks fetched years', () => {
@@ -3085,8 +3453,213 @@ test('summary poi grid year switches active poi details for h3 input', async () 
   assert.equal(ctx.resultPoiYear, 2024)
   assert.equal(ctx.allPoisDetails[0].id, 'poi-2024')
   assert.equal(rebuilt[0].id, 'poi-2024')
-  assert.deepEqual(ctx.captureSummaryTaskParams('poi_grid').poi_years, [2024])
-  assert.equal(ctx.captureSummaryTaskParams('poi_grid').poi_year, 2024)
+  assert.deepEqual(ctx.captureSummaryTaskParams('poi_raster_grid').poi_years, [2024])
+  assert.equal(ctx.captureSummaryTaskParams('poi_h3_grid').poi_year, 2024)
+})
+
+test('analysis task param bundles drive summary task params and cache keys', () => {
+  const ctx = createAgentContext({
+    poiGridType: 'raster',
+    poiDataSource: 'local',
+    resultDataSource: 'local',
+    poiYearSource: '2024',
+    h3GridResolution: 9,
+    h3NeighborRing: 2,
+    h3GridIncludeMode: 'intersects',
+    h3GridMinOverlapRatio: 0.35,
+  })
+  const rasterBundle = buildAnalysisTaskParamBundle(ctx, 'poi_raster_grid')
+  const h3Bundle = buildAnalysisTaskParamBundle(ctx, 'poi_h3_grid')
+  assert.equal(rasterBundle.task_key, 'poi_raster_grid')
+  assert.equal(rasterBundle.params.grid_type, 'raster')
+  assert.equal(rasterBundle.params.cell_id_source, 'population_nightlight_shared_cell_id')
+  assert.equal(h3Bundle.task_key, 'poi_h3_grid')
+  assert.equal(h3Bundle.params.grid_type, 'hex')
+  assert.equal(h3Bundle.params.h3_resolution, 9)
+  assert.equal(h3Bundle.params.min_overlap_ratio, 0.35)
+  assert.deepEqual(ctx.captureSummaryTaskParams('poi_raster_grid'), rasterBundle.params)
+  assert.deepEqual(ctx.captureSummaryTaskParams('poi_h3_grid'), h3Bundle.params)
+
+  const firstSnapshot = ctx.stringifySummaryTaskParams(h3Bundle.params)
+  ctx.h3GridResolution = 10
+  const secondSnapshot = ctx.stringifySummaryTaskParams(ctx.captureSummaryTaskParams('poi_h3_grid'))
+  assert.notEqual(firstSnapshot, secondSnapshot)
+})
+
+test('summary poi grid fill computes raster grid and h3 separately', async () => {
+  const calls = []
+  const ctx = createAgentContext({
+    poiGridType: 'raster',
+    h3AnalysisSummary: { grid_count: 8 },
+    h3AnalysisGridFeatures: [{ type: 'Feature', properties: { h3_id: '8928308280fffff' } }],
+    h3GridCount: 8,
+    agentSummaryReadiness: {
+      checked: true,
+      ready: false,
+      missingTasks: ['poi_grid'],
+      reused: [],
+      fetched: [],
+    },
+  })
+  ctx.ensurePoiRasterGrid = async (force = false) => {
+    calls.push({ task: 'raster', force })
+    ctx.poiGridSummary = { grid_count: 2, active_cell_count: 1 }
+    ctx.poiGridFeatures = [{ type: 'Feature', properties: { cell_id: 'cell-1', poi_count: 3 } }]
+  }
+  ctx.computeH3Analysis = async () => {
+    calls.push({ task: 'h3' })
+    ctx.h3AnalysisSummary = { grid_count: 8 }
+    ctx.h3AnalysisGridFeatures = [{ type: 'Feature', properties: { h3_id: '8928308280fffff' } }]
+    ctx.h3GridCount = 8
+  }
+
+  assert.equal(getAnalysisTaskDefinition('poi_raster_grid').hasResult(ctx), false)
+  assert.equal(getAnalysisTaskDefinition('poi_h3_grid').hasResult(ctx), true)
+  assert.deepEqual(ctx.getSummaryTaskKeysToFill(), ['poi_raster_grid'])
+
+  await ctx.runSummaryTask('poi_raster_grid')
+
+  assert.deepEqual(calls, [{ task: 'raster', force: true }])
+  assert.equal(ctx.getSummaryTaskByKey('poi_raster_grid').status, 'completed')
+  assert.equal(getAnalysisTaskDefinition('poi_raster_grid').hasResult(ctx), true)
+})
+
+test('summary poi grid split reuses raster and h3 independently', () => {
+  const rasterOnly = createAgentContext({
+    poiGridSummary: { grid_count: 2, active_cell_count: 1 },
+    poiGridFeatures: [{ type: 'Feature', properties: { cell_id: 'r0_c0' } }],
+    agentSummaryReadiness: {
+      checked: true,
+      ready: false,
+      missingTasks: ['poi_grid'],
+      reused: [],
+      fetched: [],
+    },
+  })
+  assert.equal(getAnalysisTaskDefinition('poi_raster_grid').hasResult(rasterOnly), true)
+  assert.equal(getAnalysisTaskDefinition('poi_h3_grid').hasResult(rasterOnly), false)
+  assert.deepEqual(rasterOnly.getSummaryTaskKeysToFill(), ['poi_h3_grid'])
+
+  const h3Only = createAgentContext({
+    h3AnalysisSummary: { grid_count: 8, poi_count: 10 },
+    h3AnalysisGridFeatures: [{ type: 'Feature', properties: { h3_id: '8928308280fffff' } }],
+    h3GridCount: 8,
+    agentSummaryReadiness: {
+      checked: true,
+      ready: false,
+      missingTasks: ['poi_grid'],
+      reused: [],
+      fetched: [],
+    },
+  })
+  assert.equal(getAnalysisTaskDefinition('poi_raster_grid').hasResult(h3Only), false)
+  assert.equal(getAnalysisTaskDefinition('poi_h3_grid').hasResult(h3Only), true)
+  assert.deepEqual(h3Only.getSummaryTaskKeysToFill(), ['poi_raster_grid'])
+})
+
+test('poi iteration secondary nav starts at data and gates analysis until ready', () => {
+  const ctx = createAgentContext({
+    currentHistoryRecordId: '',
+    currentHistoryAvailablePoiYears: [],
+    agentPanelPayloads: {
+      iteration_change: {
+        poi: { status: 'needs_data', yearly_grid_evidence: { items: [] } },
+      },
+    },
+  })
+
+  assert.equal(ctx.getAgentIterationSecondaryView('poi'), 'data')
+  assert.deepEqual(ctx.getAgentIterationSecondaryNavItems('poi').map((item) => item.key), ['data'])
+  ctx.setAgentIterationSecondaryView('ai', 'poi')
+  assert.equal(ctx.getAgentIterationSecondaryView('poi'), 'data')
+
+  ctx.currentHistoryRecordId = 'history-1'
+  ctx.currentHistoryAvailablePoiYears = [2023, 2024, 2025]
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    yearly_grid_evidence: {
+      evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
+      years: [2023, 2024, 2025],
+      grid_scope: 'poi_iteration_h3_per_year',
+      grid_type: 'h3',
+      latest_year: 2025,
+      latest_h3_evidence: { evidence_version: 'poi_h3_evidence_v1' },
+      items: [
+        { year: 2023, status: 'ready', h3_evidence: {} },
+        { year: 2024, status: 'ready', h3_evidence: {} },
+        { year: 2025, status: 'ready', h3_evidence: {} },
+      ],
+    },
+  })
+  const readyItems = ctx.getAgentIterationSecondaryNavItems('poi')
+  assert.deepEqual(readyItems.map((item) => item.key), ['data', 'ai', 'metrics', 'trend', 'space', 'detail'])
+  assert.equal(readyItems.find((item) => item.key === 'ai').label, '业态基础分析')
+})
+
+test('poi iteration yearly grid evidence computes h3 only', async () => {
+  const calls = []
+  const ctx = createAgentContext({
+    currentHistoryRecordId: 'history-1',
+    currentHistoryAvailablePoiYears: [2023, 2024],
+    h3GridResolution: 9,
+    agentPanelPayloads: {
+      iteration_change: {
+        poi: { yearly_grid_evidence: { evidence_version: 'poi_iteration_yearly_grid_evidence_v1', items: [] } },
+      },
+    },
+  })
+  ctx.selectAgentPoiYearForGrid = async (year) => { calls.push({ task: 'select', year }) }
+  ctx.ensurePoiRasterGrid = async () => { calls.push({ task: 'raster' }) }
+  ctx.selectAllH3PoiFilters = () => { calls.push({ task: 'h3_filters' }) }
+  ctx.computeH3Analysis = async () => { calls.push({ task: 'h3' }) }
+  ctx.buildAgentPoiH3Evidence = () => ({
+    evidence_version: 'poi_h3_evidence_v1',
+    params: { h3_resolution: ctx.h3GridResolution },
+    cells: [{ h3_id: 'h3-1' }],
+  })
+
+  const evidence = await ctx.buildAgentPoiYearlyGridEvidence([2023, 2024])
+
+  assert.equal(evidence.grid_scope, 'poi_iteration_h3_per_year')
+  assert.equal(evidence.grid_type, 'h3')
+  assert.deepEqual(calls.map((call) => call.task), ['select', 'h3_filters', 'h3', 'select', 'h3_filters', 'h3'])
+  assert.equal(evidence.items.length, 2)
+  assert.equal(evidence.items.every((item) => item.status === 'ready'), true)
+  assert.equal(evidence.items.some((item) => Object.prototype.hasOwnProperty.call(item, 'raster_grid_evidence')), false)
+})
+
+test('poi iteration grid completion clears stale missing notice', async () => {
+  const ctx = createAgentContext({
+    currentHistoryRecordId: 'history-1',
+    currentHistoryAvailablePoiYears: [2023, 2024],
+    agentPanelPayloads: {
+      iteration_change: {
+        poi: {
+          status: 'needs_data',
+          notice: '多年 POI 分析还缺 POI / 网格分析，请先补齐。',
+          error: '旧错误',
+          yearly_grid_evidence: { evidence_version: 'poi_iteration_yearly_grid_evidence_v1', items: [] },
+        },
+      },
+    },
+  })
+  ctx.selectAgentPoiYearForGrid = async () => {}
+  ctx.selectAllH3PoiFilters = () => {}
+  ctx.computeH3Analysis = async () => {}
+  ctx.buildAgentPoiH3Evidence = () => ({
+    evidence_version: 'poi_h3_evidence_v1',
+    params: { h3_resolution: 10 },
+    summary: { grid_count: 1 },
+    cells: [{ h3_id: 'h3-1', poi_count: 3 }],
+  })
+
+  await ctx.runAgentIterationPoiTask('poi_grid')
+
+  assert.equal(ctx.getAgentIterationPoiReadiness().ready, true)
+  assert.equal(ctx.getAgentIterationPoiTaskKeysToFill().length, 0)
+  assert.equal(ctx.getAgentIterationPoiPayload().notice, '')
+  assert.equal(ctx.getAgentIterationPoiPayload().error, '')
+  assert.equal(ctx.getAgentIterationPoiPrimaryActionLabel(), '进入分析')
 })
 
 test('summary primary action reuses available results instead of full recompute', async () => {
@@ -3125,7 +3698,7 @@ test('getAgentSummaryGeneratingSections maps task progress into staged skeleton 
         { key: 'poi_fetch', label: 'POI 抓取', status: 'completed' },
         { key: 'population', label: '人口结构分析', status: 'completed' },
         { key: 'nightlight', label: '夜光分析', status: 'running' },
-        { key: 'poi_grid', label: 'POI / 网格分析', status: 'running' },
+        { key: 'poi_h3_grid', label: 'POI H3 网格计算', status: 'running' },
         { key: 'road_syntax', label: '路网与可达性分析', status: 'pending' },
       ],
     },
@@ -3401,8 +3974,30 @@ test('ensureAgentIterationPopulation stores summary features', async () => {
         ok: true,
         json: async () => ({
           series: [
-            { year: 2024, total_population: 1000, population_density: 50 },
-            { year: 2026, total_population: 1200, population_density: 58 },
+            {
+              year: 2024,
+              total_population: 1000,
+              male_total: 480,
+              female_total: 520,
+              male_ratio: 0.48,
+              female_ratio: 0.52,
+              population_density: 50,
+              top_age_band_label: '25-29岁',
+              top_age_band_ratio: 0.18,
+              age_group_ratios: { child_0_14: 0.12, working_15_64: 0.72, senior_65_plus: 0.16 },
+            },
+            {
+              year: 2026,
+              total_population: 1200,
+              male_total: 590,
+              female_total: 610,
+              male_ratio: 0.491667,
+              female_ratio: 0.508333,
+              population_density: 58,
+              top_age_band_label: '30-34岁',
+              top_age_band_ratio: 0.2,
+              age_group_ratios: { child_0_14: 0.1, working_15_64: 0.7, senior_65_plus: 0.2 },
+            },
           ],
           layer: { summary: { cell_count: 10, increase_count: 7, decrease_count: 2, average_rate: 0.12 } },
           insights: ['人口增长网格占主导'],
@@ -3419,6 +4014,14 @@ test('ensureAgentIterationPopulation stores summary features', async () => {
   assert.equal(payload.period, '2024-2026')
   assert.equal(rows.find((item) => item.key === 'increase').value, 7)
   assert.equal(rows.find((item) => item.key === 'population_delta').value, '200')
+  assert.equal(rows.find((item) => item.key === 'male_total').value, '590')
+  assert.equal(rows.find((item) => item.key === 'female_total').value, '610')
+  assert.equal(rows.find((item) => item.key === 'male_ratio').value, '49.2%')
+  assert.equal(rows.find((item) => item.key === 'sex_delta').value, '-20')
+  assert.equal(rows.find((item) => item.key === 'dominant_age_band').value, '30-34岁')
+  assert.equal(rows.find((item) => item.key === 'dominant_age_shift').value, '25-29岁 -> 30-34岁')
+  assert.equal(rows.find((item) => item.key === 'working_age_ratio').value, '70.0%')
+  assert.equal(rows.find((item) => item.key === 'senior_ratio').value, '20.0%')
   assert.equal(ctx.getAgentIterationKinds().find((item) => item.key === 'population').disabled, false)
 })
 
@@ -3427,6 +4030,62 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
     currentHistoryRecordId: 'history-1',
     currentHistoryAvailablePoiYears: [2023, 2024, 2025],
     selectedPoint: { lng: 112.93, lat: 28.13 },
+    h3GridResolution: 9,
+    h3NeighborRing: 2,
+    h3TargetCategory: 'food',
+    h3CategoryMeta: [{ key: 'food', label: '餐饮' }],
+    h3AnalysisSummary: {
+      grid_count: 1,
+      poi_count: 4,
+      avg_density_poi_per_km2: 18.2,
+      avg_local_entropy: 0.62,
+      gi_z_stats: { count: 1 },
+      lisa_i_stats: { count: 1 },
+    },
+    h3AnalysisCharts: { density_histogram: { bins: ['0-10'], counts: [1] } },
+    h3AnalysisGridFeatures: [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [] },
+      properties: {
+        h3_id: 'h3-1',
+        poi_count: 4,
+        density_poi_per_km2: 18.2,
+        local_entropy: 0.62,
+        neighbor_mean_density: 10,
+        neighbor_mean_entropy: 0.4,
+        neighbor_count: 6,
+        category_counts: { food: 4 },
+        gi_star_z_score: 2.4,
+        gi_star_value: 1.1,
+        lisa_i: 0.32,
+        lisa_z_score: 1.8,
+      },
+    }],
+    h3DerivedStats: {
+      structureSummary: { rows: [{ h3_id: 'h3-1', gi_star_z_score: 2.4, lisa_i: 0.32, structure_signal: 2.4 }] },
+      typingSummary: { rows: [{ h3_id: 'h3-1', type_key: 'high_density_high_mix', entropy_norm: 0.62 }] },
+      lqSummary: { rows: [{ h3_id: 'h3-1', lq_target: 1.5, lq_map: { food: 1.5 } }] },
+      gapSummary: { rows: [{ h3_id: 'h3-1', gap_score: 0.3, demand_pct: 0.8, supply_pct: 0.5 }] },
+    },
+    agentPanelPayloads: {
+      iteration_change: {
+        poi: {
+          yearly_grid_evidence: {
+            evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
+            years: [2023, 2024, 2025],
+            grid_scope: 'poi_iteration_h3_per_year',
+            grid_type: 'h3',
+            latest_year: 2025,
+            latest_h3_evidence: { evidence_version: 'poi_h3_evidence_v1' },
+            items: [
+              { year: 2023, status: 'ready', h3_evidence: {} },
+              { year: 2024, status: 'ready', h3_evidence: {} },
+              { year: 2025, status: 'ready', h3_evidence: {} },
+            ],
+          },
+        },
+      },
+    },
     typeIdToGroupId: {
       'type-050100': 'group-7',
       'type-050500': 'group-7',
@@ -3470,6 +4129,11 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
       assert.equal(body.history_id, 'history-1')
       assert.deepEqual(body.years, [2023, 2024, 2025])
       assert.deepEqual(body.center, [112.93, 28.13])
+      assert.equal(body.h3_evidence.evidence_version, 'poi_h3_evidence_v1')
+      assert.equal(body.h3_evidence.cells[0].gi_star_z_score, 2.4)
+      assert.equal(body.h3_evidence.cells[0].geometry, undefined)
+      assert.equal(body.h3_evidence.derived_stats.lq_rows[0].lq_target, 1.5)
+      assert.equal(body.h3_evidence.omitted.geometry_removed, true)
       return {
         ok: true,
         json: async () => ({
@@ -3510,6 +4174,8 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
             emerging_area: '咖啡厅新增偏东北、中圈层补点',
             structure_judgement: '业态结构偏消费型。',
           },
+          driver_analysis: [{ driver: '餐饮补充型增长', evidence: '咖啡厅增加', confidence: '中', explanation: '小类增量支撑日常消费。' }],
+          planning_implications: [{ implication: '强化日常消费底盘', evidence: '餐饮主导', suggested_direction: '轻餐饮与社交消费。' }],
           spatial_factors: {
             geometry_mode: 'point',
             direction_factor: { dominant_direction: '东北' },
@@ -3528,6 +4194,7 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
             top_area: '一区',
           }],
           subcategory_spatial_summary: ['咖啡厅新增主要集中在东北方向。'],
+          h3_evidence: body.h3_evidence,
           error: '',
         }),
       }
@@ -3547,13 +4214,19 @@ test('ensureAgentIterationPoi summarizes multi-year history pois', async () => {
   assert.equal(payload.summaries[2].top_subcategories[0].parent, '餐饮')
   assert.equal(payload.ai_summary[0], '当前POI规模处于中等水平，餐饮为主导业态。')
   assert.equal(payload.ai_insights.emerging_area, '咖啡厅新增偏东北、中圈层补点')
+  assert.equal(payload.report_title, undefined)
+  assert.equal(payload.report_content, undefined)
   assert.equal(ctx.getAgentIterationPoiAiSummaryRows().length, 2)
   assert.equal(ctx.getAgentIterationPoiAiInsightRows().find((item) => item.key === 'fastest_growth').value, '咖啡 +120%')
+  assert.equal(ctx.getAgentIterationPoiDriverRows()[0].label, '餐饮补充型增长')
+  assert.equal(ctx.getAgentIterationPoiPlanningRows()[0].label, '强化日常消费底盘')
   assert.equal(ctx.getAgentIterationPoiTotalLineChart().length, 3)
   assert.equal(ctx.getAgentIterationPoiCategoryStackChart().length, 3)
   assert.equal(ctx.getAgentIterationPoiSubcategoryStackChart().length, 3)
   assert.equal(payload.spatial_factors.direction_factor.dominant_direction, '东北')
   assert.equal(payload.subcategory_spatial_trend_rows[0].name, '咖啡厅')
+  assert.equal(payload.h3_evidence.cells[0].lisa_i, 0.32)
+  assert.equal(payload.h3_evidence.derived_stats.gap_rows[0].gap_score, 0.3)
   assert.match(ctx.formatAgentIterationPoiSpatialTrend(ctx.getAgentIterationPoiSpatialTrendRows()[0]), /主导方位 东北/)
   assert.equal(ctx.getAgentIterationPoiAreaHeatmaps().length, 3)
   assert.equal(snapshotCalls, 1)
@@ -3692,6 +4365,62 @@ test('agent iteration poi exposes area heatmap basemap and boundary metadata', (
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapBoundaryPoints(), '')
 })
 
+test('agent iteration poi evidence compacts legacy h3 feature payloads for basis', () => {
+  const ctx = createAgentContext()
+  ctx.commitAgentIterationPoiPayload({
+    status: 'ready',
+    years: [2020, 2024],
+    summaries: [
+      { year: 2020, count: 1, category_counts: { 餐饮: 1 }, subcategory_counts: { 中餐厅: 1 }, top_areas: [{ name: 'A' }] },
+      { year: 2024, count: 2, category_counts: { 餐饮: 2 }, subcategory_counts: { 中餐厅: 2 }, top_areas: [{ name: 'A' }] },
+    ],
+    h3_evidence: {
+      evidence_version: 'poi_h3_evidence_v1',
+      cells: [{
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [[[112.1, 28.1], [112.2, 28.1], [112.1, 28.1]]] },
+        properties: {
+          h3_id: 'h3-legacy',
+          poi_count: 2,
+          density_poi_per_km2: 18.2,
+          gi_star_z_score: 2.4,
+          lisa_i: 0.3,
+        },
+      }],
+      derived_stats: {
+        lqSummary: { rows: [{ h3_id: 'h3-legacy', lq_target: 1.2 }] },
+      },
+    },
+    yearly_grid_evidence: {
+      evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
+      items: [{
+        year: 2024,
+        status: 'ready',
+        h3_evidence: {
+          cells: [{
+            type: 'Feature',
+            geometry: { type: 'Polygon', coordinates: [[[112.1, 28.1], [112.2, 28.1], [112.1, 28.1]]] },
+            properties: { h3_id: 'h3-year', poi_count: 2 },
+          }],
+        },
+      }],
+    },
+  })
+
+  const preview = ctx.buildAgentPoiIterationAiEvidencePreview(ctx.getAgentIterationPoiPayload())
+  const basis = ctx.buildAgentIterationBasisPayload('poi', 'analysis')
+  const serialized = JSON.stringify(basis.rawInput)
+
+  assert.equal(preview.h3_evidence.cells[0].h3_id, 'h3-legacy')
+  assert.equal(preview.h3_evidence.cells[0].geometry, undefined)
+  assert.equal(preview.h3_evidence.cells[0].properties, undefined)
+  assert.equal(preview.h3_evidence.derived_stats.lq_rows[0].lq_target, 1.2)
+  assert.equal(preview.yearly_grid_evidence.items[0].h3_evidence.cells[0].h3_id, 'h3-year')
+  assert.equal(serialized.includes('"geometry"'), false)
+  assert.equal(serialized.includes('"coordinates"'), false)
+  assert.equal(serialized.includes('"properties"'), false)
+})
+
 test('buildAgentIterationSnapshotSvgMarkupFromNode inlines poi heatmap overlay styles', () => {
   const ctx = createAgentContext()
   const nodes = []
@@ -3771,6 +4500,10 @@ test('agent iteration poi basis keeps real prompt while splitting analysis and i
       emerging_area: '咖啡厅向东北补点',
       structure_judgement: '结构更偏日常消费',
     },
+    driver_analysis: [{ driver: '餐饮补充型增长', evidence: '餐饮增加', confidence: '中', explanation: '主导消费业态增强。' }],
+    planning_implications: [{ implication: '强化消费底盘', evidence: '餐饮增加', suggested_direction: '餐饮与社交消费。' }],
+    h3_evidence: { evidence_version: 'poi_h3_evidence_v1', counts: { grid_count: 4 } },
+    yearly_grid_evidence: { evidence_version: 'poi_iteration_yearly_grid_evidence_v1', items: [{ year: 2024, status: 'ready' }] },
     ai_prompt: '真实 POI 多年调用 system prompt',
     ai_prompt_payload_note: '真实 POI 多年调用 user payload note',
     prompt_snapshot: {
@@ -3791,12 +4524,15 @@ test('agent iteration poi basis keeps real prompt while splitting analysis and i
   assert.equal(insightBasis.aiPromptPayloadNote, '真实 POI 多年调用 user payload note')
   assert.equal(analysisBasis.promptSourceLabel, '本次生成实际使用的提示词快照')
   assert.notEqual(analysisBasis.title, insightBasis.title)
-  assert.equal(analysisBasis.currentConclusion, '总量上升，餐饮增强。')
+  assert.match(analysisBasis.currentConclusion, /总量上升，餐饮增强。/)
   assert.match(insightBasis.currentConclusion, /增长最快行业：餐饮增长最快/)
-  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && field.value === 'summary_points'), true)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('summary_points')), true)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('report_content')), false)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'h3_evidence'), true)
+  assert.equal(analysisBasis.fields.some((field) => field.key === 'yearly_grid_evidence'), true)
   assert.equal(insightBasis.fields.some((field) => field.key === 'output_fields' && String(field.value).includes('fastest_growth')), true)
   assert.equal(analysisBasis.fields.some((field) => field.key === 'prompt_structure' && String(field.value).includes('同一基础提示词')), true)
-  assert.equal(insightBasis.fields.some((field) => field.key === 'prompt_structure' && String(field.value).includes('AI洞察任务')), true)
+  assert.equal(insightBasis.fields.some((field) => field.key === 'prompt_structure' && String(field.value).includes('业态基础分析')), true)
   assert.equal(insightBasis.rules.some((rule) => String(rule).includes('不是重复调用')), true)
   assert.equal(JSON.stringify(analysisBasis.rawInput).includes('data:image/png'), false)
   assert.equal(analysisBasis.rawInput.evidence_version, 'poi_iteration_v1')
@@ -4110,7 +4846,7 @@ test('agent iteration poi frontend heatmap bundle uses polygon viewport and filt
   assert.ok(bundle.area_heatmap_boundary.every((point) => point.x >= 0 && point.x <= view.width && point.y >= 0 && point.y <= view.height))
 })
 
-test('ensureAgentIterationPoi current fallback commits polygon heatmap metadata', async () => {
+test('ensureAgentIterationPoi without multi-year data asks for poi/grid fill', async () => {
   const ctx = createAgentContext({
     allPoisDetails: [
       { id: 'inside', type: 'type-050500', typeLabel: '咖啡厅', adname: 'A', location: [112.92, 28.12] },
@@ -4130,11 +4866,9 @@ test('ensureAgentIterationPoi current fallback commits polygon heatmap metadata'
 
   const payload = await ctx.ensureAgentIterationPoi(true)
 
-  assert.equal(payload.status, 'ready')
-  assert.equal(payload.area_heatmap_boundary.length, 5)
-  assert.equal(payload.area_heatmaps[0].point_count, 1)
-  assert.notEqual(payload.area_heatmap_basemap.view_box, '0 0 100 100')
-  assert.equal(ctx.getAgentIterationPoiAreaHeatmapViewBox(), payload.area_heatmap_basemap.view_box)
+  assert.equal(payload.status, 'needs_data')
+  assert.deepEqual(ctx.getAgentIterationPoiTaskKeysToFill(), ['poi_fetch', 'poi_grid'])
+  assert.match(payload.notice, /POI/)
 })
 
 test('agent iteration poi heatmap template prefers snapshot image and falls back to svg', async () => {
@@ -5302,6 +6036,99 @@ test('summary history list hydrates detail payloads for compact titles and previ
   assert.equal(ctx.getAgentSessionTitle(session), '总结')
   assert.equal(ctx.getAgentSessionPreview(session), '餐饮、科教和日常消费共同支撑多核结构。')
   assert.ok(calls.some((url) => url.includes('/summary-history-a')))
+})
+
+test('agent analysis snapshot includes population grid sex difference evidence', () => {
+  const ctx = createAgentContext({
+    populationOverview: {
+      summary: {
+        total_population: 300,
+        male_total: 160,
+        female_total: 140,
+      },
+    },
+    populationLayer: {
+      cells: [
+        { cell_id: 'r0_c0', value: 180 },
+        { cell_id: 'r0_c1', value: 120 },
+      ],
+    },
+    populationSexSourceLayers: {
+      scope_id: 'scope-1',
+      male: { cells: [{ cell_id: 'r0_c0', value: 100 }, { cell_id: 'r0_c1', value: 60 }] },
+      female: { cells: [{ cell_id: 'r0_c0', value: 80 }, { cell_id: 'r0_c1', value: 70 }] },
+    },
+    poiGridFeatures: [
+      { type: 'Feature', properties: { cell_id: 'r0_c0', poi_count: 5, density_poi_per_km2: 20, dominant_category_name: '餐饮' } },
+    ],
+    nightlightLayer: {
+      cells: [{ cell_id: 'r0_c0', value: 12, class_label: '高亮' }],
+    },
+  })
+
+  const snapshot = ctx.buildAgentAnalysisSnapshot()
+  const populationGrid = snapshot.population.grid_evidence
+  const overlap = snapshot.shared_grid.top_coupled_cells[0]
+
+  assert.equal(snapshot.shared_grid.evidence_version, 'shared_grid_evidence_v1')
+  assert.equal(snapshot.shared_grid.join_key, 'cell_id')
+  assert.deepEqual(snapshot.shared_grid.uses, ['population', 'poi_raster', 'nightlight'])
+  assert.equal(populationGrid.evidence_level, 'cell_id_population_and_sex')
+  assert.equal(populationGrid.top_abs_sex_diff_cells[0].cell_id, 'r0_c0')
+  assert.equal(populationGrid.top_abs_sex_diff_cells[0].sex_diff_value, 20)
+  assert.equal(overlap.cell_id, 'r0_c0')
+  assert.equal(overlap.male_value, 100)
+  assert.equal(overlap.female_value, 80)
+  assert.equal(overlap.sex_diff_value, 20)
+  assert.equal(overlap.coupling_type, 'high_pop_high_poi_high_light')
+  assert.ok(!Object.prototype.hasOwnProperty.call(snapshot.shared_grid, 'top_overlap_cells'))
+  assert.ok(!Object.prototype.hasOwnProperty.call(snapshot.shared_grid, 'mismatch_signals'))
+})
+
+test('agent analysis snapshot keeps poi raster out of summary evidence', () => {
+  const ctx = createAgentContext({
+    poiGridType: 'raster',
+    poiDataSource: 'local',
+    resultDataSource: 'local',
+    poiYearSource: '2024',
+    h3GridResolution: 9,
+    h3NeighborRing: 2,
+    h3GridIncludeMode: 'intersects',
+    h3GridMinOverlapRatio: 0.35,
+    poiGridSummary: {
+      grid_count: 4,
+      active_cell_count: 2,
+      assigned_poi_count: 10,
+      max_poi_count: 6,
+      avg_density_poi_per_km2: 25.5,
+    },
+    poiGridFeatures: [
+      { type: 'Feature', properties: { cell_id: 'r0_c0', poi_count: 6 } },
+    ],
+    h3AnalysisSummary: {
+      grid_count: 8,
+      poi_count: 10,
+      avg_density_poi_per_km2: 18.2,
+      avg_local_entropy: 0.4,
+    },
+  })
+
+  const snapshot = ctx.buildAgentAnalysisSnapshot()
+
+  assert.equal(snapshot.poi_summary.total, 0)
+  assert.equal(snapshot.poi_summary.grid_evidence, undefined)
+  assert.equal(snapshot.pois.length, 0)
+  assert.equal(snapshot.h3.poi_h3_evidence.evidence_version, 'poi_h3_evidence_v1')
+  assert.equal(snapshot.h3.poi_h3_evidence.grid_type, 'h3')
+  assert.equal(snapshot.h3.poi_h3_evidence.params.h3_resolution, 9)
+  assert.equal(snapshot.h3.poi_h3_evidence.params.neighbor_ring, 2)
+  assert.equal(snapshot.h3.poi_h3_evidence.params.min_overlap_ratio, 0.35)
+  assert.equal(snapshot.h3.poi_h3_evidence.counts.grid_count, 8)
+  assert.equal(snapshot.param_bundles.poi_h3_grid.params.h3_resolution, 9)
+  assert.equal(snapshot.param_bundles.poi_raster_grid.params.grid_type, 'raster')
+  assert.equal(snapshot.param_bundles.poi_fetch.params.year, 2024)
+  assert.equal(snapshot.param_bundles.population.task_key, 'population')
+  assert.equal(snapshot.h3.grid_params.h3_resolution, 9)
 })
 
 function ctxSessionBase(id, title) {

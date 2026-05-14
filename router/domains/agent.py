@@ -12,6 +12,8 @@ from modules.agent.schemas import (
     AgentIterationPoiBuildResponse,
     AgentIterationPoiRequest,
     AgentIterationPoiResponse,
+    AgentSiteSelectionRequest,
+    AgentSiteSelectionResponse,
     AgentSummaryStreamEvent,
     AgentToolSummary,
     AgentSummaryReadinessResponse,
@@ -34,6 +36,7 @@ from modules.agent.prompt_registry import (
     update_prompt_config,
 )
 from modules.agent.summary_service import evaluate_summary_readiness, stream_generate_summary_pack
+from modules.agent.site_selection_service import generate_site_selection_pack
 from modules.agent.session_service import (
     delete_agent_session,
     get_agent_session_detail,
@@ -116,6 +119,14 @@ async def run_agent_turn_stream(request: Request, payload: AgentTurnRequest):
 @router.get("/api/v1/analysis/agent/sessions", response_model=List[AgentSessionSummary])
 async def get_agent_sessions():
     return list_agent_sessions(agent_session_repo)
+
+
+@router.post("/api/v1/analysis/agent/site-selection", response_model=AgentSiteSelectionResponse)
+async def run_agent_site_selection(payload: AgentSiteSelectionRequest):
+    response = await generate_site_selection_pack(payload)
+    if response.status == "failed" and response.error == "missing_place_type":
+        raise HTTPException(status_code=400, detail="missing_place_type")
+    return response
 
 
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])

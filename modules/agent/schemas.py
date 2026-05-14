@@ -95,6 +95,8 @@ class AnalysisSnapshot(BaseModel):
     road: Dict[str, Any] = Field(default_factory=dict)
     population: Dict[str, Any] = Field(default_factory=dict)
     nightlight: Dict[str, Any] = Field(default_factory=dict)
+    shared_grid: Dict[str, Any] = Field(default_factory=dict)
+    param_bundles: Dict[str, Any] = Field(default_factory=dict)
     frontend_analysis: Dict[str, Any] = Field(default_factory=dict)
     active_panel: str = ""
     current_filters: Dict[str, Any] = Field(default_factory=dict)
@@ -117,6 +119,31 @@ class AgentSummaryRequest(BaseModel):
     conversation_id: str = ""
     history_id: str = ""
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
+
+
+class AgentSiteSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    conversation_id: str = ""
+    history_id: str = ""
+    analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
+    place_type: str = ""
+    policy_key: str = "business_catchment_1km"
+    strategy: str = "balanced"
+    scenario: str = "commuter"
+    source: str = "local"
+    year: Optional[int] = None
+
+
+class AgentSiteSelectionResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    status: Literal["success", "failed"] = "success"
+    site_selection_pack: Dict[str, Any] = Field(default_factory=dict)
+    current_target_supply_gap: Dict[str, Any] = Field(default_factory=dict)
+    current_site_candidate_scores: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+    error: str = ""
 
 
 class AgentSummaryDataReadiness(BaseModel):
@@ -188,7 +215,11 @@ class AgentIterationPoiResponse(BaseModel):
 
     status: str = "failed"
     ai_summary: List[str] = Field(default_factory=list)
-    ai_insights: Dict[str, str] = Field(default_factory=dict)
+    ai_insights: Dict[str, Any] = Field(default_factory=dict)
+    driver_analysis: List[Dict[str, Any]] = Field(default_factory=list)
+    planning_implications: List[Dict[str, Any]] = Field(default_factory=list)
+    report_title: str = ""
+    report_content: str = ""
     spatial_factors: Dict[str, Any] = Field(default_factory=dict)
     subcategory_spatial_trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
     subcategory_spatial_summary: List[str] = Field(default_factory=list)
@@ -205,6 +236,8 @@ class AgentIterationPoiBuildRequest(BaseModel):
     history_id: str = ""
     years: List[int] = Field(default_factory=list)
     center: List[float] = Field(default_factory=list)
+    h3_evidence: Dict[str, Any] = Field(default_factory=dict)
+    yearly_grid_evidence: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentIterationPoiBuildResponse(BaseModel):
@@ -228,10 +261,16 @@ class AgentIterationPoiBuildResponse(BaseModel):
     spatial_factors: Dict[str, Any] = Field(default_factory=dict)
     subcategory_spatial_trend_rows: List[Dict[str, Any]] = Field(default_factory=list)
     subcategory_spatial_summary: List[str] = Field(default_factory=list)
+    h3_evidence: Dict[str, Any] = Field(default_factory=dict)
+    yearly_grid_evidence: Dict[str, Any] = Field(default_factory=dict)
     rule_summary: List[str] = Field(default_factory=list)
     rule_insights: Dict[str, str] = Field(default_factory=dict)
     ai_summary: List[str] = Field(default_factory=list)
-    ai_insights: Dict[str, str] = Field(default_factory=dict)
+    ai_insights: Dict[str, Any] = Field(default_factory=dict)
+    driver_analysis: List[Dict[str, Any]] = Field(default_factory=list)
+    planning_implications: List[Dict[str, Any]] = Field(default_factory=list)
+    report_title: str = ""
+    report_content: str = ""
     ai_status: str = "pending"
     ai_prompt: str = ""
     ai_prompt_payload_note: str = ""

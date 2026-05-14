@@ -24,6 +24,7 @@ import {
   getAnalysisTaskDefinitions,
   runAnalysisTask,
 } from './analysis-task-registry.js'
+import { buildAnalysisTaskParamBundle } from './analysis-task-params.js'
 
 function createAgentUiMethods() {
   return {
@@ -315,6 +316,42 @@ function createAgentUiMethods() {
         : {}
       return cloneObject(pack)
     },
+    getAgentSummaryTourismCrossAnalysis(panelPayloads = null) {
+      const pack = this.getAgentSummaryPack(panelPayloads)
+      const payload = pack.tourism_cross_analysis && typeof pack.tourism_cross_analysis === 'object'
+        ? pack.tourism_cross_analysis
+        : {}
+      return {
+        title: asText(payload.title) || '文旅交叉策划分析',
+        content: asText(payload.content),
+      }
+    },
+    commitAgentSummaryPayloadsToActiveTab() {
+      const tabs = this.ensureAgentTabs(true)
+      const activeTab = this.getAgentActiveTopTab()
+      const activeId = asText(activeTab.id || tabs.activeTabId)
+      const currentPayloads = {
+        ...cloneObject(this.agentPanelPayloads),
+        summary_task_board: this.buildSummaryTaskBoardUiState(),
+      }
+      const summaryPack = this.getAgentSummaryPack(currentPayloads)
+      const nextTabs = cloneArray(tabs.summaryTabs).map((item) => {
+        if (asText(item.id) !== activeId) return item
+        return {
+          ...item,
+          title: this.getAgentSummaryWindowTitle(currentPayloads, item.title || '区域总结'),
+          panelPayloads: cloneObject(currentPayloads),
+          content: cloneObject(summaryPack),
+          evidenceRefs: cloneArray(summaryPack.evidence_refs || item.evidenceRefs || []),
+        }
+      })
+      this.agentTabs = {
+        ...tabs,
+        summaryTabs: nextTabs,
+      }
+      this.agentPanelPayloads = currentPayloads
+      return currentPayloads
+    },
     getAgentSummaryAreaJudgments(panelPayloads = null) {
       const pack = this.getAgentSummaryPack(panelPayloads)
       const rows = Array.isArray(pack.secondary_conclusions) ? pack.secondary_conclusions : []
@@ -453,6 +490,7 @@ function createAgentUiMethods() {
     getBasisDrawerTabs() {
       return [
         { key: 'basic', label: '基础说明' },
+        { key: 'validation', label: '输出验证' },
         { key: 'template', label: '规则模板' },
         { key: 'raw', label: '原始字段' },
       ]
@@ -479,6 +517,7 @@ function createAgentUiMethods() {
         promptSnapshot: cloneObject(source.promptSnapshot || source.prompt_snapshot || {}),
         promptSourceLabel: asText(source.promptSourceLabel || source.prompt_source_label),
         rawInput: cloneObject(source.rawInput || source.raw_input || {}),
+        validationResults: cloneObject(source.validationResults || source.validation_results || {}),
         sourceType,
       }
     },
@@ -726,6 +765,7 @@ function createAgentUiMethods() {
           headline_judgment: cloneObject(pack.headline_judgment || {}),
           user_profile: cloneObject(pack.user_profile || {}),
           behavior_inference: cloneObject(pack.behavior_inference || {}),
+          tourism_cross_analysis: cloneObject(pack.tourism_cross_analysis || {}),
         },
         business_profile: {
           label: businessProfile.business_profile,
@@ -802,6 +842,7 @@ function createAgentUiMethods() {
       const headline = generated.headline_judgment || {}
       const userProfile = generated.user_profile || {}
       const behavior = generated.behavior_inference || {}
+      const tourismCrossAnalysis = generated.tourism_cross_analysis || {}
       if (key === 'headline') {
       this.appendBasisField(fields, 'headline_summary', '核心判断', headline.summary)
         this.appendBasisField(fields, 'supporting_clause', '支撑解释', headline.supporting_clause)
@@ -814,23 +855,27 @@ function createAgentUiMethods() {
         this.appendBasisField(fields, 'behavior_headline', '行为推断结论', behavior.headline)
         this.appendBasisField(fields, 'behavior_traits', '行为特征', behavior.traits)
       }
-      if (key === 'headline' || key === 'poi_structure' || key === 'business_support') {
+      if (key === 'tourism_cross_analysis') {
+        this.appendBasisField(fields, 'tourism_cross_analysis_title', '分析标题', tourismCrossAnalysis.title)
+        this.appendBasisField(fields, 'tourism_cross_analysis_content', '交叉分析文本', tourismCrossAnalysis.content)
+      }
+      if (key === 'headline' || key === 'poi_structure' || key === 'business_support' || key === 'tourism_cross_analysis') {
         this.appendBasisField(fields, 'business_profile', '商业画像', evidence.business_profile)
         this.appendBasisField(fields, 'poi_structure_summary', 'POI 结构摘要', (evidence.poi_structure || {}).summary_text)
         this.appendBasisField(fields, 'dominant_categories', '主导业态', (evidence.poi_structure || {}).dominant_categories)
         this.appendBasisField(fields, 'structure_tags', '结构标签', (evidence.poi_structure || {}).structure_tags)
       }
-      if (key === 'headline' || key === 'spatial_structure') {
+      if (key === 'headline' || key === 'spatial_structure' || key === 'tourism_cross_analysis') {
         this.appendBasisField(fields, 'spatial_structure_summary', '空间结构摘要', (evidence.spatial_structure || {}).summary_text)
         this.appendBasisField(fields, 'hotspot_mode', '热点模式', (evidence.spatial_structure || {}).hotspot_mode)
         this.appendBasisField(fields, 'core_zone_count', '核心区数量', (evidence.spatial_structure || {}).core_zone_count)
         this.appendBasisField(fields, 'opportunity_zone_count', '机会区数量', (evidence.spatial_structure || {}).opportunity_zone_count)
       }
-      if (key === 'headline' || key === 'user_profile' || key === 'behavior_inference') {
+      if (key === 'headline' || key === 'user_profile' || key === 'behavior_inference' || key === 'tourism_cross_analysis') {
         this.appendBasisField(fields, 'population_profile', '人口画像摘要', (evidence.population_profile || {}).summary_text)
         this.appendBasisField(fields, 'top_age_band', '主要年龄段', (evidence.population_profile || {}).top_age_band || (evidence.population_profile || {}).dominant_age_band)
       }
-      if (key === 'headline' || key === 'consumption_vitality' || key === 'behavior_inference' || key === 'business_support') {
+      if (key === 'headline' || key === 'consumption_vitality' || key === 'behavior_inference' || key === 'business_support' || key === 'tourism_cross_analysis') {
         const nightlight = evidence.nightlight_pattern || {}
         const road = evidence.road_pattern || {}
         this.appendBasisField(fields, 'economic_activity_intensity_level', '经济活动强度等级', nightlight.economic_activity_intensity_level)
@@ -853,6 +898,7 @@ function createAgentUiMethods() {
       const evidence = this.buildAgentSummaryEvidencePack(panelPayloads)
       const fields = this.buildAgentSummaryEvidenceFields(section, evidence)
       const snapshots = cloneObject(panelPayloads.prompt_snapshots || pack.prompt_snapshots || {})
+      const validationResults = cloneObject(panelPayloads.validation_results || pack.validation_results || {})
       const promptSnapshot = cloneObject(snapshots[key] || {})
       const promptDisplay = this.resolveBasisPromptDisplay(key, promptSnapshot)
       return {
@@ -879,6 +925,7 @@ function createAgentUiMethods() {
         promptKey: key,
         promptSnapshot: promptDisplay.promptSnapshot,
         promptSourceLabel: promptDisplay.promptSourceLabel,
+        validationResults: validationResults[key] ? { [key]: cloneObject(validationResults[key]) } : {},
         rawInput: {
           section,
           generated_section: key === 'headline'
@@ -977,6 +1024,8 @@ function createAgentUiMethods() {
       const promptKey = isPoi ? 'poi_iteration' : 'nightlight_iteration'
       const promptSnapshots = cloneObject(payload.prompt_snapshots || payload.promptSnapshots || {})
       const promptSnapshot = cloneObject(payload.prompt_snapshot || payload.promptSnapshot || promptSnapshots[promptKey] || {})
+      const allValidationResults = cloneObject(payload.validation_results || payload.validationResults || {})
+      const validationResult = cloneObject(allValidationResults[promptKey] || {})
       const promptDisplay = this.resolveBasisPromptDisplay(promptKey, promptSnapshot)
       const evidenceYears = cloneArray(rawInput.years)
       const evidenceYearSummaries = cloneArray(rawInput.year_summaries)
@@ -986,6 +1035,8 @@ function createAgentUiMethods() {
       const evidenceSubcategoryChanges = cloneArray(rawInput.subcategory_changes)
       const evidenceSpatialTrends = cloneArray(rawInput.subcategory_spatial_trends)
       const evidenceAreaDistribution = cloneArray(rawInput.area_distribution)
+      const h3Evidence = cloneObject(rawInput.h3_evidence)
+      const yearlyGridEvidence = cloneObject(rawInput.yearly_grid_evidence)
       const nightlightSeries = cloneArray(rawInput.series)
       const nightlightHotspot = cloneObject(rawInput.hotspot_shift)
       const nightlightSnapshotRefs = cloneArray(rawInput.snapshot_refs)
@@ -1019,6 +1070,8 @@ function createAgentUiMethods() {
         { key: 'subcategory_decline', label: '减少最明显小类', value: findMetricValue('top_subcategory_decrease') || formatChangeName(strongestDecline(evidenceSubcategoryChanges)) },
         { key: 'spatial_signal_count', label: '小类空间信号', value: evidenceSpatialTrends.length ? `${evidenceSpatialTrends.length} 条` : '暂无，可能仍在生成或后端未返回' },
         { key: 'area_distribution', label: '年度区域分布', value: evidenceAreaDistribution.map((row) => `${row.year || '-'}：${row.point_count ?? '-'}点，热点${row.hotspot_cell_count ?? 0}格`) },
+        { key: 'h3_evidence', label: '末年 H3 网格证据', value: h3Evidence },
+        { key: 'yearly_grid_evidence', label: '年度网格证据', value: yearlyGridEvidence },
       ].filter((item) => item.value !== undefined && item.value !== null && item.value !== '')
       const poiAnalysisFields = poiEvidenceFields
         .filter((field) => [
@@ -1031,10 +1084,12 @@ function createAgentUiMethods() {
           'category_decline',
           'subcategory_growth',
           'subcategory_decline',
+          'h3_evidence',
+          'yearly_grid_evidence',
         ].includes(field.key))
         .concat([
-          { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取 AI分析任务字段 summary_points' },
-          { key: 'output_fields', label: '本块使用输出字段', value: 'summary_points' },
+          { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取业态基础分析 7 个字段，并结合 H3 与年度网格证据。' },
+          { key: 'output_fields', label: '本块使用输出字段', value: 'summary_points, fastest_growth, declining_category, emerging_area, structure_judgement, driver_analysis, planning_implications' },
         ])
       const poiInsightFields = [
         { key: 'evidence_version', label: '证据包版本', value: rawInput.evidence_version },
@@ -1044,14 +1099,21 @@ function createAgentUiMethods() {
         { key: 'growth_area_signal', label: '增长片区信号', value: rawInput.growth_area_signal },
         { key: 'spatial_signal_count', label: '小类空间信号', value: evidenceSpatialTrends.length ? `${evidenceSpatialTrends.length} 条` : '暂无，可能仍在生成或后端未返回' },
         { key: 'area_distribution', label: '年度区域分布', value: evidenceAreaDistribution.map((row) => `${row.year || '-'}：${row.point_count ?? '-'}点，热点${row.hotspot_cell_count ?? 0}格`) },
-        { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取 AI洞察任务字段 fastest_growth, declining_category, emerging_area, structure_judgement' },
-        { key: 'output_fields', label: '本块使用输出字段', value: 'fastest_growth, declining_category, emerging_area, structure_judgement' },
+        { key: 'h3_evidence', label: '末年 H3 网格证据', value: h3Evidence },
+        { key: 'yearly_grid_evidence', label: '年度网格证据', value: yearlyGridEvidence },
+        { key: 'prompt_structure', label: '提示词结构', value: '同一基础提示词；本块读取业态基础分析 7 个字段，并结合 H3 与年度网格证据。' },
+        { key: 'output_fields', label: '本块使用输出字段', value: 'summary_points, fastest_growth, declining_category, emerging_area, structure_judgement, driver_analysis, planning_implications' },
       ].filter((item) => item.value !== undefined && item.value !== null && item.value !== '')
       const conclusionRows = isNightlight
         ? this.getAgentIterationNightlightAnalysisRows().map((row) => `${row.label}：${row.value}`)
         : isPoiInsight
           ? this.getAgentIterationPoiAiInsightRows().map((row) => `${row.label}：${row.value}`)
-          : this.getAgentIterationPoiAiSummaryRows()
+          : [
+              ...this.getAgentIterationPoiAiSummaryRows(),
+              ...this.getAgentIterationPoiAiInsightRows().map((row) => `${row.label}：${row.value}`),
+              ...this.getAgentIterationPoiDriverRows().map((row) => `${row.label}：${row.value}`),
+              ...this.getAgentIterationPoiPlanningRows().map((row) => `${row.label}：${row.value}`),
+            ]
       return {
         title: isNightlight ? '夜光多年变化依据' : isPoiInsight ? 'POI 多年洞察依据' : isPoiAnalysis ? 'POI 多年分析依据' : 'POI 多年变化依据',
         currentConclusion: conclusionRows.join('\n') || '当前暂无可展示结论。',
@@ -1072,17 +1134,17 @@ function createAgentUiMethods() {
           'AI 输出会被后端要求按固定 JSON 字段返回，前端只展示通过校验的字段。',
           isPoi
             ? isPoiInsight
-              ? '这是同一轮 POI 多年解读中的洞察字段，不是重复调用；本块展示增长最快行业、衰退行业、增长片区和结构判断。'
+              ? '这是同一轮 POI 多年解读中的结构化字段，不是重复调用；本块展示业态变化、空间增长、原因诊断和策划启示。'
               : isPoiAnalysis
-                ? '这是同一轮 POI 多年解读中的 summary_points 字段，不是重复调用；本块展示总体趋势、业态结构和关键小类变化。'
+                ? '这是同一轮 POI 多年解读中的业态基础分析字段，不是重复调用；本块展示摘要、结构判断、原因诊断和策划启示。'
                 : 'POI 分析关注总量、业态结构、区域分布与增长/衰退方向。'
             : '夜光分析关注总辐亮、均值、P90、点亮占比和热点迁移。',
         ],
         template: isPoi
           ? isPoiInsight
-            ? '从同一轮 POI 多年解读结果中读取{增长最快行业}、{衰退行业}、{增长片区}与{结构判断}。'
+            ? '从同一轮 POI 多年解读结果中读取{业态变化}、{增长片区}、{原因诊断}与{策划启示}。'
             : isPoiAnalysis
-              ? '从同一轮 POI 多年解读结果中读取 summary_points，概括{总量趋势}、{业态结构}与{关键小类变化}。'
+              ? '从同一轮 POI 多年解读结果中读取 7 个结构化字段，组织业态基础分析。'
               : '基于{年份序列}的 POI 总量、业态结构和区域分布变化，概括{趋势判断}、{结构变化}与{机会风险}。'
           : '基于近三年夜光快照，概括{趋势判断}、{总体变化}、{热点迁移}与{机会风险}。',
         aiPrompt: promptDisplay.aiPrompt,
@@ -1091,6 +1153,7 @@ function createAgentUiMethods() {
         promptKey,
         promptSnapshot: promptDisplay.promptSnapshot,
         promptSourceLabel: promptDisplay.promptSourceLabel,
+        validationResults: Object.keys(validationResult).length ? { [promptKey]: validationResult } : {},
         rawInput,
         sourceType: 'ai_checked',
       }
@@ -1131,6 +1194,8 @@ function createAgentUiMethods() {
       const key = asText(taskKey)
       const mapping = {
         poi_fetch: 'POI 抓取',
+        poi_raster_grid: 'POI 栅格计算',
+        poi_h3_grid: 'POI H3 网格计算',
         poi_grid: 'POI / 网格分析',
         population: '人口结构分析',
         nightlight: '夜光分析',
@@ -1146,20 +1211,23 @@ function createAgentUiMethods() {
       return cloneArray(readiness.missingTasks).map((taskKey) => this.getAgentSummaryTaskLabel(taskKey))
     },
     getSummaryTaskKeys() {
-      return ['poi_fetch', 'population', 'nightlight', 'poi_grid', 'road_syntax']
+      return ['poi_fetch', 'poi_raster_grid', 'poi_h3_grid', 'population', 'nightlight', 'road_syntax']
     },
     mapReadinessTaskToBoardTaskKeys(taskKey = '') {
       const key = asText(taskKey)
       if (!key) return []
       const mapping = {
         poi_fetch: ['poi_fetch'],
-        poi_grid: ['poi_grid'],
+        poi_grid: ['poi_raster_grid', 'poi_h3_grid'],
+        h3: ['poi_h3_grid'],
+        poi_raster_grid: ['poi_raster_grid'],
+        poi_h3_grid: ['poi_h3_grid'],
         population: ['population'],
         nightlight: ['nightlight'],
         road_syntax: ['road_syntax'],
-        poi_structure: ['poi_grid'],
-        spatial_structure: ['poi_grid', 'population', 'nightlight', 'road_syntax'],
-        area_labels: ['poi_grid', 'population', 'nightlight', 'road_syntax'],
+        poi_structure: ['poi_h3_grid'],
+        spatial_structure: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'],
+        area_labels: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'],
       }
       return cloneArray(mapping[key] || [])
     },
@@ -1447,7 +1515,8 @@ function createAgentUiMethods() {
         }
         return status
       }
-      if (key === 'poi_grid') return asText(this.h3GridStatus || '')
+      if (key === 'poi_raster_grid') return asText(this.poiGridStatus || '')
+      if (key === 'poi_h3_grid') return asText(this.h3GridStatus || '')
       if (key === 'population') return asText(this.populationStatus || '')
       if (key === 'nightlight') return asText(this.nightlightStatus || '')
       return ''
@@ -1577,41 +1646,9 @@ function createAgentUiMethods() {
     },
     captureSummaryTaskParams(taskKey = '') {
       const key = asText(taskKey)
-      if (key === 'poi_fetch') {
-        const year = Number(this.poiYearSource || this.resultPoiYear || 0) || null
-        return {
-          source: asText(this.poiDataSource || this.resultDataSource || ''),
-          year,
-          years: year ? [year] : [],
-        }
-      }
-      if (key === 'poi_grid') {
-        const year = Number(this.poiYearSource || this.resultPoiYear || 0) || null
-        return {
-          resolution: Number(this.h3GridResolution || 0) || 10,
-          neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
-          include_mode: asText(this.h3GridIncludeMode || ''),
-          poi_year: year,
-          poi_years: year ? [year] : [],
-        }
-      }
-      if (key === 'population') {
-        return {
-          year: asText(this.populationSelectedYear || ''),
-        }
-      }
-      if (key === 'nightlight') {
-        return {
-          year: asText(this.nightlightSelectedYear || ''),
-        }
-      }
-      if (key === 'road_syntax') {
-        return {
-          graph_model: asText(this.roadSyntaxGraphModel || ''),
-          metric: asText(this.roadSyntaxLastMetricTab || this.roadSyntaxMetric || ''),
-          blue: Number(this.roadSyntaxDisplayBlue || 0),
-          red: Number(this.roadSyntaxDisplayRed || 0),
-        }
+      const bundle = buildAnalysisTaskParamBundle(this, key)
+      if (bundle && bundle.params && Object.keys(bundle.params).length) {
+        return cloneObject(bundle.params)
       }
       return {}
     },
@@ -1682,8 +1719,9 @@ function createAgentUiMethods() {
     },
     getSummaryTaskParameterDependents(taskKey = '') {
       const key = asText(taskKey)
-      if (key === 'poi_fetch') return ['poi_fetch', 'poi_grid']
-      if (key === 'poi_grid') return ['poi_grid']
+      if (key === 'poi_fetch') return ['poi_fetch', 'poi_raster_grid', 'poi_h3_grid']
+      if (key === 'poi_raster_grid') return ['poi_raster_grid']
+      if (key === 'poi_h3_grid') return ['poi_h3_grid']
       if (key === 'population') return ['population']
       if (key === 'nightlight') return ['nightlight']
       return key ? [key] : []
@@ -1736,7 +1774,7 @@ function createAgentUiMethods() {
     },
     async onSummaryTaskPoiGridYearChange() {
       await this.onSummaryTaskPoiAnalysisYearChange()
-      this.onSummaryTaskParameterChange('poi_grid')
+      this.onSummaryTaskParameterChange('poi_h3_grid')
     },
     async selectAgentPoiYearForGrid(year = '') {
       const targetYear = Number(year)
@@ -2082,6 +2120,7 @@ function createAgentUiMethods() {
         business_support: { key: 'business_support', content: '', status: 'pending', error: '', payload: {} },
         user_profile: { key: 'user_profile', content: '', status: 'pending', error: '', payload: {} },
         behavior: { key: 'behavior', content: '', status: 'pending', error: '', payload: {} },
+        tourism_cross_analysis: { key: 'tourism_cross_analysis', content: '', status: 'pending', error: '', payload: {} },
         followups: { key: 'followups', content: '', status: 'pending', error: '', payload: {} },
       }
     },
@@ -2158,15 +2197,16 @@ function createAgentUiMethods() {
         return fallback
       }
       const sections = [
-        { key: 'headline', title: '核心判断', layout: 'text', taskKeys: ['poi_grid', 'population', 'nightlight', 'road_syntax'] },
-        { key: 'tags', title: '商业类型标签（ICSC）', layout: 'tags', taskKeys: ['poi_grid'] },
-        { key: 'spatial_structure', title: '空间结构', layout: 'panel', taskKeys: ['poi_grid', 'population', 'nightlight', 'road_syntax'] },
-        { key: 'poi_structure', title: 'POI结构', layout: 'panel', taskKeys: ['poi_grid'] },
+        { key: 'headline', title: '核心判断', layout: 'text', taskKeys: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'] },
+        { key: 'tags', title: '商业类型标签（ICSC）', layout: 'tags', taskKeys: ['poi_h3_grid'] },
+        { key: 'spatial_structure', title: '空间结构', layout: 'panel', taskKeys: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'] },
+        { key: 'poi_structure', title: 'POI结构', layout: 'panel', taskKeys: ['poi_h3_grid'] },
         { key: 'consumption_vitality', title: '经济活动强度', layout: 'panel', taskKeys: ['nightlight'] },
-        { key: 'business_support', title: '业态承接', layout: 'panel', taskKeys: ['poi_grid', 'road_syntax'] },
+        { key: 'business_support', title: '业态承接', layout: 'panel', taskKeys: ['poi_h3_grid', 'road_syntax'] },
         { key: 'user_profile', title: '用户画像', layout: 'list', taskKeys: ['population'] },
         { key: 'behavior', title: '商业行为推断', layout: 'list', taskKeys: ['nightlight', 'road_syntax'] },
-        { key: 'followups', title: '快捷追问', layout: 'actions', taskKeys: ['poi_grid', 'population', 'nightlight', 'road_syntax'] },
+        { key: 'tourism_cross_analysis', title: '文旅交叉策划分析', layout: 'longtext', taskKeys: ['poi_raster_grid', 'poi_h3_grid', 'population', 'nightlight'] },
+        { key: 'followups', title: '快捷追问', layout: 'actions', taskKeys: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'] },
       ]
       return sections.map((section) => {
         const live = liveSections[section.key] || {}
@@ -2174,7 +2214,7 @@ function createAgentUiMethods() {
         let status = 'pending'
         if (['ready', 'failed', 'active'].includes(asText(live.status))) {
           status = asText(live.status)
-        } else if (phaseStarted && (section.key === 'headline' || section.key === 'followups')) {
+        } else if (phaseStarted && (section.key === 'headline' || section.key === 'tourism_cross_analysis' || section.key === 'followups')) {
           status = 'active'
         } else if (state.hasRunning) {
           status = 'active'
@@ -2376,6 +2416,8 @@ function createAgentUiMethods() {
               nextContent = cloneArray(sectionPayload.followup_questions).map((item) => asText(item)).filter(Boolean).join('\n')
             } else if (payload.key === 'tags') {
               nextContent = cloneArray(sectionPayload.icsc_tags).map((item) => asText(item)).filter(Boolean).join('、')
+            } else if (payload.key === 'tourism_cross_analysis') {
+              nextContent = asText(sectionPayload.content)
             }
             if (!streamKey) return
             this.patchAgentSummaryStreamSection(streamKey, {
@@ -2443,6 +2485,9 @@ function createAgentUiMethods() {
             ...cloneObject(this.agentPanelPayloads),
             summary_pack: cloneObject(data.summary_pack),
           }
+        }
+        if (this.isCurrentAgentSummaryTabActive()) {
+          this.commitAgentSummaryPayloadsToActiveTab()
         }
         const summaryPack = cloneObject(this.getAgentSummaryPack())
         const summaryStatus = this.getAgentSummaryStatus(this.agentPanelPayloads)
@@ -2576,6 +2621,7 @@ function createAgentUiMethods() {
           sessionId: asText(item && item.sessionId),
           readonly: !!(item && item.readonly),
           createdAt: asText(item && item.createdAt) || new Date().toISOString(),
+          panelPayloads: cloneObject(item && item.panelPayloads),
         })).filter((item) => item.id),
         followupTabs: cloneArray(base.followupTabs).map((item) => ({
           id: asText(item && item.id),
@@ -2720,11 +2766,21 @@ function createAgentUiMethods() {
       target.evidenceRefs = cloneArray(summaryPack.evidence_refs || [])
       this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
     },
+    captureAgentActiveSiteSelectionTabState() {
+      const tabs = this.ensureAgentTabs(true)
+      const activeTab = this.getAgentActiveTopTab()
+      if (asText(activeTab.kind) !== 'site_selection') return
+      const target = cloneArray(tabs.siteSelectionTabs).find((item) => item.id === activeTab.id)
+      if (!target || target.readonly) return
+      target.panelPayloads = cloneObject(this.agentPanelPayloads)
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+    },
     switchAgentTopTab(tabId = '') {
       const nextId = asText(tabId)
       if (!nextId) return
       this.closeAgentCreateTabMenu()
       this.captureAgentActiveSummaryTabState()
+      this.captureAgentActiveSiteSelectionTabState()
       this.captureAgentActiveFollowupTabState()
       const tabs = this.ensureAgentTabs(true)
       if (tabs.activeTabId === nextId) return
@@ -2745,7 +2801,11 @@ function createAgentUiMethods() {
           this.agentPanelPayloads = cloneObject(target.panelPayloads)
         }
       } else if (tabs.siteSelectionTabs.some((item) => item.id === nextId)) {
+        const target = tabs.siteSelectionTabs.find((item) => item.id === nextId)
         this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
+        if (target && target.panelPayloads && typeof target.panelPayloads === 'object') {
+          this.agentPanelPayloads = cloneObject(target.panelPayloads)
+        }
       } else {
         const target = tabs.followupTabs.find((item) => item.id === nextId)
         if (target) {
@@ -2826,6 +2886,7 @@ function createAgentUiMethods() {
         sessionId: '',
         readonly: false,
         createdAt: new Date().toISOString(),
+        panelPayloads: cloneObject(this.agentPanelPayloads),
       }
       tabs.siteSelectionTabs = [...cloneArray(tabs.siteSelectionTabs), tab]
       tabs.activeTabId = tabId
@@ -3047,6 +3108,398 @@ function createAgentUiMethods() {
       if (asText(this.getAgentActiveTopTab().kind) === 'followup') return
       this.openAgentFollowupFromSummary(prompt || this.agentInput || '', '追问解释')
     },
+    getAgentActiveSiteSelectionTab() {
+      const tabs = this.ensureAgentTabs(false)
+      const activeId = asText(tabs.activeTabId)
+      return cloneArray(tabs.siteSelectionTabs).find((item) => asText(item && item.id) === activeId) || null
+    },
+    getAgentActiveSiteSelectionPayloads() {
+      const activeTab = this.getAgentActiveSiteSelectionTab()
+      if (activeTab && activeTab.panelPayloads && typeof activeTab.panelPayloads === 'object') {
+        return cloneObject(activeTab.panelPayloads)
+      }
+      return cloneObject(this.agentPanelPayloads)
+    },
+    getAgentSiteSelectionState() {
+      const payloads = this.getAgentActiveSiteSelectionPayloads()
+      const state = payloads.site_selection_ui && typeof payloads.site_selection_ui === 'object'
+        ? payloads.site_selection_ui
+        : {}
+      return {
+        targetType: asText(state.target_type || state.targetType),
+        status: asText(state.status || 'idle') || 'idle',
+        error: asText(state.error),
+        strategy: asText(state.strategy) || 'balanced',
+        scenario: asText(state.scenario) || 'commuter',
+        warnings: cloneArray(state.warnings).map((item) => asText(item)).filter(Boolean),
+        selectedH3Id: asText(state.selected_h3_id || state.selectedH3Id),
+        updatedAt: asText(state.updated_at || state.updatedAt),
+      }
+    },
+    commitAgentSiteSelectionPayload(patch = {}) {
+      const tabs = this.ensureAgentTabs(true)
+      const activeId = asText(this.getAgentActiveTopTab().kind) === 'site_selection'
+        ? asText(this.getAgentActiveTopTab().id)
+        : asText(tabs.activeTabId)
+      const targetTab = cloneArray(tabs.siteSelectionTabs).find((item) => item.id === activeId)
+      const currentPayloads = targetTab && targetTab.panelPayloads && typeof targetTab.panelPayloads === 'object'
+        ? cloneObject(targetTab.panelPayloads)
+        : cloneObject(this.agentPanelPayloads)
+      const currentUi = cloneObject(currentPayloads.site_selection_ui)
+      const nextPayloads = {
+        ...currentPayloads,
+        ...cloneObject(patch.panelPayloads),
+        site_selection_ui: {
+          ...currentUi,
+          ...cloneObject(patch.ui),
+          updated_at: new Date().toISOString(),
+        },
+      }
+      tabs.siteSelectionTabs = cloneArray(tabs.siteSelectionTabs).map((item) => (
+        item.id === activeId ? { ...item, panelPayloads: cloneObject(nextPayloads) } : item
+      ))
+      this.agentTabs = { ...tabs, siteSelectionTabs: cloneArray(tabs.siteSelectionTabs) }
+      if (asText(tabs.activeTabId) === activeId) {
+        this.agentPanelPayloads = nextPayloads
+      }
+      this.syncCurrentAgentSession()
+      return nextPayloads
+    },
+    inferAgentSiteSelectionTargetType() {
+      const state = this.getAgentSiteSelectionState()
+      if (state.targetType) return state.targetType
+      const payloads = this.getAgentActiveSiteSelectionPayloads()
+      const candidates = [
+        payloads.site_selection_pack && payloads.site_selection_pack.place_type,
+        payloads.current_target_supply_gap && payloads.current_target_supply_gap.place_type,
+        payloads.current_poi_summary && payloads.current_poi_summary.keywords,
+        payloads.current_poi_summary && payloads.current_poi_summary.types,
+        this.agentInput,
+      ]
+      return asText(candidates.find((item) => asText(item))) || ''
+    },
+    setAgentSiteSelectionTargetType(value = '') {
+      this.commitAgentSiteSelectionPayload({
+        ui: {
+          target_type: asText(value),
+          error: '',
+        },
+      })
+    },
+    getAgentSiteSelectionStrategyOptions() {
+      return [
+        { value: 'balanced', label: '综合评估' },
+        { value: 'supply_gap', label: '补供给缺口' },
+        { value: 'traffic_vitality', label: '蹭流量活力' },
+        { value: 'avoid_competition', label: '避开竞争' },
+      ]
+    },
+    getAgentSiteSelectionScenarioOptions() {
+      return [
+        { value: 'commuter', label: '通勤快取' },
+        { value: 'community', label: '社区日常' },
+        { value: 'night_social', label: '夜间轻社交' },
+        { value: 'student', label: '学生消费' },
+        { value: 'family', label: '家庭亲子' },
+      ]
+    },
+    setAgentSiteSelectionStrategy(value = '') {
+      const options = this.getAgentSiteSelectionStrategyOptions()
+      const next = options.some((item) => item.value === value) ? value : 'balanced'
+      this.commitAgentSiteSelectionPayload({
+        ui: {
+          strategy: next,
+          error: '',
+        },
+      })
+    },
+    setAgentSiteSelectionScenario(value = '') {
+      const options = this.getAgentSiteSelectionScenarioOptions()
+      const next = options.some((item) => item.value === value) ? value : 'commuter'
+      this.commitAgentSiteSelectionPayload({
+        ui: {
+          scenario: next,
+          error: '',
+        },
+      })
+    },
+    getAgentSiteSelectionPack() {
+      const payloads = this.getAgentActiveSiteSelectionPayloads()
+      const pack = payloads.site_selection_pack && typeof payloads.site_selection_pack === 'object'
+        ? payloads.site_selection_pack
+        : {}
+      return cloneObject(pack)
+    },
+    hasAgentSiteSelectionPack() {
+      const pack = this.getAgentSiteSelectionPack()
+      return !!(
+        cloneArray(pack.candidate_sites).length
+        || cloneArray(pack.ranking).length
+        || asText(pack.summary_text)
+        || asText(pack.not_recommended_reason)
+      )
+    },
+    isAgentSiteSelectionRunning() {
+      const state = this.getAgentSiteSelectionState()
+      return state.status === 'running'
+    },
+    getAgentSiteSelectionReadinessItems() {
+      const hasScope = !!(this.getIsochronePolygonRing && this.getIsochronePolygonRing())
+      const hasPoi = cloneArray(this.allPoisDetails).length > 0
+        || !!(this.poiSummary && Number(this.poiSummary.total || this.poiSummary.count || 0) > 0)
+        || !!(this.resultPoiSummary && Number(this.resultPoiSummary.total || this.resultPoiSummary.count || 0) > 0)
+      const hasH3 = Number(this.h3GridCount || 0) > 0
+        || cloneArray(this.h3AnalysisGridFeatures).length > 0
+        || !!(this.h3AnalysisSummary && Object.keys(this.h3AnalysisSummary).length)
+      const hasPopulation = !!(this.populationOverview && Object.keys(this.populationOverview).length)
+      const hasNightlight = !!(this.nightlightOverview && Object.keys(this.nightlightOverview).length)
+      const hasRoad = !!(this.roadSyntaxSummary && Object.keys(this.roadSyntaxSummary).length)
+      return [
+        { key: 'scope', label: '当前范围', ready: hasScope, detail: hasScope ? '已读取等时圈或手绘范围' : '请先生成等时圈或选择分析范围', required: true },
+        { key: 'target', label: '目标业态', ready: !!this.inferAgentSiteSelectionTargetType(), detail: this.inferAgentSiteSelectionTargetType() || '请输入咖啡店、餐饮、便利店等目标', required: true },
+        { key: 'poi', label: 'POI', ready: hasPoi, detail: hasPoi ? '可用于供给和竞品结构' : '缺少 POI 时会由工具链尝试补齐', required: false },
+        { key: 'h3', label: 'H3 网格', ready: hasH3, detail: hasH3 ? '可用于候选格提取' : '缺少 H3 时会由工具链尝试补齐', required: false },
+        { key: 'population', label: '人口', ready: hasPopulation, detail: hasPopulation ? '可用于需求支撑' : '未就绪时降级为弱证据', required: false },
+        { key: 'nightlight', label: '夜光', ready: hasNightlight, detail: hasNightlight ? '可用于活力判断' : '未就绪时降级为弱证据', required: false },
+        { key: 'road', label: '路网', ready: hasRoad, detail: hasRoad ? '可用于可达性判断' : '未就绪时降级为弱证据', required: false },
+      ]
+    },
+    getAgentSiteSelectionBlockingItems() {
+      return this.getAgentSiteSelectionReadinessItems().filter((item) => item.required && !item.ready)
+    },
+    canRunAgentSiteSelection() {
+      return !this.isAgentSiteSelectionRunning() && this.getAgentSiteSelectionBlockingItems().length === 0
+    },
+    getAgentSiteSelectionSourceLabel() {
+      const source = asText(this.resultDataSource || this.poiDataSource || 'local') || 'local'
+      const year = Number(this.resultPoiYear || this.poiYearSource || 0) || null
+      return year ? `${source} · ${year}` : source
+    },
+    getAgentSiteSelectionScopeStatus() {
+      const item = this.getAgentSiteSelectionReadinessItems().find((entry) => entry.key === 'scope')
+      return item || { ready: false, detail: '请先生成等时圈或选择分析范围' }
+    },
+    async generateAgentSiteSelection() {
+      if (this.isAgentSiteSelectionRunning()) return
+      if (!this.isAgentSiteSelectionTabActive()) {
+        this.createAgentSiteSelectionTab({ title: '区域内选址' })
+      }
+      const targetType = this.inferAgentSiteSelectionTargetType()
+      if (!targetType) {
+        this.commitAgentSiteSelectionPayload({
+          ui: {
+            status: 'idle',
+            error: '请先输入目标业态',
+          },
+        })
+        return
+      }
+      const blocking = this.getAgentSiteSelectionBlockingItems()
+      if (blocking.some((item) => item.key === 'scope')) {
+        this.commitAgentSiteSelectionPayload({
+          ui: {
+            target_type: targetType,
+            status: 'idle',
+            error: '请先生成等时圈或选择分析范围',
+          },
+        })
+        return
+      }
+      const tabId = asText(this.getAgentActiveTopTab().id)
+      const state = this.getAgentSiteSelectionState()
+      const strategy = state.strategy || 'balanced'
+      const scenario = state.scenario || 'commuter'
+      this.commitAgentSiteSelectionPayload({
+        ui: {
+          target_type: targetType,
+          strategy,
+          scenario,
+          status: 'running',
+          error: '',
+          warnings: [],
+        },
+      })
+      try {
+        const year = Number(this.resultPoiYear || this.poiYearSource || 0) || null
+        const response = await fetch('/api/v1/analysis/agent/site-selection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversation_id: asText(this.activeAgentSessionId || this.agentConversationId),
+            history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
+            analysis_snapshot: this.buildAgentAnalysisSnapshot(),
+            place_type: targetType,
+            policy_key: 'business_catchment_1km',
+            strategy,
+            scenario,
+            source: asText(this.resultDataSource || this.poiDataSource || 'local') || 'local',
+            year,
+          }),
+        })
+        let data = {}
+        try {
+          data = await response.json()
+        } catch (jsonError) {
+          data = {}
+        }
+        if (!response.ok || data.status === 'failed') {
+          throw new Error(asText(data.error || data.detail) || '选址分析失败')
+        }
+        const pack = data.site_selection_pack && typeof data.site_selection_pack === 'object'
+          ? data.site_selection_pack
+          : {}
+        this.switchAgentTopTab(tabId)
+        this.commitAgentSiteSelectionPayload({
+          panelPayloads: {
+            site_selection_pack: pack,
+            current_target_supply_gap: data.current_target_supply_gap || {},
+            current_site_candidate_scores: data.current_site_candidate_scores || {},
+          },
+          ui: {
+            target_type: targetType,
+            strategy,
+            scenario,
+            status: Object.keys(pack).length ? 'ready' : 'empty',
+            error: Object.keys(pack).length ? '' : '当前证据不足，仅可做区域判断',
+            warnings: cloneArray(data.warnings).map((item) => asText(item)).filter(Boolean),
+          },
+        })
+      } catch (error) {
+        this.switchAgentTopTab(tabId)
+        this.commitAgentSiteSelectionPayload({
+          ui: {
+            target_type: targetType,
+            strategy,
+            scenario,
+            status: 'failed',
+            error: error && error.message ? error.message : '选址分析失败',
+          },
+        })
+      }
+    },
+    getAgentSiteSelectionCandidates() {
+      const pack = this.getAgentSiteSelectionPack()
+      return cloneArray(pack.candidate_sites).slice(0, 5).map((item, index) => {
+        const scoreParts = item && typeof item.scores === 'object' ? item.scores : {}
+        const center = item && typeof item.center_point === 'object' ? item.center_point : {}
+        const lng = Number(center.lng ?? center.longitude)
+        const lat = Number(center.lat ?? center.latitude)
+        const coordinate = Number.isFinite(lng) && Number.isFinite(lat) ? `${lng.toFixed(5)}, ${lat.toFixed(5)}` : ''
+        return {
+          rank: Number(item.rank || index + 1) || index + 1,
+          h3Id: asText(item.h3_id || item.h3Id),
+          title: asText(item.display_title || item.approx_address || item.label) || `候选${index + 1}`,
+          approxAddress: asText(item.approx_address),
+          coordinate,
+          positioning: asText(item.positioning) || this.getAgentSiteSelectionFallbackPositioning(),
+          totalScore: Number(item.total_score ?? item.totalScore ?? 0) || 0,
+          gapScore: Number(item.gap_score ?? item.gapScore ?? scoreParts.supply_gap ?? 0) || 0,
+          populationScore: Number(scoreParts.population_support ?? scoreParts.population ?? item.population_score ?? item.populationScore ?? 0) || 0,
+          vitalityScore: Number(scoreParts.vitality ?? item.vitality_score ?? item.vitalityScore ?? 0) || 0,
+          roadScore: Number(scoreParts.accessibility ?? scoreParts.road ?? item.road_score ?? item.roadScore ?? 0) || 0,
+          reason: asText(item.reason_summary || item.reason || item.summary),
+          whySuitable: cloneArray(item.why_suitable || item.whySuitable).map((entry) => asText(entry)).filter(Boolean),
+          nextValidationSteps: cloneArray(item.next_validation_steps || item.nextValidationSteps).map((entry) => asText(entry)).filter(Boolean),
+          strengths: cloneArray(item.strengths).map((entry) => asText(entry)).filter(Boolean),
+          risks: cloneArray(item.risks).map((entry) => asText(entry)).filter(Boolean),
+        }
+      })
+    },
+    getAgentSiteSelectionFallbackPositioning() {
+      const state = this.getAgentSiteSelectionState()
+      const scenario = this.getAgentSiteSelectionScenarioOptions().find((item) => item.value === state.scenario)
+      const strategy = this.getAgentSiteSelectionStrategyOptions().find((item) => item.value === state.strategy)
+      const target = this.inferAgentSiteSelectionTargetType() || '门店'
+      return `${scenario ? scenario.label : '通勤快取'}型${target} · ${strategy ? strategy.label : '综合评估'}`
+    },
+    getAgentSiteSelectionVerdict() {
+      const pack = this.getAgentSiteSelectionPack()
+      const verdict = asText(pack.overall_verdict || pack.overallVerdict)
+      const labelMap = { suitable: '适合优先验证', cautious: '谨慎预筛', not_recommended: '暂不建议' }
+      return {
+        key: verdict || 'cautious',
+        label: labelMap[verdict] || labelMap.cautious,
+        text: asText(pack.verdict_text || pack.verdictText || pack.summary_text || pack.not_recommended_reason) || '当前结果适合作为区域内候选片区预筛。',
+      }
+    },
+    getAgentSiteSelectionRankingRows() {
+      return cloneArray(this.getAgentSiteSelectionPack().ranking).slice(0, 5).map((item, index) => ({
+        rank: Number(item.rank || index + 1) || index + 1,
+        title: asText(item.title) || `候选${index + 1}`,
+        totalScore: Number(item.total_score ?? item.totalScore ?? 0) || 0,
+      }))
+    },
+    getAgentSiteSelectionSelectedCandidate() {
+      const candidates = this.getAgentSiteSelectionCandidates()
+      const selectedH3Id = this.getAgentSiteSelectionState().selectedH3Id
+      return candidates.find((item) => item.h3Id && item.h3Id === selectedH3Id) || candidates[0] || null
+    },
+    getAgentSiteSelectionSelectedWhySuitable() {
+      const candidate = this.getAgentSiteSelectionSelectedCandidate()
+      if (!candidate) return []
+      const points = [...candidate.whySuitable, ...candidate.strengths]
+      if (!points.length && candidate.reason) points.push(candidate.reason)
+      return points.filter(Boolean).slice(0, 4)
+    },
+    getAgentSiteSelectionSelectedValidationSteps() {
+      const candidate = this.getAgentSiteSelectionSelectedCandidate()
+      if (!candidate) return []
+      if (candidate.nextValidationSteps.length) return candidate.nextValidationSteps.slice(0, 5)
+      return [
+        '现场复核临街可见度、门面开口和动线方向',
+        '观察早晚高峰人流与停留情况',
+        '核对租金、面积和周边同类店经营状态',
+      ]
+    },
+    getAgentSiteSelectionAvoidAreas() {
+      const pack = this.getAgentSiteSelectionPack()
+      return cloneArray(pack.avoid_areas || pack.avoidAreas).slice(0, 3).map((item, index) => ({
+        rank: index + 1,
+        h3Id: asText(item.h3_id || item.h3Id),
+        title: asText(item.title || item.display_title || item.approx_address) || `不建议网格 ${index + 1}`,
+        reason: asText(item.reason || item.not_recommended_reason) || '综合风险较高，暂不作为优先看点。',
+        score: Number(item.score ?? item.total_score ?? 0) || 0,
+      }))
+    },
+    getAgentSiteSelectionEvidenceChain() {
+      return cloneArray(this.getAgentSiteSelectionPack().evidence_chain).map((item, index) => ({
+        key: asText(item.tool_name || item.metric) || `evidence-${index}`,
+        toolName: asText(item.tool_name) || '-',
+        value: this.formatAgentSiteSelectionValue(item.value),
+        reason: asText(item.rule_or_reason || item.reason),
+        confidence: asText(item.confidence) || 'weak',
+      }))
+    },
+    formatAgentSiteSelectionValue(value) {
+      if (Array.isArray(value)) return value.length ? `${value.length} 项` : '无'
+      if (value && typeof value === 'object') return Object.keys(value).length ? '已生成' : '无'
+      return asText(value) || '无'
+    },
+    formatAgentSiteSelectionScore(value = 0) {
+      const score = Number(value || 0)
+      if (!Number.isFinite(score)) return '0'
+      return score >= 10 ? score.toFixed(0) : score.toFixed(2)
+    },
+    getAgentSiteSelectionConfidenceLabel(value = '') {
+      const key = asText(value)
+      const mapping = { strong: '强', moderate: '中', weak: '弱' }
+      return mapping[key] || key || '弱'
+    },
+    async onAgentSiteSelectionCandidateClick(candidate = null) {
+      const h3Id = asText(candidate && (candidate.h3Id || candidate.h3_id))
+      if (!h3Id) return
+      this.commitAgentSiteSelectionPayload({
+        ui: {
+          selected_h3_id: h3Id,
+          error: '',
+        },
+      })
+      await this.onAgentCardItemClick({
+        type: 'h3_candidate',
+        h3_id: h3Id,
+        text: asText(candidate && candidate.title) || '候选网格',
+      })
+    },
     getAgentIterationKinds() {
       return [
         { key: 'poi', label: 'POI', disabled: false },
@@ -3057,8 +3510,11 @@ function createAgentUiMethods() {
     getAgentIterationSecondaryView(kind = '') {
       const currentKind = asText(kind || this.agentIterationActiveKind) || 'poi'
       const view = cloneObject(this.agentIterationSecondaryView)
-      const defaultItem = this.getAgentIterationSecondaryNavItems(currentKind)[0] || {}
-      return asText(view[currentKind]) || asText(defaultItem.key)
+      const items = this.getAgentIterationSecondaryNavItems(currentKind)
+      const saved = asText(view[currentKind])
+      if (saved && items.some((item) => item.key === saved)) return saved
+      const defaultItem = items[0] || {}
+      return asText(defaultItem.key)
     },
     isAgentIterationSecondaryView(key = '', kind = '') {
       return this.getAgentIterationSecondaryView(kind) === asText(key)
@@ -3101,9 +3557,13 @@ function createAgentUiMethods() {
     getAgentIterationSecondaryNavItems() {
       const activeKind = asText(arguments[0] || this.agentIterationActiveKind) || 'poi'
       if (activeKind === 'poi') {
-        const poiReady = asText(this.getAgentIterationPoiPayload().status) === 'ready'
+        const readiness = this.getAgentIterationPoiReadiness()
+        const poiReady = asText(this.getAgentIterationPoiPayload().status) === 'ready' && readiness.ready
+        const dataItem = { key: 'data', label: '数据补齐', available: true }
+        if (!poiReady) return [dataItem]
         return [
-          { key: 'ai', label: 'AI解读', available: poiReady },
+          dataItem,
+          { key: 'ai', label: '业态基础分析', available: poiReady },
           { key: 'metrics', label: '核心指标', available: poiReady },
           { key: 'trend', label: '趋势结构', available: this.getAgentIterationPoiTotalLineChart().length >= 2 },
           { key: 'space', label: '空间分布', available: this.getAgentIterationPoiAreaHeatmaps().length > 0 },
@@ -3186,6 +3646,34 @@ function createAgentUiMethods() {
       if (!Number.isFinite(number)) return '-'
       return `${number >= 0 ? '+' : ''}${(number * 100).toFixed(1)}%`
     },
+    getAgentIterationPopulationAgeGroupRatios(row = {}) {
+      const groups = row && typeof row.age_group_ratios === 'object' ? row.age_group_ratios : {}
+      const distribution = cloneArray(row && row.age_distribution)
+      const total = Number(row && (row.total_population ?? row.population ?? 0)) || distribution.reduce((sum, item) => sum + (Number(item && item.total) || 0), 0)
+      if (groups && Object.keys(groups).length) {
+        return {
+          child: Number(groups.child_0_14),
+          working: Number(groups.working_15_64),
+          senior: Number(groups.senior_65_plus),
+        }
+      }
+      const sums = { child: 0, working: 0, senior: 0 }
+      distribution.forEach((item) => {
+        const key = asText(item && item.age_band)
+        const start = key === '00' ? 0 : Number(key)
+        const value = Number(item && item.total) || 0
+        if (!Number.isFinite(start)) return
+        if (start < 15) sums.child += value
+        else if (start < 65) sums.working += value
+        else sums.senior += value
+      })
+      if (!total) return { child: NaN, working: NaN, senior: NaN }
+      return {
+        child: sums.child / total,
+        working: sums.working / total,
+        senior: sums.senior / total,
+      }
+    },
     getAgentIterationPopulationFeatureRows() {
       const payload = this.getAgentIterationPopulationPayload()
       const series = cloneArray(payload.series || (payload.timeseries && payload.timeseries.series))
@@ -3194,6 +3682,20 @@ function createAgentUiMethods() {
       const last = series[series.length - 1] || first
       const countDelta = Number(last.total_population ?? last.population ?? 0) - Number(first.total_population ?? first.population ?? 0)
       const densityDelta = Number(last.population_density ?? last.density ?? 0) - Number(first.population_density ?? first.density ?? 0)
+      const maleTotal = Number(last.male_total)
+      const femaleTotal = Number(last.female_total)
+      const totalPopulation = Number(last.total_population ?? last.population ?? 0)
+      const maleRatio = Number.isFinite(Number(last.male_ratio))
+        ? Number(last.male_ratio)
+        : (Number.isFinite(maleTotal) && Number.isFinite(femaleTotal) && (maleTotal + femaleTotal) > 0 ? maleTotal / (maleTotal + femaleTotal) : NaN)
+      const femaleRatio = Number.isFinite(Number(last.female_ratio))
+        ? Number(last.female_ratio)
+        : (Number.isFinite(maleRatio) ? 1 - maleRatio : NaN)
+      const sexDelta = Number.isFinite(maleTotal) && Number.isFinite(femaleTotal) ? maleTotal - femaleTotal : NaN
+      const ageGroups = this.getAgentIterationPopulationAgeGroupRatios(last)
+      const dominantAge = asText(last.top_age_band_label || last.dominant_age_band || last.top_age_band)
+      const firstDominantAge = asText(first.top_age_band_label || first.dominant_age_band || first.top_age_band)
+      const topAgeRatio = Number(last.top_age_band_ratio)
       const rows = [
         { key: 'period', label: '分析周期', value: asText(payload.period) || '-' },
         { key: 'cell_count', label: '格网数', value: Number.isFinite(Number(layerSummary.cell_count)) ? Math.round(Number(layerSummary.cell_count)) : '-' },
@@ -3207,6 +3709,23 @@ function createAgentUiMethods() {
           { key: 'density_delta', label: '平均密度首尾变化', value: this.formatAgentIterationMetric(densityDelta, 2) },
         )
       }
+      rows.push(
+        { key: 'male_total', label: '末年男性人口', value: Number.isFinite(maleTotal) ? this.formatAgentIterationMetric(maleTotal, 0) : '' },
+        { key: 'female_total', label: '末年女性人口', value: Number.isFinite(femaleTotal) ? this.formatAgentIterationMetric(femaleTotal, 0) : '' },
+        { key: 'male_ratio', label: '末年男性占比', value: Number.isFinite(maleRatio) ? this.formatAgentIterationPercent(maleRatio) : '' },
+        { key: 'female_ratio', label: '末年女性占比', value: Number.isFinite(femaleRatio) ? this.formatAgentIterationPercent(femaleRatio) : '' },
+        { key: 'sex_delta', label: '末年性别差（男-女）', value: Number.isFinite(sexDelta) ? this.formatAgentIterationMetric(sexDelta, 0) : '' },
+        { key: 'dominant_age_band', label: '末年主年龄段', value: dominantAge },
+        {
+          key: 'dominant_age_shift',
+          label: '主年龄段首尾变化',
+          value: firstDominantAge && dominantAge ? `${firstDominantAge} -> ${dominantAge}` : '',
+        },
+        { key: 'top_age_band_ratio', label: '主年龄段占比', value: Number.isFinite(topAgeRatio) ? this.formatAgentIterationPercent(topAgeRatio) : '' },
+        { key: 'child_ratio', label: '少儿人口占比(0-14)', value: Number.isFinite(ageGroups.child) ? this.formatAgentIterationPercent(ageGroups.child) : '' },
+        { key: 'working_age_ratio', label: '劳动年龄占比(15-64)', value: Number.isFinite(ageGroups.working) ? this.formatAgentIterationPercent(ageGroups.working) : '' },
+        { key: 'senior_ratio', label: '老年人口占比(65+)', value: Number.isFinite(ageGroups.senior) ? this.formatAgentIterationPercent(ageGroups.senior) : '' },
+      )
       return rows.filter((item) => item.value !== undefined && item.value !== null && item.value !== '')
     },
     getAgentIterationNightlightTrendRows() {
@@ -3256,6 +3775,196 @@ function createAgentUiMethods() {
         .concat(cloneArray(payload.subcategory_trend_rows))
         .filter((item) => asText(item.label) && item.value !== undefined && item.value !== null)
     },
+    getAgentIterationPoiTargetYears() {
+      const historyYears = cloneArray(this.currentHistoryAvailablePoiYears)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item))
+      const selected = cloneArray(this.poiYearSelections)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item))
+      if (this.agentIterationPoiYearSelectionTouched && selected.length >= 2) {
+        return Array.from(new Set(selected)).sort((a, b) => a - b)
+      }
+      if (historyYears.length >= 2) return Array.from(new Set(historyYears)).sort((a, b) => a - b)
+      if (selected.length >= 2) return Array.from(new Set(selected)).sort((a, b) => a - b)
+      return [2020, 2022, 2024]
+    },
+    getAgentIterationPoiYearlyGridEvidence() {
+      const payload = this.getAgentIterationPoiPayload()
+      const evidence = payload.yearly_grid_evidence && typeof payload.yearly_grid_evidence === 'object'
+        ? payload.yearly_grid_evidence
+        : {}
+      return cloneObject(evidence)
+    },
+    getAgentIterationPoiReadiness() {
+      const years = this.getAgentIterationPoiTargetYears()
+      const historyYears = cloneArray(this.currentHistoryAvailablePoiYears)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item))
+      const hasReadableHistory = !!asText(this.currentHistoryRecordId)
+      const hasMultiYearPoi = hasReadableHistory && historyYears.length >= 2
+      const yearly = this.getAgentIterationPoiYearlyGridEvidence()
+      const readyYears = new Set(cloneArray(yearly.items)
+        .filter((item) => asText(item && item.status || 'ready') === 'ready')
+        .map((item) => Number(item && item.year))
+        .filter((item) => Number.isFinite(item)))
+      const hasYearlyGrid = years.length >= 2 && years.every((year) => readyYears.has(Number(year)))
+      const missingTasks = []
+      if (!hasMultiYearPoi) missingTasks.push('poi_fetch')
+      if (!hasYearlyGrid) missingTasks.push('poi_grid')
+      return {
+        checked: true,
+        ready: missingTasks.length === 0,
+        missingTasks,
+        reused: [
+          hasMultiYearPoi ? 'poi_fetch' : '',
+          hasYearlyGrid ? 'poi_grid' : '',
+        ].filter(Boolean),
+        fetched: [],
+        years,
+      }
+    },
+    getAgentIterationPoiTaskBoardTasks() {
+      const readiness = this.getAgentIterationPoiReadiness()
+      const board = this.getAgentIterationPoiPayload().task_board || {}
+      const taskMap = new Map(cloneArray(board.tasks).map((item) => [asText(item && item.key), item]))
+      return ['poi_fetch', 'poi_grid'].map((key) => {
+        const existing = cloneObject(taskMap.get(key))
+        const isMissing = readiness.missingTasks.includes(key)
+        const isReused = readiness.reused.includes(key)
+        const status = asText(existing.status) === 'running' || asText(existing.status) === 'failed'
+          ? asText(existing.status)
+          : (isMissing ? 'pending' : (isReused ? 'reused' : 'completed'))
+        return {
+          key,
+          label: this.getAgentSummaryTaskLabel(key),
+          status,
+          error: asText(existing.error),
+          startedAt: asText(existing.startedAt),
+          endedAt: asText(existing.endedAt),
+        }
+      })
+    },
+    getAgentIterationPoiTaskKeysToFill() {
+      return this.getAgentIterationPoiReadiness().missingTasks
+    },
+    isAgentIterationPoiTaskBoardRunning() {
+      return this.getAgentIterationPoiTaskBoardTasks().some((task) => task.status === 'running')
+    },
+    getAgentIterationPoiPrimaryActionLabel() {
+      if (this.isAgentIterationPoiTaskBoardRunning()) return '补齐中'
+      return this.getAgentIterationPoiTaskKeysToFill().length ? '补齐缺失' : '进入分析'
+    },
+    getAgentIterationPoiDataCompletionYears() {
+      return this.getAgentIterationPoiTargetYears()
+    },
+    getAgentIterationPoiYearOptionRows() {
+      const optionMap = new Map()
+      cloneArray(typeof this.getPoiMultiYearOptions === 'function' ? this.getPoiMultiYearOptions() : [])
+        .forEach((item) => {
+          const year = Number(item && item.value)
+          if (Number.isFinite(year)) optionMap.set(year, { year, label: asText(item.label) || `${year}` })
+        })
+      cloneArray(this.currentHistoryAvailablePoiYears)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item))
+        .forEach((year) => {
+          if (!optionMap.has(year)) optionMap.set(year, { year, label: `${year} 本地` })
+        })
+      this.getAgentIterationPoiTargetYears().forEach((year) => {
+        if (!optionMap.has(year)) optionMap.set(year, { year, label: `${year}` })
+      })
+      const selectedYears = new Set(this.getAgentIterationPoiTargetYears().map((year) => Number(year)))
+      const availableYears = new Set(cloneArray(this.currentHistoryAvailablePoiYears)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item)))
+      return Array.from(optionMap.values())
+        .sort((a, b) => Number(a.year) - Number(b.year))
+        .map((item) => ({
+          ...item,
+          selected: selectedYears.has(Number(item.year)),
+          fetched: availableYears.has(Number(item.year)),
+        }))
+    },
+    toggleAgentIterationPoiYearSelection(year, checked) {
+      this.agentIterationPoiYearSelectionTouched = true
+      if (typeof this.togglePoiYearSelection === 'function') {
+        this.togglePoiYearSelection(year, checked)
+      } else {
+        const value = Number(year)
+        if (!Number.isFinite(value)) return
+        const next = new Set(this.getAgentIterationPoiTargetYears())
+        if (checked) next.add(value)
+        else if (next.size > 1) next.delete(value)
+        this.poiYearSelections = Array.from(next).sort((a, b) => a - b)
+      }
+      this.commitAgentIterationPoiPayload({
+        status: 'needs_data',
+        yearly_grid_evidence: {},
+        h3_evidence: {},
+      })
+    },
+    getAgentIterationPoiYearStatusLabel(status = '') {
+      const value = asText(status)
+      if (value === 'ready' || value === 'completed' || value === 'reused') return '已完成'
+      if (value === 'running') return '运行中'
+      if (value === 'queued') return '排队中'
+      if (value === 'failed') return '失败'
+      return '缺失'
+    },
+    getAgentIterationPoiFetchYearRows() {
+      const years = this.getAgentIterationPoiDataCompletionYears()
+      const availableYears = new Set(cloneArray(this.currentHistoryAvailablePoiYears)
+        .map((item) => Number(item))
+        .filter((item) => Number.isFinite(item)))
+      const task = this.getAgentIterationPoiTaskBoardTasks().find((item) => item.key === 'poi_fetch') || {}
+      const taskStatus = asText(task.status)
+      return years.map((year) => {
+        const hasYear = availableYears.has(Number(year))
+        const status = taskStatus === 'running'
+          ? 'running'
+          : (taskStatus === 'failed' && !hasYear ? 'failed' : (hasYear ? 'ready' : 'missing'))
+        return {
+          year,
+          status,
+          label: this.getAgentIterationPoiYearStatusLabel(status),
+          source: hasYear ? '历史 POI 快照' : '待抓取',
+          reuse: hasYear ? '可复用' : '未复用',
+          error: status === 'failed' ? asText(task.error) : '',
+        }
+      })
+    },
+    getAgentIterationPoiGridYearRows() {
+      const years = this.getAgentIterationPoiDataCompletionYears()
+      const yearly = this.getAgentIterationPoiYearlyGridEvidence()
+      const itemMap = new Map(cloneArray(yearly.items).map((item) => [Number(item && item.year), cloneObject(item)]))
+      const task = this.getAgentIterationPoiTaskBoardTasks().find((item) => item.key === 'poi_grid') || {}
+      const taskStatus = asText(task.status)
+      return years.map((year) => {
+        const item = itemMap.get(Number(year)) || {}
+        const itemStatus = asText(item.status)
+        const hasH3 = !!Object.keys(cloneObject(item.h3_evidence)).length
+        const status = itemStatus === 'running'
+          ? 'running'
+          : (itemStatus === 'failed'
+            ? 'failed'
+            : (itemStatus === 'ready' || hasH3
+              ? 'ready'
+              : (taskStatus === 'running' ? 'queued' : 'missing')))
+        return {
+          year,
+          status,
+          label: this.getAgentIterationPoiYearStatusLabel(status),
+          resolution: (((item.h3_evidence || {}).params || {}).h3_resolution) || this.h3GridResolution || '-',
+          scope: asText(item.grid_scope || yearly.grid_scope) || 'poi_iteration_h3_per_year',
+          error: asText(item.error) || (status === 'failed' ? asText(task.error) : ''),
+        }
+      })
+    },
+    getAgentIterationPoiLatestH3YearLabel() {
+      const yearly = this.getAgentIterationPoiYearlyGridEvidence()
+      return yearly.latest_year ? `${yearly.latest_year}` : '-'
+    },
     getAgentIterationPoiAiSummaryRows() {
       const payload = this.getAgentIterationPoiPayload()
       const rows = cloneArray(payload.ai_summary).map((item) => asText(item)).filter(Boolean)
@@ -3267,7 +3976,7 @@ function createAgentUiMethods() {
     },
     getAgentIterationPoiAiStatusText() {
       const payload = this.getAgentIterationPoiPayload()
-      if (cloneArray(payload.ai_summary).length) return 'AI 深度解读已完成。'
+      if (cloneArray(payload.ai_summary).length || this.getAgentIterationPoiAiInsightRows().length || this.getAgentIterationPoiDriverRows().length || this.getAgentIterationPoiPlanningRows().length) return '业态基础分析已完成。'
       if (asText(payload.ai_status) === 'loading') return '基础统计已完成，AI 深度解读正在生成。'
       if (this.isAgentIterationAiTimeout(payload.ai_error)) return '基础统计和快照已完成，AI 深度解读仍在补充。'
       if (payload.ai_error) return this.getAgentIterationAiErrorLabel(payload.ai_error)
@@ -3277,6 +3986,9 @@ function createAgentUiMethods() {
       const payload = this.getAgentIterationPoiPayload()
       return asText(payload.status) === 'ready'
         && !cloneArray(payload.ai_summary).length
+        && !this.getAgentIterationPoiAiInsightRows().length
+        && !this.getAgentIterationPoiDriverRows().length
+        && !this.getAgentIterationPoiPlanningRows().length
         && !asText(payload.ai_error)
     },
     getAgentIterationPoiAiInsightRows() {
@@ -3292,17 +4004,23 @@ function createAgentUiMethods() {
       }
       const formatInsightValue = (value) => {
         if (value && typeof value === 'object' && !Array.isArray(value)) {
+          const name = asText(value.name || value.area_signal || value.current_structure)
           const category = asText(value.category)
           const subcategory = asText(value.subcategory)
-          const area = asText(value.area || value.region)
+          const area = asText(value.area || value.region || value.direction || value.ring)
           const delta = value.delta ?? value.change ?? ''
           const count = value.count ?? ''
+          const evidence = asText(value.evidence || value.reason)
+          const interpretation = asText(value.interpretation || value.trend)
           const parts = []
+          if (name) parts.push(`判断：${name}`)
           if (category) parts.push(`大类：${category}`)
           if (subcategory) parts.push(`小类：${subcategory}${category && !subcategory.includes(category) ? `（${category}）` : ''}`)
           if (area) parts.push(`区域：${area}`)
           if (delta !== '') parts.push(`变化：${delta}`)
           if (count !== '') parts.push(`数量：${count}`)
+          if (evidence) parts.push(`证据：${evidence}`)
+          if (interpretation) parts.push(`解读：${interpretation}`)
           return parts.join('；') || JSON.stringify(value)
         }
         if (Array.isArray(value)) return value.map((item) => formatInsightValue(item)).filter(Boolean).join('；')
@@ -3314,6 +4032,35 @@ function createAgentUiMethods() {
         { key: 'emerging_area', label: '增长片区', value: normalizeGrowthAreaValue(pickInsightValue('emerging_area')) },
         { key: 'structure_judgement', label: '结构判断', value: formatInsightValue(pickInsightValue('structure_judgement')) },
       ].filter((item) => item.value)
+    },
+    getAgentIterationPoiDriverRows() {
+      const payload = this.getAgentIterationPoiPayload()
+      const rows = cloneArray(payload.driver_analysis).length
+        ? cloneArray(payload.driver_analysis)
+        : cloneArray(cloneObject(payload.ai_insights).driver_analysis)
+      return rows.map((row, idx) => ({
+        key: `driver-${idx}`,
+        label: asText(row.driver) || `原因${idx + 1}`,
+        value: [
+          asText(row.evidence) ? `证据：${asText(row.evidence)}` : '',
+          asText(row.confidence) ? `置信度：${asText(row.confidence)}` : '',
+          asText(row.explanation),
+        ].filter(Boolean).join('；'),
+      })).filter((row) => row.value)
+    },
+    getAgentIterationPoiPlanningRows() {
+      const payload = this.getAgentIterationPoiPayload()
+      const rows = cloneArray(payload.planning_implications).length
+        ? cloneArray(payload.planning_implications)
+        : cloneArray(cloneObject(payload.ai_insights).planning_implications)
+      return rows.map((row, idx) => ({
+        key: `planning-${idx}`,
+        label: asText(row.implication) || `启示${idx + 1}`,
+        value: [
+          asText(row.evidence) ? `依据：${asText(row.evidence)}` : '',
+          asText(row.suggested_direction) ? `方向：${asText(row.suggested_direction)}` : '',
+        ].filter(Boolean).join('；'),
+      })).filter((row) => row.value)
     },
     shouldShowAgentIterationPoiInsightPlaceholder() {
       const payload = this.getAgentIterationPoiPayload()
@@ -4706,6 +5453,11 @@ function createAgentUiMethods() {
     commitAgentIterationPoiPayload(patch = {}, options = {}) {
       return this.commitAgentIterationPayload('poi', patch, options)
     },
+    clearAgentIterationPoiNoticeIfReady(options = {}) {
+      const readiness = this.getAgentIterationPoiReadiness()
+      if (!readiness.ready) return this.getAgentIterationPoiPayload()
+      return this.commitAgentIterationPoiPayload({ notice: '', error: '' }, options)
+    },
     async ensureAgentIterationPopulation(force = false) {
       if (!this.getIsochronePolygonRing || !this.getIsochronePolygonRing()) {
         this.agentIterationPopulationError = '请先生成或选择分析范围'
@@ -5074,6 +5826,99 @@ function createAgentUiMethods() {
         },
       }
     },
+    compactAgentPoiIterationH3Evidence(value = {}, cellLimit = 40, rowLimit = 20) {
+      const source = cloneObject(value || {})
+      const pickNumber = (item) => {
+        const parsed = Number(item)
+        return Number.isFinite(parsed) ? parsed : null
+      }
+      const pickCell = (cell = {}) => {
+        const props = cell && typeof cell.properties === 'object' ? cell.properties : cell
+        const h3Id = asText(props && props.h3_id)
+        if (!h3Id) return null
+        return {
+          h3_id: h3Id,
+          poi_count: pickNumber(props.poi_count),
+          density_poi_per_km2: pickNumber(props.density_poi_per_km2),
+          local_entropy: pickNumber(props.local_entropy),
+          neighbor_mean_density: pickNumber(props.neighbor_mean_density),
+          neighbor_mean_entropy: pickNumber(props.neighbor_mean_entropy),
+          neighbor_count: pickNumber(props.neighbor_count),
+          category_counts: cloneObject(props.category_counts || {}),
+          gi_star_z_score: pickNumber(props.gi_star_z_score),
+          gi_star_value: pickNumber(props.gi_star_value),
+          lisa_i: pickNumber(props.lisa_i),
+          lisa_z_score: pickNumber(props.lisa_z_score),
+        }
+      }
+      const derived = cloneObject(source.derived_stats)
+      const rowsFrom = (compactKey, legacyKey) => {
+        const compact = cloneArray(derived[compactKey])
+        if (compact.length) return compact.slice(0, rowLimit)
+        return cloneArray(derived[legacyKey] && derived[legacyKey].rows).slice(0, rowLimit)
+      }
+      const summaryFrom = (compactKey, legacyKey) => {
+        const compact = cloneObject(derived[compactKey])
+        if (Object.keys(compact).length) return compact
+        const legacy = cloneObject(derived[legacyKey])
+        delete legacy.rows
+        return legacy
+      }
+      const allCells = cloneArray(source.cells).map(pickCell).filter(Boolean)
+      const cells = allCells.slice(0, cellLimit)
+      return {
+        evidence_version: asText(source.evidence_version) || 'poi_h3_evidence_v1',
+        grid_type: asText(source.grid_type) || 'h3',
+        usage: asText(source.usage) || 'POI-only spatial structure evidence; do not use it for population or nightlight coupling.',
+        params: cloneObject(source.params),
+        counts: {
+          ...cloneObject(source.counts),
+          cell_count: Number((source.counts && source.counts.cell_count) || allCells.length || 0) || 0,
+          included_cell_count: cells.length,
+        },
+        metrics: cloneObject(source.metrics),
+        summary: cloneObject(source.summary),
+        charts: cloneObject(source.charts),
+        cells,
+        derived_stats: {
+          structure_rows: rowsFrom('structure_rows', 'structureSummary'),
+          typing_rows: rowsFrom('typing_rows', 'typingSummary'),
+          lq_rows: rowsFrom('lq_rows', 'lqSummary'),
+          gap_rows: rowsFrom('gap_rows', 'gapSummary'),
+          structure_summary: summaryFrom('structure_summary', 'structureSummary'),
+          typing_summary: summaryFrom('typing_summary', 'typingSummary'),
+          lq_summary: summaryFrom('lq_summary', 'lqSummary'),
+          gap_summary: summaryFrom('gap_summary', 'gapSummary'),
+        },
+        omitted: {
+          cells_total: Number((source.omitted && source.omitted.cells_total) || allCells.length || 0) || 0,
+          cells_included: cells.length,
+          geometry_removed: true,
+        },
+        constraints: {
+          poi_only: true,
+          do_not_use_for_population_nightlight_coupling: true,
+        },
+      }
+    },
+    compactAgentPoiIterationYearlyGridEvidence(value = {}) {
+      const source = cloneObject(value || {})
+      return {
+        evidence_version: asText(source.evidence_version) || 'poi_iteration_yearly_grid_evidence_v1',
+        years: cloneArray(source.years),
+        grid_scope: asText(source.grid_scope) || 'poi_iteration_h3_per_year',
+        grid_type: asText(source.grid_type) || 'h3',
+        latest_year: source.latest_year || null,
+        latest_h3_evidence: this.compactAgentPoiIterationH3Evidence(source.latest_h3_evidence || {}, 20, 12),
+        items: cloneArray(source.items).map((item) => ({
+          year: item && item.year,
+          status: asText(item && item.status) || 'ready',
+          error: asText(item && item.error),
+          grid_scope: asText((item && item.grid_scope) || source.grid_scope) || 'poi_iteration_h3_per_year',
+          h3_evidence: this.compactAgentPoiIterationH3Evidence((item && item.h3_evidence) || {}, 20, 12),
+        })),
+      }
+    },
     buildAgentPoiIterationEvidence(payload = {}) {
       const centerLng = Number(this.selectedPoint && this.selectedPoint.lng)
       const centerLat = Number(this.selectedPoint && this.selectedPoint.lat)
@@ -5133,6 +5978,8 @@ function createAgentUiMethods() {
         area_heatmap_boundary: cloneArray(payload.area_heatmap_boundary),
         area_heatmap_polygon: cloneArray(payload.area_heatmap_polygon),
         area_heatmap_snapshots: cloneArray(payload.area_heatmap_snapshots),
+        h3_evidence: this.compactAgentPoiIterationH3Evidence(payload.h3_evidence || {}),
+        yearly_grid_evidence: this.compactAgentPoiIterationYearlyGridEvidence(payload.yearly_grid_evidence || {}),
         rule_insights: cloneObject(payload.rule_insights),
       }
     },
@@ -5280,6 +6127,8 @@ function createAgentUiMethods() {
           has_named_area: false,
           growth_rows: growthAreaSignalRows,
         },
+        h3_evidence: cloneObject(evidence.h3_evidence),
+        yearly_grid_evidence: cloneObject(evidence.yearly_grid_evidence),
         area_distribution: cloneArray(evidence.area_heatmaps).map((row) => ({
           year: row.year,
           point_count: row.point_count,
@@ -5318,7 +6167,7 @@ function createAgentUiMethods() {
       }
       return res.json()
     },
-    async requestAgentPoiIterationBuild({ historyId = '', years = [], center = undefined } = {}) {
+    async requestAgentPoiIterationBuild({ historyId = '', years = [], center = undefined, h3Evidence = undefined, yearlyGridEvidence = undefined } = {}) {
       const res = await fetch('/api/v1/analysis/agent/iteration/poi/build', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -5326,6 +6175,8 @@ function createAgentUiMethods() {
           history_id: asText(historyId),
           years: cloneArray(years).map((item) => Number(item)).filter((item) => Number.isFinite(item)),
           center,
+          h3_evidence: h3Evidence || (typeof this.buildAgentPoiH3Evidence === 'function' ? this.buildAgentPoiH3Evidence() : {}),
+          yearly_grid_evidence: yearlyGridEvidence || this.getAgentIterationPoiPayload().yearly_grid_evidence || {},
         }),
       })
       if (!res.ok) {
@@ -5347,6 +6198,8 @@ function createAgentUiMethods() {
           ai_status: aiResult.status === 'ready' ? 'ready' : 'failed',
           ai_summary: cloneArray(aiResult.ai_summary),
           ai_insights: cloneObject(aiResult.ai_insights),
+          driver_analysis: cloneArray(aiResult.driver_analysis),
+          planning_implications: cloneArray(aiResult.planning_implications),
           spatial_factors: cloneObject(aiResult.spatial_factors),
           subcategory_spatial_trend_rows: cloneArray(aiResult.subcategory_spatial_trend_rows),
           subcategory_spatial_summary: cloneArray(aiResult.subcategory_spatial_summary),
@@ -5426,6 +6279,159 @@ function createAgentUiMethods() {
       }
       return res.json()
     },
+    commitAgentIterationPoiTaskBoardPatch(taskKey = '', patch = {}) {
+      const key = asText(taskKey)
+      if (!key) return this.getAgentIterationPoiPayload()
+      const payload = this.getAgentIterationPoiPayload()
+      const current = payload.task_board && typeof payload.task_board === 'object' ? payload.task_board : {}
+      const tasks = this.getAgentIterationPoiTaskBoardTasks().map((task) => (
+        task.key === key ? { ...task, ...cloneObject(patch) } : task
+      ))
+      return this.commitAgentIterationPoiPayload({
+        task_board: {
+          ...cloneObject(current),
+          runState: tasks.some((task) => task.status === 'running') ? 'running' : asText(current.runState || 'idle'),
+          tasks,
+          lastRunAt: asText(current.lastRunAt) || new Date().toISOString(),
+        },
+      })
+    },
+    buildAgentPoiRasterGridEvidence() {
+      const bundle = buildAnalysisTaskParamBundle(this, 'poi_raster_grid')
+      const params = cloneObject(bundle.params || {})
+      return {
+        evidence_version: 'poi_raster_grid_evidence_v1',
+        grid_type: 'raster',
+        params: {
+          poi_year: Number(this.poiYearSource || this.resultPoiYear || 0) || null,
+          raster: cloneObject(params || {}),
+        },
+        summary: cloneObject(this.poiGridSummary || {}),
+        counts: {
+          grid_count: Number((this.poiGridSummary && this.poiGridSummary.grid_count) || cloneArray(this.poiGridFeatures).length || 0) || 0,
+          active_cell_count: Number(this.poiGridSummary && this.poiGridSummary.active_cell_count || 0) || 0,
+          assigned_poi_count: Number(this.poiGridSummary && this.poiGridSummary.assigned_poi_count || 0) || 0,
+        },
+      }
+    },
+    async buildAgentPoiYearlyGridEvidence(years = []) {
+      const targetYears = cloneArray(years).map((item) => Number(item)).filter((item) => Number.isFinite(item)).sort((a, b) => a - b)
+      const existing = this.getAgentIterationPoiYearlyGridEvidence()
+      const existingItems = new Map(cloneArray(existing.items).map((item) => [Number(item && item.year), cloneObject(item)]))
+      const original = {
+        allPoisDetails: cloneArray(this.allPoisDetails),
+        poiYearSource: asText(this.poiYearSource),
+        resultPoiYear: this.resultPoiYear,
+        currentHistorySelectedPoiYear: this.currentHistorySelectedPoiYear,
+        h3AnalysisSummary: cloneObject(this.h3AnalysisSummary),
+        h3AnalysisCharts: cloneObject(this.h3AnalysisCharts),
+        h3AnalysisGridFeatures: cloneArray(this.h3AnalysisGridFeatures),
+        h3DerivedStats: cloneObject(this.h3DerivedStats),
+      }
+      const items = []
+      const publishProgress = () => {
+        const readyItems = items.filter((item) => asText(item.status) === 'ready')
+        const latest = readyItems.slice().sort((a, b) => Number(a.year || 0) - Number(b.year || 0)).slice(-1)[0] || {}
+        this.commitAgentIterationPoiPayload({
+          yearly_grid_evidence: {
+            evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
+            years: targetYears,
+            grid_scope: 'poi_iteration_h3_per_year',
+            grid_type: 'h3',
+            items: cloneArray(items),
+            latest_year: latest.year || null,
+            latest_h3_evidence: cloneObject(latest.h3_evidence || {}),
+          },
+          h3_evidence: cloneObject(latest.h3_evidence || {}),
+        })
+      }
+      try {
+        for (const year of targetYears) {
+          const cached = existingItems.get(Number(year))
+          if (cached && asText(cached.status || 'ready') === 'ready') {
+            items.push(cached)
+            publishProgress()
+            continue
+          }
+          items.push({ year, status: 'running', error: '', grid_scope: 'poi_iteration_h3_per_year', h3_evidence: {} })
+          publishProgress()
+          try {
+            await this.selectAgentPoiYearForGrid(year)
+            if (typeof this.selectAllH3PoiFilters === 'function') this.selectAllH3PoiFilters()
+            if (typeof this.computeH3Analysis === 'function') await this.computeH3Analysis()
+            const h3Evidence = typeof this.buildAgentPoiH3Evidence === 'function' ? this.buildAgentPoiH3Evidence() : {}
+            items[items.length - 1] = { year, status: 'ready', error: '', grid_scope: 'poi_iteration_h3_per_year', h3_evidence: h3Evidence }
+          } catch (err) {
+            const message = asText(err && err.message) || String(err)
+            items[items.length - 1] = { year, status: 'failed', error: message, grid_scope: 'poi_iteration_h3_per_year', h3_evidence: {} }
+          }
+          publishProgress()
+        }
+      } finally {
+        this.allPoisDetails = original.allPoisDetails
+        this.poiYearSource = original.poiYearSource
+        this.resultPoiYear = original.resultPoiYear
+        this.currentHistorySelectedPoiYear = original.currentHistorySelectedPoiYear
+        this.h3AnalysisSummary = original.h3AnalysisSummary
+        this.h3AnalysisCharts = original.h3AnalysisCharts
+        this.h3AnalysisGridFeatures = original.h3AnalysisGridFeatures
+        this.h3DerivedStats = original.h3DerivedStats
+        if (typeof this.rebuildPoiRuntimeSystem === 'function') this.rebuildPoiRuntimeSystem(this.allPoisDetails)
+      }
+      const readyItems = items.filter((item) => asText(item.status) === 'ready')
+      const latest = readyItems.slice().sort((a, b) => Number(a.year || 0) - Number(b.year || 0)).slice(-1)[0] || {}
+      return {
+        evidence_version: 'poi_iteration_yearly_grid_evidence_v1',
+        years: targetYears,
+        grid_scope: 'poi_iteration_h3_per_year',
+        grid_type: 'h3',
+        items,
+        latest_year: latest.year || null,
+        latest_h3_evidence: cloneObject(latest.h3_evidence || {}),
+      }
+    },
+    async runAgentIterationPoiTask(taskKey = '') {
+      const key = asText(taskKey)
+      if (!['poi_fetch', 'poi_grid'].includes(key)) return
+      const startedAt = new Date().toISOString()
+      this.commitAgentIterationPoiTaskBoardPatch(key, { status: 'running', startedAt, endedAt: '', error: '' })
+      try {
+        if (key === 'poi_fetch') {
+          const years = this.getAgentIterationPoiTargetYears()
+          this.poiYearSelections = years
+          if (typeof this.fetchPois !== 'function') throw new Error('POI 抓取入口不可用')
+          await this.fetchPois({ preserveCurrentPanel: true })
+        } else {
+          const evidence = await this.buildAgentPoiYearlyGridEvidence(this.getAgentIterationPoiTargetYears())
+          const failed = cloneArray(evidence.items).find((item) => asText(item.status) === 'failed')
+          if (failed) throw new Error(`${failed.year || ''} 年网格计算失败：${asText(failed.error)}`)
+          this.commitAgentIterationPoiPayload({
+            yearly_grid_evidence: evidence,
+            h3_evidence: cloneObject(evidence.latest_h3_evidence || {}),
+          })
+          this.clearAgentIterationPoiNoticeIfReady()
+        }
+        this.commitAgentIterationPoiTaskBoardPatch(key, { status: 'completed', endedAt: new Date().toISOString(), error: '' })
+      } catch (err) {
+        const message = asText(err && err.message) || String(err)
+        this.commitAgentIterationPoiTaskBoardPatch(key, { status: 'failed', endedAt: new Date().toISOString(), error: message })
+        throw err
+      }
+    },
+    async runAgentIterationPoiPrimaryAction() {
+      const missing = this.getAgentIterationPoiTaskKeysToFill()
+      if (missing.length) {
+        for (const key of missing) {
+          await this.runAgentIterationPoiTask(key)
+        }
+      } else if (asText(this.getAgentIterationPoiPayload().status) === 'ready') {
+        this.setAgentIterationSecondaryView('ai', 'poi')
+        return this.getAgentIterationPoiPayload()
+      }
+      const payload = await this.ensureAgentIterationPoi(true)
+      if (asText(payload.status) === 'ready') this.setAgentIterationSecondaryView('ai', 'poi')
+      return payload
+    },
     async ensureAgentIterationPoi(force = false) {
       const existing = this.getAgentIterationPoiPayload()
       if (!force && asText(existing.status) === 'ready') {
@@ -5442,6 +6448,16 @@ function createAgentUiMethods() {
       this.agentIterationPoiError = ''
       this.commitAgentIterationPoiPayload({ status: 'loading', error: '' }, { tabId: targetTabId })
       try {
+        const readiness = this.getAgentIterationPoiReadiness()
+        if (!readiness.ready) {
+          return this.commitAgentIterationPoiPayload({
+            status: 'needs_data',
+            source: 'readiness',
+            years: cloneArray(readiness.years),
+            error: '',
+            notice: `多年 POI 分析还缺 ${readiness.missingTasks.map((key) => this.getAgentSummaryTaskLabel(key)).join('、')}，请先补齐。`,
+          }, { tabId: targetTabId })
+        }
         const historyYears = cloneArray(this.currentHistoryAvailablePoiYears)
           .map((item) => Number(item))
           .filter((item) => Number.isFinite(item))
@@ -5453,7 +6469,11 @@ function createAgentUiMethods() {
           const center = Number.isFinite(centerLng) && Number.isFinite(centerLat)
             ? [centerLng, centerLat]
             : undefined
-          const builtPayload = await this.requestAgentPoiIterationBuild({ historyId, years: historyYears, center })
+          const yearlyGridEvidence = this.getAgentIterationPoiYearlyGridEvidence()
+          const latestH3 = cloneObject(yearlyGridEvidence.latest_h3_evidence)
+          const latestH3HasMetrics = cloneArray(latestH3.cells).length || Object.keys(cloneObject(latestH3.summary)).length || Object.keys(cloneObject(latestH3.metrics)).length
+          const h3Evidence = latestH3HasMetrics ? latestH3 : (typeof this.buildAgentPoiH3Evidence === 'function' ? this.buildAgentPoiH3Evidence() : {})
+          const builtPayload = await this.requestAgentPoiIterationBuild({ historyId, years: historyYears, center, h3Evidence, yearlyGridEvidence })
           const committed = this.commitAgentIterationPoiPayload({
             status: asText(builtPayload.status) || 'ready',
             source: asText(builtPayload.source) || 'history',
@@ -5473,13 +6493,18 @@ function createAgentUiMethods() {
             spatial_factors: cloneObject(builtPayload.spatial_factors),
             subcategory_spatial_trend_rows: cloneArray(builtPayload.subcategory_spatial_trend_rows),
             subcategory_spatial_summary: cloneArray(builtPayload.subcategory_spatial_summary),
+            h3_evidence: cloneObject(builtPayload.h3_evidence || h3Evidence),
+            yearly_grid_evidence: cloneObject(builtPayload.yearly_grid_evidence || yearlyGridEvidence),
             rule_summary: cloneArray(builtPayload.rule_summary),
             rule_insights: cloneObject(builtPayload.rule_insights),
             ai_summary: cloneArray(builtPayload.ai_summary),
             ai_insights: cloneObject(builtPayload.ai_insights),
+            driver_analysis: cloneArray(builtPayload.driver_analysis),
+            planning_implications: cloneArray(builtPayload.planning_implications),
             ai_status: asText(builtPayload.ai_status) || (cloneArray(builtPayload.ai_summary).length ? 'ready' : 'pending'),
             ai_error: asText(builtPayload.ai_error),
             error: asText(builtPayload.error),
+            notice: '',
           }, { tabId: targetTabId })
           this.ensureAgentIterationPoiAreaHeatmapSnapshots(committed).catch((err) => {
             console.warn('[agent-iteration-poi] area snapshot generation failed', err)
@@ -5487,55 +6512,16 @@ function createAgentUiMethods() {
           this.ensureAgentIterationPoiAiAnalysis(committed, { tabId: targetTabId }).catch((err) => {
             console.warn('[agent-iteration-poi] ai analysis failed', err)
           })
+          if (this.getAgentIterationSecondaryView('poi') === 'data') this.setAgentIterationSecondaryView('ai', 'poi')
           return committed
         }
-        const pois = cloneArray(this.allPoisDetails)
-        if (pois.length) {
-          const year = Number.isFinite(Number(this.currentHistorySelectedPoiYear || this.resultPoiYear))
-            ? Number(this.currentHistorySelectedPoiYear || this.resultPoiYear)
-            : null
-          const summary = this.summarizeAgentIterationPois(pois, year)
-          const rule = this.buildAgentPoiRuleInsights([summary])
-          const areaHeatmapBundle = this.buildAgentPoiAreaHeatmapBundle(
-            [summary],
-            this.getIsochronePolygonPayload ? cloneArray(this.getIsochronePolygonPayload()) : [],
-          )
-          const committed = this.commitAgentIterationPoiPayload({
-            status: 'ready',
-            source: 'current',
-            years: year ? [year] : [],
-            summaries: [summary],
-            trend_rows: [],
-            total_series: [],
-            category_stack: [],
-            subcategory_stack: [],
-            subcategory_trend_rows: [],
-            area_heatmaps: cloneArray(areaHeatmapBundle.area_heatmaps),
-            area_heatmap_basemap: cloneObject(areaHeatmapBundle.area_heatmap_basemap),
-            area_heatmap_boundary: cloneArray(areaHeatmapBundle.area_heatmap_boundary),
-            area_heatmap_polygon: cloneArray(areaHeatmapBundle.area_heatmap_polygon),
-            area_heatmap_snapshots: this.buildAgentPoiAreaHeatmapSnapshotPlaceholders({
-              summaries: [summary],
-              area_heatmaps: cloneArray(areaHeatmapBundle.area_heatmaps),
-            }),
-            spatial_factors: {},
-            subcategory_spatial_trend_rows: [],
-            subcategory_spatial_summary: [],
-            rule_summary: rule.summary,
-            rule_insights: rule.insights,
-            ai_summary: [],
-            ai_insights: {},
-            ai_status: 'pending',
-            ai_error: '',
-            notice: '当前只有一个年份 POI，只展示特征；多年趋势需要从包含多个年份的历史记录恢复。',
-            error: '',
-          }, { tabId: targetTabId })
-          this.ensureAgentIterationPoiAreaHeatmapSnapshots(committed).catch((err) => {
-            console.warn('[agent-iteration-poi] area snapshot generation failed', err)
-          })
-          return committed
-        }
-        throw new Error('当前没有可分析的 POI 明细')
+        return this.commitAgentIterationPoiPayload({
+          status: 'needs_data',
+          source: 'readiness',
+          years: cloneArray(this.getAgentIterationPoiTargetYears()),
+          error: '',
+          notice: '多年 POI 分析需要可读取的多年 POI 历史记录和年度网格证据，请先补齐。',
+        }, { tabId: targetTabId })
       } catch (err) {
         const message = asText(err && err.message) || String(err)
         this.agentIterationPoiError = message
@@ -6108,6 +7094,7 @@ function createAgentUiMethods() {
     },
     buildAgentTabsUiState() {
       this.captureAgentActiveSummaryTabState()
+      this.captureAgentActiveSiteSelectionTabState()
       this.captureAgentActiveFollowupTabState()
       const tabs = this.ensureAgentTabs(true)
       const currentSummaryTab = cloneArray(tabs.summaryTabs).find((item) => asText(item.source) === 'current') || null
@@ -6140,6 +7127,16 @@ function createAgentUiMethods() {
           readonly: !!item.readonly,
           created_at: item.createdAt,
           active_kind: item.activeKind || 'nightlight',
+          panel_payloads: cloneObject(item.panelPayloads || this.agentPanelPayloads),
+        })),
+        site_selection_tabs: cloneArray(tabs.siteSelectionTabs).map((item) => ({
+          id: item.id,
+          title: item.title || '区域内选址',
+          kind: 'site_selection',
+          source: item.source || 'draft',
+          session_id: item.sessionId || '',
+          readonly: !!item.readonly,
+          created_at: item.createdAt,
           panel_payloads: cloneObject(item.panelPayloads || this.agentPanelPayloads),
         })),
         followup_tabs: cloneArray(tabs.followupTabs).map((item) => ({
@@ -6226,14 +7223,24 @@ function createAgentUiMethods() {
         activeKind: asText(item && (item.active_kind || item.activeKind)) || 'poi',
         panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
       })).filter((item) => item.id)
+      const siteSelectionTabs = cloneArray(uiState.site_selection_tabs || uiState.siteSelectionTabs).map((item) => ({
+        id: asText(item && item.id),
+        kind: 'site_selection',
+        title: asText(item && item.title) || '区域内选址',
+        source: asText(item && item.source) || 'draft',
+        sessionId: asText((item && (item.session_id || item.sessionId)) || ''),
+        readonly: !!(item && item.readonly && asText(item && item.source) !== 'history'),
+        createdAt: asText(item && item.created_at) || new Date().toISOString(),
+        panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
+      })).filter((item) => item.id)
       const activeId = asText(uiState.active_tab_id)
       this.agentTabs = {
         summaryTab: summaryTab.id ? summaryTab : defaultTabs.summaryTab,
         summaryTabs,
         iterationChangeTabs,
-        siteSelectionTabs: [],
+        siteSelectionTabs,
         followupTabs,
-        activeTabId: activeId || (summaryTabs[0] ? summaryTabs[0].id : (iterationChangeTabs[0] ? iterationChangeTabs[0].id : (followupTabs[0] ? followupTabs[0].id : ''))),
+        activeTabId: activeId || (summaryTabs[0] ? summaryTabs[0].id : (iterationChangeTabs[0] ? iterationChangeTabs[0].id : (siteSelectionTabs[0] ? siteSelectionTabs[0].id : (followupTabs[0] ? followupTabs[0].id : '')))),
         followupLimit: Number(uiState.followup_limit || 6) || 6,
         nextFollowupNumber: Number(uiState.next_followup_number || (followupTabs.length + 1) || 1) || 1,
       }
@@ -6246,6 +7253,11 @@ function createAgentUiMethods() {
             this.agentPanelPayloads = cloneObject(activeIteration.panelPayloads)
           }
           this.agentIterationActiveKind = asText(activeIteration && activeIteration.activeKind) || 'poi'
+        } else if (asText(activeTopTab.kind) === 'site_selection') {
+          const activeSiteSelection = cloneArray(this.agentTabs.siteSelectionTabs).find((item) => item.id === this.agentTabs.activeTabId)
+          if (activeSiteSelection && activeSiteSelection.panelPayloads && typeof activeSiteSelection.panelPayloads === 'object') {
+            this.agentPanelPayloads = cloneObject(activeSiteSelection.panelPayloads)
+          }
         } else {
           const activeTab = this.getAgentActiveFollowupTab()
           if (activeTab) {
@@ -6312,6 +7324,180 @@ function createAgentUiMethods() {
         ? schema.properties
         : {}
       return Object.keys(properties)
+    },
+    setAgentToolsViewMode(mode = 'tools') {
+      const next = asText(mode) === 'input_packages' ? 'input_packages' : 'tools'
+      this.agentToolsViewMode = next
+    },
+    countObjectKeys(value = null) {
+      return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).length : 0
+    },
+    summarizeAgentInputPackage(value = null) {
+      if (Array.isArray(value)) return `${value.length} 项`
+      if (!value || typeof value !== 'object') return asText(value) || '-'
+      const parts = []
+      const version = asText(value.evidence_version || value.version)
+      if (version) parts.push(`版本 ${version}`)
+      const counts = value.counts && typeof value.counts === 'object' ? value.counts : {}
+      Object.entries(counts).slice(0, 4).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && asText(val) !== '') parts.push(`${key}: ${val}`)
+      })
+      if (!parts.length) {
+        const keys = Object.keys(value)
+        if (keys.length) parts.push(`${keys.length} 个字段`)
+      }
+      return parts.join(' · ') || '-'
+    },
+    getBasisValidationResultItems() {
+      const payload = this.getBasisDrawerPayload()
+      const validationResults = payload.validationResults && typeof payload.validationResults === 'object'
+        ? payload.validationResults
+        : {}
+      return Object.entries(validationResults).map(([key, item]) => ({
+        key,
+        title: asText((item && item.prompt_key) || key),
+        status: asText(item && item.status) || 'unknown',
+        note: asText(item && item.note),
+        evidenceVersion: asText(item && item.evidence_version),
+        outputSchema: cloneObject(item && item.output_schema),
+        validatedOutput: cloneObject(item && item.validated_output),
+        checks: cloneArray(item && item.checks),
+      }))
+    },
+    getAgentInputPackageStatus(item = {}) {
+      const value = item && typeof item === 'object' ? item.rawInput : null
+      if (!value || (typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length)) return 'missing'
+      if (item.requiredVersion && asText(value.evidence_version) !== asText(item.requiredVersion)) return 'partial'
+      if (item.key === 'shared_grid' && Number(value.counts && value.counts.complete_overlap_cells || 0) <= 0) return 'partial'
+      return 'ready'
+    },
+    getAgentInputPackageStatusLabel(item = {}) {
+      const status = this.getAgentInputPackageStatus(item)
+      if (status === 'ready') return '已就绪'
+      if (status === 'partial') return '部分可用'
+      return '未就绪'
+    },
+    createAgentInputPackageItem({ key, title, description, sourcePath, rawInput, requiredVersion = '', fields = [] }) {
+      const item = {
+        key: asText(key),
+        title: asText(title),
+        description: asText(description),
+        sourcePath: asText(sourcePath),
+        rawInput: cloneObject(rawInput || {}),
+        requiredVersion: asText(requiredVersion),
+        fields: cloneArray(fields),
+      }
+      return {
+        ...item,
+        status: this.getAgentInputPackageStatus(item),
+        summary: this.summarizeAgentInputPackage(item.rawInput),
+      }
+    },
+    buildAgentInputPackageGroups() {
+      const snapshot = typeof this.buildAgentAnalysisSnapshot === 'function'
+        ? this.buildAgentAnalysisSnapshot()
+        : {}
+      const paramBundles = snapshot.param_bundles && typeof snapshot.param_bundles === 'object' ? snapshot.param_bundles : {}
+      const paramOrder = ['poi_fetch', 'poi_raster_grid', 'poi_h3_grid', 'population', 'nightlight', 'road_syntax']
+      const paramItems = paramOrder
+        .filter((key) => paramBundles[key])
+        .map((key) => this.createAgentInputPackageItem({
+          key: `param_${key}`,
+          title: key,
+          description: asText(paramBundles[key].display_label) || '分析任务参数口径',
+          sourcePath: `param_bundles.${key}`,
+          rawInput: paramBundles[key],
+          fields: [
+            { key: 'task_key', label: '任务', value: paramBundles[key].task_key },
+            { key: 'domain', label: '领域', value: paramBundles[key].domain },
+            { key: 'version', label: '版本', value: paramBundles[key].version },
+            { key: 'cache_key', label: '缓存键', value: paramBundles[key].cache_key },
+          ],
+        }))
+      const sharedGrid = cloneObject(snapshot.shared_grid || {})
+      const poiH3 = cloneObject(snapshot.h3 && snapshot.h3.poi_h3_evidence || {})
+      return [
+        {
+          key: 'param_bundles',
+          label: '分析参数包',
+          description: '当前任务的计算口径、缓存键和 evidence 参数。',
+          items: paramItems,
+        },
+        {
+          key: 'shared_grid',
+          label: '同源栅格交叉证据',
+          description: '人口、POI 栅格、夜光按同一 cell_id 对齐后的交叉证据。',
+          items: [
+            this.createAgentInputPackageItem({
+              key: 'shared_grid',
+              title: 'shared_grid_evidence_v1',
+              description: '只用于人口 × POI × 夜光空间耦合判断。',
+              sourcePath: 'shared_grid',
+              rawInput: sharedGrid,
+              requiredVersion: 'shared_grid_evidence_v1',
+              fields: [
+                { key: 'evidence_version', label: '证据版本', value: sharedGrid.evidence_version },
+                { key: 'join_key', label: '连接键', value: sharedGrid.join_key },
+                { key: 'uses', label: '使用数据', value: sharedGrid.uses },
+                { key: 'counts', label: '计数', value: sharedGrid.counts },
+              ],
+            }),
+          ],
+        },
+        {
+          key: 'poi_spatial',
+          label: 'POI 专项空间证据',
+          description: 'H3 专项空间结构证据；POI 栅格只通过 shared_grid 参与耦合判断。',
+          items: [
+            this.createAgentInputPackageItem({
+              key: 'poi_h3',
+              title: 'poi_h3_evidence_v1',
+              description: '只用于 POI 密度、集聚、熵、Gi/LISA 和热点结构判断。',
+              sourcePath: 'h3.poi_h3_evidence',
+              rawInput: poiH3,
+              requiredVersion: 'poi_h3_evidence_v1',
+              fields: [
+                { key: 'evidence_version', label: '证据版本', value: poiH3.evidence_version },
+                { key: 'grid_type', label: '网格类型', value: poiH3.grid_type },
+                { key: 'counts', label: '计数', value: poiH3.counts },
+                { key: 'metrics', label: '指标', value: poiH3.metrics },
+              ],
+            }),
+          ],
+        },
+        {
+          key: 'summary_evidence',
+          label: '总结输入 evidence',
+          description: 'summary/tourism payload 会读取的当前压缩证据对象。',
+          items: [
+            this.createAgentInputPackageItem({ key: 'summary_population', title: 'population', description: '人口 summary 与 grid_evidence。', sourcePath: 'population', rawInput: snapshot.population || {} }),
+            this.createAgentInputPackageItem({ key: 'summary_nightlight', title: 'nightlight', description: '夜光 summary。', sourcePath: 'nightlight', rawInput: snapshot.nightlight || {} }),
+            this.createAgentInputPackageItem({ key: 'summary_poi', title: 'poi_summary', description: 'POI 总量和来源；栅格耦合读取 shared_grid。', sourcePath: 'poi_summary', rawInput: snapshot.poi_summary || {} }),
+            this.createAgentInputPackageItem({ key: 'summary_frontend', title: 'frontend_analysis', description: '前端导出的结构化分析块。', sourcePath: 'frontend_analysis', rawInput: snapshot.frontend_analysis || {} }),
+          ],
+        },
+      ]
+    },
+    buildAgentInputPackageBasisPayload(packageItem = {}) {
+      const item = packageItem && typeof packageItem === 'object' ? packageItem : {}
+      return {
+        title: `${asText(item.title) || '输入包'}字段`,
+        currentConclusion: asText(item.description) || '当前输入包字段预览。',
+        fields: [
+          { key: 'status', label: '状态', value: this.getAgentInputPackageStatusLabel(item) },
+          { key: 'source_path', label: '来源对象', value: item.sourcePath },
+          { key: 'summary', label: '摘要', value: item.summary || this.summarizeAgentInputPackage(item.rawInput) },
+          ...cloneArray(item.fields),
+        ],
+        rules: [
+          '输入包为只读预览，用于查看当前会传给总结、文旅分析或 Agent 的参数口径与证据。',
+          '同源栅格交叉证据只使用 shared_grid_evidence_v1；H3 只作为 POI 专项空间结构证据。',
+        ],
+        template: '从当前 analysis snapshot 中读取{来源对象}，用于检查 AI 输入口径和证据边界。',
+        aiPrompt: '未调用 AI。该抽屉展示当前前端运行态 snapshot 中的输入包字段。',
+        rawInput: cloneObject(item.rawInput || {}),
+        sourceType: 'rule',
+      }
     },
     getAgentToolDetail() {
       const targetName = asText(this.agentActiveToolDetailName)

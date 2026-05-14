@@ -29,6 +29,99 @@ def _as_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _compact_h3_evidence(value: Any, cell_limit: int = 40, row_limit: int = 20) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    cells = value.get("cells") if isinstance(value.get("cells"), list) else []
+    compact_cells: List[Dict[str, Any]] = []
+    for cell in cells[:cell_limit]:
+        if not isinstance(cell, dict):
+            continue
+        props = cell.get("properties") if isinstance(cell.get("properties"), dict) else cell
+        h3_id = _as_text(props.get("h3_id"))
+        if not h3_id:
+            continue
+        compact_cells.append({
+            "h3_id": h3_id,
+            "poi_count": props.get("poi_count"),
+            "density_poi_per_km2": props.get("density_poi_per_km2"),
+            "local_entropy": props.get("local_entropy"),
+            "neighbor_mean_density": props.get("neighbor_mean_density"),
+            "neighbor_mean_entropy": props.get("neighbor_mean_entropy"),
+            "neighbor_count": props.get("neighbor_count"),
+            "category_counts": props.get("category_counts") or {},
+            "gi_star_z_score": props.get("gi_star_z_score"),
+            "gi_star_value": props.get("gi_star_value"),
+            "lisa_i": props.get("lisa_i"),
+            "lisa_z_score": props.get("lisa_z_score"),
+        })
+
+    derived = value.get("derived_stats") if isinstance(value.get("derived_stats"), dict) else {}
+
+    def rows_from(compact_key: str, legacy_key: str) -> List[Dict[str, Any]]:
+        rows = derived.get(compact_key)
+        if isinstance(rows, list):
+            return rows[:row_limit]
+        legacy = derived.get(legacy_key) if isinstance(derived.get(legacy_key), dict) else {}
+        legacy_rows = legacy.get("rows") if isinstance(legacy.get("rows"), list) else []
+        return legacy_rows[:row_limit]
+
+    return {
+        "evidence_version": value.get("evidence_version") or "poi_h3_evidence_v1",
+        "grid_type": value.get("grid_type") or "h3",
+        "usage": value.get("usage") or "POI-only spatial structure evidence; do not use it for population or nightlight coupling.",
+        "params": value.get("params") or {},
+        "counts": {
+            **(value.get("counts") if isinstance(value.get("counts"), dict) else {}),
+            "cell_count": ((value.get("counts") or {}).get("cell_count") if isinstance(value.get("counts"), dict) else len(cells)),
+            "included_cell_count": len(compact_cells),
+        },
+        "metrics": value.get("metrics") or {},
+        "summary": value.get("summary") or {},
+        "charts": value.get("charts") or {},
+        "cells": compact_cells,
+        "derived_stats": {
+            "structure_rows": rows_from("structure_rows", "structureSummary"),
+            "typing_rows": rows_from("typing_rows", "typingSummary"),
+            "lq_rows": rows_from("lq_rows", "lqSummary"),
+            "gap_rows": rows_from("gap_rows", "gapSummary"),
+        },
+        "omitted": {
+            "cells_total": ((value.get("omitted") or {}).get("cells_total") if isinstance(value.get("omitted"), dict) else len(cells)),
+            "cells_included": len(compact_cells),
+            "geometry_removed": True,
+        },
+        "constraints": {
+            "poi_only": True,
+            "do_not_use_for_population_nightlight_coupling": True,
+        },
+    }
+
+
+def _compact_yearly_grid_evidence(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        "evidence_version": value.get("evidence_version") or "poi_iteration_yearly_grid_evidence_v1",
+        "years": value.get("years") if isinstance(value.get("years"), list) else [],
+        "grid_scope": value.get("grid_scope") or "poi_iteration_h3_per_year",
+        "grid_type": value.get("grid_type") or "h3",
+        "latest_year": value.get("latest_year"),
+        "latest_h3_evidence": _compact_h3_evidence(value.get("latest_h3_evidence"), cell_limit=20, row_limit=12),
+        "items": [
+            {
+                "year": item.get("year"),
+                "status": item.get("status") or "ready",
+                "error": item.get("error") or "",
+                "grid_scope": item.get("grid_scope") or value.get("grid_scope") or "poi_iteration_h3_per_year",
+                "h3_evidence": _compact_h3_evidence(item.get("h3_evidence"), cell_limit=20, row_limit=12),
+            }
+            for item in (value.get("items") if isinstance(value.get("items"), list) else [])
+            if isinstance(item, dict)
+        ],
+    }
+
+
 def _to_number(value: Any) -> Optional[float]:
     try:
         number = float(value)
@@ -804,6 +897,12 @@ def _normalize_years(years: Iterable[Any]) -> List[int]:
     return sorted(set(result))
 
 
+def _get_payload_value(payload: Any, key: str, default: Any = None) -> Any:
+    if isinstance(payload, dict):
+        return payload.get(key, default)
+    return getattr(payload, key, default)
+
+
 async def _generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str, Any]:
     from modules.agent.iteration_change_service import generate_poi_iteration_analysis
 
@@ -821,9 +920,17 @@ async def _generate_poi_iteration_analysis_with_timeout(evidence: Dict[str, Any]
 
 
 async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any]:
-    history_id = _as_text(getattr(payload, "history_id", "") or (payload.get("history_id") if isinstance(payload, dict) else ""))
-    years = _normalize_years(getattr(payload, "years", None) if not isinstance(payload, dict) else payload.get("years"))
-    center = getattr(payload, "center", None) if not isinstance(payload, dict) else payload.get("center")
+    history_id = _as_text(_get_payload_value(payload, "history_id", ""))
+    years = _normalize_years(_get_payload_value(payload, "years", None))
+    center = _get_payload_value(payload, "center", None)
+    h3_evidence = _get_payload_value(payload, "h3_evidence", {}) or {}
+    if not isinstance(h3_evidence, dict):
+        h3_evidence = {}
+    h3_evidence = _compact_h3_evidence(h3_evidence)
+    yearly_grid_evidence = _get_payload_value(payload, "yearly_grid_evidence", {}) or {}
+    if not isinstance(yearly_grid_evidence, dict):
+        yearly_grid_evidence = {}
+    yearly_grid_evidence = _compact_yearly_grid_evidence(yearly_grid_evidence)
     if not history_id:
         raise HTTPException(status_code=400, detail="history_id is required")
     if len(years) < 2:
@@ -864,10 +971,16 @@ async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any
         "spatial_factors": {},
         "subcategory_spatial_trend_rows": [],
         "subcategory_spatial_summary": [],
+        "h3_evidence": h3_evidence,
+        "yearly_grid_evidence": yearly_grid_evidence,
         "rule_summary": rule["summary"],
         "rule_insights": rule["insights"],
         "ai_summary": [],
         "ai_insights": {},
+        "driver_analysis": [],
+        "planning_implications": [],
+        "report_title": "",
+        "report_content": "",
         "ai_status": "pending",
         "ai_error": "",
         "error": "",
