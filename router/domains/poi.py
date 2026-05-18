@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import json
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from core.spatial import transform_polygon_payload_coords
 from modules.poi import service as poi_service
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 async def fetch_pois_analysis(payload: PoiRequest):
     source = (payload.source or "local").strip().lower()
     try:
-        results = await poi_service.fetch_single_year_pois(payload)
+        results, diagnostics = await poi_service.fetch_single_year_pois_with_diagnostics(payload)
     except Exception as exc:
         logger.exception("POI fetch failed: source=%s", source)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -63,7 +65,7 @@ async def fetch_pois_analysis(payload: PoiRequest):
             poi_results_by_year=[{"source": source, "year": payload.year, "pois": s_pois}],
         )
 
-    return {"pois": results, "count": len(results)}
+    return {"pois": results, "count": len(results), "diagnostics": diagnostics}
 
 
 @router.post("/api/v1/analysis/pois/multi-year", response_model=PoiMultiYearResponse)
@@ -74,6 +76,28 @@ async def fetch_multi_year_pois_analysis(payload: PoiMultiYearRequest):
         logger.exception("Multi-year POI fetch failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return result
+
+
+@router.post("/api/v1/analysis/pois/multi-year/stream")
+async def stream_multi_year_pois_analysis(payload: PoiMultiYearRequest):
+    async def event_stream():
+        try:
+            async for event in poi_service.stream_fetch_multi_year_pois(payload):
+                event_type = str(event.get("type") or "message")
+                yield f"event: {event_type}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            logger.exception("Multi-year POI stream failed")
+            error_payload = {"type": "error", "message": str(exc)}
+            yield f"event: error\ndata: {json.dumps(error_payload, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/api/v1/analysis/pois/grid", response_model=PoiGridResponse)

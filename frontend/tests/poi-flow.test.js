@@ -57,16 +57,42 @@ function createContext(overrides = {}) {
   }
 }
 
-test('fetchPois sends one multi-year request and applies backend aggregation payload', async () => {
+function sseResponse(events) {
+  const encoder = new TextEncoder()
+  const chunks = events.map((event) => encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event.payload)}\n\n`))
+  return {
+    ok: true,
+    body: {
+      getReader() {
+        let index = 0
+        return {
+          async read() {
+            if (index >= chunks.length) return { done: true, value: undefined }
+            return { done: false, value: chunks[index++] }
+          },
+        }
+      },
+    },
+  }
+}
+
+test('fetchPois streams multi-year progress and applies backend aggregation payload', async () => {
   const ctx = createContext()
   const previousFetch = global.fetch
   const requests = []
   global.fetch = async (url, options = {}) => {
     const body = JSON.parse(options.body || '{}')
     requests.push({ url, body })
-    return {
-      ok: true,
-      json: async () => ({
+    return sseResponse([
+      { type: 'start', payload: { type: 'start', years: [2020, 2022, 2024], category_count: 1, total_units: 3 } },
+      { type: 'category_start', payload: { type: 'category_start', year: 2020, source: 'local', category: 'Food', category_index: 1, category_count: 1, progress: 0 } },
+      { type: 'category_complete', payload: { type: 'category_complete', year: 2020, source: 'local', category: 'Food', count: 1, completed_units: 1, total_units: 3, progress: 33 } },
+      { type: 'year_complete', payload: { type: 'year_complete', year: 2024, source: 'local', count: 1, progress: 100 } },
+      {
+        type: 'final',
+        payload: {
+          type: 'final',
+          result: {
         years: [2020, 2022, 2024],
         selected_year: 2024,
         display_pois: [
@@ -80,18 +106,22 @@ test('fetchPois sends one multi-year request and applies backend aggregation pay
         category_summary: [{ id: 'food', name: 'Food', count: 1 }],
         errors: [],
         history_id: 'history-123',
-      }),
-    }
+          },
+          progress: 100,
+        },
+      },
+    ])
   }
 
   try {
     await ctx.fetchPois({ preserveCurrentPanel: true })
 
     assert.equal(requests.length, 1)
-    assert.equal(requests[0].url, '/api/v1/analysis/pois/multi-year')
+    assert.equal(requests[0].url, '/api/v1/analysis/pois/multi-year/stream')
     assert.deepEqual(requests[0].body.years, [2020, 2022, 2024])
     assert.deepEqual(requests[0].body.categories, [{ id: 'food', name: 'Food', types: '050000' }])
     assert.equal(requests[0].body.save_history, true)
+    assert.equal(ctx.fetchProgress, 100)
     assert.deepEqual(ctx.currentHistoryAvailablePoiYears, [2020, 2022, 2024])
     assert.equal(ctx.currentHistorySelectedPoiYear, 2024)
     assert.equal(ctx.poiYearSource, '2024')

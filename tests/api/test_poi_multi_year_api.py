@@ -57,3 +57,40 @@ def test_poi_multi_year_api_returns_stable_payload(monkeypatch):
     assert data["selected_year"] == 2024
     assert data["history_id"] == "history-1"
     assert data["category_summary"] == [{"id": "food", "name": "Food", "count": 1}]
+
+
+def test_poi_multi_year_stream_uses_request_payload(monkeypatch):
+    async def fake_stream(payload):
+        yield {"type": "start", "years": list(payload.years)}
+        yield {
+            "type": "final",
+            "result": {
+                "years": list(payload.years),
+                "selected_year": None,
+                "display_pois": [],
+                "results_by_year": [],
+                "summary_by_year": [],
+                "category_summary": [],
+                "errors": [],
+                "history_id": None,
+            },
+        }
+
+    monkeypatch.setattr(poi_service, "stream_fetch_multi_year_pois", fake_stream)
+
+    resp = asyncio.run(
+        _request(
+            "POST",
+            "/api/v1/analysis/pois/multi-year/stream",
+            json={
+                "polygon": [[112.0, 28.0], [112.1, 28.0], [112.0, 28.1], [112.0, 28.0]],
+                "years": [2026],
+                "categories": [{"id": "food", "name": "Food", "types": "050000"}],
+            },
+        )
+    )
+
+    assert resp.status_code == 200
+    assert "event: start" in resp.text
+    assert '"years": [2026]' in resp.text
+    assert "cannot access local variable 'payload'" not in resp.text

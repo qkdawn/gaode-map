@@ -482,7 +482,7 @@
                     year: item && item.year ? String(item.year) : '-',
                     source: this.formatPoiFetchErrorSource(item && item.source),
                     category: item && item.category ? String(item.category) : '未命名分类',
-                    error: item && item.error ? String(item.error) : '未知错误',
+                    error: this.formatPoiFetchErrorMessage(item),
                 }));
             },
             getPoiFetchErrorHiddenCount(limit = 8) {
@@ -495,6 +495,33 @@
                 if (value === 'gaode') return '高德';
                 if (value === 'local') return '本地';
                 return source ? String(source) : '-';
+            },
+            formatPoiFetchErrorMessage(item) {
+                const code = item && item.error ? String(item.error) : '未知错误';
+                const reason = this.formatPoiFetchErrorReason(item && item.reason_type);
+                const detail = this.formatPoiFetchErrorDetail(item && item.detail);
+                return [code, reason, detail].filter(Boolean).join(' · ');
+            },
+            formatPoiFetchErrorReason(reasonType) {
+                const value = String(reasonType || '').trim();
+                if (value === 'qps_limit') return '高德 QPS 限流';
+                if (value === 'quota_limit') return '高德配额/Key 耗尽';
+                if (value === 'request_budget') return '请求预算触顶';
+                if (value === 'network_or_http') return '网络或 HTTP 异常';
+                if (value === 'result_cap') return '结果量仍接近上限';
+                if (value === 'unknown') return '原因待确认';
+                return '';
+            },
+            formatPoiFetchErrorDetail(detail) {
+                if (!detail || typeof detail !== 'object') return '';
+                const count = Number(detail.count || 0);
+                const samples = Array.isArray(detail.samples) ? detail.samples : [];
+                const reason = samples.map((item) => item && item.reason ? String(item.reason) : '').find(Boolean);
+                if (reason) return reason.slice(0, 80);
+                if (count > 0) return `${count} 个异常瓦片`;
+                if (detail.api_call_count) return `API 调用 ${detail.api_call_count}`;
+                if (detail.request_count) return `请求数 ${detail.request_count}`;
+                return '';
             },
             isHistoryPoiRestoring() {
                 const text = String(this.poiStatus || '');

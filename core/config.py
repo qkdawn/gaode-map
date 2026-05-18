@@ -104,6 +104,46 @@ class Settings(BaseSettings):
         validation_alias="AMAP_JS_SECURITY_CODE",
         description="高德 JS 安全码（若未开启可留空）",
     )
+    amap_poi_calls_per_second: int = Field(
+        10,
+        validation_alias="AMAP_POI_CALLS_PER_SECOND",
+        description="高德 2026 POI 抓取全局请求速率上限，过高可能触发 QPS 限流",
+    )
+    amap_poi_request_timeout_s: float = Field(
+        3.0,
+        validation_alias="AMAP_POI_REQUEST_TIMEOUT_S",
+        description="高德 POI 单次 HTTP 请求超时时间（秒）",
+    )
+    amap_poi_page_retry_count: int = Field(
+        2,
+        validation_alias="AMAP_POI_PAGE_RETRY_COUNT",
+        description="高德 POI 单页请求失败后的重试次数",
+    )
+    amap_poi_qps_backoff_base_s: float = Field(
+        1.5,
+        validation_alias="AMAP_POI_QPS_BACKOFF_BASE_S",
+        description="命中高德 QPS 限流后的指数退避基础等待时间（秒）",
+    )
+    amap_poi_qps_backoff_max_s: float = Field(
+        12.0,
+        validation_alias="AMAP_POI_QPS_BACKOFF_MAX_S",
+        description="命中高德 QPS 限流后的单次最大退避等待时间（秒）",
+    )
+    amap_tile_max_requests_per_type: int = Field(
+        160,
+        validation_alias="AMAP_TILE_MAX_REQUESTS_PER_TYPE",
+        description="高德瓦片抓取每个 type 查询的最大请求数预算",
+    )
+    amap_poi_max_pages_per_tile: int = Field(
+        4,
+        validation_alias="AMAP_POI_MAX_PAGES_PER_TILE",
+        description="高德单个瓦片最多翻页数，超过后优先继续切小瓦片",
+    )
+    amap_poi_max_api_calls_per_year: int = Field(
+        400,
+        validation_alias="AMAP_POI_MAX_API_CALLS_PER_YEAR",
+        description="高德 2026 POI 每年联合抓取的真实 API 调用预算",
+    )
     tianditu_key: str = Field(
         "",
         validation_alias="TIANDITU_KEY",

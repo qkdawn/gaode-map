@@ -1,5 +1,137 @@
 function createAnalysisPoiFlowOrchestratorMethods() {
   return {
+    parsePoiSseChunk(rawChunk) {
+      const lines = String(rawChunk || '').split(/\r?\n/)
+      let type = 'message'
+      const dataLines = []
+      lines.forEach((line) => {
+        if (line.startsWith('event:')) {
+          type = line.slice(6).trim() || 'message'
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart())
+        }
+      })
+      const rawData = dataLines.join('\n').trim()
+      const payload = rawData ? JSON.parse(rawData) : {}
+      return { type, payload }
+    },
+
+    async consumePoiSseStream(response, onEvent) {
+      if (!response || !response.body || typeof response.body.getReader !== 'function') {
+        throw new Error('POI 流式响应缺少可读数据流')
+      }
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { value, done } = await reader.read()
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+        let splitIndex = buffer.indexOf('\n\n')
+        while (splitIndex >= 0) {
+          const rawChunk = buffer.slice(0, splitIndex)
+          buffer = buffer.slice(splitIndex + 2)
+          if (rawChunk.trim()) onEvent(this.parsePoiSseChunk(rawChunk))
+          splitIndex = buffer.indexOf('\n\n')
+        }
+        if (done) break
+      }
+      if (buffer.trim()) onEvent(this.parsePoiSseChunk(buffer))
+    },
+
+    applyPoiFetchProgressEvent(event) {
+      const payload = event && event.payload && typeof event.payload === 'object' ? event.payload : {}
+      const type = String((event && event.type) || payload.type || '').trim()
+      const progress = Number(payload.progress)
+      if (Number.isFinite(progress)) {
+        this.fetchProgress = Math.max(0, Math.min(100, Math.round(progress)))
+      }
+      if (type === 'start') {
+        const years = Array.isArray(payload.years) ? payload.years.join(' / ') : ''
+        this.poiStatus = years ? `Fetching ${years} POI years...` : 'Fetching POI years...'
+        if (!Number(this.fetchProgress || 0)) this.fetchProgress = 1
+        return
+      }
+      if (type === 'category_start') {
+        const label = this.getPoiSourceLabel(payload.source, payload.year)
+        const category = String(payload.category || '未命名分类')
+        const index = Number(payload.category_index || 0)
+        const count = Number(payload.category_count || 0)
+        const completed = Number(payload.completed_units || 0)
+        const total = Number(payload.total_units || 0)
+        if (total > 0) {
+          const unitProgress = Math.floor((completed / total) * 100)
+          this.fetchProgress = Math.max(Number(this.fetchProgress || 0), Math.max(1, unitProgress))
+        }
+        this.poiStatus = `Fetching ${label}: ${index || '-'} / ${count || '-'} categories · ${category}`
+        this.fetchSubtypeProgress = Object.assign({}, this.fetchSubtypeProgress || {}, {
+          categoryName: category,
+        })
+        return
+      }
+      if (type === 'category_complete') {
+        const label = this.getPoiSourceLabel(payload.source, payload.year)
+        const category = String(payload.category || '未命名分类')
+        const completed = Number(payload.completed_units || 0)
+        const total = Number(payload.total_units || 0)
+        const count = Number(payload.count || 0)
+        const suffix = payload.status === 'failed' ? '失败' : `${count} POIs`
+        this.poiStatus = `Fetched ${label}: ${completed || '-'} / ${total || '-'} units · ${category} ${suffix}`
+        return
+      }
+      if (type === 'category_progress') {
+        const label = this.getPoiSourceLabel(payload.source, payload.year)
+        const category = String(payload.category || '未命名分类')
+        const requestCount = Number(payload.request_count || 0)
+        const apiCallCount = Number(payload.api_call_count || 0)
+        const tileCount = Number(payload.tile_count || 0)
+        const saturated = Number(payload.saturated_queries || 0)
+        const expanded = Number(payload.expanded_type_queries || 0)
+        const suffix = [
+          requestCount > 0 ? `${requestCount} requests` : '',
+          apiCallCount > 0 ? `${apiCallCount} api` : '',
+          tileCount > 0 ? `${tileCount} tiles` : '',
+          saturated > 0 ? `${saturated} saturated` : '',
+          expanded > 0 ? `${expanded} subtype` : '',
+        ].filter(Boolean).join(' · ')
+        this.poiStatus = `Fetching ${label}: ${category}${suffix ? ` · ${suffix}` : ''}`
+        this.fetchSubtypeProgress = Object.assign({}, this.fetchSubtypeProgress || {}, {
+          categoryName: category,
+        })
+        return
+      }
+      if (type === 'year_complete') {
+        const label = this.getPoiSourceLabel(payload.source, payload.year)
+        this.poiStatus = `Fetched ${label}: ${Number(payload.count || 0)} POIs`
+      }
+    },
+
+    async fetchPoiMultiYearStream(payload) {
+      const res = await fetch('/api/v1/analysis/pois/multi-year/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: this.abortController.signal,
+      })
+      if (!res.ok) {
+        let detail = ''
+        try { detail = await res.text() } catch (_) { }
+        throw new Error(detail || `HTTP ${res.status}`)
+      }
+      let finalResult = null
+      await this.consumePoiSseStream(res, (event) => {
+        this.applyPoiFetchProgressEvent(event)
+        const payload = event && event.payload ? event.payload : {}
+        if ((event && event.type) === 'final' || payload.type === 'final') {
+          finalResult = payload.result || null
+        }
+        if ((event && event.type) === 'error') {
+          throw new Error(payload.message || 'POI 流式抓取失败')
+        }
+      })
+      if (!finalResult) throw new Error('POI fetch stream returned no final payload')
+      return finalResult
+    },
+
     async fetchPoisForYear(polygon, selectedCats, poiSelection, options = {}) {
       const batchSize = Number(options.batchSize) || 4
       const yearIndex = Number(options.yearIndex || 0)
@@ -138,26 +270,7 @@ function createAnalysisPoiFlowOrchestratorMethods() {
         }
 
         if (this.abortController.signal.aborted) return
-        const res = await fetch('/api/v1/analysis/pois/multi-year', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: this.abortController.signal,
-        })
-        if (!res.ok) {
-          let detail = ''
-          try {
-            const errJson = await res.json()
-            detail = errJson && typeof errJson === 'object'
-              ? (errJson.detail || JSON.stringify(errJson))
-              : String(errJson || '')
-          } catch (_) {
-            try { detail = await res.text() } catch (__){ }
-          }
-          throw new Error(detail || `HTTP ${res.status}`)
-        }
-
-        const data = await res.json()
+        const data = await this.fetchPoiMultiYearStream(payload)
         const yearlyResults = Array.isArray(data && data.results_by_year) ? data.results_by_year : []
         if (!yearlyResults.length) {
           throw new Error('POI fetch returned no usable data')

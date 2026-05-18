@@ -29,6 +29,7 @@ class PoiPoint(BaseModel):
 class PoiResponse(BaseModel):
     pois: List[PoiPoint]
     count: int
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PoiCategoryRequest(BaseModel):
@@ -91,6 +92,7 @@ class PoiYearResult(BaseModel):
     source: Literal["gaode", "local"] = "local"
     pois: List[dict] = Field(default_factory=list)
     count: int = 0
+    diagnostics: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class PoiCategorySummaryRow(BaseModel):
@@ -111,6 +113,8 @@ class PoiFetchError(BaseModel):
     source: Literal["gaode", "local"] = "local"
     category: str
     error: str
+    detail: Dict[str, Any] = Field(default_factory=dict)
+    reason_type: Optional[str] = None
 
 
 class PoiMultiYearResponse(BaseModel):
