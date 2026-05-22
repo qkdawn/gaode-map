@@ -98,7 +98,7 @@ export function runAnalysisBootstrapApp() {
                   ...roadSyntaxUiMethods,
                   ...agentSessionMethods,
                   openAgentPanel() {
-                      this.agentWorkspaceView = 'chat';
+                      this.agentWorkspaceView = 'report';
                       if (typeof this.selectStep3Panel === 'function') {
                           this.selectStep3Panel('agent');
                           return;
@@ -133,9 +133,8 @@ export function runAnalysisBootstrapApp() {
                       if (typeof this.stopAllSummaryTaskLogTracking === 'function') {
                           this.stopAllSummaryTaskLogTracking();
                       }
-                      this.agentWorkspaceView = 'chat';
+                      this.agentWorkspaceView = 'report';
                       this.activeAgentSessionId = '';
-                      this.agentConversationId = '';
                       this.agentInput = '';
                       this.agentLoading = false;
                       this.agentStatus = 'idle';

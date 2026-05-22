@@ -569,12 +569,12 @@ function deriveAgentSessionTitle(messages = []) {
   const rows = cloneArray(messages)
   const firstUserMessage = rows.find((item) => item && item.role === 'user' && asText(item.content))
   const raw = firstUserMessage ? asText(firstUserMessage.content) : ''
-  return raw ? raw.slice(0, 24) : '新聊天'
+  return raw ? raw.slice(0, 24) : '新报告'
 }
 
 function deriveAgentSessionPreview(session = null) {
   const text = buildAgentPreviewCandidate(session)
-  return text ? text.slice(0, 120) : '开始一段新的分析对话'
+  return text ? text.slice(0, 120) : '开始一份新的区域分析'
 }
 
 function createAgentSessionRecord(seed = {}) {

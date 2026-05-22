@@ -1,4 +1,4 @@
-﻿import {
+import {
   asText,
   clampText,
   cloneArray,
@@ -29,21 +29,21 @@ import { buildAnalysisTaskParamBundle } from './analysis-task-params.js'
 function createAgentUiMethods() {
   return {
     getAgentSessionTitle(session = null) {
-      if (!session || typeof session !== 'object') return '新对话'
+      if (!session || typeof session !== 'object') return '新报告'
       if (this.isAgentSummaryHistorySession && this.isAgentSummaryHistorySession(session)) {
         return this.getAgentSummaryCompactTitle(cloneObject(session.panelPayloads), session.title)
       }
-      return clampText(session.title, 60) || '新对话'
+      return clampText(session.title, 60) || '新报告'
     },
     getAgentSessionPreview(session = null) {
-      if (!session || typeof session !== 'object') return '开始一段新的分析对话'
+      if (!session || typeof session !== 'object') return '开始一份新的区域分析'
       if (this.isAgentSummaryHistorySession && this.isAgentSummaryHistorySession(session)) {
         const pack = this.getAgentSummaryPack(cloneObject(session.panelPayloads))
         const supporting = asText((pack.headline_judgment || {}).supporting_clause)
         const headline = asText((pack.headline_judgment || {}).summary)
         return clampText(supporting || headline || session.preview, 120) || '查看已生成的区域总结'
       }
-      return clampText(session.preview, 120) || '开始一段新的分析对话'
+      return clampText(session.preview, 120) || '开始一份新的区域分析'
     },
     isAgentHistoryGroupCollapsed(groupId = '') {
       const key = asText(groupId)
@@ -136,10 +136,10 @@ function createAgentUiMethods() {
       const shortTitle = this.extractAgentTabShortTitle(kind, seed)
       return shortTitle && shortTitle !== label ? `${label} · ${shortTitle}` : label
     },
-    getAgentSummaryWindowTitle(panelPayloads = null, fallbackTitle = '') {
+    getAgentSummaryViewTitle(panelPayloads = null, fallbackTitle = '') {
       return this.getAgentSummaryCompactTitle(panelPayloads, fallbackTitle)
     },
-    getAgentFollowupWindowTitle(seed = null, fallbackTitle = '') {
+    getAgentFollowupViewTitle(seed = null, fallbackTitle = '') {
       const source = seed && typeof seed === 'object' ? seed : {}
       const firstUserMessage = cloneArray(source.messages)
         .find((item) => asText(item && item.role) === 'user' && asText(item && item.content))
@@ -259,13 +259,13 @@ function createAgentUiMethods() {
       const activeTab = this.getAgentActiveTopTab()
       return asText(activeTab.kind) === 'summary' && asText(activeTab.source) === 'current'
     },
-    createAgentSummaryWindowId() {
+    createAgentSummaryViewId() {
       return `summary-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     },
-    createAgentSiteSelectionWindowId() {
+    createAgentSiteSelectionViewId() {
       return `site-selection-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     },
-    createAgentIterationChangeWindowId() {
+    createAgentIterationChangeViewId() {
       return `iteration-change-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     },
     isAgentActiveTabReadonly() {
@@ -339,7 +339,7 @@ function createAgentUiMethods() {
         if (asText(item.id) !== activeId) return item
         return {
           ...item,
-          title: this.getAgentSummaryWindowTitle(currentPayloads, item.title || '区域总结'),
+          title: this.getAgentSummaryViewTitle(currentPayloads, item.title || '区域总结'),
           panelPayloads: cloneObject(currentPayloads),
           content: cloneObject(summaryPack),
           evidenceRefs: cloneArray(summaryPack.evidence_refs || item.evidenceRefs || []),
@@ -2039,9 +2039,8 @@ function createAgentUiMethods() {
         titleSource: 'fallback',
       })
       this.updateAgentSessions([draft, ...this.agentSessions], { loaded: this.agentSessionsLoaded })
-      this.agentConversationId = draft.id
       this.activeAgentSessionId = draft.id
-      this.agentWorkspaceView = 'chat'
+      this.agentWorkspaceView = 'report'
       this.agentInput = ''
       this.agentStatus = 'idle'
       this.agentStage = 'gating'
@@ -2258,7 +2257,7 @@ function createAgentUiMethods() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            conversation_id: asText(this.activeAgentSessionId || this.agentConversationId),
+            conversation_id: this.getActiveAgentSessionId(),
             history_id: asText(this.getCurrentAgentHistoryId()),
             analysis_snapshot: this.buildAgentAnalysisSnapshot(),
           }),
@@ -2338,7 +2337,7 @@ function createAgentUiMethods() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            conversation_id: asText(this.activeAgentSessionId || this.agentConversationId),
+            conversation_id: this.getActiveAgentSessionId(),
             history_id: asText(this.getCurrentAgentHistoryId()),
             analysis_snapshot: this.buildAgentAnalysisSnapshot(),
           }),
@@ -2623,7 +2622,7 @@ function createAgentUiMethods() {
         followupTabs: cloneArray(base.followupTabs).map((item) => ({
           id: asText(item && item.id),
           kind: 'followup',
-          title: this.getAgentFollowupWindowTitle(item, item && item.title),
+          title: this.getAgentFollowupViewTitle(item, item && item.title),
           linkedSummaryId: asText(item && item.linkedSummaryId) || 'summary',
           source: asText(item && item.source) || 'draft',
           sessionId: asText(item && item.sessionId),
@@ -2654,7 +2653,7 @@ function createAgentUiMethods() {
         }
         return {
           ...item,
-          title: this.getAgentSummaryWindowTitle(panelPayloads, item.title || currentSummaryStatus.title),
+          title: this.getAgentSummaryViewTitle(panelPayloads, item.title || currentSummaryStatus.title),
           panelPayloads,
           content: cloneObject(content),
           evidenceRefs: cloneArray(content.evidence_refs || item.evidenceRefs || []),
@@ -2664,7 +2663,7 @@ function createAgentUiMethods() {
         syncedCurrentSummaryTabs = [{
           id: 'summary-current',
           kind: 'summary',
-          title: this.getAgentSummaryWindowTitle(this.agentPanelPayloads, currentSummaryStatus.title),
+          title: this.getAgentSummaryViewTitle(this.agentPanelPayloads, currentSummaryStatus.title),
           source: 'current',
           sessionId: '',
           readonly: false,
@@ -2723,6 +2722,53 @@ function createAgentUiMethods() {
         })),
       ]
     },
+    getAgentReportHomeTabId() {
+      const tabs = this.ensureAgentTabs(false)
+      const current = cloneArray(tabs.summaryTabs).find((item) => asText(item && item.source) === 'current')
+      const first = current || cloneArray(tabs.summaryTabs)[0]
+      return asText(first && first.id)
+    },
+    getAgentWorkspaceNavTitle() {
+      const activeTab = this.getAgentActiveTopTab()
+      const kind = asText(activeTab.kind)
+      if (kind === 'site_selection') return '区域内选址'
+      if (kind === 'iteration_change') return '多年变化'
+      if (kind === 'followup') return '追问解释'
+      return '区域报告'
+    },
+    getAgentWorkspaceNavSubtitle() {
+      const kind = asText(this.getAgentActiveTopTab().kind)
+      if (kind === 'site_selection') return '从区域报告进入的开店位置判断'
+      if (kind === 'iteration_change') return '从区域报告进入的时间变化分析'
+      if (kind === 'followup') return '围绕当前区域报告继续追问'
+      if (this.hasAgentSummaryPack()) return '先看判断，再追问、查证据或继续做任务'
+      return '先补齐证据并生成当前区域的智能报告'
+    },
+    isAgentReportDetailView() {
+      return ['site_selection', 'iteration_change', 'followup'].includes(asText(this.getAgentActiveTopTab().kind))
+    },
+    returnToAgentReportHome() {
+      const tabId = this.getAgentReportHomeTabId()
+      if (tabId) {
+        this.switchAgentTopTab(tabId)
+        return tabId
+      }
+      return this.createAgentSummaryTab({ title: '区域总结', reuseExisting: true })
+    },
+    openAgentSiteSelectionFromReport(options = {}) {
+      this.agentWorkspaceView = 'report'
+      const tabs = this.ensureAgentTabs(true)
+      const existing = cloneArray(tabs.siteSelectionTabs).find((item) => asText(item && item.source) === 'current' || asText(item && item.source) === 'draft')
+      if (existing && !options.forceNew) {
+        this.switchAgentTopTab(existing.id)
+        return existing.id
+      }
+      return this.createAgentSiteSelectionTab({ title: '区域内选址', source: 'current' })
+    },
+    openAgentIterationChangeFromReport(options = {}) {
+      this.agentWorkspaceView = 'report'
+      return this.createAgentIterationChangeTab({ reuseExisting: true, source: 'current', autoload: options.autoload !== false })
+    },
     isAgentSummaryTabActive() {
       return asText(this.getAgentActiveTopTab().kind) === 'summary'
     },
@@ -2757,7 +2803,7 @@ function createAgentUiMethods() {
         summary_task_board: this.buildSummaryTaskBoardUiState(),
       }
       const summaryPack = this.getAgentSummaryPack(panelPayloads)
-      target.title = this.getAgentSummaryWindowTitle(panelPayloads, target.title || '区域总结')
+      target.title = this.getAgentSummaryViewTitle(panelPayloads, target.title || '区域总结')
       target.panelPayloads = panelPayloads
       target.content = cloneObject(summaryPack)
       target.evidenceRefs = cloneArray(summaryPack.evidence_refs || [])
@@ -2775,7 +2821,6 @@ function createAgentUiMethods() {
     switchAgentTopTab(tabId = '') {
       const nextId = asText(tabId)
       if (!nextId) return
-      this.closeAgentCreateTabMenu()
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveSiteSelectionTabState()
       this.captureAgentActiveFollowupTabState()
@@ -2820,16 +2865,6 @@ function createAgentUiMethods() {
       const tabs = this.ensureAgentTabs(false)
       return tabs.followupTabs.length < Number(tabs.followupLimit || 6)
     },
-    openAgentCreateTabMenu() {
-      this.agentCreateTabMenuOpen = true
-    },
-    closeAgentCreateTabMenu() {
-      this.agentCreateTabMenuOpen = false
-    },
-    toggleAgentCreateTabMenu(event = null) {
-      if (event && typeof event.stopPropagation === 'function') event.stopPropagation()
-      this.agentCreateTabMenuOpen = !this.agentCreateTabMenuOpen
-    },
     createAgentSummaryTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
       const panelPayloads = {
@@ -2842,7 +2877,7 @@ function createAgentUiMethods() {
         ? cloneArray(tabs.summaryTabs).find((item) => asText(item.source) === 'current')
         : null
       const summaryTab = existing || {
-        id: reuseExisting ? 'summary-current' : this.createAgentSummaryWindowId(),
+        id: reuseExisting ? 'summary-current' : this.createAgentSummaryViewId(),
         kind: 'summary',
         source: 'current',
         sessionId: '',
@@ -2852,7 +2887,7 @@ function createAgentUiMethods() {
         content: cloneObject(summaryPack),
         evidenceRefs: cloneArray(summaryPack.evidence_refs || []),
       }
-      summaryTab.title = this.getAgentSummaryWindowTitle(panelPayloads, options.title)
+      summaryTab.title = this.getAgentSummaryViewTitle(panelPayloads, options.title)
       summaryTab.panelPayloads = panelPayloads
       summaryTab.content = cloneObject(summaryPack)
       summaryTab.evidenceRefs = cloneArray(summaryPack.evidence_refs || [])
@@ -2863,7 +2898,6 @@ function createAgentUiMethods() {
       }
       tabs.activeTabId = summaryTab.id
       this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
-      this.closeAgentCreateTabMenu()
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncSummaryTaskBoardFromLocalResults()
       this.syncCurrentAgentSession()
@@ -2874,7 +2908,7 @@ function createAgentUiMethods() {
       const tabs = this.ensureAgentTabs(true)
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveFollowupTabState()
-      const tabId = this.createAgentSiteSelectionWindowId()
+      const tabId = this.createAgentSiteSelectionViewId()
       const tab = {
         id: tabId,
         kind: 'site_selection',
@@ -2888,7 +2922,6 @@ function createAgentUiMethods() {
       tabs.siteSelectionTabs = [...cloneArray(tabs.siteSelectionTabs), tab]
       tabs.activeTabId = tabId
       this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
-      this.closeAgentCreateTabMenu()
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncCurrentAgentSession()
       return tabId
@@ -2901,7 +2934,7 @@ function createAgentUiMethods() {
       const existing = reuseExisting
         ? cloneArray(tabs.iterationChangeTabs).find((item) => asText(item.source) === 'current')
         : null
-      const tabId = existing ? existing.id : this.createAgentIterationChangeWindowId()
+      const tabId = existing ? existing.id : this.createAgentIterationChangeViewId()
       const tab = {
         ...(existing || {}),
         id: tabId,
@@ -2922,7 +2955,6 @@ function createAgentUiMethods() {
       tabs.activeTabId = tabId
       this.agentIterationActiveKind = tab.activeKind
       this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
-      this.closeAgentCreateTabMenu()
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncCurrentAgentSession()
       if (options.autoload !== false) {
@@ -2935,7 +2967,7 @@ function createAgentUiMethods() {
     createAgentFollowupTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
       if (!this.canCreateAgentFollowupTab()) {
-        window.alert(`最多可创建 ${tabs.followupLimit} 个追问解释标签，请先关闭旧标签。`)
+        window.alert(`最多可保留 ${tabs.followupLimit} 条追问解释，请先关闭旧追问。`)
         return null
       }
       this.captureAgentActiveFollowupTabState()
@@ -2945,7 +2977,7 @@ function createAgentUiMethods() {
       const thread = this.createAgentFollowupThreadState({
         input: seedPrompt,
       })
-      const title = this.getAgentFollowupWindowTitle({
+      const title = this.getAgentFollowupViewTitle({
         title: options.title,
         messages: seedPrompt ? [{ role: 'user', content: seedPrompt }] : [],
       }, options.title)
@@ -2966,7 +2998,6 @@ function createAgentUiMethods() {
       tabs.nextFollowupNumber = number + 1
       tabs.activeTabId = tabId
       this.agentTabs = tabs
-      this.closeAgentCreateTabMenu()
       this.applyAgentFollowupThreadToCurrentState(thread)
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncCurrentAgentSession()
@@ -2979,7 +3010,7 @@ function createAgentUiMethods() {
       return {
         id: `summary-history-${sessionId}`,
         kind: 'summary',
-        title: this.getAgentSummaryWindowTitle(panelPayloads, session && session.title),
+        title: this.getAgentSummaryViewTitle(panelPayloads, session && session.title),
         source: 'history',
         sessionId,
         readonly: false,
@@ -2994,7 +3025,7 @@ function createAgentUiMethods() {
       return {
         id: `followup-history-${sessionId}`,
         kind: 'followup',
-        title: this.getAgentFollowupWindowTitle(session, session && session.title),
+        title: this.getAgentFollowupViewTitle(session, session && session.title),
         linkedSummaryId: 'summary',
         source: 'history',
         sessionId,
@@ -3059,38 +3090,12 @@ function createAgentUiMethods() {
       }
       if (!session) return null
       if (!this.isAgentHistorySessionInCurrentRange(session)) return null
-      this.agentWorkspaceView = 'chat'
+      this.agentWorkspaceView = 'report'
       if (this.isAgentSummaryHistorySession(session)) {
         this.applyAgentSessionSnapshot(session)
         return this.openAgentSummaryHistoryTab(session)
       }
       return this.openAgentFollowupHistoryTab(session)
-    },
-    closeAgentTopTab(tabId = '', event = null) {
-      if (event && typeof event.stopPropagation === 'function') event.stopPropagation()
-      const targetId = asText(tabId)
-      if (!targetId) return
-      const tabs = this.ensureAgentTabs(true)
-      const currentActiveId = asText(tabs.activeTabId)
-      const orderedIds = [...cloneArray(tabs.summaryTabs).map((item) => item.id), ...cloneArray(tabs.iterationChangeTabs).map((item) => item.id), ...cloneArray(tabs.siteSelectionTabs).map((item) => item.id), ...cloneArray(tabs.followupTabs).map((item) => item.id)]
-      const targetIndex = Math.max(0, orderedIds.indexOf(targetId))
-      tabs.summaryTabs = cloneArray(tabs.summaryTabs).filter((item) => item.id !== targetId)
-      tabs.iterationChangeTabs = cloneArray(tabs.iterationChangeTabs).filter((item) => item.id !== targetId)
-      tabs.siteSelectionTabs = cloneArray(tabs.siteSelectionTabs).filter((item) => item.id !== targetId)
-      tabs.followupTabs = cloneArray(tabs.followupTabs).filter((item) => item.id !== targetId)
-      if (currentActiveId === targetId) {
-        const nextIds = [...cloneArray(tabs.summaryTabs).map((item) => item.id), ...cloneArray(tabs.iterationChangeTabs).map((item) => item.id), ...cloneArray(tabs.siteSelectionTabs).map((item) => item.id), ...cloneArray(tabs.followupTabs).map((item) => item.id)]
-        const fallbackIndex = Math.max(0, Math.min(targetIndex - 1, nextIds.length - 1))
-        tabs.activeTabId = nextIds[fallbackIndex] || ''
-        const activeFollowup = tabs.followupTabs.find((item) => item.id === tabs.activeTabId)
-        if (activeFollowup) this.applyAgentFollowupThreadToCurrentState(activeFollowup.thread)
-      }
-      this.agentTabs = tabs
-      this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
-      this.syncCurrentAgentSession()
-    },
-    closeAgentFollowupTab(tabId = '', event = null) {
-      this.closeAgentTopTab(tabId, event)
     },
     openAgentFollowupFromSummary(prompt = '', title = '追问解释') {
       const nextPrompt = asText(prompt)
@@ -3240,32 +3245,112 @@ function createAgentUiMethods() {
       const state = this.getAgentSiteSelectionState()
       return state.status === 'running'
     },
+    getAgentSiteSelectionScopeInfo() {
+      if (typeof this.normalizeAgentSiteSelectionScope === 'function') {
+        return this.normalizeAgentSiteSelectionScope()
+      }
+      const polygon = (typeof this.getIsochronePolygonPayload === 'function') ? this.getIsochronePolygonPayload() : []
+      const drawnPolygon = (typeof this.getDrawnScopePolygonPoints === 'function') ? this.getDrawnScopePolygonPoints() : []
+      return {
+        hasScope: (Array.isArray(polygon) && polygon.length > 0) || (Array.isArray(drawnPolygon) && drawnPolygon.length >= 4),
+        polygon: Array.isArray(polygon) && polygon.length ? polygon : drawnPolygon,
+        drawnPolygon,
+        isochroneFeature: null,
+      }
+    },
+    formatAgentSiteSelectionError(error = '') {
+      const message = asText(error)
+      const mapping = {
+        missing_scope_polygon: '当前还没有可用分析范围。请先生成等时圈，或在地图上手绘一个范围后再分析。',
+        missing_place_type: '请先输入目标业态，例如咖啡店、便利店或餐饮。',
+        unresolved_place_type: '暂不支持这个业态名称。请换成咖啡店、便利店、餐饮、超市等更明确的类型。',
+        site_selection_base_failed: '选址基础分析没有跑通，请确认范围、POI 数据源和年份后重试。',
+      }
+      return mapping[message] || message || '选址分析失败，请稍后重试。'
+    },
     getAgentSiteSelectionReadinessItems() {
-      const hasScope = !!(this.getIsochronePolygonRing && this.getIsochronePolygonRing())
-      const hasPoi = cloneArray(this.allPoisDetails).length > 0
-        || !!(this.poiSummary && Number(this.poiSummary.total || this.poiSummary.count || 0) > 0)
-        || !!(this.resultPoiSummary && Number(this.resultPoiSummary.total || this.resultPoiSummary.count || 0) > 0)
-      const hasH3 = Number(this.h3GridCount || 0) > 0
-        || cloneArray(this.h3AnalysisGridFeatures).length > 0
-        || !!(this.h3AnalysisSummary && Object.keys(this.h3AnalysisSummary).length)
-      const hasPopulation = !!(this.populationOverview && Object.keys(this.populationOverview).length)
-      const hasNightlight = !!(this.nightlightOverview && Object.keys(this.nightlightOverview).length)
-      const hasRoad = !!(this.roadSyntaxSummary && Object.keys(this.roadSyntaxSummary).length)
+      const scopeInfo = this.getAgentSiteSelectionScopeInfo()
+      const hasScope = !!(scopeInfo && scopeInfo.hasScope)
       return [
         { key: 'scope', label: '当前范围', ready: hasScope, detail: hasScope ? '已读取等时圈或手绘范围' : '请先生成等时圈或选择分析范围', required: true },
         { key: 'target', label: '目标业态', ready: !!this.inferAgentSiteSelectionTargetType(), detail: this.inferAgentSiteSelectionTargetType() || '请输入咖啡店、餐饮、便利店等目标', required: true },
-        { key: 'poi', label: 'POI', ready: hasPoi, detail: hasPoi ? '可用于供给和竞品结构' : '缺少 POI 时会由工具链尝试补齐', required: false },
-        { key: 'h3', label: 'H3 网格', ready: hasH3, detail: hasH3 ? '可用于候选格提取' : '缺少 H3 时会由工具链尝试补齐', required: false },
-        { key: 'population', label: '人口', ready: hasPopulation, detail: hasPopulation ? '可用于需求支撑' : '未就绪时降级为弱证据', required: false },
-        { key: 'nightlight', label: '夜光', ready: hasNightlight, detail: hasNightlight ? '可用于活力判断' : '未就绪时降级为弱证据', required: false },
-        { key: 'road', label: '路网', ready: hasRoad, detail: hasRoad ? '可用于可达性判断' : '未就绪时降级为弱证据', required: false },
       ]
     },
     getAgentSiteSelectionBlockingItems() {
       return this.getAgentSiteSelectionReadinessItems().filter((item) => item.required && !item.ready)
     },
+    getAgentSiteSelectionTaskKeys() {
+      return ['poi_fetch', 'poi_h3_grid', 'population', 'nightlight', 'road_syntax']
+    },
+    getAgentSiteSelectionTaskBoardTasks() {
+      const keys = new Set(this.getAgentSiteSelectionTaskKeys())
+      return this.getSummaryTaskBoardTasks().filter((task) => keys.has(asText(task && task.key)))
+    },
+    isAgentSiteSelectionDataReady() {
+      const tasks = this.getAgentSiteSelectionTaskBoardTasks()
+      if (!tasks.length) return false
+      return tasks.every((task) => {
+        const status = asText(task && task.status)
+        return this.isSummaryTaskTerminalStatus(status) || this.summaryTaskHasReusableResult(task.key)
+      })
+    },
+    isAgentSiteSelectionDataFillRunning() {
+      return this.getAgentSiteSelectionTaskBoardTasks().some((task) => asText(task && task.status) === 'running')
+    },
+    getAgentSiteSelectionDataGateTitle() {
+      if (this.isAgentSiteSelectionDataFillRunning()) return '正在补齐选址基础数据'
+      return '先补齐选址基础数据'
+    },
+    getAgentSiteSelectionDataGateDescription() {
+      return '完成 POI、H3、人口、夜光和路网抓取后，再进入正式选址分析。'
+    },
+    getAgentSiteSelectionDataGateProgressText() {
+      const tasks = this.getAgentSiteSelectionTaskBoardTasks()
+      const done = tasks.filter((task) => this.isSummaryTaskTerminalStatus(task.status) || this.summaryTaskHasReusableResult(task.key)).length
+      return `${done}/${tasks.length || this.getAgentSiteSelectionTaskKeys().length} 项已就绪`
+    },
+    canRunAgentSiteSelectionDataFill() {
+      return !this.isAgentSiteSelectionDataFillRunning() && !this.agentSummaryGenerating
+    },
+    async runAgentSiteSelectionDataFill() {
+      if (!this.canRunAgentSiteSelectionDataFill()) return
+      this.syncSummaryTaskBoardFromLocalResults()
+      const requestedKeys = this.getAgentSiteSelectionTaskKeys()
+      const keysToRun = this.filterSummaryTaskKeysForReuse(requestedKeys, { forcePoiFetch: false })
+      const reusedKeys = requestedKeys.filter((key) => !keysToRun.includes(key))
+      reusedKeys.forEach((key) => this.finalizeSummaryTaskAsReused(key))
+      if (!keysToRun.length) {
+        this.updateSummaryTaskBoard({
+          ...this.ensureSummaryTaskBoard(false),
+          runState: this.isAgentSiteSelectionDataReady() ? 'completed' : 'idle',
+          lastRunAt: new Date().toISOString(),
+        })
+        this.agentSummaryError = ''
+        return
+      }
+      this.updateSummaryTaskBoard({
+        ...this.ensureSummaryTaskBoard(false),
+        runState: 'running',
+        lastRunAt: new Date().toISOString(),
+      })
+      const settled = await Promise.allSettled(keysToRun.map((key) => this.runSummaryTask(key, { source: 'site-selection' })))
+      const hasFailed = settled.some((item) => item.status === 'rejected')
+      if (hasFailed) {
+        const first = settled.find((item) => item.status === 'rejected')
+        const reason = first && first.reason
+        this.agentSummaryError = reason && reason.message ? `补齐失败：${reason.message}` : '补齐失败，请查看任务日志'
+      } else {
+        this.agentSummaryError = ''
+      }
+      this.updateSummaryTaskBoard({
+        ...this.ensureSummaryTaskBoard(false),
+        runState: hasFailed ? 'failed' : 'completed',
+      })
+    },
     canRunAgentSiteSelection() {
-      return !this.isAgentSiteSelectionRunning() && this.getAgentSiteSelectionBlockingItems().length === 0
+      return !this.isAgentSiteSelectionRunning()
+        && this.getAgentSiteSelectionBlockingItems().length === 0
+        && this.isAgentSiteSelectionDataReady()
     },
     getAgentSiteSelectionSourceLabel() {
       const source = asText(this.resultDataSource || this.poiDataSource || 'local') || 'local'
@@ -3297,7 +3382,17 @@ function createAgentUiMethods() {
           ui: {
             target_type: targetType,
             status: 'idle',
-            error: '请先生成等时圈或选择分析范围',
+            error: this.formatAgentSiteSelectionError('missing_scope_polygon'),
+          },
+        })
+        return
+      }
+      if (!this.isAgentSiteSelectionDataReady()) {
+        this.commitAgentSiteSelectionPayload({
+          ui: {
+            target_type: targetType,
+            status: 'idle',
+            error: '请先补齐 POI、H3、人口、夜光和路网基础数据',
           },
         })
         return
@@ -3322,7 +3417,7 @@ function createAgentUiMethods() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            conversation_id: asText(this.activeAgentSessionId || this.agentConversationId),
+            conversation_id: this.getActiveAgentSessionId(),
             history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
             analysis_snapshot: this.buildAgentAnalysisSnapshot(),
             place_type: targetType,
@@ -3340,11 +3435,14 @@ function createAgentUiMethods() {
           data = {}
         }
         if (!response.ok || data.status === 'failed') {
-          throw new Error(asText(data.error || data.detail) || '选址分析失败')
+          throw new Error(this.formatAgentSiteSelectionError(data.error || data.detail))
         }
         const pack = data.site_selection_pack && typeof data.site_selection_pack === 'object'
           ? data.site_selection_pack
           : {}
+        const firstCandidate = cloneArray(pack.candidate_sites)[0] || {}
+        const selectedH3Id = asText(firstCandidate.h3_id || firstCandidate.h3Id)
+        const hasPackContent = !!Object.keys(pack).length
         this.switchAgentTopTab(tabId)
         this.commitAgentSiteSelectionPayload({
           panelPayloads: {
@@ -3356,8 +3454,9 @@ function createAgentUiMethods() {
             target_type: targetType,
             strategy,
             scenario,
-            status: Object.keys(pack).length ? 'ready' : 'empty',
-            error: Object.keys(pack).length ? '' : '当前证据不足，仅可做区域判断',
+            selected_h3_id: selectedH3Id,
+            status: hasPackContent ? 'ready' : 'empty',
+            error: '',
             warnings: cloneArray(data.warnings).map((item) => asText(item)).filter(Boolean),
           },
         })
@@ -3369,7 +3468,7 @@ function createAgentUiMethods() {
             strategy,
             scenario,
             status: 'failed',
-            error: error && error.message ? error.message : '选址分析失败',
+            error: this.formatAgentSiteSelectionError(error && error.message ? error.message : '选址分析失败'),
           },
         })
       }
@@ -7216,7 +7315,7 @@ function createAgentUiMethods() {
     },
     shouldShowAgentComposer() {
       const activeTab = this.getAgentActiveTopTab()
-      return asText(activeTab.kind) === 'followup'
+      return ['summary', 'followup'].includes(asText(activeTab.kind))
     },
     buildAgentTabsUiState() {
       this.captureAgentActiveSummaryTabState()
@@ -7316,7 +7415,7 @@ function createAgentUiMethods() {
           summaryTabs.unshift({
             id: 'summary-current',
             kind: 'summary',
-            title: this.getAgentSummaryWindowTitle({ summary_pack: legacyPack }, '区域总结'),
+            title: this.getAgentSummaryViewTitle({ summary_pack: legacyPack }, '区域总结'),
             source: 'current',
             sessionId: '',
             readonly: false,
@@ -7330,7 +7429,7 @@ function createAgentUiMethods() {
       const followupTabs = cloneArray(uiState.followup_tabs).map((item) => ({
         id: asText(item && item.id),
         kind: 'followup',
-        title: this.getAgentFollowupWindowTitle(item, item && item.title),
+        title: this.getAgentFollowupViewTitle(item, item && item.title),
         linkedSummaryId: asText(item && item.linked_summary_id) || 'summary',
         source: asText(item && item.source) || 'draft',
         sessionId: asText((item && (item.session_id || item.sessionId)) || ''),
@@ -7401,7 +7500,7 @@ function createAgentUiMethods() {
     queueAgentPrompt(prompt = '') {
       const text = String(prompt || '').trim()
       this.openAgentPanel()
-      this.agentWorkspaceView = 'chat'
+      this.agentWorkspaceView = 'report'
       this.ensureAgentFollowupTabForPrompt(text)
       this.agentInput = text
       this.syncCurrentAgentSession()
@@ -7706,8 +7805,8 @@ function createAgentUiMethods() {
         })
       }
     },
-    backToAgentChat() {
-      this.agentWorkspaceView = 'chat'
+    backToAgentReport() {
+      this.agentWorkspaceView = 'report'
       this.closeAgentToolDetail()
     },
     openAgentToolDetail(tool = null, event = null) {
@@ -8047,7 +8146,7 @@ function createAgentUiMethods() {
     setAgentTaskConfirmation(nextConfirmation = null, sessionId = '') {
       const normalized = cloneAnalysisTaskConfirmation(nextConfirmation)
       this.agentPendingTaskConfirmation = normalized
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       if (!targetSessionId) return normalized
       this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
         ...session,
@@ -8386,13 +8485,12 @@ function createAgentUiMethods() {
       this.syncCurrentAgentSession()
       const session = this.findAgentSession(sessionId)
       if (!session) return
-      if (!window.confirm('确定要删除这条对话吗？')) return
+      if (!window.confirm('确定要删除这条分析记录吗？')) return
 
       const previousSessions = this.agentSessions
         .map((item) => cloneAgentSessionRecord(item))
         .filter((item) => !!item)
       const previousActiveSessionId = asText(this.activeAgentSessionId)
-      const previousConversationId = asText(this.agentConversationId)
       const previousAgentSessionDetailLoadingId = asText(this.agentSessionDetailLoadingId)
       const previousAgentSessionDetailRequestToken = Number(this.agentSessionDetailRequestToken || 0)
       const previousAgentSessionHydrating = !!this.agentSessionHydrating
@@ -8417,7 +8515,6 @@ function createAgentUiMethods() {
           }
         } catch (err) {
           this.updateAgentSessions(previousSessions, { loaded: this.agentSessionsLoaded })
-          this.agentConversationId = previousConversationId
           this.agentSessionDetailLoadingId = previousAgentSessionDetailLoadingId
           this.agentSessionDetailRequestToken = previousAgentSessionDetailRequestToken
           this.agentSessionHydrating = previousAgentSessionHydrating
@@ -8429,7 +8526,7 @@ function createAgentUiMethods() {
           } else {
             this.activeAgentSessionId = previousActiveSessionId
           }
-          window.alert(`删除对话失败: ${err && err.message ? err.message : String(err)}`)
+          window.alert(`删除分析记录失败: ${err && err.message ? err.message : String(err)}`)
           return
         }
       }

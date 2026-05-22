@@ -10,7 +10,7 @@
                                 <h2 class="agent-tools-title">{{ agentToolsViewMode === 'input_packages' ? '输入包' : '工具' }}</h2>
                                 <p class="agent-tools-subtitle">{{ agentToolsViewMode === 'input_packages' ? '查看当前总结、文旅分析和 Agent 调用会携带的参数口径与证据包。' : '这里展示当前后端 Agent tool registry 中可用的只读元数据，不在工具库内直接执行工具。' }}</p>
                             </div>
-                            <button type="button" class="agent-tools-back-btn" @click="backToAgentChat">返回聊天</button>
+                            <button type="button" class="agent-tools-back-btn" @click="backToAgentReport">返回区域报告</button>
                         </div>
                         <div class="agent-tools-mode-switch">
                             <button type="button" :class="{ active: agentToolsViewMode !== 'input_packages' }" @click="setAgentToolsViewMode('tools')">工具库</button>
@@ -296,66 +296,44 @@
                         :class="{
                             'is-empty': !isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating,
                             'has-thread': agentHasConversationContent() || agentLoading || agentSessionHydrating
-                        }"
-                        @click="closeAgentCreateTabMenu()">
-                        <div class="agent-top-tabs" @click.stop>
+                        }">
+                        <div class="agent-report-nav" @click.stop>
                             <button
-                                v-for="tab in getAgentTopTabs()"
-                                :key="`agent-top-tab-${tab.id}`"
+                                v-if="isAgentReportDetailView()"
                                 type="button"
-                                class="agent-top-tab"
-                                :class="{
-                                    'is-active': agentTabs.activeTabId === tab.id,
-                                    'agent-top-tab--summary': tab.kind === 'summary',
-                                    'agent-top-tab--iteration-change': tab.kind === 'iteration_change',
-                                    'agent-top-tab--site-selection': tab.kind === 'site_selection',
-                                    'agent-top-tab--followup': tab.kind === 'followup'
-                                }"
-                                @click="switchAgentTopTab(tab.id)">
-                                <span>{{ tab.title }}</span>
-                                <span
-                                    v-if="tab.closable"
-                                    class="agent-top-tab-close"
-                                    title="关闭窗口"
-                                    @click.stop="closeAgentTopTab(tab.id, $event)">
-                                    ×
-                                </span>
+                                class="agent-report-back"
+                                @click="returnToAgentReportHome()">
+                                ← 返回区域报告
                             </button>
-                            <div class="agent-top-tab-add-wrap">
-                                <button
-                                    type="button"
-                                    class="agent-top-tab-add"
-                                    title="添加窗口"
-                                    @click="toggleAgentCreateTabMenu($event)">
-                                    +
-                                </button>
-                                <div v-if="agentCreateTabMenuOpen" class="agent-top-tab-add-menu">
+                            <div class="agent-report-nav-main">
+                                <div class="agent-report-kicker">Agent 工作台</div>
+                                <div class="agent-report-title">{{ getAgentWorkspaceNavTitle() }}</div>
+                                <div class="agent-report-subtitle">{{ getAgentWorkspaceNavSubtitle() }}</div>
+                            </div>
+                            <div class="agent-report-nav-actions" aria-label="区域报告操作">
+                                <div class="agent-report-view-switch" role="group" aria-label="报告视图">
                                     <button
                                         type="button"
-                                        class="agent-top-tab-add-menu-item"
-                                        @click="createAgentSummaryTab({ title: '区域总结' })">
-                                        新建区域总结
+                                        class="agent-report-switch-btn"
+                                        :class="{ active: isAgentSummaryTabActive() }"
+                                        @click="returnToAgentReportHome()">
+                                        报告
                                     </button>
                                     <button
                                         type="button"
-                                        class="agent-top-tab-add-menu-item"
-                                        @click="createAgentIterationChangeTab()">
-                                        新建多年迭代变化
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="agent-top-tab-add-menu-item"
-                                        @click="createAgentSiteSelectionTab({ title: '区域内选址' })">
-                                        新建区域内选址
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="agent-top-tab-add-menu-item"
-                                        :disabled="!canCreateAgentFollowupTab()"
-                                        @click="createAgentFollowupTab({ title: '追问解释' })">
-                                        新建追问解释
+                                        class="agent-report-switch-btn"
+                                        :class="{ active: isAgentIterationChangeTabActive() }"
+                                        @click="openAgentIterationChangeFromReport()">
+                                        变化
                                     </button>
                                 </div>
+                                <button
+                                    type="button"
+                                    class="agent-report-primary-action"
+                                    :class="{ active: isAgentSiteSelectionTabActive() }"
+                                    @click="openAgentSiteSelectionFromReport()">
+                                    区域内选址
+                                </button>
                             </div>
                         </div>
 
@@ -484,6 +462,26 @@
                                     <div v-if="((getAgentSummaryPack().headline_judgment || {}).supporting_clause)" class="agent-summary-line">
                                         {{ (getAgentSummaryPack().headline_judgment || {}).supporting_clause }}
                                     </div>
+                                    <div class="agent-summary-actions">
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentFollowupFromSummary(`请解释这条核心判断：${((getAgentSummaryPack().headline_judgment || {}).summary) || ''}`)">
+                                            为什么？
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click.stop="openBasisDrawer(buildAgentSummaryBasisPayload({ sectionKey: 'headline', title: '核心判断', reasoning: ((getAgentSummaryPack().headline_judgment || {}).summary) || '-' }), $event)">
+                                            看证据
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentSiteSelectionFromReport()">
+                                            找适合开店位置
+                                        </button>
+                                    </div>
                                 </section>
                                 <section class="agent-summary-card">
                                     <div class="agent-summary-card-title">商业类型标签（ICSC）</div>
@@ -559,6 +557,35 @@
                                         </button>
                                     </div>
                                 </section>
+                                <section class="agent-summary-card agent-summary-card-wide">
+                                    <div class="agent-summary-card-title">继续分析</div>
+                                    <div class="agent-summary-actions">
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentSiteSelectionFromReport()">
+                                            区域内选址
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentIterationChangeFromReport()">
+                                            看多年变化
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentFollowupFromSummary('请解释这份区域总结背后的证据链与判断依据')">
+                                            解释报告依据
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openBasisDrawer(buildAgentSummaryBasisPayload({ sectionKey: 'headline', title: '区域报告证据链', reasoning: ((getAgentSummaryPack().headline_judgment || {}).summary) || '-' }), $event)">
+                                            查看证据链
+                                        </button>
+                                    </div>
+                                </section>
                                 <section v-if="agentSummaryError" class="agent-summary-card">
                                     <div class="agent-summary-card-title">生成状态</div>
                                     <div class="agent-summary-kv">
@@ -624,7 +651,7 @@
 
                                             <div v-if="task.key === 'poi_raster_grid'" class="agent-summary-task-params">
                                                 <label class="agent-summary-task-field">
-                                                    <span>POI骞翠唤</span>
+                                                    <span>POI年份</span>
                                                     <select
                                                         v-model="poiYearSource"
                                                         :disabled="task.status === 'running' || agentSummaryGenerating"
@@ -723,6 +750,13 @@
                         </div>
 
                         <div v-else-if="isAgentIterationChangeTabActive()" class="agent-summary-tab-view">
+                            <div class="agent-detail-header">
+                                <button type="button" class="agent-report-back" @click="returnToAgentReportHome()">← 返回区域报告</button>
+                                <div>
+                                    <div class="agent-detail-title">多年变化</div>
+                                    <div class="agent-detail-subtitle">从区域报告进入，查看 POI、人口和夜光的时间变化。</div>
+                                </div>
+                            </div>
                             <div class="agent-iteration-shell">
                                 <div class="agent-iteration-head">
                                     <div>
@@ -1479,7 +1513,157 @@
                         </div>
 
                         <div v-else-if="isAgentSiteSelectionTabActive()" class="agent-summary-tab-view">
+                            <div class="agent-detail-header">
+                                <button type="button" class="agent-report-back" @click="returnToAgentReportHome()">← 返回区域报告</button>
+                                <div>
+                                    <div class="agent-detail-title">区域内选址</div>
+                                    <div class="agent-detail-subtitle">基于 POI、H3、人口、夜光和路网证据判断候选位置。</div>
+                                </div>
+                            </div>
                             <div class="agent-site-selection-workbench">
+                                <template v-if="!isAgentSiteSelectionDataReady()">
+                                    <div class="agent-summary-gate">
+                                        <div class="agent-summary-gate-head">
+                                            <div class="agent-summary-gate-icon">!</div>
+                                            <div>
+                                                <div class="agent-summary-gate-title">{{ getAgentSiteSelectionDataGateTitle() }}</div>
+                                                <div class="agent-summary-gate-desc">{{ getAgentSiteSelectionDataGateDescription() }}</div>
+                                            </div>
+                                        </div>
+                                        <div class="agent-summary-gate-meta">
+                                            <div
+                                                class="agent-summary-gate-progress"
+                                                :class="{ 'is-idle': !isAgentSiteSelectionDataFillRunning() }">
+                                                {{ getAgentSiteSelectionDataGateProgressText() }}
+                                            </div>
+                                        </div>
+
+                                        <div class="agent-summary-task-board">
+                                            <div class="agent-summary-task-grid">
+                                                <section
+                                                    v-for="task in getAgentSiteSelectionTaskBoardTasks()"
+                                                    :key="`site-selection-task-${task.key}`"
+                                                    class="agent-summary-task-card"
+                                                    :class="{
+                                                        'is-running': task.status === 'running',
+                                                        'is-reused': task.status === 'reused',
+                                                        'is-completed': task.status === 'completed',
+                                                        'is-failed': task.status === 'failed'
+                                                    }">
+                                                    <div class="agent-summary-task-head">
+                                                        <div class="agent-summary-task-title">{{ task.label }}</div>
+                                                        <div class="agent-summary-task-head-actions">
+                                                            <button
+                                                                v-if="canRerunSummaryTask(task)"
+                                                                type="button"
+                                                                class="agent-summary-task-rerun-btn"
+                                                                @click="rerunSummaryTask(task.key)">
+                                                                重跑
+                                                            </button>
+                                                            <div class="agent-summary-task-status">{{ getSummaryTaskStatusLabel(task) }}</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div v-if="task.key === 'poi_fetch'" class="agent-summary-task-params">
+                                                        <label class="agent-summary-task-field">
+                                                            <span>分析年份</span>
+                                                            <select
+                                                                v-model="poiYearSource"
+                                                                :disabled="task.status === 'running' || agentSummaryGenerating"
+                                                                @change="onSummaryTaskPoiAnalysisYearChange">
+                                                                <option v-for="item in getSummaryTaskPoiYearOptions()" :key="`site-selection-poi-fetch-year-${item.value}`" :value="item.value">
+                                                                    {{ item.label }}
+                                                                </option>
+                                                            </select>
+                                                        </label>
+                                                    </div>
+
+                                                    <div v-if="task.key === 'poi_h3_grid'" class="agent-summary-task-params">
+                                                        <label class="agent-summary-task-field">
+                                                            <span>POI年份</span>
+                                                            <select
+                                                                v-model="poiYearSource"
+                                                                :disabled="task.status === 'running' || agentSummaryGenerating"
+                                                                @change="onSummaryTaskPoiGridYearChange">
+                                                                <option v-for="item in getSummaryTaskPoiYearOptions()" :key="`site-selection-grid-poi-year-${item.value}`" :value="item.value">
+                                                                    {{ item.label }}
+                                                                </option>
+                                                            </select>
+                                                        </label>
+                                                        <label class="agent-summary-task-field">
+                                                            <span>网格级别</span>
+                                                            <select
+                                                                v-model="h3GridResolution"
+                                                                :disabled="task.status === 'running' || agentSummaryGenerating"
+                                                                @change="onSummaryTaskParameterChange('poi_h3_grid')">
+                                                                <option v-for="option in [8, 9, 10, 11, 12]" :key="`site-selection-grid-resolution-${option}`" :value="option">
+                                                                    {{ option }}
+                                                                </option>
+                                                            </select>
+                                                        </label>
+                                                    </div>
+
+                                                    <div v-if="task.key === 'population'" class="agent-summary-task-params">
+                                                        <label class="agent-summary-task-field">
+                                                            <span>人口年份</span>
+                                                            <select
+                                                                v-model="populationSelectedYear"
+                                                                :disabled="task.status === 'running' || agentSummaryGenerating || isLoadingPopulationMeta"
+                                                                @change="onSummaryTaskParameterChange('population')">
+                                                                <option v-for="option in getPopulationYearOptions()" :key="`site-selection-population-year-${option.value}`" :value="option.value">
+                                                                    {{ option.label }}
+                                                                </option>
+                                                            </select>
+                                                        </label>
+                                                    </div>
+
+                                                    <div v-if="task.key === 'nightlight'" class="agent-summary-task-params">
+                                                        <label class="agent-summary-task-field">
+                                                            <span>夜光年份</span>
+                                                            <select
+                                                                v-model.number="nightlightSelectedYear"
+                                                                :disabled="task.status === 'running' || agentSummaryGenerating || isLoadingNightlightMeta"
+                                                                @change="onSummaryTaskParameterChange('nightlight')">
+                                                                <option v-for="option in getNightlightYearOptions()" :key="`site-selection-nightlight-year-${option.year}`" :value="option.year">
+                                                                    {{ option.label }}
+                                                                </option>
+                                                            </select>
+                                                        </label>
+                                                    </div>
+
+                                                    <div class="agent-summary-task-logs">
+                                                        <div v-if="!(task.logs || []).length" class="agent-summary-task-log-empty">{{ getSummaryTaskEmptyLogText(task) }}</div>
+                                                        <div
+                                                            v-for="(log, logIndex) in (task.logs || [])"
+                                                            :key="`site-selection-task-log-${task.key}-${logIndex}`"
+                                                            class="agent-summary-task-log-item">
+                                                            <span>{{ ((log.at || '').slice(11, 19)) || '--:--:--' }}</span>
+                                                            <span>{{ log.message }}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="agent-summary-task-foot">
+                                                        <span class="agent-summary-task-duration">耗时 {{ Math.max(0, Math.round((Number(task.durationMs || 0) || 0) / 1000)) }}s</span>
+                                                        <span v-if="task.error" class="agent-summary-task-error">{{ task.error }}</span>
+                                                    </div>
+                                                </section>
+                                            </div>
+                                        </div>
+
+                                        <div v-if="agentSummaryError" class="agent-summary-gate-error">{{ agentSummaryError }}</div>
+
+                                        <div class="agent-summary-gate-actions">
+                                            <button
+                                                type="button"
+                                                class="agent-summary-gate-btn agent-summary-gate-cta-btn"
+                                                :disabled="!canRunAgentSiteSelectionDataFill()"
+                                                @click="runAgentSiteSelectionDataFill()">
+                                                一键补齐选址数据
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template v-else>
                                 <div class="agent-site-selection-toolbar">
                                     <div class="agent-summary-gate-head">
                                     <div class="agent-summary-gate-icon">⌖</div>
@@ -1530,8 +1714,10 @@
                                         <button
                                             type="button"
                                             class="agent-summary-gate-btn agent-site-selection-run-btn"
+                                            :class="{ 'is-running': isAgentSiteSelectionRunning() }"
                                             :disabled="!canRunAgentSiteSelection()"
                                             @click="generateAgentSiteSelection()">
+                                            <span v-if="isAgentSiteSelectionRunning()" class="agent-site-selection-btn-loader"></span>
                                             {{ isAgentSiteSelectionRunning() ? '分析中' : '分析适合开在哪里' }}
                                         </button>
                                     </div>
@@ -1539,6 +1725,9 @@
                                 <div class="agent-site-selection-status">
                                     <span :class="{ 'is-ready': getAgentSiteSelectionScopeStatus().ready, 'is-blocked': !getAgentSiteSelectionScopeStatus().ready }">
                                         {{ getAgentSiteSelectionScopeStatus().detail }}
+                                    </span>
+                                    <span :class="{ 'is-ready': !!inferAgentSiteSelectionTargetType(), 'is-blocked': !inferAgentSiteSelectionTargetType() }">
+                                        {{ inferAgentSiteSelectionTargetType() ? `目标业态：${inferAgentSiteSelectionTargetType()}` : '请填写目标业态' }}
                                     </span>
                                     <span v-if="isAgentSiteSelectionRunning()">正在调用选址工具链...</span>
                                     <span v-else-if="!inferAgentSiteSelectionTargetType()">选择目标业态开始分析</span>
@@ -1659,9 +1848,10 @@
                                     </section>
                                 </div>
                                 <div v-else class="agent-site-selection-empty">
-                                    <strong>{{ inferAgentSiteSelectionTargetType() ? '点击开始分析生成候选网格' : '选择目标业态开始分析' }}</strong>
-                                    <span>{{ getAgentSiteSelectionScopeStatus().ready ? '当前范围已就绪，结果会在本面板内生成。' : '没有范围时不会生成选址结论。' }}</span>
+                                    <strong>{{ inferAgentSiteSelectionTargetType() ? '数据已就绪，开始生成候选网格' : '数据已就绪，输入目标业态后开始选址' }}</strong>
+                                    <span>{{ inferAgentSiteSelectionTargetType() ? '点击“分析适合开在哪里”，结果会在本面板内生成。' : '请输入咖啡店、餐饮、便利店等目标业态。' }}</span>
                                 </div>
+                                </template>
                             </div>
                         </div>
 
@@ -1672,11 +1862,11 @@
 
                         <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell">
                             <div
-                                ref="agentChatBody"
-                                class="agent-chat-body agent-chat-body-main"
-                                @scroll.passive="onAgentChatBodyScroll"
-                                @wheel.passive="onAgentChatBodyWheel"
-                                @touchmove.passive="onAgentChatBodyTouchMove">
+                                ref="agentReportThreadBody"
+                                class="agent-report-thread-body agent-report-thread-body-main"
+                                @scroll.passive="onAgentReportThreadScroll"
+                                @wheel.passive="onAgentReportThreadWheel"
+                                @touchmove.passive="onAgentReportThreadTouchMove">
                                 <div v-if="agentSessionHydrating" class="agent-session-skeleton" aria-hidden="true">
                                     <div class="agent-session-skeleton-row is-user">
                                         <div class="agent-session-skeleton-bubble is-user"></div>
@@ -1980,7 +2170,7 @@
                         </div>
 
                         <div v-if="shouldShowAgentComposer()" class="agent-app-composer-wrap">
-                            <div class="agent-chat-shortcuts">
+                            <div class="agent-report-prompts">
                                 <button type="button" class="agent-shortcut-chip" @click="queueAgentPrompt('总结这个区域的商业特征')">总结区域</button>
                                 <button type="button" class="agent-shortcut-chip" @click="queueAgentPrompt('哪里适合补充餐饮')">补充餐饮</button>
                                 <button type="button" class="agent-shortcut-chip" @click="queueAgentPrompt('为什么这里路网较差')">路网原因</button>
@@ -1988,11 +2178,11 @@
                             </div>
 
                             <div class="agent-composer-card">
-                                <button type="button" class="agent-composer-plus" @click="startNewAgentChat" title="新对话">+</button>
+                                <button type="button" class="agent-composer-plus" @click="startNewAgentReportSession" title="新报告">+</button>
                                 <textarea
                                     v-model="agentInput"
                                     class="agent-composer-input"
-                                    placeholder="有问题，尽管问"
+                                    placeholder="继续追问这份报告..."
                                     @keydown.enter.exact.prevent="submitAgentTurn()"
                                 ></textarea>
                             <div class="agent-composer-actions">

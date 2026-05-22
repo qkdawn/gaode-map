@@ -25,8 +25,7 @@ export {
 
 function createAnalysisAgentInitialState() {
   return {
-    agentWorkspaceView: 'chat',
-    agentConversationId: '',
+    agentWorkspaceView: 'report',
     agentInput: '',
     agentLoading: false,
     agentStatus: 'idle',
@@ -114,7 +113,6 @@ function createAnalysisAgentInitialState() {
       followupLimit: 6,
       nextFollowupNumber: 1,
     },
-    agentCreateTabMenuOpen: false,
     agentIterationActiveKind: 'poi',
     agentIterationSecondaryView: {
       poi: 'ai',

@@ -11,7 +11,7 @@ export const useAnalysisPoiStore = defineStore('analysis_poi', {
       { id: 'gwr', label: 'GWR', title: '夜光地理加权回归' },
       { id: 'timeseries', label: '时序', title: '人口与夜光时序变化' },
       { id: 'syntax', label: '路网', title: '路网分析' },
-      { id: 'agent', label: 'AI', title: 'AI Agent 对话分析' },
+      { id: 'agent', label: 'AI', title: 'AI Agent 区域报告' },
     ],
     activeStep3Panel: 'poi',
     lastNonAgentStep3Panel: 'poi',

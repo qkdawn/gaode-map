@@ -31,8 +31,8 @@ function createAgentSessionStoreMethods() {
   return {
     createAgentSession(seedTitle = '') {
       return createAgentSessionRecord({
-        title: String(seedTitle || '').trim() || '新对话',
-        preview: '开始一段新的分析对话',
+        title: String(seedTitle || '').trim() || '新报告',
+        preview: '开始一份新的区域分析',
         historyId: this.getCurrentAgentHistoryId(),
         status: 'idle',
         panelKind: 'followup',
@@ -150,13 +150,16 @@ function createAgentSessionStoreMethods() {
       if (!nextId) return null
       return this.agentSessions.find((item) => asText(item && item.id) === nextId) || null
     },
+    getActiveAgentSessionId(fallbackSessionId = '') {
+      return asText(fallbackSessionId || this.activeAgentSessionId)
+    },
     readSessionState(sessionId = '') {
-      const nextId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const nextId = this.getActiveAgentSessionId(sessionId)
       const session = nextId ? this.findAgentSession(nextId) : null
       return session ? cloneAgentSessionRecord(session) : null
     },
     patchSessionState(sessionId = '', patch = null, options = {}) {
-      const nextId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const nextId = this.getActiveAgentSessionId(sessionId)
       if (!nextId) return null
       const updater = typeof patch === 'function'
         ? patch
@@ -216,7 +219,6 @@ function createAgentSessionStoreMethods() {
         this.stopAllSummaryTaskLogTracking()
       }
       const previousActiveSessionId = asText(this.activeAgentSessionId)
-      this.agentConversationId = String(session.id || '')
       this.activeAgentSessionId = String(session.id || '')
       this.agentInput = String(session.input || '')
       this.agentSessionHydrating = !!options.hydrating
@@ -342,7 +344,7 @@ function createAgentSessionStoreMethods() {
       return session
     },
     syncCurrentAgentSession(options = {}) {
-      const activeId = asText(this.activeAgentSessionId || this.agentConversationId)
+      const activeId = this.getActiveAgentSessionId()
       if (!activeId) return null
       if (typeof this.captureAgentActiveFollowupTabState === 'function') {
         this.captureAgentActiveFollowupTabState()
@@ -374,7 +376,7 @@ function createAgentSessionStoreMethods() {
         id: activeId,
         title: shouldPreserveTitle
           ? existing.title
-          : (messages.length ? fallbackTitle : clampText(existing && existing.title, 60) || '新对话'),
+          : (messages.length ? fallbackTitle : clampText(existing && existing.title, 60) || '新报告'),
         preview: deriveAgentSessionPreview({
           error: this.agentError,
           riskPrompt: this.agentRiskPrompt,
@@ -512,7 +514,7 @@ function createAgentSessionStoreMethods() {
       return this.mergeAgentSessionDetail(detail)
     },
     ensureAgentPanelReady() {
-      const activeId = asText(this.activeAgentSessionId || this.agentConversationId)
+      const activeId = this.getActiveAgentSessionId()
       if (activeId) {
         const existing = this.findAgentSession(activeId)
         if (existing) {
@@ -535,8 +537,8 @@ function createAgentSessionStoreMethods() {
         })
       }
     },
-    startNewAgentChat() {
-      this.agentWorkspaceView = 'chat'
+    startNewAgentReportSession() {
+      this.agentWorkspaceView = 'report'
       this.syncCurrentAgentSession()
       const session = this.createAgentSession()
       this.updateAgentSessions([session, ...this.agentSessions], { loaded: this.agentSessionsLoaded })
@@ -545,7 +547,7 @@ function createAgentSessionStoreMethods() {
     async activateAgentSession(sessionId = '') {
       const nextId = asText(sessionId)
       if (!nextId) return
-      this.agentWorkspaceView = 'chat'
+      this.agentWorkspaceView = 'report'
       if (nextId === asText(this.activeAgentSessionId)) {
         const current = this.findAgentSession(nextId)
         if (current && current.snapshotLoaded) return
@@ -580,7 +582,7 @@ function createAgentSessionStoreMethods() {
           }
           this.applyAgentSessionSnapshot(createAgentSessionRecord({
             ...session,
-            error: `加载对话失败: ${err && err.message ? err.message : String(err)}`,
+            error: `加载分析记录失败: ${err && err.message ? err.message : String(err)}`,
             snapshotLoaded: false,
           }))
         } finally {

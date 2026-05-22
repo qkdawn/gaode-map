@@ -45,8 +45,64 @@ import { buildAnalysisTaskParamBundle, buildAnalysisTaskParamBundles } from './a
 
 function createAgentRuntimeMethods() {
   return {
+    normalizeAgentSiteSelectionScope() {
+      const normalizeRing = (raw) => {
+        if (!Array.isArray(raw) || !raw.length) return []
+        if (typeof this._closePolygonRing === 'function' && typeof this.normalizePath === 'function') {
+          const ring = this._closePolygonRing(this.normalizePath(raw, 3, 'agent.site_selection.scope'))
+          return Array.isArray(ring) && ring.length >= 4 ? ring : []
+        }
+        const points = raw
+          .filter((pt) => Array.isArray(pt) && pt.length >= 2)
+          .map((pt) => [Number(pt[0]), Number(pt[1])])
+          .filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1]))
+        if (points.length < 3) return []
+        const first = points[0]
+        const last = points[points.length - 1]
+        if (Math.abs(first[0] - last[0]) > 1e-8 || Math.abs(first[1] - last[1]) > 1e-8) {
+          points.push([first[0], first[1]])
+        }
+        return points.length >= 4 ? points : []
+      }
+      const normalizePayload = (raw) => {
+        if (!Array.isArray(raw) || !raw.length) return []
+        const direct = normalizeRing(raw)
+        if (direct.length) return direct
+        const rings = []
+        raw.forEach((item) => {
+          const ring = normalizeRing(item)
+          if (ring.length) rings.push(ring)
+          else if (Array.isArray(item) && Array.isArray(item[0])) {
+            const outer = normalizeRing(item[0])
+            if (outer.length) rings.push(outer)
+          }
+        })
+        return rings.length === 1 ? rings[0] : rings
+      }
+      const polygon = typeof this.getIsochronePolygonPayload === 'function'
+        ? normalizePayload(this.getIsochronePolygonPayload())
+        : []
+      const drawnPolygon = typeof this.getDrawnScopePolygonPoints === 'function'
+        ? normalizeRing(this.getDrawnScopePolygonPoints())
+        : []
+      const isochroneFeature = typeof this._normalizeIsochroneFeatureForExport === 'function'
+        ? this._normalizeIsochroneFeatureForExport()
+        : null
+      let featurePolygon = []
+      const geometry = isochroneFeature && isochroneFeature.geometry ? isochroneFeature.geometry : null
+      if (geometry && Array.isArray(geometry.coordinates)) {
+        featurePolygon = normalizePayload(geometry.type === 'Polygon' ? geometry.coordinates[0] : geometry.coordinates)
+      }
+      const activePolygon = polygon.length ? polygon : (drawnPolygon.length ? drawnPolygon : featurePolygon)
+      return {
+        hasScope: Array.isArray(activePolygon) && activePolygon.length > 0,
+        polygon: activePolygon,
+        drawnPolygon,
+        isochroneFeature,
+      }
+    },
     getAgentRunState(sessionId = '') {
-      const nextId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const nextId = this.getActiveAgentSessionId(sessionId)
       if (!nextId) return null
       const registry = cloneRecordMap(this.agentRunRegistry)
       const current = registry[nextId]
@@ -111,7 +167,7 @@ function createAgentRuntimeMethods() {
       return count > 1 ? String(count) : '运行中'
     },
     syncActiveAgentRuntimeView(sessionId = '') {
-      const nextId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const nextId = this.getActiveAgentSessionId(sessionId)
       if (!nextId) {
         this.agentLoading = false
         this.agentStreamState = 'idle'
@@ -205,7 +261,7 @@ function createAgentRuntimeMethods() {
       }
     },
     resetAgentStreamingState(sessionId = '') {
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       if (!targetSessionId) {
         this.agentTurnAbortController = null
         this.agentStreamingMessageId = ''
@@ -232,7 +288,7 @@ function createAgentRuntimeMethods() {
       })
     },
     startAgentThinkingTimer(sessionId = '') {
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       if (!targetSessionId) {
         this.agentStreamStartedAt = Date.now()
         this.agentStreamElapsedTick = this.agentStreamStartedAt
@@ -272,7 +328,7 @@ function createAgentRuntimeMethods() {
       this.setAgentRunState(targetSessionId, nextState)
     },
     stopAgentThinkingTimer(sessionId = '') {
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       if (!targetSessionId) {
         if (this.agentStreamElapsedTimer && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
           window.clearInterval(this.agentStreamElapsedTimer)
@@ -288,19 +344,19 @@ function createAgentRuntimeMethods() {
         this.setAgentRunState(targetSessionId, { elapsedTimer: null })
       }
     },
-    getAgentChatBodyElement() {
-      return (this.$refs && this.$refs.agentChatBody) || null
+    getAgentReportThreadElement() {
+      return (this.$refs && this.$refs.agentReportThreadBody) || null
     },
-    getAgentChatDistanceToBottom() {
-      const body = this.getAgentChatBodyElement()
+    getAgentReportThreadDistanceToBottom() {
+      const body = this.getAgentReportThreadElement()
       if (!body) return 0
       return Math.max(0, body.scrollHeight - body.scrollTop - body.clientHeight)
     },
-    isAgentChatNearBottom(thresholdPx = 24) {
-      return this.getAgentChatDistanceToBottom() <= thresholdPx
+    isAgentReportThreadNearBottom(thresholdPx = 24) {
+      return this.getAgentReportThreadDistanceToBottom() <= thresholdPx
     },
     setAgentAutoScrollLock(locked = false, options = {}) {
-      const targetSessionId = asText((options && options.sessionId) || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(options && options.sessionId)
       if (!targetSessionId) return
       const patch = {
         autoScrollLocked: !!locked,
@@ -314,24 +370,24 @@ function createAgentRuntimeMethods() {
       this.setAgentRunState(targetSessionId, patch)
     },
     onAgentInnerScrollIntent() {
-      const targetSessionId = asText(this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId()
       if (!targetSessionId || !this.isAgentSessionRunning(targetSessionId)) return
       this.setAgentAutoScrollLock(true, { sessionId: targetSessionId })
     },
-    onAgentChatBodyWheel() {
-      const targetSessionId = asText(this.activeAgentSessionId || this.agentConversationId)
+    onAgentReportThreadWheel() {
+      const targetSessionId = this.getActiveAgentSessionId()
       if (!targetSessionId || !this.isAgentSessionRunning(targetSessionId)) return
-      const nearBottom = this.isAgentChatNearBottom()
+      const nearBottom = this.isAgentReportThreadNearBottom()
       this.setAgentAutoScrollLock(!nearBottom, { sessionId: targetSessionId, sticky: nearBottom })
     },
-    onAgentChatBodyTouchMove() {
-      this.onAgentChatBodyWheel()
+    onAgentReportThreadTouchMove() {
+      this.onAgentReportThreadWheel()
     },
-    onAgentChatBodyScroll() {
+    onAgentReportThreadScroll() {
       if (Date.now() < Number(this.agentProgrammaticScrollUntil || 0)) return
-      const targetSessionId = asText(this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId()
       if (!targetSessionId || !this.isAgentSessionRunning(targetSessionId)) return
-      const nearBottom = this.isAgentChatNearBottom()
+      const nearBottom = this.isAgentReportThreadNearBottom()
       this.setAgentAutoScrollLock(!nearBottom, { sessionId: targetSessionId, sticky: nearBottom })
     },
     upsertAgentThinkingItem(seed = {}) {
@@ -349,7 +405,7 @@ function createAgentRuntimeMethods() {
       this.agentReasoningBlocks = []
     },
     scrollAgentThreadToLatest(options = {}) {
-      const body = this.getAgentChatBodyElement()
+      const body = this.getAgentReportThreadElement()
       if (!body) return
       const behavior = options.behavior || 'smooth'
       this.agentProgrammaticScrollUntil = Date.now() + 120
@@ -359,7 +415,7 @@ function createAgentRuntimeMethods() {
       })
     },
     maybeAutoScrollAgentThread(options = {}) {
-      const targetSessionId = asText((options && options.sessionId) || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(options && options.sessionId)
       const force = !!(options && options.force)
       if (!targetSessionId) return
       const runState = this.getAgentRunState(targetSessionId)
@@ -382,7 +438,7 @@ function createAgentRuntimeMethods() {
       this.agentThinkingTimeline = completeActiveThinkingItemsInList(this.agentThinkingTimeline, excludeId)
     },
     updateAgentWaitingProcessFallback(sessionId = '') {
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       if (!targetSessionId) {
         if (!this.agentLoading || this.agentStreamState !== 'connecting') return
         const startedAt = Number(this.agentStreamStartedAt || 0)
@@ -471,7 +527,7 @@ function createAgentRuntimeMethods() {
     hasAgentPreloadedPanel(key = '', sessionId = '') {
       const targetKey = asText(key)
       if (!targetKey) return false
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       if (!targetSessionId) return cloneArray(this.agentPreloadedPanelKeys).includes(targetKey)
       const runState = this.getAgentRunState(targetSessionId)
       if (!runState) return cloneArray(this.agentPreloadedPanelKeys).includes(targetKey)
@@ -480,7 +536,7 @@ function createAgentRuntimeMethods() {
     recordAgentPanelPreload(target = null, sessionId = '') {
       const key = asText(target && target.key)
       const label = asText(target && target.label)
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       if (!key || !label) return
       if (!targetSessionId) {
         if (this.hasAgentPreloadedPanel(key)) return
@@ -581,7 +637,7 @@ function createAgentRuntimeMethods() {
       return false
     },
     async maybePreloadPanelForAgentTool(trace = {}, sessionId = '') {
-      const targetSessionId = asText(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const targetSessionId = this.getActiveAgentSessionId(sessionId)
       const normalizedTrace = cloneObject(trace)
       const status = asText(normalizedTrace.status)
       if (status !== 'success') return false
@@ -971,9 +1027,9 @@ function createAgentRuntimeMethods() {
       const nightlightSummary = (this.nightlightOverview && this.nightlightOverview.summary) || {}
       const h3Summary = this.h3AnalysisSummary || {}
       const roadSummary = this.roadSyntaxSummary || {}
-      const isochroneFeature = typeof this._normalizeIsochroneFeatureForExport === 'function'
-        ? this._normalizeIsochroneFeatureForExport()
-        : null
+      const siteSelectionScope = typeof this.normalizeAgentSiteSelectionScope === 'function'
+        ? this.normalizeAgentSiteSelectionScope()
+        : { polygon: [], drawnPolygon: [], isochroneFeature: null }
       const frontendAnalysis = typeof this._buildFrontendAnalysisForExport === 'function'
         ? this._buildFrontendAnalysisForExport()
         : {}
@@ -999,9 +1055,9 @@ function createAgentRuntimeMethods() {
           history_id: asText(this.currentHistoryRecordId),
         },
         scope: {
-          polygon: this.getIsochronePolygonPayload(),
-          drawn_polygon: (typeof this.getDrawnScopePolygonPoints === 'function') ? this.getDrawnScopePolygonPoints() : [],
-          isochrone_feature: isochroneFeature,
+          polygon: siteSelectionScope.polygon || [],
+          drawn_polygon: siteSelectionScope.drawnPolygon || [],
+          isochrone_feature: siteSelectionScope.isochroneFeature || null,
         },
         pois: [],
         poi_summary: {
@@ -1176,7 +1232,7 @@ function createAgentRuntimeMethods() {
         this.ensureAgentFollowupTabForPrompt(question)
       }
       const currentSession = this.syncCurrentAgentSession() || this.readSessionState(this.activeAgentSessionId)
-      const targetSessionId = asText((currentSession && currentSession.id) || this.activeAgentSessionId || this.agentConversationId) || this.createAgentSession().id
+      const targetSessionId = this.getActiveAgentSessionId(currentSession && currentSession.id) || this.createAgentSession().id
       const wasPersisted = !!(currentSession && currentSession.persisted)
       const historyId = this.getCurrentAgentHistoryId()
       const requestAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null
@@ -1600,7 +1656,7 @@ function createAgentRuntimeMethods() {
       }
     },
     cancelAgentTurn(sessionId = '') {
-      const runState = this.getAgentRunState(sessionId || this.activeAgentSessionId || this.agentConversationId)
+      const runState = this.getAgentRunState(this.getActiveAgentSessionId(sessionId))
       const controller = runState && runState.abortController
       if (!controller) return
       try {

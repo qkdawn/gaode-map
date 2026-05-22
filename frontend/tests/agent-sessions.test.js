@@ -1,4 +1,4 @@
-﻿import fs from 'node:fs'
+import fs from 'node:fs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -128,6 +128,17 @@ const defaultYearlyGridEvidence = {
     },
   }
   return Object.assign(ctx, overrides)
+}
+
+function markSiteSelectionDataReady(ctx) {
+  ctx.allPoisDetails = [{ id: 'poi-1', name: '咖啡样本' }]
+  ctx.h3AnalysisSummary = { grid_count: 3, poi_count: 1 }
+  ctx.h3GridCount = 3
+  ctx.h3AnalysisGridFeatures = [{ properties: { h3_id: '8928308280fffff' } }]
+  ctx.populationOverview = { summary: { total_population: 12000 } }
+  ctx.nightlightOverview = { summary: { mean_radiance: 3.2 } }
+  ctx.roadSyntaxSummary = { node_count: 10, edge_count: 12 }
+  ctx.roadSyntaxStatus = '计算完成'
 }
 
 function buildSummaryPack(summary = '当前总结') {
@@ -341,7 +352,7 @@ test('agent tools panel exposes categorized input packages', () => {
   assert.equal(h3Payload.fields.some((field) => field.key === 'source_path' && field.value === 'h3.poi_h3_evidence'), true)
 })
 
-test('backToAgentChat keeps conversation state and cached tools', () => {
+test('backToAgentReport keeps report state and cached tools', () => {
   const ctx = createAgentContext({
     agentWorkspaceView: 'tools',
     agentInput: '继续分析',
@@ -350,9 +361,9 @@ test('backToAgentChat keeps conversation state and cached tools', () => {
     agentToolsLoaded: true,
   })
 
-  ctx.backToAgentChat()
+  ctx.backToAgentReport()
 
-  assert.equal(ctx.agentWorkspaceView, 'chat')
+  assert.equal(ctx.agentWorkspaceView, 'report')
   assert.equal(ctx.agentInput, '继续分析')
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['总结这个区域'])
   assert.deepEqual(ctx.agentTools.map((item) => item.name), ['read_current_scope'])
@@ -827,18 +838,18 @@ test('agent task start reuses current session and submits continuation after cal
 
 test('clarification draft state is isolated from the main composer', () => {
   const ctx = createAgentContext({
-    agentInput: '底部聊天框内容',
+    agentInput: '底部追问框内容',
     agentClarificationDraft: '门卫卡片内容',
   })
 
-  assert.equal(ctx.agentInput, '底部聊天框内容')
+  assert.equal(ctx.agentInput, '底部追问框内容')
   assert.equal(ctx.agentClarificationDraft, '门卫卡片内容')
   assert.equal(ctx.canSubmitAgentClarificationDraft(), true)
 })
 
 test('clarification option click submits immediately without mutating composer input', () => {
   const ctx = createAgentContext({
-    agentInput: '底部聊天框内容',
+    agentInput: '底部追问框内容',
   })
   let submittedPrompt = ''
   ctx.submitAgentTurn = ({ prompt }) => {
@@ -848,13 +859,13 @@ test('clarification option click submits immediately without mutating composer i
   ctx.onAgentClarificationOptionClick('总结这个区域的商业特征')
 
   assert.equal(submittedPrompt, '总结这个区域的商业特征')
-  assert.equal(ctx.agentInput, '底部聊天框内容')
+  assert.equal(ctx.agentInput, '底部追问框内容')
   assert.equal(ctx.agentClarificationSubmitting, true)
 })
 
 test('clarification draft submit uses inline input and keeps composer untouched', () => {
   const ctx = createAgentContext({
-    agentInput: '底部聊天框内容',
+    agentInput: '底部追问框内容',
     agentClarificationDraft: '比较人口和夜间活力哪个更弱',
   })
   let submittedPrompt = ''
@@ -865,7 +876,7 @@ test('clarification draft submit uses inline input and keeps composer untouched'
   ctx.onAgentClarificationDraftSubmit()
 
   assert.equal(submittedPrompt, '比较人口和夜间活力哪个更弱')
-  assert.equal(ctx.agentInput, '底部聊天框内容')
+  assert.equal(ctx.agentInput, '底部追问框内容')
   assert.equal(ctx.agentClarificationSubmitting, true)
 })
 
@@ -950,7 +961,6 @@ test('loadAgentSessionSummaries preserves local draft while adding persisted sum
   const draft = ctx.createAgentSession('本地草稿')
   ctx.agentSessions = [draft]
   ctx.activeAgentSessionId = draft.id
-  ctx.agentConversationId = draft.id
 
   global.fetch = async () => ({
     ok: true,
@@ -1009,7 +1019,7 @@ test('summary history titles use generic summary label', () => {
   }
 
   assert.equal(ctx.getAgentSessionTitle(session), '总结')
-  assert.equal(ctx.getAgentSummaryWindowTitle(session.panelPayloads, session.title), '总结')
+  assert.equal(ctx.getAgentSummaryViewTitle(session.panelPayloads, session.title), '总结')
   ctx.toggleAgentHistoryGroup('current-summary')
   assert.equal(ctx.isAgentHistoryGroupCollapsed('current-summary'), true)
 })
@@ -1213,7 +1223,6 @@ test('submitAgentRename updates local draft title without persisting history ent
   const draft = ctx.createAgentSession('旧名称')
   ctx.agentSessions = [draft]
   ctx.activeAgentSessionId = draft.id
-  ctx.agentConversationId = draft.id
   ctx.agentRenameDialogOpen = true
   ctx.agentRenameSessionId = draft.id
   ctx.agentRenameInput = '新名称'
@@ -1225,13 +1234,22 @@ test('submitAgentRename updates local draft title without persisting history ent
   assert.equal(ctx.findAgentSession(draft.id).titleSource, 'user')
   assert.equal(ctx.getAgentHistorySessions().length, 0)
   assert.equal(ctx.agentRenameDialogOpen, false)
-  assert.equal(ctx.agentConversationId, draft.id)
 })
 
-test('startNewAgentChat keeps new draft out of visible history until first turn succeeds', async () => {
+test('getActiveAgentSessionId returns the active session id', () => {
+  const ctx = createAgentContext()
+  const draft = ctx.createAgentSession('兼容会话')
+  ctx.agentSessions = [draft]
+  ctx.activeAgentSessionId = draft.id
+
+  assert.equal(ctx.getActiveAgentSessionId(), draft.id)
+  assert.equal(ctx.readSessionState().id, draft.id)
+})
+
+test('startNewAgentReportSession keeps new draft out of visible history until first turn succeeds', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
 
   assert.equal(ctx.agentSessions.length, 1)
   assert.equal(ctx.getAgentHistorySessions().length, 0)
@@ -1340,7 +1358,7 @@ test('startNewAgentChat keeps new draft out of visible history until first turn 
 test('cancelAgentTurn aborts in-flight agent request and restores idle state', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   let capturedSignal = null
@@ -1376,10 +1394,10 @@ test('cancelAgentTurn aborts in-flight agent request and restores idle state', a
   assert.equal(ctx.agentInput, '总结这个区域')
 })
 
-test('running session survives switching to a new chat and can be revisited', async () => {
+test('running session survives switching to a new report and can be revisited', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   const pendingBySessionId = new Map()
@@ -1404,7 +1422,7 @@ test('running session survives switching to a new chat and can be revisited', as
   assert.equal(ctx.isAgentSessionRunning(sessionAId), true)
   assert.equal(ctx.agentLoading, true)
 
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   const sessionBId = ctx.activeAgentSessionId
 
   assert.notEqual(sessionBId, sessionAId)
@@ -1426,7 +1444,7 @@ test('running session survives switching to a new chat and can be revisited', as
 test('parallel agent turns can run concurrently and cancel only the active session', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   const pendingBySessionId = new Map()
@@ -1448,7 +1466,7 @@ test('parallel agent turns can run concurrently and cancel only the active sessi
   const pendingA = ctx.submitAgentTurn()
   await Promise.resolve()
 
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '下一步做什么分析'
   const sessionBId = ctx.activeAgentSessionId
   const pendingB = ctx.submitAgentTurn()
@@ -1591,7 +1609,7 @@ test('reasoning deltas are merged in-memory and can be cleared before persistenc
 test('submitAgentTurn shows submit process before first stream event', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   let capturedSignal = null
@@ -1778,7 +1796,7 @@ test('getAgentProcessRoleGroups creates planner and tool panels without timeline
 test('status events create visible process fallback steps', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
@@ -2050,7 +2068,7 @@ test('maybePreloadPanelForAgentTool preloads matching panel once without switchi
 test('submitAgentTurn appends user message immediately and updates thinking timeline from stream', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
@@ -2223,10 +2241,10 @@ test('submitAgentTurn appends user message immediately and updates thinking time
   assert.equal(Object.prototype.hasOwnProperty.call(ctx.findAgentSession(ctx.activeAgentSessionId), 'reasoningBlocks'), false)
 })
 
-test('clarification follow-up continues in the same session instead of opening a new chat', async () => {
+test('clarification follow-up continues in the same session instead of opening a new report', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.updateAgentSessionSnapshot(ctx.activeAgentSessionId, (session) => ({
     ...session,
     persisted: true,
@@ -2304,7 +2322,7 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
   assert.deepEqual(ctx.getAgentMessagesAfterThinking().map((item) => item.content), ['第一轮回答'])
 
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.updateAgentSessionSnapshot(ctx.activeAgentSessionId, (session) => ({
     ...session,
     messages: [
@@ -2425,7 +2443,7 @@ test('getAgentMessagesAfterThinking only returns assistant messages from the cur
 test('submitAgentTurn keeps streamed timeline order when final diagnostics omit intermediate steps', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
@@ -2550,7 +2568,7 @@ test('submitAgentTurn keeps streamed timeline order when final diagnostics omit 
 test('submitAgentTurn shows streamed plan above final response and keeps checklist expanded by default', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
@@ -2685,7 +2703,7 @@ test('submitAgentTurn preloads mapped panel after successful trace and records l
     },
   })
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '哪里是商业核心'
 
   global.fetch = async (url) => {
@@ -2784,7 +2802,7 @@ test('onAgentCardItemClick switches to result panel and focuses target h3 cell',
     },
   })
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.updateAgentSessionSnapshot(ctx.activeAgentSessionId, (session) => ({
     ...session,
     panelPayloads: {
@@ -2814,7 +2832,7 @@ test('onAgentCardItemClick switches to result panel and focuses target h3 cell',
 test('site selection tab exposes target readiness and blocks missing target', () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   const tabId = ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
 
   assert.equal(ctx.agentTabs.activeTabId, tabId)
@@ -2826,7 +2844,65 @@ test('site selection tab exposes target readiness and blocks missing target', ()
 
   assert.equal(ctx.inferAgentSiteSelectionTargetType(), '咖啡店')
   assert.equal(ctx.getAgentSiteSelectionBlockingItems().length, 0)
+  assert.equal(ctx.isAgentSiteSelectionDataReady(), false)
+  assert.equal(ctx.getAgentSiteSelectionTaskBoardTasks().map((task) => task.key).includes('poi_raster_grid'), false)
+  assert.equal(ctx.canRunAgentSiteSelection(), false)
+
+  markSiteSelectionDataReady(ctx)
+
+  assert.equal(ctx.isAgentSiteSelectionDataReady(), true)
   assert.equal(ctx.canRunAgentSiteSelection(), true)
+})
+
+test('site selection data fill reuses summary task runner', async () => {
+  const ctx = createAgentContext()
+  const ran = []
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.runSummaryTask = async (key) => {
+    ran.push(key)
+    if (key === 'poi_fetch') ctx.allPoisDetails = [{ id: 'poi-1' }]
+    if (key === 'poi_h3_grid') {
+      ctx.h3AnalysisSummary = { grid_count: 1 }
+      ctx.h3GridCount = 1
+    }
+    if (key === 'population') ctx.populationOverview = { summary: { total_population: 1 } }
+    if (key === 'nightlight') ctx.nightlightOverview = { summary: { mean_radiance: 1 } }
+    if (key === 'road_syntax') {
+      ctx.roadSyntaxSummary = { node_count: 1 }
+      ctx.roadSyntaxStatus = '计算完成'
+    }
+    ctx.finalizeSummaryTaskAsReused(key)
+  }
+
+  await ctx.runAgentSiteSelectionDataFill()
+
+  assert.deepEqual(ran, ['poi_fetch', 'poi_h3_grid', 'population', 'nightlight', 'road_syntax'])
+  assert.equal(ctx.isAgentSiteSelectionDataReady(), true)
+})
+
+test('site selection does not call analysis API before data is ready', async () => {
+  const ctx = createAgentContext()
+  const calls = []
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.setAgentSiteSelectionTargetType('咖啡店')
+  global.fetch = async (url) => {
+    calls.push(url)
+    return {
+      ok: true,
+      async json() {
+        return {}
+      },
+    }
+  }
+
+  await ctx.generateAgentSiteSelection()
+
+  assert.equal(calls.some((url) => String(url).includes('/api/v1/analysis/agent/site-selection')), false)
+  assert.equal(ctx.getAgentSiteSelectionState().error, '请先补齐 POI、H3、人口、夜光和路网基础数据')
 })
 
 test('site selection analysis calls direct API instead of agent stream', async () => {
@@ -2834,11 +2910,12 @@ test('site selection analysis calls direct API instead of agent stream', async (
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.currentHistoryRecordId = 'history-1'
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   const tabId = ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
   ctx.setAgentSiteSelectionTargetType('咖啡店')
   ctx.setAgentSiteSelectionStrategy('supply_gap')
   ctx.setAgentSiteSelectionScenario('commuter')
+  markSiteSelectionDataReady(ctx)
 
   global.fetch = async (url, options = {}) => {
     calls.push({ url, options })
@@ -2888,11 +2965,107 @@ test('site selection analysis calls direct API instead of agent stream', async (
   assert.equal(ctx.getAgentSiteSelectionPack().summary_text, '已形成候选格。')
   assert.equal(ctx.getAgentSiteSelectionState().warnings[0], '人口数据缺失，已降级。')
   assert.equal(ctx.getAgentSiteSelectionCandidates()[0].title, '候选1')
+  assert.equal(ctx.getAgentSiteSelectionState().selectedH3Id, '8928308280fffff')
   assert.equal(ctx.getAgentSiteSelectionCandidates()[0].positioning, '通勤快取型咖啡店')
   assert.equal(ctx.getAgentSiteSelectionSelectedWhySuitable()[0], '供给缺口明显')
   assert.equal(ctx.getAgentSiteSelectionSelectedValidationSteps()[0], '观察早高峰人流')
   assert.equal(ctx.getAgentSiteSelectionAvoidAreas()[0].title, '低活力网格')
   assert.equal(ctx.getAgentSiteSelectionVerdict().label, '适合优先验证')
+})
+
+test('site selection uses drawn polygon fallback when isochrone payload is empty', async () => {
+  let requestBody = null
+  const drawnPolygon = [[112.1, 28.1], [112.2, 28.1], [112.2, 28.2], [112.1, 28.1]]
+  const ctx = createAgentContext({
+    getIsochronePolygonRing() {
+      return null
+    },
+    getIsochronePolygonPayload() {
+      return []
+    },
+    getDrawnScopePolygonPoints() {
+      return drawnPolygon
+    },
+  })
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.setAgentSiteSelectionTargetType('咖啡店')
+  markSiteSelectionDataReady(ctx)
+
+  assert.equal(ctx.canRunAgentSiteSelection(), true)
+
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/site-selection')
+    requestBody = JSON.parse(options.body)
+    return {
+      ok: true,
+      async json() {
+        return {
+          status: 'success',
+          site_selection_pack: {
+            confidence: 'weak',
+            candidate_sites: [],
+            ranking: [],
+            not_recommended_reason: '当前缺少足够候选区证据',
+          },
+        }
+      },
+    }
+  }
+
+  await ctx.generateAgentSiteSelection()
+
+  assert.deepEqual(requestBody.analysis_snapshot.scope.drawn_polygon, drawnPolygon)
+  assert.deepEqual(requestBody.analysis_snapshot.scope.polygon, drawnPolygon)
+  assert.equal(ctx.getAgentSiteSelectionState().error, '')
+  assert.equal(ctx.getAgentSiteSelectionVerdict().label, '谨慎预筛')
+})
+
+test('site selection maps backend scope errors to readable copy', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.setAgentSiteSelectionTargetType('咖啡店')
+  markSiteSelectionDataReady(ctx)
+
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return { status: 'failed', error: 'missing_scope_polygon' }
+    },
+  })
+
+  await ctx.generateAgentSiteSelection()
+
+  assert.equal(
+    ctx.getAgentSiteSelectionState().error,
+    '当前还没有可用分析范围。请先生成等时圈，或在地图上手绘一个范围后再分析。',
+  )
+})
+
+test('site selection maps unresolved place type to readable copy', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
+  ctx.setAgentSiteSelectionTargetType('不明确业态')
+  markSiteSelectionDataReady(ctx)
+
+  global.fetch = async () => ({
+    ok: true,
+    async json() {
+      return { status: 'failed', error: 'unresolved_place_type' }
+    },
+  })
+
+  await ctx.generateAgentSiteSelection()
+
+  assert.equal(
+    ctx.getAgentSiteSelectionState().error,
+    '暂不支持这个业态名称。请换成咖啡店、便利店、餐饮、超市等更明确的类型。',
+  )
 })
 
 test('site selection payload normalizes candidates, evidence, and h3 focus action', async () => {
@@ -2906,7 +3079,7 @@ test('site selection payload normalizes candidates, evidence, and h3 focus actio
     },
   })
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
   ctx.commitAgentSiteSelectionPayload({
     panelPayloads: {
@@ -2952,7 +3125,7 @@ test('site selection payload normalizes candidates, evidence, and h3 focus actio
 test('site selection tabs persist and restore with panel payloads', () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   const tabId = ctx.createAgentSiteSelectionTab({ title: '区域内选址' })
   ctx.commitAgentSiteSelectionPayload({
     panelPayloads: {
@@ -2986,7 +3159,7 @@ test('site selection tabs persist and restore with panel payloads', () => {
 test('submitAgentTurn keeps failed thinking timeline expanded after final response', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
@@ -3083,7 +3256,7 @@ test('toggleAgentSessionPinned patches persisted session and reorders list', asy
       return {
         id: 'agent-a',
         title: 'A',
-        preview: '开始一段新的分析对话',
+        preview: '开始一份新的区域分析',
         status: 'idle',
         is_pinned: !!body.is_pinned,
         created_at: '2026-04-05T00:00:00Z',
@@ -3118,7 +3291,6 @@ test('deleteAgentSession removes non-active persisted session optimistically and
       { ...ctxSessionBase('agent-b', 'B'), persisted: true, snapshotLoaded: true, updatedAt: '2026-04-05T00:00:00Z' },
     ],
     activeAgentSessionId: 'agent-a',
-    agentConversationId: 'agent-a',
   })
 
   let fetchCalled = false
@@ -3143,7 +3315,6 @@ test('deleteAgentSession removes active persisted session and falls back immedia
       { ...second, persisted: true, snapshotLoaded: true, updatedAt: '2026-04-05T00:00:00Z' },
     ],
     activeAgentSessionId: 'agent-a',
-    agentConversationId: 'agent-a',
   })
 
   global.fetch = async () => ({
@@ -3174,7 +3345,6 @@ test('deleteAgentSession falls back to hydrating persisted session when next ses
       { ...ctxSessionBase('agent-b', 'B'), persisted: true, snapshotLoaded: false, updatedAt: '2026-04-05T00:00:00Z', preview: 'B 摘要' },
     ],
     activeAgentSessionId: 'agent-a',
-    agentConversationId: 'agent-a',
   })
 
   let resolveDetail
@@ -3240,7 +3410,6 @@ test('deleteAgentSession restores previous active session when delete request fa
       { ...ctxSessionBase('agent-b', 'B'), persisted: true, snapshotLoaded: true, updatedAt: '2026-04-05T00:00:00Z' },
     ],
     activeAgentSessionId: 'agent-a',
-    agentConversationId: 'agent-a',
     agentMessages: [{ role: 'assistant', content: 'A 内容' }],
   })
 
@@ -3261,7 +3430,6 @@ test('deleteAgentSession falls back to hidden draft when no persisted history re
       { ...ctxSessionBase('agent-a', 'A'), persisted: true, snapshotLoaded: true },
     ],
     activeAgentSessionId: 'agent-a',
-    agentConversationId: 'agent-a',
   })
 
   global.fetch = async () => ({
@@ -3278,7 +3446,7 @@ test('deleteAgentSession falls back to hidden draft when no persisted history re
   assert.equal(ctx.findAgentSession(ctx.activeAgentSessionId).persisted, false)
 })
 
-test('createAgentSummaryTab opens a new summary window instead of reusing the default summary tab', () => {
+test('createAgentSummaryTab opens a new summary view instead of reusing the default summary tab', () => {
   const ctx = createAgentContext({
     agentPanelPayloads: {
       summary_pack: buildSummaryPack('这是一个以日常生活消费为主的社区级商业区，适合继续补齐业态结构证据'),
@@ -3310,6 +3478,43 @@ test('createAgentSummaryTab opens a new summary window instead of reusing the de
   assert.equal(ctx.agentTabs.activeTabId, secondId)
 })
 
+test('agent report navigation opens drill-down views and returns to report home', () => {
+  const ctx = createAgentContext({
+    agentPanelPayloads: {
+      summary_pack: buildSummaryPack('这是一个以日常生活消费为主的社区级商业区'),
+      summary_status: { status: 'ready', generated: true },
+    },
+  })
+
+  const homeId = ctx.getAgentReportHomeTabId()
+  assert.equal(homeId, 'summary-current')
+  assert.equal(ctx.isAgentSummaryTabActive(), true)
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '区域报告')
+  assert.equal(ctx.shouldShowAgentComposer(), true)
+
+  const siteId = ctx.openAgentSiteSelectionFromReport()
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'site_selection')
+  assert.equal(ctx.agentTabs.activeTabId, siteId)
+  assert.equal(ctx.isAgentReportDetailView(), true)
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '区域内选址')
+  assert.equal(ctx.shouldShowAgentComposer(), false)
+
+  ctx.returnToAgentReportHome()
+  assert.equal(ctx.isAgentSummaryTabActive(), true)
+  assert.equal(ctx.agentTabs.activeTabId, homeId)
+
+  const iterationId = ctx.openAgentIterationChangeFromReport({ autoload: false })
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'iteration_change')
+  assert.equal(ctx.agentTabs.activeTabId, iterationId)
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '多年变化')
+  assert.equal(ctx.shouldShowAgentComposer(), false)
+
+  ctx.openAgentFollowupFromSummary('为什么这样判断？')
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'followup')
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '追问解释')
+  assert.equal(ctx.shouldShowAgentComposer(), true)
+})
+
 test('summary session history persists tourism cross analysis in summary pack and tabs', () => {
   const tourismCrossAnalysis = {
     title: '文旅交叉策划分析',
@@ -3319,7 +3524,7 @@ test('summary session history persists tourism cross analysis in summary pack an
   summaryPack.tourism_cross_analysis = tourismCrossAnalysis
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.agentPanelPayloads = {
     summary_pack: summaryPack,
     summary_status: { status: 'ready', generated: true, title: '区域总结' },
@@ -3356,7 +3561,7 @@ test('summary stream completion fills tourism content from payload', async () =>
     },
   })
   ctx.agentSessionsLoaded = true
-  ctx.startNewAgentChat()
+  ctx.startNewAgentReportSession()
   ctx.refreshAgentSummaryReadiness = async () => {}
   ctx.canGenerateSummaryAfterTasks = () => true
 
@@ -6096,7 +6301,7 @@ test('summary history list hydrates detail payloads for compact titles and previ
             {
               id: 'summary-history-a',
               title: '该区域是一个以年轻人群日常消费和科教文化配套为主的多核商业区。',
-              preview: '开始一段新的分析对话',
+              preview: '开始一份新的区域分析',
               history_id: 'history-current',
               panel_kind: 'commercial_summary',
               status: 'answered',
@@ -6115,7 +6320,7 @@ test('summary history list hydrates detail payloads for compact titles and previ
           return {
             id: 'summary-history-a',
             title: '该区域是一个以年轻人群日常消费和科教文化配套为主的多核商业区。',
-            preview: '开始一段新的分析对话',
+            preview: '开始一份新的区域分析',
             history_id: 'history-current',
             panel_kind: 'commercial_summary',
             status: 'answered',
@@ -6242,7 +6447,7 @@ function ctxSessionBase(id, title) {
   return {
     id,
     title,
-    preview: '开始一段新的分析对话',
+    preview: '开始一份新的区域分析',
     status: 'idle',
     input: '',
     cards: [],
