@@ -38,8 +38,11 @@ async def lifespan(_: FastAPI):
     logger.info(f"静态文件目录: {settings.static_dir}")
     logger.info("=" * 50)
 
-    # 初始化数据库
-    await asyncio.to_thread(init_db)
+    # 初始化数据库。数据库不可用时，静态工作台和只读工具元数据仍应可访问。
+    try:
+        await asyncio.to_thread(init_db)
+    except Exception:
+        logger.exception("数据库初始化失败，应用将以降级模式继续启动")
 
     # 确保静态文件目录存在
     os.makedirs(settings.static_dir, exist_ok=True)

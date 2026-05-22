@@ -8,6 +8,7 @@ import logging
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine import make_url
 
 from core.config import settings
 from .models import AgentSession, Base, PoiResult
@@ -23,11 +24,24 @@ def _build_engine(db_uri: str | None = None):
     if effective_db_uri.lower().startswith("sqlite"):
         raise ValueError("SQLite is no longer supported. Configure DB_URL with mysql+pymysql://...")
 
+    connect_args = {}
+    try:
+        drivername = make_url(effective_db_uri).drivername
+    except Exception:
+        drivername = ""
+    if "pymysql" in drivername:
+        connect_args = {
+            "connect_timeout": 5,
+            "read_timeout": 10,
+            "write_timeout": 10,
+        }
+
     return create_engine(
         effective_db_uri,
         future=True,
         pool_pre_ping=True,  # Auto-reconnect
         pool_recycle=3600,
+        connect_args=connect_args,
     )
 
 
