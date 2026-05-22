@@ -754,19 +754,6 @@ def _normalize_area_judgments(raw: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         payload = _validate_secondary_section_payload(section_key, item)
         if payload:
             rows_by_key[section_key] = payload
-    if len(rows_by_key) == len(_SUMMARY_SECTION_SPECS):
-        return rows_by_key
-
-    legacy_rows = raw.get("secondary_conclusions") if isinstance(raw.get("secondary_conclusions"), list) else []
-    for item in legacy_rows:
-        if not isinstance(item, dict):
-            continue
-        section_key = _normalize_summary_section_key(item.get("section_key") or item.get("title"))
-        if not section_key:
-            continue
-        payload = _validate_secondary_section_payload(section_key, item)
-        if payload:
-            rows_by_key[section_key] = payload
     return rows_by_key
 
 
@@ -807,84 +794,6 @@ def _derive_icsc_tags(snapshot: Any, artifacts: Dict[str, Any]) -> List[str]:
     return tags[:6]
 
 
-def _legacy_summary_pack_system_prompt() -> str:
-    return (
-        "你是一名商业地理与城市空间分析师。"
-        "你只负责把已给定的结构化证据整理成商业判断，不得创造新的事实。"
-        "必须只输出 JSON，不要输出 markdown。"
-        "JSON 结构固定为："
-        "{\"headline_judgment\":{\"summary\":\"...\",\"supporting_clause\":\"...\"},"
-        "\"secondary_conclusions\":[{\"title\":\"...\",\"reasoning\":\"...\"}],"
-        "\"user_profile\":{\"headline\":\"...\",\"traits\":[\"...\"]},"
-        "\"behavior_inference\":{\"headline\":\"...\",\"traits\":[\"...\"]}}"
-        "规则："
-        "1. headline_judgment.summary 必须是一句话商业判断，直接回答这个区域是什么级别或类型的商业。"
-        "2. 不要把原始指标、百分比、样本量直接写成主句；不要做数据播报。"
-        "3. secondary_conclusions 必须输出 2 到 4 条，每条都要写“判断 + 含义”，不能只列指标。"
-        "4. user_profile 必须写消费者是谁，不能写成区域类型或商业区描述。"
-        "5. behavior_inference 必须写消费行为、频次、时段或跨区吸引力，不能重复 user_profile 或 headline_judgment。"
-        "6. 如果证据不足，也只能基于已给证据做保守判断，不能虚构。"
-        "7. 不要输出 ICSC 标签，这部分会由系统注入。"
-    )
-
-
-def _legacy_build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict[str, Any]:
-    poi_structure = artifacts.get("current_poi_structure_analysis") if isinstance(artifacts.get("current_poi_structure_analysis"), dict) else {}
-    h3_structure = artifacts.get("current_h3_structure_analysis") if isinstance(artifacts.get("current_h3_structure_analysis"), dict) else {}
-    population_profile = artifacts.get("current_population_profile_analysis") if isinstance(artifacts.get("current_population_profile_analysis"), dict) else {}
-    nightlight_pattern = artifacts.get("current_nightlight_pattern_analysis") if isinstance(artifacts.get("current_nightlight_pattern_analysis"), dict) else {}
-    road_pattern = artifacts.get("current_road_pattern_analysis") if isinstance(artifacts.get("current_road_pattern_analysis"), dict) else {}
-    business_profile = artifacts.get("current_business_profile") if isinstance(artifacts.get("current_business_profile"), dict) else {}
-    area_labels = artifacts.get("current_area_character_labels") if isinstance(artifacts.get("current_area_character_labels"), dict) else {}
-    commercial_hotspots = artifacts.get("current_commercial_hotspots") if isinstance(artifacts.get("current_commercial_hotspots"), dict) else {}
-    return {
-        "task": "summary_pack_generation",
-        "business_profile": {
-            "label": _clean_text(business_profile.get("business_profile")),
-            "portrait": _clean_text(business_profile.get("portrait")),
-            "summary_text": _clean_text(business_profile.get("summary_text")),
-            "functional_mix_score": business_profile.get("functional_mix_score"),
-        },
-        "poi_structure": {
-            "summary_text": _clean_text(poi_structure.get("summary_text")),
-            "dominant_categories": list(poi_structure.get("dominant_categories") or []),
-            "structure_tags": list(poi_structure.get("structure_tags") or []),
-            "top_category_mix": _top_poi_mix(snapshot),
-        },
-        "spatial_structure": {
-            "distribution_pattern": _clean_text(h3_structure.get("distribution_pattern")),
-            "summary_text": _clean_text(h3_structure.get("summary_text")),
-            "hotspot_mode": _clean_text(commercial_hotspots.get("hotspot_mode")),
-            "hotspot_summary": _clean_text(commercial_hotspots.get("summary_text")),
-            "core_zone_count": commercial_hotspots.get("core_zone_count"),
-            "opportunity_zone_count": commercial_hotspots.get("opportunity_zone_count"),
-        },
-        "population_profile": {
-            "summary_text": _clean_text(population_profile.get("summary_text")),
-            "total_population": population_profile.get("total_population"),
-            "top_age_band": _clean_text(population_profile.get("top_age_band")),
-        },
-        "nightlight_pattern": {
-            "summary_text": _clean_text(nightlight_pattern.get("summary_text")),
-            "total_radiance": nightlight_pattern.get("total_radiance"),
-            "core_hotspot_count": nightlight_pattern.get("core_hotspot_count"),
-        },
-        "road_pattern": {
-            "summary_text": _clean_text(road_pattern.get("summary_text")),
-            "node_count": road_pattern.get("node_count"),
-            "edge_count": road_pattern.get("edge_count"),
-            "regression_r2": road_pattern.get("regression_r2"),
-        },
-        "area_labels": list(area_labels.get("character_tags") or []),
-        "guardrails": {
-            "write_business_judgment_not_data_description": True,
-            "no_raw_metric_recital_as_headline": True,
-            "user_profile_must_describe_people": True,
-            "behavior_inference_must_describe_usage": True,
-        },
-    }
-
-
 def _normalize_trait_list(items: Any, *, min_items: int = 2, max_items: int = 4) -> List[str]:
     traits: List[str] = []
     for item in items or []:
@@ -894,50 +803,6 @@ def _normalize_trait_list(items: Any, *, min_items: int = 2, max_items: int = 4)
     if len(traits) < min_items:
         return []
     return traits[:max_items]
-
-
-def _legacy_validate_summary_pack_payload(raw: Dict[str, Any], *, icsc_tags: List[str], evidence_refs: List[str]) -> Dict[str, Any]:
-    if not isinstance(raw, dict):
-        return {}
-    headline = raw.get("headline_judgment") if isinstance(raw.get("headline_judgment"), dict) else {}
-    secondary_raw = raw.get("secondary_conclusions") if isinstance(raw.get("secondary_conclusions"), list) else []
-    user_profile = raw.get("user_profile") if isinstance(raw.get("user_profile"), dict) else {}
-    behavior = raw.get("behavior_inference") if isinstance(raw.get("behavior_inference"), dict) else {}
-    secondary: List[Dict[str, str]] = []
-    for item in secondary_raw:
-        if not isinstance(item, dict):
-            continue
-        title = _clean_text(item.get("title"))
-        reasoning = _clean_text(item.get("reasoning"))
-        if title and reasoning:
-            secondary.append({"title": title, "reasoning": reasoning})
-    if len(secondary) < 2:
-        return {}
-    normalized = {
-        "headline_judgment": {
-            "summary": _clean_text(headline.get("summary")),
-            "supporting_clause": _clean_text(headline.get("supporting_clause")),
-        },
-        "icsc_tags": list(icsc_tags),
-        "secondary_conclusions": secondary[:4],
-        "user_profile": {
-            "headline": _clean_text(user_profile.get("headline")),
-            "traits": _normalize_trait_list(user_profile.get("traits")),
-        },
-        "behavior_inference": {
-            "headline": _clean_text(behavior.get("headline")),
-            "traits": _normalize_trait_list(behavior.get("traits")),
-        },
-        "evidence_refs": list(evidence_refs),
-        "confidence": "moderate" if len(evidence_refs) >= 2 else "weak",
-    }
-    if not normalized["headline_judgment"]["summary"]:
-        return {}
-    if not normalized["user_profile"]["headline"] or not normalized["user_profile"]["traits"]:
-        return {}
-    if not normalized["behavior_inference"]["headline"] or not normalized["behavior_inference"]["traits"]:
-        return {}
-    return normalized
 
 
 def _summary_pack_system_prompt() -> str:
@@ -952,12 +817,11 @@ def _summary_pack_system_prompt() -> str:
         "规则："
         "1. headline_judgment.summary 必须是一句话商业判断，直接回答这个区域是什么级别或类型的商业。"
         "2. 不要输出 spatial_structure、poi_structure、consumption_vitality、business_support；这些区域判断由独立任务生成。"
-        "3. 不要输出 secondary_conclusions。"
-        "4. 不要把原始指标、百分比、样本量直接写成主句；不要做数据播报。"
-        "5. user_profile 必须写消费者是谁，不能写成区域类型或商业区描述。"
-        "6. behavior_inference 必须写消费行为、频次、时段或跨区吸引力，不能重复 user_profile 或 headline_judgment。"
-        "7. 如果证据不足，也只能基于已给证据做保守判断，不能虚构。"
-        "8. 不要输出 ICSC 标签，这部分会由系统注入。"
+        "3. 不要把原始指标、百分比、样本量直接写成主句；不要做数据播报。"
+        "4. user_profile 必须写消费者是谁，不能写成区域类型或商业区描述。"
+        "5. behavior_inference 必须写消费行为、频次、时段或跨区吸引力，不能重复 user_profile 或 headline_judgment。"
+        "6. 如果证据不足，也只能基于已给证据做保守判断，不能虚构。"
+        "7. 不要输出 ICSC 标签，这部分会由系统注入。"
     )
 
 

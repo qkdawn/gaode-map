@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Dict
 
 from .analysis_extractors import (
     is_business_profile_ready,

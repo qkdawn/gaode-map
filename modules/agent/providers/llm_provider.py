@@ -8,20 +8,9 @@ import httpx
 
 from core.config import settings
 
-from ..analysis_extractors import (
-    build_h3_structure_analysis,
-    build_nightlight_pattern_analysis,
-    build_population_profile_analysis,
-    build_road_pattern_analysis,
-    is_h3_structure_ready,
-    is_nightlight_pattern_ready,
-    is_poi_structure_ready,
-    is_population_profile_ready,
-    is_road_pattern_ready,
-)
 from ..context_builder import build_context_summary
 from ..executor import execute_plan_step
-from ..gate import _clarification_options, classify_question_type, latest_user_message, run_gate
+from ..gate import _clarification_options, latest_user_message, run_gate
 from ..governance import check_tool_governance
 from ..planner import build_planning_fallback
 from ..schemas import (
@@ -63,20 +52,19 @@ from .prompts import (
     synthesizer_system_prompt as _synthesizer_system_prompt_from_module,
 )
 from .tool_loop import (
-    artifact_digest as _artifact_digest_from_module,
-    chat_completion_tools as _chat_completion_tools_from_module,
-    compact_json as _compact_json_from_module,
-    context_digest as _context_digest_from_module,
-    is_reusable_tool_call as _is_reusable_tool_call_from_module,
-    llm_visible_registry as _llm_visible_registry_from_module,
-    planner_question_archetype as _planner_question_archetype_from_module,
-    planner_tool_routing_hints as _planner_tool_routing_hints_from_module,
-    snapshot_digest as _snapshot_digest_from_module,
-    summarize_tool_arguments as _summarize_tool_arguments_from_module,
-    summarize_tool_result as _summarize_tool_result_from_module,
-    tool_cache_key as _tool_cache_key_from_module,
-    tool_catalog as _tool_catalog_from_module,
-    tool_output_payload as _tool_output_payload_from_module,
+    artifact_digest,
+    chat_completion_tools,
+    context_digest,
+    is_reusable_tool_call,
+    llm_visible_registry,
+    planner_question_archetype,
+    planner_tool_routing_hints,
+    snapshot_digest,
+    summarize_tool_arguments,
+    summarize_tool_result,
+    tool_cache_key,
+    tool_catalog,
+    tool_output_payload,
     trim_messages as _trim_messages_from_module,
 )
 
@@ -98,29 +86,6 @@ def get_llm_provider_client(provider: Optional[str] = None) -> Optional[LLMProvi
 def _trim_messages(messages: List[AgentMessage]) -> List[Dict[str, str]]:
     return _trim_messages_from_module(messages)
 
-
-def _snapshot_digest(snapshot: AnalysisSnapshot) -> Dict[str, Any]:
-    return _snapshot_digest_from_module(snapshot)
-
-
-def _context_digest(context: ContextBundle) -> Dict[str, Any]:
-    return _context_digest_from_module(context)
-
-
-def _tool_catalog(registry: Dict[str, RegisteredTool]) -> List[Dict[str, Any]]:
-    return _tool_catalog_from_module(registry)
-
-def _llm_visible_registry(registry: Dict[str, RegisteredTool], *, include_secondary: bool = False) -> Dict[str, RegisteredTool]:
-    return _llm_visible_registry_from_module(registry, include_secondary=include_secondary)
-
-def _planner_question_archetype(question: str) -> str:
-    return _planner_question_archetype_from_module(question)
-
-def _artifact_digest(snapshot: AnalysisSnapshot, memory: WorkingMemory) -> Dict[str, Any]:
-    return _artifact_digest_from_module(snapshot, memory)
-
-def _planner_tool_routing_hints() -> Dict[str, Any]:
-    return _planner_tool_routing_hints_from_module()
 
 def _extract_text_content(payload: Dict[str, Any]) -> str:
     return _extract_text_content_from_module(payload)
@@ -170,26 +135,6 @@ async def generate_title_with_llm(
     if not title:
         raise ValueError("empty_title_completion")
     return title[:24]
-
-
-def _chat_completion_tools(registry: Dict[str, RegisteredTool]) -> List[Dict[str, Any]]:
-    tools: List[Dict[str, Any]] = []
-    for name, registered in _llm_visible_registry(registry).items():
-        tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": registered.spec.description,
-                    "parameters": registered.spec.input_schema or {
-                        "type": "object",
-                        "properties": {},
-                        "additionalProperties": False,
-                    },
-                },
-            }
-        )
-    return tools
 
 
 def _with_thinking_mode(request_body: Dict[str, Any]) -> Dict[str, Any]:
@@ -314,24 +259,6 @@ def _parse_chat_completion_response(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _extract_chat_completion_text(payload: Dict[str, Any]) -> str:
     return _extract_chat_completion_text_from_module(payload)
-
-def _tool_output_payload(result: ToolResult) -> str:
-    return _tool_output_payload_from_module(result)
-
-def _compact_json(value: Any, *, max_length: int = 160) -> str:
-    return _compact_json_from_module(value, max_length=max_length)
-
-def _summarize_tool_arguments(arguments: Dict[str, Any]) -> str:
-    return _summarize_tool_arguments_from_module(arguments)
-
-def _summarize_tool_result(result: ToolResult) -> str:
-    return _summarize_tool_result_from_module(result)
-
-def _is_reusable_tool_call(registered: RegisteredTool, step: PlanStep) -> bool:
-    return _is_reusable_tool_call_from_module(registered, step)
-
-def _tool_cache_key(step: PlanStep) -> str:
-    return _tool_cache_key_from_module(step)
 
 async def _maybe_emit(emit: LoopEmit | None, event_type: str, payload: Dict[str, Any]) -> None:
     if emit is None:
@@ -490,8 +417,8 @@ async def run_gate_with_llm(
             user_payload={
                 "messages": _trim_messages(messages),
                 "latest_user_message": latest_user_message(messages),
-                "analysis_snapshot_digest": _snapshot_digest(snapshot),
-                "context_digest": _context_digest(context),
+                "analysis_snapshot_digest": snapshot_digest(snapshot),
+                "context_digest": context_digest(context),
                 "context_summary": context.context_summary.model_dump(),
             },
             emit=emit,
@@ -522,14 +449,14 @@ async def plan_with_llm(
     emit: LoopEmit | None = None,
 ) -> PlanningResult:
     question = latest_user_message(messages)
-    visible_registry = _llm_visible_registry(registry)
+    visible_registry = llm_visible_registry(registry)
     fallback = build_planning_fallback(
         question=question,
         snapshot=snapshot,
         memory=memory,
         audit_feedback=audit_feedback,
     )
-    question_archetype = _planner_question_archetype(question)
+    question_archetype = planner_question_archetype(question)
     try:
         payload = await _invoke_json_role(
             system_prompt=_planner_system_prompt(),
@@ -537,13 +464,13 @@ async def plan_with_llm(
                 "messages": _trim_messages(messages),
                 "latest_user_message": question,
                 "question_archetype": question_archetype,
-                "analysis_snapshot_digest": _snapshot_digest(snapshot),
-                "context_digest": _context_digest(context),
+                "analysis_snapshot_digest": snapshot_digest(snapshot),
+                "context_digest": context_digest(context),
                 "context_summary": context.context_summary.model_dump(),
-                "artifact_digest": _artifact_digest(snapshot, memory),
-                "available_tools": _tool_catalog(visible_registry),
+                "artifact_digest": artifact_digest(snapshot, memory),
+                "available_tools": tool_catalog(visible_registry),
                 "available_artifacts": list(memory.artifacts.keys()),
-                "tool_routing_hints": _planner_tool_routing_hints(),
+                "tool_routing_hints": planner_tool_routing_hints(),
                 "audit_feedback": dict(audit_feedback or {}),
                 "fallback_plan": fallback.model_dump(mode="json"),
             },
@@ -593,8 +520,8 @@ async def audit_with_llm(
             system_prompt=_auditor_system_prompt(),
             user_payload={
                 "question": question,
-                "analysis_snapshot_digest": _snapshot_digest(snapshot),
-                "context_digest": _context_digest(context),
+                "analysis_snapshot_digest": snapshot_digest(snapshot),
+                "context_digest": context_digest(context),
                 "plan": plan.model_dump(mode="json"),
                 "tool_results": [item.model_dump(mode="json") for item in (memory.tool_results or [])],
                 "execution_trace": [item.model_dump(mode="json") for item in (memory.execution_trace or [])],
@@ -643,10 +570,10 @@ async def run_llm_tool_loop(
     }
     initial_payload = {
         "messages": _trim_messages(messages),
-        "analysis_snapshot_digest": _snapshot_digest(snapshot),
-        "context_digest": _context_digest(context),
+        "analysis_snapshot_digest": snapshot_digest(snapshot),
+        "context_digest": context_digest(context),
         "context_summary": build_context_summary(snapshot).model_dump(),
-        "available_tools": _tool_catalog(_llm_visible_registry(registry)),
+        "available_tools": tool_catalog(llm_visible_registry(registry)),
     }
     loop_result = ToolLoopResult(artifacts={})
     loop_messages: List[Dict[str, Any]] = [
@@ -675,7 +602,7 @@ async def run_llm_tool_loop(
             request_body: Dict[str, Any] = {
                 "model": settings.ai_model,
                 "messages": loop_messages,
-                "tools": _chat_completion_tools(registry),
+                "tools": chat_completion_tools(registry),
                 "tool_choice": "auto",
             }
             payload = await _stream_chat_completion(
@@ -761,7 +688,7 @@ async def run_llm_tool_loop(
                         "status": "start",
                         "reason": step.reason,
                         "message": "开始执行工具",
-                        "arguments_summary": _summarize_tool_arguments(step.arguments),
+                        "arguments_summary": summarize_tool_arguments(step.arguments),
                         "produced_artifacts": list(step.expected_artifacts or []),
                     },
                 )
@@ -791,7 +718,7 @@ async def run_llm_tool_loop(
                             "status": "blocked",
                             "reason": step.reason,
                             "message": prompt,
-                            "arguments_summary": _summarize_tool_arguments(step.arguments),
+                            "arguments_summary": summarize_tool_arguments(step.arguments),
                             "produced_artifacts": list(step.expected_artifacts or []),
                         },
                     )
@@ -817,7 +744,7 @@ async def run_llm_tool_loop(
                             "status": "failed",
                             "reason": step.reason,
                             "message": argument_error,
-                            "arguments_summary": _summarize_tool_arguments(step.arguments),
+                            "arguments_summary": summarize_tool_arguments(step.arguments),
                             "result_summary": argument_error,
                             "evidence_count": 0,
                             "warning_count": len(result.warnings or []),
@@ -828,7 +755,7 @@ async def run_llm_tool_loop(
                         {
                             "role": "tool",
                             "tool_call_id": str(call.get("call_id") or tool_name),
-                            "content": _tool_output_payload(result),
+                            "content": tool_output_payload(result),
                         }
                     )
                     if consecutive_tool_errors >= max_errors:
@@ -838,8 +765,8 @@ async def run_llm_tool_loop(
                         return loop_result
                     continue
 
-                cache_key = _tool_cache_key(step)
-                if _is_reusable_tool_call(registered, step) and cache_key in reusable_tool_results:
+                cache_key = tool_cache_key(step)
+                if is_reusable_tool_call(registered, step) and cache_key in reusable_tool_results:
                     cached_result = reusable_tool_results[cache_key]
                     trace = ExecutionTraceItem(
                         tool_name=registered.spec.name,
@@ -862,8 +789,8 @@ async def run_llm_tool_loop(
                             "status": trace.status,
                             "reason": step.reason,
                             "message": trace.message,
-                            "arguments_summary": _summarize_tool_arguments(step.arguments),
-                            "result_summary": _summarize_tool_result(cached_result),
+                            "arguments_summary": summarize_tool_arguments(step.arguments),
+                            "result_summary": summarize_tool_result(cached_result),
                             "evidence_count": len(cached_result.evidence or []),
                             "warning_count": len(cached_result.warnings or []),
                             "produced_artifacts": list((cached_result.artifacts or {}).keys())[:12],
@@ -873,7 +800,7 @@ async def run_llm_tool_loop(
                         {
                             "role": "tool",
                             "tool_call_id": str(call.get("call_id") or tool_name),
-                            "content": _tool_output_payload(cached_result),
+                            "content": tool_output_payload(cached_result),
                         }
                     )
                     consecutive_tool_errors = 0
@@ -898,7 +825,7 @@ async def run_llm_tool_loop(
                 loop_result.tool_results.append(result)
                 if result.artifacts:
                     loop_result.artifacts.update(result.artifacts)
-                if result.status == "success" and _is_reusable_tool_call(registered, step):
+                if result.status == "success" and is_reusable_tool_call(registered, step):
                     reusable_tool_results[cache_key] = result.model_copy(deep=True)
                 if result.warnings:
                     loop_result.research_notes.extend([str(item) for item in result.warnings if str(item).strip()])
@@ -913,8 +840,8 @@ async def run_llm_tool_loop(
                         "status": result.status,
                         "reason": step.reason,
                         "message": trace.message or ("执行成功" if result.status == "success" else "执行失败"),
-                        "arguments_summary": _summarize_tool_arguments(step.arguments),
-                        "result_summary": _summarize_tool_result(result),
+                        "arguments_summary": summarize_tool_arguments(step.arguments),
+                        "result_summary": summarize_tool_result(result),
                         "evidence_count": len(result.evidence or []),
                         "warning_count": len(result.warnings or []),
                         "produced_artifacts": list((result.artifacts or {}).keys())[:12],
@@ -925,7 +852,7 @@ async def run_llm_tool_loop(
                     {
                         "role": "tool",
                         "tool_call_id": str(call.get("call_id") or tool_name),
-                        "content": _tool_output_payload(result),
+                        "content": tool_output_payload(result),
                     }
                 )
                 if consecutive_tool_errors >= max_errors:
@@ -952,8 +879,8 @@ async def generate_answer_output_with_llm(
         system_prompt=_synthesizer_system_prompt(),
         user_payload={
             "messages": _trim_messages(messages),
-            "analysis_snapshot_digest": _snapshot_digest(snapshot),
-            "context_digest": _context_digest(context),
+            "analysis_snapshot_digest": snapshot_digest(snapshot),
+            "context_digest": context_digest(context),
             "synthesis_payload": synthesis_payload,
         },
         emit=emit,

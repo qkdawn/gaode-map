@@ -244,7 +244,10 @@ def save_history_request(payload: HistorySaveRequest, repo) -> Dict[str, Any]:
 
 
 def get_history_list_payload(limit: int, repo) -> List[Dict[str, Any]]:
-    return repo.get_list(limit)
+    try:
+        return repo.get_list(limit)
+    except SQLAlchemyError:
+        return []
 
 
 def convert_history_detail_to_gcj02(res: Dict[str, Any], *, include_pois: bool) -> Dict[str, Any]:

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query
+from starlette.concurrency import run_in_threadpool
 
 from modules.history import service as history_service
 from modules.poi.schemas import HistorySaveRequest
@@ -14,7 +15,7 @@ async def save_history_manually(payload: HistorySaveRequest):
 
 @router.get("/api/v1/analysis/history")
 async def get_history_list(limit: int = Query(100, ge=0, le=500)):
-    return history_service.get_history_list_payload(limit, history_repo)
+    return await run_in_threadpool(history_service.get_history_list_payload, limit, history_repo)
 
 
 @router.get("/api/v1/analysis/history/{id}/pois")

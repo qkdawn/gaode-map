@@ -23,7 +23,7 @@ def test_build_diverging_cell_marks_rate_drop_as_strong_decrease():
     key, label, color, opacity = build_diverging_cell(-10.0, -0.35, "population_rate")
 
     assert key == "strong_decrease"
-    assert "涓嬮檷" in label
+    assert "下降" in label
     assert color == "#1d4ed8"
     assert opacity > 0.7
 

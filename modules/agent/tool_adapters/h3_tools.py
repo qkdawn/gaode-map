@@ -64,20 +64,19 @@ async def compute_h3_metrics_from_scope_and_pois(
         )
     result = await asyncio.to_thread(
         analyze_h3_grid,
-        polygon,
-        int(arguments.get("resolution") or snapshot.current_filters.get("h3_resolution") or 10),
-        "gcj02",
-        str(arguments.get("include_mode") or "intersects"),
-        float(arguments.get("min_overlap_ratio") or 0.0),
-        pois,
-        "gcj02",
-        int(arguments.get("neighbor_ring") or 1),
-        False,
-        None,
-        1,
-        None,
-        False,
-        240,
+        polygon=polygon,
+        resolution=int(arguments.get("resolution") or snapshot.current_filters.get("h3_resolution") or 10),
+        coord_type="gcj02",
+        include_mode=str(arguments.get("include_mode") or "intersects"),
+        min_overlap_ratio=float(arguments.get("min_overlap_ratio") or 0.0),
+        pois=pois,
+        poi_coord_type="gcj02",
+        neighbor_ring=int(arguments.get("neighbor_ring") or 1),
+        use_arcgis=False,
+        arcgis_neighbor_ring=1,
+        arcgis_knn_neighbors=None,
+        arcgis_export_image=False,
+        arcgis_timeout_sec=240,
     )
     summary = result.get("summary") or {}
     return ToolResult(

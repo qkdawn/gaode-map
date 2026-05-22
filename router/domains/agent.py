@@ -3,6 +3,7 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from modules.agent.runtime import process_agent_turn, stream_agent_turn
 from modules.agent.schemas import (
@@ -45,7 +46,7 @@ from modules.agent.session_service import (
     update_agent_session_metadata,
     upsert_agent_session,
 )
-from modules.agent.tools import get_tool_registry
+from modules.agent.tool_service import list_agent_tools
 from store.agent_session_repo import agent_session_repo
 from store.history_repo import history_repo
 
@@ -118,7 +119,7 @@ async def run_agent_turn_stream(request: Request, payload: AgentTurnRequest):
 
 @router.get("/api/v1/analysis/agent/sessions", response_model=List[AgentSessionSummary])
 async def get_agent_sessions():
-    return list_agent_sessions(agent_session_repo)
+    return await run_in_threadpool(list_agent_sessions, agent_session_repo)
 
 
 @router.post("/api/v1/analysis/agent/site-selection", response_model=AgentSiteSelectionResponse)
@@ -131,37 +132,7 @@ async def run_agent_site_selection(payload: AgentSiteSelectionRequest):
 
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])
 async def get_agent_tools():
-    tools = []
-    for name, registered in get_tool_registry().items():
-        spec = registered.spec
-        tools.append(
-            AgentToolSummary(
-                name=name,
-                description=spec.description,
-                category=spec.category,
-                layer=spec.layer,
-                ui_tier=spec.ui_tier,
-                data_domain=spec.data_domain,
-                capability_type=spec.capability_type,
-                scene_type=spec.scene_type,
-                llm_exposure=spec.llm_exposure,
-                toolkit_id=spec.toolkit_id,
-                default_policy_key=spec.default_policy_key,
-                evidence_contract=list(spec.evidence_contract or []),
-                applicable_scenarios=list(spec.applicable_scenarios or []),
-                cautions=list(spec.cautions or []),
-                requires=list(spec.requires or []),
-                produces=list(spec.produces or []),
-                input_schema=dict(spec.input_schema or {}),
-                output_schema=dict(spec.output_schema or {}),
-                readonly=bool(spec.readonly),
-                cost_level=spec.cost_level,
-                risk_level=spec.risk_level,
-                timeout_sec=int(spec.timeout_sec or 0),
-                cacheable=bool(spec.cacheable),
-            )
-        )
-    return tools
+    return list_agent_tools()
 
 
 @router.get("/api/v1/analysis/agent/prompts", response_model=List[PromptConfig])
@@ -238,19 +209,19 @@ async def post_agent_iteration_poi_build(payload: AgentIterationPoiBuildRequest)
 
 @router.get("/api/v1/analysis/agent/sessions/{session_id}", response_model=AgentSessionDetail)
 async def get_agent_session(session_id: str):
-    return get_agent_session_detail(session_id, agent_session_repo)
+    return await run_in_threadpool(get_agent_session_detail, session_id, agent_session_repo)
 
 
 @router.put("/api/v1/analysis/agent/sessions/{session_id}", response_model=AgentSessionDetail)
 async def put_agent_session(session_id: str, payload: AgentSessionSnapshotRequest):
-    return upsert_agent_session(session_id, payload, agent_session_repo)
+    return await run_in_threadpool(upsert_agent_session, session_id, payload, agent_session_repo)
 
 
 @router.patch("/api/v1/analysis/agent/sessions/{session_id}", response_model=AgentSessionDetail)
 async def patch_agent_session(session_id: str, payload: AgentSessionMetadataPatchRequest):
-    return update_agent_session_metadata(session_id, payload, agent_session_repo)
+    return await run_in_threadpool(update_agent_session_metadata, session_id, payload, agent_session_repo)
 
 
 @router.delete("/api/v1/analysis/agent/sessions/{session_id}")
 async def remove_agent_session(session_id: str):
-    return delete_agent_session(session_id, agent_session_repo)
+    return await run_in_threadpool(delete_agent_session, session_id, agent_session_repo)

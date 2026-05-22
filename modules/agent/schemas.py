@@ -636,33 +636,6 @@ class AgentTurnResponse(BaseModel):
         if not isinstance(value, dict):
             return value
         value = dict(value)
-        if "output" not in value:
-            value["output"] = {
-                "cards": value.pop("assistant_cards", value.pop("cards", [])),
-                "clarification_question": value.pop("clarification_question", ""),
-                "clarification_options": value.pop("clarification_options", []),
-                "risk_prompt": value.pop("risk_prompt", ""),
-                "next_suggestions": value.pop("next_suggestions", []),
-                "panel_payloads": value.pop("panel_payloads", {}),
-                "decision": value.pop("decision", {}),
-                "support": value.pop("support", []),
-                "counterpoints": value.pop("counterpoints", []),
-                "actions": value.pop("actions", []),
-                "boundary": value.pop("boundary", []),
-            }
-        if "diagnostics" not in value:
-            value["diagnostics"] = {
-                "execution_trace": value.pop("execution_trace", []),
-                "used_tools": value.pop("used_tools", []),
-                "citations": value.pop("citations", []),
-                "research_notes": value.pop("research_notes", []),
-                "audit_issues": value.pop("audit_issues", []),
-                "thinking_timeline": value.pop("thinking_timeline", []),
-                "planning_summary": value.pop("planning_summary", ""),
-                "audit_summary": value.pop("audit_summary", ""),
-                "replan_count": value.pop("replan_count", 0),
-                "error": value.pop("error", ""),
-            }
         if value.get("stage"):
             return value
         status = str(value.get("status") or "").strip()
@@ -742,41 +715,6 @@ class AgentSessionSnapshotRequest(BaseModel):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_legacy_shape(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        value = dict(value)
-        if "output" not in value:
-            value["output"] = {
-                "cards": value.pop("cards", []),
-                "clarification_question": value.pop("clarification_question", ""),
-                "clarification_options": value.pop("clarification_options", []),
-                "risk_prompt": value.pop("risk_prompt", ""),
-                "next_suggestions": value.pop("next_suggestions", []),
-                "panel_payloads": value.pop("panel_payloads", {}),
-                "decision": value.pop("decision", {}),
-                "support": value.pop("support", []),
-                "counterpoints": value.pop("counterpoints", []),
-                "actions": value.pop("actions", []),
-                "boundary": value.pop("boundary", []),
-            }
-        if "diagnostics" not in value:
-            value["diagnostics"] = {
-                "execution_trace": value.pop("execution_trace", []),
-                "used_tools": value.pop("used_tools", []),
-                "citations": value.pop("citations", []),
-                "research_notes": value.pop("research_notes", []),
-                "audit_issues": value.pop("audit_issues", []),
-                "thinking_timeline": value.pop("thinking_timeline", []),
-                "planning_summary": value.pop("planning_summary", ""),
-                "audit_summary": value.pop("audit_summary", ""),
-                "replan_count": value.pop("replan_count", 0),
-                "error": value.pop("error", ""),
-            }
-        return value
 
 
 class AgentSessionMetadataPatchRequest(BaseModel):

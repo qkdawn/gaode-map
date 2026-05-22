@@ -9,7 +9,6 @@ from core.config import settings
 
 from .auditor import audit_execution
 from .context_builder import build_context_bundle, build_context_summary
-from .executor import execute_plan_step
 from .gate import latest_user_message
 from .governance import check_tool_governance
 from .memory import create_working_memory
@@ -40,6 +39,7 @@ from .synthesizer import (
     build_synthesis_payload,
     enrich_answer_output,
 )
+from .tool_service import run_registered_tool
 from .tools import get_tool_registry
 
 StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
@@ -274,13 +274,16 @@ async def _execute_planned_steps(
                 context_summary=build_context_summary(snapshot, memory.artifacts),
                 plan=plan_envelope,
             )
-        result, trace = await execute_plan_step(
-            registered_tool=registered,
+        execution = await run_registered_tool(
+            registry=registry,
             step=step,
             snapshot=snapshot,
             artifacts=memory.artifacts,
             question=question,
+            caller="internal",
         )
+        result = execution.result
+        trace = execution.trace
         data_readiness = dict(result.result.get("data_readiness") or {}) if isinstance(result.result, dict) else {}
         if data_readiness.get("checked"):
             await _emit_preflight_trace(

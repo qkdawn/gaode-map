@@ -58,13 +58,9 @@ def _compact_h3_evidence(value: Any, cell_limit: int = 40, row_limit: int = 20) 
 
     derived = value.get("derived_stats") if isinstance(value.get("derived_stats"), dict) else {}
 
-    def rows_from(compact_key: str, legacy_key: str) -> List[Dict[str, Any]]:
+    def rows_from(compact_key: str) -> List[Dict[str, Any]]:
         rows = derived.get(compact_key)
-        if isinstance(rows, list):
-            return rows[:row_limit]
-        legacy = derived.get(legacy_key) if isinstance(derived.get(legacy_key), dict) else {}
-        legacy_rows = legacy.get("rows") if isinstance(legacy.get("rows"), list) else []
-        return legacy_rows[:row_limit]
+        return rows[:row_limit] if isinstance(rows, list) else []
 
     return {
         "evidence_version": value.get("evidence_version") or "poi_h3_evidence_v1",
@@ -81,10 +77,10 @@ def _compact_h3_evidence(value: Any, cell_limit: int = 40, row_limit: int = 20) 
         "charts": value.get("charts") or {},
         "cells": compact_cells,
         "derived_stats": {
-            "structure_rows": rows_from("structure_rows", "structureSummary"),
-            "typing_rows": rows_from("typing_rows", "typingSummary"),
-            "lq_rows": rows_from("lq_rows", "lqSummary"),
-            "gap_rows": rows_from("gap_rows", "gapSummary"),
+            "structure_rows": rows_from("structure_rows"),
+            "typing_rows": rows_from("typing_rows"),
+            "lq_rows": rows_from("lq_rows"),
+            "gap_rows": rows_from("gap_rows"),
         },
         "omitted": {
             "cells_total": ((value.get("omitted") or {}).get("cells_total") if isinstance(value.get("omitted"), dict) else len(cells)),

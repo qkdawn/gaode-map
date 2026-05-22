@@ -4,7 +4,6 @@ from typing import Any, Dict, List
 
 from ..analysis_extractors import (
     analyze_poi_mix,
-    build_h3_structure_analysis,
     build_nightlight_pattern_analysis,
     build_poi_structure_analysis,
     build_population_profile_analysis,
@@ -22,6 +21,7 @@ from .capability_tools import (
     get_area_data_bundle,
     infer_area_labels,
 )
+from .scope_tools import extract_scope_polygon
 
 
 def _pack_evidence_chain(*items: tuple[str, Any, str, str]) -> List[Dict[str, Any]]:
@@ -154,6 +154,12 @@ async def run_site_selection_pack(
 ) -> ToolResult:
     policy = resolve_policy(arguments.get("policy_key"), fallback="business_catchment_1km")
     local_artifacts = dict(artifacts or {})
+    polygon = extract_scope_polygon(snapshot)
+    if polygon and not local_artifacts.get("scope_polygon"):
+        local_artifacts["scope_polygon"] = polygon
+    scope = snapshot.scope if isinstance(snapshot.scope, dict) else {}
+    if scope and not local_artifacts.get("scope_data"):
+        local_artifacts["scope_data"] = scope
 
     business_result = await run_business_site_advice(
         arguments={
@@ -182,8 +188,9 @@ async def run_site_selection_pack(
             artifacts=dict(local_artifacts),
         )
 
+    resolved_place_type = str(business_result.result.get("place_type") or arguments.get("place_type") or "").strip()
     gap_result = await analyze_target_supply_gap_from_scope(
-        arguments={"place_type": str(arguments.get("place_type") or "")},
+        arguments={"place_type": resolved_place_type},
         snapshot=snapshot,
         artifacts=local_artifacts,
         question=question,
@@ -218,7 +225,7 @@ async def run_site_selection_pack(
         "confidence": scoring.get("confidence") or "weak",
         "policy_key": policy["policy_key"],
         "policy_params": policy,
-        "place_type": business_result.result.get("place_type") or gap_result.result.get("place_type") or str(arguments.get("place_type") or "").strip(),
+        "place_type": resolved_place_type or gap_result.result.get("place_type") or str(arguments.get("place_type") or "").strip(),
         "summary_text": scoring.get("summary_text") or gap_result.result.get("summary_text") or "",
     }
     return ToolResult(

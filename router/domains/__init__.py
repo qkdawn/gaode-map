@@ -12,6 +12,7 @@ from .population import router as population_router
 from .road import router as road_router
 from .system import router as system_router
 from .timeseries import router as timeseries_router
+from .tools import router as tools_router
 
 __all__ = [
     "agent_router",
@@ -28,4 +29,5 @@ __all__ = [
     "road_router",
     "system_router",
     "timeseries_router",
+    "tools_router",
 ]

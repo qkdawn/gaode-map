@@ -1,6 +1,8 @@
 ﻿import asyncio
 
 import modules.agent.tool_adapters.business_tools as business_tools
+import modules.agent.tool_adapters.h3_tools as h3_tools
+import modules.agent.tool_adapters.road_tools as road_tools
 import modules.agent.tool_adapters.scenario_tools as scenario_tools
 from modules.agent.schemas import AnalysisSnapshot, ToolResult
 
@@ -116,6 +118,50 @@ def test_run_business_site_advice_requires_resolved_place_type():
     assert result.error == "unresolved_place_type"
 
 
+def test_run_business_site_advice_infers_target_from_descriptive_place_type(monkeypatch):
+    async def fake_fetch(*, arguments, snapshot, artifacts, question):
+        del snapshot, artifacts, question
+        return ToolResult(
+            tool_name="fetch_pois_in_scope",
+            status="success",
+            artifacts={
+                "current_pois": [],
+                "current_poi_summary": {"total": 0, "types": arguments["types"], "keywords": arguments["keywords"]},
+            },
+        )
+
+    async def fake_h3(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        return ToolResult(
+            tool_name="compute_h3_metrics_from_scope_and_pois",
+            status="success",
+            artifacts={"current_h3_summary": {"grid_count": 1, "poi_count": 0}},
+        )
+
+    async def fake_optional(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        return ToolResult(tool_name="optional", status="success")
+
+    monkeypatch.setattr(business_tools, "fetch_pois_in_scope", fake_fetch)
+    monkeypatch.setattr(business_tools, "compute_h3_metrics_from_scope_and_pois", fake_h3)
+    monkeypatch.setattr(business_tools, "compute_population_overview_from_scope", fake_optional)
+    monkeypatch.setattr(business_tools, "compute_nightlight_overview_from_scope", fake_optional)
+    monkeypatch.setattr(business_tools, "compute_road_syntax_from_scope", fake_optional)
+
+    snapshot = _snapshot_with_scope()
+    result = asyncio.run(
+        business_tools.run_business_site_advice(
+            arguments={"place_type": "咖啡店选址"},
+            snapshot=snapshot,
+            artifacts={"scope_polygon": snapshot.scope["polygon"]},
+            question="分析适合开在哪里",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.result["place_type"] == "咖啡厅"
+
+
 def test_run_business_site_advice_degrades_optional_tool_failure(monkeypatch):
     async def fake_fetch(*, arguments, snapshot, artifacts, question):
         del arguments, snapshot, artifacts, question
@@ -155,6 +201,60 @@ def test_run_business_site_advice_degrades_optional_tool_failure(monkeypatch):
 
     assert result.status == "success"
     assert any("已降级继续" in warning for warning in result.warnings)
+
+
+def test_compute_h3_metrics_uses_keyword_arguments(monkeypatch):
+    seen = {}
+
+    def fake_analyze_h3_grid(**kwargs):
+        seen.update(kwargs)
+        return {
+            "grid": {"type": "FeatureCollection", "features": [], "count": 0},
+            "summary": {"grid_count": 0, "poi_count": 0, "avg_density_poi_per_km2": 0.0},
+            "charts": {},
+        }
+
+    monkeypatch.setattr(h3_tools, "analyze_h3_grid", fake_analyze_h3_grid)
+
+    snapshot = _snapshot_with_scope()
+    result = asyncio.run(
+        h3_tools.compute_h3_metrics_from_scope_and_pois(
+            arguments={"resolution": 10, "neighbor_ring": 1},
+            snapshot=snapshot,
+            artifacts={"scope_polygon": snapshot.scope["polygon"], "current_pois": []},
+            question="计算 H3",
+        )
+    )
+
+    assert result.status == "success"
+    assert seen["polygon"] == snapshot.scope["polygon"]
+    assert seen["arcgis_timeout_sec"] == 240
+    assert "progress_callback" not in seen
+
+
+def test_compute_road_syntax_uses_keyword_arguments(monkeypatch):
+    seen = {}
+
+    def fake_analyze_road_syntax(**kwargs):
+        seen.update(kwargs)
+        return {"summary": {"node_count": 0, "edge_count": 0, "avg_choice": None}}
+
+    monkeypatch.setattr(road_tools, "analyze_road_syntax", fake_analyze_road_syntax)
+
+    snapshot = _snapshot_with_scope()
+    result = asyncio.run(
+        road_tools.compute_road_syntax_from_scope(
+            arguments={"mode": "walking"},
+            snapshot=snapshot,
+            artifacts={"scope_polygon": snapshot.scope["polygon"]},
+            question="计算路网",
+        )
+    )
+
+    assert result.status == "success"
+    assert seen["polygon"] == snapshot.scope["polygon"]
+    assert seen["arcgis_timeout_sec"] == 60
+    assert "progress_callback" not in seen
 
 
 def test_run_area_character_pack_returns_tags_and_evidence_chain(monkeypatch):
@@ -322,3 +422,79 @@ def test_run_site_selection_pack_returns_ranking(monkeypatch):
     assert result.status == "success"
     assert result.result["ranking"][0]["title"] == "候选：人民路附近"
     assert result.result["candidate_sites"][0]["total_score"] == 81.0
+
+
+def test_run_site_selection_pack_injects_scope_from_snapshot(monkeypatch):
+    seen = {}
+
+    async def fake_business(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, question
+        seen["scope_polygon"] = artifacts.get("scope_polygon")
+        return ToolResult(
+            tool_name="run_business_site_advice",
+            status="success",
+            result={"place_type": "咖啡厅", "poi_count": 5},
+            artifacts={**artifacts, "current_poi_summary": {"total": 5}},
+        )
+
+    async def fake_gap(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        return ToolResult(
+            tool_name="analyze_target_supply_gap",
+            status="success",
+            result={"place_type": "咖啡厅", "candidate_zones": []},
+        )
+
+    monkeypatch.setattr(scenario_tools, "run_business_site_advice", fake_business)
+    monkeypatch.setattr(scenario_tools, "analyze_target_supply_gap_from_scope", fake_gap)
+
+    snapshot = _snapshot_with_scope()
+    result = asyncio.run(
+        scenario_tools.run_site_selection_pack(
+            arguments={"place_type": "咖啡厅", "policy_key": "business_catchment_1km"},
+            snapshot=snapshot,
+            artifacts={},
+            question="我想在这里开一家咖啡店，给我建议",
+        )
+    )
+
+    assert result.status == "success"
+    assert seen["scope_polygon"] == snapshot.scope["polygon"]
+
+
+def test_run_site_selection_pack_uses_resolved_place_type_for_gap(monkeypatch):
+    seen = {}
+
+    async def fake_business(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, question
+        return ToolResult(
+            tool_name="run_business_site_advice",
+            status="success",
+            result={"place_type": "咖啡厅", "poi_count": 0},
+            artifacts=artifacts,
+        )
+
+    async def fake_gap(*, arguments, snapshot, artifacts, question):
+        del snapshot, artifacts, question
+        seen["place_type"] = arguments.get("place_type")
+        return ToolResult(
+            tool_name="analyze_target_supply_gap",
+            status="success",
+            result={"place_type": arguments.get("place_type"), "candidate_zones": []},
+        )
+
+    monkeypatch.setattr(scenario_tools, "run_business_site_advice", fake_business)
+    monkeypatch.setattr(scenario_tools, "analyze_target_supply_gap_from_scope", fake_gap)
+
+    result = asyncio.run(
+        scenario_tools.run_site_selection_pack(
+            arguments={"place_type": "咖啡店选址", "policy_key": "business_catchment_1km"},
+            snapshot=_snapshot_with_scope(),
+            artifacts={"scope_polygon": _snapshot_with_scope().scope["polygon"]},
+            question="分析适合开在哪里",
+        )
+    )
+
+    assert result.status == "success"
+    assert seen["place_type"] == "咖啡厅"
+    assert result.result["place_type"] == "咖啡厅"

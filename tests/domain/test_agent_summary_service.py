@@ -257,33 +257,31 @@ def _valid_summary_pack():
             "supporting_clause": "缺少中心型商业吸引力。",
         },
         "icsc_tags": ["餐饮主导", "购物配套较强"],
-        "secondary_conclusions": [
-            {
-                "section_key": "spatial_structure",
-                "title": "空间结构",
-                "reasoning": "整体呈多核分布，但核心之间联系较弱。",
-                "dimensions": [
-                    {"key": "aggregation", "label": "聚集性", "conclusion": "热点形成，但集中度有限。"},
-                    {"key": "mixing", "label": "混合性", "conclusion": "功能混合度中等。"},
-                    {"key": "morphology", "label": "形态性", "conclusion": "整体偏分散。"},
-                ],
-            },
-            {
-                "section_key": "poi_structure",
-                "title": "POI结构",
-                "reasoning": "业态以生活消费和餐饮为主。",
-            },
-            {
-                "section_key": "consumption_vitality",
-                "title": "经济活动强度",
-                "reasoning": "夜间经济活动强度偏弱，暂不能据此判断全天候经济活动表现。",
-            },
-            {
-                "section_key": "business_support",
-                "title": "业态承接",
-                "reasoning": "路网可以承接社区级消费，但难支撑更高能级集聚。",
-            },
-        ],
+        "spatial_structure": {
+            "section_key": "spatial_structure",
+            "title": "空间结构",
+            "reasoning": "整体呈多核分布，但核心之间联系较弱。",
+            "dimensions": [
+                {"key": "aggregation", "label": "聚集性", "conclusion": "热点形成，但集中度有限。"},
+                {"key": "mixing", "label": "混合性", "conclusion": "功能混合度中等。"},
+                {"key": "morphology", "label": "形态性", "conclusion": "整体偏分散。"},
+            ],
+        },
+        "poi_structure": {
+            "section_key": "poi_structure",
+            "title": "POI结构",
+            "reasoning": "业态以生活消费和餐饮为主。",
+        },
+        "consumption_vitality": {
+            "section_key": "consumption_vitality",
+            "title": "经济活动强度",
+            "reasoning": "夜间经济活动强度偏弱，暂不能据此判断全天候经济活动表现。",
+        },
+        "business_support": {
+            "section_key": "business_support",
+            "title": "业态承接",
+            "reasoning": "路网可以承接社区级消费，但难支撑更高能级集聚。",
+        },
         "user_profile": {
             "headline": "本地居民为主的稳定消费人群",
             "traits": ["以周边社区居民为主", "高频低客单消费", "以便利和就近为核心决策"],
@@ -741,7 +739,7 @@ def test_generate_poi_iteration_analysis_accepts_report_payload(monkeypatch):
     assert "summary_points" not in result
 
 
-def test_generate_poi_iteration_analysis_rejects_legacy_seven_field_payload(monkeypatch):
+def test_generate_poi_iteration_analysis_rejects_invalid_report_payload(monkeypatch):
     monkeypatch.setattr("modules.agent.iteration_change_service.is_llm_enabled", lambda: True)
 
     async def fake_invoke(**kwargs):
@@ -1151,9 +1149,6 @@ def test_build_agent_poi_iteration_payload_area_heatmap_falls_back_to_poi_bounds
 
 def _valid_summary_pack_new_schema():
     payload = dict(_valid_summary_pack())
-    sections = payload.pop("secondary_conclusions")
-    for section in sections:
-        payload[section["section_key"]] = dict(section)
     payload["tourism_cross_analysis"] = {
         "title": "文旅交叉策划分析",
         "content": "一、综合判断\n成立。\n五、人口 × POI × 夜光交叉诊断\n匹配。\n九、策划结论\n该地块适合以本地客群为核心客群。",
@@ -1264,18 +1259,6 @@ def test_generate_summary_pack_rejects_invalid_llm_payload(monkeypatch):
     assert result.panel_payloads["summary_status"]["retryable"] is False
 
 
-def test_validate_summary_pack_accepts_legacy_area_judgment_array():
-    result = _validate_summary_pack_payload(
-        _valid_summary_pack(),
-        icsc_tags=["餐饮主导"],
-        evidence_refs=["analysis_snapshot.poi_summary"],
-    )
-
-    assert result["spatial_structure"]["title"]
-    assert result["business_support"]["reasoning"]
-    assert "secondary_conclusions" not in result
-
-
 def test_validate_summary_pack_requires_all_area_judgments():
     payload = _valid_summary_pack_new_schema()
     payload.pop("business_support")
@@ -1312,7 +1295,6 @@ def test_generate_summary_pack_returns_new_schema(monkeypatch):
 
     assert result.error == ""
     assert result.summary_pack["headline_judgment"]["summary"].startswith("社区型生活消费商业区")
-    assert "secondary_conclusions" not in result.summary_pack
     assert result.summary_pack["spatial_structure"]["title"]
     assert result.summary_pack["poi_structure"]["reasoning"]
     assert result.summary_pack["consumption_vitality"]["reasoning"]
@@ -1456,7 +1438,6 @@ def test_stream_generate_summary_pack_emits_section_events(monkeypatch):
     assert event_types[-1] == "final"
     final_payload = events[-1].payload
     assert final_payload["summary_pack"]["headline_judgment"]["summary"] == "社区型生活消费商业区"
-    assert "secondary_conclusions" not in final_payload["summary_pack"]
     assert final_payload["summary_pack"]["spatial_structure"]["title"]
     assert final_payload["summary_pack"]["followup_questions"][0] == "解释结论依据"
     assert final_payload["summary_pack"]["validation_results"]["headline"]["source"] == "backend"

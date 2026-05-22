@@ -116,7 +116,11 @@ def llm_visible_registry(registry: Dict[str, RegisteredTool], *, include_seconda
 
 
 def planner_question_archetype(question: str) -> str:
-    return classify_question_type(str(question or "").strip()) or "general"
+    question_text = str(question or "").strip()
+    classified = classify_question_type(question_text) or "general"
+    if classified == "general" and any(token in question_text for token in ("核心", "热点", "集中", "分布", "偏空", "空白", "多核", "单核")):
+        return "metric"
+    return classified
 
 
 def artifact_digest(snapshot: AnalysisSnapshot, memory: WorkingMemory) -> Dict[str, Any]:

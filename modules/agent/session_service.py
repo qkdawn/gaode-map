@@ -243,40 +243,23 @@ def build_turn_persist_payload(payload: AgentTurnRequest, response: AgentTurnRes
 
 
 def _normalize_output(snapshot: Dict[str, Any]) -> AgentTurnOutput:
-    if isinstance(snapshot.get("output"), dict):
-        return AgentTurnOutput(**snapshot.get("output"))
-    return AgentTurnOutput(
-        cards=[item for item in (snapshot.get("cards") or []) if isinstance(item, dict)],
-        clarification_question=str(snapshot.get("clarification_question") or ""),
-        risk_prompt=str(snapshot.get("risk_prompt") or ""),
-        next_suggestions=[str(item) for item in (snapshot.get("next_suggestions") or [])],
-    )
+    output = snapshot.get("output")
+    return AgentTurnOutput(**output) if isinstance(output, dict) else AgentTurnOutput()
 
 
 def _normalize_diagnostics(snapshot: Dict[str, Any]) -> AgentTurnDiagnostics:
-    if isinstance(snapshot.get("diagnostics"), dict):
-        return AgentTurnDiagnostics(**snapshot.get("diagnostics"))
-    return AgentTurnDiagnostics(
-        execution_trace=[item for item in (snapshot.get("execution_trace") or []) if isinstance(item, dict)],
-        used_tools=[str(item) for item in (snapshot.get("used_tools") or [])],
-        citations=[str(item) for item in (snapshot.get("citations") or [])],
-        research_notes=[str(item) for item in (snapshot.get("research_notes") or [])],
-        audit_issues=[],
-        thinking_timeline=[item for item in (snapshot.get("thinking_timeline") or []) if isinstance(item, dict)],
-        error=str(snapshot.get("error") or ""),
-    )
+    diagnostics = snapshot.get("diagnostics")
+    return AgentTurnDiagnostics(**diagnostics) if isinstance(diagnostics, dict) else AgentTurnDiagnostics()
 
 
 def _normalize_context_summary(snapshot: Dict[str, Any]) -> AgentContextSummary:
-    if isinstance(snapshot.get("context_summary"), dict):
-        return AgentContextSummary(**snapshot.get("context_summary"))
-    return AgentContextSummary()
+    context_summary = snapshot.get("context_summary")
+    return AgentContextSummary(**context_summary) if isinstance(context_summary, dict) else AgentContextSummary()
 
 
 def _normalize_plan(snapshot: Dict[str, Any]) -> AgentPlanEnvelope:
-    if isinstance(snapshot.get("plan"), dict):
-        return AgentPlanEnvelope(**snapshot.get("plan"))
-    return AgentPlanEnvelope()
+    plan = snapshot.get("plan")
+    return AgentPlanEnvelope(**plan) if isinstance(plan, dict) else AgentPlanEnvelope()
 
 
 def _build_summary_model(record: Dict[str, Any]) -> AgentSessionSummary:

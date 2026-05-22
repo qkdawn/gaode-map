@@ -57,6 +57,42 @@ def test_get_tool_registry_exposes_stage1_tools():
     assert registry["compute_road_syntax_from_scope"].spec.risk_level == "safe"
 
 
+def test_get_tool_registry_keeps_expected_tool_order():
+    registry = get_tool_registry()
+
+    assert list(registry.keys()) == [
+        "read_current_scope",
+        "read_current_results",
+        "fetch_pois_in_scope",
+        "build_h3_grid_from_scope",
+        "compute_h3_metrics_from_scope_and_pois",
+        "compute_population_overview_from_scope",
+        "compute_nightlight_overview_from_scope",
+        "compute_road_syntax_from_scope",
+        "get_area_data_bundle",
+        "analyze_poi_structure",
+        "analyze_spatial_structure",
+        "infer_area_labels",
+        "score_site_candidates",
+        "run_area_character_pack",
+        "run_site_selection_pack",
+        "run_vitality_assessment_pack",
+        "run_tod_pack",
+        "run_livability_pack",
+        "run_facility_gap_pack",
+        "run_renewal_priority_pack",
+        "read_poi_structure_analysis",
+        "read_h3_structure_analysis",
+        "read_road_pattern_analysis",
+        "read_population_profile_analysis",
+        "read_nightlight_pattern_analysis",
+        "analyze_poi_mix_from_scope",
+        "detect_commercial_hotspots",
+        "analyze_target_supply_gap",
+        "run_business_site_advice",
+    ]
+
+
 def test_validate_tool_arguments_rejects_unknown_keys():
     registry = get_tool_registry()
     errors = validate_tool_arguments(

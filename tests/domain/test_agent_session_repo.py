@@ -25,7 +25,7 @@ def test_upsert_and_get_agent_session_record(monkeypatch):
     repo.upsert_record(
         "agent-1",
         title="商业分析",
-        preview="开始一段新的分析对话",
+        preview="开始一份新的区域分析",
         status="answered",
         history_id="history-current",
         panel_kind="commercial_summary",
@@ -42,7 +42,7 @@ def test_upsert_and_get_agent_session_record(monkeypatch):
     assert record is not None
     assert record["id"] == "agent-1"
     assert record["title"] == "商业分析"
-    assert record["preview"] == "开始一段新的分析对话"
+    assert record["preview"] == "开始一份新的区域分析"
     assert record["status"] == "answered"
     assert record["history_id"] == "history-current"
     assert record["panel_kind"] == "commercial_summary"

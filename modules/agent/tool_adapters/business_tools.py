@@ -16,7 +16,13 @@ ToolAdapter = Callable[..., Awaitable[ToolResult]]
 
 def _resolve_target(arguments: Dict[str, Any], question: str) -> Optional[Dict[str, Any]]:
     place_type = str(arguments.get("place_type") or "").strip()
-    return resolve_type_info(place_type) if place_type else infer_type_info_from_text(question)
+    if place_type:
+        return (
+            resolve_type_info(place_type)
+            or infer_type_info_from_text(place_type)
+            or infer_type_info_from_text(f"{place_type} {question}")
+        )
+    return infer_type_info_from_text(question)
 
 
 def _child_status(result: ToolResult) -> Dict[str, Any]:
@@ -26,6 +32,21 @@ def _child_status(result: ToolResult) -> Dict[str, Any]:
         "error": result.error or "",
         "warning_count": len(result.warnings or []),
     }
+
+
+def _friendly_optional_tool_warning(tool_name: str, error: str = "") -> str:
+    labels = {
+        "compute_population_overview_from_scope": "人口数据",
+        "compute_nightlight_overview_from_scope": "夜间灯光数据",
+        "compute_road_syntax_from_scope": "路网可达性数据",
+    }
+    label = labels.get(tool_name, tool_name)
+    suffix = "，已降级继续"
+    if str(error or "").strip() == "ValueError":
+        return f"{label}当前不可用{suffix}"
+    if str(error or "").strip() == "RuntimeError":
+        return f"{label}服务暂不可用{suffix}"
+    return f"{label}暂未跑通{suffix}"
 
 
 async def _run_child_tool(
@@ -209,8 +230,9 @@ async def run_business_site_advice(
         if result.status == "success":
             artifacts.update(result.artifacts or {})
         else:
-            warnings.append(f"{tool_name} 执行失败，已降级继续：{result.error or 'unknown_error'}")
-        warnings.extend(result.warnings or [])
+            warnings.append(_friendly_optional_tool_warning(tool_name, result.error or ""))
+        if result.status == "success":
+            warnings.extend(result.warnings or [])
 
     business_site_advice = {
         "resolved": True,
