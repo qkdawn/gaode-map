@@ -977,7 +977,7 @@
                                             <section v-if="false" class="agent-summary-task-card">
                                                 <div class="agent-summary-task-head">
                                                     <div class="agent-summary-task-title">迭代栅格状态</div>
-                                                    <div class="agent-summary-task-status">shared cell_id · {{ getAgentIterationPoiRasterGridYearRows().filter((row) => row.status === 'ready').length }}/{{ getAgentIterationPoiRasterGridYearRows().length }}</div>
+                                                    <div class="agent-summary-task-status">shared cell_id · {{ getAgentIterationPoiRasterGridReadyCount() }}/{{ getAgentIterationPoiRasterGridYearRows().length }}</div>
                                                 </div>
                                                 <div
                                                     v-for="row in getAgentIterationPoiRasterGridYearRows()"
@@ -989,7 +989,7 @@
                                                     <span>{{ row.label }} · 栅格 {{ row.resolution }}</span>
                                                 </div>
                                                 <div
-                                                    v-for="row in getAgentIterationPoiRasterGridYearRows().filter((item) => item.error)"
+                                                    v-for="row in getAgentIterationPoiRasterGridErrorRows()"
                                                     :key="`iteration-poi-raster-error-${row.year}`"
                                                     class="agent-summary-task-error">
                                                     {{ row.year }} 年：{{ row.error }}
@@ -998,7 +998,7 @@
                                             <section class="agent-summary-task-card">
                                                 <div class="agent-summary-task-head">
                                                     <div class="agent-summary-task-title">迭代 H3 状态</div>
-                                                    <div class="agent-summary-task-status">最新 {{ getAgentIterationPoiLatestH3YearLabel() }} · {{ getAgentIterationPoiGridYearRows().filter((row) => row.status === 'ready').length }}/{{ getAgentIterationPoiGridYearRows().length }} 完成</div>
+                                                    <div class="agent-summary-task-status">最新 {{ getAgentIterationPoiLatestH3YearLabel() }} · {{ getAgentIterationPoiGridReadyCount() }}/{{ getAgentIterationPoiGridYearRows().length }} 完成</div>
                                                 </div>
                                                 <div
                                                     v-for="row in getAgentIterationPoiGridYearRows()"
@@ -1010,7 +1010,7 @@
                                                     <span>{{ row.stageLabel || row.label }} · H3 {{ row.resolution }}<template v-if="row.detailLabel"> · {{ row.detailLabel }}</template></span>
                                                 </div>
                                                 <div
-                                                    v-for="row in getAgentIterationPoiGridYearRows().filter((item) => item.error)"
+                                                    v-for="row in getAgentIterationPoiGridErrorRows()"
                                                     :key="`iteration-poi-grid-error-${row.year}`"
                                                     class="agent-summary-task-error">
                                                     {{ row.year }} 年：{{ row.error }}
@@ -2065,8 +2065,8 @@
                                     <div class="agent-summary-kv">
                                         <div><strong>{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).title) || '当前对象' }}</strong></div>
                                         <div>{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).summary) || '暂无摘要' }}</div>
-                                        <div v-if="((((getAgentActiveDeepAnalysisTab() || {}).target || {}).evidence || []).length">
-                                            证据：{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).evidence || []).slice(0, 3).map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join('；') }}
+                                        <div v-if="getAgentDeepAnalysisEvidencePreview()">
+                                            证据：{{ getAgentDeepAnalysisEvidencePreview() }}
                                         </div>
                                     </div>
                                 </section>
@@ -2383,13 +2383,13 @@
 
                                 __AGENT_CLARIFICATION_CARD__
 
-                                <div v-else-if="agentRiskPrompt" class="agent-message-row is-assistant">
+                                <div v-if="agentRiskPrompt && !agentClarificationQuestion" class="agent-message-row is-assistant">
                                     <div class="agent-message-bubble is-assistant agent-message-bubble-note">
                                         <div>{{ agentRiskPrompt }}</div>
                                     </div>
                                 </div>
 
-                                <div v-else-if="agentError" class="agent-message-row is-assistant">
+                                <div v-if="agentError && !agentClarificationQuestion && !agentRiskPrompt" class="agent-message-row is-assistant">
                                     <div class="agent-message-bubble is-assistant agent-message-bubble-error">
                                         {{ agentError }}
                                     </div>

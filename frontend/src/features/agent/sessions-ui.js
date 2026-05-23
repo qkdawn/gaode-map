@@ -3326,6 +3326,25 @@ function createAgentUiMethods() {
     getAgentDeepAnalysisModeLabel(mode = '') {
       return asText(mode || this.agentDeepAnalysisMode) === 'deep' ? '深度思考' : '快速分析'
     },
+    getAgentDeepAnalysisEvidencePreview(limit = 3) {
+      const activeTab = this.getAgentActiveDeepAnalysisTab()
+      const target = activeTab && activeTab.target && typeof activeTab.target === 'object'
+        ? activeTab.target
+        : {}
+      return cloneArray(target.evidence)
+        .slice(0, Math.max(1, Number(limit || 3)))
+        .map((item) => {
+          if (typeof item === 'string') return item
+          try {
+            return JSON.stringify(item)
+          } catch (_) {
+            return asText(item)
+          }
+        })
+        .map((item) => clampText(item, 120))
+        .filter(Boolean)
+        .join('；')
+    },
     buildAgentDeepAnalysisResultModule(seed = {}) {
       const activeTab = this.getAgentActiveDeepAnalysisTab()
       const target = this.normalizeContextAskTarget((seed && seed.target) || (activeTab && activeTab.target))
@@ -4569,6 +4588,15 @@ function createAgentUiMethods() {
         }
       })
     },
+    getAgentIterationPoiGridReadyCount() {
+      return this.getAgentIterationPoiGridYearRows()
+        .filter((row) => asText(row && row.status) === 'ready')
+        .length
+    },
+    getAgentIterationPoiGridErrorRows() {
+      return this.getAgentIterationPoiGridYearRows()
+        .filter((row) => !!asText(row && row.error))
+    },
     getAgentIterationPoiRasterGridYearRows() {
       const years = this.getAgentIterationPoiDataCompletionYears()
       const yearly = this.getAgentIterationPoiYearlyGridEvidence()
@@ -4595,6 +4623,15 @@ function createAgentUiMethods() {
           error: asText(item.error) || (status === 'failed' ? asText(task.error) : ''),
         }
       })
+    },
+    getAgentIterationPoiRasterGridReadyCount() {
+      return this.getAgentIterationPoiRasterGridYearRows()
+        .filter((row) => asText(row && row.status) === 'ready')
+        .length
+    },
+    getAgentIterationPoiRasterGridErrorRows() {
+      return this.getAgentIterationPoiRasterGridYearRows()
+        .filter((row) => !!asText(row && row.error))
     },
     getAgentIterationPoiLatestH3YearLabel() {
       const yearly = this.getAgentIterationPoiYearlyGridEvidence()
