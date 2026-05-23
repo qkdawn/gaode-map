@@ -146,6 +146,40 @@ class AgentSiteSelectionResponse(BaseModel):
     error: str = ""
 
 
+class ContextAskTarget(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate"] = "report_section"
+    id: str = ""
+    title: str = ""
+    source: Literal["report", "iteration", "site_selection"] = "report"
+    summary: str = ""
+    evidence: List[Any] = Field(default_factory=list)
+    artifact_refs: List[str] = Field(default_factory=list)
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentContextAskRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    conversation_id: str = ""
+    history_id: str = ""
+    question: str = ""
+    analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
+    target: ContextAskTarget = Field(default_factory=ContextAskTarget)
+
+
+class AgentContextAskResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    status: Literal["success", "failed"] = "success"
+    answer: str = ""
+    evidence: List[Any] = Field(default_factory=list)
+    citations: List[Any] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    error: str = ""
+
+
 class AgentSummaryDataReadiness(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

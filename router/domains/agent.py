@@ -7,6 +7,8 @@ from starlette.concurrency import run_in_threadpool
 
 from modules.agent.runtime import process_agent_turn, stream_agent_turn
 from modules.agent.schemas import (
+    AgentContextAskRequest,
+    AgentContextAskResponse,
     AgentIterationNightlightRequest,
     AgentIterationNightlightResponse,
     AgentIterationPoiBuildRequest,
@@ -27,6 +29,7 @@ from modules.agent.schemas import (
     AgentTurnRequest,
     AgentTurnResponse,
 )
+from modules.agent.context_ask_service import answer_context_ask
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload
 from modules.agent.prompt_registry import (
@@ -128,6 +131,11 @@ async def run_agent_site_selection(payload: AgentSiteSelectionRequest):
     if response.status == "failed" and response.error == "missing_place_type":
         raise HTTPException(status_code=400, detail="missing_place_type")
     return response
+
+
+@router.post("/api/v1/analysis/agent/context-ask", response_model=AgentContextAskResponse)
+async def run_agent_context_ask(payload: AgentContextAskRequest):
+    return await answer_context_ask(payload)
 
 
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])
