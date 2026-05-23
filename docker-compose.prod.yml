@@ -6,7 +6,7 @@ x-app-environment: &app-environment
   VALHALLA_BASE_URL: http://valhalla:8002
   AMAP_WEB_SERVICE_KEY:
   DB_URL:
-  DB_HOST: ${DB_HOST:-175.0.78.138}
+  DB_HOST: ${DB_HOST:-175.0.105.223}
   DB_PORT: ${DB_PORT:-13306}
   DB_USER: ${DB_USER:-map_app}
   DB_PASSWORD:
