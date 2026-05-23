@@ -218,6 +218,266 @@ test('normalizeAgentTurnPayload reads staged backend response shape', () => {
   assert.equal(normalized.plan.summary, '先读取范围，再分析业态结构')
 })
 
+test('context ask target normalization keeps a stable schema', () => {
+  const ctx = createAgentContext()
+  const target = ctx.normalizeContextAskTarget({
+    type: 'site_candidate',
+    id: 'h3-1',
+    title: '候选点',
+    source: 'site_selection',
+    summary: '人口和活力较好',
+    evidence: ['poi', { tool: 'population' }],
+    artifact_refs: ['artifact-1'],
+    payload: { rank: 1 },
+  })
+
+  assert.equal(target.type, 'site_candidate')
+  assert.equal(target.source, 'site_selection')
+  assert.equal(target.id, 'h3-1')
+  assert.deepEqual(target.artifactRefs, ['artifact-1'])
+  assert.equal(target.payload.rank, 1)
+})
+
+test('openContextAsk does not mutate legacy chat state', () => {
+  const ctx = createAgentContext()
+  ctx.agentInput = '旧输入'
+  ctx.agentMessages = [{ role: 'user', content: '旧消息' }]
+
+  ctx.openContextAsk(ctx.buildReportSectionContextAskTarget({
+    sectionKey: 'headline',
+    title: '核心判断',
+    summary: '商业活力较强',
+  }))
+
+  assert.equal(ctx.contextAskVisible, true)
+  assert.equal(ctx.contextAskTarget.type, 'report_section')
+  assert.equal(ctx.agentInput, '旧输入')
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['旧消息'])
+})
+
+test('context ask survives report detail tab switching', () => {
+  const ctx = createAgentContext()
+  ctx.openContextAsk({ type: 'report_section', title: '核心判断', source: 'report', summary: 'A' })
+  ctx.contextAskMessages.push({ role: 'user', content: '为什么？' })
+
+  const iterationId = ctx.openAgentIterationChangeFromReport({ autoload: false })
+  ctx.openAgentSiteSelectionFromReport()
+  ctx.switchAgentTopTab(iterationId)
+
+  assert.equal(ctx.contextAskVisible, true)
+  assert.equal(ctx.contextAskTarget.title, '核心判断')
+  assert.deepEqual(ctx.contextAskMessages.map((item) => item.content), ['我会围绕“核心判断”解释，不会离开当前区域上下文。', '为什么？'])
+})
+
+test('deep analysis tab persists target across report detail switching', () => {
+  const ctx = createAgentContext()
+  const target = ctx.buildReportSectionContextAskTarget({
+    sectionKey: 'headline',
+    title: '核心判断',
+    summary: '需要继续识别断点',
+  })
+
+  const deepId = ctx.openAgentDeepAnalysisFromTarget(target, { question: '识别断点街区' })
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
+  assert.equal(ctx.getAgentActiveDeepAnalysisTab().target.title, '核心判断')
+  assert.equal(ctx.agentInput, '识别断点街区')
+
+  ctx.openAgentIterationChangeFromReport({ autoload: false })
+  ctx.openAgentSiteSelectionFromReport()
+  ctx.switchAgentTopTab(deepId)
+
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
+  assert.equal(ctx.getAgentActiveDeepAnalysisTab().target.summary, '需要继续识别断点')
+  assert.equal(ctx.agentInput, '识别断点街区')
+})
+
+test('deep analysis submit keeps its tab and sends target context without creating followup', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.openAgentDeepAnalysisFromTarget({
+    type: 'report_section',
+    id: 'headline',
+    title: '核心判断',
+    source: 'report',
+    summary: '路网微循环受阻',
+    evidence: ['road_syntax', 'poi_heatmap'],
+  }, { question: '识别断点街区' })
+
+  let requestBody = null
+  const previousFetch = global.fetch
+  global.fetch = async (url, options = {}) => {
+    if (String(url).includes('/api/v1/analysis/agent/sessions/')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            id: ctx.activeAgentSessionId,
+            panel_kind: 'deep_analysis',
+            history_id: ctx.getCurrentAgentHistoryId(),
+            status: 'answered',
+            stage: 'answered',
+            messages: ctx.agentMessages,
+            output: {
+              decision: { summary: '断点集中在低连通高活力错配街区。', mode: 'judgment', strength: 'moderate', can_act: true },
+              support: [{ headline: '路网证据', interpretation: '空间句法指标偏弱', source: 'road_syntax', confidence: 'moderate' }],
+              actions: [{ title: '叠加 POI 热力复核', detail: '验证断点周边活力是否被割裂' }],
+              counterpoints: [],
+              boundary: [],
+            },
+            diagnostics: { execution_trace: [{ tool_name: 'compute_road_syntax_from_scope', status: 'success' }], citations: ['road'] },
+            context_summary: {},
+            plan: {},
+            risk_confirmations: [],
+          }
+        },
+      }
+    }
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: {
+              cards: [],
+              decision: { summary: '应优先识别低连通高活力错配街区', mode: 'judgment', strength: 'moderate', can_act: true },
+              support: [],
+              counterpoints: [],
+              actions: [],
+              boundary: [],
+              clarification_question: '',
+              clarification_options: [],
+              risk_prompt: '',
+              next_suggestions: [],
+              panel_payloads: {},
+            },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
+            plan: { steps: [], followup_steps: [], followup_applied: false },
+            risk_confirmations: [],
+          },
+        },
+      },
+    ])
+  }
+
+  try {
+    await ctx.submitAgentTurn({ panelKind: 'deep_analysis' })
+  } finally {
+    global.fetch = previousFetch
+  }
+
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
+  assert.equal(ctx.agentTabs.followupTabs.length, 0)
+  assert.match(requestBody.messages[0].content, /继续分析任务/)
+  assert.match(requestBody.messages[0].content, /核心判断/)
+  assert.match(requestBody.messages[0].content, /road_syntax/)
+  assert.equal(ctx.findAgentSession(ctx.activeAgentSessionId).panelKind, 'deep_analysis')
+})
+
+test('deep analysis mode is included in prompt and result can be written back to report', async () => {
+  const ctx = createAgentContext({
+    agentPanelPayloads: {
+      summary_pack: buildSummaryPack('这是一个以日常生活消费为主的社区级商业区'),
+      summary_status: { status: 'ready', generated: true },
+    },
+  })
+  ctx.agentSessionsLoaded = true
+  ctx.openAgentDeepAnalysisFromTarget({
+    type: 'report_section',
+    id: 'headline',
+    title: '核心判断',
+    source: 'report',
+    summary: '需要继续识别断点',
+    evidence: ['road_syntax'],
+  }, { question: '识别断点街区', mode: 'deep' })
+  ctx.setAgentDeepAnalysisMode('deep')
+  ctx.updateAgentSessionSnapshot(ctx.activeAgentSessionId, (session) => ({
+    ...session,
+    persisted: true,
+    panelKind: 'deep_analysis',
+  }))
+
+  let requestBody = null
+  const previousFetch = global.fetch
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: {
+              cards: [],
+              decision: { summary: '断点集中在低连通高活力错配街区。', mode: 'judgment', strength: 'moderate', can_act: true },
+              support: [{ headline: '路网证据', interpretation: '空间句法指标偏弱', source: 'road_syntax', confidence: 'moderate' }],
+              counterpoints: [],
+              actions: [{ title: '叠加 POI 热力复核', detail: '验证断点周边活力是否被割裂' }],
+              boundary: [],
+              clarification_question: '',
+              clarification_options: [],
+              risk_prompt: '',
+              next_suggestions: [],
+              panel_payloads: {},
+            },
+            diagnostics: { execution_trace: [{ tool_name: 'compute_road_syntax_from_scope', status: 'success' }], used_tools: ['compute_road_syntax_from_scope'], citations: ['road'], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
+            plan: { steps: [], followup_steps: [], followup_applied: false },
+            risk_confirmations: [],
+          },
+        },
+      },
+    ])
+  }
+
+  try {
+    await ctx.submitAgentTurn({ panelKind: 'deep_analysis' })
+  } finally {
+    global.fetch = previousFetch
+  }
+
+  assert.match(requestBody.messages[0].content, /深度思考/)
+  assert.equal(ctx.getAgentDeepAnalysisPreviewModule().mode, 'deep')
+  const module = ctx.writeAgentDeepAnalysisModuleToReport(ctx.getAgentDeepAnalysisPreviewModule())
+  assert.equal(module.conclusion, '断点集中在低连通高活力错配街区。')
+  assert.equal(ctx.getAgentSummaryDeepAnalysisModules().length, 1)
+  assert.equal(ctx.getAgentSummaryDeepAnalysisModules()[0].support[0].source, 'road_syntax')
+})
+
+test('submitContextAskQuestion appends user and assistant messages', async () => {
+  const ctx = createAgentContext()
+  const calls = []
+  const previousFetch = global.fetch
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url, body: JSON.parse(options.body || '{}') })
+    return {
+      ok: true,
+      async json() {
+        return { status: 'success', answer: '依据 POI 和人口证据判断。', evidence: ['e1'], citations: ['c1'], warnings: [] }
+      },
+    }
+  }
+  ctx.activeAgentSessionId = 'agent-1'
+  ctx.openContextAsk({ type: 'report_section', title: '核心判断', source: 'report', summary: 'A' }, { resetMessages: true })
+
+  try {
+    await ctx.submitContextAskQuestion('为什么？')
+  } finally {
+    global.fetch = previousFetch
+  }
+
+  assert.equal(calls[0].url, '/api/v1/analysis/agent/context-ask')
+  assert.equal(calls[0].body.conversation_id, 'agent-1')
+  assert.equal(calls[0].body.target.title, '核心判断')
+  assert.deepEqual(ctx.contextAskMessages.slice(-2).map((item) => item.content), ['为什么？', '依据 POI 和人口证据判断。'])
+})
+
 test('normalizeAgentTurnPayload keeps backward compatibility when structured output is absent', () => {
   const normalized = normalizeAgentTurnPayload({
     status: 'answered',
@@ -3114,6 +3374,12 @@ test('site selection payload normalizes candidates, evidence, and h3 focus actio
   assert.equal(ctx.getAgentSiteSelectionEvidenceChain()[0].value, '1 项')
   assert.equal(candidates[0].positioning, '通勤快取型咖啡店 · 综合评估')
   assert.ok(ctx.getAgentSiteSelectionSelectedValidationSteps().length > 0)
+  const askTarget = ctx.buildSiteCandidateContextAskTarget(candidates[0])
+  assert.equal(askTarget.type, 'site_candidate')
+  assert.equal(askTarget.id, '8928308280fffff')
+  assert.equal(askTarget.payload.rank, 1)
+  assert.equal(askTarget.payload.h3Id, '8928308280fffff')
+  assert.equal(askTarget.evidence.length, 1)
 
   await ctx.onAgentSiteSelectionCandidateClick(candidates[0])
 
@@ -3490,7 +3756,7 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(homeId, 'summary-current')
   assert.equal(ctx.isAgentSummaryTabActive(), true)
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '区域报告')
-  assert.equal(ctx.shouldShowAgentComposer(), true)
+  assert.equal(ctx.shouldShowAgentComposer(), false)
 
   const siteId = ctx.openAgentSiteSelectionFromReport()
   assert.equal(ctx.getAgentActiveTopTab().kind, 'site_selection')
@@ -3513,6 +3779,16 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.getAgentActiveTopTab().kind, 'followup')
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '追问解释')
   assert.equal(ctx.shouldShowAgentComposer(), true)
+
+  const deepId = ctx.openAgentDeepAnalysisFromTarget(ctx.buildReportSectionContextAskTarget({
+    sectionKey: 'headline',
+    title: '核心判断',
+    summary: '继续研究这个判断',
+  }))
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
+  assert.equal(ctx.agentTabs.activeTabId, deepId)
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '继续分析')
+  assert.equal(ctx.shouldShowAgentComposer(), false)
 })
 
 test('summary session history persists tourism cross analysis in summary pack and tabs', () => {

@@ -45,6 +45,31 @@ import { buildAnalysisTaskParamBundle, buildAnalysisTaskParamBundles } from './a
 
 function createAgentRuntimeMethods() {
   return {
+    buildAgentDeepAnalysisPrompt(question = '', targetSeed = null) {
+      const target = typeof this.normalizeContextAskTarget === 'function'
+        ? this.normalizeContextAskTarget(targetSeed)
+        : cloneObject(targetSeed)
+      const mode = asText(this.agentDeepAnalysisMode) === 'deep' ? 'deep' : 'quick'
+      const title = asText(target && target.title) || '当前对象'
+      const source = asText(target && target.source) || 'report'
+      const summary = asText(target && target.summary)
+      const evidence = cloneArray(target && target.evidence)
+        .map((item) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .filter(Boolean)
+        .slice(0, 8)
+      const parts = [
+        mode === 'deep'
+          ? '请把下面的问题作为“深度思考继续分析任务”处理：先重写问题，再盘点证据，规划工具，执行或复用分析结果，最后输出可写回报告的新模块。'
+          : '请把下面的问题作为“快速继续分析任务”处理：优先复用已有证据，必要时少量调用工具，快速输出可写回报告的新模块。',
+        `执行模式：${mode === 'deep' ? '深度思考' : '快速分析'}`,
+        `当前对象：${title}`,
+        `对象来源：${source}`,
+      ]
+      if (summary) parts.push(`对象摘要：${summary}`)
+      if (evidence.length) parts.push(`已有证据：${evidence.join('；')}`)
+      parts.push(`用户问题：${asText(question)}`)
+      return parts.join('\n')
+    },
     normalizeAgentSiteSelectionScope() {
       const normalizeRing = (raw) => {
         if (!Array.isArray(raw) || !raw.length) return []
@@ -1225,10 +1250,17 @@ function createAgentRuntimeMethods() {
       return this.mergeAgentSessionDetail(detail)
     },
     buildTurnContext(options = {}) {
-      const question = String((options && options.prompt) || this.agentInput || '').trim()
+      const panelKind = asText(options && options.panelKind)
+        || (typeof this.getAgentActiveTopTab === 'function' ? asText(this.getAgentActiveTopTab().kind) : '')
+        || 'followup'
+      const target = (options && options.target) || (typeof this.getAgentActiveDeepAnalysisTab === 'function' ? ((this.getAgentActiveDeepAnalysisTab() || {}).target) : null)
+      const rawQuestion = String((options && options.prompt) || this.agentInput || '').trim()
+      const question = panelKind === 'deep_analysis' && typeof this.buildAgentDeepAnalysisPrompt === 'function'
+        ? this.buildAgentDeepAnalysisPrompt(rawQuestion, target)
+        : rawQuestion
       if (!question || this.agentSessionHydrating) return null
       this.ensureAgentPanelReady()
-      if (typeof this.ensureAgentFollowupTabForPrompt === 'function') {
+      if (panelKind !== 'deep_analysis' && typeof this.ensureAgentFollowupTabForPrompt === 'function') {
         this.ensureAgentFollowupTabForPrompt(question)
       }
       const currentSession = this.syncCurrentAgentSession() || this.readSessionState(this.activeAgentSessionId)
@@ -1253,6 +1285,9 @@ function createAgentRuntimeMethods() {
       const nextMessages = [...baseMessages, { role: 'user', content: question }]
       return {
         question,
+        rawQuestion,
+        panelKind,
+        target,
         currentSession,
         targetSessionId,
         wasPersisted,
@@ -1293,6 +1328,8 @@ function createAgentRuntimeMethods() {
       if (!turnContext) return
       const {
         question,
+        rawQuestion,
+        panelKind,
         targetSessionId,
         wasPersisted,
         historyId,
@@ -1302,7 +1339,7 @@ function createAgentRuntimeMethods() {
       } = turnContext
       this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
         ...session,
-        panelKind: 'followup',
+        panelKind,
         persisted: wasPersisted,
         snapshotLoaded: true,
         historyId,
@@ -1337,7 +1374,7 @@ function createAgentRuntimeMethods() {
         reasoningBlocks: [],
         panelPreloadNotes: [],
         preloadedPanelKeys: [],
-        pendingQuestion: question,
+        pendingQuestion: rawQuestion || question,
         autoScrollLocked: false,
         autoScrollSticky: true,
         autoScrollThresholdPx: 24,
@@ -1536,7 +1573,7 @@ function createAgentRuntimeMethods() {
           }
           this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
             ...session,
-            panelKind: 'followup',
+            panelKind,
             persisted: true,
             snapshotLoaded: true,
             status: nextStatus,

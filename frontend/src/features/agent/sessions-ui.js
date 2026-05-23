@@ -99,6 +99,7 @@ function createAgentUiMethods() {
         summaryTabs: [],
         iterationChangeTabs: [],
         siteSelectionTabs: [],
+        deepAnalysisTabs: [],
         followupTabs: [],
         activeTabId: '',
         followupLimit: 6,
@@ -115,11 +116,12 @@ function createAgentUiMethods() {
       if (normalized === 'summary') return '区域总结'
       if (normalized === 'iteration_change') return '多年迭代变化'
       if (normalized === 'site_selection') return '区域内选址'
+      if (normalized === 'deep_analysis') return '继续分析'
       return '追问解释'
     },
     extractAgentTabShortTitle(kind = '', seed = '') {
       const label = this.getAgentTabKindLabel(kind)
-      const raw = clampText(asText(seed).replace(/^(?:区域总结|多年迭代变化|区域内选址|追问解释|总结|追问)\s*[·:：-]\s*/u, '').trim(), 24)
+      const raw = clampText(asText(seed).replace(/^(?:区域总结|多年迭代变化|区域内选址|继续分析|追问解释|总结|追问)\s*[·:：-]\s*/u, '').trim(), 24)
       if (raw) return raw
       return label
     },
@@ -177,6 +179,7 @@ function createAgentUiMethods() {
         thinkingTimeline: cloneArray(normalized.thinkingTimeline),
         pendingTaskConfirmation: cloneObject(normalized.pendingTaskConfirmation),
         riskConfirmations: cloneArray(normalized.riskConfirmations),
+        deepAnalysisMode: asText(normalized.deepAnalysisMode || normalized.deep_analysis_mode) || 'quick',
       }
     },
     buildAgentFollowupThreadFromCurrentState() {
@@ -209,6 +212,7 @@ function createAgentUiMethods() {
         thinkingTimeline: this.agentThinkingTimeline,
         pendingTaskConfirmation: this.agentPendingTaskConfirmation,
         riskConfirmations: this.agentRiskConfirmations,
+        deepAnalysisMode: this.agentDeepAnalysisMode,
       })
     },
     applyAgentFollowupThreadToCurrentState(thread = null) {
@@ -241,6 +245,7 @@ function createAgentUiMethods() {
       this.agentThinkingTimeline = cloneArray(state.thinkingTimeline)
       this.agentPendingTaskConfirmation = cloneAnalysisTaskConfirmation(state.pendingTaskConfirmation)
       this.agentRiskConfirmations = cloneArray(state.riskConfirmations)
+      this.agentDeepAnalysisMode = asText(state.deepAnalysisMode) || 'quick'
     },
     getAgentActiveTopTab() {
       const tabs = this.ensureAgentTabs(false)
@@ -251,6 +256,8 @@ function createAgentUiMethods() {
       if (iterationChangeTab) return { ...cloneObject(iterationChangeTab), kind: 'iteration_change', fixed: false }
       const siteSelectionTab = cloneArray(tabs.siteSelectionTabs).find((item) => asText(item && item.id) === activeId)
       if (siteSelectionTab) return { ...cloneObject(siteSelectionTab), kind: 'site_selection', fixed: false }
+      const deepAnalysisTab = cloneArray(tabs.deepAnalysisTabs).find((item) => asText(item && item.id) === activeId)
+      if (deepAnalysisTab) return { ...cloneObject(deepAnalysisTab), kind: 'deep_analysis', fixed: false }
       const followupTab = cloneArray(tabs.followupTabs).find((item) => asText(item && item.id) === activeId)
       if (followupTab) return { ...cloneObject(followupTab), kind: 'followup', fixed: false }
       return { id: '', kind: '', fixed: false, source: '', sessionId: '', title: '' }
@@ -267,6 +274,9 @@ function createAgentUiMethods() {
     },
     createAgentIterationChangeViewId() {
       return `iteration-change-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    },
+    createAgentDeepAnalysisViewId() {
+      return `deep-analysis-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     },
     isAgentActiveTabReadonly() {
       const activeTab = this.getAgentActiveTopTab()
@@ -481,6 +491,226 @@ function createAgentUiMethods() {
       this.basisPromptEditMode = false
       this.basisPromptError = ''
       this.basisPromptNotice = ''
+    },
+    normalizeContextAskTarget(target = null) {
+      const source = target && typeof target === 'object' ? target : {}
+      const allowedTypes = new Set(['report_section', 'trend_chart', 'trend_metric', 'site_candidate'])
+      const allowedSources = new Set(['report', 'iteration', 'site_selection'])
+      const type = allowedTypes.has(asText(source.type)) ? asText(source.type) : 'report_section'
+      const targetSource = allowedSources.has(asText(source.source)) ? asText(source.source) : 'report'
+      const title = clampText(asText(source.title), 80) || '当前上下文'
+      const evidence = cloneArray(source.evidence || source.evidence_refs || source.evidenceRefs)
+        .map((item) => (item && typeof item === 'object' ? cloneObject(item) : asText(item)))
+        .filter((item) => (typeof item === 'object' ? Object.keys(item).length : !!item))
+      const artifactRefs = cloneArray(source.artifactRefs || source.artifact_refs)
+        .map((item) => asText(item))
+        .filter(Boolean)
+      return {
+        type,
+        id: asText(source.id || source.key) || `${type}-${Date.now().toString(36)}`,
+        title,
+        source: targetSource,
+        summary: clampText(asText(source.summary || source.reasoning || source.content || source.value), 800),
+        evidence,
+        artifactRefs,
+        payload: cloneObject(source.payload),
+      }
+    },
+    getContextAskSourceLabel(source = '') {
+      const labels = {
+        report: '区域报告',
+        iteration: '多年变化',
+        site_selection: '区域内选址',
+      }
+      return labels[asText(source)] || '当前分析'
+    },
+    getContextAskQuickQuestions() {
+      return ['为什么这么判断？', '用了哪些证据？', '这个结论可靠吗？']
+    },
+    openContextAsk(target = null, options = {}) {
+      const normalized = this.normalizeContextAskTarget(target)
+      this.contextAskTarget = normalized
+      this.contextAskVisible = true
+      this.contextAskMinimized = !!options.minimized
+      this.contextAskError = ''
+      this.contextAskDraft = asText(options.question)
+      if (!Array.isArray(this.contextAskMessages) || options.resetMessages) {
+        this.contextAskMessages = []
+      }
+      if (!this.contextAskMessages.length || options.resetMessages) {
+        this.contextAskMessages = [{
+          role: 'assistant',
+          content: `我会围绕“${normalized.title}”解释，不会离开当前区域上下文。`,
+          evidence: [],
+          citations: [],
+          warnings: [],
+        }]
+      }
+      return normalized
+    },
+    closeContextAsk() {
+      this.contextAskVisible = false
+      this.contextAskMinimized = false
+      this.contextAskLoading = false
+      this.contextAskError = ''
+      this.contextAskDraft = ''
+    },
+    minimizeContextAsk() {
+      this.contextAskMinimized = !this.contextAskMinimized
+      this.contextAskVisible = true
+    },
+    resizeContextAsk(size = {}) {
+      const current = this.contextAskSize && typeof this.contextAskSize === 'object'
+        ? this.contextAskSize
+        : { width: 420, height: 560 }
+      const width = Math.min(720, Math.max(320, Number(size.width || current.width || 420)))
+      const height = Math.min(760, Math.max(220, Number(size.height || current.height || 560)))
+      this.contextAskSize = { width, height }
+      return this.contextAskSize
+    },
+    buildContextAskFallbackAnswer(question = '', targetSeed = null) {
+      const target = this.normalizeContextAskTarget(targetSeed || this.contextAskTarget)
+      const summary = asText(target.summary) || '当前对象没有完整自然语言摘要，需要结合右侧证据和图表继续核对。'
+      const evidenceCount = cloneArray(target.evidence).length
+      const refsCount = cloneArray(target.artifactRefs).length
+      const basis = evidenceCount ? `已有 ${evidenceCount} 条证据可参考` : '当前上下文没有传入结构化证据'
+      const refs = refsCount ? `，并关联 ${refsCount} 个产物引用` : ''
+      return [
+        `针对“${target.title}”：${summary}`,
+        `你的问题是“${asText(question) || '请解释这个判断'}”。${basis}${refs}。`,
+        '不确定性：这个回答只解释当前点击对象，不会重新跑工具；如果原始数据缺失或证据链较弱，需要回到报告证据抽屉复核。',
+      ].join('\n')
+    },
+    async submitContextAskQuestion(question = '') {
+      const text = asText(question || this.contextAskDraft).trim()
+      if (!text || this.contextAskLoading) return null
+      const target = this.normalizeContextAskTarget(this.contextAskTarget)
+      this.contextAskVisible = true
+      this.contextAskMinimized = false
+      this.contextAskDraft = ''
+      this.contextAskError = ''
+      this.contextAskMessages = [
+        ...cloneArray(this.contextAskMessages),
+        { role: 'user', content: text },
+      ]
+      this.contextAskLoading = true
+      try {
+        const response = await fetch('/api/v1/analysis/agent/context-ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversation_id: this.getActiveAgentSessionId ? this.getActiveAgentSessionId() : asText(this.activeAgentSessionId),
+            history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
+            question: text,
+            analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
+            target: {
+              ...target,
+              artifact_refs: cloneArray(target.artifactRefs),
+            },
+          }),
+        })
+        let data = {}
+        try { data = await response.json() } catch (_) { data = {} }
+        if (!response.ok || asText(data.status) === 'failed') {
+          throw new Error(asText(data.error || data.detail) || `context_ask_failed_${response.status}`)
+        }
+        const assistant = {
+          role: 'assistant',
+          content: asText(data.answer) || this.buildContextAskFallbackAnswer(text, target),
+          evidence: cloneArray(data.evidence),
+          citations: cloneArray(data.citations),
+          warnings: cloneArray(data.warnings),
+        }
+        this.contextAskMessages = [...cloneArray(this.contextAskMessages), assistant]
+        return assistant
+      } catch (error) {
+        const assistant = {
+          role: 'assistant',
+          content: this.buildContextAskFallbackAnswer(text, target),
+          evidence: cloneArray(target.evidence),
+          citations: cloneArray(target.artifactRefs),
+          warnings: ['AI 解释接口暂不可用，已返回本地规则解释。'],
+        }
+        this.contextAskMessages = [...cloneArray(this.contextAskMessages), assistant]
+        this.contextAskError = asText(error && error.message)
+        return assistant
+      } finally {
+        this.contextAskLoading = false
+      }
+    },
+    buildReportSectionContextAskTarget(seed = {}) {
+      const source = seed && typeof seed === 'object' ? seed : { summary: asText(seed) }
+      const sectionKey = asText(source.sectionKey || source.section_key || source.id || source.key) || 'report-section'
+      const basis = this.buildAgentSummaryBasisPayload
+        ? this.buildAgentSummaryBasisPayload({
+          sectionKey,
+          title: asText(source.title) || '区域报告',
+          reasoning: asText(source.reasoning || source.summary || source.content || source.value),
+        })
+        : {}
+      return this.normalizeContextAskTarget({
+        type: 'report_section',
+        id: sectionKey,
+        title: asText(source.title) || asText(basis.title) || '区域报告',
+        source: 'report',
+        summary: asText(source.summary || source.reasoning || source.content || source.value || basis.currentConclusion),
+        evidence: cloneArray(source.evidence || basis.fields),
+        artifactRefs: cloneArray(source.artifactRefs || source.artifact_refs || basis.evidenceRefs),
+        payload: {
+          section_key: sectionKey,
+          dimensions: cloneArray(source.dimensions),
+          basis,
+        },
+      })
+    },
+    buildIterationContextAskTarget(seed = {}) {
+      const source = seed && typeof seed === 'object' ? seed : { summary: asText(seed) }
+      const kind = asText(source.kind || this.agentIterationActiveKind) || 'poi'
+      const section = asText(source.section || source.id || source.key) || kind
+      const payload = source.payload && typeof source.payload === 'object'
+        ? cloneObject(source.payload)
+        : this.getAgentIterationPayload(kind)
+      return this.normalizeContextAskTarget({
+        type: asText(source.type) || 'trend_metric',
+        id: `${kind}-${section}`,
+        title: asText(source.title) || this.getAgentIterationActiveDescription(),
+        source: 'iteration',
+        summary: asText(source.summary || source.value || payload.notice || payload.report_title),
+        evidence: cloneArray(source.evidence || source.rows || payload.report_sections || payload.ai_summary),
+        artifactRefs: cloneArray(source.artifactRefs || source.artifact_refs),
+        payload: {
+          kind,
+          section,
+          row: cloneObject(source.row),
+          payload,
+        },
+      })
+    },
+    buildSiteCandidateContextAskTarget(candidate = null) {
+      const source = candidate && typeof candidate === 'object'
+        ? candidate
+        : (this.getAgentSiteSelectionSelectedCandidate ? this.getAgentSiteSelectionSelectedCandidate() : {})
+      const evidenceChain = this.getAgentSiteSelectionEvidenceChain ? this.getAgentSiteSelectionEvidenceChain() : []
+      return this.normalizeContextAskTarget({
+        type: 'site_candidate',
+        id: asText(source.h3Id || source.h3_id || source.title) || 'site-candidate',
+        title: asText(source.title) || `候选 ${source.rank || ''}`.trim() || '候选点',
+        source: 'site_selection',
+        summary: asText(source.reason) || cloneArray(source.whySuitable).join('；') || cloneArray(source.strengths).join('；'),
+        evidence: evidenceChain,
+        artifactRefs: [asText(source.h3Id || source.h3_id)].filter(Boolean),
+        payload: {
+          rank: Number(source.rank || 0) || 0,
+          h3Id: asText(source.h3Id || source.h3_id),
+          score: Number(source.totalScore || source.total_score || 0) || 0,
+          reason: asText(source.reason),
+          strengths: cloneArray(source.strengths).map((item) => asText(item)).filter(Boolean),
+          risks: cloneArray(source.risks).map((item) => asText(item)).filter(Boolean),
+          whySuitable: cloneArray(source.whySuitable || source.why_suitable).map((item) => asText(item)).filter(Boolean),
+          validationSteps: cloneArray(source.nextValidationSteps || source.next_validation_steps).map((item) => asText(item)).filter(Boolean),
+          evidence_chain: evidenceChain,
+        },
+      })
     },
     setBasisDrawerTab(tab = 'basic') {
       const key = asText(tab) || 'basic'
@@ -2619,6 +2849,21 @@ function createAgentUiMethods() {
           createdAt: asText(item && item.createdAt) || new Date().toISOString(),
           panelPayloads: cloneObject(item && item.panelPayloads),
         })).filter((item) => item.id),
+        deepAnalysisTabs: cloneArray(base.deepAnalysisTabs).map((item) => ({
+          id: asText(item && item.id),
+          kind: 'deep_analysis',
+          title: asText(item && item.title) || '继续分析',
+          source: asText(item && item.source) || 'draft',
+          sessionId: asText(item && item.sessionId),
+          readonly: !!(item && item.readonly),
+          createdAt: asText(item && item.createdAt) || new Date().toISOString(),
+          target: this.normalizeContextAskTarget(item && item.target),
+          question: asText(item && item.question),
+          mode: asText(item && item.mode) || 'quick',
+          resultModuleId: asText(item && item.resultModuleId),
+          thread: this.createAgentFollowupThreadState(item && item.thread),
+          panelPayloads: cloneObject(item && item.panelPayloads),
+        })).filter((item) => item.id),
         followupTabs: cloneArray(base.followupTabs).map((item) => ({
           id: asText(item && item.id),
           kind: 'followup',
@@ -2674,9 +2919,9 @@ function createAgentUiMethods() {
         }]
       }
       nextTabs.summaryTabs = [...syncedCurrentSummaryTabs, ...historySummaryTabs]
-      const validIds = new Set([...nextTabs.summaryTabs.map((item) => item.id), ...nextTabs.iterationChangeTabs.map((item) => item.id), ...nextTabs.siteSelectionTabs.map((item) => item.id), ...nextTabs.followupTabs.map((item) => item.id)])
+      const validIds = new Set([...nextTabs.summaryTabs.map((item) => item.id), ...nextTabs.iterationChangeTabs.map((item) => item.id), ...nextTabs.siteSelectionTabs.map((item) => item.id), ...nextTabs.deepAnalysisTabs.map((item) => item.id), ...nextTabs.followupTabs.map((item) => item.id)])
       if (!validIds.has(nextTabs.activeTabId)) {
-        nextTabs.activeTabId = nextTabs.summaryTabs[0] ? nextTabs.summaryTabs[0].id : (nextTabs.iterationChangeTabs[0] ? nextTabs.iterationChangeTabs[0].id : (nextTabs.siteSelectionTabs[0] ? nextTabs.siteSelectionTabs[0].id : (nextTabs.followupTabs[0] ? nextTabs.followupTabs[0].id : '')))
+        nextTabs.activeTabId = nextTabs.summaryTabs[0] ? nextTabs.summaryTabs[0].id : (nextTabs.iterationChangeTabs[0] ? nextTabs.iterationChangeTabs[0].id : (nextTabs.siteSelectionTabs[0] ? nextTabs.siteSelectionTabs[0].id : (nextTabs.deepAnalysisTabs[0] ? nextTabs.deepAnalysisTabs[0].id : (nextTabs.followupTabs[0] ? nextTabs.followupTabs[0].id : ''))))
       }
       nextTabs.summaryTab.content = defaultSummaryPack
       nextTabs.summaryTab.evidenceRefs = cloneArray((defaultSummaryPack.evidence_refs || []))
@@ -2712,6 +2957,14 @@ function createAgentUiMethods() {
           source: item.source || 'draft',
           sessionId: item.sessionId || '',
         })),
+        ...tabs.deepAnalysisTabs.map((item) => ({
+          id: item.id,
+          title: item.title || '继续分析',
+          kind: 'deep_analysis',
+          closable: true,
+          source: item.source || 'draft',
+          sessionId: item.sessionId || '',
+        })),
         ...tabs.followupTabs.map((item) => ({
           id: item.id,
           title: item.title || '追问解释',
@@ -2728,11 +2981,20 @@ function createAgentUiMethods() {
       const first = current || cloneArray(tabs.summaryTabs)[0]
       return asText(first && first.id)
     },
+    getAgentWorkspaceNavKicker() {
+      const kind = asText(this.getAgentActiveTopTab().kind)
+      if (kind === 'site_selection') return '区域报告 / 选址'
+      if (kind === 'iteration_change') return '区域报告 / 变化'
+      if (kind === 'deep_analysis') return '区域报告 / 继续分析'
+      if (kind === 'followup') return '区域报告 / 追问'
+      return 'Agent 工作台'
+    },
     getAgentWorkspaceNavTitle() {
       const activeTab = this.getAgentActiveTopTab()
       const kind = asText(activeTab.kind)
       if (kind === 'site_selection') return '区域内选址'
       if (kind === 'iteration_change') return '多年变化'
+      if (kind === 'deep_analysis') return '继续分析'
       if (kind === 'followup') return '追问解释'
       return '区域报告'
     },
@@ -2740,12 +3002,13 @@ function createAgentUiMethods() {
       const kind = asText(this.getAgentActiveTopTab().kind)
       if (kind === 'site_selection') return '从区域报告进入的开店位置判断'
       if (kind === 'iteration_change') return '从区域报告进入的时间变化分析'
+      if (kind === 'deep_analysis') return '基于当前报告对象继续跑工具、生成新证据'
       if (kind === 'followup') return '围绕当前区域报告继续追问'
       if (this.hasAgentSummaryPack()) return '先看判断，再追问、查证据或继续做任务'
       return '先补齐证据并生成当前区域的智能报告'
     },
     isAgentReportDetailView() {
-      return ['site_selection', 'iteration_change', 'followup'].includes(asText(this.getAgentActiveTopTab().kind))
+      return ['site_selection', 'iteration_change', 'deep_analysis', 'followup'].includes(asText(this.getAgentActiveTopTab().kind))
     },
     returnToAgentReportHome() {
       const tabId = this.getAgentReportHomeTabId()
@@ -2778,6 +3041,9 @@ function createAgentUiMethods() {
     isAgentSiteSelectionTabActive() {
       return asText(this.getAgentActiveTopTab().kind) === 'site_selection'
     },
+    isAgentDeepAnalysisTabActive() {
+      return asText(this.getAgentActiveTopTab().kind) === 'deep_analysis'
+    },
     getAgentActiveFollowupTab() {
       const tabs = this.ensureAgentTabs(false)
       const activeId = asText(tabs.activeTabId)
@@ -2790,7 +3056,7 @@ function createAgentUiMethods() {
       if (!target) return
       if (target.readonly) return
       target.thread = this.buildAgentFollowupThreadFromCurrentState()
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
     },
     captureAgentActiveSummaryTabState() {
       const tabs = this.ensureAgentTabs(true)
@@ -2807,7 +3073,7 @@ function createAgentUiMethods() {
       target.panelPayloads = panelPayloads
       target.content = cloneObject(summaryPack)
       target.evidenceRefs = cloneArray(summaryPack.evidence_refs || [])
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
     },
     captureAgentActiveSiteSelectionTabState() {
       const tabs = this.ensureAgentTabs(true)
@@ -2816,18 +3082,36 @@ function createAgentUiMethods() {
       const target = cloneArray(tabs.siteSelectionTabs).find((item) => item.id === activeTab.id)
       if (!target || target.readonly) return
       target.panelPayloads = cloneObject(this.agentPanelPayloads)
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
+    },
+    getAgentActiveDeepAnalysisTab() {
+      const tabs = this.ensureAgentTabs(false)
+      const activeId = asText(tabs.activeTabId)
+      return cloneArray(tabs.deepAnalysisTabs).find((item) => asText(item && item.id) === activeId) || null
+    },
+    captureAgentActiveDeepAnalysisTabState() {
+      const tabs = this.ensureAgentTabs(true)
+      const activeTab = this.getAgentActiveTopTab()
+      if (asText(activeTab.kind) !== 'deep_analysis') return
+      const target = cloneArray(tabs.deepAnalysisTabs).find((item) => item.id === activeTab.id)
+      if (!target || target.readonly) return
+      target.thread = this.buildAgentFollowupThreadFromCurrentState()
+      target.question = asText(this.agentInput || target.question)
+      target.mode = asText(this.agentDeepAnalysisMode || target.mode) || 'quick'
+      target.panelPayloads = cloneObject(this.agentPanelPayloads)
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
     },
     switchAgentTopTab(tabId = '') {
       const nextId = asText(tabId)
       if (!nextId) return
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveSiteSelectionTabState()
+      this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const tabs = this.ensureAgentTabs(true)
       if (tabs.activeTabId === nextId) return
       tabs.activeTabId = nextId
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
       const targetSummary = cloneArray(tabs.summaryTabs).find((item) => item.id === nextId)
       if (targetSummary) {
         this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
@@ -2848,6 +3132,14 @@ function createAgentUiMethods() {
         if (target && target.panelPayloads && typeof target.panelPayloads === 'object') {
           this.agentPanelPayloads = cloneObject(target.panelPayloads)
         }
+      } else if (tabs.deepAnalysisTabs.some((item) => item.id === nextId)) {
+        const target = tabs.deepAnalysisTabs.find((item) => item.id === nextId)
+        this.applyAgentFollowupThreadToCurrentState(target && target.thread)
+        this.agentDeepAnalysisMode = asText(target && target.mode) || 'quick'
+        if (target && target.panelPayloads && typeof target.panelPayloads === 'object') {
+          this.agentPanelPayloads = cloneObject(target.panelPayloads)
+        }
+        this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       } else {
         const target = tabs.followupTabs.find((item) => item.id === nextId)
         if (target) {
@@ -2897,7 +3189,7 @@ function createAgentUiMethods() {
         tabs.summaryTabs = cloneArray(tabs.summaryTabs).map((item) => (item.id === existing.id ? summaryTab : item))
       }
       tabs.activeTabId = summaryTab.id
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncSummaryTaskBoardFromLocalResults()
       this.syncCurrentAgentSession()
@@ -2907,6 +3199,7 @@ function createAgentUiMethods() {
     createAgentSiteSelectionTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
       this.captureAgentActiveSummaryTabState()
+      this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const tabId = this.createAgentSiteSelectionViewId()
       const tab = {
@@ -2921,7 +3214,7 @@ function createAgentUiMethods() {
       }
       tabs.siteSelectionTabs = [...cloneArray(tabs.siteSelectionTabs), tab]
       tabs.activeTabId = tabId
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncCurrentAgentSession()
       return tabId
@@ -2929,6 +3222,7 @@ function createAgentUiMethods() {
     createAgentIterationChangeTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
       this.captureAgentActiveSummaryTabState()
+      this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const reuseExisting = !!options.reuseExisting
       const existing = reuseExisting
@@ -2954,7 +3248,7 @@ function createAgentUiMethods() {
       }
       tabs.activeTabId = tabId
       this.agentIterationActiveKind = tab.activeKind
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncCurrentAgentSession()
       if (options.autoload !== false) {
@@ -2963,6 +3257,153 @@ function createAgentUiMethods() {
         })
       }
       return tabId
+    },
+    createAgentDeepAnalysisTab(options = {}) {
+      const tabs = this.ensureAgentTabs(true)
+      this.captureAgentActiveSummaryTabState()
+      this.captureAgentActiveSiteSelectionTabState()
+      this.captureAgentActiveFollowupTabState()
+      const target = this.normalizeContextAskTarget(options.target)
+      const question = asText(options.question)
+      const titleSeed = asText(options.title || question || target.title)
+      const tabId = this.createAgentDeepAnalysisViewId()
+      const thread = this.createAgentFollowupThreadState({
+        input: question,
+      })
+      const tab = {
+        id: tabId,
+        kind: 'deep_analysis',
+        title: this.formatAgentTabTitle('deep_analysis', titleSeed),
+        source: asText(options.source) || 'current',
+        sessionId: asText(options.sessionId),
+        readonly: !!options.readonly,
+        createdAt: new Date().toISOString(),
+        target,
+        question,
+        mode: asText(options.mode) || 'quick',
+        thread,
+        panelPayloads: cloneObject(this.agentPanelPayloads),
+      }
+      tabs.deepAnalysisTabs = [...cloneArray(tabs.deepAnalysisTabs), tab]
+      tabs.activeTabId = tabId
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentDeepAnalysisMode = tab.mode
+      this.applyAgentFollowupThreadToCurrentState(thread)
+      this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
+      this.syncCurrentAgentSession()
+      return tabId
+    },
+    openAgentDeepAnalysisFromTarget(target = null, options = {}) {
+      this.agentWorkspaceView = 'report'
+      const normalizedTarget = this.normalizeContextAskTarget(target)
+      if (!asText(this.activeAgentSessionId) && typeof this.createAgentSession === 'function') {
+        const draft = this.createAgentSession('继续分析')
+        this.updateAgentSessions([draft, ...cloneArray(this.agentSessions)], { loaded: this.agentSessionsLoaded })
+        this.activeAgentSessionId = draft.id
+      }
+      return this.createAgentDeepAnalysisTab({
+        target: normalizedTarget,
+        title: options.title || normalizedTarget.title || '继续分析',
+        question: options.question,
+        mode: options.mode || 'quick',
+        source: options.source || normalizedTarget.source || 'current',
+      })
+    },
+    setAgentDeepAnalysisMode(mode = '') {
+      const normalized = asText(mode) === 'deep' ? 'deep' : 'quick'
+      this.agentDeepAnalysisMode = normalized
+      const tabs = this.ensureAgentTabs(true)
+      const activeTab = this.getAgentActiveTopTab()
+      if (asText(activeTab.kind) === 'deep_analysis') {
+        tabs.deepAnalysisTabs = cloneArray(tabs.deepAnalysisTabs).map((item) => (
+          item.id === activeTab.id ? { ...item, mode: normalized } : item
+        ))
+        this.agentTabs = { ...tabs, deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs) }
+        this.syncCurrentAgentSession()
+      }
+      return normalized
+    },
+    getAgentDeepAnalysisModeLabel(mode = '') {
+      return asText(mode || this.agentDeepAnalysisMode) === 'deep' ? '深度思考' : '快速分析'
+    },
+    buildAgentDeepAnalysisResultModule(seed = {}) {
+      const activeTab = this.getAgentActiveDeepAnalysisTab()
+      const target = this.normalizeContextAskTarget((seed && seed.target) || (activeTab && activeTab.target))
+      const decision = cloneObject(seed.decision || this.agentDecision)
+      const support = cloneArray(seed.support || this.agentSupport)
+      const actions = cloneArray(seed.actions || this.agentActions)
+      const counterpoints = cloneArray(seed.counterpoints || this.agentCounterpoints)
+      const boundary = cloneArray(seed.boundary || this.agentBoundary)
+      const question = asText(seed.question || (activeTab && activeTab.question) || this.agentInput || (this.agentMessages[0] && this.agentMessages[0].content))
+      const titleSeed = asText(seed.title || decision.summary || question || target.title)
+      return {
+        id: asText(seed.id) || `deep-module-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        type: 'deep_analysis',
+        title: this.formatAgentTabTitle('deep_analysis', titleSeed),
+        mode: asText(seed.mode || this.agentDeepAnalysisMode) === 'deep' ? 'deep' : 'quick',
+        source: target.source,
+        target,
+        question,
+        conclusion: asText(seed.conclusion || decision.summary),
+        strength: asText(decision.strength || 'weak') || 'weak',
+        support,
+        actions,
+        counterpoints,
+        boundary,
+        evidence: cloneArray(seed.evidence || this.agentCitations || target.evidence),
+        trace: cloneArray(seed.trace || this.agentExecutionTrace),
+        createdAt: asText(seed.createdAt) || new Date().toISOString(),
+      }
+    },
+    getAgentDeepAnalysisPreviewModule() {
+      if (!this.hasAgentStructuredOutput()) return null
+      return this.buildAgentDeepAnalysisResultModule()
+    },
+    getAgentSummaryDeepAnalysisModules(panelPayloads = null) {
+      const pack = this.getAgentSummaryPack(panelPayloads)
+      return cloneArray(pack.deep_analysis_modules || pack.deepAnalysisModules)
+        .map((item) => this.buildAgentDeepAnalysisResultModule(item))
+        .filter((item) => item.id && item.conclusion)
+    },
+    writeAgentDeepAnalysisModuleToReport(moduleSeed = null) {
+      const module = this.buildAgentDeepAnalysisResultModule(moduleSeed || {})
+      if (!module.conclusion) return null
+      const tabs = this.ensureAgentTabs(true)
+      const summaryTab = cloneArray(tabs.summaryTabs).find((item) => asText(item.source) === 'current') || tabs.summaryTabs[0]
+      if (!summaryTab) return null
+      const panelPayloads = cloneObject(summaryTab.panelPayloads || this.agentPanelPayloads)
+      const summaryPack = this.getAgentSummaryPack(panelPayloads)
+      const modules = cloneArray(summaryPack.deep_analysis_modules || summaryPack.deepAnalysisModules)
+      const exists = modules.some((item) => asText(item && item.id) === module.id)
+      const nextModules = exists
+        ? modules.map((item) => (asText(item && item.id) === module.id ? module : item))
+        : [...modules, module]
+      const nextPack = {
+        ...summaryPack,
+        deep_analysis_modules: nextModules,
+      }
+      const nextPayloads = {
+        ...panelPayloads,
+        summary_pack: nextPack,
+      }
+      tabs.summaryTabs = cloneArray(tabs.summaryTabs).map((item) => (
+        item.id === summaryTab.id
+          ? { ...item, panelPayloads: nextPayloads, content: nextPack, evidenceRefs: cloneArray(nextPack.evidence_refs || item.evidenceRefs) }
+          : item
+      ))
+      const activeDeepTab = this.getAgentActiveDeepAnalysisTab()
+      if (activeDeepTab) {
+        tabs.deepAnalysisTabs = cloneArray(tabs.deepAnalysisTabs).map((item) => (
+          item.id === activeDeepTab.id ? { ...item, resultModuleId: module.id } : item
+        ))
+      }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs) }
+      if (asText(this.getAgentActiveTopTab().kind) === 'summary' || asText(summaryTab.source) === 'current') {
+        this.agentPanelPayloads = nextPayloads
+        this.syncAgentSummaryStateFromPanelPayload(nextPayloads)
+      }
+      this.syncCurrentAgentSession()
+      return module
     },
     createAgentFollowupTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
@@ -3034,6 +3475,28 @@ function createAgentUiMethods() {
         thread: this.createAgentFollowupThreadState(session || {}),
       }
     },
+    buildAgentHistoryDeepAnalysisTab(session = null) {
+      const sessionId = asText(session && session.id)
+      const panelPayloads = cloneObject(session && session.panelPayloads)
+      const uiState = cloneObject(panelPayloads.agent_tabs)
+      const savedTabs = cloneArray(uiState.deep_analysis_tabs || uiState.deepAnalysisTabs)
+      const savedTab = savedTabs.find((item) => asText(item && (item.session_id || item.sessionId)) === sessionId) || savedTabs[0] || {}
+      return {
+        id: `deep-analysis-history-${sessionId}`,
+        kind: 'deep_analysis',
+        title: asText(savedTab.title) || this.formatAgentTabTitle('deep_analysis', session && session.title),
+        source: 'history',
+        sessionId,
+        readonly: false,
+        createdAt: new Date().toISOString(),
+        target: this.normalizeContextAskTarget(savedTab.target),
+        question: asText(savedTab.question || session && session.input),
+        mode: asText(savedTab.mode) || 'quick',
+        resultModuleId: asText(savedTab.result_module_id || savedTab.resultModuleId),
+        thread: this.createAgentFollowupThreadState(session || savedTab.thread || {}),
+        panelPayloads,
+      }
+    },
     openAgentSummaryHistoryTab(session = null) {
       if (!session || !asText(session.id)) return null
       const panelPayloads = cloneObject(session.panelPayloads)
@@ -3050,7 +3513,7 @@ function createAgentUiMethods() {
         tabs.summaryTabs = [...cloneArray(tabs.summaryTabs), tab]
         tabs.activeTabId = tab.id
       }
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncCurrentAgentSession()
       return tabs.activeTabId
@@ -3068,7 +3531,25 @@ function createAgentUiMethods() {
         tabs.activeTabId = tab.id
         this.applyAgentFollowupThreadToCurrentState(tab.thread)
       }
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
+      this.syncCurrentAgentSession()
+      return tabs.activeTabId
+    },
+    openAgentDeepAnalysisHistoryTab(session = null) {
+      if (!session || !asText(session.id)) return null
+      const tabs = this.ensureAgentTabs(true)
+      const tab = this.buildAgentHistoryDeepAnalysisTab(session)
+      const existing = cloneArray(tabs.deepAnalysisTabs).find((item) => item.sessionId === tab.sessionId || item.id === tab.id)
+      if (existing) {
+        tabs.activeTabId = existing.id
+        this.applyAgentFollowupThreadToCurrentState(existing.thread)
+      } else {
+        tabs.deepAnalysisTabs = [...cloneArray(tabs.deepAnalysisTabs), tab]
+        tabs.activeTabId = tab.id
+        this.applyAgentFollowupThreadToCurrentState(tab.thread)
+      }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
       this.syncCurrentAgentSession()
       return tabs.activeTabId
@@ -3094,6 +3575,10 @@ function createAgentUiMethods() {
       if (this.isAgentSummaryHistorySession(session)) {
         this.applyAgentSessionSnapshot(session)
         return this.openAgentSummaryHistoryTab(session)
+      }
+      if (this.isAgentDeepAnalysisHistorySession(session)) {
+        this.applyAgentSessionSnapshot(session)
+        return this.openAgentDeepAnalysisHistoryTab(session)
       }
       return this.openAgentFollowupHistoryTab(session)
     },
@@ -7315,11 +7800,12 @@ function createAgentUiMethods() {
     },
     shouldShowAgentComposer() {
       const activeTab = this.getAgentActiveTopTab()
-      return ['summary', 'followup'].includes(asText(activeTab.kind))
+      return asText(activeTab.kind) === 'followup'
     },
     buildAgentTabsUiState() {
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveSiteSelectionTabState()
+      this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const tabs = this.ensureAgentTabs(true)
       const currentSummaryTab = cloneArray(tabs.summaryTabs).find((item) => asText(item.source) === 'current') || null
@@ -7362,6 +7848,21 @@ function createAgentUiMethods() {
           session_id: item.sessionId || '',
           readonly: !!item.readonly,
           created_at: item.createdAt,
+          panel_payloads: cloneObject(item.panelPayloads || this.agentPanelPayloads),
+        })),
+        deep_analysis_tabs: cloneArray(tabs.deepAnalysisTabs).map((item) => ({
+          id: item.id,
+          title: item.title || '继续分析',
+          kind: 'deep_analysis',
+          source: item.source || 'draft',
+          session_id: item.sessionId || '',
+          readonly: !!item.readonly,
+          created_at: item.createdAt,
+          target: this.normalizeContextAskTarget(item.target),
+          question: asText(item.question),
+          mode: asText(item.mode) || 'quick',
+          result_module_id: asText(item.resultModuleId || item.result_module_id),
+          thread: this.createAgentFollowupThreadState(item.thread),
           panel_payloads: cloneObject(item.panelPayloads || this.agentPanelPayloads),
         })),
         followup_tabs: cloneArray(tabs.followupTabs).map((item) => ({
@@ -7458,14 +7959,30 @@ function createAgentUiMethods() {
         createdAt: asText(item && item.created_at) || new Date().toISOString(),
         panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
       })).filter((item) => item.id)
+      const deepAnalysisTabs = cloneArray(uiState.deep_analysis_tabs || uiState.deepAnalysisTabs).map((item) => ({
+        id: asText(item && item.id),
+        kind: 'deep_analysis',
+        title: asText(item && item.title) || '继续分析',
+        source: asText(item && item.source) || 'draft',
+        sessionId: asText((item && (item.session_id || item.sessionId)) || ''),
+        readonly: !!(item && item.readonly && asText(item && item.source) !== 'history'),
+        createdAt: asText(item && item.created_at) || new Date().toISOString(),
+        target: this.normalizeContextAskTarget(item && item.target),
+        question: asText(item && item.question),
+        mode: asText(item && item.mode) || 'quick',
+        resultModuleId: asText(item && (item.result_module_id || item.resultModuleId)),
+        thread: this.createAgentFollowupThreadState(item && item.thread),
+        panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
+      })).filter((item) => item.id)
       const activeId = asText(uiState.active_tab_id)
       this.agentTabs = {
         summaryTab: summaryTab.id ? summaryTab : defaultTabs.summaryTab,
         summaryTabs,
         iterationChangeTabs,
         siteSelectionTabs,
+        deepAnalysisTabs,
         followupTabs,
-        activeTabId: activeId || (summaryTabs[0] ? summaryTabs[0].id : (iterationChangeTabs[0] ? iterationChangeTabs[0].id : (siteSelectionTabs[0] ? siteSelectionTabs[0].id : (followupTabs[0] ? followupTabs[0].id : '')))),
+        activeTabId: activeId || (summaryTabs[0] ? summaryTabs[0].id : (iterationChangeTabs[0] ? iterationChangeTabs[0].id : (siteSelectionTabs[0] ? siteSelectionTabs[0].id : (deepAnalysisTabs[0] ? deepAnalysisTabs[0].id : (followupTabs[0] ? followupTabs[0].id : ''))))),
         followupLimit: Number(uiState.followup_limit || 6) || 6,
         nextFollowupNumber: Number(uiState.next_followup_number || (followupTabs.length + 1) || 1) || 1,
       }
@@ -7482,6 +7999,14 @@ function createAgentUiMethods() {
           const activeSiteSelection = cloneArray(this.agentTabs.siteSelectionTabs).find((item) => item.id === this.agentTabs.activeTabId)
           if (activeSiteSelection && activeSiteSelection.panelPayloads && typeof activeSiteSelection.panelPayloads === 'object') {
             this.agentPanelPayloads = cloneObject(activeSiteSelection.panelPayloads)
+          }
+        } else if (asText(activeTopTab.kind) === 'deep_analysis') {
+          const activeDeepAnalysis = cloneArray(this.agentTabs.deepAnalysisTabs).find((item) => item.id === this.agentTabs.activeTabId)
+          if (activeDeepAnalysis) {
+            this.applyAgentFollowupThreadToCurrentState(activeDeepAnalysis.thread)
+            if (activeDeepAnalysis.panelPayloads && typeof activeDeepAnalysis.panelPayloads === 'object') {
+              this.agentPanelPayloads = cloneObject(activeDeepAnalysis.panelPayloads)
+            }
           }
         } else {
           const activeTab = this.getAgentActiveFollowupTab()
@@ -8191,6 +8716,7 @@ function createAgentUiMethods() {
       })
       await this.submitAgentTurn({
         prompt: `已复用当前${current.label}结果，请基于最新左侧计算结果继续回答。`,
+        panelKind: asText(this.getAgentActiveTopTab().kind) === 'deep_analysis' ? 'deep_analysis' : undefined,
       })
     },
     async onAgentTaskStartClick(taskConfirmation = null) {
@@ -8218,6 +8744,7 @@ function createAgentUiMethods() {
         })
         await this.submitAgentTurn({
           prompt: `${checked.label}已完成，请基于最新左侧计算结果继续回答。`,
+          panelKind: asText(this.getAgentActiveTopTab().kind) === 'deep_analysis' ? 'deep_analysis' : undefined,
         })
       } catch (err) {
         this.setAgentTaskConfirmation({

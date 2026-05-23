@@ -294,19 +294,22 @@
                         v-else
                         class="agent-app-center"
                         :class="{
-                            'is-empty': !isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating,
+                            'is-empty': !isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating,
                             'has-thread': agentHasConversationContent() || agentLoading || agentSessionHydrating
                         }">
-                        <div class="agent-report-nav" @click.stop>
+                        <div
+                            class="agent-report-nav"
+                            :class="{ 'is-detail': isAgentReportDetailView() }"
+                            @click.stop>
                             <button
                                 v-if="isAgentReportDetailView()"
                                 type="button"
                                 class="agent-report-back"
                                 @click="returnToAgentReportHome()">
-                                ← 返回区域报告
+                                ← 报告
                             </button>
                             <div class="agent-report-nav-main">
-                                <div class="agent-report-kicker">Agent 工作台</div>
+                                <div class="agent-report-kicker">{{ getAgentWorkspaceNavKicker() }}</div>
                                 <div class="agent-report-title">{{ getAgentWorkspaceNavTitle() }}</div>
                                 <div class="agent-report-subtitle">{{ getAgentWorkspaceNavSubtitle() }}</div>
                             </div>
@@ -326,14 +329,21 @@
                                         @click="openAgentIterationChangeFromReport()">
                                         变化
                                     </button>
+                                    <button
+                                        type="button"
+                                        class="agent-report-switch-btn"
+                                        :class="{ active: isAgentSiteSelectionTabActive() }"
+                                        @click="openAgentSiteSelectionFromReport()">
+                                        选址
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="agent-report-switch-btn"
+                                        :class="{ active: isAgentDeepAnalysisTabActive() }"
+                                        @click="openAgentDeepAnalysisFromTarget(buildReportSectionContextAskTarget({ sectionKey: 'report', title: '区域报告', summary: ((getAgentSummaryPack().headline_judgment || {}).summary) || '基于当前区域报告继续分析' }))">
+                                        继续分析
+                                    </button>
                                 </div>
-                                <button
-                                    type="button"
-                                    class="agent-report-primary-action"
-                                    :class="{ active: isAgentSiteSelectionTabActive() }"
-                                    @click="openAgentSiteSelectionFromReport()">
-                                    区域内选址
-                                </button>
                             </div>
                         </div>
 
@@ -377,7 +387,7 @@
                                                         :key="`summary-live-followup-${idx}`"
                                                         type="button"
                                                         class="agent-shortcut-chip"
-                                                        @click="openAgentFollowupFromSummary(item)">
+                                                        @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: `live-followup-${idx}`, title: item, summary: item }), { question: item, resetMessages: true })">
                                                         {{ item }}
                                                     </button>
                                                 </div>
@@ -466,7 +476,7 @@
                                         <button
                                             type="button"
                                             class="agent-shortcut-chip"
-                                            @click="openAgentFollowupFromSummary(`请解释这条核心判断：${((getAgentSummaryPack().headline_judgment || {}).summary) || ''}`)">
+                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: 'headline', title: '核心判断', summary: ((getAgentSummaryPack().headline_judgment || {}).summary) || '', reasoning: ((getAgentSummaryPack().headline_judgment || {}).supporting_clause) || '' }), { question: '为什么这么判断？', resetMessages: true })">
                                             为什么？
                                         </button>
                                         <button
@@ -506,6 +516,14 @@
                                         class="agent-summary-secondary-dimension">
                                         <strong>{{ dimension.label || '-' }}:</strong>{{ dimension.conclusion || '-' }}
                                     </div>
+                                    <div class="agent-summary-actions">
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openContextAsk(buildReportSectionContextAskTarget(item), { resetMessages: true })">
+                                            追问
+                                        </button>
+                                    </div>
                                 </section>
                                 <section class="agent-summary-card">
                                     <div class="agent-summary-card-head">
@@ -519,6 +537,14 @@
                                         <div v-for="(item, idx) in ((getAgentSummaryPack().user_profile || {}).traits || [])" :key="`summary-user-trait-${idx}`">
                                             {{ item }}
                                         </div>
+                                    </div>
+                                    <div class="agent-summary-actions">
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: 'user_profile', title: '用户画像', summary: ((getAgentSummaryPack().user_profile || {}).headline) || '', evidence: ((getAgentSummaryPack().user_profile || {}).traits) || [] }), { resetMessages: true })">
+                                            追问
+                                        </button>
                                     </div>
                                 </section>
                                 <section class="agent-summary-card">
@@ -534,15 +560,14 @@
                                             {{ item }}
                                         </div>
                                     </div>
-                                </section>
-                                <section v-if="getAgentSummaryTourismCrossAnalysis().content" class="agent-summary-card agent-summary-card-wide">
-                                    <div class="agent-summary-card-head">
-                                        <div class="agent-summary-card-title">{{ getAgentSummaryTourismCrossAnalysis().title }}</div>
-                                        <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentSummaryBasisPayload({ sectionKey: 'tourism_cross_analysis', title: getAgentSummaryTourismCrossAnalysis().title, reasoning: getAgentSummaryTourismCrossAnalysis().content }), $event)">
-                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                    <div class="agent-summary-actions">
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: 'behavior_inference', title: '商业行为推断', summary: ((getAgentSummaryPack().behavior_inference || {}).headline) || '', evidence: ((getAgentSummaryPack().behavior_inference || {}).traits) || [] }), { resetMessages: true })">
+                                            追问
                                         </button>
                                     </div>
-                                    <div class="agent-summary-longtext">{{ getAgentSummaryTourismCrossAnalysis().content }}</div>
                                 </section>
                                 <section class="agent-summary-card">
                                     <div class="agent-summary-card-title">快捷追问</div>
@@ -552,8 +577,68 @@
                                             :key="`summary-followup-${idx}`"
                                             type="button"
                                             class="agent-shortcut-chip"
-                                            @click="openAgentFollowupFromSummary(item)">
+                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: `followup-${idx}`, title: item, summary: item }), { question: item, resetMessages: true })">
                                             {{ item }}
+                                        </button>
+                                    </div>
+                                </section>
+                                <section v-if="getAgentSummaryTourismCrossAnalysis().content" class="agent-summary-card agent-summary-card-wide">
+                                    <div class="agent-summary-card-head">
+                                        <div class="agent-summary-card-title">{{ getAgentSummaryTourismCrossAnalysis().title }}</div>
+                                        <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentSummaryBasisPayload({ sectionKey: 'tourism_cross_analysis', title: getAgentSummaryTourismCrossAnalysis().title, reasoning: getAgentSummaryTourismCrossAnalysis().content }), $event)">
+                                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                        </button>
+                                    </div>
+                                    <div class="agent-summary-longtext">{{ getAgentSummaryTourismCrossAnalysis().content }}</div>
+                                    <div class="agent-summary-actions">
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: 'tourism_cross_analysis', title: getAgentSummaryTourismCrossAnalysis().title, summary: getAgentSummaryTourismCrossAnalysis().content }), { resetMessages: true })">
+                                            追问
+                                        </button>
+                                    </div>
+                                </section>
+                                <section
+                                    v-for="module in getAgentSummaryDeepAnalysisModules()"
+                                    :key="`summary-deep-module-${module.id}`"
+                                    class="agent-summary-card agent-summary-card-wide agent-deep-module-card">
+                                    <div class="agent-summary-card-head">
+                                        <div>
+                                            <div class="agent-summary-card-title">{{ module.title }}</div>
+                                            <div class="agent-summary-line">模式：{{ getAgentDeepAnalysisModeLabel(module.mode) }} · 来源：{{ getContextAskSourceLabel(module.source) }}</div>
+                                        </div>
+                                        <span class="agent-deep-analysis-source">写回模块</span>
+                                    </div>
+                                    <div class="agent-summary-longtext">{{ module.conclusion }}</div>
+                                    <div v-if="module.support.length" class="agent-summary-kv">
+                                        <div v-for="(item, idx) in module.support.slice(0, 4)" :key="`summary-deep-module-${module.id}-support-${idx}`">
+                                            <strong>{{ item.headline || item.metric || '证据' }}</strong>
+                                            <span>{{ item.interpretation || item.source || '' }}</span>
+                                        </div>
+                                    </div>
+                                    <div v-if="module.actions.length" class="agent-summary-actions">
+                                        <button
+                                            v-for="(item, idx) in module.actions.slice(0, 3)"
+                                            :key="`summary-deep-module-${module.id}-action-${idx}`"
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentDeepAnalysisFromTarget(module.target, { question: item.prompt || item.title || item.detail, mode: module.mode })">
+                                            {{ item.title || item.detail || '继续分析' }}
+                                        </button>
+                                    </div>
+                                    <div class="agent-summary-actions">
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: module.id, title: module.title, summary: module.conclusion, evidence: module.support }), { resetMessages: true })">
+                                            追问
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentDeepAnalysisFromTarget(module.target, { question: module.question, mode: module.mode })">
+                                            继续分析
                                         </button>
                                     </div>
                                 </section>
@@ -575,8 +660,14 @@
                                         <button
                                             type="button"
                                             class="agent-shortcut-chip"
-                                            @click="openAgentFollowupFromSummary('请解释这份区域总结背后的证据链与判断依据')">
+                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: 'report_evidence_chain', title: '区域报告证据链', summary: ((getAgentSummaryPack().headline_judgment || {}).summary) || '请解释这份区域总结背后的证据链与判断依据' }), { question: '请解释这份区域总结背后的证据链与判断依据', resetMessages: true })">
                                             解释报告依据
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="agent-shortcut-chip"
+                                            @click="openAgentDeepAnalysisFromTarget(buildReportSectionContextAskTarget({ sectionKey: 'report_continue', title: '区域报告', summary: ((getAgentSummaryPack().headline_judgment || {}).summary) || '基于当前区域报告继续分析' }))">
+                                            继续深度分析
                                         </button>
                                         <button
                                             type="button"
@@ -749,18 +840,11 @@
                             </div>
                         </div>
 
-                        <div v-else-if="isAgentIterationChangeTabActive()" class="agent-summary-tab-view">
-                            <div class="agent-detail-header">
-                                <button type="button" class="agent-report-back" @click="returnToAgentReportHome()">← 返回区域报告</button>
-                                <div>
-                                    <div class="agent-detail-title">多年变化</div>
-                                    <div class="agent-detail-subtitle">从区域报告进入，查看 POI、人口和夜光的时间变化。</div>
-                                </div>
-                            </div>
+                        <div v-else-if="isAgentIterationChangeTabActive()" class="agent-summary-tab-view is-detail">
                             <div class="agent-iteration-shell">
                                 <div class="agent-iteration-head">
                                     <div>
-                                        <div class="agent-summary-gate-title">多年迭代变化</div>
+                                        <div class="agent-summary-gate-title">变化分析</div>
                                         <div class="agent-summary-gate-desc">{{ getAgentIterationActiveDescription() }}</div>
                                     </div>
                                     <button
@@ -769,6 +853,12 @@
                                         :disabled="getAgentIterationActiveLoading()"
                                         @click="ensureAgentIterationKind(agentIterationActiveKind, true)">
                                         {{ getAgentIterationActiveLoadingText() }}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="agent-summary-gate-btn"
+                                        @click="openAgentDeepAnalysisFromTarget(buildIterationContextAskTarget({ kind: agentIterationActiveKind, type: 'trend_metric', section: 'iteration_overview', title: '变化分析', summary: getAgentIterationActiveDescription() }))">
+                                        继续分析
                                     </button>
                                 </div>
                                 <div class="agent-iteration-kind-tabs">
@@ -783,7 +873,7 @@
                                         {{ kind.label }}
                                     </button>
                                 </div>
-                                <div class="agent-iteration-subnav" aria-label="多年迭代变化内容分组">
+                                <div class="agent-iteration-subnav" aria-label="变化分析内容分组">
                                     <button
                                         v-for="item in getAgentIterationSecondaryNavItems()"
                                         :key="`agent-iteration-subnav-${agentIterationActiveKind}-${item.key}`"
@@ -953,9 +1043,12 @@
                                     <section v-if="getAgentIterationPoiPayload().status === 'ready' && isAgentIterationSecondaryView('ai')" class="agent-summary-card">
                                         <div class="agent-summary-card-head">
                                             <div class="agent-summary-card-title">业态基础分析</div>
-                                            <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('poi', 'analysis'), $event)">
-                                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
-                                            </button>
+                                            <div class="agent-card-head-actions">
+                                                <button type="button" class="agent-mini-action-btn" @click="openContextAsk(buildIterationContextAskTarget({ kind: 'poi', type: 'trend_chart', section: 'analysis', title: '业态基础分析', summary: getAgentIterationPoiPayload().report_title || getAgentIterationPoiAiStatusText(), evidence: getAgentIterationPoiReportSections() }), { resetMessages: true })">追问</button>
+                                                <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('poi', 'analysis'), $event)">
+                                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
+                                                </button>
+                                            </div>
                                         </div>
                                         <div v-if="getAgentIterationPoiPayload().notice" class="agent-summary-line agent-iteration-note">
                                             {{ getAgentIterationPoiPayload().notice }}
@@ -1012,7 +1105,10 @@
                                         <div class="agent-iteration-chart-grid agent-iteration-poi-dashboard">
                                             <div v-if="isAgentIterationSecondaryView('trend')" class="agent-iteration-poi-dashboard-top">
                                             <div class="agent-iteration-chart-card">
-                                                <div class="agent-iteration-chart-title">POI总量变化</div>
+                                                <div class="agent-iteration-chart-head">
+                                                    <div class="agent-iteration-chart-title">POI总量变化</div>
+                                                    <button type="button" class="agent-mini-action-btn" @click="openContextAsk(buildIterationContextAskTarget({ kind: 'poi', type: 'trend_chart', section: 'poi_total_line', title: 'POI总量变化', summary: getAgentIterationPoiAreaHeatmapChangeSummary(), evidence: getAgentIterationPoiTotalLineChart() }), { resetMessages: true })">追问</button>
+                                                </div>
                                                 <svg viewBox="0 0 320 140" class="agent-iteration-line-chart" role="img" aria-label="POI总量变化折线图">
                                                     <polyline
                                                         :points="getAgentIterationPoiLineChartPolyline()"
@@ -1035,7 +1131,10 @@
                                             </div>
 
                                             <div class="agent-iteration-chart-card">
-                                                <div class="agent-iteration-chart-title">业态结构变化</div>
+                                                <div class="agent-iteration-chart-head">
+                                                    <div class="agent-iteration-chart-title">业态结构变化</div>
+                                                    <button type="button" class="agent-mini-action-btn" @click="openContextAsk(buildIterationContextAskTarget({ kind: 'poi', type: 'trend_chart', section: 'poi_category_stack', title: '业态结构变化', evidence: getAgentIterationPoiCategoryStackChart() }), { resetMessages: true })">追问</button>
+                                                </div>
                                                 <div class="agent-iteration-stack-chart">
                                                     <div
                                                         v-for="row in getAgentIterationPoiCategoryStackChart()"
@@ -1068,6 +1167,7 @@
                                                         <div class="agent-iteration-chart-title">全部 POI 区域分布变化</div>
                                                         <div class="agent-iteration-chart-subtitle">{{ getAgentIterationPoiAreaHeatmapChangeSummary() }}</div>
                                                     </div>
+                                                    <button type="button" class="agent-mini-action-btn" @click.stop="openContextAsk(buildIterationContextAskTarget({ kind: 'poi', type: 'trend_chart', section: 'poi_area_heatmap', title: '全部 POI 区域分布变化', summary: getAgentIterationPoiAreaHeatmapChangeSummary(), evidence: getAgentIterationPoiAreaHeatmaps() }), { resetMessages: true })">追问</button>
                                                 </div>
                                                 <div class="agent-iteration-heatmap-layer-controls" @click.stop>
                                                     <button
@@ -1293,7 +1393,10 @@
                                     </section>
 
                                     <section v-if="getAgentIterationPoiTrendRows().length && isAgentIterationSecondaryView('trend')" class="agent-summary-card">
-                                        <div class="agent-summary-card-title">POI 多年趋势</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">POI 多年趋势</div>
+                                            <button type="button" class="agent-mini-action-btn" @click="openContextAsk(buildIterationContextAskTarget({ kind: 'poi', type: 'trend_metric', section: 'poi_trend_metrics', title: 'POI 多年趋势', evidence: getAgentIterationPoiTrendRows() }), { resetMessages: true })">追问</button>
+                                        </div>
                                         <div class="agent-iteration-metric-grid">
                                             <div
                                                 v-for="row in getAgentIterationPoiTrendRows()"
@@ -1346,7 +1449,10 @@
                                     </div>
 
                                     <section v-if="getAgentIterationPopulationPayload().status === 'ready' && isAgentIterationSecondaryView('metrics')" class="agent-summary-card">
-                                        <div class="agent-summary-card-title">人口总结特征</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">人口总结特征</div>
+                                            <button type="button" class="agent-mini-action-btn" @click="openContextAsk(buildIterationContextAskTarget({ kind: 'population', type: 'trend_metric', section: 'population_metrics', title: '人口总结特征', evidence: getAgentIterationPopulationFeatureRows() }), { resetMessages: true })">追问</button>
+                                        </div>
                                         <div class="agent-iteration-metric-grid">
                                             <div
                                                 v-for="row in getAgentIterationPopulationFeatureRows()"
@@ -1383,7 +1489,10 @@
                                     </div>
 
                                     <section v-if="(getAgentIterationNightlightPayload().snapshots || []).length && isAgentIterationSecondaryView('snapshots')" class="agent-summary-card agent-iteration-snapshot-section">
-                                        <div class="agent-summary-card-title">近三年夜光快照</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">近三年夜光快照</div>
+                                            <button type="button" class="agent-mini-action-btn" @click.stop="openContextAsk(buildIterationContextAskTarget({ kind: 'nightlight', type: 'trend_chart', section: 'nightlight_snapshots', title: '近三年夜光快照', evidence: getAgentIterationNightlightPayload().snapshots || [] }), { resetMessages: true })">追问</button>
+                                        </div>
                                         <div class="agent-iteration-snapshot-grid">
                                             <article
                                                 v-for="snapshot in (getAgentIterationNightlightPayload().snapshots || [])"
@@ -1471,6 +1580,7 @@
                                             <button type="button" class="basis-icon-btn" title="查看生成依据" aria-label="查看生成依据" @click.stop="openBasisDrawer(buildAgentIterationBasisPayload('nightlight'), $event)">
                                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v5"></path><path d="M12 8h.01"></path><path d="M5 4h14v16H5z"></path></svg>
                                             </button>
+                                            <button type="button" class="agent-mini-action-btn" @click="openContextAsk(buildIterationContextAskTarget({ kind: 'nightlight', type: 'trend_metric', section: 'nightlight_ai', title: 'AI 热点变化解析', evidence: getAgentIterationNightlightAnalysisRows() }), { resetMessages: true })">追问</button>
                                         </div>
                                         <div v-if="getAgentIterationNightlightAnalysisRows().length" class="agent-iteration-analysis-list">
                                             <div
@@ -1490,7 +1600,10 @@
                                     </section>
 
                                     <section v-if="getAgentIterationNightlightPayload().status && isAgentIterationSecondaryView('trend')" class="agent-summary-card">
-                                        <div class="agent-summary-card-title">三年趋势指标</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">三年趋势指标</div>
+                                            <button type="button" class="agent-mini-action-btn" @click="openContextAsk(buildIterationContextAskTarget({ kind: 'nightlight', type: 'trend_metric', section: 'nightlight_trend_metrics', title: '三年趋势指标', evidence: getAgentIterationNightlightTrendRows().concat(getAgentIterationNightlightHotspotRows()) }), { resetMessages: true })">追问</button>
+                                        </div>
                                         <div class="agent-iteration-metric-grid">
                                             <div
                                                 v-for="row in getAgentIterationNightlightTrendRows()"
@@ -1512,14 +1625,7 @@
                             </div>
                         </div>
 
-                        <div v-else-if="isAgentSiteSelectionTabActive()" class="agent-summary-tab-view">
-                            <div class="agent-detail-header">
-                                <button type="button" class="agent-report-back" @click="returnToAgentReportHome()">← 返回区域报告</button>
-                                <div>
-                                    <div class="agent-detail-title">区域内选址</div>
-                                    <div class="agent-detail-subtitle">基于 POI、H3、人口、夜光和路网证据判断候选位置。</div>
-                                </div>
-                            </div>
+                        <div v-else-if="isAgentSiteSelectionTabActive()" class="agent-summary-tab-view is-detail">
                             <div class="agent-site-selection-workbench">
                                 <template v-if="!isAgentSiteSelectionDataReady()">
                                     <div class="agent-summary-gate">
@@ -1743,14 +1849,17 @@
                                 <div v-if="hasAgentSiteSelectionPack()" class="agent-site-selection-layout">
                                     <section class="agent-summary-card agent-site-selection-candidates">
                                         <div class="agent-summary-card-title">{{ inferAgentSiteSelectionTargetType() || '目标业态' }}适合开的位置</div>
-                                        <button
+                                        <div
                                             v-for="candidate in getAgentSiteSelectionCandidates()"
                                             :key="`site-selection-candidate-${candidate.rank}-${candidate.h3Id || candidate.title}`"
-                                            type="button"
                                             class="agent-site-selection-candidate"
                                             :class="{ 'is-selected': getAgentSiteSelectionSelectedCandidate() && getAgentSiteSelectionSelectedCandidate().h3Id === candidate.h3Id }"
-                                            :disabled="!candidate.h3Id"
-                                            @click="onAgentSiteSelectionCandidateClick(candidate)">
+                                            role="button"
+                                            tabindex="0"
+                                            :aria-disabled="!candidate.h3Id ? 'true' : 'false'"
+                                            @click="candidate.h3Id && onAgentSiteSelectionCandidateClick(candidate)"
+                                            @keyup.enter="candidate.h3Id && onAgentSiteSelectionCandidateClick(candidate)"
+                                            @keyup.space.prevent="candidate.h3Id && onAgentSiteSelectionCandidateClick(candidate)">
                                             <span class="agent-site-selection-rank">推荐 {{ candidate.rank }}</span>
                                             <span class="agent-site-selection-candidate-main">
                                                 <strong>{{ candidate.title }}</strong>
@@ -1759,15 +1868,41 @@
                                                 <em v-if="candidate.reason">原因：{{ candidate.reason }}</em>
                                                 <em v-else-if="candidate.strengths.length">原因：{{ candidate.strengths.slice(0, 2).join(' / ') }}</em>
                                                 <em v-if="candidate.risks.length">风险：{{ candidate.risks[0] }}</em>
+                                                <span class="agent-site-selection-card-actions">
+                                                    <span
+                                                        class="agent-mini-action-btn"
+                                                        role="button"
+                                                        tabindex="0"
+                                                        @click.stop="openContextAsk(buildSiteCandidateContextAskTarget(candidate), { resetMessages: true })"
+                                                        @keyup.enter.stop="openContextAsk(buildSiteCandidateContextAskTarget(candidate), { resetMessages: true })">
+                                                        追问
+                                                    </span>
+                                                </span>
                                             </span>
                                             <span class="agent-site-selection-score">{{ formatAgentSiteSelectionScore(candidate.totalScore) }}</span>
-                                        </button>
+                                        </div>
                                         <div v-if="!getAgentSiteSelectionCandidates().length" class="agent-summary-line">
                                             当前没有形成可点击候选格，结果仅适合作为区域级判断。
                                         </div>
                                     </section>
                                     <section class="agent-summary-card agent-site-selection-detail">
-                                        <div class="agent-summary-card-title">为什么这里适合</div>
+                                        <div class="agent-summary-card-head">
+                                            <div class="agent-summary-card-title">为什么这里适合</div>
+                                            <button
+                                                v-if="getAgentSiteSelectionSelectedCandidate()"
+                                                type="button"
+                                                class="agent-mini-action-btn"
+                                                @click="openContextAsk(buildSiteCandidateContextAskTarget(getAgentSiteSelectionSelectedCandidate()), { resetMessages: true })">
+                                                追问这个点
+                                            </button>
+                                            <button
+                                                v-if="getAgentSiteSelectionSelectedCandidate()"
+                                                type="button"
+                                                class="agent-mini-action-btn"
+                                                @click="openAgentDeepAnalysisFromTarget(buildSiteCandidateContextAskTarget(getAgentSiteSelectionSelectedCandidate()))">
+                                                继续分析
+                                            </button>
+                                        </div>
                                         <div v-if="getAgentSiteSelectionSelectedCandidate()" class="agent-site-selection-selected">
                                             <strong>{{ getAgentSiteSelectionSelectedCandidate().title }}</strong>
                                             <span>{{ getAgentSiteSelectionSelectedCandidate().positioning }}</span>
@@ -1855,12 +1990,215 @@
                             </div>
                         </div>
 
-                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">
+                        <div v-else-if="isAgentDeepAnalysisTabActive()" class="agent-summary-tab-view is-detail agent-deep-analysis-view">
+                            <section class="agent-deep-analysis-hero agent-summary-card">
+                                <div>
+                                    <div class="agent-summary-card-title">深度分析任务</div>
+                                    <div class="agent-summary-line">{{ ((getAgentActiveDeepAnalysisTab() || {}).target || {}).title || '当前报告对象' }}</div>
+                                    <p>{{ ((getAgentActiveDeepAnalysisTab() || {}).target || {}).summary || '基于当前区域报告继续提出可执行分析问题。' }}</p>
+                                </div>
+                                <span class="agent-deep-analysis-source">{{ getContextAskSourceLabel((((getAgentActiveDeepAnalysisTab() || {}).target || {}).source)) }}</span>
+                            </section>
+
+                            <section class="agent-summary-card agent-deep-analysis-composer">
+                                <div class="agent-summary-card-title">分析问题</div>
+                                <div class="agent-deep-mode-switch" role="group" aria-label="继续分析模式">
+                                    <button
+                                        type="button"
+                                        :class="{ active: agentDeepAnalysisMode !== 'deep' }"
+                                        @click="setAgentDeepAnalysisMode('quick')">
+                                        快速分析
+                                    </button>
+                                    <button
+                                        type="button"
+                                        :class="{ active: agentDeepAnalysisMode === 'deep' }"
+                                        @click="setAgentDeepAnalysisMode('deep')">
+                                        深度思考
+                                    </button>
+                                </div>
+                                <textarea
+                                    v-model="agentInput"
+                                    class="agent-composer-input"
+                                    placeholder="例如：识别路网句法与 POI 热力错配形成的断点街区，并给出缝合策略..."
+                                    :disabled="agentLoading || agentSessionHydrating"
+                                    @keydown.enter.exact.prevent="submitAgentTurn({ panelKind: 'deep_analysis' })"></textarea>
+                                <div class="agent-summary-actions">
+                                    <button
+                                        type="button"
+                                        class="agent-summary-gate-btn agent-summary-gate-cta-btn"
+                                        :disabled="agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
+                                        @click="agentLoading ? cancelAgentTurn() : submitAgentTurn({ panelKind: 'deep_analysis' })">
+                                        {{ agentLoading ? '停止分析' : (agentDeepAnalysisMode === 'deep' ? '开始深度思考' : '开始快速分析') }}
+                                    </button>
+                                </div>
+                            </section>
+
+                            <div class="agent-deep-analysis-grid">
+                                <section class="agent-summary-card">
+                                    <div class="agent-summary-card-title">任务流程</div>
+                                    <div class="agent-deep-analysis-stage-list">
+                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': agentLoading || agentHasConversationContent() }">
+                                            <strong>问题重写</strong>
+                                            <span>{{ agentDeepAnalysisMode === 'deep' ? '深度思考会先把问题转成可执行分析目标' : '快速分析会尽量保持问题直达结论' }}</span>
+                                        </div>
+                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': agentShouldRenderThinkingBlock() }">
+                                            <strong>证据盘点 / 工具计划</strong>
+                                            <span>{{ getAgentPlanSummary() || '等待 Agent 判断需要复用或补跑哪些工具' }}</span>
+                                        </div>
+                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': getAgentToolCallItems().length > 0 }">
+                                            <strong>执行轨迹</strong>
+                                            <span>{{ getAgentToolCallItems().length ? `${getAgentToolCallItems().length} 次工具事件` : '工具运行后在这里沉淀状态' }}</span>
+                                        </div>
+                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': hasAgentStructuredOutput() }">
+                                            <strong>结果模块</strong>
+                                            <span>{{ hasAgentStructuredOutput() ? '已生成结构化判断' : '完成后输出新证据、新判断和建议' }}</span>
+                                        </div>
+                                        <div class="agent-deep-analysis-stage is-disabled">
+                                            <strong>写回报告</strong>
+                                            <span>{{ getAgentDeepAnalysisPreviewModule() ? '结果可预览后手动写回区域报告' : '完成后可作为新面板写回区域报告' }}</span>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                <section class="agent-summary-card">
+                                    <div class="agent-summary-card-title">来源上下文</div>
+                                    <div class="agent-summary-kv">
+                                        <div><strong>{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).title) || '当前对象' }}</strong></div>
+                                        <div>{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).summary) || '暂无摘要' }}</div>
+                                        <div v-if="((((getAgentActiveDeepAnalysisTab() || {}).target || {}).evidence || []).length">
+                                            证据：{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).evidence || []).slice(0, 3).map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join('；') }}
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <section v-if="getAgentDeepAnalysisPreviewModule()" class="agent-summary-card agent-deep-analysis-result-preview">
+                                <div class="agent-summary-card-head">
+                                    <div>
+                                        <div class="agent-summary-card-title">结果预览</div>
+                                        <div class="agent-summary-line">将作为“{{ getAgentDeepAnalysisPreviewModule().title }}”写回区域报告</div>
+                                    </div>
+                                    <span class="agent-deep-analysis-source">{{ getAgentDeepAnalysisModeLabel(getAgentDeepAnalysisPreviewModule().mode) }}</span>
+                                </div>
+                                <div class="agent-summary-longtext">{{ getAgentDeepAnalysisPreviewModule().conclusion }}</div>
+                                <div v-if="getAgentDeepAnalysisPreviewModule().support.length" class="agent-summary-kv">
+                                    <div v-for="(item, idx) in getAgentDeepAnalysisPreviewModule().support.slice(0, 4)" :key="`deep-preview-support-${idx}`">
+                                        <strong>{{ item.headline || item.metric || '证据' }}</strong>
+                                        <span>{{ item.interpretation || item.source || '' }}</span>
+                                    </div>
+                                </div>
+                                <div class="agent-summary-actions">
+                                    <button
+                                        type="button"
+                                        class="agent-summary-gate-btn agent-summary-gate-cta-btn"
+                                        @click="writeAgentDeepAnalysisModuleToReport(getAgentDeepAnalysisPreviewModule())">
+                                        写回报告
+                                    </button>
+                                </div>
+                            </section>
+
+                            <div v-if="agentHasConversationContent() || agentLoading || agentSessionHydrating" class="agent-thread-shell agent-deep-analysis-thread">
+                                <div
+                                    ref="agentReportThreadBody"
+                                    class="agent-report-thread-body agent-report-thread-body-main"
+                                    @scroll.passive="onAgentReportThreadScroll"
+                                    @wheel.passive="onAgentReportThreadWheel"
+                                    @touchmove.passive="onAgentReportThreadTouchMove">
+                                    <div v-if="agentSessionHydrating" class="agent-session-skeleton" aria-hidden="true">
+                                        <div class="agent-session-skeleton-row is-user">
+                                            <div class="agent-session-skeleton-bubble is-user"></div>
+                                        </div>
+                                    </div>
+                                    <template v-else>
+                                        <div v-for="(message, index) in getAgentMessagesBeforeThinking()" :key="`agent-deep-message-before-${index}`" class="agent-message-row" :class="`is-${message.role}`">
+                                            <div class="agent-message-bubble" :class="`is-${message.role}`">
+                                                {{ message.content }}
+                                            </div>
+                                        </div>
+
+                                        <div v-if="agentShouldRenderThinkingBlock()" class="agent-message-row is-assistant">
+                                            <div class="agent-message-bubble is-assistant agent-thinking-bubble" :class="{ 'is-debug-open': agentThinkingExpanded }">
+                                                __AGENT_THINKING_HEADER__
+                                                __AGENT_REASONING_PANEL__
+                                                <div v-if="agentThinkingExpanded || agentLoading" class="agent-thinking-steps" data-agent-scroll-inner>
+                                                    <div
+                                                        v-for="roleGroup in getAgentProcessRoleGroups()"
+                                                        :key="`agent-deep-process-role-${roleGroup.key}`"
+                                                        class="agent-process-role-panel"
+                                                        :class="`is-${roleGroup.state}`">
+                                                        <div class="agent-process-role-head">
+                                                            <div>
+                                                                <div class="agent-process-role-title">{{ roleGroup.title }}</div>
+                                                                <div class="agent-process-role-summary">{{ roleGroup.summary }}</div>
+                                                            </div>
+                                                            <div v-if="roleGroup.countLabel" class="agent-process-role-count">{{ roleGroup.countLabel }}</div>
+                                                        </div>
+                                                        <div class="agent-process-role-steps">
+                                                            <div
+                                                                v-for="stepItem in roleGroup.steps"
+                                                                :key="`agent-deep-visible-process-${stepItem.id}`"
+                                                                class="agent-thinking-current"
+                                                                :class="`is-${stepItem.state}`">
+                                                                <div class="agent-thinking-item-title">{{ stepItem.title }}</div>
+                                                                <div v-if="stepItem.detail" class="agent-thinking-item-detail">{{ stepItem.detail }}</div>
+                                                            </div>
+                                                            <div v-if="roleGroup.planChecklist && roleGroup.planChecklist.visible" class="agent-process-role-detail-block is-plan">
+                                                                <div v-for="group in roleGroup.planChecklist.groups" :key="`agent-deep-role-plan-group-${group.key}`" class="agent-plan-group">
+                                                                    <div class="agent-plan-group-head">
+                                                                        <div class="agent-plan-group-title">{{ group.title }}</div>
+                                                                        <div class="agent-plan-group-desc">{{ group.description }}</div>
+                                                                    </div>
+                                                                    <div class="agent-plan-items">
+                                                                        <div v-for="(item, index) in group.items" :key="`agent-deep-role-plan-item-${group.key}-${index}`" class="agent-plan-item" :class="`is-${item.status}`">
+                                                                            <div class="agent-plan-item-status" :title="getAgentPlanStatusLabel(item.status)">{{ getAgentPlanStatusSymbol(item.status) }}</div>
+                                                                            <div class="agent-plan-item-main">
+                                                                                <div class="agent-plan-item-title-row">
+                                                                                    <div class="agent-plan-item-title">{{ item.title }}</div>
+                                                                                    <div v-if="item.optional" class="agent-plan-item-optional">可选</div>
+                                                                                </div>
+                                                                                <div v-if="item.detail" class="agent-plan-item-detail">{{ item.detail }}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div v-if="roleGroup.toolCallItems && roleGroup.toolCallItems.length" class="agent-process-role-detail-block is-trace">
+                                                                <div class="agent-trace-list">
+                                                                    <div v-for="item in roleGroup.toolCallItems" :key="`agent-deep-role-trace-item-${item.id}`" class="agent-trace-item">
+                                                                        <div class="agent-trace-main">
+                                                                            <div class="agent-process-entry-title">{{ item.toolName }}</div>
+                                                                            <span class="agent-trace-status" :class="`is-${item.statusTone}`">{{ getAgentToolCallStatusLabel(item.status) }}</span>
+                                                                        </div>
+                                                                        <div v-if="item.message || item.reason" class="agent-process-entry-detail">{{ item.message || item.reason }}</div>
+                                                                        <div class="agent-trace-meta">
+                                                                            <span v-if="item.argumentsSummary">参数：{{ item.argumentsSummary }}</span>
+                                                                            <span v-if="item.resultSummary">结果：{{ item.resultSummary }}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div v-for="(message, index) in getAgentMessagesAfterThinking()" :key="`agent-deep-message-after-${index}`" class="agent-message-row" :class="`is-${message.role}`">
+                                            <div class="agent-message-bubble" :class="`is-${message.role}`">
+                                                {{ message.content }}
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">
                             <div class="agent-hero-title">我们先从哪里开始呢？</div>
                             <div class="agent-hero-subtitle">先说问题，Agent 会调用已有工具和分析能力直接处理。</div>
                         </div>
 
-                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell">
+                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentDeepAnalysisTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell">
                             <div
                                 ref="agentReportThreadBody"
                                 class="agent-report-thread-body agent-report-thread-body-main"
@@ -2201,6 +2539,66 @@
                             </div>
                         </div>
                     </div>
+                    <aside
+                        v-if="contextAskVisible"
+                        class="context-ask-floating"
+                        :class="{ 'is-minimized': contextAskMinimized }"
+                        :style="{ width: `${(contextAskSize || {}).width || 420}px`, height: contextAskMinimized ? 'auto' : `${(contextAskSize || {}).height || 560}px` }"
+                        role="dialog"
+                        aria-label="上下文追问">
+                        <header class="context-ask-head">
+                            <div>
+                                <div class="context-ask-eyebrow">{{ getContextAskSourceLabel((contextAskTarget || {}).source) }}</div>
+                                <div class="context-ask-title">{{ (contextAskTarget || {}).title || '上下文追问' }}</div>
+                            </div>
+                            <div class="context-ask-head-actions">
+                                <button type="button" class="context-ask-icon-btn" :aria-label="contextAskMinimized ? '恢复追问浮窗' : '最小化追问浮窗'" @click="minimizeContextAsk">{{ contextAskMinimized ? '□' : '_' }}</button>
+                                <button type="button" class="context-ask-icon-btn" aria-label="关闭追问浮窗" @click="closeContextAsk">×</button>
+                            </div>
+                        </header>
+                        <template v-if="!contextAskMinimized">
+                            <section class="context-ask-target">
+                                <div class="context-ask-target-label">当前对象</div>
+                                <p>{{ (contextAskTarget || {}).summary || '这个入口会围绕当前点击对象解释，不会重新跑工具。' }}</p>
+                            </section>
+                            <div class="context-ask-quick">
+                                <button
+                                    v-for="item in getContextAskQuickQuestions()"
+                                    :key="`context-ask-quick-${item}`"
+                                    type="button"
+                                    class="agent-shortcut-chip"
+                                    :disabled="contextAskLoading"
+                                    @click="submitContextAskQuestion(item)">
+                                    {{ item }}
+                                </button>
+                            </div>
+                            <div class="context-ask-messages">
+                                <div
+                                    v-for="(message, idx) in contextAskMessages"
+                                    :key="`context-ask-message-${idx}`"
+                                    class="context-ask-message"
+                                    :class="`is-${message.role || 'assistant'}`">
+                                    <div class="context-ask-bubble">{{ message.content }}</div>
+                                    <div v-if="(message.warnings || []).length" class="context-ask-warning">
+                                        {{ (message.warnings || []).join('；') }}
+                                    </div>
+                                </div>
+                                <div v-if="contextAskLoading" class="context-ask-message is-assistant">
+                                    <div class="context-ask-bubble">正在解释当前上下文...</div>
+                                </div>
+                            </div>
+                            <div v-if="contextAskError" class="context-ask-error">{{ contextAskError }}</div>
+                            <form class="context-ask-composer" @submit.prevent="submitContextAskQuestion()">
+                                <textarea
+                                    v-model="contextAskDraft"
+                                    placeholder="围绕当前对象继续追问..."
+                                    :disabled="contextAskLoading"
+                                    @keydown.enter.exact.prevent="submitContextAskQuestion()"></textarea>
+                                <button type="submit" :disabled="contextAskLoading || !contextAskDraft.trim()">发送</button>
+                            </form>
+                        </template>
+                    </aside>
+
                     <div
                         v-if="basisDrawerOpen && getBasisDrawerPayload() && agentWorkspaceView !== 'tools'"
                         class="basis-drawer-mask"

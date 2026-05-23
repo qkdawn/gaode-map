@@ -67,6 +67,10 @@ function createAgentSessionStoreMethods() {
       if (!session || typeof session !== 'object') return false
       return asText(session.panelKind) === 'followup'
     },
+    isAgentDeepAnalysisHistorySession(session = null) {
+      if (!session || typeof session !== 'object') return false
+      return asText(session.panelKind) === 'deep_analysis'
+    },
     splitAgentHistorySessionsByPanel(sessions = []) {
       const summary = []
       const followup = []
@@ -179,11 +183,12 @@ function createAgentSessionStoreMethods() {
         ? this.getAgentActiveTopTab()
         : null
       const isSummaryTab = asText(activeTopTab && activeTopTab.kind) === 'summary'
+      const isDeepAnalysisTab = asText(activeTopTab && activeTopTab.kind) === 'deep_analysis'
       return {
         session,
         activeTabId,
         isSummaryTab,
-        followupThread: isSummaryTab
+        followupThread: isSummaryTab || isDeepAnalysisTab
           ? null
           : cloneObject(this.getAgentActiveFollowupTab && this.getAgentActiveFollowupTab()),
       }
@@ -283,11 +288,21 @@ function createAgentSessionStoreMethods() {
       if (!options.keepDetailLoadingId) {
         this.agentSessionDetailLoadingId = ''
       }
+      const hasAgentTopTabs = !!(
+        this.agentTabs
+        && (
+          (Array.isArray(this.agentTabs.summaryTabs) && this.agentTabs.summaryTabs.length)
+          || (Array.isArray(this.agentTabs.iterationChangeTabs) && this.agentTabs.iterationChangeTabs.length)
+          || (Array.isArray(this.agentTabs.siteSelectionTabs) && this.agentTabs.siteSelectionTabs.length)
+          || (Array.isArray(this.agentTabs.deepAnalysisTabs) && this.agentTabs.deepAnalysisTabs.length)
+          || (Array.isArray(this.agentTabs.followupTabs) && this.agentTabs.followupTabs.length)
+        )
+      )
       const shouldRestoreTabs = !!(
         options.hydrating
         || !this.agentTabs
         || !Array.isArray(this.agentTabs.followupTabs)
-        || !this.agentTabs.followupTabs.length
+        || !hasAgentTopTabs
         || previousActiveSessionId !== asText(session.id)
       )
       if (typeof this.restoreAgentTabsFromSession === 'function') {
@@ -349,10 +364,20 @@ function createAgentSessionStoreMethods() {
       if (typeof this.captureAgentActiveFollowupTabState === 'function') {
         this.captureAgentActiveFollowupTabState()
       }
+      if (typeof this.captureAgentActiveDeepAnalysisTabState === 'function') {
+        this.captureAgentActiveDeepAnalysisTabState()
+      }
       const existing = this.readSessionState(activeId)
       let messages = cloneArray((existing && existing.messages) || [])
       if (!messages.length) {
         messages = cloneArray(this.agentMessages)
+      }
+      if (typeof this.getAgentActiveDeepAnalysisTab === 'function') {
+        const activeDeepAnalysisTab = this.getAgentActiveDeepAnalysisTab()
+        const threadMessages = cloneArray(activeDeepAnalysisTab && activeDeepAnalysisTab.thread && activeDeepAnalysisTab.thread.messages)
+        if (threadMessages.length) {
+          messages = threadMessages
+        }
       }
       if (typeof this.getAgentActiveFollowupTab === 'function') {
         const activeFollowupTab = this.getAgentActiveFollowupTab()
