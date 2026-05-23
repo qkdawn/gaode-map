@@ -246,8 +246,8 @@ def save_history_request(payload: HistorySaveRequest, repo) -> Dict[str, Any]:
 def get_history_list_payload(limit: int, repo) -> List[Dict[str, Any]]:
     try:
         return repo.get_list(limit)
-    except SQLAlchemyError:
-        return []
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="历史记录数据库不可用，请检查 MySQL 连接") from exc
 
 
 def convert_history_detail_to_gcj02(res: Dict[str, Any], *, include_pois: bool) -> Dict[str, Any]:

@@ -112,3 +112,26 @@ test('backFromHistory falls back to home when return context is missing', () => 
   assert.equal(ctx.step, 1)
   assert.equal(ctx.historyReturnContext, null)
 })
+
+test('loadHistoryList surfaces database failures instead of showing empty state', async () => {
+  const ctx = createContext({
+    historyList: [{ id: 'existing' }],
+    historyListRaw: [{ id: 'existing' }],
+    historyLoadedCount: 1,
+  })
+  const previousFetch = global.fetch
+  global.fetch = async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({}),
+  })
+
+  try {
+    await historyListMethods.loadHistoryList.call(ctx, { force: true, keepExisting: true })
+    assert.equal(ctx.historyLoadError, '历史记录请求失败(503)')
+    assert.equal(ctx.historyLoading, false)
+    assert.deepEqual(ctx.historyList, [{ id: 'existing' }])
+  } finally {
+    global.fetch = previousFetch
+  }
+})

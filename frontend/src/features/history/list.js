@@ -3,6 +3,7 @@
             historyListRaw: [],
             historyList: [],
             historyLoading: false,
+            historyLoadError: '',
             historyLoadedCount: 0,
             historySkeletonCount: 5,
             historyHasLoadedOnce: false,
@@ -171,6 +172,7 @@
                 const keepExisting = options && Object.prototype.hasOwnProperty.call(options, 'keepExisting')
                     ? !!options.keepExisting
                     : (this.historyHasLoadedOnce && this.historyList.length > 0);
+                this.historyLoadError = '';
                 if (!force && this.historyHasLoadedOnce) {
                     return;
                 }
@@ -224,12 +226,14 @@
                         if (sessionId === this.historyRenderSessionId) {
                             console.warn('History load timed out or was cancelled');
                             this.historyLoading = false;
+                            this.historyLoadError = '历史记录加载超时，请检查数据库连接后重试';
                         }
                         return;
                     }
                     console.error('History Load Error:', e);
                     if (sessionId !== this.historyRenderSessionId) return;
                     this.historyLoading = false;
+                    this.historyLoadError = e && e.message ? e.message : '历史记录加载失败，请检查数据库连接';
                     if (!keepExisting && !background) {
                         this.historyListRaw = [];
                         this.historyList = [];

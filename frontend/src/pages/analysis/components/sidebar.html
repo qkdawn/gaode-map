@@ -73,6 +73,12 @@
                         </div>
                     </div>
 
+                    <div v-if="!historyLoading && historyLoadError" style="text-align:center; padding:40px 20px; color:#b91c1c; display:flex; flex-direction:column; align-items:center;">
+                        <img src="/static/images/empty.svg"
+                            style="width:48px; height:48px; opacity:0.3; margin-bottom:10px; filter:grayscale(100%);">
+                        <span>{{ historyLoadError }}</span>
+                    </div>
+
                     <div v-for="item in historyList" :key="item.id" class="history-card"
                         @click="handleHistoryItemClick(item)"
                         :class="{'selection-mode': isSelectionMode, 'selected': selectedHistoryIds.includes(item.id)}">
@@ -130,7 +136,7 @@
                         </button>
                     </div>
 
-                    <div v-if="!historyLoading && historyList.length === 0"
+                    <div v-if="!historyLoading && !historyLoadError && historyList.length === 0"
                         style="text-align:center; padding:40px 20px; color:#999; display:flex; flex-direction:column; align-items:center;">
                         <img src="/static/images/empty.svg"
                             style="width:48px; height:48px; opacity:0.3; margin-bottom:10px;">

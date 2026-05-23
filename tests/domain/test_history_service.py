@@ -1,6 +1,10 @@
 import sys
 from pathlib import Path
 
+import pytest
+from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
+
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import modules.history.service as history_service
@@ -33,3 +37,15 @@ def test_convert_history_detail_to_gcj02_restores_center_polygon_and_pois(monkey
     assert result["params"]["drawn_polygon"][0] == [100.1, 20.2]
     assert result["polygon"][0] == [100.1, 20.2]
     assert result["pois"][0]["location"] == [100.3, 20.4]
+
+
+def test_get_history_list_payload_surfaces_database_errors():
+    class _Repo:
+        def get_list(self, limit):
+            raise SQLAlchemyError("db down")
+
+    with pytest.raises(HTTPException) as exc:
+        history_service.get_history_list_payload(100, _Repo())
+
+    assert exc.value.status_code == 503
+    assert "MySQL" in exc.value.detail
