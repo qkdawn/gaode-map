@@ -17,6 +17,9 @@ from modules.agent.schemas import (
     AgentIterationPoiResponse,
     AgentSiteSelectionRequest,
     AgentSiteSelectionResponse,
+    AgentReactEvent,
+    AgentReactRunRequest,
+    AgentReactRunResponse,
     AgentSummaryStreamEvent,
     AgentToolSummary,
     AgentSummaryReadinessResponse,
@@ -29,6 +32,7 @@ from modules.agent.schemas import (
     AgentTurnRequest,
     AgentTurnResponse,
 )
+from modules.agent.react_orchestrator import cancel_react_run, create_react_run, stream_react_run
 from modules.agent.context_ask_service import answer_context_ask
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload
@@ -62,6 +66,10 @@ def _encode_sse(event: AgentTurnStreamEvent) -> str:
 
 def _encode_summary_sse(event: AgentSummaryStreamEvent) -> str:
     return f"event: {event.type}\ndata: {json.dumps(event.payload, ensure_ascii=False)}\n\n"
+
+
+def _encode_react_sse(event: AgentReactEvent) -> str:
+    return f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
 
 
 @router.post("/api/v1/analysis/agent/turn", response_model=AgentTurnResponse)
@@ -118,6 +126,50 @@ async def run_agent_turn_stream(request: Request, payload: AgentTurnRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/api/v1/analysis/agent/react/run", response_model=AgentReactRunResponse)
+async def create_agent_react_run(payload: AgentReactRunRequest):
+    try:
+        return await create_react_run(payload)
+    except ValueError as exc:
+        if str(exc) == "question_required":
+            raise HTTPException(status_code=400, detail="question_required")
+        raise
+
+
+@router.get("/api/v1/analysis/agent/react/stream")
+async def stream_agent_react_run(request: Request, run_id: str):
+    async def event_stream():
+        try:
+            generator = stream_react_run(run_id)
+            async for event in generator:
+                if await request.is_disconnected():
+                    break
+                yield _encode_react_sse(event)
+        except KeyError:
+            error = AgentReactEvent(
+                run_id=str(run_id or ""),
+                step=0,
+                type="error",
+                ts="",
+                payload={"summary": "ReAct run 不存在或已结束", "code": "run_not_found"},
+            )
+            yield _encode_react_sse(error)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/api/v1/analysis/agent/react/cancel/{run_id}")
+async def cancel_agent_react_run(run_id: str):
+    return {"cancelled": cancel_react_run(run_id)}
 
 
 @router.get("/api/v1/analysis/agent/sessions", response_model=List[AgentSessionSummary])

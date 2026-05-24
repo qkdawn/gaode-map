@@ -62,6 +62,7 @@ ToolLoopStatus = Literal["completed", "requires_risk_confirmation", "failed"]
 CardType = Literal["summary", "evidence", "recommendation"]
 AgentSessionTitleSource = Literal["user", "ai", "fallback"]
 AgentTurnStreamEventType = Literal["meta", "status", "thinking", "reasoning_delta", "trace", "plan", "final", "error"]
+AgentReactEventType = Literal["status", "thought", "action", "observation", "reflection", "final", "error"]
 AgentSummaryStreamEventType = Literal[
     "status",
     "section_start",
@@ -111,6 +112,41 @@ class AgentTurnRequest(BaseModel):
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     risk_confirmations: List[str] = Field(default_factory=list)
     governance_mode: GovernanceMode = "auto"
+
+
+class AgentReactOptions(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    max_steps: Optional[int] = None
+    stagnation_limit: Optional[int] = None
+    tool_timeout_seconds: Optional[int] = None
+    max_tool_failures: Optional[int] = None
+
+
+class AgentReactRunRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    question: str = ""
+    scope: Dict[str, Any] = Field(default_factory=dict)
+    analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
+    options: AgentReactOptions = Field(default_factory=AgentReactOptions)
+
+
+class AgentReactRunResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str
+    status: Literal["created"] = "created"
+
+
+class AgentReactEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: str
+    step: int = 0
+    type: AgentReactEventType
+    ts: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentSummaryRequest(BaseModel):
