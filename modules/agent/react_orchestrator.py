@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -209,6 +210,29 @@ def _raw_preview(value: Any, limit: int = 4000) -> Any:
     if len(encoded) <= limit:
         return value
     return {"preview": encoded[:limit], "truncated": True}
+
+
+def _format_react_brain_error(exc: Exception) -> str:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
+    raw_detail = ""
+    if response is not None:
+        try:
+            raw_detail = str(getattr(response, "text", "") or "")
+        except Exception:
+            raw_detail = ""
+    if not raw_detail:
+        raw_detail = str(getattr(exc, "body", "") or getattr(exc, "message", "") or exc)
+
+    detail = re.sub(r"<[^>]+>", " ", raw_detail)
+    detail = " ".join(detail.split())[:240]
+    if status_code:
+        if int(status_code) == 403:
+            return "LLM provider 返回 HTTP 403 Forbidden：上游拒绝访问，请检查 AI_BASE_URL、AI_API_KEY、AI_MODEL，以及服务端 IP 白名单/访问权限。"
+        return f"LLM provider 返回 HTTP {status_code}" + (f"：{detail}" if detail else "")
+    if "<html" in raw_detail.lower() or "openresty" in raw_detail.lower():
+        return "LLM provider 返回了网关错误页面：请检查 AI_BASE_URL 是否指向正确的兼容接口，以及服务端访问权限。"
+    return f"LLM provider 调用失败：{type(exc).__name__}" + (f"：{detail}" if detail else "")
 
 
 def _observation_payload(result: ToolResult, duration_ms: int) -> Dict[str, Any]:
@@ -452,12 +476,13 @@ async def _execute_llm_react_run(run: ReactRun, *, question: str, snapshot: Anal
                 max_errors_override=run.config.max_tool_failures,
             )
     except Exception as exc:
-        await _put(run, step_no + 1, "error", {"summary": f"ReAct Brain 执行失败：{exc}"})
+        error_message = _format_react_brain_error(exc)
+        await _put(run, step_no + 1, "error", {"summary": f"ReAct Brain 执行失败：{error_message}"})
         await _put(
             run,
             step_no + 2,
             "final",
-            _llm_final_payload(question=question, assistant_summary="", observations=observations, event_steps=evidence_steps, error=str(exc)),
+            _llm_final_payload(question=question, assistant_summary="", observations=observations, event_steps=evidence_steps, error=error_message),
         )
         return True
 

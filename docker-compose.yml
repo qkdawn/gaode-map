@@ -57,6 +57,8 @@ services:
   app:
     build: *app-build
     container_name: gaode-map-app
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     extra_hosts:
