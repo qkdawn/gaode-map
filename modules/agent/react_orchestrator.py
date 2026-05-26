@@ -280,18 +280,22 @@ def _final_payload(question: str, observations: List[Dict[str, Any]], event_step
     if not conclusion_parts:
         conclusion_parts.append("当前证据不足，优先补齐等时圈范围和 POI 基础数据。")
 
-    confidence = 0.35 + min(0.5, len(success) * 0.12) - min(0.2, len(failed) * 0.05)
-    confidence = round(max(0.1, min(0.9, confidence)), 2)
+    if len(success) >= 3 and not failed:
+        evidence_status = "证据较完整"
+    elif success:
+        evidence_status = "证据可用但仍需补充"
+    else:
+        evidence_status = "证据不足"
 
     return {
         "summary": "；".join(conclusion_parts),
         "conclusion": f"针对“{question}”，" + "；".join(conclusion_parts),
-        "confidence": confidence,
+        "evidence_status": evidence_status,
         "evidence_steps": event_steps,
         "next_actions": [
             "围绕 POI 结构识别服务缺口、同质竞争或功能错配。",
             "把路网观察与实际步行/驾车等时圈对照，判断可达性是否只是表面成立。",
-            "后续接入人口、夜光或互联网证据后，再提高结论置信度。",
+            "后续接入人口、夜光或互联网证据后，再提升证据完整性。",
         ],
         "uncertainties": [
             "v1 仅使用当前结构化数据和本地工具观察。",

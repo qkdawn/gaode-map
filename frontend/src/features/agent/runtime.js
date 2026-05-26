@@ -1357,13 +1357,13 @@ function createAgentRuntimeMethods() {
     buildReactFinalTurnPayload({ finalEvent = {}, question = '', messages = [], executionTrace = [] } = {}) {
       const payload = cloneObject(finalEvent.payload)
       const conclusion = asText(payload.conclusion || payload.summary) || 'ReAct 循环已完成。'
-      const confidence = payload.confidence
+      const evidenceStatus = asText(payload.evidence_status)
       const evidenceSteps = cloneArray(payload.evidence_steps || payload.evidenceSteps)
       const nextActions = cloneArray(payload.next_actions || payload.nextActions).map((item) => asText(item)).filter(Boolean)
       const uncertainties = cloneArray(payload.uncertainties).map((item) => asText(item)).filter(Boolean)
       const evidenceText = evidenceSteps.length ? `证据步骤：${evidenceSteps.join('、')}` : ''
-      const confidenceText = confidence !== undefined && confidence !== null ? `置信度：${confidence}` : ''
-      const detailItems = [confidenceText, evidenceText, ...nextActions.slice(0, 3), ...uncertainties.slice(0, 2)]
+      const evidenceStatusText = evidenceStatus ? `证据状态：${evidenceStatus}` : ''
+      const detailItems = [evidenceStatusText, evidenceText, ...nextActions.slice(0, 3), ...uncertainties.slice(0, 2)]
         .filter(Boolean)
       const assistantParts = [conclusion]
       if (detailItems.length) {
@@ -1381,7 +1381,7 @@ function createAgentRuntimeMethods() {
           decision: {
             summary: '',
             mode: 'judgment',
-            strength: Number(confidence || 0) >= 0.7 ? 'strong' : 'moderate',
+            strength: evidenceStatus === '证据较完整' ? 'strong' : 'moderate',
             can_act: nextActions.length > 0,
           },
           support: [],

@@ -64,7 +64,8 @@ def test_react_run_handles_missing_scope_without_crashing(monkeypatch):
     events = asyncio.run(collect())
 
     assert events[-1].type == "final"
-    assert events[-1].payload["confidence"] < 0.7
+    assert events[-1].payload["evidence_status"] == "证据不足"
+    assert "confidence" not in events[-1].payload
     assert any(event.type == "observation" for event in events)
 
 

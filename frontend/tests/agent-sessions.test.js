@@ -563,6 +563,29 @@ test('quick deep-analysis prompt does not add deep thinking review workflow', ()
   assert.match(prompt, /用户问题：请形成下一轮策划定位和补证据计划。/)
 })
 
+test('react final payload renders evidence status', () => {
+  const ctx = createAgentContext()
+  const result = ctx.buildReactFinalTurnPayload({
+    finalEvent: {
+      payload: {
+        conclusion: '当前证据只能支持初步判断。',
+        evidence_status: '证据可用但仍需补充',
+        evidence_steps: [3],
+        next_actions: ['补充人口和夜光证据。'],
+        uncertainties: ['POI 分类颗粒度会影响判断。'],
+      },
+    },
+    question: '哪里适合补充餐饮',
+    messages: [{ role: 'user', content: '哪里适合补充餐饮' }],
+    executionTrace: [],
+  })
+  const assistant = result.messages[result.messages.length - 1].content
+
+  assert.match(assistant, /证据状态：证据可用但仍需补充/)
+  assert.match(assistant, /证据步骤：3/)
+  assert.equal(result.output.decision.strength, 'moderate')
+})
+
 test('submitContextAskQuestion appends user and assistant messages', async () => {
   const ctx = createAgentContext()
   const calls = []
