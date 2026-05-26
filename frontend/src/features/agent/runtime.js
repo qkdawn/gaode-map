@@ -45,6 +45,15 @@ import { buildAnalysisTaskParamBundle, buildAnalysisTaskParamBundles } from './a
 
 function createAgentRuntimeMethods() {
   return {
+    buildAgentDeepThinkingWorkflowPrompt() {
+      return [
+        '深度思考审查视角：',
+        '1. 空间自洽：检查人口、POI、夜光、路网、等时圈和边界之间是否互相支撑；明确耦合、错位和不能证明的关系。',
+        '2. 证据可靠：区分“已有证据可支持”“只能趋势推断”“还需要补证据”；不要把人口、POI、夜光直接等同于消费额、客流或经营质量。',
+        '3. 规划转译：把空间和数据判断转成可执行的定位、客群、业态组合、空间组织、运营动作，并标注约束和风险。',
+        '4. 评审表达：最后输出可写回报告的结构化模块，包含核心判断、证据依据、风险边界和 3 个下一步追问。',
+      ].join('\n')
+    },
     buildAgentDeepAnalysisPrompt(question = '', targetSeed = null) {
       const target = typeof this.normalizeContextAskTarget === 'function'
         ? this.normalizeContextAskTarget(targetSeed)
@@ -67,6 +76,7 @@ function createAgentRuntimeMethods() {
       ]
       if (summary) parts.push(`对象摘要：${summary}`)
       if (evidence.length) parts.push(`已有证据：${evidence.join('；')}`)
+      if (mode === 'deep') parts.push(this.buildAgentDeepThinkingWorkflowPrompt())
       parts.push(`用户问题：${asText(question)}`)
       return parts.join('\n')
     },

@@ -444,6 +444,11 @@ test('deep analysis mode is included in prompt and result can be written back to
   }
 
   assert.match(requestBody.messages[0].content, /深度思考/)
+  assert.match(requestBody.messages[0].content, /深度思考审查视角/)
+  assert.match(requestBody.messages[0].content, /空间自洽/)
+  assert.match(requestBody.messages[0].content, /证据可靠/)
+  assert.match(requestBody.messages[0].content, /规划转译/)
+  assert.match(requestBody.messages[0].content, /评审表达/)
   assert.equal(ctx.getAgentDeepAnalysisPreviewModule().mode, 'deep')
   const module = ctx.writeAgentDeepAnalysisModuleToReport(ctx.getAgentDeepAnalysisPreviewModule())
   assert.equal(module.conclusion, '断点集中在低连通高活力错配街区。')
@@ -515,6 +520,7 @@ test('composer plus menu selects one-shot deep thinking mode and keeps user mess
   }
 
   assert.match(requestBody.messages[0].content, /深度思考/)
+  assert.match(requestBody.messages[0].content, /深度思考审查视角/)
   assert.match(requestBody.messages[0].content, /用户问题：识别断点街区/)
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区'])
   assert.equal(ctx.agentComposerMode, '')
@@ -534,6 +540,27 @@ test('composer plus menu preserves new report action and clears deep mode', () =
   assert.equal(ctx.agentDeepAnalysisMode, 'quick')
   assert.equal(ctx.agentWorkspaceView, 'report')
   assert.ok(ctx.activeAgentSessionId)
+})
+
+test('quick deep-analysis prompt does not add deep thinking review workflow', () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  const target = ctx.buildReportSectionContextAskTarget({
+    sectionKey: 'report_continue',
+    title: '区域报告',
+    summary: '夜光增强但文旅供给不足。',
+  })
+
+  ctx.openAgentDeepAnalysisFromTarget(target, {
+    question: '请形成下一轮策划定位和补证据计划。',
+    mode: 'quick',
+  })
+  ctx.setAgentDeepAnalysisMode('quick')
+  const prompt = ctx.buildAgentDeepAnalysisPrompt('请形成下一轮策划定位和补证据计划。', target)
+
+  assert.match(prompt, /快速继续分析任务/)
+  assert.doesNotMatch(prompt, /深度思考审查视角/)
+  assert.match(prompt, /用户问题：请形成下一轮策划定位和补证据计划。/)
 })
 
 test('submitContextAskQuestion appends user and assistant messages', async () => {
