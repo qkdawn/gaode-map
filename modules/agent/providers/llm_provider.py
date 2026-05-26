@@ -9,7 +9,6 @@ import httpx
 from core.config import settings
 
 from ..context_builder import build_context_summary
-from ..executor import execute_plan_step
 from ..gate import _clarification_options, latest_user_message, run_gate
 from ..governance import check_tool_governance
 from ..planner import build_planning_fallback
@@ -67,6 +66,7 @@ from .tool_loop import (
     tool_output_payload,
     trim_messages as _trim_messages_from_module,
 )
+from .tool_call_execution import execute_tool_call_step, tool_finish_trace_payload, tool_start_trace_payload
 
 LoopEmit = Callable[[str, Dict[str, Any]], Awaitable[None] | None]
 
@@ -562,6 +562,9 @@ async def run_llm_tool_loop(
     governance_mode: str,
     confirmed_tools: List[str] | None = None,
     emit: LoopEmit | None = None,
+    include_secondary_tools: bool = False,
+    max_steps_override: int | None = None,
+    max_errors_override: int | None = None,
 ) -> ToolLoopResult:
     base_url = str(settings.ai_base_url or "").rstrip("/")
     headers = {
@@ -581,8 +584,8 @@ async def run_llm_tool_loop(
         {"role": "user", "content": json.dumps(initial_payload, ensure_ascii=False)},
     ]
     consecutive_tool_errors = 0
-    max_steps = max(1, int(settings.ai_max_tool_steps or 8))
-    max_errors = max(1, int(settings.ai_max_tool_errors or 2))
+    max_steps = max(1, int(max_steps_override or settings.ai_max_tool_steps or 8))
+    max_errors = max(1, int(max_errors_override or settings.ai_max_tool_errors or 2))
     reusable_tool_results: Dict[str, ToolResult] = {}
 
     async with httpx.AsyncClient(timeout=float(settings.ai_timeout_s or 60)) as client:
@@ -602,7 +605,7 @@ async def run_llm_tool_loop(
             request_body: Dict[str, Any] = {
                 "model": settings.ai_model,
                 "messages": loop_messages,
-                "tools": chat_completion_tools(registry),
+                "tools": chat_completion_tools(registry, include_secondary=include_secondary_tools),
                 "tool_choice": "auto",
             }
             payload = await _stream_chat_completion(
@@ -681,22 +684,36 @@ async def run_llm_tool_loop(
                 await _maybe_emit(
                     emit,
                     "trace",
-                    {
-                        "id": f"tool-call:{call.get('call_id') or tool_name}",
-                        "call_id": str(call.get("call_id") or ""),
-                        "tool_name": tool_name,
-                        "status": "start",
-                        "reason": step.reason,
-                        "message": "开始执行工具",
-                        "arguments_summary": summarize_tool_arguments(step.arguments),
-                        "produced_artifacts": list(step.expected_artifacts or []),
-                    },
+                    tool_start_trace_payload(
+                        trace_id=f"tool-call:{call.get('call_id') or tool_name}",
+                        call_id=str(call.get("call_id") or ""),
+                        step=step,
+                    ),
                 )
 
                 if registered is None:
+                    execution = await execute_tool_call_step(
+                        registered_tool=None,
+                        step=step,
+                        snapshot=snapshot,
+                        artifacts=loop_result.artifacts,
+                        question=str(messages[-1].content if messages else ""),
+                        governance_mode=governance_mode,
+                        confirmed_tools=confirmed_tools,
+                    )
+                    await _maybe_emit(
+                        emit,
+                        "trace",
+                        tool_finish_trace_payload(
+                            trace_id=f"tool-call:{call.get('call_id') or tool_name}",
+                            call_id=str(call.get("call_id") or ""),
+                            step=step,
+                            execution=execution,
+                        ),
+                    )
                     loop_result.status = "failed"
                     loop_result.stop_reason = "unknown_tool"
-                    loop_result.error = f"unknown_tool:{tool_name}"
+                    loop_result.error = str(execution.result.error or f"unknown_tool:{tool_name}")
                     return loop_result
 
                 prompt = check_tool_governance(
@@ -806,13 +823,17 @@ async def run_llm_tool_loop(
                     consecutive_tool_errors = 0
                     continue
 
-                result, trace = await execute_plan_step(
+                execution = await execute_tool_call_step(
                     registered_tool=registered,
                     step=step,
                     snapshot=snapshot,
                     artifacts=loop_result.artifacts,
                     question=str(messages[-1].content if messages else ""),
+                    governance_mode=governance_mode,
+                    confirmed_tools=confirmed_tools,
                 )
+                result = execution.result
+                trace = execution.trace
                 data_readiness = dict(result.result.get("data_readiness") or {}) if isinstance(result.result, dict) else {}
                 if data_readiness.get("checked"):
                     await _emit_preflight_trace(
@@ -833,18 +854,13 @@ async def run_llm_tool_loop(
                     emit,
                     "trace",
                     {
-                        "id": f"tool-call:{call.get('call_id') or tool_name}",
-                        "call_id": str(call.get("call_id") or ""),
-                        "tool_name": tool_name,
+                        **tool_finish_trace_payload(
+                            trace_id=f"tool-call:{call.get('call_id') or tool_name}",
+                            call_id=str(call.get("call_id") or ""),
+                            step=step,
+                            execution=execution,
+                        ),
                         "phase": "analysis" if data_readiness.get("checked") else "executing",
-                        "status": result.status,
-                        "reason": step.reason,
-                        "message": trace.message or ("执行成功" if result.status == "success" else "执行失败"),
-                        "arguments_summary": summarize_tool_arguments(step.arguments),
-                        "result_summary": summarize_tool_result(result),
-                        "evidence_count": len(result.evidence or []),
-                        "warning_count": len(result.warnings or []),
-                        "produced_artifacts": list((result.artifacts or {}).keys())[:12],
                     },
                 )
                 consecutive_tool_errors = consecutive_tool_errors + 1 if result.status == "failed" else 0

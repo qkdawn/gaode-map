@@ -7,8 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
+from .context_builder import build_context_bundle
 from .executor import execute_plan_step
+from .providers.langgraph_react import run_langgraph_react_loop
+from .providers.client import is_llm_enabled
+from .providers.llm_provider import run_llm_tool_loop
 from .schemas import (
+    AgentMessage,
     AgentReactEvent,
     AgentReactOptions,
     AgentReactRunRequest,
@@ -20,6 +25,50 @@ from .schemas import (
 from .tools import get_tool_registry
 
 
+REACT_SAFE_TOOL_NAMES = {
+    "read_current_scope",
+    "read_current_results",
+    "fetch_pois_in_scope",
+    "compute_h3_metrics_from_scope_and_pois",
+    "compute_population_overview_from_scope",
+    "compute_nightlight_overview_from_scope",
+    "compute_road_syntax_from_scope",
+    "get_area_data_bundle",
+    "analyze_poi_structure",
+    "analyze_spatial_structure",
+    "infer_area_labels",
+    "run_area_character_pack",
+    "read_poi_structure_analysis",
+    "read_h3_structure_analysis",
+    "read_road_pattern_analysis",
+    "read_population_profile_analysis",
+    "read_nightlight_pattern_analysis",
+    "analyze_poi_mix_from_scope",
+    "detect_commercial_hotspots",
+    "analyze_target_supply_gap",
+}
+REACT_TOOL_LABELS = {
+    "read_current_scope": "读取当前分析范围",
+    "read_current_results": "读取已有分析结果",
+    "fetch_pois_in_scope": "抓取范围内 POI",
+    "compute_h3_metrics_from_scope_and_pois": "计算 H3 网格指标",
+    "compute_population_overview_from_scope": "计算人口概览",
+    "compute_nightlight_overview_from_scope": "计算夜光活力",
+    "compute_road_syntax_from_scope": "计算路网句法",
+    "get_area_data_bundle": "汇总区域数据包",
+    "analyze_poi_structure": "分析 POI 结构",
+    "analyze_spatial_structure": "分析空间结构",
+    "infer_area_labels": "推断区域标签",
+    "run_area_character_pack": "生成区域画像",
+    "read_poi_structure_analysis": "读取 POI 结构分析",
+    "read_h3_structure_analysis": "读取 H3 结构分析",
+    "read_road_pattern_analysis": "读取路网模式分析",
+    "read_population_profile_analysis": "读取人口画像分析",
+    "read_nightlight_pattern_analysis": "读取夜光模式分析",
+    "analyze_poi_mix_from_scope": "分析业态混合",
+    "detect_commercial_hotspots": "识别商业热点",
+    "analyze_target_supply_gap": "分析目标业态供需缺口",
+}
 DEFAULT_MAX_STEPS = 8
 DEFAULT_STAGNATION_LIMIT = 2
 DEFAULT_TOOL_TIMEOUT_SECONDS = 20
@@ -91,6 +140,39 @@ def _merge_scope(snapshot: AnalysisSnapshot, scope: Dict[str, Any]) -> AnalysisS
 
 def _latest_user_question(request: AgentReactRunRequest) -> str:
     return str(request.question or "").strip()
+
+
+def _react_tool_registry() -> Dict[str, Any]:
+    registry = get_tool_registry()
+    return {name: registered for name, registered in registry.items() if name in REACT_SAFE_TOOL_NAMES}
+
+
+def _tool_label(tool_name: str) -> str:
+    name = str(tool_name or "").strip()
+    if not name:
+        return "工具"
+    return REACT_TOOL_LABELS.get(name, name)
+
+
+def _trace_action_summary(tool_name: str, payload: Dict[str, Any]) -> str:
+    label = _tool_label(tool_name)
+    argument_summary = str(payload.get("arguments_summary") or "").strip()
+    if argument_summary and argument_summary != "无参数":
+        return f"我正在调用「{label}」，参数是：{argument_summary}。"
+    return f"我正在调用「{label}」，先拿到这一步需要的证据。"
+
+
+def _trace_observation_summary(tool_name: str, payload: Dict[str, Any], *, failed: bool = False) -> str:
+    label = _tool_label(tool_name)
+    result_summary = str(payload.get("result_summary") or payload.get("message") or payload.get("reason") or "").strip()
+    if failed:
+        return f"「{label}」没有顺利返回可用结果：{result_summary or '工具执行失败'}。"
+    if result_summary:
+        return f"「{label}」返回了观察结果：{result_summary}。"
+    evidence_count = payload.get("evidence_count")
+    if evidence_count not in (None, ""):
+        return f"「{label}」已返回观察结果，包含 {evidence_count} 条证据。"
+    return f"「{label}」已返回观察结果。"
 
 
 def _tool_summary(result: ToolResult) -> str:
@@ -218,10 +300,183 @@ def _final_payload(question: str, observations: List[Dict[str, Any]], event_step
     }
 
 
+def _llm_final_payload(
+    *,
+    question: str,
+    assistant_summary: str,
+    observations: List[Dict[str, Any]],
+    event_steps: List[int],
+    error: str = "",
+) -> Dict[str, Any]:
+    fallback = _final_payload(question, observations, event_steps)
+    conclusion = str(assistant_summary or "").strip() or str(fallback.get("conclusion") or "")
+    if error and not assistant_summary:
+        conclusion = f"ReAct 循环未能稳定完成，已回退到当前观察：{fallback.get('summary') or error}"
+    return {
+        **fallback,
+        "summary": conclusion,
+        "conclusion": conclusion,
+        "evidence_steps": list(event_steps or fallback.get("evidence_steps") or []),
+        "meta": {
+            "mode": "llm_react" if assistant_summary else "fallback",
+            "error": error,
+        },
+    }
+
+
 async def _put(run: ReactRun, step: int, event_type: str, payload: Dict[str, Any]) -> AgentReactEvent:
     event = _event(run.run_id, step, event_type, payload)
     await run.queue.put(event)
     return event
+
+
+async def _execute_llm_react_run(run: ReactRun, *, question: str, snapshot: AnalysisSnapshot) -> bool:
+    if not is_llm_enabled():
+        return False
+
+    step_no = 0
+    observations: List[Dict[str, Any]] = []
+    evidence_steps: List[int] = []
+    await _put(
+        run,
+        step_no,
+        "status",
+        {"summary": "ReAct Brain 已启动", "state": "running", "meta": {"mode": "llm_react"}},
+    )
+
+    async def emit(source_type: str, payload: Dict[str, Any]) -> None:
+        nonlocal step_no
+        if run.cancelled:
+            return
+        if source_type == "reasoning_delta":
+            return
+        if source_type == "thinking":
+            phase = str(payload.get("phase") or "")
+            title = str(payload.get("title") or "").strip()
+            if phase == "executing" and title.startswith("准备调用"):
+                return
+            step_no += 1
+            await _put(
+                run,
+                step_no,
+                "thought",
+                {
+                    "summary": str(payload.get("detail") or title or "正在判断下一步行动。"),
+                    "meta": {"source": str(payload.get("source") or "react_brain"), "phase": phase},
+                },
+            )
+            return
+        if source_type != "trace":
+            return
+
+        status = str(payload.get("status") or "").strip()
+        tool_name = str(payload.get("tool_name") or "").strip()
+        summary = str(payload.get("message") or payload.get("result_summary") or payload.get("reason") or "").strip()
+        if status in {"start", "blocked"}:
+            step_no += 1
+            label = _tool_label(tool_name)
+            await _put(
+                run,
+                step_no,
+                "action" if status == "start" else "error",
+                {
+                    "summary": _trace_action_summary(tool_name, payload) if status == "start" else (summary or f"「{label}」被安全策略拦截。"),
+                    "raw": {
+                        "tool": tool_name,
+                        "tool_label": label,
+                        "arguments_summary": payload.get("arguments_summary"),
+                    },
+                    "meta": {"tool": tool_name, "tool_label": label, "status": status},
+                },
+            )
+            return
+
+        step_no += 1
+        event_type = "observation" if status in {"success", "skipped"} else "error"
+        label = _tool_label(tool_name)
+        event = await _put(
+            run,
+            step_no,
+            event_type,
+            {
+                "summary": _trace_observation_summary(tool_name, payload, failed=event_type == "error"),
+                "raw": {
+                    "tool": tool_name,
+                    "tool_label": label,
+                    "result_summary": payload.get("result_summary"),
+                    "warning_count": payload.get("warning_count"),
+                    "evidence_count": payload.get("evidence_count"),
+                },
+                "meta": {"tool": tool_name, "tool_label": label, "status": status},
+                "quality": "usable" if event_type == "observation" else "limited",
+            },
+        )
+        observations.append(
+            {
+                "tool": tool_name,
+                "status": "success" if event_type == "observation" else "failed",
+                "summary": summary,
+                "step": event.step,
+            }
+        )
+        if event_type == "observation":
+            evidence_steps.append(event.step)
+
+    try:
+        try:
+            result = await run_langgraph_react_loop(
+                messages=[AgentMessage(role="user", content=question)],
+                snapshot=snapshot,
+                context=build_context_bundle(snapshot),
+                registry=_react_tool_registry(),
+                governance_mode="auto",
+                emit=emit,
+                include_secondary_tools=True,
+                max_steps_override=run.config.max_steps,
+                max_errors_override=run.config.max_tool_failures,
+            )
+        except ImportError:
+            result = await run_llm_tool_loop(
+                messages=[AgentMessage(role="user", content=question)],
+                snapshot=snapshot,
+                context=build_context_bundle(snapshot),
+                registry=_react_tool_registry(),
+                governance_mode="auto",
+                emit=emit,
+                include_secondary_tools=True,
+                max_steps_override=run.config.max_steps,
+                max_errors_override=run.config.max_tool_failures,
+            )
+    except Exception as exc:
+        await _put(run, step_no + 1, "error", {"summary": f"ReAct Brain 执行失败：{exc}"})
+        await _put(
+            run,
+            step_no + 2,
+            "final",
+            _llm_final_payload(question=question, assistant_summary="", observations=observations, event_steps=evidence_steps, error=str(exc)),
+        )
+        return True
+
+    if result.status != "completed":
+        await _put(
+            run,
+            step_no + 1,
+            "error",
+            {"summary": result.error or result.risk_prompt or result.stop_reason or "ReAct Brain 未完成"},
+        )
+    await _put(
+        run,
+        step_no + 2,
+        "final",
+        _llm_final_payload(
+            question=question,
+            assistant_summary=result.assistant_summary,
+            observations=observations,
+            event_steps=evidence_steps,
+            error=result.error,
+        ),
+    )
+    return True
 
 
 async def _execute_react_run(run: ReactRun) -> None:
@@ -236,6 +491,8 @@ async def _execute_react_run(run: ReactRun) -> None:
     step_no = 0
 
     try:
+        if await _execute_llm_react_run(run, question=question, snapshot=snapshot):
+            return
         await _put(run, step_no, "status", {"summary": "ReAct 循环已启动", "state": "running"})
         steps = _build_steps(question, snapshot)
         for plan_step in steps[: run.config.max_steps]:

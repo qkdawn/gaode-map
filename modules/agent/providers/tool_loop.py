@@ -228,7 +228,7 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
     }
 
 
-def chat_completion_tools(registry: Dict[str, RegisteredTool]) -> List[Dict[str, Any]]:
+def chat_completion_tools(registry: Dict[str, RegisteredTool], *, include_secondary: bool = False) -> List[Dict[str, Any]]:
     return [
         {
             "type": "function",
@@ -238,7 +238,7 @@ def chat_completion_tools(registry: Dict[str, RegisteredTool]) -> List[Dict[str,
                 "parameters": registered.spec.input_schema or {"type": "object", "properties": {}, "additionalProperties": False},
             },
         }
-        for name, registered in llm_visible_registry(registry).items()
+        for name, registered in llm_visible_registry(registry, include_secondary=include_secondary).items()
     ]
 
 
