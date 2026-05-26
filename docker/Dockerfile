@@ -14,7 +14,6 @@ FROM python:3.11-slim
 ARG DEPTHMAPX_VERSION=v0.8.0
 WORKDIR /app
 
-# Install system dependencies
 RUN printf '%s\n' \
     'Types: deb' \
     'URIs: https://mirrors.tuna.tsinghua.edu.cn/debian' \
@@ -43,10 +42,7 @@ RUN curl -fL "https://github.com/SpaceGroupUCL/depthmapX/releases/download/${DEP
 
 ENV DEPTHMAPX_CLI_PATH=/usr/local/bin/depthmapXcli
 
-# Copy application code, excluding ignored frontend build artifacts.
-COPY . .
-
-# Install Python dependencies from pyproject.toml without relying on packaging metadata.
+COPY pyproject.toml ./
 RUN python - <<'PY' > /tmp/requirements-docker.txt
 import tomllib
 from pathlib import Path
@@ -57,11 +53,9 @@ for dependency in project["project"]["dependencies"]:
 PY
 RUN pip install --no-cache-dir -r /tmp/requirements-docker.txt
 
-# Copy frontend production assets built in the dedicated Node stage.
+COPY . .
 COPY --from=frontend-builder /app/static/frontend ./static/frontend
 
-# Exposure
 EXPOSE 8000
 
-# Command
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

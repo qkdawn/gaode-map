@@ -1,102 +1,14 @@
-x-app-build: &app-build
-  context: .
-  dockerfile: docker/Dockerfile
-
-x-app-environment: &app-environment
-  VALHALLA_BASE_URL: http://valhalla:8002
-  AMAP_WEB_SERVICE_KEY:
-  DB_URL:
-  DB_HOST: ${DB_HOST:-175.0.105.249}
-  DB_PORT: ${DB_PORT:-13306}
-  DB_USER: ${DB_USER:-map_app}
-  DB_PASSWORD:
-  DB_NAME: ${DB_NAME:-gaode_deploy}
-  # Inside compose, app must use the Docker service name even when local .env points to 127.0.0.1.
-  LOCAL_QUERY_BASE_URL: http://search:8001
-  LOCAL_QUERY_COORD_SYSTEM: ${LOCAL_QUERY_COORD_SYSTEM:-gcj02}
-  DEPTHMAPX_CLI_PATH: ${DEPTHMAPX_CLI_PATH:-/usr/local/bin/depthmapXcli}
-  OVERPASS_ENDPOINT: ${OVERPASS_ENDPOINT:-http://overpass/api/interpreter}
-  CITY_BOUNDARY_DIR: /mapdata/boundaries
-  POPULATION_DATA_DIR: /mapdata/population
-  POPULATION_PREVIEW_MAX_SIZE: ${POPULATION_PREVIEW_MAX_SIZE:-2048}
-  NIGHTLIGHT_DATA_DIR: /mapdata/nightlight/processed
-  NIGHTLIGHT_PREVIEW_MAX_SIZE: ${NIGHTLIGHT_PREVIEW_MAX_SIZE:-2048}
-  PYTHONUNBUFFERED: "1"
-
-x-city-boundary-volume: &city-boundary-volume "${CITY_BOUNDARY_HOST_DIR:-D:/MapData/boundaries}:/mapdata/boundaries:ro"
-x-population-volume: &population-volume "${POPULATION_DATA_HOST_DIR:-E:/PeopleData}:/mapdata/population:ro"
-x-nightlight-volume: &nightlight-volume "${NIGHTLIGHT_DATA_HOST_DIR:-E:/NightlightData}:/mapdata/nightlight:ro"
-
-x-valhalla-environment: &valhalla-environment
-  build_elevation: "False"
-  build_admins: "False"
-  build_time_zones: "False"
-  server_threads: ${VALHALLA_SERVER_THREADS:-8}
-  use_tiles_ignore_pbf: "False"
-  use_default_speeds_config: "True"
-  default_speeds_config_url: https://raw.githubusercontent.com/OpenStreetMapSpeeds/schema/master/default_speeds.json
-
-x-overpass-environment: &overpass-environment
-  OVERPASS_MODE: init
-  OVERPASS_META: "no"
-  OVERPASS_PLANET_URL: file:///osm/${OVERPASS_PBF_FILE:-hunan-260201.osm.pbf}
-  OVERPASS_PLANET_PREPROCESS: mv /db/planet.osm.bz2 /db/planet.osm.pbf && osmium cat /db/planet.osm.pbf -o /db/planet.osm.bz2 -f osm.bz2 --overwrite && rm -f /db/planet.osm.pbf
-  OVERPASS_RULES_LOAD: "10"
-
 services:
   search:
-    build:
-      context: ../search
-      dockerfile: Dockerfile
-    container_name: gaode-map-search
-    env_file:
-      - ../search/.env
-    ports:
-      - "8001:8001"
     restart: unless-stopped
 
   app:
-    build: *app-build
-    container_name: gaode-map-app
-    ports:
-      - "8000:8000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment: *app-environment
-    depends_on:
-      search:
-        condition: service_started
-      valhalla:
-        condition: service_started
-      overpass:
-        condition: service_started
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
-    volumes:
-      - *city-boundary-volume
-      - *population-volume
-      - *nightlight-volume
+    environment:
+      DB_HOST: ${DB_HOST:-175.0.105.249}
     restart: unless-stopped
 
   valhalla:
-    image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest
-    container_name: gaode-map-valhalla
-    ports:
-      - "8002:8002"
-    volumes:
-      - "${VALHALLA_CUSTOM_FILES_DIR:-D:/MapData/osm_source}:/custom_files"
-      - "${VALHALLA_TILES_DIR:-D:/MapData/valhalla_tiles}:/valhalla/tiles"
-    environment: *valhalla-environment
-    # Note: Valhalla needs a 'tiles.tar' or PBF files in the mapped volume to start effectively.
-    # Without data, it will start but return empty results for routing.
     restart: unless-stopped
 
   overpass:
-    image: wiktorn/overpass-api:latest
-    container_name: gaode-map-overpass
-    ports:
-      - "8003:80"
-    environment: *overpass-environment
-    volumes:
-      - "${OVERPASS_DB_DIR:-D:/MapData/overpass_db}:/db"
-      - "${OVERPASS_SOURCE_DIR:-D:/MapData/osm_source}:/osm:ro"
     restart: unless-stopped

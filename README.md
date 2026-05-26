@@ -108,8 +108,12 @@ bash ../scripts/check_repo_hygiene.sh
 ## 9. Docker
 ```bash
 cd /mnt/d/Coding/map_analyse/gaode-map
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
+- `docker-compose.yml` 是基础拓扑，默认使用镜像内代码和生产前端构建产物
+- `docker-compose.dev.yml` 只覆盖开发差异：挂载源码并使用 `uvicorn --reload`
+- `docker-compose.prod.yml` 只覆盖生产差异：设置重启策略和生产 DB 默认 host
 - 生产镜像会在 Docker 多阶段构建中自动执行前端 `npm ci` 和 `npm run build`
 - 运行容器直接加载镜像内的 `static/frontend/`，不依赖宿主机预先打包
 

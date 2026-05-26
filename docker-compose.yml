@@ -69,14 +69,11 @@ services:
         condition: service_started
       overpass:
         condition: service_started
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     volumes:
-      - .:/app
       - *city-boundary-volume
       - *population-volume
       - *nightlight-volume
-      - /app/.venv
-      - /app/__pycache__
 
   valhalla:
     image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest

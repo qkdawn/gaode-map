@@ -1,0 +1,9 @@
+services:
+  app:
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+      - "${CITY_BOUNDARY_HOST_DIR:-D:/MapData/boundaries}:/mapdata/boundaries:ro"
+      - "${POPULATION_DATA_HOST_DIR:-E:/PeopleData}:/mapdata/population:ro"
+      - "${NIGHTLIGHT_DATA_HOST_DIR:-E:/NightlightData}:/mapdata/nightlight:ro"
+      - /app/__pycache__
