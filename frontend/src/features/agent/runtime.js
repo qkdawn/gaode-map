@@ -1253,15 +1253,17 @@ function createAgentRuntimeMethods() {
       const panelKind = asText(options && options.panelKind)
         || (typeof this.getAgentActiveTopTab === 'function' ? asText(this.getAgentActiveTopTab().kind) : '')
         || 'followup'
+      const mode = asText((options && options.mode) || this.agentComposerMode || this.agentDeepAnalysisMode) === 'deep' ? 'deep' : 'quick'
+      this.agentDeepAnalysisMode = mode
       const target = (options && options.target) || (typeof this.getAgentActiveDeepAnalysisTab === 'function' ? ((this.getAgentActiveDeepAnalysisTab() || {}).target) : null)
       const rawQuestion = String((options && options.prompt) || this.agentInput || '').trim()
-      const question = panelKind === 'deep_analysis' && typeof this.buildAgentDeepAnalysisPrompt === 'function'
+      const requestQuestion = panelKind === 'deep_analysis' && typeof this.buildAgentDeepAnalysisPrompt === 'function'
         ? this.buildAgentDeepAnalysisPrompt(rawQuestion, target)
         : rawQuestion
-      if (!question || this.agentSessionHydrating) return null
+      if (!rawQuestion || !requestQuestion || this.agentSessionHydrating) return null
       this.ensureAgentPanelReady()
       if (panelKind !== 'deep_analysis' && typeof this.ensureAgentFollowupTabForPrompt === 'function') {
-        this.ensureAgentFollowupTabForPrompt(question)
+        this.ensureAgentFollowupTabForPrompt(rawQuestion)
       }
       const currentSession = this.syncCurrentAgentSession() || this.readSessionState(this.activeAgentSessionId)
       const targetSessionId = this.getActiveAgentSessionId(currentSession && currentSession.id) || this.createAgentSession().id
@@ -1282,10 +1284,16 @@ function createAgentRuntimeMethods() {
       if (!baseMessages.length) {
         baseMessages = cloneArray(this.agentMessages)
       }
-      const nextMessages = [...baseMessages, { role: 'user', content: question }]
+      const nextMessages = [...baseMessages, { role: 'user', content: rawQuestion }]
+      const requestMessages = [
+        ...baseMessages,
+        { role: 'user', content: requestQuestion },
+      ]
       return {
-        question,
+        question: requestQuestion,
         rawQuestion,
+        requestMessages,
+        mode,
         panelKind,
         target,
         currentSession,
@@ -1300,30 +1308,98 @@ function createAgentRuntimeMethods() {
     async consumeTurnStream(res, handler) {
       await consumeSseStream(res, handler)
     },
-    async commitTurnResult(turnContext = {}, finalResponse = null) {
-      const targetSessionId = asText(turnContext.targetSessionId)
-      this.stopAgentThinkingTimer(targetSessionId)
-      if (!turnContext.wasPersisted && String((finalResponse || {}).status || '') === 'answered') {
-        try {
-          await this.loadAgentSessionDetail(targetSessionId)
-        } catch (detailErr) {
-          console.warn('Agent session detail load failed after first streamed turn', detailErr)
-        }
+    normalizeReactLoopEvent(event = {}) {
+      const type = asText(event.type)
+      const payload = cloneObject(event.payload)
+      const step = Number(event.step || 0) || 0
+      const summary = asText(payload.summary || payload.conclusion || payload.message)
+      const tool = asText(payload.meta && (payload.meta.tool_label || payload.meta.tool))
+      const rawTool = asText(payload.meta && payload.meta.tool)
+      const labels = {
+        status: '状态',
+        thought: '思考',
+        action: '行动',
+        observation: '观察',
+        reflection: '反思',
+        final: '结论',
+        error: '异常',
+      }
+      return normalizeAgentThinkingItem({
+        id: `react-${type || 'event'}-${step}-${tool || 'core'}`,
+        phase: 'react_loop',
+        title: labels[type] || 'ReAct',
+        detail: summary,
+        items: tool ? [`工具：${tool}`] : [],
+        meta: {
+          ...cloneObject(payload.meta),
+          reactLoop: true,
+          reactType: type,
+          step,
+          tool,
+          rawTool,
+          raw: payload.raw || null,
+        },
+        state: ['final'].includes(type)
+          ? 'completed'
+          : (['error'].includes(type) ? 'failed' : (['observation', 'reflection'].includes(type) ? 'completed' : 'active')),
+      })
+    },
+    buildReactFinalTurnPayload({ finalEvent = {}, question = '', messages = [], executionTrace = [] } = {}) {
+      const payload = cloneObject(finalEvent.payload)
+      const conclusion = asText(payload.conclusion || payload.summary) || 'ReAct 循环已完成。'
+      const confidence = payload.confidence
+      const evidenceSteps = cloneArray(payload.evidence_steps || payload.evidenceSteps)
+      const nextActions = cloneArray(payload.next_actions || payload.nextActions).map((item) => asText(item)).filter(Boolean)
+      const uncertainties = cloneArray(payload.uncertainties).map((item) => asText(item)).filter(Boolean)
+      const evidenceText = evidenceSteps.length ? `证据步骤：${evidenceSteps.join('、')}` : ''
+      const confidenceText = confidence !== undefined && confidence !== null ? `置信度：${confidence}` : ''
+      const detailItems = [confidenceText, evidenceText, ...nextActions.slice(0, 3), ...uncertainties.slice(0, 2)]
+        .filter(Boolean)
+      const assistantParts = [conclusion]
+      if (detailItems.length) {
+        assistantParts.push(detailItems.map((item) => `- ${item}`).join('\n'))
+      }
+      const nextMessages = [
+        ...cloneArray(messages),
+        { role: 'assistant', content: assistantParts.filter(Boolean).join('\n\n') },
+      ]
+      return {
+        status: 'answered',
+        stage: 'answered',
+        output: {
+          cards: [],
+          decision: {
+            summary: '',
+            mode: 'judgment',
+            strength: Number(confidence || 0) >= 0.7 ? 'strong' : 'moderate',
+            can_act: nextActions.length > 0,
+          },
+          support: [],
+          actions: [],
+          boundary: [],
+          next_suggestions: nextActions.length ? nextActions : ['继续追问为什么', '补充人口或夜光证据', '导出当前判断'],
+          panel_payloads: {},
+        },
+        diagnostics: {
+          execution_trace: cloneArray(executionTrace),
+          used_tools: cloneArray(executionTrace).map((item) => asText(item.tool_name || item.toolName)).filter(Boolean),
+          thinking_timeline: [],
+          error: '',
+        },
+        context_summary: {
+          question: asText(question),
+          mode: 'react_loop',
+        },
+        plan: {
+          steps: [],
+          followup_steps: [],
+          followup_applied: false,
+          summary: 'ReAct 循环已完成',
+        },
+        messages: nextMessages,
       }
     },
-    syncUiAfterTurn(turnContext = {}) {
-      const targetSessionId = asText(turnContext.targetSessionId)
-      this.stopAgentThinkingTimer(targetSessionId)
-      const runState = this.getAgentRunState(targetSessionId)
-      if (runState && runState.abortController === turnContext.requestAbortController) {
-        this.clearAgentRunState(targetSessionId)
-      }
-      if (targetSessionId === asText(this.activeAgentSessionId)) {
-        this.agentClarificationSubmitting = false
-        this.syncActiveAgentRuntimeView(targetSessionId)
-      }
-    },
-    async submitAgentTurn(options = {}) {
+    async submitReactAgentTurn(options = {}) {
       const turnContext = this.buildTurnContext(options)
       if (!turnContext) return
       const {
@@ -1363,9 +1439,237 @@ function createAgentRuntimeMethods() {
         panelPreloadNotes: [],
         preloadedPanelKeys: [],
         status: 'running',
+        stage: 'executing',
+        thinkingTimeline: [normalizeAgentSubmitThinkingItem('active')],
+      }))
+      this.setAgentRunState(targetSessionId, {
+        abortController: requestAbortController,
+        loading: true,
+        streamState: 'connecting',
+        streamingMessageId: `agent-react-${Date.now().toString(36)}`,
+        reasoningBlocks: [],
+        pendingQuestion: rawQuestion || question,
+        autoScrollLocked: false,
+        autoScrollSticky: true,
+        autoScrollThresholdPx: 24,
+      })
+      this.agentTurnAbortController = targetSessionId === asText(this.activeAgentSessionId) ? requestAbortController : null
+      this.agentInput = ''
+      this.agentClarificationDraft = ''
+      this.agentClarificationSubmitting = false
+      this.agentThinkingExpanded = true
+      this.agentPlanExpanded = false
+      this.agentTraceExpanded = false
+      this.startAgentThinkingTimer(targetSessionId)
+      try {
+        const runRes = await fetch('/api/v1/analysis/agent/react/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: requestAbortController ? requestAbortController.signal : undefined,
+          body: JSON.stringify({
+            question,
+            analysis_snapshot: this.buildAgentAnalysisSnapshot(),
+            options: {
+              max_steps: 8,
+              stagnation_limit: 2,
+              tool_timeout_seconds: 20,
+              max_tool_failures: 2,
+            },
+          }),
+        })
+        if (!runRes.ok) {
+          throw new Error(`/api/v1/analysis/agent/react/run 请求失败(${runRes.status})`)
+        }
+        const runPayload = await runRes.json()
+        const runId = asText(runPayload && runPayload.run_id)
+        if (!runId) throw new Error('ReAct run_id 缺失')
+        const streamRes = await fetch(`/api/v1/analysis/agent/react/stream?run_id=${encodeURIComponent(runId)}`, {
+          signal: requestAbortController ? requestAbortController.signal : undefined,
+        })
+        if (!streamRes.ok) {
+          throw new Error(`/api/v1/analysis/agent/react/stream 请求失败(${streamRes.status})`)
+        }
+        let finalEvent = null
+        const executionTrace = []
+        await this.consumeTurnStream(streamRes, ({ type, payload }) => {
+          const event = payload && typeof payload === 'object' && payload.type ? payload : { type, payload }
+          const item = this.normalizeReactLoopEvent(event)
+          if (type === 'action' || event.type === 'action') {
+            executionTrace.push({
+              tool_name: asText(event.payload && event.payload.meta && event.payload.meta.tool) || 'react_action',
+              status: 'start',
+              reason: asText(event.payload && event.payload.summary),
+              message: asText(event.payload && event.payload.summary),
+              evidence_count: 0,
+              warning_count: 0,
+            })
+          }
+          this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+            ...session,
+            status: item.state === 'failed' ? 'failed' : 'running',
+            stage: item.state === 'failed' ? 'failed' : 'executing',
+            thinkingTimeline: upsertThinkingItemInList(
+              completeActiveThinkingItemsInList(
+                upsertThinkingItemInList(session.thinkingTimeline, normalizeAgentSubmitThinkingItem('completed')),
+                item.id,
+              ),
+              item,
+            ),
+            executionTrace: cloneArray(executionTrace),
+          }))
+          this.setAgentRunState(targetSessionId, { streamState: 'streaming' })
+          if (targetSessionId === asText(this.activeAgentSessionId)) {
+            this.agentThinkingExpanded = true
+            this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
+          }
+          if (event.type === 'final') {
+            finalEvent = event
+          }
+        })
+        if (!finalEvent) {
+          throw new Error('ReAct 流式执行未返回最终结果')
+        }
+        const finalResponse = this.buildReactFinalTurnPayload({
+          finalEvent,
+          question: rawQuestion || question,
+          messages: nextMessages,
+          executionTrace,
+        })
+        const turn = normalizeAgentTurnPayload(finalResponse)
+        const finalStatusItem = normalizeAgentStatusThinkingItem({ stage: 'answered' })
+        const finalMessages = cloneArray(finalResponse.messages)
+        this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+          ...session,
+          panelKind,
+          persisted: false,
+          snapshotLoaded: true,
+          status: 'answered',
+          stage: 'answered',
+          cards: cloneArray(turn.output.cards),
+          decision: normalizeAgentDecision(turn.output.decision),
+          support: cloneArray(turn.output.support).map((item) => normalizeAgentDecisionEvidence(item)),
+          counterpoints: cloneArray(turn.output.counterpoints).map((item) => normalizeAgentCounterpoint(item)),
+          actions: cloneArray(turn.output.actions).map((item) => normalizeAgentAction(item)),
+          boundary: cloneArray(turn.output.boundary).map((item) => normalizeAgentBoundaryItem(item)),
+          executionTrace: cloneArray(executionTrace),
+          usedTools: cloneArray(finalResponse.diagnostics.used_tools),
+          thinkingTimeline: upsertThinkingItemInList(
+            completeActiveThinkingItemsInList(session.thinkingTimeline, finalStatusItem.id),
+            finalStatusItem,
+          ),
+          nextSuggestions: cloneArray(turn.output.nextSuggestions),
+          messages: finalMessages.length ? finalMessages : nextMessages,
+          error: '',
+          contextSummary: cloneObject(turn.contextSummary),
+          plan: normalizeAgentPlanEnvelope(turn.plan),
+          riskConfirmations: [],
+        }))
+        this.setAgentRunState(targetSessionId, { streamState: 'completed' })
+      } catch (err) {
+        if (err && (err.name === 'AbortError' || String(err.message || '').includes('aborted'))) {
+          this.stopAgentThinkingTimer(targetSessionId)
+          this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+            ...session,
+            input: rawQuestion || question,
+            status: 'idle',
+            stage: 'gating',
+            thinkingTimeline: [],
+            executionTrace: [],
+          }))
+          if (targetSessionId === asText(this.activeAgentSessionId)) {
+            this.agentInput = rawQuestion || question
+          }
+          return
+        }
+        const message = 'ReAct 执行失败: ' + (err && err.message ? err.message : String(err))
+        const item = normalizeAgentStatusThinkingItem({ stage: 'failed', message })
+        this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+          ...session,
+          status: 'failed',
+          stage: 'failed',
+          error: message,
+          thinkingTimeline: upsertThinkingItemInList(
+            completeActiveThinkingItemsInList(session.thinkingTimeline, item.id),
+            item,
+          ),
+        }))
+        this.setAgentRunState(targetSessionId, { streamState: 'failed' })
+      } finally {
+        this.syncUiAfterTurn(turnContext)
+      }
+    },
+    async commitTurnResult(turnContext = {}, finalResponse = null) {
+      const targetSessionId = asText(turnContext.targetSessionId)
+      this.stopAgentThinkingTimer(targetSessionId)
+      if (!turnContext.wasPersisted && String((finalResponse || {}).status || '') === 'answered') {
+        try {
+          await this.loadAgentSessionDetail(targetSessionId)
+        } catch (detailErr) {
+          console.warn('Agent session detail load failed after first streamed turn', detailErr)
+        }
+      }
+    },
+    syncUiAfterTurn(turnContext = {}) {
+      const targetSessionId = asText(turnContext.targetSessionId)
+      this.stopAgentThinkingTimer(targetSessionId)
+      const runState = this.getAgentRunState(targetSessionId)
+      if (runState && runState.abortController === turnContext.requestAbortController) {
+        this.clearAgentRunState(targetSessionId)
+      }
+      if (targetSessionId === asText(this.activeAgentSessionId)) {
+        this.agentClarificationSubmitting = false
+        this.syncActiveAgentRuntimeView(targetSessionId)
+      }
+    },
+    async submitAgentTurn(options = {}) {
+      if (options && options.useReactLoop) {
+        return this.submitReactAgentTurn(options)
+      }
+      const turnContext = this.buildTurnContext(options)
+      if (!turnContext) return
+      const {
+        question,
+        rawQuestion,
+        requestMessages,
+        mode,
+        panelKind,
+        targetSessionId,
+        wasPersisted,
+        historyId,
+        requestAbortController,
+        requestRiskConfirmations,
+        nextMessages,
+      } = turnContext
+      this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+        ...session,
+        panelKind,
+        persisted: wasPersisted,
+        snapshotLoaded: true,
+        historyId,
+        input: '',
+        messages: nextMessages,
+        cards: [],
+        executionTrace: [],
+        usedTools: [],
+        citations: [],
+        researchNotes: [],
+        auditIssues: [],
+        nextSuggestions: [],
+        clarificationQuestion: '',
+        clarificationOptions: [],
+        pendingTaskConfirmation: null,
+        riskPrompt: '',
+        error: '',
+        contextSummary: {},
+        plan: normalizeAgentPlanEnvelope(),
+        riskConfirmations: cloneArray(requestRiskConfirmations),
+        panelPreloadNotes: [],
+        preloadedPanelKeys: [],
+        status: 'running',
         stage: 'gating',
         thinkingTimeline: [normalizeAgentSubmitThinkingItem('active')],
       }))
+      this.agentDeepAnalysisMode = mode
       this.setAgentRunState(targetSessionId, {
         abortController: requestAbortController,
         loading: true,
@@ -1400,7 +1704,7 @@ function createAgentRuntimeMethods() {
             conversation_id: targetSessionId,
             history_id: historyId,
             governance_mode: 'auto',
-            messages: nextMessages,
+            messages: requestMessages,
             analysis_snapshot: this.buildAgentAnalysisSnapshot(),
             risk_confirmations: requestRiskConfirmations,
           }),
@@ -1637,12 +1941,16 @@ function createAgentRuntimeMethods() {
           throw new Error('Agent 流式执行未返回最终结果')
         }
         await this.commitTurnResult(turnContext, finalResponse)
+        if (mode === 'deep' && typeof this.clearAgentComposerMode === 'function') {
+          this.agentComposerMode = ''
+          this.closeAgentComposerMenu()
+        }
       } catch (err) {
         if (err && (err.name === 'AbortError' || String(err.message || '').includes('aborted'))) {
           this.stopAgentThinkingTimer(targetSessionId)
           this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
             ...session,
-            input: question,
+            input: rawQuestion || question,
             status: 'idle',
             stage: 'gating',
             cards: [],
@@ -1662,7 +1970,7 @@ function createAgentRuntimeMethods() {
             thinkingTimeline: [],
           }))
           if (targetSessionId === asText(this.activeAgentSessionId)) {
-            this.agentInput = question
+            this.agentInput = rawQuestion || question
             this.agentClarificationDraft = ''
             this.agentClarificationSubmitting = false
           }

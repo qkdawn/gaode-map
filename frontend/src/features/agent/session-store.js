@@ -266,6 +266,9 @@ function createAgentSessionStoreMethods() {
       this.agentRiskConfirmations = cloneArray(session.riskConfirmations)
       this.agentMessages = cloneArray(session.messages)
       this.agentThinkingTimeline = cloneArray(session.thinkingTimeline)
+      if (String(session.panelKind || '') !== 'deep_analysis' && !this.agentLoading) {
+        this.agentDeepAnalysisMode = 'quick'
+      }
       this.agentSummaryLoading = false
       this.agentSummaryGenerating = false
       this.agentSummaryProgressPhase = ''
@@ -564,6 +567,9 @@ function createAgentSessionStoreMethods() {
     },
     startNewAgentReportSession() {
       this.agentWorkspaceView = 'report'
+      if (typeof this.clearAgentComposerMode === 'function') {
+        this.clearAgentComposerMode()
+      }
       this.syncCurrentAgentSession()
       const session = this.createAgentSession()
       this.updateAgentSessions([session, ...this.agentSessions], { loaded: this.agentSessionsLoaded })

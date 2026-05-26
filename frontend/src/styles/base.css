@@ -667,6 +667,37 @@ body,
   gap: 16px;
 }
 
+.agent-iteration-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  padding: 7px 11px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.agent-iteration-refresh-btn:hover:not(:disabled) {
+  border-color: rgba(37, 99, 235, 0.45);
+  color: #1d4ed8;
+  background: #f8fbff;
+}
+
+.agent-iteration-refresh-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.agent-iteration-refresh-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
 .agent-iteration-kind-tabs {
   display: flex;
   gap: 8px;

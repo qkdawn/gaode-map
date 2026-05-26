@@ -28,6 +28,53 @@ import { buildAnalysisTaskParamBundle } from './analysis-task-params.js'
 
 function createAgentUiMethods() {
   return {
+    escapeAgentMessageHtml(value = '') {
+      return asText(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+    },
+    renderAgentInlineMarkdown(value = '') {
+      return this.escapeAgentMessageHtml(value)
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+    },
+    renderAgentMessageHtml(message = {}) {
+      const role = asText(message && message.role)
+      const content = asText(message && message.content)
+      if (!content) return ''
+      if (role === 'user') {
+        return this.escapeAgentMessageHtml(content).replace(/\n/g, '<br>')
+      }
+      const lines = content.replace(/\r\n/g, '\n').split('\n')
+      const html = []
+      for (const rawLine of lines) {
+        const line = asText(rawLine).trim()
+        if (!line) {
+          html.push('<div class="agent-message-gap"></div>')
+          continue
+        }
+        const heading = line.match(/^(#{1,4})\s+(.+)$/)
+        if (heading) {
+          html.push(`<div class="agent-message-heading">${this.renderAgentInlineMarkdown(heading[2])}</div>`)
+          continue
+        }
+        const quote = line.match(/^>\s*(.+)$/)
+        if (quote) {
+          html.push(`<div class="agent-message-quote">${this.renderAgentInlineMarkdown(quote[1])}</div>`)
+          continue
+        }
+        const bullet = line.match(/^[-*]\s+(.+)$/)
+        if (bullet) {
+          html.push(`<div class="agent-message-list-item"><span>•</span><span>${this.renderAgentInlineMarkdown(bullet[1])}</span></div>`)
+          continue
+        }
+        html.push(`<div class="agent-message-paragraph">${this.renderAgentInlineMarkdown(line)}</div>`)
+      }
+      return html.join('')
+    },
     getAgentSessionTitle(session = null) {
       if (!session || typeof session !== 'object') return '新报告'
       if (this.isAgentSummaryHistorySession && this.isAgentSummaryHistorySession(session)) {
@@ -3097,7 +3144,7 @@ function createAgentUiMethods() {
       if (!target || target.readonly) return
       target.thread = this.buildAgentFollowupThreadFromCurrentState()
       target.question = asText(this.agentInput || target.question)
-      target.mode = asText(this.agentDeepAnalysisMode || target.mode) || 'quick'
+      target.mode = asText(this.agentComposerMode || this.agentDeepAnalysisMode || target.mode) || 'quick'
       target.panelPayloads = cloneObject(this.agentPanelPayloads)
       this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
     },
@@ -3323,6 +3370,28 @@ function createAgentUiMethods() {
       }
       return normalized
     },
+    toggleAgentComposerMenu() {
+      this.agentComposerMenuOpen = !this.agentComposerMenuOpen
+    },
+    closeAgentComposerMenu() {
+      this.agentComposerMenuOpen = false
+    },
+    selectAgentComposerMode(mode = '') {
+      const normalized = asText(mode) === 'deep' ? 'deep' : ''
+      this.agentComposerMode = normalized
+      this.agentDeepAnalysisMode = normalized === 'deep' ? 'deep' : 'quick'
+      this.closeAgentComposerMenu()
+      return normalized
+    },
+    clearAgentComposerMode() {
+      this.agentComposerMode = ''
+      this.agentDeepAnalysisMode = 'quick'
+      this.closeAgentComposerMenu()
+    },
+    startAgentComposerNewReportSession() {
+      this.clearAgentComposerMode()
+      this.startNewAgentReportSession()
+    },
     getAgentDeepAnalysisModeLabel(mode = '') {
       return asText(mode || this.agentDeepAnalysisMode) === 'deep' ? '深度思考' : '快速分析'
     },
@@ -3358,7 +3427,7 @@ function createAgentUiMethods() {
       return {
         id: asText(seed.id) || `deep-module-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
         type: 'deep_analysis',
-        title: this.formatAgentTabTitle('deep_analysis', titleSeed),
+        title: asText(seed.title) || this.formatAgentTabTitle('deep_analysis', titleSeed),
         mode: asText(seed.mode || this.agentDeepAnalysisMode) === 'deep' ? 'deep' : 'quick',
         source: target.source,
         target,
@@ -3423,6 +3492,57 @@ function createAgentUiMethods() {
       }
       this.syncCurrentAgentSession()
       return module
+    },
+    startEditAgentDeepAnalysisModule(moduleSeed = null) {
+      const module = this.buildAgentDeepAnalysisResultModule(moduleSeed || {})
+      if (!module.id) return null
+      this.agentEditingDeepModuleId = module.id
+      this.agentEditingDeepModuleDraft = {
+        title: asText(module.title),
+        conclusion: asText(module.conclusion),
+      }
+      return module.id
+    },
+    cancelEditAgentDeepAnalysisModule() {
+      this.agentEditingDeepModuleId = ''
+      this.agentEditingDeepModuleDraft = { title: '', conclusion: '' }
+    },
+    saveAgentDeepAnalysisModuleEdit(moduleSeed = null) {
+      const module = this.buildAgentDeepAnalysisResultModule(moduleSeed || {})
+      const moduleId = asText(module.id || this.agentEditingDeepModuleId)
+      if (!moduleId) return null
+      const title = asText(this.agentEditingDeepModuleDraft && this.agentEditingDeepModuleDraft.title) || module.title
+      const conclusion = asText(this.agentEditingDeepModuleDraft && this.agentEditingDeepModuleDraft.conclusion) || module.conclusion
+      const tabs = this.ensureAgentTabs(true)
+      const summaryTab = cloneArray(tabs.summaryTabs).find((item) => asText(item.source) === 'current') || tabs.summaryTabs[0]
+      if (!summaryTab) return null
+      const panelPayloads = cloneObject(summaryTab.panelPayloads || this.agentPanelPayloads)
+      const summaryPack = this.getAgentSummaryPack(panelPayloads)
+      const modules = cloneArray(summaryPack.deep_analysis_modules || summaryPack.deepAnalysisModules)
+      const nextModules = modules.map((item) => (
+        asText(item && item.id) === moduleId
+          ? { ...cloneObject(item), title, conclusion }
+          : item
+      ))
+      const nextPack = {
+        ...summaryPack,
+        deep_analysis_modules: nextModules,
+      }
+      const nextPayloads = {
+        ...panelPayloads,
+        summary_pack: nextPack,
+      }
+      tabs.summaryTabs = cloneArray(tabs.summaryTabs).map((item) => (
+        item.id === summaryTab.id
+          ? { ...item, panelPayloads: nextPayloads, content: nextPack, evidenceRefs: cloneArray(nextPack.evidence_refs || item.evidenceRefs) }
+          : item
+      ))
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs) }
+      this.agentPanelPayloads = nextPayloads
+      this.syncAgentSummaryStateFromPanelPayload(nextPayloads)
+      this.cancelEditAgentDeepAnalysisModule()
+      this.syncCurrentAgentSession()
+      return this.buildAgentDeepAnalysisResultModule({ ...module, title, conclusion })
     },
     createAgentFollowupTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
@@ -7837,7 +7957,7 @@ function createAgentUiMethods() {
     },
     shouldShowAgentComposer() {
       const activeTab = this.getAgentActiveTopTab()
-      return asText(activeTab.kind) === 'followup'
+      return ['followup', 'deep_analysis'].includes(asText(activeTab.kind))
     },
     buildAgentTabsUiState() {
       this.captureAgentActiveSummaryTabState()
@@ -8065,6 +8185,7 @@ function createAgentUiMethods() {
       this.agentWorkspaceView = 'report'
       this.ensureAgentFollowupTabForPrompt(text)
       this.agentInput = text
+      this.closeAgentComposerMenu()
       this.syncCurrentAgentSession()
     },
     getAgentToolLabel(value = '') {
@@ -8389,7 +8510,7 @@ function createAgentUiMethods() {
     },
     getAgentCurrentTurnMessageBoundary() {
       const messages = Array.isArray(this.agentMessages) ? this.agentMessages : []
-      if (!this.agentShouldRenderThinkingBlock() || !messages.length) return -1
+      if (!this.agentHasThinkingContent() || !messages.length) return -1
       for (let index = messages.length - 1; index >= 0; index -= 1) {
         if (asText(messages[index] && messages[index].role) === 'user') {
           return index
@@ -8424,6 +8545,63 @@ function createAgentUiMethods() {
       return mapping[String(this.agentStatus || 'idle')] || String(this.agentStatus || '待执行')
     },
     agentShouldRenderThinkingBlock() {
+      return this.agentHasThinkingContent()
+    },
+    shouldShowAgentThinkingProcessBlock() {
+      if (!this.agentHasThinkingContent()) return false
+      if (this.isAgentReactLoopProcess()) return false
+      return (
+        asText(this.agentDeepAnalysisMode) === 'deep'
+        || asText(this.agentComposerMode) === 'deep'
+        || !!this.agentPendingTaskConfirmation
+        || !!this.agentRiskPrompt
+        || !!this.agentClarificationQuestion
+      )
+    },
+    isAgentReactLoopProcess() {
+      return cloneArray(this.agentThinkingTimeline).some((item) => {
+        const meta = cloneObject(item && item.meta)
+        return !!meta.reactLoop || asText(item && item.phase) === 'react_loop'
+      })
+    },
+    getAgentReactProcessMessages() {
+      if (!this.isAgentReactLoopProcess()) return []
+      const visibleTypes = new Set(['thought', 'action', 'observation', 'reflection', 'error'])
+      return cloneArray(this.agentThinkingTimeline)
+        .map((item) => {
+          const meta = cloneObject(item && item.meta)
+          const reactType = asText(meta.reactType)
+          const raw = cloneObject(meta.raw)
+          const detail = asText(item && item.detail)
+          if (!visibleTypes.has(reactType) || !detail) return null
+          const labels = {
+            thought: '思考',
+            action: '行动',
+            observation: '观察',
+            reflection: '复盘',
+            error: '异常',
+          }
+          const tool = asText(meta.tool_label || meta.tool || raw.tool_label || raw.tool)
+          const argumentSummary = asText(raw.arguments_summary)
+          const evidenceCount = raw.evidence_count
+          const warningCount = raw.warning_count
+          const metaParts = []
+          if (argumentSummary && argumentSummary !== '无参数') metaParts.push(`参数：${argumentSummary}`)
+          if (evidenceCount !== undefined && evidenceCount !== null && String(evidenceCount) !== '') metaParts.push(`证据：${evidenceCount} 条`)
+          if (warningCount !== undefined && warningCount !== null && Number(warningCount) > 0) metaParts.push(`警告：${warningCount} 条`)
+          return {
+            id: asText(item && item.id),
+            type: reactType,
+            label: labels[reactType] || '过程',
+            content: detail,
+            tool,
+            metaParts,
+            state: asText(item && item.state) || 'pending',
+          }
+        })
+        .filter(Boolean)
+    },
+    agentHasThinkingContent() {
       return !!(
         this.agentLoading
         || (Array.isArray(this.agentThinkingTimeline) && this.agentThinkingTimeline.length)
@@ -8502,6 +8680,10 @@ function createAgentUiMethods() {
           title: '\u8f93\u51fa\u56de\u7b54',
           description: '\u56de\u7b54\u751f\u6210\u4e2d\uff0c\u7ec4\u7ec7\u7ed3\u6784\u5316\u5185\u5bb9\u3002',
         },
+        react_loop: {
+          title: 'ReAct \u5faa\u73af',
+          description: '\u6309\u601d\u8003\u3001\u884c\u52a8\u3001\u89c2\u5bdf\u7684\u987a\u5e8f\u5c55\u793a Agent \u6b63\u5728\u505a\u4ec0\u4e48\u3002',
+        },
         answered: {
           title: '\u5df2\u5b8c\u6210',
           description: '\u5df2\u5b8c\u6210\u8f93\u51fa\u56de\u7b54\u3002',
@@ -8527,6 +8709,7 @@ function createAgentUiMethods() {
         'auditing',
         'synthesizing',
         'answering',
+        'react_loop',
         'answered',
         'requires_clarification',
         'failed',

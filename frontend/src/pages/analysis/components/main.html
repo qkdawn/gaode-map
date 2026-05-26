@@ -605,12 +605,36 @@
                                     class="agent-summary-card agent-summary-card-wide agent-deep-module-card">
                                     <div class="agent-summary-card-head">
                                         <div>
-                                            <div class="agent-summary-card-title">{{ module.title }}</div>
+                                            <input
+                                                v-if="agentEditingDeepModuleId === module.id"
+                                                v-model="agentEditingDeepModuleDraft.title"
+                                                class="agent-report-edit-title"
+                                                aria-label="编辑写回模块标题">
+                                            <div v-else class="agent-summary-card-title">{{ module.title }}</div>
                                             <div class="agent-summary-line">模式：{{ getAgentDeepAnalysisModeLabel(module.mode) }} · 来源：{{ getContextAskSourceLabel(module.source) }}</div>
                                         </div>
-                                        <span class="agent-deep-analysis-source">写回模块</span>
+                                        <div class="agent-report-edit-actions">
+                                            <button
+                                                v-if="agentEditingDeepModuleId !== module.id"
+                                                type="button"
+                                                class="agent-mini-icon-btn"
+                                                title="编辑"
+                                                aria-label="编辑写回模块"
+                                                @click="startEditAgentDeepAnalysisModule(module)">
+                                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="M13.5 7.5l3 3"></path></svg>
+                                            </button>
+                                            <template v-else>
+                                                <button type="button" class="agent-mini-text-btn" @click="saveAgentDeepAnalysisModuleEdit(module)">保存</button>
+                                                <button type="button" class="agent-mini-text-btn" @click="cancelEditAgentDeepAnalysisModule">取消</button>
+                                            </template>
+                                        </div>
                                     </div>
-                                    <div class="agent-summary-longtext">{{ module.conclusion }}</div>
+                                    <textarea
+                                        v-if="agentEditingDeepModuleId === module.id"
+                                        v-model="agentEditingDeepModuleDraft.conclusion"
+                                        class="agent-report-edit-textarea"
+                                        aria-label="编辑写回模块正文"></textarea>
+                                    <div v-else class="agent-summary-longtext">{{ module.conclusion }}</div>
                                     <div v-if="module.support.length" class="agent-summary-kv">
                                         <div v-for="(item, idx) in module.support.slice(0, 4)" :key="`summary-deep-module-${module.id}-support-${idx}`">
                                             <strong>{{ item.headline || item.metric || '证据' }}</strong>
@@ -849,16 +873,12 @@
                                     </div>
                                     <button
                                         type="button"
-                                        class="agent-summary-gate-btn"
+                                        class="agent-iteration-refresh-btn"
                                         :disabled="getAgentIterationActiveLoading()"
+                                        title="重新生成当前变化分析"
                                         @click="ensureAgentIterationKind(agentIterationActiveKind, true)">
+                                        <span class="agent-iteration-refresh-icon" aria-hidden="true">↻</span>
                                         {{ getAgentIterationActiveLoadingText() }}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="agent-summary-gate-btn"
-                                        @click="openAgentDeepAnalysisFromTarget(buildIterationContextAskTarget({ kind: agentIterationActiveKind, type: 'trend_metric', section: 'iteration_overview', title: '变化分析', summary: getAgentIterationActiveDescription() }))">
-                                        继续分析
                                     </button>
                                 </div>
                                 <div class="agent-iteration-kind-tabs">
@@ -1990,215 +2010,12 @@
                             </div>
                         </div>
 
-                        <div v-else-if="isAgentDeepAnalysisTabActive()" class="agent-summary-tab-view is-detail agent-deep-analysis-view">
-                            <section class="agent-deep-analysis-hero agent-summary-card">
-                                <div>
-                                    <div class="agent-summary-card-title">深度分析任务</div>
-                                    <div class="agent-summary-line">{{ ((getAgentActiveDeepAnalysisTab() || {}).target || {}).title || '当前报告对象' }}</div>
-                                    <p>{{ ((getAgentActiveDeepAnalysisTab() || {}).target || {}).summary || '基于当前区域报告继续提出可执行分析问题。' }}</p>
-                                </div>
-                                <span class="agent-deep-analysis-source">{{ getContextAskSourceLabel((((getAgentActiveDeepAnalysisTab() || {}).target || {}).source)) }}</span>
-                            </section>
-
-                            <section class="agent-summary-card agent-deep-analysis-composer">
-                                <div class="agent-summary-card-title">分析问题</div>
-                                <div class="agent-deep-mode-switch" role="group" aria-label="继续分析模式">
-                                    <button
-                                        type="button"
-                                        :class="{ active: agentDeepAnalysisMode !== 'deep' }"
-                                        @click="setAgentDeepAnalysisMode('quick')">
-                                        快速分析
-                                    </button>
-                                    <button
-                                        type="button"
-                                        :class="{ active: agentDeepAnalysisMode === 'deep' }"
-                                        @click="setAgentDeepAnalysisMode('deep')">
-                                        深度思考
-                                    </button>
-                                </div>
-                                <textarea
-                                    v-model="agentInput"
-                                    class="agent-composer-input"
-                                    placeholder="例如：识别路网句法与 POI 热力错配形成的断点街区，并给出缝合策略..."
-                                    :disabled="agentLoading || agentSessionHydrating"
-                                    @keydown.enter.exact.prevent="submitAgentTurn({ panelKind: 'deep_analysis' })"></textarea>
-                                <div class="agent-summary-actions">
-                                    <button
-                                        type="button"
-                                        class="agent-summary-gate-btn agent-summary-gate-cta-btn"
-                                        :disabled="agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
-                                        @click="agentLoading ? cancelAgentTurn() : submitAgentTurn({ panelKind: 'deep_analysis' })">
-                                        {{ agentLoading ? '停止分析' : (agentDeepAnalysisMode === 'deep' ? '开始深度思考' : '开始快速分析') }}
-                                    </button>
-                                </div>
-                            </section>
-
-                            <div class="agent-deep-analysis-grid">
-                                <section class="agent-summary-card">
-                                    <div class="agent-summary-card-title">任务流程</div>
-                                    <div class="agent-deep-analysis-stage-list">
-                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': agentLoading || agentHasConversationContent() }">
-                                            <strong>问题重写</strong>
-                                            <span>{{ agentDeepAnalysisMode === 'deep' ? '深度思考会先把问题转成可执行分析目标' : '快速分析会尽量保持问题直达结论' }}</span>
-                                        </div>
-                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': agentShouldRenderThinkingBlock() }">
-                                            <strong>证据盘点 / 工具计划</strong>
-                                            <span>{{ getAgentPlanSummary() || '等待 Agent 判断需要复用或补跑哪些工具' }}</span>
-                                        </div>
-                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': getAgentToolCallItems().length > 0 }">
-                                            <strong>执行轨迹</strong>
-                                            <span>{{ getAgentToolCallItems().length ? `${getAgentToolCallItems().length} 次工具事件` : '工具运行后在这里沉淀状态' }}</span>
-                                        </div>
-                                        <div class="agent-deep-analysis-stage" :class="{ 'is-active': hasAgentStructuredOutput() }">
-                                            <strong>结果模块</strong>
-                                            <span>{{ hasAgentStructuredOutput() ? '已生成结构化判断' : '完成后输出新证据、新判断和建议' }}</span>
-                                        </div>
-                                        <div class="agent-deep-analysis-stage is-disabled">
-                                            <strong>写回报告</strong>
-                                            <span>{{ getAgentDeepAnalysisPreviewModule() ? '结果可预览后手动写回区域报告' : '完成后可作为新面板写回区域报告' }}</span>
-                                        </div>
-                                    </div>
-                                </section>
-
-                                <section class="agent-summary-card">
-                                    <div class="agent-summary-card-title">来源上下文</div>
-                                    <div class="agent-summary-kv">
-                                        <div><strong>{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).title) || '当前对象' }}</strong></div>
-                                        <div>{{ (((getAgentActiveDeepAnalysisTab() || {}).target || {}).summary) || '暂无摘要' }}</div>
-                                        <div v-if="getAgentDeepAnalysisEvidencePreview()">
-                                            证据：{{ getAgentDeepAnalysisEvidencePreview() }}
-                                        </div>
-                                    </div>
-                                </section>
-                            </div>
-
-                            <section v-if="getAgentDeepAnalysisPreviewModule()" class="agent-summary-card agent-deep-analysis-result-preview">
-                                <div class="agent-summary-card-head">
-                                    <div>
-                                        <div class="agent-summary-card-title">结果预览</div>
-                                        <div class="agent-summary-line">将作为“{{ getAgentDeepAnalysisPreviewModule().title }}”写回区域报告</div>
-                                    </div>
-                                    <span class="agent-deep-analysis-source">{{ getAgentDeepAnalysisModeLabel(getAgentDeepAnalysisPreviewModule().mode) }}</span>
-                                </div>
-                                <div class="agent-summary-longtext">{{ getAgentDeepAnalysisPreviewModule().conclusion }}</div>
-                                <div v-if="getAgentDeepAnalysisPreviewModule().support.length" class="agent-summary-kv">
-                                    <div v-for="(item, idx) in getAgentDeepAnalysisPreviewModule().support.slice(0, 4)" :key="`deep-preview-support-${idx}`">
-                                        <strong>{{ item.headline || item.metric || '证据' }}</strong>
-                                        <span>{{ item.interpretation || item.source || '' }}</span>
-                                    </div>
-                                </div>
-                                <div class="agent-summary-actions">
-                                    <button
-                                        type="button"
-                                        class="agent-summary-gate-btn agent-summary-gate-cta-btn"
-                                        @click="writeAgentDeepAnalysisModuleToReport(getAgentDeepAnalysisPreviewModule())">
-                                        写回报告
-                                    </button>
-                                </div>
-                            </section>
-
-                            <div v-if="agentHasConversationContent() || agentLoading || agentSessionHydrating" class="agent-thread-shell agent-deep-analysis-thread">
-                                <div
-                                    ref="agentReportThreadBody"
-                                    class="agent-report-thread-body agent-report-thread-body-main"
-                                    @scroll.passive="onAgentReportThreadScroll"
-                                    @wheel.passive="onAgentReportThreadWheel"
-                                    @touchmove.passive="onAgentReportThreadTouchMove">
-                                    <div v-if="agentSessionHydrating" class="agent-session-skeleton" aria-hidden="true">
-                                        <div class="agent-session-skeleton-row is-user">
-                                            <div class="agent-session-skeleton-bubble is-user"></div>
-                                        </div>
-                                    </div>
-                                    <template v-else>
-                                        <div v-for="(message, index) in getAgentMessagesBeforeThinking()" :key="`agent-deep-message-before-${index}`" class="agent-message-row" :class="`is-${message.role}`">
-                                            <div class="agent-message-bubble" :class="`is-${message.role}`">
-                                                {{ message.content }}
-                                            </div>
-                                        </div>
-
-                                        <div v-if="agentShouldRenderThinkingBlock()" class="agent-message-row is-assistant">
-                                            <div class="agent-message-bubble is-assistant agent-thinking-bubble" :class="{ 'is-debug-open': agentThinkingExpanded }">
-                                                __AGENT_THINKING_HEADER__
-                                                __AGENT_REASONING_PANEL__
-                                                <div v-if="agentThinkingExpanded || agentLoading" class="agent-thinking-steps" data-agent-scroll-inner>
-                                                    <div
-                                                        v-for="roleGroup in getAgentProcessRoleGroups()"
-                                                        :key="`agent-deep-process-role-${roleGroup.key}`"
-                                                        class="agent-process-role-panel"
-                                                        :class="`is-${roleGroup.state}`">
-                                                        <div class="agent-process-role-head">
-                                                            <div>
-                                                                <div class="agent-process-role-title">{{ roleGroup.title }}</div>
-                                                                <div class="agent-process-role-summary">{{ roleGroup.summary }}</div>
-                                                            </div>
-                                                            <div v-if="roleGroup.countLabel" class="agent-process-role-count">{{ roleGroup.countLabel }}</div>
-                                                        </div>
-                                                        <div class="agent-process-role-steps">
-                                                            <div
-                                                                v-for="stepItem in roleGroup.steps"
-                                                                :key="`agent-deep-visible-process-${stepItem.id}`"
-                                                                class="agent-thinking-current"
-                                                                :class="`is-${stepItem.state}`">
-                                                                <div class="agent-thinking-item-title">{{ stepItem.title }}</div>
-                                                                <div v-if="stepItem.detail" class="agent-thinking-item-detail">{{ stepItem.detail }}</div>
-                                                            </div>
-                                                            <div v-if="roleGroup.planChecklist && roleGroup.planChecklist.visible" class="agent-process-role-detail-block is-plan">
-                                                                <div v-for="group in roleGroup.planChecklist.groups" :key="`agent-deep-role-plan-group-${group.key}`" class="agent-plan-group">
-                                                                    <div class="agent-plan-group-head">
-                                                                        <div class="agent-plan-group-title">{{ group.title }}</div>
-                                                                        <div class="agent-plan-group-desc">{{ group.description }}</div>
-                                                                    </div>
-                                                                    <div class="agent-plan-items">
-                                                                        <div v-for="(item, index) in group.items" :key="`agent-deep-role-plan-item-${group.key}-${index}`" class="agent-plan-item" :class="`is-${item.status}`">
-                                                                            <div class="agent-plan-item-status" :title="getAgentPlanStatusLabel(item.status)">{{ getAgentPlanStatusSymbol(item.status) }}</div>
-                                                                            <div class="agent-plan-item-main">
-                                                                                <div class="agent-plan-item-title-row">
-                                                                                    <div class="agent-plan-item-title">{{ item.title }}</div>
-                                                                                    <div v-if="item.optional" class="agent-plan-item-optional">可选</div>
-                                                                                </div>
-                                                                                <div v-if="item.detail" class="agent-plan-item-detail">{{ item.detail }}</div>
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                            <div v-if="roleGroup.toolCallItems && roleGroup.toolCallItems.length" class="agent-process-role-detail-block is-trace">
-                                                                <div class="agent-trace-list">
-                                                                    <div v-for="item in roleGroup.toolCallItems" :key="`agent-deep-role-trace-item-${item.id}`" class="agent-trace-item">
-                                                                        <div class="agent-trace-main">
-                                                                            <div class="agent-process-entry-title">{{ item.toolName }}</div>
-                                                                            <span class="agent-trace-status" :class="`is-${item.statusTone}`">{{ getAgentToolCallStatusLabel(item.status) }}</span>
-                                                                        </div>
-                                                                        <div v-if="item.message || item.reason" class="agent-process-entry-detail">{{ item.message || item.reason }}</div>
-                                                                        <div class="agent-trace-meta">
-                                                                            <span v-if="item.argumentsSummary">参数：{{ item.argumentsSummary }}</span>
-                                                                            <span v-if="item.resultSummary">结果：{{ item.resultSummary }}</span>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <div v-for="(message, index) in getAgentMessagesAfterThinking()" :key="`agent-deep-message-after-${index}`" class="agent-message-row" :class="`is-${message.role}`">
-                                            <div class="agent-message-bubble" :class="`is-${message.role}`">
-                                                {{ message.content }}
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-                            </div>
-                        </div>
-
                         <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">
                             <div class="agent-hero-title">我们先从哪里开始呢？</div>
                             <div class="agent-hero-subtitle">先说问题，Agent 会调用已有工具和分析能力直接处理。</div>
                         </div>
 
-                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentDeepAnalysisTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell">
+                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell" :class="{ 'agent-deep-analysis-thread': isAgentDeepAnalysisTabActive() }">
                             <div
                                 ref="agentReportThreadBody"
                                 class="agent-report-thread-body agent-report-thread-body-main"
@@ -2223,12 +2040,10 @@
                                 </div>
                                 <template v-else>
                                 <div v-for="(message, index) in getAgentMessagesBeforeThinking()" :key="`agent-message-main-before-${index}`" class="agent-message-row" :class="`is-${message.role}`">
-                                    <div class="agent-message-bubble" :class="`is-${message.role}`">
-                                        {{ message.content }}
-                                    </div>
+                                    <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
                                 </div>
 
-                                <div v-if="agentShouldRenderThinkingBlock()" class="agent-message-row is-assistant">
+                                <div v-if="shouldShowAgentThinkingProcessBlock()" class="agent-message-row is-assistant">
                                     <div
                                         class="agent-message-bubble is-assistant agent-thinking-bubble"
                                         :class="{ 'is-debug-open': agentThinkingExpanded }">
@@ -2375,10 +2190,30 @@
                                     </div>
                                 </div>
 
-                                <div v-for="(message, index) in getAgentMessagesAfterThinking()" :key="`agent-message-main-after-${index}`" class="agent-message-row" :class="`is-${message.role}`">
-                                    <div class="agent-message-bubble" :class="`is-${message.role}`">
-                                        {{ message.content }}
+                                <div
+                                    v-for="processMessage in getAgentReactProcessMessages()"
+                                    :key="`agent-react-process-${processMessage.id}`"
+                                    class="agent-message-row is-assistant">
+                                    <div
+                                        class="agent-message-bubble is-assistant agent-react-process-bubble"
+                                        :class="[`is-${processMessage.type}`, `is-${processMessage.state}`]">
+                                        <div class="agent-react-process-label">
+                                            {{ processMessage.label }}
+                                            <span v-if="processMessage.tool"> · {{ processMessage.tool }}</span>
+                                        </div>
+                                        <div class="agent-react-process-content">{{ processMessage.content }}</div>
+                                        <div v-if="processMessage.metaParts && processMessage.metaParts.length" class="agent-react-process-meta">
+                                            <span
+                                                v-for="metaItem in processMessage.metaParts"
+                                                :key="`${processMessage.id}-${metaItem}`">
+                                                {{ metaItem }}
+                                            </span>
+                                        </div>
                                     </div>
+                                </div>
+
+                                <div v-for="(message, index) in getAgentMessagesAfterThinking()" :key="`agent-message-main-after-${index}`" class="agent-message-row" :class="`is-${message.role}`">
+                                    <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
                                 </div>
 
                                 __AGENT_CLARIFICATION_CARD__
@@ -2484,7 +2319,7 @@
                                 </div>
 
                                 <div v-if="agentResearchNotes.length || agentNextSuggestions.length || agentCitations.length" class="agent-meta-inline">
-                                    <div v-if="agentResearchNotes.length" class="agent-meta-group">
+                                <div v-if="agentResearchNotes.length" class="agent-meta-group">
                                         <div class="agent-meta-title">研究笔记</div>
                                         <ul class="agent-meta-list">
                                             <li v-for="(item, index) in agentResearchNotes" :key="`agent-main-note-${index}`">{{ item }}</li>
@@ -2507,21 +2342,51 @@
                             </div>
                         </div>
 
+                        <div v-if="isAgentDeepAnalysisTabActive() && getAgentDeepAnalysisPreviewModule()" class="agent-message-row is-assistant agent-deep-analysis-writeback-row">
+                            <div class="agent-reply-inline-actions">
+                                <button
+                                    type="button"
+                                    class="agent-reply-icon-action"
+                                    title="写回报告"
+                                    aria-label="写回报告"
+                                    @click="writeAgentDeepAnalysisModuleToReport(getAgentDeepAnalysisPreviewModule())">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"></path><path d="M15 4v5h5"></path><path d="M8 14h8"></path><path d="M8 17h6"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+
                         <div v-if="shouldShowAgentComposer()" class="agent-app-composer-wrap">
                             <div class="agent-report-prompts">
-                                <button type="button" class="agent-shortcut-chip" @click="queueAgentPrompt('总结这个区域的商业特征')">总结区域</button>
-                                <button type="button" class="agent-shortcut-chip" @click="queueAgentPrompt('哪里适合补充餐饮')">补充餐饮</button>
-                                <button type="button" class="agent-shortcut-chip" @click="queueAgentPrompt('为什么这里路网较差')">路网原因</button>
-                                <button type="button" class="agent-shortcut-chip" @click="queueAgentPrompt('下一步做什么分析')">下一步建议</button>
+                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '总结这个区域的商业特征', useReactLoop: true })">总结区域</button>
+                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '哪里适合补充餐饮', useReactLoop: true })">补充餐饮</button>
+                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '为什么这里路网较差', useReactLoop: true })">路网原因</button>
+                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '下一步做什么分析', useReactLoop: true })">下一步建议</button>
                             </div>
 
                             <div class="agent-composer-card">
-                                <button type="button" class="agent-composer-plus" @click="startNewAgentReportSession" title="新报告">+</button>
+                                <div class="agent-composer-menu-wrap">
+                                    <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" @click="toggleAgentComposerMenu" title="更多操作">+</button>
+                                    <div v-if="agentComposerMenuOpen" class="agent-composer-menu">
+                                        <button type="button" class="agent-composer-menu-item" @click="startAgentComposerNewReportSession">
+                                            <span>新报告</span>
+                                            <small>开启新的追问上下文</small>
+                                        </button>
+                                        <button type="button" class="agent-composer-menu-item" @click="selectAgentComposerMode('deep')">
+                                            <span>深度思考</span>
+                                            <small>本次发送展示分析过程</small>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
+                                    深度思考
+                                    <button type="button" aria-label="取消深度思考" @click="clearAgentComposerMode">×</button>
+                                </div>
                                 <textarea
                                     v-model="agentInput"
                                     class="agent-composer-input"
                                     placeholder="继续追问这份报告..."
-                                    @keydown.enter.exact.prevent="submitAgentTurn()"
+                                    :disabled="agentSessionHydrating"
+                                    @keydown.enter.exact.prevent="submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined, useReactLoop: true })"
                                 ></textarea>
                             <div class="agent-composer-actions">
                                 <button
@@ -2530,7 +2395,7 @@
                                         :class="{ 'is-loading': agentLoading }"
                                         :disabled="agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
                                         :title="agentLoading ? '暂停执行' : '发送'"
-                                        @click="agentLoading ? cancelAgentTurn() : submitAgentTurn()">
+                                        @click="agentLoading ? cancelAgentTurn() : submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined, useReactLoop: true })">
                                         <span v-if="!agentLoading">发送</span>
                                         <span v-else class="agent-composer-send-loading" aria-hidden="true">
                                             <span class="agent-composer-send-stop"></span>

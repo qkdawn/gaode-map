@@ -1761,6 +1761,13 @@ label {
     line-height: 1.65;
 }
 
+.agent-deep-analysis-evidence {
+    margin-top: 8px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 .agent-deep-analysis-source {
     flex: 0 0 auto;
     border: 1px solid #dbe3ee;
@@ -1851,6 +1858,107 @@ label {
 
 .agent-deep-analysis-thread {
     min-height: 360px;
+}
+
+.agent-deep-analysis-writeback-row {
+    margin: -4px 0 4px;
+}
+
+.agent-reply-inline-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+    width: min(760px, 86%);
+    margin-left: 8px;
+}
+
+.agent-reply-icon-action,
+.agent-mini-icon-btn {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #475569;
+    cursor: pointer;
+}
+
+.agent-reply-icon-action:hover,
+.agent-reply-icon-action:focus-visible,
+.agent-mini-icon-btn:hover,
+.agent-mini-icon-btn:focus-visible {
+    outline: none;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+    background: #eff6ff;
+}
+
+.agent-reply-icon-action svg,
+.agent-mini-icon-btn svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.agent-report-edit-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+.agent-mini-text-btn {
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: #ffffff;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.agent-mini-text-btn:hover,
+.agent-mini-text-btn:focus-visible {
+    outline: none;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+    background: #eff6ff;
+}
+
+.agent-report-edit-title,
+.agent-report-edit-textarea {
+    width: 100%;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #0f172a;
+    font: inherit;
+    outline: none;
+}
+
+.agent-report-edit-title {
+    min-height: 34px;
+    padding: 6px 9px;
+    font-size: 15px;
+    font-weight: 900;
+}
+
+.agent-report-edit-textarea {
+    min-height: 136px;
+    margin-top: 10px;
+    padding: 10px 12px;
+    resize: vertical;
+    font-size: 13px;
+    line-height: 1.85;
 }
 
 .agent-deep-analysis-result-preview,
@@ -3025,7 +3133,7 @@ label {
     border-radius: 16px;
     font-size: 13px;
     line-height: 1.7;
-    white-space: pre-wrap;
+    white-space: normal;
     word-break: break-word;
 }
 
@@ -3040,6 +3148,102 @@ label {
     color: #1f2937;
     border: 1px solid #eceef2;
     border-bottom-left-radius: 6px;
+}
+
+.agent-message-heading {
+    margin: 2px 0 8px;
+    color: #111827;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.45;
+}
+
+.agent-message-paragraph {
+    margin: 4px 0;
+}
+
+.agent-message-gap {
+    height: 8px;
+}
+
+.agent-message-list-item {
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    gap: 6px;
+    margin: 4px 0;
+}
+
+.agent-message-list-item > span:first-child {
+    color: #64748b;
+}
+
+.agent-message-quote {
+    margin: 8px 0;
+    padding: 8px 10px;
+    border-left: 3px solid #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #475569;
+}
+
+.agent-message-bubble strong {
+    font-weight: 800;
+}
+
+.agent-message-bubble code {
+    border-radius: 5px;
+    padding: 1px 4px;
+    background: #e5e7eb;
+    font-size: 12px;
+}
+
+.agent-react-process-bubble {
+    max-width: min(72%, 560px);
+    padding: 10px 12px;
+    background: #fbfcff;
+    border-color: #e5ebf4;
+    color: #334155;
+}
+
+.agent-react-process-bubble.is-active {
+    border-color: #bfdbfe;
+    background: #f8fbff;
+}
+
+.agent-react-process-bubble.is-failed {
+    border-color: #fecaca;
+    background: #fff7f7;
+}
+
+.agent-react-process-label {
+    margin-bottom: 4px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+}
+
+.agent-react-process-content {
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.agent-react-process-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.agent-react-process-meta span {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #eef4ff;
+    color: #475569;
+    font-size: 11px;
+    line-height: 1.45;
 }
 
 .agent-message-bubble-note {
@@ -3952,6 +4156,7 @@ label {
 }
 
 .agent-composer-card {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 14px;
@@ -3980,6 +4185,95 @@ label {
     font-weight: 300;
     line-height: 22px;
     cursor: pointer;
+}
+
+.agent-composer-plus.active {
+    background: #eef2ff;
+    color: #1d4ed8;
+}
+
+.agent-composer-menu-wrap {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+}
+
+.agent-composer-menu {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 10px);
+    z-index: 30;
+    width: 220px;
+    display: grid;
+    gap: 4px;
+    padding: 8px;
+    border: 1px solid #dbe3ee;
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 16px 38px rgba(15, 23, 42, 0.14);
+}
+
+.agent-composer-menu-item {
+    width: 100%;
+    border: 0;
+    border-radius: 10px;
+    padding: 9px 10px;
+    background: transparent;
+    color: #0f172a;
+    text-align: left;
+    cursor: pointer;
+    display: grid;
+    gap: 3px;
+}
+
+.agent-composer-menu-item:hover,
+.agent-composer-menu-item:focus-visible {
+    outline: none;
+    background: #f1f5f9;
+}
+
+.agent-composer-menu-item span {
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.agent-composer-menu-item small {
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.agent-composer-mode-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    height: 28px;
+    border: 1px solid #bfdbfe;
+    border-radius: 999px;
+    padding: 0 8px 0 10px;
+    background: #eff6ff;
+    color: #1e3a8a;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.agent-composer-mode-chip button {
+    width: 16px;
+    height: 16px;
+    border: 0;
+    border-radius: 999px;
+    padding: 0;
+    background: transparent;
+    color: #1e40af;
+    cursor: pointer;
+    line-height: 16px;
+}
+
+.agent-composer-mode-chip button:hover,
+.agent-composer-mode-chip button:focus-visible {
+    outline: none;
+    background: rgba(37, 99, 235, 0.12);
 }
 
 .agent-composer-input {

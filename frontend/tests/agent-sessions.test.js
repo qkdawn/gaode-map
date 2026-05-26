@@ -375,6 +375,7 @@ test('deep analysis submit keeps its tab and sends target context without creati
   assert.match(requestBody.messages[0].content, /继续分析任务/)
   assert.match(requestBody.messages[0].content, /核心判断/)
   assert.match(requestBody.messages[0].content, /road_syntax/)
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区'])
   assert.equal(ctx.findAgentSession(ctx.activeAgentSessionId).panelKind, 'deep_analysis')
 })
 
@@ -448,6 +449,91 @@ test('deep analysis mode is included in prompt and result can be written back to
   assert.equal(module.conclusion, '断点集中在低连通高活力错配街区。')
   assert.equal(ctx.getAgentSummaryDeepAnalysisModules().length, 1)
   assert.equal(ctx.getAgentSummaryDeepAnalysisModules()[0].support[0].source, 'road_syntax')
+
+  ctx.startEditAgentDeepAnalysisModule(module)
+  assert.equal(ctx.agentEditingDeepModuleId, module.id)
+  ctx.agentEditingDeepModuleDraft.title = '断点街区修复建议'
+  ctx.agentEditingDeepModuleDraft.conclusion = '优先修复低连通高活力错配街区，并补充慢行缝合。'
+  const edited = ctx.saveAgentDeepAnalysisModuleEdit(module)
+  assert.equal(edited.title, '断点街区修复建议')
+  assert.equal(ctx.getAgentSummaryDeepAnalysisModules()[0].conclusion, '优先修复低连通高活力错配街区，并补充慢行缝合。')
+  assert.equal(ctx.agentEditingDeepModuleId, '')
+})
+
+test('composer plus menu selects one-shot deep thinking mode and keeps user message raw', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.openAgentFollowupFromSummary('', '追问解释')
+  ctx.agentInput = '识别断点街区'
+
+  ctx.toggleAgentComposerMenu()
+  assert.equal(ctx.agentComposerMenuOpen, true)
+  ctx.selectAgentComposerMode('deep')
+  assert.equal(ctx.agentComposerMode, 'deep')
+  assert.equal(ctx.agentDeepAnalysisMode, 'deep')
+  assert.equal(ctx.agentComposerMenuOpen, false)
+
+  let requestBody = null
+  const previousFetch = global.fetch
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: {
+              cards: [],
+              decision: { summary: '断点集中在低连通高活力错配街区。', mode: 'judgment', strength: 'moderate', can_act: true },
+              support: [],
+              counterpoints: [],
+              actions: [],
+              boundary: [],
+              clarification_question: '',
+              clarification_options: [],
+              risk_prompt: '',
+              next_suggestions: [],
+              panel_payloads: {},
+            },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
+            plan: { steps: [], followup_steps: [], followup_applied: false },
+            risk_confirmations: [],
+          },
+        },
+      },
+    ])
+  }
+
+  try {
+    await ctx.submitAgentTurn({ panelKind: 'deep_analysis' })
+  } finally {
+    global.fetch = previousFetch
+  }
+
+  assert.match(requestBody.messages[0].content, /深度思考/)
+  assert.match(requestBody.messages[0].content, /用户问题：识别断点街区/)
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区'])
+  assert.equal(ctx.agentComposerMode, '')
+  assert.equal(ctx.agentDeepAnalysisMode, 'deep')
+})
+
+test('composer plus menu preserves new report action and clears deep mode', () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.openAgentFollowupFromSummary('', '追问解释')
+  ctx.selectAgentComposerMode('deep')
+  assert.equal(ctx.agentComposerMode, 'deep')
+
+  ctx.startAgentComposerNewReportSession()
+
+  assert.equal(ctx.agentComposerMode, '')
+  assert.equal(ctx.agentDeepAnalysisMode, 'quick')
+  assert.equal(ctx.agentWorkspaceView, 'report')
+  assert.ok(ctx.activeAgentSessionId)
 })
 
 test('submitContextAskQuestion appends user and assistant messages', async () => {
@@ -3788,7 +3874,7 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
   assert.equal(ctx.agentTabs.activeTabId, deepId)
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '继续分析')
-  assert.equal(ctx.shouldShowAgentComposer(), false)
+  assert.equal(ctx.shouldShowAgentComposer(), true)
 })
 
 test('summary session history persists tourism cross analysis in summary pack and tabs', () => {
