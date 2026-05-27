@@ -2271,7 +2271,7 @@
                                                 </ul>
                                             </div>
 
-                                            <div v-if="getAgentReviewContractItems().length" class="agent-card agent-review-contract-card">
+                                            <div v-if="shouldShowAgentReviewContract()" class="agent-card agent-review-contract-card">
                                                 <div class="agent-card-type">review contract</div>
                                                 <div class="agent-card-title">深度审查契约</div>
                                                 <div class="agent-review-contract-grid">

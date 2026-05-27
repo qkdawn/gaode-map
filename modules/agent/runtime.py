@@ -342,6 +342,7 @@ async def _execute_planned_steps(
 async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None = None) -> AgentTurnResponse:
     snapshot = payload.analysis_snapshot
     question = latest_user_message(payload.messages)
+    is_deep_review_turn = "执行模式：深度思考" in question or "深度思考继续分析任务" in question
     state = AgentStateMachine()
     thinking_timeline: List[AgentThinkingItem] = []
 
@@ -753,15 +754,19 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         research_notes=list(memory.research_notes or []),
         audit=latest_rule_audit,
     )
-    review_contract = build_review_contract(
-        question=question,
-        snapshot=snapshot,
-        artifacts=memory.artifacts,
-        tool_results=memory.tool_results,
-        audit=latest_rule_audit,
-        decision_summary=answer_output.decision.summary,
-    )
-    answer_output.review_contract = review_contract
+    review_contract: Dict[str, Any] = {}
+    if is_deep_review_turn:
+        review_contract = build_review_contract(
+            question=question,
+            snapshot=snapshot,
+            artifacts=memory.artifacts,
+            tool_results=memory.tool_results,
+            audit=latest_rule_audit,
+            decision_summary=answer_output.decision.summary,
+        )
+        answer_output.review_contract = review_contract
+    else:
+        answer_output.review_contract = {}
     return AgentTurnResponse(
         status="answered",
         stage="answered",

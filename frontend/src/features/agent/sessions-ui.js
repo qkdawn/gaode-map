@@ -9070,8 +9070,11 @@ function createAgentUiMethods() {
         || (Array.isArray(this.agentActions) && this.agentActions.length)
         || (Array.isArray(this.agentCounterpoints) && this.agentCounterpoints.length)
         || (Array.isArray(this.agentBoundary) && this.agentBoundary.length)
-        || this.getAgentReviewContractItems().length
+        || this.shouldShowAgentReviewContract()
       )
+    },
+    shouldShowAgentReviewContract() {
+      return asText(this.agentDeepAnalysisMode) === 'deep' && this.getAgentReviewContractItems().length > 0
     },
     getAgentReviewContractItems() {
       const contract = cloneObject(this.agentReviewContract)
