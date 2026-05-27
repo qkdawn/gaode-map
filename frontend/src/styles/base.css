@@ -1848,3 +1848,73 @@ body,
 .agent-iteration-year-status-row.is-failed .agent-iteration-year-status-dot {
   background: #ef4444;
 }
+
+.agent-review-contract-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.agent-review-contract-item {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.agent-review-contract-item.is-supported {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.agent-review-contract-item.is-missing {
+  border-color: #fecdd3;
+  background: #fff1f2;
+}
+
+.agent-review-contract-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.agent-review-contract-head em {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.agent-review-contract-summary,
+.agent-review-contract-meta,
+.agent-review-contract-question {
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.agent-review-contract-meta {
+  color: #475569;
+}
+
+.agent-review-contract-meta.is-gap {
+  color: #b45309;
+}
+
+.agent-review-contract-question {
+  color: #1d4ed8;
+}
+
+@media (max-width: 900px) {
+  .agent-review-contract-grid {
+    grid-template-columns: 1fr;
+  }
+}

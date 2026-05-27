@@ -453,6 +453,11 @@ function normalizeAgentTurnPayload(seed = {}) {
         ? seed.boundary
         : rawOutput.boundary,
     ).map((item) => normalizeAgentBoundaryItem(item)),
+    reviewContract: cloneObject(
+      Object.prototype.hasOwnProperty.call(seed, 'reviewContract')
+        ? seed.reviewContract
+        : (rawOutput.review_contract || rawOutput.reviewContract),
+    ),
   }
   const diagnostics = {
     executionTrace: cloneArray(
@@ -489,6 +494,11 @@ function normalizeAgentTurnPayload(seed = {}) {
       Object.prototype.hasOwnProperty.call(seed, 'auditSummary')
         ? seed.auditSummary
         : (rawDiagnostics.audit_summary || rawDiagnostics.auditSummary),
+    ),
+    reviewContract: cloneObject(
+      Object.prototype.hasOwnProperty.call(seed, 'reviewContract')
+        ? seed.reviewContract
+        : (rawDiagnostics.review_contract || rawDiagnostics.reviewContract),
     ),
     replanCount: Number(
       Object.prototype.hasOwnProperty.call(seed, 'replanCount')
@@ -604,6 +614,7 @@ function createAgentSessionRecord(seed = {}) {
     counterpoints: cloneArray(turn.output.counterpoints).map((item) => normalizeAgentCounterpoint(item)),
     actions: cloneArray(turn.output.actions).map((item) => normalizeAgentAction(item)),
     boundary: cloneArray(turn.output.boundary).map((item) => normalizeAgentBoundaryItem(item)),
+    reviewContract: cloneObject(turn.output.reviewContract || turn.diagnostics.reviewContract),
     executionTrace: cloneArray(turn.diagnostics.executionTrace),
     usedTools: cloneArray(turn.diagnostics.usedTools),
     citations: cloneArray(turn.diagnostics.citations),
@@ -666,8 +677,9 @@ function createAgentSessionPlaceholderRecord(session = null) {
       counterpoints: [],
       actions: [],
       boundary: [],
+      reviewContract: {},
     },
-    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], error: '' },
+    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], reviewContract: {}, error: '' },
     contextSummary: {},
     plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
     snapshotLoaded: false,

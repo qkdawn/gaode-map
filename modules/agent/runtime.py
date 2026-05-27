@@ -19,6 +19,7 @@ from .providers.llm_provider import (
     plan_with_llm,
     run_gate_with_llm,
 )
+from .review_contract import build_review_contract
 from .schemas import (
     AgentPlanEnvelope,
     AgentThinkingItem,
@@ -189,6 +190,7 @@ def _build_diagnostics(
     research_notes: List[str] | None = None,
     planning_summary: str = "",
     audit_summary: str = "",
+    review_contract: Dict[str, Any] | None = None,
     replan_count: int = 0,
 ) -> AgentTurnDiagnostics:
     return AgentTurnDiagnostics(
@@ -200,6 +202,7 @@ def _build_diagnostics(
         thinking_timeline=list(thinking_timeline or []),
         planning_summary=str(planning_summary or ""),
         audit_summary=str(audit_summary or ""),
+        review_contract=dict(review_contract or {}),
         replan_count=int(replan_count or 0),
         error=str(error or ""),
     )
@@ -750,6 +753,15 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         research_notes=list(memory.research_notes or []),
         audit=latest_rule_audit,
     )
+    review_contract = build_review_contract(
+        question=question,
+        snapshot=snapshot,
+        artifacts=memory.artifacts,
+        tool_results=memory.tool_results,
+        audit=latest_rule_audit,
+        decision_summary=answer_output.decision.summary,
+    )
+    answer_output.review_contract = review_contract
     return AgentTurnResponse(
         status="answered",
         stage="answered",
@@ -761,6 +773,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             thinking_timeline=thinking_timeline,
             planning_summary=planning_summary,
             audit_summary=audit_summary,
+            review_contract=review_contract,
             replan_count=replan_count,
         ),
         context_summary=build_context_summary(snapshot, memory.artifacts),

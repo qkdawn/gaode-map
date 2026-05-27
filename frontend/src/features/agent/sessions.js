@@ -36,6 +36,7 @@ function createAnalysisAgentInitialState() {
     agentCounterpoints: [],
     agentActions: [],
     agentBoundary: [],
+    agentReviewContract: {},
     agentExecutionTrace: [],
     agentUsedTools: [],
     agentCitations: [],

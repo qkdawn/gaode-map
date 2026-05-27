@@ -235,6 +235,7 @@ function createAgentSessionStoreMethods() {
       this.agentCounterpoints = cloneArray(session.counterpoints).map((item) => normalizeAgentCounterpoint(item))
       this.agentActions = cloneArray(session.actions).map((item) => normalizeAgentAction(item))
       this.agentBoundary = cloneArray(session.boundary).map((item) => normalizeAgentBoundaryItem(item))
+      this.agentReviewContract = cloneObject(session.reviewContract || (session.output && session.output.reviewContract) || (session.diagnostics && session.diagnostics.reviewContract))
       this.agentExecutionTrace = cloneArray(session.executionTrace)
       this.agentUsedTools = cloneArray(session.usedTools)
       this.agentCitations = cloneArray(session.citations)
@@ -436,6 +437,7 @@ function createAgentSessionStoreMethods() {
           counterpoints: this.agentCounterpoints,
           actions: this.agentActions,
           boundary: this.agentBoundary,
+          reviewContract: this.agentReviewContract,
         },
         diagnostics: {
           executionTrace: this.agentExecutionTrace,
@@ -448,6 +450,7 @@ function createAgentSessionStoreMethods() {
             || (this.agentPlan && this.agentPlan.summary),
           ),
           auditSummary: asText(existing && existing.diagnostics && (existing.diagnostics.auditSummary || existing.diagnostics.audit_summary)),
+          reviewContract: this.agentReviewContract,
           replanCount: Number(existing && existing.diagnostics && (existing.diagnostics.replanCount ?? existing.diagnostics.replan_count ?? 0)) || 0,
           thinkingTimeline: this.agentThinkingTimeline,
           error: this.agentError,

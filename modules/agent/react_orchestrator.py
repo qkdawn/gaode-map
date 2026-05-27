@@ -13,6 +13,7 @@ from .executor import execute_plan_step
 from .providers.langgraph_react import run_langgraph_react_loop
 from .providers.client import is_llm_enabled
 from .providers.llm_provider import run_llm_tool_loop
+from .review_contract import build_review_contract
 from .schemas import (
     AgentMessage,
     AgentReactEvent,
@@ -20,6 +21,7 @@ from .schemas import (
     AgentReactRunRequest,
     AgentReactRunResponse,
     AnalysisSnapshot,
+    AuditResult,
     PlanStep,
     ToolResult,
 )
@@ -287,7 +289,13 @@ def _reflection_summary(observations: List[Dict[str, Any]], stale_count: int, co
     return f"已形成 {len(usable)} 条可用观察，继续检查是否还缺关键证据。"
 
 
-def _final_payload(question: str, observations: List[Dict[str, Any]], event_steps: List[int]) -> Dict[str, Any]:
+def _final_payload(
+    question: str,
+    observations: List[Dict[str, Any]],
+    event_steps: List[int],
+    *,
+    snapshot: AnalysisSnapshot | None = None,
+) -> Dict[str, Any]:
     success = [item for item in observations if item.get("status") == "success"]
     failed = [item for item in observations if item.get("status") != "success"]
     poi = next((item for item in success if item.get("tool") == "fetch_pois_in_scope"), None)
@@ -311,10 +319,19 @@ def _final_payload(question: str, observations: List[Dict[str, Any]], event_step
     else:
         evidence_status = "证据不足"
 
+    review_contract = build_review_contract(
+        question=question,
+        snapshot=snapshot or AnalysisSnapshot(),
+        artifacts={},
+        tool_results=[],
+        audit=AuditResult(passed=bool(success), missing_evidence=[] if success else ["ReAct 工具观察"]),
+        decision_summary="；".join(conclusion_parts),
+    )
     return {
         "summary": "；".join(conclusion_parts),
         "conclusion": f"针对“{question}”，" + "；".join(conclusion_parts),
         "evidence_status": evidence_status,
+        "review_contract": review_contract,
         "evidence_steps": event_steps,
         "next_actions": [
             "围绕 POI 结构识别服务缺口、同质竞争或功能错配。",
@@ -334,9 +351,10 @@ def _llm_final_payload(
     assistant_summary: str,
     observations: List[Dict[str, Any]],
     event_steps: List[int],
+    snapshot: AnalysisSnapshot | None = None,
     error: str = "",
 ) -> Dict[str, Any]:
-    fallback = _final_payload(question, observations, event_steps)
+    fallback = _final_payload(question, observations, event_steps, snapshot=snapshot)
     conclusion = str(assistant_summary or "").strip() or str(fallback.get("conclusion") or "")
     if error and not assistant_summary:
         conclusion = f"ReAct 循环未能稳定完成，已回退到当前观察：{fallback.get('summary') or error}"
@@ -482,7 +500,7 @@ async def _execute_llm_react_run(run: ReactRun, *, question: str, snapshot: Anal
             run,
             step_no + 2,
             "final",
-            _llm_final_payload(question=question, assistant_summary="", observations=observations, event_steps=evidence_steps, error=error_message),
+            _llm_final_payload(question=question, assistant_summary="", observations=observations, event_steps=evidence_steps, snapshot=snapshot, error=error_message),
         )
         return True
 
@@ -503,6 +521,7 @@ async def _execute_llm_react_run(run: ReactRun, *, question: str, snapshot: Anal
             observations=observations,
             event_steps=evidence_steps,
             error=result.error,
+            snapshot=snapshot,
         ),
     )
     return True
@@ -624,7 +643,7 @@ async def _execute_react_run(run: ReactRun) -> None:
                 break
 
         step_no += 1
-        await _put(run, step_no, "final", _final_payload(question, observations, evidence_steps))
+        await _put(run, step_no, "final", _final_payload(question, observations, evidence_steps, snapshot=snapshot))
     finally:
         await run.queue.put(None)
 

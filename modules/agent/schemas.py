@@ -638,6 +638,7 @@ class AgentTurnOutput(BaseModel):
     counterpoints: List[DecisionCounterpointItem] = Field(default_factory=list)
     actions: List[DecisionActionItem] = Field(default_factory=list)
     boundary: List[DecisionBoundaryItem] = Field(default_factory=list)
+    review_contract: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentTurnDiagnostics(BaseModel):
@@ -651,6 +652,7 @@ class AgentTurnDiagnostics(BaseModel):
     thinking_timeline: List["AgentThinkingItem"] = Field(default_factory=list)
     planning_summary: str = ""
     audit_summary: str = ""
+    review_contract: Dict[str, Any] = Field(default_factory=dict)
     replan_count: int = 0
     error: str = ""
 

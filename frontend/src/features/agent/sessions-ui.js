@@ -284,6 +284,7 @@ function createAgentUiMethods() {
         counterpoints: this.agentCounterpoints,
         actions: this.agentActions,
         boundary: this.agentBoundary,
+        reviewContract: this.agentReviewContract,
         executionTrace: this.agentExecutionTrace,
         usedTools: this.agentUsedTools,
         citations: this.agentCitations,
@@ -317,6 +318,7 @@ function createAgentUiMethods() {
       this.agentCounterpoints = cloneArray(state.counterpoints)
       this.agentActions = cloneArray(state.actions)
       this.agentBoundary = cloneArray(state.boundary)
+      this.agentReviewContract = cloneObject(state.reviewContract)
       this.agentExecutionTrace = cloneArray(state.executionTrace)
       this.agentUsedTools = cloneArray(state.usedTools)
       this.agentCitations = cloneArray(state.citations)
@@ -2370,6 +2372,7 @@ function createAgentUiMethods() {
       this.agentCounterpoints = []
       this.agentActions = []
       this.agentBoundary = []
+      this.agentReviewContract = {}
       this.agentExecutionTrace = []
       this.agentUsedTools = []
       this.agentCitations = []
@@ -2828,6 +2831,7 @@ function createAgentUiMethods() {
           counterpoints: this.agentCounterpoints,
           actions: this.agentActions,
           boundary: this.agentBoundary,
+          reviewContract: this.agentReviewContract,
           executionTrace: this.agentExecutionTrace,
           usedTools: this.agentUsedTools,
           citations: this.agentCitations,
@@ -9066,7 +9070,42 @@ function createAgentUiMethods() {
         || (Array.isArray(this.agentActions) && this.agentActions.length)
         || (Array.isArray(this.agentCounterpoints) && this.agentCounterpoints.length)
         || (Array.isArray(this.agentBoundary) && this.agentBoundary.length)
+        || this.getAgentReviewContractItems().length
       )
+    },
+    getAgentReviewContractItems() {
+      const contract = cloneObject(this.agentReviewContract)
+      const keys = ['spatial_consistency', 'evidence_status', 'planning_translation', 'report_expression']
+      const fallbackLabels = {
+        spatial_consistency: '空间自洽',
+        evidence_status: '证据状态',
+        planning_translation: '策划转译',
+        report_expression: '报告写回',
+      }
+      return keys
+        .map((key) => {
+          const item = cloneObject(contract[key])
+          if (!Object.keys(item).length) return null
+          const evidence = cloneArray(item.evidence).map((entry) => asText(entry)).filter(Boolean)
+          const gaps = cloneArray(item.gaps).map((entry) => asText(entry)).filter(Boolean)
+          return {
+            key,
+            label: asText(item.label) || fallbackLabels[key],
+            status: asText(item.status || 'partial') || 'partial',
+            summary: asText(item.summary),
+            evidence,
+            gaps,
+            nextQuestion: asText(item.next_question || item.nextQuestion),
+          }
+        })
+        .filter((item) => item && (item.summary || item.evidence.length || item.gaps.length || item.nextQuestion))
+    },
+    getAgentReviewContractStatusLabel(status = '') {
+      return {
+        supported: '已支撑',
+        partial: '部分支撑',
+        missing: '缺证据',
+      }[asText(status)] || '部分支撑'
     },
     getAgentDecisionStrengthLabel(strength = '') {
       const key = asText(strength || (this.agentDecision && this.agentDecision.strength) || 'weak')

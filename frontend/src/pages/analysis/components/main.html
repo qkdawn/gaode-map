@@ -2271,6 +2271,27 @@
                                                 </ul>
                                             </div>
 
+                                            <div v-if="getAgentReviewContractItems().length" class="agent-card agent-review-contract-card">
+                                                <div class="agent-card-type">review contract</div>
+                                                <div class="agent-card-title">深度审查契约</div>
+                                                <div class="agent-review-contract-grid">
+                                                    <div
+                                                        v-for="item in getAgentReviewContractItems()"
+                                                        :key="`agent-review-contract-${item.key}`"
+                                                        class="agent-review-contract-item"
+                                                        :class="`is-${item.status}`">
+                                                        <div class="agent-review-contract-head">
+                                                            <span>{{ item.label }}</span>
+                                                            <em>{{ getAgentReviewContractStatusLabel(item.status) }}</em>
+                                                        </div>
+                                                        <div v-if="item.summary" class="agent-review-contract-summary">{{ item.summary }}</div>
+                                                        <div v-if="item.evidence.length" class="agent-review-contract-meta">证据：{{ item.evidence.slice(0, 2).join('；') }}</div>
+                                                        <div v-if="item.gaps.length" class="agent-review-contract-meta is-gap">缺口：{{ item.gaps.slice(0, 2).join('；') }}</div>
+                                                        <div v-if="item.nextQuestion" class="agent-review-contract-question">{{ item.nextQuestion }}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                             <div v-if="agentActions.length" class="agent-card">
                                                 <div class="agent-card-type">actions</div>
                                                 <div class="agent-card-title">下一步怎么做</div>

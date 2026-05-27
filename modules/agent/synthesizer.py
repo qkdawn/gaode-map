@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 from .analysis_extractors import is_target_supply_gap_ready
 from .intent_signals import mentions_nightlight, mentions_population, mentions_road, mentions_summary, mentions_supply
+from .review_contract import build_review_contract
 from .synthesis_evidence import build_analysis_evidence as _build_analysis_evidence_from_module
 from .synthesis_metrics import build_summary_metrics as _build_summary_metrics_from_module
 from .schemas import (
@@ -397,6 +398,14 @@ def _build_structured_output(
             decision_strength=decision_strength,
         ),
         "boundary": _build_boundary_items(limits),
+        "review_contract": build_review_contract(
+            question=question,
+            snapshot=snapshot,
+            artifacts=artifacts,
+            tool_results=tool_results,
+            audit=audit,
+            decision_summary=decision.summary,
+        ),
         "research_notes": list(research_notes or []),
         "tool_chain": [result.tool_name for result in tool_results if result.status == "success"],
     }
@@ -495,6 +504,7 @@ def build_synthesis_payload(
         "counterpoints": [item.model_dump(mode="json") for item in structured["counterpoints"]],
         "actions": [item.model_dump(mode="json") for item in structured["actions"]],
         "boundary": [item.model_dump(mode="json") for item in structured["boundary"]],
+        "review_contract": structured["review_contract"],
         "business_profile": {
             "portrait": metrics.get("business_profile_portrait") or _infer_business_portrait(metrics)[0],
             "type": metrics.get("business_profile_label") or _infer_business_portrait(metrics)[0],
@@ -715,5 +725,6 @@ def enrich_answer_output(
         output.actions = structured["actions"]
     if not list(output.boundary or []):
         output.boundary = structured["boundary"]
+    output.review_contract = structured["review_contract"]
     output.panel_payloads = build_summary_panel_payloads(question, snapshot, artifacts)
     return output
