@@ -75,6 +75,49 @@ function createAgentUiMethods() {
       }
       return html.join('')
     },
+    renderAgentReportMarkdownHtml(value = '') {
+      const content = asText(value).replace(/\r\n/g, '\n')
+      if (!content) return ''
+      const lines = content
+        .split('\n')
+        .filter((line) => !/^```(?:markdown|md)?\s*$/i.test(asText(line).trim()))
+      const html = []
+      let seenContent = false
+      const hasStructuredLines = lines.some((line) => /^(\d+)[.、]\s+/.test(asText(line).trim()) || /^#{1,4}\s+/.test(asText(line).trim()))
+      for (const rawLine of lines) {
+        const line = asText(rawLine).trim()
+        if (!line) {
+          if (html.length) html.push('<div class="agent-iteration-report-gap"></div>')
+          continue
+        }
+        const heading = line.match(/^(#{1,4})\s+(.+)$/)
+        if (heading) {
+          html.push(`<div class="agent-iteration-report-md-heading">${this.renderAgentInlineMarkdown(heading[2])}</div>`)
+          seenContent = true
+          continue
+        }
+        if (!seenContent && hasStructuredLines && line.length <= 40 && !/^(\d+)[.、]\s+/.test(line)) {
+          html.push(`<div class="agent-iteration-report-md-heading">${this.renderAgentInlineMarkdown(line)}</div>`)
+          seenContent = true
+          continue
+        }
+        const numbered = line.match(/^(\d+)[.、]\s+(.+)$/)
+        if (numbered) {
+          html.push(`<div class="agent-iteration-report-md-list-item"><span>${this.escapeAgentMessageHtml(numbered[1])}.</span><span>${this.renderAgentInlineMarkdown(numbered[2])}</span></div>`)
+          seenContent = true
+          continue
+        }
+        const bullet = line.match(/^[-*]\s+(.+)$/)
+        if (bullet) {
+          html.push(`<div class="agent-iteration-report-md-list-item"><span>•</span><span>${this.renderAgentInlineMarkdown(bullet[1])}</span></div>`)
+          seenContent = true
+          continue
+        }
+        html.push(`<div class="agent-iteration-report-md-paragraph">${this.renderAgentInlineMarkdown(line)}</div>`)
+        seenContent = true
+      }
+      return html.join('')
+    },
     getAgentSessionTitle(session = null) {
       if (!session || typeof session !== 'object') return '新报告'
       if (this.isAgentSummaryHistorySession && this.isAgentSummaryHistorySession(session)) {

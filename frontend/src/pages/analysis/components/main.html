@@ -1094,11 +1094,11 @@
                                                     :key="section.key"
                                                     class="agent-iteration-report-section">
                                                     <h4>{{ section.heading }}</h4>
-                                                    <p
+                                                    <div
                                                         v-for="(paragraph, idx) in section.paragraphs"
-                                                        :key="`${section.key}-paragraph-${idx}`">
-                                                        {{ paragraph }}
-                                                    </p>
+                                                        :key="`${section.key}-paragraph-${idx}`"
+                                                        class="agent-iteration-report-markdown"
+                                                        v-html="renderAgentReportMarkdownHtml(paragraph)"></div>
                                                 </section>
                                             </div>
                                         </div>

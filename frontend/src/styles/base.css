@@ -839,6 +839,44 @@ body,
   line-height: 1.8;
 }
 
+.agent-iteration-report-markdown {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-iteration-report-md-heading {
+  margin-top: 2px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.agent-iteration-report-md-paragraph {
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.agent-iteration-report-md-list-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.agent-iteration-report-md-list-item > span:first-child {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.agent-iteration-report-gap {
+  height: 4px;
+}
+
 .agent-iteration-report-paragraph {
   margin: 0;
   color: #334155;
