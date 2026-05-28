@@ -184,6 +184,10 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
             "foundation": [
                 "read_current_scope",
                 "read_current_results",
+                "search_analysis_context",
+                "read_analysis_chunk",
+                "search_report_context",
+                "read_report_chunk",
                 "fetch_pois_in_scope",
                 "compute_h3_metrics_from_scope_and_pois",
                 "compute_population_overview_from_scope",
@@ -201,6 +205,7 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
         },
         "priority_rules": [
             "先读 scope 和 current_results，再决定是否需要重算基础数据。",
+            "涉及已有分析结论或报告追问时，优先 search 对应上下文，再 read 命中的 chunk。",
             "区域画像类问题优先使用 run_area_character_pack。",
             "选址评估类问题优先使用 run_site_selection_pack。",
             "如果上游分析产物不完整，先补依赖，再给结论。",

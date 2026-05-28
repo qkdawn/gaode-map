@@ -26,10 +26,34 @@ def _result_names(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any] | None =
     return rows
 
 
+def _available_context_sources(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any] | None = None) -> List[str]:
+    sources: List[str] = []
+    for name in _result_names(snapshot, artifacts):
+        if name in {"pois", "h3", "road", "population", "nightlight"}:
+            sources.append(f"analysis:{'poi' if name == 'pois' else name}")
+        elif name == "business_site_advice":
+            sources.append("analysis:site_selection")
+    current = artifacts or {}
+    if current.get("site_selection_pack") or current.get("current_target_supply_gap"):
+        sources.append("analysis:site_selection")
+    if current.get("summary_pack") or current.get("current_summary_pack"):
+        sources.append("report:summary")
+    if current.get("area_character_pack"):
+        sources.append("report:area_character")
+    if current.get("site_selection_pack"):
+        sources.append("report:site_selection")
+    deduped: List[str] = []
+    for source in sources:
+        if source not in deduped:
+            deduped.append(source)
+    return deduped
+
+
 def build_context_summary(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any] | None = None) -> AgentContextSummary:
     return AgentContextSummary(
         has_scope=bool(artifacts and artifacts.get("scope_polygon")) or bool(extract_scope_polygon(snapshot)),
         available_results=_result_names(snapshot, artifacts),
+        available_context_sources=_available_context_sources(snapshot, artifacts),
         active_panel=str(snapshot.active_panel or ""),
         filters_digest=dict(snapshot.current_filters or {}),
     )
@@ -60,6 +84,7 @@ def build_context_bundle(snapshot: AnalysisSnapshot) -> ContextBundle:
         "不能把推测写成事实。",
         "不能直接从 GIS 指标推断客流、消费能力、经营收益。",
         "人口、夜光、路网等结论必须基于对应 summary 字段。",
+        "需要解释分析结论时，优先通过 search_analysis_context/read_analysis_chunk 或 search_report_context/read_report_chunk 获取证据块。",
     ]
     return ContextBundle(
         facts=facts,

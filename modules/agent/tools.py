@@ -8,6 +8,7 @@ from .tool_definitions import (
     register_analysis_business_tools,
     register_capability_tools,
     register_foundation_tools,
+    register_retrieval_tools,
     register_scenario_tools,
 )
 
@@ -15,6 +16,7 @@ from .tool_definitions import (
 def get_tool_registry() -> Dict[str, RegisteredTool]:
     registry: Dict[str, RegisteredTool] = {}
     register_foundation_tools(registry)
+    register_retrieval_tools(registry)
     register_capability_tools(registry)
     register_scenario_tools(registry)
     register_analysis_business_tools(registry)

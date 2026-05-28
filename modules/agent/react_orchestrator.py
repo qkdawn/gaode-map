@@ -31,6 +31,10 @@ from .tools import get_tool_registry
 REACT_SAFE_TOOL_NAMES = {
     "read_current_scope",
     "read_current_results",
+    "search_analysis_context",
+    "read_analysis_chunk",
+    "search_report_context",
+    "read_report_chunk",
     "fetch_pois_in_scope",
     "compute_h3_metrics_from_scope_and_pois",
     "compute_population_overview_from_scope",
@@ -53,6 +57,10 @@ REACT_SAFE_TOOL_NAMES = {
 REACT_TOOL_LABELS = {
     "read_current_scope": "读取当前分析范围",
     "read_current_results": "读取已有分析结果",
+    "search_analysis_context": "搜索分析上下文",
+    "read_analysis_chunk": "读取分析证据块",
+    "search_report_context": "搜索报告上下文",
+    "read_report_chunk": "读取报告证据块",
     "fetch_pois_in_scope": "抓取范围内 POI",
     "compute_h3_metrics_from_scope_and_pois": "计算 H3 网格指标",
     "compute_population_overview_from_scope": "计算人口概览",

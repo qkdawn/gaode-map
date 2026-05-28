@@ -571,6 +571,7 @@ class AgentContextSummary(BaseModel):
 
     has_scope: bool = False
     available_results: List[str] = Field(default_factory=list)
+    available_context_sources: List[str] = Field(default_factory=list)
     active_panel: str = ""
     filters_digest: Dict[str, Any] = Field(default_factory=dict)
 
