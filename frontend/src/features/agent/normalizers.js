@@ -229,6 +229,30 @@ function normalizeAgentPanelPreloadNotes(items = []) {
     .filter((item) => item.key && item.label)
 }
 
+function normalizeAgentAttachment(seed = {}) {
+  const status = asText(seed.status || 'uploaded') || 'uploaded'
+  return {
+    attachmentId: asText(seed.attachmentId || seed.attachment_id || seed.id),
+    conversationId: asText(seed.conversationId || seed.conversation_id),
+    historyId: asText(seed.historyId || seed.history_id),
+    filename: asText(seed.filename || seed.name),
+    mimeType: asText(seed.mimeType || seed.mime_type || seed.type),
+    sizeBytes: Number(seed.sizeBytes ?? seed.size_bytes ?? seed.size ?? 0) || 0,
+    status,
+    summary: asText(seed.summary),
+    warnings: cloneArray(seed.warnings).map((item) => asText(item)).filter(Boolean),
+    error: asText(seed.error),
+    createdAt: asText(seed.createdAt || seed.created_at),
+    updatedAt: asText(seed.updatedAt || seed.updated_at),
+  }
+}
+
+function normalizeAgentAttachments(items = []) {
+  return cloneArray(items)
+    .map((item) => normalizeAgentAttachment(item))
+    .filter((item) => item.attachmentId)
+}
+
 function normalizeAgentProducedArtifacts(seed = {}) {
   return cloneArray(seed.produced_artifacts || seed.producedArtifacts)
     .map((item) => asText(item))
@@ -627,6 +651,8 @@ function createAgentSessionRecord(seed = {}) {
     riskPrompt: String(turn.output.riskPrompt || ''),
     error: String(turn.diagnostics.error || ''),
     riskConfirmations: cloneArray(seed.riskConfirmations || seed.risk_confirmations),
+    attachments: normalizeAgentAttachments(seed.attachments || seed.agentAttachments || seed.agent_attachments),
+    attachmentIds: cloneArray(seed.attachmentIds || seed.attachment_ids).map((item) => asText(item)).filter(Boolean),
     panelPreloadNotes: normalizeAgentPanelPreloadNotes(seed.panelPreloadNotes),
     preloadedPanelKeys: cloneArray(seed.preloadedPanelKeys).map((item) => asText(item)).filter(Boolean),
     pendingTaskConfirmation: cloneObject(seed.pendingTaskConfirmation || seed.pending_task_confirmation),
@@ -698,6 +724,8 @@ function cloneAgentSessionRecord(session = null) {
     thinkingTimeline: cloneArray(session.thinkingTimeline),
     nextSuggestions: cloneArray(session.nextSuggestions),
     riskConfirmations: cloneArray(session.riskConfirmations),
+    attachments: normalizeAgentAttachments(session.attachments),
+    attachmentIds: cloneArray(session.attachmentIds),
     panelPreloadNotes: normalizeAgentPanelPreloadNotes(session.panelPreloadNotes),
     preloadedPanelKeys: cloneArray(session.preloadedPanelKeys),
     pendingTaskConfirmation: cloneObject(session.pendingTaskConfirmation),
@@ -804,6 +832,8 @@ export {
   normalizeAgentBoundaryItem,
   normalizeAgentPanelPreloadNote,
   normalizeAgentPanelPreloadNotes,
+  normalizeAgentAttachment,
+  normalizeAgentAttachments,
   normalizeAgentProducedArtifacts,
   normalizeAgentStatusThinkingItem,
   normalizeAgentSubmitThinkingItem,

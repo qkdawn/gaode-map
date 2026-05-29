@@ -1,7 +1,7 @@
 import json
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -54,6 +54,13 @@ from modules.agent.session_service import (
     upsert_agent_session,
 )
 from modules.agent.tool_service import list_agent_tools
+from modules.retrieval.attachments import (
+    delete_attachment,
+    list_attachments,
+    save_attachment_upload,
+    schedule_attachment_ingest,
+)
+from modules.retrieval.schemas import AttachmentRecord
 from store.agent_session_repo import agent_session_repo
 from store.history_repo import history_repo
 
@@ -193,6 +200,42 @@ async def run_agent_context_ask(payload: AgentContextAskRequest):
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])
 async def get_agent_tools():
     return list_agent_tools()
+
+
+@router.post("/api/v1/analysis/agent/attachments", response_model=AttachmentRecord)
+async def post_agent_attachment(
+    conversation_id: str = Form(...),
+    history_id: str = Form(""),
+    file: UploadFile = File(...),
+):
+    try:
+        record = save_attachment_upload(
+            conversation_id=conversation_id,
+            history_id=history_id,
+            filename=file.filename or "attachment",
+            content_type=file.content_type or "",
+            fileobj=file.file,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 413 if detail == "attachment_too_large" else 400
+        raise HTTPException(status_code=status_code, detail=detail)
+    finally:
+        await file.close()
+    schedule_attachment_ingest(record)
+    return record.model_copy(update={"status": "processing"})
+
+
+@router.get("/api/v1/analysis/agent/attachments", response_model=List[AttachmentRecord])
+async def get_agent_attachments(conversation_id: str):
+    return list_attachments(conversation_id)
+
+
+@router.delete("/api/v1/analysis/agent/attachments/{attachment_id}")
+async def remove_agent_attachment(attachment_id: str, conversation_id: str):
+    if not delete_attachment(conversation_id, attachment_id):
+        raise HTTPException(status_code=404, detail="attachment_not_found")
+    return {"status": "success", "id": attachment_id}
 
 
 @router.get("/api/v1/analysis/agent/prompts", response_model=List[PromptConfig])

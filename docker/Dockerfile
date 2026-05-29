@@ -9,51 +9,42 @@ COPY frontend/ ./
 RUN npm run build
 
 
-FROM python:3.11-slim
+FROM python:3.11-slim AS runtime
 
 ARG DEPTHMAPX_VERSION=v0.8.0
+ARG INSTALL_BUILD_TOOLCHAIN=false
 WORKDIR /app
 
-RUN printf '%s\n' \
-    'Types: deb' \
-    'URIs: https://mirrors.tuna.tsinghua.edu.cn/debian' \
-    'Suites: trixie' \
-    'Components: main' \
-    'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
-    '' \
-    'Types: deb' \
-    'URIs: https://mirrors.tuna.tsinghua.edu.cn/debian-security' \
-    'Suites: trixie-security' \
-    'Components: main' \
-    'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
-    > /etc/apt/sources.list.d/debian.sources \
-    && apt-get update -o Acquire::Retries=3 \
+RUN apt-get update -o Acquire::Retries=3 \
     && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    gcc \
     libexpat1 \
+    && if [ "$INSTALL_BUILD_TOOLCHAIN" = "true" ]; then apt-get install -y --no-install-recommends gcc; fi \
     && rm -rf /var/lib/apt/lists/*
 
-# Install depthmapX CLI
 RUN curl -fL "https://github.com/SpaceGroupUCL/depthmapX/releases/download/${DEPTHMAPX_VERSION}/depthmapXcli_linux64" \
     -o /usr/local/bin/depthmapXcli \
     && chmod +x /usr/local/bin/depthmapXcli
 
-ENV DEPTHMAPX_CLI_PATH=/usr/local/bin/depthmapXcli
+ENV DEPTHMAPX_CLI_PATH=/usr/local/bin/depthmapXcli \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-COPY pyproject.toml ./
-RUN python - <<'PY' > /tmp/requirements-docker.txt
-import tomllib
-from pathlib import Path
+COPY pyproject.toml uv.lock ./
+RUN pip install uv \
+    && uv export --frozen --no-dev --format requirements-txt --no-hashes -o /tmp/requirements-docker.txt
+RUN pip install -r /tmp/requirements-docker.txt
 
-project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-for dependency in project["project"]["dependencies"]:
-    print(dependency)
-PY
-RUN pip install --no-cache-dir -r /tmp/requirements-docker.txt
-
-COPY . .
+COPY core ./core
+COPY modules ./modules
+COPY router ./router
+COPY share ./share
+COPY store ./store
+COPY static ./static
+COPY templates ./templates
+COPY utils ./utils
+COPY main.py README.md ./
 COPY --from=frontend-builder /app/static/frontend ./static/frontend
 
 EXPOSE 8000

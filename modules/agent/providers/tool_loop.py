@@ -139,7 +139,7 @@ def artifact_digest(snapshot: AnalysisSnapshot, memory: WorkingMemory) -> Dict[s
     }
     summary_keys = [
         key
-        for key in ("current_poi_summary", "current_h3_summary", "current_population_summary", "current_nightlight_summary", "current_road_summary")
+        for key in ("current_poi_summary", "current_poi_h3_summary", "current_population_summary", "current_nightlight_summary", "current_road_summary")
         if isinstance(artifacts.get(key), dict) and artifacts.get(key)
     ]
     if not summary_keys:
@@ -188,6 +188,8 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
                 "read_analysis_chunk",
                 "search_report_context",
                 "read_report_chunk",
+                "search_uploaded_attachment_context",
+                "read_uploaded_attachment_context",
                 "fetch_pois_in_scope",
                 "compute_h3_metrics_from_scope_and_pois",
                 "compute_population_overview_from_scope",
@@ -196,6 +198,7 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
             ],
             "capability": [
                 "get_area_data_bundle",
+                "rank_next_analysis_options",
                 "analyze_poi_structure",
                 "analyze_spatial_structure",
                 "infer_area_labels",
@@ -206,6 +209,8 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
         "priority_rules": [
             "先读 scope 和 current_results，再决定是否需要重算基础数据。",
             "涉及已有分析结论或报告追问时，优先 search 对应上下文，再 read 命中的 chunk。",
+            "用户提到附件、文件、图片、报告、图纸、表格时，优先 search_uploaded_attachment_context，再 read_uploaded_attachment_context；附件证据必须标注文件名。",
+            "下一步分析建议类问题只排序分析方向，不直接调用区域画像或选址场景工具。",
             "区域画像类问题优先使用 run_area_character_pack。",
             "选址评估类问题优先使用 run_site_selection_pack。",
             "如果上游分析产物不完整，先补依赖，再给结论。",
@@ -224,6 +229,7 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
             "score_site_candidates": ["current_target_supply_gap"],
         },
         "question_routes": {
+            "next_analysis": ["read_current_results", "rank_next_analysis_options"],
             "area_character": ["read_current_results", "run_area_character_pack"],
             "site_selection": ["read_current_results", "run_site_selection_pack"],
             "population": ["read_current_results", "compute_population_overview_from_scope"],

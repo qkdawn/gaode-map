@@ -371,6 +371,13 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
 
     context = build_context_bundle(snapshot)
     memory = create_working_memory()
+    attachment_ids = [str(item).strip() for item in (payload.attachment_ids or []) if str(item).strip()]
+    if attachment_ids:
+        memory.artifacts["uploaded_attachment_ids"] = attachment_ids
+        memory.artifacts["uploaded_attachment_conversation_id"] = str(payload.conversation_id or "")
+        context.available_artifacts.append("uploaded_attachments")
+        context.context_summary.available_context_sources.append("attachment:uploaded")
+        context.limits.append("用户上传附件只能作为附件证据引用，不能伪装成地图分析计算结果。")
     used_tools: List[str] = []
     initial_plan_steps: List[PlanStep] = []
     replan_steps: List[PlanStep] = []
@@ -720,18 +727,28 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             synthesis_payload=synthesis_payload,
             emit=emit_event,
         )
-    except Exception:
-        cards = build_cards(
-            question=question,
-            snapshot=snapshot,
-            artifacts=memory.artifacts,
-            tool_results=memory.tool_results,
-            research_notes=list(memory.research_notes or []),
-            audit=latest_rule_audit,
-        )
-        answer_output = AgentTurnOutput(
-            cards=cards,
-            next_suggestions=build_next_suggestions(question, latest_rule_audit),
+    except Exception as exc:
+        await _emit_status(emit, "failed")
+        return AgentTurnResponse(
+            status="failed",
+            stage="failed",
+            output=AgentTurnOutput(),
+            diagnostics=_build_diagnostics(
+                memory=memory,
+                used_tools=used_tools,
+                error=f"综合回答 LLM 调用失败：{exc}",
+                thinking_timeline=thinking_timeline,
+                planning_summary=planning_summary,
+                audit_summary=audit_summary,
+                replan_count=replan_count,
+            ),
+            context_summary=build_context_summary(snapshot, memory.artifacts),
+            plan=AgentPlanEnvelope(
+                steps=list(initial_plan_steps or []),
+                followup_steps=list(replan_steps or []),
+                followup_applied=bool(replan_steps),
+                summary=planning_summary,
+            ),
         )
 
     state.move_to("answered")

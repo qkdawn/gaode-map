@@ -20,6 +20,7 @@ ToolDataDomain = Literal[
     "policy",
     "competitor",
     "general",
+    "attachment",
 ]
 ToolCapabilityType = Literal["fetch", "transform", "analyze", "interpret", "decide", "none"]
 ToolSceneType = Literal[
@@ -112,6 +113,7 @@ class AgentTurnRequest(BaseModel):
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     risk_confirmations: List[str] = Field(default_factory=list)
     governance_mode: GovernanceMode = "auto"
+    attachment_ids: List[str] = Field(default_factory=list)
 
 
 class AgentReactOptions(BaseModel):
@@ -130,6 +132,7 @@ class AgentReactRunRequest(BaseModel):
     scope: Dict[str, Any] = Field(default_factory=dict)
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     options: AgentReactOptions = Field(default_factory=AgentReactOptions)
+    attachment_ids: List[str] = Field(default_factory=list)
 
 
 class AgentReactRunResponse(BaseModel):
@@ -788,6 +791,7 @@ class AgentSessionSnapshotRequest(BaseModel):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
+    attachment_ids: List[str] = Field(default_factory=list)
 
 
 class AgentSessionMetadataPatchRequest(BaseModel):
@@ -806,3 +810,4 @@ class AgentSessionDetail(AgentSessionSummary):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
+    attachment_ids: List[str] = Field(default_factory=list)

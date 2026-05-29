@@ -9,7 +9,7 @@ def gate_system_prompt() -> str:
         "你的任务是判断用户问题是否足够清晰、是否可以进入规划阶段。"
         "只输出 JSON。"
         "JSON 结构："
-        "{\"status\":\"pass|clarify|block\",\"question_type\":\"area_character|site_selection|population|nightlight|road|vitality|tod|livability|facility_gap|renewal_priority|metric|general\","
+        "{\"status\":\"pass|clarify|block\",\"question_type\":\"next_analysis|area_character|site_selection|population|nightlight|road|vitality|tod|livability|facility_gap|renewal_priority|metric|general\","
         "\"summary\":\"...\",\"missing_information\":[\"...\"],\"clarification_questions\":[\"...\"],\"clarification_question\":\"...\",\"clarification_options\":[\"...\"],\"blocked_reason\":\"...\"}"
         "规则："
         "1. 如果问题已经足够清晰，返回 pass；"
@@ -29,14 +29,15 @@ def planner_system_prompt() -> str:
         f"{review_contract_prompt()}"
         "只输出 JSON。"
         "JSON 结构："
-        "{\"goal\":\"...\",\"question_type\":\"area_character|site_selection|population|nightlight|road|vitality|tod|livability|facility_gap|renewal_priority|metric|general\","
+        "{\"goal\":\"...\",\"question_type\":\"next_analysis|area_character|site_selection|population|nightlight|road|vitality|tod|livability|facility_gap|renewal_priority|metric|general\","
         "\"summary\":\"...\",\"requires_tools\":true,\"stop_condition\":\"...\",\"evidence_focus\":[\"...\"],"
         "\"steps\":[{\"tool_name\":\"...\",\"arguments\":{},\"reason\":\"...\",\"evidence_goal\":\"...\",\"expected_artifacts\":[\"...\"],\"optional\":false}]}"
         "规划原则："
-        "1. 先识别任务类型：area_character、site_selection、population、nightlight、road、vitality、tod、livability、facility_gap、renewal_priority、metric 或 general；"
+        "1. 先识别任务类型：next_analysis、area_character、site_selection、population、nightlight、road、vitality、tod、livability、facility_gap、renewal_priority、metric 或 general；"
         "2. 默认优先场景工具，其次能力工具，最后基础工具；"
-        "3. 区域画像/调性判断默认优先 run_area_character_pack；"
-        "4. 开店、选址、补位、目标业态建议默认优先 run_site_selection_pack；"
+        "3. 用户问下一步/继续做什么分析时，必须使用 next_analysis，优先读取已有结果并调用 rank_next_analysis_options，不要直接生成区域画像；"
+        "4. 区域画像/调性判断默认优先 run_area_character_pack；"
+        "5. 开店、选址、补位、目标业态建议默认优先 run_site_selection_pack；"
         "5. 用户只问单项人口、夜光、路网时，才直接规划对应单维基础工具；"
         "6. 只有审计反馈要求补局部证据，或场景工具明显过重时，才下钻到能力工具或基础工具；"
         "7. frontend_analysis 中键存在不等于有可用分析，analysis_readiness=false 时不能把空结构当证据；"
@@ -45,7 +46,8 @@ def planner_system_prompt() -> str:
         "10. steps 必须按执行顺序输出，reason、evidence_goal、expected_artifacts 必须具体；"
         "11. 如果已有证据足以直接回答，可以 requires_tools=false 且 steps 为空；"
         "12. 深度分析类任务的 steps 要覆盖空间自洽、证据状态、策划转译和报告写回，缺什么就明确补什么；"
-        "13. 不要输出 registry 中不存在的工具名，不要把 GIS 指标直接当成客流、消费能力、营业额或收益证据。"
+        "13. 当用户提到上传的文件、附件、图片、图纸、表格、报告时，必须优先规划 search_uploaded_attachment_context，再 read_uploaded_attachment_context；"
+        "14. 不要输出 registry 中不存在的工具名，不要把 GIS 指标直接当成客流、消费能力、营业额或收益证据。"
     )
 
 
@@ -92,7 +94,8 @@ def synthesizer_system_prompt() -> str:
         "5. boundary 必须明确哪些结论不能直接推出，尤其不能把 GIS 指标翻译成客流、消费能力、营业额或经营收益，不建议直接推断未给出的经营结果；"
         "6. cards 仍需输出三类卡片：summary 标题为“核心判断”，evidence 标题为“证据依据”，recommendation 标题为“下一步建议”；"
         "7. review_contract 必须按四个固定维度输出，status 只能是 supported、partial 或 missing；"
-        "8. 只能使用给定证据，不要编造不存在的数据。"
+        "8. 只能使用给定证据，不要编造不存在的数据；"
+        "9. 使用上传附件证据时必须写清文件名和页码/图片/表格定位；附件内容不能伪装成地图分析计算结果。"
     )
 
 
@@ -111,5 +114,6 @@ def loop_system_prompt() -> str:
         "7. 遇到开店、选址、补位、目标业态建议类问题时，优先调用 run_site_selection_pack；"
         "8. 只有用户只问单项指标时才直接调用人口、夜光、路网等基础工具；"
         "9. 深度分析需要优先补齐四个审查维度中缺失的证据，而不是只快速回答；"
-        "10. 不要把 GIS 指标直接推断成客流、消费能力或经营收益。"
+        "10. 用户提到上传的文件、附件、图片、图纸、表格、报告时，优先 search_uploaded_attachment_context，再 read_uploaded_attachment_context；"
+        "11. 不要把 GIS 指标直接推断成客流、消费能力或经营收益。"
     )

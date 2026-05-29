@@ -203,6 +203,7 @@ def build_snapshot_payload(request: AgentSessionSnapshotRequest) -> Dict[str, An
         "context_summary": request.context_summary.model_dump(),
         "plan": request.plan.model_dump(),
         "risk_confirmations": [str(item) for item in request.risk_confirmations],
+        "attachment_ids": [str(item) for item in request.attachment_ids if str(item).strip()],
     }
     history_id = _normalize_text(request.history_id, max_length=128)
     panel_kind = normalize_agent_panel_kind(request.panel_kind)
@@ -237,6 +238,7 @@ def build_turn_persist_payload(payload: AgentTurnRequest, response: AgentTurnRes
         context_summary=response.context_summary,
         plan=response.plan,
         risk_confirmations=[str(item) for item in payload.risk_confirmations],
+        attachment_ids=[str(item) for item in payload.attachment_ids if str(item).strip()],
     )
     request.preview = derive_agent_session_preview(build_snapshot_payload(request))
     return request
@@ -293,6 +295,7 @@ def _build_detail_model(record: Dict[str, Any]) -> AgentSessionDetail:
         context_summary=_normalize_context_summary(snapshot),
         plan=_normalize_plan(snapshot),
         risk_confirmations=[str(item) for item in (snapshot.get("risk_confirmations") or [])],
+        attachment_ids=[str(item) for item in (snapshot.get("attachment_ids") or [])],
     )
 
 

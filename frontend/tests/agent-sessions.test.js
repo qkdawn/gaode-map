@@ -586,6 +586,26 @@ test('react final payload renders evidence status', () => {
   assert.equal(result.output.decision.strength, 'moderate')
 })
 
+test('react final payload does not invent next suggestions', () => {
+  const ctx = createAgentContext()
+  const result = ctx.buildReactFinalTurnPayload({
+    finalEvent: {
+      payload: {
+        conclusion: '当前只返回模型结论。',
+        evidence_status: '证据可用但仍需补充',
+        evidence_steps: [],
+      },
+    },
+    question: '下一步做什么分析',
+    messages: [{ role: 'user', content: '下一步做什么分析' }],
+    executionTrace: [],
+  })
+
+  assert.deepEqual(result.output.next_suggestions, [])
+  assert.equal(result.output.decision.can_act, false)
+  assert.doesNotMatch(result.messages[result.messages.length - 1].content, /继续追问为什么|补充人口或夜光证据|导出当前判断/)
+})
+
 test('submitContextAskQuestion appends user and assistant messages', async () => {
   const ctx = createAgentContext()
   const calls = []
@@ -1155,8 +1175,21 @@ test('rule basis payloads expose algorithm fields and clearly state no ai call',
 })
 
 test('analysis task registry maps backend tool traces to left panel tasks', () => {
-  assert.equal(getAnalysisTaskDefinition('poi_raster_grid').panelId, 'poi')
-  assert.equal(getAnalysisTaskDefinition('poi_h3_grid').panelId, 'poi')
+  const rasterTask = getAnalysisTaskDefinition('poi_raster_grid')
+  const poiH3Task = getAnalysisTaskDefinition('poi_h3_grid')
+  assert.equal(rasterTask.panelId, 'poi')
+  assert.equal(rasterTask.label, 'POI 共享栅格计算')
+  assert.equal(rasterTask.subPanelLabel, 'POI 共享栅格')
+  assert.deepEqual(rasterTask.producedArtifacts, ['current_poi_grid'])
+  assert.equal(poiH3Task.panelId, 'poi')
+  assert.equal(poiH3Task.label, 'POI H3 六边形网格计算')
+  assert.equal(poiH3Task.subPanelLabel, 'POI H3 六边形网格')
+  assert.deepEqual(poiH3Task.producedArtifacts, [
+    'current_poi_h3',
+    'current_poi_h3_grid',
+    'current_poi_h3_summary',
+    'current_poi_h3_charts',
+  ])
   assert.equal(resolveAnalysisTaskKeyFromTrace({
     tool_name: 'aggregate_pois_to_shared_grid',
     status: 'success',
@@ -1790,6 +1823,78 @@ test('cancelAgentTurn aborts in-flight agent request and restores idle state', a
   assert.equal(ctx.agentInput, '总结这个区域')
 })
 
+test('submitAgentTurn sends ready attachment ids without embedding file content', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '结合附件看这个区域'
+  ctx.agentAttachments = [
+    { attachmentId: 'att-ready', filename: 'plan.pdf', status: 'ready' },
+    { attachmentId: 'att-processing', filename: 'draft.png', status: 'processing' },
+  ]
+
+  let requestBody = null
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: { cards: [], next_suggestions: [], panel_payloads: {} },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: {},
+            plan: {},
+          },
+        },
+      },
+    ])
+  }
+
+  await ctx.submitAgentTurn()
+
+  assert.deepEqual(requestBody.attachment_ids, ['att-ready'])
+  assert.equal(JSON.stringify(requestBody.messages).includes('plan.pdf'), false)
+})
+
+test('submitAgentTurn ignores duplicate submit while active session is running', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '哪里适合补充餐饮'
+
+  let runRequestCount = 0
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/react/run')
+    runRequestCount += 1
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => {
+        const error = new Error('aborted')
+        error.name = 'AbortError'
+        reject(error)
+      }, { once: true })
+    })
+  }
+
+  const pending = ctx.submitAgentTurn({ useReactLoop: true })
+  await Promise.resolve()
+
+  assert.equal(ctx.agentLoading, true)
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['哪里适合补充餐饮'])
+
+  ctx.agentInput = '哪里适合补充餐饮'
+  await ctx.submitAgentTurn({ useReactLoop: true })
+
+  assert.equal(runRequestCount, 1)
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['哪里适合补充餐饮'])
+
+  ctx.cancelAgentTurn()
+  await pending
+})
+
 test('running session survives switching to a new report and can be revisited', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
@@ -2081,6 +2186,42 @@ test('getAgentVisibleProcessSteps keeps cumulative visible timeline items', () =
   assert.equal(ctx.agentThinkingTimeline.length, 3)
   assert.deepEqual(ctx.getAgentVisibleProcessSteps().map((item) => item.id), ['thinking-gating', 'tool-call-read-current-scope'])
   assert.equal(ctx.getAgentVisibleProcessSteps()[1].items.includes('结果：scope_polygon 已读取'), true)
+})
+
+test('getAgentNaturalProcessItems renders process as prose with tool lines', () => {
+  const ctx = createAgentContext()
+
+  ctx.upsertAgentThinkingItem({
+    id: 'thinking-gating',
+    phase: 'gating',
+    title: '思考',
+    detail: '我先判断这个问题是不是“下一步分析建议”，避免重新跑区域画像。',
+    state: 'completed',
+  })
+  ctx.upsertAgentTraceThinkingItem({
+    id: 'tool-call-read-current-results-start',
+    tool_name: 'read_current_results',
+    status: 'start',
+    arguments_summary: '无参数',
+    message: '正在调用工具。',
+  })
+  ctx.upsertAgentTraceThinkingItem({
+    id: 'tool-call-read-current-results-success',
+    tool_name: 'read_current_results',
+    status: 'success',
+    result_summary: '已发现 POI、H3、road、population、nightlight 结果。',
+    evidence_count: 5,
+  })
+
+  const items = ctx.getAgentNaturalProcessItems()
+
+  assert.deepEqual(items.map((item) => item.text), [
+    '我先判断这个问题是不是“下一步分析建议”，避免重新跑区域画像。',
+    '调用工具：读取已有分析结果',
+    '已发现 POI、H3、road、population、nightlight 结果。',
+  ])
+  assert.equal(items.some((item) => ['思考', '行动', '观察'].includes(item.text)), false)
+  assert.equal(items[2].metaText, '证据：5 条')
 })
 
 test('getAgentProcessRoleGroups groups role steps into first-level panels', () => {
@@ -3179,7 +3320,7 @@ test('submitAgentTurn preloads mapped panel after successful trace and records l
   assert.equal(h3ChartsCount, 1)
   assert.equal(decisionCardsCount, 1)
   assert.equal(h3RestoreCount, 1)
-  assert.deepEqual(ctx.getAgentPanelPreloadNotes().map((item) => item.label), ['已预加载 H3 面板内容'])
+  assert.deepEqual(ctx.getAgentPanelPreloadNotes().map((item) => item.label), ['已预加载 POI H3 面板内容'])
   assert.equal(ctx.activeStep3Panel, 'agent')
 })
 
@@ -4100,10 +4241,16 @@ test('analysis task param bundles drive summary task params and cache keys', () 
   assert.equal(rasterBundle.task_key, 'poi_raster_grid')
   assert.equal(rasterBundle.params.grid_type, 'raster')
   assert.equal(rasterBundle.params.cell_id_source, 'population_nightlight_shared_cell_id')
+  assert.match(rasterBundle.evidence_params.description, /POI 共享栅格/)
+  assert.match(rasterBundle.evidence_params.description, /同一 cell_id/)
+  assert.match(rasterBundle.display_label, /POI 共享栅格/)
   assert.equal(h3Bundle.task_key, 'poi_h3_grid')
   assert.equal(h3Bundle.params.grid_type, 'hex')
   assert.equal(h3Bundle.params.h3_resolution, 9)
   assert.equal(h3Bundle.params.min_overlap_ratio, 0.35)
+  assert.match(h3Bundle.evidence_params.description, /POI H3 六边形网格/)
+  assert.match(h3Bundle.evidence_params.description, /POI 供给和密度结构/)
+  assert.match(h3Bundle.display_label, /POI H3 res=9/)
   assert.deepEqual(ctx.captureSummaryTaskParams('poi_raster_grid'), rasterBundle.params)
   assert.deepEqual(ctx.captureSummaryTaskParams('poi_h3_grid'), h3Bundle.params)
 
@@ -4400,7 +4547,7 @@ test('getAgentSummaryGeneratingSections maps task progress into staged skeleton 
         { key: 'poi_fetch', label: 'POI 抓取', status: 'completed' },
         { key: 'population', label: '人口结构分析', status: 'completed' },
         { key: 'nightlight', label: '夜光分析', status: 'running' },
-        { key: 'poi_h3_grid', label: 'POI H3 网格计算', status: 'running' },
+        { key: 'poi_h3_grid', label: 'POI H3 六边形网格计算', status: 'running' },
         { key: 'road_syntax', label: '路网与可达性分析', status: 'pending' },
       ],
     },

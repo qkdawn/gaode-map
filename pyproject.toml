@@ -3,7 +3,7 @@ name = "gaode-map"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "aiofiles==23.2.1",
     "annotated-types==0.7.0",
@@ -14,7 +14,7 @@ dependencies = [
     "click==8.3.1",
     "colorama==0.4.6",
     "et-xmlfile==2.0.0",
-    "fastapi==0.109.0",
+    "fastapi==0.115.6",
     "greenlet==3.3.0",
     "gunicorn==21.2.0",
     "h11==0.16.0",
@@ -29,9 +29,8 @@ dependencies = [
     "markupsafe==3.0.3",
     "openpyxl==3.1.5",
     "packaging==25.0",
-    "pydantic==2.12.5",
-    "pydantic-core==2.41.5",
-    "pydantic-settings==2.1.0",
+    "pydantic==2.12.3",
+    "pydantic-settings==2.2.1",
     "python-dotenv==1.2.1",
     "pytz==2025.2",
     "pyyaml==6.0.3",
@@ -39,7 +38,7 @@ dependencies = [
     "six==1.17.0",
     "sniffio==1.3.1",
     "sqlalchemy==2.0.45",
-    "starlette==0.35.1",
+    "starlette==0.41.3",
     "typing-extensions==4.15.0",
     "tzdata==2025.2",
     "tzlocal==5.3.1",
@@ -56,6 +55,8 @@ dependencies = [
     "shapely>=2.0.0",
     "rasterio>=1.3.0",
     "pillow>=10.0.0",
+    "python-multipart==0.0.21",
+    "raganything[all]==1.3.1",
     "h5py>=3.11.0",
     "aiohttp>=3.9.0",
     "cryptography",

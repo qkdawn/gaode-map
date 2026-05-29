@@ -16,6 +16,7 @@ import {
   normalizeAgentDecision,
   normalizeAgentDecisionEvidence,
   normalizeAgentPanelPreloadNotes,
+  normalizeAgentAttachments,
   normalizeAgentPlanEnvelope,
   normalizeAgentSessionSummary,
   sortAgentSessions,
@@ -265,6 +266,8 @@ function createAgentSessionStoreMethods() {
         hasContent: hasAgentExecutionTraceContent(this.agentExecutionTrace),
       })
       this.agentRiskConfirmations = cloneArray(session.riskConfirmations)
+      this.agentAttachments = normalizeAgentAttachments(session.attachments)
+      this.agentAttachmentIds = cloneArray(session.attachmentIds)
       this.agentMessages = cloneArray(session.messages)
       this.agentThinkingTimeline = cloneArray(session.thinkingTimeline)
       if (String(session.panelKind || '') !== 'deep_analysis' && !this.agentLoading) {
@@ -348,6 +351,8 @@ function createAgentSessionStoreMethods() {
         contextSummary: detail && detail.context_summary,
         plan: detail && detail.plan,
         riskConfirmations: detail && detail.risk_confirmations,
+        attachmentIds: detail && detail.attachment_ids,
+        attachments: existing && existing.attachments,
         messages: detail && detail.messages,
         isPinned: !!(detail && detail.is_pinned),
         persisted: true,
@@ -458,6 +463,8 @@ function createAgentSessionStoreMethods() {
         contextSummary: this.agentContextSummary,
         plan: this.agentPlan,
         riskConfirmations: this.agentRiskConfirmations,
+        attachments: this.agentAttachments,
+        attachmentIds: this.getAgentReadyAttachmentIds ? this.getAgentReadyAttachmentIds() : cloneArray(this.agentAttachmentIds),
         pendingTaskConfirmation: cloneAnalysisTaskConfirmation(this.agentPendingTaskConfirmation),
         panelPreloadNotes: this.agentPanelPreloadNotes,
         preloadedPanelKeys: this.agentPreloadedPanelKeys,

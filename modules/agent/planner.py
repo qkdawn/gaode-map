@@ -39,6 +39,16 @@ def _current_summary(snapshot: AnalysisSnapshot, memory: WorkingMemory, key: str
     return {}
 
 
+def _current_poi_h3_summary(snapshot: AnalysisSnapshot, memory: WorkingMemory) -> Dict[str, Any]:
+    artifact = memory.artifacts.get("current_poi_h3_summary")
+    if isinstance(artifact, dict):
+        return dict(artifact or {})
+    source = snapshot.h3 if isinstance(snapshot.h3, dict) else {}
+    if isinstance(source.get("summary"), dict):
+        return dict(source.get("summary") or {})
+    return {}
+
+
 def _has_scope(snapshot: AnalysisSnapshot, memory: WorkingMemory) -> bool:
     if memory.artifacts.get("scope_polygon"):
         return True
@@ -76,7 +86,7 @@ def _needs_business_summary_dimensions(snapshot: AnalysisSnapshot, memory: Worki
     missing: List[str] = []
     if not _has_pois(snapshot, memory):
         missing.append("poi")
-    if not _current_summary(snapshot, memory, "h3"):
+    if not _current_poi_h3_summary(snapshot, memory):
         missing.append("h3")
     if not _current_summary(snapshot, memory, "population"):
         missing.append("population")
@@ -138,6 +148,11 @@ def _is_hotspot_question(question: str) -> bool:
     return any(token in question for token in tokens)
 
 
+def _mentions_uploaded_attachment(question: str) -> bool:
+    tokens = ("附件", "文件", "图片", "图纸", "上传", "这份", "这个表", "表格", "报告", "PDF", "pdf", "文档")
+    return any(token in str(question or "") for token in tokens)
+
+
 def build_planning_fallback(
     *,
     question: str,
@@ -152,15 +167,38 @@ def build_planning_fallback(
     if _has_scope(snapshot, memory):
         _append_step(steps, scope_step())
     _append_step(steps, results_step("先读取当前已有结果，避免重复计算。"))
+    if _mentions_uploaded_attachment(question) and memory.artifacts.get("uploaded_attachment_ids"):
+        _append_step(
+            steps,
+            _analysis_step(
+                "search_uploaded_attachment_context",
+                "用户问题涉及上传附件，先检索附件证据。",
+                "上传附件相关证据",
+                ["uploaded_attachment_hits"],
+                arguments={"query": question, "top_k": 5},
+            ),
+        )
 
     summary = "优先复用现有结果，再按缺失证据补齐关键分析维度。"
     evidence_focus: List[str] = []
 
     missing_evidence = [str(item) for item in (feedback.get("missing_evidence") or []) if str(item).strip()]
 
-    if question_type == "area_character":
+    if question_type == "next_analysis":
+        summary = "这是下一步分析建议题，先复用当前结果，再基于证据就绪状态推荐最值得继续的应用分析方向。"
+        evidence_focus = ["当前结果就绪状态", "下一步分析方向", "可应用场景"]
+        _append_step(
+            steps,
+            _analysis_step(
+                "rank_next_analysis_options",
+                "基于当前证据链完整度，排序下一步分析方向。",
+                "下一步分析方向",
+                ["current_next_analysis_options"],
+            ),
+        )
+    elif question_type == "area_character":
         summary = "这是区域画像/调性判断题，默认优先走场景工具包，统一串联商业供给、空间分布、人口、夜间活力和路网证据。"
-        evidence_focus = ["POI 业态结构", "H3 空间分布", "人口基础", "夜间活力", "路网可达性"]
+        evidence_focus = ["POI 业态结构", "POI H3 空间分布", "人口基础", "夜间活力", "路网可达性"]
         _append_step(
             steps,
             PlanStep(
@@ -239,24 +277,24 @@ def build_planning_fallback(
     else:
         evidence_focus = ["当前已有结果"]
         if _is_hotspot_question(question):
-            summary = "这是空间结构/热点题，优先补齐 H3 底座并识别商业核心与机会区。"
-            evidence_focus = ["H3 空间结构", "商业热点区"]
-            if not _current_summary(snapshot, memory, "h3"):
+            summary = "这是空间结构/热点题，优先补齐 POI H3 密度底座并识别商业核心与机会区。"
+            evidence_focus = ["POI H3 空间结构", "商业热点区"]
+            if not _current_poi_h3_summary(snapshot, memory):
                 _append_step(
                     steps,
                     PlanStep(
                         tool_name="compute_h3_metrics_from_scope_and_pois",
-                        reason="缺少 H3 空间底座，先补齐网格密度结果。",
-                        evidence_goal="H3 空间密度",
-                        expected_artifacts=["current_h3", "current_h3_summary", "current_h3_grid", "current_h3_charts"],
+                        reason="缺少 POI H3 密度底座，先补齐网格密度结果。",
+                        evidence_goal="POI H3 密度",
+                        expected_artifacts=["current_poi_h3", "current_poi_h3_summary", "current_poi_h3_grid", "current_poi_h3_charts"],
                     ),
                 )
             _append_step(
                 steps,
                 _analysis_step(
                     "read_h3_structure_analysis",
-                    "读取 H3 结构结果。",
-                    "H3 空间结构",
+                    "读取 POI H3 结构结果。",
+                    "POI H3 空间结构",
                     ["current_h3_structure_analysis"],
                 ),
             )

@@ -961,9 +961,10 @@
                                                     </label>
                                                 </div>
                                                 <div v-if="false" class="agent-summary-task-params">
-                                                    <div class="agent-summary-line">按 shared cell_id 生成每年 POI 栅格，用于人口、POI、夜光耦合。</div>
+                                                    <div class="agent-summary-line">POI 共享栅格：和人口/夜光按同一 cell_id 对齐。</div>
                                                 </div>
                                                 <div v-if="task.key === 'poi_h3_grid'" class="agent-summary-task-params">
+                                                    <div class="agent-summary-line">POI H3 六边形网格：按 H3 聚合 POI 供给和密度结构。</div>
                                                     <label class="agent-summary-task-field">
                                                         <span>网格级别</span>
                                                         <select
@@ -2053,161 +2054,49 @@
 
                                         <div
                                             v-if="agentThinkingExpanded || agentLoading"
-                                            class="agent-thinking-steps"
+                                            class="agent-process-flow"
                                             data-agent-scroll-inner
                                             @wheel.stop.passive="onAgentInnerScrollIntent"
                                             @touchmove.stop.passive="onAgentInnerScrollIntent"
                                             @scroll.passive="onAgentInnerScrollIntent">
                                             <div
-                                                v-for="roleGroup in getAgentProcessRoleGroups()"
-                                                :key="`agent-process-role-${roleGroup.key}`"
-                                                class="agent-process-role-panel"
-                                                :class="`is-${roleGroup.state}`">
-                                                <div class="agent-process-role-head">
-                                                    <div>
-                                                        <div class="agent-process-role-title">{{ roleGroup.title }}</div>
-                                                        <div class="agent-process-role-summary">{{ roleGroup.summary }}</div>
-                                                    </div>
-                                                    <div v-if="roleGroup.countLabel" class="agent-process-role-count">{{ roleGroup.countLabel }}</div>
-                                                </div>
-                                                <div class="agent-process-role-steps">
-                                                    <div
-                                                        v-for="stepItem in roleGroup.steps"
-                                                        :key="`agent-visible-process-${stepItem.id}`"
-                                                        class="agent-thinking-current"
-                                                        :class="`is-${stepItem.state}`">
-                                                        <div class="agent-thinking-item-title">{{ stepItem.title }}</div>
-                                                        <div v-if="stepItem.detail" class="agent-thinking-item-detail">{{ stepItem.detail }}</div>
-                                                        <div v-if="stepItem.items && stepItem.items.length" class="agent-thinking-item-list">
-                                                            <div
-                                                                v-for="(subItem, subIndex) in stepItem.items.slice(0, 3)"
-                                                                :key="`${stepItem.id}-current-item-${subIndex}`"
-                                                                class="agent-thinking-item-meta">
-                                                                {{ subItem }}
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div v-if="roleGroup.planChecklist && roleGroup.planChecklist.visible" class="agent-process-role-detail-block is-plan">
-                                                        <div v-for="group in roleGroup.planChecklist.groups" :key="`agent-role-plan-group-${group.key}`" class="agent-plan-group">
-                                                            <div class="agent-plan-group-head">
-                                                                <div class="agent-plan-group-title">{{ group.title }}</div>
-                                                                <div class="agent-plan-group-desc">{{ group.description }}</div>
-                                                            </div>
-                                                            <div class="agent-plan-items">
-                                                                <div v-for="(item, index) in group.items" :key="`agent-role-plan-item-${group.key}-${index}`" class="agent-plan-item" :class="`is-${item.status}`">
-                                                                    <div class="agent-plan-item-status" :title="getAgentPlanStatusLabel(item.status)">
-                                                                        {{ getAgentPlanStatusSymbol(item.status) }}
-                                                                    </div>
-                                                                    <div class="agent-plan-item-main">
-                                                                        <div class="agent-plan-item-title-row">
-                                                                            <div class="agent-plan-item-title">{{ item.title }}</div>
-                                                                        <div v-if="item.optional" class="agent-plan-item-optional">可选</div>
-                                                                        </div>
-                                                                        <div v-if="item.detail" class="agent-plan-item-detail">{{ item.detail }}</div>
-                                                                    </div>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div v-if="roleGroup.toolCallItems && roleGroup.toolCallItems.length" class="agent-process-role-detail-block is-trace">
-                                                        <div class="agent-trace-list">
-                                                            <div v-for="item in roleGroup.toolCallItems" :key="`agent-role-trace-item-${item.id}`" class="agent-trace-item">
-                                                                <div class="agent-trace-main">
-                                                                    <div class="agent-process-entry-title">{{ item.toolName }}</div>
-                                                                    <span class="agent-trace-status" :class="`is-${item.statusTone}`">{{ getAgentToolCallStatusLabel(item.status) }}</span>
-                                                                </div>
-                                                                <div v-if="item.message || item.reason" class="agent-process-entry-detail">{{ item.message || item.reason }}</div>
-                                                                <div class="agent-trace-meta">
-                                                                    <span v-if="item.argumentsSummary">参数：{{ item.argumentsSummary }}</span>
-                                                                    <span v-if="item.resultSummary">结果：{{ item.resultSummary }}</span>
-                                                                    <span v-if="item.evidenceCount !== undefined && item.evidenceCount !== null && String(item.evidenceCount) !== ''">证据：{{ item.evidenceCount }} 条</span>
-                                                                    <span v-if="item.warningCount !== undefined && item.warningCount !== null && Number(item.warningCount) > 0">警告：{{ item.warningCount }} 条</span>
-                                                                </div>
-                                                                <div v-if="item.producedArtifacts.length" class="agent-process-chip-row">
-                                                                    <span v-for="artifact in item.producedArtifacts" :key="`${item.id}-${artifact}`" class="agent-process-chip">{{ artifact }}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div v-if="roleGroup.taskConfirmation" class="agent-process-role-detail-block is-task-confirmation">
-                                                        <div class="agent-task-confirmation-card" :class="`is-${roleGroup.taskConfirmation.status}`">
-                                                            <div class="agent-task-confirmation-head">
-                                                                <div>
-                                                                    <div class="agent-task-confirmation-title">{{ roleGroup.taskConfirmation.title }}</div>
-                                                                    <div class="agent-task-confirmation-desc">{{ roleGroup.taskConfirmation.description }}</div>
-                                                                </div>
-                                                                <span class="agent-trace-status" :class="`is-${getAgentTaskConfirmationProcessState(roleGroup.taskConfirmation.status)}`">
-                                                                    {{ getAgentTaskConfirmationStatusLabel(roleGroup.taskConfirmation.status) }}
-                                                                </span>
-                                                            </div>
-                                                            <div class="agent-task-confirmation-meta">
-                                                                <span>面板：{{ roleGroup.taskConfirmation.subPanelLabel }}</span>
-                                                                <span>预计耗时：{{ roleGroup.taskConfirmation.estimate }}</span>
-                                                                <span v-if="roleGroup.taskConfirmation.parameterSummary">参数：{{ roleGroup.taskConfirmation.parameterSummary }}</span>
-                                                            </div>
-                                                            <div class="agent-task-confirmation-usage">{{ roleGroup.taskConfirmation.resultUsage }}</div>
-                                                            <div v-if="roleGroup.taskConfirmation.blockReason" class="agent-task-confirmation-warning">
-                                                                {{ roleGroup.taskConfirmation.blockReason }}
-                                                            </div>
-                                                            <div v-if="roleGroup.taskConfirmation.error" class="agent-task-confirmation-warning is-error">
-                                                                {{ roleGroup.taskConfirmation.error }}
-                                                            </div>
-                                                            <div class="agent-task-confirmation-actions">
-                                                                <button
-                                                                    v-if="roleGroup.taskConfirmation.canReuse && roleGroup.taskConfirmation.status === 'reuse_available'"
-                                                                    type="button"
-                                                                    class="agent-task-confirmation-btn is-primary"
-                                                                    :disabled="agentLoading || agentSessionHydrating"
-                                                                    @click="onAgentTaskReuseClick(roleGroup.taskConfirmation)">
-                                                                    复用已有结果
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    class="agent-task-confirmation-btn is-primary"
-                                                                    :disabled="agentLoading || agentSessionHydrating || !roleGroup.taskConfirmation.canStart || ['blocked','running','executing','completed','cancelled'].includes(roleGroup.taskConfirmation.status)"
-                                                                    @click="onAgentTaskStartClick(roleGroup.taskConfirmation)">
-                                                                    {{ roleGroup.taskConfirmation.status === 'reuse_available' ? '重新计算' : '开始计算' }}
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    class="agent-task-confirmation-btn"
-                                                                    @click="onAgentTaskAdjustClick(roleGroup.taskConfirmation)">
-                                                                    调整参数
-                                                                </button>
-                                                                <button
-                                                                    v-if="!['completed','cancelled','executing'].includes(roleGroup.taskConfirmation.status)"
-                                                                    type="button"
-                                                                    class="agent-task-confirmation-btn"
-                                                                    @click="onAgentTaskCancelClick(roleGroup.taskConfirmation)">
-                                                                    取消
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
+                                                v-for="processItem in getAgentNaturalProcessItems()"
+                                                :key="`agent-natural-process-${processItem.id}`"
+                                                class="agent-process-flow-item"
+                                                :class="[`is-${processItem.kind}`, `is-${processItem.state}`]">
+                                                <div class="agent-process-flow-text">{{ processItem.text }}</div>
+                                                <div v-if="processItem.metaText" class="agent-process-flow-meta">{{ processItem.metaText }}</div>
                                             </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div
-                                    v-for="processMessage in getAgentReactProcessMessages()"
-                                    :key="`agent-react-process-${processMessage.id}`"
-                                    class="agent-message-row is-assistant">
-                                    <div
-                                        class="agent-message-bubble is-assistant agent-react-process-bubble"
-                                        :class="[`is-${processMessage.type}`, `is-${processMessage.state}`]">
-                                        <div class="agent-react-process-label">
-                                            {{ processMessage.label }}
-                                            <span v-if="processMessage.tool"> · {{ processMessage.tool }}</span>
-                                        </div>
-                                        <div class="agent-react-process-content">{{ processMessage.content }}</div>
-                                        <div v-if="processMessage.metaParts && processMessage.metaParts.length" class="agent-react-process-meta">
-                                            <span
-                                                v-for="metaItem in processMessage.metaParts"
-                                                :key="`${processMessage.id}-${metaItem}`">
-                                                {{ metaItem }}
-                                            </span>
+                                            <div v-if="getAgentTaskConfirmation()" class="agent-process-task-actions">
+                                                <button
+                                                    v-if="getAgentTaskConfirmation().canReuse && getAgentTaskConfirmation().status === 'reuse_available'"
+                                                    type="button"
+                                                    class="agent-task-confirmation-btn is-primary"
+                                                    :disabled="agentLoading || agentSessionHydrating"
+                                                    @click="onAgentTaskReuseClick(getAgentTaskConfirmation())">
+                                                    复用已有结果
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="agent-task-confirmation-btn is-primary"
+                                                    :disabled="agentLoading || agentSessionHydrating || !getAgentTaskConfirmation().canStart || ['blocked','running','executing','completed','cancelled'].includes(getAgentTaskConfirmation().status)"
+                                                    @click="onAgentTaskStartClick(getAgentTaskConfirmation())">
+                                                    {{ getAgentTaskConfirmation().status === 'reuse_available' ? '重新计算' : '开始计算' }}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="agent-task-confirmation-btn"
+                                                    @click="onAgentTaskAdjustClick(getAgentTaskConfirmation())">
+                                                    调整参数
+                                                </button>
+                                                <button
+                                                    v-if="!['completed','cancelled','executing'].includes(getAgentTaskConfirmation().status)"
+                                                    type="button"
+                                                    class="agent-task-confirmation-btn"
+                                                    @click="onAgentTaskCancelClick(getAgentTaskConfirmation())">
+                                                    取消
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -2378,10 +2267,10 @@
 
                         <div v-if="shouldShowAgentComposer()" class="agent-app-composer-wrap">
                             <div class="agent-report-prompts">
-                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '总结这个区域的商业特征', useReactLoop: true })">总结区域</button>
-                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '哪里适合补充餐饮', useReactLoop: true })">补充餐饮</button>
-                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '为什么这里路网较差', useReactLoop: true })">路网原因</button>
-                                <button type="button" class="agent-shortcut-chip" @click="submitAgentTurn({ prompt: '下一步做什么分析', useReactLoop: true })">下一步建议</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '总结这个区域的商业特征' })">总结区域</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '哪里适合补充餐饮' })">补充餐饮</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '为什么这里路网较差' })">路网原因</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '下一步做什么分析' })">下一步建议</button>
                             </div>
 
                             <div class="agent-composer-card">
@@ -2396,18 +2285,41 @@
                                             <span>深度思考</span>
                                             <small>本次发送展示分析过程</small>
                                         </button>
+                                        <label class="agent-composer-menu-item agent-composer-upload-item">
+                                            <span>上传文件/图片</span>
+                                            <small>解析为本次聊天证据</small>
+                                            <input
+                                                type="file"
+                                                multiple
+                                                accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.tif,.gif,.webp,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md"
+                                                @change="onAgentAttachmentInputChange">
+                                        </label>
                                     </div>
                                 </div>
                                 <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
                                     深度思考
                                     <button type="button" aria-label="取消深度思考" @click="clearAgentComposerMode">×</button>
                                 </div>
+                                <div v-if="agentAttachments.length || agentAttachmentUploading || agentAttachmentError" class="agent-attachment-strip">
+                                    <span v-if="agentAttachmentUploading" class="agent-attachment-chip is-processing">上传中</span>
+                                    <span
+                                        v-for="item in agentAttachments"
+                                        :key="`agent-attachment-${item.attachmentId}`"
+                                        class="agent-attachment-chip"
+                                        :class="`is-${item.status || 'uploaded'}`"
+                                        :title="item.error || item.summary || item.filename">
+                                        <span class="agent-attachment-name">{{ item.filename }}</span>
+                                        <span class="agent-attachment-status">{{ item.status === 'ready' ? '已解析' : (item.status === 'failed' ? '失败' : '解析中') }}</span>
+                                        <button type="button" aria-label="移除附件" @click.stop="removeAgentAttachment(item.attachmentId)">×</button>
+                                    </span>
+                                    <span v-if="agentAttachmentError" class="agent-attachment-error">{{ agentAttachmentError }}</span>
+                                </div>
                                 <textarea
                                     v-model="agentInput"
                                     class="agent-composer-input"
                                     placeholder="继续追问这份报告..."
                                     :disabled="agentSessionHydrating"
-                                    @keydown.enter.exact.prevent="submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined, useReactLoop: true })"
+                                    @keydown.enter.exact.prevent="submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined })"
                                 ></textarea>
                             <div class="agent-composer-actions">
                                 <button
@@ -2416,7 +2328,7 @@
                                         :class="{ 'is-loading': agentLoading }"
                                         :disabled="agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
                                         :title="agentLoading ? '暂停执行' : '发送'"
-                                        @click="agentLoading ? cancelAgentTurn() : submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined, useReactLoop: true })">
+                                        @click="agentLoading ? cancelAgentTurn() : submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined })">
                                         <span v-if="!agentLoading">发送</span>
                                         <span v-else class="agent-composer-send-loading" aria-hidden="true">
                                             <span class="agent-composer-send-stop"></span>

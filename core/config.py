@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"  # 应用主机地址，默认0.0.0.0（允许外部访问）
     app_port: int = 8000  # 应用端口，默认8000
     app_base_url: str = "http://localhost:8000"  # 基础URL，用于生成完整的访问链接
+    frontend_mode: Literal["dev", "built"] = Field(
+        "built",
+        validation_alias="FRONTEND_MODE",
+        description="Frontend serving mode: dev proxies Vite, built serves static/frontend.",
+    )
+    frontend_dev_origin: str = Field(
+        "http://127.0.0.1:5173",
+        validation_alias="FRONTEND_DEV_ORIGIN",
+        description="Vite dev server origin used when FRONTEND_MODE=dev.",
+    )
 
     # API密钥配置
     api_keys: List[str] = ["dev-only-key-change-in-production"]  # API密钥列表，用于访问鉴权
@@ -209,6 +219,64 @@ class Settings(BaseSettings):
         2,
         validation_alias="AI_MAX_REPLANS",
         description="Agent 在审计未通过时允许重新规划的最大次数",
+    )
+    agent_attachment_upload_dir: str = Field(
+        str(Path(__file__).resolve().parent.parent / "runtime" / "agent_uploads"),
+        validation_alias="AGENT_ATTACHMENT_UPLOAD_DIR",
+        description="Directory for uploaded Agent chat attachments and per-attachment RAG stores",
+    )
+    agent_attachment_max_mb: int = Field(
+        30,
+        validation_alias="AGENT_ATTACHMENT_MAX_MB",
+        description="Maximum Agent chat attachment size in MB",
+    )
+    agent_attachment_lifetime_hours: int = Field(
+        168,
+        validation_alias="AGENT_ATTACHMENT_LIFETIME_HOURS",
+        description="Agent chat attachment retention period in hours",
+    )
+    agent_attachment_allowed_extensions: List[str] = Field(
+        default_factory=lambda: [
+            ".pdf",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".bmp",
+            ".tiff",
+            ".tif",
+            ".gif",
+            ".webp",
+            ".doc",
+            ".docx",
+            ".ppt",
+            ".pptx",
+            ".xls",
+            ".xlsx",
+            ".txt",
+            ".md",
+        ],
+        validation_alias="AGENT_ATTACHMENT_ALLOWED_EXTENSIONS",
+        description="Allowed Agent chat attachment extensions",
+    )
+    raganything_parser: Literal["mineru", "docling", "paddleocr"] = Field(
+        "mineru",
+        validation_alias="RAGANYTHING_PARSER",
+        description="RAG-Anything parser backend",
+    )
+    raganything_parse_method: Literal["auto", "ocr", "txt"] = Field(
+        "auto",
+        validation_alias="RAGANYTHING_PARSE_METHOD",
+        description="RAG-Anything parse method",
+    )
+    raganything_embedding_model: str = Field(
+        "text-embedding-3-large",
+        validation_alias="RAGANYTHING_EMBEDDING_MODEL",
+        description="OpenAI-compatible embedding model used by RAG-Anything",
+    )
+    raganything_embedding_dim: int = Field(
+        3072,
+        validation_alias="RAGANYTHING_EMBEDDING_DIM",
+        description="Embedding dimension for the RAG-Anything embedding model",
     )
 
     # 本地历史数据查询服务配置
