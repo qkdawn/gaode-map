@@ -107,7 +107,7 @@ def test_build_cards_includes_business_site_advice_target():
             "keywords": "咖啡厅",
         },
         "current_poi_summary": {"total": 2, "types": "050500|050501|050502|050503|050504", "keywords": "咖啡厅"},
-        "current_h3_summary": {"grid_count": 8, "avg_density_poi_per_km2": 6.5},
+        "current_poi_h3_summary": {"grid_count": 8, "avg_density_poi_per_km2": 6.5},
     }
     cards = build_cards(
         question="我想在这里开一家咖啡店，给我建议",
@@ -222,7 +222,7 @@ def test_enrich_answer_output_appends_candidate_items_and_h3_panel_payload():
                     }
                 ],
             },
-            "current_h3": {
+            "current_poi_h3": {
                 "grid": {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"h3_id": "8928308280fffff"}}], "count": 1},
                 "summary": {"grid_count": 1},
                 "charts": {"density_hist": []},
@@ -238,7 +238,7 @@ def test_enrich_answer_output_appends_candidate_items_and_h3_panel_payload():
 
 def test_build_synthesis_payload_ignores_empty_analysis_placeholders_and_falls_back_to_summary():
     artifacts = {
-        "current_h3_summary": {"grid_count": 8, "avg_density_poi_per_km2": 6.5},
+        "current_poi_h3_summary": {"grid_count": 8, "avg_density_poi_per_km2": 6.5},
         "current_h3_structure_analysis": {
             "distribution_pattern": "weak_signal",
             "summary_text": "当前缺少可直接利用的 H3 结构化诊断结果。",

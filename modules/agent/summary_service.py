@@ -242,6 +242,16 @@ def _current_summary(snapshot: Any, artifacts: Dict[str, Any], key: str) -> Dict
     return {}
 
 
+def _current_poi_h3_summary(snapshot: Any, artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    artifact = artifacts.get("current_poi_h3_summary")
+    if isinstance(artifact, dict):
+        return dict(artifact or {})
+    payload = getattr(snapshot, "h3", {})
+    if isinstance(payload, dict) and isinstance(payload.get("summary"), dict):
+        return dict(payload.get("summary") or {})
+    return {}
+
+
 def _current_commercial_hotspots(snapshot: Any, artifacts: Dict[str, Any], h3_structure: Dict[str, Any]) -> Dict[str, Any]:
     payload = artifacts.get("current_commercial_hotspots")
     if isinstance(payload, dict):
@@ -834,7 +844,7 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
     business_profile = artifacts.get("current_business_profile") if isinstance(artifacts.get("current_business_profile"), dict) else {}
     area_labels = artifacts.get("current_area_character_labels") if isinstance(artifacts.get("current_area_character_labels"), dict) else {}
     commercial_hotspots = _current_commercial_hotspots(snapshot, artifacts, h3_structure)
-    h3_summary = _current_summary(snapshot, artifacts, "h3")
+    h3_summary = _current_poi_h3_summary(snapshot, artifacts)
     h3_raw = dict(snapshot.h3 or {}) if isinstance(getattr(snapshot, "h3", {}), dict) else {}
     poi_h3_evidence = h3_raw.get("poi_h3_evidence") if isinstance(h3_raw.get("poi_h3_evidence"), dict) else {}
     frontend = snapshot.frontend_analysis if isinstance(snapshot.frontend_analysis, dict) else {}

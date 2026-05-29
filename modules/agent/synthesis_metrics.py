@@ -25,7 +25,8 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
     business_profile = artifacts.get("current_business_profile") if isinstance(artifacts.get("current_business_profile"), dict) else {}
     commercial_hotspots = artifacts.get("current_commercial_hotspots") if isinstance(artifacts.get("current_commercial_hotspots"), dict) else {}
     target_supply_gap = artifacts.get("current_target_supply_gap") if isinstance(artifacts.get("current_target_supply_gap"), dict) else {}
-    h3_summary = artifacts.get("current_h3_summary") or ((snapshot.h3 or {}).get("summary") if isinstance(snapshot.h3, dict) else {}) or {}
+    next_analysis_options = artifacts.get("current_next_analysis_options") if isinstance(artifacts.get("current_next_analysis_options"), dict) else {}
+    h3_summary = artifacts.get("current_poi_h3_summary") or ((snapshot.h3 or {}).get("summary") if isinstance(snapshot.h3, dict) else {}) or {}
     road_summary = artifacts.get("current_road_summary") or ((snapshot.road or {}).get("summary") if isinstance(snapshot.road, dict) else {}) or {}
     population_summary = artifacts.get("current_population_summary") or ((snapshot.population or {}).get("summary") if isinstance(snapshot.population, dict) else {}) or {}
     nightlight_summary = artifacts.get("current_nightlight_summary") or ((snapshot.nightlight or {}).get("summary") if isinstance(snapshot.nightlight, dict) else {}) or {}
@@ -89,4 +90,8 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
         "target_supply_gap_summary": target_supply_gap.get("summary_text") if is_target_supply_gap_ready(target_supply_gap) else None,
         "target_supply_gap_place_type": target_supply_gap.get("place_type") if is_target_supply_gap_ready(target_supply_gap) else None,
         "target_supply_gap_candidates": target_supply_gap.get("candidate_zones") if is_target_supply_gap_ready(target_supply_gap) else [],
+        "next_analysis_options": next_analysis_options.get("recommended_options") or [],
+        "next_analysis_summary": next_analysis_options.get("summary_text"),
+        "next_analysis_ready_dimensions": next_analysis_options.get("ready_dimensions") or [],
+        "next_analysis_missing_dimensions": next_analysis_options.get("missing_dimensions") or [],
     }

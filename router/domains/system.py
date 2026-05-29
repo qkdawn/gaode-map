@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+import httpx
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from core.config import settings
@@ -17,6 +18,50 @@ from store import (
 from utils import generate_html_content, load_type_config, parse_json
 
 router = APIRouter()
+
+
+_HOP_BY_HOP_HEADERS = {
+    "connection",
+    "content-encoding",
+    "content-length",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+}
+
+
+async def _proxy_vite_dev(path: str, request: Request | None = None) -> Response:
+    origin = str(settings.frontend_dev_origin or "").rstrip("/")
+    if not origin:
+        raise HTTPException(status_code=503, detail="FRONTEND_DEV_ORIGIN 未配置")
+    url = f"{origin}/{path.lstrip('/')}"
+    if request and request.url.query:
+        url = f"{url}?{request.url.query}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            proxied = await client.get(url)
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=503, detail=f"Vite 开发服务不可用: {origin}") from exc
+
+    headers = {
+        key: value
+        for key, value in proxied.headers.items()
+        if key.lower() not in _HOP_BY_HOP_HEADERS
+    }
+    return Response(
+        content=proxied.content,
+        status_code=proxied.status_code,
+        headers=headers,
+        media_type=proxied.headers.get("content-type"),
+    )
+
+
+def _uses_vite_dev() -> bool:
+    return str(settings.frontend_mode or "").strip().lower() == "dev"
 
 
 @router.get("/health", summary="健康检查")
@@ -98,12 +143,15 @@ async def render_map_page(
 
 
 @router.get("/analysis", response_class=FileResponse, summary="渲染分析工作台")
-async def render_analysis_page():
+async def render_analysis_page(request: Request):
+    if _uses_vite_dev():
+        return await _proxy_vite_dev("analysis", request)
+
     frontend_index = Path(settings.static_dir).resolve() / "frontend" / "index.html"
     if not frontend_index.exists():
         raise HTTPException(
             status_code=503,
-            detail="frontend 构建产物不存在，请先在 frontend 目录执行 npm run build",
+            detail="生产前端构建产物不存在；开发态请访问 Vite /analysis，生产态请通过 Docker 构建生成 static/frontend",
         )
     return FileResponse(
         frontend_index,
@@ -113,3 +161,31 @@ async def render_analysis_page():
             "Expires": "0",
         },
     )
+
+
+@router.get("/src/{asset_path:path}", include_in_schema=False)
+async def proxy_vite_src(asset_path: str, request: Request):
+    if not _uses_vite_dev():
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _proxy_vite_dev(f"src/{asset_path}", request)
+
+
+@router.get("/@vite/{asset_path:path}", include_in_schema=False)
+async def proxy_vite_client(asset_path: str, request: Request):
+    if not _uses_vite_dev():
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _proxy_vite_dev(f"@vite/{asset_path}", request)
+
+
+@router.get("/@id/{asset_path:path}", include_in_schema=False)
+async def proxy_vite_id(asset_path: str, request: Request):
+    if not _uses_vite_dev():
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _proxy_vite_dev(f"@id/{asset_path}", request)
+
+
+@router.get("/node_modules/{asset_path:path}", include_in_schema=False)
+async def proxy_vite_node_modules(asset_path: str, request: Request):
+    if not _uses_vite_dev():
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _proxy_vite_dev(f"node_modules/{asset_path}", request)

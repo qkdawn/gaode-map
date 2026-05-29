@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 
 import modules.agent.tool_adapters.business_tools as business_tools
 import modules.agent.tool_adapters.h3_tools as h3_tools
@@ -45,7 +45,7 @@ def test_run_business_site_advice_chains_l1_tools(monkeypatch):
             tool_name="compute_h3_metrics_from_scope_and_pois",
             status="success",
             result={"grid_count": 4, "poi_count": 2},
-            artifacts={"current_h3_summary": {"grid_count": 4, "avg_density_poi_per_km2": 1.5}},
+            artifacts={"current_poi_h3_summary": {"grid_count": 4, "avg_density_poi_per_km2": 1.5}},
         )
 
     async def fake_population(*, arguments, snapshot, artifacts, question):
@@ -97,7 +97,7 @@ def test_run_business_site_advice_chains_l1_tools(monkeypatch):
     assert [name for name, _args in calls] == ["poi", "h3", "population", "nightlight", "road"]
     assert result.artifacts["business_site_advice"]["place_type"] == "咖啡厅"
     assert result.artifacts["current_poi_summary"]["total"] == 2
-    assert result.artifacts["current_h3_summary"]["grid_count"] == 4
+    assert result.artifacts["current_poi_h3_summary"]["grid_count"] == 4
     assert result.artifacts["current_population_summary"]["total_population"] == 1000
     assert result.artifacts["current_nightlight_summary"]["max_radiance"] == 6.0
     assert result.artifacts["current_road_summary"]["node_count"] == 5
@@ -135,7 +135,7 @@ def test_run_business_site_advice_infers_target_from_descriptive_place_type(monk
         return ToolResult(
             tool_name="compute_h3_metrics_from_scope_and_pois",
             status="success",
-            artifacts={"current_h3_summary": {"grid_count": 1, "poi_count": 0}},
+            artifacts={"current_poi_h3_summary": {"grid_count": 1, "poi_count": 0}},
         )
 
     async def fake_optional(*, arguments, snapshot, artifacts, question):
@@ -176,7 +176,7 @@ def test_run_business_site_advice_degrades_optional_tool_failure(monkeypatch):
         return ToolResult(
             tool_name="compute_h3_metrics_from_scope_and_pois",
             status="success",
-            artifacts={"current_h3_summary": {"grid_count": 2, "avg_density_poi_per_km2": 0.5}},
+            artifacts={"current_poi_h3_summary": {"grid_count": 2, "avg_density_poi_per_km2": 0.5}},
         )
 
     async def fake_failed(*, arguments, snapshot, artifacts, question):

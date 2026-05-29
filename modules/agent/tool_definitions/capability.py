@@ -8,6 +8,7 @@ from ..tool_adapters.capability_tools import (
     analyze_spatial_structure,
     get_area_data_bundle,
     infer_area_labels,
+    rank_next_analysis_options,
     score_site_candidates_tool,
 )
 
@@ -29,7 +30,7 @@ def register_capability_tools(registry: Dict[str, RegisteredTool]) -> None:
             applicable_scenarios=["区域画像", "调性判断", "前期研究"],
             cautions=["优先作为场景工具内部步骤；单独调用时仍需后续解释层工具"],
             requires=["scope_polygon"],
-            produces=["current_area_data_bundle", "current_poi_summary", "current_h3_summary", "current_population_summary", "current_nightlight_summary", "current_road_summary"],
+            produces=["current_area_data_bundle", "current_poi_summary", "current_poi_h3_summary", "current_population_summary", "current_nightlight_summary", "current_road_summary"],
             input_schema={
                 "type": "object",
                 "properties": {
@@ -63,6 +64,28 @@ def register_capability_tools(registry: Dict[str, RegisteredTool]) -> None:
             cost_level="normal",
         ),
         analyze_poi_structure,
+    )
+    registry["rank_next_analysis_options"] = _register(
+        _tool_spec(
+            name="rank_next_analysis_options",
+            description="基于当前证据就绪状态推荐下一步最值得开展的分析方向",
+            category="processing",
+            layer="L2",
+            ui_tier="capability",
+            data_domain="general",
+            capability_type="decide",
+            llm_exposure="primary",
+            scene_type="general",
+            toolkit_id="next_analysis_pack",
+            evidence_contract=["current_next_analysis_options"],
+            applicable_scenarios=["下一步分析建议", "研究路线选择", "应用分析入口"],
+            cautions=["只推荐分析方向，不直接替代具体选址、招商或经营判断"],
+            produces=["current_next_analysis_options"],
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            readonly=True,
+            cost_level="safe",
+        ),
+        rank_next_analysis_options,
     )
     registry["analyze_spatial_structure"] = _register(
         _tool_spec(

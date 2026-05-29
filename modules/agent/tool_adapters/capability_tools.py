@@ -57,6 +57,16 @@ def _current_summary(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any], key:
     return {}
 
 
+def _current_poi_h3_summary(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    artifact = artifacts.get("current_poi_h3_summary")
+    if isinstance(artifact, dict):
+        return dict(artifact)
+    source = snapshot.h3 if isinstance(snapshot.h3, dict) else {}
+    if isinstance(source.get("summary"), dict):
+        return dict(source.get("summary") or {})
+    return {}
+
+
 def _has_scope(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> bool:
     if artifacts.get("scope_polygon"):
         return True
@@ -71,7 +81,7 @@ def _available_dimensions(snapshot: AnalysisSnapshot, local_artifacts: Dict[str,
             if bool(local_artifacts.get("current_pois") or snapshot.pois or (snapshot.poi_summary or {}).get("total")):
                 available.append(key)
             continue
-        if bool(_current_summary(snapshot, local_artifacts, key)):
+        if bool(_current_poi_h3_summary(snapshot, local_artifacts) if key == "h3" else _current_summary(snapshot, local_artifacts, key)):
             available.append(key)
     return available
 
@@ -90,6 +100,113 @@ def _missing_dimensions_from_results(read_results_payload: Dict[str, Any]) -> Li
     if not bool(read_results_payload.get("has_road_summary")):
         missing.append("road")
     return missing
+
+
+def _has_frontend_panel(snapshot: AnalysisSnapshot, key: str) -> bool:
+    frontend_analysis = snapshot.frontend_analysis if isinstance(snapshot.frontend_analysis, dict) else {}
+    panel = frontend_analysis.get(key)
+    return isinstance(panel, dict) and bool(panel)
+
+
+def _next_option(rank: int, title: str, why: str, prompt: str, *, application: str, evidence: List[str]) -> Dict[str, Any]:
+    return {
+        "rank": rank,
+        "title": title,
+        "application": application,
+        "why": why,
+        "prompt": prompt,
+        "evidence_basis": evidence,
+    }
+
+
+def build_next_analysis_options(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    local_artifacts = dict(artifacts or {})
+    readiness = {
+        "poi": bool(local_artifacts.get("current_pois") or snapshot.pois or (snapshot.poi_summary or {}).get("total")),
+        "h3": bool(_current_poi_h3_summary(snapshot, local_artifacts)) or _has_frontend_panel(snapshot, "h3"),
+        "population": bool(_current_summary(snapshot, local_artifacts, "population")) or _has_frontend_panel(snapshot, "population"),
+        "nightlight": bool(_current_summary(snapshot, local_artifacts, "nightlight")) or _has_frontend_panel(snapshot, "nightlight"),
+        "road": bool(_current_summary(snapshot, local_artifacts, "road")) or _has_frontend_panel(snapshot, "road"),
+        "frontend_analysis": bool(snapshot.frontend_analysis),
+    }
+    ready_dimensions = [key for key, ready in readiness.items() if ready and key != "frontend_analysis"]
+    missing_dimensions = [key for key, ready in readiness.items() if not ready and key != "frontend_analysis"]
+    options: List[Dict[str, Any]] = []
+    has_business_chain = all(readiness.get(key) for key in ("poi", "h3", "population", "nightlight", "road"))
+    has_market_chain = readiness["poi"] and readiness["h3"]
+    if has_business_chain:
+        options.append(
+            _next_option(
+                len(options) + 1,
+                "业态缺口与选址预筛",
+                "POI、H3、人口、夜光和路网证据已具备，下一步最适合从描述性画像转向可执行的补位/选址判断。",
+                "基于当前结果，选择一个目标业态并分析供给缺口、机会格和候选点位排序",
+                application="商业选址 / 招商补位",
+                evidence=["poi", "h3", "population", "nightlight", "road"],
+            )
+        )
+    if has_market_chain:
+        options.append(
+            _next_option(
+                len(options) + 1,
+                "细分业态与竞品结构",
+                "当前 POI 与 H3 底座可用于下钻到咖啡、快餐、便利店等目标业态，判断同质竞争和空间错配。",
+                "围绕咖啡、快餐或便利店做细分 POI 竞品与空间缺口分析",
+                application="竞品调查 / 业态定位",
+                evidence=["poi", "h3"],
+            )
+        )
+    if readiness["road"] and (readiness["h3"] or readiness["poi"]):
+        options.append(
+            _next_option(
+                len(options) + 1,
+                "可达性真实性校验",
+                "路网证据已具备，适合验证热点或候选区是否真的容易到达，避免只看密度形成表面判断。",
+                "把商业热点、候选格和步行/驾车可达性对照，判断机会区是否真实可达",
+                application="交通可达 / 点位风险",
+                evidence=["road", "h3" if readiness["h3"] else "poi"],
+            )
+        )
+    if readiness["nightlight"] and readiness["poi"]:
+        options.append(
+            _next_option(
+                len(options) + 1,
+                "夜间活力与业态匹配",
+                "夜光和 POI 可用于判断夜间活力是否被餐饮、休闲、购物等真实消费供给承接。",
+                "对比夜光热点与餐饮休闲 POI 分布，判断夜间经济机会和错配区域",
+                application="夜经济 / 运营时段",
+                evidence=["nightlight", "poi"],
+            )
+        )
+    if readiness["population"] and readiness["poi"]:
+        options.append(
+            _next_option(
+                len(options) + 1,
+                "客群与服务供给匹配",
+                "人口画像和 POI 结构可用于判断青年、家庭或社区客群对应的服务是否充分。",
+                "对照人口年龄结构和 POI 供给，判断目标客群对应的服务缺口",
+                application="客群画像 / 社区服务",
+                evidence=["population", "poi"],
+            )
+        )
+    if not options:
+        options.append(
+            _next_option(
+                1,
+                "先补齐基础证据链",
+                "当前可用维度不足，直接做应用判断容易变成泛泛建议。",
+                "先补齐 POI、H3、人口、夜光和路网基础结果，再推荐下一步应用分析",
+                application="数据就绪 / 分析准备",
+                evidence=ready_dimensions,
+            )
+        )
+    return {
+        "readiness": readiness,
+        "ready_dimensions": ready_dimensions,
+        "missing_dimensions": missing_dimensions,
+        "recommended_options": options[:5],
+        "summary_text": f"已基于当前证据就绪状态生成 {min(len(options), 5)} 个下一步分析方向。",
+    }
 
 
 async def ensure_area_data_readiness(
@@ -332,6 +449,27 @@ async def get_area_data_bundle(
         evidence=list(readiness_payload["evidence"] or []),
         warnings=list(readiness_payload["warnings"] or []),
         artifacts=dict(readiness_payload["artifacts"] or {}),
+    )
+
+
+async def rank_next_analysis_options(
+    *,
+    arguments: Dict[str, Any],
+    snapshot: AnalysisSnapshot,
+    artifacts: Dict[str, Any],
+    question: str,
+) -> ToolResult:
+    del arguments, question
+    payload = build_next_analysis_options(snapshot, artifacts)
+    return ToolResult(
+        tool_name="rank_next_analysis_options",
+        status="success",
+        result=payload,
+        evidence=[
+            {"field": "next_analysis.ready_dimensions", "value": payload.get("ready_dimensions")},
+            {"field": "next_analysis.recommended_options", "value": payload.get("recommended_options")},
+        ],
+        artifacts={"current_next_analysis_options": payload},
     )
 
 

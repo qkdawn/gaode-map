@@ -1,14 +1,31 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   plugins: [vue()],
+  base: command === 'serve' ? '/' : '/static/frontend/',
+  server: {
+    allowedHosts: ['frontend', 'localhost', '127.0.0.1'],
+    hmr: {
+      host: 'localhost',
+      clientPort: 5173,
+    },
+    proxy: {
+      '/api': {
+        target: process.env.VITE_BACKEND_ORIGIN || 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+      '/static': {
+        target: process.env.VITE_BACKEND_ORIGIN || 'http://127.0.0.1:8000',
+        changeOrigin: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       vue: 'vue/dist/vue.esm-bundler.js',
     },
   },
-  base: '/static/frontend/',
   build: {
     outDir: '../static/frontend',
     emptyOutDir: true,
@@ -36,4 +53,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))

@@ -2249,7 +2249,7 @@
                         ? `分析完成：${this.h3GridCount} 个网格，${(this.h3AnalysisSummary && this.h3AnalysisSummary.poi_count) || 0} 个POI`
                         : '分析完成，但当前范围无可用网格';
                     await pollProgress();
-                    applyProgress({ status: 'success', stage: 'completed', message: 'H3 网格分析计算完成' });
+                    applyProgress({ status: 'success', stage: 'completed', message: 'POI H3 网格分析计算完成' });
                     if (this.isH3DisplayActive()) {
                         this.renderH3BySubTab();
                         if (this.isH3PanelActive()) {
@@ -2271,6 +2271,9 @@
                     }
                     if (typeof this.commitCurrentPoiGridResult === 'function') {
                         this.commitCurrentPoiGridResult('h3', Number(this.poiYearSource || this.resultPoiYear || 0) || null);
+                    }
+                    if (typeof this.persistAnalysisArtifactQuietly === 'function') {
+                        this.persistAnalysisArtifactQuietly('poi_h3_grid');
                     }
                     return { progress: { ...latestProgress } };
                 } catch (e) {

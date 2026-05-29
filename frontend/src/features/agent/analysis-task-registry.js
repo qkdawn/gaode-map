@@ -40,9 +40,9 @@ const ANALYSIS_TASKS = Object.freeze({
   },
   poi_raster_grid: {
     key: 'poi_raster_grid',
-    label: 'POI 栅格计算',
+    label: 'POI 共享栅格计算',
     panelId: 'poi',
-    subPanelLabel: 'POI 栅格',
+    subPanelLabel: 'POI 共享栅格',
     estimate: '约 1-3 分钟',
     description: '使用当前分析范围和 POI 数据生成同源 cell_id 栅格，补齐 POI 与人口/夜光耦合证据。',
     resultUsage: '完成后会用于人口、POI、夜光共享网格交叉诊断。',
@@ -73,21 +73,21 @@ const ANALYSIS_TASKS = Object.freeze({
     },
     async run(ctx) {
       if (typeof ctx.ensurePoiRasterGrid !== 'function') {
-        throw new Error('POI 栅格计算入口不可用')
+        throw new Error('POI 共享栅格计算入口不可用')
       }
       await ctx.ensurePoiRasterGrid(true)
     },
   },
   poi_h3_grid: {
     key: 'poi_h3_grid',
-    label: 'POI H3 网格计算',
+    label: 'POI H3 六边形网格计算',
     panelId: 'poi',
-    subPanelLabel: 'POI H3 网格',
+    subPanelLabel: 'POI H3 六边形网格',
     estimate: '约 1-3 分钟',
     description: '使用当前分析范围和 POI 数据生成 H3 六边形指标，补齐空间结构、热点和缺口证据。',
     resultUsage: '完成后会用于 POI 空间结构、热点、LISA、Gi*、LQ 和缺口分析。',
     toolNames: ['compute_h3_metrics_from_scope_and_pois', 'build_h3_grid_from_scope', 'read_h3_structure_analysis'],
-    producedArtifacts: ['current_h3', 'current_h3_grid', 'current_h3_summary', 'current_h3_metrics'],
+    producedArtifacts: ['current_poi_h3', 'current_poi_h3_grid', 'current_poi_h3_summary', 'current_poi_h3_charts'],
     runningFlag: 'isComputingH3Analysis',
     hasResult(ctx) {
       return !!(
@@ -117,7 +117,7 @@ const ANALYSIS_TASKS = Object.freeze({
     },
     async run(ctx) {
       if (typeof ctx.computeH3Analysis !== 'function') {
-        throw new Error('POI 六边形格子计算入口不可用')
+        throw new Error('POI H3 六边形网格计算入口不可用')
       }
       await ctx.computeH3Analysis()
     },

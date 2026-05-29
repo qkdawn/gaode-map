@@ -3,7 +3,7 @@
 ## 1. 当前状态
 - 后端：FastAPI（`main.py`）
 - 前端：Vue 3 + Vite（`frontend/`）
-- Analysis 主链路：`/analysis`（返回 `static/frontend/index.html`）
+- Analysis 主链路：`/analysis`。开发态由 FastAPI 代理 Vite 源码页面，生产态返回镜像内 `static/frontend/index.html`
 - Legacy：`/analysis-legacy` 已下线
 - 运行时图表产物目录：`runtime/generated_charts/`
 
@@ -13,7 +13,7 @@
 - `modules/`：业务域实现（`poi`/`population`/`nightlight`/`h3`/`road`/`isochrone`/`export`/`providers`）
 - `store/`：数据库与仓储
 - `frontend/`：前端源码（Vite 构建）
-- `static/frontend/`：前端构建产物（由 Vite 输出）
+- `static/frontend/`：生产前端构建产物目录（由 Vite 输出，不提交）
 - `runtime/`：运行时数据（图表、临时文件）
 - `../scripts/check_repo_hygiene.sh`：仓库卫生检查
 - `tests/`：`api` / `domain` / `integration` / `e2e`
@@ -29,12 +29,15 @@ uv sync
 - `uv sync` 负责安装/同步依赖
 - 测试执行统一使用 `bash ../scripts/run_pytest.sh ...`，避免在 WSL/沙箱环境下依赖 `uv run pytest`
 
-### 3.2 前端构建
+### 3.2 前端开发
 ```bash
 cd /mnt/d/Coding/map_analyse/gaode-map/frontend
 npm install
-npm run build
+npm run dev
 ```
+- 开发入口：`http://localhost:8000/analysis`
+- 后端在 `FRONTEND_MODE=dev` 时代理 Vite；Vite 直接读取 `frontend/src`
+- 开发态不要先构建 `static/frontend/`，避免后端服务旧 bundle
 
 ### 3.3 启动服务
 ```bash
@@ -45,14 +48,14 @@ uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ### 3.4 Docker 开发模式
 ```bash
 cd /mnt/d/Coding/map_analyse/gaode-map
-docker compose up --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
-- 仅启动后端及其依赖服务，不再单独启动前端构建容器
-- 因为开发 Compose 会把项目目录挂进容器，启动前请先在宿主机执行一次 `npm run build`，确保 `static/frontend/` 已生成
-- `static/frontend/` 是部署产物，继续保持 `.gitignore`
+- 开发入口：`http://localhost:8000/analysis`
+- Compose 开发模式会启动 Vite dev server，并让 FastAPI 代理它；不需要、也不应该预先执行 `npm run build`
+- `static/frontend/` 不参与开发路径
 
 ## 4. 访问入口
-- `http://localhost:8000/analysis`：分析工作台
+- `http://localhost:8000/analysis`：分析工作台。开发态代理 Vite，生产态服务构建产物
 - `http://localhost:8000/map?...`：常规地图页
 - `http://localhost:8000/docs`：OpenAPI 文档
 - `http://localhost:8000/health`：健康检查
@@ -112,12 +115,12 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 - `docker-compose.yml` 是基础拓扑，默认使用镜像内代码和生产前端构建产物
-- `docker-compose.dev.yml` 只覆盖开发差异：挂载源码并使用 `uvicorn --reload`
+- `docker-compose.dev.yml` 只覆盖开发差异：后端挂载源码并使用 `uvicorn --reload`，前端由 Vite dev server 提供，`/analysis` 由后端代理到 Vite
 - `docker-compose.prod.yml` 只覆盖生产差异：设置重启策略和生产 DB 默认 host
 - 生产镜像会在 Docker 多阶段构建中自动执行前端 `npm ci` 和 `npm run build`
 - 运行容器直接加载镜像内的 `static/frontend/`，不依赖宿主机预先打包
 
 ### 9.1 构建产物约定
 - `frontend/` 存放 Vue + Vite 源码
-- `static/frontend/` 存放部署产物，由 Vite 输出
-- 部署产物不应提交到仓库；本地缺失时可通过 `npm run build` 或 Docker 构建重新生成
+- `static/frontend/` 存放生产部署产物，由 Vite 输出
+- `static/frontend/` 不提交到仓库；开发态不读取它，生产态通过 Docker 多阶段构建生成

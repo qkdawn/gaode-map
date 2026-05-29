@@ -97,7 +97,7 @@ def build_review_contract(
     if _has_value(metrics.get("poi_count")):
         _append_unique(evidence, f"POI 样本量 {metrics.get('poi_count')}")
     if _has_value(metrics.get("h3_grid_count")):
-        _append_unique(evidence, f"H3 网格 {metrics.get('h3_grid_count')} 个")
+        _append_unique(evidence, f"POI H3 网格 {metrics.get('h3_grid_count')} 个")
     if _has_value(metrics.get("population_total")):
         _append_unique(evidence, f"人口总量 {metrics.get('population_total')}")
     if _has_value(metrics.get("nightlight_mean_radiance")):
@@ -134,7 +134,7 @@ def build_review_contract(
     if not (_has_value(metrics.get("road_node_count")) or _has_value(metrics.get("road_edge_count"))):
         spatial_gaps.append("路网概览")
     if not _has_value(metrics.get("h3_grid_count")):
-        spatial_gaps.append("H3 空间密度")
+        spatial_gaps.append("POI H3 密度")
 
     evidence_status = "supported" if not gaps and evidence else ("partial" if evidence else "missing")
     planning_signals = [

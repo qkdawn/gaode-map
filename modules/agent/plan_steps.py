@@ -18,8 +18,8 @@ def results_step(reason: str) -> PlanStep:
         expected_artifacts=[
             "current_pois",
             "current_poi_summary",
-            "current_h3",
-            "current_h3_summary",
+            "current_poi_h3",
+            "current_poi_h3_summary",
             "current_road",
             "current_road_summary",
             "current_population",

@@ -2,6 +2,14 @@ x-app-build: &app-build
   context: .
   dockerfile: docker/Dockerfile
 
+x-app-command: &app-command
+  - uvicorn
+  - main:app
+  - --host
+  - 0.0.0.0
+  - --port
+  - "8000"
+
 x-app-environment: &app-environment
   VALHALLA_BASE_URL: http://valhalla:8002
   AMAP_WEB_SERVICE_KEY:
@@ -23,9 +31,21 @@ x-app-environment: &app-environment
   NIGHTLIGHT_PREVIEW_MAX_SIZE: ${NIGHTLIGHT_PREVIEW_MAX_SIZE:-2048}
   PYTHONUNBUFFERED: "1"
 
-x-city-boundary-volume: &city-boundary-volume "${CITY_BOUNDARY_HOST_DIR:-D:/MapData/boundaries}:/mapdata/boundaries:ro"
-x-population-volume: &population-volume "${POPULATION_DATA_HOST_DIR:-E:/PeopleData}:/mapdata/population:ro"
-x-nightlight-volume: &nightlight-volume "${NIGHTLIGHT_DATA_HOST_DIR:-E:/NightlightData}:/mapdata/nightlight:ro"
+x-app-volumes: &app-volumes
+  - "${CITY_BOUNDARY_HOST_DIR:-D:/MapData/boundaries}:/mapdata/boundaries:ro"
+  - "${POPULATION_DATA_HOST_DIR:-E:/PeopleData}:/mapdata/population:ro"
+  - "${NIGHTLIGHT_DATA_HOST_DIR:-E:/NightlightData}:/mapdata/nightlight:ro"
+
+x-app-healthcheck: &app-healthcheck
+  test:
+    - CMD
+    - python
+    - -c
+    - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"
+  interval: 30s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
 
 x-valhalla-environment: &valhalla-environment
   build_elevation: "False"
@@ -71,11 +91,9 @@ services:
         condition: service_started
       overpass:
         condition: service_started
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
-    volumes:
-      - *city-boundary-volume
-      - *population-volume
-      - *nightlight-volume
+    command: *app-command
+    volumes: *app-volumes
+    healthcheck: *app-healthcheck
 
   valhalla:
     image: ghcr.io/gis-ops/docker-valhalla/valhalla:latest

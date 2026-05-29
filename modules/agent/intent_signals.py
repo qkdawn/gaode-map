@@ -5,6 +5,10 @@ def mentions_summary(text: str) -> bool:
     return any(token in text for token in ("总结", "概括", "商业特征", "分析这个区域"))
 
 
+def mentions_next_analysis(text: str) -> bool:
+    return any(token in text for token in ("下一步", "继续", "还可以", "做什么分析", "还能分析"))
+
+
 def mentions_road(text: str) -> bool:
     return any(token in text for token in ("路网", "可达性", "通达", "交通"))
 

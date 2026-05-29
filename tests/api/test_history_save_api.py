@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import router.domains.history as history_module
+from modules.history.artifact_service import AnalysisArtifactUpsertRequest
 from modules.poi.schemas import HistoryPoiYearResult, HistorySaveRequest
 
 
@@ -110,3 +111,32 @@ def test_save_history_passes_multi_year_snapshots(monkeypatch):
     assert response["history_id"] == "history-multi"
     assert captured["params"]["years"] == [2022, 2024]
     assert [item["year"] for item in captured["poi_results_by_year"]] == [2022, 2024]
+
+
+def test_history_artifact_api_upserts_and_lists(monkeypatch):
+    calls = {}
+
+    class FakeRepo:
+        def upsert(self, **kwargs):
+            calls["upsert"] = kwargs
+            return {"history_id": kwargs["history_id"], "artifact_type": kwargs["artifact_type"], "params_hash": "hash"}
+
+        def list(self, history_id, *, artifact_type="", params_hash=""):
+            calls["list"] = {"history_id": history_id, "artifact_type": artifact_type, "params_hash": params_hash}
+            return [{"history_id": history_id, "artifact_type": artifact_type or "scope"}]
+
+    payload = AnalysisArtifactUpsertRequest(
+        artifact_type="scope",
+        params={"mode": "walking"},
+        payload={"polygon": []},
+        summary={"has_polygon": False},
+        scope_fingerprint="scope-a",
+    )
+
+    response = history_module.upsert_history_artifact("history-1", payload, repo=FakeRepo())
+    listed = history_module.list_history_artifacts("history-1", artifact_type="scope", repo=FakeRepo())
+
+    assert response["artifact_type"] == "scope"
+    assert calls["upsert"]["params"] == {"mode": "walking"}
+    assert listed[0]["artifact_type"] == "scope"
+    assert calls["list"]["history_id"] == "history-1"

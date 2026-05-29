@@ -11,7 +11,7 @@ def _result_names(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any] | None =
     current = artifacts or {}
     if current.get("current_pois") or snapshot.pois:
         rows.append("pois")
-    if current.get("current_h3_summary") or (snapshot.h3 or {}).get("summary"):
+    if current.get("current_poi_h3_summary") or (snapshot.h3 or {}).get("summary"):
         rows.append("h3")
     if current.get("current_road_summary") or (snapshot.road or {}).get("summary"):
         rows.append("road")

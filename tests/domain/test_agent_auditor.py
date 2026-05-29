@@ -32,7 +32,7 @@ def test_auditor_requires_business_profile_for_commercial_summary():
             "scope_polygon": snapshot.scope["polygon"],
             "current_pois": [{"id": "poi-1"}],
             "current_poi_summary": {"total": 8},
-            "current_h3_summary": {"grid_count": 3, "avg_density_poi_per_km2": 2.1},
+            "current_poi_h3_summary": {"grid_count": 3, "avg_density_poi_per_km2": 2.1},
             "current_population_summary": {"total_population": 1000},
             "current_nightlight_summary": {"max_radiance": 4.2},
             "current_road_summary": {"node_count": 8, "edge_count": 10},
@@ -99,10 +99,59 @@ def test_auditor_treats_empty_analysis_artifacts_as_missing_evidence():
     )
 
     assert result.passed is False
-    assert "H3 空间密度证据" in result.missing_evidence
+    assert "POI H3 密度证据" in result.missing_evidence
     assert "人口概览" in result.missing_evidence
     assert "夜光概览" in result.missing_evidence
     assert "路网概览" in result.missing_evidence
+
+
+def test_auditor_keeps_poi_raster_and_poi_h3_evidence_separate():
+    snapshot = _snapshot_with_scope(
+        poi_summary={"total": 8},
+        population={"summary": {"total_population": 1000}},
+        nightlight={"summary": {"max_radiance": 4.2}},
+        road={"summary": {"node_count": 8, "edge_count": 10}},
+    )
+    raster_only = WorkingMemory(
+        artifacts={
+            "scope_polygon": snapshot.scope["polygon"],
+            "current_pois": [{"id": "poi-1"}],
+            "current_poi_summary": {"total": 8},
+            "current_poi_raster_summary": {"grid_count": 6, "assigned_poi_count": 8},
+            "current_poi_raster_evidence": {"cell_id_source": "population_nightlight_shared_cell_id"},
+            "current_population_summary": {"total_population": 1000},
+            "current_nightlight_summary": {"max_radiance": 4.2},
+            "current_road_summary": {"node_count": 8, "edge_count": 10},
+            "current_business_profile": {"business_profile": "生活消费主导"},
+        }
+    )
+
+    raster_result = audit_execution(
+        question="总结这个区域的商业特征",
+        snapshot=snapshot,
+        context=build_context_bundle(snapshot),
+        memory=raster_only,
+    )
+
+    assert raster_result.passed is False
+    assert "POI H3 密度证据" in raster_result.required_evidence
+    assert "POI H3 密度证据" in raster_result.missing_evidence
+
+    poi_h3_only = WorkingMemory(
+        artifacts={
+            **raster_only.artifacts,
+            "current_poi_h3_summary": {"grid_count": 3, "avg_density_poi_per_km2": 2.1},
+        }
+    )
+
+    h3_result = audit_execution(
+        question="总结这个区域的商业特征",
+        snapshot=snapshot,
+        context=build_context_bundle(snapshot),
+        memory=poi_h3_only,
+    )
+
+    assert "POI H3 密度证据" not in h3_result.missing_evidence
 
 
 def test_auditor_population_question_accepts_population_profile_analysis():
@@ -131,7 +180,7 @@ def test_auditor_hotspot_question_requires_spatial_hotspot_analysis():
     memory = WorkingMemory(
         artifacts={
             "scope_polygon": snapshot.scope["polygon"],
-            "current_h3_summary": {"grid_count": 4, "avg_density_poi_per_km2": 5.6},
+            "current_poi_h3_summary": {"grid_count": 4, "avg_density_poi_per_km2": 5.6},
             "current_h3_structure_analysis": {"distribution_pattern": "multi_core", "summary_text": "H3 结构完整"},
         }
     )

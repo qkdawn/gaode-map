@@ -66,8 +66,10 @@ async def read_current_results(
         artifacts={
             "current_pois": list(snapshot.pois or []),
             "current_poi_summary": poi_summary,
-            "current_h3": h3_payload,
-            "current_h3_summary": h3_summary,
+            "current_poi_h3": h3_payload,
+            "current_poi_h3_grid": _safe_summary_block(h3_payload.get("grid")),
+            "current_poi_h3_summary": h3_summary,
+            "current_poi_h3_charts": _safe_summary_block(h3_payload.get("charts")),
             "current_road": road_payload,
             "current_road_summary": road_summary,
             "current_population": population_payload,

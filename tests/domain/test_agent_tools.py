@@ -15,8 +15,13 @@ def test_get_tool_registry_exposes_stage1_tools():
         "compute_population_overview_from_scope",
         "compute_nightlight_overview_from_scope",
         "compute_road_syntax_from_scope",
+        "search_analysis_context",
+        "read_analysis_chunk",
+        "search_report_context",
+        "read_report_chunk",
         "get_area_data_bundle",
         "analyze_poi_structure",
+        "rank_next_analysis_options",
         "analyze_spatial_structure",
         "infer_area_labels",
         "score_site_candidates",
@@ -33,6 +38,7 @@ def test_get_tool_registry_exposes_stage1_tools():
     assert registry["read_current_results"].spec.llm_exposure == "primary"
     assert registry["analyze_poi_structure"].spec.ui_tier == "capability"
     assert registry["analyze_poi_structure"].spec.capability_type == "analyze"
+    assert registry["rank_next_analysis_options"].spec.toolkit_id == "next_analysis_pack"
     assert registry["run_area_character_pack"].spec.ui_tier == "scenario"
     assert registry["run_area_character_pack"].spec.scene_type == "area_character"
     assert registry["run_area_character_pack"].spec.llm_exposure == "primary"
@@ -48,10 +54,10 @@ def test_get_tool_registry_exposes_stage1_tools():
     assert registry["compute_population_overview_from_scope"].spec.requires == ["scope_polygon"]
     assert registry["compute_nightlight_overview_from_scope"].spec.requires == ["scope_polygon"]
     assert registry["compute_h3_metrics_from_scope_and_pois"].spec.produces == [
-        "current_h3",
-        "current_h3_grid",
-        "current_h3_summary",
-        "current_h3_charts",
+        "current_poi_h3",
+        "current_poi_h3_grid",
+        "current_poi_h3_summary",
+        "current_poi_h3_charts",
     ]
     assert registry["compute_road_syntax_from_scope"].spec.cost_level == "expensive"
     assert registry["compute_road_syntax_from_scope"].spec.risk_level == "safe"
@@ -69,8 +75,13 @@ def test_get_tool_registry_keeps_expected_tool_order():
         "compute_population_overview_from_scope",
         "compute_nightlight_overview_from_scope",
         "compute_road_syntax_from_scope",
+        "search_analysis_context",
+        "read_analysis_chunk",
+        "search_report_context",
+        "read_report_chunk",
         "get_area_data_bundle",
         "analyze_poi_structure",
+        "rank_next_analysis_options",
         "analyze_spatial_structure",
         "infer_area_labels",
         "score_site_candidates",

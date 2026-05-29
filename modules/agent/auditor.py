@@ -28,6 +28,15 @@ def _current_summary(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any], key:
     return {}
 
 
+def _current_poi_h3_summary(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    if isinstance(artifacts.get("current_poi_h3_summary"), dict):
+        return dict(artifacts.get("current_poi_h3_summary") or {})
+    source = snapshot.h3 if isinstance(snapshot.h3, dict) else {}
+    if isinstance(source.get("summary"), dict):
+        return dict(source.get("summary") or {})
+    return {}
+
+
 def _has_pois(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> bool:
     return bool(artifacts.get("current_pois") or snapshot.pois or (snapshot.poi_summary or {}).get("total"))
 
@@ -113,7 +122,7 @@ def audit_execution(
     memory: WorkingMemory,
 ) -> AuditResult:
     artifacts = memory.artifacts
-    h3_summary = _current_summary(snapshot, artifacts, "h3")
+    h3_summary = _current_poi_h3_summary(snapshot, artifacts)
     road_summary = _current_summary(snapshot, artifacts, "road")
     population_summary = _current_summary(snapshot, artifacts, "population")
     nightlight_summary = _current_summary(snapshot, artifacts, "nightlight")
@@ -126,12 +135,14 @@ def audit_execution(
     commercial_hotspots = _current_analysis(artifacts, "current_commercial_hotspots")
     target_supply_gap = _current_analysis(artifacts, "current_target_supply_gap")
     business_site_advice = _current_analysis(artifacts, "business_site_advice")
+    next_analysis_options = _current_analysis(artifacts, "current_next_analysis_options")
     issues: List[str] = []
     missing_evidence: List[str] = []
     required_evidence: List[str] = []
     needs_comprehensive_business_evidence = mentions_summary(question) or mentions_supply(question)
     needs_business_site_advice = mentions_supply(question) and bool(infer_type_info_from_text(question))
     needs_hotspot_analysis = _is_hotspot_question(question) and not mentions_road(question) and not mentions_population(question)
+    needs_next_analysis = any(token in question for token in ("下一步", "继续", "还可以", "做什么分析", "还能分析"))
 
     has_h3_view = _has_h3_density(h3_summary) or _has_h3_structure_evidence(h3_structure)
     has_population_view = _has_population_evidence(population_summary) or _has_population_profile_evidence(population_profile)
@@ -144,9 +155,9 @@ def audit_execution(
         has_poi_evidence = _has_target_poi_evidence(snapshot, artifacts, question) if needs_business_site_advice else has_poi_view
         if not has_poi_evidence:
             _append_unique(missing_evidence, "POI 供给证据")
-        _append_unique(required_evidence, "H3 空间密度证据")
+        _append_unique(required_evidence, "POI H3 密度证据")
         if not has_h3_view:
-            _append_unique(missing_evidence, "H3 空间密度证据")
+            _append_unique(missing_evidence, "POI H3 密度证据")
         if mentions_summary(question):
             _append_unique(required_evidence, "商业画像分析")
             if not is_business_profile_ready(business_profile):
@@ -175,6 +186,10 @@ def audit_execution(
         _append_unique(required_evidence, "候选格子列表")
         if not _has_target_candidate_evidence(target_supply_gap):
             _append_unique(missing_evidence, "候选格子列表")
+    if needs_next_analysis:
+        _append_unique(required_evidence, "下一步分析方向")
+        if not next_analysis_options.get("recommended_options"):
+            _append_unique(missing_evidence, "下一步分析方向")
 
     if mentions_population(question) and not has_population_view:
         issues.append("人口相关结论缺少 total_population 证据。")
@@ -182,13 +197,15 @@ def audit_execution(
         issues.append("夜间活力相关结论缺少夜光峰值证据。")
     if mentions_supply(question) and (
         "POI 供给证据" in missing_evidence
-        or "H3 空间密度证据" in missing_evidence
+        or "POI H3 密度证据" in missing_evidence
         or "目标业态补位分析" in missing_evidence
         or "候选格子列表" in missing_evidence
     ):
         issues.append("当前缺少供给或空间密度证据，暂不能形成具体补位/选址判断。")
     if mentions_summary(question) and missing_evidence:
         issues.append(f"区域总结仍有证据缺口：{'、'.join(missing_evidence)}。")
+    if needs_next_analysis and "下一步分析方向" in missing_evidence:
+        issues.append("当前缺少基于证据就绪状态排序的下一步分析方向。")
     if any(token in question for token in ("客流", "消费", "收益", "营业额")):
         issues.append("当前 Agent 不应直接从 GIS 指标推断客流、消费能力或经营收益。")
     for limit in context.limits:

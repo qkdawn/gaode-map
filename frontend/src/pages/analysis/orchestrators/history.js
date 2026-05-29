@@ -192,8 +192,7 @@ function createAnalysisHistoryOrchestratorMethods() {
             pois: compactPois,
           }],
       }
-      setTimeout(() => {
-        fetch('/api/v1/analysis/history/save', {
+      const savePromise = fetch('/api/v1/analysis/history/save', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -240,13 +239,233 @@ function createAnalysisHistoryOrchestratorMethods() {
                 console.warn('refresh history list after save failed', err)
               })
             }
+            if (historyId && typeof this.persistAnalysisArtifactQuietly === 'function') {
+              this.persistAnalysisArtifactQuietly('scope')
+            }
+            return data
           })
           .catch((err) => {
             console.warn('Failed to save history', err)
             const message = err && err.message ? err.message : String(err)
-            this.poiStatus = `分析完成，但历史保存失败：${message}`
+              this.poiStatus = `分析完成，但历史保存失败：${message}`
+          throw err
           })
-      }, 0)
+      return savePromise
+    },
+    cloneArtifactValue(value) {
+      if (value === undefined || value === null) return Array.isArray(value) ? [] : {}
+      try {
+        return JSON.parse(JSON.stringify(value))
+      } catch (_) {
+        return Array.isArray(value) ? value.slice() : Object.assign({}, value)
+      }
+    },
+    normalizeArtifactParams(params = {}) {
+      return this.cloneArtifactValue(params && typeof params === 'object' ? params : {})
+    },
+    buildAnalysisScopeFingerprint() {
+      const scope = typeof this.getIsochronePolygonPayload === 'function' ? this.getIsochronePolygonPayload() : []
+      const payload = {
+        polygon: scope,
+        mode: String(this.transportMode || ''),
+        time_min: Number(this.timeHorizon || 0) || 0,
+        center: this.selectedPoint ? [Number(this.selectedPoint.lng), Number(this.selectedPoint.lat)] : [],
+      }
+      try {
+        return JSON.stringify(payload)
+      } catch (_) {
+        return `${payload.mode}:${payload.time_min}:${scope.length}`
+      }
+    },
+    buildCurrentScopeArtifactPayload() {
+      const polygon = typeof this.getIsochronePolygonPayload === 'function' ? this.getIsochronePolygonPayload() : []
+      const drawnPolygon = Array.isArray(this.drawnScopePolygon) ? this.drawnScopePolygon : []
+      const fingerprint = this.buildAnalysisScopeFingerprint()
+      return {
+        params: {
+          mode: String(this.transportMode || ''),
+          time_min: Number(this.timeHorizon || 0) || 0,
+          center: this.selectedPoint ? [Number(this.selectedPoint.lng), Number(this.selectedPoint.lat)] : [],
+          scope_source: String(this.scopeSource || ''),
+        },
+        payload: {
+          polygon,
+          drawn_polygon: drawnPolygon,
+          center: this.selectedPoint ? [Number(this.selectedPoint.lng), Number(this.selectedPoint.lat)] : [],
+          mode: String(this.transportMode || ''),
+          time_min: Number(this.timeHorizon || 0) || 0,
+          area: null,
+          scope_fingerprint: fingerprint,
+        },
+        summary: {
+          has_polygon: Array.isArray(polygon) && polygon.length > 0,
+          mode: String(this.transportMode || ''),
+          time_min: Number(this.timeHorizon || 0) || 0,
+        },
+        scope_fingerprint: fingerprint,
+      }
+    },
+    buildAnalysisArtifactBundle(artifactType = '') {
+      const type = String(artifactType || '').trim()
+      const scopeFingerprint = this.buildAnalysisScopeFingerprint()
+      if (type === 'scope') return this.buildCurrentScopeArtifactPayload()
+      if (type === 'poi_raster_grid') {
+        const params = {
+          grid_type: 'raster',
+          cell_id_source: 'population_nightlight_shared_cell_id',
+          source: this.normalizePoiSource ? this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local') : String(this.resultDataSource || this.poiDataSource || ''),
+          year: Number(this.getPoiRasterGridYear ? this.getPoiRasterGridYear() : (this.poiYearSource || this.resultPoiYear)) || null,
+        }
+        const features = Array.isArray(this.poiGridFeatures) ? this.poiGridFeatures : []
+        return {
+          params,
+          payload: {
+            type: 'FeatureCollection',
+            grid_type: 'raster',
+            features,
+            count: features.length,
+            summary: this.cloneArtifactValue(this.poiGridSummary || {}),
+            ...params,
+          },
+          summary: this.cloneArtifactValue(this.poiGridSummary || {}),
+          scope_fingerprint: scopeFingerprint,
+        }
+      }
+      if (type === 'poi_h3_grid') {
+        const features = Array.isArray(this.h3AnalysisGridFeatures) ? this.h3AnalysisGridFeatures : []
+        const params = {
+          resolution: Number(this.h3GridResolution || 0) || 10,
+          neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
+          include_mode: String(this.h3GridIncludeMode || 'intersects'),
+          min_overlap_ratio: String(this.h3GridIncludeMode || '') === 'intersects' ? Number(this.h3GridMinOverlapRatio || 0) || 0 : 0,
+          source: this.normalizePoiSource ? this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local') : String(this.resultDataSource || this.poiDataSource || ''),
+          year: Number(this.poiYearSource || this.resultPoiYear || 0) || null,
+        }
+        return {
+          params,
+          payload: {
+            grid: {
+              type: 'FeatureCollection',
+              features,
+              count: Number(this.h3GridCount || features.length || 0) || 0,
+              resolution: params.resolution,
+              include_mode: params.include_mode,
+              min_overlap_ratio: params.min_overlap_ratio,
+            },
+            summary: this.cloneArtifactValue(this.h3AnalysisSummary || {}),
+            charts: this.cloneArtifactValue(this.h3AnalysisCharts || {}),
+          },
+          summary: this.cloneArtifactValue(this.h3AnalysisSummary || {}),
+          scope_fingerprint: scopeFingerprint,
+        }
+      }
+      if (type === 'population') {
+        const params = {
+          year: String(typeof this.getPopulationSelectedYear === 'function' ? this.getPopulationSelectedYear() : (this.populationSelectedYear || '')),
+          view: String(this.populationAnalysisView || 'density'),
+        }
+        const layer = this.populationLayer && typeof this.populationLayer === 'object' ? this.populationLayer : {}
+        return {
+          params,
+          payload: {
+            overview: this.cloneArtifactValue(this.populationOverview || {}),
+            summary: this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {}),
+            grid_evidence: typeof this.buildAgentPopulationGridEvidence === 'function' ? this.buildAgentPopulationGridEvidence() : {},
+            layer_cells: this.cloneArtifactValue(layer.cells || layer.features || []),
+            year: params.year,
+            view: params.view,
+          },
+          summary: this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {}),
+          scope_fingerprint: scopeFingerprint,
+        }
+      }
+      if (type === 'nightlight') {
+        const params = {
+          year: Number(this.nightlightSelectedYear || 0) || null,
+          view: String(this.nightlightAnalysisView || 'radiance'),
+        }
+        const layer = this.nightlightLayer && typeof this.nightlightLayer === 'object' ? this.nightlightLayer : {}
+        return {
+          params,
+          payload: {
+            overview: this.cloneArtifactValue(this.nightlightOverview || {}),
+            summary: this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {}),
+            layer_cells: this.cloneArtifactValue(layer.cells || layer.features || []),
+            raster: this.cloneArtifactValue(this.nightlightRaster || {}),
+            year: params.year,
+            view: params.view,
+          },
+          summary: this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {}),
+          scope_fingerprint: scopeFingerprint,
+        }
+      }
+      if (type === 'road_syntax') {
+        const params = {
+          graph_model: String(this.roadSyntaxGraphModel || 'segment'),
+          mode: String(this.transportMode || 'walking'),
+          metric: String(this.roadSyntaxLastMetricTab || this.roadSyntaxMetric || ''),
+        }
+        const roadFeatures = Array.isArray(this.roadSyntaxRoadFeatures) ? this.roadSyntaxRoadFeatures : []
+        const nodeFeatures = Array.isArray(this.roadSyntaxNodes) ? this.roadSyntaxNodes : []
+        return {
+          params,
+          payload: {
+            summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
+            diagnostics: this.cloneArtifactValue(this.roadSyntaxDiagnostics || {}),
+            roads: { type: 'FeatureCollection', features: roadFeatures, count: roadFeatures.length },
+            nodes: { type: 'FeatureCollection', features: nodeFeatures, count: nodeFeatures.length },
+            webgl: this.cloneArtifactValue(this.roadSyntaxWebglPayload || {}),
+            graph_model: params.graph_model,
+            mode: params.mode,
+            metric: params.metric,
+          },
+          summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
+          scope_fingerprint: scopeFingerprint,
+        }
+      }
+      return null
+    },
+    async ensureCurrentHistoryRecordForArtifact() {
+      const currentHistoryId = String(this.currentHistoryRecordId || '').trim()
+      if (currentHistoryId) return currentHistoryId
+      if (typeof this.saveAnalysisHistoryAsync !== 'function') return ''
+      const result = await this.saveAnalysisHistoryAsync(
+        typeof this.getIsochronePolygonPayload === 'function' ? this.getIsochronePolygonPayload() : [],
+        typeof this.buildSelectedCategoryBuckets === 'function' ? this.buildSelectedCategoryBuckets() : [],
+        Array.isArray(this.allPoisDetails) ? this.allPoisDetails : []
+      ).catch(() => null)
+      return String((result && result.history_id) || this.currentHistoryRecordId || '').trim()
+    },
+    async persistAnalysisArtifact(artifactType = '') {
+      const type = String(artifactType || '').trim()
+      if (!type) return null
+      const historyId = await this.ensureCurrentHistoryRecordForArtifact()
+      if (!historyId) return null
+      const bundle = this.buildAnalysisArtifactBundle(type)
+      if (!bundle) return null
+      const res = await fetch(`/api/v1/analysis/history/${encodeURIComponent(historyId)}/artifacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          artifact_type: type,
+          params: this.normalizeArtifactParams(bundle.params),
+          payload: this.cloneArtifactValue(bundle.payload || {}),
+          summary: this.cloneArtifactValue(bundle.summary || {}),
+          scope_fingerprint: String(bundle.scope_fingerprint || this.buildAnalysisScopeFingerprint()),
+          data_version: 'v1',
+        }),
+      })
+      if (!res.ok) {
+        let detail = ''
+        try { detail = await res.text() } catch (_) {}
+        throw new Error(detail || `artifact ${type} 保存失败`)
+      }
+      return res.json()
+    },
+    persistAnalysisArtifactQuietly(artifactType = '') {
+      this.persistAnalysisArtifact(artifactType).catch((err) => {
+        console.warn('[analysis-artifact] save failed', artifactType, err)
+      })
     },
   }
 }

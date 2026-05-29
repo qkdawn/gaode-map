@@ -239,16 +239,16 @@
                     let data = null;
                     if (type === 'h3') {
                         if (typeof this.syncH3PoiFilterSelection === 'function') this.syncH3PoiFilterSelection(false);
-                        if (typeof this.computeH3Analysis !== 'function') throw new Error('POI H3 网格计算入口不可用');
+                        if (typeof this.computeH3Analysis !== 'function') throw new Error('POI H3 六边形网格计算入口不可用');
                         const h3Run = await this.computeH3Analysis();
                         data = this.buildCurrentPoiGridResult('h3', targetYear);
                         if (h3Run && h3Run.progress) data.progress = clonePoiGridValue(h3Run.progress);
                         if (!data.features.length && !Object.keys(data.summary || {}).length) {
-                            throw new Error(this.h3GridStatus || 'H3 网格计算未返回结果');
+                            throw new Error(this.h3GridStatus || 'POI H3 六边形网格计算未返回结果');
                         }
                     } else {
                         data = await this.ensurePoiRasterGrid(true);
-                        if (!data) throw new Error(this.poiGridStatus || 'POI 栅格生成失败');
+                        if (!data) throw new Error(this.poiGridStatus || 'POI 共享栅格生成失败');
                         data = this.buildCurrentPoiGridResult('raster', targetYear);
                     }
                     data.status = 'ready';
@@ -259,8 +259,8 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : String(err);
                     this.commitPoiGridResult(targetYear, type, { status: 'failed', error: message });
-                    if (type === 'h3') this.h3GridStatus = `H3 网格生成失败: ${message}`;
-                    else this.poiGridStatus = `POI 栅格生成失败: ${message}`;
+                    if (type === 'h3') this.h3GridStatus = `POI H3 六边形网格生成失败: ${message}`;
+                    else this.poiGridStatus = `POI 共享栅格生成失败: ${message}`;
                     throw err;
                 }
             },
@@ -308,6 +308,25 @@
                     };
                 }));
             },
+            getPoiGridMatrixYearGroups() {
+                const rowsByYear = this.getPoiGridMatrixRows().reduce((groups, row) => {
+                    const yearKey = String(row.year || 'current');
+                    if (!groups.has(yearKey)) {
+                        groups.set(yearKey, {
+                            year: row.year || '当前',
+                            readyCount: 0,
+                            totalCount: 0,
+                            rows: [],
+                        });
+                    }
+                    const group = groups.get(yearKey);
+                    group.totalCount += 1;
+                    if (String(row.status || '').toLowerCase() === 'ready') group.readyCount += 1;
+                    group.rows.push(row);
+                    return groups;
+                }, new Map());
+                return Array.from(rowsByYear.values());
+            },
             getPoiGridResultStatusLabel(status) {
                 const normalized = String(status || '').toLowerCase();
                 if (normalized === 'ready') return '已就绪';
@@ -316,7 +335,29 @@
                 return '待生成';
             },
             async onPoiGridMatrixSelect(row = {}) {
-                await this.activatePoiGridResult(row.year, row.gridType);
+                const type = this.normalizePoiGridType(row.gridType || this.poiGridType);
+                const targetYear = Number(row.year || this.getActivePoiGridYear());
+                this.poiGridType = this.poiGridTypeToUiValue(type);
+                this.activePoiGridResultKey = this.makePoiGridResultKey(targetYear, type);
+                const result = this.getPoiGridResult(targetYear, type);
+                if (result && String(result.status || '') === 'ready') {
+                    this.applyPoiGridResultToProjection(result);
+                    return result;
+                }
+                if (Number.isFinite(targetYear) && targetYear > 0 && typeof this.selectAgentPoiYearForGrid === 'function') {
+                    await this.selectAgentPoiYearForGrid(targetYear);
+                }
+                if (type === 'h3') {
+                    if (typeof this.clearPoiRasterGridDisplayOnLeave === 'function') this.clearPoiRasterGridDisplayOnLeave();
+                    if (typeof this.clearH3Grid === 'function') this.clearH3Grid();
+                    return null;
+                }
+                this.poiGridFeatures = [];
+                this.poiGridSummary = null;
+                this.selectedPoiGridCellId = null;
+                if (typeof this.clearH3GridDisplayOnLeave === 'function') this.clearH3GridDisplayOnLeave();
+                if (typeof this.clearPoiRasterGridDisplayOnLeave === 'function') this.clearPoiRasterGridDisplayOnLeave();
+                return null;
             },
             async generatePoiGridMatrixCell(row = {}, force = true) {
                 await this.ensurePoiGridResult({ year: row.year, gridType: row.gridType, force });
@@ -625,7 +666,7 @@
                     this.selectedH3Id = null;
                     this.clearPoiRasterGridDisplayOnLeave();
                 }
-                this.poiGridStatus = '正在生成 POI 栅格...';
+                this.poiGridStatus = '正在生成 POI 共享栅格...';
                 try {
                     const polygon = this.getIsochronePolygonPayload();
                     const res = await fetch('/api/v1/analysis/pois/grid', {
@@ -645,7 +686,7 @@
                         try {
                             detail = await res.text();
                         } catch (_) {}
-                        throw new Error(detail || 'POI 栅格生成失败');
+                        throw new Error(detail || 'POI 共享栅格生成失败');
                     }
                     const data = await res.json();
                     this.poiGridFeatures = Array.isArray(data.features) ? data.features : [];
@@ -660,10 +701,13 @@
                         this.restorePoiRasterGridDisplayOnEnter();
                     }
                     this.commitCurrentPoiGridResult('raster', this.getPoiRasterGridYear());
+                    if (typeof this.persistAnalysisArtifactQuietly === 'function') {
+                        this.persistAnalysisArtifactQuietly('poi_raster_grid');
+                    }
                     return data;
                 } catch (err) {
                     console.error(err);
-                    this.poiGridStatus = 'POI 栅格生成失败: ' + (err && err.message ? err.message : String(err));
+                    this.poiGridStatus = 'POI 共享栅格生成失败: ' + (err && err.message ? err.message : String(err));
                     return null;
                 } finally {
                     this.isLoadingPoiGrid = false;

@@ -224,6 +224,85 @@
                 const roadRestored = await this._restoreHistoryRoadResultAsync(roadResult, token);
                 return { h3Restored, roadRestored };
             },
+            pickLatestHistoryArtifact(artifacts = [], artifactType = '') {
+                const type = String(artifactType || '').trim();
+                return (Array.isArray(artifacts) ? artifacts : [])
+                    .filter((item) => item && String(item.artifact_type || '') === type)
+                    .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] || null;
+            },
+            async fetchHistoryArtifacts(historyId, signal = null) {
+                const res = await fetch(`/api/v1/analysis/history/${encodeURIComponent(historyId)}/artifacts`, { signal });
+                if (!res.ok) {
+                    let detail = '';
+                    try { detail = await res.text(); } catch (_) {}
+                    throw new Error(`历史证据请求失败(${res.status})${detail ? `: ${detail}` : ''}`);
+                }
+                const data = await res.json();
+                return Array.isArray(data) ? data : [];
+            },
+            async restoreHistoryPoiRasterArtifact(artifact, token) {
+                if (token !== this.historyDetailLoadToken || !artifact) return false;
+                const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
+                const features = Array.isArray(payload.features) ? payload.features : [];
+                const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : (artifact.summary || null);
+                if (!features.length && !summary) return false;
+                this.poiGridFeatures = features;
+                this.poiGridSummary = summary || null;
+                this.poiGridType = 'raster';
+                this.commitCurrentPoiGridResult && this.commitCurrentPoiGridResult('raster', Number(payload.year || 0) || null);
+                if (this.poiSubTab === 'grid' && typeof this.restorePoiRasterGridDisplayOnEnter === 'function') {
+                    this.restorePoiRasterGridDisplayOnEnter();
+                }
+                return true;
+            },
+            async restoreHistoryPopulationArtifact(artifact, token) {
+                if (token !== this.historyDetailLoadToken || !artifact) return false;
+                const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
+                const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
+                const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
+                if (!Object.keys(overview).length && !Object.keys(summary).length) return false;
+                this.populationOverview = Object.keys(overview).length ? overview : { summary };
+                this.populationLayer = { cells: Array.isArray(payload.layer_cells) ? payload.layer_cells : [] };
+                this.populationGridCount = this.populationLayer.cells.length;
+                if (payload.year) this.populationSelectedYear = String(payload.year);
+                if (payload.view) this.populationAnalysisView = String(payload.view);
+                this.populationSubTab = 'analysis';
+                if (typeof this.updatePopulationCharts === 'function') {
+                    this.$nextTick(() => this.updatePopulationCharts());
+                }
+                return true;
+            },
+            async restoreHistoryNightlightArtifact(artifact, token) {
+                if (token !== this.historyDetailLoadToken || !artifact) return false;
+                const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
+                const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
+                const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
+                if (!Object.keys(overview).length && !Object.keys(summary).length) return false;
+                this.nightlightOverview = Object.keys(overview).length ? overview : { summary };
+                this.nightlightLayer = { cells: Array.isArray(payload.layer_cells) ? payload.layer_cells : [] };
+                this.nightlightGridCount = this.nightlightLayer.cells.length;
+                this.nightlightRaster = payload.raster && typeof payload.raster === 'object' ? payload.raster : null;
+                if (payload.year) this.nightlightSelectedYear = Number(payload.year);
+                if (payload.view) this.nightlightAnalysisView = String(payload.view);
+                return true;
+            },
+            async restoreHistoryArtifactsAsync(historyId, token, signal = null) {
+                if (token !== this.historyDetailLoadToken) {
+                    return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
+                }
+                const artifacts = await this.fetchHistoryArtifacts(historyId, signal);
+                if (token !== this.historyDetailLoadToken) {
+                    return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
+                }
+                const rasterRestored = await this.restoreHistoryPoiRasterArtifact(this.pickLatestHistoryArtifact(artifacts, 'poi_raster_grid'), token);
+                const h3Artifact = this.pickLatestHistoryArtifact(artifacts, 'poi_h3_grid');
+                const h3Restored = await this._restoreHistoryH3ResultAsync(h3Artifact && h3Artifact.payload, token);
+                const populationRestored = await this.restoreHistoryPopulationArtifact(this.pickLatestHistoryArtifact(artifacts, 'population'), token);
+                const nightlightRestored = await this.restoreHistoryNightlightArtifact(this.pickLatestHistoryArtifact(artifacts, 'nightlight'), token);
+                const roadArtifact = this.pickLatestHistoryArtifact(artifacts, 'road_syntax');
+                const roadRestored = await this._restoreHistoryRoadResultAsync(roadArtifact && roadArtifact.payload, token);
+                return { rasterRestored, h3Restored, populationRestored, nightlightRestored, roadRestored };
+            },
             _applyHistoryDetailBaseResult(data) {
                 this.clearH3Grid();
                 this.clearPoiOverlayLayers({
@@ -444,7 +523,20 @@
                         this.resetAgentIterationChangeForHistorySwitch(historyId, { previousHistoryId });
                     }
                     baseRestored = true;
-                    const restoredSnapshots = await this._restoreHistoryAnalysisSnapshotsAsync(data, token);
+                    const legacySnapshots = await this._restoreHistoryAnalysisSnapshotsAsync(data, token);
+                    let restoredSnapshots = legacySnapshots;
+                    try {
+                        const artifactSnapshots = await this.restoreHistoryArtifactsAsync(historyId, token, controller.signal);
+                        restoredSnapshots = {
+                            h3Restored: artifactSnapshots.h3Restored || legacySnapshots.h3Restored,
+                            roadRestored: artifactSnapshots.roadRestored || legacySnapshots.roadRestored,
+                            rasterRestored: artifactSnapshots.rasterRestored,
+                            populationRestored: artifactSnapshots.populationRestored,
+                            nightlightRestored: artifactSnapshots.nightlightRestored,
+                        };
+                    } catch (artifactErr) {
+                        console.warn('history artifacts restore failed', artifactErr);
+                    }
                     if (token !== this.historyDetailLoadToken) return;
                     this.currentHistoryRecordId = historyId;
                     if (this.lastIsochroneGeoJSON) {
@@ -455,7 +547,10 @@
                         Number((data && data.poi_count) || (((data || {}).poi_summary || {}).total) || 0)
                     );
                     const restoredTags = [];
+                    if (restoredSnapshots.rasterRestored) restoredTags.push('共享栅格');
                     if (restoredSnapshots.h3Restored) restoredTags.push('网格');
+                    if (restoredSnapshots.populationRestored) restoredTags.push('人口');
+                    if (restoredSnapshots.nightlightRestored) restoredTags.push('夜光');
                     if (restoredSnapshots.roadRestored) restoredTags.push('路网');
                     const restoredText = restoredTags.length ? `（${restoredTags.join(' + ')}已恢复）` : '';
                     this.poiStatus = poiCountHint > 0

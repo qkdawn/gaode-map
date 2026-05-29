@@ -5,6 +5,7 @@ from typing import List
 from modules.providers.amap.utils.get_type_info import infer_type_info_from_text
 
 from .intent_signals import (
+    mentions_next_analysis,
     mentions_nightlight,
     mentions_population,
     mentions_road,
@@ -90,6 +91,8 @@ def _is_actionable_question(text: str) -> bool:
 
 def classify_question_type(text: str) -> str:
     normalized = str(text or "").strip()
+    if mentions_next_analysis(normalized):
+        return "next_analysis"
     if any(token in normalized for token in ("TOD", "tod", "站城", "轨交站", "地铁站")):
         return "tod"
     if any(token in normalized for token in ("宜居", "适宜居住", "居住适宜性")):
@@ -119,7 +122,7 @@ def _needs_clarification_for_ambiguous_intent(text: str) -> str:
     if _has_any(text, AMBIGUOUS_DECISION_TOKENS) and not _has_any(text, DECISION_CONTEXT_TOKENS):
         return "请补充要比较或优化的对象和目标，例如比较哪两个区域/方案，或要优化商业、人口、路网还是夜间活力。"
     if _has_any(text, VAGUE_ANALYSIS_TOKENS):
-        return "你想重点分析哪个方向？可以选择商业/业态补位、人口、夜光活力、路网可达性或 H3 空间结构。"
+        return "你想重点分析哪个方向？可以选择商业/业态补位、人口、夜光活力、路网可达性或 POI H3 空间结构。"
     return ""
 
 

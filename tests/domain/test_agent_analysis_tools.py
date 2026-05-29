@@ -122,7 +122,7 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
         "current_h3_structure_analysis": asyncio.run(
             read_h3_structure_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结")
         ).result,
-        "current_h3_grid": {
+        "current_poi_h3_grid": {
             "type": "FeatureCollection",
             "count": 2,
             "features": [

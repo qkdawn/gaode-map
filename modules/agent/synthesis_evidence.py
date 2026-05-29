@@ -61,6 +61,21 @@ def build_analysis_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, obj
                 limitation="缺口高不等于一定适合开店，还需要验证店面条件、竞品质量、租金与动线。",
             )
         )
+    if metrics["next_analysis_options"]:
+        evidence.append(
+            AgentEvidenceItem(
+                metric="next_analysis_options",
+                value={
+                    "options": metrics["next_analysis_options"],
+                    "ready_dimensions": metrics["next_analysis_ready_dimensions"],
+                    "missing_dimensions": metrics["next_analysis_missing_dimensions"],
+                },
+                interpretation="下一步分析方向来自当前证据就绪状态和可应用场景排序，用于选择后续继续分析的入口。",
+                source="current_next_analysis_options",
+                confidence="moderate",
+                limitation="这是分析路线建议，不是具体选址、招商或经营结论。",
+            )
+        )
     if metrics["business_place_type"]:
         evidence.append(
             AgentEvidenceItem(
@@ -95,8 +110,8 @@ def build_analysis_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, obj
                     "grid_count": metrics["h3_grid_count"],
                     "avg_density_poi_per_km2": metrics["avg_density_poi_per_km2"],
                 },
-                interpretation="H3 网格把 POI 密度落到空间单元上，能观察供给是否集中以及是否存在薄弱格。",
-                source="analysis_snapshot.h3.summary / current_h3_summary",
+                interpretation="POI H3 网格把 POI 密度落到六边形空间单元上，能观察供给是否集中以及是否存在薄弱格。",
+                source="analysis_snapshot.h3.summary / current_poi_h3_summary",
                 confidence=evidence_confidence(metrics["h3_grid_count"]),
                 limitation="网格密度受边界、采样范围和 POI 完整度影响，不能单独作为选址结论。",
             )

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,7 +8,6 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
 from .context_builder import build_context_bundle
-from .executor import execute_plan_step
 from .providers.langgraph_react import run_langgraph_react_loop
 from .providers.client import is_llm_enabled
 from .providers.llm_provider import run_llm_tool_loop
@@ -22,8 +20,6 @@ from .schemas import (
     AgentReactRunResponse,
     AnalysisSnapshot,
     AuditResult,
-    PlanStep,
-    ToolResult,
 )
 from .tools import get_tool_registry
 
@@ -62,7 +58,7 @@ REACT_TOOL_LABELS = {
     "search_report_context": "搜索报告上下文",
     "read_report_chunk": "读取报告证据块",
     "fetch_pois_in_scope": "抓取范围内 POI",
-    "compute_h3_metrics_from_scope_and_pois": "计算 H3 网格指标",
+    "compute_h3_metrics_from_scope_and_pois": "计算 POI H3 网格指标",
     "compute_population_overview_from_scope": "计算人口概览",
     "compute_nightlight_overview_from_scope": "计算夜光活力",
     "compute_road_syntax_from_scope": "计算路网句法",
@@ -186,42 +182,6 @@ def _trace_observation_summary(tool_name: str, payload: Dict[str, Any], *, faile
     return f"「{label}」已返回观察结果。"
 
 
-def _tool_summary(result: ToolResult) -> str:
-    if result.status == "failed":
-        warning = "；".join(str(item) for item in (result.warnings or []) if str(item).strip())
-        return warning or str(result.error or "工具执行失败")
-    if result.tool_name == "read_current_scope":
-        return "已读取当前分析范围。" if result.result.get("has_scope") else "未发现可用分析范围。"
-    if result.tool_name == "read_current_results":
-        poi_count = result.result.get("poi_count")
-        parts = []
-        if poi_count is not None:
-            parts.append(f"已有 POI 记录 {poi_count} 条")
-        if result.result.get("has_road_summary"):
-            parts.append("已有路网摘要")
-        if result.result.get("has_population_summary"):
-            parts.append("已有人口摘要")
-        return "；".join(parts) or "已检查当前已有分析结果。"
-    if result.tool_name == "fetch_pois_in_scope":
-        return f"等时圈/范围内 POI 样本 {int(result.result.get('poi_count') or 0)} 条。"
-    if result.tool_name == "compute_road_syntax_from_scope":
-        return (
-            f"路网节点 {int(result.result.get('node_count') or 0)} 个，"
-            f"边 {int(result.result.get('edge_count') or 0)} 条。"
-        )
-    return "工具已返回结构化观察。"
-
-
-def _raw_preview(value: Any, limit: int = 4000) -> Any:
-    try:
-        encoded = json.dumps(value, ensure_ascii=False)
-    except TypeError:
-        return str(value)
-    if len(encoded) <= limit:
-        return value
-    return {"preview": encoded[:limit], "truncated": True}
-
-
 def _format_react_brain_error(exc: Exception) -> str:
     response = getattr(exc, "response", None)
     status_code = getattr(response, "status_code", None) or getattr(exc, "status_code", None)
@@ -243,58 +203,6 @@ def _format_react_brain_error(exc: Exception) -> str:
     if "<html" in raw_detail.lower() or "openresty" in raw_detail.lower():
         return "LLM provider 返回了网关错误页面：请检查 AI_BASE_URL 是否指向正确的兼容接口，以及服务端访问权限。"
     return f"LLM provider 调用失败：{type(exc).__name__}" + (f"：{detail}" if detail else "")
-
-
-def _observation_payload(result: ToolResult, duration_ms: int) -> Dict[str, Any]:
-    return {
-        "summary": _tool_summary(result),
-        "raw": _raw_preview(
-            {
-                "result": result.result,
-                "evidence": result.evidence,
-                "warnings": result.warnings,
-                "error": result.error,
-            }
-        ),
-        "meta": {
-            "tool": result.tool_name,
-            "status": result.status,
-            "duration_ms": duration_ms,
-        },
-        "quality": "usable" if result.status == "success" else "limited",
-    }
-
-
-def _has_new_information(result: ToolResult) -> bool:
-    if result.status != "success":
-        return False
-    if result.evidence:
-        return True
-    if isinstance(result.result, dict):
-        return any(value not in (None, "", [], {}, False) for value in result.result.values())
-    return bool(result.result)
-
-
-def _build_steps(question: str, snapshot: AnalysisSnapshot) -> List[PlanStep]:
-    del question, snapshot
-    return [
-        PlanStep(tool_name="read_current_scope", reason="确认当前等时圈或地图范围是否可用于分析"),
-        PlanStep(tool_name="read_current_results", reason="复用前端已经完成的 POI、路网、人口等分析结果"),
-        PlanStep(
-            tool_name="fetch_pois_in_scope",
-            arguments={"source": "local", "max_count": 3000},
-            reason="补齐等时圈内 POI 样本，观察设施供给与业态结构",
-        ),
-    ]
-
-
-def _reflection_summary(observations: List[Dict[str, Any]], stale_count: int, config: ReactConfig) -> str:
-    usable = [item for item in observations if item.get("status") == "success"]
-    if stale_count >= config.stagnation_limit:
-        return "连续观察没有带来足够新增信息，进入收束判断。"
-    if not usable:
-        return "当前证据仍偏弱，需要继续尝试读取或补齐基础数据。"
-    return f"已形成 {len(usable)} 条可用观察，继续检查是否还缺关键证据。"
 
 
 def _final_payload(
@@ -341,15 +249,6 @@ def _final_payload(
         "evidence_status": evidence_status,
         "review_contract": review_contract,
         "evidence_steps": event_steps,
-        "next_actions": [
-            "围绕 POI 结构识别服务缺口、同质竞争或功能错配。",
-            "把路网观察与实际步行/驾车等时圈对照，判断可达性是否只是表面成立。",
-            "后续接入人口、夜光或互联网证据后，再提升证据完整性。",
-        ],
-        "uncertainties": [
-            "v1 仅使用当前结构化数据和本地工具观察。",
-            "POI 更新频率、分类颗粒度和范围边界会影响判断。",
-        ],
     }
 
 
@@ -365,14 +264,14 @@ def _llm_final_payload(
     fallback = _final_payload(question, observations, event_steps, snapshot=snapshot)
     conclusion = str(assistant_summary or "").strip() or str(fallback.get("conclusion") or "")
     if error and not assistant_summary:
-        conclusion = f"ReAct 循环未能稳定完成，已回退到当前观察：{fallback.get('summary') or error}"
+        conclusion = f"ReAct Brain 未能完成：{error}"
     return {
         **fallback,
         "summary": conclusion,
         "conclusion": conclusion,
         "evidence_steps": list(event_steps or fallback.get("evidence_steps") or []),
         "meta": {
-            "mode": "llm_react" if assistant_summary else "fallback",
+            "mode": "llm_react",
             "error": error,
         },
     }
@@ -386,7 +285,22 @@ async def _put(run: ReactRun, step: int, event_type: str, payload: Dict[str, Any
 
 async def _execute_llm_react_run(run: ReactRun, *, question: str, snapshot: AnalysisSnapshot) -> bool:
     if not is_llm_enabled():
-        return False
+        error_message = "LLM provider 未启用或配置不完整，ReAct Brain 无法执行。"
+        await _put(run, 0, "error", {"summary": error_message})
+        await _put(
+            run,
+            1,
+            "final",
+            _llm_final_payload(
+                question=question,
+                assistant_summary="",
+                observations=[],
+                event_steps=[],
+                snapshot=snapshot,
+                error=error_message,
+            ),
+        )
+        return True
 
     step_no = 0
     observations: List[Dict[str, Any]] = []
@@ -538,120 +452,8 @@ async def _execute_llm_react_run(run: ReactRun, *, question: str, snapshot: Anal
 async def _execute_react_run(run: ReactRun) -> None:
     question = _latest_user_question(run.request)
     snapshot = _merge_scope(run.request.analysis_snapshot, run.request.scope)
-    registry = get_tool_registry()
-    artifacts: Dict[str, object] = {}
-    observations: List[Dict[str, Any]] = []
-    evidence_steps: List[int] = []
-    stale_count = 0
-    failure_count = 0
-    step_no = 0
-
     try:
-        if await _execute_llm_react_run(run, question=question, snapshot=snapshot):
-            return
-        await _put(run, step_no, "status", {"summary": "ReAct 循环已启动", "state": "running"})
-        steps = _build_steps(question, snapshot)
-        for plan_step in steps[: run.config.max_steps]:
-            if run.cancelled:
-                await _put(run, step_no, "status", {"summary": "ReAct 循环已停止", "state": "cancelled"})
-                break
-
-            step_no += 1
-            await _put(
-                run,
-                step_no,
-                "thought",
-                {
-                    "summary": plan_step.reason,
-                    "meta": {"tool": plan_step.tool_name},
-                },
-            )
-
-            registered = registry.get(plan_step.tool_name)
-            if not registered:
-                failure_count += 1
-                await _put(
-                    run,
-                    step_no,
-                    "error",
-                    {"summary": f"工具不可用：{plan_step.tool_name}", "meta": {"tool": plan_step.tool_name}},
-                )
-                if failure_count >= run.config.max_tool_failures:
-                    break
-                continue
-
-            await _put(
-                run,
-                step_no,
-                "action",
-                {
-                    "summary": f"调用 {registered.spec.description or registered.spec.name}",
-                    "raw": {"tool": registered.spec.name, "arguments": plan_step.arguments},
-                    "meta": {"tool": registered.spec.name},
-                },
-            )
-
-            started = datetime.now(timezone.utc)
-            try:
-                result, _trace = await asyncio.wait_for(
-                    execute_plan_step(
-                        registered_tool=registered,
-                        step=plan_step,
-                        snapshot=snapshot,
-                        artifacts=artifacts,
-                        question=question,
-                        run_preflight=False,
-                    ),
-                    timeout=run.config.tool_timeout_seconds,
-                )
-            except Exception as exc:
-                failure_count += 1
-                await _put(
-                    run,
-                    step_no,
-                    "error",
-                    {
-                        "summary": f"{plan_step.tool_name} 执行失败：{exc}",
-                        "meta": {"tool": plan_step.tool_name},
-                    },
-                )
-                if failure_count >= run.config.max_tool_failures:
-                    break
-                continue
-
-            duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
-            observation_payload = _observation_payload(result, duration_ms)
-            observation_event = await _put(run, step_no, "observation", observation_payload)
-            observations.append(
-                {
-                    "tool": result.tool_name,
-                    "status": result.status,
-                    "summary": observation_payload.get("summary"),
-                    "step": observation_event.step,
-                }
-            )
-            if result.status != "success":
-                failure_count += 1
-            if _has_new_information(result):
-                stale_count = 0
-                evidence_steps.append(observation_event.step)
-            else:
-                stale_count += 1
-
-            await _put(
-                run,
-                step_no,
-                "reflection",
-                {
-                    "summary": _reflection_summary(observations, stale_count, run.config),
-                    "meta": {"stagnation": stale_count},
-                },
-            )
-            if stale_count >= run.config.stagnation_limit or failure_count >= run.config.max_tool_failures:
-                break
-
-        step_no += 1
-        await _put(run, step_no, "final", _final_payload(question, observations, evidence_steps, snapshot=snapshot))
+        await _execute_llm_react_run(run, question=question, snapshot=snapshot)
     finally:
         await run.queue.put(None)
 

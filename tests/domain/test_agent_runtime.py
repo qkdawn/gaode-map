@@ -61,7 +61,7 @@ def _fake_registry():
             artifacts={
                 "current_pois": list(snapshot.pois or []),
                 "current_poi_summary": dict(snapshot.poi_summary or {}),
-                "current_h3_summary": dict((snapshot.h3 or {}).get("summary") or {}),
+                "current_poi_h3_summary": dict((snapshot.h3 or {}).get("summary") or {}),
                 "current_population_summary": dict((snapshot.population or {}).get("summary") or {}),
                 "current_nightlight_summary": dict((snapshot.nightlight or {}).get("summary") or {}),
                 "current_road_summary": dict((snapshot.road or {}).get("summary") or {}),
@@ -74,7 +74,7 @@ def _fake_registry():
             tool_name="compute_h3_metrics_from_scope_and_pois",
             status="success",
             result={"grid_count": 18, "poi_count": 30},
-            artifacts={"current_h3_summary": {"grid_count": 18, "avg_density_poi_per_km2": 7.5}},
+            artifacts={"current_poi_h3_summary": {"grid_count": 18, "avg_density_poi_per_km2": 7.5}},
         )
 
     async def population_runner(*, arguments, snapshot, artifacts, question):
@@ -129,7 +129,7 @@ def _fake_registry():
             [
                 "current_pois",
                 "current_poi_summary",
-                "current_h3_summary",
+                "current_poi_h3_summary",
                 "current_population_summary",
                 "current_nightlight_summary",
                 "current_road_summary",
@@ -139,7 +139,7 @@ def _fake_registry():
         "compute_h3_metrics_from_scope_and_pois": tool(
             "compute_h3_metrics_from_scope_and_pois",
             h3_runner,
-            ["current_h3_summary"],
+            ["current_poi_h3_summary"],
             cost_level="normal",
         ),
         "compute_population_overview_from_scope": tool(
@@ -314,7 +314,7 @@ def test_runtime_replans_after_audit_then_executes_missing_dimensions(monkeypatc
                 question_type="summary",
                 summary="补齐空间、人口、夜光和路网四类证据。",
                 steps=[
-                    PlanStep(tool_name="compute_h3_metrics_from_scope_and_pois", reason="补齐 H3", evidence_goal="H3 空间密度"),
+                    PlanStep(tool_name="compute_h3_metrics_from_scope_and_pois", reason="补齐 H3", evidence_goal="POI H3 密度"),
                     PlanStep(tool_name="compute_population_overview_from_scope", reason="补齐人口", evidence_goal="人口概览"),
                     PlanStep(tool_name="compute_nightlight_overview_from_scope", reason="补齐夜光", evidence_goal="夜光概览"),
                     road_step("补齐路网"),
@@ -325,7 +325,7 @@ def test_runtime_replans_after_audit_then_executes_missing_dimensions(monkeypatc
             AuditVerdict(
                 status="replan",
                 summary="首轮只有 POI，不足以回答商业特征总结。",
-                missing_evidence=["H3 空间密度证据", "人口概览", "夜光概览", "路网概览"],
+                missing_evidence=["POI H3 密度证据", "人口概览", "夜光概览", "路网概览"],
                 replan_instructions="补齐四类证据后再回答。",
                 should_answer=False,
             ),

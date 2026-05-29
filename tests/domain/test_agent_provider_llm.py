@@ -2,11 +2,12 @@ import asyncio
 import json
 
 import httpx
+import pytest
 
 from core.config import settings
 from modules.agent.context_builder import build_context_bundle
-from modules.agent.providers.llm_provider import _invoke_json_role, generate_answer_output_with_llm, plan_with_llm, run_gate_with_llm, run_llm_tool_loop
-from modules.agent.schemas import AgentMessage, AnalysisSnapshot, GateDecision, PlanStep, ToolResult, ToolSpec, WorkingMemory
+from modules.agent.providers.llm_provider import _invoke_json_role, audit_with_llm, generate_answer_output_with_llm, plan_with_llm, run_gate_with_llm, run_llm_tool_loop
+from modules.agent.schemas import AgentMessage, AnalysisSnapshot, AuditResult, GateDecision, PlanStep, PlanningResult, ToolResult, ToolSpec, WorkingMemory
 from modules.agent.tools import RegisteredTool, get_tool_registry
 
 
@@ -472,6 +473,47 @@ def test_plan_with_llm_uses_site_advice_archetype_for_target_supply_questions(mo
 
     assert any(step.tool_name == "run_site_selection_pack" for step in plan.steps)
     assert captured["user_payload"]["question_archetype"] == "site_selection"
+
+
+def test_plan_with_llm_surfaces_llm_errors(monkeypatch):
+    async def fail_invoke_json_role(**kwargs):
+        del kwargs
+        raise RuntimeError("llm_bad_request")
+
+    monkeypatch.setattr("modules.agent.providers.llm_provider._invoke_json_role", fail_invoke_json_role)
+
+    with pytest.raises(RuntimeError, match="llm_bad_request"):
+        asyncio.run(
+            plan_with_llm(
+                messages=[AgentMessage(role="user", content="下一步做什么分析")],
+                snapshot=_snapshot_with_scope(),
+                context=build_context_bundle(_snapshot_with_scope()),
+                registry=get_tool_registry(),
+                memory=WorkingMemory(),
+            )
+        )
+
+
+def test_audit_with_llm_surfaces_llm_errors(monkeypatch):
+    async def fail_invoke_json_role(**kwargs):
+        del kwargs
+        raise RuntimeError("llm_bad_request")
+
+    snapshot = _snapshot_with_scope()
+    monkeypatch.setattr("modules.agent.providers.llm_provider._invoke_json_role", fail_invoke_json_role)
+
+    with pytest.raises(RuntimeError, match="llm_bad_request"):
+        asyncio.run(
+            audit_with_llm(
+                question="下一步做什么分析",
+                snapshot=snapshot,
+                context=build_context_bundle(snapshot),
+                memory=WorkingMemory(),
+                plan=PlanningResult(goal="回答问题", question_type="next_analysis"),
+                rule_audit=AuditResult(missing_evidence=["下一步分析方向"]),
+                replan_count=0,
+            )
+        )
 
 
 def test_run_gate_with_llm_preserves_llm_clarification_options(monkeypatch):

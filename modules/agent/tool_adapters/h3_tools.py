@@ -41,7 +41,7 @@ async def build_h3_grid_from_scope(
         result={"grid_count": int(grid.get("count") or 0), "resolution": resolution},
         evidence=[{"field": "h3.grid_count", "value": int(grid.get("count") or 0)}],
         warnings=[] if int(grid.get("count") or 0) > 0 else ["当前范围未生成可用 H3 网格"],
-        artifacts={"current_h3_grid": grid},
+        artifacts={"current_h3_base_grid": grid},
     )
 
 
@@ -92,9 +92,9 @@ async def compute_h3_metrics_from_scope_and_pois(
             {"field": "h3.summary.avg_density_poi_per_km2", "value": summary.get("avg_density_poi_per_km2")},
         ],
         artifacts={
-            "current_h3": result,
-            "current_h3_grid": result.get("grid") or {},
-            "current_h3_summary": summary,
-            "current_h3_charts": result.get("charts") or {},
+            "current_poi_h3": result,
+            "current_poi_h3_grid": result.get("grid") or {},
+            "current_poi_h3_summary": summary,
+            "current_poi_h3_charts": result.get("charts") or {},
         },
     )

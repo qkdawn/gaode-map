@@ -67,3 +67,26 @@ def test_ensure_area_data_readiness_readonly_does_not_compute(monkeypatch):
         "compute_population_overview_from_scope",
         "compute_road_syntax_from_scope",
     }
+
+
+def test_rank_next_analysis_options_prefers_application_when_chain_is_ready():
+    snapshot = AnalysisSnapshot(
+        poi_summary={"total": 10},
+        h3={"summary": {"grid_count": 4}},
+        population={"summary": {"total_population": 1000}},
+        nightlight={"summary": {"max_radiance": 4.0}},
+        road={"summary": {"node_count": 8}},
+    )
+
+    result = asyncio.run(
+        capability_tools.rank_next_analysis_options(
+            arguments={},
+            snapshot=snapshot,
+            artifacts={},
+            question="下一步做什么分析",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.artifacts["current_next_analysis_options"]["recommended_options"][0]["title"] == "业态缺口与选址预筛"
+    assert result.result["missing_dimensions"] == []

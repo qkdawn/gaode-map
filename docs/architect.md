@@ -116,7 +116,7 @@ gaode-map/
 
 ## 6. 前端架构 (Vite + Vue3 + TS)
 
-*   `/analysis`：由 `frontend` 构建产物入口承载（`/static/frontend/index.html`）。
+*   `/analysis`：开发态由 FastAPI 代理 Vite dev server，直接读取 `frontend/src`；生产态由 `frontend` 构建产物入口承载（`/static/frontend/index.html`）。
 *   `frontend/src/main.ts`：Vue 应用入口。
 *   `frontend/src/pages/analysis/App.vue`：analysis 页面壳与初始化流程（通过 `/api/v1/config` 拉配置）。
 *   analysis 主链代码统一在 `frontend/src/features` 与 `frontend/src/map`。

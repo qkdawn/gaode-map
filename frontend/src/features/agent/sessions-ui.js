@@ -1513,8 +1513,8 @@ function createAgentUiMethods() {
       const key = asText(taskKey)
       const mapping = {
         poi_fetch: 'POI 抓取',
-        poi_raster_grid: 'POI 栅格计算',
-        poi_h3_grid: 'POI H3 网格计算',
+        poi_raster_grid: 'POI 共享栅格计算',
+        poi_h3_grid: 'POI H3 六边形网格计算',
         poi_grid: 'POI / 网格分析',
         population: '人口结构分析',
         nightlight: '夜光分析',
@@ -8381,7 +8381,7 @@ function createAgentUiMethods() {
         {
           key: 'shared_grid',
           label: '同源栅格交叉证据',
-          description: '人口、POI 栅格、夜光按同一 cell_id 对齐后的交叉证据。',
+          description: '人口、POI 共享栅格、夜光按同一 cell_id 对齐后的交叉证据。',
           items: [
             this.createAgentInputPackageItem({
               key: 'shared_grid',
@@ -8402,7 +8402,7 @@ function createAgentUiMethods() {
         {
           key: 'poi_spatial',
           label: 'POI 专项空间证据',
-          description: 'H3 专项空间结构证据；POI 栅格只通过 shared_grid 参与耦合判断。',
+          description: 'POI H3 专项空间结构证据；POI 共享栅格只通过 shared_grid 参与耦合判断。',
           items: [
             this.createAgentInputPackageItem({
               key: 'poi_h3',
@@ -8596,14 +8596,7 @@ function createAgentUiMethods() {
     },
     shouldShowAgentThinkingProcessBlock() {
       if (!this.agentHasThinkingContent()) return false
-      if (this.isAgentReactLoopProcess()) return false
-      return (
-        asText(this.agentDeepAnalysisMode) === 'deep'
-        || asText(this.agentComposerMode) === 'deep'
-        || !!this.agentPendingTaskConfirmation
-        || !!this.agentRiskPrompt
-        || !!this.agentClarificationQuestion
-      )
+      return true
     },
     isAgentReactLoopProcess() {
       return cloneArray(this.agentThinkingTimeline).some((item) => {
@@ -8674,12 +8667,127 @@ function createAgentUiMethods() {
           title: asText(item && item.title) || '处理中',
           detail: asText(item && item.detail),
           items: cloneArray(item && item.items).map((entry) => asText(entry)).filter(Boolean),
+          meta: cloneObject(item && item.meta),
           state: asText(item && item.state) || 'pending',
         }))
         .filter((item) => item.id !== 'stream-connect')
       const hasBackendStep = steps.some((item) => item.id && !item.id.startsWith('frontend-'))
       if (!hasBackendStep) return steps
       return steps.filter((item) => !item.id.startsWith('frontend-wait-'))
+    },
+    getAgentNaturalProcessItems() {
+      const toolLabels = {
+        read_current_scope: '读取当前分析范围',
+        read_current_results: '读取已有分析结果',
+        rank_next_analysis_options: '推荐下一步分析方向',
+        run_area_character_pack: '生成区域画像',
+        detect_commercial_hotspots: '识别商业热点',
+        infer_area_tags: '推断区域标签',
+        analyze_spatial_structure: '分析空间结构',
+        read_poi_structure_analysis: '读取 POI 结构分析',
+        read_h3_structure_analysis: '读取 H3 结构分析',
+        read_road_network_analysis: '读取路网分析',
+        read_population_analysis: '读取人口画像',
+        read_nightlight_analysis: '读取夜光活力',
+        read_timeseries_analysis: '读取时序变化',
+      }
+      const forbiddenLabels = new Set(['思考', '行动', '观察', '复盘', '异常'])
+      const clean = (value = '') => asText(value)
+        .replace(/^(思考|行动|观察|复盘|异常)\s*[·:：-]?\s*/u, '')
+        .trim()
+      const readItemValue = (items = [], prefix = '') => {
+        const matched = cloneArray(items)
+          .map((entry) => asText(entry))
+          .find((entry) => entry.startsWith(prefix))
+        return matched ? matched.slice(prefix.length).trim() : ''
+      }
+      const formatTool = (name = '') => {
+        const normalizedName = asText(name)
+        return toolLabels[normalizedName] || normalizedName || '工具'
+      }
+      const makeTextItem = (seed = {}) => {
+        const text = clean(seed.text)
+        if (!text || forbiddenLabels.has(text)) return null
+        return {
+          id: seed.id,
+          kind: seed.kind || 'text',
+          text,
+          metaText: clean(seed.metaText),
+          state: asText(seed.state) || 'pending',
+        }
+      }
+      const items = []
+      this.getAgentVisibleProcessSteps().forEach((step, index) => {
+        const meta = cloneObject(step && step.meta)
+        const toolName = asText(meta.toolName || meta.tool_name)
+        const status = asText(meta.status)
+        const resultSummary = readItemValue(step.items, '结果：')
+        const argumentsSummary = readItemValue(step.items, '参数：')
+        const evidenceSummary = readItemValue(step.items, '证据：')
+        const warningSummary = readItemValue(step.items, '警告：')
+        const detail = clean(step.detail)
+        if (toolName) {
+          if (status === 'start' || status === 'active' || !status) {
+            const metaParts = []
+            if (argumentsSummary && argumentsSummary !== '无参数') metaParts.push(`参数：${argumentsSummary}`)
+            const toolItem = makeTextItem({
+              id: `${step.id || index}-tool-start`,
+              kind: 'tool',
+              text: `调用工具：${formatTool(toolName)}`,
+              metaText: metaParts.join('；'),
+              state: step.state,
+            })
+            if (toolItem) items.push(toolItem)
+            return
+          }
+          const metaParts = []
+          if (evidenceSummary) metaParts.push(`证据：${evidenceSummary}`)
+          if (warningSummary) metaParts.push(`警告：${warningSummary}`)
+          const resultText = status === 'success'
+            ? (resultSummary || detail || `${formatTool(toolName)}已返回结果。`)
+            : (detail || `${formatTool(toolName)}没有完成。`)
+          const resultItem = makeTextItem({
+            id: `${step.id || index}-tool-result`,
+            kind: status === 'success' ? 'result' : 'warning',
+            text: resultText,
+            metaText: metaParts.join('；'),
+            state: step.state,
+          })
+          if (resultItem) items.push(resultItem)
+          return
+        }
+        const text = clean(detail || step.title)
+        const plainItem = makeTextItem({
+          id: step.id || `process-${index}`,
+          kind: 'text',
+          text,
+          state: step.state,
+        })
+        if (plainItem) items.push(plainItem)
+      })
+      const planChecklist = this.getAgentPlanChecklist()
+      if (planChecklist.visible && !items.some((item) => item.id === 'agent-plan-summary')) {
+        const planItem = makeTextItem({
+          id: 'agent-plan-summary',
+          kind: 'text',
+          text: planChecklist.summary || '我已经列出这轮要检查的证据和工具顺序。',
+          metaText: planChecklist.progressLabel,
+          state: 'completed',
+        })
+        if (planItem) items.push(planItem)
+      }
+      const taskConfirmation = this.getAgentTaskConfirmation()
+      if (taskConfirmation) {
+        const taskItem = makeTextItem({
+          id: `agent-task-${taskConfirmation.taskKey || 'confirmation'}`,
+          kind: 'warning',
+          text: taskConfirmation.description || `${taskConfirmation.label || '分析任务'}需要确认后继续。`,
+          metaText: taskConfirmation.parameterSummary || taskConfirmation.resultUsage,
+          state: this.getAgentTaskConfirmationProcessState(taskConfirmation.status),
+        })
+        if (taskItem) items.push(taskItem)
+      }
+      return items
     },
     getAgentProcessRoleGroups() {
       const roleMeta = {

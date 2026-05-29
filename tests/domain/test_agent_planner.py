@@ -47,6 +47,29 @@ def test_planner_area_character_prefers_scene_pack():
     assert result.question_type == "area_character"
 
 
+def test_planner_next_analysis_uses_analysis_options_tool():
+    snapshot = _snapshot_with_scope(
+        poi_summary={"total": 10},
+        h3={"summary": {"grid_count": 4}},
+        population={"summary": {"total_population": 1000}},
+        nightlight={"summary": {"max_radiance": 4.0}},
+        road={"summary": {"node_count": 8}},
+    )
+    memory = WorkingMemory(artifacts={"scope_polygon": snapshot.scope["polygon"]})
+
+    result = build_planning_fallback(
+        question="下一步做什么分析",
+        snapshot=snapshot,
+        memory=memory,
+    )
+
+    tool_names = [step.tool_name for step in result.steps]
+    assert result.question_type == "next_analysis"
+    assert tool_names[:2] == ["read_current_scope", "read_current_results"]
+    assert "rank_next_analysis_options" in tool_names
+    assert "run_area_character_pack" not in tool_names
+
+
 def test_planner_area_character_still_uses_scene_pack_when_dimensions_empty():
     snapshot = _snapshot_with_scope(
         poi_summary={"total": 2931},
@@ -96,7 +119,7 @@ def test_planner_site_selection_prefers_scene_pack():
             "scope_polygon": snapshot.scope["polygon"],
             "current_pois": [{"id": "coffee-1"}],
             "current_poi_summary": {"total": 5, "types": "050500|050501|050502|050503|050504", "keywords": "咖啡厅"},
-            "current_h3_summary": {"grid_count": 4, "avg_density_poi_per_km2": 5.2},
+            "current_poi_h3_summary": {"grid_count": 4, "avg_density_poi_per_km2": 5.2},
         }
     )
 

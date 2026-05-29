@@ -225,7 +225,7 @@ export function runAnalysisBootstrapApp() {
                               this.clearH3GridDisplayOnLeave();
                           }
                           const baseStatus = this.h3GridCount > 0
-                              ? `已生成 ${this.h3GridCount} 个 H3 网格`
+                              ? `已生成 ${this.h3GridCount} 个 POI H3 网格`
                               : '已生成网络，但当前范围无可用网格';
                           this.h3GridStatus = this.isH3DisplayActive()
                               ? baseStatus
@@ -2999,6 +2999,9 @@ export function runAnalysisBootstrapApp() {
                                   typeof this.buildSelectedCategoryBuckets === 'function' ? this.buildSelectedCategoryBuckets() : [],
                                   this.allPoisDetails
                               );
+                          }
+                          if (typeof this.persistAnalysisArtifactQuietly === 'function') {
+                              this.persistAnalysisArtifactQuietly('road_syntax');
                           }
                       } catch (e) {
                           if (requestToken !== this.roadSyntaxRequestToken) {

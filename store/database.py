@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import make_url
 
 from core.config import settings
-from .models import AgentSession, Base, PoiResult
+from .models import AgentSession, AnalysisArtifact, Base, PoiResult
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +32,17 @@ def _build_engine(db_uri: str | None = None):
     if "pymysql" in drivername:
         connect_args = {
             "connect_timeout": 5,
-            "read_timeout": 10,
-            "write_timeout": 10,
+            "read_timeout": 30,
+            "write_timeout": 30,
         }
 
     return create_engine(
         effective_db_uri,
         future=True,
         pool_pre_ping=True,  # Auto-reconnect
-        pool_recycle=3600,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=5,
         connect_args=connect_args,
     )
 
@@ -92,6 +94,15 @@ def _ensure_poi_results_schema() -> None:
         logger.debug("poi_results multi-year unique index already exists or could not be created", exc_info=True)
 
 
+def _ensure_analysis_artifacts_schema() -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("analysis_artifacts"):
+        AnalysisArtifact.__table__.create(bind=engine, checkfirst=True)
+        return
+    for index in AnalysisArtifact.__table__.indexes:
+        index.create(bind=engine, checkfirst=True)
+
+
 def init_db() -> None:
     """
     创建表结构（幂等）。
@@ -99,4 +110,5 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_agent_sessions_schema()
     _ensure_poi_results_schema()
+    _ensure_analysis_artifacts_schema()
     logger.info("数据库初始化完成")

@@ -17,7 +17,9 @@ from ..tools import RegisteredTool
 from .prompts import loop_system_prompt
 from .tool_loop import (
     chat_completion_tools,
-    tool_output_payload,
+    context_digest,
+    snapshot_digest,
+    summarize_tool_result,
 )
 from .tool_call_execution import execute_tool_call_step, tool_finish_trace_payload, tool_start_trace_payload
 
@@ -45,6 +47,73 @@ def _safe_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+def _shape_summary(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return {"type": "object", "key_count": len(value), "keys": list(value.keys())[:20]}
+    if isinstance(value, list):
+        return {"type": "array", "count": len(value)}
+    return {"type": type(value).__name__}
+
+
+def _compact_for_llm(value: Any, *, depth: int = 0, max_depth: int = 5) -> Any:
+    if value in (None, "", [], {}):
+        return value
+    if isinstance(value, str):
+        return value if len(value) <= 600 else f"{value[:600]}..."
+    if isinstance(value, (int, float, bool)):
+        return value
+    if depth >= max_depth:
+        return _shape_summary(value)
+    if isinstance(value, list):
+        if len(value) <= 12:
+            return [_compact_for_llm(item, depth=depth + 1, max_depth=max_depth) for item in value]
+        return {
+            "type": "array",
+            "count": len(value),
+            "sample": [_compact_for_llm(item, depth=depth + 1, max_depth=max_depth) for item in value[:8]],
+        }
+    if isinstance(value, dict):
+        items = list(value.items())
+        compacted = {
+            str(key): _compact_for_llm(item, depth=depth + 1, max_depth=max_depth)
+            for key, item in items[:30]
+        }
+        if len(items) > 30:
+            compacted["_truncated"] = {
+                "total_keys": len(items),
+                "omitted_keys": [str(key) for key, _ in items[30:50]],
+            }
+        return compacted
+    return str(value)
+
+
+def _react_context_digest(context: ContextBundle) -> Dict[str, Any]:
+    digest = context_digest(context)
+    analysis = digest.get("analysis") if isinstance(digest.get("analysis"), dict) else {}
+    frontend_analysis = analysis.get("frontend_analysis") if isinstance(analysis.get("frontend_analysis"), dict) else {}
+    if frontend_analysis:
+        analysis["frontend_analysis"] = {
+            "available_sections": list(frontend_analysis.keys())[:20],
+            "section_count": len(frontend_analysis),
+        }
+    digest["analysis"] = analysis
+    return _compact_for_llm(digest, max_depth=5)
+
+
+def _react_tool_result_payload(result: ToolResult) -> str:
+    payload = {
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "result_summary": summarize_tool_result(result),
+        "result": _compact_for_llm(result.result, max_depth=4),
+        "evidence": _compact_for_llm(result.evidence, max_depth=4),
+        "warnings": list(result.warnings or [])[:8],
+        "error": result.error,
+        "artifact_keys": list((result.artifacts or {}).keys())[:20],
+    }
+    return _safe_json(payload)
+
+
 def _initial_payload(
     *,
     question: str,
@@ -54,14 +123,8 @@ def _initial_payload(
 ) -> Dict[str, Any]:
     return {
         "question": question,
-        "analysis_snapshot": snapshot.model_dump(mode="json"),
-        "context": {
-            "facts": dict(context.facts or {}),
-            "analysis": dict(context.analysis or {}),
-            "limits": list(context.limits or []),
-            "available_artifacts": list(context.available_artifacts or []),
-            "context_summary": context.context_summary.model_dump(mode="json"),
-        },
+        "analysis_snapshot_digest": _compact_for_llm(snapshot_digest(snapshot), max_depth=5),
+        "context_digest": _react_context_digest(context),
         "tool_catalog": [
             {
                 "name": name,
@@ -251,7 +314,7 @@ async def run_langgraph_react_loop(
 
             next_messages.append(
                 ToolMessage(
-                    content=tool_output_payload(tool_result),
+                    content=_react_tool_result_payload(tool_result),
                     tool_call_id=str(call.get("id") or tool_name),
                     name=tool_name,
                 )

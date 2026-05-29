@@ -186,6 +186,14 @@ test('loadHistoryDetail keeps restored history id and history scope source', asy
     },
   }
   global.fetch = async (url) => {
+    if (url === '/api/v1/analysis/history/123/artifacts') {
+      return {
+        ok: true,
+        async json() {
+          return []
+        },
+      }
+    }
     assert.equal(url, '/api/v1/analysis/history/123?include_pois=false')
     return {
       ok: true,
@@ -216,6 +224,64 @@ test('loadHistoryDetail keeps restored history id and history scope source', asy
   assert.equal(ctx.scopeSource, 'history')
   assert.equal(ctx.restoredPoiHistoryId, '123')
   assert.deepEqual(ctx.allPoisDetails, [{ id: 'history-poi' }])
+})
+
+test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () => {
+  const originalFetch = global.fetch
+  const ctx = Object.assign(createHistoryRestoreContext(), historyMethods, {
+    historyDetailLoadToken: 1,
+    commitCurrentPoiGridResult(type, year) {
+      this.committedPoiGrid = { type, year }
+    },
+    restorePoiRasterGridDisplayOnEnter() {
+      this.restoredRasterDisplay = true
+    },
+    _restoreHistoryH3ResultAsync(payload) {
+      this.h3AnalysisSummary = payload.summary
+      return true
+    },
+    _restoreHistoryRoadResultAsync(payload) {
+      this.roadSyntaxSummary = payload.summary
+      return true
+    },
+    $nextTick(callback) {
+      if (typeof callback === 'function') callback()
+      return Promise.resolve()
+    },
+    updatePopulationCharts() {
+      this.populationChartsUpdated = true
+    },
+  })
+  global.fetch = async (url) => {
+    assert.equal(url, '/api/v1/analysis/history/history-1/artifacts')
+    return {
+      ok: true,
+      json: async () => [
+        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-01', payload: { year: 2024, features: [{ properties: { cell_id: 'cell-1' } }], summary: { grid_count: 1 } } },
+        { artifact_type: 'poi_h3_grid', updated_at: '2026-01-01', payload: { summary: { grid_count: 2 } } },
+        { artifact_type: 'population', updated_at: '2026-01-01', payload: { year: '2026', overview: { summary: { total_population: 10 } }, layer_cells: [{ cell_id: 'p1' }] } },
+        { artifact_type: 'nightlight', updated_at: '2026-01-01', payload: { year: 2025, overview: { summary: { mean_radiance: 3 } }, layer_cells: [{ cell_id: 'n1' }] } },
+        { artifact_type: 'road_syntax', updated_at: '2026-01-01', payload: { summary: { node_count: 5 } } },
+      ],
+    }
+  }
+
+  try {
+    const result = await ctx.restoreHistoryArtifactsAsync('history-1', 1)
+
+    assert.equal(result.rasterRestored, true)
+    assert.equal(result.h3Restored, true)
+    assert.equal(result.populationRestored, true)
+    assert.equal(result.nightlightRestored, true)
+    assert.equal(result.roadRestored, true)
+    assert.equal(ctx.poiGridSummary.grid_count, 1)
+    assert.equal(ctx.h3AnalysisSummary.grid_count, 2)
+    assert.equal(ctx.populationOverview.summary.total_population, 10)
+    assert.equal(ctx.nightlightOverview.summary.mean_radiance, 3)
+    assert.equal(ctx.roadSyntaxSummary.node_count, 5)
+  } finally {
+    global.fetch = originalFetch
+  }
 })
 
 test('_restoreHistoryPoisAsync includes backend detail in failure message', async () => {

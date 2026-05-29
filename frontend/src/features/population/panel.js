@@ -1063,6 +1063,9 @@ function createAnalysisPopulationMethods() {
         this.$nextTick(() => {
           this.updatePopulationCharts()
         })
+        if (typeof this.persistAnalysisArtifactQuietly === 'function') {
+          this.persistAnalysisArtifactQuietly('population')
+        }
       } catch (e) {
         console.error(e)
         this.populationStatus = '人口分析失败: ' + (e && e.message ? e.message : String(e))

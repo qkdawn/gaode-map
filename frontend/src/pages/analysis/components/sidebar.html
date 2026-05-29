@@ -722,61 +722,6 @@
                                             @click="onH3MainStageChange('evaluate')">评估</button>
                                     </div>
                                     <div v-if="h3MainStage === 'params'" class="h3-params-card">
-                                        <div class="h3-params-grid">
-                                            <label class="h3-params-field h3-params-field-wide">
-                                                <span class="h3-params-label">网格类型</span>
-                                                <select v-model="poiGridType" @change="setPoiGridType(poiGridType)" class="h3-params-select">
-                                                    <option value="raster">栅格</option>
-                                                    <option value="hex">六边形格子</option>
-                                                </select>
-                                            </label>
-                                        </div>
-                                        <div class="h3-analysis-hint" style="margin-top:8px;">
-                                            多年 POI 网格按年份和类型独立保存；栅格用于同源 cell_id 耦合，H3 用于六边形空间结构。
-                                        </div>
-                                        <div class="h3-params-actions" style="margin-top:8px;">
-                                            <button class="h3-btn h3-btn-ghost"
-                                                :disabled="isLoadingPoiGrid || isComputingH3Analysis"
-                                                @click="ensureAllPoiGridMatrixResults(false)">
-                                                补齐多年栅格/H3
-                                            </button>
-                                        </div>
-                                        <div class="poi-fetch-error-list" style="margin-top:8px;">
-                                            <div
-                                                v-for="row in getPoiGridMatrixRows()"
-                                                :key="`poi-grid-matrix-${row.key}`"
-                                                class="poi-fetch-error-row"
-                                                :class="{ 'h3-row-active': row.active }">
-                                                <div class="poi-fetch-error-meta">
-                                                    <strong>{{ row.year }} · {{ row.label }}</strong>
-                                                    <span>{{ getPoiGridResultStatusLabel(row.status) }} · {{ row.count || 0 }} 格</span>
-                                                </div>
-                                                <div class="poi-fetch-error-message">
-                                                    <button type="button" class="btn-outline btn-compact" @click="onPoiGridMatrixSelect(row)">查看</button>
-                                                    <button type="button" class="btn-outline btn-compact" :disabled="row.status === 'running'" @click="generatePoiGridMatrixCell(row, true)">
-                                                        {{ row.status === 'ready' ? '重算' : '生成' }}
-                                                    </button>
-                                                </div>
-                                                <div v-if="row.error" class="poi-fetch-error-message">{{ row.error }}</div>
-                                            </div>
-                                        </div>
-                                        <div class="h3-params-chips" v-if="isPoiRasterGridMode()">
-                                            <span class="count-badge">栅格数 {{ (poiGridSummary && poiGridSummary.grid_count) || poiGridFeatures.length || 0 }}</span>
-                                            <span class="count-badge">含POI {{ (poiGridSummary && poiGridSummary.active_cell_count) || 0 }}</span>
-                                            <span class="count-badge">POI {{ (poiGridSummary && poiGridSummary.assigned_poi_count) || 0 }}</span>
-                                        </div>
-                                        <div class="h3-params-chips" v-else>
-                                            <span class="count-badge">网格数 {{ h3GridCount }}</span>
-                                        </div>
-                                        <div v-if="isPoiRasterGridMode() && poiGridStatus" class="h3-analysis-hint" style="margin-top:8px;">
-                                            {{ poiGridStatus }}
-                                        </div>
-                                        <div v-if="isPoiRasterGridMode() && !poiGridFeatures.length && !isLoadingPoiGrid" class="panel-placeholder" style="margin-top:8px;">
-                                            当前尚未生成 POI 栅格，请点击“开始分析”后查看分析、诊断和评估。
-                                        </div>
-                                        <div v-if="!isPoiRasterGridMode() && h3GridCount === 0 && !isComputingH3Analysis" class="panel-placeholder" style="margin-top:8px;">
-                                            当前尚未生成 POI 六边形格子，请点击“开始分析”后查看分析、诊断和评估。
-                                        </div>
                                         <div v-if="isPoiRasterGridMode() && poiGridSummary" style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                                             <div class="count-badge">最高POI {{ poiGridSummary.max_poi_count || 0 }}</div>
                                             <div class="count-badge">平均密度 {{ Number(poiGridSummary.avg_density_poi_per_km2 || 0).toFixed(2) }}</div>
@@ -854,7 +799,7 @@
                                         </div>
                                     </div>
                                     <div v-if="isPoiRasterGridMode() && h3MainStage !== 'params' && !poiGridFeatures.length" class="panel-placeholder" style="margin-top:10px;">
-                                        当前还没有 POI 栅格结果。请先回到“参数”页点击“生成栅格”。
+                                        当前还没有 POI 共享栅格结果。请先回到“参数”页点击“生成栅格”。
                                     </div>
                                     <div class="filter-section h3-control-row h3-control-row-tight"
                                         v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && (h3MainStage === 'diagnosis' || h3MainStage === 'evaluate')"
@@ -878,7 +823,7 @@
                                     </div>
                                     <div v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && h3MainStage === 'analysis'" style="margin-top:10px;">
                                         <div class="h3-analysis-hint">
-                                            POI 栅格按人口/夜光同源 cell_id 聚合，仅用于判断 POI 供给分布、密度和主导业态。
+                                            POI 共享栅格按人口/夜光同源 cell_id 聚合，用于 POI-人口-夜光耦合判断。
                                         </div>
                                         <div class="h3-decision-cards">
                                             <div class="h3-decision-card">

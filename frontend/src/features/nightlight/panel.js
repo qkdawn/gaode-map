@@ -481,6 +481,9 @@ function createAnalysisNightlightMethods() {
         if (this.isNightlightDisplayActive()) {
           this.applyNightlightGridToMap()
         }
+        if (typeof this.persistAnalysisArtifactQuietly === 'function') {
+          this.persistAnalysisArtifactQuietly('nightlight')
+        }
       } catch (e) {
         console.error(e)
         this.nightlightStatus = '夜光分析失败: ' + (e && e.message ? e.message : String(e))

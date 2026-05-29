@@ -100,9 +100,9 @@ function buildPoiGridParamBundle(ctx = {}) {
     domain: 'poi',
     params,
     evidenceParams: {
-      description: 'POI 同时按人口/夜光同源栅格和 H3 六边形格子计算。',
-      raster_usage: '用于人口、POI、夜光 cell_id 对齐。',
-      hex_usage: '用于 H3 空间统计、热点和聚集分析。',
+      description: 'POI 同时按共享 cell_id 栅格和 POI H3 六边形网格计算。',
+      raster_usage: 'POI 共享栅格用于和人口/夜光按同一 cell_id 对齐。',
+      hex_usage: 'POI H3 六边形网格用于 POI 供给、密度结构、热点和聚集分析。',
       current_display_grid_type: params.current_display_grid_type,
       computed_grid_types: cloneArray(params.computed_grid_types),
       raster: cloneObject(params.raster),
@@ -125,7 +125,7 @@ function buildPoiGridParamBundle(ctx = {}) {
         avg_local_entropy: toNumber(ctx.h3AnalysisSummary && ctx.h3AnalysisSummary.avg_local_entropy, 0),
       },
     },
-    displayLabel: `${year || '当前 POI 年份'}，${source || '当前 POI 数据'}，栅格 + H3，H3 res=${params.hex.h3_resolution}`,
+    displayLabel: `${year || '当前 POI 年份'}，${source || '当前 POI 数据'}，共享栅格 + POI H3，H3 res=${params.hex.h3_resolution}`,
   })
 }
 
@@ -146,8 +146,8 @@ function buildPoiRasterGridParamBundle(ctx = {}) {
     domain: 'poi',
     params,
     evidenceParams: {
-      description: 'POI 按人口/夜光同源 cell_id 栅格聚合。',
-      usage: '用于人口、POI、夜光共享网格交叉诊断。',
+      description: 'POI 共享栅格和人口/夜光按同一 cell_id 对齐。',
+      usage: '用于人口、POI、夜光共享栅格交叉诊断。',
       ...cloneObject(params),
     },
     resultRefs: {
@@ -160,7 +160,7 @@ function buildPoiRasterGridParamBundle(ctx = {}) {
         avg_density_poi_per_km2: toNumber(ctx.poiGridSummary && ctx.poiGridSummary.avg_density_poi_per_km2, 0),
       },
     },
-    displayLabel: `${year || '当前 POI 年份'}，${source || '当前 POI 数据'}，同源栅格`,
+    displayLabel: `${year || '当前 POI 年份'}，${source || '当前 POI 数据'}，POI 共享栅格`,
   })
 }
 
@@ -184,7 +184,7 @@ function buildPoiH3GridParamBundle(ctx = {}) {
     domain: 'poi',
     params,
     evidenceParams: {
-      description: 'POI 按 H3 六边形网格计算空间结构指标。',
+      description: 'POI H3 六边形网格按 H3 聚合 POI 供给和密度结构。',
       usage: '用于 POI 空间结构、热点、LISA、Gi*、LQ 和缺口分析。',
       ...cloneObject(params),
     },
@@ -197,7 +197,7 @@ function buildPoiH3GridParamBundle(ctx = {}) {
         avg_local_entropy: toNumber(ctx.h3AnalysisSummary && ctx.h3AnalysisSummary.avg_local_entropy, 0),
       },
     },
-    displayLabel: `${year || '当前 POI 年份'}，${source || '当前 POI 数据'}，H3 res=${params.h3_resolution}`,
+    displayLabel: `${year || '当前 POI 年份'}，${source || '当前 POI 数据'}，POI H3 res=${params.h3_resolution}`,
   })
 }
 

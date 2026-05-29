@@ -21,7 +21,7 @@ from .schemas import (
     ToolResult,
 )
 
-_ALL_BUSINESS_EVIDENCE = ["POI 供给证据", "H3 空间密度证据", "人口概览", "夜光概览", "路网概览"]
+_ALL_BUSINESS_EVIDENCE = ["POI 供给证据", "POI H3 密度证据", "人口概览", "夜光概览", "路网概览"]
 
 
 def _summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) -> Dict[str, object]:
@@ -47,6 +47,11 @@ def _infer_output_mode(question: str) -> str:
 
 
 def _evidence_headline(item: AgentEvidenceItem) -> str:
+    if item.metric == "next_analysis_options" and isinstance(item.value, dict):
+        options = [option for option in (item.value.get("options") or []) if isinstance(option, dict)]
+        if options:
+            return f"推荐下一步：{options[0].get('title') or '继续分析'}"
+        return "已评估下一步分析方向"
     if item.metric == "business_profile" and isinstance(item.value, dict):
         return f"商业画像偏向 {item.value.get('business_profile') or '未明确'}"
     if item.metric == "commercial_hotspots" and isinstance(item.value, dict):
@@ -59,7 +64,7 @@ def _evidence_headline(item: AgentEvidenceItem) -> str:
         return f"POI 样本量 {item.value}"
     if item.metric == "h3_density" and isinstance(item.value, dict):
         density = item.value.get("avg_density_poi_per_km2")
-        return f"H3 网格 {item.value.get('grid_count') or 0} 个，平均密度 {density if density is not None else '未提供'}"
+        return f"POI H3 网格 {item.value.get('grid_count') or 0} 个，平均密度 {density if density is not None else '未提供'}"
     if item.metric == "road_structure" and isinstance(item.value, dict):
         return f"路网节点 {item.value.get('node_count') or 0}、边段 {item.value.get('edge_count') or 0}"
     if item.metric == "population_profile" and isinstance(item.value, dict):
@@ -122,7 +127,9 @@ def _detect_conflicts(metrics: Dict[str, object], audit: AuditResult) -> List[st
 
 
 def _select_key_evidence(evidence: List[AgentEvidenceItem], *, question: str) -> List[DecisionEvidenceItem]:
-    if mentions_supply(question):
+    if any(token in question for token in ("下一步", "继续", "还可以", "做什么分析", "还能分析")):
+        preferred_order = ["next_analysis_options", "poi_count", "h3_density", "population_profile", "nightlight_activity", "road_structure"]
+    elif mentions_supply(question):
         preferred_order = ["target_supply_gap", "business_site_advice", "commercial_hotspots", "h3_density", "road_structure"]
     elif mentions_nightlight(question):
         preferred_order = ["nightlight_activity", "population_profile", "road_structure", "poi_count"]
@@ -232,6 +239,19 @@ def _build_boundary_items(limits: List[str]) -> List[DecisionBoundaryItem]:
 
 def _build_action_items(*, question: str, metrics: Dict[str, object], audit: AuditResult, decision_strength: str) -> List[DecisionActionItem]:
     items: List[DecisionActionItem] = []
+    next_options = [item for item in (metrics.get("next_analysis_options") or []) if isinstance(item, dict)]
+    if next_options:
+        for option in next_options[:3]:
+            items.append(
+                DecisionActionItem(
+                    title=str(option.get("title") or "下一步分析"),
+                    detail=str(option.get("why") or ""),
+                    condition=str(option.get("application") or "当你要继续推进当前分析时"),
+                    target="next_analysis",
+                    prompt=str(option.get("prompt") or option.get("title") or ""),
+                )
+            )
+        return items
     if metrics.get("target_supply_gap_level") in {"medium", "high"}:
         place_type = _as_text(metrics.get("target_supply_gap_place_type"), "目标业态")
         items.append(
@@ -328,6 +348,9 @@ def _metric_items_for_question(question: str, audit: AuditResult, metrics: Dict[
             f"目标业态缺口：{metrics.get('target_supply_gap_place_type') or '未指定'} / "
             f"{metrics['target_supply_gap_level']} / {metrics.get('target_supply_gap_mode') or 'unclear'}"
         )
+    next_options = [item for item in (metrics.get("next_analysis_options") or []) if isinstance(item, dict)]
+    if next_options:
+        items.append("下一步分析方向：" + "、".join(str(item.get("title") or "") for item in next_options[:3] if str(item.get("title") or "").strip()))
     candidate_zones = metrics.get("target_supply_gap_candidates") or []
     if candidate_zones:
         items.append(f"候选格子：{len(candidate_zones)} 个")
@@ -341,7 +364,7 @@ def _metric_items_for_question(question: str, audit: AuditResult, metrics: Dict[
         items.append(f"POI 样本量：{metrics['poi_count']}")
     if metrics.get("h3_grid_count") or metrics.get("avg_density_poi_per_km2") is not None:
         density = metrics.get("avg_density_poi_per_km2")
-        items.append(f"H3 网格：{metrics.get('h3_grid_count') or 0} 个，平均密度：{density if density is not None else '未提供'}")
+        items.append(f"POI H3 网格：{metrics.get('h3_grid_count') or 0} 个，平均密度：{density if density is not None else '未提供'}")
     if metrics.get("population_total") is not None:
         items.append(f"人口总量：{metrics['population_total']}")
     if metrics.get("nightlight_mean_radiance") is not None:
@@ -538,9 +561,9 @@ def build_synthesis_payload(
 
 
 def build_next_suggestions(question: str, audit: AuditResult) -> List[str]:
-    suggestions = ["继续追问更具体的业态、路网或空间结构问题。"]
+    suggestions: List[str] = []
     if audit.missing_evidence:
-        suggestions.insert(0, f"如需更完整结论，可以继续补充 {'、'.join(audit.missing_evidence)} 相关分析。")
+        suggestions.append(f"如需更完整结论，可以继续补充 {'、'.join(audit.missing_evidence)} 相关分析。")
     if mentions_population(question):
         suggestions.append("继续追问年龄结构或与周边商业供给的匹配关系。")
     return suggestions
@@ -548,7 +571,7 @@ def build_next_suggestions(question: str, audit: AuditResult) -> List[str]:
 
 def build_citations(snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) -> List[str]:
     citations: List[str] = []
-    if artifacts.get("current_h3_summary") or (snapshot.h3 or {}).get("summary"):
+    if artifacts.get("current_poi_h3_summary") or (snapshot.h3 or {}).get("summary"):
         citations.append("analysis_snapshot.h3.summary")
     if artifacts.get("current_road_summary") or (snapshot.road or {}).get("summary"):
         citations.append("analysis_snapshot.road.summary")
@@ -558,7 +581,7 @@ def build_citations(snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) ->
         citations.append("analysis_snapshot.nightlight.summary")
     if artifacts.get("current_pois") or snapshot.pois or snapshot.poi_summary:
         citations.append("analysis_snapshot.pois")
-    for key in ("business_site_advice", "current_business_profile", "current_commercial_hotspots", "current_target_supply_gap"):
+    for key in ("business_site_advice", "current_business_profile", "current_commercial_hotspots", "current_target_supply_gap", "current_next_analysis_options"):
         if artifacts.get(key):
             citations.append(key)
     return citations
@@ -628,17 +651,17 @@ def build_panel_payloads(question: str, snapshot: AnalysisSnapshot, artifacts: D
         "evidence_refs": evidence_refs,
         "confidence": "moderate" if len(evidence_refs) >= 2 else "weak",
     }
-    if not (mentions_supply(question) or mentions_summary(question) or "current_h3" in artifacts or "current_h3_grid" in artifacts):
+    if not (mentions_supply(question) or mentions_summary(question) or "current_poi_h3" in artifacts or "current_poi_h3_grid" in artifacts):
         return payloads
-    current_h3 = artifacts.get("current_h3") if isinstance(artifacts.get("current_h3"), dict) else {}
-    current_h3_grid = artifacts.get("current_h3_grid") if isinstance(artifacts.get("current_h3_grid"), dict) else {}
-    current_h3_summary = artifacts.get("current_h3_summary") if isinstance(artifacts.get("current_h3_summary"), dict) else {}
-    current_h3_charts = artifacts.get("current_h3_charts") if isinstance(artifacts.get("current_h3_charts"), dict) else {}
+    poi_h3_payload = artifacts.get("current_poi_h3") if isinstance(artifacts.get("current_poi_h3"), dict) else {}
+    current_poi_h3_grid = artifacts.get("current_poi_h3_grid") if isinstance(artifacts.get("current_poi_h3_grid"), dict) else {}
+    current_poi_h3_summary = artifacts.get("current_poi_h3_summary") if isinstance(artifacts.get("current_poi_h3_summary"), dict) else {}
+    current_poi_h3_charts = artifacts.get("current_poi_h3_charts") if isinstance(artifacts.get("current_poi_h3_charts"), dict) else {}
     target_supply_gap = artifacts.get("current_target_supply_gap") if isinstance(artifacts.get("current_target_supply_gap"), dict) else {}
     h3_structure = artifacts.get("current_h3_structure_analysis") if isinstance(artifacts.get("current_h3_structure_analysis"), dict) else {}
-    grid = current_h3_grid or (current_h3.get("grid") if isinstance(current_h3.get("grid"), dict) else {})
-    summary = current_h3_summary or (current_h3.get("summary") if isinstance(current_h3.get("summary"), dict) else {})
-    charts = current_h3_charts or (current_h3.get("charts") if isinstance(current_h3.get("charts"), dict) else {})
+    grid = current_poi_h3_grid or (poi_h3_payload.get("grid") if isinstance(poi_h3_payload.get("grid"), dict) else {})
+    summary = current_poi_h3_summary or (poi_h3_payload.get("summary") if isinstance(poi_h3_payload.get("summary"), dict) else {})
+    charts = current_poi_h3_charts or (poi_h3_payload.get("charts") if isinstance(poi_h3_payload.get("charts"), dict) else {})
     has_h3_payload = bool((grid or {}).get("features")) or bool(summary)
     if has_h3_payload:
         payloads["h3_result"] = {

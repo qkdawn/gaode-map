@@ -145,13 +145,13 @@ def is_target_supply_gap_ready(payload: Dict[str, Any] | None) -> bool:
     return bool(_safe_list(item.get("candidate_zones")) or _safe_list(item.get("gap_zones"))) or gap_mode in {"overall_shortage", "spatial_mismatch"}
 
 
-def _current_h3_grid(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
-    artifact_grid = artifacts.get("current_h3_grid")
+def _current_poi_h3_grid(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    artifact_grid = artifacts.get("current_poi_h3_grid")
     if isinstance(artifact_grid, dict):
         return dict(artifact_grid)
-    current_h3 = artifacts.get("current_h3")
-    if isinstance(current_h3, dict) and isinstance(current_h3.get("grid"), dict):
-        return dict(current_h3.get("grid") or {})
+    poi_h3_payload = artifacts.get("current_poi_h3")
+    if isinstance(poi_h3_payload, dict) and isinstance(poi_h3_payload.get("grid"), dict):
+        return dict(poi_h3_payload.get("grid") or {})
     h3_payload = getattr(snapshot, "h3", {})
     if isinstance(h3_payload, dict) and isinstance(h3_payload.get("grid"), dict):
         return dict(h3_payload.get("grid") or {})
@@ -336,7 +336,7 @@ def _target_candidate_zones(
     artifacts: Dict[str, Any],
     gap_zones: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    features = _safe_list(_current_h3_grid(snapshot, artifacts).get("features"))
+    features = _safe_list(_current_poi_h3_grid(snapshot, artifacts).get("features"))
     feature_lookup = {}
     for feature in features:
         props = _safe_dict(_safe_dict(feature).get("properties"))

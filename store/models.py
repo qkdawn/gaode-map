@@ -99,6 +99,37 @@ class PoiResult(Base):
     )
 
 
+class AnalysisArtifact(Base):
+    """
+    可复用分析证据单元。
+    """
+    __tablename__ = "analysis_artifacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    history_id = Column(String(64), ForeignKey("analysis_history.id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact_type = Column(String(64), nullable=False, index=True)
+    params_hash = Column(String(64), nullable=False, index=True)
+    params = Column(JSON, nullable=False, default=dict)
+    scope_fingerprint = Column(String(128), nullable=False, default="", index=True)
+    data_version = Column(String(32), nullable=False, default="v1", index=True)
+    payload = Column(JSON, nullable=False, default=dict)
+    summary = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "history_id",
+            "artifact_type",
+            "params_hash",
+            "scope_fingerprint",
+            "data_version",
+            name="uq_analysis_artifact_identity",
+        ),
+        Index("ix_analysis_artifacts_history_type", "history_id", "artifact_type"),
+    )
+
+
 class AgentSession(Base):
     """
     AI 面板历史记录

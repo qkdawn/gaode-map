@@ -411,24 +411,21 @@ async def run_gate_with_llm(
     rule_decision = run_gate(messages, snapshot)
     if rule_decision.status in {"clarify", "block"}:
         return rule_decision
-    try:
-        payload = await _invoke_json_role(
-            system_prompt=_gate_system_prompt(),
-            user_payload={
-                "messages": _trim_messages(messages),
-                "latest_user_message": latest_user_message(messages),
-                "analysis_snapshot_digest": snapshot_digest(snapshot),
-                "context_digest": context_digest(context),
-                "context_summary": context.context_summary.model_dump(),
-            },
-            emit=emit,
-            phase="gating",
-            title="门卫判断问题是否清晰",
-            reasoning_id="gatekeeper-reasoning",
-        )
-        decision = GateDecision(**payload)
-    except Exception:
-        return rule_decision
+    payload = await _invoke_json_role(
+        system_prompt=_gate_system_prompt(),
+        user_payload={
+            "messages": _trim_messages(messages),
+            "latest_user_message": latest_user_message(messages),
+            "analysis_snapshot_digest": snapshot_digest(snapshot),
+            "context_digest": context_digest(context),
+            "context_summary": context.context_summary.model_dump(),
+        },
+        emit=emit,
+        phase="gating",
+        title="门卫判断问题是否清晰",
+        reasoning_id="gatekeeper-reasoning",
+    )
+    decision = GateDecision(**payload)
     if decision.status == "clarify":
         fallback_options = _clarification_options(latest_user_message(messages), snapshot)[:3]
         normalized_options = [str(item).strip() for item in (decision.clarification_options or []) if str(item).strip()]
@@ -457,31 +454,28 @@ async def plan_with_llm(
         audit_feedback=audit_feedback,
     )
     question_archetype = planner_question_archetype(question)
-    try:
-        payload = await _invoke_json_role(
-            system_prompt=_planner_system_prompt(),
-            user_payload={
-                "messages": _trim_messages(messages),
-                "latest_user_message": question,
-                "question_archetype": question_archetype,
-                "analysis_snapshot_digest": snapshot_digest(snapshot),
-                "context_digest": context_digest(context),
-                "context_summary": context.context_summary.model_dump(),
-                "artifact_digest": artifact_digest(snapshot, memory),
-                "available_tools": tool_catalog(visible_registry),
-                "available_artifacts": list(memory.artifacts.keys()),
-                "tool_routing_hints": planner_tool_routing_hints(),
-                "audit_feedback": dict(audit_feedback or {}),
-                "fallback_plan": fallback.model_dump(mode="json"),
-            },
-            emit=emit,
-            phase="planning",
-            title="规划本轮分析步骤",
-            reasoning_id="planner-reasoning",
-        )
-        plan = PlanningResult(**payload)
-    except Exception:
-        return fallback
+    payload = await _invoke_json_role(
+        system_prompt=_planner_system_prompt(),
+        user_payload={
+            "messages": _trim_messages(messages),
+            "latest_user_message": question,
+            "question_archetype": question_archetype,
+            "analysis_snapshot_digest": snapshot_digest(snapshot),
+            "context_digest": context_digest(context),
+            "context_summary": context.context_summary.model_dump(),
+            "artifact_digest": artifact_digest(snapshot, memory),
+            "available_tools": tool_catalog(visible_registry),
+            "available_artifacts": list(memory.artifacts.keys()),
+            "tool_routing_hints": planner_tool_routing_hints(),
+            "audit_feedback": dict(audit_feedback or {}),
+            "fallback_plan": fallback.model_dump(mode="json"),
+        },
+        emit=emit,
+        phase="planning",
+        title="规划本轮分析步骤",
+        reasoning_id="planner-reasoning",
+    )
+    plan = PlanningResult(**payload)
     plan.goal = plan.goal or fallback.goal
     plan.question_type = plan.question_type or fallback.question_type
     plan.summary = plan.summary or fallback.summary
@@ -503,40 +497,25 @@ async def audit_with_llm(
     replan_count: int,
     emit: LoopEmit | None = None,
 ) -> AuditVerdict:
-    fallback = AuditVerdict(
-        status="replan" if rule_audit.missing_evidence else "pass",
-        summary="当前证据仍需补齐。" if rule_audit.missing_evidence else "当前证据已满足最低回答条件。",
-        issues=list(rule_audit.issues or []),
-        missing_evidence=list(rule_audit.missing_evidence or []),
-        replan_instructions=(
-            f"请围绕 {'、'.join(rule_audit.missing_evidence)} 重新规划补证步骤。"
-            if rule_audit.missing_evidence
-            else ""
-        ),
-        should_answer=not bool(rule_audit.missing_evidence),
+    payload = await _invoke_json_role(
+        system_prompt=_auditor_system_prompt(),
+        user_payload={
+            "question": question,
+            "analysis_snapshot_digest": snapshot_digest(snapshot),
+            "context_digest": context_digest(context),
+            "plan": plan.model_dump(mode="json"),
+            "tool_results": [item.model_dump(mode="json") for item in (memory.tool_results or [])],
+            "execution_trace": [item.model_dump(mode="json") for item in (memory.execution_trace or [])],
+            "available_artifacts": list(memory.artifacts.keys()),
+            "rule_audit": rule_audit.model_dump(mode="json"),
+            "replan_count": int(replan_count),
+        },
+        emit=emit,
+        phase="auditing",
+        title="审计本轮结果是否足够回答问题",
+        reasoning_id="auditor-reasoning",
     )
-    try:
-        payload = await _invoke_json_role(
-            system_prompt=_auditor_system_prompt(),
-            user_payload={
-                "question": question,
-                "analysis_snapshot_digest": snapshot_digest(snapshot),
-                "context_digest": context_digest(context),
-                "plan": plan.model_dump(mode="json"),
-                "tool_results": [item.model_dump(mode="json") for item in (memory.tool_results or [])],
-                "execution_trace": [item.model_dump(mode="json") for item in (memory.execution_trace or [])],
-                "available_artifacts": list(memory.artifacts.keys()),
-                "rule_audit": rule_audit.model_dump(mode="json"),
-                "replan_count": int(replan_count),
-            },
-            emit=emit,
-            phase="auditing",
-            title="审计本轮结果是否足够回答问题",
-            reasoning_id="auditor-reasoning",
-        )
-        verdict = AuditVerdict(**payload)
-    except Exception:
-        return fallback
+    verdict = AuditVerdict(**payload)
     verdict.issues = list(dict.fromkeys(list(verdict.issues or []) + list(rule_audit.issues or [])))
     verdict.missing_evidence = list(
         dict.fromkeys(list(verdict.missing_evidence or []) + list(rule_audit.missing_evidence or []))

@@ -52,7 +52,7 @@ def register_foundation_tools(registry: Dict[str, RegisteredTool]) -> None:
             llm_exposure="primary",
             evidence_contract=[
                 "current_poi_summary",
-                "current_h3_summary",
+                "current_poi_h3_summary",
                 "current_population_summary",
                 "current_nightlight_summary",
                 "current_road_summary",
@@ -61,7 +61,10 @@ def register_foundation_tools(registry: Dict[str, RegisteredTool]) -> None:
             produces=[
                 "current_pois",
                 "current_poi_summary",
-                "current_h3_summary",
+                "current_poi_h3",
+                "current_poi_h3_grid",
+                "current_poi_h3_summary",
+                "current_poi_h3_charts",
                 "current_road_summary",
                 "current_population_summary",
                 "current_nightlight_summary",
@@ -127,7 +130,7 @@ def register_foundation_tools(registry: Dict[str, RegisteredTool]) -> None:
     registry["build_h3_grid_from_scope"] = _register(
         _tool_spec(
             name="build_h3_grid_from_scope",
-            description="根据当前 scope 生成 H3 网格",
+            description="根据当前 scope 生成基础 H3 网格容器，不聚合 POI",
             category="action",
             layer="L1",
             ui_tier="foundation",
@@ -135,7 +138,7 @@ def register_foundation_tools(registry: Dict[str, RegisteredTool]) -> None:
             capability_type="transform",
             llm_exposure="hidden",
             requires=["scope_polygon"],
-            produces=["current_h3_grid"],
+            produces=["current_h3_base_grid"],
             applicable_scenarios=["网格化预处理"],
             cautions=["仅生成网格，不直接形成业务判断"],
             input_schema={
@@ -163,7 +166,7 @@ def register_foundation_tools(registry: Dict[str, RegisteredTool]) -> None:
     registry["compute_h3_metrics_from_scope_and_pois"] = _register(
         _tool_spec(
             name="compute_h3_metrics_from_scope_and_pois",
-            description="结合 scope 和 POI 计算 H3 指标",
+            description="结合 scope 和 POI 计算 POI H3 六边形网格指标",
             category="action",
             layer="L1",
             ui_tier="foundation",
@@ -171,8 +174,8 @@ def register_foundation_tools(registry: Dict[str, RegisteredTool]) -> None:
             capability_type="analyze",
             llm_exposure="secondary",
             requires=["scope_polygon"],
-            produces=["current_h3", "current_h3_grid", "current_h3_summary", "current_h3_charts"],
-            evidence_contract=["h3.summary.grid_count", "h3.summary.avg_density_poi_per_km2"],
+            produces=["current_poi_h3", "current_poi_h3_grid", "current_poi_h3_summary", "current_poi_h3_charts"],
+            evidence_contract=["poi_h3.summary.grid_count", "poi_h3.summary.avg_density_poi_per_km2"],
             applicable_scenarios=["空间分布分析", "机会网格识别", "选址前置"],
             cautions=["只提供空间统计，不直接替代调性或选址结论"],
             input_schema={

@@ -84,7 +84,7 @@ def _chunk(
 def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> List[KnowledgeChunk]:
     chunks: List[KnowledgeChunk] = []
     poi_summary = _safe_dict(artifacts.get("current_poi_summary") or snapshot.poi_summary)
-    h3_summary = _safe_dict(artifacts.get("current_h3_summary") or _safe_dict(snapshot.h3).get("summary"))
+    h3_summary = _safe_dict(artifacts.get("current_poi_h3_summary") or _safe_dict(snapshot.h3).get("summary"))
     population_summary = _safe_dict(artifacts.get("current_population_summary") or _safe_dict(snapshot.population).get("summary"))
     nightlight_summary = _safe_dict(artifacts.get("current_nightlight_summary") or _safe_dict(snapshot.nightlight).get("summary"))
     road_summary = _safe_dict(artifacts.get("current_road_summary") or _safe_dict(snapshot.road).get("summary"))
@@ -122,7 +122,7 @@ def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any])
             title="H3 网格结构摘要",
             content=_text(h3_structure.get("summary_text")) or _text(h3_summary),
             metrics={**_compact_metrics(h3_summary, ["grid_count", "avg_density_poi_per_km2"]), **_compact_metrics(h3_structure, ["distribution_pattern", "structure_signal_count", "hotspot_count", "opportunity_count"])},
-            source_artifacts=_source_present(artifacts, snapshot, "current_h3_summary", "h3") + ["current_h3_structure_analysis"],
+            source_artifacts=_source_present(artifacts, snapshot, "current_poi_h3_summary", "h3") + ["current_h3_structure_analysis"],
         ),
         _chunk(
             chunk_id="session:current:analysis:h3.hotspot.top",
