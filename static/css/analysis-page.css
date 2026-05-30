@@ -6996,6 +6996,117 @@ label {
     margin-top: 0;
 }
 
+.poi-grid-matrix-panel {
+    display: grid;
+    gap: 10px;
+}
+
+.poi-grid-matrix-year {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 10px;
+}
+
+.poi-grid-matrix-year-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: #1f2937;
+}
+
+.poi-grid-matrix-year-head strong {
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.poi-grid-matrix-year-head span {
+    color: #64748b;
+    font-size: 12px;
+}
+
+.poi-grid-matrix-cells {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.poi-grid-matrix-cell {
+    appearance: none;
+    border: 1px solid #dbe6f2;
+    border-radius: 9px;
+    background: #f8fafc;
+    color: #1f2937;
+    min-height: 72px;
+    padding: 10px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+}
+
+.poi-grid-matrix-cell:hover {
+    border-color: #8bb7f0;
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12);
+}
+
+.poi-grid-matrix-cell.active {
+    border-color: #2563eb;
+    background: #eff6ff;
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.16);
+}
+
+.poi-grid-matrix-cell.is-ready {
+    border-color: #99f6e4;
+    background: #f0fdfa;
+}
+
+.poi-grid-matrix-cell.is-failed {
+    border-color: #fecaca;
+    background: #fff1f2;
+}
+
+.poi-grid-matrix-cell.is-running,
+.poi-grid-matrix-cell.is-queued {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+}
+
+.poi-grid-matrix-cell-label,
+.poi-grid-matrix-cell-status,
+.poi-grid-matrix-cell-count,
+.poi-grid-matrix-cell-error {
+    display: block;
+}
+
+.poi-grid-matrix-cell-label {
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.25;
+}
+
+.poi-grid-matrix-cell-status {
+    margin-top: 4px;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.poi-grid-matrix-cell-count {
+    margin-top: 2px;
+    color: #0f766e;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.poi-grid-matrix-cell-error {
+    margin-top: 4px;
+    color: #b91c1c;
+    font-size: 11px;
+    line-height: 1.3;
+}
+
 .poi-grid-config-panel {
     border: 1px solid #e5eaf3;
     border-radius: 12px;

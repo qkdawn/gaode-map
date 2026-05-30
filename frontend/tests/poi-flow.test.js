@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
 
 import { createAnalysisPoiFlowOrchestratorMethods } from '../src/pages/analysis/orchestrators/poi-flow.js'
 import { createAnalysisPoiPanelMethods } from '../src/features/poi/panel.js'
@@ -142,6 +143,84 @@ test('poi raster grid exposes public target label for templates', () => {
   })
 
   assert.equal(ctx.getPoiRasterTargetCategoryLabel(), '餐饮')
+})
+
+test('poi grid matrix groups raster and h3 cells by year', () => {
+  const ctx = createContext({
+    currentHistoryAvailablePoiYears: [2026],
+    poiYearSelections: [2020, 2024],
+  })
+  ctx.commitPoiGridResult(2024, 'h3', {
+    status: 'ready',
+    summary: { grid_count: 12 },
+    features: [{ type: 'Feature' }],
+  })
+
+  const groups = ctx.getPoiGridMatrixYearGroups()
+  assert.deepEqual(groups.map((group) => group.year), [2020, 2024, 2026])
+  assert.equal(groups[1].readyCount, 1)
+  assert.equal(groups[1].totalCount, 2)
+  assert.deepEqual(groups[1].rows.map((row) => row.label), ['栅格', 'H3'])
+  assert.equal(groups[1].rows.find((row) => row.gridType === 'h3').count, 12)
+  assert.equal(ctx.getPoiGridResultStatusLabel('pending'), '待生成')
+  assert.equal(ctx.getPoiGridResultStatusLabel('ready'), '已就绪')
+})
+
+test('poi grid matrix selection switches active year and grid type', async () => {
+  const selectedYears = []
+  const ctx = createContext({
+    clearH3Grid() {
+      this.h3Cleared = true
+    },
+    clearPoiRasterGridDisplayOnLeave() {
+      this.rasterDisplayCleared = true
+    },
+    async selectAgentPoiYearForGrid(year) {
+      selectedYears.push(year)
+      this.poiYearSource = String(year)
+      this.resultPoiYear = Number(year)
+    },
+  })
+
+  await ctx.onPoiGridMatrixSelect({ year: 2024, gridType: 'h3' })
+
+  assert.equal(ctx.poiGridType, 'hex')
+  assert.equal(ctx.activePoiGridResultKey, '2024:h3')
+  assert.deepEqual(selectedYears, [2024])
+  assert.equal(ctx.h3Cleared, true)
+  assert.equal(ctx.rasterDisplayCleared, true)
+})
+
+test('poi grid matrix can generate raster and h3 for every year', async () => {
+  const calls = []
+  const ctx = createContext({
+    currentHistoryAvailablePoiYears: [2026],
+    poiYearSelections: [2020, 2024],
+    async ensurePoiGridResult(options) {
+      calls.push(options)
+    },
+  })
+
+  await ctx.ensureAllPoiGridMatrixResults(true)
+
+  assert.deepEqual(calls, [
+    { year: 2020, gridType: 'raster', force: true },
+    { year: 2020, gridType: 'h3', force: true },
+    { year: 2024, gridType: 'raster', force: true },
+    { year: 2024, gridType: 'h3', force: true },
+    { year: 2026, gridType: 'raster', force: true },
+    { year: 2026, gridType: 'h3', force: true },
+  ])
+})
+
+test('poi grid params template uses the year matrix panel', async () => {
+  const html = await fs.readFile(new URL('../src/pages/analysis/components/sidebar.html', import.meta.url), 'utf8')
+
+  assert.match(html, /getPoiGridMatrixYearGroups\(\)/)
+  assert.match(html, /onPoiGridMatrixSelect\(row\)/)
+  assert.match(html, /ensureAllPoiGridMatrixResults\(true\)/)
+  assert.doesNotMatch(html, /poi-grid-mode-panel/)
+  assert.doesNotMatch(html, /POI栅格密度 Top/)
 })
 
 test('ensurePoiRasterGrid force refreshes raster features from grid API', async () => {

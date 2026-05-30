@@ -722,19 +722,32 @@
                                             @click="onH3MainStageChange('evaluate')">评估</button>
                                     </div>
                                     <div v-if="h3MainStage === 'params'" class="h3-params-card">
-                                        <div v-if="isPoiRasterGridMode() && poiGridSummary" style="margin-top:10px; display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                                            <div class="count-badge">最高POI {{ poiGridSummary.max_poi_count || 0 }}</div>
-                                            <div class="count-badge">平均密度 {{ Number(poiGridSummary.avg_density_poi_per_km2 || 0).toFixed(2) }}</div>
-                                        </div>
-                                        <div v-if="isPoiRasterGridMode() && getPoiRasterGridTopCells().length" style="margin-top:10px;">
-                                            <div class="h3-analysis-hint">POI栅格密度 Top</div>
-                                            <div class="poi-fetch-error-list" style="margin-top:6px;">
-                                                <div v-for="row in getPoiRasterGridTopCells()" :key="`poi-grid-top-${row.cell_id}`" class="poi-fetch-error-row">
-                                                    <div class="poi-fetch-error-meta">
-                                                        <strong>{{ row.cell_id }}</strong>
-                                                        <span>{{ row.dominant_category_name || '未分类' }}</span>
-                                                    </div>
-                                                    <div class="poi-fetch-error-message">POI {{ row.poi_count }}，密度 {{ Number(row.density_poi_per_km2 || 0).toFixed(2) }}</div>
+                                        <div class="poi-grid-matrix-panel">
+                                            <div
+                                                v-for="group in getPoiGridMatrixYearGroups()"
+                                                :key="`poi-grid-year-${group.year}`"
+                                                class="poi-grid-matrix-year">
+                                                <div class="poi-grid-matrix-year-head">
+                                                    <strong>{{ group.year }} 年</strong>
+                                                    <span>{{ group.readyCount }}/{{ group.totalCount }} 就绪</span>
+                                                </div>
+                                                <div class="poi-grid-matrix-cells">
+                                                    <button
+                                                        v-for="row in group.rows"
+                                                        :key="row.key"
+                                                        type="button"
+                                                        class="poi-grid-matrix-cell"
+                                                        :class="[
+                                                            `is-${row.status || 'pending'}`,
+                                                            `is-${row.gridType}`,
+                                                            { active: row.active }
+                                                        ]"
+                                                        @click="onPoiGridMatrixSelect(row)">
+                                                        <span class="poi-grid-matrix-cell-label">{{ row.label }}</span>
+                                                        <span class="poi-grid-matrix-cell-status">{{ getPoiGridResultStatusLabel(row.status) }}</span>
+                                                        <span v-if="row.count" class="poi-grid-matrix-cell-count">{{ row.count }} 格</span>
+                                                        <span v-if="row.error" class="poi-grid-matrix-cell-error">{{ row.error }}</span>
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -751,7 +764,12 @@
                                             <button class="h3-btn h3-btn-primary h3-params-compute-btn"
                                                 :disabled="isPoiRasterGridMode() ? (isLoadingPoiGrid || !lastIsochroneGeoJSON) : (isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON)"
                                                 @click="startPoiGridAnalysis">
-                                                {{ (isPoiRasterGridMode() ? isLoadingPoiGrid : isComputingH3Analysis) ? '分析中...' : '开始分析' }}
+                                                {{ (isPoiRasterGridMode() ? isLoadingPoiGrid : isComputingH3Analysis) ? '生成中...' : '生成当前' }}
+                                            </button>
+                                            <button class="h3-btn h3-btn-primary h3-params-compute-btn"
+                                                :disabled="isLoadingPoiGrid || isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON"
+                                                @click="ensureAllPoiGridMatrixResults(true)">
+                                                生成全部年份网格
                                             </button>
                                         </div>
                                         <div v-if="poiGridConfigExpanded" class="poi-grid-config-panel">
@@ -759,7 +777,7 @@
                                                 <div class="h3-analysis-hint">栅格口径</div>
                                                 <div class="count-badge">同源 cell_id：人口/夜光栅格</div>
                                                 <div class="count-badge">POI 坐标：GCJ02 匹配</div>
-                                                <div class="count-badge">年份 {{ getPoiRasterGridYear() || '当前' }}</div>
+                                                <div class="count-badge">年份 {{ getActivePoiGridYear() || getPoiRasterGridYear() || '当前' }}</div>
                                             </div>
                                             <div v-else class="h3-params-grid">
                                                 <label class="h3-params-field">
