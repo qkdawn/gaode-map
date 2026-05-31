@@ -5,9 +5,9 @@ from typing import Any, Dict, Iterable
 
 from ..executor import execute_plan_step
 from ..governance import check_tool_governance
+from ..llm_digest import summarize_tool_arguments, summarize_tool_result
 from ..schemas import AnalysisSnapshot, ExecutionTraceItem, PlanStep, ToolResult
 from ..tools import RegisteredTool
-from .tool_loop import summarize_tool_arguments, summarize_tool_result
 
 
 @dataclass
@@ -15,6 +15,16 @@ class ToolCallExecution:
     result: ToolResult
     trace: ExecutionTraceItem
     registered_tool: RegisteredTool | None = None
+
+
+_GENERIC_TOOL_RESULT_TEXT = {"", "执行成功", "成功", "已完成", "完成", "ok", "OK", "无结果"}
+
+
+def _tool_result_display_text(result: ToolResult) -> str:
+    if result.status == "failed":
+        return str(result.error or "执行失败")
+    summary = summarize_tool_result(result)
+    return "" if str(summary or "").strip() in _GENERIC_TOOL_RESULT_TEXT else str(summary or "").strip()
 
 
 def tool_start_trace_payload(*, trace_id: str, call_id: str, step: PlanStep) -> Dict[str, Any]:
@@ -25,6 +35,7 @@ def tool_start_trace_payload(*, trace_id: str, call_id: str, step: PlanStep) -> 
         "status": "start",
         "reason": step.reason,
         "message": "开始执行工具",
+        "display_text": step.reason or "",
         "arguments_summary": summarize_tool_arguments(step.arguments),
         "produced_artifacts": list(step.expected_artifacts or []),
     }
@@ -39,6 +50,7 @@ def tool_finish_trace_payload(
 ) -> Dict[str, Any]:
     result = execution.result
     trace = execution.trace
+    display_text = _tool_result_display_text(result)
     return {
         "id": trace_id,
         "call_id": str(call_id or ""),
@@ -46,8 +58,9 @@ def tool_finish_trace_payload(
         "status": trace.status if trace.status == "blocked" else result.status,
         "reason": step.reason,
         "message": trace.message or ("执行成功" if result.status == "success" else "执行失败"),
+        "display_text": display_text,
         "arguments_summary": summarize_tool_arguments(step.arguments),
-        "result_summary": summarize_tool_result(result),
+        "result_summary": display_text or summarize_tool_result(result),
         "evidence_count": len(result.evidence or []),
         "warning_count": len(result.warnings or []),
         "produced_artifacts": list((result.artifacts or {}).keys())[:12],

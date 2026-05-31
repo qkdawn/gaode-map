@@ -5,6 +5,8 @@ import {
   buildAgentPlanChecklist,
   buildAgentToolCallItems,
   shouldExpandAgentProcessSection,
+  shouldShowAgentProcessLiveStatus,
+  shouldShowAgentProcessToggle,
 } from '../src/features/agent/derived.js'
 
 test('buildAgentPlanChecklist maps execution trace into planner progress and statuses', () => {
@@ -60,9 +62,18 @@ test('buildAgentToolCallItems normalizes trace metadata and artifact labels', ()
   assert.deepEqual(items[0].producedArtifacts, ['current_pois', 'current_poi_summary'])
 })
 
-test('shouldExpandAgentProcessSection keeps history collapsed but opens for running and failure states', () => {
+test('shouldExpandAgentProcessSection keeps completed and failed history collapsed', () => {
   assert.equal(shouldExpandAgentProcessSection('answered', { hasContent: true, isLoading: false }), false)
   assert.equal(shouldExpandAgentProcessSection('running', { hasContent: true, isLoading: false }), true)
-  assert.equal(shouldExpandAgentProcessSection('failed', { hasContent: true, isLoading: false }), true)
+  assert.equal(shouldExpandAgentProcessSection('failed', { hasContent: true, isLoading: false }), false)
+  assert.equal(shouldExpandAgentProcessSection('requires_risk_confirmation', { hasContent: true, isLoading: false }), true)
   assert.equal(shouldExpandAgentProcessSection('answered', { hasContent: false, isLoading: true }), false)
+})
+
+test('agent process toggle is hidden while live status is running', () => {
+  assert.equal(shouldShowAgentProcessLiveStatus('running', { hasContent: true, isLoading: true }), true)
+  assert.equal(shouldShowAgentProcessToggle('running', { hasContent: true, isLoading: true }), false)
+  assert.equal(shouldShowAgentProcessLiveStatus('answered', { hasContent: true, isLoading: false }), false)
+  assert.equal(shouldShowAgentProcessToggle('answered', { hasContent: true, isLoading: false }), true)
+  assert.equal(shouldShowAgentProcessToggle('answered', { hasContent: false, isLoading: false }), false)
 })

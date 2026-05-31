@@ -93,7 +93,6 @@ def analyze_road_syntax(
     max_edge_features: Optional[int] = None,
     radii_m: Optional[List[int]] = None,
     metric: Literal["choice", "integration"] = "choice",
-    depthmap_cli_path: Optional[str] = None,
     tulip_bins: Optional[int] = None,
     merge_geojson_edges: bool = True,
     merge_bucket_step: float = 0.025,
@@ -330,7 +329,7 @@ def analyze_road_syntax(
         extra={"context_edge_count": len(edge_inputs)},
     )
 
-    cli_path = _resolve_depthmap_cli_path(depthmap_cli_path)
+    cli_path = _resolve_depthmap_cli_path()
     timeout_s = int(getattr(settings, "depthmapx_timeout_s", 300) or 300)
     tulip_bins_value = int(getattr(settings, "depthmapx_tulip_bins", 1024) or 1024) if tulip_bins is None else int(tulip_bins)
     tulip_bins_value = max(4, min(1024, tulip_bins_value))

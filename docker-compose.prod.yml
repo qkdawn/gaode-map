@@ -3,8 +3,6 @@ services:
     restart: unless-stopped
 
   app:
-    environment:
-      DB_HOST: ${DB_HOST:-175.0.136.39}
     restart: unless-stopped
 
   valhalla:

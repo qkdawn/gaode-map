@@ -21,6 +21,7 @@ from .capability_tools import (
     get_area_data_bundle,
     infer_area_labels,
 )
+from .result_tools import read_current_results
 from .scope_tools import extract_scope_polygon
 
 
@@ -160,6 +161,19 @@ async def run_site_selection_pack(
     scope = snapshot.scope if isinstance(snapshot.scope, dict) else {}
     if scope and not local_artifacts.get("scope_data"):
         local_artifacts["scope_data"] = scope
+    current_results = await read_current_results(
+        arguments={},
+        snapshot=snapshot,
+        artifacts=local_artifacts,
+        question=question,
+    )
+    local_artifacts.update(
+        {
+            key: value
+            for key, value in (current_results.artifacts or {}).items()
+            if value not in ({}, [], None) and not local_artifacts.get(key)
+        }
+    )
 
     business_result = await run_business_site_advice(
         arguments={
@@ -178,13 +192,16 @@ async def run_site_selection_pack(
     )
     local_artifacts.update(business_result.artifacts or {})
     if business_result.status == "failed":
+        base_error = business_result.error or "site_selection_base_failed"
+        if base_error not in {"missing_scope_polygon", "unresolved_place_type"}:
+            base_error = "site_selection_base_failed"
         return ToolResult(
             tool_name="run_site_selection_pack",
             status="failed",
             result={"policy_key": policy["policy_key"], "policy_params": policy},
             evidence=list(business_result.evidence or []),
             warnings=list(business_result.warnings or []),
-            error=business_result.error or "site_selection_base_failed",
+            error=base_error,
             artifacts=dict(local_artifacts),
         )
 

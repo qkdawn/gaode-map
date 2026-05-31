@@ -210,6 +210,7 @@ def aggregate_pois_to_h3(
         cell_id: {
             "poi_count": 0,
             "category_counts": empty_category_counts(),
+            "subcategory_counts": {},
             "density_poi_per_km2": 0.0,
             "local_entropy": 0.0,
             "neighbor_mean_density": 0.0,
@@ -241,6 +242,9 @@ def aggregate_pois_to_h3(
         if category_key:
             bucket["category_counts"][category_key] += 1
             global_category_counts[category_key] += 1
+        point_type = str(poi.get("type") or "").strip()
+        if point_type:
+            bucket["subcategory_counts"][point_type] = int(bucket["subcategory_counts"].get(point_type, 0)) + 1
 
     return stats_by_cell, assigned_poi_count, global_category_counts
 

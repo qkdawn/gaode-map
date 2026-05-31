@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from core.config import settings
 from modules.map_manage.schemas import MapRequest
+from modules.system import build_system_readiness
 from store import (
     build_center_fingerprint,
     find_map_by_fingerprint,
@@ -98,6 +99,11 @@ async def get_frontend_config():
         "tianditu_key": settings.tianditu_key,
         "map_type_config_json": load_type_config(),
     }
+
+
+@router.get("/api/v1/system/readiness", summary="获取系统运行时就绪状态")
+async def get_system_readiness():
+    return build_system_readiness()
 
 
 @router.get("/map", response_class=HTMLResponse, summary="渲染常规地图")

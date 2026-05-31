@@ -2040,14 +2040,79 @@
                                     </div>
                                 </div>
                                 <template v-else>
-                                <div v-for="(message, index) in getAgentMessagesBeforeThinking()" :key="`agent-message-main-before-${index}`" class="agent-message-row" :class="`is-${message.role}`">
-                                    <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
-                                </div>
+                                <template v-for="(message, index) in getAgentThreadMessages()" :key="`agent-message-main-${index}`">
+                                    <div v-if="shouldShowAgentMessageProcess(message)" class="agent-message-row is-assistant">
+                                        <div
+                                            class="agent-message-bubble is-assistant agent-thinking-bubble"
+                                            :class="{ 'is-debug-open': isAgentMessageProcessExpanded(message, index), 'is-collapsed': !isAgentMessageProcessExpanded(message, index) }">
+                                            <div class="agent-thinking-head">
+                                                <button
+                                                    type="button"
+                                                    class="agent-thinking-toggle"
+                                                    @click="toggleAgentMessageProcessExpanded(message, index)">
+                                                    <span class="agent-thinking-dot"></span>
+                                                    <span>{{ getAgentMessageProcessStatusLabel(message) }}</span>
+                                                    <span class="agent-thinking-chevron" :class="{ 'is-open': isAgentMessageProcessExpanded(message, index) }">⌄</span>
+                                                </button>
+                                            </div>
+
+                                            <div
+                                                v-if="isAgentMessageProcessExpanded(message, index)"
+                                                class="agent-process-flow"
+                                                data-agent-scroll-inner
+                                                @wheel.stop.passive="onAgentInnerScrollIntent"
+                                                @touchmove.stop.passive="onAgentInnerScrollIntent"
+                                                @scroll.passive="onAgentInnerScrollIntent">
+                                                <div
+                                                    v-for="processItem in getAgentMessageNaturalProcessItems(message)"
+                                                    :key="`agent-message-process-${getAgentMessageProcessKey(message, index)}-${processItem.id}`"
+                                                    class="agent-process-flow-item"
+                                                    :class="[`is-${processItem.kind}`, `is-${processItem.state}`]">
+                                                    <div class="agent-process-flow-text">{{ processItem.text }}</div>
+                                                    <div v-if="processItem.metaText" class="agent-process-flow-meta">{{ processItem.metaText }}</div>
+                                                </div>
+                                                <div v-if="getAgentMessageTaskConfirmation(message, index)" class="agent-process-task-actions">
+                                                    <button
+                                                        v-if="getAgentMessageTaskConfirmation(message, index).canReuse && getAgentMessageTaskConfirmation(message, index).status === 'reuse_available'"
+                                                        type="button"
+                                                        class="agent-task-confirmation-btn is-primary"
+                                                        :disabled="agentLoading || agentSessionHydrating"
+                                                        @click="onAgentTaskReuseClick(getAgentMessageTaskConfirmation(message, index))">
+                                                        复用已有结果
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="agent-task-confirmation-btn is-primary"
+                                                        :disabled="agentLoading || agentSessionHydrating || !getAgentMessageTaskConfirmation(message, index).canStart || ['blocked','running','executing','completed','cancelled'].includes(getAgentMessageTaskConfirmation(message, index).status)"
+                                                        @click="onAgentTaskStartClick(getAgentMessageTaskConfirmation(message, index))">
+                                                        {{ getAgentMessageTaskConfirmation(message, index).status === 'reuse_available' ? '重新计算' : '开始计算' }}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="agent-task-confirmation-btn"
+                                                        @click="onAgentTaskAdjustClick(getAgentMessageTaskConfirmation(message, index))">
+                                                        调整参数
+                                                    </button>
+                                                    <button
+                                                        v-if="!['completed','cancelled','executing'].includes(getAgentMessageTaskConfirmation(message, index).status)"
+                                                        type="button"
+                                                        class="agent-task-confirmation-btn"
+                                                        @click="onAgentTaskCancelClick(getAgentMessageTaskConfirmation(message, index))">
+                                                        取消
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="agent-message-row" :class="`is-${message.role}`">
+                                        <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
+                                    </div>
+                                </template>
 
                                 <div v-if="shouldShowAgentThinkingProcessBlock()" class="agent-message-row is-assistant">
                                     <div
                                         class="agent-message-bubble is-assistant agent-thinking-bubble"
-                                        :class="{ 'is-debug-open': agentThinkingExpanded }">
+                                        :class="{ 'is-debug-open': agentThinkingExpanded, 'is-collapsed': !agentThinkingExpanded && !agentLoading }">
                                         __AGENT_THINKING_HEADER__
 
                                         __AGENT_REASONING_PANEL__
@@ -2099,10 +2164,6 @@
                                             </div>
                                         </div>
                                     </div>
-                                </div>
-
-                                <div v-for="(message, index) in getAgentMessagesAfterThinking()" :key="`agent-message-main-after-${index}`" class="agent-message-row" :class="`is-${message.role}`">
-                                    <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
                                 </div>
 
                                 __AGENT_CLARIFICATION_CARD__

@@ -2372,6 +2372,9 @@
                     if (typeof this.commitCurrentPoiGridResult === 'function') {
                         this.commitCurrentPoiGridResult('h3', Number(this.poiYearSource || this.resultPoiYear || 0) || null);
                     }
+                    if (typeof this.persistAnalysisArtifactQuietly === 'function') {
+                        this.persistAnalysisArtifactQuietly('poi_h3_grid');
+                    }
                 } catch (e) {
                     console.error(e);
                     this.h3GridStatus = '结构快照生成失败: ' + ((e && e.message) ? e.message : String(e));

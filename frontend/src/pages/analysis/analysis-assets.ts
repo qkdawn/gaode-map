@@ -1,6 +1,4 @@
 const scriptCache = new Map<string, Promise<void>>()
-const styleIdPrefix = 'analysis-style-'
-
 function ensureScript(src: string): Promise<void> {
   const cached = scriptCache.get(src)
   if (cached) return cached
@@ -33,21 +31,7 @@ function ensureScript(src: string): Promise<void> {
   return p
 }
 
-function ensureStyle(href: string): void {
-  const id = `${styleIdPrefix}${href}`.replace(/[^a-zA-Z0-9_-]/g, '_')
-  if (document.getElementById(id)) return
-  const link = document.createElement('link')
-  link.id = id
-  link.rel = 'stylesheet'
-  link.href = href
-  document.head.appendChild(link)
-}
-
 export async function ensureAnalysisVendorsAndStyles(): Promise<void> {
-  ensureStyle('/static/css/map-common.css')
-  ensureStyle('/static/css/filter-panel.css')
-  ensureStyle('/static/css/analysis-page.css')
-
   await ensureScript('/static/vendor/html2canvas.min.js')
   await ensureScript('/static/vendor/echarts.min.js')
 }

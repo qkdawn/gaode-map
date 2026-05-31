@@ -62,6 +62,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 ## 5. 主要接口（分析链路）
 - `GET /api/v1/config`
+- `GET /api/v1/system/readiness`
 - `POST /api/v1/analysis/isochrone`
 - `POST /api/v1/analysis/pois`
 - `POST /api/v1/analysis/h3-grid`
@@ -73,19 +74,24 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 - `GET /api/v1/analysis/history/{id}`
 
 ## 6. 关键环境变量
+- 配置优先级：后端代码只读取 `core/config.py` 中的 `settings`；本地默认值来自根目录 `.env`；Docker Compose 只覆盖容器网络和容器内挂载路径，不再承载第二套业务默认值。
 - 地图：`AMAP_WEB_SERVICE_KEY`、`AMAP_JS_API_KEY`、`AMAP_JS_SECURITY_CODE`、`TIANDITU_KEY`
 - 路网/等时圈：`DEPTHMAPX_CLI_PATH`、`OVERPASS_ENDPOINT`、`VALHALLA_BASE_URL`
 - 人口分析：`POPULATION_DATA_DIR`、`POPULATION_PREVIEW_MAX_SIZE`
 - 夜光分析：`NIGHTLIGHT_DATA_DIR`、`NIGHTLIGHT_PREVIEW_MAX_SIZE`
 - 数据库：`DB_URL` 保存账号、密码、库名等稳定信息；`DB_HOST` 用于覆盖 `DB_URL` 中的主机地址。数据库公网 IP 是动态地址，启动前按当前可用 IP 更新 `.env` 里的 `DB_HOST`，不要在文档中写死具体 IP。
 - 图表输出目录覆盖：`CHART_OUTPUT_DIR`（可选，默认 `runtime/generated_charts/`）
+- `POST /api/v1/analysis/road-syntax` 不再接受 `depthmap_cli_path`；depthmapX CLI 路径只从 `DEPTHMAPX_CLI_PATH` 或系统 `PATH` 解析。
 
 ### 人口数据目录
-- Docker 启动时，默认把宿主机 `E:/PeopleData` 挂到容器内 `/mapdata/population`
-- Docker 启动时，默认把宿主机 `E:/NightlightData` 挂到容器内 `/mapdata/nightlight`
-- 可通过 `POPULATION_DATA_HOST_DIR` 覆盖宿主机目录
-- 容器内应用读取目录由 `POPULATION_DATA_DIR` 控制，默认 `/mapdata/population`
-- 夜光处理后目录由 `NIGHTLIGHT_DATA_DIR` 控制，默认 `/mapdata/nightlight/processed`
+- 根目录 `.env` 维护本地宿主机目录，例如 `POPULATION_DATA_DIR=E:/PeopleData`、`NIGHTLIGHT_DATA_DIR=E:/NightlightData/processed`
+- Docker 启动时通过 `POPULATION_DATA_HOST_DIR`、`NIGHTLIGHT_DATA_HOST_DIR`、`CITY_BOUNDARY_HOST_DIR` 把宿主机目录挂到容器内
+- 容器内应用读取目录由 Compose 覆盖为 `/mapdata/population`、`/mapdata/nightlight/processed`、`/mapdata/boundaries`
+
+### Readiness
+- `GET /api/v1/system/readiness` 用于解释当前运行环境为什么“能跑 / 不能跑”
+- 当前会返回 `depthmapx`、`chart_output_dir`、`population_data_dir`、`nightlight_data_dir`、`arcgis_bridge` 五类检查
+- readiness 只做本地配置、目录和可执行文件解析检查，不做远程服务探活
 
 ## 7. 测试与仓库卫生
 ```bash
@@ -116,7 +122,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 - `docker-compose.yml` 是基础拓扑，默认使用镜像内代码和生产前端构建产物
 - `docker-compose.dev.yml` 只覆盖开发差异：后端挂载源码并使用 `uvicorn --reload`，前端由 Vite dev server 提供，`/analysis` 由后端代理到 Vite
-- `docker-compose.prod.yml` 只覆盖生产差异：设置重启策略和生产 DB 默认 host
+- `docker-compose.prod.yml` 只覆盖生产差异：设置重启策略
+- `.env.example` 是本地配置模板；`docker-compose.yml` 依赖 `.env` 提供宿主机路径和业务配置，只在容器网络和容器内路径上做覆盖
 - 生产镜像会在 Docker 多阶段构建中自动执行前端 `npm ci` 和 `npm run build`
 - 运行容器直接加载镜像内的 `static/frontend/`，不依赖宿主机预先打包
 

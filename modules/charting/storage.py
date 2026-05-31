@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import os
 import shutil
 import uuid
 from pathlib import Path
+
+from core.config import settings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -12,13 +13,8 @@ LEGACY_CHART_DIR = PROJECT_ROOT / "modules" / "generated_charts"
 
 
 def _resolve_chart_dir() -> Path:
-    configured = os.getenv("CHART_OUTPUT_DIR", "").strip()
-    if configured:
-        path = Path(configured)
-        if not path.is_absolute():
-            path = PROJECT_ROOT / path
-        return path
-    return DEFAULT_CHART_DIR
+    configured = str(settings.chart_output_dir or "").strip()
+    return Path(configured) if configured else DEFAULT_CHART_DIR
 
 
 def _migrate_legacy_dir(target_dir: Path) -> None:
@@ -46,8 +42,8 @@ CHART_DIR = str(CHART_DIR_PATH)
 def save_svg(svg_content: str) -> tuple[str, str]:
     chart_id = uuid.uuid4().hex
     filename = f"{chart_id}.svg"
-    filepath = os.path.join(CHART_DIR, filename)
-    with open(filepath, "w", encoding="utf-8") as handle:
+    filepath = CHART_DIR_PATH / filename
+    with filepath.open("w", encoding="utf-8") as handle:
         handle.write(svg_content)
     return chart_id, filename
 
@@ -55,12 +51,12 @@ def save_svg(svg_content: str) -> tuple[str, str]:
 def save_png(png_bytes: bytes) -> tuple[str, str]:
     chart_id = uuid.uuid4().hex
     filename = f"{chart_id}.png"
-    filepath = os.path.join(CHART_DIR, filename)
-    with open(filepath, "wb") as handle:
+    filepath = CHART_DIR_PATH / filename
+    with filepath.open("wb") as handle:
         handle.write(png_bytes)
     return chart_id, filename
 
 
 def get_chart_path(filename: str) -> str:
-    safe_name = os.path.basename(filename)
-    return os.path.join(CHART_DIR, safe_name)
+    safe_name = Path(filename).name
+    return str(CHART_DIR_PATH / safe_name)

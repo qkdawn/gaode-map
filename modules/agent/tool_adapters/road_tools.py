@@ -35,7 +35,6 @@ async def compute_road_syntax_from_scope(
         max_edge_features=None,
         radii_m=None,
         metric="choice",
-        depthmap_cli_path=None,
         tulip_bins=None,
         merge_geojson_edges=True,
         merge_bucket_step=0.025,

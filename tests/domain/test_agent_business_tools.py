@@ -21,6 +21,78 @@ def _snapshot_with_scope() -> AnalysisSnapshot:
     )
 
 
+def _snapshot_with_reusable_site_selection_base() -> AnalysisSnapshot:
+    snapshot = _snapshot_with_scope()
+    snapshot.h3 = {"summary": {"grid_count": 4, "poi_count": 2}}
+    snapshot.frontend_analysis = {
+        "h3": {
+            "derived_stats": {
+                "gapSummary": {
+                    "opportunityCount": 1,
+                    "rows": [
+                        {
+                            "h3_id": "h3-1",
+                            "gap_zone_label": "高需求低供给",
+                            "gap_score": 0.56,
+                            "demand_pct": 0.8,
+                            "supply_pct": 0.2,
+                        }
+                    ],
+                },
+            },
+            "target_category_label": "咖啡店",
+        }
+    }
+    return snapshot
+
+
+def _snapshot_with_h3_cells_for_gap() -> AnalysisSnapshot:
+    snapshot = _snapshot_with_scope()
+    snapshot.h3 = {
+        "summary": {"grid_count": 3, "poi_count": 30},
+        "poi_h3_evidence": {
+            "evidence_version": "poi_h3_evidence_v1",
+            "category_meta": [
+                {"key": "group-7", "label": "餐饮"},
+                {"key": "group-4", "label": "商务住宅"},
+                {"key": "group-3", "label": "交通"},
+                {"key": "group-13", "label": "科教文化"},
+                {"key": "group-10", "label": "医疗"},
+            ],
+            "ui": {"target_category": "group-7", "target_category_label": "餐饮"},
+            "cells": [
+                {
+                    "h3_id": "h3-gap",
+                    "poi_count": 10,
+                    "density_poi_per_km2": 100,
+                    "category_counts": {
+                        "group-7": 0,
+                        "group-4": 4,
+                        "group-3": 4,
+                        "group-13": 1,
+                        "group-10": 1,
+                    },
+                    "subcategory_counts": {"type-050700": 0},
+                },
+                {
+                    "h3_id": "h3-balanced",
+                    "poi_count": 10,
+                    "density_poi_per_km2": 80,
+                    "category_counts": {
+                        "group-7": 5,
+                        "group-4": 2,
+                        "group-3": 1,
+                        "group-13": 1,
+                        "group-10": 1,
+                    },
+                    "subcategory_counts": {"type-050700": 5},
+                },
+            ],
+        },
+    }
+    return snapshot
+
+
 def test_run_business_site_advice_chains_l1_tools(monkeypatch):
     calls = []
 
@@ -101,6 +173,77 @@ def test_run_business_site_advice_chains_l1_tools(monkeypatch):
     assert result.artifacts["current_population_summary"]["total_population"] == 1000
     assert result.artifacts["current_nightlight_summary"]["max_radiance"] == 6.0
     assert result.artifacts["current_road_summary"]["node_count"] == 5
+
+
+def test_run_business_site_advice_reuses_ready_snapshot_before_local_fetch(monkeypatch):
+    async def fail_fetch(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        raise AssertionError("local POI fetch should not run when current H3 gap evidence is ready")
+
+    monkeypatch.setattr(business_tools, "fetch_pois_in_scope", fail_fetch)
+
+    snapshot = _snapshot_with_reusable_site_selection_base()
+    result = asyncio.run(
+        business_tools.run_business_site_advice(
+            arguments={"place_type": "咖啡店"},
+            snapshot=snapshot,
+            artifacts={
+                "scope_polygon": snapshot.scope["polygon"],
+                "current_poi_h3_summary": snapshot.h3["summary"],
+                "current_frontend_analysis": snapshot.frontend_analysis,
+            },
+            question="分析适合开在哪里",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.artifacts["business_site_advice"]["reused_current_results"] is True
+    assert result.result["place_type"] == "咖啡厅"
+    assert result.result["h3_grid_count"] == 4
+
+
+def test_run_business_site_advice_reuses_h3_cells_to_build_gap(monkeypatch):
+    async def fail_fetch(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        raise AssertionError("local POI fetch should not run when H3 category cells can build gap evidence")
+
+    monkeypatch.setattr(business_tools, "fetch_pois_in_scope", fail_fetch)
+
+    snapshot = _snapshot_with_h3_cells_for_gap()
+    result = asyncio.run(
+        business_tools.run_business_site_advice(
+            arguments={"place_type": "奶茶店"},
+            snapshot=snapshot,
+            artifacts={"scope_polygon": snapshot.scope["polygon"], "current_poi_h3_summary": snapshot.h3["summary"]},
+            question="分析适合开在哪里",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.artifacts["business_site_advice"]["reused_current_results"] is True
+
+
+def test_run_business_site_advice_does_not_reuse_broad_category_for_small_type(monkeypatch):
+    async def fail_fetch(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        return ToolResult(tool_name="fetch_pois_in_scope", status="failed", error="expected_small_type_fetch")
+
+    monkeypatch.setattr(business_tools, "fetch_pois_in_scope", fail_fetch)
+
+    snapshot = _snapshot_with_h3_cells_for_gap()
+    for cell in snapshot.h3["poi_h3_evidence"]["cells"]:
+        cell.pop("subcategory_counts", None)
+    result = asyncio.run(
+        business_tools.run_business_site_advice(
+            arguments={"place_type": "奶茶店"},
+            snapshot=snapshot,
+            artifacts={"scope_polygon": snapshot.scope["polygon"], "current_poi_h3_summary": snapshot.h3["summary"]},
+            question="分析适合开在哪里",
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.error == "expected_small_type_fetch"
 
 
 def test_run_business_site_advice_requires_resolved_place_type():
@@ -498,3 +641,51 @@ def test_run_site_selection_pack_uses_resolved_place_type_for_gap(monkeypatch):
     assert result.status == "success"
     assert seen["place_type"] == "咖啡厅"
     assert result.result["place_type"] == "咖啡厅"
+
+
+def test_run_site_selection_pack_hides_required_tool_exception_codes(monkeypatch):
+    async def fake_business(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        return ToolResult(
+            tool_name="run_business_site_advice",
+            status="failed",
+            warnings=["Local query failed"],
+            error="ValueError",
+        )
+
+    monkeypatch.setattr(scenario_tools, "run_business_site_advice", fake_business)
+
+    result = asyncio.run(
+        scenario_tools.run_site_selection_pack(
+            arguments={"place_type": "咖啡厅", "policy_key": "business_catchment_1km"},
+            snapshot=_snapshot_with_scope(),
+            artifacts={"scope_polygon": _snapshot_with_scope().scope["polygon"]},
+            question="分析适合开在哪里",
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.error == "site_selection_base_failed"
+
+
+def test_run_site_selection_pack_builds_candidates_from_h3_cells(monkeypatch):
+    async def fail_fetch(*, arguments, snapshot, artifacts, question):
+        del arguments, snapshot, artifacts, question
+        raise AssertionError("local POI fetch should not run when reusable H3 cells are present")
+
+    monkeypatch.setattr(business_tools, "fetch_pois_in_scope", fail_fetch)
+
+    snapshot = _snapshot_with_h3_cells_for_gap()
+    result = asyncio.run(
+        scenario_tools.run_site_selection_pack(
+            arguments={"place_type": "奶茶店", "policy_key": "business_catchment_1km"},
+            snapshot=snapshot,
+            artifacts={"scope_polygon": snapshot.scope["polygon"]},
+            question="分析适合开在哪里",
+        )
+    )
+
+    assert result.status == "success"
+    candidates = result.artifacts["site_selection_pack"]["candidate_sites"]
+    assert candidates
+    assert candidates[0]["h3_id"] == "h3-gap"

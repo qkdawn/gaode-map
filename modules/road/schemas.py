@@ -58,10 +58,6 @@ class RoadSyntaxRequest(BaseModel):
         "choice",
         description="Default metric for frontend rendering",
     )
-    depthmap_cli_path: str | None = Field(
-        None,
-        description="Optional override path of depthmapXcli executable",
-    )
     tulip_bins: int | None = Field(
         None,
         ge=4,

@@ -9,6 +9,9 @@ from urllib.parse import quote_plus, urlsplit, urlunsplit
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CHART_OUTPUT_DIR = PROJECT_ROOT / "runtime" / "generated_charts"
+
 
 class Settings(BaseSettings):
     """
@@ -17,7 +20,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=str(Path(__file__).resolve().parent.parent / ".env"),
+        env_file=str(PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",  # 未声明的 env 变量忽略，不抛出校验错误
     )
@@ -41,8 +44,8 @@ class Settings(BaseSettings):
     api_keys: List[str] = ["dev-only-key-change-in-production"]  # API密钥列表，用于访问鉴权
 
     # 文件存储配置
-    static_dir: str = str(Path(__file__).resolve().parent.parent / "static")  # 静态资源根目录
-    templates_dir: str = str(Path(__file__).resolve().parent.parent / "templates")  # Jinja模板目录
+    static_dir: str = str(PROJECT_ROOT / "static")  # 静态资源根目录
+    templates_dir: str = str(PROJECT_ROOT / "templates")  # Jinja模板目录
     template_name: str = "map_with_filters.html"  # 默认模板文件名
     file_lifetime_hours: int = Field(
         168,
@@ -53,6 +56,11 @@ class Settings(BaseSettings):
         24,
         validation_alias="CLEANUP_INTERVAL_HOURS",
         description="Background cleanup interval in hours",
+    )
+    chart_output_dir: str = Field(
+        str(DEFAULT_CHART_OUTPUT_DIR),
+        validation_alias="CHART_OUTPUT_DIR",
+        description="Directory containing generated chart assets",
     )
     db_url: str = Field("", validation_alias="DB_URL", description="Database connection string")
     db_host: str = Field("", validation_alias="DB_HOST", description="Database host override")
@@ -163,6 +171,15 @@ class Settings(BaseSettings):
     def model_post_init(self, __context) -> None:
         if not str(self.amap_js_api_key or "").strip() and str(self.amap_web_service_key or "").strip():
             self.amap_js_api_key = str(self.amap_web_service_key or "").split(",", 1)[0].strip()
+        self.chart_output_dir = self._normalize_project_path(self.chart_output_dir, DEFAULT_CHART_OUTPUT_DIR)
+
+    @staticmethod
+    def _normalize_project_path(raw_value: str, default_path: Path) -> str:
+        configured = str(raw_value or "").strip()
+        path = default_path if not configured else Path(configured)
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        return str(path.resolve())
 
     # AI Agent provider 配置
     ai_enabled: bool = Field(

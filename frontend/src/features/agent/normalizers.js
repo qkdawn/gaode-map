@@ -47,6 +47,7 @@ function normalizeAgentThinkingItem(seed = {}) {
     phase: asText(seed.phase),
     title: asText(seed.title) || '处理中',
     detail: asText(seed.detail),
+    displayText: asText(seed.displayText || seed.display_text),
     items: cloneArray(seed.items).map((item) => asText(item)).filter(Boolean),
     meta: cloneObject(seed.meta),
     state: asText(seed.state || 'pending') || 'pending',
@@ -101,6 +102,7 @@ function normalizeAgentTraceThinkingItem(seed = {}) {
     phase: 'executing',
     title: `${titleStatus} ${toolName}`,
     detail: asText(seed.message || seed.reason),
+    displayText: asText(seed.displayText || seed.display_text),
     items,
     meta: {
       toolName,
@@ -165,6 +167,62 @@ function normalizeAgentPlanEnvelope(seed = {}) {
     followupApplied: !!(seed.followupApplied || seed.followup_applied),
     summary: asText(seed.summary),
   }
+}
+
+function hasAgentPlanEnvelopeContent(plan = {}) {
+  const normalized = normalizeAgentPlanEnvelope(plan)
+  return !!(normalized.steps.length || normalized.followupSteps.length || normalized.summary)
+}
+
+function normalizeAgentMessageProcess(seed = {}) {
+  const raw = seed && typeof seed === 'object' ? seed : {}
+  const plan = normalizeAgentPlanEnvelope(raw.plan)
+  const pendingTaskConfirmation = cloneObject(raw.pendingTaskConfirmation || raw.pending_task_confirmation)
+  return {
+    turnId: asText(raw.turnId || raw.turn_id),
+    status: asText(raw.status),
+    stage: asText(raw.stage),
+    startedAt: asText(raw.startedAt || raw.started_at),
+    completedAt: asText(raw.completedAt || raw.completed_at),
+    elapsedMs: Math.max(0, Number(raw.elapsedMs ?? raw.elapsed_ms ?? 0) || 0),
+    thinkingTimeline: cloneArray(raw.thinkingTimeline || raw.thinking_timeline)
+      .map((item) => normalizeAgentThinkingItem(item)),
+    executionTrace: cloneArray(raw.executionTrace || raw.execution_trace),
+    plan,
+    pendingTaskConfirmation,
+  }
+}
+
+function hasAgentMessageProcessContent(process = {}) {
+  const normalized = normalizeAgentMessageProcess(process)
+  return !!(
+    normalized.thinkingTimeline.length
+    || normalized.executionTrace.length
+    || hasAgentPlanEnvelopeContent(normalized.plan)
+    || Object.keys(normalized.pendingTaskConfirmation || {}).length
+  )
+}
+
+function normalizeAgentMessage(seed = {}) {
+  const raw = seed && typeof seed === 'object' ? seed : {}
+  const processSeed = raw.process || raw.agentProcess || raw.agent_process || (raw.meta && (raw.meta.process || raw.meta.agent_process)) || {}
+  const process = normalizeAgentMessageProcess(processSeed)
+  const message = {
+    role: asText(raw.role) || 'user',
+    content: String(raw.content || ''),
+  }
+  const id = asText(raw.id || raw.messageId || raw.message_id)
+  if (id) message.id = id
+  if (hasAgentMessageProcessContent(process)) {
+    message.process = process
+  }
+  return message
+}
+
+function normalizeAgentMessages(items = []) {
+  return cloneArray(items)
+    .map((item) => normalizeAgentMessage(item))
+    .filter((item) => item.content || hasAgentMessageProcessContent(item.process))
 }
 
 function normalizeAgentDecision(seed = {}) {
@@ -614,7 +672,7 @@ function deriveAgentSessionPreview(session = null) {
 function createAgentSessionRecord(seed = {}) {
   const nowIso = new Date().toISOString()
   const turn = normalizeAgentTurnPayload(seed)
-  const messages = stripMirroredSummaryAssistantMessage(seed.messages, turn.output.cards)
+  const messages = normalizeAgentMessages(seed.messages)
   const titleSource = asText(seed.titleSource || seed.title_source || 'fallback') || 'fallback'
   const panelKind = normalizeAgentPanelKind(seed.panelKind || seed.panel_kind)
   const session = {
@@ -825,6 +883,10 @@ export {
   upsertReasoningDeltaInList,
   normalizeAgentPlanStep,
   normalizeAgentPlanEnvelope,
+  normalizeAgentMessageProcess,
+  hasAgentMessageProcessContent,
+  normalizeAgentMessage,
+  normalizeAgentMessages,
   normalizeAgentDecision,
   normalizeAgentDecisionEvidence,
   normalizeAgentCounterpoint,

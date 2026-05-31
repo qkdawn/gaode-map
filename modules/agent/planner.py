@@ -148,6 +148,11 @@ def _is_hotspot_question(question: str) -> bool:
     return any(token in question for token in tokens)
 
 
+def _needs_road_spatial_cells(question: str) -> bool:
+    tokens = ("空间分布", "低值", "低集成", "低连接", "错位", "网格", "落位", "服务盲区")
+    return any(token in question for token in tokens)
+
+
 def _mentions_uploaded_attachment(question: str) -> bool:
     tokens = ("附件", "文件", "图片", "图纸", "上传", "这份", "这个表", "表格", "报告", "PDF", "pdf", "文档")
     return any(token in str(question or "") for token in tokens)
@@ -209,6 +214,16 @@ def build_planning_fallback(
                 expected_artifacts=["area_character_pack", "current_area_character_labels"],
             ),
         )
+        _append_step(
+            steps,
+            PlanStep(
+                tool_name="build_unified_spatial_cells",
+                arguments={"coord_type": "gcj02", "road_mode": "walking", "poi_coord_type": "gcj02"},
+                reason="把 POI、人口、夜光和路网统一到同一套共享栅格，支撑空间自洽判断。",
+                evidence_goal="空间同格对齐证据",
+                expected_artifacts=["current_unified_spatial_cells", "current_unified_spatial_cells_summary"],
+            ),
+        )
     elif question_type == "site_selection":
         target = infer_type_info_from_text(question)
         evidence_focus = ["目标业态供给", "候选区排序", "供给缺口判断", "可达性与活力"]
@@ -259,6 +274,7 @@ def build_planning_fallback(
             )
     elif question_type == "road":
         evidence_focus = ["路网结构"]
+        needs_spatial_cells = _needs_road_spatial_cells(question)
         if not _current_summary(snapshot, memory, "road") and not _road_pattern_ready(snapshot, memory):
             _append_step(
                 steps,
@@ -272,6 +288,17 @@ def build_planning_fallback(
                     "读取路网结构模式结果，直接回答可达性问题。",
                     "路网结构",
                     ["current_road_pattern_analysis"],
+                ),
+            )
+        if needs_spatial_cells and not memory.artifacts.get("current_unified_spatial_cells_summary"):
+            _append_step(
+                steps,
+                PlanStep(
+                    tool_name="build_unified_spatial_cells",
+                    arguments={"coord_type": "gcj02", "road_mode": "walking", "poi_coord_type": "gcj02"},
+                    reason="将路网集成度、连接度与 POI、人口、夜光统一落到共享栅格，识别低值区和空间错位。",
+                    evidence_goal="路网空间分布与低值区",
+                    expected_artifacts=["current_unified_spatial_cells", "current_unified_spatial_cells_summary"],
                 ),
             )
     else:

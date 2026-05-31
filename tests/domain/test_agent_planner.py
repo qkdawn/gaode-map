@@ -44,6 +44,7 @@ def test_planner_area_character_prefers_scene_pack():
     tool_names = [step.tool_name for step in result.steps]
     assert tool_names[:2] == ["read_current_scope", "read_current_results"]
     assert "run_area_character_pack" in tool_names
+    assert "build_unified_spatial_cells" in tool_names
     assert result.question_type == "area_character"
 
 
@@ -91,6 +92,7 @@ def test_planner_area_character_still_uses_scene_pack_when_dimensions_empty():
 
     tool_names = [step.tool_name for step in result.steps]
     assert "run_area_character_pack" in tool_names
+    assert "build_unified_spatial_cells" in tool_names
     assert tool_names[:2] == ["read_current_scope", "read_current_results"]
 
 
@@ -107,6 +109,21 @@ def test_planner_population_question_prefers_population_profile_tool():
     tool_names = [step.tool_name for step in result.steps]
     assert "read_population_profile_analysis" in tool_names or "compute_population_overview_from_scope" in tool_names
     assert "compute_population_overview_from_scope" not in tool_names
+
+
+def test_planner_road_spatial_distribution_uses_unified_spatial_cells():
+    snapshot = _snapshot_with_scope(road={"summary": {"node_count": 8, "edge_count": 10}})
+    memory = WorkingMemory(artifacts={"scope_polygon": snapshot.scope["polygon"]})
+
+    result = build_planning_fallback(
+        question="分析路网集成度和连接度的空间分布，识别低值区域",
+        snapshot=snapshot,
+        memory=memory,
+    )
+
+    tool_names = [step.tool_name for step in result.steps]
+    assert result.question_type == "road"
+    assert "build_unified_spatial_cells" in tool_names
 
 
 def test_planner_site_selection_prefers_scene_pack():

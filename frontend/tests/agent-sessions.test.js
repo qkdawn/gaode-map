@@ -375,7 +375,8 @@ test('deep analysis submit keeps its tab and sends target context without creati
   assert.match(requestBody.messages[0].content, /继续分析任务/)
   assert.match(requestBody.messages[0].content, /核心判断/)
   assert.match(requestBody.messages[0].content, /road_syntax/)
-  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区'])
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '## 核心判断\n应优先识别低连通高活力错配街区'])
+  assert.equal(ctx.agentMessages[1].role, 'assistant')
   assert.equal(ctx.findAgentSession(ctx.activeAgentSessionId).panelKind, 'deep_analysis')
 })
 
@@ -522,7 +523,8 @@ test('composer plus menu selects one-shot deep thinking mode and keeps user mess
   assert.match(requestBody.messages[0].content, /深度思考/)
   assert.match(requestBody.messages[0].content, /深度思考审查视角/)
   assert.match(requestBody.messages[0].content, /用户问题：识别断点街区/)
-  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区'])
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '## 核心判断\n断点集中在低连通高活力错配街区。'])
+  assert.equal(ctx.agentMessages[1].role, 'assistant')
   assert.equal(ctx.agentComposerMode, '')
   assert.equal(ctx.agentDeepAnalysisMode, 'deep')
 })
@@ -1753,7 +1755,25 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
           input: '',
           messages: [
             { role: 'user', content: '总结这个区域' },
-            { role: 'assistant', content: '这里以社区商业为主' },
+            {
+              role: 'assistant',
+              content: '这里以社区商业为主',
+              process: {
+                thinking_timeline: [
+                  { id: 'thinking-gating', phase: 'gating', title: '检查输入', detail: '正在检查问题与范围。', state: 'completed' },
+                  {
+                    id: 'tool-call-read-current-scope',
+                    phase: 'executing',
+                    title: '执行成功 read_current_scope',
+                    detail: '执行成功',
+                    items: ['参数：无参数', '结果：scope_polygon 已读取', '证据：1 条', '产物：scope_polygon'],
+                    state: 'completed',
+                  },
+                  { id: 'status-answered', phase: 'answered', title: '回答生成完成', detail: '', state: 'completed' },
+                ],
+                execution_trace: [{ tool_name: 'read_current_scope', status: 'success' }],
+              },
+            },
           ],
           output: {
             cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
@@ -2037,6 +2057,24 @@ test('thinking elapsed timer updates reactive tick and freezes after stop', () =
   }
 })
 
+test('thinking elapsed label does not keep growing after elapsed tick is missing', () => {
+  const ctx = createAgentContext()
+  const originalDateNow = Date.now
+  let now = 1000
+  Date.now = () => now
+
+  try {
+    ctx.agentStreamStartedAt = 1000
+    ctx.agentStreamElapsedTick = 0
+    assert.equal(ctx.getAgentThinkingElapsedLabel(), '1s')
+
+    now = 61000
+    assert.equal(ctx.getAgentThinkingElapsedLabel(), '1s')
+  } finally {
+    Date.now = originalDateNow
+  }
+})
+
 test('waiting process fallback advances while first backend event is delayed', () => {
   const ctx = createAgentContext()
   const originalDateNow = Date.now
@@ -2149,6 +2187,8 @@ test('submitAgentTurn shows submit process before first stream event', async () 
   assert.equal(steps[0].detail.includes('正在建立 Agent 流式响应'), false)
   assert.equal(ctx.agentThinkingTimeline.some((item) => item.id === 'stream-connect'), false)
   assert.equal(ctx.agentThinkingExpanded, true)
+  assert.equal(ctx.shouldShowAgentThinkingLiveStatus(), true)
+  assert.equal(ctx.shouldShowAgentThinkingToggle(), false)
   ctx.toggleAgentThinkingExpanded()
   assert.equal(ctx.agentThinkingExpanded, false)
   assert.equal(ctx.getAgentVisibleProcessSteps().length, 1)
@@ -2156,6 +2196,39 @@ test('submitAgentTurn shows submit process before first stream event', async () 
 
   ctx.cancelAgentTurn()
   await pending
+})
+
+test('submitAgentTurn collapses process when stream errors before final response', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '总结这个区域'
+
+  global.fetch = async (url) => {
+    if (url === '/api/v1/analysis/agent/summary/readiness') {
+      return {
+        ok: true,
+        async json() {
+          return { checked: false, ready: false, missing_tasks: [], reused: [], fetched: [] }
+        },
+      }
+    }
+    return createSseResponse([
+      {
+        type: 'error',
+        payload: { message: '综合回答失败' },
+      },
+    ])
+  }
+
+  await ctx.submitAgentTurn()
+
+  assert.equal(ctx.agentStatus, 'failed')
+  assert.equal(ctx.agentThinkingExpanded, false)
+  assert.equal(ctx.agentPlanExpanded, false)
+  assert.equal(ctx.agentTraceExpanded, false)
+  assert.equal(ctx.shouldShowAgentThinkingLiveStatus(), false)
+  assert.equal(ctx.shouldShowAgentThinkingToggle(), true)
 })
 
 test('getAgentVisibleProcessSteps keeps cumulative visible timeline items', () => {
@@ -2196,6 +2269,7 @@ test('getAgentNaturalProcessItems renders process as prose with tool lines', () 
     phase: 'gating',
     title: '思考',
     detail: '我先判断这个问题是不是“下一步分析建议”，避免重新跑区域画像。',
+    display_text: '我先判断这个问题是不是“下一步分析建议”，避免重新跑区域画像。',
     state: 'completed',
   })
   ctx.upsertAgentTraceThinkingItem({
@@ -2210,6 +2284,7 @@ test('getAgentNaturalProcessItems renders process as prose with tool lines', () 
     tool_name: 'read_current_results',
     status: 'success',
     result_summary: '已发现 POI、H3、road、population、nightlight 结果。',
+    display_text: '已发现 POI、H3、road、population、nightlight 结果。',
     evidence_count: 5,
   })
 
@@ -2222,6 +2297,76 @@ test('getAgentNaturalProcessItems renders process as prose with tool lines', () 
   ])
   assert.equal(items.some((item) => ['思考', '行动', '观察'].includes(item.text)), false)
   assert.equal(items[2].metaText, '证据：5 条')
+})
+
+test('getAgentNaturalProcessItems only renders explicit display text and tool usage', () => {
+  const ctx = createAgentContext()
+
+  ctx.upsertAgentThinkingItem({
+    id: 'frontend-submit-request',
+    phase: 'connecting',
+    title: '提交请求',
+    detail: '问题已经发给 AI 了，正在等它开始处理。',
+    state: 'completed',
+  })
+  ctx.upsertAgentThinkingItem({
+    id: 'status-gating',
+    phase: 'gating',
+    title: '门卫判断',
+    detail: '正在判断你的问题是否清晰、当前范围是否能直接开始分析。',
+    state: 'completed',
+  })
+  ctx.upsertAgentThinkingItem({
+    id: 'thinking-gating-result',
+    phase: 'gating',
+    title: '门卫通过',
+    detail: '这个 detail 不能作为自然过程文案。',
+    display_text: '用户要解释路网较差原因，当前范围有效，可以开始分析。',
+    state: 'completed',
+  })
+  ctx.upsertAgentThinkingItem({
+    id: 'status-planning',
+    phase: 'planning',
+    title: '规划分析步骤',
+    detail: '正在决定这轮要调用哪些工具、补哪些证据。',
+    state: 'active',
+  })
+  ctx.upsertAgentThinkingItem({
+    id: 'thinking-planning',
+    phase: 'planning',
+    title: '规划分析步骤',
+    detail: '正在决定本轮应调用哪些工具、补哪些证据。',
+    display_text: '先复用已有路网结果，再补充空间分布证据。',
+    state: 'active',
+  })
+  ctx.upsertAgentTraceThinkingItem({
+    id: 'tool-call-analysis-preflight-start',
+    tool_name: 'analysis_preflight',
+    status: 'start',
+    message: '执行工具',
+    display_text: '确认当前已有 POI、人口、夜光和路网证据状态。',
+    arguments_summary: '无参数',
+  })
+  ctx.upsertAgentTraceThinkingItem({
+    id: 'tool-call-analysis-preflight-success',
+    tool_name: 'analysis_preflight',
+    status: 'success',
+    message: '执行成功',
+    result_summary: '执行成功',
+    evidence_count: 2,
+  })
+
+  const items = ctx.getAgentNaturalProcessItems()
+
+  assert.deepEqual(items.map((item) => item.text), [
+    '用户要解释路网较差原因，当前范围有效，可以开始分析。',
+    '先复用已有路网结果，再补充空间分布证据。',
+    '调用工具：检查已有分析证据',
+  ])
+  assert.equal(items.some((item) => item.text.includes('问题已经发给 AI')), false)
+  assert.equal(items.some((item) => item.text.includes('正在决定这轮')), false)
+  assert.equal(items.some((item) => item.text.includes('这个 detail 不能作为自然过程文案')), false)
+  assert.equal(items[2].metaText, '确认当前已有 POI、人口、夜光和路网证据状态。')
 })
 
 test('getAgentProcessRoleGroups groups role steps into first-level panels', () => {
@@ -2422,7 +2567,7 @@ test('status events create visible process fallback steps', async () => {
   assert.equal(ctx.getAgentVisibleProcessSteps()[3].state, 'completed')
 })
 
-test('applyAgentSessionSnapshot expands failed and risk confirmation thinking timeline', () => {
+test('applyAgentSessionSnapshot collapses failed timeline but expands risk confirmation', () => {
   const ctx = createAgentContext()
   const baseSnapshot = {
     id: 'agent-restored',
@@ -2445,7 +2590,7 @@ test('applyAgentSessionSnapshot expands failed and risk confirmation thinking ti
   }
 
   ctx.applyAgentSessionSnapshot({ ...baseSnapshot, status: 'failed' })
-  assert.equal(ctx.agentThinkingExpanded, true)
+  assert.equal(ctx.agentThinkingExpanded, false)
 
   ctx.applyAgentSessionSnapshot({
     ...baseSnapshot,
@@ -2753,8 +2898,10 @@ test('submitAgentTurn appends user message immediately and updates thinking time
   assert.equal(ctx.agentThinkingExpanded, false)
   assert.equal(ctx.agentPlanExpanded, false)
   assert.equal(ctx.agentTraceExpanded, false)
+  assert.equal(ctx.shouldShowAgentThinkingLiveStatus(), false)
+  assert.equal(ctx.shouldShowAgentThinkingToggle(), true)
   assert.deepEqual(ctx.getAgentMessagesBeforeThinking().map((item) => item.content), ['总结这个区域'])
-  assert.deepEqual(ctx.getAgentMessagesAfterThinking().map((item) => item.content), [])
+  assert.deepEqual(ctx.getAgentMessagesAfterThinking().map((item) => item.content), ['这里以社区商业为主'])
   assert.deepEqual(
     ctx.getAgentVisibleProcessSteps().map((item) => item.id),
     ['frontend-submit-request', 'status-gating', 'thinking-gating', 'tool-call-read-current-scope', 'status-answered'],
@@ -2769,7 +2916,13 @@ test('submitAgentTurn appends user message immediately and updates thinking time
   assert.equal(ctx.agentCards.length, 1)
   assert.equal(ctx.agentReasoningBlocks.length, 1)
   assert.equal(ctx.getAgentVisibleReasoningBlocks()[0].content, '先读取当前范围。')
-  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['总结这个区域'])
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['总结这个区域', '这里以社区商业为主'])
+  assert.equal(ctx.shouldShowAgentThinkingProcessBlock(), false)
+  assert.equal(ctx.shouldShowAgentMessageProcess(ctx.agentMessages[1]), true)
+  assert.deepEqual(
+    ctx.agentMessages[1].process.thinkingTimeline.map((item) => item.id),
+    ['frontend-submit-request', 'status-gating', 'thinking-gating', 'tool-call-read-current-scope', 'status-answered'],
+  )
   assert.equal(
     ctx.findAgentSession(ctx.activeAgentSessionId).thinkingTimeline.some((item) => item.id === 'thinking-gating'),
     true,
@@ -2840,8 +2993,10 @@ test('clarification follow-up continues in the same session instead of opening a
   assert.equal(ctx.findAgentSession(originalSessionId).status, 'answered')
   assert.deepEqual(
     ctx.findAgentSession(originalSessionId).messages.map((item) => item.content),
-    ['总结这个区域', '哪里适合补充餐饮'],
+    ['总结这个区域', '哪里适合补充餐饮', '已继续在原会话中回答。'],
   )
+  assert.equal(ctx.findAgentSession(originalSessionId).messages[2].role, 'assistant')
+  assert.equal(ctx.shouldShowAgentThinkingProcessBlock(), false)
 })
 
 test('multi-turn thinking keeps previous assistant above the new user turn', async () => {
@@ -2923,6 +3078,16 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
             { role: 'user', content: '第一轮问题' },
             { role: 'assistant', content: '第一轮回答' },
             { role: 'user', content: '第二轮问题' },
+            {
+              role: 'assistant',
+              content: '第二轮结论',
+              process: {
+                thinking_timeline: [
+                  { id: 'thinking-gating', phase: 'gating', title: '门卫判断', detail: '已完成。', state: 'completed' },
+                  { id: 'status-answered', phase: 'answered', title: '回答生成完成', detail: '', state: 'completed' },
+                ],
+              },
+            },
           ],
           output: {
             cards: [{ type: 'summary', title: '概览', content: '第二轮结论', items: [] }],
@@ -2954,7 +3119,11 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
     ctx.getAgentMessagesBeforeThinking().map((item) => item.content),
     ['第一轮问题', '第一轮回答', '第二轮问题'],
   )
-  assert.deepEqual(ctx.getAgentMessagesAfterThinking().map((item) => item.content), [])
+  assert.deepEqual(ctx.getAgentMessagesAfterThinking().map((item) => item.content), ['第二轮结论'])
+  assert.deepEqual(
+    ctx.getAgentThreadMessages().map((item) => item.content),
+    ['第一轮问题', '第一轮回答', '第二轮问题', '第二轮结论'],
+  )
 })
 
 test('getAgentMessagesAfterThinking only returns assistant messages from the current turn', () => {
@@ -3699,7 +3868,7 @@ test('site selection tabs persist and restore with panel payloads', () => {
   assert.equal(restored.getAgentSiteSelectionPack().summary_text, '已形成候选格。')
 })
 
-test('submitAgentTurn keeps failed thinking timeline expanded after final response', async () => {
+test('submitAgentTurn collapses failed thinking timeline after final response', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -3769,7 +3938,7 @@ test('submitAgentTurn keeps failed thinking timeline expanded after final respon
   await ctx.submitAgentTurn()
 
   assert.equal(ctx.agentStatus, 'failed')
-  assert.equal(ctx.agentThinkingExpanded, true)
+  assert.equal(ctx.agentThinkingExpanded, false)
   assert.equal(ctx.agentThinkingTimeline.some((item) => item.state === 'failed'), true)
   assert.equal(ctx.agentError, 'LLM 卡片生成失败')
 })
@@ -5774,7 +5943,7 @@ test('agent history template hides empty text while folders are collapsed', asyn
   const html = await fs.promises.readFile(new URL('../src/pages/analysis/components/sidebar.html', import.meta.url), 'utf8')
   assert.match(html, /!isAgentHistoryGroupCollapsed\(group\.id\) && \(!group\.panels \|\| !group\.panels\.length\)/)
   assert.match(html, /v-else-if="!isAgentHistoryGroupCollapsed\(`\$\{group\.id\}-\$\{panel\.id\}`\)"/)
-  assert.match(html, /v-else-if="!isAgentHistoryGroupCollapsed\(group\.id\)"/)
+  assert.match(html, /!isAgentHistoryGroupCollapsed\(group\.id\) && !\(group\.sessions && group\.sessions\.length\) && !\(group\.headingOnly && group\.count > 0\)/)
 })
 
 test('agent iteration poi heatmap clusters dense display points', () => {

@@ -5789,6 +5789,27 @@ label {
     min-width: 126px;
 }
 
+.poi-grid-params-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.poi-grid-params-actions .h3-btn {
+    width: 100%;
+    min-width: 0;
+    margin-top: 0;
+    white-space: nowrap;
+}
+
+.poi-grid-params-actions .h3-params-compute-btn {
+    min-width: 0;
+}
+
+.poi-grid-generate-all-btn {
+    grid-column: 1 / -1;
+}
+
 .h3-map-toolbar {
     position: absolute;
     top: 12px;

@@ -4,15 +4,13 @@ import csv
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from core.config import settings
 
 
-def resolve_depthmap_cli_path(override_path: Optional[str] = None) -> str:
+def resolve_depthmap_cli_path() -> str:
     candidates: List[str] = []
-    if override_path:
-        candidates.append(str(override_path).strip())
     if getattr(settings, "depthmapx_cli_path", ""):
         candidates.append(str(settings.depthmapx_cli_path).strip())
     candidates.extend(["depthmapXcli", "depthmapXcli.exe"])

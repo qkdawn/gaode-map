@@ -446,6 +446,12 @@
                     "defaultChecked": true,
                     "types": "050700",
                     "keywords": "冷饮店",
+                    "aliases": [
+                        "奶茶店",
+                        "奶茶",
+                        "茶饮店",
+                        "饮品店"
+                    ],
                     "point_type": "type-050700"
                 },
                 {

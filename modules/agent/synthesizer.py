@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 from .analysis_extractors import is_target_supply_gap_ready
 from .intent_signals import mentions_nightlight, mentions_population, mentions_road, mentions_summary, mentions_supply
+from .llm_digest import tool_results_llm_digest
 from .review_contract import build_review_contract
 from .synthesis_evidence import build_analysis_evidence as _build_analysis_evidence_from_module
 from .synthesis_metrics import build_summary_metrics as _build_summary_metrics_from_module
@@ -508,15 +509,7 @@ def build_synthesis_payload(
     )
     metrics = structured["metrics"]
     evidence = structured["evidence"]
-    tool_result_digest = [
-        {
-            "tool_name": result.tool_name,
-            "status": result.status,
-            "result": dict(result.result or {}),
-            "warnings": list(result.warnings or []),
-        }
-        for result in tool_results
-    ]
+    tool_result_digest = tool_results_llm_digest(tool_results)
     evidence_items = _metric_items_for_question(question, audit, metrics)
     return {
         "question": question,

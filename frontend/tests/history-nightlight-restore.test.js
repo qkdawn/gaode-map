@@ -54,6 +54,10 @@ function createHistoryRestoreContext(overrides = {}) {
     lastIsochroneGeoJSON: null,
     isochroneScopeMode: 'point',
     allPoisDetails: [{ id: 'old-poi' }],
+    poiGridResultsByYearType: {
+      '2020:h3': { status: 'failed', error: 'old failed h3' },
+    },
+    activePoiGridResultKey: '2020:h3',
     clearH3Grid() {
       this.clearedH3Grid += 1
     },
@@ -151,6 +155,8 @@ test('_applyHistoryDetailBaseResult resets nightlight analysis state while prese
   assert.equal(ctx.step, 2)
   assert.equal(ctx.sidebarView, 'wizard')
   assert.equal(ctx.scopeSource, 'history')
+  assert.deepEqual(ctx.poiGridResultsByYearType, {})
+  assert.equal(ctx.activePoiGridResultKey, '')
   assert.deepEqual(ctx.resetPanelCalls, [{ panelId: 'poi', options: { apply: false } }])
 })
 
@@ -177,6 +183,10 @@ test('loadHistoryDetail keeps restored history id and history scope source', asy
       async _restoreHistoryPoisAsync(id) {
         this.restoredPoiHistoryId = id
         this.allPoisDetails = [{ id: 'history-poi' }]
+      },
+      syncSummaryTaskBoardFromLocalResults(options) {
+        this.summaryTaskBoardSyncs = Array.isArray(this.summaryTaskBoardSyncs) ? this.summaryTaskBoardSyncs.slice() : []
+        this.summaryTaskBoardSyncs.push(options)
       },
     },
   )
@@ -224,14 +234,22 @@ test('loadHistoryDetail keeps restored history id and history scope source', asy
   assert.equal(ctx.scopeSource, 'history')
   assert.equal(ctx.restoredPoiHistoryId, '123')
   assert.deepEqual(ctx.allPoisDetails, [{ id: 'history-poi' }])
+  assert.deepEqual(ctx.summaryTaskBoardSyncs, [{ sync: false }])
 })
 
 test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () => {
   const originalFetch = global.fetch
   const ctx = Object.assign(createHistoryRestoreContext(), historyMethods, {
     historyDetailLoadToken: 1,
+    currentHistorySelectedPoiYear: 2024,
+    resultPoiYear: 2024,
+    poiYearSource: '2024',
+    commitPoiGridResult(year, type, patch) {
+      this.committedPoiGrid = this.committedPoiGrid || []
+      this.committedPoiGrid.push({ type, year, status: patch && patch.status })
+    },
     commitCurrentPoiGridResult(type, year) {
-      this.committedPoiGrid = { type, year }
+      this.appliedPoiGrid = { type, year }
     },
     restorePoiRasterGridDisplayOnEnter() {
       this.restoredRasterDisplay = true
@@ -251,14 +269,19 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
     updatePopulationCharts() {
       this.populationChartsUpdated = true
     },
+    syncSummaryTaskBoardFromLocalResults(options) {
+      this.summaryTaskBoardSyncs = Array.isArray(this.summaryTaskBoardSyncs) ? this.summaryTaskBoardSyncs.slice() : []
+      this.summaryTaskBoardSyncs.push(options)
+    },
   })
   global.fetch = async (url) => {
     assert.equal(url, '/api/v1/analysis/history/history-1/artifacts')
     return {
       ok: true,
       json: async () => [
-        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-01', payload: { year: 2024, features: [{ properties: { cell_id: 'cell-1' } }], summary: { grid_count: 1 } } },
-        { artifact_type: 'poi_h3_grid', updated_at: '2026-01-01', payload: { summary: { grid_count: 2 } } },
+        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-02', params: { year: 2020 }, payload: { year: 2020, features: [{ properties: { cell_id: 'wrong-year' } }], summary: { grid_count: 999 } } },
+        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-01', params: { year: 2024 }, payload: { year: 2024, features: [{ properties: { cell_id: 'cell-1' } }], summary: { grid_count: 1 } } },
+        { artifact_type: 'poi_h3_grid', updated_at: '2026-01-01', params: { year: 2024 }, payload: { summary: { grid_count: 2 } } },
         { artifact_type: 'population', updated_at: '2026-01-01', payload: { year: '2026', overview: { summary: { total_population: 10 } }, layer_cells: [{ cell_id: 'p1' }] } },
         { artifact_type: 'nightlight', updated_at: '2026-01-01', payload: { year: 2025, overview: { summary: { mean_radiance: 3 } }, layer_cells: [{ cell_id: 'n1' }] } },
         { artifact_type: 'road_syntax', updated_at: '2026-01-01', payload: { summary: { node_count: 5 } } },
@@ -276,12 +299,75 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
     assert.equal(result.roadRestored, true)
     assert.equal(ctx.poiGridSummary.grid_count, 1)
     assert.equal(ctx.h3AnalysisSummary.grid_count, 2)
+    assert.deepEqual(ctx.committedPoiGrid, [
+      { type: 'raster', year: 2020, status: 'ready' },
+      { type: 'raster', year: 2024, status: 'ready' },
+    ])
+    assert.deepEqual(ctx.appliedPoiGrid, { type: 'raster', year: 2024 })
     assert.equal(ctx.populationOverview.summary.total_population, 10)
     assert.equal(ctx.nightlightOverview.summary.mean_radiance, 3)
     assert.equal(ctx.roadSyntaxSummary.node_count, 5)
+    assert.deepEqual(ctx.summaryTaskBoardSyncs, [{ sync: false }])
   } finally {
     global.fetch = originalFetch
   }
+})
+
+test('_restoreHistoryH3ResultAsync restores h3 data and recomputes derived stats', async () => {
+  const ctx = createHistoryRestoreContext({
+    historyDetailLoadToken: 1,
+    activeStep3Panel: 'poi',
+    poiSubTab: 'params',
+    h3MainStage: 'params',
+    h3SubTab: 'metric_map',
+    h3MetricView: 'density',
+    h3StructureFillMode: 'gi_z',
+    computeH3DerivedStatsCalls: 0,
+    ensureH3PanelEntryStateCalls: 0,
+    computeH3DerivedStats() {
+      this.computeH3DerivedStatsCalls += 1
+      this.h3DerivedStats = { structureSummary: { rows: [{ h3_id: 'h3-1' }] } }
+    },
+    ensureH3PanelEntryState() {
+      this.ensureH3PanelEntryStateCalls += 1
+    },
+    commitCurrentPoiGridResult(type, year) {
+      this.committedH3GridResult = { type, year }
+    },
+  })
+
+  const restored = await historyMethods._restoreHistoryH3ResultAsync.call(ctx, {
+    grid: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: { h3_id: 'h3-1', poi_count: 8 } }],
+      count: 1,
+      resolution: 9,
+      include_mode: 'intersects',
+      min_overlap_ratio: 0.35,
+    },
+    summary: { grid_count: 1, poi_count: 8 },
+    charts: { density_histogram: { bins: [1, 2] } },
+    year: 2024,
+    ui: {
+      main_stage: 'diagnosis',
+      sub_tab: 'gap',
+      metric_view: 'entropy',
+      structure_fill_mode: 'lisa_z',
+    },
+  }, 1)
+
+  assert.equal(restored, true)
+  assert.equal(ctx.h3AnalysisGridFeatures.length, 1)
+  assert.equal(ctx.h3GridResolution, 9)
+  assert.equal(ctx.h3GridMinOverlapRatio, 0.35)
+  assert.equal(ctx.h3AnalysisSummary.grid_count, 1)
+  assert.equal(ctx.h3MainStage, 'diagnosis')
+  assert.equal(ctx.h3SubTab, 'gap')
+  assert.equal(ctx.h3MetricView, 'entropy')
+  assert.equal(ctx.h3StructureFillMode, 'lisa_z')
+  assert.equal(ctx.computeH3DerivedStatsCalls, 1)
+  assert.equal(ctx.ensureH3PanelEntryStateCalls, 1)
+  assert.deepEqual(ctx.committedH3GridResult, { type: 'h3', year: 2024 })
 })
 
 test('_restoreHistoryPoisAsync includes backend detail in failure message', async () => {

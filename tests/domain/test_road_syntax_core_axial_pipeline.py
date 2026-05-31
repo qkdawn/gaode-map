@@ -43,7 +43,7 @@ def _mock_shapegraph_csv() -> str:
 
 def _patch_core_runtime(monkeypatch, call_log, fail_axial=False):
     monkeypatch.setattr(core, "_fetch_overpass_elements", lambda _query: _sample_overpass_elements())
-    monkeypatch.setattr(core, "_resolve_depthmap_cli_path", lambda _override=None: "/usr/local/bin/depthmapXcli")
+    monkeypatch.setattr(core, "_resolve_depthmap_cli_path", lambda: "/usr/local/bin/depthmapXcli")
 
     def _fake_run_depthmap_cmd(cli_path, args, workdir, timeout_s):
         mode = ""

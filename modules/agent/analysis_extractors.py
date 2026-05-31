@@ -3,8 +3,20 @@ from __future__ import annotations
 from math import asin, cos, radians, sin, sqrt
 from typing import Any, Dict, List, Tuple
 
+from modules.providers.amap.utils.get_type_info import infer_type_info_from_text, resolve_type_info
+
 from .schemas import AnalysisSnapshot
 
+
+_DEFAULT_H3_CATEGORY_META = [
+    {"key": "group-7", "label": "餐饮"},
+    {"key": "group-6", "label": "购物"},
+    {"key": "group-4", "label": "商务住宅"},
+    {"key": "group-3", "label": "交通"},
+    {"key": "group-2", "label": "旅游"},
+    {"key": "group-13", "label": "科教文化"},
+    {"key": "group-10", "label": "医疗"},
+]
 
 def _safe_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -156,6 +168,167 @@ def _current_poi_h3_grid(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) 
     if isinstance(h3_payload, dict) and isinstance(h3_payload.get("grid"), dict):
         return dict(h3_payload.get("grid") or {})
     return {}
+
+
+def _current_poi_h3_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    artifact = artifacts.get("current_poi_h3_evidence")
+    if isinstance(artifact, dict):
+        return dict(artifact)
+    h3_payload = artifacts.get("current_poi_h3")
+    if isinstance(h3_payload, dict) and isinstance(h3_payload.get("poi_h3_evidence"), dict):
+        return dict(h3_payload.get("poi_h3_evidence") or {})
+    h3_payload = getattr(snapshot, "h3", {})
+    if isinstance(h3_payload, dict) and isinstance(h3_payload.get("poi_h3_evidence"), dict):
+        return dict(h3_payload.get("poi_h3_evidence") or {})
+    return {}
+
+
+def _h3_category_meta(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> List[Dict[str, str]]:
+    evidence = _current_poi_h3_evidence(snapshot, artifacts)
+    raw_items = _safe_list(evidence.get("category_meta"))
+    if not raw_items:
+        raw_items = _DEFAULT_H3_CATEGORY_META
+    items: List[Dict[str, str]] = []
+    for item in raw_items:
+        source = _safe_dict(item)
+        key = str(source.get("key") or "").strip()
+        label = str(source.get("label") or "").strip()
+        if key and label:
+            items.append({"key": key, "label": label})
+    return items
+
+
+def _h3_category_key_for_label(category_meta: List[Dict[str, str]], label: str) -> str:
+    target = str(label or "").strip()
+    if not target:
+        return ""
+    for item in category_meta:
+        if target == item["key"]:
+            return item["key"]
+    for item in category_meta:
+        item_label = item["label"]
+        if target == item_label or target in item_label or item_label in target:
+            return item["key"]
+    return ""
+
+
+def _target_point_type(label: str) -> str:
+    text = str(label or "").strip()
+    if not text:
+        return ""
+    info = resolve_type_info(text) or infer_type_info_from_text(text) or {}
+    return str(info.get("point_type") or info.get("id") or "").strip()
+
+
+def _percentile(sorted_values: List[float], value: float | None) -> float:
+    if value is None or not sorted_values:
+        return 0.0
+    count = sum(1 for item in sorted_values if item <= value)
+    if len(sorted_values) <= 1:
+        return 1.0 if count else 0.0
+    return max(0.0, min(1.0, (count - 1) / (len(sorted_values) - 1)))
+
+
+def _classify_gap_zone(demand_pct: float, supply_pct: float, gap_score: float) -> str:
+    if demand_pct >= 0.6 and supply_pct < 0.4:
+        return "补位机会区"
+    if demand_pct >= 0.6 and supply_pct >= 0.6:
+        return "高需求高供给（竞争区）"
+    if demand_pct < 0.4 and supply_pct >= 0.6:
+        return "低需求高供给（偏饱和）"
+    if demand_pct < 0.4 and supply_pct < 0.4:
+        return "低需求低供给（观察区）"
+    if gap_score >= 0.15:
+        return "偏机会区"
+    if gap_score <= -0.15:
+        return "偏饱和区"
+    return "相对平衡区"
+
+
+def build_h3_gap_rows_for_target(
+    snapshot: AnalysisSnapshot,
+    artifacts: Dict[str, Any],
+    *,
+    target_label: str,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
+    category_meta = _h3_category_meta(snapshot, artifacts)
+    target_category_key = _h3_category_key_for_label(category_meta, target_label)
+    target_subcategory_key = _target_point_type(target_label)
+    if not target_category_key and not target_subcategory_key:
+        return []
+    demand_keys = {
+        "transport": _h3_category_key_for_label(category_meta, "交通"),
+        "life": _h3_category_key_for_label(category_meta, "商务住宅"),
+        "education": _h3_category_key_for_label(category_meta, "科教文化"),
+        "medical": _h3_category_key_for_label(category_meta, "医疗"),
+    }
+    rows: List[Dict[str, Any]] = []
+    evidence = _current_poi_h3_evidence(snapshot, artifacts)
+    for cell in _safe_list(evidence.get("cells")):
+        source = _safe_dict(cell)
+        h3_id = str(source.get("h3_id") or "").strip()
+        if not h3_id:
+            continue
+        poi_count = _to_float(source.get("poi_count"), 0.0) or 0.0
+        density = _to_float(source.get("density_poi_per_km2"), _to_float(source.get("density"), 0.0)) or 0.0
+        category_counts = _safe_dict(source.get("category_counts"))
+        subcategory_counts = _safe_dict(source.get("subcategory_counts")) or _safe_dict(source.get("type_counts"))
+
+        def category_density(key: str) -> float:
+            if not key or poi_count <= 0:
+                return 0.0
+            return density * ((_to_float(category_counts.get(key), 0.0) or 0.0) / poi_count)
+
+        def target_supply_density() -> float | None:
+            if target_subcategory_key:
+                if target_subcategory_key not in subcategory_counts:
+                    return None
+                return density * ((_to_float(subcategory_counts.get(target_subcategory_key), 0.0) or 0.0) / poi_count) if poi_count > 0 else 0.0
+            if target_category_key:
+                return category_density(target_category_key)
+            return None
+
+        demand_proxy = (
+            0.4 * category_density(demand_keys["transport"])
+            + 0.25 * category_density(demand_keys["life"])
+            + 0.2 * category_density(demand_keys["education"])
+            + 0.15 * category_density(demand_keys["medical"])
+        )
+        supply_density = target_supply_density()
+        if supply_density is None:
+            continue
+        rows.append(
+            {
+                **source,
+                "demand_proxy": demand_proxy,
+                "supply_target_density": supply_density,
+            }
+        )
+    demand_sorted = sorted(_to_float(row.get("demand_proxy"), 0.0) or 0.0 for row in rows)
+    supply_sorted = sorted(_to_float(row.get("supply_target_density"), 0.0) or 0.0 for row in rows)
+    scored: List[Dict[str, Any]] = []
+    for row in rows:
+        demand_pct = _percentile(demand_sorted, _to_float(row.get("demand_proxy"), 0.0))
+        supply_pct = _percentile(supply_sorted, _to_float(row.get("supply_target_density"), 0.0))
+        gap_score = demand_pct - supply_pct
+        scored.append(
+            {
+                **row,
+                "demand_pct": demand_pct,
+                "supply_pct": supply_pct,
+                "gap_score": gap_score,
+                "gap_zone_label": _classify_gap_zone(demand_pct, supply_pct, gap_score),
+            }
+        )
+    scored.sort(
+        key=lambda item: (
+            -(_to_float(item.get("gap_score"), -999.0) or -999.0),
+            -(_to_float(_safe_dict(item.get("confidence")).get("score"), 0.0) or 0.0),
+            str(item.get("h3_id") or ""),
+        )
+    )
+    return scored[:limit]
 
 
 def _feature_center_point(feature: Dict[str, Any]) -> Dict[str, float] | None:
@@ -447,11 +620,26 @@ def build_poi_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str
 def build_h3_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
     h3_panel = _current_frontend_panel(snapshot, artifacts, "h3")
     derived = _safe_dict(h3_panel.get("derived_stats"))
+    h3_evidence = _current_poi_h3_evidence(snapshot, artifacts)
+    evidence_derived = _safe_dict(h3_evidence.get("derived_stats"))
+    evidence_ui = _safe_dict(h3_evidence.get("ui"))
     structure_summary = _safe_dict(derived.get("structureSummary"))
     typing_summary = _safe_dict(derived.get("typingSummary"))
     gap_summary = _safe_dict(derived.get("gapSummary"))
     top_cells = _safe_dict(derived.get("topCells"))
-    structure_rows = _safe_list(structure_summary.get("rows"))
+    structure_rows = _safe_list(structure_summary.get("rows")) or _safe_list(evidence_derived.get("structure_rows"))
+    gap_rows = _safe_list(gap_summary.get("rows")) or _safe_list(evidence_derived.get("gap_rows"))
+    target_category = str(h3_panel.get("target_category") or evidence_ui.get("target_category") or "").strip()
+    target_category_label = str(
+        h3_panel.get("target_category_label") or evidence_ui.get("target_category_label") or ""
+    ).strip()
+    if not gap_rows and (target_category_label or target_category):
+        gap_rows = build_h3_gap_rows_for_target(
+            snapshot,
+            artifacts,
+            target_label=target_category_label or target_category,
+            limit=10,
+        )
     signal_count = sum(1 for row in structure_rows if _safe_dict(row).get("is_structure_signal"))
     if signal_count <= 0:
         signal_count = len(structure_rows)
@@ -464,6 +652,13 @@ def build_h3_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str,
         hotspot_count = _to_int(typing_summary.get("opportunityCount"), 0) or 0
     opportunity_count = _to_int(gap_summary.get("opportunityCount"), None)
     if opportunity_count is None:
+        opportunity_count = sum(
+            1
+            for row in gap_rows
+            if (_to_float(_safe_dict(row).get("gap_score"), 0.0) or 0.0) > 0.25
+            and (_to_float(_safe_dict(row).get("demand_pct"), 0.0) or 0.0) >= 0.6
+        )
+    if opportunity_count <= 0:
         opportunity_count = _to_int(typing_summary.get("opportunityCount"), 0) or 0
     typing_recommendation = str(typing_summary.get("recommendation") or "").strip()
     gap_recommendation = str(gap_summary.get("recommendation") or "").strip()
@@ -495,9 +690,9 @@ def build_h3_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str,
         "summary_text": summary_text,
         "top_cells": top_cells,
         "structure_rows": structure_rows[:10],
-        "gap_rows": _safe_list(gap_summary.get("rows"))[:10],
-        "target_category": str(h3_panel.get("target_category") or "").strip(),
-        "target_category_label": str(h3_panel.get("target_category_label") or "").strip(),
+        "gap_rows": gap_rows[:10],
+        "target_category": target_category,
+        "target_category_label": target_category_label,
     }
     return _with_analysis_status(payload, ready=is_h3_structure_ready(payload))
 
@@ -823,8 +1018,19 @@ def analyze_target_supply_gap(
     h3_structure: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     h3_structure = h3_structure or build_h3_structure_analysis(snapshot, artifacts)
-    gap_rows = [_safe_dict(item) for item in _safe_list(h3_structure.get("gap_rows"))]
+    target_gap_rows = [
+        _safe_dict(item)
+        for item in build_h3_gap_rows_for_target(snapshot, artifacts, target_label=place_type, limit=10)
+    ]
+    gap_rows = target_gap_rows or [_safe_dict(item) for item in _safe_list(h3_structure.get("gap_rows"))]
     opportunity_count = _to_int(h3_structure.get("opportunity_count"), 0) or 0
+    if gap_rows and opportunity_count <= 0:
+        opportunity_count = sum(
+            1
+            for row in gap_rows
+            if (_to_float(row.get("gap_score"), 0.0) or 0.0) > 0.25
+            and (_to_float(row.get("demand_pct"), 0.0) or 0.0) >= 0.6
+        )
     max_gap = 0.0
     if gap_rows:
         max_gap = max(_to_float(row.get("gap_score"), 0.0) or 0.0 for row in gap_rows)

@@ -87,6 +87,7 @@ def test_h3_metrics_api_shape(monkeypatch):
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
         "neighbor_ring": 1,
+        "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
     assert resp.status_code == 200
@@ -118,6 +119,7 @@ def test_h3_metrics_progress_api_roundtrip(monkeypatch):
         "poi_coord_type": "gcj02",
         "neighbor_ring": 1,
         "run_id": run_id,
+        "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
     assert resp.status_code == 200
@@ -156,6 +158,7 @@ def test_h3_metrics_poi_count_consistency(monkeypatch):
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
         "neighbor_ring": 1,
+        "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
     assert resp.status_code == 200
@@ -175,6 +178,7 @@ def test_h3_metrics_grid_count_changes_with_threshold(monkeypatch):
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
         "neighbor_ring": 1,
+        "use_arcgis": True,
     }
     loose = client.post("/api/v1/analysis/h3-metrics", json={**base_payload, "min_overlap_ratio": 0.0})
     strict = client.post("/api/v1/analysis/h3-metrics", json={**base_payload, "min_overlap_ratio": 0.4})
@@ -197,6 +201,7 @@ def test_h3_metrics_spatial_structure_fields(monkeypatch):
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
         "neighbor_ring": 1,
+        "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
     assert resp.status_code == 200
@@ -235,6 +240,7 @@ def test_h3_metrics_legacy_significance_payload_is_ignored(monkeypatch):
         "moran_seed": 1,
         "significance_fdr": True,
         "significance_local_sum_k": 888,
+        "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
     assert resp.status_code == 200
@@ -259,6 +265,7 @@ def test_h3_metrics_arcgis_failure_returns_502_without_native_fallback(monkeypat
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
         "neighbor_ring": 1,
+        "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
     assert resp.status_code == 502

@@ -116,7 +116,15 @@ function shouldExpandAgentProcessSection(status = '', options = {}) {
   const hasContent = !!options.hasContent
   if (!hasContent) return false
   if (options.isLoading) return true
-  return ['running', 'failed', 'requires_risk_confirmation'].includes(normalizedStatus)
+  return ['running', 'requires_risk_confirmation'].includes(normalizedStatus)
+}
+
+function shouldShowAgentProcessToggle(status = '', options = {}) {
+  return !!options.hasContent && !options.isLoading
+}
+
+function shouldShowAgentProcessLiveStatus(status = '', options = {}) {
+  return !!options.hasContent && !!options.isLoading
 }
 
 function buildAgentToolCallItems(executionTrace = []) {
@@ -156,5 +164,7 @@ export {
   hasAgentPlanContent,
   hasAgentExecutionTraceContent,
   shouldExpandAgentProcessSection,
+  shouldShowAgentProcessToggle,
+  shouldShowAgentProcessLiveStatus,
   buildAgentToolCallItems,
 }

@@ -104,6 +104,11 @@ def build_review_contract(
         _append_unique(evidence, f"夜光均值 {metrics.get('nightlight_mean_radiance')}")
     if _has_value(metrics.get("road_node_count")) or _has_value(metrics.get("road_edge_count")):
         _append_unique(evidence, f"路网节点/边段 {metrics.get('road_node_count') or 0}/{metrics.get('road_edge_count') or 0}")
+    if _has_value(metrics.get("unified_spatial_cell_count")):
+        _append_unique(
+            evidence,
+            f"统一空间格网 {metrics.get('unified_spatial_cell_count')} 个，POI/夜光/路网覆盖 {metrics.get('unified_active_poi_cell_count') or 0}/{metrics.get('unified_lit_cell_count') or 0}/{metrics.get('unified_road_covered_cell_count') or 0}",
+        )
     for summary_key in (
         "poi_structure_summary",
         "h3_structure_summary",
@@ -123,6 +128,7 @@ def build_review_contract(
         metrics.get("population_total"),
         metrics.get("nightlight_mean_radiance"),
         metrics.get("road_node_count"),
+        metrics.get("unified_spatial_cell_count"),
     ]
     spatial_count = sum(1 for value in spatial_inputs if _has_value(value))
     spatial_status = "supported" if spatial_count >= 4 else ("partial" if spatial_count >= 2 else "missing")
@@ -142,6 +148,7 @@ def build_review_contract(
         metrics.get("target_supply_gap_summary"),
         metrics.get("commercial_hotspot_summary"),
         metrics.get("business_place_type"),
+        metrics.get("unified_spatial_cell_count"),
     ]
     planning_count = sum(1 for value in planning_signals if _has_value(value))
     planning_status = "supported" if planning_count >= 2 else ("partial" if planning_count == 1 or evidence else "missing")

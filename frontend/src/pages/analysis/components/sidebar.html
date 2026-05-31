@@ -476,7 +476,9 @@
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div v-else-if="!isAgentHistoryGroupCollapsed(group.id)" class="agent-sidebar-history-empty">
+                                                    <div
+                                                        v-else-if="!isAgentHistoryGroupCollapsed(group.id) && !(group.sessions && group.sessions.length) && !(group.headingOnly && group.count > 0)"
+                                                        class="agent-sidebar-history-empty">
                                                         {{ group.emptyText }}
                                                     </div>
                                                 </div>
@@ -751,7 +753,7 @@
                                                 </div>
                                             </div>
                                         </div>
-                                        <div class="h3-params-actions">
+                                        <div class="h3-params-actions poi-grid-params-actions">
                                             <button class="h3-btn h3-btn-ghost"
                                                 :disabled="isPoiRasterGridMode() ? poiGridFeatures.length === 0 : h3GridCount === 0"
                                                 @click="isPoiRasterGridMode() ? clearPoiRasterGrid() : clearH3Grid()">
@@ -766,7 +768,7 @@
                                                 @click="startPoiGridAnalysis">
                                                 {{ (isPoiRasterGridMode() ? isLoadingPoiGrid : isComputingH3Analysis) ? '生成中...' : '生成当前' }}
                                             </button>
-                                            <button class="h3-btn h3-btn-primary h3-params-compute-btn"
+                                            <button class="h3-btn h3-btn-primary h3-params-compute-btn poi-grid-generate-all-btn"
                                                 :disabled="isLoadingPoiGrid || isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON"
                                                 @click="ensureAllPoiGridMatrixResults(true)">
                                                 生成全部年份网格

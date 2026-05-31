@@ -96,6 +96,17 @@
                         this.updateDecisionCards();
                     }
                 }
+                if (typeof this.commitCurrentPoiGridResult === 'function') {
+                    const restoredYear = Number(
+                        h3Result.year
+                        || (h3Result.params && h3Result.params.year)
+                        || this.currentHistorySelectedPoiYear
+                        || this.resultPoiYear
+                        || this.poiYearSource
+                        || 0
+                    );
+                    this.commitCurrentPoiGridResult('h3', Number.isFinite(restoredYear) && restoredYear > 0 ? restoredYear : null);
+                }
                 return true;
             },
             async _restoreHistoryRoadResultAsync(roadResult, token) {
@@ -224,11 +235,52 @@
                 const roadRestored = await this._restoreHistoryRoadResultAsync(roadResult, token);
                 return { h3Restored, roadRestored };
             },
-            pickLatestHistoryArtifact(artifacts = [], artifactType = '') {
+            getHistoryArtifactYear(artifact = {}) {
+                const payload = artifact && artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
+                const params = artifact && artifact.params && typeof artifact.params === 'object' ? artifact.params : {};
+                const payloadParams = payload && payload.params && typeof payload.params === 'object' ? payload.params : {};
+                const raw = payload.year || payloadParams.year || params.year;
+                const year = Number(raw);
+                return Number.isFinite(year) && year > 0 ? year : null;
+            },
+            getHistoryArtifactPreferredYear() {
+                const year = Number(this.currentHistorySelectedPoiYear || this.resultPoiYear || this.poiYearSource || 0);
+                return Number.isFinite(year) && year > 0 ? year : null;
+            },
+            pickLatestHistoryArtifact(artifacts = [], artifactType = '', options = {}) {
                 const type = String(artifactType || '').trim();
-                return (Array.isArray(artifacts) ? artifacts : [])
+                const candidates = (Array.isArray(artifacts) ? artifacts : [])
                     .filter((item) => item && String(item.artifact_type || '') === type)
-                    .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0] || null;
+                    .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+                const preferredYear = Number(options.preferredYear || 0);
+                if (Number.isFinite(preferredYear) && preferredYear > 0) {
+                    const matched = candidates.find((item) => this.getHistoryArtifactYear(item) === preferredYear);
+                    if (matched) return matched;
+                }
+                return candidates[0] || null;
+            },
+            pickLatestHistoryArtifactsByYear(artifacts = [], artifactType = '') {
+                const type = String(artifactType || '').trim();
+                const latestByYear = new Map();
+                const unknown = [];
+                for (const item of (Array.isArray(artifacts) ? artifacts : [])) {
+                    if (!item || String(item.artifact_type || '') !== type) continue;
+                    const year = this.getHistoryArtifactYear(item);
+                    if (!year) {
+                        unknown.push(item);
+                        continue;
+                    }
+                    const existing = latestByYear.get(year);
+                    if (!existing || String(item.updated_at || '').localeCompare(String(existing.updated_at || '')) > 0) {
+                        latestByYear.set(year, item);
+                    }
+                }
+                const rows = Array.from(latestByYear.values())
+                    .sort((a, b) => (this.getHistoryArtifactYear(a) || 0) - (this.getHistoryArtifactYear(b) || 0));
+                if (!rows.length && unknown.length) {
+                    rows.push(unknown.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')))[0]);
+                }
+                return rows;
             },
             async fetchHistoryArtifacts(historyId, signal = null) {
                 const res = await fetch(`/api/v1/analysis/history/${encodeURIComponent(historyId)}/artifacts`, { signal });
@@ -240,18 +292,82 @@
                 const data = await res.json();
                 return Array.isArray(data) ? data : [];
             },
-            async restoreHistoryPoiRasterArtifact(artifact, token) {
+            async restoreHistoryPoiRasterArtifact(artifact, token, options = {}) {
                 if (token !== this.historyDetailLoadToken || !artifact) return false;
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
                 const features = Array.isArray(payload.features) ? payload.features : [];
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : (artifact.summary || null);
                 if (!features.length && !summary) return false;
+                const restoredYear = this.getHistoryArtifactYear(artifact);
+                const applyToProjection = options.applyToProjection !== false;
+                const gridResult = {
+                    status: 'ready',
+                    features: features,
+                    summary: summary || {},
+                    charts: {},
+                    derivedStats: {},
+                    params: artifact.params && typeof artifact.params === 'object' ? JSON.parse(JSON.stringify(artifact.params)) : {},
+                    evidence: {},
+                    error: '',
+                    year: restoredYear,
+                    gridType: 'raster',
+                };
+                if (typeof this.commitPoiGridResult === 'function') {
+                    this.commitPoiGridResult(restoredYear, 'raster', gridResult);
+                }
+                if (!applyToProjection) return true;
                 this.poiGridFeatures = features;
                 this.poiGridSummary = summary || null;
                 this.poiGridType = 'raster';
-                this.commitCurrentPoiGridResult && this.commitCurrentPoiGridResult('raster', Number(payload.year || 0) || null);
+                if (typeof this.commitCurrentPoiGridResult === 'function') {
+                    this.commitCurrentPoiGridResult('raster', restoredYear);
+                }
                 if (this.poiSubTab === 'grid' && typeof this.restorePoiRasterGridDisplayOnEnter === 'function') {
                     this.restorePoiRasterGridDisplayOnEnter();
+                }
+                return true;
+            },
+            buildHistoryH3PayloadFromArtifact(artifact) {
+                if (!artifact || !artifact.payload || typeof artifact.payload !== 'object') return null;
+                const payload = artifact.payload;
+                return Object.assign(
+                    {},
+                    payload,
+                    {
+                        params: Object.assign(
+                            {},
+                            artifact.params && typeof artifact.params === 'object' ? artifact.params : {},
+                            payload.params && typeof payload.params === 'object' ? payload.params : {}
+                        ),
+                        year: this.getHistoryArtifactYear(artifact),
+                    }
+                );
+            },
+            async restoreHistoryH3Artifact(artifact, token, options = {}) {
+                if (token !== this.historyDetailLoadToken || !artifact) return false;
+                const h3Payload = this.buildHistoryH3PayloadFromArtifact(artifact);
+                if (!h3Payload) return false;
+                const applyToProjection = options.applyToProjection !== false;
+                if (applyToProjection) {
+                    return this._restoreHistoryH3ResultAsync(h3Payload, token);
+                }
+                const grid = h3Payload.grid && typeof h3Payload.grid === 'object' ? h3Payload.grid : {};
+                const features = Array.isArray(grid.features) ? grid.features : [];
+                const summary = h3Payload.summary && typeof h3Payload.summary === 'object' ? h3Payload.summary : {};
+                if (!features.length && !Object.keys(summary).length) return false;
+                if (typeof this.commitPoiGridResult === 'function') {
+                    this.commitPoiGridResult(this.getHistoryArtifactYear(artifact), 'h3', {
+                        status: 'ready',
+                        features,
+                        summary,
+                        charts: h3Payload.charts && typeof h3Payload.charts === 'object' ? h3Payload.charts : {},
+                        derivedStats: {},
+                        params: h3Payload.params && typeof h3Payload.params === 'object' ? JSON.parse(JSON.stringify(h3Payload.params)) : {},
+                        evidence: {},
+                        error: '',
+                        year: this.getHistoryArtifactYear(artifact),
+                        gridType: 'h3',
+                    });
                 }
                 return true;
             },
@@ -294,13 +410,36 @@
                 if (token !== this.historyDetailLoadToken) {
                     return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
                 }
-                const rasterRestored = await this.restoreHistoryPoiRasterArtifact(this.pickLatestHistoryArtifact(artifacts, 'poi_raster_grid'), token);
-                const h3Artifact = this.pickLatestHistoryArtifact(artifacts, 'poi_h3_grid');
-                const h3Restored = await this._restoreHistoryH3ResultAsync(h3Artifact && h3Artifact.payload, token);
+                const preferredYear = this.getHistoryArtifactPreferredYear();
+                const rasterArtifacts = this.pickLatestHistoryArtifactsByYear(artifacts, 'poi_raster_grid');
+                const preferredRaster = this.pickLatestHistoryArtifact(artifacts, 'poi_raster_grid', { preferredYear });
+                let rasterRestored = false;
+                for (const artifact of rasterArtifacts) {
+                    const restored = await this.restoreHistoryPoiRasterArtifact(artifact, token, {
+                        applyToProjection: artifact === preferredRaster,
+                    });
+                    rasterRestored = rasterRestored || restored;
+                }
+                const h3Artifacts = this.pickLatestHistoryArtifactsByYear(artifacts, 'poi_h3_grid');
+                const preferredH3 = this.pickLatestHistoryArtifact(artifacts, 'poi_h3_grid', { preferredYear });
+                let h3Restored = false;
+                for (const artifact of h3Artifacts) {
+                    const restored = await this.restoreHistoryH3Artifact(artifact, token, {
+                        applyToProjection: artifact === preferredH3,
+                    });
+                    h3Restored = h3Restored || restored;
+                }
                 const populationRestored = await this.restoreHistoryPopulationArtifact(this.pickLatestHistoryArtifact(artifacts, 'population'), token);
                 const nightlightRestored = await this.restoreHistoryNightlightArtifact(this.pickLatestHistoryArtifact(artifacts, 'nightlight'), token);
                 const roadArtifact = this.pickLatestHistoryArtifact(artifacts, 'road_syntax');
                 const roadRestored = await this._restoreHistoryRoadResultAsync(roadArtifact && roadArtifact.payload, token);
+                if (
+                    token === this.historyDetailLoadToken
+                    && (rasterRestored || h3Restored || populationRestored || nightlightRestored || roadRestored)
+                    && typeof this.syncSummaryTaskBoardFromLocalResults === 'function'
+                ) {
+                    this.syncSummaryTaskBoardFromLocalResults({ sync: false });
+                }
                 return { rasterRestored, h3Restored, populationRestored, nightlightRestored, roadRestored };
             },
             _applyHistoryDetailBaseResult(data) {
@@ -318,6 +457,8 @@
                 this.resetPopulationAnalysisState({ keepMeta: true, keepYear: true });
                 this.resetNightlightAnalysisState({ keepMeta: true, keepYear: true });
                 this.allPoisDetails = [];
+                this.poiGridResultsByYearType = {};
+                this.activePoiGridResultKey = '';
                 this.currentHistoryAvailablePoiYears = Array.isArray(data && data.available_years)
                     ? data.available_years.map((item) => Number(item)).filter((item) => Number.isFinite(item))
                     : [];
@@ -559,6 +700,9 @@
                     await this.$nextTick();
                     await new Promise((resolve) => window.requestAnimationFrame(resolve));
                     await this._restoreHistoryPoisAsync(historyId, token, controller.signal, poiCountHint);
+                    if (token === this.historyDetailLoadToken && typeof this.syncSummaryTaskBoardFromLocalResults === 'function') {
+                        this.syncSummaryTaskBoardFromLocalResults({ sync: false });
+                    }
 
                 } catch (e) {
                     if (e && e.name === 'AbortError') {

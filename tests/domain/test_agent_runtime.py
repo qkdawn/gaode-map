@@ -416,6 +416,7 @@ def test_runtime_fails_when_ai_not_enabled(monkeypatch):
 def test_stream_agent_turn_emits_new_stages(monkeypatch):
     _mock_roles(
         monkeypatch,
+        gate=GateDecision(status="pass", question_type="next_step", summary="问题已明确，可以基于当前范围继续。"),
         plans=[
             PlanningResult(
                 goal="读取已有结果",
@@ -441,6 +442,8 @@ def test_stream_agent_turn_emits_new_stages(monkeypatch):
     events = asyncio.run(collect())
     statuses = [event.payload.get("stage") for event in events if event.type == "status"]
     plans = [event.payload for event in events if event.type == "plan"]
+    thinking = [event.payload for event in events if event.type == "thinking"]
+    traces = [event.payload for event in events if event.type == "trace"]
 
     assert "gating" in statuses
     assert "planning" in statuses
@@ -449,4 +452,13 @@ def test_stream_agent_turn_emits_new_stages(monkeypatch):
     assert "synthesizing" in statuses
     assert plans
     assert plans[0]["steps"][0]["tool_name"] == "read_current_scope"
+    latest_thinking = {item["id"]: item for item in thinking}
+    assert latest_thinking["gating-check"]["display_text"] == "问题已明确，可以基于当前范围继续。"
+    assert latest_thinking["plan-0"]["display_text"] == "先读取范围和已有结果。"
+    assert latest_thinking["audit-0"]["display_text"] == "审计通过。"
+    assert latest_thinking["executing-0"].get("display_text", "") == ""
+    start_trace = next(item for item in traces if item.get("tool_name") == "read_current_scope" and item.get("status") == "start")
+    assert start_trace["display_text"] == "读取当前分析范围"
+    success_trace = next(item for item in traces if item.get("tool_name") == "read_current_scope" and item.get("status") == "success")
+    assert success_trace["display_text"]
     assert events[-1].type == "final"

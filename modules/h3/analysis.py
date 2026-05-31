@@ -233,6 +233,7 @@ def analyze_h3_grid(
                 "neighbor_mean_entropy": safe_round(cell_stats["neighbor_mean_entropy"], 6) or 0.0,
                 "neighbor_count": int(cell_stats["neighbor_count"]),
                 "category_counts": cell_stats["category_counts"],
+                "subcategory_counts": cell_stats.get("subcategory_counts") or {},
                 "lisa_i": local_stats.get("lisa_i"),
                 "lisa_z_score": local_stats.get("lisa_z_score"),
                 "gi_star_value": local_stats.get("gi_star_value"),

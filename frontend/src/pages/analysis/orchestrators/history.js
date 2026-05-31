@@ -280,7 +280,6 @@ function createAnalysisHistoryOrchestratorMethods() {
     buildCurrentScopeArtifactPayload() {
       const polygon = typeof this.getIsochronePolygonPayload === 'function' ? this.getIsochronePolygonPayload() : []
       const drawnPolygon = Array.isArray(this.drawnScopePolygon) ? this.drawnScopePolygon : []
-      const fingerprint = this.buildAnalysisScopeFingerprint()
       return {
         params: {
           mode: String(this.transportMode || ''),
@@ -295,19 +294,16 @@ function createAnalysisHistoryOrchestratorMethods() {
           mode: String(this.transportMode || ''),
           time_min: Number(this.timeHorizon || 0) || 0,
           area: null,
-          scope_fingerprint: fingerprint,
         },
         summary: {
           has_polygon: Array.isArray(polygon) && polygon.length > 0,
           mode: String(this.transportMode || ''),
           time_min: Number(this.timeHorizon || 0) || 0,
         },
-        scope_fingerprint: fingerprint,
       }
     },
     buildAnalysisArtifactBundle(artifactType = '') {
       const type = String(artifactType || '').trim()
-      const scopeFingerprint = this.buildAnalysisScopeFingerprint()
       if (type === 'scope') return this.buildCurrentScopeArtifactPayload()
       if (type === 'poi_raster_grid') {
         const params = {
@@ -328,7 +324,6 @@ function createAnalysisHistoryOrchestratorMethods() {
             ...params,
           },
           summary: this.cloneArtifactValue(this.poiGridSummary || {}),
-          scope_fingerprint: scopeFingerprint,
         }
       }
       if (type === 'poi_h3_grid') {
@@ -344,6 +339,8 @@ function createAnalysisHistoryOrchestratorMethods() {
         return {
           params,
           payload: {
+            year: params.year,
+            params: this.cloneArtifactValue(params),
             grid: {
               type: 'FeatureCollection',
               features,
@@ -356,7 +353,6 @@ function createAnalysisHistoryOrchestratorMethods() {
             charts: this.cloneArtifactValue(this.h3AnalysisCharts || {}),
           },
           summary: this.cloneArtifactValue(this.h3AnalysisSummary || {}),
-          scope_fingerprint: scopeFingerprint,
         }
       }
       if (type === 'population') {
@@ -376,7 +372,6 @@ function createAnalysisHistoryOrchestratorMethods() {
             view: params.view,
           },
           summary: this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {}),
-          scope_fingerprint: scopeFingerprint,
         }
       }
       if (type === 'nightlight') {
@@ -396,7 +391,6 @@ function createAnalysisHistoryOrchestratorMethods() {
             view: params.view,
           },
           summary: this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {}),
-          scope_fingerprint: scopeFingerprint,
         }
       }
       if (type === 'road_syntax') {
@@ -420,7 +414,6 @@ function createAnalysisHistoryOrchestratorMethods() {
             metric: params.metric,
           },
           summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
-          scope_fingerprint: scopeFingerprint,
         }
       }
       return null
@@ -451,7 +444,7 @@ function createAnalysisHistoryOrchestratorMethods() {
           params: this.normalizeArtifactParams(bundle.params),
           payload: this.cloneArtifactValue(bundle.payload || {}),
           summary: this.cloneArtifactValue(bundle.summary || {}),
-          scope_fingerprint: String(bundle.scope_fingerprint || this.buildAnalysisScopeFingerprint()),
+          scope_fingerprint: this.buildAnalysisScopeFingerprint(),
           data_version: 'v1',
         }),
       })

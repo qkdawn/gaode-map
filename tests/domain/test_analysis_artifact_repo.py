@@ -1,4 +1,4 @@
-from store.analysis_artifact_repo import AnalysisArtifactRepo, compute_params_hash
+from store.analysis_artifact_repo import AnalysisArtifactRepo, compute_params_hash, normalize_scope_fingerprint
 
 
 class FakeQuery:
@@ -33,6 +33,12 @@ class FakeSession:
     def query(self, _model):
         return FakeQuery(self.rows)
 
+    def get(self, _model, record_id):
+        for row in self.rows:
+            if row.id == record_id:
+                return row
+        return None
+
     def add(self, record):
         record.id = self.next_id
         self.next_id += 1
@@ -54,6 +60,15 @@ class FakeSession:
 def test_params_hash_is_canonical_and_changes_with_params():
     assert compute_params_hash({"year": 2024, "source": "local"}) == compute_params_hash({"source": "local", "year": 2024})
     assert compute_params_hash({"year": 2024}) != compute_params_hash({"year": 2025})
+
+
+def test_scope_fingerprint_keeps_short_keys_and_hashes_scope_payloads():
+    raw_scope = '{"polygon":[[112.1,28.1],[112.2,28.2]],"mode":"walking","time_min":30}'
+
+    assert normalize_scope_fingerprint("scope-a") == "scope-a"
+    assert normalize_scope_fingerprint(raw_scope).startswith("scope:")
+    assert len(normalize_scope_fingerprint(raw_scope)) == 70
+    assert normalize_scope_fingerprint(raw_scope) == normalize_scope_fingerprint(raw_scope)
 
 
 def test_artifact_repo_upserts_by_identity(monkeypatch):

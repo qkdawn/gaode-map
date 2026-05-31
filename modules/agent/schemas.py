@@ -84,6 +84,7 @@ class AgentMessage(BaseModel):
 
     role: Literal["system", "user", "assistant"] = "user"
     content: str = ""
+    process: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AnalysisSnapshot(BaseModel):
@@ -450,7 +451,7 @@ class AssistantCard(BaseModel):
 
     type: CardType
     title: str
-    content: str
+    content: str = ""
     items: List[Any] = Field(default_factory=list)
 
 
@@ -556,6 +557,28 @@ class PlanningResult(BaseModel):
     stop_condition: str = ""
     evidence_focus: List[str] = Field(default_factory=list)
     steps: List[PlanStep] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class PlanningIntent(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    goal: str = ""
+    question_type: str = ""
+    summary: str = ""
+    requires_tools: bool = True
+    stop_condition: str = ""
+    evidence_focus: List[str] = Field(default_factory=list)
+    tool_selection_brief: str = ""
+
+
+class ToolSelectionResult(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    summary: str = ""
+    requires_tools: bool = True
+    steps: List[PlanStep] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class AuditVerdict(BaseModel):
@@ -668,6 +691,7 @@ class AgentThinkingItem(BaseModel):
     phase: str
     title: str
     detail: str = ""
+    display_text: str = ""
     items: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
     state: ThinkingState = "pending"

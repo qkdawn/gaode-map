@@ -61,6 +61,25 @@ def test_poi_count_consistency():
     assert assigned == result["summary"]["poi_count"]
 
 
+def test_h3_grid_preserves_subcategory_counts():
+    result = analyze_h3_grid(
+        polygon=_sample_gcj02_polygon(),
+        resolution=10,
+        coord_type="gcj02",
+        include_mode="intersects",
+        min_overlap_ratio=0.0,
+        pois=[{**poi, "type": "type-050700"} for poi in _sample_pois_gcj02()],
+        poi_coord_type="gcj02",
+        neighbor_ring=1,
+    )
+    non_empty_cells = [f for f in result["grid"]["features"] if (f.get("properties", {}).get("poi_count") or 0) > 0]
+    assert non_empty_cells
+    assert sum(
+        int((feature["properties"].get("subcategory_counts") or {}).get("type-050700") or 0)
+        for feature in non_empty_cells
+    ) == result["summary"]["poi_count"]
+
+
 def test_single_category_entropy_zero():
     one_poi = [_sample_pois_gcj02()[0]]
     result = analyze_h3_grid(

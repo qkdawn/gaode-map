@@ -61,6 +61,24 @@ def build_analysis_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, obj
                 limitation="缺口高不等于一定适合开店，还需要验证店面条件、竞品质量、租金与动线。",
             )
         )
+    if metrics["unified_spatial_cell_count"]:
+        evidence.append(
+            AgentEvidenceItem(
+                metric="unified_spatial_cells",
+                value={
+                    "cell_count": metrics["unified_spatial_cell_count"],
+                    "active_poi_cell_count": metrics["unified_active_poi_cell_count"],
+                    "lit_cell_count": metrics["unified_lit_cell_count"],
+                    "road_covered_cell_count": metrics["unified_road_covered_cell_count"],
+                    "coverage": metrics["unified_spatial_coverage"],
+                    "top_cells": metrics["unified_spatial_top_cells"][:5],
+                },
+                interpretation="统一空间结构把 POI、人口、夜光和路网落到同一套共享栅格，可直接检查供给、需求 proxy、夜间活力和可达性是否在同一空间单元上耦合或错位。",
+                source="current_unified_spatial_cells_summary",
+                confidence="strong",
+                limitation="同格对齐只能说明空间关系和 proxy 信号，不能直接证明客流、消费能力、营业额或经营收益。",
+            )
+        )
     if metrics["next_analysis_options"]:
         evidence.append(
             AgentEvidenceItem(

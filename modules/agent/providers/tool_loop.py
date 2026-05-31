@@ -15,64 +15,9 @@ from ..analysis_extractors import (
     is_road_pattern_ready,
 )
 from ..gate import classify_question_type
-from ..schemas import AnalysisSnapshot, ContextBundle, PlanStep, ToolResult, WorkingMemory
+from ..llm_digest import tool_result_llm_digest
+from ..schemas import AnalysisSnapshot, PlanStep, ToolResult, WorkingMemory
 from ..tools import RegisteredTool
-
-
-def trim_messages(messages) -> List[Dict[str, str]]:
-    from core.config import settings
-
-    max_turns = max(1, int(settings.ai_max_context_turns or 12))
-    kept = messages[-max_turns:]
-    normalized: List[Dict[str, str]] = []
-    for item in kept:
-        role = str(item.role or "").strip() or "user"
-        content = str(item.content or "").strip()
-        if content:
-            normalized.append({"role": role, "content": content})
-    return normalized
-
-
-def snapshot_digest(snapshot: AnalysisSnapshot) -> Dict[str, Any]:
-    scope = snapshot.scope if isinstance(snapshot.scope, dict) else {}
-    context = snapshot.context if isinstance(snapshot.context, dict) else {}
-    current_filters = snapshot.current_filters if isinstance(snapshot.current_filters, dict) else {}
-    h3_payload = snapshot.h3 if isinstance(snapshot.h3, dict) else {}
-    road_payload = snapshot.road if isinstance(snapshot.road, dict) else {}
-    population_payload = snapshot.population if isinstance(snapshot.population, dict) else {}
-    nightlight_payload = snapshot.nightlight if isinstance(snapshot.nightlight, dict) else {}
-    frontend_analysis = snapshot.frontend_analysis if isinstance(snapshot.frontend_analysis, dict) else {}
-    return {
-        "context": {
-            "mode": context.get("mode"),
-            "time_min": context.get("time_min"),
-            "source": context.get("source"),
-            "scope_source": context.get("scope_source"),
-            "year": context.get("year"),
-        },
-        "scope": {
-            "has_polygon": bool(scope.get("polygon") or scope.get("drawn_polygon")),
-            "has_isochrone_feature": bool(scope.get("isochrone_feature")),
-        },
-        "poi": {"count": len(snapshot.pois or []), "summary": snapshot.poi_summary or {}},
-        "h3": {"summary": h3_payload.get("summary") or {}, "grid_count": h3_payload.get("grid_count") or 0},
-        "road": {"summary": road_payload.get("summary") or {}},
-        "population": {"summary": population_payload.get("summary") or {}},
-        "nightlight": {"summary": nightlight_payload.get("summary") or {}},
-        "frontend_analysis_keys": list(frontend_analysis.keys())[:20],
-        "active_panel": snapshot.active_panel,
-        "current_filters": current_filters,
-    }
-
-
-def context_digest(context: ContextBundle) -> Dict[str, Any]:
-    return {
-        "facts": dict(context.facts or {}),
-        "analysis": dict(context.analysis or {}),
-        "limits": list(context.limits or []),
-        "available_artifacts": list(context.available_artifacts or []),
-        "context_summary": context.context_summary.model_dump(),
-    }
 
 
 def tool_catalog(registry: Dict[str, RegisteredTool]) -> List[Dict[str, Any]]:
@@ -101,6 +46,44 @@ def tool_catalog(registry: Dict[str, RegisteredTool]) -> List[Dict[str, Any]]:
                 "cost_level": spec.cost_level,
                 "risk_level": spec.risk_level,
                 "input_schema": spec.input_schema,
+            }
+        )
+    return catalog
+
+
+def _tool_argument_hints(name: str) -> Dict[str, Any]:
+    if name == "search_uploaded_attachment_context":
+        return {"query": "用户原问题", "top_k": 5}
+    if name in {"search_analysis_context", "search_report_context"}:
+        return {"query": "用户原问题", "top_k": 8}
+    if name in {"read_analysis_chunk", "read_report_chunk", "read_uploaded_attachment_context"}:
+        return {"id": "来自 search 命中的 chunk id"}
+    if name == "run_area_character_pack":
+        return {"policy_key": "district_summary", "analysis_mode": "district_summary"}
+    if name == "run_site_selection_pack":
+        return {"place_type": "从用户问题抽取的目标业态", "policy_key": "business_catchment_1km"}
+    if name == "compute_h3_metrics_from_scope_and_pois":
+        return {"resolution": 10, "include_mode": "intersects"}
+    return {}
+
+
+def compact_tool_catalog(registry: Dict[str, RegisteredTool]) -> List[Dict[str, Any]]:
+    catalog: List[Dict[str, Any]] = []
+    for name, registered in registry.items():
+        spec = registered.spec
+        intent = str(spec.description or "").strip()
+        catalog.append(
+            {
+                "name": name,
+                "intent": intent[:96],
+                "layer": spec.layer,
+                "data_domain": spec.data_domain,
+                "requires": list(spec.requires or [])[:8],
+                "produces": list(spec.produces or [])[:8],
+                "readonly": bool(spec.readonly),
+                "cost_level": spec.cost_level,
+                "risk_level": spec.risk_level,
+                "argument_hints": _tool_argument_hints(name),
             }
         )
     return catalog
@@ -201,6 +184,7 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
                 "rank_next_analysis_options",
                 "analyze_poi_structure",
                 "analyze_spatial_structure",
+                "build_unified_spatial_cells",
                 "infer_area_labels",
                 "score_site_candidates",
             ],
@@ -211,7 +195,7 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
             "涉及已有分析结论或报告追问时，优先 search 对应上下文，再 read 命中的 chunk。",
             "用户提到附件、文件、图片、报告、图纸、表格时，优先 search_uploaded_attachment_context，再 read_uploaded_attachment_context；附件证据必须标注文件名。",
             "下一步分析建议类问题只排序分析方向，不直接调用区域画像或选址场景工具。",
-            "区域画像类问题优先使用 run_area_character_pack。",
+            "区域画像类问题优先使用 run_area_character_pack，并补充 build_unified_spatial_cells 作为空间同格证据。",
             "选址评估类问题优先使用 run_site_selection_pack。",
             "如果上游分析产物不完整，先补依赖，再给结论。",
             "frontend_analysis 只能作为参考线索，不能替代正式分析结果。",
@@ -219,6 +203,7 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
         ],
         "dependencies": {
             "run_area_character_pack": ["scope_polygon"],
+            "build_unified_spatial_cells": ["scope_polygon"],
             "run_site_selection_pack": ["scope_polygon", "place_type"],
             "infer_area_labels": [
                 "current_poi_structure_analysis",
@@ -230,11 +215,11 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
         },
         "question_routes": {
             "next_analysis": ["read_current_results", "rank_next_analysis_options"],
-            "area_character": ["read_current_results", "run_area_character_pack"],
+            "area_character": ["read_current_results", "run_area_character_pack", "build_unified_spatial_cells"],
             "site_selection": ["read_current_results", "run_site_selection_pack"],
             "population": ["read_current_results", "compute_population_overview_from_scope"],
             "nightlight": ["read_current_results", "compute_nightlight_overview_from_scope"],
-            "road": ["read_current_results", "compute_road_syntax_from_scope"],
+            "road": ["read_current_results", "compute_road_syntax_from_scope", "build_unified_spatial_cells"],
         },
     }
 
@@ -253,48 +238,8 @@ def chat_completion_tools(registry: Dict[str, RegisteredTool], *, include_second
     ]
 
 
-def compact_json(value: Any, *, max_length: int = 160) -> str:
-    if value in (None, "", [], {}):
-        return ""
-    text = json.dumps(value, ensure_ascii=False, default=str)
-    return f"{text[:max_length]}..." if len(text) > max_length else text
-
-
-def summarize_tool_arguments(arguments: Dict[str, Any]) -> str:
-    if not isinstance(arguments, dict) or not arguments:
-        return "无参数"
-    preferred = ("place_type", "types", "keywords", "resolution", "include_mode", "mode", "graph_model", "highway_filter", "year", "max_count", "coord_type")
-    items = [f"{key}={arguments.get(key)}" for key in preferred if key in arguments and arguments.get(key) not in (None, "", [], {})]
-    if not items:
-        items = [f"{key}={compact_json(value, max_length=40)}" for key, value in list(arguments.items())[:4] if value not in (None, "", [], {})]
-    return ", ".join(items) or "无参数"
-
-
-def summarize_tool_result(result: ToolResult) -> str:
-    if result.status == "failed":
-        return str(result.error or "执行失败")
-    payload = result.result if isinstance(result.result, dict) else {}
-    if not payload:
-        return "无结果"
-    preferred = ("place_type", "poi_count", "h3_grid_count", "grid_count", "resolution", "road_node_count", "road_edge_count", "population_total", "nightlight_mean_radiance", "source", "total")
-    items = [f"{key}={payload.get(key)}" for key in preferred if key in payload and payload.get(key) not in (None, "", [], {})]
-    if not items:
-        items = [f"{key}={compact_json(value, max_length=50)}" for key, value in list(payload.items())[:4] if value not in (None, "", [], {})]
-    return ", ".join(items) or "无结果"
-
-
 def tool_output_payload(result: ToolResult) -> str:
-    return json.dumps(
-        {
-            "tool_name": result.tool_name,
-            "status": result.status,
-            "result": result.result,
-            "evidence": result.evidence,
-            "warnings": result.warnings,
-            "error": result.error,
-        },
-        ensure_ascii=False,
-    )
+    return json.dumps(tool_result_llm_digest(result), ensure_ascii=False)
 
 
 def is_reusable_tool_call(registered: RegisteredTool, step: PlanStep) -> bool:

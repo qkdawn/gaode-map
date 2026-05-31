@@ -4,6 +4,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from modules.providers.amap.utils.get_type_info import infer_type_info_from_text, resolve_type_info
 
+from ..analysis_extractors import build_h3_gap_rows_for_target, build_h3_structure_analysis
 from ..schemas import AnalysisSnapshot, ToolResult
 from .h3_tools import compute_h3_metrics_from_scope_and_pois
 from .nightlight_tools import compute_nightlight_overview_from_scope
@@ -47,6 +48,54 @@ def _friendly_optional_tool_warning(tool_name: str, error: str = "") -> str:
     if str(error or "").strip() == "RuntimeError":
         return f"{label}服务暂不可用{suffix}"
     return f"{label}暂未跑通{suffix}"
+
+
+def _safe_dict(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _canonical_place_type_label(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    resolved = resolve_type_info(text) or infer_type_info_from_text(text)
+    return str((resolved or {}).get("label") or text).strip()
+
+
+def _same_place_type(left: str, right: str) -> bool:
+    left_text = str(left or "").strip()
+    right_text = str(right or "").strip()
+    if not left_text or not right_text:
+        return False
+    left_label = _canonical_place_type_label(left_text)
+    right_label = _canonical_place_type_label(right_text)
+    return left_label == right_label or left_text in right_text or right_text in left_text
+
+
+def _has_reusable_site_selection_base(
+    *,
+    snapshot: AnalysisSnapshot,
+    artifacts: Dict[str, Any],
+    target_label: str,
+) -> bool:
+    h3_summary = _safe_dict(artifacts.get("current_poi_h3_summary")) or _safe_dict(
+        _safe_dict(snapshot.h3).get("summary")
+    )
+    if not h3_summary:
+        return False
+    h3_structure = build_h3_structure_analysis(snapshot, artifacts)
+    if not h3_structure.get("evidence_ready"):
+        return bool(build_h3_gap_rows_for_target(snapshot, artifacts, target_label=target_label, limit=1))
+    h3_target_label = str(
+        h3_structure.get("target_category_label") or h3_structure.get("target_category") or ""
+    ).strip()
+    if not h3_target_label:
+        return bool(h3_structure.get("gap_rows")) or bool(
+            build_h3_gap_rows_for_target(snapshot, artifacts, target_label=target_label, limit=1)
+        )
+    return _same_place_type(target_label, h3_target_label) or bool(
+        build_h3_gap_rows_for_target(snapshot, artifacts, target_label=target_label, limit=1)
+    )
 
 
 async def _run_child_tool(
@@ -106,6 +155,60 @@ async def run_business_site_advice(
             warnings=[f"目标业态 `{target_label}` 缺少可用 types/keywords"],
             error="unresolved_place_type",
             artifacts={"business_site_advice": {"resolved": False, "place_type": target_label}},
+        )
+
+    if _has_reusable_site_selection_base(snapshot=snapshot, artifacts=artifacts, target_label=target_label):
+        business_site_advice = {
+            "resolved": True,
+            "place_type": target_label,
+            "types": target_types,
+            "keywords": target_keywords,
+            "point_type": point_type,
+            "tool_statuses": [_child_status(ToolResult(tool_name="read_current_results", status="success"))],
+            "reused_current_results": True,
+        }
+        return ToolResult(
+            tool_name="run_business_site_advice",
+            status="success",
+            result={
+                "place_type": target_label,
+                "types": target_types,
+                "keywords": target_keywords,
+                "poi_count": (
+                    _safe_dict(artifacts.get("current_poi_summary")) or _safe_dict(snapshot.poi_summary)
+                ).get("total"),
+                "h3_grid_count": (
+                    _safe_dict(artifacts.get("current_poi_h3_summary"))
+                    or _safe_dict(_safe_dict(snapshot.h3).get("summary"))
+                ).get("grid_count"),
+            },
+            evidence=[
+                {"field": "business_site_advice.place_type", "value": target_label},
+                {"field": "business_site_advice.reused_current_results", "value": True},
+            ],
+            warnings=["已复用当前页面已生成的 POI/H3 结构化证据，未重复请求本地 POI 服务。"],
+            artifacts={
+                "current_pois": artifacts.get("current_pois") or list(snapshot.pois or []),
+                "current_poi_summary": artifacts.get("current_poi_summary") or dict(snapshot.poi_summary or {}),
+                "current_poi_h3": artifacts.get("current_poi_h3") or dict(snapshot.h3 or {}),
+                "current_poi_h3_grid": artifacts.get("current_poi_h3_grid")
+                or _safe_dict(_safe_dict(snapshot.h3).get("grid")),
+                "current_poi_h3_summary": artifacts.get("current_poi_h3_summary")
+                or _safe_dict(_safe_dict(snapshot.h3).get("summary")),
+                "current_poi_h3_charts": artifacts.get("current_poi_h3_charts")
+                or _safe_dict(_safe_dict(snapshot.h3).get("charts")),
+                "current_population": artifacts.get("current_population") or dict(snapshot.population or {}),
+                "current_population_summary": artifacts.get("current_population_summary")
+                or _safe_dict(_safe_dict(snapshot.population).get("summary")),
+                "current_nightlight": artifacts.get("current_nightlight") or dict(snapshot.nightlight or {}),
+                "current_nightlight_summary": artifacts.get("current_nightlight_summary")
+                or _safe_dict(_safe_dict(snapshot.nightlight).get("summary")),
+                "current_road": artifacts.get("current_road") or dict(snapshot.road or {}),
+                "current_road_summary": artifacts.get("current_road_summary")
+                or _safe_dict(_safe_dict(snapshot.road).get("summary")),
+                "current_frontend_analysis": artifacts.get("current_frontend_analysis") or dict(snapshot.frontend_analysis or {}),
+                "business_site_advice": business_site_advice,
+            },
         )
 
     tool_statuses: List[Dict[str, Any]] = []

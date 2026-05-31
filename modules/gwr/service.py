@@ -10,6 +10,13 @@ from core.spatial import round_float
 from modules.nightlight.service import get_nightlight_layer
 from modules.population.service import get_population_grid, get_population_layer
 from modules.providers.amap.utils.transform_posi import wgs84_to_gcj02
+from modules.spatial_cells.service import (
+    apply_layer_cell_values,
+    apply_nightlight_cell_values,
+    apply_poi_cell_metrics,
+    apply_road_cell_metrics,
+    shared_raster_cells_from_grid,
+)
 
 from .arcgis_bridge import ArcGISGwrBridgeError, run_arcgis_gwr_analysis
 
@@ -75,41 +82,15 @@ def _line_length_km(line: BaseGeometry) -> float:
 
 
 def _build_base_cells(grid_payload: dict[str, Any]) -> list[dict[str, Any]]:
-    cells: list[dict[str, Any]] = []
-    for feature in grid_payload.get("features") or []:
-        if not isinstance(feature, dict):
-            continue
-        props = feature.get("properties") or {}
-        cell_id = str(props.get("cell_id") or props.get("h3_id") or "").strip()
-        if not cell_id:
-            continue
-        try:
-            geom = shape(feature.get("geometry") or {})
-        except Exception:
-            continue
-        if geom.is_empty:
-            continue
-        centroid = props.get("centroid_gcj02") or []
-        if not (isinstance(centroid, list) and len(centroid) >= 2):
-            centroid = [geom.centroid.x, geom.centroid.y]
-        area_km2 = max(_cell_area_km2(geom), 1e-9)
-        cells.append(
-            {
-                "cell_id": cell_id,
-                "feature": feature,
-                "geometry": geom,
-                "centroid": [float(centroid[0]), float(centroid[1])],
-                "area_km2": area_km2,
-                "predictors": {
-                    "poi_density_per_km2": 0.0,
-                    "population_density": 0.0,
-                    "road_integration": 0.0,
-                    "road_connectivity": 0.0,
-                    "road_length_km_per_km2": 0.0,
-                },
-                "nightlight_radiance": None,
-            }
-        )
+    cells = shared_raster_cells_from_grid(grid_payload)
+    for cell in cells:
+        cell["predictors"] = {
+            "poi_density_per_km2": 0.0,
+            "population_density": 0.0,
+            "road_integration": 0.0,
+            "road_connectivity": 0.0,
+            "road_length_km_per_km2": 0.0,
+        }
     return cells
 
 
@@ -127,33 +108,24 @@ def _poi_point(poi: dict[str, Any], coord_type: str) -> Point | None:
 
 
 def _apply_poi_predictors(cells: list[dict[str, Any]], pois: list[dict[str, Any]], poi_coord_type: str) -> None:
-    if not cells or not pois:
+    if not cells:
         return
-    points = [pt for pt in (_poi_point(poi, poi_coord_type) for poi in pois) if pt is not None]
     for cell in cells:
-        geom = cell["geometry"]
-        count = sum(1 for point in points if geom.covers(point))
-        cell["predictors"]["poi_density_per_km2"] = round_float(count / max(float(cell["area_km2"]), 1e-9), 6)
+        cell.setdefault("predictors", {})
+    apply_poi_cell_metrics(cells, pois or [], poi_coord_type=poi_coord_type)
+    for cell in cells:
+        cell["predictors"]["poi_density_per_km2"] = round_float(cell.get("density_poi_per_km2"), 6)
 
 
 def _apply_layer_values(cells: list[dict[str, Any]], layer: dict[str, Any], target_key: str) -> None:
-    value_by_id = {
-        str(item.get("cell_id") or ""): _safe_float(item.get("value"), 0.0)
-        for item in (layer.get("cells") or [])
-        if isinstance(item, dict)
-    }
+    apply_layer_cell_values(cells, layer, target_key)
     for cell in cells:
-        cell["predictors"][target_key] = round_float(value_by_id.get(cell["cell_id"], 0.0), 6)
+        cell.setdefault("predictors", {})
+        cell["predictors"][target_key] = round_float(cell.get(target_key), 6)
 
 
 def _apply_nightlight(cells: list[dict[str, Any]], layer: dict[str, Any]) -> None:
-    value_by_id = {
-        str(item.get("cell_id") or ""): _safe_float(item.get("value"), None)
-        for item in (layer.get("cells") or [])
-        if isinstance(item, dict)
-    }
-    for cell in cells:
-        cell["nightlight_radiance"] = value_by_id.get(cell["cell_id"])
+    apply_nightlight_cell_values(cells, layer)
 
 
 def _road_feature_line(feature: dict[str, Any]) -> LineString | None:
@@ -167,37 +139,14 @@ def _road_feature_line(feature: dict[str, Any]) -> LineString | None:
 
 
 def _apply_road_predictors(cells: list[dict[str, Any]], road_features: list[dict[str, Any]]) -> None:
-    if not cells or not road_features:
+    if not cells:
         return
-    roads: list[tuple[BaseGeometry, dict[str, Any]]] = []
-    for feature in road_features:
-        if not isinstance(feature, dict):
-            continue
-        line = _road_feature_line(feature)
-        if line is None:
-            continue
-        roads.append((line, feature.get("properties") or {}))
-    if not roads:
-        return
+    apply_road_cell_metrics(cells, road_features or [])
     for cell in cells:
-        geom = cell["geometry"]
-        total_len = 0.0
-        integ_sum = 0.0
-        conn_sum = 0.0
-        for line, props in roads:
-            if not geom.intersects(line):
-                continue
-            clipped = geom.intersection(line)
-            length_km = _line_length_km(clipped)
-            if length_km <= 1e-9:
-                continue
-            total_len += length_km
-            integ_sum += length_km * float(_safe_float(props.get("integration_score"), 0.0) or 0.0)
-            conn_sum += length_km * float(_safe_float(props.get("connectivity_score"), 0.0) or 0.0)
-        if total_len > 1e-9:
-            cell["predictors"]["road_integration"] = round_float(integ_sum / total_len, 6)
-            cell["predictors"]["road_connectivity"] = round_float(conn_sum / total_len, 6)
-            cell["predictors"]["road_length_km_per_km2"] = round_float(total_len / max(float(cell["area_km2"]), 1e-9), 6)
+        cell.setdefault("predictors", {})
+        cell["predictors"]["road_integration"] = round_float(cell.get("road_integration"), 6)
+        cell["predictors"]["road_connectivity"] = round_float(cell.get("road_connectivity"), 6)
+        cell["predictors"]["road_length_km_per_km2"] = round_float(cell.get("road_length_km_per_km2"), 6)
 
 
 def _valid_rows(cells: list[dict[str, Any]], variable_keys: list[str]) -> list[dict[str, Any]]:

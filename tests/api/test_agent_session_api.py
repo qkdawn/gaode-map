@@ -151,6 +151,8 @@ def test_agent_turn_persists_multiple_statuses(monkeypatch):
         assert answered_detail.json()["history_id"] == "history-1"
         assert answered_detail.json()["panel_kind"] == "followup"
         assert answered_detail.json()["messages"][-1]["role"] == "assistant"
+        assert answered_detail.json()["messages"][-1]["content"] == "已完成分析"
+        assert answered_detail.json()["messages"][-1]["process"]["thinking_timeline"][0]["id"] == "thinking-answer"
         assert answered_detail.json()["diagnostics"]["thinking_timeline"][0]["id"] == "thinking-answer"
 
         clarification_detail = client.get("/api/v1/analysis/agent/sessions/agent-2")

@@ -11,6 +11,7 @@ from ..tool_adapters.capability_tools import (
     rank_next_analysis_options,
     score_site_candidates_tool,
 )
+from ..tool_adapters.spatial_cell_tools import build_unified_spatial_cells_tool
 
 
 def register_capability_tools(registry: Dict[str, RegisteredTool]) -> None:
@@ -117,6 +118,40 @@ def register_capability_tools(registry: Dict[str, RegisteredTool]) -> None:
             cost_level="normal",
         ),
         analyze_spatial_structure,
+    )
+    registry["build_unified_spatial_cells"] = _register(
+        _tool_spec(
+            name="build_unified_spatial_cells",
+            description="把 POI、人口、夜光和路网指标统一聚合到人口/夜光共享栅格 cell_id 上",
+            category="processing",
+            layer="L2",
+            ui_tier="capability",
+            data_domain="grid",
+            capability_type="analyze",
+            llm_exposure="primary",
+            scene_type="area_character",
+            toolkit_id="area_character_pack",
+            evidence_contract=["current_unified_spatial_cells", "current_unified_spatial_cells_summary"],
+            applicable_scenarios=["区域画像", "商业特征总结", "空间自洽检查"],
+            cautions=["同格证据不能直接推断客流、消费力、营业额或收益"],
+            requires=["scope_polygon"],
+            produces=["current_unified_spatial_cells", "current_unified_spatial_cells_summary"],
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "coord_type": {"type": "string", "enum": ["gcj02", "wgs84"]},
+                    "population_year": {"type": "string"},
+                    "nightlight_year": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "road_mode": {"type": "string", "enum": ["walking", "bicycling", "driving"]},
+                    "poi_coord_type": {"type": "string", "enum": ["gcj02", "wgs84"]},
+                },
+                "additionalProperties": False,
+            },
+            readonly=True,
+            cost_level="normal",
+            timeout_sec=90,
+        ),
+        build_unified_spatial_cells_tool,
     )
     registry["infer_area_labels"] = _register(
         _tool_spec(

@@ -86,6 +86,7 @@ function createAnalysisAgentInitialState() {
     agentStreamElapsedTimer: null,
     agentProgrammaticScrollUntil: 0,
     agentThinkingExpanded: false,
+    agentMessageProcessExpandedIds: {},
     agentSessions: [],
     activeAgentSessionId: '',
     agentSessionsLoaded: false,

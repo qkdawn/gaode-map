@@ -9,6 +9,8 @@ import {
   createAgentRunState,
   deriveAgentSessionPreview,
   deriveAgentSessionTitle,
+  getAgentSummaryCardContent,
+  hasAgentMessageProcessContent,
   mergeAgentThinkingTimeline,
   normalizeAgentAction,
   normalizeAgentBoundaryItem,
@@ -16,6 +18,7 @@ import {
   normalizeAgentDecision,
   normalizeAgentDecisionEvidence,
   normalizeAgentAttachments,
+  normalizeAgentMessageProcess,
   normalizeAgentPanelPreloadNotes,
   normalizeAgentPlanEnvelope,
   normalizeAgentPlanThinkingItem,
@@ -511,7 +514,7 @@ function createAgentRuntimeMethods() {
     getAgentThinkingElapsedLabel() {
       const startedAt = Number(this.agentStreamStartedAt || 0)
       if (!startedAt) return ''
-      const tick = Number(this.agentStreamElapsedTick || Date.now())
+      const tick = Number(this.agentStreamElapsedTick || startedAt)
       const seconds = Math.max(1, Math.floor((tick - startedAt) / 1000))
       return `${seconds}s`
     },
@@ -739,6 +742,7 @@ function createAgentRuntimeMethods() {
         neighbor_mean_entropy: toNumber(props.neighbor_mean_entropy, 0),
         neighbor_count: toNumber(props.neighbor_count, 0),
         category_counts: cloneObject(props.category_counts || {}),
+        subcategory_counts: cloneObject(props.subcategory_counts || {}),
         lisa_i: Number.isFinite(Number(props.lisa_i)) ? Number(props.lisa_i) : null,
         lisa_z_score: Number.isFinite(Number(props.lisa_z_score)) ? Number(props.lisa_z_score) : null,
         gi_star_value: Number.isFinite(Number(props.gi_star_value)) ? Number(props.gi_star_value) : null,
@@ -1160,10 +1164,7 @@ function createAgentRuntimeMethods() {
           ? !!overrides.isPinned
           : !!merged.isPinned,
         input: String(merged.input || ''),
-        messages: messages.map((item) => ({
-          role: asText(item && item.role) || 'user',
-          content: String((item && item.content) || ''),
-        })),
+        messages: messages.map((item) => this.serializeAgentMessageForSession(item)),
         output: {
           cards: cloneArray(merged.cards),
           clarification_question: String(merged.clarificationQuestion || ''),
@@ -1393,6 +1394,107 @@ function createAgentRuntimeMethods() {
       }
       const detail = await res.json()
       return this.mergeAgentSessionDetail(detail)
+    },
+    buildAgentAssistantMessageContent(turn = {}) {
+      const output = turn && turn.output ? turn.output : {}
+      const sections = []
+      const summary = getAgentSummaryCardContent(output.cards)
+      const decision = normalizeAgentDecision(output.decision)
+      if (decision.summary) {
+        sections.push(`## 核心判断\n${decision.summary}`)
+      } else if (summary) {
+        sections.push(summary)
+      }
+      const support = cloneArray(output.support).map((item) => normalizeAgentDecisionEvidence(item))
+      if (support.length) {
+        sections.push([
+          '## 为什么这样判断',
+          ...support.map((item) => {
+            const headline = asText(item.headline || item.metric || item.key) || '证据'
+            const detail = asText(item.interpretation)
+            const source = asText(item.source)
+            const confidence = asText(item.confidence)
+            const meta = [source ? `来源：${source}` : '', confidence ? `置信度：${confidence}` : ''].filter(Boolean).join('；')
+            return `- ${[headline, detail, meta].filter(Boolean).join('。')}`
+          }),
+        ].join('\n'))
+      }
+      const counterpoints = cloneArray(output.counterpoints).map((item) => normalizeAgentCounterpoint(item))
+      if (counterpoints.length) {
+        sections.push([
+          '## 还不能判断什么',
+          ...counterpoints.map((item) => `- ${[asText(item.title), asText(item.detail)].filter(Boolean).join('：')}`),
+        ].join('\n'))
+      }
+      const actions = cloneArray(output.actions).map((item) => normalizeAgentAction(item))
+      if (actions.length) {
+        sections.push([
+          '## 下一步怎么做',
+          ...actions.map((item) => {
+            const body = [
+              asText(item.detail),
+              asText(item.condition) ? `触发条件：${asText(item.condition)}` : '',
+              asText(item.target) ? `目标：${asText(item.target)}` : '',
+            ].filter(Boolean).join('；')
+            return `- ${[asText(item.title), body].filter(Boolean).join('：')}`
+          }),
+        ].join('\n'))
+      }
+      const boundary = cloneArray(output.boundary).map((item) => normalizeAgentBoundaryItem(item))
+      if (boundary.length) {
+        sections.push([
+          '## 适用边界',
+          ...boundary.map((item) => `- ${[asText(item.title), asText(item.detail)].filter(Boolean).join('：')}`),
+        ].join('\n'))
+      }
+      const clarification = asText(output.clarificationQuestion)
+      if (clarification) {
+        sections.push(`## 需要补充\n${clarification}`)
+      }
+      const riskPrompt = asText(output.riskPrompt)
+      if (riskPrompt) {
+        sections.push(`## 需要确认\n${riskPrompt}`)
+      }
+      return sections.filter(Boolean).join('\n\n') || summary || '已完成分析'
+    },
+    buildAgentTurnProcessSnapshot(seed = {}) {
+      const runState = this.getAgentRunState(seed.sessionId) || createAgentRunState()
+      const startedAtMs = Number(seed.startedAt || runState.startedAt || this.agentStreamStartedAt || 0) || 0
+      const completedAtMs = Number(seed.completedAt || Date.now()) || Date.now()
+      return normalizeAgentMessageProcess({
+        turnId: asText(seed.turnId || runState.streamingMessageId) || `agent-turn-${completedAtMs.toString(36)}`,
+        status: asText(seed.status || this.agentStatus),
+        stage: asText(seed.stage || this.agentStage),
+        startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : '',
+        completedAt: new Date(completedAtMs).toISOString(),
+        elapsedMs: startedAtMs ? Math.max(0, completedAtMs - startedAtMs) : 0,
+        thinkingTimeline: cloneArray(seed.thinkingTimeline),
+        executionTrace: cloneArray(seed.executionTrace),
+        plan: normalizeAgentPlanEnvelope(seed.plan),
+        pendingTaskConfirmation: cloneObject(seed.pendingTaskConfirmation),
+      })
+    },
+    buildAgentAssistantMessageFromTurn(turn = {}, process = {}) {
+      const message = {
+        role: 'assistant',
+        content: this.buildAgentAssistantMessageContent(turn),
+      }
+      const normalizedProcess = normalizeAgentMessageProcess(process)
+      if (hasAgentMessageProcessContent(normalizedProcess)) {
+        message.process = normalizedProcess
+      }
+      return message
+    },
+    serializeAgentMessageForSession(message = {}) {
+      const row = {
+        role: asText(message && message.role) || 'user',
+        content: String((message && message.content) || ''),
+      }
+      const process = normalizeAgentMessageProcess(message && message.process)
+      if (hasAgentMessageProcessContent(process)) {
+        row.process = process
+      }
+      return row
     },
     buildTurnContext(options = {}) {
       const panelKind = asText(options && options.panelKind)
@@ -1697,7 +1799,27 @@ function createAgentRuntimeMethods() {
         })
         const turn = normalizeAgentTurnPayload(finalResponse)
         const finalStatusItem = normalizeAgentStatusThinkingItem({ stage: 'answered' })
+        const currentSessionSnapshot = this.findAgentSession(targetSessionId) || {}
+        const nextThinkingTimeline = upsertThinkingItemInList(
+          completeActiveThinkingItemsInList(currentSessionSnapshot.thinkingTimeline, finalStatusItem.id),
+          finalStatusItem,
+        )
+        const assistantProcess = this.buildAgentTurnProcessSnapshot({
+          sessionId: targetSessionId,
+          status: 'answered',
+          stage: 'answered',
+          thinkingTimeline: nextThinkingTimeline,
+          executionTrace,
+          plan: turn.plan,
+        })
         const finalMessages = cloneArray(finalResponse.messages)
+        const lastMessage = finalMessages[finalMessages.length - 1]
+        if (lastMessage && asText(lastMessage.role) === 'assistant' && hasAgentMessageProcessContent(assistantProcess)) {
+          finalMessages.splice(finalMessages.length - 1, 1, {
+            ...lastMessage,
+            process: assistantProcess,
+          })
+        }
         this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
           ...session,
           panelKind,
@@ -1714,10 +1836,7 @@ function createAgentRuntimeMethods() {
           reviewContract: cloneObject(turn.output.reviewContract || turn.diagnostics.reviewContract),
           executionTrace: cloneArray(executionTrace),
           usedTools: cloneArray(finalResponse.diagnostics.used_tools),
-          thinkingTimeline: upsertThinkingItemInList(
-            completeActiveThinkingItemsInList(session.thinkingTimeline, finalStatusItem.id),
-            finalStatusItem,
-          ),
+          thinkingTimeline: nextThinkingTimeline,
           nextSuggestions: cloneArray(turn.output.nextSuggestions),
           messages: finalMessages.length ? finalMessages : nextMessages,
           error: '',
@@ -2009,7 +2128,9 @@ function createAgentRuntimeMethods() {
             }))
             this.setAgentRunState(targetSessionId, { streamState: 'failed' })
             if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.agentThinkingExpanded = true
+              this.agentThinkingExpanded = false
+              this.agentPlanExpanded = false
+              this.agentTraceExpanded = false
             }
             return
           }
@@ -2038,6 +2159,23 @@ function createAgentRuntimeMethods() {
               finalStatusItem,
             )
           }
+          const assistantProcess = nextStatus === 'answered'
+            ? this.buildAgentTurnProcessSnapshot({
+              sessionId: targetSessionId,
+              status: nextStatus,
+              stage: nextStage,
+              thinkingTimeline: nextThinkingTimeline,
+              executionTrace: turn.diagnostics.executionTrace,
+              plan: turn.plan,
+              pendingTaskConfirmation,
+            })
+            : null
+          const finalMessages = nextStatus === 'answered'
+            ? [
+              ...cloneArray(nextMessages),
+              this.buildAgentAssistantMessageFromTurn(turn, assistantProcess),
+            ]
+            : cloneArray(nextMessages)
           this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
             ...session,
             panelKind,
@@ -2079,7 +2217,7 @@ function createAgentRuntimeMethods() {
               }
               return mergedPayloads
             })(),
-            messages: nextStatus === 'answered' ? cloneArray(nextMessages) : cloneArray(session.messages),
+            messages: nextStatus === 'answered' ? cloneArray(finalMessages) : cloneArray(session.messages),
             riskConfirmations: nextStatus === 'answered' ? [] : cloneArray(requestRiskConfirmations),
             attachmentIds: cloneArray(requestAttachmentIds),
             attachments: normalizeAgentAttachments(session.attachments),
@@ -2095,10 +2233,14 @@ function createAgentRuntimeMethods() {
           if (targetSessionId === asText(this.activeAgentSessionId)) {
             this.agentClarificationDraft = ''
             this.agentClarificationSubmitting = false
-            if (['failed', 'requires_risk_confirmation'].includes(nextStatus)) {
+            if (nextStatus === 'requires_risk_confirmation') {
               this.agentThinkingExpanded = Array.isArray(nextThinkingTimeline) && nextThinkingTimeline.length > 0
               this.agentPlanExpanded = hasAgentPlanContent(turn.plan)
               this.agentTraceExpanded = hasAgentExecutionTraceContent(turn.diagnostics.executionTrace)
+            } else {
+              this.agentThinkingExpanded = false
+              this.agentPlanExpanded = false
+              this.agentTraceExpanded = false
             }
             this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
           }
@@ -2160,7 +2302,9 @@ function createAgentRuntimeMethods() {
         this.setAgentRunState(targetSessionId, { streamState: 'failed' })
         if (targetSessionId === asText(this.activeAgentSessionId)) {
           this.agentClarificationSubmitting = false
-          this.agentThinkingExpanded = true
+          this.agentThinkingExpanded = false
+          this.agentPlanExpanded = false
+          this.agentTraceExpanded = false
         }
       } finally {
         this.syncUiAfterTurn(turnContext)

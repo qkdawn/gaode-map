@@ -1,11 +1,18 @@
 <div class="agent-thinking-head">
+    <div
+        v-if="shouldShowAgentThinkingLiveStatus()"
+        class="agent-thinking-status"
+        aria-live="polite">
+        <span class="agent-thinking-dot is-running"></span>
+        <span>{{ getAgentThinkingElapsedLabel() ? '已处理 ' + getAgentThinkingElapsedLabel() : getAgentThinkingStatusLabel() }}</span>
+    </div>
     <button
-        v-if="agentThinkingTimeline.length || agentReasoningBlocks.length || agentExecutionTrace.length || getAgentPlanChecklist().visible || agentResearchNotes.length"
+        v-else-if="shouldShowAgentThinkingToggle()"
         type="button"
         class="agent-thinking-toggle"
         @click="toggleAgentThinkingExpanded">
-        <span class="agent-thinking-dot" :class="{ 'is-running': agentLoading }"></span>
+        <span class="agent-thinking-dot"></span>
         <span>{{ getAgentThinkingElapsedLabel() ? '已处理 ' + getAgentThinkingElapsedLabel() : getAgentThinkingStatusLabel() }}</span>
-        <span class="agent-thinking-chevron" :class="{ 'is-open': agentThinkingExpanded || agentLoading }">⌄</span>
+        <span class="agent-thinking-chevron" :class="{ 'is-open': agentThinkingExpanded }">⌄</span>
     </button>
 </div>

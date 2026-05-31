@@ -1,7 +1,28 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List
+
+
+def _strip_json_trailing_commas(text: str) -> str:
+    return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
+def _load_json_object(text: str) -> Dict[str, Any]:
+    candidates = [text, _strip_json_trailing_commas(text)]
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+            raise ValueError("llm_json_output_not_object")
+        except Exception as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise ValueError("invalid_llm_json_output")
 
 
 def extract_text_content(payload: Dict[str, Any]) -> str:
@@ -36,12 +57,12 @@ def extract_json_object(raw_text: str) -> Dict[str, Any]:
         if len(lines) >= 3:
             text = "\n".join(lines[1:-1]).strip()
     try:
-        return json.loads(text)
+        return _load_json_object(text)
     except json.JSONDecodeError:
         start = text.find("{")
         end = text.rfind("}")
         if start >= 0 and end > start:
-            return json.loads(text[start:end + 1])
+            return _load_json_object(text[start:end + 1])
         raise
 
 

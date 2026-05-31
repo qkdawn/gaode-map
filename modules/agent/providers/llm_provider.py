@@ -11,6 +11,15 @@ from core.config import settings
 from ..context_builder import build_context_summary
 from ..gate import _clarification_options, latest_user_message, run_gate
 from ..governance import check_tool_governance
+from ..llm_digest import (
+    audit_tool_results_digest,
+    compact_context_summary_dump,
+    context_digest,
+    snapshot_digest,
+    summarize_tool_arguments,
+    summarize_tool_result,
+    trim_messages as _trim_messages_from_module,
+)
 from ..planner import build_planning_fallback
 from ..schemas import (
     AuditResult,
@@ -22,7 +31,9 @@ from ..schemas import (
     ExecutionTraceItem,
     GateDecision,
     PlanStep,
+    PlanningIntent,
     PlanningResult,
+    ToolSelectionResult,
     ToolLoopResult,
     ToolResult,
     WorkingMemory,
@@ -49,22 +60,19 @@ from .prompts import (
     loop_system_prompt as _loop_system_prompt_from_module,
     planner_system_prompt as _planner_system_prompt_from_module,
     synthesizer_system_prompt as _synthesizer_system_prompt_from_module,
+    tool_selector_system_prompt as _tool_selector_system_prompt_from_module,
 )
 from .tool_loop import (
     artifact_digest,
     chat_completion_tools,
-    context_digest,
+    compact_tool_catalog,
     is_reusable_tool_call,
     llm_visible_registry,
     planner_question_archetype,
     planner_tool_routing_hints,
-    snapshot_digest,
-    summarize_tool_arguments,
-    summarize_tool_result,
     tool_cache_key,
     tool_catalog,
     tool_output_payload,
-    trim_messages as _trim_messages_from_module,
 )
 from .tool_call_execution import execute_tool_call_step, tool_finish_trace_payload, tool_start_trace_payload
 
@@ -186,7 +194,15 @@ async def _stream_chat_completion(
     tool_call_accumulator: List[Dict[str, Any]] = []
 
     async with client.stream("POST", f"{base_url}/chat/completions", headers=headers, json=body) as response:
-        response.raise_for_status()
+        status_code = int(getattr(response, "status_code", 200) or 200)
+        if status_code >= 400:
+            error_body = (await response.aread()).decode("utf-8", errors="replace").strip()
+            detail = error_body[:800] if error_body else str(getattr(response, "reason_phrase", "LLM provider error"))
+            raise httpx.HTTPStatusError(
+                f"LLM provider returned HTTP {status_code}: {detail}",
+                request=response.request,
+                response=response,
+            )
         async for raw_data in _iter_sse_data(response):
             if raw_data.strip() == "[DONE]":
                 break
@@ -364,6 +380,9 @@ def _gate_system_prompt() -> str:
 def _planner_system_prompt() -> str:
     return _planner_system_prompt_from_module()
 
+def _tool_selector_system_prompt() -> str:
+    return _tool_selector_system_prompt_from_module()
+
 def _auditor_system_prompt() -> str:
     return _auditor_system_prompt_from_module()
 
@@ -401,6 +420,35 @@ def _merge_plan_steps(primary: List[PlanStep], fallback: List[PlanStep]) -> List
     return merged
 
 
+def _fallback_step_hints(steps: List[PlanStep]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "tool_name": str(step.tool_name or ""),
+            "arguments": dict(step.arguments or {}),
+            "reason": str(step.reason or ""),
+            "evidence_goal": str(step.evidence_goal or ""),
+            "expected_artifacts": list(step.expected_artifacts or [])[:8],
+            "optional": bool(step.optional),
+        }
+        for step in list(steps or [])[:8]
+        if str(step.tool_name or "").strip()
+    ]
+
+
+def _filter_known_steps(steps: List[PlanStep], registry: Dict[str, RegisteredTool]) -> tuple[List[PlanStep], List[str]]:
+    known_steps: List[PlanStep] = []
+    warnings: List[str] = []
+    for step in steps or []:
+        tool_name = str(step.tool_name or "").strip()
+        if not tool_name:
+            continue
+        if tool_name not in registry:
+            warnings.append(f"tool_selector_unknown_tool:{tool_name}")
+            continue
+        known_steps.append(step.model_copy(update={"tool_name": tool_name}))
+    return known_steps, warnings
+
+
 async def run_gate_with_llm(
     *,
     messages: List[AgentMessage],
@@ -417,8 +465,8 @@ async def run_gate_with_llm(
             "messages": _trim_messages(messages),
             "latest_user_message": latest_user_message(messages),
             "analysis_snapshot_digest": snapshot_digest(snapshot),
-            "context_digest": context_digest(context),
-            "context_summary": context.context_summary.model_dump(),
+            "context_summary": compact_context_summary_dump(context.context_summary),
+            "available_artifacts": list(context.available_artifacts or []),
         },
         emit=emit,
         phase="gating",
@@ -462,28 +510,68 @@ async def plan_with_llm(
             "question_archetype": question_archetype,
             "analysis_snapshot_digest": snapshot_digest(snapshot),
             "context_digest": context_digest(context),
-            "context_summary": context.context_summary.model_dump(),
+            "context_summary": compact_context_summary_dump(context.context_summary),
             "artifact_digest": artifact_digest(snapshot, memory),
-            "available_tools": tool_catalog(visible_registry),
             "available_artifacts": list(memory.artifacts.keys()),
-            "tool_routing_hints": planner_tool_routing_hints(),
             "audit_feedback": dict(audit_feedback or {}),
-            "fallback_plan": fallback.model_dump(mode="json"),
         },
         emit=emit,
         phase="planning",
         title="规划本轮分析步骤",
         reasoning_id="planner-reasoning",
     )
-    plan = PlanningResult(**payload)
-    plan.goal = plan.goal or fallback.goal
-    plan.question_type = plan.question_type or fallback.question_type
-    plan.summary = plan.summary or fallback.summary
-    plan.stop_condition = plan.stop_condition or fallback.stop_condition
-    plan.evidence_focus = list(plan.evidence_focus or fallback.evidence_focus)
-    plan.steps = _merge_plan_steps(list(plan.steps or []), list(fallback.steps or []))
-    plan.requires_tools = bool(plan.steps) if plan.requires_tools is False else (bool(plan.steps) or fallback.requires_tools)
-    return plan
+    intent = PlanningIntent(**payload)
+    intent.goal = intent.goal or fallback.goal
+    intent.question_type = intent.question_type or fallback.question_type
+    intent.summary = intent.summary or fallback.summary
+    intent.stop_condition = intent.stop_condition or fallback.stop_condition
+    intent.evidence_focus = list(intent.evidence_focus or fallback.evidence_focus)
+    if not intent.tool_selection_brief:
+        intent.tool_selection_brief = intent.summary or fallback.summary
+
+    selector_warnings: List[str] = []
+    selected_steps: List[PlanStep] = []
+    selector_summary = ""
+    try:
+        selector_payload = await _invoke_json_role(
+            system_prompt=_tool_selector_system_prompt(),
+            user_payload={
+                "messages": _trim_messages(messages),
+                "latest_user_message": question,
+                "question_archetype": question_archetype,
+                "planning_intent": intent.model_dump(mode="json"),
+                "analysis_snapshot_digest": snapshot_digest(snapshot),
+                "artifact_digest": artifact_digest(snapshot, memory),
+                "available_tools": compact_tool_catalog(visible_registry),
+                "available_artifacts": list(memory.artifacts.keys()),
+                "tool_routing_hints": planner_tool_routing_hints(),
+                "audit_feedback": dict(audit_feedback or {}),
+                "fallback_step_hints": _fallback_step_hints(list(fallback.steps or [])),
+            },
+            emit=emit,
+            phase="planning",
+            title="选择本轮工具",
+            reasoning_id="tool-selector-reasoning",
+        )
+        selection = ToolSelectionResult(**selector_payload)
+        selector_summary = selection.summary
+        selected_steps, unknown_warnings = _filter_known_steps(list(selection.steps or []), visible_registry)
+        selector_warnings.extend([str(item) for item in (selection.warnings or []) if str(item).strip()])
+        selector_warnings.extend(unknown_warnings)
+    except Exception as exc:
+        selector_warnings.append(f"tool_selector_failed:{exc}")
+
+    steps = _merge_plan_steps(selected_steps, list(fallback.steps or []))
+    return PlanningResult(
+        goal=intent.goal,
+        question_type=intent.question_type,
+        summary=selector_summary or intent.summary or fallback.summary,
+        requires_tools=bool(steps) if intent.requires_tools is False else (bool(steps) or fallback.requires_tools),
+        stop_condition=intent.stop_condition or fallback.stop_condition,
+        evidence_focus=list(intent.evidence_focus or fallback.evidence_focus),
+        steps=steps,
+        warnings=list(dict.fromkeys(selector_warnings)),
+    )
 
 
 async def audit_with_llm(
@@ -504,7 +592,7 @@ async def audit_with_llm(
             "analysis_snapshot_digest": snapshot_digest(snapshot),
             "context_digest": context_digest(context),
             "plan": plan.model_dump(mode="json"),
-            "tool_results": [item.model_dump(mode="json") for item in (memory.tool_results or [])],
+            "tool_results": audit_tool_results_digest(memory.tool_results),
             "execution_trace": [item.model_dump(mode="json") for item in (memory.execution_trace or [])],
             "available_artifacts": list(memory.artifacts.keys()),
             "rule_audit": rule_audit.model_dump(mode="json"),
@@ -554,7 +642,7 @@ async def run_llm_tool_loop(
         "messages": _trim_messages(messages),
         "analysis_snapshot_digest": snapshot_digest(snapshot),
         "context_digest": context_digest(context),
-        "context_summary": build_context_summary(snapshot).model_dump(),
+        "context_summary": compact_context_summary_dump(build_context_summary(snapshot)),
         "available_tools": tool_catalog(llm_visible_registry(registry)),
     }
     loop_result = ToolLoopResult(artifacts={})

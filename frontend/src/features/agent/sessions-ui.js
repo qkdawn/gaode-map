@@ -6,6 +6,8 @@ import {
   cloneObject,
   consumeSseStream,
   createAgentSessionRecord,
+  hasAgentMessageProcessContent,
+  normalizeAgentMessageProcess,
   normalizeAgentPanelPreloadNotes,
   normalizeAgentToolSummary,
   sortAgentSessions,
@@ -15,6 +17,8 @@ import {
   buildAgentToolCallItems,
   hasAgentExecutionTraceContent,
   hasAgentPlanContent,
+  shouldShowAgentProcessLiveStatus,
+  shouldShowAgentProcessToggle,
 } from './derived.js'
 import {
   buildAnalysisTaskConfirmation,
@@ -378,12 +382,6 @@ function createAgentUiMethods() {
       const nextSessionId = asText(sessionId)
       if (!nextSessionId) return false
       return asText(this.getAgentActiveTopTab().sessionId) === nextSessionId
-    },
-    isAgentHistorySessionInCurrentRange(session = null) {
-      if (!session || typeof session !== 'object') return false
-      const currentHistoryId = asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId())
-      const historyId = asText(session.historyId)
-      return Boolean(historyId && currentHistoryId && historyId === currentHistoryId)
     },
     getAgentActiveSummaryPanelPayloads() {
       const tabs = this.ensureAgentTabs(false)
@@ -1681,6 +1679,9 @@ function createAgentUiMethods() {
           fetched: cloneArray(readiness.fetched),
         },
         summary_task_board: this.buildSummaryTaskBoardUiState(),
+      }
+      if (typeof this.captureAgentActiveSummaryTabState === 'function') {
+        this.captureAgentActiveSummaryTabState()
       }
       if (options.sync !== false) this.syncCurrentAgentSession()
       return nextBoard
@@ -3252,6 +3253,9 @@ function createAgentUiMethods() {
       return tabs.followupTabs.length < Number(tabs.followupLimit || 6)
     },
     createAgentSummaryTab(options = {}) {
+      if (options.syncLocalResults !== false && typeof this.syncSummaryTaskBoardFromLocalResults === 'function') {
+        this.syncSummaryTaskBoardFromLocalResults({ sync: false })
+      }
       const tabs = this.ensureAgentTabs(true)
       const panelPayloads = {
         ...cloneObject(this.agentPanelPayloads),
@@ -3285,7 +3289,6 @@ function createAgentUiMethods() {
       tabs.activeTabId = summaryTab.id
       this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
       this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
-      this.syncSummaryTaskBoardFromLocalResults()
       this.syncCurrentAgentSession()
       this.refreshAgentSummaryReadiness(false)
       return summaryTab.id
@@ -8577,6 +8580,85 @@ function createAgentUiMethods() {
       if (boundaryIndex < 0 || boundaryIndex >= messages.length - 1) return []
       return messages.slice(boundaryIndex + 1).filter((message) => asText(message && message.role) === 'assistant')
     },
+    getAgentThreadMessages() {
+      return cloneArray(this.agentMessages)
+    },
+    getAgentMessageProcess(message = {}) {
+      return normalizeAgentMessageProcess(message && message.process)
+    },
+    shouldShowAgentMessageProcess(message = {}) {
+      return asText(message && message.role) === 'assistant'
+        && hasAgentMessageProcessContent(this.getAgentMessageProcess(message))
+    },
+    getAgentMessageProcessKey(message = {}, index = 0) {
+      const process = this.getAgentMessageProcess(message)
+      return asText(process.turnId || message.id) || `agent-message-process-${index}`
+    },
+    isAgentMessageProcessExpanded(message = {}, index = 0) {
+      const key = this.getAgentMessageProcessKey(message, index)
+      return !!(this.agentMessageProcessExpandedIds && this.agentMessageProcessExpandedIds[key])
+    },
+    toggleAgentMessageProcessExpanded(message = {}, index = 0) {
+      const key = this.getAgentMessageProcessKey(message, index)
+      if (!key) return
+      this.agentMessageProcessExpandedIds = {
+        ...(this.agentMessageProcessExpandedIds || {}),
+        [key]: !this.isAgentMessageProcessExpanded(message, index),
+      }
+    },
+    getAgentMessageProcessElapsedLabel(message = {}) {
+      const process = this.getAgentMessageProcess(message)
+      let elapsedMs = Number(process.elapsedMs || 0) || 0
+      if (!elapsedMs && process.startedAt && process.completedAt) {
+        const startedAt = Date.parse(process.startedAt)
+        const completedAt = Date.parse(process.completedAt)
+        if (Number.isFinite(startedAt) && Number.isFinite(completedAt) && completedAt >= startedAt) {
+          elapsedMs = completedAt - startedAt
+        }
+      }
+      if (!elapsedMs) return ''
+      const seconds = Math.max(1, Math.round(elapsedMs / 1000))
+      return `${seconds}s`
+    },
+    getAgentMessageProcessStatusLabel(message = {}) {
+      const elapsed = this.getAgentMessageProcessElapsedLabel(message)
+      if (elapsed) return `已处理 ${elapsed}`
+      const process = this.getAgentMessageProcess(message)
+      const mapping = {
+        answered: '已思考',
+        failed: '思考失败',
+        requires_clarification: '已思考',
+        requires_risk_confirmation: '等待确认',
+        running: '思考中',
+      }
+      return mapping[asText(process.status)] || '已思考'
+    },
+    getAgentMessageNaturalProcessItems(message = {}) {
+      return this.getAgentNaturalProcessItems(this.getAgentMessageProcess(message))
+    },
+    isAgentLatestAssistantMessage(message = {}, index = 0) {
+      if (asText(message && message.role) !== 'assistant') return false
+      const messages = cloneArray(this.agentMessages)
+      for (let cursor = messages.length - 1; cursor >= 0; cursor -= 1) {
+        if (asText(messages[cursor] && messages[cursor].role) === 'assistant') {
+          return cursor === index
+        }
+      }
+      return false
+    },
+    getAgentMessageTaskConfirmation(message = {}, index = 0) {
+      if (!this.isAgentLatestAssistantMessage(message, index)) return null
+      return this.getAgentTaskConfirmation(this.getAgentMessageProcess(message))
+    },
+    agentLatestAssistantMessageHasProcess() {
+      const messages = cloneArray(this.agentMessages)
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index]
+        if (asText(message && message.role) !== 'assistant') continue
+        return this.shouldShowAgentMessageProcess(message)
+      }
+      return false
+    },
     getAgentStatusLabel() {
       if (this.agentSessionHydrating) {
         return '加载中'
@@ -8596,7 +8678,22 @@ function createAgentUiMethods() {
     },
     shouldShowAgentThinkingProcessBlock() {
       if (!this.agentHasThinkingContent()) return false
+      if (!this.agentLoading && asText(this.agentStatus) === 'answered' && this.agentLatestAssistantMessageHasProcess()) {
+        return false
+      }
       return true
+    },
+    shouldShowAgentThinkingLiveStatus() {
+      return shouldShowAgentProcessLiveStatus(this.agentStatus, {
+        hasContent: this.agentHasThinkingContent(),
+        isLoading: this.agentLoading,
+      })
+    },
+    shouldShowAgentThinkingToggle() {
+      return shouldShowAgentProcessToggle(this.agentStatus, {
+        hasContent: this.agentHasThinkingContent(),
+        isLoading: this.agentLoading,
+      })
     },
     isAgentReactLoopProcess() {
       return cloneArray(this.agentThinkingTimeline).some((item) => {
@@ -8659,13 +8756,15 @@ function createAgentUiMethods() {
       if (this.agentExecutionTrace.length || hasAgentPlanContent(this.agentPlan)) return '已思考'
       return '处理中'
     },
-    getAgentVisibleProcessSteps() {
-      const steps = cloneArray(this.agentThinkingTimeline)
+    getAgentVisibleProcessSteps(process = null) {
+      const processContext = process ? normalizeAgentMessageProcess(process) : null
+      const steps = cloneArray(processContext ? processContext.thinkingTimeline : this.agentThinkingTimeline)
         .map((item) => ({
           id: asText(item && item.id),
           phase: asText(item && item.phase),
           title: asText(item && item.title) || '处理中',
           detail: asText(item && item.detail),
+          displayText: asText(item && (item.displayText || item.display_text)),
           items: cloneArray(item && item.items).map((entry) => asText(entry)).filter(Boolean),
           meta: cloneObject(item && item.meta),
           state: asText(item && item.state) || 'pending',
@@ -8675,15 +8774,19 @@ function createAgentUiMethods() {
       if (!hasBackendStep) return steps
       return steps.filter((item) => !item.id.startsWith('frontend-wait-'))
     },
-    getAgentNaturalProcessItems() {
+    getAgentNaturalProcessItems(process = null) {
+      const processContext = process ? normalizeAgentMessageProcess(process) : null
       const toolLabels = {
         read_current_scope: '读取当前分析范围',
         read_current_results: '读取已有分析结果',
+        analysis_preflight: '检查已有分析证据',
         rank_next_analysis_options: '推荐下一步分析方向',
         run_area_character_pack: '生成区域画像',
+        build_unified_spatial_cells: '构建统一空间格网',
         detect_commercial_hotspots: '识别商业热点',
         infer_area_tags: '推断区域标签',
         analyze_spatial_structure: '分析空间结构',
+        compute_road_syntax_from_scope: '计算路网句法指标',
         read_poi_structure_analysis: '读取 POI 结构分析',
         read_h3_structure_analysis: '读取 H3 结构分析',
         read_road_network_analysis: '读取路网分析',
@@ -8717,18 +8820,24 @@ function createAgentUiMethods() {
         }
       }
       const items = []
-      this.getAgentVisibleProcessSteps().forEach((step, index) => {
+      const visibleSteps = this.getAgentVisibleProcessSteps(processContext)
+      const hasBackendStep = visibleSteps.some((step) => {
+        const id = asText(step && step.id)
+        return id && !id.startsWith('frontend-')
+      })
+      const seenText = new Set()
+      visibleSteps.forEach((step, index) => {
         const meta = cloneObject(step && step.meta)
         const toolName = asText(meta.toolName || meta.tool_name)
         const status = asText(meta.status)
-        const resultSummary = readItemValue(step.items, '结果：')
         const argumentsSummary = readItemValue(step.items, '参数：')
         const evidenceSummary = readItemValue(step.items, '证据：')
         const warningSummary = readItemValue(step.items, '警告：')
-        const detail = clean(step.detail)
+        const displayText = clean(step.displayText)
         if (toolName) {
           if (status === 'start' || status === 'active' || !status) {
             const metaParts = []
+            if (displayText) metaParts.push(displayText)
             if (argumentsSummary && argumentsSummary !== '无参数') metaParts.push(`参数：${argumentsSummary}`)
             const toolItem = makeTextItem({
               id: `${step.id || index}-tool-start`,
@@ -8743,9 +8852,8 @@ function createAgentUiMethods() {
           const metaParts = []
           if (evidenceSummary) metaParts.push(`证据：${evidenceSummary}`)
           if (warningSummary) metaParts.push(`警告：${warningSummary}`)
-          const resultText = status === 'success'
-            ? (resultSummary || detail || `${formatTool(toolName)}已返回结果。`)
-            : (detail || `${formatTool(toolName)}没有完成。`)
+          const resultText = displayText
+          if (!resultText) return
           const resultItem = makeTextItem({
             id: `${step.id || index}-tool-result`,
             kind: status === 'success' ? 'result' : 'warning',
@@ -8756,7 +8864,11 @@ function createAgentUiMethods() {
           if (resultItem) items.push(resultItem)
           return
         }
-        const text = clean(detail || step.title)
+        if (hasBackendStep && asText(step.id).startsWith('frontend-')) return
+        const text = displayText
+        if (!text) return
+        if (seenText.has(text)) return
+        seenText.add(text)
         const plainItem = makeTextItem({
           id: step.id || `process-${index}`,
           kind: 'text',
@@ -8765,18 +8877,18 @@ function createAgentUiMethods() {
         })
         if (plainItem) items.push(plainItem)
       })
-      const planChecklist = this.getAgentPlanChecklist()
-      if (planChecklist.visible && !items.some((item) => item.id === 'agent-plan-summary')) {
+      const planChecklist = this.getAgentPlanChecklist(processContext)
+      if (planChecklist.visible && planChecklist.summary && !items.some((item) => item.id === 'agent-plan-summary')) {
         const planItem = makeTextItem({
           id: 'agent-plan-summary',
           kind: 'text',
-          text: planChecklist.summary || '我已经列出这轮要检查的证据和工具顺序。',
+          text: planChecklist.summary,
           metaText: planChecklist.progressLabel,
           state: 'completed',
         })
         if (planItem) items.push(planItem)
       }
-      const taskConfirmation = this.getAgentTaskConfirmation()
+      const taskConfirmation = this.getAgentTaskConfirmation(processContext)
       if (taskConfirmation) {
         const taskItem = makeTextItem({
           id: `agent-task-${taskConfirmation.taskKey || 'confirmation'}`,
@@ -8992,12 +9104,17 @@ function createAgentUiMethods() {
     toggleAgentTraceExpanded() {
       this.agentTraceExpanded = !this.agentTraceExpanded
     },
-    getAgentPlanChecklist() {
-      return buildAgentPlanChecklist(this.agentPlan, this.agentExecutionTrace, {
-        isLoading: this.agentLoading,
-        stage: this.agentStage,
-        diagnostics: (this.findAgentSession(this.activeAgentSessionId) || {}).diagnostics || {},
-      })
+    getAgentPlanChecklist(process = null) {
+      const processContext = process ? normalizeAgentMessageProcess(process) : null
+      return buildAgentPlanChecklist(
+        processContext ? processContext.plan : this.agentPlan,
+        processContext ? processContext.executionTrace : this.agentExecutionTrace,
+        {
+          isLoading: processContext ? false : this.agentLoading,
+          stage: processContext ? processContext.stage : this.agentStage,
+          diagnostics: (this.findAgentSession(this.activeAgentSessionId) || {}).diagnostics || {},
+        },
+      )
     },
     getAgentPlanSummary() {
       return this.getAgentPlanChecklist().summary
@@ -9005,8 +9122,9 @@ function createAgentUiMethods() {
     getAgentPlanProgressLabel() {
       return this.getAgentPlanChecklist().progressLabel
     },
-    getAgentToolCallItems() {
-      return buildAgentToolCallItems(this.agentExecutionTrace)
+    getAgentToolCallItems(process = null) {
+      const processContext = process ? normalizeAgentMessageProcess(process) : null
+      return buildAgentToolCallItems(processContext ? processContext.executionTrace : this.agentExecutionTrace)
     },
     getAgentToolCallStatusLabel(status = '') {
       const mapping = {
@@ -9018,8 +9136,9 @@ function createAgentUiMethods() {
       }
       return mapping[asText(status)] || '执行中'
     },
-    getAgentTaskConfirmation() {
-      return cloneAnalysisTaskConfirmation(this.agentPendingTaskConfirmation)
+    getAgentTaskConfirmation(process = null) {
+      const processContext = process ? normalizeAgentMessageProcess(process) : null
+      return cloneAnalysisTaskConfirmation(processContext ? processContext.pendingTaskConfirmation : this.agentPendingTaskConfirmation)
     },
     getAgentTaskConfirmationStatusLabel(status = '') {
       const mapping = {

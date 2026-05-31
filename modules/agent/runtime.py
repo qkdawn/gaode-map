@@ -12,6 +12,7 @@ from .context_builder import build_context_bundle, build_context_summary
 from .gate import latest_user_message
 from .governance import check_tool_governance
 from .memory import create_working_memory
+from .llm_digest import summarize_tool_result
 from .providers.llm_provider import (
     audit_with_llm,
     generate_answer_output_with_llm,
@@ -60,6 +61,15 @@ _STAGE_LABELS = {
     "requires_risk_confirmation": "等待风险确认",
 }
 
+_GENERIC_TOOL_RESULT_TEXT = {"", "执行成功", "成功", "已完成", "完成", "ok", "OK", "无结果"}
+
+
+def _tool_result_display_text(result) -> str:
+    if result.status == "failed":
+        return str(result.error or "执行失败")
+    summary = summarize_tool_result(result)
+    return "" if str(summary or "").strip() in _GENERIC_TOOL_RESULT_TEXT else str(summary or "").strip()
+
 
 async def _maybe_emit(emit: StreamEmit | None, event_type: str, payload: dict[str, Any]) -> None:
     if emit is None:
@@ -79,6 +89,7 @@ def _timeline_item(seed: dict[str, Any], fallback_id: str) -> AgentThinkingItem:
     payload.setdefault("phase", "")
     payload.setdefault("title", "处理中")
     payload.setdefault("detail", "")
+    payload.setdefault("display_text", "")
     payload.setdefault("state", "pending")
     return AgentThinkingItem(**payload)
 
@@ -115,6 +126,7 @@ def _trace_to_thinking_payload(seed: dict[str, Any], fallback_id: str) -> dict[s
         "phase": phase,
         "title": f"{title_status} {tool_name}",
         "detail": str(payload.get("message") or payload.get("reason") or ""),
+        "display_text": str(payload.get("display_text") or ""),
         "items": items,
         "meta": {
             "tool_name": tool_name,
@@ -235,6 +247,7 @@ async def _execute_planned_steps(
                 "status": "start",
                 "reason": step.reason,
                 "message": step.evidence_goal or step.reason or "开始执行规划步骤",
+                "display_text": step.reason or "",
                 "arguments_summary": "无参数" if not step.arguments else str(step.arguments),
                 "produced_artifacts": list(step.expected_artifacts or []),
             },
@@ -287,6 +300,7 @@ async def _execute_planned_steps(
         )
         result = execution.result
         trace = execution.trace
+        result_display_text = _tool_result_display_text(result)
         data_readiness = dict(result.result.get("data_readiness") or {}) if isinstance(result.result, dict) else {}
         if data_readiness.get("checked"):
             await _emit_preflight_trace(
@@ -305,8 +319,9 @@ async def _execute_planned_steps(
                 "status": result.status,
                 "reason": step.reason,
                 "message": trace.message or ("执行成功" if result.status == "success" else "执行失败"),
+                "display_text": result_display_text,
                 "arguments_summary": "无参数" if not step.arguments else str(step.arguments),
-                "result_summary": result.error or ("执行成功" if result.status == "success" else "执行失败"),
+                "result_summary": result_display_text or result.error or ("执行成功" if result.status == "success" else "执行失败"),
                 "evidence_count": len(result.evidence or []),
                 "warning_count": len(result.warnings or []),
                 "produced_artifacts": list((result.artifacts or {}).keys())[:12],
@@ -443,6 +458,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
                 "phase": "clarifying",
                 "title": "需要先补充信息",
                 "detail": gate.summary or gate.clarification_question,
+                "display_text": gate.summary or "",
                 "items": list(gate.clarification_questions or []),
                 "state": "failed",
             },
@@ -482,6 +498,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             "phase": "gating",
             "title": "门卫通过",
             "detail": gate.summary or "问题已明确，可以进入规划阶段。",
+            "display_text": gate.summary or "",
             "state": "completed",
         },
         "gating-check",
@@ -529,6 +546,8 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
                 plan=AgentPlanEnvelope(summary=planning_summary),
             )
         planning_summary = plan.summary
+        if plan.warnings:
+            memory.research_notes.extend([str(item) for item in plan.warnings if str(item).strip()])
         if replan_count == 0:
             initial_plan_steps = list(plan.steps or [])
         else:
@@ -538,6 +557,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
                 "phase": stage_name,
                 "title": "规划完成" if replan_count == 0 else "重新规划完成",
                 "detail": plan.summary or "已形成下一步执行计划。",
+                "display_text": plan.summary or "",
                 "items": [step.reason or step.tool_name for step in (plan.steps or [])[:6]],
                 "state": "completed",
             },
@@ -640,6 +660,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
                     "phase": "auditing",
                     "title": "审计通过",
                     "detail": verdict.summary or "当前证据足以支持回答。",
+                    "display_text": verdict.summary or "",
                     "state": "completed",
                 },
                 f"audit-{replan_count}",
@@ -686,6 +707,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
                 "phase": "auditing",
                 "title": "审计要求补充证据",
                 "detail": verdict.summary or "当前证据还不够，需要重新规划。",
+                "display_text": verdict.summary or "",
                 "items": list(verdict.missing_evidence or []),
                 "state": "failed",
             },

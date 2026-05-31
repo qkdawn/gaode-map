@@ -31,6 +31,15 @@ def compute_params_hash(params: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def normalize_scope_fingerprint(scope_fingerprint: Any) -> str:
+    raw = str(scope_fingerprint or "").strip()
+    if not raw:
+        return ""
+    if len(raw) <= 128 and not raw.startswith(("{", "[")):
+        return raw
+    return f"scope:{hashlib.sha256(raw.encode('utf-8')).hexdigest()}"
+
+
 def _artifact_payload(record: AnalysisArtifact) -> Dict[str, Any]:
     return {
         "id": record.id,
@@ -67,7 +76,7 @@ class AnalysisArtifactRepo:
             raise ValueError("artifact_type_required")
         canonical_params = canonicalize_params(params)
         params_hash = compute_params_hash(canonical_params)
-        normalized_scope = str(scope_fingerprint or "").strip()
+        normalized_scope = normalize_scope_fingerprint(scope_fingerprint)
         normalized_version = str(data_version or DATA_VERSION).strip() or DATA_VERSION
         now = datetime.utcnow()
         session: Session = SessionLocal()
@@ -123,15 +132,15 @@ class AnalysisArtifactRepo:
             return []
         session: Session = SessionLocal()
         try:
-            query = session.query(AnalysisArtifact).filter_by(history_id=normalized_history_id)
+            query = session.query(AnalysisArtifact.id).filter_by(history_id=normalized_history_id)
             if artifact_type:
                 query = query.filter_by(artifact_type=str(artifact_type).strip())
             if params_hash:
                 query = query.filter_by(params_hash=str(params_hash).strip())
-            return [
-                _artifact_payload(record)
-                for record in query.order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc()).all()
-            ]
+            id_rows = query.order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc()).all()
+            record_ids = [int(row[0] if isinstance(row, tuple) else getattr(row, "id", row)) for row in id_rows]
+            records = [session.get(AnalysisArtifact, record_id) for record_id in record_ids]
+            return [_artifact_payload(record) for record in records if record is not None]
         finally:
             session.close()
 

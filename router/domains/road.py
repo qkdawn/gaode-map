@@ -52,7 +52,6 @@ async def analyze_road_syntax_api(payload: RoadSyntaxRequest):
             merge_bucket_step=payload.merge_bucket_step,
             radii_m=payload.radii_m,
             metric=payload.metric,
-            depthmap_cli_path=payload.depthmap_cli_path,
             tulip_bins=payload.tulip_bins,
             use_arcgis_webgl=payload.use_arcgis_webgl,
             arcgis_timeout_sec=payload.arcgis_timeout_sec,

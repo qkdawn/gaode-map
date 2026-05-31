@@ -1,3 +1,5 @@
+import json
+
 from modules.agent.schemas import AgentTurnOutput, AnalysisSnapshot, AuditResult, ToolResult
 from modules.agent.synthesizer import build_analysis_evidence, build_cards, build_synthesis_payload, enrich_answer_output
 
@@ -42,6 +44,57 @@ def test_build_synthesis_payload_includes_evidence_matrix_and_decision_layers():
     assert payload["recommendation_layers"]["can_act_now"]
     assert payload["recommendation_layers"]["do_not_infer"]
     assert any("客流" in item for item in payload["interpretation_limits"])
+
+
+def test_build_synthesis_payload_uses_compact_tool_result_digest():
+    huge_points = [{"id": f"poi-{index}", "lng": 112.98 + index * 0.001, "lat": 28.19} for index in range(300)]
+    huge_h3_features = [
+        {"id": f"h3-{index}", "properties": {"poi_count": index, "label": f"cell-{index}"}}
+        for index in range(300)
+    ]
+
+    payload = build_synthesis_payload(
+        question="总结这个区域",
+        snapshot=_snapshot_with_decision_evidence(),
+        artifacts={},
+        tool_results=[
+            ToolResult(
+                tool_name="read_current_results",
+                status="success",
+                result={"poi_count": 300, "raw_points": huge_points},
+                evidence=[{"field": f"poi.{index}", "value": f"evidence-{index}"} for index in range(20)],
+                warnings=[f"warning-{index}" for index in range(12)],
+                artifacts={
+                    "current_pois": huge_points,
+                    "current_poi_h3_grid": {"features": huge_h3_features, "summary": {"grid_count": 300}},
+                    "current_frontend_analysis": {
+                        "poi": {"raw_points": huge_points},
+                        "h3": {"features": huge_h3_features},
+                    },
+                },
+            )
+        ],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    tool_digest = payload["tool_results"][0]
+    encoded = json.dumps(payload, ensure_ascii=False)
+
+    assert "result" not in tool_digest
+    assert "evidence" not in tool_digest
+    assert "artifacts" not in tool_digest
+    assert "poi-299" not in encoded
+    assert "h3-299" not in encoded
+    assert "evidence-19" not in encoded
+    assert tool_digest["result_summary"] == "poi_count=300"
+    assert tool_digest["result_shape"] == {"type": "object", "key_count": 2, "keys": ["poi_count", "raw_points"]}
+    assert len(tool_digest["evidence_sample"]) == 8
+    assert tool_digest["evidence_count"] == 20
+    assert tool_digest["warnings"] == [f"warning-{index}" for index in range(8)]
+    assert tool_digest["artifact_keys"] == ["current_pois", "current_poi_h3_grid", "current_frontend_analysis"]
+    assert tool_digest["artifact_shapes"]["current_pois"] == {"type": "array", "count": 300}
+    assert tool_digest["artifact_shapes"]["current_poi_h3_grid"]["keys"] == ["features", "summary"]
 
 
 def test_build_cards_uses_decision_oriented_titles_and_layers():

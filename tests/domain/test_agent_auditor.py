@@ -63,6 +63,7 @@ def test_auditor_accepts_analysis_artifacts_for_commercial_summary():
             "current_nightlight_pattern_analysis": {"total_radiance": 12.3, "summary_text": "夜光画像完整"},
             "current_road_pattern_analysis": {"node_count": 8, "summary_text": "路网画像完整"},
             "current_business_profile": {"business_profile": "生活消费主导", "summary_text": "画像完整"},
+            "current_unified_spatial_cells_summary": {"cell_count": 12, "active_poi_cell_count": 8, "lit_cell_count": 10, "road_covered_cell_count": 9},
         }
     )
 
@@ -103,6 +104,38 @@ def test_auditor_treats_empty_analysis_artifacts_as_missing_evidence():
     assert "人口概览" in result.missing_evidence
     assert "夜光概览" in result.missing_evidence
     assert "路网概览" in result.missing_evidence
+
+
+def test_auditor_requires_unified_cells_for_road_spatial_distribution():
+    snapshot = _snapshot_with_scope(road={"summary": {"node_count": 8, "edge_count": 10}})
+    memory = WorkingMemory(
+        artifacts={
+            "scope_polygon": snapshot.scope["polygon"],
+            "current_road_summary": {"node_count": 8, "edge_count": 10},
+        }
+    )
+
+    result = audit_execution(
+        question="分析路网集成度和连接度的空间分布，识别低值区域",
+        snapshot=snapshot,
+        context=build_context_bundle(snapshot),
+        memory=memory,
+    )
+
+    assert result.passed is False
+    assert "空间同格对齐证据" in result.missing_evidence
+
+    memory.artifacts["current_unified_spatial_cells_summary"] = {
+        "cell_count": 12,
+        "road_covered_cell_count": 8,
+    }
+    result = audit_execution(
+        question="分析路网集成度和连接度的空间分布，识别低值区域",
+        snapshot=snapshot,
+        context=build_context_bundle(snapshot),
+        memory=memory,
+    )
+    assert "空间同格对齐证据" not in result.missing_evidence
 
 
 def test_auditor_keeps_poi_raster_and_poi_h3_evidence_separate():
