@@ -58,6 +58,22 @@ def test_build_answer_evidence_payload_includes_key_evidence_and_limits():
     assert "不要逐项翻译指标面板" in payload["spatial_narrative_guidance"]["anti_patterns"]
     assert "不要把行动建议写成工具流程" in payload["spatial_narrative_guidance"]["anti_patterns"]
     assert "place_anchors" not in json.dumps(payload["spatial_narrative_guidance"], ensure_ascii=False)
+    assert payload["answer_depth_guidance"]["target_depth"] == "full"
+    assert "3 到 6 个展开段" in payload["answer_depth_guidance"]["suggested_shape"]
+
+
+def test_build_answer_evidence_payload_keeps_simple_metric_questions_concise():
+    payload = build_answer_evidence_payload(
+        question="夜光均值是什么意思",
+        snapshot=_snapshot_with_decision_evidence(),
+        artifacts={},
+        tool_results=[ToolResult(tool_name="read_current_results", status="success")],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    assert payload["answer_depth_guidance"]["target_depth"] == "concise"
+    assert "不扩展成报告" in payload["answer_depth_guidance"]["reason"]
 
 
 def test_build_answer_evidence_payload_uses_compact_tool_result_digest():

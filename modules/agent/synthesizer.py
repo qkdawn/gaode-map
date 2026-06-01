@@ -34,6 +34,59 @@ def _infer_output_mode(question: str) -> str:
     return "cognition"
 
 
+def _answer_depth_guidance(question: str) -> Dict[str, Any]:
+    text = str(question or "")
+    concise_tokens = (
+        "是什么意思",
+        "什么含义",
+        "定义",
+        "多少",
+        "几个",
+        "是否完成",
+        "完成了吗",
+        "状态",
+        "单项",
+        "均值",
+        "总量",
+    )
+    full_tokens = (
+        "总结",
+        "商业特征",
+        "下一步",
+        "继续",
+        "行动",
+        "方案",
+        "建议",
+        "选址",
+        "补位",
+        "空间结构",
+        "空间关系",
+        "规划",
+        "研判",
+        "为什么",
+        "分析一下",
+    )
+    is_concise = any(token in text for token in concise_tokens)
+    is_full = any(token in text for token in full_tokens)
+    target_depth = "concise" if is_concise and not is_full else ("full" if is_full else "balanced")
+    if target_depth == "full":
+        guidance = "高价值问题要充分展开：先给总判断，再解释空间矛盾、关键证据、边界和下一步判断标准。"
+        suggested_shape = "一个总判断 + 3 到 6 个展开段 + 一句话结论"
+    elif target_depth == "concise":
+        guidance = "简单问题保持短答：只回答关键结论、必要证据和解释边界，不扩展成报告。"
+        suggested_shape = "一个直接结论 + 1 到 2 个必要说明"
+    else:
+        guidance = "按证据复杂度自然展开，避免过短的指标转述，也避免无证据长篇。"
+        suggested_shape = "一个总判断 + 若干自然段"
+    return {
+        "target_depth": target_depth,
+        "reason": guidance,
+        "suggested_shape": suggested_shape,
+        "full_depth_triggers": ["总结", "商业特征", "下一步", "行动方案", "选址/补位", "空间结构", "规划式分析"],
+        "concise_triggers": ["单项指标", "定义", "状态", "数量", "是否完成", "某个数字含义"],
+    }
+
+
 def _evidence_headline(item: AgentEvidenceItem) -> str:
     if item.metric == "next_analysis_options" and isinstance(item.value, dict):
         options = [option for option in (item.value.get("options") or []) if isinstance(option, dict)]
@@ -370,6 +423,7 @@ def build_answer_evidence_payload(
             "evidence_rule": "具体地名、H3 格子、路网线段、人口/夜光 cell 只有通过 search_analysis_context 命中并 read_analysis_chunk 读取后，才能在最终回答中引用。",
         },
         "spatial_narrative_guidance": _spatial_narrative_guidance(),
+        "answer_depth_guidance": _answer_depth_guidance(question),
     }
     return {
         **base_payload,

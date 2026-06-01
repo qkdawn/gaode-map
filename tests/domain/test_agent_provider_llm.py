@@ -168,7 +168,8 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "先直接回答用户问题" in system_prompt
     assert "文风跟问题类型走" in system_prompt
     assert "Markdown 风格的中文标题和分段" in system_prompt
-    assert "不要输出一整坨文字" in system_prompt
+    assert "按问题价值组织自然段或小标题" in system_prompt
+    assert "高价值问题要充分展开，简单问题要保持简短" in system_prompt
     assert "不设置固定字数上限" in system_prompt
     assert "保留能支撑判断的关键数字" in system_prompt
     assert "空间主结构" in system_prompt
@@ -179,7 +180,10 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "关键矛盾/机会 -> 为什么此动作重要 -> 用什么证据筛掉伪机会" in system_prompt
     assert "不要写成“系统可以跑哪些工具”的流程说明" in system_prompt
     assert "学生高频低客单" in system_prompt
+    assert "target_depth=full" in system_prompt
+    assert "target_depth=concise" in system_prompt
     assert "只补最必要的证据支撑" not in system_prompt
+    assert "3 到 5 个简短小标题或自然段" not in system_prompt
     assert "review_contract" not in system_prompt
     assert "cards" not in system_prompt
     assert "decision_strength" not in system_prompt
