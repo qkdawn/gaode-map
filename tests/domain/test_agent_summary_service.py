@@ -147,7 +147,6 @@ def test_tourism_cross_analysis_payload_includes_shared_grid_evidence():
                     "nightlight_radiance": 12,
                     "composite_score": 0.9,
                     "coupling_type": "high_pop_high_poi_high_light",
-                    "planning_meaning": "人口、业态供给与夜间活力重合，适合作为优先策划节点。",
                 }
             ],
         },
@@ -307,18 +306,18 @@ def test_generate_nightlight_iteration_analysis_returns_llm_unavailable(monkeypa
     assert result["prompt_snapshots"]["nightlight_iteration"]["system_prompt"] == config.system_prompt
 
 
-def test_tourism_cross_analysis_prompt_uses_full_planning_constraints():
+def test_tourism_cross_analysis_prompt_uses_ai_translation_without_fixed_templates():
     config = get_prompt_config("tourism_cross_analysis")
 
-    assert "人口数据回答" in config.system_prompt
+    assert "AI 基于三类证据自行生成" in config.system_prompt
     assert "人口密度 × POI供给" in config.system_prompt
-    assert "POI业态 × 夜间灯光" in config.system_prompt
     assert "不得凭空编造政策、道路、商圈、地铁" in config.system_prompt
     assert "当前证据只能支持趋势判断，不能直接证明真实消费规模" in config.system_prompt
-    assert "该地块适合以____为核心客群" in config.system_prompt
+    assert "不要求固定九节标题" in config.system_prompt
+    assert "该地块适合以____为核心客群" not in config.system_prompt
 
 
-def test_validate_tourism_cross_analysis_requires_report_sections():
+def test_validate_tourism_cross_analysis_accepts_flexible_content():
     valid = _validate_tourism_cross_analysis_payload({
         "title": "文旅交叉策划分析",
         "content": "一、综合判断\n成立。\n五、人口 × POI × 夜光交叉诊断\n匹配。\n九、策划结论\n该地块适合以本地客群为核心客群。",
@@ -331,15 +330,15 @@ def test_validate_tourism_cross_analysis_requires_report_sections():
         "title": "文旅交叉策划分析",
         "content": "一、综合判断\n成立。\n五、人口、POI与夜光交叉诊断\n三类信号基本匹配。\n九、策划结论\n该地块适合以本地客群为核心客群。",
     })
-    invalid = _validate_tourism_cross_analysis_payload({
+    flexible = _validate_tourism_cross_analysis_payload({
         "title": "文旅交叉策划分析",
-        "content": "一、综合判断\n成立。",
+        "content": "人口、POI 和夜光证据可以自然组织，不要求固定九节。",
     })
 
     assert valid["title"] == "文旅交叉策划分析"
     assert variant["content"]
     assert natural_variant["content"]
-    assert invalid == {}
+    assert flexible["content"]
 
 
 def test_generate_nightlight_iteration_analysis_validates_llm_payload(monkeypatch):
@@ -1379,11 +1378,10 @@ def test_consumption_vitality_rewrites_to_direction_orientation_template():
     )
 
     economic_reasoning = normalized["consumption_vitality"]["reasoning"]
-    assert economic_reasoning.startswith("从空间分布来看，等时圈内夜间经济活动整体处于中等偏上水平")
-    assert "高值区域主要集中在东北及东方向" in economic_reasoning
-    assert "区域道路以东西向为主，东北-西南向为辅" in economic_reasoning
-    assert "高度一致" in economic_reasoning
-    assert "交通廊道对夜间经济活动的空间引导作用较明显" in economic_reasoning
+    assert economic_reasoning.startswith("nightlight_level=中等偏上")
+    assert "nightlight_direction=东北及东" in economic_reasoning
+    assert "road_orientation=东西向,东北-西南向" in economic_reasoning
+    assert "direction_orientation_consistency=dominant_direction_matches_orientation" in economic_reasoning
     for token in ["消费能力", "客流", "营业额", "白天活跃", "日间消费", "全天候经济活动"]:
         assert token not in economic_reasoning
 

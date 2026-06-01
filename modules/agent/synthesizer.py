@@ -38,12 +38,12 @@ def _evidence_headline(item: AgentEvidenceItem) -> str:
     if item.metric == "next_analysis_options" and isinstance(item.value, dict):
         options = [option for option in (item.value.get("options") or []) if isinstance(option, dict)]
         if options:
-            return f"推荐下一步：{options[0].get('title') or '继续分析'}"
-        return "已评估下一步分析方向"
+            return f"next_analysis_option={options[0].get('title') or '-'}"
+        return "next_analysis_options_available"
     if item.metric == "business_profile" and isinstance(item.value, dict):
-        return f"商业画像偏向 {item.value.get('business_profile') or '未明确'}"
+        return f"poi_mix_signal={item.value.get('poi_mix_signal') or item.value.get('business_profile') or '-'}"
     if item.metric == "commercial_hotspots" and isinstance(item.value, dict):
-        return f"商业热点结构为 {item.value.get('hotspot_mode') or '未明确'}，核心区 {item.value.get('core_zone_count') or 0} 个"
+        return f"hotspot_mode={item.value.get('hotspot_mode') or '-'}; core_zone_count={item.value.get('core_zone_count') or 0}"
     if item.metric == "target_supply_gap" and isinstance(item.value, dict):
         return f"{item.value.get('place_type') or '目标业态'}供给缺口 {item.value.get('supply_gap_level') or 'unknown'}"
     if item.metric == "business_site_advice" and isinstance(item.value, dict):
@@ -87,16 +87,16 @@ def _detect_conflicts(metrics: Dict[str, object], audit: AuditResult) -> List[st
 
     try:
         if nightlight_mean not in (None, "") and population_total not in (None, "") and float(nightlight_mean) >= 3.0 and float(population_total) < 2000:
-            conflicts.append("夜光活力信号较强，但人口基础偏弱，活动可能更依赖局部目的地或流动活动。")
+            conflicts.append("nightlight_mean_ge_3_population_lt_2000")
     except (TypeError, ValueError):
         pass
     try:
         if poi_count not in (None, "") and road_nodes not in (None, "") and int(poi_count) >= 20 and int(road_nodes) <= 40:
-            conflicts.append("POI 供给量不低，但路网支撑偏弱，商业分布不一定能转化为高可达性。")
+            conflicts.append("poi_count_ge_20_road_nodes_le_40")
     except (TypeError, ValueError):
         pass
     if density not in (None, "") and metrics.get("target_supply_gap_level") in {"medium", "high"}:
-        conflicts.append("空间密度不低，但目标业态仍存在缺口，问题更可能是结构错配而不是单纯总量不足。")
+        conflicts.append("density_available_target_gap_medium_or_high")
     for item in audit.issues or []:
         text = str(item).strip()
         if text and text not in conflicts:
@@ -136,7 +136,7 @@ def _select_key_evidence(evidence: List[AgentEvidenceItem], *, question: str) ->
 def _infer_business_portrait(metrics: Dict[str, object]) -> tuple[str, List[str]]:
     mix = [item for item in (metrics.get("poi_category_mix") or []) if isinstance(item, dict)]
     if not mix:
-        return "综合商业画像仍需更多业态结构信息", []
+        return "poi_mix_unavailable", []
 
     top_labels = {str(item.get("label") or ""): float(item.get("ratio") or 0.0) for item in mix}
     ordered = [f"{item.get('label')} {item.get('count')} 个" for item in mix[:3]]
@@ -146,24 +146,26 @@ def _infer_business_portrait(metrics: Dict[str, object]) -> tuple[str, List[str]
     office_ratio = top_labels.get("公司", 0.0) + top_labels.get("商务住宅", 0.0)
     culture_ratio = top_labels.get("科教文化", 0.0)
 
+    signal_parts: List[str] = []
     if dining_ratio + shopping_ratio >= 0.45:
-        portrait = "生活消费主导的综合商业区"
-    elif lodging_ratio >= 0.12:
-        portrait = "住宿接待功能较强的复合片区"
-    elif office_ratio >= 0.18:
-        portrait = "商务与日常消费复合片区"
-    else:
-        portrait = "多业态混合的综合服务片区"
+        signal_parts.append("dining_shopping_ratio_ge_0_45")
+    if lodging_ratio >= 0.12:
+        signal_parts.append("lodging_ratio_ge_0_12")
+    if office_ratio >= 0.18:
+        signal_parts.append("office_ratio_ge_0_18")
+    if culture_ratio >= 0.1:
+        signal_parts.append("culture_ratio_ge_0_10")
+    portrait = ",".join(signal_parts) or "no_ratio_threshold_hit"
 
     reasons: List[str] = []
     if ordered:
-        reasons.append(f"头部业态为 {'、'.join(ordered)}。")
+        reasons.append(f"top_categories={'/'.join(ordered)}")
     if culture_ratio >= 0.1:
-        reasons.append("科教文化设施占比不低，说明公共服务或教育配套参与度较高。")
+        reasons.append("culture_ratio_ge_0_10")
     if office_ratio >= 0.12:
-        reasons.append("公司与商务住宅占比有一定体量，商业功能不只是纯生活配套。")
+        reasons.append("office_ratio_ge_0_12")
     if lodging_ratio >= 0.08:
-        reasons.append("住宿设施占比不低，说明区域对流动人口或短停留活动有承接能力。")
+        reasons.append("lodging_ratio_ge_0_08")
     return portrait, reasons
 
 
@@ -189,8 +191,8 @@ def _required_evidence_labels(question: str, audit: AuditResult) -> List[str]:
 def _business_profile_block(metrics: Dict[str, object]) -> Dict[str, Any]:
     portrait, reasons = _infer_business_portrait(metrics)
     return {
-        "portrait": metrics.get("business_profile_portrait") or portrait,
-        "type": metrics.get("business_profile_label") or portrait,
+        "portrait": portrait,
+        "type": "poi_mix_raw_signal" if portrait != "poi_mix_unavailable" else portrait,
         "top_category_mix": metrics.get("poi_category_mix") or [],
         "functional_mix_score": metrics.get("functional_mix_score"),
         "reasons": reasons,
@@ -223,14 +225,14 @@ def _compose_business_profile_summary(metrics: Dict[str, object], business_profi
     functional_mix_score = metrics.get("functional_mix_score")
     parts: List[str] = []
     if portrait:
-        parts.append(f"业态画像上，这里更接近{portrait}")
+        parts.append(f"poi_mix_signal={portrait}")
     if reasons:
         parts.append(reasons[0].rstrip("。"))
     if hotspot_mode:
-        parts.append(f"整体空间组织偏{hotspot_mode}")
+        parts.append(f"hotspot_mode={hotspot_mode}")
     if functional_mix_score not in (None, ""):
-        parts.append(f"功能混合度约为 {functional_mix_score}")
-    return "，".join([part for part in parts if part]).strip("，")
+        parts.append(f"functional_mix_score={functional_mix_score}")
+    return "; ".join([part for part in parts if part])
 
 
 def _compose_spatial_structure_summary(metrics: Dict[str, object], spatial_structure: Dict[str, Any]) -> str:
@@ -242,23 +244,23 @@ def _compose_spatial_structure_summary(metrics: Dict[str, object], spatial_struc
     hotspot_mode = _as_text(spatial_structure.get("hotspot_mode") or metrics.get("commercial_hotspot_mode"))
     parts: List[str] = []
     if hotspot_mode:
-        parts.append(f"空间结构更接近{hotspot_mode}")
+        parts.append(f"hotspot_mode={hotspot_mode}")
     if core_zone_count not in (None, ""):
-        parts.append(f"内部形成 {core_zone_count} 个核心区")
+        parts.append(f"core_zone_count={core_zone_count}")
     if opportunity_zone_count not in (None, ""):
-        parts.append(f"并保留 {opportunity_zone_count} 个机会区")
-    return "，".join([part for part in parts if part]).strip("，")
+        parts.append(f"opportunity_zone_count={opportunity_zone_count}")
+    return "; ".join([part for part in parts if part])
 
 
 def _compose_population_vitality_summary(metrics: Dict[str, object]) -> str:
     parts: List[str] = []
     if metrics.get("population_total") not in (None, ""):
-        parts.append(f"人口基盘约 {metrics.get('population_total')}")
+        parts.append(f"population_total={metrics.get('population_total')}")
     if metrics.get("nightlight_mean_radiance") not in (None, ""):
-        parts.append(f"夜光均值约 {metrics.get('nightlight_mean_radiance')}")
+        parts.append(f"nightlight_mean_radiance={metrics.get('nightlight_mean_radiance')}")
     if metrics.get("road_node_count") not in (None, "") and metrics.get("road_edge_count") not in (None, ""):
-        parts.append(f"路网节点/边段约为 {metrics.get('road_node_count')}/{metrics.get('road_edge_count')}")
-    return "，".join([part for part in parts if part]).strip("，")
+        parts.append(f"road_node_edge_count={metrics.get('road_node_count')}/{metrics.get('road_edge_count')}")
+    return "; ".join([part for part in parts if part])
 
 
 def _build_evidence_highlights(metrics: Dict[str, object], key_evidence: List[Dict[str, Any]]) -> List[str]:
@@ -285,6 +287,36 @@ def _build_evidence_highlights(metrics: Dict[str, object], key_evidence: List[Di
         if text and text not in deduped:
             deduped.append(text)
     return deduped[:6]
+
+
+def _frontend_visual_snapshot_block(artifacts: Dict[str, object], research_notes: List[str]) -> Dict[str, Any]:
+    snapshots = artifacts.get("visual_snapshots") if isinstance(artifacts, dict) else []
+    available: List[Dict[str, Any]] = []
+    if isinstance(snapshots, list):
+        for item in snapshots[:12]:
+            if not isinstance(item, dict):
+                continue
+            available.append(
+                {
+                    "snapshot_id": _as_text(item.get("snapshot_id")),
+                    "kind": _as_text(item.get("kind")),
+                    "title": _as_text(item.get("title")),
+                    "source": _as_text(item.get("source")) or "frontend_map",
+                    "captured_at": _as_text(item.get("captured_at")),
+                    "bounds": item.get("bounds") if isinstance(item.get("bounds"), dict) else {},
+                    "warnings": [str(warning) for warning in (item.get("warnings") or []) if str(warning).strip()],
+                }
+            )
+    warning_notes = [
+        str(note).strip()
+        for note in (research_notes or [])
+        if str(note).strip() and ("快照" in str(note) or "图片" in str(note))
+    ]
+    return {
+        "available": available,
+        "skipped_or_warnings": warning_notes[:8],
+        "evidence_rule": "这些是前端自动截取的可见地图图层，只能作为视觉观察证据，不能当作后端计算指标。",
+    }
 
 
 def build_answer_evidence_payload(
@@ -319,11 +351,15 @@ def build_answer_evidence_payload(
         "business_profile": business_profile,
         "spatial_structure": spatial_structure,
         "target_supply_gap": target_supply_gap,
+        "frontend_visual_snapshots": _frontend_visual_snapshot_block(artifacts, research_notes),
+        "map_search_context": {
+            "available": bool((artifacts or {}).get("frontend_map_search_context")),
+            "artifact_key": "frontend_map_search_context" if (artifacts or {}).get("frontend_map_search_context") else "",
+            "evidence_rule": "具体地名、H3 格子、路网线段、人口/夜光 cell 只有通过 search_analysis_context 命中并 read_analysis_chunk 读取后，才能在最终回答中引用。",
+        },
     }
-    direct_answer_seed = _compose_direct_answer(question, base_payload)
     return {
         **base_payload,
-        "direct_answer_seed": direct_answer_seed,
         "business_profile_summary": _compose_business_profile_summary(metrics, business_profile),
         "spatial_structure_summary": _compose_spatial_structure_summary(metrics, spatial_structure),
         "population_vitality_summary": _compose_population_vitality_summary(metrics),
@@ -332,48 +368,8 @@ def build_answer_evidence_payload(
 
 
 def _compose_direct_answer(question: str, payload: Dict[str, Any]) -> str:
-    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
-    business_profile = payload.get("business_profile") if isinstance(payload.get("business_profile"), dict) else {}
-    spatial_structure = payload.get("spatial_structure") if isinstance(payload.get("spatial_structure"), dict) else {}
-    target_supply_gap = payload.get("target_supply_gap") if isinstance(payload.get("target_supply_gap"), dict) else {}
-    mode = _infer_output_mode(question)
-
-    if mode == "action":
-        next_options = [item for item in (metrics.get("next_analysis_options") or []) if isinstance(item, dict)]
-        if next_options:
-            top = next_options[0]
-            return f"下一步最值得优先做的是 {top.get('title') or '继续分析'}，因为{top.get('why') or '它最能补齐当前判断缺口'}。"
-        if target_supply_gap.get("supply_gap_level") in {"medium", "high"}:
-            place_type = _as_text(target_supply_gap.get("place_type"), "目标业态")
-            return f"如果你的目标是继续推进选址或补位，当前更适合先围绕 {place_type} 的供给缺口做机会区预筛。"
-        return "下一步更适合先补齐关键证据，再决定是否进入更细的选址或经营判断。"
-
-    if mentions_supply(question) and target_supply_gap.get("supply_gap_level"):
-        place_type = _as_text(target_supply_gap.get("place_type"), "目标业态")
-        gap_level = _as_text(target_supply_gap.get("supply_gap_level"), "未明确")
-        gap_mode = _as_text(target_supply_gap.get("gap_mode"))
-        summary = _as_text(target_supply_gap.get("summary"))
-        if summary:
-            return summary
-        if gap_mode:
-            return f"从现有证据看，这里对 {place_type} 更像是存在 {gap_level} 级供给缺口，核心问题偏向 {gap_mode}。"
-        return f"从现有证据看，这里对 {place_type} 仍存在 {gap_level} 级供给缺口。"
-
-    if mode == "judgment" and mentions_road(question):
-        road_summary = _as_text(metrics.get("road_pattern_summary"))
-        if road_summary:
-            return road_summary
-        return "这里路网表现偏弱时，通常不是单一指标异常，而是可达性、连接度和与现有商业热点的衔接一起偏弱。"
-
-    portrait = _as_text(business_profile.get("portrait")) or _as_text(metrics.get("business_profile_portrait"))
-    hotspot_summary = _as_text(spatial_structure.get("summary"))
-    if portrait and hotspot_summary:
-        return f"整体看，这个区域更接近{portrait}，而且{hotspot_summary}"
-    if portrait:
-        return f"整体看，这个区域更接近{portrait}。"
-    if hotspot_summary:
-        return hotspot_summary
-    return "当前证据可以支持方向性判断，但更适合先回答区域画像和结构特征，不适合外推出更细的经营结论。"
+    del question, payload
+    return ""
 
 
 def build_answer_fallback(
@@ -394,72 +390,12 @@ def build_answer_fallback(
         research_notes=list(research_notes or []),
         audit=audit,
     )
-    mode = _infer_output_mode(question)
-    direct_answer = _as_text(payload.get("direct_answer_seed") or _compose_direct_answer(question, payload))
-    business_profile_summary = _as_text(payload.get("business_profile_summary"))
-    spatial_structure_summary = _as_text(payload.get("spatial_structure_summary"))
-    population_vitality_summary = _as_text(payload.get("population_vitality_summary"))
-    key_evidence = [item for item in (payload.get("key_evidence") or []) if isinstance(item, dict)]
-    conflicts = [str(item).strip() for item in (payload.get("conflicting_evidence") or []) if str(item).strip()]
     missing_evidence = [str(item).strip() for item in (payload.get("missing_evidence") or []) if str(item).strip()]
-    interpretation_limits = [str(item).strip() for item in (payload.get("interpretation_limits") or []) if str(item).strip()]
-    support_lines = [
-        f"{_as_text(item.get('headline'), '证据')}：{_as_text(item.get('interpretation'))}"
-        for item in key_evidence[:3]
-        if _as_text(item.get("interpretation"))
-    ]
-    paragraphs: List[str] = []
-    if mode == "action":
-        if direct_answer:
-            paragraphs.append(direct_answer)
-        if support_lines:
-            paragraphs.append("当前更主要的依据是" + "；".join(support_lines[:2]) + "。")
-        if conflicts:
-            paragraphs.append("需要注意的是" + conflicts[0].rstrip("。") + "。")
-        elif missing_evidence:
-            paragraphs.append("当前还缺少 " + "、".join(missing_evidence[:2]) + "，所以下一步更适合先补齐这些缺口。")
-        else:
-            target_gap = payload.get("target_supply_gap") if isinstance(payload.get("target_supply_gap"), dict) else {}
-            if target_gap.get("candidate_zones"):
-                paragraphs.append("下一步可优先查看 gap 较高的候选格，再结合实地条件继续筛选。")
-    elif mode == "judgment":
-        if direct_answer:
-            paragraphs.append(direct_answer)
-        if support_lines:
-            paragraphs.append("主要依据是" + "；".join(support_lines[:2]) + "。")
-        if conflicts:
-            paragraphs.append("需要注意的是" + conflicts[0].rstrip("。") + "。")
-        elif missing_evidence:
-            paragraphs.append("当前还缺少 " + "、".join(missing_evidence[:2]) + "，所以这个判断更适合先停留在方向性层面。")
-        elif interpretation_limits:
-            paragraphs.append("解释边界上，" + interpretation_limits[0].rstrip("。") + "。")
-    else:
-        second_parts = [item.rstrip("。") for item in (business_profile_summary, spatial_structure_summary) if item]
-        third_parts = [item.rstrip("。") for item in (population_vitality_summary,) if item]
-        if support_lines:
-            third_parts.append("主要依据是" + "；".join(support_lines[:3]))
-        if direct_answer:
-            paragraphs.append(direct_answer)
-        if second_parts:
-            paragraphs.append("；".join(second_parts) + "。")
-        elif support_lines:
-            paragraphs.append("主要依据是" + "；".join(support_lines[:2]) + "。")
-        if conflicts:
-            third_parts.append("需要注意的是" + conflicts[0].rstrip("。"))
-        elif missing_evidence:
-            third_parts.append("当前还缺少 " + "、".join(missing_evidence[:2]) + "，所以更适合做区域画像层面的判断")
-        elif interpretation_limits:
-            third_parts.append("解释边界上，" + interpretation_limits[0].rstrip("。"))
-        if third_parts:
-            paragraphs.append("；".join([part for part in third_parts if part]) + "。")
-    answer = "\n\n".join([part.strip() for part in paragraphs if str(part).strip()]).strip()
-    if answer:
-        return answer
-
     required_labels = [str(item).strip() for item in _required_evidence_labels(question, audit) if str(item).strip()]
-    if required_labels:
-        return f"当前可以先做方向性判断，但还需要补充 {('、'.join(required_labels[:3]))} 相关证据，才能把结论说得更稳。"
-    return "当前证据可以支持方向性回答，但还不适合外推出更细的经营结论。"
+    missing = missing_evidence or required_labels
+    if missing:
+        return "AI 转译暂不可用；当前缺少关键证据：" + "、".join(missing[:3]) + "。"
+    return "AI 转译暂不可用；当前仅返回原始证据，未生成策划解释。"
 
 
 def build_citations(snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) -> List[str]:

@@ -41,6 +41,43 @@ from .tools import get_tool_registry
 
 StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
+_VISUAL_SNAPSHOT_LIMIT = 12
+_VISUAL_SNAPSHOT_MAX_DATA_URL_CHARS = 2_500_000
+
+
+def _visual_snapshot_inputs(payload: AgentTurnRequest) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    images: List[Dict[str, Any]] = []
+    metadata: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    for raw in list(payload.visual_snapshots or [])[:_VISUAL_SNAPSHOT_LIMIT]:
+        kind = str(raw.kind or "").strip()
+        title = str(raw.title or kind or "地图快照").strip()
+        data_url = str(raw.data_url or "").strip()
+        item_warnings = [str(item).strip() for item in (raw.warnings or []) if str(item).strip()]
+        if not data_url.startswith("data:image/"):
+            warnings.extend(item_warnings)
+            if kind or title:
+                warnings.append(f"{title} 未传入有效图片，已跳过。")
+            continue
+        if len(data_url) > _VISUAL_SNAPSHOT_MAX_DATA_URL_CHARS:
+            warnings.extend(item_warnings)
+            warnings.append(f"{title} 图片过大，已跳过直传。")
+            continue
+        meta = {
+            "snapshot_id": str(raw.snapshot_id or "").strip(),
+            "kind": kind,
+            "title": title,
+            "source": str(raw.source or "frontend_map").strip(),
+            "captured_at": str(raw.captured_at or "").strip(),
+            "bounds": dict(raw.bounds or {}),
+            "warnings": item_warnings,
+        }
+        metadata.append(meta)
+        images.append({**meta, "data_url": data_url})
+    if len(payload.visual_snapshots or []) > _VISUAL_SNAPSHOT_LIMIT:
+        warnings.append(f"地图视觉快照超过 {_VISUAL_SNAPSHOT_LIMIT} 张，已只使用前 {_VISUAL_SNAPSHOT_LIMIT} 张。")
+    return images, metadata, warnings
+
 _STAGE_LABELS = {
     "gating": "门卫判断",
     "clarifying": "生成追问",
@@ -210,11 +247,10 @@ def _build_diagnostics(
 
 
 def _tool_loop_limits(thinking_mode: str) -> tuple[int | None, int | None]:
-    max_steps = max(1, int(settings.ai_max_tool_steps or 8))
+    configured_steps = int(settings.ai_max_tool_steps or 0)
+    max_steps = max(1, configured_steps) if configured_steps > 0 else None
     max_errors = max(1, int(settings.ai_max_tool_errors or 2))
-    if str(thinking_mode or "").strip() == "deep":
-        return max_steps, max_errors
-    return min(max_steps, 4), min(max_errors, 2)
+    return max_steps, max_errors
 
 
 def _build_loop_plan_summary(*, used_tools: List[str], assistant_summary: str = "") -> str:
@@ -269,6 +305,22 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
 
     context = build_context_bundle(snapshot)
     memory = create_working_memory()
+    map_search_context = dict(payload.map_search_context or {}) if isinstance(payload.map_search_context, dict) else {}
+    if map_search_context:
+        memory.artifacts["frontend_map_search_context"] = map_search_context
+        context.available_artifacts.append("frontend_map_search_context")
+        context.context_summary.available_context_sources.append("analysis:frontend_map_search_context")
+        context.limits.append(
+            "frontend_map_search_context 是本轮可检索地图空间对象源；最终回答只能引用 search_analysis_context/read_analysis_chunk 已读取到的具体地名、格子、线段或 cell。"
+        )
+    visual_image_inputs, visual_snapshot_meta, visual_snapshot_warnings = _visual_snapshot_inputs(payload)
+    if visual_snapshot_meta:
+        memory.artifacts["visual_snapshots"] = visual_snapshot_meta
+        context.available_artifacts.append("frontend_visual_snapshots")
+        context.context_summary.available_context_sources.append("visual:frontend_map_snapshots")
+        context.limits.append("地图视觉快照只能作为可见图层证据，不能伪装成后端指标计算结果。")
+    for warning in visual_snapshot_warnings:
+        memory.research_notes.append(warning)
     attachment_ids = [str(item).strip() for item in (payload.attachment_ids or []) if str(item).strip()]
     if attachment_ids:
         memory.artifacts["uploaded_attachment_ids"] = attachment_ids
@@ -285,6 +337,35 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
 
     await _maybe_emit(emit, "meta", {"conversation_id": str(payload.conversation_id or "")})
     await _emit_status(emit, state.stage)
+    if visual_snapshot_meta:
+        snapshot_titles = [
+            str(item.get("title") or item.get("kind") or "").strip()
+            for item in visual_snapshot_meta
+            if str(item.get("title") or item.get("kind") or "").strip()
+        ]
+        await emit_thinking(
+            {
+                "phase": "preflight",
+                "title": "地图视觉快照已接收",
+                "detail": f"本轮已收到 {len(visual_snapshot_meta)} 张前端地图快照：{'、'.join(snapshot_titles[:6])}。",
+                "display_text": f"本轮已收到 {len(visual_snapshot_meta)} 张前端地图快照。",
+                "items": snapshot_titles[:6],
+                "state": "completed",
+            },
+            "visual-snapshots",
+        )
+    elif visual_snapshot_warnings:
+        await emit_thinking(
+            {
+                "phase": "preflight",
+                "title": "地图视觉快照未传入",
+                "detail": "本轮未收到可直传模型的地图快照，已继续使用结构化指标分析。",
+                "display_text": "本轮未收到可直传模型的地图快照。",
+                "items": list(visual_snapshot_warnings or [])[:6],
+                "state": "completed",
+            },
+            "visual-snapshots",
+        )
     await emit_thinking(
         {
             "phase": "gating",
@@ -409,6 +490,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             max_steps_override=max_steps_override,
             max_errors_override=max_errors_override,
             thinking_mode=thinking_mode,
+            initial_artifacts=dict(memory.artifacts or {}),
         )
     except Exception as exc:
         await _emit_status(emit, "failed")
@@ -532,6 +614,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             snapshot=snapshot,
             context=context,
             answer_evidence_payload=answer_evidence_payload,
+            image_inputs=visual_image_inputs,
             thinking_mode=thinking_mode,
             emit=emit_event,
         )
@@ -583,6 +666,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             context=context,
             answer_evidence_payload=answer_evidence_payload,
             translation_pack=translation_pack,
+            image_inputs=visual_image_inputs,
             thinking_mode=thinking_mode,
             emit=emit_event,
         )

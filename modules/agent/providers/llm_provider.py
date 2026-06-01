@@ -243,6 +243,7 @@ async def _invoke_json_role(
     *,
     system_prompt: str,
     user_payload: Dict[str, Any],
+    image_inputs: List[Dict[str, Any]] | None = None,
     emit: LoopEmit | None,
     phase: str,
     title: str,
@@ -253,12 +254,28 @@ async def _invoke_json_role(
         "Authorization": f"Bearer {settings.ai_api_key}",
         "Content-Type": "application/json",
     }
+    user_content: Any = json.dumps(user_payload, ensure_ascii=False)
+    cleaned_images = [
+        item
+        for item in (image_inputs or [])
+        if isinstance(item, dict) and str(item.get("data_url") or "").startswith("data:image/")
+    ]
+    if cleaned_images:
+        user_content = [{"type": "text", "text": user_content}]
+        for item in cleaned_images:
+            user_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": str(item.get("data_url") or "")},
+                }
+            )
+
     request_body = {
         "model": settings.ai_model,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            {"role": "user", "content": user_content},
         ],
     }
     async with httpx.AsyncClient(timeout=float(settings.ai_timeout_s or 60)) as client:
@@ -320,6 +337,7 @@ async def generate_answer_output_with_llm(
     context: ContextBundle,
     answer_evidence_payload: Dict[str, Any],
     translation_pack: AgentTranslationPack | Dict[str, Any] | None = None,
+    image_inputs: List[Dict[str, Any]] | None = None,
     thinking_mode: str = "quick",
     emit: LoopEmit | None = None,
 ) -> AgentTurnOutput:
@@ -338,6 +356,7 @@ async def generate_answer_output_with_llm(
             "answer_evidence_payload": answer_evidence_payload,
             "translation_pack": translation_payload,
         },
+        image_inputs=image_inputs,
         emit=emit,
         phase="synthesizing",
         title="综合分析并生成最终结论",
@@ -352,6 +371,7 @@ async def generate_translation_pack_with_llm(
     snapshot: AnalysisSnapshot,
     context: ContextBundle,
     answer_evidence_payload: Dict[str, Any],
+    image_inputs: List[Dict[str, Any]] | None = None,
     thinking_mode: str = "quick",
     emit: LoopEmit | None = None,
 ) -> AgentTranslationPack:
@@ -364,6 +384,7 @@ async def generate_translation_pack_with_llm(
             "context_digest": context_digest(context),
             "answer_evidence_payload": answer_evidence_payload,
         },
+        image_inputs=image_inputs,
         emit=emit,
         phase="synthesizing",
         title="转译指标为空间体验与策划含义",

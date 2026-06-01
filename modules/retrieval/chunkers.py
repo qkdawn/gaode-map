@@ -81,6 +81,144 @@ def _chunk(
     )
 
 
+def _map_search_context_chunks(artifacts: Dict[str, Any]) -> List[KnowledgeChunk]:
+    context = _safe_dict(artifacts.get("frontend_map_search_context"))
+    if not context:
+        return []
+    chunks: List[KnowledgeChunk] = []
+    place_anchors = _safe_dict(context.get("place_anchors"))
+    spatial_anchors = _safe_dict(context.get("spatial_anchors"))
+
+    groups = []
+    names: List[str] = []
+    for group in _safe_list(place_anchors.get("groups")):
+        item = _safe_dict(group)
+        rows = [_safe_dict(row) for row in _safe_list(item.get("items"))]
+        clean_rows = [
+            {
+                "name": str(row.get("name") or "").strip(),
+                "type": str(row.get("type") or "").strip(),
+                "address": str(row.get("address") or "").strip(),
+                "lng": row.get("lng"),
+                "lat": row.get("lat"),
+            }
+            for row in rows
+            if str(row.get("name") or "").strip()
+        ]
+        if clean_rows:
+            groups.append({"key": item.get("key"), "label": item.get("label"), "items": clean_rows[:12]})
+            names.extend([row["name"] for row in clean_rows if row["name"] not in names])
+    if not names:
+        names = [str(name).strip() for name in _safe_list(place_anchors.get("names")) if str(name).strip()][:48]
+    chunk = _chunk(
+        chunk_id="session:current:analysis:poi.place_anchors",
+        kind="analysis",
+        domain="poi",
+        title="POI 地名锚点",
+        content="；".join(
+            [
+                f"{group.get('label') or group.get('key')}："
+                + "、".join(
+                    " ".join(part for part in [str(row.get("name") or ""), str(row.get("type") or ""), str(row.get("address") or "")] if part).strip()
+                    for row in _safe_list(group.get("items"))[:12]
+                )
+                for group in groups
+            ]
+        )
+        or "、".join(names),
+        metrics={"groups": groups[:8], "names": names[:48]},
+        source_artifacts=["frontend_map_search_context"],
+        warnings=[POI_WARNING, "地名锚点来自前端当前 POI 结果抽样；只能引用读取到的名称，不能扩展成完整地名数据库。"],
+        evidence_level="frontend_map_anchor",
+    )
+    if chunk:
+        chunks.append(chunk)
+
+    selected_point = _safe_dict(spatial_anchors.get("selected_point"))
+    h3 = _safe_dict(spatial_anchors.get("h3"))
+    h3_cells = _safe_list(h3.get("top_cells"))
+    chunk = _chunk(
+        chunk_id="session:current:analysis:h3.spatial_anchors",
+        kind="analysis",
+        domain="h3",
+        title="H3 代表格空间锚点",
+        content=" ".join([_text(selected_point), _text(h3_cells[:12])]),
+        metrics={
+            "selected_point": selected_point,
+            "feature_count": h3.get("feature_count"),
+            "top_cells": h3_cells[:12],
+        },
+        source_artifacts=["frontend_map_search_context"],
+        warnings=[POI_WARNING, "H3 代表格是前端当前图层抽样，不是完整网格结果。"],
+        evidence_level="frontend_map_anchor",
+    )
+    if chunk:
+        chunks.append(chunk)
+
+    road = _safe_dict(spatial_anchors.get("road"))
+    road_segments = _safe_list(road.get("sample_segments"))
+    chunk = _chunk(
+        chunk_id="session:current:analysis:road.metric_anchors",
+        kind="analysis",
+        domain="road",
+        title="路网指标与代表线段锚点",
+        content=" ".join([_text(road.get("metric_tabs")), _text(road.get("metric_keys")), _text(road_segments[:12])]),
+        metrics={
+            "feature_count": road.get("feature_count"),
+            "metric_tabs": _safe_list(road.get("metric_tabs"))[:12],
+            "metric_keys": _safe_list(road.get("metric_keys"))[:24],
+            "sample_segments": road_segments[:12],
+        },
+        source_artifacts=["frontend_map_search_context"],
+        warnings=[ROAD_WARNING, "代表线段来自前端当前路网图层抽样；只能辅助定位局部路网现象。"],
+        evidence_level="frontend_map_anchor",
+    )
+    if chunk:
+        chunks.append(chunk)
+
+    population = _safe_dict(spatial_anchors.get("population"))
+    population_cells = _safe_list(population.get("top_cells"))
+    chunk = _chunk(
+        chunk_id="session:current:analysis:population.cell_anchors",
+        kind="analysis",
+        domain="population",
+        title="人口代表 cell 锚点",
+        content=" ".join([_text(population.get("layer_summary")), _text(population_cells[:12])]),
+        metrics={
+            "cell_count": population.get("cell_count"),
+            "layer_summary": _safe_dict(population.get("layer_summary")),
+            "top_cells": population_cells[:12],
+        },
+        source_artifacts=["frontend_map_search_context"],
+        warnings=[POPULATION_WARNING, "人口 cell 是前端当前图层代表样本，不能直接推断消费能力。"],
+        evidence_level="frontend_map_anchor",
+    )
+    if chunk:
+        chunks.append(chunk)
+
+    nightlight = _safe_dict(spatial_anchors.get("nightlight"))
+    nightlight_cells = _safe_list(nightlight.get("top_cells"))
+    chunk = _chunk(
+        chunk_id="session:current:analysis:nightlight.cell_anchors",
+        kind="analysis",
+        domain="nightlight",
+        title="夜光代表 cell 锚点",
+        content=" ".join([_text(nightlight.get("layer_summary")), _text(nightlight.get("analysis")), _text(nightlight_cells[:12])]),
+        metrics={
+            "cell_count": nightlight.get("cell_count"),
+            "layer_summary": _safe_dict(nightlight.get("layer_summary")),
+            "analysis": _safe_dict(nightlight.get("analysis")),
+            "top_cells": nightlight_cells[:12],
+        },
+        source_artifacts=["frontend_map_search_context"],
+        warnings=[NIGHTLIGHT_WARNING, "夜光 cell 是前端当前图层代表样本，只能作为活力 proxy。"],
+        evidence_level="frontend_map_anchor",
+    )
+    if chunk:
+        chunks.append(chunk)
+    return chunks
+
+
 def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> List[KnowledgeChunk]:
     chunks: List[KnowledgeChunk] = []
     poi_summary = _safe_dict(artifacts.get("current_poi_summary") or snapshot.poi_summary)
@@ -195,6 +333,7 @@ def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any])
     for item in raw_chunks:
         if item is not None:
             chunks.append(item)
+    chunks.extend(_map_search_context_chunks(artifacts))
     return chunks
 
 

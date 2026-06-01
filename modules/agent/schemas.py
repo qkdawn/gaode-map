@@ -100,6 +100,19 @@ class AnalysisSnapshot(BaseModel):
     current_filters: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AgentVisualSnapshot(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    snapshot_id: str = ""
+    kind: str = ""
+    title: str = ""
+    data_url: str = ""
+    source: str = "frontend_map"
+    captured_at: str = ""
+    bounds: Dict[str, Any] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -111,6 +124,8 @@ class AgentTurnRequest(BaseModel):
     governance_mode: GovernanceMode = "auto"
     thinking_mode: ThinkingMode = "quick"
     attachment_ids: List[str] = Field(default_factory=list)
+    visual_snapshots: List[AgentVisualSnapshot] = Field(default_factory=list)
+    map_search_context: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod

@@ -78,8 +78,12 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
         "road_pattern_summary": road_pattern.get("summary_text") if is_road_pattern_ready(road_pattern) else None,
         "population_profile_summary": population_profile.get("summary_text") if is_population_profile_ready(population_profile) else None,
         "nightlight_pattern_summary": nightlight_pattern.get("summary_text") if is_nightlight_pattern_ready(nightlight_pattern) else None,
-        "business_profile_label": business_profile.get("business_profile") if is_business_profile_ready(business_profile) else None,
-        "business_profile_portrait": business_profile.get("portrait") if is_business_profile_ready(business_profile) else None,
+        "business_profile_label": (
+            business_profile.get("poi_mix_signal") or business_profile.get("business_profile")
+            if is_business_profile_ready(business_profile)
+            else None
+        ),
+        "business_profile_portrait": None,
         "business_profile_summary": business_profile.get("summary_text") if is_business_profile_ready(business_profile) else None,
         "functional_mix_score": business_profile.get("functional_mix_score"),
         "commercial_hotspot_mode": commercial_hotspots.get("hotspot_mode") if is_commercial_hotspots_ready(commercial_hotspots) else None,

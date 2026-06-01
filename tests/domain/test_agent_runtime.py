@@ -25,6 +25,36 @@ def test_agent_turn_request_normalizes_thinking_mode_alias():
     assert request.thinking_mode == "deep"
 
 
+def test_agent_turn_request_accepts_visual_snapshots():
+    request = AgentTurnRequest(
+        messages=[AgentMessage(role="user", content="总结这个区域")],
+        visual_snapshots=[
+            {
+                "snapshot_id": "visual-1",
+                "kind": "road_map",
+                "title": "路网全图",
+                "data_url": "data:image/jpeg;base64,abc",
+                "bounds": {"west": 1, "south": 2, "east": 3, "north": 4},
+            }
+        ],
+    )
+
+    assert request.visual_snapshots[0].kind == "road_map"
+    assert request.visual_snapshots[0].data_url.startswith("data:image/")
+
+
+def test_agent_turn_request_accepts_map_search_context():
+    request = AgentTurnRequest(
+        messages=[AgentMessage(role="user", content="总结这个区域")],
+        map_search_context={
+            "place_anchors": {"names": ["后湖", "湖南师范大学"]},
+            "spatial_anchors": {"h3": {"top_cells": [{"h3_id": "h3-a"}]}},
+        },
+    )
+
+    assert request.map_search_context["place_anchors"]["names"] == ["后湖", "湖南师范大学"]
+
+
 def _snapshot_with_scope(**kwargs) -> AnalysisSnapshot:
     payload = {
         "scope": {
@@ -61,6 +91,7 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, translat
         max_steps_override=None,
         max_errors_override=None,
         thinking_mode="quick",
+        initial_artifacts=None,
     ):
         del messages, snapshot, context, registry, governance_mode, confirmed_tools, emit
         if captured is not None:
@@ -68,12 +99,15 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, translat
             captured["max_steps_override"] = max_steps_override
             captured["max_errors_override"] = max_errors_override
             captured["thinking_mode"] = thinking_mode
+            captured["initial_artifacts"] = dict(initial_artifacts or {})
         return loop_result or ToolLoopResult(status="completed")
 
-    async def fake_translation(*, messages, snapshot, context, answer_evidence_payload, thinking_mode="quick", emit=None):
-        del messages, snapshot, context, answer_evidence_payload, emit
+    async def fake_translation(*, messages, snapshot, context, answer_evidence_payload, image_inputs=None, thinking_mode="quick", emit=None):
+        del messages, snapshot, context, emit
         if captured is not None:
             captured["translation_thinking_mode"] = thinking_mode
+            captured["translation_image_inputs"] = image_inputs or []
+            captured["translation_evidence_payload"] = answer_evidence_payload
         return translation_pack or AgentTranslationPack(
             status="ready",
             summary="已将关键指标转译为空间体验与策划含义。",
@@ -83,19 +117,21 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, translat
                     "raw_signal": "POI 样本量 12",
                     "spatial_phenomenon": "服务供给已有基础。",
                     "human_experience": "可支撑基础到访。",
-                    "planning_implication": "适合继续判断社区服务补位。",
+                    "planning_implication": "AI 生成的策划含义。",
                     "action_hint": "继续核对业态结构。",
                     "confidence": "moderate",
                 }
             ],
         )
 
-    async def fake_answer(*, messages, snapshot, context, answer_evidence_payload, translation_pack=None, thinking_mode="quick", emit=None):
-        del messages, snapshot, context, answer_evidence_payload, emit
+    async def fake_answer(*, messages, snapshot, context, answer_evidence_payload, translation_pack=None, image_inputs=None, thinking_mode="quick", emit=None):
+        del messages, snapshot, context, emit
         if captured is not None:
             captured["answer_thinking_mode"] = thinking_mode
             captured["answer_translation_pack"] = translation_pack
-        return answer_output or AgentTurnOutput(answer="这是一个生活消费主导的综合商业区。")
+            captured["answer_image_inputs"] = image_inputs or []
+            captured["answer_evidence_payload"] = answer_evidence_payload
+        return answer_output or AgentTurnOutput(answer="AI 生成的最终回答。")
 
     monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fake_gate)
     monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fake_loop)
@@ -222,6 +258,90 @@ def test_runtime_passes_deep_thinking_mode_into_tool_loop_and_finalizer(monkeypa
     assert captured["include_secondary_tools"] is True
 
 
+def test_runtime_does_not_cap_quick_tool_loop_at_four(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(agent_runtime.settings, "ai_max_tool_steps", 0)
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed"),
+        captured=captured,
+    )
+
+    response = asyncio.run(
+        process_agent_turn(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="多跑几步把证据补齐")],
+                analysis_snapshot=_snapshot_with_scope(),
+                thinking_mode="quick",
+            )
+        )
+    )
+
+    assert response.status == "answered"
+    assert captured["max_steps_override"] is None
+
+
+def test_runtime_passes_visual_snapshots_only_to_translation_and_answer(monkeypatch):
+    captured = {}
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed"),
+        captured=captured,
+    )
+
+    response = asyncio.run(
+        process_agent_turn(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="总结这个区域")],
+                analysis_snapshot=_snapshot_with_scope(),
+                visual_snapshots=[
+                    {
+                        "snapshot_id": "visual-road",
+                        "kind": "road_map",
+                        "title": "路网分析全范围图层",
+                        "data_url": "data:image/jpeg;base64,abc",
+                    }
+                ],
+            )
+        )
+    )
+
+    assert response.status == "answered"
+    assert captured["translation_image_inputs"][0]["kind"] == "road_map"
+    assert captured["answer_image_inputs"][0]["kind"] == "road_map"
+    assert captured["answer_evidence_payload"]["frontend_visual_snapshots"]["available"][0]["kind"] == "road_map"
+    assert "data_url" not in captured["answer_evidence_payload"]["frontend_visual_snapshots"]["available"][0]
+    assert response.diagnostics.translation_pack.status == "ready"
+
+
+def test_runtime_puts_map_search_context_only_in_working_memory_artifacts(monkeypatch):
+    captured = {}
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed"),
+        captured=captured,
+    )
+
+    response = asyncio.run(
+        process_agent_turn(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="总结这个区域的商业特征")],
+                analysis_snapshot=_snapshot_with_scope(context={"mode": "walking"}),
+                map_search_context={
+                    "place_anchors": {"names": ["后湖", "湖南师范大学"]},
+                    "spatial_anchors": {"road": {"metric_keys": ["choice_score"]}},
+                },
+            )
+        )
+    )
+
+    assert response.status == "answered"
+    assert captured["initial_artifacts"]["frontend_map_search_context"]["place_anchors"]["names"] == ["后湖", "湖南师范大学"]
+    assert "place_anchors" not in captured["answer_evidence_payload"]
+    assert captured["answer_evidence_payload"]["map_search_context"]["available"] is True
+    assert "analysis:frontend_map_search_context" in response.context_summary.available_context_sources
+
+
 def test_runtime_falls_back_to_server_side_answer_when_finalizer_fails(monkeypatch):
     _install_runtime_stubs(
         monkeypatch,
@@ -233,8 +353,8 @@ def test_runtime_falls_back_to_server_side_answer_when_finalizer_fails(monkeypat
         ),
     )
 
-    async def failing_answer(*, messages, snapshot, context, answer_evidence_payload, translation_pack=None, thinking_mode="quick", emit=None):
-        del messages, snapshot, context, answer_evidence_payload, translation_pack, thinking_mode, emit
+    async def failing_answer(*, messages, snapshot, context, answer_evidence_payload, translation_pack=None, image_inputs=None, thinking_mode="quick", emit=None):
+        del messages, snapshot, context, answer_evidence_payload, translation_pack, image_inputs, thinking_mode, emit
         raise RuntimeError("llm failed")
 
     monkeypatch.setattr(agent_runtime, "generate_answer_output_with_llm", failing_answer)
@@ -265,8 +385,8 @@ def test_runtime_keeps_answering_when_translation_layer_fails(monkeypatch):
         answer_output=AgentTurnOutput(answer="这里仍可基于原始证据形成方向性判断。"),
     )
 
-    async def failing_translation(*, messages, snapshot, context, answer_evidence_payload, thinking_mode="quick", emit=None):
-        del messages, snapshot, context, answer_evidence_payload, thinking_mode, emit
+    async def failing_translation(*, messages, snapshot, context, answer_evidence_payload, image_inputs=None, thinking_mode="quick", emit=None):
+        del messages, snapshot, context, answer_evidence_payload, image_inputs, thinking_mode, emit
         raise RuntimeError("translation failed")
 
     monkeypatch.setattr(agent_runtime, "generate_translation_pack_with_llm", failing_translation)

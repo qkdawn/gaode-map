@@ -67,6 +67,38 @@ def _artifacts():
     }
 
 
+def _map_search_artifacts():
+    return {
+        "frontend_map_search_context": {
+            "place_anchors": {
+                "groups": [
+                    {
+                        "key": "campus_culture",
+                        "label": "校园与文教",
+                        "items": [
+                            {"name": "湖南师范大学", "type": "科教文化", "address": "岳麓区"},
+                            {"name": "后湖国际艺术区", "type": "文化", "address": "后湖"},
+                        ],
+                    },
+                    {
+                        "key": "commercial_life",
+                        "label": "商业与生活服务",
+                        "items": [{"name": "后湖小吃街", "type": "餐饮", "address": "后湖"}],
+                    },
+                ],
+                "names": ["湖南师范大学", "后湖国际艺术区", "后湖小吃街"],
+            },
+            "spatial_anchors": {
+                "selected_point": {"name": "后湖", "lng": 112.96, "lat": 28.19},
+                "h3": {"feature_count": 2, "top_cells": [{"h3_id": "h3-a", "poi_count": 12}]},
+                "road": {"feature_count": 1, "metric_keys": ["choice_score"], "sample_segments": [{"id": "r1", "choice_score": 0.8}]},
+                "population": {"cell_count": 1, "top_cells": [{"cell_id": "p1", "total_population": 900}]},
+                "nightlight": {"cell_count": 1, "top_cells": [{"cell_id": "n1", "radiance": 42}]},
+            },
+        }
+    }
+
+
 def test_build_analysis_chunks_from_snapshot():
     chunks = build_analysis_chunks(_snapshot(), {})
     chunk_ids = {chunk.chunk_id for chunk in chunks}
@@ -76,6 +108,17 @@ def test_build_analysis_chunks_from_snapshot():
     assert "session:current:analysis:population.summary" in chunk_ids
     assert "session:current:analysis:nightlight.summary" in chunk_ids
     assert "session:current:analysis:road.summary" in chunk_ids
+
+
+def test_build_analysis_chunks_from_frontend_map_search_context():
+    chunks = build_analysis_chunks(_snapshot(), _map_search_artifacts())
+    chunk_ids = {chunk.chunk_id for chunk in chunks}
+
+    assert "session:current:analysis:poi.place_anchors" in chunk_ids
+    assert "session:current:analysis:h3.spatial_anchors" in chunk_ids
+    assert "session:current:analysis:road.metric_anchors" in chunk_ids
+    assert "session:current:analysis:population.cell_anchors" in chunk_ids
+    assert "session:current:analysis:nightlight.cell_anchors" in chunk_ids
 
 
 def test_search_analysis_context_hits_opportunity_evidence():
@@ -88,6 +131,18 @@ def test_search_analysis_context_hits_opportunity_evidence():
 
     assert hits
     assert any(hit.chunk_id == "session:current:analysis:h3.opportunity.top" for hit in hits)
+
+
+def test_search_analysis_context_hits_frontend_place_anchor_chunk():
+    service = RetrievalService(snapshot=_snapshot(), artifacts=_map_search_artifacts())
+    hits = service.search_analysis_context(
+        query="后湖 湖南师大 商业特征",
+        domains=["poi", "h3", "road", "population", "nightlight"],
+        top_k=8,
+    )
+
+    assert hits
+    assert hits[0].chunk_id == "session:current:analysis:poi.place_anchors"
 
 
 def test_read_analysis_chunk_returns_metrics_and_warnings():
@@ -103,6 +158,22 @@ def test_read_analysis_chunk_returns_metrics_and_warnings():
     assert result.status == "success"
     assert result.result["metrics"]["mean_radiance"] == 3.15
     assert "夜光仅作为活力 proxy" in result.result["warnings"][0]
+
+
+def test_read_analysis_chunk_returns_frontend_map_anchor_limits():
+    result = asyncio.run(
+        read_analysis_chunk(
+            arguments={"chunk_id": "session:current:analysis:poi.place_anchors"},
+            snapshot=_snapshot(),
+            artifacts=_map_search_artifacts(),
+            question="总结后湖周边商业特征",
+        )
+    )
+
+    assert result.status == "success"
+    assert "湖南师范大学" in result.result["content"]
+    assert result.result["source_artifacts"] == ["frontend_map_search_context"]
+    assert any("不能扩展成完整地名数据库" in warning for warning in result.result["warnings"])
 
 
 def test_report_context_search_and_read():

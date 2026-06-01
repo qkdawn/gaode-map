@@ -1807,6 +1807,225 @@ test('submitAgentTurn sends ready attachment ids without embedding file content'
   assert.equal(JSON.stringify(requestBody.messages).includes('plan.pdf'), false)
 })
 
+test('submitAgentTurn sends automatic visual snapshots when available', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '总结这个区域的商业特征'
+  ctx.captureAgentVisualSnapshots = async () => [
+    {
+      snapshot_id: 'visual-road',
+      kind: 'road_map',
+      title: '路网分析全范围图层',
+      data_url: 'data:image/jpeg;base64,abc',
+      source: 'frontend_map',
+      bounds: { west: 1, south: 2, east: 3, north: 4 },
+      warnings: [],
+    },
+  ]
+
+  let requestBody = null
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: { cards: [], next_suggestions: [], panel_payloads: {} },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: {},
+            plan: {},
+          },
+        },
+      },
+    ])
+  }
+
+  await ctx.submitAgentTurn()
+
+  assert.equal(requestBody.visual_snapshots[0].kind, 'road_map')
+  assert.equal(requestBody.visual_snapshots[0].data_url, 'data:image/jpeg;base64,abc')
+})
+
+test('submitAgentTurn sends map search context separately from analysis snapshot', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '总结这个区域的商业特征'
+  ctx.allPoisDetails = [
+    { name: '湖南师范大学', type: '科教文化', lng: 112.95, lat: 28.18 },
+    { name: '后湖小吃街', type: '餐饮', lng: 112.96, lat: 28.19 },
+  ]
+  ctx.h3AnalysisGridFeatures = [{ properties: { h3_id: 'h3-a', poi_count: 12 } }]
+  ctx.roadSyntaxRoadFeatures = [{ properties: { id: 'r1', choice_score: 0.8 } }]
+  ctx.populationLayer = { cells: [{ cell_id: 'p1', total_population: 900 }] }
+  ctx.nightlightLayer = { cells: [{ cell_id: 'n1', radiance: 42 }] }
+  ctx.captureAgentVisualSnapshots = async () => [
+    { snapshot_id: 'visual-1', kind: 'overview_map', title: '当前地图总览', data_url: 'data:image/jpeg;base64,abc' },
+  ]
+
+  let requestBody = null
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: { answer: '已完成', panel_payloads: {} },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: {},
+            plan: {},
+          },
+        },
+      },
+    ])
+  }
+
+  await ctx.submitAgentTurn()
+
+  assert.equal(requestBody.analysis_snapshot.context.place_anchors, undefined)
+  assert.equal(requestBody.analysis_snapshot.context.spatial_anchors, undefined)
+  assert.deepEqual(requestBody.map_search_context.place_anchors.names, ['湖南师范大学', '后湖小吃街'])
+  assert.equal(requestBody.map_search_context.spatial_anchors.h3.top_cells[0].h3_id, 'h3-a')
+  assert.equal(requestBody.map_search_context.spatial_anchors.road.sample_segments[0].id, 'r1')
+  assert.equal(requestBody.map_search_context.spatial_anchors.population.top_cells[0].cell_id, 'p1')
+  assert.equal(requestBody.map_search_context.spatial_anchors.nightlight.top_cells[0].cell_id, 'n1')
+  assert.equal(requestBody.visual_snapshots[0].kind, 'overview_map')
+})
+
+test('agent visual road snapshot bounds use road features', () => {
+  const ctx = createAgentContext()
+  ctx.roadSyntaxRoadFeatures = [
+    { geometry: { coordinates: [[112.98, 28.19], [113.02, 28.23]] } },
+    { geometry: { coordinates: [[112.97, 28.18], [113.01, 28.21]] } },
+  ]
+
+  assert.deepEqual(ctx.getAgentRoadFeatureBounds(), {
+    west: 112.97,
+    south: 28.18,
+    east: 113.02,
+    north: 28.23,
+  })
+})
+
+test('agent visual snapshot targets include population and each road metric', () => {
+  const ctx = createAgentContext()
+  ctx.populationOverview = { summary: { total_population: 1200 } }
+  ctx.roadSyntaxSummary = { node_count: 10 }
+  ctx.roadSyntaxMetricTabs = () => [
+    { value: 'connectivity', label: '连接度' },
+    { value: 'control', label: '控制值' },
+    { value: 'depth', label: '深度值' },
+    { value: 'choice', label: '选择度' },
+    { value: 'integration', label: '整合度' },
+    { value: 'intelligibility', label: '可理解度' },
+  ]
+
+  const targets = ctx.buildAgentVisualSnapshotTargets()
+  const roadTargets = targets.filter((item) => item.kind === 'road_map')
+
+  assert.equal(targets.some((item) => item.kind === 'population_map'), true)
+  assert.deepEqual(roadTargets.map((item) => item.metric), [
+    'connectivity',
+    'control',
+    'depth',
+    'choice',
+    'integration',
+    'intelligibility',
+  ])
+  assert.equal(roadTargets[0].title.includes('连接度'), true)
+})
+
+test('agent map search context includes concrete place anchors outside analysis snapshot', () => {
+  const ctx = createAgentContext()
+  ctx.allPoisDetails = [
+    { name: '湖南师范大学', type: '科教文化', lng: 112.95, lat: 28.18 },
+    { name: '后湖国际艺术区', type: '文化', lng: 112.96, lat: 28.19 },
+    { name: '桃子湖公园', type: '公园', lng: 112.97, lat: 28.2 },
+    { name: '麓山南路', type: '道路', lng: 112.98, lat: 28.21 },
+  ]
+
+  const snapshot = ctx.buildAgentAnalysisSnapshot()
+  const mapSearchContext = ctx.buildAgentMapSearchContext()
+
+  assert.equal(snapshot.context.place_anchors, undefined)
+  assert.deepEqual(mapSearchContext.place_anchors.names, [
+    '湖南师范大学',
+    '后湖国际艺术区',
+    '桃子湖公园',
+    '麓山南路',
+  ])
+  assert.equal(mapSearchContext.place_anchors.groups.some((group) => group.key === 'campus_culture'), true)
+})
+
+test('agent map search context includes lightweight spatial anchors outside analysis snapshot', () => {
+  const ctx = createAgentContext()
+  ctx.selectedPoint = { name: '后湖', lng: 112.96, lat: 28.19 }
+  ctx.h3AnalysisGridFeatures = [
+    { properties: { h3_id: 'h3-a', poi_count: 12, density: 9.5, gi_z_score: 2.1 } },
+    { properties: { h3_id: 'h3-b', poi_count: 3, density: 1.5 } },
+  ]
+  ctx.roadSyntaxRoadFeatures = [
+    { properties: { id: 'r1', integration_score: 0.8, choice_score: 0.2 } },
+  ]
+  ctx.populationLayer = {
+    summary: { total_population: 1200 },
+    cells: [{ cell_id: 'p1', total_population: 900, density: 100 }],
+  }
+  ctx.nightlightLayer = {
+    summary: { mean_radiance: 30 },
+    cells: [{ cell_id: 'n1', radiance: 42 }],
+  }
+
+  const snapshot = ctx.buildAgentAnalysisSnapshot()
+  const anchors = ctx.buildAgentMapSearchContext().spatial_anchors
+
+  assert.equal(snapshot.context.spatial_anchors, undefined)
+  assert.equal(anchors.selected_point.name, '后湖')
+  assert.equal(anchors.h3.feature_count, 2)
+  assert.equal(anchors.h3.top_cells[0].h3_id, 'h3-a')
+  assert.equal(anchors.road.feature_count, 1)
+  assert.equal(anchors.population.top_cells[0].cell_id, 'p1')
+  assert.equal(anchors.nightlight.top_cells[0].cell_id, 'n1')
+})
+
+test('agent visual snapshot capture restores panel and map state', async () => {
+  const mapState = { center: [113, 28], zoom: 12 }
+  const ctx = createAgentContext({
+    activeStep3Panel: 'agent',
+    poiSubTab: 'category',
+    allPoisDetails: [{ id: 'poi-1' }],
+    buildAgentAnalysisSnapshot: () => ({
+      scope: { polygon: [[112.9, 28.1], [113.1, 28.1], [113.1, 28.3], [112.9, 28.1]] },
+    }),
+    map: {
+      getCenter: () => ({ lng: mapState.center[0], lat: mapState.center[1] }),
+      getZoom: () => mapState.zoom,
+      setZoomAndCenter: (zoom, center) => {
+        mapState.zoom = zoom
+        mapState.center = center
+      },
+    },
+    _captureMapSnapshotBase64: async () => 'data:image/png;base64,abc',
+    _sleepForExport: async () => {},
+  })
+
+  const snapshots = await ctx.captureAgentVisualSnapshots()
+
+  assert.equal(snapshots.length, 2)
+  assert.deepEqual(mapState, { center: [113, 28], zoom: 12 })
+  assert.equal(ctx.activeStep3Panel, 'agent')
+  assert.equal(ctx.poiSubTab, 'category')
+})
+
 test('submitAgentTurn ignores duplicate submit while active session is running', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true

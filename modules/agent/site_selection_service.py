@@ -39,33 +39,28 @@ def _score(candidate: Dict[str, Any]) -> float:
 
 def _positioning(strategy: str, scenario: str, place_type: str) -> str:
     scenario_label = _SCENARIO_LABELS.get(scenario, _SCENARIO_LABELS["commuter"])
-    strategy_label = {
-        "balanced": "稳健综合型",
-        "supply_gap": "补缺口型",
-        "traffic_vitality": "高活力型",
-        "avoid_competition": "低竞争型",
-    }.get(strategy, "稳健综合型")
+    strategy_label = strategy if strategy in {"balanced", "supply_gap", "traffic_vitality", "avoid_competition"} else "balanced"
     suffix = f"{place_type}" if place_type else "门店"
     return f"{scenario_label}{suffix} · {strategy_label}"
 
 
 def _validation_steps(strategy: str, scenario: str, place_type: str) -> List[str]:
     steps = [
-        "现场复核临街可见度、门面开口和动线方向",
-        "核对租金、面积、转让费与同类店价格带",
+        "field_check_visibility_frontage_access",
+        "field_check_rent_area_transfer_fee_price_band",
     ]
     if strategy in {"traffic_vitality", "balanced"} or scenario == "commuter":
-        steps.append("观察工作日 8:00-10:00 与 17:00-19:00 人流")
+        steps.append("field_check_weekday_0800_1000_1700_1900_flow")
     if strategy in {"supply_gap", "avoid_competition"}:
-        steps.append(f"步行核查周边同类{place_type or '业态'}数量、客流和营业状态")
+        steps.append(f"field_check_same_category_count_flow_status:{place_type or '-'}")
     if scenario == "night_social":
-        steps.append("观察 19:00-22:00 夜间停留和外摆条件")
+        steps.append("field_check_1900_2200_stay_and_outdoor_conditions")
     if scenario == "community":
-        steps.append("确认社区出入口、买菜/接送/归家动线是否经过")
+        steps.append("field_check_community_entrances_daily_routes")
     if scenario == "student":
-        steps.append("确认学校出入口、放学高峰和学生价格敏感度")
+        steps.append("field_check_school_entrances_after_school_peak_price_band")
     if scenario == "family":
-        steps.append("确认亲子家庭停留空间、停车和周末客流")
+        steps.append("field_check_family_stay_space_parking_weekend_flow")
     return steps[:5]
 
 
@@ -77,11 +72,11 @@ def _why_suitable(candidate: Dict[str, Any], strategy: str) -> List[str]:
         points.insert(0, reason)
     if not points:
         points = {
-            "supply_gap": ["优先看供给缺口与需求支撑是否匹配"],
-            "traffic_vitality": ["优先看活力、人流和可达性是否支撑开店"],
-            "avoid_competition": ["优先看同类竞争是否可控"],
-            "balanced": ["综合供给缺口、人口、活力和路网支撑形成候选"],
-        }.get(strategy, ["综合证据形成候选"])
+            "supply_gap": ["strategy=supply_gap"],
+            "traffic_vitality": ["strategy=traffic_vitality"],
+            "avoid_competition": ["strategy=avoid_competition"],
+            "balanced": ["strategy=balanced"],
+        }.get(strategy, ["strategy=unknown"])
     return points[:4]
 
 
@@ -92,14 +87,14 @@ def _avoid_areas(candidates: List[Dict[str, Any]], not_recommended_reason: str) 
         if _score(item) >= 60 and len(risks) < 2:
             continue
         h3_id = _as_text(item.get("h3_id") or item.get("h3Id"))
-        title = _as_text(item.get("display_title") or item.get("approx_address") or item.get("label")) or "低优先级候选网格"
+        title = _as_text(item.get("display_title") or item.get("approx_address") or item.get("label")) or "low_priority_candidate_cell"
         if not h3_id and _score(item) >= 60:
             continue
         avoid.append(
             {
                 "h3_id": h3_id,
                 "title": title,
-                "reason": "；".join(risks) or not_recommended_reason or "综合评分偏低，暂不作为优先看点。",
+                "reason": ";".join(risks) or not_recommended_reason or "score_below_priority_threshold",
                 "score": _score(item),
             }
         )
@@ -124,13 +119,13 @@ def _enrich_pack(pack: Dict[str, Any], *, place_type: str, strategy: str, scenar
     top_score = _score(candidates[0]) if candidates else 0.0
     if not candidates:
         verdict = "not_recommended"
-        verdict_text = "当前证据不足，暂不能形成稳定候选片区。"
+        verdict_text = "candidate_count=0"
     elif top_score >= 75 and confidence != "weak":
         verdict = "suitable"
-        verdict_text = f"当前范围可优先验证{place_type or '目标业态'}，首选片区综合支撑较好。"
+        verdict_text = f"top_score_ge_75; place_type={place_type or '-'}"
     else:
         verdict = "cautious"
-        verdict_text = f"当前范围可以做{place_type or '目标业态'}预筛，但需要重点复核客流、租金和竞争。"
+        verdict_text = f"top_score_lt_75_or_confidence_weak; place_type={place_type or '-'}"
     enriched.setdefault("overall_verdict", verdict)
     enriched.setdefault("verdict_text", verdict_text)
     enriched.setdefault("avoid_areas", _avoid_areas(candidates[1:], _as_text(enriched.get("not_recommended_reason"))))

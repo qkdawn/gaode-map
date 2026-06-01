@@ -163,7 +163,8 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
         )
     )
 
-    assert mix.result["business_profile"] in {"生活消费主导", "综合服务混合", "商务消费复合"}
+    assert mix.result["business_profile"] == "poi_mix_raw_signal"
+    assert mix.result["functional_mix_score"] is not None
     assert hotspots.result["core_zone_count"] >= 1
     assert gap.result["place_type"] == "咖啡厅"
     assert gap.result["supply_gap_level"] in {"medium", "high"}

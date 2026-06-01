@@ -167,8 +167,10 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "translation_pack.status=ready" in system_prompt
     assert "先直接回答用户问题" in system_prompt
     assert "文风跟问题类型走" in system_prompt
-    assert "总结类问题默认写成 3 到 4 段自然回答" in system_prompt
-    assert "允许自然带出 3 到 6 个关键数字增强说服力" in system_prompt
+    assert "Markdown 风格的中文标题和分段" in system_prompt
+    assert "不要输出一整坨文字" in system_prompt
+    assert "不设置固定字数上限" in system_prompt
+    assert "保留能支撑判断的关键数字" in system_prompt
     assert "只补最必要的证据支撑" not in system_prompt
     assert "review_contract" not in system_prompt
     assert "cards" not in system_prompt
@@ -301,6 +303,41 @@ def test_invoke_json_role_requests_json_object_response(monkeypatch):
     assert requests[0]["json"]["response_format"] == {"type": "json_object"}
 
 
+def test_invoke_json_role_sends_visual_snapshots_as_image_url(monkeypatch):
+    requests = []
+    monkeypatch.setattr(settings, "ai_base_url", "https://example.test/v1")
+    monkeypatch.setattr(settings, "ai_api_key", "test-key")
+    monkeypatch.setattr(settings, "ai_model", "test-model")
+    monkeypatch.setattr(settings, "ai_thinking_enabled", False)
+    monkeypatch.setattr(settings, "ai_timeout_s", 5)
+    _mock_streams(
+        monkeypatch,
+        requests,
+        [
+            _completion_stream(
+                response_id="resp-json-image-1",
+                content='{"ok":true}',
+            )
+        ],
+    )
+
+    result = asyncio.run(_invoke_json_role(
+        system_prompt="只输出 json",
+        user_payload={"task": "unit_test"},
+        image_inputs=[{"data_url": "data:image/jpeg;base64,abc", "kind": "road_map"}],
+        emit=None,
+        phase="unit",
+        title="JSON unit",
+        reasoning_id="json-unit",
+    ))
+
+    user_content = requests[0]["json"]["messages"][1]["content"]
+    assert result == {"ok": True}
+    assert user_content[0]["type"] == "text"
+    assert json.loads(user_content[0]["text"]) == {"task": "unit_test"}
+    assert user_content[1] == {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,abc"}}
+
+
 def test_extract_json_object_repairs_trailing_commas():
     parsed = extract_json_object(
         """
@@ -313,6 +350,12 @@ def test_extract_json_object_repairs_trailing_commas():
     )
 
     assert parsed["answer"] == "继续看路网，"
+
+
+def test_extract_json_object_accepts_llm_control_characters_in_strings():
+    parsed = extract_json_object('{"answer":"第一行\n第二行"}')
+
+    assert parsed["answer"] == "第一行\n第二行"
 
 
 def test_compact_tool_catalog_omits_full_schema_and_long_contracts():

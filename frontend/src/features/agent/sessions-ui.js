@@ -4020,7 +4020,7 @@ function createAgentUiMethods() {
       return {
         key: verdict || 'cautious',
         label: labelMap[verdict] || labelMap.cautious,
-        text: asText(pack.verdict_text || pack.verdictText || pack.summary_text || pack.not_recommended_reason) || '当前结果适合作为区域内候选片区预筛。',
+        text: asText(pack.verdict_text || pack.verdictText || pack.summary_text || pack.not_recommended_reason) || 'candidate_site_result_unavailable',
       }
     },
     getAgentSiteSelectionRankingRows() {
@@ -6492,8 +6492,8 @@ function createAgentUiMethods() {
         delta: Number(lastAreas[name] || 0) - Number(firstAreas[name] || 0),
       })).filter((item) => item.delta > 0).sort((a, b) => b.delta - a.delta)[0]
       const growthAreaText = growthArea
-        ? `${growthArea.name}内部 POI 增量较明显（+${growthArea.delta}）。`
-        : '未形成可命名增长片区；需结合小类空间信号判断具体增量方向。'
+        ? `growth_area=${growthArea.name}; delta=${growthArea.delta}.`
+        : 'growth_area=-; named_growth_area=false.'
       const topCategory = (cloneArray(last.top_categories)[0] || {})
       const topSubcategory = (cloneArray(last.top_subcategories)[0] || {})
       const topArea = (cloneArray(last.top_areas)[0] || {})
@@ -6503,16 +6503,16 @@ function createAgentUiMethods() {
       return {
         summary: [
           `当前POI规模为 ${this.formatAgentIterationMetric(last.count, 0)}，较${first.year || '首年'}${totalDelta >= 0 ? '增加' : '减少'} ${this.formatAgentIterationMetric(Math.abs(totalDelta), 0)}。`,
-          `${topCategory.name || '主导业态'}占比约 ${(topRatio * 100).toFixed(1)}%，是当前一级主导业态。`,
-          subcategoryText ? `小类层面以${subcategoryText}最为突出。` : '小类层面暂未形成清晰主导。',
-          `${topArea.name || '主要区域'}为核心聚集区，承担最多POI分布。`,
-          `业态结构整体${topRatio >= 0.25 ? '呈现较强主导业态特征' : '较分散'}。`,
+          `top_category=${topCategory.name || '-'}; top_category_ratio=${(topRatio * 100).toFixed(1)}%.`,
+          subcategoryText ? `top_subcategories=${subcategoryText}.` : 'top_subcategories=-.',
+          `top_area=${topArea.name || '-'}.`,
+          `top_category_ratio_signal=${topRatio >= 0.25 ? 'ge_0_25' : 'lt_0_25'}.`,
         ],
         insights: {
-          fastest_growth: fastest ? `${fastest.name}大类增长较快（${fastest.delta >= 0 ? '+' : ''}${fastest.delta}，${fastest.rate >= 0 ? '+' : ''}${(fastest.rate * 100).toFixed(1)}%）${fastestSubcategory ? `；小类增长最快为${fastestSubcategory.name}${fastestSubcategory.parent ? `（${fastestSubcategory.parent}）` : ''}，+${fastestSubcategory.delta}` : ''}` : '未发现明显增长行业。',
-          declining_category: declining ? `${declining.name}大类下降明显（${declining.delta}，${(declining.rate * 100).toFixed(1)}%）${decliningSubcategory ? `；小类下降明显为${decliningSubcategory.name}${decliningSubcategory.parent ? `（${decliningSubcategory.parent}）` : ''}，${decliningSubcategory.delta}` : ''}` : '未发现明显衰退行业。',
+          fastest_growth: fastest ? `category=${fastest.name}; delta=${fastest.delta}; rate=${(fastest.rate * 100).toFixed(1)}%; subcategory=${fastestSubcategory ? fastestSubcategory.name : '-'}.` : 'fastest_growth=-.',
+          declining_category: declining ? `category=${declining.name}; delta=${declining.delta}; rate=${(declining.rate * 100).toFixed(1)}%; subcategory=${decliningSubcategory ? decliningSubcategory.name : '-'}.` : 'declining_category=-.',
           emerging_area: growthAreaText,
-          structure_judgement: topCategory.name ? `一级结构偏向${topCategory.name}主导${topSubcategory.name ? `，其下小类${topSubcategory.name}表现突出` : ''}，需结合目标业态判断消费型/生产型属性。` : '结构判断信号有限。',
+          structure_judgement: topCategory.name ? `top_category=${topCategory.name}; top_subcategory=${topSubcategory.name || '-'}.` : 'top_category=-.',
         },
       }
     },

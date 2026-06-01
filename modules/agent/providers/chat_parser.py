@@ -14,7 +14,7 @@ def _load_json_object(text: str) -> Dict[str, Any]:
     last_error: Exception | None = None
     for candidate in candidates:
         try:
-            parsed = json.loads(candidate)
+            parsed = _loads_llm_json(candidate)
             if isinstance(parsed, dict):
                 return parsed
             raise ValueError("llm_json_output_not_object")
@@ -23,6 +23,13 @@ def _load_json_object(text: str) -> Dict[str, Any]:
     if last_error:
         raise last_error
     raise ValueError("invalid_llm_json_output")
+
+
+def _loads_llm_json(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(text, strict=False)
 
 
 def extract_text_content(payload: Dict[str, Any]) -> str:

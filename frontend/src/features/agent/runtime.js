@@ -925,20 +925,6 @@ function createAgentRuntimeMethods() {
         if (pop === 'low' && poi === 'low' && light === 'low') return 'low_all'
         return 'balanced_medium'
       }
-      const planningMeaning = (type) => {
-        const meanings = {
-          high_pop_high_poi_high_light: '人口、业态供给与夜间活力重合，适合作为优先策划节点。',
-          high_pop_low_poi: '人口需求集中但 POI 供给偏弱，适合作为服务补位机会区。',
-          high_pop_low_light: '人口基础较强但夜间活力偏弱，需关注夜间运营和活动转化。',
-          high_poi_low_light: 'POI 供给较强但夜间亮度偏弱，需验证营业时间、夜间运营和灯光氛围。',
-          high_light_low_poi: '夜光较强但 POI 供给偏弱，需验证是否来自道路照明、公共设施或非消费活动。',
-          low_pop_high_poi_high_light: '人口基础偏弱但 POI 与夜光较强，需验证外来客流或目的性消费能力。',
-          low_all: '人口、供给和夜间活力均偏弱，更适合低强度公共休闲或暂缓作为消费核心。',
-          balanced_medium: '三类指标相对均衡，可作为复合型生活消费补充节点。',
-        }
-        return meanings[type] || meanings.balanced_medium
-      }
-
       const populationGridEvidence = typeof this.buildAgentPopulationGridEvidence === 'function'
         ? this.buildAgentPopulationGridEvidence()
         : {}
@@ -1018,7 +1004,6 @@ function createAgentRuntimeMethods() {
         return {
           ...row,
           coupling_type: couplingType,
-          planning_meaning: planningMeaning(couplingType),
         }
       })
       const completeRows = overlapRows.filter((row) => row.has_population && row.has_poi && row.has_nightlight)
@@ -1050,15 +1035,155 @@ function createAgentRuntimeMethods() {
         top_poi_cells: topRows(poiCells, 'poi_count'),
         top_nightlight_cells: topRows(nightlightCells, 'radiance'),
         top_coupled_cells: topCoupledCells,
-        service_gap_cells: byPopulation(completeRows.filter((row) => row.coupling_type === 'high_pop_low_poi')),
-        night_operation_gap_cells: byPopulation(completeRows.filter((row) => ['high_pop_low_light', 'high_poi_low_light'].includes(row.coupling_type))),
-        external_flow_suspect_cells: byPoi(completeRows.filter((row) => row.coupling_type === 'low_pop_high_poi_high_light')),
+        high_pop_low_poi_cells: byPopulation(completeRows.filter((row) => row.coupling_type === 'high_pop_low_poi')),
+        high_pop_or_poi_low_light_cells: byPopulation(completeRows.filter((row) => ['high_pop_low_light', 'high_poi_low_light'].includes(row.coupling_type))),
+        low_pop_high_poi_high_light_cells: byPoi(completeRows.filter((row) => row.coupling_type === 'low_pop_high_poi_high_light')),
         high_light_low_poi_cells: byNightlight(completeRows.filter((row) => row.coupling_type === 'high_light_low_poi')),
         sex_balance_attention_cells: bySexDiff(completeRows),
         notes: [
           'population, poi and nightlight cells use the same cell_id only when complete_overlap_cells > 0',
           'values are display-level evidence for spatial coupling, not proof of real traffic or consumption',
         ],
+      }
+    },
+    buildAgentPlaceAnchors() {
+      const pois = Array.isArray(this.allPoisDetails) ? this.allPoisDetails : []
+      const keywordGroups = [
+        { key: 'campus_culture', label: '校园与文教', tokens: ['大学', '学院', '师范', '中学', '小学', '学校', '图书馆', '博物馆', '美术馆', '文化', '艺术'] },
+        { key: 'landscape', label: '山水与公共空间', tokens: ['山', '湖', '江', '河', '溪', '洲', '岛', '公园', '绿地', '景区', '风景', '广场'] },
+        { key: 'commercial_life', label: '商业与生活服务', tokens: ['商场', '广场', '超市', '市场', '餐饮', '酒店', '民宿', '咖啡', '茶', '购物'] },
+        { key: 'transport_corridor', label: '道路与交通节点', tokens: ['路', '街', '大道', '桥', '地铁', '公交', '车站', '码头', '隧道'] },
+      ]
+      const seen = new Set()
+      const groups = keywordGroups.map((group) => ({ key: group.key, label: group.label, items: [] }))
+      const pushAnchor = (groupIndex, poi) => {
+        if (!poi || typeof poi !== 'object') return
+        const name = asText(poi.name || poi.title)
+        if (!name || seen.has(name)) return
+        const anchor = {
+          name,
+          type: asText(poi.type || poi.type_label || poi.category || poi.category_label),
+          address: asText(poi.address || poi.adname || poi.district),
+          lng: Number.isFinite(Number(poi.lng)) ? Number(poi.lng) : (Array.isArray(poi.location) ? Number(poi.location[0]) : null),
+          lat: Number.isFinite(Number(poi.lat)) ? Number(poi.lat) : (Array.isArray(poi.location) ? Number(poi.location[1]) : null),
+        }
+        seen.add(name)
+        groups[groupIndex].items.push(anchor)
+      }
+      pois.forEach((poi) => {
+        const haystack = `${asText(poi && (poi.name || poi.title))} ${asText(poi && poi.type)} ${asText(poi && poi.address)}`
+        keywordGroups.forEach((group, index) => {
+          if (groups[index].items.length >= 10) return
+          if (group.tokens.some((token) => haystack.includes(token))) {
+            pushAnchor(index, poi)
+          }
+        })
+      })
+      if (!seen.size) {
+        pois.slice(0, 24).forEach((poi) => pushAnchor(2, poi))
+      }
+      const compactGroups = groups
+        .map((group) => ({ ...group, items: group.items.slice(0, 10) }))
+        .filter((group) => group.items.length)
+      return {
+        source: 'frontend_current_pois',
+        rule: '这些是前端从当前 POI 结果中抽取的地名锚点，用于让回答落到具体山水、校园、道路和商业节点；不得据此虚构不存在的地名。',
+        groups: compactGroups,
+        names: compactGroups.flatMap((group) => group.items.map((item) => item.name)).slice(0, 36),
+      }
+    },
+    buildAgentSpatialAnchors() {
+      const pickProps = (value = {}, keys = []) => {
+        const props = value && value.properties && typeof value.properties === 'object' ? value.properties : value
+        const result = {}
+        keys.forEach((key) => {
+          if (props && props[key] !== undefined && props[key] !== null && props[key] !== '') result[key] = props[key]
+        })
+        return result
+      }
+      const numericValue = (value, keys = []) => {
+        const props = value && value.properties && typeof value.properties === 'object' ? value.properties : value
+        for (const key of keys) {
+          const parsed = Number(props && props[key])
+          if (Number.isFinite(parsed)) return parsed
+        }
+        return -Infinity
+      }
+      const topRows = (rows = [], keys = [], pickKeys = [], limit = 10) => cloneArray(rows)
+        .filter((row) => row && typeof row === 'object')
+        .sort((a, b) => numericValue(b, keys) - numericValue(a, keys))
+        .slice(0, limit)
+        .map((row) => pickProps(row, pickKeys))
+        .filter((row) => Object.keys(row).length)
+
+      const h3Features = cloneArray(this.h3AnalysisGridFeatures)
+      const roadFeatures = cloneArray(this.roadSyntaxRoadFeatures)
+      const populationCells = cloneArray((this.populationLayer && this.populationLayer.cells) || [])
+      const nightlightCells = cloneArray((this.nightlightLayer && this.nightlightLayer.cells) || [])
+      const roadMetricTabs = typeof this.roadSyntaxMetricTabs === 'function'
+        ? this.roadSyntaxMetricTabs().map((tab) => ({ value: asText(tab && tab.value), label: asText(tab && tab.label) })).filter((tab) => tab.value)
+        : []
+      const roadMetricKeys = Array.from(new Set(roadFeatures.flatMap((feature) => Object.keys((feature && feature.properties) || {}))))
+        .filter((key) => /(connect|control|depth|choice|integration|intelligibility|score|value)/i.test(key))
+        .slice(0, 24)
+      return {
+        selected_point: this.selectedPoint
+          ? {
+              name: asText(this.selectedPoint.name),
+              lng: Number(this.selectedPoint.lng),
+              lat: Number(this.selectedPoint.lat),
+            }
+          : {},
+        h3: {
+          feature_count: h3Features.length,
+          top_cells: topRows(
+            h3Features,
+            ['poi_count', 'density', 'gi_z_score', 'lisa_z_score', 'value'],
+            ['h3_id', 'poi_count', 'density', 'gi_z_score', 'lisa_z_score', 'gap_score', 'label'],
+            12,
+          ),
+        },
+        road: {
+          feature_count: roadFeatures.length,
+          metric_tabs: roadMetricTabs,
+          metric_keys: roadMetricKeys,
+          sample_segments: topRows(
+            roadFeatures,
+            ['integration_score', 'choice_score', 'connectivity_score', 'control_score', 'depth_score', 'value'],
+            ['id', 'name', 'road_name', 'integration_score', 'choice_score', 'connectivity_score', 'control_score', 'depth_score', 'intelligibility_score'],
+            12,
+          ),
+        },
+        population: {
+          cell_count: populationCells.length,
+          layer_summary: cloneObject((this.populationLayer && this.populationLayer.summary) || {}),
+          top_cells: topRows(
+            populationCells,
+            ['total_population', 'population', 'density', 'value'],
+            ['cell_id', 'total_population', 'population', 'density', 'dominant_age_band_label', 'male_total', 'female_total'],
+            12,
+          ),
+        },
+        nightlight: {
+          cell_count: nightlightCells.length,
+          layer_summary: cloneObject((this.nightlightLayer && this.nightlightLayer.summary) || {}),
+          analysis: cloneObject((this.nightlightLayer && this.nightlightLayer.analysis) || {}),
+          top_cells: topRows(
+            nightlightCells,
+            ['radiance', 'mean_radiance', 'value', 'sum_radiance'],
+            ['cell_id', 'radiance', 'mean_radiance', 'sum_radiance', 'value', 'class_label'],
+            12,
+          ),
+        },
+      }
+    },
+    buildAgentMapSearchContext() {
+      return {
+        evidence_version: 'frontend_map_search_context_v1',
+        source: 'frontend_current_map_layers',
+        rule: '这些结构化空间对象只作为本轮可检索证据源；Agent 必须先 search_analysis_context 再 read_analysis_chunk，才能在最终回答中引用具体地名、格子、线段或 cell。',
+        place_anchors: this.buildAgentPlaceAnchors(),
+        spatial_anchors: this.buildAgentSpatialAnchors(),
       }
     },
     buildAgentAnalysisSnapshot() {
@@ -1495,6 +1620,316 @@ function createAgentRuntimeMethods() {
     async consumeTurnStream(res, handler) {
       await consumeSseStream(res, handler)
     },
+    getAgentMapInstance() {
+      return (this.mapCore && this.mapCore.map) || this.map || null
+    },
+    getAgentMapViewState() {
+      const map = this.getAgentMapInstance()
+      if (!map) return null
+      const center = typeof map.getCenter === 'function' ? map.getCenter() : null
+      const zoom = typeof map.getZoom === 'function' ? map.getZoom() : null
+      return {
+        center: center ? [Number(center.lng), Number(center.lat)] : null,
+        zoom: Number.isFinite(Number(zoom)) ? Number(zoom) : null,
+      }
+    },
+    getAgentVisualLayerState() {
+      return {
+        activeStep3Panel: asText(this.activeStep3Panel),
+        poiSubTab: asText(this.poiSubTab),
+        h3StructureFillMode: asText(this.h3StructureFillMode),
+        roadSyntaxMainTab: asText(this.roadSyntaxMainTab),
+        roadSyntaxMetric: asText(this.roadSyntaxMetric),
+        roadSyntaxLastMetricTab: asText(this.roadSyntaxLastMetricTab),
+      }
+    },
+    restoreAgentMapViewState(view = null) {
+      const map = this.getAgentMapInstance()
+      if (!map || !view || !Array.isArray(view.center)) return
+      const center = view.center
+      const zoom = Number(view.zoom)
+      if (typeof map.setZoomAndCenter === 'function' && Number.isFinite(zoom)) {
+        map.setZoomAndCenter(zoom, center)
+        return
+      }
+      if (typeof map.setCenter === 'function') map.setCenter(center)
+      if (typeof map.setZoom === 'function' && Number.isFinite(zoom)) map.setZoom(zoom)
+    },
+    async restoreAgentVisualLayerState(state = null) {
+      if (!state || typeof state !== 'object') return
+      this.activeStep3Panel = asText(state.activeStep3Panel || this.activeStep3Panel)
+      if (Object.prototype.hasOwnProperty.call(state, 'poiSubTab')) this.poiSubTab = asText(state.poiSubTab)
+      if (Object.prototype.hasOwnProperty.call(state, 'h3StructureFillMode')) this.h3StructureFillMode = asText(state.h3StructureFillMode || this.h3StructureFillMode)
+      if (Object.prototype.hasOwnProperty.call(state, 'roadSyntaxMainTab')) this.roadSyntaxMainTab = asText(state.roadSyntaxMainTab || this.roadSyntaxMainTab)
+      if (Object.prototype.hasOwnProperty.call(state, 'roadSyntaxMetric')) this.roadSyntaxMetric = asText(state.roadSyntaxMetric || this.roadSyntaxMetric)
+      if (Object.prototype.hasOwnProperty.call(state, 'roadSyntaxLastMetricTab')) this.roadSyntaxLastMetricTab = asText(state.roadSyntaxLastMetricTab || this.roadSyntaxLastMetricTab)
+      if (this.activeStep3Panel === 'syntax' && this.roadSyntaxMainTab !== 'params' && typeof this.renderRoadSyntaxByMetric === 'function') {
+        await this.renderRoadSyntaxByMetric(this.roadSyntaxMetric || this.roadSyntaxLastMetricTab)
+      }
+      await this.waitForAgentVisualSnapshotPaint()
+    },
+    getAgentScopeBounds() {
+      const snapshot = this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {}
+      const polygon = snapshot && snapshot.scope && Array.isArray(snapshot.scope.polygon) ? snapshot.scope.polygon : []
+      return this.computeAgentLngLatBoundsFromCoordinates(polygon)
+    },
+    computeAgentLngLatBoundsFromCoordinates(source = []) {
+      const points = []
+      const visit = (value) => {
+        if (!Array.isArray(value)) return
+        if (value.length >= 2 && Number.isFinite(Number(value[0])) && Number.isFinite(Number(value[1]))) {
+          points.push([Number(value[0]), Number(value[1])])
+          return
+        }
+        value.forEach(visit)
+      }
+      visit(source)
+      if (!points.length) return null
+      const lngs = points.map((item) => item[0])
+      const lats = points.map((item) => item[1])
+      return {
+        west: Math.min(...lngs),
+        south: Math.min(...lats),
+        east: Math.max(...lngs),
+        north: Math.max(...lats),
+      }
+    },
+    getAgentRoadFeatureBounds() {
+      const features = Array.isArray(this.roadSyntaxRoadFeatures) ? this.roadSyntaxRoadFeatures : []
+      const coords = []
+      features.forEach((feature) => {
+        if (feature && feature.geometry && Array.isArray(feature.geometry.coordinates)) {
+          coords.push(feature.geometry.coordinates)
+        }
+      })
+      return this.computeAgentLngLatBoundsFromCoordinates(coords)
+    },
+    async fitAgentMapToBounds(bounds = null) {
+      const map = this.getAgentMapInstance()
+      if (!map || !bounds || !window.AMap || !AMap.LngLat || !AMap.Bounds) return false
+      try {
+        const sw = new AMap.LngLat(bounds.west, bounds.south)
+        const ne = new AMap.LngLat(bounds.east, bounds.north)
+        const amapBounds = new AMap.Bounds(sw, ne)
+        if (typeof map.setBounds === 'function') {
+          map.setBounds(amapBounds)
+        } else if (typeof map.setFitView === 'function') {
+          map.setFitView()
+          if (typeof map.setCenter === 'function' && amapBounds.getCenter) map.setCenter(amapBounds.getCenter())
+        } else {
+          return false
+        }
+        await this.waitForAgentVisualSnapshotPaint()
+        return true
+      } catch (err) {
+        console.warn('fit agent map snapshot bounds failed', err)
+        return false
+      }
+    },
+    waitForAgentVisualSnapshotPaint() {
+      const waitFrame = () => new Promise((resolve) => {
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => resolve())
+        } else {
+          resolve()
+        }
+      })
+      return waitFrame().then(waitFrame).then(() => this._sleepForExport ? this._sleepForExport(120) : undefined)
+    },
+    buildAgentVisualSnapshotTargets() {
+      const snapshotLimit = 12
+      const targets = [{ kind: 'overview_map', title: '当前地图总览', key: '' }]
+      if (Array.isArray(this.allPoisDetails) && this.allPoisDetails.length) {
+        targets.push({ kind: 'poi_map', title: 'POI 点位与分类图层', key: 'poi' })
+      }
+      if (this.h3AnalysisSummary || (this.sharedGridMetrics && Object.keys(this.sharedGridMetrics || {}).length)) {
+        targets.push({ kind: 'h3_map', title: 'H3 网格分析图层', key: 'h3' })
+      }
+      if (this.populationSummary || this.populationOverview || this.populationLayer || this.populationRaster || this.populationAnalysisResult) {
+        targets.push({ kind: 'population_map', title: '人口分析图层', key: 'population' })
+      }
+      if (this.nightlightSummary || this.nightlightOverview || this.nightlightLayer || this.nightlightRaster || this.nightlightAnalysisResult) {
+        targets.push({ kind: 'nightlight_map', title: '夜光活力图层', key: 'nightlight' })
+      }
+      if (this.roadSyntaxSummary || (Array.isArray(this.roadSyntaxRoadFeatures) && this.roadSyntaxRoadFeatures.length)) {
+        const tabs = (typeof this.roadSyntaxMetricTabs === 'function')
+          ? this.roadSyntaxMetricTabs()
+          : [
+              { value: 'connectivity', label: '连接度' },
+              { value: 'control', label: '控制值' },
+              { value: 'depth', label: '深度值' },
+              { value: 'choice', label: '选择度' },
+              { value: 'integration', label: '整合度' },
+              { value: 'intelligibility', label: '可理解度' },
+            ]
+        const seenMetrics = new Set()
+        cloneArray(tabs).forEach((tab) => {
+          const metric = asText(tab && tab.value)
+          if (!metric || seenMetrics.has(metric)) return
+          seenMetrics.add(metric)
+          const label = asText(tab && tab.label) || metric
+          targets.push({
+            kind: 'road_map',
+            title: `路网分析全范围图层 · ${label}`,
+            key: 'syntax',
+            fit: 'road',
+            metric,
+          })
+        })
+      }
+      return targets.slice(0, snapshotLimit)
+    },
+    applyAgentVisualSnapshotPanelState(target = {}) {
+      const key = asText(target.key)
+      if (key === 'poi') {
+        this.activeStep3Panel = 'poi'
+        if (this.poiSubTab !== 'grid') this.poiSubTab = 'category'
+      } else if (key === 'h3') {
+        this.activeStep3Panel = 'poi'
+        this.poiSubTab = 'grid'
+      } else if (key === 'population') {
+        this.activeStep3Panel = 'population'
+      } else if (key === 'nightlight') {
+        this.activeStep3Panel = 'nightlight'
+      } else if (key === 'syntax') {
+        this.activeStep3Panel = 'syntax'
+      }
+    },
+    async prepareAgentVisualSnapshotTarget(target = {}) {
+      const key = asText(target.key)
+      this.applyAgentVisualSnapshotPanelState(target)
+      if (key === 'syntax' && asText(target.metric)) {
+        this.roadSyntaxMainTab = asText(target.metric)
+        this.roadSyntaxMetric = asText(target.metric)
+        this.roadSyntaxLastMetricTab = asText(target.metric)
+      }
+      if (key && typeof this.preloadAgentPanelContent === 'function') {
+        await this.preloadAgentPanelContent({ key })
+      }
+      const bounds = target.fit === 'road'
+        ? (this.getAgentRoadFeatureBounds() || this.getAgentScopeBounds())
+        : this.getAgentScopeBounds()
+      if (target.fit === 'road' && bounds) {
+        await this.fitAgentMapToBounds(bounds)
+      }
+      await this.waitForAgentVisualSnapshotPaint()
+      return bounds || {}
+    },
+    async compressAgentVisualSnapshotDataUrl(dataUrl = '') {
+      const raw = asText(dataUrl)
+      if (!raw.startsWith('data:image/')) return ''
+      if (typeof document === 'undefined' || typeof Image === 'undefined') return raw
+      return new Promise((resolve) => {
+        const image = new Image()
+        image.onload = () => {
+          try {
+            const maxEdge = 1280
+            const scale = Math.min(1, maxEdge / Math.max(image.naturalWidth || image.width || maxEdge, image.naturalHeight || image.height || maxEdge))
+            const width = Math.max(1, Math.round((image.naturalWidth || image.width || maxEdge) * scale))
+            const height = Math.max(1, Math.round((image.naturalHeight || image.height || maxEdge) * scale))
+            const canvas = document.createElement('canvas')
+            canvas.width = width
+            canvas.height = height
+            const ctx = canvas.getContext('2d')
+            if (!ctx) {
+              resolve(raw)
+              return
+            }
+            ctx.fillStyle = '#ffffff'
+            ctx.fillRect(0, 0, width, height)
+            ctx.drawImage(image, 0, 0, width, height)
+            const qualities = [0.82, 0.76, 0.70]
+            let best = raw
+            for (const quality of qualities) {
+              const next = canvas.toDataURL('image/jpeg', quality)
+              if (next && next.length < best.length) best = next
+              if (next && next.length <= 1500000) {
+                resolve(next)
+                return
+              }
+            }
+            resolve(best.length <= 1500000 ? best : '')
+          } catch (err) {
+            console.warn('compress agent visual snapshot failed', err)
+            resolve(raw.length <= 1500000 ? raw : '')
+          }
+        }
+        image.onerror = () => resolve(raw.length <= 1500000 ? raw : '')
+        image.src = raw
+      })
+    },
+    async captureAgentVisualSnapshots() {
+      if (typeof this._captureMapSnapshotBase64 !== 'function') {
+        return [{
+          snapshot_id: `visual-${Date.now().toString(36)}-missing-capture`,
+          kind: 'overview_map',
+          title: '当前地图总览',
+          data_url: '',
+          source: 'frontend_map',
+          captured_at: new Date().toISOString(),
+          bounds: {},
+          warnings: ['前端缺少地图截图方法，未能传入地图快照。'],
+        }]
+      }
+      const view = this.getAgentMapViewState()
+      const layerState = this.getAgentVisualLayerState()
+      const targets = this.buildAgentVisualSnapshotTargets()
+      const snapshots = []
+      try {
+        for (const target of targets) {
+          const warnings = []
+          let bounds = {}
+          try {
+            bounds = await this.prepareAgentVisualSnapshotTarget(target)
+            const rawDataUrl = await this._captureMapSnapshotBase64()
+            if (!rawDataUrl) {
+              snapshots.push({
+                snapshot_id: `visual-${Date.now().toString(36)}-${snapshots.length + 1}`,
+                kind: asText(target.kind),
+                title: asText(target.title),
+                data_url: '',
+                source: 'frontend_map',
+                captured_at: new Date().toISOString(),
+                bounds: bounds || {},
+                warnings: ['地图截图方法未返回有效图片，已跳过该快照。'],
+              })
+              continue
+            }
+            const dataUrl = await this.compressAgentVisualSnapshotDataUrl(rawDataUrl)
+            if (!dataUrl) {
+              snapshots.push({
+                snapshot_id: `visual-${Date.now().toString(36)}-${snapshots.length + 1}`,
+                kind: asText(target.kind),
+                title: asText(target.title),
+                data_url: '',
+                source: 'frontend_map',
+                captured_at: new Date().toISOString(),
+                bounds: bounds || {},
+                warnings: ['地图快照生成后超过大小限制，已跳过直传。'],
+              })
+              continue
+            }
+            snapshots.push({
+              snapshot_id: `visual-${Date.now().toString(36)}-${snapshots.length + 1}`,
+              kind: asText(target.kind),
+              title: asText(target.title),
+              data_url: dataUrl,
+              source: 'frontend_map',
+              captured_at: new Date().toISOString(),
+              bounds: bounds || {},
+              warnings,
+            })
+          } catch (err) {
+            console.warn('capture agent visual snapshot failed', target, err)
+          }
+        }
+      } finally {
+        await this.restoreAgentVisualLayerState(layerState)
+        this.restoreAgentMapViewState(view)
+        await this.waitForAgentVisualSnapshotPaint()
+      }
+      return snapshots.slice(0, 12)
+    },
     async commitTurnResult(turnContext = {}, finalResponse = null) {
       const targetSessionId = asText(turnContext.targetSessionId)
       this.stopAgentThinkingTimer(targetSessionId)
@@ -1590,6 +2025,14 @@ function createAgentRuntimeMethods() {
           this.maybeAutoScrollAgentThread({ sessionId: targetSessionId, force: true })
         }
 
+        let visualSnapshots = []
+        try {
+          visualSnapshots = await this.captureAgentVisualSnapshots()
+        } catch (snapshotErr) {
+          console.warn('Agent visual snapshots failed; continuing text-only', snapshotErr)
+          visualSnapshots = []
+        }
+
         const res = await fetch('/api/v1/analysis/agent/turn/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1601,8 +2044,10 @@ function createAgentRuntimeMethods() {
             thinking_mode: mode,
             messages: requestMessages,
             analysis_snapshot: this.buildAgentAnalysisSnapshot(),
+            map_search_context: typeof this.buildAgentMapSearchContext === 'function' ? this.buildAgentMapSearchContext() : {},
             risk_confirmations: requestRiskConfirmations,
             attachment_ids: requestAttachmentIds,
+            visual_snapshots: visualSnapshots,
           }),
         })
         if (!res.ok) {

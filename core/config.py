@@ -223,9 +223,9 @@ class Settings(BaseSettings):
         description="发送给 LLM tool loop 的最大历史轮次数",
     )
     ai_max_tool_steps: int = Field(
-        8,
+        0,
         validation_alias="AI_MAX_TOOL_STEPS",
-        description="LLM tool-calling loop 最大工具步数",
+        description="LLM tool-calling loop 最大工具步数；0 表示不按工具步数截断",
     )
     ai_max_tool_errors: int = Field(
         2,

@@ -364,7 +364,7 @@ _DIRECTION_TO_ROAD_AXES = {
 def _economic_activity_level_label(value: Any) -> str:
     text = _clean_text(value)
     if not text:
-        return "偏低"
+        return "unknown"
     return _ECONOMIC_ACTIVITY_LEVEL_LABELS.get(text, text)
 
 
@@ -376,11 +376,11 @@ def _direction_phrase(dominant: str, secondary: str) -> str:
 
 def _orientation_phrase(dominant: str, secondary: str) -> str:
     if dominant and secondary:
-        return f"区域道路以{dominant}为主，{secondary}为辅。"
+        return f"road_orientation={dominant},{secondary}"
     if dominant:
-        return f"区域道路以{dominant}为主。"
+        return f"road_orientation={dominant}"
     if secondary:
-        return f"区域道路以{secondary}为辅。"
+        return f"road_orientation={secondary}"
     return ""
 
 
@@ -396,10 +396,10 @@ def _classify_direction_orientation_consistency(
 ) -> tuple[str, str]:
     orientations = [item for item in [dominant_orientation, secondary_orientation] if item]
     if dominant_direction and any(_direction_matches_orientation(dominant_direction, item) for item in orientations):
-        return "高度一致", "较明显"
+        return "dominant_direction_matches_orientation", "match"
     if secondary_direction and any(_direction_matches_orientation(secondary_direction, item) for item in orientations):
-        return "部分一致", "具有一定支撑"
-    return "一致性较弱", "相对有限"
+        return "secondary_direction_matches_orientation", "partial_match"
+    return "direction_orientation_no_match", "no_match"
 
 
 def _build_economic_activity_direction_judgment(source_payload: Dict[str, Any]) -> str:
@@ -417,7 +417,7 @@ def _build_economic_activity_direction_judgment(source_payload: Dict[str, Any]) 
 
     if not direction_text:
         return ""
-    first = f"从空间分布来看，等时圈内夜间经济活动整体处于{level}水平，高值区域主要集中在{direction_text}方向。"
+    first = f"nightlight_level={level}; nightlight_direction={direction_text}."
     road_text = _orientation_phrase(dominant_orientation, secondary_orientation)
     if not road_text:
         return first
@@ -427,32 +427,14 @@ def _build_economic_activity_direction_judgment(source_payload: Dict[str, Any]) 
         dominant_orientation,
         secondary_orientation,
     )
-    return f"{first}{road_text}两者在空间上呈现{consistency}关系，表明交通廊道对夜间经济活动的空间引导作用{influence}。"
+    return f"{first} {road_text}; direction_orientation_consistency={consistency}; consistency_signal={influence}."
 
 
 def _build_poi_structure_judgment(source_payload: Dict[str, Any]) -> str:
     poi = source_payload.get("poi_structure") if isinstance(source_payload.get("poi_structure"), dict) else {}
-    business = source_payload.get("business_profile") if isinstance(source_payload.get("business_profile"), dict) else {}
     tags = [str(item).strip() for item in (poi.get("structure_tags") or []) if str(item).strip()]
     dominant = [str(item).strip() for item in (poi.get("dominant_categories") or []) if str(item).strip()]
-    business_label = _clean_text(business.get("label"))
-    if "生活消费主导" in tags or business_label == "生活消费主导":
-        first = "业态以生活消费为主"
-    elif business_label:
-        first = f"业态呈现{business_label}特征"
-    elif tags:
-        first = f"业态以{tags[0]}为主"
-    else:
-        first = "业态结构已有明确主次"
-    if len(dominant) >= 2:
-        second = f"{dominant[0]}与{dominant[1]}构成主要供给"
-    elif dominant:
-        second = f"{dominant[0]}是最核心的供给类型"
-    else:
-        second = ""
-    extras = [item for item in tags if item not in {business_label, "生活消费主导"}]
-    third = f"{extras[0]}进一步强化了功能定位" if extras else ""
-    return "，".join(part for part in [first, second, third] if part) + "。"
+    return f"dominant_categories={','.join(dominant) or '-'}; structure_tags={','.join(tags) or '-'}."
 
 
 def _build_consumption_vitality_judgment(source_payload: Dict[str, Any]) -> str:
@@ -465,54 +447,15 @@ def _build_consumption_vitality_judgment(source_payload: Dict[str, Any]) -> str:
         return summary_text
     pattern_tags = [str(item).strip() for item in (nightlight.get("pattern_tags") or []) if str(item).strip()]
     core_hotspot_count = int(nightlight.get("core_hotspot_count") or 0)
-    if core_hotspot_count > 0:
-        first = "夜间经济活动存在明确热点"
-    elif any("亮灯覆盖高" in item for item in pattern_tags):
-        first = "夜间灯光覆盖较广但强核心不足"
-    else:
-        first = "夜间经济活动强度整体偏弱"
-    if any("中心亮度突出" in item for item in pattern_tags):
-        second = "经济活动强度更容易集中在少数核心点位"
-    elif core_hotspot_count > 0:
-        second = "高值区主要体现为夜间活动与照明强度信号"
-    else:
-        second = "夜光证据不足时不推断白天经济活动表现"
-    return "，".join(part for part in [first, second] if part) + "。"
+    return f"core_hotspot_count={core_hotspot_count}; pattern_tags={','.join(pattern_tags) or '-'}."
 
 
 def _build_business_support_judgment(source_payload: Dict[str, Any]) -> str:
     road = source_payload.get("road_pattern") if isinstance(source_payload.get("road_pattern"), dict) else {}
-    business = source_payload.get("business_profile") if isinstance(source_payload.get("business_profile"), dict) else {}
     connectivity = _clean_text(((road.get("connectivity") or {}).get("signal")))
     access = _clean_text(((road.get("access") or {}).get("signal")))
     readability = _clean_text(((road.get("readability") or {}).get("signal")))
-    business_label = _clean_text(business.get("label")) or "当前业态"
-
-    connectivity_sentence = {
-        "strong": "内部路网连通顺畅，节点之间互达性较好",
-        "moderate": "内部路网连通性中等，片区内到达基本顺畅",
-        "weak": "内部路网连通偏弱，局部转换效率受限",
-    }.get(connectivity, "内部路网已有基本支撑")
-    access_sentence = {
-        "strong": "主路径承接能力较强，更容易形成稳定通行流",
-        "moderate": "通达效率中等，更适合片区内日常通行",
-        "weak": "被经过与主路径承接能力有限，难以形成高流动性优势",
-    }.get(access, "")
-    readability_sentence = {
-        "strong": "动线识别清晰，有利于组织消费动线",
-        "moderate": "动线可读性尚可，商业识别成本可控",
-        "weak": "动线可读性有限，不利于快速识别与导流",
-    }.get(readability, "")
-
-    strong_count = sum(1 for item in (connectivity, access, readability) if item == "strong")
-    weak_count = sum(1 for item in (connectivity, access, readability) if item == "weak")
-    if strong_count >= 2:
-        closing = f"整体上对{business_label}的空间承接较强。"
-    elif weak_count >= 2:
-        closing = f"整体更适合片区内日常服务，对{business_label}的扩张承接偏谨慎。"
-    else:
-        closing = f"整体能承接{business_label}，但更偏向中等强度的片区服务。"
-    return "。".join(part for part in [connectivity_sentence, access_sentence, readability_sentence] if part) + f"。{closing}"
+    return f"connectivity_signal={connectivity or '-'}; access_signal={access or '-'}; readability_signal={readability or '-'}."
 
 
 def _normalize_area_judgment_reasoning(pack: Dict[str, Any], source_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -568,15 +511,15 @@ def _build_section_generation_prompt(section_key: str) -> str:
             "两者在空间上呈现{一致性等级}关系，表明交通廊道对夜间经济活动的空间引导作用{影响强度}。"
             "缺少路网或夜光方位时只描述可用夜光证据，不要硬凑一致性。"
         ),
-        "business_support": "只写路网与空间条件对现有业态的承接。必须先写连通性，再写通达效率，再写认知可读性，最后落到承接判断。",
+        "business_support": "只使用路网与空间条件 raw signal，不规定判断顺序，不替模型预设承接结论。",
     }
     return (
         base
         + "JSON 结构固定为："
         + f'{{"section_key":"{section_key}","title":"{title}","reasoning":"..."}}'
         + "规则："
-        + focus_rules.get(section_key, "只写当前段落对应的商业判断。")
-        + " reasoning 必须直接下判断，推荐使用“以…为主”“偏…”“较强/较弱”“明显/有限”“更适合…”等表达。"
+        + focus_rules.get(section_key, "只写当前段落对应的证据解释。")
+        + " reasoning 应基于输入证据自然生成，不套用固定判断句或固定表达。"
     )
 
 
@@ -1530,23 +1473,6 @@ def _validate_tourism_cross_analysis_payload(raw: Dict[str, Any]) -> Dict[str, s
     content = _clean_text(raw.get("content"))
     if not content:
         return {}
-    compact_content = re.sub(r"\s+", "", content).replace("x", "×").replace("X", "×").replace("Ｘ", "×")
-    cross_start = compact_content.find("五、")
-    cross_segment = compact_content[cross_start:cross_start + 80] if cross_start >= 0 else ""
-    has_cross_section = (
-        "人口" in cross_segment
-        and "POI" in cross_segment
-        and ("夜光" in cross_segment or "夜间灯光" in cross_segment or ("夜间" in cross_segment and "灯光" in cross_segment))
-        and "交叉" in cross_segment
-        and ("诊断" in cross_segment or "分析" in cross_segment)
-    )
-    required_markers_ready = (
-        "一、综合判断" in compact_content
-        and "九、策划结论" in compact_content
-        and has_cross_section
-    )
-    if not required_markers_ready:
-        return {}
     return {
         "title": title,
         "content": content,
@@ -1555,25 +1481,10 @@ def _validate_tourism_cross_analysis_payload(raw: Dict[str, Any]) -> Dict[str, s
 
 def _tourism_validation_checks(output: Dict[str, Any]) -> List[Dict[str, Any]]:
     content = _clean_text((output or {}).get("content"))
-    compact_content = re.sub(r"\s+", "", content).replace("x", "×").replace("X", "×").replace("Ｘ", "×")
-    cross_start = compact_content.find("五、")
-    cross_segment = compact_content[cross_start:cross_start + 80] if cross_start >= 0 else ""
     return [
         {"key": "required.title", "label": "必填字段 title", "passed": bool((output or {}).get("title"))},
         {"key": "required.content", "label": "必填字段 content", "passed": bool(content)},
-        {"key": "section.1", "label": "包含一、综合判断", "passed": "一、综合判断" in compact_content},
-        {
-            "key": "section.5",
-            "label": "第五节包含人口 / POI / 夜光交叉诊断语义",
-            "passed": (
-                "人口" in cross_segment
-                and "POI" in cross_segment
-                and ("夜光" in cross_segment or "夜间灯光" in cross_segment or ("夜间" in cross_segment and "灯光" in cross_segment))
-                and "交叉" in cross_segment
-                and ("诊断" in cross_segment or "分析" in cross_segment)
-            ),
-        },
-        {"key": "section.9", "label": "包含九、策划结论", "passed": "九、策划结论" in compact_content},
+        {"key": "format.flexible_sections", "label": "不要求固定章节", "passed": bool(content)},
     ]
 
 

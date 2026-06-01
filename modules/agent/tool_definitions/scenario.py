@@ -10,7 +10,7 @@ def register_scenario_tools(registry: Dict[str, RegisteredTool]) -> None:
     registry["run_area_character_pack"] = _register(
         _tool_spec(
             name="run_area_character_pack",
-            description="固定流程完成区域总体调性判断，输出标签、主导功能和证据链",
+            description="整理区域总体调性所需 raw metrics，供 AI 转译层生成判断",
             category="action",
             layer="L2",
             ui_tier="scenario",
@@ -58,7 +58,7 @@ def register_scenario_tools(registry: Dict[str, RegisteredTool]) -> None:
     registry["run_site_selection_pack"] = _register(
         _tool_spec(
             name="run_site_selection_pack",
-            description="固定流程完成建店选址/补位分析，输出候选点排序、优劣势和证据链",
+            description="整理建店选址/补位所需候选点 raw metrics，供 AI 转译层生成判断",
             category="action",
             layer="L2",
             ui_tier="scenario",

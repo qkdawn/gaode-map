@@ -32,13 +32,22 @@ class LangGraphReactState(TypedDict, total=False):
     governance_mode: str
     confirmed_tools: List[str]
     thinking_mode: str
-    max_steps: int
+    max_steps: Optional[int]
     max_errors: int
     step_count: int
     consecutive_errors: int
     result: ToolLoopResult
     final_message: str
     stop_reason: str
+    initial_artifacts: Dict[str, Any]
+
+
+def _optional_positive_limit(value: Any) -> Optional[int]:
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return max(1, parsed) if parsed > 0 else None
 
 
 def _safe_json(value: Any) -> str:
@@ -56,6 +65,25 @@ def _react_context_digest(context: ContextBundle) -> Dict[str, Any]:
         }
     digest["analysis"] = analysis
     return compact_for_llm(digest, max_depth=5)
+
+
+def _artifact_catalog(artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    catalog: Dict[str, Any] = {}
+    if artifacts.get("frontend_map_search_context"):
+        context = artifacts.get("frontend_map_search_context") if isinstance(artifacts.get("frontend_map_search_context"), dict) else {}
+        spatial = context.get("spatial_anchors") if isinstance(context.get("spatial_anchors"), dict) else {}
+        place = context.get("place_anchors") if isinstance(context.get("place_anchors"), dict) else {}
+        catalog["frontend_map_search_context"] = {
+            "purpose": "本轮前端地图结构化对象可检索源，需要 search_analysis_context/read_analysis_chunk 才能引用具体对象。",
+            "place_group_count": len(place.get("groups") or []) if isinstance(place, dict) else 0,
+            "place_name_count": len(place.get("names") or []) if isinstance(place, dict) else 0,
+            "domains": [
+                key
+                for key in ("poi", "h3", "road", "population", "nightlight")
+                if key == "poi" or (isinstance(spatial.get(key), dict) and spatial.get(key))
+            ],
+        }
+    return catalog
 
 
 def _react_tool_result_payload(result: ToolResult) -> str:
@@ -78,11 +106,13 @@ def _initial_payload(
     snapshot: AnalysisSnapshot,
     context: ContextBundle,
     registry: Dict[str, RegisteredTool],
+    artifacts: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return {
         "question": question,
         "analysis_snapshot_digest": compact_for_llm(snapshot_digest(snapshot), max_depth=5),
         "context_digest": _react_context_digest(context),
+        "artifact_catalog": _artifact_catalog(dict(artifacts or {})),
         "tool_catalog": [
             {
                 "name": name,
@@ -160,6 +190,7 @@ async def run_langgraph_react_loop(
     max_steps_override: Optional[int] = None,
     max_errors_override: Optional[int] = None,
     thinking_mode: str = "quick",
+    initial_artifacts: Optional[Dict[str, Any]] = None,
 ) -> ToolLoopResult:
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
     from langchain_openai import ChatOpenAI
@@ -167,7 +198,7 @@ async def run_langgraph_react_loop(
 
     question = str(messages[-1].content if messages else "").strip()
     context_bundle = context or build_context_bundle(snapshot)
-    max_steps = max(1, int(max_steps_override or settings.ai_max_tool_steps or 8))
+    max_steps = _optional_positive_limit(max_steps_override if max_steps_override is not None else settings.ai_max_tool_steps)
     max_errors = max(1, int(max_errors_override or settings.ai_max_tool_errors or 2))
     tool_schemas = chat_completion_tools(registry, include_secondary=include_secondary_tools)
     model = ChatOpenAI(
@@ -224,10 +255,11 @@ async def run_langgraph_react_loop(
         artifacts = result.artifacts if isinstance(result.artifacts, dict) else {}
 
         for call in tool_calls:
-            if step_count >= int(state["max_steps"]):
+            max_steps_limit = state.get("max_steps")
+            if max_steps_limit is not None and step_count >= int(max_steps_limit):
                 result.status = "failed"
                 result.stop_reason = "max_tool_steps_exceeded"
-                result.error = f"工具调用步数超过上限 {state['max_steps']}"
+                result.error = f"工具调用步数超过上限 {max_steps_limit}"
                 break
 
             tool_name = str(call.get("name") or "").strip()
@@ -375,10 +407,10 @@ async def run_langgraph_react_loop(
     graph.add_edge("finalize", END)
     app = graph.compile()
 
-    result = ToolLoopResult(status="completed")
+    result = ToolLoopResult(status="completed", artifacts=dict(initial_artifacts or {}))
     initial_messages = [
         SystemMessage(content=loop_system_prompt(thinking_mode=thinking_mode)),
-        HumanMessage(content=_safe_json(_initial_payload(question=question, snapshot=snapshot, context=context_bundle, registry=registry))),
+        HumanMessage(content=_safe_json(_initial_payload(question=question, snapshot=snapshot, context=context_bundle, registry=registry, artifacts=initial_artifacts))),
     ]
     final_state = await app.ainvoke(
         {
@@ -395,7 +427,8 @@ async def run_langgraph_react_loop(
             "step_count": 0,
             "consecutive_errors": 0,
             "result": result,
+            "initial_artifacts": dict(initial_artifacts or {}),
         },
-        {"recursion_limit": max(6, max_steps * 3 + 4)},
+        {"recursion_limit": max(100, (max_steps or 32) * 3 + 4)},
     )
     return final_state.get("result") or result

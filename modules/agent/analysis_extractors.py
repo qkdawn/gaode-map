@@ -137,7 +137,11 @@ def is_nightlight_pattern_ready(payload: Dict[str, Any] | None) -> bool:
 
 def is_business_profile_ready(payload: Dict[str, Any] | None) -> bool:
     item = _safe_dict(payload)
-    return bool(str(item.get("business_profile") or "").strip() or str(item.get("portrait") or "").strip())
+    return bool(
+        str(item.get("poi_mix_signal") or item.get("business_profile") or "").strip()
+        or item.get("functional_mix_score") is not None
+        or bool(item.get("dominant_functions"))
+    )
 
 
 def is_commercial_hotspots_ready(payload: Dict[str, Any] | None) -> bool:
@@ -231,18 +235,18 @@ def _percentile(sorted_values: List[float], value: float | None) -> float:
 
 def _classify_gap_zone(demand_pct: float, supply_pct: float, gap_score: float) -> str:
     if demand_pct >= 0.6 and supply_pct < 0.4:
-        return "补位机会区"
+        return "demand_pct_ge_0_60_supply_pct_lt_0_40"
     if demand_pct >= 0.6 and supply_pct >= 0.6:
-        return "高需求高供给（竞争区）"
+        return "demand_pct_ge_0_60_supply_pct_ge_0_60"
     if demand_pct < 0.4 and supply_pct >= 0.6:
-        return "低需求高供给（偏饱和）"
+        return "demand_pct_lt_0_40_supply_pct_ge_0_60"
     if demand_pct < 0.4 and supply_pct < 0.4:
-        return "低需求低供给（观察区）"
+        return "demand_pct_lt_0_40_supply_pct_lt_0_40"
     if gap_score >= 0.15:
-        return "偏机会区"
+        return "gap_score_ge_0_15"
     if gap_score <= -0.15:
-        return "偏饱和区"
-    return "相对平衡区"
+        return "gap_score_le_minus_0_15"
+    return "gap_score_balanced"
 
 
 def build_h3_gap_rows_for_target(
@@ -582,24 +586,24 @@ def build_poi_structure_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str
     culture_ratio = ratio_by_label.get("科教文化", 0.0)
     structure_tags: List[str] = []
     if dining_ratio >= 0.28:
-        structure_tags.append("餐饮主导")
+        structure_tags.append("dining_ratio_ge_0_28")
     if shopping_ratio >= 0.15:
-        structure_tags.append("购物配套较强")
+        structure_tags.append("shopping_ratio_ge_0_15")
     if lodging_ratio >= 0.08:
-        structure_tags.append("住宿承接明显")
+        structure_tags.append("lodging_ratio_ge_0_08")
     if office_ratio >= 0.1:
-        structure_tags.append("商务功能参与")
+        structure_tags.append("office_ratio_ge_0_10")
     if culture_ratio >= 0.08:
-        structure_tags.append("科教文化配套明显")
+        structure_tags.append("culture_ratio_ge_0_08")
     if dining_ratio + shopping_ratio >= 0.45:
-        structure_tags.append("生活消费主导")
+        structure_tags.append("dining_shopping_ratio_ge_0_45")
     dominant_categories = [str(item["label"]) for item in pairs[:3]]
     top_category_text = "、".join(
         f"{item['label']} {_format_ratio(float(item['ratio']))}"
         for item in pairs[:3]
     ) or "暂无稳定类别分布"
     summary_text = (
-        f"当前 POI 结构以 {top_category_text} 为主。"
+        f"POI top categories: {top_category_text}."
         if pairs
         else "当前缺少可直接利用的 POI 类别结构结果。"
     )
@@ -744,23 +748,23 @@ def build_road_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str,
     )
     pattern_tags: List[str] = []
     if node_count >= 1000 and edge_count >= 1000:
-        pattern_tags.append("路网规模较大")
+        pattern_tags.append("node_edge_count_ge_1000")
     if edge_count > node_count and node_count > 0:
-        pattern_tags.append("连接较充分")
+        pattern_tags.append("edge_count_gt_node_count")
     if regression_r2 is not None and regression_r2 >= 0.5:
-        pattern_tags.append("结构可读性较强")
+        pattern_tags.append("regression_r2_ge_0_50")
     if connectivity_signal == "strong":
-        pattern_tags.append("内部连通顺畅")
+        pattern_tags.append("connectivity_signal_strong")
     elif connectivity_signal == "weak":
-        pattern_tags.append("内部连通偏弱")
+        pattern_tags.append("connectivity_signal_weak")
     if access_signal == "strong":
-        pattern_tags.append("主路径承接较强")
+        pattern_tags.append("access_signal_strong")
     elif access_signal == "weak":
-        pattern_tags.append("通达效率一般")
+        pattern_tags.append("access_signal_weak")
     if readability_signal == "strong":
-        pattern_tags.append("动线识别清晰")
+        pattern_tags.append("readability_signal_strong")
     elif readability_signal == "weak":
-        pattern_tags.append("动线可读性有限")
+        pattern_tags.append("readability_signal_weak")
     if metric:
         pattern_tags.append(f"当前关注指标:{metric}")
     summary_text = (
@@ -837,9 +841,9 @@ def build_population_profile_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
     female_ratio = _to_float(summary.get("female_ratio"), None)
     profile_tags: List[str] = []
     if total_population is not None:
-        profile_tags.append("人口基础存在")
+        profile_tags.append("total_population_available")
     if male_ratio is not None and female_ratio is not None and abs(male_ratio - female_ratio) <= 0.08:
-        profile_tags.append("性别结构均衡")
+        profile_tags.append("sex_ratio_diff_le_0_08")
     if top_age_band:
         profile_tags.append(f"年龄主段:{top_age_band}")
     density_level = _density_level(average_density)
@@ -882,15 +886,15 @@ def build_nightlight_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
     sector_direction_analysis = _safe_dict(analysis.get("sector_direction_analysis"))
     pattern_tags: List[str] = []
     if lit_pixel_ratio is not None and lit_pixel_ratio >= 0.8:
-        pattern_tags.append("亮灯覆盖高")
+        pattern_tags.append("lit_pixel_ratio_ge_0_80")
     if core_hotspot_count > 0:
-        pattern_tags.append("存在夜间热点核心")
+        pattern_tags.append("core_hotspot_count_gt_0")
     if peak_to_edge_ratio is not None and peak_to_edge_ratio >= 2:
-        pattern_tags.append("中心亮度突出")
+        pattern_tags.append("peak_to_edge_ratio_ge_2")
     if total_radiance is not None or core_hotspot_count > 0:
         total_text = f"{total_radiance:.1f}" if total_radiance is not None else "-"
         mean_text = f"{mean_radiance:.2f}" if mean_radiance is not None else "-"
-        summary_text = economic_activity_summary_text or f"基于夜间灯光亮度，等时圈内经济活动强度总辐亮 {total_text}，均值 {mean_text}，热点核心 {core_hotspot_count} 个。"
+        summary_text = f"夜光总辐亮 {total_text}，均值 {mean_text}，热点核心 {core_hotspot_count} 个。"
     else:
         summary_text = "当前缺少可直接利用的夜光结构结果。"
     payload = {
@@ -928,29 +932,30 @@ def analyze_poi_mix(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any], poi_s
     richness = sum(1 for item in top_categories if (_to_float(item.get("ratio"), 0.0) or 0.0) >= 0.05)
     functional_mix_score = round(max(0.0, min(100.0, 45 + richness * 8 + (1 - min(top_share, 1.0)) * 35)), 1)
 
+    signal_parts: List[str] = []
     if dining_ratio + shopping_ratio >= 0.48:
-        business_profile = "生活消费主导"
-        portrait = "该区域更像一个以日常消费和社区级配套为主的综合商业区。"
-    elif office_ratio >= 0.16:
-        business_profile = "商务消费复合"
-        portrait = "该区域兼具商务活动与日常消费功能，不是单一生活配套区。"
-    elif lodging_ratio >= 0.1:
-        business_profile = "住宿接待复合"
-        portrait = "该区域对流动人口和短停留需求有较强承接能力，商业结构带有接待属性。"
-    else:
-        business_profile = "综合服务混合"
-        portrait = "该区域呈现多业态混合供给，更像综合服务片区而不是单一功能板块。"
-
+        signal_parts.append("dining_shopping_ratio_ge_0_48")
+    if office_ratio >= 0.16:
+        signal_parts.append("office_ratio_ge_0_16")
+    if lodging_ratio >= 0.1:
+        signal_parts.append("lodging_ratio_ge_0_10")
     if culture_ratio >= 0.1:
-        portrait += " 科教文化占比不低，说明公共服务或教育相关配套参与度较高。"
+        signal_parts.append("culture_ratio_ge_0_10")
+    business_profile = "poi_mix_raw_signal"
+    poi_mix_signal = ",".join(signal_parts) or "no_ratio_threshold_hit"
+    ratio_summary = (
+        f"dining_ratio={dining_ratio:.4f}; shopping_ratio={shopping_ratio:.4f}; "
+        f"lodging_ratio={lodging_ratio:.4f}; office_ratio={office_ratio:.4f}; culture_ratio={culture_ratio:.4f}"
+    )
 
     return {
         "business_profile": business_profile,
+        "poi_mix_signal": poi_mix_signal,
         "dominant_functions": dominant_functions,
         "supporting_functions": supporting_functions,
         "functional_mix_score": functional_mix_score,
-        "portrait": portrait,
-        "summary_text": f"{business_profile}，主导功能为 {'、'.join(dominant_functions) or '未明确'}。",
+        "portrait": "",
+        "summary_text": f"POI mix raw signal: {ratio_summary}; top_categories={','.join(dominant_functions) or '-'}。",
     }
 
 
@@ -999,14 +1004,16 @@ def detect_commercial_hotspots(
                 "gap_score": _to_float(row.get("gap_score"), None),
             }
         )
-    target_suffix = f"（目标类别：{target_category}）" if str(target_category).strip() else ""
     return {
         "hotspot_mode": hotspot_mode,
         "core_zone_count": core_zone_count,
         "secondary_zone_count": secondary_zone_count,
         "opportunity_zone_count": opportunity_count,
         "zone_rows": zone_rows,
-        "summary_text": f"商业热点结构为 {hotspot_mode}{target_suffix}，核心区 {core_zone_count} 个，机会区 {opportunity_count} 个。",
+        "summary_text": (
+            f"hotspot_mode={hotspot_mode}; target_category={str(target_category).strip() or '-'}; "
+            f"core_zone_count={core_zone_count}; opportunity_zone_count={opportunity_count}."
+        ),
     }
 
 
@@ -1078,8 +1085,8 @@ def analyze_target_supply_gap(
         "candidate_zones": candidate_zones,
         "evidence_summary": evidence_summary,
         "summary_text": (
-            f"{target_label or '目标业态'}供给缺口等级为 {supply_gap_level}，模式为 {gap_mode}。"
-            + (f" 当前可优先查看 {candidate_zones[0]['approx_address']} 等 {len(candidate_zones)} 个候选格。" if candidate_zones else "")
+            f"place_type={target_label or '-'}; supply_gap_level={supply_gap_level}; "
+            f"gap_mode={gap_mode}; candidate_zone_count={len(candidate_zones)}."
         ),
     }
     return _with_analysis_status(payload, ready=bool(gap_rows or candidate_zones or gap_mode in {"overall_shortage", "spatial_mismatch"}))
@@ -1132,7 +1139,7 @@ def infer_area_character_labels(
     peak_to_edge_ratio = _to_float(nightlight_pattern.get("peak_to_edge_ratio"), None)
     node_count = _to_int(road_pattern.get("node_count"), 0) or 0
     edge_count = _to_int(road_pattern.get("edge_count"), 0) or 0
-    business_label = str(business_profile.get("business_profile") or "").strip()
+    business_label = str(business_profile.get("poi_mix_signal") or "").strip()
 
     rule_hits: List[Dict[str, Any]] = []
     character_tags: List[str] = []
@@ -1141,34 +1148,34 @@ def infer_area_character_labels(
         _append_rule_hit(
             rule_hits,
             rule_id="night_economic_activity_cluster",
-            label="夜间经济活动活跃片区",
+            label="dining_nightlight_threshold_hit",
             evidence_metrics=["poi.dining_ratio", "nightlight.core_hotspot_count", "nightlight.peak_to_edge_ratio"],
             threshold_hit=f"餐饮占比 {dining_ratio:.2f}，夜间热点 {core_hotspot_count} 个，中心亮度比 {peak_to_edge_ratio or 0.0:.2f}",
             confidence="strong",
         )
-        character_tags.append("夜间经济活动活跃片区")
+        character_tags.append("dining_nightlight_threshold_hit")
 
     if culture_ratio >= 0.08 and (total_population or 0.0) >= 20000 and node_count >= 1500 and edge_count >= node_count:
         _append_rule_hit(
             rule_hits,
             rule_id="community_service_cluster",
-            label="生活服务型社区",
+            label="culture_population_road_threshold_hit",
             evidence_metrics=["poi.culture_ratio", "population.total_population", "road.node_count", "road.edge_count"],
             threshold_hit=f"科教文化占比 {culture_ratio:.2f}，人口 {total_population or 0.0:.0f}，路网节点 {node_count}",
             confidence="moderate",
         )
-        character_tags.append("生活服务型社区")
+        character_tags.append("culture_population_road_threshold_hit")
 
     if office_ratio >= 0.12 and node_count >= 1500 and top_age_band in {"25-34岁", "35-44岁"} and ((total_radiance or 0.0) >= 800 or density_level in {"high", "medium"}):
         _append_rule_hit(
             rule_hits,
             rule_id="business_oriented_cluster",
-            label="商务导向片区",
+            label="office_road_population_nightlight_threshold_hit",
             evidence_metrics=["poi.office_ratio", "road.node_count", "population.top_age_band", "nightlight.total_radiance"],
             threshold_hit=f"商务占比 {office_ratio:.2f}，主年龄段 {top_age_band or '-'}，夜光总辐亮 {total_radiance or 0.0:.1f}",
             confidence="moderate",
         )
-        character_tags.append("商务导向片区")
+        character_tags.append("office_road_population_nightlight_threshold_hit")
 
     if not character_tags and business_label:
         character_tags.append(business_label)
@@ -1183,18 +1190,18 @@ def infer_area_character_labels(
         crowd_traits.append(f"居住密度 {density_level}")
 
     if core_hotspot_count >= 1 or (total_radiance or 0.0) >= 800:
-        activity_period = "夜间经济活动信号较强"
+        activity_period = "nightlight_signal_strong"
     elif (total_radiance or 0.0) > 0 or (peak_to_edge_ratio or 0.0) > 0:
-        activity_period = "夜间经济活动信号中等"
+        activity_period = "nightlight_signal_moderate"
     else:
-        activity_period = "夜间经济活动信号较弱"
+        activity_period = "nightlight_signal_weak"
 
     if node_count >= 2000 and edge_count >= node_count:
-        spatial_temperament = "路网细密、可达性较强"
+        spatial_temperament = "road_node_count_ge_2000_edge_ge_node"
     elif node_count >= 500:
-        spatial_temperament = "骨架清晰、通达性中等"
+        spatial_temperament = "road_node_count_ge_500"
     else:
-        spatial_temperament = "结构较松散、仍需结合实地判断"
+        spatial_temperament = "road_node_count_lt_500"
 
     confidence = "strong" if any(item.get("confidence") == "strong" for item in rule_hits) else ("moderate" if rule_hits else "weak")
     return {
@@ -1206,7 +1213,8 @@ def infer_area_character_labels(
         "rule_hits": rule_hits,
         "confidence": confidence,
         "summary_text": (
-            f"区域标签为 {'、'.join(character_tags) or '综合服务混合'}，主导功能为 {'、'.join(dominant_functions) or '未明确'}。"
+            f"character_tags={','.join(character_tags) or '-'}; "
+            f"dominant_functions={','.join(dominant_functions) or '-'}."
         ),
     }
 
@@ -1263,22 +1271,22 @@ def score_site_candidates(
         strengths: List[str] = []
         risks: List[str] = []
         if supply_gap_score >= 70:
-            strengths.append("目标业态供给缺口较明显")
+            strengths.append("supply_gap_score_ge_70")
         if vitality_score >= 60:
-            strengths.append("夜间曝光和活力支撑较好")
+            strengths.append("vitality_score_ge_60")
         if access_score >= 60:
-            strengths.append("路网通达性较强")
+            strengths.append("access_score_ge_60")
         if population_score >= 60:
-            strengths.append("周边人口基盘可支撑")
+            strengths.append("population_score_ge_60")
 
         if supply_pct >= 0.6:
-            risks.append("现状供给分位不低，需复核竞品强度")
+            risks.append("supply_pct_ge_0_60")
         if core_hotspot_count <= 0:
-            risks.append("夜间活力信号偏弱")
+            risks.append("core_hotspot_count_eq_0")
         if node_count < 500:
-            risks.append("路网骨架证据偏弱")
+            risks.append("road_node_count_lt_500")
         if total_population < 8000:
-            risks.append("人口基盘偏小")
+            risks.append("total_population_lt_8000")
 
         ranked.append(
             {
@@ -1313,16 +1321,16 @@ def score_site_candidates(
             for item in ranked
         ],
         "strengths": ranked[0].get("strengths") if ranked else [],
-        "risks": ranked[0].get("risks") if ranked else ["当前缺少足够候选区证据"],
+        "risks": ranked[0].get("risks") if ranked else ["candidate_zone_count_eq_0"],
         "not_recommended_reason": (
-            "候选区供给缺口、人口或活力证据不足，当前结果更适合作为预筛而非最终定点。"
+            "candidate_zone_count_eq_0"
             if not ranked
-            else "低排名点位在供给缺口、可达性或活力上至少一项明显偏弱。"
+            else "low_rank_has_lower_supply_access_or_vitality_score"
         ),
         "confidence": "moderate" if ranked else "weak",
         "summary_text": (
-            f"已完成 {len(ranked)} 个候选区打分排序，首选 {ranked[0]['display_title']}。"
+            f"candidate_count={len(ranked)}; top_candidate={ranked[0]['display_title']}."
             if ranked
-            else "当前缺少足够候选区，暂不能形成稳定排序。"
+            else "candidate_count=0."
         ),
     }

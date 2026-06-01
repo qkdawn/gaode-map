@@ -841,8 +841,8 @@ def build_rule_insights(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
     declining = next((item for item in sorted(category_changes, key=lambda item: (item["rate"], item["delta"])) if item["delta"] < 0), None)
     fastest_sub = next((item for item in sorted(subcategory_changes, key=lambda item: (-item["rate"], -item["delta"])) if item["delta"] > 0), None)
     declining_sub = next((item for item in sorted(subcategory_changes, key=lambda item: (item["rate"], item["delta"])) if item["delta"] < 0), None)
-    growth_sub_detail = f"；小类增长最快为{fastest_sub['name']}，+{fastest_sub['delta']}" if fastest_sub else ""
-    decline_sub_detail = f"；小类下降明显为{declining_sub['name']}，{declining_sub['delta']}" if declining_sub else ""
+    growth_sub_detail = f"; fastest_subcategory={fastest_sub['name']}; delta={fastest_sub['delta']}" if fastest_sub else ""
+    decline_sub_detail = f"; declining_subcategory={declining_sub['name']}; delta={declining_sub['delta']}" if declining_sub else ""
     growth_area = next(
         (
             item
@@ -852,23 +852,23 @@ def build_rule_insights(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
         None,
     )
     growth_area_text = (
-        f"{growth_area['name']}内部 POI 增量较明显（+{growth_area['delta']}）。"
+        f"growth_area={growth_area['name']}; delta={growth_area['delta']}."
         if growth_area
-        else "未形成可命名增长片区；需结合小类空间信号判断具体增量方向。"
+        else "growth_area=-."
     )
     return {
         "summary": [
             f"当前POI规模为 {_format_metric(last.get('count'), 0)}，较{first.get('year') or '首年'}{'增加' if total_delta >= 0 else '减少'} {_format_metric(abs(total_delta), 0)}。",
-            f"{top_category.get('name') or '主导业态'}占比约 {top_ratio * 100:.1f}%，是当前一级主导业态。",
-            f"小类层面以{top_subcategory_text}最为突出。" if top_subcategory_text else "小类层面暂未形成清晰主导。",
-            f"{top_area.get('name') or '主要区域'}为核心聚集区，承担最多POI分布。",
-            f"业态结构整体{'呈现较强主导业态特征' if top_ratio >= 0.25 else '较分散'}。",
+            f"top_category={top_category.get('name') or '-'}; top_category_ratio={top_ratio * 100:.1f}%.",
+            f"top_subcategories={top_subcategory_text}." if top_subcategory_text else "top_subcategories=-.",
+            f"top_area={top_area.get('name') or '-'}.",
+            f"top_category_ratio_signal={'ge_0_25' if top_ratio >= 0.25 else 'lt_0_25'}.",
         ],
         "insights": {
-            "fastest_growth": f"{fastest['name']}大类增长较快（+{fastest['delta']}，+{fastest['rate'] * 100:.1f}%）{growth_sub_detail}" if fastest else "未发现明显增长行业。",
-            "declining_category": f"{declining['name']}大类下降明显（{declining['delta']}，{declining['rate'] * 100:.1f}%）{decline_sub_detail}" if declining else "未发现明显衰退行业。",
+            "fastest_growth": f"category={fastest['name']}; delta={fastest['delta']}; rate={fastest['rate'] * 100:.1f}%{growth_sub_detail}" if fastest else "fastest_growth=-.",
+            "declining_category": f"category={declining['name']}; delta={declining['delta']}; rate={declining['rate'] * 100:.1f}%{decline_sub_detail}" if declining else "declining_category=-.",
             "emerging_area": growth_area_text,
-            "structure_judgement": f"一级结构偏向{top_category.get('name')}主导{structure_detail}，需结合目标业态判断消费型/生产型属性。" if top_category.get("name") else "结构判断信号有限。",
+            "structure_judgement": f"top_category={top_category.get('name')}; detail={structure_detail or '-'}." if top_category.get("name") else "top_category=-.",
         },
     }
 

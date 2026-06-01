@@ -36,6 +36,8 @@ def _available_context_sources(snapshot: AnalysisSnapshot, artifacts: Dict[str, 
     current = artifacts or {}
     if current.get("site_selection_pack") or current.get("current_target_supply_gap"):
         sources.append("analysis:site_selection")
+    if current.get("frontend_map_search_context"):
+        sources.append("analysis:frontend_map_search_context")
     if current.get("summary_pack") or current.get("current_summary_pack"):
         sources.append("report:summary")
     if current.get("area_character_pack"):

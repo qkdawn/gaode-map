@@ -43,10 +43,10 @@ def test_build_answer_evidence_payload_includes_key_evidence_and_limits():
     assert payload["key_evidence"]
     assert any(item["metric"] == "poi_count" for item in payload["key_evidence"])
     assert any("客流" in item for item in payload["interpretation_limits"])
-    assert payload["business_profile"]["portrait"]
+    assert payload["business_profile"]["portrait"] in {"poi_mix_unavailable", ""}
     assert payload["spatial_structure"]["hotspot_mode"] is None
     assert payload["research_notes"] == ["已复用当前快照"]
-    assert payload["direct_answer_seed"]
+    assert "direct_answer_seed" not in payload
     assert "business_profile_summary" in payload
     assert "spatial_structure_summary" in payload
     assert "population_vitality_summary" in payload
@@ -180,7 +180,7 @@ def test_build_answer_evidence_payload_expands_key_evidence_for_summary_question
     assert payload["evidence_highlights"]
 
 
-def test_build_answer_fallback_generates_natural_prose():
+def test_build_answer_fallback_only_reports_translation_or_evidence_gap():
     answer = build_answer_fallback(
         question="这里适合补充咖啡吗",
         snapshot=_snapshot_with_decision_evidence(),
@@ -197,12 +197,12 @@ def test_build_answer_fallback_generates_natural_prose():
         audit=AuditResult(missing_evidence=["路网概览"]),
     )
 
-    assert "咖啡厅" in answer
-    assert "主要依据是" in answer
-    assert "需要注意的是" in answer or "还缺少" in answer or "方向性判断" in answer
+    assert "AI 转译暂不可用" in answer
+    assert "路网概览" in answer
+    assert "咖啡厅" not in answer
 
 
-def test_build_answer_fallback_expands_summary_questions_into_multiple_paragraphs():
+def test_build_answer_fallback_does_not_generate_planning_prose():
     answer = build_answer_fallback(
         question="总结这个区域的商业特征",
         snapshot=AnalysisSnapshot(
@@ -230,10 +230,10 @@ def test_build_answer_fallback_expands_summary_questions_into_multiple_paragraph
     )
 
     paragraphs = [item for item in answer.split("\n\n") if item.strip()]
-    assert len(paragraphs) >= 3
-    assert "整体看" in paragraphs[0] or "该区域" in paragraphs[0]
-    assert "空间结构" in answer or "多核心" in answer
-    assert "人口基盘" in answer or "人口" in answer
+    assert len(paragraphs) == 1
+    assert "AI 转译暂不可用" in answer
+    assert "整体看" not in answer
+    assert "多核心格局" not in answer
 
 
 def test_enrich_answer_output_sets_fallback_answer_and_h3_panel_payload():
