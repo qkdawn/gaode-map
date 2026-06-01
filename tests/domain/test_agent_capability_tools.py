@@ -88,5 +88,9 @@ def test_rank_next_analysis_options_prefers_application_when_chain_is_ready():
     )
 
     assert result.status == "success"
-    assert result.artifacts["current_next_analysis_options"]["recommended_options"][0]["title"] == "业态缺口与选址预筛"
+    first_option = result.artifacts["current_next_analysis_options"]["recommended_options"][0]
+    assert first_option["title"] == "业态缺口与选址预筛"
+    assert "补位缝隙" in first_option["why"]
+    assert "ready_dimensions" not in first_option["why"]
+    assert "伪机会" in first_option["prompt"]
     assert result.result["missing_dimensions"] == []

@@ -176,6 +176,9 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "动线" in system_prompt
     assert "不要按餐饮占比、科教占比、多核心、路网、夜光逐项翻译成指标总结" in system_prompt
     assert "谁围着谁、谁带动谁、哪里是内圈、哪里是外圈" in system_prompt
+    assert "关键矛盾/机会 -> 为什么此动作重要 -> 用什么证据筛掉伪机会" in system_prompt
+    assert "不要写成“系统可以跑哪些工具”的流程说明" in system_prompt
+    assert "学生高频低客单" in system_prompt
     assert "只补最必要的证据支撑" not in system_prompt
     assert "review_contract" not in system_prompt
     assert "cards" not in system_prompt

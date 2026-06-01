@@ -53,7 +53,10 @@ def test_build_answer_evidence_payload_includes_key_evidence_and_limits():
     assert payload["evidence_highlights"]
     assert payload["spatial_narrative_guidance"]["structure_first"] is True
     assert "内圈/外圈" in payload["spatial_narrative_guidance"]["relationship_lenses"]
+    assert "先说片区矛盾或机会" in payload["spatial_narrative_guidance"]["action_lenses"]
+    assert "文创游逛停留" in payload["spatial_narrative_guidance"]["scenario_lenses"]
     assert "不要逐项翻译指标面板" in payload["spatial_narrative_guidance"]["anti_patterns"]
+    assert "不要把行动建议写成工具流程" in payload["spatial_narrative_guidance"]["anti_patterns"]
     assert "place_anchors" not in json.dumps(payload["spatial_narrative_guidance"], ensure_ascii=False)
 
 
