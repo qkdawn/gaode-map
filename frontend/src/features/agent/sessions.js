@@ -120,6 +120,7 @@ function createAnalysisAgentInitialState() {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
+      pptPlanningTabs: [],
       deepAnalysisTabs: [],
       followupTabs: [],
       activeTabId: '',

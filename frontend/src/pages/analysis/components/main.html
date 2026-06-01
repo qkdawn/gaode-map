@@ -294,7 +294,7 @@
                         v-else
                         class="agent-app-center"
                         :class="{
-                            'is-empty': !isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating,
+                            'is-empty': !isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating,
                             'has-thread': agentHasConversationContent() || agentLoading || agentSessionHydrating
                         }">
                         <div
@@ -335,6 +335,13 @@
                                         :class="{ active: isAgentSiteSelectionTabActive() }"
                                         @click="openAgentSiteSelectionFromReport()">
                                         选址
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="agent-report-switch-btn"
+                                        :class="{ active: isAgentPptPlanningTabActive() }"
+                                        @click="openAgentPptPlanningFromReport()">
+                                        PPT
                                     </button>
                                     <button
                                         type="button"
@@ -1944,12 +1951,101 @@
                             </div>
                         </div>
 
-                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">
+                        <div v-else-if="isAgentPptPlanningTabActive()" class="agent-summary-tab-view is-detail">
+                            <div class="agent-ppt-planning-workbench">
+                                <div class="agent-ppt-notebook">
+                                    <aside class="agent-ppt-notebook-panel agent-ppt-sources-panel" aria-label="来源">
+                                        <div class="agent-ppt-notebook-head">
+                                            <h3>来源</h3>
+                                            <button type="button" class="agent-ppt-source-collapse-btn" disabled aria-label="折叠来源">
+                                                <span></span>
+                                                <span></span>
+                                            </button>
+                                        </div>
+                                        <button type="button" class="agent-ppt-add-source-btn" disabled>+ 添加来源</button>
+                                        <div class="agent-ppt-source-search">
+                                            <div class="agent-ppt-source-search-main">
+                                                <span>在网络中搜索新来源</span>
+                                                <div class="agent-ppt-source-search-chips">
+                                                    <button type="button" disabled>Web</button>
+                                                    <button type="button" disabled>Fast Research</button>
+                                                </div>
+                                            </div>
+                                            <button type="button" disabled>搜索</button>
+                                        </div>
+                                        <div class="agent-ppt-source-select-row">
+                                            <i aria-hidden="true"></i>
+                                            <span>全选</span>
+                                            <strong>✓</strong>
+                                        </div>
+                                        <div class="agent-ppt-source-list">
+                                            <article class="agent-ppt-source-row is-ready">
+                                                <span class="agent-ppt-source-icon"></span>
+                                                <strong>区域总结.md</strong>
+                                                <em>✓</em>
+                                            </article>
+                                            <article class="agent-ppt-source-row is-ready">
+                                                <span class="agent-ppt-source-icon"></span>
+                                                <strong>当前地图范围.json</strong>
+                                                <em>✓</em>
+                                            </article>
+                                            <article class="agent-ppt-source-row is-ready">
+                                                <span class="agent-ppt-source-icon"></span>
+                                                <strong>POI 人口 夜光 路网证据.xlsx</strong>
+                                                <em>✓</em>
+                                            </article>
+                                            <article class="agent-ppt-source-row">
+                                                <span class="agent-ppt-source-icon"></span>
+                                                <strong>附件素材待接入.pptx</strong>
+                                                <em></em>
+                                            </article>
+                                            <article class="agent-ppt-source-row">
+                                                <span class="agent-ppt-source-icon is-web"></span>
+                                                <strong>联网来源待研究.url</strong>
+                                                <em></em>
+                                            </article>
+                                        </div>
+                                    </aside>
+
+                                    <section class="agent-ppt-notebook-panel agent-ppt-document-panel" aria-label="策划文档">
+                                        <div class="agent-ppt-notebook-head">
+                                            <h3>策划文档</h3>
+                                            <span>15 页 · 政府评审</span>
+                                        </div>
+                                        <div class="agent-ppt-brief-list">
+                                            <article class="agent-ppt-brief-row is-active"><span>01</span><strong>封面</strong><em>项目命题</em></article>
+                                            <article class="agent-ppt-brief-row"><span>02</span><strong>区位判断</strong><em>地图与资源</em></article>
+                                            <article class="agent-ppt-brief-row"><span>03</span><strong>现状诊断</strong><em>指标证据</em></article>
+                                            <article class="agent-ppt-brief-row"><span>04</span><strong>更新策略</strong><em>功能与空间</em></article>
+                                            <article class="agent-ppt-brief-row"><span>05</span><strong>实施路径</strong><em>分期与运营</em></article>
+                                        </div>
+                                        <div class="agent-ppt-prompt-box">
+                                            <span>输入主题或生成要求</span>
+                                            <button type="button" disabled>生成</button>
+                                        </div>
+                                    </section>
+
+                                    <aside class="agent-ppt-notebook-panel agent-ppt-studio-panel" aria-label="Studio">
+                                        <div class="agent-ppt-notebook-head">
+                                            <h3>Studio</h3>
+                                        </div>
+                                        <div class="agent-ppt-studio-grid">
+                                            <button type="button" disabled>页面脚本</button>
+                                            <button type="button" disabled>幻灯片预览</button>
+                                            <button type="button" disabled>导出 PPTX</button>
+                                            <button type="button" disabled>引用检查</button>
+                                        </div>
+                                    </aside>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">
                             <div class="agent-hero-title">我们先从哪里开始呢？</div>
                             <div class="agent-hero-subtitle">先说问题，Agent 会调用已有工具和分析能力直接处理。</div>
                         </div>
 
-                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell" :class="{ 'agent-deep-analysis-thread': isAgentDeepAnalysisTabActive() }">
+                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell" :class="{ 'agent-deep-analysis-thread': isAgentDeepAnalysisTabActive() }">
                             <div
                                 ref="agentReportThreadBody"
                                 class="agent-report-thread-body agent-report-thread-body-main"

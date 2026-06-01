@@ -4698,6 +4698,16 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '区域内选址')
   assert.equal(ctx.shouldShowAgentComposer(), false)
 
+  const pptId = ctx.openAgentPptPlanningFromReport()
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'ppt_planning')
+  assert.equal(ctx.agentTabs.activeTabId, pptId)
+  assert.equal(ctx.isAgentPptPlanningTabActive(), true)
+  assert.equal(ctx.isAgentReportDetailView(), true)
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '策划 PPT')
+  assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '先生成策划文档和逐页页面脚本，再进入幻灯片生成')
+  assert.equal(ctx.shouldShowAgentComposer(), false)
+  assert.equal(ctx.openAgentPptPlanningFromReport(), pptId)
+
   ctx.returnToAgentReportHome()
   assert.equal(ctx.isAgentSummaryTabActive(), true)
   assert.equal(ctx.agentTabs.activeTabId, homeId)

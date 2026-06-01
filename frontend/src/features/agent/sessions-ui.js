@@ -193,6 +193,7 @@ function createAgentUiMethods() {
         summaryTabs: [],
         iterationChangeTabs: [],
         siteSelectionTabs: [],
+        pptPlanningTabs: [],
         deepAnalysisTabs: [],
         followupTabs: [],
         activeTabId: '',
@@ -210,12 +211,13 @@ function createAgentUiMethods() {
       if (normalized === 'summary') return '区域总结'
       if (normalized === 'iteration_change') return '多年迭代变化'
       if (normalized === 'site_selection') return '区域内选址'
+      if (normalized === 'ppt_planning') return '策划 PPT'
       if (normalized === 'deep_analysis') return '继续分析'
       return '追问解释'
     },
     extractAgentTabShortTitle(kind = '', seed = '') {
       const label = this.getAgentTabKindLabel(kind)
-      const raw = clampText(asText(seed).replace(/^(?:区域总结|多年迭代变化|区域内选址|继续分析|追问解释|总结|追问)\s*[·:：-]\s*/u, '').trim(), 24)
+      const raw = clampText(asText(seed).replace(/^(?:区域总结|多年迭代变化|区域内选址|策划 PPT|继续分析|追问解释|总结|追问)\s*[·:：-]\s*/u, '').trim(), 24)
       if (raw) return raw
       return label
     },
@@ -332,6 +334,8 @@ function createAgentUiMethods() {
       if (iterationChangeTab) return { ...cloneObject(iterationChangeTab), kind: 'iteration_change', fixed: false }
       const siteSelectionTab = cloneArray(tabs.siteSelectionTabs).find((item) => asText(item && item.id) === activeId)
       if (siteSelectionTab) return { ...cloneObject(siteSelectionTab), kind: 'site_selection', fixed: false }
+      const pptPlanningTab = cloneArray(tabs.pptPlanningTabs).find((item) => asText(item && item.id) === activeId)
+      if (pptPlanningTab) return { ...cloneObject(pptPlanningTab), kind: 'ppt_planning', fixed: false }
       const deepAnalysisTab = cloneArray(tabs.deepAnalysisTabs).find((item) => asText(item && item.id) === activeId)
       if (deepAnalysisTab) return { ...cloneObject(deepAnalysisTab), kind: 'deep_analysis', fixed: false }
       const followupTab = cloneArray(tabs.followupTabs).find((item) => asText(item && item.id) === activeId)
@@ -347,6 +351,9 @@ function createAgentUiMethods() {
     },
     createAgentSiteSelectionViewId() {
       return `site-selection-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    },
+    createAgentPptPlanningViewId() {
+      return `ppt-planning-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     },
     createAgentIterationChangeViewId() {
       return `iteration-change-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -2905,6 +2912,17 @@ function createAgentUiMethods() {
           createdAt: asText(item && item.createdAt) || new Date().toISOString(),
           panelPayloads: cloneObject(item && item.panelPayloads),
         })).filter((item) => item.id),
+        pptPlanningTabs: cloneArray(base.pptPlanningTabs).map((item) => ({
+          id: asText(item && item.id),
+          kind: 'ppt_planning',
+          title: asText(item && item.title) || '策划 PPT',
+          source: asText(item && item.source) || 'draft',
+          sessionId: asText(item && item.sessionId),
+          readonly: !!(item && item.readonly),
+          createdAt: asText(item && item.createdAt) || new Date().toISOString(),
+          panelPayloads: cloneObject(item && item.panelPayloads),
+          configDraft: cloneObject(item && item.configDraft),
+        })).filter((item) => item.id),
         deepAnalysisTabs: cloneArray(base.deepAnalysisTabs).map((item) => ({
           id: asText(item && item.id),
           kind: 'deep_analysis',
@@ -2975,9 +2993,17 @@ function createAgentUiMethods() {
         }]
       }
       nextTabs.summaryTabs = [...syncedCurrentSummaryTabs, ...historySummaryTabs]
-      const validIds = new Set([...nextTabs.summaryTabs.map((item) => item.id), ...nextTabs.iterationChangeTabs.map((item) => item.id), ...nextTabs.siteSelectionTabs.map((item) => item.id), ...nextTabs.deepAnalysisTabs.map((item) => item.id), ...nextTabs.followupTabs.map((item) => item.id)])
+      const validIds = new Set([...nextTabs.summaryTabs.map((item) => item.id), ...nextTabs.iterationChangeTabs.map((item) => item.id), ...nextTabs.siteSelectionTabs.map((item) => item.id), ...nextTabs.pptPlanningTabs.map((item) => item.id), ...nextTabs.deepAnalysisTabs.map((item) => item.id), ...nextTabs.followupTabs.map((item) => item.id)])
       if (!validIds.has(nextTabs.activeTabId)) {
-        nextTabs.activeTabId = nextTabs.summaryTabs[0] ? nextTabs.summaryTabs[0].id : (nextTabs.iterationChangeTabs[0] ? nextTabs.iterationChangeTabs[0].id : (nextTabs.siteSelectionTabs[0] ? nextTabs.siteSelectionTabs[0].id : (nextTabs.deepAnalysisTabs[0] ? nextTabs.deepAnalysisTabs[0].id : (nextTabs.followupTabs[0] ? nextTabs.followupTabs[0].id : ''))))
+        const fallbackTab = [
+          ...nextTabs.summaryTabs,
+          ...nextTabs.iterationChangeTabs,
+          ...nextTabs.siteSelectionTabs,
+          ...nextTabs.pptPlanningTabs,
+          ...nextTabs.deepAnalysisTabs,
+          ...nextTabs.followupTabs,
+        ].find((item) => asText(item && item.id))
+        nextTabs.activeTabId = asText(fallbackTab && fallbackTab.id)
       }
       nextTabs.summaryTab.content = defaultSummaryPack
       nextTabs.summaryTab.evidenceRefs = cloneArray((defaultSummaryPack.evidence_refs || []))
@@ -3013,6 +3039,14 @@ function createAgentUiMethods() {
           source: item.source || 'draft',
           sessionId: item.sessionId || '',
         })),
+        ...tabs.pptPlanningTabs.map((item) => ({
+          id: item.id,
+          title: item.title || '策划 PPT',
+          kind: 'ppt_planning',
+          closable: true,
+          source: item.source || 'draft',
+          sessionId: item.sessionId || '',
+        })),
         ...tabs.deepAnalysisTabs.map((item) => ({
           id: item.id,
           title: item.title || '继续分析',
@@ -3041,6 +3075,7 @@ function createAgentUiMethods() {
       const kind = asText(this.getAgentActiveTopTab().kind)
       if (kind === 'site_selection') return '区域报告 / 选址'
       if (kind === 'iteration_change') return '区域报告 / 变化'
+      if (kind === 'ppt_planning') return '区域报告 / PPT'
       if (kind === 'deep_analysis') return '区域报告 / 继续分析'
       if (kind === 'followup') return '区域报告 / 追问'
       return 'Agent 工作台'
@@ -3050,6 +3085,7 @@ function createAgentUiMethods() {
       const kind = asText(activeTab.kind)
       if (kind === 'site_selection') return '区域内选址'
       if (kind === 'iteration_change') return '多年变化'
+      if (kind === 'ppt_planning') return '策划 PPT'
       if (kind === 'deep_analysis') return '继续分析'
       if (kind === 'followup') return '追问解释'
       return '区域报告'
@@ -3058,13 +3094,14 @@ function createAgentUiMethods() {
       const kind = asText(this.getAgentActiveTopTab().kind)
       if (kind === 'site_selection') return '从区域报告进入的开店位置判断'
       if (kind === 'iteration_change') return '从区域报告进入的时间变化分析'
+      if (kind === 'ppt_planning') return '先生成策划文档和逐页页面脚本，再进入幻灯片生成'
       if (kind === 'deep_analysis') return '基于当前报告对象继续跑工具、生成新证据'
       if (kind === 'followup') return '围绕当前区域报告继续追问'
       if (this.hasAgentSummaryPack()) return '先看判断，再追问、查证据或继续做任务'
       return '先补齐证据并生成当前区域的智能报告'
     },
     isAgentReportDetailView() {
-      return ['site_selection', 'iteration_change', 'deep_analysis', 'followup'].includes(asText(this.getAgentActiveTopTab().kind))
+      return ['site_selection', 'iteration_change', 'ppt_planning', 'deep_analysis', 'followup'].includes(asText(this.getAgentActiveTopTab().kind))
     },
     returnToAgentReportHome() {
       const tabId = this.getAgentReportHomeTabId()
@@ -3084,6 +3121,16 @@ function createAgentUiMethods() {
       }
       return this.createAgentSiteSelectionTab({ title: '区域内选址', source: 'current' })
     },
+    openAgentPptPlanningFromReport(options = {}) {
+      this.agentWorkspaceView = 'report'
+      const tabs = this.ensureAgentTabs(true)
+      const existing = cloneArray(tabs.pptPlanningTabs).find((item) => asText(item && item.source) === 'current' || asText(item && item.source) === 'draft')
+      if (existing && !options.forceNew) {
+        this.switchAgentTopTab(existing.id)
+        return existing.id
+      }
+      return this.createAgentPptPlanningTab({ title: '策划 PPT', source: 'current' })
+    },
     openAgentIterationChangeFromReport(options = {}) {
       this.agentWorkspaceView = 'report'
       return this.createAgentIterationChangeTab({ reuseExisting: true, source: 'current', autoload: options.autoload !== false })
@@ -3096,6 +3143,9 @@ function createAgentUiMethods() {
     },
     isAgentSiteSelectionTabActive() {
       return asText(this.getAgentActiveTopTab().kind) === 'site_selection'
+    },
+    isAgentPptPlanningTabActive() {
+      return asText(this.getAgentActiveTopTab().kind) === 'ppt_planning'
     },
     isAgentDeepAnalysisTabActive() {
       return asText(this.getAgentActiveTopTab().kind) === 'deep_analysis'
@@ -3138,7 +3188,22 @@ function createAgentUiMethods() {
       const target = cloneArray(tabs.siteSelectionTabs).find((item) => item.id === activeTab.id)
       if (!target || target.readonly) return
       target.panelPayloads = cloneObject(this.agentPanelPayloads)
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), pptPlanningTabs: cloneArray(tabs.pptPlanningTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
+    },
+    getAgentActivePptPlanningTab() {
+      const tabs = this.ensureAgentTabs(false)
+      const activeId = asText(tabs.activeTabId)
+      return cloneArray(tabs.pptPlanningTabs).find((item) => asText(item && item.id) === activeId) || null
+    },
+    captureAgentActivePptPlanningTabState() {
+      const tabs = this.ensureAgentTabs(true)
+      const activeTab = this.getAgentActiveTopTab()
+      if (asText(activeTab.kind) !== 'ppt_planning') return
+      const target = cloneArray(tabs.pptPlanningTabs).find((item) => item.id === activeTab.id)
+      if (!target || target.readonly) return
+      target.panelPayloads = cloneObject(this.agentPanelPayloads)
+      target.configDraft = cloneObject(target.configDraft)
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), pptPlanningTabs: cloneArray(tabs.pptPlanningTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
     },
     getAgentActiveDeepAnalysisTab() {
       const tabs = this.ensureAgentTabs(false)
@@ -3162,6 +3227,7 @@ function createAgentUiMethods() {
       if (!nextId) return
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveSiteSelectionTabState()
+      this.captureAgentActivePptPlanningTabState()
       this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const tabs = this.ensureAgentTabs(true)
@@ -3184,6 +3250,12 @@ function createAgentUiMethods() {
         }
       } else if (tabs.siteSelectionTabs.some((item) => item.id === nextId)) {
         const target = tabs.siteSelectionTabs.find((item) => item.id === nextId)
+        this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
+        if (target && target.panelPayloads && typeof target.panelPayloads === 'object') {
+          this.agentPanelPayloads = cloneObject(target.panelPayloads)
+        }
+      } else if (tabs.pptPlanningTabs.some((item) => item.id === nextId)) {
+        const target = tabs.pptPlanningTabs.find((item) => item.id === nextId)
         this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
         if (target && target.panelPayloads && typeof target.panelPayloads === 'object') {
           this.agentPanelPayloads = cloneObject(target.panelPayloads)
@@ -3257,6 +3329,7 @@ function createAgentUiMethods() {
     createAgentSiteSelectionTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
       this.captureAgentActiveSummaryTabState()
+      this.captureAgentActivePptPlanningTabState()
       this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const tabId = this.createAgentSiteSelectionViewId()
@@ -3277,9 +3350,36 @@ function createAgentUiMethods() {
       this.syncCurrentAgentSession()
       return tabId
     },
+    createAgentPptPlanningTab(options = {}) {
+      const tabs = this.ensureAgentTabs(true)
+      this.captureAgentActiveSummaryTabState()
+      this.captureAgentActiveSiteSelectionTabState()
+      this.captureAgentActivePptPlanningTabState()
+      this.captureAgentActiveDeepAnalysisTabState()
+      this.captureAgentActiveFollowupTabState()
+      const tabId = this.createAgentPptPlanningViewId()
+      const tab = {
+        id: tabId,
+        kind: 'ppt_planning',
+        title: this.formatAgentTabTitle('ppt_planning', options.title),
+        source: asText(options.source) || 'draft',
+        sessionId: asText(options.sessionId),
+        readonly: !!options.readonly,
+        createdAt: new Date().toISOString(),
+        panelPayloads: cloneObject(this.agentPanelPayloads),
+        configDraft: cloneObject(options.configDraft),
+      }
+      tabs.pptPlanningTabs = [...cloneArray(tabs.pptPlanningTabs), tab]
+      tabs.activeTabId = tabId
+      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), pptPlanningTabs: cloneArray(tabs.pptPlanningTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
+      this.syncActiveAgentRuntimeView(this.activeAgentSessionId)
+      this.syncCurrentAgentSession()
+      return tabId
+    },
     createAgentIterationChangeTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
       this.captureAgentActiveSummaryTabState()
+      this.captureAgentActivePptPlanningTabState()
       this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const reuseExisting = !!options.reuseExisting
@@ -3320,6 +3420,7 @@ function createAgentUiMethods() {
       const tabs = this.ensureAgentTabs(true)
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveSiteSelectionTabState()
+      this.captureAgentActivePptPlanningTabState()
       this.captureAgentActiveFollowupTabState()
       const target = this.normalizeContextAskTarget(options.target)
       const question = asText(options.question)
@@ -3431,6 +3532,7 @@ function createAgentUiMethods() {
         window.alert(`最多可保留 ${tabs.followupLimit} 条追问解释，请先关闭旧追问。`)
         return null
       }
+      this.captureAgentActivePptPlanningTabState()
       this.captureAgentActiveFollowupTabState()
       const number = Number(tabs.nextFollowupNumber || (tabs.followupTabs.length + 1))
       const tabId = `followup-${number}`
@@ -7843,6 +7945,7 @@ function createAgentUiMethods() {
     buildAgentTabsUiState() {
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveSiteSelectionTabState()
+      this.captureAgentActivePptPlanningTabState()
       this.captureAgentActiveDeepAnalysisTabState()
       this.captureAgentActiveFollowupTabState()
       const tabs = this.ensureAgentTabs(true)
@@ -7887,6 +7990,17 @@ function createAgentUiMethods() {
           readonly: !!item.readonly,
           created_at: item.createdAt,
           panel_payloads: cloneObject(item.panelPayloads || this.agentPanelPayloads),
+        })),
+        ppt_planning_tabs: cloneArray(tabs.pptPlanningTabs).map((item) => ({
+          id: item.id,
+          title: item.title || '策划 PPT',
+          kind: 'ppt_planning',
+          source: item.source || 'draft',
+          session_id: item.sessionId || '',
+          readonly: !!item.readonly,
+          created_at: item.createdAt,
+          panel_payloads: cloneObject(item.panelPayloads || this.agentPanelPayloads),
+          config_draft: cloneObject(item.configDraft),
         })),
         deep_analysis_tabs: cloneArray(tabs.deepAnalysisTabs).map((item) => ({
           id: item.id,
@@ -7997,6 +8111,17 @@ function createAgentUiMethods() {
         createdAt: asText(item && item.created_at) || new Date().toISOString(),
         panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
       })).filter((item) => item.id)
+      const pptPlanningTabs = cloneArray(uiState.ppt_planning_tabs || uiState.pptPlanningTabs).map((item) => ({
+        id: asText(item && item.id),
+        kind: 'ppt_planning',
+        title: asText(item && item.title) || '策划 PPT',
+        source: asText(item && item.source) || 'draft',
+        sessionId: asText((item && (item.session_id || item.sessionId)) || ''),
+        readonly: !!(item && item.readonly && asText(item && item.source) !== 'history'),
+        createdAt: asText(item && item.created_at) || new Date().toISOString(),
+        panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
+        configDraft: cloneObject(item && (item.config_draft || item.configDraft)),
+      })).filter((item) => item.id)
       const deepAnalysisTabs = cloneArray(uiState.deep_analysis_tabs || uiState.deepAnalysisTabs).map((item) => ({
         id: asText(item && item.id),
         kind: 'deep_analysis',
@@ -8018,9 +8143,17 @@ function createAgentUiMethods() {
         summaryTabs,
         iterationChangeTabs,
         siteSelectionTabs,
+        pptPlanningTabs,
         deepAnalysisTabs,
         followupTabs,
-        activeTabId: activeId || (summaryTabs[0] ? summaryTabs[0].id : (iterationChangeTabs[0] ? iterationChangeTabs[0].id : (siteSelectionTabs[0] ? siteSelectionTabs[0].id : (deepAnalysisTabs[0] ? deepAnalysisTabs[0].id : (followupTabs[0] ? followupTabs[0].id : ''))))),
+        activeTabId: activeId || asText([
+          ...summaryTabs,
+          ...iterationChangeTabs,
+          ...siteSelectionTabs,
+          ...pptPlanningTabs,
+          ...deepAnalysisTabs,
+          ...followupTabs,
+        ].find((item) => asText(item && item.id))?.id),
         followupLimit: Number(uiState.followup_limit || 6) || 6,
         nextFollowupNumber: Number(uiState.next_followup_number || (followupTabs.length + 1) || 1) || 1,
       }
@@ -8037,6 +8170,11 @@ function createAgentUiMethods() {
           const activeSiteSelection = cloneArray(this.agentTabs.siteSelectionTabs).find((item) => item.id === this.agentTabs.activeTabId)
           if (activeSiteSelection && activeSiteSelection.panelPayloads && typeof activeSiteSelection.panelPayloads === 'object') {
             this.agentPanelPayloads = cloneObject(activeSiteSelection.panelPayloads)
+          }
+        } else if (asText(activeTopTab.kind) === 'ppt_planning') {
+          const activePptPlanning = cloneArray(this.agentTabs.pptPlanningTabs).find((item) => item.id === this.agentTabs.activeTabId)
+          if (activePptPlanning && activePptPlanning.panelPayloads && typeof activePptPlanning.panelPayloads === 'object') {
+            this.agentPanelPayloads = cloneObject(activePptPlanning.panelPayloads)
           }
         } else if (asText(activeTopTab.kind) === 'deep_analysis') {
           const activeDeepAnalysis = cloneArray(this.agentTabs.deepAnalysisTabs).find((item) => item.id === this.agentTabs.activeTabId)
