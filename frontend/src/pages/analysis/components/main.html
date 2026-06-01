@@ -85,7 +85,7 @@
                                                     <div class="agent-tool-row-head">
                                                         <div class="agent-tool-name">{{ tool.name }}</div>
                                                         <div class="agent-tool-badges">
-                                                            <span v-if="tool.uiTier === 'scenario'" class="agent-tool-badge is-primary">Planner 优先</span>
+                                                            <span v-if="tool.uiTier === 'scenario'" class="agent-tool-badge is-primary">场景优先</span>
                                                             <span class="agent-tool-badge">{{ getAgentToolLabel(tool.capabilityType) }}</span>
                                                             <span class="agent-tool-readonly" :class="{ 'is-write': !tool.readonly }">
                                                                 {{ tool.readonly ? '只读' : '会写入' }}
@@ -127,7 +127,7 @@
                                     <button type="button" class="agent-tool-detail-close" aria-label="关闭工具详情" @click="closeAgentToolDetail">×</button>
                                 </div>
                                 <div class="agent-tool-badges agent-tool-detail-badges">
-                                    <span v-if="getAgentToolDetail().uiTier === 'scenario'" class="agent-tool-badge is-primary">Planner 优先</span>
+                                    <span v-if="getAgentToolDetail().uiTier === 'scenario'" class="agent-tool-badge is-primary">场景优先</span>
                                     <span v-if="getAgentToolDetail().defaultPolicyKey" class="agent-tool-badge">{{ getAgentToolDetail().defaultPolicyKey }}</span>
                                     <span class="agent-tool-readonly" :class="{ 'is-write': !getAgentToolDetail().readonly }">
                                         {{ getAgentToolDetail().readonly ? '只读' : '会写入' }}
@@ -596,73 +596,6 @@
                                             class="agent-shortcut-chip"
                                             @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: 'tourism_cross_analysis', title: getAgentSummaryTourismCrossAnalysis().title, summary: getAgentSummaryTourismCrossAnalysis().content }), { resetMessages: true })">
                                             追问
-                                        </button>
-                                    </div>
-                                </section>
-                                <section
-                                    v-for="module in getAgentSummaryDeepAnalysisModules()"
-                                    :key="`summary-deep-module-${module.id}`"
-                                    class="agent-summary-card agent-summary-card-wide agent-deep-module-card">
-                                    <div class="agent-summary-card-head">
-                                        <div>
-                                            <input
-                                                v-if="agentEditingDeepModuleId === module.id"
-                                                v-model="agentEditingDeepModuleDraft.title"
-                                                class="agent-report-edit-title"
-                                                aria-label="编辑写回模块标题">
-                                            <div v-else class="agent-summary-card-title">{{ module.title }}</div>
-                                            <div class="agent-summary-line">模式：{{ getAgentDeepAnalysisModeLabel(module.mode) }} · 来源：{{ getContextAskSourceLabel(module.source) }}</div>
-                                        </div>
-                                        <div class="agent-report-edit-actions">
-                                            <button
-                                                v-if="agentEditingDeepModuleId !== module.id"
-                                                type="button"
-                                                class="agent-mini-icon-btn"
-                                                title="编辑"
-                                                aria-label="编辑写回模块"
-                                                @click="startEditAgentDeepAnalysisModule(module)">
-                                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"></path><path d="M13.5 7.5l3 3"></path></svg>
-                                            </button>
-                                            <template v-else>
-                                                <button type="button" class="agent-mini-text-btn" @click="saveAgentDeepAnalysisModuleEdit(module)">保存</button>
-                                                <button type="button" class="agent-mini-text-btn" @click="cancelEditAgentDeepAnalysisModule">取消</button>
-                                            </template>
-                                        </div>
-                                    </div>
-                                    <textarea
-                                        v-if="agentEditingDeepModuleId === module.id"
-                                        v-model="agentEditingDeepModuleDraft.conclusion"
-                                        class="agent-report-edit-textarea"
-                                        aria-label="编辑写回模块正文"></textarea>
-                                    <div v-else class="agent-summary-longtext">{{ module.conclusion }}</div>
-                                    <div v-if="module.support.length" class="agent-summary-kv">
-                                        <div v-for="(item, idx) in module.support.slice(0, 4)" :key="`summary-deep-module-${module.id}-support-${idx}`">
-                                            <strong>{{ item.headline || item.metric || '证据' }}</strong>
-                                            <span>{{ item.interpretation || item.source || '' }}</span>
-                                        </div>
-                                    </div>
-                                    <div v-if="module.actions.length" class="agent-summary-actions">
-                                        <button
-                                            v-for="(item, idx) in module.actions.slice(0, 3)"
-                                            :key="`summary-deep-module-${module.id}-action-${idx}`"
-                                            type="button"
-                                            class="agent-shortcut-chip"
-                                            @click="openAgentDeepAnalysisFromTarget(module.target, { question: item.prompt || item.title || item.detail, mode: module.mode })">
-                                            {{ item.title || item.detail || '继续分析' }}
-                                        </button>
-                                    </div>
-                                    <div class="agent-summary-actions">
-                                        <button
-                                            type="button"
-                                            class="agent-shortcut-chip"
-                                            @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: module.id, title: module.title, summary: module.conclusion, evidence: module.support }), { resetMessages: true })">
-                                            追问
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="agent-shortcut-chip"
-                                            @click="openAgentDeepAnalysisFromTarget(module.target, { question: module.question, mode: module.mode })">
-                                            继续分析
                                         </button>
                                     </div>
                                 </section>
@@ -2051,8 +1984,10 @@
                                                     class="agent-thinking-toggle"
                                                     @click="toggleAgentMessageProcessExpanded(message, index)">
                                                     <span class="agent-thinking-dot"></span>
-                                                    <span>{{ getAgentMessageProcessStatusLabel(message) }}</span>
-                                                    <span class="agent-thinking-chevron" :class="{ 'is-open': isAgentMessageProcessExpanded(message, index) }">⌄</span>
+                                                    <span class="agent-thinking-toggle-label">{{ getAgentMessageProcessStatusLabel(message) }}</span>
+                                                    <span class="agent-thinking-toggle-icon">
+                                                        <span class="agent-thinking-chevron" :class="{ 'is-open': isAgentMessageProcessExpanded(message, index) }">⌄</span>
+                                                    </span>
                                                 </button>
                                             </div>
 
@@ -2180,126 +2115,11 @@
                                     </div>
                                 </div>
 
-                                <div v-if="hasAgentStructuredOutput()" class="agent-message-row is-assistant">
-                                    <div class="agent-message-bubble is-assistant agent-card-bubble">
-                                        <div class="agent-decision-layout">
-                                            <div class="agent-card agent-card-decision">
-                                                <div class="agent-card-type">decision</div>
-                                                <div class="agent-card-title">核心判断</div>
-                                                <div class="agent-card-content">{{ agentDecision.summary }}</div>
-                                                <div class="agent-decision-badges">
-                                                    <span class="agent-decision-badge">{{ getAgentDecisionStrengthLabel(agentDecision.strength) }}</span>
-                                                    <span class="agent-decision-badge is-muted">{{ getAgentDecisionModeLabel(agentDecision.mode) }}</span>
-                                                    <span v-if="agentDecision.canAct" class="agent-decision-badge is-positive">可直接推进</span>
-                                                </div>
-                                            </div>
-
-                                            <div v-if="agentSupport.length" class="agent-card">
-                                                <div class="agent-card-type">support</div>
-                                                <div class="agent-card-title">为什么这样判断</div>
-                                                <ul class="agent-card-items">
-                                                    <li v-for="(item, index) in agentSupport" :key="getAgentStructuredItemKey(item, index)">
-                                                        <span class="agent-structured-headline">{{ item.headline || item.metric }}</span>
-                                                        <span class="agent-structured-detail">{{ item.interpretation }}</span>
-                                                        <span class="agent-structured-meta">来源：{{ item.source || '未标注' }}；置信度：{{ item.confidence || 'weak' }}</span>
-                                                    </li>
-                                                </ul>
-                                            </div>
-
-                                            <div v-if="agentCounterpoints.length || agentBoundary.length" class="agent-card">
-                                                <div class="agent-card-type">counterpoints</div>
-                                                <div class="agent-card-title">还不能判断什么</div>
-                                                <ul class="agent-card-items">
-                                                    <li v-for="(item, index) in agentCounterpoints" :key="`agent-counterpoint-${getAgentStructuredItemKey(item, index)}`">
-                                                        <span class="agent-structured-headline">{{ item.title || '约束' }}</span>
-                                                        <span class="agent-structured-detail">{{ item.detail }}</span>
-                                                    </li>
-                                                    <li v-for="(item, index) in agentBoundary" :key="`agent-boundary-${getAgentStructuredItemKey(item, index)}`">
-                                                        <span class="agent-structured-headline">{{ item.title || '适用边界' }}</span>
-                                                        <span class="agent-structured-detail">{{ item.detail }}</span>
-                                                    </li>
-                                                </ul>
-                                            </div>
-
-                                            <div v-if="shouldShowAgentReviewContract()" class="agent-card agent-review-contract-card">
-                                                <div class="agent-card-type">review contract</div>
-                                                <div class="agent-card-title">深度审查契约</div>
-                                                <div class="agent-review-contract-grid">
-                                                    <div
-                                                        v-for="item in getAgentReviewContractItems()"
-                                                        :key="`agent-review-contract-${item.key}`"
-                                                        class="agent-review-contract-item"
-                                                        :class="`is-${item.status}`">
-                                                        <div class="agent-review-contract-head">
-                                                            <span>{{ item.label }}</span>
-                                                            <em>{{ getAgentReviewContractStatusLabel(item.status) }}</em>
-                                                        </div>
-                                                        <div v-if="item.summary" class="agent-review-contract-summary">{{ item.summary }}</div>
-                                                        <div v-if="item.evidence.length" class="agent-review-contract-meta">证据：{{ item.evidence.slice(0, 2).join('；') }}</div>
-                                                        <div v-if="item.gaps.length" class="agent-review-contract-meta is-gap">缺口：{{ item.gaps.slice(0, 2).join('；') }}</div>
-                                                        <div v-if="item.nextQuestion" class="agent-review-contract-question">{{ item.nextQuestion }}</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <div v-if="agentActions.length" class="agent-card">
-                                                <div class="agent-card-type">actions</div>
-                                                <div class="agent-card-title">下一步怎么做</div>
-                                                <ul class="agent-card-items">
-                                                    <li v-for="(item, index) in agentActions" :key="`agent-action-${getAgentStructuredItemKey(item, index)}`">
-                                                        <button
-                                                            v-if="hasAgentActionPrompt(item)"
-                                                            type="button"
-                                                            class="agent-card-item-btn"
-                                                            @click="onAgentActionPromptClick(item)">
-                                                            {{ item.title || item.detail }}
-                                                        </button>
-                                                        <span v-else class="agent-structured-headline">{{ item.title || item.detail }}</span>
-                                                        <div v-if="item.detail" class="agent-structured-detail">{{ item.detail }}</div>
-                                                        <div v-if="item.condition || item.target" class="agent-structured-meta">
-                                                            <span v-if="item.condition">触发条件：{{ item.condition }}</span>
-                                                            <span v-if="item.target">目标：{{ item.target }}</span>
-                                                        </div>
-                                                    </li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div v-else-if="agentCards.length" class="agent-message-row is-assistant">
-                                    <div class="agent-message-bubble is-assistant agent-card-bubble">
-                                        <div v-for="(card, index) in agentCards" :key="`agent-main-card-${index}`" class="agent-card">
-                                            <div class="agent-card-type">{{ card.type }}</div>
-                                            <div class="agent-card-title">{{ card.title }}</div>
-                                            <div class="agent-card-content">{{ card.content }}</div>
-                                            <ul v-if="card.items && card.items.length" class="agent-card-items">
-                                                <li v-for="(item, itemIndex) in card.items" :key="getAgentCardItemKey(item, itemIndex)">
-                                                    <button
-                                                        v-if="isAgentCardActionItem(item)"
-                                                        type="button"
-                                                        class="agent-card-item-btn"
-                                                        @click="onAgentCardItemClick(item)">
-                                                        {{ getAgentCardItemText(item) }}
-                                                    </button>
-                                                    <span v-else>{{ getAgentCardItemText(item) }}</span>
-                                                </li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div v-if="agentResearchNotes.length || agentNextSuggestions.length || agentCitations.length" class="agent-meta-inline">
+                                <div v-if="agentResearchNotes.length || agentCitations.length" class="agent-meta-inline">
                                 <div v-if="agentResearchNotes.length" class="agent-meta-group">
                                         <div class="agent-meta-title">研究笔记</div>
                                         <ul class="agent-meta-list">
                                             <li v-for="(item, index) in agentResearchNotes" :key="`agent-main-note-${index}`">{{ item }}</li>
-                                        </ul>
-                                    </div>
-                                    <div v-if="agentNextSuggestions.length" class="agent-meta-group">
-                                        <div class="agent-meta-title">下一步建议</div>
-                                        <ul class="agent-meta-list">
-                                            <li v-for="(item, index) in agentNextSuggestions" :key="`agent-main-next-${index}`">{{ item }}</li>
                                         </ul>
                                     </div>
                                     <div v-if="agentCitations.length" class="agent-meta-group">
@@ -2310,19 +2130,6 @@
                                     </div>
                                 </div>
                                 </template>
-                            </div>
-                        </div>
-
-                        <div v-if="isAgentDeepAnalysisTabActive() && getAgentDeepAnalysisPreviewModule()" class="agent-message-row is-assistant agent-deep-analysis-writeback-row">
-                            <div class="agent-reply-inline-actions">
-                                <button
-                                    type="button"
-                                    class="agent-reply-icon-action"
-                                    title="写回报告"
-                                    aria-label="写回报告"
-                                    @click="writeAgentDeepAnalysisModuleToReport(getAgentDeepAnalysisPreviewModule())">
-                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"></path><path d="M15 4v5h5"></path><path d="M8 14h8"></path><path d="M8 17h6"></path></svg>
-                                </button>
                             </div>
                         </div>
 

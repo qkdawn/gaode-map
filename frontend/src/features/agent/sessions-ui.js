@@ -167,7 +167,7 @@ function createAgentUiMethods() {
       }
       return Boolean(
         (Array.isArray(this.agentMessages) && this.agentMessages.length)
-        || (Array.isArray(this.agentCards) && this.agentCards.length)
+        || asText(this.agentAnswer)
         || this.agentError
         || this.agentClarificationQuestion
         || this.agentRiskPrompt,
@@ -248,19 +248,13 @@ function createAgentUiMethods() {
         input: String(normalized.input || ''),
         status: String(normalized.status || 'idle'),
         stage: String(normalized.stage || 'gating'),
+        answer: String(normalized.answer || ''),
         messages: cloneArray(normalized.messages),
-        cards: cloneArray(normalized.cards),
-        decision: cloneObject(normalized.decision || { summary: '', mode: 'judgment', strength: 'weak', canAct: false }),
-        support: cloneArray(normalized.support),
-        counterpoints: cloneArray(normalized.counterpoints),
-        actions: cloneArray(normalized.actions),
-        boundary: cloneArray(normalized.boundary),
         executionTrace: cloneArray(normalized.executionTrace),
         usedTools: cloneArray(normalized.usedTools),
         citations: cloneArray(normalized.citations),
         researchNotes: cloneArray(normalized.researchNotes),
         auditIssues: cloneArray(normalized.auditIssues),
-        nextSuggestions: cloneArray(normalized.nextSuggestions),
         clarificationQuestion: String(normalized.clarificationQuestion || ''),
         clarificationOptions: cloneArray(normalized.clarificationOptions),
         riskPrompt: String(normalized.riskPrompt || ''),
@@ -281,20 +275,13 @@ function createAgentUiMethods() {
         input: this.agentInput,
         status: this.agentStatus,
         stage: this.agentStage,
+        answer: this.agentAnswer,
         messages: this.agentMessages,
-        cards: this.agentCards,
-        decision: this.agentDecision,
-        support: this.agentSupport,
-        counterpoints: this.agentCounterpoints,
-        actions: this.agentActions,
-        boundary: this.agentBoundary,
-        reviewContract: this.agentReviewContract,
         executionTrace: this.agentExecutionTrace,
         usedTools: this.agentUsedTools,
         citations: this.agentCitations,
         researchNotes: this.agentResearchNotes,
         auditIssues: this.agentAuditIssues,
-        nextSuggestions: this.agentNextSuggestions,
         clarificationQuestion: this.agentClarificationQuestion,
         clarificationOptions: this.agentClarificationOptions,
         riskPrompt: this.agentRiskPrompt,
@@ -315,20 +302,13 @@ function createAgentUiMethods() {
       this.agentInput = String(state.input || '')
       this.agentStatus = String(state.status || 'idle')
       this.agentStage = String(state.stage || 'gating')
+      this.agentAnswer = String(state.answer || '')
       this.agentMessages = cloneArray(state.messages)
-      this.agentCards = cloneArray(state.cards)
-      this.agentDecision = cloneObject(state.decision)
-      this.agentSupport = cloneArray(state.support)
-      this.agentCounterpoints = cloneArray(state.counterpoints)
-      this.agentActions = cloneArray(state.actions)
-      this.agentBoundary = cloneArray(state.boundary)
-      this.agentReviewContract = cloneObject(state.reviewContract)
       this.agentExecutionTrace = cloneArray(state.executionTrace)
       this.agentUsedTools = cloneArray(state.usedTools)
       this.agentCitations = cloneArray(state.citations)
       this.agentResearchNotes = cloneArray(state.researchNotes)
       this.agentAuditIssues = cloneArray(state.auditIssues)
-      this.agentNextSuggestions = cloneArray(state.nextSuggestions)
       this.agentClarificationQuestion = String(state.clarificationQuestion || '')
       this.agentClarificationOptions = cloneArray(state.clarificationOptions)
       this.agentRiskPrompt = String(state.riskPrompt || '')
@@ -2346,13 +2326,7 @@ function createAgentUiMethods() {
         status: 'idle',
         stage: 'gating',
         output: {
-          cards: [],
           panelPayloads: payloads,
-          decision: { summary: '', mode: 'judgment', strength: 'weak', canAct: false },
-          support: [],
-          counterpoints: [],
-          actions: [],
-          boundary: [],
         },
         diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], error: '' },
         contextSummary: {},
@@ -2367,19 +2341,12 @@ function createAgentUiMethods() {
       this.agentInput = ''
       this.agentStatus = 'idle'
       this.agentStage = 'gating'
-      this.agentCards = []
-      this.agentDecision = { summary: '', mode: 'judgment', strength: 'weak', canAct: false }
-      this.agentSupport = []
-      this.agentCounterpoints = []
-      this.agentActions = []
-      this.agentBoundary = []
-      this.agentReviewContract = {}
+      this.agentAnswer = ''
       this.agentExecutionTrace = []
       this.agentUsedTools = []
       this.agentCitations = []
       this.agentResearchNotes = []
       this.agentAuditIssues = []
-      this.agentNextSuggestions = []
       this.agentMessages = []
       this.agentPanelPayloads = payloads
       this.agentSummaryReadiness = readiness
@@ -2826,13 +2793,7 @@ function createAgentUiMethods() {
           stage: 'answered',
           input: '',
           messages: [],
-          cards: [],
-          decision: this.agentDecision,
-          support: this.agentSupport,
-          counterpoints: this.agentCounterpoints,
-          actions: this.agentActions,
-          boundary: this.agentBoundary,
-          reviewContract: this.agentReviewContract,
+          answer: '',
           executionTrace: this.agentExecutionTrace,
           usedTools: this.agentUsedTools,
           citations: this.agentCitations,
@@ -3463,136 +3424,6 @@ function createAgentUiMethods() {
         .map((item) => clampText(item, 120))
         .filter(Boolean)
         .join('；')
-    },
-    buildAgentDeepAnalysisResultModule(seed = {}) {
-      const activeTab = this.getAgentActiveDeepAnalysisTab()
-      const target = this.normalizeContextAskTarget((seed && seed.target) || (activeTab && activeTab.target))
-      const decision = cloneObject(seed.decision || this.agentDecision)
-      const support = cloneArray(seed.support || this.agentSupport)
-      const actions = cloneArray(seed.actions || this.agentActions)
-      const counterpoints = cloneArray(seed.counterpoints || this.agentCounterpoints)
-      const boundary = cloneArray(seed.boundary || this.agentBoundary)
-      const question = asText(seed.question || (activeTab && activeTab.question) || this.agentInput || (this.agentMessages[0] && this.agentMessages[0].content))
-      const titleSeed = asText(seed.title || decision.summary || question || target.title)
-      return {
-        id: asText(seed.id) || `deep-module-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-        type: 'deep_analysis',
-        title: asText(seed.title) || this.formatAgentTabTitle('deep_analysis', titleSeed),
-        mode: asText(seed.mode || this.agentDeepAnalysisMode) === 'deep' ? 'deep' : 'quick',
-        source: target.source,
-        target,
-        question,
-        conclusion: asText(seed.conclusion || decision.summary),
-        strength: asText(decision.strength || 'weak') || 'weak',
-        support,
-        actions,
-        counterpoints,
-        boundary,
-        evidence: cloneArray(seed.evidence || this.agentCitations || target.evidence),
-        trace: cloneArray(seed.trace || this.agentExecutionTrace),
-        createdAt: asText(seed.createdAt) || new Date().toISOString(),
-      }
-    },
-    getAgentDeepAnalysisPreviewModule() {
-      if (!this.hasAgentStructuredOutput()) return null
-      return this.buildAgentDeepAnalysisResultModule()
-    },
-    getAgentSummaryDeepAnalysisModules(panelPayloads = null) {
-      const pack = this.getAgentSummaryPack(panelPayloads)
-      return cloneArray(pack.deep_analysis_modules || pack.deepAnalysisModules)
-        .map((item) => this.buildAgentDeepAnalysisResultModule(item))
-        .filter((item) => item.id && item.conclusion)
-    },
-    writeAgentDeepAnalysisModuleToReport(moduleSeed = null) {
-      const module = this.buildAgentDeepAnalysisResultModule(moduleSeed || {})
-      if (!module.conclusion) return null
-      const tabs = this.ensureAgentTabs(true)
-      const summaryTab = cloneArray(tabs.summaryTabs).find((item) => asText(item.source) === 'current') || tabs.summaryTabs[0]
-      if (!summaryTab) return null
-      const panelPayloads = cloneObject(summaryTab.panelPayloads || this.agentPanelPayloads)
-      const summaryPack = this.getAgentSummaryPack(panelPayloads)
-      const modules = cloneArray(summaryPack.deep_analysis_modules || summaryPack.deepAnalysisModules)
-      const exists = modules.some((item) => asText(item && item.id) === module.id)
-      const nextModules = exists
-        ? modules.map((item) => (asText(item && item.id) === module.id ? module : item))
-        : [...modules, module]
-      const nextPack = {
-        ...summaryPack,
-        deep_analysis_modules: nextModules,
-      }
-      const nextPayloads = {
-        ...panelPayloads,
-        summary_pack: nextPack,
-      }
-      tabs.summaryTabs = cloneArray(tabs.summaryTabs).map((item) => (
-        item.id === summaryTab.id
-          ? { ...item, panelPayloads: nextPayloads, content: nextPack, evidenceRefs: cloneArray(nextPack.evidence_refs || item.evidenceRefs) }
-          : item
-      ))
-      const activeDeepTab = this.getAgentActiveDeepAnalysisTab()
-      if (activeDeepTab) {
-        tabs.deepAnalysisTabs = cloneArray(tabs.deepAnalysisTabs).map((item) => (
-          item.id === activeDeepTab.id ? { ...item, resultModuleId: module.id } : item
-        ))
-      }
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs) }
-      if (asText(this.getAgentActiveTopTab().kind) === 'summary' || asText(summaryTab.source) === 'current') {
-        this.agentPanelPayloads = nextPayloads
-        this.syncAgentSummaryStateFromPanelPayload(nextPayloads)
-      }
-      this.syncCurrentAgentSession()
-      return module
-    },
-    startEditAgentDeepAnalysisModule(moduleSeed = null) {
-      const module = this.buildAgentDeepAnalysisResultModule(moduleSeed || {})
-      if (!module.id) return null
-      this.agentEditingDeepModuleId = module.id
-      this.agentEditingDeepModuleDraft = {
-        title: asText(module.title),
-        conclusion: asText(module.conclusion),
-      }
-      return module.id
-    },
-    cancelEditAgentDeepAnalysisModule() {
-      this.agentEditingDeepModuleId = ''
-      this.agentEditingDeepModuleDraft = { title: '', conclusion: '' }
-    },
-    saveAgentDeepAnalysisModuleEdit(moduleSeed = null) {
-      const module = this.buildAgentDeepAnalysisResultModule(moduleSeed || {})
-      const moduleId = asText(module.id || this.agentEditingDeepModuleId)
-      if (!moduleId) return null
-      const title = asText(this.agentEditingDeepModuleDraft && this.agentEditingDeepModuleDraft.title) || module.title
-      const conclusion = asText(this.agentEditingDeepModuleDraft && this.agentEditingDeepModuleDraft.conclusion) || module.conclusion
-      const tabs = this.ensureAgentTabs(true)
-      const summaryTab = cloneArray(tabs.summaryTabs).find((item) => asText(item.source) === 'current') || tabs.summaryTabs[0]
-      if (!summaryTab) return null
-      const panelPayloads = cloneObject(summaryTab.panelPayloads || this.agentPanelPayloads)
-      const summaryPack = this.getAgentSummaryPack(panelPayloads)
-      const modules = cloneArray(summaryPack.deep_analysis_modules || summaryPack.deepAnalysisModules)
-      const nextModules = modules.map((item) => (
-        asText(item && item.id) === moduleId
-          ? { ...cloneObject(item), title, conclusion }
-          : item
-      ))
-      const nextPack = {
-        ...summaryPack,
-        deep_analysis_modules: nextModules,
-      }
-      const nextPayloads = {
-        ...panelPayloads,
-        summary_pack: nextPack,
-      }
-      tabs.summaryTabs = cloneArray(tabs.summaryTabs).map((item) => (
-        item.id === summaryTab.id
-          ? { ...item, panelPayloads: nextPayloads, content: nextPack, evidenceRefs: cloneArray(nextPack.evidence_refs || item.evidenceRefs) }
-          : item
-      ))
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs) }
-      this.agentPanelPayloads = nextPayloads
-      this.syncAgentSummaryStateFromPanelPayload(nextPayloads)
-      this.cancelEditAgentDeepAnalysisModule()
-      this.syncCurrentAgentSession()
-      return this.buildAgentDeepAnalysisResultModule({ ...module, title, conclusion })
     },
     createAgentFollowupTab(options = {}) {
       const tabs = this.ensureAgentTabs(true)
@@ -6794,7 +6625,7 @@ function createAgentUiMethods() {
       const source = cloneObject(value || {})
       return {
         evidence_version: asText(source.evidence_version) || 'poi_raster_grid_evidence_v1',
-        grid_type: asText(source.grid_type) || 'raster',
+        grid_type: asText(source.grid_type) || 'shared_raster',
         params: cloneObject(source.params),
         summary: cloneObject(source.summary),
         counts: cloneObject(source.counts),
@@ -7190,10 +7021,10 @@ function createAgentUiMethods() {
       const params = cloneObject(bundle.params || {})
       return {
         evidence_version: 'poi_raster_grid_evidence_v1',
-        grid_type: 'raster',
+        grid_type: 'shared_raster',
         params: {
           poi_year: Number(this.poiYearSource || this.resultPoiYear || 0) || null,
-          raster: cloneObject(params || {}),
+          shared: cloneObject(params || {}),
         },
         summary: cloneObject(this.poiGridSummary || {}),
         counts: {
@@ -8485,7 +8316,7 @@ function createAgentUiMethods() {
             ? '底层数据与计算能力，主要用于补证和兜底。'
             : tierKey === 'capability'
               ? '把获取、分析、解释、决策固化为统一能力接口。'
-              : '面向真实任务场景，供 Planner 优先选择。',
+              : '面向真实任务场景，默认优先使用场景工具。',
           subgroups: Array.from(subgroupMap.entries()).map(([subgroupKey, subgroupTools]) => ({
             key: subgroupKey,
             label: this.getAgentToolLabel(subgroupKey),
@@ -8695,49 +8526,6 @@ function createAgentUiMethods() {
         isLoading: this.agentLoading,
       })
     },
-    isAgentReactLoopProcess() {
-      return cloneArray(this.agentThinkingTimeline).some((item) => {
-        const meta = cloneObject(item && item.meta)
-        return !!meta.reactLoop || asText(item && item.phase) === 'react_loop'
-      })
-    },
-    getAgentReactProcessMessages() {
-      if (!this.isAgentReactLoopProcess()) return []
-      const visibleTypes = new Set(['thought', 'action', 'observation', 'reflection', 'error'])
-      return cloneArray(this.agentThinkingTimeline)
-        .map((item) => {
-          const meta = cloneObject(item && item.meta)
-          const reactType = asText(meta.reactType)
-          const raw = cloneObject(meta.raw)
-          const detail = asText(item && item.detail)
-          if (!visibleTypes.has(reactType) || !detail) return null
-          const labels = {
-            thought: '思考',
-            action: '行动',
-            observation: '观察',
-            reflection: '复盘',
-            error: '异常',
-          }
-          const tool = asText(meta.tool_label || meta.tool || raw.tool_label || raw.tool)
-          const argumentSummary = asText(raw.arguments_summary)
-          const evidenceCount = raw.evidence_count
-          const warningCount = raw.warning_count
-          const metaParts = []
-          if (argumentSummary && argumentSummary !== '无参数') metaParts.push(`参数：${argumentSummary}`)
-          if (evidenceCount !== undefined && evidenceCount !== null && String(evidenceCount) !== '') metaParts.push(`证据：${evidenceCount} 条`)
-          if (warningCount !== undefined && warningCount !== null && Number(warningCount) > 0) metaParts.push(`警告：${warningCount} 条`)
-          return {
-            id: asText(item && item.id),
-            type: reactType,
-            label: labels[reactType] || '过程',
-            content: detail,
-            tool,
-            metaParts,
-            state: asText(item && item.state) || 'pending',
-          }
-        })
-        .filter(Boolean)
-    },
     agentHasThinkingContent() {
       return !!(
         this.agentLoading
@@ -8920,12 +8708,12 @@ function createAgentUiMethods() {
           description: '\u6c47\u603b\u5f53\u524d\u8303\u56f4\u3001\u9762\u677f\u72b6\u6001\u548c\u53ef\u590d\u7528\u5206\u6790\u7ed3\u679c\u3002',
         },
         planning: {
-          title: 'Planner',
-          description: '\u89c4\u5212\u672c\u8f6e\u8981\u8c03\u7528\u7684\u5de5\u5177\u548c\u8bc1\u636e\u94fe\u3002',
+          title: '\u5de5\u5177\u5224\u65ad',
+          description: '\u5224\u65ad\u8fd9\u4e00\u8f6e\u6700\u8be5\u5148\u8c03\u4ec0\u4e48\u5de5\u5177\uff0c\u4ee5\u53ca\u8fd8\u9700\u8981\u8865\u54ea\u4e9b\u8bc1\u636e\u3002',
         },
         replanning: {
-          title: 'Planner \u590d\u76d8',
-          description: '\u6839\u636e\u73b0\u573a\u53d8\u91cf\uff0c\u8c03\u6574\u8def\u7ebf\u6216\u66f4\u6362\u6267\u884c\u6b65\u9aa4\u3002',
+          title: '\u7ee7\u7eed\u5224\u65ad',
+          description: '\u6839\u636e\u65b0\u8bc1\u636e\u8c03\u6574\u4e0b\u4e00\u6b65\u8981\u4e0d\u8981\u7ee7\u7eed\u8c03\u5de5\u5177\u3002',
         },
         tool_confirmation: {
           title: '\u5de5\u5177\u786e\u8ba4',
@@ -8946,10 +8734,6 @@ function createAgentUiMethods() {
         answering: {
           title: '\u8f93\u51fa\u56de\u7b54',
           description: '\u56de\u7b54\u751f\u6210\u4e2d\uff0c\u7ec4\u7ec7\u7ed3\u6784\u5316\u5185\u5bb9\u3002',
-        },
-        react_loop: {
-          title: 'ReAct \u5faa\u73af',
-          description: '\u6309\u601d\u8003\u3001\u884c\u52a8\u3001\u89c2\u5bdf\u7684\u987a\u5e8f\u5c55\u793a Agent \u6b63\u5728\u505a\u4ec0\u4e48\u3002',
         },
         answered: {
           title: '\u5df2\u5b8c\u6210',
@@ -8976,7 +8760,6 @@ function createAgentUiMethods() {
         'auditing',
         'synthesizing',
         'answering',
-        'react_loop',
         'answered',
         'requires_clarification',
         'failed',
@@ -9289,78 +9072,6 @@ function createAgentUiMethods() {
         return cloneObject(targetSession.panelPayloads)
       }
       return cloneObject(this.agentPanelPayloads)
-    },
-    hasAgentStructuredOutput() {
-      return !!(
-        asText(this.agentDecision && this.agentDecision.summary)
-        || (Array.isArray(this.agentSupport) && this.agentSupport.length)
-        || (Array.isArray(this.agentActions) && this.agentActions.length)
-        || (Array.isArray(this.agentCounterpoints) && this.agentCounterpoints.length)
-        || (Array.isArray(this.agentBoundary) && this.agentBoundary.length)
-        || this.shouldShowAgentReviewContract()
-      )
-    },
-    shouldShowAgentReviewContract() {
-      return asText(this.agentDeepAnalysisMode) === 'deep' && this.getAgentReviewContractItems().length > 0
-    },
-    getAgentReviewContractItems() {
-      const contract = cloneObject(this.agentReviewContract)
-      const keys = ['spatial_consistency', 'evidence_status', 'planning_translation', 'report_expression']
-      const fallbackLabels = {
-        spatial_consistency: '空间自洽',
-        evidence_status: '证据状态',
-        planning_translation: '策划转译',
-        report_expression: '报告写回',
-      }
-      return keys
-        .map((key) => {
-          const item = cloneObject(contract[key])
-          if (!Object.keys(item).length) return null
-          const evidence = cloneArray(item.evidence).map((entry) => asText(entry)).filter(Boolean)
-          const gaps = cloneArray(item.gaps).map((entry) => asText(entry)).filter(Boolean)
-          return {
-            key,
-            label: asText(item.label) || fallbackLabels[key],
-            status: asText(item.status || 'partial') || 'partial',
-            summary: asText(item.summary),
-            evidence,
-            gaps,
-            nextQuestion: asText(item.next_question || item.nextQuestion),
-          }
-        })
-        .filter((item) => item && (item.summary || item.evidence.length || item.gaps.length || item.nextQuestion))
-    },
-    getAgentReviewContractStatusLabel(status = '') {
-      return {
-        supported: '已支撑',
-        partial: '部分支撑',
-        missing: '缺证据',
-      }[asText(status)] || '部分支撑'
-    },
-    getAgentDecisionStrengthLabel(strength = '') {
-      const key = asText(strength || (this.agentDecision && this.agentDecision.strength) || 'weak')
-      return {
-        strong: '强判断',
-        moderate: '中等判断',
-        weak: '方向性判断',
-      }[key] || '方向性判断'
-    },
-    getAgentDecisionModeLabel(mode = '') {
-      const key = asText(mode || (this.agentDecision && this.agentDecision.mode) || 'judgment')
-      return {
-        cognition: '认知输出',
-        judgment: '判断输出',
-        action: '行动输出',
-      }[key] || '判断输出'
-    },
-    getAgentStructuredItemKey(item = null, fallbackIndex = 0) {
-      if (item && typeof item === 'object') {
-        return asText(item.key || item.metric || item.title || item.prompt) || `agent-structured-item-${fallbackIndex}`
-      }
-      return `agent-structured-item-${fallbackIndex}`
-    },
-    hasAgentActionPrompt(item = null) {
-      return !!asText(item && item.prompt)
     },
     getAgentClarificationOptions(limit = 3) {
       const max = Math.max(0, Number(limit || 0))

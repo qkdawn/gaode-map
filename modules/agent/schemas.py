@@ -35,6 +35,7 @@ ToolSceneType = Literal[
 ]
 ToolLlmExposure = Literal["primary", "secondary", "hidden"]
 GovernanceMode = Literal["auto", "guarded", "readonly"]
+ThinkingMode = Literal["quick", "deep"]
 AgentStatus = Literal["answered", "requires_clarification", "requires_risk_confirmation", "failed"]
 AgentStage = Literal[
     "gating",
@@ -60,10 +61,8 @@ PersistedAgentStatus = Literal[
 ]
 ToolStatus = Literal["success", "failed", "skipped"]
 ToolLoopStatus = Literal["completed", "requires_risk_confirmation", "failed"]
-CardType = Literal["summary", "evidence", "recommendation"]
 AgentSessionTitleSource = Literal["user", "ai", "fallback"]
 AgentTurnStreamEventType = Literal["meta", "status", "thinking", "reasoning_delta", "trace", "plan", "final", "error"]
-AgentReactEventType = Literal["status", "thought", "action", "observation", "reflection", "final", "error"]
 AgentSummaryStreamEventType = Literal[
     "status",
     "section_start",
@@ -75,16 +74,12 @@ AgentSummaryStreamEventType = Literal[
 ]
 ThinkingState = Literal["pending", "active", "completed", "failed"]
 EvidenceConfidence = Literal["strong", "moderate", "weak"]
-DecisionMode = Literal["cognition", "judgment", "action"]
-DecisionStrength = Literal["strong", "moderate", "weak"]
-
-
 class AgentMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     role: Literal["system", "user", "assistant"] = "user"
     content: str = ""
-    process: Dict[str, Any] = Field(default_factory=dict)
+    process: "AgentMessageProcess" = Field(default_factory=lambda: AgentMessageProcess())
 
 
 class AnalysisSnapshot(BaseModel):
@@ -114,43 +109,18 @@ class AgentTurnRequest(BaseModel):
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     risk_confirmations: List[str] = Field(default_factory=list)
     governance_mode: GovernanceMode = "auto"
+    thinking_mode: ThinkingMode = "quick"
     attachment_ids: List[str] = Field(default_factory=list)
 
-
-class AgentReactOptions(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    max_steps: Optional[int] = None
-    stagnation_limit: Optional[int] = None
-    tool_timeout_seconds: Optional[int] = None
-    max_tool_failures: Optional[int] = None
-
-
-class AgentReactRunRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    question: str = ""
-    scope: Dict[str, Any] = Field(default_factory=dict)
-    analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
-    options: AgentReactOptions = Field(default_factory=AgentReactOptions)
-    attachment_ids: List[str] = Field(default_factory=list)
-
-
-class AgentReactRunResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    run_id: str
-    status: Literal["created"] = "created"
-
-
-class AgentReactEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    run_id: str
-    step: int = 0
-    type: AgentReactEventType
-    ts: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        if "thinking_mode" not in value and "thinkingMode" in value:
+            value["thinking_mode"] = value.get("thinkingMode")
+        return value
 
 
 class AgentSummaryRequest(BaseModel):
@@ -446,15 +416,6 @@ class ExecutionTraceItem(BaseModel):
     warning_count: int = 0
 
 
-class AssistantCard(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    type: CardType
-    title: str
-    content: str = ""
-    items: List[Any] = Field(default_factory=list)
-
-
 class AgentEvidenceItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -466,53 +427,45 @@ class AgentEvidenceItem(BaseModel):
     limitation: str = ""
 
 
-class DecisionPayload(BaseModel):
+TranslationStatus = Literal["ready", "skipped", "failed"]
+
+
+class AgentTranslationItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    summary: str = ""
-    mode: DecisionMode = "judgment"
-    strength: DecisionStrength = "weak"
-    can_act: bool = False
-
-
-class DecisionEvidenceItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    key: str = ""
     metric: str = ""
-    headline: str = ""
-    value: Any = None
-    interpretation: str = ""
     source: str = ""
+    raw_signal: str = ""
+    spatial_phenomenon: str = ""
+    human_experience: str = ""
+    planning_implication: str = ""
+    action_hint: str = ""
     confidence: EvidenceConfidence = "weak"
-    limitation: str = ""
-    supports: List[str] = Field(default_factory=list)
-    is_key: bool = False
+    boundary: str = ""
 
 
-class DecisionCounterpointItem(BaseModel):
+class AgentTranslationPack(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    kind: Literal["conflict", "missing", "boundary"] = "boundary"
-    title: str = ""
-    detail: str = ""
+    status: TranslationStatus = "skipped"
+    summary: str = ""
+    items: List[AgentTranslationItem] = Field(default_factory=list)
+    error: str = ""
 
-
-class DecisionActionItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    title: str = ""
-    detail: str = ""
-    condition: str = ""
-    target: str = ""
-    prompt: str = ""
-
-
-class DecisionBoundaryItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    title: str = ""
-    detail: str = ""
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_nullable_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        if value.get("status") is None:
+            value["status"] = "skipped"
+        for key in ["summary", "error"]:
+            if value.get(key) is None:
+                value[key] = ""
+        if value.get("items") is None:
+            value["items"] = []
+        return value
 
 
 class GateDecision(BaseModel):
@@ -527,6 +480,31 @@ class GateDecision(BaseModel):
     summary: str = ""
     blocked_reason: str = ""
     research_notes: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_nullable_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        for key in [
+            "status",
+            "clarification_question",
+            "question_type",
+            "summary",
+            "blocked_reason",
+        ]:
+            if value.get(key) is None:
+                value[key] = ""
+        for key in [
+            "clarification_questions",
+            "clarification_options",
+            "missing_information",
+            "research_notes",
+        ]:
+            if value.get(key) is None:
+                value[key] = []
+        return value
 
     @model_validator(mode="after")
     def _normalize_clarification(self):
@@ -545,51 +523,6 @@ class ClarificationBundle(BaseModel):
     missing_information: List[str] = Field(default_factory=list)
     questions: List[str] = Field(default_factory=list)
     summary: str = ""
-
-
-class PlanningResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    goal: str = ""
-    question_type: str = ""
-    summary: str = ""
-    requires_tools: bool = True
-    stop_condition: str = ""
-    evidence_focus: List[str] = Field(default_factory=list)
-    steps: List[PlanStep] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-
-
-class PlanningIntent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    goal: str = ""
-    question_type: str = ""
-    summary: str = ""
-    requires_tools: bool = True
-    stop_condition: str = ""
-    evidence_focus: List[str] = Field(default_factory=list)
-    tool_selection_brief: str = ""
-
-
-class ToolSelectionResult(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    summary: str = ""
-    requires_tools: bool = True
-    steps: List[PlanStep] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-
-
-class AuditVerdict(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    status: Literal["pass", "replan", "fail"] = "pass"
-    summary: str = ""
-    issues: List[str] = Field(default_factory=list)
-    missing_evidence: List[str] = Field(default_factory=list)
-    replan_instructions: str = ""
-    should_answer: bool = True
 
 
 class AgentContextSummary(BaseModel):
@@ -654,18 +587,11 @@ class ToolLoopResult(BaseModel):
 class AgentTurnOutput(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    cards: List[AssistantCard] = Field(default_factory=list)
+    answer: str = ""
     clarification_question: str = ""
     clarification_options: List[str] = Field(default_factory=list)
     risk_prompt: str = ""
-    next_suggestions: List[str] = Field(default_factory=list)
     panel_payloads: Dict[str, Any] = Field(default_factory=dict)
-    decision: DecisionPayload = Field(default_factory=DecisionPayload)
-    support: List[DecisionEvidenceItem] = Field(default_factory=list)
-    counterpoints: List[DecisionCounterpointItem] = Field(default_factory=list)
-    actions: List[DecisionActionItem] = Field(default_factory=list)
-    boundary: List[DecisionBoundaryItem] = Field(default_factory=list)
-    review_contract: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentTurnDiagnostics(BaseModel):
@@ -679,8 +605,7 @@ class AgentTurnDiagnostics(BaseModel):
     thinking_timeline: List["AgentThinkingItem"] = Field(default_factory=list)
     planning_summary: str = ""
     audit_summary: str = ""
-    review_contract: Dict[str, Any] = Field(default_factory=dict)
-    replan_count: int = 0
+    translation_pack: AgentTranslationPack = Field(default_factory=AgentTranslationPack)
     error: str = ""
 
 
@@ -695,6 +620,16 @@ class AgentThinkingItem(BaseModel):
     items: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
     state: ThinkingState = "pending"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        if "display_text" not in value and "displayText" in value:
+            value["display_text"] = value.get("displayText")
+        return value
 
 
 class AgentTurnStreamEvent(BaseModel):
@@ -719,6 +654,56 @@ class AgentPlanEnvelope(BaseModel):
     followup_applied: bool = False
     summary: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        if "followup_steps" not in value and "followupSteps" in value:
+            value["followup_steps"] = value.get("followupSteps")
+        if "followup_applied" not in value and "followupApplied" in value:
+            value["followup_applied"] = value.get("followupApplied")
+        return value
+
+
+class AgentMessageProcess(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    turn_id: str = ""
+    status: str = ""
+    stage: str = ""
+    started_at: str = ""
+    completed_at: str = ""
+    elapsed_ms: int = 0
+    thinking_timeline: List[AgentThinkingItem] = Field(default_factory=list)
+    execution_trace: List[ExecutionTraceItem] = Field(default_factory=list)
+    plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
+    pending_task_confirmation: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        aliases = {
+            "turnId": "turn_id",
+            "startedAt": "started_at",
+            "completedAt": "completed_at",
+            "elapsedMs": "elapsed_ms",
+            "thinkingTimeline": "thinking_timeline",
+            "executionTrace": "execution_trace",
+            "pendingTaskConfirmation": "pending_task_confirmation",
+        }
+        for source, target in aliases.items():
+            if target not in value and source in value:
+                value[target] = value.get(source)
+        return value
+
+
+AgentMessage.model_rebuild()
+
 
 class AgentTurnResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -729,6 +714,7 @@ class AgentTurnResponse(BaseModel):
     diagnostics: AgentTurnDiagnostics = Field(default_factory=AgentTurnDiagnostics)
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
+    messages: List[AgentMessage] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -750,20 +736,12 @@ class AgentTurnResponse(BaseModel):
         return value
 
     @property
-    def assistant_cards(self) -> List[AssistantCard]:
-        return list(self.output.cards or [])
-
-    @property
     def clarification_question(self) -> str:
         return str(self.output.clarification_question or "")
 
     @property
     def risk_prompt(self) -> str:
         return str(self.output.risk_prompt or "")
-
-    @property
-    def next_suggestions(self) -> List[str]:
-        return list(self.output.next_suggestions or [])
 
     @property
     def execution_trace(self) -> List[ExecutionTraceItem]:

@@ -776,8 +776,8 @@
                                         </div>
                                         <div v-if="poiGridConfigExpanded" class="poi-grid-config-panel">
                                             <div v-if="isPoiRasterGridMode()" class="poi-grid-config-notes">
-                                                <div class="h3-analysis-hint">栅格口径</div>
-                                                <div class="count-badge">同源 cell_id：人口/夜光栅格</div>
+                                                <div class="h3-analysis-hint">共享栅格口径</div>
+                                                <div class="count-badge">同源 cell_id：人口/夜光共享 cell</div>
                                                 <div class="count-badge">POI 坐标：GCJ02 匹配</div>
                                                 <div class="count-badge">年份 {{ getActivePoiGridYear() || getPoiRasterGridYear() || '当前' }}</div>
                                             </div>
@@ -818,11 +818,11 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div v-if="isPoiRasterGridMode() && h3MainStage !== 'params' && !poiGridFeatures.length" class="panel-placeholder" style="margin-top:10px;">
-                                        当前还没有 POI 共享栅格结果。请先回到“参数”页点击“生成栅格”。
+                                    <div v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && h3MainStage !== 'params' && !poiGridFeatures.length" class="panel-placeholder" style="margin-top:10px;">
+                                        当前还没有 POI 共享栅格结果。请先回到“参数”页点击“生成当前”。
                                     </div>
                                     <div class="filter-section h3-control-row h3-control-row-tight"
-                                        v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && (h3MainStage === 'diagnosis' || h3MainStage === 'evaluate')"
+                                        v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && poiGridFeatures.length > 0 && (h3MainStage === 'diagnosis' || h3MainStage === 'evaluate')"
                                         style="margin-top:8px;">
                                         <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666;">
                                             TopN
@@ -841,7 +841,7 @@
                                             </select>
                                         </label>
                                     </div>
-                                    <div v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && h3MainStage === 'analysis'" style="margin-top:10px;">
+                                    <div v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && poiGridFeatures.length > 0 && h3MainStage === 'analysis'" style="margin-top:10px;">
                                         <div class="h3-analysis-hint">
                                             POI 共享栅格按人口/夜光同源 cell_id 聚合，用于 POI-人口-夜光耦合判断。
                                         </div>
@@ -899,7 +899,7 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <div v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && h3MainStage === 'diagnosis'" style="margin-top:10px;">
+                                    <div v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && poiGridFeatures.length > 0 && h3MainStage === 'diagnosis'" style="margin-top:10px;">
                                         <div class="h3-analysis-hint">
                                             栅格诊断只解释 POI 供给结构：高密代表供给集中，低密代表供给较弱；不直接等同于真实客流或消费。
                                         </div>
@@ -960,7 +960,7 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <div v-if="isPoiRasterGridMode() && poiGridFeatures.length > 0 && h3MainStage === 'evaluate'" style="margin-top:10px;">
+                                    <div v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && poiGridFeatures.length > 0 && h3MainStage === 'evaluate'" style="margin-top:10px;">
                                         <div class="h3-analysis-hint">
                                             栅格评估为 POI 供给侧判断。目标业态低供给不代表真实需求高，需要后续叠加人口、夜光、客流和经营数据验证。
                                         </div>
@@ -1021,9 +1021,9 @@
                                             </tbody>
                                         </table>
                                     </div>
-                                    <template v-if="!isPoiRasterGridMode()">
+                                    <template v-if="shouldUsePoiUnifiedGridUi()">
                                     <div class="h3-subtabs"
-                                        v-if="!isPoiRasterGridMode() && h3MainStage !== 'params' && h3AnalysisGridFeatures.length > 0 && getH3CurrentStageTabs().length > 1"
+                                        v-if="shouldUsePoiUnifiedGridUi() && h3MainStage !== 'params' && h3AnalysisGridFeatures.length > 0 && getH3CurrentStageTabs().length > 1"
                                         style="margin-top:6px; grid-template-columns: repeat(2, minmax(0, 1fr));">
                                         <button type="button" class="h3-subtab-pill"
                                             v-for="tab in getH3CurrentStageTabs()"
@@ -1353,9 +1353,19 @@
                                         </table>
                                     </div>
                                     </template>
-                                    <div v-if="!isPoiRasterGridMode() && h3GridStatus" class="status-text"
+                                    <div v-if="getPoiGridRuntimeStatus()" class="status-text"
                                         style="margin-top:10px; display:flex; align-items:center; gap:8px; justify-content:flex-start;">
-                                        <span>{{ h3GridStatus }}</span>
+                                        <span>{{ getPoiGridRuntimeStatus() }}</span>
+                                        <span
+                                            v-if="getPoiGridRuntimeProgress() && Number((getPoiGridRuntimeProgress() || {}).elapsed_sec || 0) > 0"
+                                            class="count-badge">
+                                            {{ `计时 ${Math.floor(Number((getPoiGridRuntimeProgress() || {}).elapsed_sec || 0))}s` }}
+                                        </span>
+                                        <span
+                                            v-if="getPoiGridRuntimeProgress() && Number((getPoiGridRuntimeProgress() || {}).step || 0) > 0 && Number((getPoiGridRuntimeProgress() || {}).total || 0) > 0"
+                                            class="count-badge">
+                                            {{ `进度 ${Math.max(0, Math.min(Number((getPoiGridRuntimeProgress() || {}).total || 0), Number((getPoiGridRuntimeProgress() || {}).step || 0)))}/${Number((getPoiGridRuntimeProgress() || {}).total || 0)}` }}
+                                        </span>
                                         <button v-if="selectedH3Id" type="button"
                                             style="border:1px solid #d9dee7; background:#fff; color:#4b5563; border-radius:999px; padding:2px 8px; font-size:11px; cursor:pointer;"
                                             @click="clearGridLock">

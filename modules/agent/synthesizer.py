@@ -5,22 +5,9 @@ from typing import Any, Dict, List
 from .analysis_extractors import is_target_supply_gap_ready
 from .intent_signals import mentions_nightlight, mentions_population, mentions_road, mentions_summary, mentions_supply
 from .llm_digest import tool_results_llm_digest
-from .review_contract import build_review_contract
 from .synthesis_evidence import build_analysis_evidence as _build_analysis_evidence_from_module
 from .synthesis_metrics import build_summary_metrics as _build_summary_metrics_from_module
-from .schemas import (
-    AgentEvidenceItem,
-    AgentTurnOutput,
-    AnalysisSnapshot,
-    AssistantCard,
-    AuditResult,
-    DecisionActionItem,
-    DecisionBoundaryItem,
-    DecisionCounterpointItem,
-    DecisionEvidenceItem,
-    DecisionPayload,
-    ToolResult,
-)
+from .schemas import AgentEvidenceItem, AgentTurnOutput, AnalysisSnapshot, AuditResult, ToolResult
 
 _ALL_BUSINESS_EVIDENCE = ["POI 供给证据", "POI H3 密度证据", "人口概览", "夜光概览", "路网概览"]
 
@@ -78,16 +65,6 @@ def _evidence_headline(item: AgentEvidenceItem) -> str:
     return item.metric
 
 
-def _decision_strength(evidence: List[AgentEvidenceItem], audit: AuditResult) -> str:
-    if audit.missing_evidence or audit.issues:
-        return "weak"
-    if len(evidence) >= 4:
-        return "strong"
-    if len(evidence) >= 2:
-        return "moderate"
-    return "weak"
-
-
 def _interpretation_limits(evidence: List[AgentEvidenceItem], audit: AuditResult) -> List[str]:
     limits = ["不能直接从 GIS 指标推断客流、消费能力、营业额或经营收益。"]
     limits.extend([item.limitation for item in evidence if item.limitation])
@@ -127,7 +104,7 @@ def _detect_conflicts(metrics: Dict[str, object], audit: AuditResult) -> List[st
     return conflicts
 
 
-def _select_key_evidence(evidence: List[AgentEvidenceItem], *, question: str) -> List[DecisionEvidenceItem]:
+def _select_key_evidence(evidence: List[AgentEvidenceItem], *, question: str) -> List[Dict[str, Any]]:
     if any(token in question for token in ("下一步", "继续", "还可以", "做什么分析", "还能分析")):
         preferred_order = ["next_analysis_options", "poi_count", "h3_density", "population_profile", "nightlight_activity", "road_structure"]
     elif mentions_supply(question):
@@ -142,21 +119,17 @@ def _select_key_evidence(evidence: List[AgentEvidenceItem], *, question: str) ->
         preferred_order = ["business_profile", "commercial_hotspots", "poi_count", "h3_density", "population_profile", "nightlight_activity", "road_structure"]
     ranking = {name: index for index, name in enumerate(preferred_order)}
     ordered = sorted(evidence, key=lambda item: (ranking.get(item.metric, 99), {"strong": 0, "moderate": 1, "weak": 2}.get(item.confidence, 2)))
-    decision_key = "actionability" if _infer_output_mode(question) == "action" else "core_judgment"
     return [
-        DecisionEvidenceItem(
-            key=item.metric,
-            metric=item.metric,
-            headline=_evidence_headline(item),
-            value=item.value,
-            interpretation=item.interpretation,
-            source=item.source,
-            confidence=item.confidence,
-            limitation=item.limitation,
-            supports=[decision_key],
-            is_key=True,
-        )
-        for item in ordered[:3]
+        {
+            "metric": item.metric,
+            "headline": _evidence_headline(item),
+            "value": item.value,
+            "interpretation": item.interpretation,
+            "source": item.source,
+            "confidence": item.confidence,
+            "limitation": item.limitation,
+        }
+        for item in ordered[:5]
     ]
 
 
@@ -194,129 +167,6 @@ def _infer_business_portrait(metrics: Dict[str, object]) -> tuple[str, List[str]
     return portrait, reasons
 
 
-def _build_decision_summary(
-    *,
-    question: str,
-    metrics: Dict[str, object],
-    decision_strength: str,
-    conflicts: List[str],
-    missing_evidence: List[str],
-) -> str:
-    portrait, _ = _infer_business_portrait(metrics)
-    strength_label = {"strong": "较强", "moderate": "中等", "weak": "偏弱"}.get(decision_strength, "偏弱")
-    base = _as_text(metrics.get("business_profile_portrait")) or f"当前更接近{portrait}。"
-    if _infer_output_mode(question) == "action":
-        if decision_strength == "strong" and not missing_evidence:
-            text = f"{base} 当前证据强度{strength_label}，可以继续做方向性判断和下一步预筛。"
-        else:
-            text = f"{base} 但当前证据强度{strength_label}，更适合做预研判断，不适合直接拍板。"
-    else:
-        text = f"{base} 当前证据强度{strength_label}。"
-    if metrics.get("commercial_hotspot_summary"):
-        text = f"{text} {metrics['commercial_hotspot_summary']}"
-    if mentions_supply(question) and metrics.get("target_supply_gap_summary"):
-        text = f"{text} {metrics['target_supply_gap_summary']}"
-    if conflicts:
-        text = f"{text} 不过{conflicts[0]}"
-    elif missing_evidence:
-        text = f"{text} 仍需补充 {'、'.join(missing_evidence[:2])} 后再做更强结论。"
-    return text
-
-
-def _build_counterpoints(*, conflicts: List[str], missing_evidence: List[str], limits: List[str]) -> List[DecisionCounterpointItem]:
-    items: List[DecisionCounterpointItem] = []
-    for detail in conflicts[:3]:
-        items.append(DecisionCounterpointItem(kind="conflict", title="冲突证据", detail=detail))
-    for detail in missing_evidence[:3]:
-        items.append(DecisionCounterpointItem(kind="missing", title="仍缺证据", detail=f"当前仍缺少 {detail}。"))
-    for detail in limits[:2]:
-        items.append(DecisionCounterpointItem(kind="boundary", title="解释边界", detail=detail))
-    return items
-
-
-def _build_boundary_items(limits: List[str]) -> List[DecisionBoundaryItem]:
-    return [DecisionBoundaryItem(title="适用边界", detail=item) for item in limits[:4]]
-
-
-def _build_action_items(*, question: str, metrics: Dict[str, object], audit: AuditResult, decision_strength: str) -> List[DecisionActionItem]:
-    items: List[DecisionActionItem] = []
-    next_options = [item for item in (metrics.get("next_analysis_options") or []) if isinstance(item, dict)]
-    if next_options:
-        for option in next_options[:3]:
-            items.append(
-                DecisionActionItem(
-                    title=str(option.get("title") or "下一步分析"),
-                    detail=str(option.get("why") or ""),
-                    condition=str(option.get("application") or "当你要继续推进当前分析时"),
-                    target="next_analysis",
-                    prompt=str(option.get("prompt") or option.get("title") or ""),
-                )
-            )
-        return items
-    if metrics.get("target_supply_gap_level") in {"medium", "high"}:
-        place_type = _as_text(metrics.get("target_supply_gap_place_type"), "目标业态")
-        items.append(
-            DecisionActionItem(
-                title="优先查看缺口候选格",
-                detail="先看 gap 较高的候选格，再结合实地条件缩小范围。",
-                condition="当目标是做补位或选址预筛时",
-                target="site_selection",
-                prompt=f"基于当前结果，继续细化候选格并比较{place_type}的机会区",
-            )
-        )
-    if audit.missing_evidence:
-        missing_text = "、".join(audit.missing_evidence[:2])
-        items.append(
-            DecisionActionItem(
-                title="先补齐关键证据",
-                detail=f"优先补齐 {missing_text}，再提高判断强度。",
-                condition="当你需要更强结论时",
-                target="evidence_gap",
-                prompt=f"请补齐{missing_text}，再重新判断这个区域是否值得继续研究",
-            )
-        )
-    if mentions_nightlight(question) or metrics.get("nightlight_mean_radiance") is not None:
-        items.append(
-            DecisionActionItem(
-                title="核查夜光与业态是否一致",
-                detail="把夜光热点与餐饮、休闲类 POI 分布对照，判断夜间活力是否可转化为商业机会。",
-                condition="当你关心夜间消费或活动时",
-                target="vitality_check",
-                prompt="对比夜光热点与餐饮休闲 POI 的空间重合，判断夜间活力是否支撑商业机会",
-            )
-        )
-    if not items:
-        items.append(
-            DecisionActionItem(
-                title="继续收敛问题",
-                detail="把问题收敛到区域画像、选址预筛或活力判断中的一个，再进入下一轮分析。",
-                condition="当当前问题仍偏宽泛时",
-                target="clarify_goal",
-                prompt="基于当前结果，告诉我下一步最值得继续的分析方向",
-            )
-        )
-    if decision_strength == "strong" and len(items) > 1:
-        return items[:3]
-    return items[:2]
-
-
-def _recommendation_layers(question: str, audit: AuditResult, decision_strength: str, metrics: Dict[str, object]) -> Dict[str, List[str]]:
-    can_act_now = ["可以基于当前证据做方向性判断，优先使用证据较完整的指标作为依据。"]
-    needs_more_analysis: List[str] = []
-    if metrics.get("commercial_hotspot_mode") == "multi_core":
-        can_act_now.append("可以按多核心结构分别审视核心区、次核心区和机会区，不要把整个范围当成单一板块。")
-    if metrics.get("target_supply_gap_level") in {"medium", "high"}:
-        can_act_now.append("可以优先排查 H3 gap 较高的机会区，再结合现场条件做二次筛选。")
-    if audit.missing_evidence:
-        needs_more_analysis.append(f"需要补充 {'、'.join(audit.missing_evidence)} 后再做强结论。")
-    if decision_strength == "weak":
-        needs_more_analysis.append("当前证据强度偏弱，建议先补齐关键数据再给具体选址或业态判断。")
-    if mentions_supply(question):
-        needs_more_analysis.append("如需具体补位建议，应继续比较目标业态 POI 密度、竞品分布和可达性。")
-    do_not_infer = ["不建议直接推断客流、消费能力、营业额或收益。"]
-    return {"can_act_now": can_act_now, "needs_more_analysis": needs_more_analysis, "do_not_infer": do_not_infer}
-
-
 def _required_evidence_labels(question: str, audit: AuditResult) -> List[str]:
     required: List[str] = []
     for item in list(audit.required_evidence or []) + list(audit.missing_evidence or []):
@@ -336,46 +186,108 @@ def _required_evidence_labels(question: str, audit: AuditResult) -> List[str]:
     return []
 
 
-def _metric_items_for_question(question: str, audit: AuditResult, metrics: Dict[str, object]) -> List[str]:
-    items: List[str] = []
-    if metrics.get("business_profile_label"):
-        items.append(f"区域画像：{metrics['business_profile_label']}")
-    if metrics.get("business_profile_portrait"):
-        items.append(f"画像说明：{metrics['business_profile_portrait']}")
-    if metrics.get("commercial_hotspot_mode"):
-        items.append(f"空间结构：{metrics['commercial_hotspot_mode']}")
-    if metrics.get("target_supply_gap_level"):
-        items.append(
-            f"目标业态缺口：{metrics.get('target_supply_gap_place_type') or '未指定'} / "
-            f"{metrics['target_supply_gap_level']} / {metrics.get('target_supply_gap_mode') or 'unclear'}"
+def _business_profile_block(metrics: Dict[str, object]) -> Dict[str, Any]:
+    portrait, reasons = _infer_business_portrait(metrics)
+    return {
+        "portrait": metrics.get("business_profile_portrait") or portrait,
+        "type": metrics.get("business_profile_label") or portrait,
+        "top_category_mix": metrics.get("poi_category_mix") or [],
+        "functional_mix_score": metrics.get("functional_mix_score"),
+        "reasons": reasons,
+    }
+
+
+def _spatial_structure_block(metrics: Dict[str, object]) -> Dict[str, Any]:
+    return {
+        "hotspot_mode": metrics.get("commercial_hotspot_mode"),
+        "summary": metrics.get("commercial_hotspot_summary"),
+        "core_zone_count": metrics.get("core_zone_count"),
+        "opportunity_zone_count": metrics.get("opportunity_zone_count"),
+    }
+
+
+def _target_supply_gap_block(metrics: Dict[str, object]) -> Dict[str, Any]:
+    return {
+        "place_type": metrics.get("target_supply_gap_place_type"),
+        "supply_gap_level": metrics.get("target_supply_gap_level"),
+        "gap_mode": metrics.get("target_supply_gap_mode"),
+        "summary": metrics.get("target_supply_gap_summary"),
+        "candidate_zones": metrics.get("target_supply_gap_candidates") or [],
+    }
+
+
+def _compose_business_profile_summary(metrics: Dict[str, object], business_profile: Dict[str, Any]) -> str:
+    portrait = _as_text(business_profile.get("portrait") or metrics.get("business_profile_portrait"))
+    reasons = [str(item).strip() for item in (business_profile.get("reasons") or []) if str(item).strip()]
+    hotspot_mode = _as_text(metrics.get("commercial_hotspot_mode"))
+    functional_mix_score = metrics.get("functional_mix_score")
+    parts: List[str] = []
+    if portrait:
+        parts.append(f"业态画像上，这里更接近{portrait}")
+    if reasons:
+        parts.append(reasons[0].rstrip("。"))
+    if hotspot_mode:
+        parts.append(f"整体空间组织偏{hotspot_mode}")
+    if functional_mix_score not in (None, ""):
+        parts.append(f"功能混合度约为 {functional_mix_score}")
+    return "，".join([part for part in parts if part]).strip("，")
+
+
+def _compose_spatial_structure_summary(metrics: Dict[str, object], spatial_structure: Dict[str, Any]) -> str:
+    summary = _as_text(spatial_structure.get("summary") or metrics.get("commercial_hotspot_summary"))
+    if summary:
+        return summary
+    core_zone_count = spatial_structure.get("core_zone_count")
+    opportunity_zone_count = spatial_structure.get("opportunity_zone_count")
+    hotspot_mode = _as_text(spatial_structure.get("hotspot_mode") or metrics.get("commercial_hotspot_mode"))
+    parts: List[str] = []
+    if hotspot_mode:
+        parts.append(f"空间结构更接近{hotspot_mode}")
+    if core_zone_count not in (None, ""):
+        parts.append(f"内部形成 {core_zone_count} 个核心区")
+    if opportunity_zone_count not in (None, ""):
+        parts.append(f"并保留 {opportunity_zone_count} 个机会区")
+    return "，".join([part for part in parts if part]).strip("，")
+
+
+def _compose_population_vitality_summary(metrics: Dict[str, object]) -> str:
+    parts: List[str] = []
+    if metrics.get("population_total") not in (None, ""):
+        parts.append(f"人口基盘约 {metrics.get('population_total')}")
+    if metrics.get("nightlight_mean_radiance") not in (None, ""):
+        parts.append(f"夜光均值约 {metrics.get('nightlight_mean_radiance')}")
+    if metrics.get("road_node_count") not in (None, "") and metrics.get("road_edge_count") not in (None, ""):
+        parts.append(f"路网节点/边段约为 {metrics.get('road_node_count')}/{metrics.get('road_edge_count')}")
+    return "，".join([part for part in parts if part]).strip("，")
+
+
+def _build_evidence_highlights(metrics: Dict[str, object], key_evidence: List[Dict[str, Any]]) -> List[str]:
+    highlights: List[str] = []
+    for item in key_evidence[:4]:
+        headline = _as_text(item.get("headline"))
+        interpretation = _as_text(item.get("interpretation"))
+        if headline and interpretation:
+            highlights.append(f"{headline}：{interpretation}")
+        elif headline:
+            highlights.append(headline)
+    poi_mix = [item for item in (metrics.get("poi_category_mix") or []) if isinstance(item, dict)]
+    if poi_mix:
+        top_labels = "、".join(
+            f"{item.get('label')} {item.get('ratio')}%"
+            for item in poi_mix[:3]
+            if _as_text(item.get("label")) and item.get("ratio") not in (None, "")
         )
-    next_options = [item for item in (metrics.get("next_analysis_options") or []) if isinstance(item, dict)]
-    if next_options:
-        items.append("下一步分析方向：" + "、".join(str(item.get("title") or "") for item in next_options[:3] if str(item.get("title") or "").strip()))
-    candidate_zones = metrics.get("target_supply_gap_candidates") or []
-    if candidate_zones:
-        items.append(f"候选格子：{len(candidate_zones)} 个")
-    if metrics.get("business_place_type"):
-        items.append(f"目标业态：{metrics['business_place_type']}")
-        if metrics.get("business_types"):
-            items.append(f"POI 类型：{metrics['business_types']}")
-        if metrics.get("business_keywords"):
-            items.append(f"关键词：{metrics['business_keywords']}")
-    if metrics.get("poi_count") is not None:
-        items.append(f"POI 样本量：{metrics['poi_count']}")
-    if metrics.get("h3_grid_count") or metrics.get("avg_density_poi_per_km2") is not None:
-        density = metrics.get("avg_density_poi_per_km2")
-        items.append(f"POI H3 网格：{metrics.get('h3_grid_count') or 0} 个，平均密度：{density if density is not None else '未提供'}")
-    if metrics.get("population_total") is not None:
-        items.append(f"人口总量：{metrics['population_total']}")
-    if metrics.get("nightlight_mean_radiance") is not None:
-        items.append(f"夜光均值：{metrics['nightlight_mean_radiance']}")
-    if metrics.get("road_node_count") or metrics.get("road_edge_count"):
-        items.append(f"路网节点/边段：{metrics.get('road_node_count') or 0}/{metrics.get('road_edge_count') or 0}")
-    return items
+        if top_labels:
+            highlights.append(f"头部业态占比：{top_labels}")
+    deduped: List[str] = []
+    for item in highlights:
+        text = str(item or "").strip()
+        if text and text not in deduped:
+            deduped.append(text)
+    return deduped[:6]
 
 
-def _build_structured_output(
+def build_answer_evidence_payload(
     *,
     question: str,
     snapshot: AnalysisSnapshot,
@@ -386,180 +298,168 @@ def _build_structured_output(
 ) -> Dict[str, Any]:
     metrics = _summary_metrics(snapshot, artifacts)
     evidence = build_analysis_evidence(snapshot, artifacts)
-    decision_strength = _decision_strength(evidence, audit)
     conflicts = _detect_conflicts(metrics, audit)
-    limits = _interpretation_limits(evidence, audit)
-    support = _select_key_evidence(evidence, question=question)
-    decision = DecisionPayload(
-        summary=_build_decision_summary(
-            question=question,
-            metrics=metrics,
-            decision_strength=decision_strength,
-            conflicts=conflicts,
-            missing_evidence=list(audit.missing_evidence or []),
-        ),
-        mode=_infer_output_mode(question),
-        strength=decision_strength,
-        can_act=decision_strength != "weak" and not bool(audit.missing_evidence),
-    )
-    return {
-        "metrics": metrics,
-        "evidence": evidence,
-        "decision_strength": decision_strength,
-        "conflicts": conflicts,
-        "limits": limits,
-        "decision": decision,
-        "support": support,
-        "counterpoints": _build_counterpoints(
-            conflicts=conflicts,
-            missing_evidence=list(audit.missing_evidence or []),
-            limits=limits,
-        ),
-        "actions": _build_action_items(
-            question=question,
-            metrics=metrics,
-            audit=audit,
-            decision_strength=decision_strength,
-        ),
-        "boundary": _build_boundary_items(limits),
-        "review_contract": build_review_contract(
-            question=question,
-            snapshot=snapshot,
-            artifacts=artifacts,
-            tool_results=tool_results,
-            audit=audit,
-            decision_summary=decision.summary,
-        ),
-        "research_notes": list(research_notes or []),
-        "tool_chain": [result.tool_name for result in tool_results if result.status == "success"],
-    }
-
-
-def build_cards(
-    *,
-    question: str,
-    snapshot: AnalysisSnapshot,
-    artifacts: Dict[str, object],
-    tool_results: List[ToolResult],
-    research_notes: List[str],
-    audit: AuditResult,
-) -> List[AssistantCard]:
-    structured = _build_structured_output(
-        question=question,
-        snapshot=snapshot,
-        artifacts=artifacts,
-        tool_results=tool_results,
-        research_notes=research_notes,
-        audit=audit,
-    )
-    metrics = structured["metrics"]
-    support = structured["support"]
-    decision = structured["decision"]
-    counterpoints = structured["counterpoints"]
-    actions = structured["actions"]
-    used_tool_names = structured["tool_chain"]
-    strength_label = {"strong": "较强", "moderate": "中等", "weak": "偏弱"}.get(decision.strength, "偏弱")
-    metric_items = _metric_items_for_question(question, audit, metrics)
-    evidence_items = [f"{item.headline}；解释：{item.interpretation}；置信度：{item.confidence}" for item in support]
-
-    recommendation_layers = _recommendation_layers(question, audit, decision.strength, metrics)
-    recommendation_items: List[Any] = []
-    recommendation_items.extend(_build_candidate_card_items(metrics.get("target_supply_gap_candidates") or []))
-    recommendation_items.extend([f"下一步动作：{item.title} - {item.detail}" for item in actions])
-    recommendation_items.extend([f"可以直接采取：{item}" for item in recommendation_layers["can_act_now"]])
-    recommendation_items.extend([f"需补充后判断：{item}" for item in recommendation_layers["needs_more_analysis"]])
-    recommendation_items.extend([f"不建议直接推断：{item}" for item in recommendation_layers["do_not_infer"]])
-    recommendation_items.extend([f"{item.title}：{item.detail}" for item in counterpoints])
-    recommendation_items.extend(list(research_notes or []))
-    recommendation_items.extend([str(item) for item in audit.issues if str(item).strip()])
-    suggestion = actions[0].detail if actions else "可以先基于当前证据做方向性判断，再补齐关键缺口。"
-    return [
-        AssistantCard(
-            type="summary",
-            title="核心判断",
-            content=f"{decision.summary} 证据强度：{strength_label}。",
-            items=[f"执行链：{' -> '.join(used_tool_names) or '无'}"],
-        ),
-        AssistantCard(
-            type="evidence",
-            title="证据依据",
-            content="当前回答基于以下结构化证据，而不是只复述工具执行状态。",
-            items=metric_items + evidence_items,
-        ),
-        AssistantCard(type="recommendation", title="下一步建议", content=suggestion, items=recommendation_items),
-    ]
-
-
-def build_synthesis_payload(
-    *,
-    question: str,
-    snapshot: AnalysisSnapshot,
-    artifacts: Dict[str, object],
-    tool_results: List[ToolResult],
-    research_notes: List[str],
-    audit: AuditResult,
-) -> Dict[str, Any]:
-    structured = _build_structured_output(
-        question=question,
-        snapshot=snapshot,
-        artifacts=artifacts,
-        tool_results=tool_results,
-        research_notes=research_notes,
-        audit=audit,
-    )
-    metrics = structured["metrics"]
-    evidence = structured["evidence"]
-    tool_result_digest = tool_results_llm_digest(tool_results)
-    evidence_items = _metric_items_for_question(question, audit, metrics)
-    return {
+    interpretation_limits = _interpretation_limits(evidence, audit)
+    business_profile = _business_profile_block(metrics)
+    spatial_structure = _spatial_structure_block(metrics)
+    target_supply_gap = _target_supply_gap_block(metrics)
+    key_evidence = _select_key_evidence(evidence, question=question)
+    base_payload = {
         "question": question,
-        "tool_chain": structured["tool_chain"],
+        "tool_chain": [result.tool_name for result in tool_results if result.status == "success"],
         "metrics": metrics,
-        "decision": structured["decision"].model_dump(mode="json"),
-        "support": [item.model_dump(mode="json") for item in structured["support"]],
-        "counterpoints": [item.model_dump(mode="json") for item in structured["counterpoints"]],
-        "actions": [item.model_dump(mode="json") for item in structured["actions"]],
-        "boundary": [item.model_dump(mode="json") for item in structured["boundary"]],
-        "review_contract": structured["review_contract"],
-        "business_profile": {
-            "portrait": metrics.get("business_profile_portrait") or _infer_business_portrait(metrics)[0],
-            "type": metrics.get("business_profile_label") or _infer_business_portrait(metrics)[0],
-            "top_category_mix": metrics.get("poi_category_mix") or [],
-            "functional_mix_score": metrics.get("functional_mix_score"),
-        },
-        "spatial_structure": {
-            "hotspot_mode": metrics.get("commercial_hotspot_mode"),
-            "summary": metrics.get("commercial_hotspot_summary"),
-            "core_zone_count": metrics.get("core_zone_count"),
-            "opportunity_zone_count": metrics.get("opportunity_zone_count"),
-        },
-        "target_supply_gap": {
-            "place_type": metrics.get("target_supply_gap_place_type"),
-            "supply_gap_level": metrics.get("target_supply_gap_level"),
-            "gap_mode": metrics.get("target_supply_gap_mode"),
-            "summary": metrics.get("target_supply_gap_summary"),
-            "candidate_zones": metrics.get("target_supply_gap_candidates") or [],
-        },
-        "evidence_matrix": [item.model_dump(mode="json") for item in evidence],
-        "decision_strength": structured["decision_strength"],
-        "interpretation_limits": structured["limits"],
-        "recommendation_layers": _recommendation_layers(question, audit, structured["decision_strength"], metrics),
-        "evidence_items": evidence_items,
-        "tool_results": tool_result_digest,
+        "key_evidence": key_evidence,
+        "interpretation_limits": interpretation_limits,
+        "tool_results": tool_results_llm_digest(tool_results),
         "research_notes": list(research_notes or []),
         "audit_issues": [str(item) for item in audit.issues if str(item).strip()],
         "missing_evidence": list(audit.missing_evidence or []),
         "required_evidence": _required_evidence_labels(question, audit),
+        "conflicting_evidence": conflicts,
+        "business_profile": business_profile,
+        "spatial_structure": spatial_structure,
+        "target_supply_gap": target_supply_gap,
+    }
+    direct_answer_seed = _compose_direct_answer(question, base_payload)
+    return {
+        **base_payload,
+        "direct_answer_seed": direct_answer_seed,
+        "business_profile_summary": _compose_business_profile_summary(metrics, business_profile),
+        "spatial_structure_summary": _compose_spatial_structure_summary(metrics, spatial_structure),
+        "population_vitality_summary": _compose_population_vitality_summary(metrics),
+        "evidence_highlights": _build_evidence_highlights(metrics, key_evidence),
     }
 
 
-def build_next_suggestions(question: str, audit: AuditResult) -> List[str]:
-    suggestions: List[str] = []
-    if audit.missing_evidence:
-        suggestions.append(f"如需更完整结论，可以继续补充 {'、'.join(audit.missing_evidence)} 相关分析。")
-    if mentions_population(question):
-        suggestions.append("继续追问年龄结构或与周边商业供给的匹配关系。")
-    return suggestions
+def _compose_direct_answer(question: str, payload: Dict[str, Any]) -> str:
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    business_profile = payload.get("business_profile") if isinstance(payload.get("business_profile"), dict) else {}
+    spatial_structure = payload.get("spatial_structure") if isinstance(payload.get("spatial_structure"), dict) else {}
+    target_supply_gap = payload.get("target_supply_gap") if isinstance(payload.get("target_supply_gap"), dict) else {}
+    mode = _infer_output_mode(question)
+
+    if mode == "action":
+        next_options = [item for item in (metrics.get("next_analysis_options") or []) if isinstance(item, dict)]
+        if next_options:
+            top = next_options[0]
+            return f"下一步最值得优先做的是 {top.get('title') or '继续分析'}，因为{top.get('why') or '它最能补齐当前判断缺口'}。"
+        if target_supply_gap.get("supply_gap_level") in {"medium", "high"}:
+            place_type = _as_text(target_supply_gap.get("place_type"), "目标业态")
+            return f"如果你的目标是继续推进选址或补位，当前更适合先围绕 {place_type} 的供给缺口做机会区预筛。"
+        return "下一步更适合先补齐关键证据，再决定是否进入更细的选址或经营判断。"
+
+    if mentions_supply(question) and target_supply_gap.get("supply_gap_level"):
+        place_type = _as_text(target_supply_gap.get("place_type"), "目标业态")
+        gap_level = _as_text(target_supply_gap.get("supply_gap_level"), "未明确")
+        gap_mode = _as_text(target_supply_gap.get("gap_mode"))
+        summary = _as_text(target_supply_gap.get("summary"))
+        if summary:
+            return summary
+        if gap_mode:
+            return f"从现有证据看，这里对 {place_type} 更像是存在 {gap_level} 级供给缺口，核心问题偏向 {gap_mode}。"
+        return f"从现有证据看，这里对 {place_type} 仍存在 {gap_level} 级供给缺口。"
+
+    if mode == "judgment" and mentions_road(question):
+        road_summary = _as_text(metrics.get("road_pattern_summary"))
+        if road_summary:
+            return road_summary
+        return "这里路网表现偏弱时，通常不是单一指标异常，而是可达性、连接度和与现有商业热点的衔接一起偏弱。"
+
+    portrait = _as_text(business_profile.get("portrait")) or _as_text(metrics.get("business_profile_portrait"))
+    hotspot_summary = _as_text(spatial_structure.get("summary"))
+    if portrait and hotspot_summary:
+        return f"整体看，这个区域更接近{portrait}，而且{hotspot_summary}"
+    if portrait:
+        return f"整体看，这个区域更接近{portrait}。"
+    if hotspot_summary:
+        return hotspot_summary
+    return "当前证据可以支持方向性判断，但更适合先回答区域画像和结构特征，不适合外推出更细的经营结论。"
+
+
+def build_answer_fallback(
+    *,
+    question: str,
+    snapshot: AnalysisSnapshot,
+    artifacts: Dict[str, object],
+    tool_results: List[ToolResult] | None = None,
+    research_notes: List[str] | None = None,
+    audit: AuditResult | None = None,
+) -> str:
+    audit = audit or AuditResult()
+    payload = build_answer_evidence_payload(
+        question=question,
+        snapshot=snapshot,
+        artifacts=artifacts,
+        tool_results=list(tool_results or []),
+        research_notes=list(research_notes or []),
+        audit=audit,
+    )
+    mode = _infer_output_mode(question)
+    direct_answer = _as_text(payload.get("direct_answer_seed") or _compose_direct_answer(question, payload))
+    business_profile_summary = _as_text(payload.get("business_profile_summary"))
+    spatial_structure_summary = _as_text(payload.get("spatial_structure_summary"))
+    population_vitality_summary = _as_text(payload.get("population_vitality_summary"))
+    key_evidence = [item for item in (payload.get("key_evidence") or []) if isinstance(item, dict)]
+    conflicts = [str(item).strip() for item in (payload.get("conflicting_evidence") or []) if str(item).strip()]
+    missing_evidence = [str(item).strip() for item in (payload.get("missing_evidence") or []) if str(item).strip()]
+    interpretation_limits = [str(item).strip() for item in (payload.get("interpretation_limits") or []) if str(item).strip()]
+    support_lines = [
+        f"{_as_text(item.get('headline'), '证据')}：{_as_text(item.get('interpretation'))}"
+        for item in key_evidence[:3]
+        if _as_text(item.get("interpretation"))
+    ]
+    paragraphs: List[str] = []
+    if mode == "action":
+        if direct_answer:
+            paragraphs.append(direct_answer)
+        if support_lines:
+            paragraphs.append("当前更主要的依据是" + "；".join(support_lines[:2]) + "。")
+        if conflicts:
+            paragraphs.append("需要注意的是" + conflicts[0].rstrip("。") + "。")
+        elif missing_evidence:
+            paragraphs.append("当前还缺少 " + "、".join(missing_evidence[:2]) + "，所以下一步更适合先补齐这些缺口。")
+        else:
+            target_gap = payload.get("target_supply_gap") if isinstance(payload.get("target_supply_gap"), dict) else {}
+            if target_gap.get("candidate_zones"):
+                paragraphs.append("下一步可优先查看 gap 较高的候选格，再结合实地条件继续筛选。")
+    elif mode == "judgment":
+        if direct_answer:
+            paragraphs.append(direct_answer)
+        if support_lines:
+            paragraphs.append("主要依据是" + "；".join(support_lines[:2]) + "。")
+        if conflicts:
+            paragraphs.append("需要注意的是" + conflicts[0].rstrip("。") + "。")
+        elif missing_evidence:
+            paragraphs.append("当前还缺少 " + "、".join(missing_evidence[:2]) + "，所以这个判断更适合先停留在方向性层面。")
+        elif interpretation_limits:
+            paragraphs.append("解释边界上，" + interpretation_limits[0].rstrip("。") + "。")
+    else:
+        second_parts = [item.rstrip("。") for item in (business_profile_summary, spatial_structure_summary) if item]
+        third_parts = [item.rstrip("。") for item in (population_vitality_summary,) if item]
+        if support_lines:
+            third_parts.append("主要依据是" + "；".join(support_lines[:3]))
+        if direct_answer:
+            paragraphs.append(direct_answer)
+        if second_parts:
+            paragraphs.append("；".join(second_parts) + "。")
+        elif support_lines:
+            paragraphs.append("主要依据是" + "；".join(support_lines[:2]) + "。")
+        if conflicts:
+            third_parts.append("需要注意的是" + conflicts[0].rstrip("。"))
+        elif missing_evidence:
+            third_parts.append("当前还缺少 " + "、".join(missing_evidence[:2]) + "，所以更适合做区域画像层面的判断")
+        elif interpretation_limits:
+            third_parts.append("解释边界上，" + interpretation_limits[0].rstrip("。"))
+        if third_parts:
+            paragraphs.append("；".join([part for part in third_parts if part]) + "。")
+    answer = "\n\n".join([part.strip() for part in paragraphs if str(part).strip()]).strip()
+    if answer:
+        return answer
+
+    required_labels = [str(item).strip() for item in _required_evidence_labels(question, audit) if str(item).strip()]
+    if required_labels:
+        return f"当前可以先做方向性判断，但还需要补充 {('、'.join(required_labels[:3]))} 相关证据，才能把结论说得更稳。"
+    return "当前证据可以支持方向性回答，但还不适合外推出更细的经营结论。"
 
 
 def build_citations(snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) -> List[str]:
@@ -578,29 +478,6 @@ def build_citations(snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) ->
         if artifacts.get(key):
             citations.append(key)
     return citations
-
-
-def _build_candidate_card_items(candidate_zones: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
-    for zone in candidate_zones[:3]:
-        h3_id = str(zone.get("h3_id") or "").strip()
-        label = str(zone.get("display_title") or zone.get("approx_address") or zone.get("label") or "候选格").strip()
-        reason = str(zone.get("reason_summary") or "").strip()
-        gap_score = zone.get("gap_score")
-        if gap_score is not None:
-            label = f"{label} - 缺口分数 {float(gap_score):.2f}"
-        items.append(
-            {
-                "type": "h3_candidate",
-                "label": label,
-                "text": f"{label}{(' - 判断：' + reason) if reason else ''}",
-                "h3_id": h3_id,
-                "approx_address": str(zone.get("approx_address") or "").strip(),
-                "reason_summary": reason,
-                "center_point": dict(zone.get("center_point") or {}) if isinstance(zone.get("center_point"), dict) else {},
-            }
-        )
-    return items
 
 
 def build_panel_payloads(question: str, snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) -> Dict[str, Any]:
@@ -698,49 +575,14 @@ def enrich_answer_output(
     audit: AuditResult | None = None,
 ) -> AgentTurnOutput:
     audit = audit or AuditResult()
-    structured = _build_structured_output(
-        question=question,
-        snapshot=snapshot,
-        artifacts=artifacts,
-        tool_results=list(tool_results or []),
-        research_notes=list(research_notes or []),
-        audit=audit,
-    )
-    cards = [AssistantCard.model_validate(item) if not isinstance(item, AssistantCard) else item for item in (output.cards or [])]
-    target_supply_gap = artifacts.get("current_target_supply_gap") if isinstance(artifacts.get("current_target_supply_gap"), dict) else {}
-    candidate_items = _build_candidate_card_items(list(target_supply_gap.get("candidate_zones") or []))
-    if candidate_items and mentions_supply(question):
-        summary = next((card for card in cards if card.type == "summary"), None)
-        if summary is not None and "候选" not in str(summary.content or ""):
-            summary.content = f"{summary.content} 可优先查看前 3 个候选格。".strip()
-    if candidate_items:
-        recommendation = next((card for card in cards if card.type == "recommendation"), None)
-        if recommendation is None:
-            recommendation = AssistantCard(type="recommendation", title="下一步建议", content="", items=[])
-            cards.append(recommendation)
-        existing_candidate_ids = {
-            str(item.get("h3_id") or "").strip()
-            for item in recommendation.items
-            if isinstance(item, dict) and str(item.get("type") or "").strip() == "h3_candidate"
-        }
-        for item in candidate_items:
-            h3_id = str(item.get("h3_id") or "").strip()
-            if h3_id and h3_id in existing_candidate_ids:
-                continue
-            recommendation.items.append(item)
-        if not recommendation.content and mentions_supply(question):
-            recommendation.content = "可先查看下面的候选格，再结合实地租金、竞品质量和动线做最终判断。"
-    output.cards = cards
-    if not getattr(output, "decision", None) or not str(output.decision.summary or "").strip():
-        output.decision = structured["decision"]
-    if not list(output.support or []):
-        output.support = structured["support"]
-    if not list(output.counterpoints or []):
-        output.counterpoints = structured["counterpoints"]
-    if not list(output.actions or []):
-        output.actions = structured["actions"]
-    if not list(output.boundary or []):
-        output.boundary = structured["boundary"]
-    output.review_contract = structured["review_contract"]
+    if not _as_text(output.answer):
+        output.answer = build_answer_fallback(
+            question=question,
+            snapshot=snapshot,
+            artifacts=artifacts,
+            tool_results=list(tool_results or []),
+            research_notes=list(research_notes or []),
+            audit=audit,
+        )
     output.panel_payloads = build_summary_panel_payloads(question, snapshot, artifacts)
     return output

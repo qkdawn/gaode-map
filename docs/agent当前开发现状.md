@@ -1,632 +1,363 @@
-# Agent 当前开发现状
+# Agent 当前真实架构说明
 
-本文盘点当前仓库中已经开发的 Agent 能力、模块边界、前后端入口和已暴露的问题。它描述的是现状，不是理想设计。
+本文用于说明 `/analysis` 中 Agent 的当前真实形态，面向评审、汇报和产品沟通场景。
 
-## 1. 总体定位
+这不是一份未来方案，也不是工程内部的接口手册。它回答的是三个问题：
 
-当前 Agent 已经不是简单聊天框，而是一套面向 `/analysis` 工作台的 GIS 分析编排系统。
+- 现在的 Agent 是什么
+- 它当前怎么工作
+- 为什么它比早期方案更收束、更可信
 
-它已经覆盖：
+## 1. 文档定位
 
-- 用户问题识别
-- 当前地图范围和分析快照整理
-- LLM 规划
-- 工具选择
-- GIS 工具执行
-- 证据审计
-- 审计后重规划
-- 结构化综合回答
-- 会话持久化
-- 流式进度展示
-- 附件检索
-- 报告总结生成
-- 区域画像和选址场景包
+当前 Agent 已经不是一个“加在地图右侧的聊天框”，而是一套围绕城市空间分析任务组织起来的受控运行系统。
 
-当前主链路更接近一个轻量 Agent harness，而不是单次问答接口。
+它的目标不是做开放式通用助手，而是把用户提出的问题，和当前地图范围、分析结果、工具能力、证据边界组合起来，产出一段可解释的自然回答。
 
-## 2. 后端主链路
+在当前版本里，Agent 的默认任务可以概括为一句话：
 
-Agent 主流程位于 `modules/agent/runtime.py`。
+> 基于当前地图分析上下文，继续回答用户问题，并在需要时调用少量工具补充证据。
 
-当前阶段包括：
+这套设计的重点不在“让模型自由发挥”，而在：
 
-| 阶段 | 作用 | 主要模块 |
-| --- | --- | --- |
-| `gating` | 判断用户问题是否可执行，是否缺范围或关键意图 | `gate.py` |
-| `context_ready` | 整理当前 analysis snapshot 和已有 artifacts | `context_builder.py` |
-| `planning` | 生成分析目标、证据关注点和是否需要工具 | `planner.py`、`providers/llm_provider.py` |
-| `executing` | 调用注册工具并收集结果 | `executor.py`、`tool_service.py` |
-| `auditing` | 检查证据是否足够回答问题 | `auditor.py` |
-| `replanning` | 审计不通过时补充工具步骤 | `runtime.py`、`planner.py` |
-| `synthesizing` | 生成结构化结论、证据、建议和卡片 | `synthesizer.py` |
-| `answered` | 返回最终回答并持久化会话 | `session_service.py` |
+- 问题入口清晰
+- 工具调用受控
+- 回答边界明确
+- 过程可追踪
+- 会话可恢复
 
-主链路已经具备完整闭环，但目前自由度较高，容易在简单任务上产生过长执行链。
+## 2. 一页式核心判断
 
-## 3. API 入口
+当前 Agent 已经完成了从“多角色串行交卷”到“单一路径自然回答”的收敛。
 
-Agent 路由集中在 `router/domains/agent.py`。
+当前的核心特征有四点：
 
-当前已暴露接口包括：
+1. 主链路只有一条  
+   用户问题统一进入 `turn / turn/stream` 主入口，不再维护独立实验链路。
 
-| 接口 | 用途 |
-| --- | --- |
-| `POST /api/v1/analysis/agent/turn` | 非流式 Agent turn |
-| `POST /api/v1/analysis/agent/turn/stream` | 流式 Agent turn |
-| `POST /api/v1/analysis/agent/react/run` | 创建 ReAct run |
-| `GET /api/v1/analysis/agent/react/stream` | ReAct run 流式事件 |
-| `POST /api/v1/analysis/agent/react/cancel/{run_id}` | 取消 ReAct run |
-| `GET /api/v1/analysis/agent/sessions` | 获取 Agent 会话列表 |
-| `GET /api/v1/analysis/agent/sessions/{session_id}` | 获取会话详情 |
-| `PUT /api/v1/analysis/agent/sessions/{session_id}` | 保存会话快照 |
-| `PATCH /api/v1/analysis/agent/sessions/{session_id}` | 更新会话元数据 |
-| `DELETE /api/v1/analysis/agent/sessions/{session_id}` | 删除会话 |
-| `POST /api/v1/analysis/agent/context-ask` | 针对报告块或图表的上下文解释 |
-| `POST /api/v1/analysis/agent/site-selection` | 生成选址分析包 |
-| `GET /api/v1/analysis/agent/tools` | 列出 Agent 工具 |
-| `POST /api/v1/analysis/agent/attachments` | 上传附件 |
-| `GET /api/v1/analysis/agent/attachments` | 获取附件列表 |
-| `DELETE /api/v1/analysis/agent/attachments/{attachment_id}` | 删除附件 |
-| `GET /api/v1/analysis/agent/prompts` | 列出 prompt 配置 |
-| `GET /api/v1/analysis/agent/prompts/{prompt_key}` | 读取单个 prompt |
-| `PUT /api/v1/analysis/agent/prompts/{prompt_key}` | 更新 prompt |
-| `POST /api/v1/analysis/agent/summary/readiness` | 检查报告总结数据就绪状态 |
-| `POST /api/v1/analysis/agent/summary/generate` | 流式生成总结报告包 |
-| `POST /api/v1/analysis/agent/iteration/nightlight/interpret` | 夜光迭代解释 |
-| `POST /api/v1/analysis/agent/iteration/poi/interpret` | POI 迭代解释 |
-| `POST /api/v1/analysis/agent/iteration/poi/build` | 构建 POI 迭代 payload |
+2. 中段是受控工具循环  
+   系统会先判断问题是否清晰、是否需要澄清，再按需进入工具循环，证据够了就停，不再默认做长链条规划。
 
-接口数量已经较多，后续需要区分“核心 Agent 主链路”和“附属分析服务”。
+3. 最终输出是自然回答  
+   answered 状态的主契约只有 `answer`，系统不再把结构化栏目当作用户最终回复。
 
-## 3.1 Agent 输入体系
+4. 后台仍保留完整可解释性  
+   虽然用户看到的是自然文本，但后台仍保存工具轨迹、过程状态、证据引用、风险确认和会话上下文。
 
-当前 Agent 的输入已经不只是用户在聊天框输入的一段文字，而是由多种上下文共同组成。
+对评审来说，这意味着当前 Agent 的产品形态已经比较明确：
 
-现有输入来源包括：
+- 前台是“会继续回答问题的分析助手”
+- 后台是“有工具治理和证据边界的分析运行时”
 
-| 输入类型 | 来源 | 说明 |
-| --- | --- | --- |
-| 用户文本 | Agent composer / chat messages | 用户直接提出的问题、追问、分析目标 |
-| 当前地图范围 | `analysis_snapshot.scope` | 当前等时圈、绘制范围、polygon、isochrone feature |
-| 当前分析快照 | `AnalysisSnapshot` | POI、H3、人口、夜光、路网、前端分析面板、过滤条件等 |
-| 已有运行产物 | `memory.artifacts` | 工具执行后产生的结构化中间结果 |
-| 历史分析上下文 | `modules/retrieval/service.py` | 当前会话内的 analysis chunks 和 report chunks |
-| 用户上传附件 | `modules/retrieval/attachments.py` | PDF、图片、Office、表格、文本等外部材料 |
-| 附件检索结果 | `search_uploaded_attachment_context` / `read_uploaded_attachment_context` | Agent 可按问题检索并读取上传文件中的证据片段 |
+## 3. 当前 Agent 主链路
 
-### 3.1.1 附件上传
-
-附件上传入口位于：
-
-- `POST /api/v1/analysis/agent/attachments`
-- `GET /api/v1/analysis/agent/attachments`
-- `DELETE /api/v1/analysis/agent/attachments/{attachment_id}`
-
-前端对应逻辑主要在：
-
-- `frontend/src/features/agent/runtime.js`
-- `frontend/src/features/agent/normalizers.js`
-- `frontend/src/features/agent/session-store.js`
-
-上传后附件会保存到：
+当前主链路可以概括为：
 
 ```text
-runtime/agent_uploads/{conversation_id}/{attachment_id}/
+用户问题
+-> 入口校验
+-> 轻量门卫判断
+-> 工具循环
+-> 证据检查
+-> 自然回答
+-> 会话持久化
 ```
 
-每个附件会有：
+其中最关键的三个实现锚点是：
+
+- `modules/agent/runtime.py`
+- `modules/agent/providers/langgraph_react.py`
+- `modules/agent/session_service.py`
+
+### 3.1 入口阶段
+
+主入口只有两个：
+
+- `/api/v1/analysis/agent/turn`
+- `/api/v1/analysis/agent/turn/stream`
+
+输入的核心是：
+
+- 用户消息
+- 当前 `analysis_snapshot`
+- `thinking_mode: quick | deep`
+- 风险确认状态
+- 上传附件引用
+
+这里的 `thinking_mode` 只决定内部执行深度，不决定回答模板。
+
+- `quick` 更偏复用已有证据、少量补工具
+- `deep` 更偏多做一轮校验、把边界说得更稳
+
+两者最终都回到同一个目标：继续回答用户问题。
+
+### 3.2 门卫判断
+
+进入工具阶段前，系统会先做一次轻量判断，确认：
+
+- 问题是否足够清晰
+- 当前范围和上下文是否能支撑执行
+- 是否需要先向用户补充关键信息
+
+如果问题不清晰，系统不会硬编造结论，而是进入澄清分支。
+
+这一步的价值是把“是否能开工”提前判断掉，避免模型在不完整输入上自由发挥。
+
+### 3.3 工具循环
+
+通过门卫后，系统进入 LangGraph 风格的工具循环。
+
+这一段不是一次性列出完整大计划，而是按轮次判断：
+
+- 现有证据够不够
+- 如果不够，最该先调什么工具
+- 工具结果回来后是否还要继续
+- 什么时候停止并进入回答
+
+它的运行原则是：
+
+- 优先复用已有快照和已有结果
+- 只有确实缺证据时才调用新工具
+- 证据足够时立即停止，不把分析拖成长流程
+
+这使得 Agent 更像一个受控分析运行时，而不是一个无边界的自由推理器。
+
+### 3.4 证据检查与回答生成
+
+工具循环结束后，系统会做一次规则层面的证据检查，识别：
+
+- 当前有哪些可用证据
+- 哪些维度仍然缺失
+- 哪些结论只能做方向性表达
+- 哪些解释必须保留边界
+
+随后，系统把这些证据整理成轻量回答底座，再生成最终自然回答。
+
+当前回答生成的组织原则是：
+
+- 先直接回答用户问题
+- 再展开最关键的判断依据
+- 在必要时补充边界或下一步
+
+总结类问题会更完整一些，解释类和建议类问题会更聚焦一些，但都不再强制按固定栏目输出。
+
+## 4. 当前前后端交互与回答契约
+
+### 4.1 当前对外主契约
+
+当前 Agent 对外主契约非常收束：
+
+- 主请求：`/api/v1/analysis/agent/turn`
+- 流式请求：`/api/v1/analysis/agent/turn/stream`
+- answered 主输出：`output.answer`
+- 执行深度开关：`thinking_mode: quick | deep`
+
+非 answered 状态只保留两类产品语义：
+
+- 澄清问题
+- 风险确认
+
+这意味着系统不再把结构化栏目当作用户回复契约，也不要求前端去拼装判断、证据、建议卡片。
+
+### 4.2 后端统一生成 canonical assistant message
+
+当前 assistant 的主回答内容由后端统一生成并持久化。
+
+这带来两个直接收益：
+
+1. 用户看到的 assistant 消息有唯一来源  
+   刷新页面、切换历史、重新打开会话后，看到的回答不会因为前端重组逻辑不同而变化。
+
+2. 过程和结果可以一起恢复  
+   每条 assistant 消息不仅有最终文本，也带有对应的过程信息、工具轨迹和执行摘要。
+
+换句话说，前端看到的是“回答的呈现”，不是“回答的再生产”。
+
+### 4.3 前端当前负责什么
+
+前端当前负责：
+
+- 渲染消息内容
+- 渲染思考过程和工具轨迹
+- 管理会话切换与恢复
+- 管理澄清、风险确认和继续分析交互
+
+前端不再负责：
+
+- 拼装结构化结论
+- 复刻后端回答逻辑
+- 决定工具治理规则
+
+这让前后端职责分界比早期版本更清楚。
+
+## 5. 从旧链路收敛到当前单一路径
+
+当前架构不是一步到位得到的，而是从更重、更散的方案收束而来。可以用四组变化来理解。
+
+### 5.1 双轨链路 -> 单一路径
+
+早期系统同时维护主链路和独立实验链路，前后端都要理解两套入口、两套事件流和两套心智模型。
+
+当前已经收束为统一主路径：
+
+- 所有普通继续分析都走同一条 `turn` 主链路
+- 中段工具循环作为主链路内部机制存在
+- 不再保留并行的独立产品面
+
+这让评审更容易理解“系统现在到底有几条路”，也降低了维护和解释成本。
+
+### 5.2 串行交卷 -> 轻治理加工具循环
+
+早期链路更像一套长流程审查系统：前段设定框架，中段按框架执行，后段再审一轮是否够答。
+
+当前收敛后的逻辑更直接：
+
+- 先判断能不能回答
+- 再按需补证据
+- 证据够了就回答
+
+这让简单问题不再被拉进复杂的内部流程，也让系统更符合用户对“继续分析”的预期。
+
+### 5.3 结构化 answered 契约 -> 单一自然文本契约
+
+早期 answered 输出更像一份结构化交付物，系统内部和前端都围绕多块字段组织。
+
+当前 answered 输出只保留自然文本主回答：
+
+- 用户看到的是一段完整回答
+- 系统内部继续保留过程和证据
+- 结构化中间层不再塑造用户最终回复
+
+这一步的意义是把“内部治理结构”和“用户可见表达”真正拆开。
+
+### 5.4 continue-analysis 夹带报告语义 -> 继续回答问题
+
+早期“继续分析”容易和报告写回、模块生成、结构化审查语义混在一起。
+
+当前已经明确：
+
+- continue-analysis 的默认目标就是继续回答当前问题
+- deep 只是更强的证据检查，不是报告模式
+- 报告、总结、选址、迭代解释等能力保留为独立旁支，不再反向塑造主回答链路
+
+这一步让产品语义更纯，也更符合用户直觉。
+
+## 6. 当前系统边界与不做什么
+
+为了让 Agent 的能力可解释，当前系统刻意保留了一些边界。
+
+### 6.1 它不是通用开放式 Agent
+
+当前 Agent 只服务 `/analysis` 工作台里的空间分析语境。
+
+它擅长的是：
+
+- 基于当前地图范围继续分析
+- 利用已有结果和工具补证据
+- 对区域特征、空间结构、供需关系、选址机会做方向性判断
+
+它不以“无限自由任务处理”为目标。
+
+### 6.2 它不会把 GIS 指标直接外推成经营结果
+
+当前系统明确保留一条硬边界：
+
+- GIS 密度、分布、人口、夜光、路网等指标，可以支持空间画像和趋势判断
+- 但不能被直接翻译成客流、消费力、营业额或经营收益
+
+这不是能力缺失，而是产品可信性的必要边界。
+
+### 6.3 deep 不是报告模式
+
+当前 `deep` 的含义只是：
+
+- 工具轮次可以更多
+- 证据校验更严格
+- 边界表达更完整
+
+它不再意味着固定栏目输出，也不意味着自动生成报告模块。
+
+### 6.4 主对话链路不等于全部 Agent 能力
+
+当前系统里仍有总结、选址、专题解释、历史分析等旁支能力。
+
+但这些能力不等于主对话链路本身。
+
+当前文档关注的是普通 Agent turn 主链路，而不是把所有分析服务混成一个总系统。
+
+## 7. 评审视角下的价值与可信性
+
+从评审视角看，当前这套 Agent 的价值不在“更像一个万能助手”，而在“更像一个可以落在地图分析场景里的可信系统”。
+
+它当前的可信性来自三个层面。
+
+### 7.1 它更短
+
+高频问题不再默认经过冗长的多角色流程，而是更直接地收敛到回答。
+
+这意味着：
+
+- 响应路径更短
+- 解释更直接
+- 产品体验更接近日常 AI 问答
+
+### 7.2 它更稳
+
+系统现在把高频交互语义收束得更明确：
+
+- 继续分析就是继续回答问题
+- 工具循环只在需要时补证据
+- answered 只产出自然回答
+
+这让前后端都围绕同一套契约工作，减少了用户看不见但系统内部很重的复杂度。
+
+### 7.3 它仍然可解释
+
+虽然用户主视图看到的是自然回答，但后台仍然保留：
+
+- 思考阶段
+- 工具轨迹
+- 风险确认
+- 证据引用
+- 会话恢复信息
+
+这使它不是“纯黑箱聊天”，而是一套可以被复盘的分析系统。
+
+对地图分析工作台来说，这种“前台自然、后台可追溯”的平衡，比一味追求更强的自由推理更有产品价值。
+
+## 8. 后续演进方向
+
+当前架构已经基本收束，但仍有几条清晰的后续方向。
+
+第一，继续提高回答质量。  
+当前自然回答已经替代结构化模板，但后续仍可继续优化不同问题类型下的展开度、证据表达和边界语气。
+
+第二，继续强化高频任务的稳定性。  
+总结类、解释类、建议类问题已经有明显不同的回答风格，后续仍可继续固化高频场景的证据组织方式。
+
+第三，继续产品化过程展示。  
+当前过程信息已经保留得较完整，后续可以进一步把技术轨迹翻译成更容易理解的进度表达。
+
+第四，继续明确主链路与旁支能力的分层。  
+主对话链路、专题服务、总结能力和报告类能力，后续可以在文档和产品呈现上继续拉开层次，减少误解。
+
+## 9. 简短结论
+
+当前 Agent 的真实状态可以概括为：
 
 ```text
-source/      原始文件
-rag/         RAG-Anything 工作目录
-parsed/      解析输出目录
-metadata.json
-chunks.json
+一个面向地图分析工作台的
+单一路径、工具受控、证据有边界、
+结果可恢复、前台自然回答的分析系统
 ```
 
-附件状态包括：
+它现在最重要的变化不是“能力越来越多”，而是“主链路终于变得清楚”：
 
-```text
-uploaded
-processing
-ready
-failed
-```
+- 用户问题统一进入主入口
+- 中段按需补证据
+- 最终只输出自然回答
+- 后台继续保留轨迹、证据和恢复能力
 
-前端会轮询附件状态，只有 `ready` 状态的附件会作为 `attachment_ids` 传入 Agent turn。
+这套设计更适合城市空间分析场景，也更适合向评审说明：
 
-### 3.1.2 支持的附件类型
-
-允许的扩展名配置在 `core/config.py`：
-
-```text
-.pdf
-.jpg / .jpeg / .png / .bmp / .tiff / .tif / .gif / .webp
-.doc / .docx
-.ppt / .pptx
-.xls / .xlsx
-.txt
-.md
-```
-
-默认最大附件大小为 30MB。
-
-### 3.1.3 开源解析能力
-
-当前项目已经接入：
-
-```text
-raganything[all]==1.3.1
-```
-
-配置项包括：
-
-```text
-RAGANYTHING_PARSER=mineru|docling|paddleocr
-RAGANYTHING_PARSE_METHOD=auto|ocr|txt
-RAGANYTHING_EMBEDDING_MODEL=text-embedding-3-large
-RAGANYTHING_EMBEDDING_DIM=3072
-```
-
-也就是说，现在已经具备接收多模态/多格式材料的基础能力：
-
-- PDF 文档
-- 图片
-- 图纸截图
-- 表格
-- Word 文档
-- PPT
-- Markdown / TXT
-- 带图表、公式、表格的材料
-
-解析流程在 `modules/retrieval/attachments.py` 中。
-
-核心流程是：
-
-```text
-用户上传附件
--> 保存原始文件
--> 创建 AttachmentRecord
--> 后台调用 RAG-Anything
--> 解析文本、图片、表格、公式等内容
--> 生成可检索上下文
--> 切成 AttachmentChunk
--> 写入 chunks.json
--> 附件状态变为 ready
-```
-
-### 3.1.4 Agent 如何使用附件
-
-附件不会直接整份塞进 LLM prompt。
-
-Agent 通过工具检索：
-
-| 工具 | 作用 |
-| --- | --- |
-| `search_uploaded_attachment_context` | 根据用户问题搜索上传附件中的相关片段 |
-| `read_uploaded_attachment_context` | 读取搜索命中的具体 chunk |
-
-工具定义在：
-
-- `modules/agent/tool_definitions/retrieval.py`
-
-工具实现位于：
-
-- `modules/agent/tool_adapters/retrieval_tools.py`
-
-Prompt 中已经明确要求：
-
-- 用户提到附件、文件、图片、图纸、表格、报告时，优先检索附件。
-- 附件证据必须标注文件名。
-- 附件内容不能伪装成地图分析计算结果。
-
-### 3.1.5 当前输入体系的问题
-
-目前输入能力已经比较强，但还需要收敛：
-
-1. 附件输入和 GIS snapshot 输入还没有形成统一的“证据类型”模型。
-2. 附件 chunk 是外部材料证据，不能和 POI、人口、夜光等计算结果混为一谈。
-3. 附件检索目前依赖 Agent 自己决定何时调用，常见场景可以做显式入口，例如“基于这份规划文件分析当前范围”。
-4. RAG-Anything 解析结果被二次 query 后切 chunk，后续可考虑保存更细的页码、表格、图片定位。
-5. 多附件、多轮追问时，需要更清楚地展示“本次回答引用了哪些文件证据”。
-
-这部分是 Agent 成为“城市规划研究员”的重要输入层：它不仅能读地图数据，也能读用户上传的规划文本、图纸截图、表格和汇报材料。
-
-## 4. LLM Provider 和多角色 Prompt
-
-LLM 调用集中在 `modules/agent/providers/`。
-
-当前已经实现：
-
-- OpenAI-compatible / DeepSeek 风格 chat completions 调用
-- JSON role 调用
-- 流式 reasoning delta
-- tool calling 消息解析
-- tool call 合并与执行
-- title 生成
-- Gatekeeper、Planner、Tool Selector、Auditor、Synthesizer、Tool Loop prompt
-
-主要文件：
-
-- `providers/client.py`
-- `providers/llm_provider.py`
-- `providers/prompts.py`
-- `providers/tool_loop.py`
-- `providers/tool_call_execution.py`
-- `providers/chat_parser.py`
-
-当前 LLM 角色包括：
-
-| 角色 | 作用 |
-| --- | --- |
-| Gatekeeper | 判断是否可执行、是否需要澄清或阻断 |
-| Planner | 生成分析目标、问题类型和证据关注点 |
-| Tool Selector | 根据 Planner 意图选择工具步骤 |
-| Auditor | 判断证据是否足够，必要时要求重规划 |
-| Synthesizer | 生成最终结构化输出 |
-| Tool Loop | ReAct/tool calling 风格的工具调度 |
-
-## 5. 工具注册和工具执行
-
-工具系统已经比较完整，核心文件包括：
-
-- `tools.py`
-- `tool_service.py`
-- `executor.py`
-- `tool_definitions/`
-- `tool_adapters/`
-
-工具按定义和适配器分离。
-
-### 5.1 工具定义
-
-工具定义位于 `modules/agent/tool_definitions/`：
-
-| 文件 | 作用 |
-| --- | --- |
-| `common.py` | RegisteredTool、ToolSpec 和注册 helper |
-| `foundation.py` | 基础工具，如读取范围、读取结果、基础数据计算 |
-| `capability.py` | 能力工具，如数据就绪、下一步分析、空间结构分析 |
-| `scenario.py` | 场景工具，如区域画像、选址分析 |
-| `analysis_business.py` | 商业分析相关工具 |
-| `retrieval.py` | 分析上下文、报告上下文、附件检索工具 |
-
-### 5.2 工具适配器
-
-工具适配器位于 `modules/agent/tool_adapters/`。
-
-当前已开发：
-
-| 文件 | 能力 |
-| --- | --- |
-| `scope_tools.py` | 读取和归一化当前范围 |
-| `result_tools.py` | 读取当前已有分析结果 |
-| `poi_tools.py` | POI 获取 |
-| `h3_tools.py` | H3 网格和指标 |
-| `population_tools.py` | 人口概览 |
-| `nightlight_tools.py` | 夜光概览 |
-| `road_tools.py` | 路网句法 |
-| `spatial_cell_tools.py` | 空间同格对齐 |
-| `capability_tools.py` | 数据就绪、下一步分析、POI/空间结构/标签/候选评分 |
-| `analysis_tools.py` | 读取和生成结构化分析证据 |
-| `business_tools.py` | 商业选址建议 |
-| `scenario_tools.py` | 区域画像包、选址包 |
-| `retrieval_tools.py` | analysis/report/attachment 检索 |
-
-工具系统已经能覆盖 POI、H3、人口、夜光、路网、空间同格、区域画像、选址、检索等核心 GIS 分析能力。
-
-## 6. 城市分析抽取器
-
-`modules/agent/analysis_extractors.py` 是当前 Agent 最重要的领域能力底座之一。
-
-它已经包含：
-
-- POI 结构分析
-- H3 结构分析
-- 路网模式分析
-- 人口画像分析
-- 夜光模式分析
-- POI 业态混合分析
-- 商业热点识别
-- 目标业态供给缺口
-- 区域特征标签推断
-- 候选点评分
-
-这些能力使 Agent 不只是复述数据，而是能把已有数据加工成城市规划语义。
-
-## 7. 场景包
-
-当前已经有场景化分析包，主要在 `tool_adapters/scenario_tools.py`。
-
-已实现：
-
-- `run_area_character_pack`
-- `run_site_selection_pack`
-- `run_placeholder_scene_pack`
-
-其中：
-
-- `run_area_character_pack` 用于区域画像、商业调性、功能标签、活动信号、客群特征等判断。
-- `run_site_selection_pack` 用于目标业态选址、候选区、供给缺口和评分。
-
-后续更适合继续扩展为稳定 recipe，而不是让通用 Agent 对所有问题自由规划。
-
-## 8. 审计和边界控制
-
-当前已经有两类控制：
-
-### 8.1 证据审计
-
-`auditor.py` 会检查：
-
-- 是否有 POI 证据
-- 是否有 H3 密度证据
-- 是否有路网证据
-- 是否有人口证据
-- 是否有夜光证据
-- 是否有 POI 结构分析
-- 是否有 H3 结构分析
-- 是否有目标候选证据
-- 是否需要空间同格对齐
-
-审计不通过时，主链路会进入 `replanning`。
-
-### 8.2 工具治理
-
-`governance.py` 会检查工具风险和治理模式。
-
-Agent 支持：
-
-- `auto`
-- `guarded`
-- `readonly`
-
-高风险或高成本工具可以要求用户确认。
-
-## 9. 综合输出
-
-`synthesizer.py` 负责把证据和工具结果转为最终输出。
-
-当前输出结构包括：
-
-- `decision`
-- `support`
-- `counterpoints`
-- `actions`
-- `boundary`
-- `cards`
-- `next_suggestions`
-- `review_contract`
-- `panel_payloads`
-
-它已经试图把 Agent 输出从普通文本升级为结构化城市规划判断。
-
-当前风险是：综合阶段输入偏大，复杂任务容易触发 JSON 输出失败，需要进一步压缩输入和增加后端 fallback。
-
-## 10. Context Ask
-
-`context_ask_service.py` 已经实现针对某个 target 的解释能力。
-
-它的定位是：
-
-- 只解释当前点击对象
-- 不重新规划
-- 不调用工具
-- 使用 target、evidence、artifact_refs 和 snapshot summary
-- 证据不足时给出缺口说明
-
-如果后续将“追问”统一定义为“继续分析”，这个服务可以下沉为 follow-up context builder 的内部能力，而不是单独作为用户侧追问主入口。
-
-## 11. Summary Pack
-
-`summary_service.py` 已经实现报告总结相关能力。
-
-包括：
-
-- 数据就绪检查
-- 面板 payload 生成
-- 报告结构生成
-- 分 section LLM 生成
-- follow-up questions
-- tourism cross analysis
-- 流式 summary 事件
-
-该模块已经很大，属于 Agent 体系下的报告生成子系统。
-
-## 12. Iteration 分析
-
-当前已经有迭代解释相关服务：
-
-- `iteration_change_service.py`
-- `poi_iteration_build_service.py`
-
-已支持：
-
-- 夜光迭代解释
-- POI 迭代解释
-- POI 多年份趋势 payload 构建
-- 增长区识别
-- 分类变化摘要
-- 空间趋势证据增强
-
-这部分更偏“专题分析服务”，可以被 Agent 调用或由前端直接触发。
-
-## 13. LangGraph / ReAct 尝试
-
-当前已有 LangGraph ReAct loop：
-
-- `providers/langgraph_react.py`
-- `react_orchestrator.py`
-
-它支持：
-
-- 创建 run
-- 流式事件
-- tool calling
-- max steps
-- max errors
-- cancel
-- trace/action/observation/final 事件
-
-这说明项目已经开始尝试接入开源 Agent runtime，但目前主链路仍主要是自研 orchestrator。
-
-## 14. 会话持久化
-
-`session_service.py` 和 `store/agent_session_repo.py` 支撑 Agent 会话。
-
-当前支持：
-
-- 会话列表
-- 会话详情
-- 创建 / 更新会话
-- 更新元数据
-- 删除会话
-- turn 结果持久化
-- 会话标题生成
-- 会话状态、输出、诊断、上下文、计划和附件保存
-
-前端也已经配套做了 session store 和 UI 状态同步。
-
-## 15. 前端 Agent 工作区
-
-前端 Agent 相关代码主要在：
-
-- `frontend/src/features/agent/runtime.js`
-- `frontend/src/features/agent/session-store.js`
-- `frontend/src/features/agent/sessions-ui.js`
-- `frontend/src/features/agent/normalizers.js`
-- `frontend/src/features/agent/derived.js`
-- `frontend/src/pages/analysis/components/agent/`
-
-当前已支持：
-
-- Agent 输入
-- 流式执行
-- thinking timeline
-- reasoning panel
-- trace 展示
-- plan 展示
-- 会话列表
-- 会话切换
-- 会话重命名 / 删除 / pin
-- clarification card
-- risk confirmation
-- 附件状态
-- Agent panel payload 预加载
-- pending task confirmation
-- summary task log tracking
-
-前端已经承载了大量 Agent 运行态逻辑，后续可以考虑把 prompt 拼接和业务判断进一步收回后端。
-
-## 16. 已有测试
-
-Agent 前端已有测试：
-
-- `frontend/tests/agent-sessions.test.js`
-- `frontend/tests/agent-normalizers.test.js`
-- `frontend/tests/agent-derived.test.js`
-
-这些主要覆盖 session、normalizer、derived UI 状态。
-
-后端 Agent 主链路、工具 recipe、审计规则和 synthesis fallback 仍需要更明确的测试覆盖。
-
-## 17. 当前主要问题
-
-从现状看，Agent 已经“做得很多”，但出现了几个明显结构问题。
-
-### 17.1 自由编排过重
-
-简单任务也会经过 Gatekeeper、Planner、Tool Selector、Executor、Auditor、Replanner、Synthesizer，多轮 LLM 参与后容易耗时过长。
-
-典型问题：
-
-- “总结商业特征”这类固定任务可能跑成 10 多步。
-- Planner 判断证据充分，Auditor 又要求补证据，随后又重新判断充分。
-- 用户看到大量内部过程，但得不到稳定结论。
-
-### 17.2 常见任务缺少固定 recipe
-
-目前已经有区域画像和选址场景包，但主链路仍倾向让 LLM 自由决定工具链。
-
-更适合固定为 recipe 的任务包括：
-
-- 区域商业特征总结
-- 业态缺口分析
-- 咖啡 / 餐饮 / 便利店选址
-- 夜间活力诊断
-- 路网可达性诊断
-- TOD 初筛
-- 15 分钟生活圈缺口
-- 更新优先级判断
-
-### 17.3 Synthesizer 上下文过大
-
-综合阶段目前会接收较多 payload，包括 snapshot digest、context digest、synthesis payload、tool results、metrics、evidence matrix 等。
-
-复杂任务下容易导致：
-
-- LLM JSON 输出损坏
-- 响应时间过长
-- 用户最后只看到 LLM 调用失败
-
-### 17.4 UI 暴露了过多内部过程
-
-前端展示了大量 planning、audit、replan、tool trace 文本。
-
-对开发调试有价值，但对演示用户来说噪声较大。
-
-用户更需要看到：
-
-- 正在检查哪些证据
-- 当前结论是什么
-- 哪些证据支持
-- 哪些地方不确定
-- 下一步能做什么
-
-### 17.5 证据异常没有足够硬约束
-
-部分异常信号应该阻止模型得出强结论。
-
-例如：
-
-- 同格对齐后 `active_poi_cell_count=0`
-- H3 网格为空
-- 夜光有效像素过少
-- 路网为空或节点过少
-- 前端 analysis key 存在但 payload 为空
-
-这些应该作为 rule audit 的硬边界，而不是交给模型自由解释。
-
-## 18. 建议的后续收敛方向
-
-下一步不建议继续横向增加 Agent 功能，而应优先收敛成几个稳定的城市规划场景工作流。
-
-建议优先级：
-
-1. 把“区域商业特征总结”做成固定 recipe。
-2. 把“追问”统一为 `continue_analysis`，并携带 anchor 和当前 analysis snapshot。
-3. 限制 Synthesizer 输入体积，只传 evidence digest，不传完整 tool results。
-4. 增加结构化 fallback：LLM 综合失败时仍返回后端构造的 cards。
-5. 隐藏大部分内部 trace，把 UI 主视图改成用户可理解的分析进度。
-6. 对关键证据异常增加硬规则审计。
-7. 明确哪些接口属于核心 Agent，哪些属于专题服务或历史实验。
-
-## 19. 简短结论
-
-当前 Agent 已经具备完整技术链路：
-
-```text
-+++ 用户问题
-+++ 分析快照
-+++ LLM 规划
-+++ 工具注册
-+++ GIS 工具执行
-+++ 证据审计
-+++ 结构化输出
-+++ 前端流式展示
-+++ 会话持久化
-```
-
-但产品层面还需要从“通用自由 Agent”收敛为“稳定城市规划场景 Agent”。
-
-换句话说，下一阶段的重点不是继续让 Agent 更自由，而是让它在几个高频规划任务上更短、更准、更稳、更像专业分析师。
+当前 Agent 不是一套还在发散的实验系统，而是一条已经收束成型、可以持续打磨质量的产品主链路。

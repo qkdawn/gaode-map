@@ -1,7 +1,12 @@
 import json
 
 from modules.agent.schemas import AgentTurnOutput, AnalysisSnapshot, AuditResult, ToolResult
-from modules.agent.synthesizer import build_analysis_evidence, build_cards, build_synthesis_payload, enrich_answer_output
+from modules.agent.synthesizer import (
+    build_analysis_evidence,
+    build_answer_evidence_payload,
+    build_answer_fallback,
+    enrich_answer_output,
+)
 
 
 def _snapshot_with_decision_evidence() -> AnalysisSnapshot:
@@ -13,7 +18,7 @@ def _snapshot_with_decision_evidence() -> AnalysisSnapshot:
     )
 
 
-def test_build_analysis_evidence_converts_metrics_to_decision_evidence():
+def test_build_analysis_evidence_converts_metrics_to_evidence_items():
     evidence = build_analysis_evidence(_snapshot_with_decision_evidence(), {})
 
     evidence_by_metric = {item.metric: item for item in evidence}
@@ -24,36 +29,38 @@ def test_build_analysis_evidence_converts_metrics_to_decision_evidence():
     assert evidence_by_metric["h3_density"].confidence == "moderate"
 
 
-def test_build_synthesis_payload_includes_evidence_matrix_and_decision_layers():
-    payload = build_synthesis_payload(
+def test_build_answer_evidence_payload_includes_key_evidence_and_limits():
+    payload = build_answer_evidence_payload(
         question="总结这个区域",
         snapshot=_snapshot_with_decision_evidence(),
         artifacts={},
         tool_results=[ToolResult(tool_name="read_current_results", status="success")],
-        research_notes=[],
+        research_notes=["已复用当前快照"],
         audit=AuditResult(),
     )
 
-    assert payload["decision_strength"] == "strong"
-    assert payload["decision"]["strength"] == "strong"
-    assert payload["decision"]["can_act"] is True
-    assert payload["support"]
-    assert payload["actions"]
-    assert payload["boundary"]
-    assert any(item["metric"] == "poi_count" for item in payload["evidence_matrix"])
-    assert payload["recommendation_layers"]["can_act_now"]
-    assert payload["recommendation_layers"]["do_not_infer"]
+    assert payload["tool_chain"] == ["read_current_results"]
+    assert payload["key_evidence"]
+    assert any(item["metric"] == "poi_count" for item in payload["key_evidence"])
     assert any("客流" in item for item in payload["interpretation_limits"])
+    assert payload["business_profile"]["portrait"]
+    assert payload["spatial_structure"]["hotspot_mode"] is None
+    assert payload["research_notes"] == ["已复用当前快照"]
+    assert payload["direct_answer_seed"]
+    assert "business_profile_summary" in payload
+    assert "spatial_structure_summary" in payload
+    assert "population_vitality_summary" in payload
+    assert payload["evidence_highlights"]
 
 
-def test_build_synthesis_payload_uses_compact_tool_result_digest():
+def test_build_answer_evidence_payload_uses_compact_tool_result_digest():
     huge_points = [{"id": f"poi-{index}", "lng": 112.98 + index * 0.001, "lat": 28.19} for index in range(300)]
     huge_h3_features = [
         {"id": f"h3-{index}", "properties": {"poi_count": index, "label": f"cell-{index}"}}
         for index in range(300)
     ]
 
-    payload = build_synthesis_payload(
+    payload = build_answer_evidence_payload(
         question="总结这个区域",
         snapshot=_snapshot_with_decision_evidence(),
         artifacts={},
@@ -97,26 +104,9 @@ def test_build_synthesis_payload_uses_compact_tool_result_digest():
     assert tool_digest["artifact_shapes"]["current_poi_h3_grid"]["keys"] == ["features", "summary"]
 
 
-def test_build_cards_uses_decision_oriented_titles_and_layers():
-    audit = AuditResult(missing_evidence=["路网概览"], issues=["路网证据不足。"])
-    cards = build_cards(
-        question="这个区域适合补充餐饮吗",
-        snapshot=_snapshot_with_decision_evidence(),
-        artifacts={},
-        tool_results=[ToolResult(tool_name="read_current_results", status="success")],
-        research_notes=[],
-        audit=audit,
-    )
-
-    assert [card.title for card in cards] == ["核心判断", "证据依据", "下一步建议"]
-    assert "证据强度" in cards[0].content
-    assert any(str(item).startswith("需补充后判断") for item in cards[2].items)
-    assert any(str(item).startswith("不建议直接推断") for item in cards[2].items)
-
-
-def test_build_synthesis_payload_marks_missing_evidence_as_non_actionable():
+def test_build_answer_evidence_payload_tracks_missing_evidence_and_required_labels():
     audit = AuditResult(missing_evidence=["路网概览", "夜光概览"])
-    payload = build_synthesis_payload(
+    payload = build_answer_evidence_payload(
         question="这里值不值得继续做商业选址研究",
         snapshot=AnalysisSnapshot(poi_summary={"total": 6}),
         artifacts={},
@@ -125,110 +115,11 @@ def test_build_synthesis_payload_marks_missing_evidence_as_non_actionable():
         audit=audit,
     )
 
-    assert payload["decision"]["strength"] == "weak"
-    assert payload["decision"]["can_act"] is False
-    assert any(item["kind"] == "missing" for item in payload["counterpoints"])
-    assert any("路网概览" in item["detail"] for item in payload["counterpoints"])
+    assert payload["missing_evidence"] == ["路网概览", "夜光概览"]
+    assert payload["required_evidence"][:2] == ["路网概览", "夜光概览"]
 
 
-def test_build_synthesis_payload_explains_conflicts_in_output():
-    payload = build_synthesis_payload(
-        question="为什么这里夜间活动看起来强，但不一定适合直接开店",
-        snapshot=AnalysisSnapshot(
-            poi_summary={"total": 28},
-            population={"summary": {"total_population": 1200, "male_ratio": 0.48, "female_ratio": 0.52}},
-            nightlight={"summary": {"total_radiance": 188.0, "mean_radiance": 4.3, "max_radiance": 11.5, "lit_pixel_ratio": 0.81}},
-            road={"summary": {"node_count": 26, "edge_count": 33}},
-            h3={"summary": {"grid_count": 10, "avg_density_poi_per_km2": 8.1}},
-        ),
-        artifacts={},
-        tool_results=[ToolResult(tool_name="read_current_results", status="success")],
-        research_notes=[],
-        audit=AuditResult(),
-    )
-
-    assert any(item["kind"] == "conflict" for item in payload["counterpoints"])
-    assert "不过" in payload["decision"]["summary"]
-    assert payload["actions"]
-
-
-def test_build_cards_includes_business_site_advice_target():
-    artifacts = {
-        "business_site_advice": {
-            "place_type": "咖啡厅",
-            "types": "050500|050501|050502|050503|050504",
-            "keywords": "咖啡厅",
-        },
-        "current_poi_summary": {"total": 2, "types": "050500|050501|050502|050503|050504", "keywords": "咖啡厅"},
-        "current_poi_h3_summary": {"grid_count": 8, "avg_density_poi_per_km2": 6.5},
-    }
-    cards = build_cards(
-        question="我想在这里开一家咖啡店，给我建议",
-        snapshot=AnalysisSnapshot(),
-        artifacts=artifacts,
-        tool_results=[ToolResult(tool_name="run_business_site_advice", status="success")],
-        research_notes=[],
-        audit=AuditResult(),
-    )
-    payload = build_synthesis_payload(
-        question="我想在这里开一家咖啡店，给我建议",
-        snapshot=AnalysisSnapshot(),
-        artifacts=artifacts,
-        tool_results=[ToolResult(tool_name="run_business_site_advice", status="success")],
-        research_notes=[],
-        audit=AuditResult(),
-    )
-
-    evidence_card = next(card for card in cards if card.type == "evidence")
-    assert "目标业态：咖啡厅" in evidence_card.items
-    assert "POI 类型：050500|050501|050502|050503|050504" in evidence_card.items
-    assert payload["metrics"]["business_place_type"] == "咖啡厅"
-    assert any(item["metric"] == "business_site_advice" for item in payload["evidence_matrix"])
-
-
-def test_build_cards_prioritize_business_profile_and_hotspots_when_available():
-    artifacts = {
-        "current_business_profile": {
-            "business_profile": "生活消费主导",
-            "portrait": "这个区域更像一个生活消费主导的综合商业区。",
-            "functional_mix_score": 76.5,
-            "summary_text": "生活消费主导",
-        },
-        "current_commercial_hotspots": {
-            "hotspot_mode": "multi_core",
-            "core_zone_count": 2,
-            "opportunity_zone_count": 3,
-            "summary_text": "商业热点结构为 multi_core，核心区 2 个，机会区 3 个。",
-        },
-        "current_poi_structure_analysis": {
-            "summary_text": "POI 结构完整",
-        },
-    }
-
-    cards = build_cards(
-        question="总结这个区域的商业特征",
-        snapshot=_snapshot_with_decision_evidence(),
-        artifacts=artifacts,
-        tool_results=[ToolResult(tool_name="analyze_poi_mix_from_scope", status="success")],
-        research_notes=[],
-        audit=AuditResult(),
-    )
-    payload = build_synthesis_payload(
-        question="总结这个区域的商业特征",
-        snapshot=_snapshot_with_decision_evidence(),
-        artifacts=artifacts,
-        tool_results=[ToolResult(tool_name="analyze_poi_mix_from_scope", status="success")],
-        research_notes=[],
-        audit=AuditResult(),
-    )
-
-    assert "生活消费主导" in cards[0].content
-    assert "multi_core" in cards[0].content
-    assert payload["business_profile"]["type"] == "生活消费主导"
-    assert payload["spatial_structure"]["hotspot_mode"] == "multi_core"
-
-
-def test_build_synthesis_payload_includes_target_supply_gap_artifact():
+def test_build_answer_evidence_payload_explains_conflicts_and_target_gap():
     artifacts = {
         "current_target_supply_gap": {
             "place_type": "咖啡厅",
@@ -238,25 +129,116 @@ def test_build_synthesis_payload_includes_target_supply_gap_artifact():
             "candidate_zones": [{"h3_id": "8928308280fffff", "approx_address": "人民路附近", "display_title": "候选：人民路附近"}],
         }
     }
-
-    payload = build_synthesis_payload(
-        question="这里适合补充咖啡吗",
-        snapshot=_snapshot_with_decision_evidence(),
+    payload = build_answer_evidence_payload(
+        question="为什么这里夜间活动看起来强，但不一定适合直接开店",
+        snapshot=AnalysisSnapshot(
+            poi_summary={"total": 28},
+            population={"summary": {"total_population": 1200, "male_ratio": 0.48, "female_ratio": 0.52}},
+            nightlight={"summary": {"total_radiance": 188.0, "mean_radiance": 4.3, "max_radiance": 11.5, "lit_pixel_ratio": 0.81}},
+            road={"summary": {"node_count": 26, "edge_count": 33}},
+            h3={"summary": {"grid_count": 10, "avg_density_poi_per_km2": 8.1}},
+        ),
         artifacts=artifacts,
         tool_results=[ToolResult(tool_name="analyze_target_supply_gap", status="success")],
         research_notes=[],
         audit=AuditResult(),
     )
 
+    assert payload["conflicting_evidence"]
     assert payload["target_supply_gap"]["place_type"] == "咖啡厅"
-    assert payload["target_supply_gap"]["supply_gap_level"] == "high"
     assert payload["target_supply_gap"]["candidate_zones"][0]["approx_address"] == "人民路附近"
-    assert any(item["metric"] == "target_supply_gap" for item in payload["evidence_matrix"])
 
 
-def test_enrich_answer_output_appends_candidate_items_and_h3_panel_payload():
+def test_build_answer_evidence_payload_expands_key_evidence_for_summary_questions():
+    payload = build_answer_evidence_payload(
+        question="总结这个区域的商业特征",
+        snapshot=AnalysisSnapshot(
+            poi_summary={"total": 28},
+            population={"summary": {"total_population": 1200, "male_ratio": 0.48, "female_ratio": 0.52}},
+            nightlight={"summary": {"total_radiance": 188.0, "mean_radiance": 4.3, "max_radiance": 11.5, "lit_pixel_ratio": 0.81}},
+            road={"summary": {"node_count": 26, "edge_count": 33}},
+            h3={"summary": {"grid_count": 10, "avg_density_poi_per_km2": 8.1}},
+        ),
+        artifacts={
+            "current_business_profile": {
+                "business_profile": "生活消费主导",
+                "portrait": "该区域更偏生活消费导向。",
+            },
+            "current_commercial_hotspots": {
+                "hotspot_mode": "multi_core",
+                "core_zone_count": 2,
+                "opportunity_zone_count": 3,
+                "summary_text": "商业热点呈多核心分布。",
+            },
+        },
+        tool_results=[ToolResult(tool_name="run_area_character_pack", status="success")],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    assert 3 <= len(payload["key_evidence"]) <= 5
+    assert payload["evidence_highlights"]
+
+
+def test_build_answer_fallback_generates_natural_prose():
+    answer = build_answer_fallback(
+        question="这里适合补充咖啡吗",
+        snapshot=_snapshot_with_decision_evidence(),
+        artifacts={
+            "current_target_supply_gap": {
+                "place_type": "咖啡厅",
+                "supply_gap_level": "high",
+                "gap_mode": "spatial_mismatch",
+                "summary_text": "咖啡厅供给缺口等级为 high，模式为 spatial_mismatch。",
+            }
+        },
+        tool_results=[ToolResult(tool_name="analyze_target_supply_gap", status="success")],
+        research_notes=[],
+        audit=AuditResult(missing_evidence=["路网概览"]),
+    )
+
+    assert "咖啡厅" in answer
+    assert "主要依据是" in answer
+    assert "需要注意的是" in answer or "还缺少" in answer or "方向性判断" in answer
+
+
+def test_build_answer_fallback_expands_summary_questions_into_multiple_paragraphs():
+    answer = build_answer_fallback(
+        question="总结这个区域的商业特征",
+        snapshot=AnalysisSnapshot(
+            poi_summary={"total": 28},
+            population={"summary": {"total_population": 91000, "male_ratio": 0.48, "female_ratio": 0.52}},
+            nightlight={"summary": {"total_radiance": 188.0, "mean_radiance": 30.97, "max_radiance": 11.5, "lit_pixel_ratio": 0.81}},
+            road={"summary": {"node_count": 260, "edge_count": 330}},
+            h3={"summary": {"grid_count": 10, "avg_density_poi_per_km2": 8.1}},
+        ),
+        artifacts={
+            "current_business_profile": {
+                "business_profile": "生活消费主导",
+                "portrait": "生活消费主导的社区级综合商业区。",
+            },
+            "current_commercial_hotspots": {
+                "hotspot_mode": "multi_core",
+                "core_zone_count": 10,
+                "opportunity_zone_count": 127,
+                "summary_text": "空间结构上表现为多核心格局，内部分布多个商业核心区与机会区。",
+            },
+        },
+        tool_results=[ToolResult(tool_name="run_area_character_pack", status="success")],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    paragraphs = [item for item in answer.split("\n\n") if item.strip()]
+    assert len(paragraphs) >= 3
+    assert "整体看" in paragraphs[0] or "该区域" in paragraphs[0]
+    assert "空间结构" in answer or "多核心" in answer
+    assert "人口基盘" in answer or "人口" in answer
+
+
+def test_enrich_answer_output_sets_fallback_answer_and_h3_panel_payload():
     output = enrich_answer_output(
-        output=AgentTurnOutput(cards=[], next_suggestions=[]),
+        output=AgentTurnOutput(answer=""),
         question="哪里适合补一家咖啡店",
         snapshot=AnalysisSnapshot(),
         artifacts={
@@ -283,13 +265,11 @@ def test_enrich_answer_output_appends_candidate_items_and_h3_panel_payload():
         },
     )
 
-    recommendation = next(card for card in output.cards if card.type == "recommendation")
-    assert isinstance(recommendation.items[0], dict)
-    assert recommendation.items[0]["type"] == "h3_candidate"
+    assert output.answer
     assert output.panel_payloads["h3_result"]["summary"]["grid_count"] == 1
 
 
-def test_build_synthesis_payload_ignores_empty_analysis_placeholders_and_falls_back_to_summary():
+def test_build_answer_evidence_payload_ignores_empty_analysis_placeholders_and_falls_back_to_summary():
     artifacts = {
         "current_poi_h3_summary": {"grid_count": 8, "avg_density_poi_per_km2": 6.5},
         "current_h3_structure_analysis": {
@@ -300,7 +280,7 @@ def test_build_synthesis_payload_ignores_empty_analysis_placeholders_and_falls_b
         },
     }
 
-    payload = build_synthesis_payload(
+    payload = build_answer_evidence_payload(
         question="总结这个区域的商业特征",
         snapshot=_snapshot_with_decision_evidence(),
         artifacts=artifacts,
@@ -310,4 +290,4 @@ def test_build_synthesis_payload_ignores_empty_analysis_placeholders_and_falls_b
     )
 
     assert payload["metrics"]["h3_structure_summary"] is None
-    assert any(item["metric"] == "h3_density" for item in payload["evidence_matrix"])
+    assert any(item["metric"] == "h3_density" for item in payload["key_evidence"])

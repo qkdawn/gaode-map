@@ -230,19 +230,12 @@ function createAgentSessionStoreMethods() {
       this.agentSessionHydrating = !!options.hydrating
       this.agentStatus = String(session.status || 'idle')
       this.agentStage = String(session.stage || 'gating')
-      this.agentCards = cloneArray(session.cards)
-      this.agentDecision = normalizeAgentDecision(session.decision)
-      this.agentSupport = cloneArray(session.support).map((item) => normalizeAgentDecisionEvidence(item))
-      this.agentCounterpoints = cloneArray(session.counterpoints).map((item) => normalizeAgentCounterpoint(item))
-      this.agentActions = cloneArray(session.actions).map((item) => normalizeAgentAction(item))
-      this.agentBoundary = cloneArray(session.boundary).map((item) => normalizeAgentBoundaryItem(item))
-      this.agentReviewContract = cloneObject(session.reviewContract || (session.output && session.output.reviewContract) || (session.diagnostics && session.diagnostics.reviewContract))
+      this.agentAnswer = String(session.answer || (session.output && session.output.answer) || '')
       this.agentExecutionTrace = cloneArray(session.executionTrace)
       this.agentUsedTools = cloneArray(session.usedTools)
       this.agentCitations = cloneArray(session.citations)
       this.agentResearchNotes = cloneArray(session.researchNotes)
       this.agentAuditIssues = cloneArray(session.auditIssues)
-      this.agentNextSuggestions = cloneArray(session.nextSuggestions)
       this.agentPanelPayloads = cloneObject(session.panelPayloads)
       if (typeof this.syncAgentSummaryReadinessFromPanelPayload === 'function') {
         this.syncAgentSummaryReadinessFromPanelPayload(this.agentPanelPayloads)
@@ -415,7 +408,7 @@ function createAgentSessionStoreMethods() {
           error: this.agentError,
           riskPrompt: this.agentRiskPrompt,
           clarificationQuestion: this.agentClarificationQuestion,
-          cards: this.agentCards,
+          answer: this.agentAnswer,
           messages,
         }),
         updatedAt: new Date().toISOString(),
@@ -431,18 +424,11 @@ function createAgentSessionStoreMethods() {
         stage: String(this.agentStage || 'gating'),
         input: String(this.agentInput || ''),
         output: {
-          cards: this.agentCards,
+          answer: this.agentAnswer,
           clarificationQuestion: this.agentClarificationQuestion,
           clarificationOptions: this.agentClarificationOptions,
           riskPrompt: this.agentRiskPrompt,
-          nextSuggestions: this.agentNextSuggestions,
           panelPayloads,
-          decision: this.agentDecision,
-          support: this.agentSupport,
-          counterpoints: this.agentCounterpoints,
-          actions: this.agentActions,
-          boundary: this.agentBoundary,
-          reviewContract: this.agentReviewContract,
         },
         diagnostics: {
           executionTrace: this.agentExecutionTrace,
@@ -455,7 +441,6 @@ function createAgentSessionStoreMethods() {
             || (this.agentPlan && this.agentPlan.summary),
           ),
           auditSummary: asText(existing && existing.diagnostics && (existing.diagnostics.auditSummary || existing.diagnostics.audit_summary)),
-          reviewContract: this.agentReviewContract,
           replanCount: Number(existing && existing.diagnostics && (existing.diagnostics.replanCount ?? existing.diagnostics.replan_count ?? 0)) || 0,
           thinkingTimeline: this.agentThinkingTimeline,
           error: this.agentError,

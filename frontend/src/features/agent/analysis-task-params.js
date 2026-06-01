@@ -71,24 +71,25 @@ function buildPoiGridParamBundle(ctx = {}) {
   const source = asText(ctx.poiDataSource || ctx.resultDataSource || '')
   const isRasterMode = typeof ctx.isPoiRasterGridMode === 'function'
     ? ctx.isPoiRasterGridMode()
-    : asText(ctx.poiGridType || 'raster') !== 'hex'
+    : asText(ctx.poiGridType || 'shared') !== 'hex'
   const includeMode = asText(ctx.h3GridIncludeMode || '')
   const params = {
-    current_display_grid_type: isRasterMode ? 'raster' : 'hex',
-    computed_grid_types: ['raster', 'hex'],
+    current_display_grid_type: isRasterMode ? 'shared' : 'h3',
+    computed_grid_types: ['shared', 'h3'],
     poi_source: source,
     poi_year: year,
     poi_years: year ? [year] : [],
     poi_coord_type: 'gcj02',
     raster: {
-      grid_type: 'raster',
+      grid_type: 'shared_raster',
       cell_id_source: 'population_nightlight_shared_cell_id',
       coord_type: 'gcj02',
       poi_coord_type: 'gcj02',
       year,
+      neighbor_ring: toNumber(ctx.h3NeighborRing, 1),
     },
     hex: {
-      grid_type: 'hex',
+      grid_type: 'h3',
       h3_resolution: toNumber(ctx.h3GridResolution, 10),
       neighbor_ring: toNumber(ctx.h3NeighborRing, 1),
       include_mode: includeMode,
@@ -100,8 +101,8 @@ function buildPoiGridParamBundle(ctx = {}) {
     domain: 'poi',
     params,
     evidenceParams: {
-      description: 'POI 同时按共享 cell_id 栅格和 POI H3 六边形网格计算。',
-      raster_usage: 'POI 共享栅格用于和人口/夜光按同一 cell_id 对齐。',
+      description: 'POI 同时按共享 cell_id 网格和 POI H3 六边形网格计算。',
+      raster_usage: 'POI 共享栅格用于和人口/夜光按同一 cell_id 对齐，并复用完整分析链。',
       hex_usage: 'POI H3 六边形网格用于 POI 供给、密度结构、热点和聚集分析。',
       current_display_grid_type: params.current_display_grid_type,
       computed_grid_types: cloneArray(params.computed_grid_types),
@@ -133,13 +134,14 @@ function buildPoiRasterGridParamBundle(ctx = {}) {
   const year = Number(ctx.poiYearSource || ctx.resultPoiYear || 0) || null
   const source = asText(ctx.poiDataSource || ctx.resultDataSource || '')
   const params = {
-    grid_type: 'raster',
+    grid_type: 'shared_raster',
     poi_source: source,
     poi_year: year,
     poi_years: year ? [year] : [],
     poi_coord_type: 'gcj02',
     cell_id_source: 'population_nightlight_shared_cell_id',
     coord_type: 'gcj02',
+    neighbor_ring: toNumber(ctx.h3NeighborRing, 1),
   }
   return createBundle({
     taskKey: 'poi_raster_grid',

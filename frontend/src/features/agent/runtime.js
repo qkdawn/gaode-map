@@ -9,7 +9,6 @@ import {
   createAgentRunState,
   deriveAgentSessionPreview,
   deriveAgentSessionTitle,
-  getAgentSummaryCardContent,
   hasAgentMessageProcessContent,
   mergeAgentThinkingTimeline,
   normalizeAgentAction,
@@ -51,11 +50,10 @@ function createAgentRuntimeMethods() {
   return {
     buildAgentDeepThinkingWorkflowPrompt() {
       return [
-        '深度思考审查视角：',
-        '1. 空间自洽：检查人口、POI、夜光、路网、等时圈和边界之间是否互相支撑；明确耦合、错位和不能证明的关系。',
-        '2. 证据可靠：区分“已有证据可支持”“只能趋势推断”“还需要补证据”；不要把人口、POI、夜光直接等同于消费额、客流或经营质量。',
-        '3. 规划转译：把空间和数据判断转成可执行的定位、客群、业态组合、空间组织、运营动作，并标注约束和风险。',
-        '4. 评审表达：最后输出可写回报告的结构化模块，包含核心判断、证据依据、风险边界和 3 个下一步追问。',
+        '深度思考工作方式：',
+        '1. 先明确当前问题真正要回答什么，不要把任务自动改写成报告写回。',
+        '2. 优先复用已有证据，必要时再补工具或补证据。',
+        '3. 回答时明确依据、边界和下一步，但不要按固定栏目输出。',
       ].join('\n')
     },
     buildAgentDeepAnalysisPrompt(question = '', targetSeed = null) {
@@ -72,8 +70,8 @@ function createAgentRuntimeMethods() {
         .slice(0, 8)
       const parts = [
         mode === 'deep'
-          ? '请把下面的问题作为“深度思考继续分析任务”处理：先重写问题，再盘点证据，规划工具，执行或复用分析结果，最后输出可写回报告的新模块。'
-          : '请把下面的问题作为“快速继续分析任务”处理：优先复用已有证据，必要时少量调用工具，快速输出可写回报告的新模块。',
+          ? '请把下面的问题作为“深度思考继续分析任务”处理：先盘点证据与缺口，必要时补工具，再直接回答用户问题；回答要更充分，但不要按固定栏目或报告模块组织。'
+          : '请把下面的问题作为“快速继续分析任务”处理：优先复用已有证据，必要时少量调用工具，直接回答用户问题；结论尽量自然，不要按固定栏目或报告模块组织。',
         `执行模式：${mode === 'deep' ? '深度思考' : '快速分析'}`,
         `当前对象：${title}`,
         `对象来源：${source}`,
@@ -709,16 +707,16 @@ function createAgentRuntimeMethods() {
       const resultRefs = cloneObject(bundle.result_refs)
       return {
         evidence_version: 'poi_raster_grid_evidence_v1',
-        current_display_grid_type: 'raster',
-        computed_grid_types: ['raster'],
+        current_display_grid_type: 'shared',
+        computed_grid_types: ['shared'],
         params: {
-          current_display_grid_type: 'raster',
-          computed_grid_types: ['raster'],
+          current_display_grid_type: 'shared',
+          computed_grid_types: ['shared'],
           poi_source: asText(params.poi_source),
           poi_year: params.poi_year,
           poi_years: cloneArray(params.poi_years),
           poi_coord_type: asText(params.poi_coord_type),
-          raster: cloneObject(params || {}),
+          shared: cloneObject(params || {}),
         },
         raster_summary: cloneObject(resultRefs.raster_summary || this.poiGridSummary || {}),
         raster_counts: cloneObject(resultRefs.raster_counts || {}),
@@ -1166,47 +1164,11 @@ function createAgentRuntimeMethods() {
         input: String(merged.input || ''),
         messages: messages.map((item) => this.serializeAgentMessageForSession(item)),
         output: {
-          cards: cloneArray(merged.cards),
+          answer: String(merged.answer || ''),
           clarification_question: String(merged.clarificationQuestion || ''),
           clarification_options: cloneArray(merged.clarificationOptions).map((item) => asText(item)).filter(Boolean),
           risk_prompt: String(merged.riskPrompt || ''),
-          next_suggestions: cloneArray(merged.nextSuggestions),
           panel_payloads: cloneObject(merged.panelPayloads),
-          review_contract: cloneObject(merged.reviewContract),
-          decision: {
-            summary: asText(merged.decision && merged.decision.summary),
-            mode: asText(merged.decision && merged.decision.mode) || 'judgment',
-            strength: asText(merged.decision && merged.decision.strength) || 'weak',
-            can_act: !!(merged.decision && merged.decision.canAct),
-          },
-          support: cloneArray(merged.support).map((item) => ({
-            key: asText(item && item.key),
-            metric: asText(item && item.metric),
-            headline: asText(item && item.headline),
-            value: item && Object.prototype.hasOwnProperty.call(item, 'value') ? item.value : null,
-            interpretation: asText(item && item.interpretation),
-            source: asText(item && item.source),
-            confidence: asText(item && item.confidence) || 'weak',
-            limitation: asText(item && item.limitation),
-            supports: cloneArray(item && item.supports).map((entry) => asText(entry)).filter(Boolean),
-            is_key: !!(item && item.isKey),
-          })),
-          counterpoints: cloneArray(merged.counterpoints).map((item) => ({
-            kind: asText(item && item.kind) || 'boundary',
-            title: asText(item && item.title),
-            detail: asText(item && item.detail),
-          })),
-          actions: cloneArray(merged.actions).map((item) => ({
-            title: asText(item && item.title),
-            detail: asText(item && item.detail),
-            condition: asText(item && item.condition),
-            target: asText(item && item.target),
-            prompt: asText(item && item.prompt),
-          })),
-          boundary: cloneArray(merged.boundary).map((item) => ({
-            title: asText(item && item.title),
-            detail: asText(item && item.detail),
-          })),
         },
         diagnostics: {
           execution_trace: cloneArray(merged.executionTrace),
@@ -1216,7 +1178,6 @@ function createAgentRuntimeMethods() {
           audit_issues: cloneArray(merged.auditIssues),
           planning_summary: String((merged.diagnostics && merged.diagnostics.planningSummary) || (merged.plan && merged.plan.summary) || ''),
           audit_summary: String((merged.diagnostics && merged.diagnostics.auditSummary) || ''),
-          review_contract: cloneObject(merged.reviewContract || (merged.diagnostics && merged.diagnostics.reviewContract)),
           replan_count: Number((merged.diagnostics && merged.diagnostics.replanCount) || 0) || 0,
           thinking_timeline: cloneArray(merged.thinkingTimeline),
           error: String(merged.error || ''),
@@ -1395,67 +1356,9 @@ function createAgentRuntimeMethods() {
       const detail = await res.json()
       return this.mergeAgentSessionDetail(detail)
     },
-    buildAgentAssistantMessageContent(turn = {}) {
+    buildAgentAssistantFallbackContent(turn = {}) {
       const output = turn && turn.output ? turn.output : {}
-      const sections = []
-      const summary = getAgentSummaryCardContent(output.cards)
-      const decision = normalizeAgentDecision(output.decision)
-      if (decision.summary) {
-        sections.push(`## 核心判断\n${decision.summary}`)
-      } else if (summary) {
-        sections.push(summary)
-      }
-      const support = cloneArray(output.support).map((item) => normalizeAgentDecisionEvidence(item))
-      if (support.length) {
-        sections.push([
-          '## 为什么这样判断',
-          ...support.map((item) => {
-            const headline = asText(item.headline || item.metric || item.key) || '证据'
-            const detail = asText(item.interpretation)
-            const source = asText(item.source)
-            const confidence = asText(item.confidence)
-            const meta = [source ? `来源：${source}` : '', confidence ? `置信度：${confidence}` : ''].filter(Boolean).join('；')
-            return `- ${[headline, detail, meta].filter(Boolean).join('。')}`
-          }),
-        ].join('\n'))
-      }
-      const counterpoints = cloneArray(output.counterpoints).map((item) => normalizeAgentCounterpoint(item))
-      if (counterpoints.length) {
-        sections.push([
-          '## 还不能判断什么',
-          ...counterpoints.map((item) => `- ${[asText(item.title), asText(item.detail)].filter(Boolean).join('：')}`),
-        ].join('\n'))
-      }
-      const actions = cloneArray(output.actions).map((item) => normalizeAgentAction(item))
-      if (actions.length) {
-        sections.push([
-          '## 下一步怎么做',
-          ...actions.map((item) => {
-            const body = [
-              asText(item.detail),
-              asText(item.condition) ? `触发条件：${asText(item.condition)}` : '',
-              asText(item.target) ? `目标：${asText(item.target)}` : '',
-            ].filter(Boolean).join('；')
-            return `- ${[asText(item.title), body].filter(Boolean).join('：')}`
-          }),
-        ].join('\n'))
-      }
-      const boundary = cloneArray(output.boundary).map((item) => normalizeAgentBoundaryItem(item))
-      if (boundary.length) {
-        sections.push([
-          '## 适用边界',
-          ...boundary.map((item) => `- ${[asText(item.title), asText(item.detail)].filter(Boolean).join('：')}`),
-        ].join('\n'))
-      }
-      const clarification = asText(output.clarificationQuestion)
-      if (clarification) {
-        sections.push(`## 需要补充\n${clarification}`)
-      }
-      const riskPrompt = asText(output.riskPrompt)
-      if (riskPrompt) {
-        sections.push(`## 需要确认\n${riskPrompt}`)
-      }
-      return sections.filter(Boolean).join('\n\n') || summary || '已完成分析'
+      return asText(output.answer || output.clarificationQuestion || output.riskPrompt) || '已完成分析'
     },
     buildAgentTurnProcessSnapshot(seed = {}) {
       const runState = this.getAgentRunState(seed.sessionId) || createAgentRunState()
@@ -1474,16 +1377,42 @@ function createAgentRuntimeMethods() {
         pendingTaskConfirmation: cloneObject(seed.pendingTaskConfirmation),
       })
     },
+    getCanonicalAssistantMessage(messages = []) {
+      const rows = cloneArray(messages)
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const message = rows[index]
+        if (asText(message && message.role) === 'assistant') return cloneObject(message)
+      }
+      return null
+    },
+    mergeAssistantProcessIntoMessage(message = {}, process = {}) {
+      const merged = {
+        role: asText(message && message.role) || 'assistant',
+        content: String((message && message.content) || ''),
+      }
+      const id = asText(message && message.id)
+      if (id) merged.id = id
+      const existingProcess = normalizeAgentMessageProcess(message && message.process)
+      const overlayProcess = normalizeAgentMessageProcess(process)
+      if (hasAgentMessageProcessContent(overlayProcess)) {
+        merged.process = overlayProcess
+      } else if (hasAgentMessageProcessContent(existingProcess)) {
+        merged.process = existingProcess
+      }
+      return merged
+    },
     buildAgentAssistantMessageFromTurn(turn = {}, process = {}) {
-      const message = {
+      const message = this.getCanonicalAssistantMessage(turn.messages) || {
         role: 'assistant',
-        content: this.buildAgentAssistantMessageContent(turn),
+        content: this.buildAgentAssistantFallbackContent(turn),
       }
-      const normalizedProcess = normalizeAgentMessageProcess(process)
-      if (hasAgentMessageProcessContent(normalizedProcess)) {
-        message.process = normalizedProcess
-      }
-      return message
+      return this.mergeAssistantProcessIntoMessage(message, process)
+    },
+    buildAgentMessagesFromTurn(turn = {}, fallbackMessages = [], process = {}) {
+      return [
+        ...cloneArray(fallbackMessages),
+        this.buildAgentAssistantMessageFromTurn(turn, process),
+      ]
     },
     serializeAgentMessageForSession(message = {}) {
       const row = {
@@ -1566,318 +1495,6 @@ function createAgentRuntimeMethods() {
     async consumeTurnStream(res, handler) {
       await consumeSseStream(res, handler)
     },
-    normalizeReactLoopEvent(event = {}) {
-      const type = asText(event.type)
-      const payload = cloneObject(event.payload)
-      const step = Number(event.step || 0) || 0
-      const summary = asText(payload.summary || payload.conclusion || payload.message)
-      const tool = asText(payload.meta && (payload.meta.tool_label || payload.meta.tool))
-      const rawTool = asText(payload.meta && payload.meta.tool)
-      const labels = {
-        status: '状态',
-        thought: '思考',
-        action: '行动',
-        observation: '观察',
-        reflection: '反思',
-        final: '结论',
-        error: '异常',
-      }
-      return normalizeAgentThinkingItem({
-        id: `react-${type || 'event'}-${step}-${tool || 'core'}`,
-        phase: 'react_loop',
-        title: labels[type] || 'ReAct',
-        detail: summary,
-        items: tool ? [`工具：${tool}`] : [],
-        meta: {
-          ...cloneObject(payload.meta),
-          reactLoop: true,
-          reactType: type,
-          step,
-          tool,
-          rawTool,
-          raw: payload.raw || null,
-        },
-        state: ['final'].includes(type)
-          ? 'completed'
-          : (['error'].includes(type) ? 'failed' : (['observation', 'reflection'].includes(type) ? 'completed' : 'active')),
-      })
-    },
-    buildReactFinalTurnPayload({ finalEvent = {}, question = '', messages = [], executionTrace = [] } = {}) {
-      const payload = cloneObject(finalEvent.payload)
-      const conclusion = asText(payload.conclusion || payload.summary) || 'ReAct 循环已完成。'
-      const evidenceStatus = asText(payload.evidence_status)
-      const evidenceSteps = cloneArray(payload.evidence_steps || payload.evidenceSteps)
-      const nextActions = cloneArray(payload.next_actions || payload.nextActions).map((item) => asText(item)).filter(Boolean)
-      const uncertainties = cloneArray(payload.uncertainties).map((item) => asText(item)).filter(Boolean)
-      const evidenceText = evidenceSteps.length ? `证据步骤：${evidenceSteps.join('、')}` : ''
-      const evidenceStatusText = evidenceStatus ? `证据状态：${evidenceStatus}` : ''
-      const detailItems = [evidenceStatusText, evidenceText, ...nextActions.slice(0, 3), ...uncertainties.slice(0, 2)]
-        .filter(Boolean)
-      const assistantParts = [conclusion]
-      if (detailItems.length) {
-        assistantParts.push(detailItems.map((item) => `- ${item}`).join('\n'))
-      }
-      const nextMessages = [
-        ...cloneArray(messages),
-        { role: 'assistant', content: assistantParts.filter(Boolean).join('\n\n') },
-      ]
-      return {
-        status: 'answered',
-        stage: 'answered',
-        output: {
-          cards: [],
-          decision: {
-            summary: '',
-            mode: 'judgment',
-            strength: evidenceStatus === '证据较完整' ? 'strong' : 'moderate',
-            can_act: nextActions.length > 0,
-          },
-          support: [],
-          actions: [],
-          boundary: [],
-          review_contract: cloneObject(payload.review_contract || payload.reviewContract),
-          next_suggestions: nextActions,
-          panel_payloads: {},
-        },
-        diagnostics: {
-          execution_trace: cloneArray(executionTrace),
-          used_tools: cloneArray(executionTrace).map((item) => asText(item.tool_name || item.toolName)).filter(Boolean),
-          review_contract: cloneObject(payload.review_contract || payload.reviewContract),
-          thinking_timeline: [],
-          error: '',
-        },
-        context_summary: {
-          question: asText(question),
-          mode: 'react_loop',
-        },
-        plan: {
-          steps: [],
-          followup_steps: [],
-          followup_applied: false,
-          summary: 'ReAct 循环已完成',
-        },
-        messages: nextMessages,
-      }
-    },
-    async submitReactAgentTurn(options = {}) {
-      const turnContext = this.buildTurnContext(options)
-      if (!turnContext) return
-      const {
-        question,
-        rawQuestion,
-        panelKind,
-        targetSessionId,
-        wasPersisted,
-        historyId,
-        requestAbortController,
-        requestRiskConfirmations,
-        requestAttachmentIds,
-        nextMessages,
-      } = turnContext
-      this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-        ...session,
-        panelKind,
-        persisted: wasPersisted,
-        snapshotLoaded: true,
-        historyId,
-        input: '',
-        messages: nextMessages,
-        cards: [],
-        executionTrace: [],
-        usedTools: [],
-        citations: [],
-        researchNotes: [],
-        auditIssues: [],
-        nextSuggestions: [],
-        clarificationQuestion: '',
-        clarificationOptions: [],
-        pendingTaskConfirmation: null,
-        riskPrompt: '',
-        error: '',
-        contextSummary: {},
-        plan: normalizeAgentPlanEnvelope(),
-        riskConfirmations: cloneArray(requestRiskConfirmations),
-        panelPreloadNotes: [],
-        preloadedPanelKeys: [],
-        status: 'running',
-        stage: 'executing',
-        thinkingTimeline: [normalizeAgentSubmitThinkingItem('active')],
-      }))
-      this.setAgentRunState(targetSessionId, {
-        abortController: requestAbortController,
-        loading: true,
-        streamState: 'connecting',
-        streamingMessageId: `agent-react-${Date.now().toString(36)}`,
-        reasoningBlocks: [],
-        pendingQuestion: rawQuestion || question,
-        autoScrollLocked: false,
-        autoScrollSticky: true,
-        autoScrollThresholdPx: 24,
-      })
-      this.agentTurnAbortController = targetSessionId === asText(this.activeAgentSessionId) ? requestAbortController : null
-      this.agentInput = ''
-      this.agentClarificationDraft = ''
-      this.agentClarificationSubmitting = false
-      this.agentThinkingExpanded = true
-      this.agentPlanExpanded = false
-      this.agentTraceExpanded = false
-      this.startAgentThinkingTimer(targetSessionId)
-      try {
-        const runRes = await fetch('/api/v1/analysis/agent/react/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: requestAbortController ? requestAbortController.signal : undefined,
-          body: JSON.stringify({
-            question,
-            analysis_snapshot: this.buildAgentAnalysisSnapshot(),
-            options: {
-              max_steps: 8,
-              stagnation_limit: 2,
-              tool_timeout_seconds: 20,
-              max_tool_failures: 2,
-            },
-            attachment_ids: requestAttachmentIds,
-          }),
-        })
-        if (!runRes.ok) {
-          throw new Error(`/api/v1/analysis/agent/react/run 请求失败(${runRes.status})`)
-        }
-        const runPayload = await runRes.json()
-        const runId = asText(runPayload && runPayload.run_id)
-        if (!runId) throw new Error('ReAct run_id 缺失')
-        const streamRes = await fetch(`/api/v1/analysis/agent/react/stream?run_id=${encodeURIComponent(runId)}`, {
-          signal: requestAbortController ? requestAbortController.signal : undefined,
-        })
-        if (!streamRes.ok) {
-          throw new Error(`/api/v1/analysis/agent/react/stream 请求失败(${streamRes.status})`)
-        }
-        let finalEvent = null
-        const executionTrace = []
-        await this.consumeTurnStream(streamRes, ({ type, payload }) => {
-          const event = payload && typeof payload === 'object' && payload.type ? payload : { type, payload }
-          const item = this.normalizeReactLoopEvent(event)
-          if (type === 'action' || event.type === 'action') {
-            executionTrace.push({
-              tool_name: asText(event.payload && event.payload.meta && event.payload.meta.tool) || 'react_action',
-              status: 'start',
-              reason: asText(event.payload && event.payload.summary),
-              message: asText(event.payload && event.payload.summary),
-              evidence_count: 0,
-              warning_count: 0,
-            })
-          }
-          this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-            ...session,
-            status: item.state === 'failed' ? 'failed' : 'running',
-            stage: item.state === 'failed' ? 'failed' : 'executing',
-            thinkingTimeline: upsertThinkingItemInList(
-              completeActiveThinkingItemsInList(
-                upsertThinkingItemInList(session.thinkingTimeline, normalizeAgentSubmitThinkingItem('completed')),
-                item.id,
-              ),
-              item,
-            ),
-            executionTrace: cloneArray(executionTrace),
-          }))
-          this.setAgentRunState(targetSessionId, { streamState: 'streaming' })
-          if (targetSessionId === asText(this.activeAgentSessionId)) {
-            this.agentThinkingExpanded = true
-            this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
-          }
-          if (event.type === 'final') {
-            finalEvent = event
-          }
-        })
-        if (!finalEvent) {
-          throw new Error('ReAct 流式执行未返回最终结果')
-        }
-        const finalResponse = this.buildReactFinalTurnPayload({
-          finalEvent,
-          question: rawQuestion || question,
-          messages: nextMessages,
-          executionTrace,
-        })
-        const turn = normalizeAgentTurnPayload(finalResponse)
-        const finalStatusItem = normalizeAgentStatusThinkingItem({ stage: 'answered' })
-        const currentSessionSnapshot = this.findAgentSession(targetSessionId) || {}
-        const nextThinkingTimeline = upsertThinkingItemInList(
-          completeActiveThinkingItemsInList(currentSessionSnapshot.thinkingTimeline, finalStatusItem.id),
-          finalStatusItem,
-        )
-        const assistantProcess = this.buildAgentTurnProcessSnapshot({
-          sessionId: targetSessionId,
-          status: 'answered',
-          stage: 'answered',
-          thinkingTimeline: nextThinkingTimeline,
-          executionTrace,
-          plan: turn.plan,
-        })
-        const finalMessages = cloneArray(finalResponse.messages)
-        const lastMessage = finalMessages[finalMessages.length - 1]
-        if (lastMessage && asText(lastMessage.role) === 'assistant' && hasAgentMessageProcessContent(assistantProcess)) {
-          finalMessages.splice(finalMessages.length - 1, 1, {
-            ...lastMessage,
-            process: assistantProcess,
-          })
-        }
-        this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-          ...session,
-          panelKind,
-          persisted: false,
-          snapshotLoaded: true,
-          status: 'answered',
-          stage: 'answered',
-          cards: cloneArray(turn.output.cards),
-          decision: normalizeAgentDecision(turn.output.decision),
-          support: cloneArray(turn.output.support).map((item) => normalizeAgentDecisionEvidence(item)),
-          counterpoints: cloneArray(turn.output.counterpoints).map((item) => normalizeAgentCounterpoint(item)),
-          actions: cloneArray(turn.output.actions).map((item) => normalizeAgentAction(item)),
-          boundary: cloneArray(turn.output.boundary).map((item) => normalizeAgentBoundaryItem(item)),
-          reviewContract: cloneObject(turn.output.reviewContract || turn.diagnostics.reviewContract),
-          executionTrace: cloneArray(executionTrace),
-          usedTools: cloneArray(finalResponse.diagnostics.used_tools),
-          thinkingTimeline: nextThinkingTimeline,
-          nextSuggestions: cloneArray(turn.output.nextSuggestions),
-          messages: finalMessages.length ? finalMessages : nextMessages,
-          error: '',
-          contextSummary: cloneObject(turn.contextSummary),
-          plan: normalizeAgentPlanEnvelope(turn.plan),
-          riskConfirmations: [],
-        }))
-        this.setAgentRunState(targetSessionId, { streamState: 'completed' })
-      } catch (err) {
-        if (err && (err.name === 'AbortError' || String(err.message || '').includes('aborted'))) {
-          this.stopAgentThinkingTimer(targetSessionId)
-          this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-            ...session,
-            input: rawQuestion || question,
-            status: 'idle',
-            stage: 'gating',
-            thinkingTimeline: [],
-            executionTrace: [],
-          }))
-          if (targetSessionId === asText(this.activeAgentSessionId)) {
-            this.agentInput = rawQuestion || question
-          }
-          return
-        }
-        const message = 'ReAct 执行失败: ' + (err && err.message ? err.message : String(err))
-        const item = normalizeAgentStatusThinkingItem({ stage: 'failed', message })
-        this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-          ...session,
-          status: 'failed',
-          stage: 'failed',
-          error: message,
-          thinkingTimeline: upsertThinkingItemInList(
-            completeActiveThinkingItemsInList(session.thinkingTimeline, item.id),
-            item,
-          ),
-        }))
-        this.setAgentRunState(targetSessionId, { streamState: 'failed' })
-      } finally {
-        this.syncUiAfterTurn(turnContext)
-      }
-    },
     async commitTurnResult(turnContext = {}, finalResponse = null) {
       const targetSessionId = asText(turnContext.targetSessionId)
       this.stopAgentThinkingTimer(targetSessionId)
@@ -1902,9 +1519,6 @@ function createAgentRuntimeMethods() {
       }
     },
     async submitAgentTurn(options = {}) {
-      if (options && options.useReactLoop) {
-        return this.submitReactAgentTurn(options)
-      }
       const turnContext = this.buildTurnContext(options)
       if (!turnContext) return
       const {
@@ -1929,13 +1543,12 @@ function createAgentRuntimeMethods() {
         historyId,
         input: '',
         messages: nextMessages,
-        cards: [],
+        answer: '',
         executionTrace: [],
         usedTools: [],
         citations: [],
         researchNotes: [],
         auditIssues: [],
-        nextSuggestions: [],
         clarificationQuestion: '',
         clarificationOptions: [],
         pendingTaskConfirmation: null,
@@ -1985,6 +1598,7 @@ function createAgentRuntimeMethods() {
             conversation_id: targetSessionId,
             history_id: historyId,
             governance_mode: 'auto',
+            thinking_mode: mode,
             messages: requestMessages,
             analysis_snapshot: this.buildAgentAnalysisSnapshot(),
             risk_confirmations: requestRiskConfirmations,
@@ -2171,10 +1785,7 @@ function createAgentRuntimeMethods() {
             })
             : null
           const finalMessages = nextStatus === 'answered'
-            ? [
-              ...cloneArray(nextMessages),
-              this.buildAgentAssistantMessageFromTurn(turn, assistantProcess),
-            ]
+            ? this.buildAgentMessagesFromTurn(turn, nextMessages, assistantProcess)
             : cloneArray(nextMessages)
           this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
             ...session,
@@ -2183,20 +1794,13 @@ function createAgentRuntimeMethods() {
             snapshotLoaded: true,
             status: nextStatus,
             stage: nextStage,
-            cards: cloneArray(turn.output.cards),
-            decision: normalizeAgentDecision(turn.output.decision),
-            support: cloneArray(turn.output.support).map((item) => normalizeAgentDecisionEvidence(item)),
-            counterpoints: cloneArray(turn.output.counterpoints).map((item) => normalizeAgentCounterpoint(item)),
-            actions: cloneArray(turn.output.actions).map((item) => normalizeAgentAction(item)),
-            boundary: cloneArray(turn.output.boundary).map((item) => normalizeAgentBoundaryItem(item)),
-            reviewContract: cloneObject(turn.output.reviewContract || turn.diagnostics.reviewContract),
+            answer: String(turn.output.answer || ''),
             executionTrace: cloneArray(turn.diagnostics.executionTrace),
             usedTools: cloneArray(turn.diagnostics.usedTools),
             citations: cloneArray(turn.diagnostics.citations),
             researchNotes: cloneArray(turn.diagnostics.researchNotes),
             auditIssues: cloneArray(turn.diagnostics.auditIssues),
             thinkingTimeline: nextThinkingTimeline,
-            nextSuggestions: cloneArray(turn.output.nextSuggestions),
             clarificationQuestion: String(turn.output.clarificationQuestion || ''),
             clarificationOptions: cloneArray(turn.output.clarificationOptions),
             pendingTaskConfirmation,
@@ -2261,13 +1865,12 @@ function createAgentRuntimeMethods() {
             input: rawQuestion || question,
             status: 'idle',
             stage: 'gating',
-            cards: [],
+            answer: '',
             executionTrace: [],
             usedTools: [],
             citations: [],
             researchNotes: [],
             auditIssues: [],
-            nextSuggestions: [],
             clarificationQuestion: '',
             clarificationOptions: [],
             pendingTaskConfirmation: null,

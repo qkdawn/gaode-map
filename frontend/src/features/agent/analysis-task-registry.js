@@ -44,8 +44,8 @@ const ANALYSIS_TASKS = Object.freeze({
     panelId: 'poi',
     subPanelLabel: 'POI 共享栅格',
     estimate: '约 1-3 分钟',
-    description: '使用当前分析范围和 POI 数据生成同源 cell_id 栅格，补齐 POI 与人口/夜光耦合证据。',
-    resultUsage: '完成后会用于人口、POI、夜光共享网格交叉诊断。',
+    description: '使用当前分析范围和 POI 数据生成同源 cell_id 共享栅格，补齐 POI 与人口/夜光耦合证据。',
+    resultUsage: '完成后会用于人口、POI、夜光共享栅格交叉诊断。',
     toolNames: ['aggregate_pois_to_shared_grid'],
     producedArtifacts: ['current_poi_grid'],
     runningFlag: 'isLoadingPoiGrid',
@@ -66,16 +66,16 @@ const ANALYSIS_TASKS = Object.freeze({
         ctx.poiSubTab = 'grid'
       }
       if (typeof ctx.setPoiGridType === 'function') {
-        ctx.setPoiGridType('raster')
+        ctx.setPoiGridType('shared')
       } else {
-        ctx.poiGridType = 'raster'
+        ctx.poiGridType = 'shared'
       }
     },
     async run(ctx) {
-      if (typeof ctx.ensurePoiRasterGrid !== 'function') {
+      if (typeof ctx.ensurePoiSharedGridAnalysis !== 'function') {
         throw new Error('POI 共享栅格计算入口不可用')
       }
-      await ctx.ensurePoiRasterGrid(true)
+      await ctx.ensurePoiSharedGridAnalysis(true)
     },
   },
   poi_h3_grid: {

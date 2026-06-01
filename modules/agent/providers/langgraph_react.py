@@ -31,6 +31,7 @@ class LangGraphReactState(TypedDict, total=False):
     question: str
     governance_mode: str
     confirmed_tools: List[str]
+    thinking_mode: str
     max_steps: int
     max_errors: int
     step_count: int
@@ -158,6 +159,7 @@ async def run_langgraph_react_loop(
     include_secondary_tools: bool = False,
     max_steps_override: Optional[int] = None,
     max_errors_override: Optional[int] = None,
+    thinking_mode: str = "quick",
 ) -> ToolLoopResult:
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
     from langchain_openai import ChatOpenAI
@@ -175,6 +177,20 @@ async def run_langgraph_react_loop(
         timeout=float(settings.ai_timeout_s or 60),
     ).bind_tools(tool_schemas)
 
+    async def preflight(_state: LangGraphReactState) -> Dict[str, Any]:
+        if emit:
+            await emit(
+                "thinking",
+                {
+                    "phase": "preflight",
+                    "source": "langgraph_react",
+                    "title": "整理执行边界",
+                    "detail": "正在确认当前问题、范围与可用工具后进入工具循环。",
+                    "state": "completed",
+                },
+            )
+        return {}
+
     async def think(state: LangGraphReactState) -> Dict[str, Any]:
         result = state["result"]
         if emit:
@@ -184,7 +200,7 @@ async def run_langgraph_react_loop(
                     "phase": "planned",
                     "source": "langgraph_react",
                     "title": "判断下一步",
-                    "detail": "我正在根据已有观察和工具目录判断是否继续调用工具。",
+                    "detail": "我正在根据已有观察和工具目录判断是否继续调用工具，还是已经可以回答问题。",
                     "state": "active",
                 },
             )
@@ -247,6 +263,22 @@ async def run_langgraph_react_loop(
             trace = execution.trace
 
             result.execution_trace.append(trace)
+            if trace.status == "blocked":
+                result.status = "requires_risk_confirmation"
+                result.stop_reason = "governance_blocked"
+                result.risk_prompt = str(trace.message or tool_result.error or "工具调用需要风险确认")
+                result.error = ""
+                if emit:
+                    await emit(
+                        "trace",
+                        tool_finish_trace_payload(
+                            trace_id=f"langgraph-tool:{call.get('id') or tool_name}",
+                            call_id=str(call.get("id") or ""),
+                            step=step,
+                            execution=execution,
+                        ),
+                    )
+                break
             result.tool_results.append(tool_result)
             if tool_result.status == "success":
                 result.used_tools.append(tool_name)
@@ -290,11 +322,29 @@ async def run_langgraph_react_loop(
             "consecutive_errors": consecutive_errors,
         }
 
+    async def assess(state: LangGraphReactState) -> Dict[str, Any]:
+        result = state["result"]
+        if emit:
+            await emit(
+                "thinking",
+                {
+                    "phase": "assess",
+                    "source": "langgraph_react",
+                    "title": "检查是否继续",
+                    "detail": "正在根据刚拿到的工具结果判断证据是否已够用。",
+                    "state": "completed" if result.status == "completed" else "active",
+                },
+            )
+        return {"result": result}
+
     async def finalize(state: LangGraphReactState) -> Dict[str, Any]:
         result = state["result"]
         if result.status != "completed" and not result.assistant_summary:
-            result.assistant_summary = result.error or result.stop_reason or "LangGraph ReAct 未能稳定完成。"
+            result.assistant_summary = result.error or result.stop_reason or "工具循环未能稳定完成。"
         return {"result": result, "final_message": result.assistant_summary}
+
+    def route_after_preflight(_state: LangGraphReactState) -> str:
+        return "think"
 
     def route_after_think(state: LangGraphReactState) -> str:
         if state["result"].status != "failed" and _tool_calls_from_message(state["messages"][-1]):
@@ -302,23 +352,32 @@ async def run_langgraph_react_loop(
         return "finalize"
 
     def route_after_tools(state: LangGraphReactState) -> str:
-        if state["result"].status == "failed":
+        if state["result"].status in {"failed", "requires_risk_confirmation"}:
+            return "finalize"
+        return "assess"
+
+    def route_after_assess(state: LangGraphReactState) -> str:
+        if state["result"].status in {"failed", "requires_risk_confirmation"}:
             return "finalize"
         return "think"
 
     graph = StateGraph(LangGraphReactState)
+    graph.add_node("preflight", preflight)
     graph.add_node("think", think)
     graph.add_node("act_tools", act_tools)
+    graph.add_node("assess", assess)
     graph.add_node("finalize", finalize)
-    graph.set_entry_point("think")
+    graph.set_entry_point("preflight")
+    graph.add_conditional_edges("preflight", route_after_preflight, {"think": "think"})
     graph.add_conditional_edges("think", route_after_think, {"act_tools": "act_tools", "finalize": "finalize"})
-    graph.add_conditional_edges("act_tools", route_after_tools, {"think": "think", "finalize": "finalize"})
+    graph.add_conditional_edges("act_tools", route_after_tools, {"assess": "assess", "finalize": "finalize"})
+    graph.add_conditional_edges("assess", route_after_assess, {"think": "think", "finalize": "finalize"})
     graph.add_edge("finalize", END)
     app = graph.compile()
 
     result = ToolLoopResult(status="completed")
     initial_messages = [
-        SystemMessage(content=loop_system_prompt()),
+        SystemMessage(content=loop_system_prompt(thinking_mode=thinking_mode)),
         HumanMessage(content=_safe_json(_initial_payload(question=question, snapshot=snapshot, context=context_bundle, registry=registry))),
     ]
     final_state = await app.ainvoke(
@@ -330,6 +389,7 @@ async def run_langgraph_react_loop(
             "question": question,
             "governance_mode": governance_mode,
             "confirmed_tools": list(confirmed_tools or []),
+            "thinking_mode": str(thinking_mode or "quick"),
             "max_steps": max_steps,
             "max_errors": max_errors,
             "step_count": 0,

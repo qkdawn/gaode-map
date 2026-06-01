@@ -8,44 +8,20 @@ import httpx
 
 from core.config import settings
 
-from ..context_builder import build_context_summary
 from ..gate import _clarification_options, latest_user_message, run_gate
-from ..governance import check_tool_governance
 from ..llm_digest import (
-    audit_tool_results_digest,
     compact_context_summary_dump,
     context_digest,
     snapshot_digest,
-    summarize_tool_arguments,
-    summarize_tool_result,
     trim_messages as _trim_messages_from_module,
 )
-from ..planner import build_planning_fallback
-from ..schemas import (
-    AuditResult,
-    AuditVerdict,
-    AgentMessage,
-    AgentTurnOutput,
-    AnalysisSnapshot,
-    ContextBundle,
-    ExecutionTraceItem,
-    GateDecision,
-    PlanStep,
-    PlanningIntent,
-    PlanningResult,
-    ToolSelectionResult,
-    ToolLoopResult,
-    ToolResult,
-    WorkingMemory,
-)
-from ..tools import RegisteredTool
+from ..schemas import AgentMessage, AgentTranslationPack, AgentTurnOutput, AnalysisSnapshot, ContextBundle, GateDecision
 from .chat_parser import (
     extract_chat_completion_text as _extract_chat_completion_text_from_module,
     extract_json_object as _extract_json_object_from_module,
     extract_text_content as _extract_text_content_from_module,
     finalize_tool_calls as _finalize_tool_calls_from_module,
     merge_tool_call_delta as _merge_tool_call_delta_from_module,
-    parse_chat_completion_response as _parse_chat_completion_response_from_module,
 )
 from .client import (
     LLMProviderClient,
@@ -55,26 +31,10 @@ from .client import (
     is_llm_enabled as _is_llm_enabled_from_module,
 )
 from .prompts import (
-    auditor_system_prompt as _auditor_system_prompt_from_module,
     gate_system_prompt as _gate_system_prompt_from_module,
-    loop_system_prompt as _loop_system_prompt_from_module,
-    planner_system_prompt as _planner_system_prompt_from_module,
     synthesizer_system_prompt as _synthesizer_system_prompt_from_module,
-    tool_selector_system_prompt as _tool_selector_system_prompt_from_module,
+    translation_system_prompt as _translation_system_prompt_from_module,
 )
-from .tool_loop import (
-    artifact_digest,
-    chat_completion_tools,
-    compact_tool_catalog,
-    is_reusable_tool_call,
-    llm_visible_registry,
-    planner_question_archetype,
-    planner_tool_routing_hints,
-    tool_cache_key,
-    tool_catalog,
-    tool_output_payload,
-)
-from .tool_call_execution import execute_tool_call_step, tool_finish_trace_payload, tool_start_trace_payload
 
 LoopEmit = Callable[[str, Dict[str, Any]], Awaitable[None] | None]
 
@@ -98,8 +58,10 @@ def _trim_messages(messages: List[AgentMessage]) -> List[Dict[str, str]]:
 def _extract_text_content(payload: Dict[str, Any]) -> str:
     return _extract_text_content_from_module(payload)
 
+
 def _extract_json_object(raw_text: str) -> Dict[str, Any]:
     return _extract_json_object_from_module(raw_text)
+
 
 async def generate_title_with_llm(
     *,
@@ -172,8 +134,18 @@ async def _iter_sse_data(response: httpx.Response):
 def _merge_tool_call_delta(accumulator: List[Dict[str, Any]], raw_call: Dict[str, Any]) -> None:
     _merge_tool_call_delta_from_module(accumulator, raw_call)
 
+
 def _finalize_tool_calls(accumulator: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return _finalize_tool_calls_from_module(accumulator)
+
+
+async def _maybe_emit(emit: LoopEmit | None, event_type: str, payload: Dict[str, Any]) -> None:
+    if emit is None:
+        return
+    outcome = emit(event_type, payload)
+    if inspect.isawaitable(outcome):
+        await outcome
+
 
 async def _stream_chat_completion(
     *,
@@ -267,77 +239,6 @@ async def _stream_chat_completion(
     }
 
 
-def _loop_system_prompt() -> str:
-    return _loop_system_prompt_from_module()
-
-def _parse_chat_completion_response(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return _parse_chat_completion_response_from_module(payload)
-
-def _extract_chat_completion_text(payload: Dict[str, Any]) -> str:
-    return _extract_chat_completion_text_from_module(payload)
-
-async def _maybe_emit(emit: LoopEmit | None, event_type: str, payload: Dict[str, Any]) -> None:
-    if emit is None:
-        return
-    outcome = emit(event_type, payload)
-    if inspect.isawaitable(outcome):
-        await outcome
-
-
-async def _emit_preflight_trace(
-    *,
-    emit: LoopEmit | None,
-    trace_id: str,
-    data_readiness: Dict[str, Any],
-) -> None:
-    if emit is None or not isinstance(data_readiness, dict):
-        return
-    reused = [str(item) for item in (data_readiness.get("reused") or []) if str(item).strip()]
-    fetched = [str(item) for item in (data_readiness.get("fetched") or []) if str(item).strip()]
-    ready = bool(data_readiness.get("ready"))
-    await _maybe_emit(
-        emit,
-        "trace",
-        {
-            "id": f"{trace_id}:precheck",
-            "tool_name": "analysis_preflight",
-            "phase": "precheck",
-            "status": "success" if data_readiness.get("checked") else "failed",
-            "reason": "checked",
-            "message": "已完成现有数据检查",
-            "result_summary": f"复用: {', '.join(reused) if reused else '无'}",
-            "produced_artifacts": ["current_data_readiness"],
-        },
-    )
-    await _maybe_emit(
-        emit,
-        "trace",
-        {
-            "id": f"{trace_id}:fetch_missing",
-            "tool_name": "analysis_preflight",
-            "phase": "fetch_missing",
-            "status": "success" if ready else "failed",
-            "reason": "fetched_missing",
-            "message": "已按缺失维度补齐数据" if ready else "缺失维度补齐失败",
-            "result_summary": f"补齐: {', '.join(fetched) if fetched else '无'}",
-            "produced_artifacts": ["current_area_data_bundle", "current_data_readiness"],
-        },
-    )
-    await _maybe_emit(
-        emit,
-        "trace",
-        {
-            "id": f"{trace_id}:analysis",
-            "tool_name": "analysis_preflight",
-            "phase": "analysis",
-            "status": "start" if ready else "failed",
-            "reason": "analysis_started",
-            "message": "数据就绪，开始分析" if ready else "数据未就绪，阻止进入分析",
-            "produced_artifacts": ["current_data_readiness"],
-        },
-    )
-
-
 async def _invoke_json_role(
     *,
     system_prompt: str,
@@ -371,82 +272,11 @@ async def _invoke_json_role(
             phase=phase,
             title=title,
         )
-    return _extract_json_object(_extract_chat_completion_text(payload))
+    return _extract_json_object(_extract_chat_completion_text_from_module(payload))
 
 
 def _gate_system_prompt() -> str:
     return _gate_system_prompt_from_module()
-
-def _planner_system_prompt() -> str:
-    return _planner_system_prompt_from_module()
-
-def _tool_selector_system_prompt() -> str:
-    return _tool_selector_system_prompt_from_module()
-
-def _auditor_system_prompt() -> str:
-    return _auditor_system_prompt_from_module()
-
-def _synthesizer_system_prompt() -> str:
-    return _synthesizer_system_prompt_from_module()
-
-def _merge_plan_steps(primary: List[PlanStep], fallback: List[PlanStep]) -> List[PlanStep]:
-    merged: List[PlanStep] = []
-    lookup: Dict[tuple[str, str], PlanStep] = {}
-    ordered_steps = list(primary or []) + list(fallback or [])
-    priority = {"read_current_scope": 0, "read_current_results": 1}
-    ordered_steps.sort(key=lambda step: priority.get(step.tool_name, 10))
-    for step in ordered_steps:
-        arguments = step.arguments if isinstance(step.arguments, dict) else {}
-        key = (
-            str(step.tool_name or "").strip(),
-            json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str),
-        )
-        if not key[0]:
-            continue
-        if key in lookup:
-            current = lookup[key]
-            if not current.reason and step.reason:
-                current.reason = step.reason
-            if not current.evidence_goal and step.evidence_goal:
-                current.evidence_goal = step.evidence_goal
-            if not current.expected_artifacts and step.expected_artifacts:
-                current.expected_artifacts = list(step.expected_artifacts or [])
-            current.optional = current.optional and step.optional
-            continue
-        normalized = step.model_copy(deep=True)
-        normalized.arguments = arguments
-        lookup[key] = normalized
-        merged.append(normalized)
-    return merged
-
-
-def _fallback_step_hints(steps: List[PlanStep]) -> List[Dict[str, Any]]:
-    return [
-        {
-            "tool_name": str(step.tool_name or ""),
-            "arguments": dict(step.arguments or {}),
-            "reason": str(step.reason or ""),
-            "evidence_goal": str(step.evidence_goal or ""),
-            "expected_artifacts": list(step.expected_artifacts or [])[:8],
-            "optional": bool(step.optional),
-        }
-        for step in list(steps or [])[:8]
-        if str(step.tool_name or "").strip()
-    ]
-
-
-def _filter_known_steps(steps: List[PlanStep], registry: Dict[str, RegisteredTool]) -> tuple[List[PlanStep], List[str]]:
-    known_steps: List[PlanStep] = []
-    warnings: List[str] = []
-    for step in steps or []:
-        tool_name = str(step.tool_name or "").strip()
-        if not tool_name:
-            continue
-        if tool_name not in registry:
-            warnings.append(f"tool_selector_unknown_tool:{tool_name}")
-            continue
-        known_steps.append(step.model_copy(update={"tool_name": tool_name}))
-    return known_steps, warnings
 
 
 async def run_gate_with_llm(
@@ -483,488 +313,30 @@ async def run_gate_with_llm(
     return decision
 
 
-async def plan_with_llm(
-    *,
-    messages: List[AgentMessage],
-    snapshot: AnalysisSnapshot,
-    context: ContextBundle,
-    registry: Dict[str, RegisteredTool],
-    memory: WorkingMemory,
-    audit_feedback: Dict[str, Any] | None = None,
-    emit: LoopEmit | None = None,
-) -> PlanningResult:
-    question = latest_user_message(messages)
-    visible_registry = llm_visible_registry(registry)
-    fallback = build_planning_fallback(
-        question=question,
-        snapshot=snapshot,
-        memory=memory,
-        audit_feedback=audit_feedback,
-    )
-    question_archetype = planner_question_archetype(question)
-    payload = await _invoke_json_role(
-        system_prompt=_planner_system_prompt(),
-        user_payload={
-            "messages": _trim_messages(messages),
-            "latest_user_message": question,
-            "question_archetype": question_archetype,
-            "analysis_snapshot_digest": snapshot_digest(snapshot),
-            "context_digest": context_digest(context),
-            "context_summary": compact_context_summary_dump(context.context_summary),
-            "artifact_digest": artifact_digest(snapshot, memory),
-            "available_artifacts": list(memory.artifacts.keys()),
-            "audit_feedback": dict(audit_feedback or {}),
-        },
-        emit=emit,
-        phase="planning",
-        title="规划本轮分析步骤",
-        reasoning_id="planner-reasoning",
-    )
-    intent = PlanningIntent(**payload)
-    intent.goal = intent.goal or fallback.goal
-    intent.question_type = intent.question_type or fallback.question_type
-    intent.summary = intent.summary or fallback.summary
-    intent.stop_condition = intent.stop_condition or fallback.stop_condition
-    intent.evidence_focus = list(intent.evidence_focus or fallback.evidence_focus)
-    if not intent.tool_selection_brief:
-        intent.tool_selection_brief = intent.summary or fallback.summary
-
-    selector_warnings: List[str] = []
-    selected_steps: List[PlanStep] = []
-    selector_summary = ""
-    try:
-        selector_payload = await _invoke_json_role(
-            system_prompt=_tool_selector_system_prompt(),
-            user_payload={
-                "messages": _trim_messages(messages),
-                "latest_user_message": question,
-                "question_archetype": question_archetype,
-                "planning_intent": intent.model_dump(mode="json"),
-                "analysis_snapshot_digest": snapshot_digest(snapshot),
-                "artifact_digest": artifact_digest(snapshot, memory),
-                "available_tools": compact_tool_catalog(visible_registry),
-                "available_artifacts": list(memory.artifacts.keys()),
-                "tool_routing_hints": planner_tool_routing_hints(),
-                "audit_feedback": dict(audit_feedback or {}),
-                "fallback_step_hints": _fallback_step_hints(list(fallback.steps or [])),
-            },
-            emit=emit,
-            phase="planning",
-            title="选择本轮工具",
-            reasoning_id="tool-selector-reasoning",
-        )
-        selection = ToolSelectionResult(**selector_payload)
-        selector_summary = selection.summary
-        selected_steps, unknown_warnings = _filter_known_steps(list(selection.steps or []), visible_registry)
-        selector_warnings.extend([str(item) for item in (selection.warnings or []) if str(item).strip()])
-        selector_warnings.extend(unknown_warnings)
-    except Exception as exc:
-        selector_warnings.append(f"tool_selector_failed:{exc}")
-
-    steps = _merge_plan_steps(selected_steps, list(fallback.steps or []))
-    return PlanningResult(
-        goal=intent.goal,
-        question_type=intent.question_type,
-        summary=selector_summary or intent.summary or fallback.summary,
-        requires_tools=bool(steps) if intent.requires_tools is False else (bool(steps) or fallback.requires_tools),
-        stop_condition=intent.stop_condition or fallback.stop_condition,
-        evidence_focus=list(intent.evidence_focus or fallback.evidence_focus),
-        steps=steps,
-        warnings=list(dict.fromkeys(selector_warnings)),
-    )
-
-
-async def audit_with_llm(
-    *,
-    question: str,
-    snapshot: AnalysisSnapshot,
-    context: ContextBundle,
-    memory: WorkingMemory,
-    plan: PlanningResult,
-    rule_audit: AuditResult,
-    replan_count: int,
-    emit: LoopEmit | None = None,
-) -> AuditVerdict:
-    payload = await _invoke_json_role(
-        system_prompt=_auditor_system_prompt(),
-        user_payload={
-            "question": question,
-            "analysis_snapshot_digest": snapshot_digest(snapshot),
-            "context_digest": context_digest(context),
-            "plan": plan.model_dump(mode="json"),
-            "tool_results": audit_tool_results_digest(memory.tool_results),
-            "execution_trace": [item.model_dump(mode="json") for item in (memory.execution_trace or [])],
-            "available_artifacts": list(memory.artifacts.keys()),
-            "rule_audit": rule_audit.model_dump(mode="json"),
-            "replan_count": int(replan_count),
-        },
-        emit=emit,
-        phase="auditing",
-        title="审计本轮结果是否足够回答问题",
-        reasoning_id="auditor-reasoning",
-    )
-    verdict = AuditVerdict(**payload)
-    verdict.issues = list(dict.fromkeys(list(verdict.issues or []) + list(rule_audit.issues or [])))
-    verdict.missing_evidence = list(
-        dict.fromkeys(list(verdict.missing_evidence or []) + list(rule_audit.missing_evidence or []))
-    )
-    if verdict.missing_evidence:
-        verdict.status = "replan"
-        verdict.should_answer = False
-        if not verdict.replan_instructions:
-            verdict.replan_instructions = f"请优先补齐 {'、'.join(verdict.missing_evidence)}。"
-        if not verdict.summary:
-            verdict.summary = "当前证据还不能稳定回答用户问题，需要先补齐关键维度。"
-    elif not verdict.summary:
-        verdict.summary = "当前证据通过审计，可以进入综合分析。"
-    return verdict
-
-
-async def run_llm_tool_loop(
-    *,
-    messages: List[AgentMessage],
-    snapshot: AnalysisSnapshot,
-    context: ContextBundle,
-    registry: Dict[str, RegisteredTool],
-    governance_mode: str,
-    confirmed_tools: List[str] | None = None,
-    emit: LoopEmit | None = None,
-    include_secondary_tools: bool = False,
-    max_steps_override: int | None = None,
-    max_errors_override: int | None = None,
-) -> ToolLoopResult:
-    base_url = str(settings.ai_base_url or "").rstrip("/")
-    headers = {
-        "Authorization": f"Bearer {settings.ai_api_key}",
-        "Content-Type": "application/json",
-    }
-    initial_payload = {
-        "messages": _trim_messages(messages),
-        "analysis_snapshot_digest": snapshot_digest(snapshot),
-        "context_digest": context_digest(context),
-        "context_summary": compact_context_summary_dump(build_context_summary(snapshot)),
-        "available_tools": tool_catalog(llm_visible_registry(registry)),
-    }
-    loop_result = ToolLoopResult(artifacts={})
-    loop_messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": _loop_system_prompt()},
-        {"role": "user", "content": json.dumps(initial_payload, ensure_ascii=False)},
-    ]
-    consecutive_tool_errors = 0
-    max_steps = max(1, int(max_steps_override or settings.ai_max_tool_steps or 8))
-    max_errors = max(1, int(max_errors_override or settings.ai_max_tool_errors or 2))
-    reusable_tool_results: Dict[str, ToolResult] = {}
-
-    async with httpx.AsyncClient(timeout=float(settings.ai_timeout_s or 60)) as client:
-        for step_index in range(max_steps):
-            analysis_item_id = f"llm-loop-analysis-{step_index + 1}"
-            await _maybe_emit(
-                emit,
-                "thinking",
-                {
-                    "id": analysis_item_id,
-                    "phase": "planned",
-                    "title": f"分析当前证据（第 {step_index + 1} 轮）",
-                    "detail": "正在判断是否需要继续调用工具。",
-                    "state": "active",
-                },
-            )
-            request_body: Dict[str, Any] = {
-                "model": settings.ai_model,
-                "messages": loop_messages,
-                "tools": chat_completion_tools(registry, include_secondary=include_secondary_tools),
-                "tool_choice": "auto",
-            }
-            payload = await _stream_chat_completion(
-                client=client,
-                base_url=base_url,
-                headers=headers,
-                request_body=request_body,
-                emit=emit,
-                reasoning_id=analysis_item_id,
-                phase="planned",
-                title=f"模型思考（第 {step_index + 1} 轮）",
-            )
-
-            loop_result.provider_response_id = str(payload.get("id") or loop_result.provider_response_id or "")
-
-            parsed = _parse_chat_completion_response(payload)
-            loop_result.warnings.extend([str(item) for item in parsed["warnings"] if str(item).strip()])
-            if parsed["texts"]:
-                loop_result.assistant_summary = "\n".join(parsed["texts"]).strip()
-
-            function_calls = [item for item in parsed["function_calls"] if str(item.get("tool_name") or "").strip()]
-            if not function_calls:
-                if loop_result.assistant_summary:
-                    loop_result.status = "completed"
-                    loop_result.stop_reason = "assistant_completed"
-                    await _maybe_emit(
-                        emit,
-                        "thinking",
-                        {
-                            "id": analysis_item_id,
-                            "phase": "planned",
-                            "title": f"工具调度完成（第 {step_index + 1} 轮）",
-                            "detail": "当前证据已足够，准备进入结果审计。",
-                            "state": "completed",
-                        },
-                    )
-                    return loop_result
-                loop_result.status = "failed"
-                loop_result.stop_reason = "no_parseable_output"
-                loop_result.error = "DeepSeek chat completions 返回了不可解析的输出"
-                return loop_result
-
-            choice_message = {}
-            choices = payload.get("choices") or []
-            if choices and isinstance(choices[0], dict) and isinstance(choices[0].get("message"), dict):
-                choice_message = choices[0]["message"]
-            assistant_message = {
-                "role": "assistant",
-                "content": choice_message.get("content") or "",
-                "tool_calls": choice_message.get("tool_calls") or [],
-            }
-            if choice_message.get("reasoning_content"):
-                assistant_message["reasoning_content"] = choice_message.get("reasoning_content")
-            loop_messages.append(assistant_message)
-            for call in function_calls:
-                tool_name = str(call.get("tool_name") or "").strip()
-                registered = registry.get(tool_name)
-                step = PlanStep(
-                    tool_name=tool_name,
-                    arguments=call.get("arguments") if isinstance(call.get("arguments"), dict) else {},
-                    reason="LLM tool call",
-                    expected_artifacts=list(registered.spec.produces or []) if registered else [],
-                )
-                loop_result.steps.append(step)
-                await _maybe_emit(
-                    emit,
-                    "thinking",
-                    {
-                        "id": f"tool-call:{tool_name}",
-                        "phase": "executing",
-                        "title": f"准备调用 {tool_name}",
-                        "detail": str(registered.spec.description if registered else "正在尝试执行工具。"),
-                        "state": "active",
-                    },
-                )
-                await _maybe_emit(
-                    emit,
-                    "trace",
-                    tool_start_trace_payload(
-                        trace_id=f"tool-call:{call.get('call_id') or tool_name}",
-                        call_id=str(call.get("call_id") or ""),
-                        step=step,
-                    ),
-                )
-
-                if registered is None:
-                    execution = await execute_tool_call_step(
-                        registered_tool=None,
-                        step=step,
-                        snapshot=snapshot,
-                        artifacts=loop_result.artifacts,
-                        question=str(messages[-1].content if messages else ""),
-                        governance_mode=governance_mode,
-                        confirmed_tools=confirmed_tools,
-                    )
-                    await _maybe_emit(
-                        emit,
-                        "trace",
-                        tool_finish_trace_payload(
-                            trace_id=f"tool-call:{call.get('call_id') or tool_name}",
-                            call_id=str(call.get("call_id") or ""),
-                            step=step,
-                            execution=execution,
-                        ),
-                    )
-                    loop_result.status = "failed"
-                    loop_result.stop_reason = "unknown_tool"
-                    loop_result.error = str(execution.result.error or f"unknown_tool:{tool_name}")
-                    return loop_result
-
-                prompt = check_tool_governance(
-                    mode=governance_mode,
-                    spec=registered.spec,
-                    confirmed_tools=confirmed_tools,
-                )
-                if prompt:
-                    loop_result.status = "requires_risk_confirmation"
-                    loop_result.stop_reason = "governance_blocked"
-                    loop_result.risk_prompt = prompt
-                    await _maybe_emit(
-                        emit,
-                        "trace",
-                        {
-                            "id": f"tool-call:{call.get('call_id') or tool_name}",
-                            "call_id": str(call.get("call_id") or ""),
-                            "tool_name": tool_name,
-                            "status": "blocked",
-                            "reason": step.reason,
-                            "message": prompt,
-                            "arguments_summary": summarize_tool_arguments(step.arguments),
-                            "produced_artifacts": list(step.expected_artifacts or []),
-                        },
-                    )
-                    return loop_result
-
-                argument_error = str(call.get("argument_error") or "").strip()
-                if argument_error:
-                    result = ToolResult(
-                        tool_name=tool_name,
-                        status="failed",
-                        warnings=[argument_error],
-                        error="invalid_tool_call_arguments",
-                    )
-                    loop_result.tool_results.append(result)
-                    consecutive_tool_errors += 1
-                    await _maybe_emit(
-                        emit,
-                        "trace",
-                        {
-                            "id": f"tool-call:{call.get('call_id') or tool_name}",
-                            "call_id": str(call.get("call_id") or ""),
-                            "tool_name": tool_name,
-                            "status": "failed",
-                            "reason": step.reason,
-                            "message": argument_error,
-                            "arguments_summary": summarize_tool_arguments(step.arguments),
-                            "result_summary": argument_error,
-                            "evidence_count": 0,
-                            "warning_count": len(result.warnings or []),
-                            "produced_artifacts": [],
-                        },
-                    )
-                    loop_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": str(call.get("call_id") or tool_name),
-                            "content": tool_output_payload(result),
-                        }
-                    )
-                    if consecutive_tool_errors >= max_errors:
-                        loop_result.status = "failed"
-                        loop_result.stop_reason = "too_many_tool_errors"
-                        loop_result.error = "连续工具调用参数错误过多"
-                        return loop_result
-                    continue
-
-                cache_key = tool_cache_key(step)
-                if is_reusable_tool_call(registered, step) and cache_key in reusable_tool_results:
-                    cached_result = reusable_tool_results[cache_key]
-                    trace = ExecutionTraceItem(
-                        tool_name=registered.spec.name,
-                        status="skipped",
-                        reason=step.reason,
-                        message="复用已有工具结果",
-                        cost_level=registered.spec.cost_level,
-                        risk_level=registered.spec.risk_level,
-                        evidence_count=len(cached_result.evidence or []),
-                        warning_count=len(cached_result.warnings or []),
-                    )
-                    loop_result.execution_trace.append(trace)
-                    await _maybe_emit(
-                        emit,
-                        "trace",
-                        {
-                            "id": f"tool-call:{call.get('call_id') or tool_name}",
-                            "call_id": str(call.get("call_id") or ""),
-                            "tool_name": tool_name,
-                            "status": trace.status,
-                            "reason": step.reason,
-                            "message": trace.message,
-                            "arguments_summary": summarize_tool_arguments(step.arguments),
-                            "result_summary": summarize_tool_result(cached_result),
-                            "evidence_count": len(cached_result.evidence or []),
-                            "warning_count": len(cached_result.warnings or []),
-                            "produced_artifacts": list((cached_result.artifacts or {}).keys())[:12],
-                        },
-                    )
-                    loop_messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": str(call.get("call_id") or tool_name),
-                            "content": tool_output_payload(cached_result),
-                        }
-                    )
-                    consecutive_tool_errors = 0
-                    continue
-
-                execution = await execute_tool_call_step(
-                    registered_tool=registered,
-                    step=step,
-                    snapshot=snapshot,
-                    artifacts=loop_result.artifacts,
-                    question=str(messages[-1].content if messages else ""),
-                    governance_mode=governance_mode,
-                    confirmed_tools=confirmed_tools,
-                )
-                result = execution.result
-                trace = execution.trace
-                data_readiness = dict(result.result.get("data_readiness") or {}) if isinstance(result.result, dict) else {}
-                if data_readiness.get("checked"):
-                    await _emit_preflight_trace(
-                        emit=emit,
-                        trace_id=f"tool-call:{call.get('call_id') or tool_name}",
-                        data_readiness=data_readiness,
-                    )
-                loop_result.execution_trace.append(trace)
-                loop_result.used_tools.append(tool_name)
-                loop_result.tool_results.append(result)
-                if result.artifacts:
-                    loop_result.artifacts.update(result.artifacts)
-                if result.status == "success" and is_reusable_tool_call(registered, step):
-                    reusable_tool_results[cache_key] = result.model_copy(deep=True)
-                if result.warnings:
-                    loop_result.research_notes.extend([str(item) for item in result.warnings if str(item).strip()])
-                await _maybe_emit(
-                    emit,
-                    "trace",
-                    {
-                        **tool_finish_trace_payload(
-                            trace_id=f"tool-call:{call.get('call_id') or tool_name}",
-                            call_id=str(call.get("call_id") or ""),
-                            step=step,
-                            execution=execution,
-                        ),
-                        "phase": "analysis" if data_readiness.get("checked") else "executing",
-                    },
-                )
-                consecutive_tool_errors = consecutive_tool_errors + 1 if result.status == "failed" else 0
-                loop_messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": str(call.get("call_id") or tool_name),
-                        "content": tool_output_payload(result),
-                    }
-                )
-                if consecutive_tool_errors >= max_errors:
-                    loop_result.status = "failed"
-                    loop_result.stop_reason = "too_many_tool_errors"
-                    loop_result.error = str(result.error or "tool_execution_failed")
-                    return loop_result
-
-        loop_result.status = "failed"
-        loop_result.stop_reason = "max_tool_steps_exceeded"
-        loop_result.error = f"工具调用步数超过上限 {max_steps}"
-        return loop_result
-
-
 async def generate_answer_output_with_llm(
     *,
     messages: List[AgentMessage],
     snapshot: AnalysisSnapshot,
     context: ContextBundle,
-    synthesis_payload: Dict[str, Any],
+    answer_evidence_payload: Dict[str, Any],
+    translation_pack: AgentTranslationPack | Dict[str, Any] | None = None,
+    thinking_mode: str = "quick",
     emit: LoopEmit | None = None,
 ) -> AgentTurnOutput:
+    translation_payload = (
+        translation_pack.model_dump(mode="json")
+        if isinstance(translation_pack, AgentTranslationPack)
+        else dict(translation_pack or {})
+    )
     parsed = await _invoke_json_role(
-        system_prompt=_synthesizer_system_prompt(),
+        system_prompt=_synthesizer_system_prompt_from_module(thinking_mode=thinking_mode),
         user_payload={
             "messages": _trim_messages(messages),
+            "thinking_mode": str(thinking_mode or "quick"),
             "analysis_snapshot_digest": snapshot_digest(snapshot),
             "context_digest": context_digest(context),
-            "synthesis_payload": synthesis_payload,
+            "answer_evidence_payload": answer_evidence_payload,
+            "translation_pack": translation_payload,
         },
         emit=emit,
         phase="synthesizing",
@@ -972,3 +344,32 @@ async def generate_answer_output_with_llm(
         reasoning_id="synthesizer-reasoning",
     )
     return AgentTurnOutput(**parsed)
+
+
+async def generate_translation_pack_with_llm(
+    *,
+    messages: List[AgentMessage],
+    snapshot: AnalysisSnapshot,
+    context: ContextBundle,
+    answer_evidence_payload: Dict[str, Any],
+    thinking_mode: str = "quick",
+    emit: LoopEmit | None = None,
+) -> AgentTranslationPack:
+    payload = await _invoke_json_role(
+        system_prompt=_translation_system_prompt_from_module(thinking_mode=thinking_mode),
+        user_payload={
+            "messages": _trim_messages(messages),
+            "thinking_mode": str(thinking_mode or "quick"),
+            "analysis_snapshot_digest": snapshot_digest(snapshot),
+            "context_digest": context_digest(context),
+            "answer_evidence_payload": answer_evidence_payload,
+        },
+        emit=emit,
+        phase="synthesizing",
+        title="转译指标为空间体验与策划含义",
+        reasoning_id="translation-reasoning",
+    )
+    pack = AgentTranslationPack(**payload)
+    if not pack.status or pack.status == "skipped":
+        pack.status = "ready" if pack.items else "skipped"
+    return pack

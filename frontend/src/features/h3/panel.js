@@ -309,7 +309,8 @@
                 this.mapCore.clearGridPolygons();
             },
             restoreH3GridDisplayOnEnter() {
-                if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()) {
+                if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()
+                    && !(this.shouldUsePoiUnifiedGridUi && this.shouldUsePoiUnifiedGridUi())) {
                     if (typeof this.restorePoiRasterGridDisplayOnEnter === 'function') {
                         this.restorePoiRasterGridDisplayOnEnter();
                     }
@@ -343,7 +344,8 @@
                 }
             },
             ensureH3PanelEntryState() {
-                if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()) {
+                if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()
+                    && !(this.shouldUsePoiUnifiedGridUi && this.shouldUsePoiUnifiedGridUi())) {
                     return;
                 }
                 this._ensureH3CategoryState();
@@ -578,7 +580,8 @@
                 const showSyntax = this.step === 2 && normalizedTargets.indexOf('syntax') >= 0;
 
                 const clearGridDisplay = () => {
-                    if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()) {
+                    if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()
+                        && !(this.shouldUsePoiUnifiedGridUi && this.shouldUsePoiUnifiedGridUi())) {
                         if (typeof this.clearPoiRasterGridDisplayOnLeave === 'function') this.clearPoiRasterGridDisplayOnLeave();
                     } else {
                         this.clearH3GridDisplayOnLeave();
@@ -1043,7 +1046,8 @@
                         return { value: null, noData: true };
                     }
                     const rawEntropy = this._toNumber(props.local_entropy, 0);
-                    const normalized = rawEntropy / Math.log(7);
+                    const categoryCount = Math.max(2, Number((this.h3CategoryMeta || []).length) || 7);
+                    const normalized = rawEntropy / Math.log(categoryCount);
                     const bounded = Math.max(0, Math.min(1, normalized));
                     return { value: bounded, noData: false };
                 }

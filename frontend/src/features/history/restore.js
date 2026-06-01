@@ -295,8 +295,10 @@
             async restoreHistoryPoiRasterArtifact(artifact, token, options = {}) {
                 if (token !== this.historyDetailLoadToken || !artifact) return false;
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
-                const features = Array.isArray(payload.features) ? payload.features : [];
+                const grid = payload.grid && typeof payload.grid === 'object' ? payload.grid : payload;
+                const features = Array.isArray(grid.features) ? grid.features : [];
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : (artifact.summary || null);
+                const charts = payload.charts && typeof payload.charts === 'object' ? payload.charts : {};
                 if (!features.length && !summary) return false;
                 const restoredYear = this.getHistoryArtifactYear(artifact);
                 const applyToProjection = options.applyToProjection !== false;
@@ -304,26 +306,34 @@
                     status: 'ready',
                     features: features,
                     summary: summary || {},
-                    charts: {},
+                    charts: charts,
                     derivedStats: {},
                     params: artifact.params && typeof artifact.params === 'object' ? JSON.parse(JSON.stringify(artifact.params)) : {},
                     evidence: {},
                     error: '',
                     year: restoredYear,
-                    gridType: 'raster',
+                    gridType: 'shared',
                 };
                 if (typeof this.commitPoiGridResult === 'function') {
-                    this.commitPoiGridResult(restoredYear, 'raster', gridResult);
+                    this.commitPoiGridResult(restoredYear, 'shared', gridResult);
                 }
                 if (!applyToProjection) return true;
                 this.poiGridFeatures = features;
                 this.poiGridSummary = summary || null;
-                this.poiGridType = 'raster';
-                if (typeof this.commitCurrentPoiGridResult === 'function') {
-                    this.commitCurrentPoiGridResult('raster', restoredYear);
+                this.poiGridType = 'shared';
+                this.h3AnalysisGridFeatures = features;
+                this.h3GridFeatures = features;
+                this.h3GridCount = Number((summary && summary.grid_count) || features.length || 0);
+                this.h3AnalysisSummary = summary || null;
+                this.h3AnalysisCharts = charts || null;
+                if (typeof this.computeH3DerivedStats === 'function' && summary) {
+                    this.computeH3DerivedStats();
                 }
-                if (this.poiSubTab === 'grid' && typeof this.restorePoiRasterGridDisplayOnEnter === 'function') {
-                    this.restorePoiRasterGridDisplayOnEnter();
+                if (typeof this.commitCurrentPoiGridResult === 'function') {
+                    this.commitCurrentPoiGridResult('shared', restoredYear);
+                }
+                if (this.poiSubTab === 'grid' && typeof this.restoreH3GridDisplayOnEnter === 'function') {
+                    this.restoreH3GridDisplayOnEnter();
                 }
                 return true;
             },

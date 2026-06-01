@@ -38,13 +38,13 @@ test('normalizeAgentTurnPayload normalizes structured agent response fields', ()
   assert.equal(normalized.plan.steps[0].tool_name, 'read_current_scope')
 })
 
-test('deriveAgentSessionPreview prefers summary card and deriveAgentSessionTitle prefers first user message', () => {
+test('deriveAgentSessionPreview prefers answer text and deriveAgentSessionTitle prefers first user message', () => {
   const session = {
     messages: [
       { role: 'user', content: '总结这个区域的商业特征' },
       { role: 'assistant', content: '这里以社区商业为主' },
     ],
-    cards: [{ type: 'summary', title: '核心判断', content: '这里以社区商业为主', items: [] }],
+    answer: '这里以社区商业为主',
   }
 
   assert.equal(deriveAgentSessionPreview(session), '这里以社区商业为主')

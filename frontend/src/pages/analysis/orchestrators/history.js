@@ -307,20 +307,27 @@ function createAnalysisHistoryOrchestratorMethods() {
       if (type === 'scope') return this.buildCurrentScopeArtifactPayload()
       if (type === 'poi_raster_grid') {
         const params = {
-          grid_type: 'raster',
+          grid_type: 'shared_raster',
           cell_id_source: 'population_nightlight_shared_cell_id',
           source: this.normalizePoiSource ? this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local') : String(this.resultDataSource || this.poiDataSource || ''),
           year: Number(this.getPoiRasterGridYear ? this.getPoiRasterGridYear() : (this.poiYearSource || this.resultPoiYear)) || null,
+          neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
         }
         const features = Array.isArray(this.poiGridFeatures) ? this.poiGridFeatures : []
         return {
           params,
           payload: {
-            type: 'FeatureCollection',
-            grid_type: 'raster',
-            features,
-            count: features.length,
+            grid: {
+              type: 'FeatureCollection',
+              grid_type: 'shared_raster',
+              cell_id_source: 'population_nightlight_shared_cell_id',
+              scope_id: (this.poiGridSummary && this.poiGridSummary.scope_id) || null,
+              features,
+              count: features.length,
+              cell_count: features.length,
+            },
             summary: this.cloneArtifactValue(this.poiGridSummary || {}),
+            charts: this.cloneArtifactValue(this.h3AnalysisCharts || {}),
             ...params,
           },
           summary: this.cloneArtifactValue(this.poiGridSummary || {}),

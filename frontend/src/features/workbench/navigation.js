@@ -218,8 +218,8 @@
                             setTimeout(() => this.resizePoiChart(), 0);
                         } else if (poiTab === 'grid') {
                             if (typeof this.isPoiRasterGridMode === 'function' && this.isPoiRasterGridMode()) {
-                                if (typeof this.ensurePoiRasterGrid === 'function') this.ensurePoiRasterGrid();
-                                if (typeof this.restorePoiRasterGridDisplayOnEnter === 'function') this.restorePoiRasterGridDisplayOnEnter();
+                                if (typeof this.ensurePoiSharedGridAnalysis === 'function') this.ensurePoiSharedGridAnalysis();
+                                if (typeof this.restoreH3GridDisplayOnEnter === 'function') this.restoreH3GridDisplayOnEnter();
                             } else {
                                 this.syncH3PoiFilterSelection(false);
                                 this.ensureH3PanelEntryState();

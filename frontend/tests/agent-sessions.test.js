@@ -165,14 +165,8 @@ test('normalizeAgentTurnPayload reads staged backend response shape', () => {
     status: 'answered',
     stage: 'answered',
     output: {
-      cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
-      next_suggestions: ['继续看路网'],
+      answer: '这里以社区商业为主，当前更适合继续做方向性预研。',
       panel_payloads: { h3_result: { summary: { grid_count: 8 } } },
-      decision: { summary: '适合继续预研', mode: 'action', strength: 'moderate', can_act: true },
-      support: [{ key: 'poi_count', metric: 'poi_count', headline: 'POI 样本量 12', interpretation: '供给样本够用', source: 'analysis_snapshot.poi_summary', confidence: 'moderate', limitation: '不能直接推断收益', supports: ['core_judgment'], is_key: true }],
-      counterpoints: [{ kind: 'missing', title: '仍缺证据', detail: '当前仍缺少路网概览。' }],
-      actions: [{ title: '补齐路网证据', detail: '先补跑路网分析', condition: '当要做更强判断时', target: 'evidence_gap', prompt: '补齐路网概览再判断' }],
-      boundary: [{ title: '适用边界', detail: '不能直接推断经营收益。' }],
     },
     diagnostics: {
       execution_trace: [{ tool_name: 'read_current_scope', status: 'success' }],
@@ -200,14 +194,8 @@ test('normalizeAgentTurnPayload reads staged backend response shape', () => {
     },
   })
 
-  assert.equal(normalized.output.cards[0].content, '这里以社区商业为主')
+  assert.equal(normalized.output.answer, '这里以社区商业为主，当前更适合继续做方向性预研。')
   assert.equal(normalized.output.panelPayloads.h3_result.summary.grid_count, 8)
-  assert.equal(normalized.output.decision.mode, 'action')
-  assert.equal(normalized.output.decision.canAct, true)
-  assert.equal(normalized.output.support[0].headline, 'POI 样本量 12')
-  assert.equal(normalized.output.counterpoints[0].kind, 'missing')
-  assert.equal(normalized.output.actions[0].prompt, '补齐路网概览再判断')
-  assert.equal(normalized.output.boundary[0].detail, '不能直接推断经营收益。')
   assert.deepEqual(normalized.diagnostics.usedTools, ['read_current_scope'])
   assert.deepEqual(normalized.diagnostics.auditIssues, ['不能直接推断经营收益'])
   assert.equal(normalized.diagnostics.planningSummary, '先读取范围，再分析业态结构')
@@ -342,21 +330,18 @@ test('deep analysis submit keeps its tab and sends target context without creati
             status: 'answered',
             stage: 'answered',
             output: {
-              cards: [],
-              decision: { summary: '应优先识别低连通高活力错配街区', mode: 'judgment', strength: 'moderate', can_act: true },
-              support: [],
-              counterpoints: [],
-              actions: [],
-              boundary: [],
+              answer: '应优先识别低连通高活力错配街区。',
               clarification_question: '',
               clarification_options: [],
               risk_prompt: '',
-              next_suggestions: [],
               panel_payloads: {},
             },
             diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
             context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
             plan: { steps: [], followup_steps: [], followup_applied: false },
+            messages: [
+              { role: 'assistant', content: '应优先识别低连通高活力错配街区。' },
+            ],
             risk_confirmations: [],
           },
         },
@@ -375,12 +360,14 @@ test('deep analysis submit keeps its tab and sends target context without creati
   assert.match(requestBody.messages[0].content, /继续分析任务/)
   assert.match(requestBody.messages[0].content, /核心判断/)
   assert.match(requestBody.messages[0].content, /road_syntax/)
-  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '## 核心判断\n应优先识别低连通高活力错配街区'])
+  assert.equal(requestBody.thinking_mode, 'quick')
+  assert.doesNotMatch(requestBody.messages[0].content, /可写回报告的新模块/)
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '应优先识别低连通高活力错配街区。'])
   assert.equal(ctx.agentMessages[1].role, 'assistant')
   assert.equal(ctx.findAgentSession(ctx.activeAgentSessionId).panelKind, 'deep_analysis')
 })
 
-test('deep analysis mode is included in prompt and result can be written back to report', async () => {
+test('deep analysis mode is included in prompt and result stays as natural answer', async () => {
   const ctx = createAgentContext({
     agentPanelPayloads: {
       summary_pack: buildSummaryPack('这是一个以日常生活消费为主的社区级商业区'),
@@ -416,21 +403,18 @@ test('deep analysis mode is included in prompt and result can be written back to
             status: 'answered',
             stage: 'answered',
             output: {
-              cards: [],
-              decision: { summary: '断点集中在低连通高活力错配街区。', mode: 'judgment', strength: 'moderate', can_act: true },
-              support: [{ headline: '路网证据', interpretation: '空间句法指标偏弱', source: 'road_syntax', confidence: 'moderate' }],
-              counterpoints: [],
-              actions: [{ title: '叠加 POI 热力复核', detail: '验证断点周边活力是否被割裂' }],
-              boundary: [],
+              answer: '断点集中在低连通高活力错配街区，建议再叠加 POI 热力复核周边活力是否被割裂。',
               clarification_question: '',
               clarification_options: [],
               risk_prompt: '',
-              next_suggestions: [],
               panel_payloads: {},
             },
             diagnostics: { execution_trace: [{ tool_name: 'compute_road_syntax_from_scope', status: 'success' }], used_tools: ['compute_road_syntax_from_scope'], citations: ['road'], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
             context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
             plan: { steps: [], followup_steps: [], followup_applied: false },
+            messages: [
+              { role: 'assistant', content: '断点集中在低连通高活力错配街区，建议再叠加 POI 热力复核周边活力是否被割裂。' },
+            ],
             risk_confirmations: [],
           },
         },
@@ -444,26 +428,16 @@ test('deep analysis mode is included in prompt and result can be written back to
     global.fetch = previousFetch
   }
 
+  assert.equal(requestBody.thinking_mode, 'deep')
   assert.match(requestBody.messages[0].content, /深度思考/)
-  assert.match(requestBody.messages[0].content, /深度思考审查视角/)
-  assert.match(requestBody.messages[0].content, /空间自洽/)
-  assert.match(requestBody.messages[0].content, /证据可靠/)
-  assert.match(requestBody.messages[0].content, /规划转译/)
-  assert.match(requestBody.messages[0].content, /评审表达/)
-  assert.equal(ctx.getAgentDeepAnalysisPreviewModule().mode, 'deep')
-  const module = ctx.writeAgentDeepAnalysisModuleToReport(ctx.getAgentDeepAnalysisPreviewModule())
-  assert.equal(module.conclusion, '断点集中在低连通高活力错配街区。')
-  assert.equal(ctx.getAgentSummaryDeepAnalysisModules().length, 1)
-  assert.equal(ctx.getAgentSummaryDeepAnalysisModules()[0].support[0].source, 'road_syntax')
-
-  ctx.startEditAgentDeepAnalysisModule(module)
-  assert.equal(ctx.agentEditingDeepModuleId, module.id)
-  ctx.agentEditingDeepModuleDraft.title = '断点街区修复建议'
-  ctx.agentEditingDeepModuleDraft.conclusion = '优先修复低连通高活力错配街区，并补充慢行缝合。'
-  const edited = ctx.saveAgentDeepAnalysisModuleEdit(module)
-  assert.equal(edited.title, '断点街区修复建议')
-  assert.equal(ctx.getAgentSummaryDeepAnalysisModules()[0].conclusion, '优先修复低连通高活力错配街区，并补充慢行缝合。')
-  assert.equal(ctx.agentEditingDeepModuleId, '')
+  assert.match(requestBody.messages[0].content, /深度思考工作方式/)
+  assert.match(requestBody.messages[0].content, /直接回答用户问题/)
+  assert.doesNotMatch(requestBody.messages[0].content, /空间自洽/)
+  assert.doesNotMatch(requestBody.messages[0].content, /可写回报告的新模块/)
+  assert.deepEqual(
+    ctx.agentMessages.map((item) => item.content),
+    ['识别断点街区', '断点集中在低连通高活力错配街区，建议再叠加 POI 热力复核周边活力是否被割裂。'],
+  )
 })
 
 test('composer plus menu selects one-shot deep thinking mode and keeps user message raw', async () => {
@@ -492,21 +466,18 @@ test('composer plus menu selects one-shot deep thinking mode and keeps user mess
             status: 'answered',
             stage: 'answered',
             output: {
-              cards: [],
-              decision: { summary: '断点集中在低连通高活力错配街区。', mode: 'judgment', strength: 'moderate', can_act: true },
-              support: [],
-              counterpoints: [],
-              actions: [],
-              boundary: [],
+              answer: '断点集中在低连通高活力错配街区。',
               clarification_question: '',
               clarification_options: [],
               risk_prompt: '',
-              next_suggestions: [],
               panel_payloads: {},
             },
             diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
             context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
             plan: { steps: [], followup_steps: [], followup_applied: false },
+            messages: [
+              { role: 'assistant', content: '断点集中在低连通高活力错配街区。' },
+            ],
             risk_confirmations: [],
           },
         },
@@ -520,10 +491,11 @@ test('composer plus menu selects one-shot deep thinking mode and keeps user mess
     global.fetch = previousFetch
   }
 
+  assert.equal(requestBody.thinking_mode, 'deep')
   assert.match(requestBody.messages[0].content, /深度思考/)
-  assert.match(requestBody.messages[0].content, /深度思考审查视角/)
+  assert.match(requestBody.messages[0].content, /深度思考工作方式/)
   assert.match(requestBody.messages[0].content, /用户问题：识别断点街区/)
-  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '## 核心判断\n断点集中在低连通高活力错配街区。'])
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '断点集中在低连通高活力错配街区。'])
   assert.equal(ctx.agentMessages[1].role, 'assistant')
   assert.equal(ctx.agentComposerMode, '')
   assert.equal(ctx.agentDeepAnalysisMode, 'deep')
@@ -561,51 +533,10 @@ test('quick deep-analysis prompt does not add deep thinking review workflow', ()
   const prompt = ctx.buildAgentDeepAnalysisPrompt('请形成下一轮策划定位和补证据计划。', target)
 
   assert.match(prompt, /快速继续分析任务/)
-  assert.doesNotMatch(prompt, /深度思考审查视角/)
+  assert.match(prompt, /直接回答用户问题/)
+  assert.doesNotMatch(prompt, /深度思考工作方式/)
+  assert.doesNotMatch(prompt, /可写回报告的新模块/)
   assert.match(prompt, /用户问题：请形成下一轮策划定位和补证据计划。/)
-})
-
-test('react final payload renders evidence status', () => {
-  const ctx = createAgentContext()
-  const result = ctx.buildReactFinalTurnPayload({
-    finalEvent: {
-      payload: {
-        conclusion: '当前证据只能支持初步判断。',
-        evidence_status: '证据可用但仍需补充',
-        evidence_steps: [3],
-        next_actions: ['补充人口和夜光证据。'],
-        uncertainties: ['POI 分类颗粒度会影响判断。'],
-      },
-    },
-    question: '哪里适合补充餐饮',
-    messages: [{ role: 'user', content: '哪里适合补充餐饮' }],
-    executionTrace: [],
-  })
-  const assistant = result.messages[result.messages.length - 1].content
-
-  assert.match(assistant, /证据状态：证据可用但仍需补充/)
-  assert.match(assistant, /证据步骤：3/)
-  assert.equal(result.output.decision.strength, 'moderate')
-})
-
-test('react final payload does not invent next suggestions', () => {
-  const ctx = createAgentContext()
-  const result = ctx.buildReactFinalTurnPayload({
-    finalEvent: {
-      payload: {
-        conclusion: '当前只返回模型结论。',
-        evidence_status: '证据可用但仍需补充',
-        evidence_steps: [],
-      },
-    },
-    question: '下一步做什么分析',
-    messages: [{ role: 'user', content: '下一步做什么分析' }],
-    executionTrace: [],
-  })
-
-  assert.deepEqual(result.output.next_suggestions, [])
-  assert.equal(result.output.decision.can_act, false)
-  assert.doesNotMatch(result.messages[result.messages.length - 1].content, /继续追问为什么|补充人口或夜光证据|导出当前判断/)
 })
 
 test('submitContextAskQuestion appends user and assistant messages', async () => {
@@ -640,20 +571,17 @@ test('normalizeAgentTurnPayload keeps backward compatibility when structured out
   const normalized = normalizeAgentTurnPayload({
     status: 'answered',
     output: {
-      cards: [{ type: 'summary', title: '概览', content: '这里只能先做方向性判断', items: [] }],
+      answer: '这里只能先做方向性判断',
     },
   })
 
-  assert.equal(normalized.output.decision.summary, '')
-  assert.deepEqual(normalized.output.support, [])
-  assert.deepEqual(normalized.output.actions, [])
-  assert.deepEqual(normalized.output.boundary, [])
+  assert.equal(normalized.output.answer, '这里只能先做方向性判断')
 })
 
-test('deriveAgentSessionPreview prefers summary card over mirrored message fallback', () => {
+test('deriveAgentSessionPreview prefers answer text', () => {
   const preview = deriveAgentSessionPreview({
     messages: [{ role: 'user', content: '总结这个区域' }],
-    cards: [{ type: 'summary', title: '核心判断', content: '这里以社区商业为主', items: [] }],
+    answer: '这里以社区商业为主',
   })
 
   assert.equal(preview, '这里以社区商业为主')
@@ -1707,10 +1635,9 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
               status: 'answered',
               stage: 'answered',
               output: {
-                cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+                answer: '这里以社区商业为主',
                 clarification_question: '',
                 risk_prompt: '',
-                next_suggestions: [],
               },
               diagnostics: {
                 execution_trace: [],
@@ -1776,7 +1703,7 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
             },
           ],
           output: {
-            cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+            answer: '这里以社区商业为主',
             clarification_question: '',
             risk_prompt: '',
             next_suggestions: [],
@@ -1888,7 +1815,7 @@ test('submitAgentTurn ignores duplicate submit while active session is running',
 
   let runRequestCount = 0
   global.fetch = async (url, options = {}) => {
-    assert.equal(url, '/api/v1/analysis/agent/react/run')
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     runRequestCount += 1
     return new Promise((_resolve, reject) => {
       options.signal.addEventListener('abort', () => {
@@ -1899,14 +1826,14 @@ test('submitAgentTurn ignores duplicate submit while active session is running',
     })
   }
 
-  const pending = ctx.submitAgentTurn({ useReactLoop: true })
+  const pending = ctx.submitAgentTurn()
   await Promise.resolve()
 
   assert.equal(ctx.agentLoading, true)
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['哪里适合补充餐饮'])
 
   ctx.agentInput = '哪里适合补充餐饮'
-  await ctx.submitAgentTurn({ useReactLoop: true })
+  await ctx.submitAgentTurn()
 
   assert.equal(runRequestCount, 1)
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['哪里适合补充餐饮'])
@@ -2400,7 +2327,7 @@ test('getAgentProcessRoleGroups groups role steps into first-level panels', () =
   assert.equal(groups[0].title, '门卫判断')
   assert.deepEqual(groups[0].steps.map((item) => item.title), ['门卫判断', '门卫通过'])
   assert.equal(groups[0].summary, '问题已明确，可以进入规划。')
-  assert.equal(groups[1].title, 'Planner')
+  assert.equal(groups[1].title, '工具判断')
   assert.equal(groups[1].state, 'active')
 })
 
@@ -2444,7 +2371,7 @@ test('getAgentProcessRoleGroups embeds planner checklist and tool calls', () => 
   const plannerGroup = groups.find((item) => item.key === 'planning')
   const executingGroup = groups.find((item) => item.key === 'executing')
 
-  assert.equal(plannerGroup.title, 'Planner')
+  assert.equal(plannerGroup.title, '工具判断')
   assert.equal(plannerGroup.planChecklist.visible, true)
   assert.equal(plannerGroup.planChecklist.groups[0].items.length, 2)
   assert.equal(plannerGroup.countLabel.includes('1/2 已完成'), true)
@@ -2499,7 +2426,7 @@ test('status events create visible process fallback steps', async () => {
               status: 'answered',
               stage: 'answered',
               output: {
-                cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+                answer: '这里以社区商业为主',
                 clarification_question: '',
                 risk_prompt: '',
                 next_suggestions: [],
@@ -2540,10 +2467,9 @@ test('status events create visible process fallback steps', async () => {
             { role: 'assistant', content: '这里以社区商业为主' },
           ],
           output: {
-            cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+            answer: '这里以社区商业为主',
             clarification_question: '',
             risk_prompt: '',
-            next_suggestions: [],
           },
           diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
@@ -2563,7 +2489,7 @@ test('status events create visible process fallback steps', async () => {
   assert.equal(ctx.getAgentVisibleProcessSteps()[0].state, 'completed')
   assert.equal(ctx.getAgentVisibleProcessSteps()[1].state, 'completed')
   assert.equal(ctx.getAgentVisibleProcessSteps()[2].state, 'completed')
-  assert.equal(ctx.getAgentVisibleProcessSteps()[2].title, '规划分析步骤')
+  assert.equal(ctx.getAgentVisibleProcessSteps()[2].title, '工具判断')
   assert.equal(ctx.getAgentVisibleProcessSteps()[3].state, 'completed')
 })
 
@@ -2791,7 +2717,7 @@ test('submitAgentTurn appends user message immediately and updates thinking time
               status: 'answered',
               stage: 'answered',
               output: {
-                cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+                answer: '这里以社区商业为主',
                 clarification_question: '',
                 risk_prompt: '',
                 next_suggestions: [],
@@ -2851,7 +2777,7 @@ test('submitAgentTurn appends user message immediately and updates thinking time
             { role: 'assistant', content: '这里以社区商业为主' },
           ],
           output: {
-            cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+            answer: '这里以社区商业为主',
             clarification_question: '',
             risk_prompt: '',
             next_suggestions: [],
@@ -2913,7 +2839,7 @@ test('submitAgentTurn appends user message immediately and updates thinking time
   assert.equal(ctx.agentStreamElapsedTimer, null)
   assert.equal(ctx.getAgentThinkingElapsedLabel().endsWith('s'), true)
   assert.equal(ctx.agentExecutionTrace.length, 1)
-  assert.equal(ctx.agentCards.length, 1)
+  assert.equal(ctx.agentAnswer, '这里以社区商业为主')
   assert.equal(ctx.agentReasoningBlocks.length, 1)
   assert.equal(ctx.getAgentVisibleReasoningBlocks()[0].content, '先读取当前范围。')
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['总结这个区域', '这里以社区商业为主'])
@@ -2961,11 +2887,10 @@ test('clarification follow-up continues in the same session instead of opening a
             status: 'answered',
             stage: 'answered',
             output: {
-              cards: [{ type: 'summary', title: '概览', content: '已继续在原会话中回答。', items: [] }],
+              answer: '已继续在原会话中回答。',
               clarification_question: '',
               clarification_options: [],
               risk_prompt: '',
-              next_suggestions: [],
             },
             diagnostics: {
               execution_trace: [],
@@ -3038,7 +2963,7 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
               status: 'answered',
               stage: 'answered',
               output: {
-                cards: [{ type: 'summary', title: '概览', content: '第二轮结论', items: [] }],
+                answer: '第二轮结论',
                 clarification_question: '',
                 risk_prompt: '',
                 next_suggestions: [],
@@ -3090,10 +3015,9 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
             },
           ],
           output: {
-            cards: [{ type: 'summary', title: '概览', content: '第二轮结论', items: [] }],
+            answer: '第二轮结论',
             clarification_question: '',
             risk_prompt: '',
-            next_suggestions: [],
           },
           diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [{ id: 'thinking-gating', phase: 'gating', title: '门卫判断', detail: '已完成。', state: 'completed' }], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
@@ -3189,7 +3113,7 @@ test('submitAgentTurn keeps streamed timeline order when final diagnostics omit 
               status: 'answered',
               stage: 'answered',
               output: {
-                cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+                answer: '这里以社区商业为主',
                 clarification_question: '',
                 risk_prompt: '',
                 next_suggestions: [],
@@ -3237,7 +3161,7 @@ test('submitAgentTurn keeps streamed timeline order when final diagnostics omit 
             { role: 'assistant', content: '这里以社区商业为主' },
           ],
           output: {
-            cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+            answer: '这里以社区商业为主',
             clarification_question: '',
             risk_prompt: '',
             next_suggestions: [],
@@ -3308,7 +3232,7 @@ test('submitAgentTurn shows streamed plan above final response and keeps checkli
               status: 'answered',
               stage: 'answered',
               output: {
-                cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+                answer: '这里以社区商业为主',
                 clarification_question: '',
                 risk_prompt: '',
                 next_suggestions: [],
@@ -3354,7 +3278,7 @@ test('submitAgentTurn shows streamed plan above final response and keeps checkli
           input: '',
           messages: [{ role: 'user', content: '总结这个区域' }],
           output: {
-            cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
+            answer: '这里以社区商业为主',
             clarification_question: '',
             risk_prompt: '',
             next_suggestions: [],

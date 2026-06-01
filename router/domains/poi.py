@@ -1,16 +1,28 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from core.spatial import transform_polygon_payload_coords
 from modules.poi import service as poi_service
 from modules.poi.aggregation import build_poi_shared_grid
-from modules.poi.schemas import PoiGridRequest, PoiGridResponse, PoiMultiYearRequest, PoiMultiYearResponse, PoiRequest, PoiResponse
+from modules.poi.schemas import (
+    PoiGridMetricsRequest,
+    PoiGridMetricsResponse,
+    PoiGridRequest,
+    PoiGridResponse,
+    PoiMultiYearRequest,
+    PoiMultiYearResponse,
+    PoiRequest,
+    PoiResponse,
+)
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84
+from modules.spatial_cells.progress import get_shared_grid_progress, update_shared_grid_progress
+from modules.spatial_cells.service import analyze_shared_grid
 from store.history_repo import history_repo
 
 router = APIRouter()
@@ -114,3 +126,82 @@ async def build_poi_grid_analysis(payload: PoiGridRequest):
     except Exception as exc:
         logger.exception("POI shared grid aggregation failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/api/v1/analysis/pois/grid-metrics", response_model=PoiGridMetricsResponse)
+async def build_poi_grid_metrics(payload: PoiGridMetricsRequest):
+    run_id = str(payload.run_id or "").strip()
+    if run_id:
+        update_shared_grid_progress(
+            run_id,
+            status="running",
+            stage="queued",
+            message="已接收请求，等待开始计算",
+            step=0,
+            total=7,
+            extra={"grid_type": "shared_raster", "arcgis_enabled": True},
+        )
+
+    def _progress_callback(snapshot):
+        if not run_id:
+            return
+        update_shared_grid_progress(
+            run_id,
+            status="running" if str(snapshot.get("stage") or "") != "completed" else "success",
+            stage=str(snapshot.get("stage") or ""),
+            message=str(snapshot.get("message") or ""),
+            step=snapshot.get("step"),
+            total=snapshot.get("total"),
+            extra=snapshot.get("extra") if isinstance(snapshot.get("extra"), dict) else {},
+        )
+
+    try:
+        return await asyncio.to_thread(
+            analyze_shared_grid,
+            polygon=payload.polygon,
+            coord_type=payload.coord_type,
+            pois=payload.pois,
+            poi_coord_type=payload.poi_coord_type,
+            categories=payload.categories,
+            year=payload.year,
+            neighbor_ring=payload.neighbor_ring,
+            arcgis_neighbor_ring=payload.arcgis_neighbor_ring,
+            arcgis_export_image=payload.arcgis_export_image,
+            arcgis_timeout_sec=payload.arcgis_timeout_sec,
+            progress_callback=_progress_callback,
+        )
+    except Exception as exc:
+        if run_id:
+            update_shared_grid_progress(
+                run_id,
+                status="failed",
+                stage="failed",
+                message=str(exc),
+                step=7,
+                total=7,
+                extra={"grid_type": "shared_raster", "arcgis_enabled": True},
+            )
+        logger.exception("POI shared grid metrics failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/api/v1/analysis/pois/grid-metrics/progress")
+async def get_poi_grid_metrics_progress(run_id: str = Query(..., description="POI shared-grid metrics run id")):
+    payload = get_shared_grid_progress(run_id)
+    if not payload:
+        return {
+            "run_id": str(run_id or "").strip(),
+            "status": "running",
+            "stage": "queued",
+            "message": "任务已提交，等待进度同步",
+            "step": 0,
+            "total": 7,
+            "started_at": 0.0,
+            "updated_at": 0.0,
+            "elapsed_sec": 0.0,
+            "extra": {
+                "grid_type": "shared_raster",
+                "missing_progress_record": True,
+            },
+        }
+    return payload

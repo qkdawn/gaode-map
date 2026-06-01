@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional, Literal
 from pydantic import BaseModel, Field
+from modules.h3.analysis_schemas import H3AnalysisCharts, H3AnalysisSummary
+from modules.h3.schemas import GridFeature
 
 class PoiRequest(BaseModel):
     polygon: list = Field(..., description="Polygon or multi-ring polygon payload (GCJ02)")
@@ -66,11 +68,43 @@ class PoiGridSummary(BaseModel):
 
 class PoiGridResponse(BaseModel):
     type: str = "FeatureCollection"
-    grid_type: str = "raster"
+    grid_type: str = "shared_raster"
+    cell_id_source: str = "population_nightlight_shared_cell_id"
+    scope_id: Optional[str] = None
     count: int = 0
     cell_count: int = 0
     features: List[dict] = Field(default_factory=list)
     summary: PoiGridSummary = Field(default_factory=PoiGridSummary)
+
+
+class PoiGridMetricsRequest(BaseModel):
+    polygon: list = Field(..., description="Polygon or multi-ring polygon payload")
+    coord_type: Literal["gcj02", "wgs84"] = Field(default="gcj02", description="Polygon coordinate type")
+    pois: List[dict] = Field(default_factory=list, description="POI records to aggregate")
+    poi_coord_type: Literal["gcj02", "wgs84"] = Field(default="gcj02", description="POI coordinate type")
+    categories: List[PoiCategoryRequest] = Field(default_factory=list, description="Selected POI categories")
+    year: Optional[int] = Field(default=None, description="Optional POI data year")
+    neighbor_ring: int = Field(default=1, ge=1, le=3, description="Shared-grid Moore neighbor ring")
+    arcgis_neighbor_ring: int = Field(default=1, ge=1, le=3, description="ArcGIS ring mapped to shared-grid KNN(8/24/48)")
+    arcgis_export_image: bool = Field(default=True, description="Whether to export ArcGIS structure preview image")
+    arcgis_timeout_sec: int = Field(default=240, ge=30, le=1800, description="ArcGIS bridge timeout in seconds")
+    run_id: Optional[str] = Field(default=None, description="Reserved run id field for frontend parity with H3")
+
+
+class PoiGridMetricsGrid(BaseModel):
+    type: str = "FeatureCollection"
+    grid_type: str = "shared_raster"
+    cell_id_source: str = "population_nightlight_shared_cell_id"
+    scope_id: Optional[str] = None
+    count: int = 0
+    cell_count: int = 0
+    features: List[GridFeature] = Field(default_factory=list)
+
+
+class PoiGridMetricsResponse(BaseModel):
+    grid: PoiGridMetricsGrid
+    summary: H3AnalysisSummary
+    charts: H3AnalysisCharts
 
 
 class PoiMultiYearRequest(BaseModel):

@@ -9,6 +9,8 @@ import requests
 
 from core.config import settings
 
+OVERPASS_USER_AGENT = "gaode-map-dev/0.1"
+
 OverpassMode = Literal["walking", "bicycling", "driving"]
 HighwayFilter = Literal["mode", "all", "major"]
 
@@ -125,7 +127,12 @@ def fetch_overpass_elements(query: str) -> List[Dict[str, Any]]:
     last_error: Optional[Exception] = None
     for attempt in range(retry_count + 1):
         try:
-            response = requests.post(endpoint, data={"data": query}, timeout=(connect_timeout_s, read_timeout_s))
+            response = requests.post(
+                endpoint,
+                data={"data": query},
+                headers={"User-Agent": OVERPASS_USER_AGENT},
+                timeout=(connect_timeout_s, read_timeout_s),
+            )
             if response.status_code != 200:
                 preview = (response.text or "").strip().replace("\n", " ")[:280]
                 raise RuntimeError(f"HTTP {response.status_code}, body={preview}")

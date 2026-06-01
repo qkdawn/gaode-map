@@ -10,19 +10,18 @@ from core.config import settings
 from .auditor import audit_execution
 from .context_builder import build_context_bundle, build_context_summary
 from .gate import latest_user_message
-from .governance import check_tool_governance
 from .memory import create_working_memory
 from .llm_digest import summarize_tool_result
+from .providers.langgraph_react import run_langgraph_react_loop
 from .providers.llm_provider import (
-    audit_with_llm,
     generate_answer_output_with_llm,
+    generate_translation_pack_with_llm,
     is_llm_enabled,
-    plan_with_llm,
     run_gate_with_llm,
 )
-from .review_contract import build_review_contract
 from .schemas import (
     AgentPlanEnvelope,
+    AgentTranslationPack,
     AgentThinkingItem,
     AgentTurnDiagnostics,
     AgentTurnOutput,
@@ -30,18 +29,14 @@ from .schemas import (
     AgentTurnResponse,
     AgentTurnStreamEvent,
     AuditResult,
-    PlanStep,
-    PlanningResult,
 )
 from .state_machine import AgentStateMachine
 from .synthesizer import (
-    build_cards,
+    build_answer_evidence_payload,
+    build_answer_fallback,
     build_citations,
-    build_next_suggestions,
-    build_synthesis_payload,
     enrich_answer_output,
 )
-from .tool_service import run_registered_tool
 from .tools import get_tool_registry
 
 StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
@@ -49,11 +44,7 @@ StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 _STAGE_LABELS = {
     "gating": "门卫判断",
     "clarifying": "生成追问",
-    "context_ready": "整理上下文",
-    "planning": "规划分析步骤",
     "executing": "执行工具",
-    "auditing": "审计结果",
-    "replanning": "根据审计重新规划",
     "synthesizing": "综合分析",
     "answered": "已完成",
     "failed": "失败",
@@ -202,8 +193,7 @@ def _build_diagnostics(
     research_notes: List[str] | None = None,
     planning_summary: str = "",
     audit_summary: str = "",
-    review_contract: Dict[str, Any] | None = None,
-    replan_count: int = 0,
+    translation_pack: AgentTranslationPack | None = None,
 ) -> AgentTurnDiagnostics:
     return AgentTurnDiagnostics(
         execution_trace=list(memory.execution_trace or []),
@@ -214,150 +204,43 @@ def _build_diagnostics(
         thinking_timeline=list(thinking_timeline or []),
         planning_summary=str(planning_summary or ""),
         audit_summary=str(audit_summary or ""),
-        review_contract=dict(review_contract or {}),
-        replan_count=int(replan_count or 0),
+        translation_pack=translation_pack or AgentTranslationPack(),
         error=str(error or ""),
     )
 
 
-async def _execute_planned_steps(
-    *,
-    plan: PlanningResult,
-    payload: AgentTurnRequest,
-    question: str,
-    memory,
-    used_tools: List[str],
-    thinking_timeline: List[AgentThinkingItem],
-    plan_envelope: AgentPlanEnvelope,
-    planning_summary: str,
-    audit_summary: str,
-    replan_count: int,
-    emit: StreamEmit | None = None,
-) -> AgentTurnResponse | None:
-    snapshot = payload.analysis_snapshot
-    registry = get_tool_registry()
-    for step in plan.steps:
-        registered = registry.get(step.tool_name)
-        await _maybe_emit(
-            emit,
-            "trace",
-            {
-                "id": f"plan:{step.tool_name}:{len(used_tools) + 1}",
-                "tool_name": step.tool_name,
-                "status": "start",
-                "reason": step.reason,
-                "message": step.evidence_goal or step.reason or "开始执行规划步骤",
-                "display_text": step.reason or "",
-                "arguments_summary": "无参数" if not step.arguments else str(step.arguments),
-                "produced_artifacts": list(step.expected_artifacts or []),
-            },
-        )
-        if registered is None:
-            return AgentTurnResponse(
-                status="failed",
-                stage="failed",
-                output=AgentTurnOutput(),
-                diagnostics=_build_diagnostics(
-                    memory=memory,
-                    used_tools=used_tools,
-                    error=f"unknown_tool:{step.tool_name}",
-                    thinking_timeline=thinking_timeline,
-                    planning_summary=planning_summary,
-                    audit_summary=audit_summary,
-                    replan_count=replan_count,
-                ),
-                context_summary=build_context_summary(snapshot, memory.artifacts),
-                plan=plan_envelope,
-            )
-        prompt = check_tool_governance(
-            mode=payload.governance_mode,
-            spec=registered.spec,
-            confirmed_tools=payload.risk_confirmations,
-        )
-        if prompt:
-            return AgentTurnResponse(
-                status="requires_risk_confirmation",
-                stage="requires_risk_confirmation",
-                output=AgentTurnOutput(risk_prompt=prompt),
-                diagnostics=_build_diagnostics(
-                    memory=memory,
-                    used_tools=used_tools,
-                    thinking_timeline=thinking_timeline,
-                    planning_summary=planning_summary,
-                    audit_summary=audit_summary,
-                    replan_count=replan_count,
-                ),
-                context_summary=build_context_summary(snapshot, memory.artifacts),
-                plan=plan_envelope,
-            )
-        execution = await run_registered_tool(
-            registry=registry,
-            step=step,
-            snapshot=snapshot,
-            artifacts=memory.artifacts,
-            question=question,
-            caller="internal",
-        )
-        result = execution.result
-        trace = execution.trace
-        result_display_text = _tool_result_display_text(result)
-        data_readiness = dict(result.result.get("data_readiness") or {}) if isinstance(result.result, dict) else {}
-        if data_readiness.get("checked"):
-            await _emit_preflight_trace(
-                emit=emit,
-                step_tool_name=step.tool_name,
-                step_index=len(used_tools) + 1,
-                data_readiness=data_readiness,
-            )
-        await _maybe_emit(
-            emit,
-            "trace",
-            {
-                "id": f"plan:{step.tool_name}:{len(used_tools) + 1}",
-                "tool_name": step.tool_name,
-                "phase": "analysis" if data_readiness.get("checked") else "executing",
-                "status": result.status,
-                "reason": step.reason,
-                "message": trace.message or ("执行成功" if result.status == "success" else "执行失败"),
-                "display_text": result_display_text,
-                "arguments_summary": "无参数" if not step.arguments else str(step.arguments),
-                "result_summary": result_display_text or result.error or ("执行成功" if result.status == "success" else "执行失败"),
-                "evidence_count": len(result.evidence or []),
-                "warning_count": len(result.warnings or []),
-                "produced_artifacts": list((result.artifacts or {}).keys())[:12],
-            },
-        )
-        memory.execution_trace.append(trace)
-        used_tools.append(step.tool_name)
-        memory.tool_results.append(result)
-        if result.artifacts:
-            memory.artifacts.update(result.artifacts)
-        if result.warnings:
-            memory.research_notes.extend([str(item) for item in result.warnings if str(item).strip()])
-        if result.status == "failed" and not step.optional:
-            return AgentTurnResponse(
-                status="failed",
-                stage="failed",
-                output=AgentTurnOutput(),
-                diagnostics=_build_diagnostics(
-                    memory=memory,
-                    used_tools=used_tools,
-                    error=str(result.error or "tool_execution_failed"),
-                    thinking_timeline=thinking_timeline,
-                    planning_summary=planning_summary,
-                    audit_summary=audit_summary,
-                    replan_count=replan_count,
-                ),
-                context_summary=build_context_summary(snapshot, memory.artifacts),
-                plan=plan_envelope,
-            )
-    return None
+def _tool_loop_limits(thinking_mode: str) -> tuple[int | None, int | None]:
+    max_steps = max(1, int(settings.ai_max_tool_steps or 8))
+    max_errors = max(1, int(settings.ai_max_tool_errors or 2))
+    if str(thinking_mode or "").strip() == "deep":
+        return max_steps, max_errors
+    return min(max_steps, 4), min(max_errors, 2)
+
+
+def _build_loop_plan_summary(*, used_tools: List[str], assistant_summary: str = "") -> str:
+    if used_tools:
+        tool_text = " -> ".join(list(dict.fromkeys([str(item).strip() for item in used_tools if str(item).strip()]))[:5])
+        return f"本轮按需调用工具补证据：{tool_text}。"
+    if str(assistant_summary or "").strip():
+        return "现有证据已基本够用，本轮未继续调用工具。"
+    return "根据当前问题复用已有证据并按需补充必要工具。"
+
+
+def _build_rule_audit_summary(audit: AuditResult) -> str:
+    if list(audit.missing_evidence or []):
+        missing = "、".join([str(item).strip() for item in list(audit.missing_evidence or [])[:3] if str(item).strip()])
+        return f"当前回答仍有证据缺口：{missing}。"
+    if list(audit.issues or []):
+        issue = next((str(item).strip() for item in audit.issues if str(item).strip()), "")
+        if issue:
+            return f"当前回答需要标注边界：{issue}"
+    return "当前证据足以支持直接回答，并已保留必要解释边界。"
 
 
 async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None = None) -> AgentTurnResponse:
     snapshot = payload.analysis_snapshot
     question = latest_user_message(payload.messages)
-    is_deep_review_turn = "执行模式：深度思考" in question or "深度思考继续分析任务" in question
+    thinking_mode = str(payload.thinking_mode or "quick").strip() or "quick"
     state = AgentStateMachine()
     thinking_timeline: List[AgentThinkingItem] = []
 
@@ -394,14 +277,11 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         context.context_summary.available_context_sources.append("attachment:uploaded")
         context.limits.append("用户上传附件只能作为附件证据引用，不能伪装成地图分析计算结果。")
     used_tools: List[str] = []
-    initial_plan_steps: List[PlanStep] = []
-    replan_steps: List[PlanStep] = []
     planning_summary = ""
     audit_summary = ""
     latest_rule_audit = AuditResult()
-    replan_count = 0
-    audit_feedback: dict[str, Any] = {}
-    max_replans = max(0, int(settings.ai_max_replans or 2))
+    current_plan_envelope = AgentPlanEnvelope()
+    translation_pack = AgentTranslationPack(status="skipped")
 
     await _maybe_emit(emit, "meta", {"conversation_id": str(payload.conversation_id or "")})
     await _emit_status(emit, state.stage)
@@ -422,7 +302,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             stage="failed",
             output=AgentTurnOutput(),
             diagnostics=AgentTurnDiagnostics(
-                error="LLM provider 未启用或配置不完整，当前版本要求 DeepSeek chat completions 多角色编排。",
+                error="LLM provider 未启用或配置不完整，当前版本要求统一主链路工具循环与自然回答。",
                 thinking_timeline=list(thinking_timeline or []),
             ),
             context_summary=context.context_summary,
@@ -497,257 +377,38 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         {
             "phase": "gating",
             "title": "门卫通过",
-            "detail": gate.summary or "问题已明确，可以进入规划阶段。",
+            "detail": gate.summary or "问题已明确，可以继续收集证据并回答。",
             "display_text": gate.summary or "",
             "state": "completed",
         },
         "gating-check",
     )
 
-    while True:
-        stage_name = "planning" if replan_count == 0 else "replanning"
-        state.move_to(stage_name)
-        await _emit_status(emit, stage_name)
-        await emit_thinking(
-            {
-                "phase": stage_name,
-                "title": "规划本轮分析步骤" if replan_count == 0 else "根据审计重新规划",
-                "detail": "正在决定本轮应调用哪些工具、补哪些证据。",
-                "state": "active",
-            },
-            f"plan-{replan_count}",
-        )
-        try:
-            plan = await plan_with_llm(
-                messages=payload.messages,
-                snapshot=snapshot,
-                context=context,
-                registry=get_tool_registry(),
-                memory=memory,
-                audit_feedback=audit_feedback,
-                emit=emit_event,
-            )
-        except Exception as exc:
-            await _emit_status(emit, "failed")
-            return AgentTurnResponse(
-                status="failed",
-                stage="failed",
-                output=AgentTurnOutput(),
-                diagnostics=_build_diagnostics(
-                    memory=memory,
-                    used_tools=used_tools,
-                    error=f"Planner 调用失败：{exc}",
-                    thinking_timeline=thinking_timeline,
-                    planning_summary=planning_summary,
-                    audit_summary=audit_summary,
-                    replan_count=replan_count,
-                ),
-                context_summary=build_context_summary(snapshot, memory.artifacts),
-                plan=AgentPlanEnvelope(summary=planning_summary),
-            )
-        planning_summary = plan.summary
-        if plan.warnings:
-            memory.research_notes.extend([str(item) for item in plan.warnings if str(item).strip()])
-        if replan_count == 0:
-            initial_plan_steps = list(plan.steps or [])
-        else:
-            replan_steps.extend(list(plan.steps or []))
-        await emit_thinking(
-            {
-                "phase": stage_name,
-                "title": "规划完成" if replan_count == 0 else "重新规划完成",
-                "detail": plan.summary or "已形成下一步执行计划。",
-                "display_text": plan.summary or "",
-                "items": [step.reason or step.tool_name for step in (plan.steps or [])[:6]],
-                "state": "completed",
-            },
-            f"plan-{replan_count}",
-        )
-
-        state.move_to("executing")
-        await _emit_status(emit, "executing")
-        await emit_thinking(
-            {
-                "phase": "executing",
-                "title": "执行工具",
-                "detail": "正在按规划步骤执行工具并收集证据。",
-                "state": "active",
-            },
-            f"executing-{replan_count}",
-        )
-        current_plan_envelope = AgentPlanEnvelope(
-            steps=list(initial_plan_steps or []),
-            followup_steps=list(replan_steps or []),
-            followup_applied=bool(replan_steps),
-            summary=planning_summary,
-        )
-        await _maybe_emit(
-            emit,
-            "plan",
-            current_plan_envelope.model_dump(mode="json"),
-        )
-        execution_failure = await _execute_planned_steps(
-            plan=plan,
-            payload=payload,
-            question=question,
-            memory=memory,
-            used_tools=used_tools,
-            thinking_timeline=thinking_timeline,
-            plan_envelope=current_plan_envelope,
-            planning_summary=planning_summary,
-            audit_summary=audit_summary,
-            replan_count=replan_count,
-            emit=emit_event,
-        )
-        if execution_failure is not None:
-            return execution_failure
-        await emit_thinking(
-            {
-                "phase": "executing",
-                "title": "执行完成",
-                "detail": "本轮工具执行结束，准备进入审计。",
-                "state": "completed",
-            },
-            f"executing-{replan_count}",
-        )
-
-        state.move_to("auditing")
-        await _emit_status(emit, "auditing")
-        await emit_thinking(
-            {
-                "phase": "auditing",
-                "title": "审计结果",
-                "detail": "正在检查证据是否足够回答用户问题。",
-                "state": "active",
-            },
-            f"audit-{replan_count}",
-        )
-        latest_rule_audit = audit_execution(question=question, snapshot=snapshot, context=context, memory=memory)
-        try:
-            verdict = await audit_with_llm(
-                question=question,
-                snapshot=snapshot,
-                context=context,
-                memory=memory,
-                plan=plan,
-                rule_audit=latest_rule_audit,
-                replan_count=replan_count,
-                emit=emit_event,
-            )
-        except Exception as exc:
-            await _emit_status(emit, "failed")
-            return AgentTurnResponse(
-                status="failed",
-                stage="failed",
-                output=AgentTurnOutput(),
-                diagnostics=_build_diagnostics(
-                    memory=memory,
-                    used_tools=used_tools,
-                    error=f"Auditor 调用失败：{exc}",
-                    thinking_timeline=thinking_timeline,
-                    planning_summary=planning_summary,
-                    audit_summary=audit_summary,
-                    replan_count=replan_count,
-                ),
-                context_summary=build_context_summary(snapshot, memory.artifacts),
-                plan=current_plan_envelope,
-            )
-        audit_summary = verdict.summary
-        memory.audit_issues = list(verdict.issues or [])
-        if verdict.status == "pass" and verdict.should_answer:
-            await emit_thinking(
-                {
-                    "phase": "auditing",
-                    "title": "审计通过",
-                    "detail": verdict.summary or "当前证据足以支持回答。",
-                    "display_text": verdict.summary or "",
-                    "state": "completed",
-                },
-                f"audit-{replan_count}",
-            )
-            break
-        if verdict.status == "fail":
-            await _emit_status(emit, "failed")
-            return AgentTurnResponse(
-                status="failed",
-                stage="failed",
-                output=AgentTurnOutput(),
-                diagnostics=_build_diagnostics(
-                    memory=memory,
-                    used_tools=used_tools,
-                    error=verdict.summary or "审计未通过",
-                    thinking_timeline=thinking_timeline,
-                    planning_summary=planning_summary,
-                    audit_summary=audit_summary,
-                    replan_count=replan_count,
-                ),
-                context_summary=build_context_summary(snapshot, memory.artifacts),
-                plan=current_plan_envelope,
-            )
-        if replan_count >= max_replans:
-            await _emit_status(emit, "failed")
-            return AgentTurnResponse(
-                status="failed",
-                stage="failed",
-                output=AgentTurnOutput(),
-                diagnostics=_build_diagnostics(
-                    memory=memory,
-                    used_tools=used_tools,
-                    error=verdict.summary or f"重规划超过上限 {max_replans}",
-                    thinking_timeline=thinking_timeline,
-                    planning_summary=planning_summary,
-                    audit_summary=audit_summary,
-                    replan_count=replan_count,
-                ),
-                context_summary=build_context_summary(snapshot, memory.artifacts),
-                plan=current_plan_envelope,
-            )
-        await emit_thinking(
-            {
-                "phase": "auditing",
-                "title": "审计要求补充证据",
-                "detail": verdict.summary or "当前证据还不够，需要重新规划。",
-                "display_text": verdict.summary or "",
-                "items": list(verdict.missing_evidence or []),
-                "state": "failed",
-            },
-            f"audit-{replan_count}",
-        )
-        replan_count += 1
-        audit_feedback = {
-            "summary": verdict.summary,
-            "issues": list(verdict.issues or []),
-            "missing_evidence": list(verdict.missing_evidence or []),
-            "replan_instructions": verdict.replan_instructions,
-        }
-
-    synthesis_payload = build_synthesis_payload(
-        question=question,
-        snapshot=snapshot,
-        artifacts=memory.artifacts,
-        tool_results=memory.tool_results,
-        research_notes=list(memory.research_notes or []),
-        audit=latest_rule_audit,
-    )
-    citations = build_citations(snapshot, memory.artifacts)
-    state.move_to("synthesizing")
-    await _emit_status(emit, "synthesizing")
+    state.move_to("executing")
+    await _emit_status(emit, "executing")
     await emit_thinking(
         {
-            "phase": "synthesizing",
-            "title": "综合分析",
-            "detail": "正在组织最终判断、证据依据与建议。",
+            "phase": "executing",
+            "title": "执行工具循环",
+            "detail": "正在按需调用工具补证据，证据足够后会直接收敛到回答。",
             "state": "active",
         },
-        "synthesizing-final",
+        "tool-loop",
     )
     try:
-        answer_output = await generate_answer_output_with_llm(
+        max_steps_override, max_errors_override = _tool_loop_limits(thinking_mode)
+        loop_result = await run_langgraph_react_loop(
             messages=payload.messages,
             snapshot=snapshot,
             context=context,
-            synthesis_payload=synthesis_payload,
+            registry=get_tool_registry(),
+            governance_mode=payload.governance_mode,
+            confirmed_tools=list(payload.risk_confirmations or []),
             emit=emit_event,
+            include_secondary_tools=True,
+            max_steps_override=max_steps_override,
+            max_errors_override=max_errors_override,
+            thinking_mode=thinking_mode,
         )
     except Exception as exc:
         await _emit_status(emit, "failed")
@@ -758,19 +419,194 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             diagnostics=_build_diagnostics(
                 memory=memory,
                 used_tools=used_tools,
-                error=f"综合回答 LLM 调用失败：{exc}",
+                error=f"工具循环调用失败：{exc}",
                 thinking_timeline=thinking_timeline,
-                planning_summary=planning_summary,
-                audit_summary=audit_summary,
-                replan_count=replan_count,
             ),
             context_summary=build_context_summary(snapshot, memory.artifacts),
-            plan=AgentPlanEnvelope(
-                steps=list(initial_plan_steps or []),
-                followup_steps=list(replan_steps or []),
-                followup_applied=bool(replan_steps),
-                summary=planning_summary,
+            plan=AgentPlanEnvelope(),
+        )
+
+    used_tools = list(loop_result.used_tools or [])
+    memory.execution_trace = list(loop_result.execution_trace or [])
+    memory.tool_results = list(loop_result.tool_results or [])
+    memory.artifacts.update(dict(loop_result.artifacts or {}))
+    memory.research_notes.extend([str(item) for item in list(loop_result.research_notes or []) if str(item).strip()])
+    planning_summary = _build_loop_plan_summary(
+        used_tools=used_tools,
+        assistant_summary=str(loop_result.assistant_summary or ""),
+    )
+    current_plan_envelope = AgentPlanEnvelope(
+        steps=list(loop_result.steps or []),
+        followup_steps=[],
+        followup_applied=False,
+        summary=planning_summary,
+    )
+    await _maybe_emit(emit, "plan", current_plan_envelope.model_dump(mode="json"))
+
+    if loop_result.status == "requires_risk_confirmation":
+        await emit_thinking(
+            {
+                "phase": "executing",
+                "title": "等待风险确认",
+                "detail": loop_result.risk_prompt or "存在需要确认的高成本工具调用。",
+                "state": "failed",
+            },
+            "tool-loop",
+        )
+        await _emit_status(emit, "requires_risk_confirmation")
+        return AgentTurnResponse(
+            status="requires_risk_confirmation",
+            stage="requires_risk_confirmation",
+            output=AgentTurnOutput(risk_prompt=loop_result.risk_prompt),
+            diagnostics=_build_diagnostics(
+                memory=memory,
+                used_tools=used_tools,
+                thinking_timeline=thinking_timeline,
+                planning_summary=planning_summary,
             ),
+            context_summary=build_context_summary(snapshot, memory.artifacts),
+            plan=current_plan_envelope,
+        )
+
+    if loop_result.status == "failed":
+        await emit_thinking(
+            {
+                "phase": "executing",
+                "title": "工具循环失败",
+                "detail": loop_result.error or loop_result.stop_reason or "工具循环未能稳定完成。",
+                "state": "failed",
+            },
+            "tool-loop",
+        )
+        await _emit_status(emit, "failed")
+        return AgentTurnResponse(
+            status="failed",
+            stage="failed",
+            output=AgentTurnOutput(),
+            diagnostics=_build_diagnostics(
+                memory=memory,
+                used_tools=used_tools,
+                error=loop_result.error or loop_result.stop_reason or "tool_loop_failed",
+                thinking_timeline=thinking_timeline,
+                planning_summary=planning_summary,
+            ),
+            context_summary=build_context_summary(snapshot, memory.artifacts),
+            plan=current_plan_envelope,
+        )
+
+    latest_rule_audit = audit_execution(question=question, snapshot=snapshot, context=context, memory=memory)
+    memory.audit_issues = list(latest_rule_audit.issues or [])
+    audit_summary = _build_rule_audit_summary(latest_rule_audit)
+    await emit_thinking(
+        {
+            "phase": "assess",
+            "title": "证据检查完成",
+            "detail": audit_summary,
+            "display_text": audit_summary,
+            "items": list(latest_rule_audit.missing_evidence or [])[:3],
+            "state": "completed",
+        },
+        "audit-check",
+    )
+
+    answer_evidence_payload = build_answer_evidence_payload(
+        question=question,
+        snapshot=snapshot,
+        artifacts=memory.artifacts,
+        tool_results=memory.tool_results,
+        research_notes=list(memory.research_notes or []),
+        audit=latest_rule_audit,
+    )
+    await emit_thinking(
+        {
+            "phase": "synthesizing",
+            "title": "转译指标含义",
+            "detail": "正在把关键指标转成空间现象、人的体验和策划含义。",
+            "state": "active",
+        },
+        "translation-layer",
+    )
+    try:
+        translation_pack = await generate_translation_pack_with_llm(
+            messages=payload.messages,
+            snapshot=snapshot,
+            context=context,
+            answer_evidence_payload=answer_evidence_payload,
+            thinking_mode=thinking_mode,
+            emit=emit_event,
+        )
+        await emit_thinking(
+            {
+                "phase": "synthesizing",
+                "title": "指标转译完成",
+                "detail": translation_pack.summary or "已完成关键指标的空间体验与策划含义转译。",
+                "display_text": translation_pack.summary or "",
+                "items": [
+                    str(item.planning_implication or item.spatial_phenomenon or item.metric)
+                    for item in list(translation_pack.items or [])[:3]
+                    if str(item.planning_implication or item.spatial_phenomenon or item.metric).strip()
+                ],
+                "state": "completed",
+            },
+            "translation-layer",
+        )
+    except Exception as exc:
+        translation_pack = AgentTranslationPack(status="failed", error=str(exc))
+        note = f"指标转译层调用失败，已继续使用原始证据回答：{exc}"
+        memory.research_notes.append(note)
+        await emit_thinking(
+            {
+                "phase": "synthesizing",
+                "title": "指标转译失败",
+                "detail": note,
+                "state": "failed",
+            },
+            "translation-layer",
+        )
+    citations = build_citations(snapshot, memory.artifacts)
+    state.move_to("synthesizing")
+    await _emit_status(emit, "synthesizing")
+    await emit_thinking(
+        {
+            "phase": "synthesizing",
+            "title": "综合分析",
+            "detail": "正在基于现有证据组织自然回答。",
+            "state": "active",
+        },
+        "synthesizing-final",
+    )
+    synthesis_error = ""
+    try:
+        answer_output = await generate_answer_output_with_llm(
+            messages=payload.messages,
+            snapshot=snapshot,
+            context=context,
+            answer_evidence_payload=answer_evidence_payload,
+            translation_pack=translation_pack,
+            thinking_mode=thinking_mode,
+            emit=emit_event,
+        )
+    except Exception as exc:
+        synthesis_error = f"综合回答 LLM 调用失败，已切换到服务端兜底：{exc}"
+        memory.research_notes.append(synthesis_error)
+        answer_output = AgentTurnOutput(
+            answer=build_answer_fallback(
+                question=question,
+                snapshot=snapshot,
+                artifacts=memory.artifacts,
+                tool_results=memory.tool_results,
+                research_notes=list(memory.research_notes or []),
+                audit=latest_rule_audit,
+            )
+        )
+    if not str(answer_output.answer or "").strip():
+        answer_output.answer = build_answer_fallback(
+            question=question,
+            snapshot=snapshot,
+            artifacts=memory.artifacts,
+            tool_results=memory.tool_results,
+            research_notes=list(memory.research_notes or []),
+            audit=latest_rule_audit,
         )
 
     state.move_to("answered")
@@ -778,8 +614,8 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
     await emit_thinking(
         {
             "phase": "synthesizing",
-            "title": "综合分析完成",
-            "detail": "已生成最终判断、证据与建议。",
+            "title": "回答生成完成",
+            "detail": "已生成最终自然回答。",
             "state": "completed",
         },
         "synthesizing-final",
@@ -793,19 +629,6 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         research_notes=list(memory.research_notes or []),
         audit=latest_rule_audit,
     )
-    review_contract: Dict[str, Any] = {}
-    if is_deep_review_turn:
-        review_contract = build_review_contract(
-            question=question,
-            snapshot=snapshot,
-            artifacts=memory.artifacts,
-            tool_results=memory.tool_results,
-            audit=latest_rule_audit,
-            decision_summary=answer_output.decision.summary,
-        )
-        answer_output.review_contract = review_contract
-    else:
-        answer_output.review_contract = {}
     return AgentTurnResponse(
         status="answered",
         stage="answered",
@@ -817,16 +640,11 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             thinking_timeline=thinking_timeline,
             planning_summary=planning_summary,
             audit_summary=audit_summary,
-            review_contract=review_contract,
-            replan_count=replan_count,
+            translation_pack=translation_pack,
+            error=synthesis_error,
         ),
         context_summary=build_context_summary(snapshot, memory.artifacts),
-        plan=AgentPlanEnvelope(
-            steps=list(initial_plan_steps or []),
-            followup_steps=list(replan_steps or []),
-            followup_applied=bool(replan_steps),
-            summary=planning_summary,
-        ),
+        plan=current_plan_envelope,
     )
 
 

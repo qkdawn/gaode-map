@@ -45,7 +45,9 @@ def test_build_poi_shared_grid_aggregates_points_by_population_cell(monkeypatch)
         ],
     )
 
-    assert payload["grid_type"] == "raster"
+    assert payload["grid_type"] == "shared_raster"
+    assert payload["cell_id_source"] == "population_nightlight_shared_cell_id"
+    assert payload["scope_id"] is None
     assert payload["summary"]["grid_count"] == 2
     assert payload["summary"]["assigned_poi_count"] == 3
     assert payload["summary"]["active_cell_count"] == 2
@@ -54,5 +56,6 @@ def test_build_poi_shared_grid_aggregates_points_by_population_cell(monkeypatch)
     assert rows["r0_c0"]["poi_count"] == 2
     assert rows["r0_c0"]["category_counts"] == {"food": 2}
     assert rows["r0_c0"]["dominant_category_name"] == "餐饮"
+    assert rows["r0_c0"]["grid_type"] == "shared_raster"
     assert rows["r0_c1"]["poi_count"] == 1
     assert rows["r0_c1"]["category_counts"] == {"retail": 1}

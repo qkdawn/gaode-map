@@ -132,7 +132,7 @@ def register_capability_tools(registry: Dict[str, RegisteredTool]) -> None:
             scene_type="area_character",
             toolkit_id="area_character_pack",
             evidence_contract=["current_unified_spatial_cells", "current_unified_spatial_cells_summary"],
-            applicable_scenarios=["区域画像", "商业特征总结", "空间自洽检查"],
+            applicable_scenarios=["区域画像", "商业特征总结", "空间对齐校验"],
             cautions=["同格证据不能直接推断客流、消费力、营业额或收益"],
             requires=["scope_polygon"],
             produces=["current_unified_spatial_cells", "current_unified_spatial_cells_summary"],

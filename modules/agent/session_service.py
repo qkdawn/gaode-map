@@ -12,6 +12,7 @@ from .providers.llm_provider import (
 from .schemas import (
     AgentContextSummary,
     AgentMessage,
+    AgentMessageProcess,
     AgentPlanEnvelope,
     AgentSessionDetail,
     AgentSessionMetadataPatchRequest,
@@ -85,11 +86,7 @@ def derive_agent_session_title(messages: List[Dict[str, Any]] | List[AgentMessag
 
 
 def _summary_card_content_from_output(output: Dict[str, Any]) -> str:
-    cards = output.get("cards") or []
-    for item in cards:
-        if isinstance(item, dict) and str(item.get("type") or "") == "summary":
-            return _normalize_text(item.get("content"), max_length=120)
-    return ""
+    return _normalize_text(output.get("answer"), max_length=120)
 
 
 def derive_agent_session_preview(payload: Dict[str, Any]) -> str:
@@ -163,11 +160,7 @@ def _build_turn_title_seed(payload: AgentTurnRequest, response: AgentTurnRespons
         if str(item.role or "").strip() == "user" and _normalize_text(item.content):
             first_user_message = _normalize_text(item.content)
             break
-    assistant_summary = ""
-    for item in response.output.cards:
-        if str(item.type or "").strip() == "summary" and _normalize_text(item.content):
-            assistant_summary = _normalize_text(item.content, max_length=240)
-            break
+    assistant_summary = _normalize_text(response.output.answer, max_length=240)
     if not assistant_summary:
         assistant_summary = _normalize_text(response.output.clarification_question or response.output.risk_prompt, max_length=240)
     if not assistant_summary and response.diagnostics.error:
@@ -176,73 +169,33 @@ def _build_turn_title_seed(payload: AgentTurnRequest, response: AgentTurnRespons
 
 
 def _build_assistant_message_content(response: AgentTurnResponse) -> str:
-    sections: List[str] = []
-    summary_card = next((item for item in response.output.cards if item.type == "summary" and _normalize_text(item.content)), None)
-    decision_summary = _normalize_text(response.output.decision.summary)
-    if decision_summary:
-        sections.append(f"## 核心判断\n{decision_summary}")
-    elif summary_card:
-        sections.append(_normalize_text(summary_card.content))
-
-    if response.output.support:
-        lines = ["## 为什么这样判断"]
-        for item in response.output.support:
-            headline = _normalize_text(item.headline or item.metric or item.key) or "证据"
-            detail = _normalize_text(item.interpretation)
-            meta = "；".join(
-                part
-                for part in [
-                    f"来源：{_normalize_text(item.source)}" if _normalize_text(item.source) else "",
-                    f"置信度：{_normalize_text(item.confidence)}" if _normalize_text(item.confidence) else "",
-                ]
-                if part
-            )
-            lines.append(f"- {'。'.join(part for part in [headline, detail, meta] if part)}")
-        sections.append("\n".join(lines))
-
-    if response.output.counterpoints:
-        lines = ["## 还不能判断什么"]
-        for item in response.output.counterpoints:
-            lines.append(f"- {'：'.join(part for part in [_normalize_text(item.title), _normalize_text(item.detail)] if part)}")
-        sections.append("\n".join(lines))
-
-    if response.output.actions:
-        lines = ["## 下一步怎么做"]
-        for item in response.output.actions:
-            detail = "；".join(
-                part
-                for part in [
-                    _normalize_text(item.detail),
-                    f"触发条件：{_normalize_text(item.condition)}" if _normalize_text(item.condition) else "",
-                    f"目标：{_normalize_text(item.target)}" if _normalize_text(item.target) else "",
-                ]
-                if part
-            )
-            lines.append(f"- {'：'.join(part for part in [_normalize_text(item.title), detail] if part)}")
-        sections.append("\n".join(lines))
-
-    if response.output.boundary:
-        lines = ["## 适用边界"]
-        for item in response.output.boundary:
-            lines.append(f"- {'：'.join(part for part in [_normalize_text(item.title), _normalize_text(item.detail)] if part)}")
-        sections.append("\n".join(lines))
-
+    answer = _normalize_text(response.output.answer)
+    if answer:
+        return answer
     if response.output.clarification_question:
-        sections.append(f"## 需要补充\n{_normalize_text(response.output.clarification_question)}")
+        return _normalize_text(response.output.clarification_question)
     if response.output.risk_prompt:
-        sections.append(f"## 需要确认\n{_normalize_text(response.output.risk_prompt)}")
-    return "\n\n".join(part for part in sections if part) or (summary_card.content if summary_card else "已完成分析")
+        return _normalize_text(response.output.risk_prompt)
+    return "已完成分析"
 
 
-def _build_turn_process_payload(response: AgentTurnResponse) -> Dict[str, Any]:
-    return {
-        "status": str(response.status or ""),
-        "stage": str(response.stage or ""),
-        "completed_at": serialize_datetime(datetime.now(timezone.utc)),
-        "thinking_timeline": [item.model_dump(mode="json") for item in response.diagnostics.thinking_timeline],
-        "execution_trace": [item.model_dump(mode="json") for item in response.diagnostics.execution_trace],
-        "plan": response.plan.model_dump(mode="json"),
-    }
+def _build_turn_process_payload(response: AgentTurnResponse) -> AgentMessageProcess:
+    return AgentMessageProcess(
+        status=str(response.status or ""),
+        stage=str(response.stage or ""),
+        completed_at=serialize_datetime(datetime.now(timezone.utc)),
+        thinking_timeline=list(response.diagnostics.thinking_timeline or []),
+        execution_trace=list(response.diagnostics.execution_trace or []),
+        plan=response.plan,
+    )
+
+
+def _build_assistant_message(response: AgentTurnResponse) -> AgentMessage:
+    return AgentMessage(
+        role="assistant",
+        content=_build_assistant_message_content(response),
+        process=_build_turn_process_payload(response),
+    )
 
 
 async def generate_agent_session_title(payload: AgentTurnRequest, response: AgentTurnResponse) -> Optional[str]:
@@ -285,15 +238,9 @@ def build_snapshot_payload(request: AgentSessionSnapshotRequest) -> Dict[str, An
 
 
 def build_turn_persist_payload(payload: AgentTurnRequest, response: AgentTurnResponse) -> AgentSessionSnapshotRequest:
-    messages = [item.model_dump() for item in payload.messages]
+    messages = [AgentMessage(**item.model_dump(mode="json")) for item in payload.messages]
     if response.status == "answered":
-        messages.append(
-            {
-                "role": "assistant",
-                "content": _build_assistant_message_content(response),
-                "process": _build_turn_process_payload(response),
-            }
-        )
+        messages.append(_build_assistant_message(response))
     request = AgentSessionSnapshotRequest(
         title=derive_agent_session_title(messages),
         preview="",
@@ -302,7 +249,7 @@ def build_turn_persist_payload(payload: AgentTurnRequest, response: AgentTurnRes
         history_id=_normalize_text(payload.history_id, max_length=128),
         panel_kind=PANEL_KIND_FOLLOWUP,
         input="" if response.status == "answered" else str(payload.messages[-1].content if payload.messages else ""),
-        messages=[AgentMessage(**item) for item in messages],
+        messages=messages,
         output=response.output,
         diagnostics=response.diagnostics,
         context_summary=response.context_summary,
@@ -448,4 +395,4 @@ async def persist_agent_turn(payload: AgentTurnRequest, response: AgentTurnRespo
         generated_title = await generate_agent_session_title(payload, response)
         if generated_title:
             repo.update_metadata(session_id, title=generated_title, title_source=TITLE_SOURCE_AI)
-    return response
+    return response.model_copy(update={"messages": request.messages})

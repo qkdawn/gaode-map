@@ -12,7 +12,9 @@
         class="agent-thinking-toggle"
         @click="toggleAgentThinkingExpanded">
         <span class="agent-thinking-dot"></span>
-        <span>{{ getAgentThinkingElapsedLabel() ? '已处理 ' + getAgentThinkingElapsedLabel() : getAgentThinkingStatusLabel() }}</span>
-        <span class="agent-thinking-chevron" :class="{ 'is-open': agentThinkingExpanded }">⌄</span>
+        <span class="agent-thinking-toggle-label">{{ getAgentThinkingElapsedLabel() ? '已处理 ' + getAgentThinkingElapsedLabel() : getAgentThinkingStatusLabel() }}</span>
+        <span class="agent-thinking-toggle-icon">
+            <span class="agent-thinking-chevron" :class="{ 'is-open': agentThinkingExpanded }">⌄</span>
+        </span>
     </button>
 </div>

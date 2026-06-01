@@ -323,11 +323,11 @@ function normalizeAgentStatusThinkingItem(seed = {}) {
     gating: ['门卫判断', '正在判断你的问题是否清晰、当前范围是否能直接开始分析。'],
     clarifying: ['生成追问', '还缺少关键信息，正在整理最关键的补充问题。'],
     context_ready: ['整理上下文', '正在汇总当前分析快照与可复用结果。'],
-    planning: ['规划分析步骤', '正在决定这轮要调用哪些工具、补哪些证据。'],
+    planning: ['工具判断', '正在判断这轮最该先调什么工具，以及还缺哪些证据。'],
     executing: ['执行工具', '正在执行工具调用并收集证据。'],
-    auditing: ['审计结果', '正在检查这些证据够不够真正回答你的问题。'],
-    replanning: ['重新规划', '审计发现证据还不够，正在调整下一轮分析步骤。'],
-    synthesizing: ['综合分析', '正在把结果整理成更完整的判断、依据和建议。'],
+    auditing: ['证据检查', '正在检查这些证据够不够真正回答你的问题。'],
+    replanning: ['继续判断', '正在根据新证据决定要不要继续调用工具。'],
+    synthesizing: ['综合分析', '正在把现有证据整理成自然回答。'],
     answered: ['回答生成完成', '已生成最终回答。'],
     requires_clarification: ['需要补充信息', '还差关键信息，补充后才能继续分析。'],
     requires_risk_confirmation: ['等待风险确认', '需要确认后继续执行。'],
@@ -472,10 +472,10 @@ function normalizeAgentTurnPayload(seed = {}) {
     : ((seed.context_summary && typeof seed.context_summary === 'object') ? seed.context_summary : {})
   const rawPlan = seed.plan && typeof seed.plan === 'object' ? seed.plan : {}
   const output = {
-    cards: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'cards')
-        ? seed.cards
-        : (Object.prototype.hasOwnProperty.call(seed, 'assistant_cards') ? seed.assistant_cards : rawOutput.cards),
+    answer: asText(
+      Object.prototype.hasOwnProperty.call(seed, 'answer')
+        ? seed.answer
+        : rawOutput.answer,
     ),
     clarificationQuestion: asText(
       Object.prototype.hasOwnProperty.call(seed, 'clarificationQuestion')
@@ -498,47 +498,10 @@ function normalizeAgentTurnPayload(seed = {}) {
           ? seed.risk_prompt
           : rawOutput.risk_prompt),
     ),
-    nextSuggestions: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'nextSuggestions')
-        ? seed.nextSuggestions
-        : (Object.prototype.hasOwnProperty.call(seed, 'next_suggestions')
-          ? seed.next_suggestions
-          : rawOutput.next_suggestions),
-    ),
     panelPayloads: cloneObject(
       Object.prototype.hasOwnProperty.call(seed, 'panelPayloads')
         ? seed.panelPayloads
         : (rawOutput.panel_payloads || rawOutput.panelPayloads),
-    ),
-    decision: normalizeAgentDecision(
-      Object.prototype.hasOwnProperty.call(seed, 'decision')
-        ? seed.decision
-        : rawOutput.decision,
-    ),
-    support: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'support')
-        ? seed.support
-        : rawOutput.support,
-    ).map((item) => normalizeAgentDecisionEvidence(item)),
-    counterpoints: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'counterpoints')
-        ? seed.counterpoints
-        : rawOutput.counterpoints,
-    ).map((item) => normalizeAgentCounterpoint(item)),
-    actions: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'actions')
-        ? seed.actions
-        : rawOutput.actions,
-    ).map((item) => normalizeAgentAction(item)),
-    boundary: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'boundary')
-        ? seed.boundary
-        : rawOutput.boundary,
-    ).map((item) => normalizeAgentBoundaryItem(item)),
-    reviewContract: cloneObject(
-      Object.prototype.hasOwnProperty.call(seed, 'reviewContract')
-        ? seed.reviewContract
-        : (rawOutput.review_contract || rawOutput.reviewContract),
     ),
   }
   const diagnostics = {
@@ -577,11 +540,6 @@ function normalizeAgentTurnPayload(seed = {}) {
         ? seed.auditSummary
         : (rawDiagnostics.audit_summary || rawDiagnostics.auditSummary),
     ),
-    reviewContract: cloneObject(
-      Object.prototype.hasOwnProperty.call(seed, 'reviewContract')
-        ? seed.reviewContract
-        : (rawDiagnostics.review_contract || rawDiagnostics.reviewContract),
-    ),
     replanCount: Number(
       Object.prototype.hasOwnProperty.call(seed, 'replanCount')
         ? seed.replanCount
@@ -606,17 +564,13 @@ function normalizeAgentTurnPayload(seed = {}) {
     diagnostics,
     contextSummary: cloneObject(rawContextSummary),
     plan: normalizeAgentPlanEnvelope(rawPlan),
+    messages: normalizeAgentMessages(seed.messages),
   }
 }
 
-function getAgentSummaryCardContent(cards = []) {
-  const summaryCard = cloneArray(cards).find((card) => card && asText(card.type) === 'summary')
-  return summaryCard ? asText(summaryCard.content) : ''
-}
-
-function stripMirroredSummaryAssistantMessage(messages = [], cards = []) {
+function stripMirroredSummaryAssistantMessage(messages = [], answer = '') {
   const rows = cloneArray(messages)
-  const summary = getAgentSummaryCardContent(cards)
+  const summary = asText(answer)
   if (!summary || !rows.length) return rows
   const last = rows[rows.length - 1]
   if (!last || asText(last.role) !== 'assistant') return rows
@@ -636,7 +590,7 @@ function buildAgentPreviewCandidate(session = null) {
     asText(session.error),
     asText(session.riskPrompt),
     asText(session.clarificationQuestion),
-    getAgentSummaryCardContent(session.cards || (session.output && session.output.cards) || []),
+    asText(session.answer || (session.output && session.output.answer)),
   ].find(Boolean) || ''
 }
 
@@ -687,23 +641,16 @@ function createAgentSessionRecord(seed = {}) {
     stage: asText(seed.stage || turn.stage || 'gating'),
     input: String(seed.input || ''),
     output: cloneObject(turn.output),
+    answer: String(turn.output.answer || ''),
     diagnostics: cloneObject(turn.diagnostics),
     contextSummary: cloneObject(turn.contextSummary),
     plan: cloneObject(turn.plan),
-    cards: cloneArray(turn.output.cards),
-    decision: normalizeAgentDecision(turn.output.decision),
-    support: cloneArray(turn.output.support).map((item) => normalizeAgentDecisionEvidence(item)),
-    counterpoints: cloneArray(turn.output.counterpoints).map((item) => normalizeAgentCounterpoint(item)),
-    actions: cloneArray(turn.output.actions).map((item) => normalizeAgentAction(item)),
-    boundary: cloneArray(turn.output.boundary).map((item) => normalizeAgentBoundaryItem(item)),
-    reviewContract: cloneObject(turn.output.reviewContract || turn.diagnostics.reviewContract),
     executionTrace: cloneArray(turn.diagnostics.executionTrace),
     usedTools: cloneArray(turn.diagnostics.usedTools),
     citations: cloneArray(turn.diagnostics.citations),
     researchNotes: cloneArray(turn.diagnostics.researchNotes),
     auditIssues: cloneArray(turn.diagnostics.auditIssues),
     thinkingTimeline: cloneArray(turn.diagnostics.thinkingTimeline),
-    nextSuggestions: cloneArray(turn.output.nextSuggestions),
     clarificationQuestion: String(turn.output.clarificationQuestion || ''),
     clarificationOptions: cloneArray(turn.output.clarificationOptions),
     riskPrompt: String(turn.output.riskPrompt || ''),
@@ -736,12 +683,11 @@ function createAgentSessionPlaceholderRecord(session = null) {
   return createAgentSessionRecord({
     ...base,
     input: '',
-    cards: [],
     executionTrace: [],
     usedTools: [],
     citations: [],
     researchNotes: [],
-    nextSuggestions: [],
+    answer: '',
     clarificationQuestion: '',
     clarificationOptions: [],
     riskPrompt: '',
@@ -750,20 +696,13 @@ function createAgentSessionPlaceholderRecord(session = null) {
     pendingTaskConfirmation: null,
     messages: [],
     output: {
-      cards: [],
+      answer: '',
       clarificationQuestion: '',
       clarificationOptions: [],
       riskPrompt: '',
-      nextSuggestions: [],
       panelPayloads: {},
-      decision: { summary: '', mode: 'judgment', strength: 'weak', canAct: false },
-      support: [],
-      counterpoints: [],
-      actions: [],
-      boundary: [],
-      reviewContract: {},
     },
-    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], reviewContract: {}, error: '' },
+    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], replanCount: 0, error: '' },
     contextSummary: {},
     plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
     snapshotLoaded: false,
@@ -774,13 +713,11 @@ function cloneAgentSessionRecord(session = null) {
   if (!session || typeof session !== 'object') return null
   return createAgentSessionRecord({
     ...session,
-    cards: cloneArray(session.cards),
     executionTrace: cloneArray(session.executionTrace),
     usedTools: cloneArray(session.usedTools),
     citations: cloneArray(session.citations),
     researchNotes: cloneArray(session.researchNotes),
     thinkingTimeline: cloneArray(session.thinkingTimeline),
-    nextSuggestions: cloneArray(session.nextSuggestions),
     riskConfirmations: cloneArray(session.riskConfirmations),
     attachments: normalizeAgentAttachments(session.attachments),
     attachmentIds: cloneArray(session.attachmentIds),
@@ -905,7 +842,6 @@ export {
   parseSseChunk,
   consumeSseStream,
   normalizeAgentTurnPayload,
-  getAgentSummaryCardContent,
   stripMirroredSummaryAssistantMessage,
   toTimestamp,
   buildAgentPreviewCandidate,

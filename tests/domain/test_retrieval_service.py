@@ -1,7 +1,6 @@
 import asyncio
 
 from modules.agent.schemas import AnalysisSnapshot
-from modules.agent.react_orchestrator import REACT_SAFE_TOOL_NAMES
 from modules.agent.tools import get_tool_registry
 from modules.agent.tool_adapters.retrieval_tools import (
     read_analysis_chunk,
@@ -180,10 +179,11 @@ def test_retrieval_tools_are_registered_with_expected_contracts():
     ]
 
 
-def test_retrieval_tools_are_available_to_react():
+def test_retrieval_tools_are_available_to_main_agent_loop():
+    registry = get_tool_registry()
     assert {
         "search_analysis_context",
         "read_analysis_chunk",
         "search_report_context",
         "read_report_chunk",
-    }.issubset(REACT_SAFE_TOOL_NAMES)
+    }.issubset(set(registry.keys()))

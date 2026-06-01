@@ -58,7 +58,7 @@ def test_agent_session_crud_api(monkeypatch):
                 "is_pinned": False,
                 "input": "",
                 "messages": [{"role": "user", "content": "总结这个区域"}],
-                "output": {"cards": [], "next_suggestions": [], "clarification_question": "", "risk_prompt": ""},
+                "output": {"answer": "", "clarification_question": "", "risk_prompt": ""},
                 "diagnostics": {
                     "execution_trace": [],
                     "used_tools": [],
@@ -107,6 +107,21 @@ def test_agent_session_crud_api(monkeypatch):
         assert missing_resp.status_code == 404
 
 
+def test_legacy_react_routes_are_removed(monkeypatch):
+    _install_test_session(monkeypatch)
+    with TestClient(_build_test_app()) as client:
+        run_resp = client.post(
+            "/api/v1/analysis/agent/react/run",
+            json={"question": "总结这个区域", "analysis_snapshot": {"scope": {"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}}},
+        )
+        stream_resp = client.get("/api/v1/analysis/agent/react/stream?run_id=legacy")
+        cancel_resp = client.post("/api/v1/analysis/agent/react/cancel/legacy")
+
+        assert run_resp.status_code == 404
+        assert stream_resp.status_code == 404
+        assert cancel_resp.status_code == 404
+
+
 def test_agent_turn_persists_multiple_statuses(monkeypatch):
     _install_test_session(monkeypatch)
     async def fake_generate_title(*_args, **_kwargs):
@@ -115,7 +130,7 @@ def test_agent_turn_persists_multiple_statuses(monkeypatch):
     monkeypatch.setattr(agent_session_service, "generate_agent_session_title", fake_generate_title)
     with TestClient(_build_test_app()) as client:
         statuses = [
-            ("answered", {"output": {"cards": [{"type": "summary", "title": "概览", "content": "已完成分析", "items": []}]}, "diagnostics": {"thinking_timeline": [{"id": "thinking-answer", "phase": "answering", "title": "回答生成完成", "state": "completed"}]}}),
+            ("answered", {"output": {"answer": "已完成分析"}, "diagnostics": {"thinking_timeline": [{"id": "thinking-answer", "phase": "answering", "title": "回答生成完成", "state": "completed"}]}}),
             ("requires_clarification", {"output": {"clarification_question": "请补充范围"}, "diagnostics": {"thinking_timeline": [{"id": "thinking-clarify", "phase": "gating", "title": "需要补充信息", "state": "failed"}]}}),
             ("requires_risk_confirmation", {"output": {"risk_prompt": "工具 `compute_road_syntax_from_scope` 属于高成本执行，请确认后重试。"}, "diagnostics": {"thinking_timeline": [{"id": "thinking-risk", "phase": "planned", "title": "等待风险确认", "state": "failed"}]}}),
             ("failed", {"diagnostics": {"thinking_timeline": [{"id": "thinking-failed", "phase": "answering", "title": "回答生成失败", "state": "failed"}]}}),
@@ -139,6 +154,10 @@ def test_agent_turn_persists_multiple_statuses(monkeypatch):
 
             assert resp.status_code == 200
             assert resp.json()["status"] == status
+            if status == "answered":
+                assert resp.json()["messages"][-1]["role"] == "assistant"
+                assert resp.json()["messages"][-1]["content"] == "已完成分析"
+                assert resp.json()["messages"][-1]["process"]["thinking_timeline"][0]["id"] == "thinking-answer"
 
         list_resp = client.get("/api/v1/analysis/agent/sessions")
         assert list_resp.status_code == 200
@@ -183,7 +202,7 @@ def test_agent_turn_generates_title_only_for_first_persist(monkeypatch):
         async def fake_process_agent_turn(_payload):
             return AgentTurnResponse(
                 status="answered",
-                output={"cards": [{"type": "summary", "title": "概览", "content": "已完成分析", "items": []}]},
+                output={"answer": "已完成分析"},
             )
 
         monkeypatch.setattr(agent_router_module, "process_agent_turn", fake_process_agent_turn)
@@ -243,7 +262,7 @@ def test_agent_turn_keeps_user_title_without_auto_override(monkeypatch):
                 "panel_kind": "followup",
                 "input": "",
                 "messages": [],
-                "output": {"cards": [], "next_suggestions": [], "clarification_question": "", "risk_prompt": ""},
+                "output": {"answer": "", "clarification_question": "", "risk_prompt": ""},
                 "diagnostics": {
                     "execution_trace": [],
                     "used_tools": [],
@@ -260,7 +279,7 @@ def test_agent_turn_keeps_user_title_without_auto_override(monkeypatch):
         async def fake_process_agent_turn(_payload):
             return AgentTurnResponse(
                 status="answered",
-                output={"cards": [{"type": "summary", "title": "概览", "content": "已完成分析", "items": []}]},
+                output={"answer": "已完成分析"},
             )
 
         monkeypatch.setattr(agent_router_module, "process_agent_turn", fake_process_agent_turn)

@@ -285,7 +285,7 @@ def build_poi_shared_grid(
                 "category_counts": counts,
                 "dominant_category": dominant_category,
                 "dominant_category_name": dominant_category_name,
-                "grid_type": "raster",
+                "grid_type": "shared_raster",
             }
         )
         styled_features.append(
@@ -326,7 +326,9 @@ def build_poi_shared_grid(
     }
     return {
         "type": "FeatureCollection",
-        "grid_type": "raster",
+        "grid_type": "shared_raster",
+        "cell_id_source": "population_nightlight_shared_cell_id",
+        "scope_id": grid.get("scope_id"),
         "count": len(styled_features),
         "cell_count": len(styled_features),
         "features": styled_features,
