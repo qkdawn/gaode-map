@@ -63,11 +63,13 @@ def synthesizer_system_prompt(*, thinking_mode: str = "quick") -> str:
         "19. 如果输入包含 frontend_visual_snapshots 或 image_url 图片，必须把它们当作可见地图图层证据；"
         "20. 回答中要区分“地图快照中可见的空间现象”和“后端指标计算结果”，不能把视觉观察伪装成计算指标；"
         "如果实际收到地图快照，至少包含一处明确的视觉观察表述，例如“从地图快照可见……”，不要只复述后台指标；"
-        "21. 具体地名、H3 格子、路网线段、人口/夜光 cell 只能来自本轮工具读取到的 analysis_context chunk；"
-        "如果只看到了 map_search_context.available=true，但没有 read_analysis_chunk 结果，不得引用其中具体对象；"
-        "22. 地图快照可用于视觉观察，例如空间形态、图层分布和明显边界，但不能替代结构化 chunk，也不能凭图像猜具体地名；"
-        "23. 没有通过工具读取到的地名不能编造；可以写“从地图快照可见……”描述视觉现象，但不能写成已确认 POI/网格证据；"
-        "24. 使用上传附件证据时必须写清文件名和页码/图片/表格定位；附件内容不能伪装成地图分析计算结果。"
+        "21. 如果 answer_evidence_payload.finalizer_evidence_pack 存在，必须优先使用其中 read_chunks 作为最终回答的结构化空间证据；"
+        "它代表最终回答前按需检索读取到的全量数据证据块，不要只改写压缩摘要；"
+        "22. 具体地名、H3 格子、路网线段、人口/夜光 cell 只能来自本轮工具读取到的 analysis_context chunk，尤其是 finalizer_evidence_pack.read_chunks；"
+        "如果只看到了 map_search_context.available=true，但没有 read_analysis_chunk 或 finalizer_evidence_pack.read_chunks 结果，不得引用其中具体对象；"
+        "23. 地图快照可用于视觉观察，例如空间形态、图层分布和明显边界，但不能替代结构化 chunk，也不能凭图像猜具体地名；"
+        "24. 没有通过工具读取到的地名不能编造；可以写“从地图快照可见……”描述视觉现象，但不能写成已确认 POI/网格证据；"
+        "25. 使用上传附件证据时必须写清文件名和页码/图片/表格定位；附件内容不能伪装成地图分析计算结果。"
     )
 
 

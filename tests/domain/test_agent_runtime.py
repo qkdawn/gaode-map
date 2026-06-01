@@ -199,7 +199,9 @@ def test_runtime_uses_tool_loop_then_answers(monkeypatch):
 
     assert response.status == "answered"
     assert response.output.answer == "这里更接近生活服务导向的社区商业片区。"
-    assert response.used_tools == ["read_current_scope", "read_current_results"]
+    assert response.used_tools[:2] == ["read_current_scope", "read_current_results"]
+    assert "search_analysis_context" in response.used_tools
+    assert "read_analysis_chunk" in response.used_tools
     assert response.plan.steps[0].tool_name == "read_current_scope"
     assert "本轮按需调用工具补证据" in response.diagnostics.planning_summary
     assert response.diagnostics.translation_pack.status == "ready"
@@ -340,6 +342,104 @@ def test_runtime_puts_map_search_context_only_in_working_memory_artifacts(monkey
     assert "place_anchors" not in captured["answer_evidence_payload"]
     assert captured["answer_evidence_payload"]["map_search_context"]["available"] is True
     assert "analysis:frontend_map_search_context" in response.context_summary.available_context_sources
+
+
+def test_runtime_reads_finalizer_evidence_for_high_value_map_questions(monkeypatch):
+    captured = {}
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed"),
+        captured=captured,
+    )
+
+    response = asyncio.run(
+        process_agent_turn(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="总结这个区域的商业特征")],
+                analysis_snapshot=_snapshot_with_scope(context={"mode": "walking"}),
+                map_search_context={
+                    "place_anchors": {"names": ["后湖", "湖南师范大学", "中南大学"]},
+                    "spatial_anchors": {
+                        "road": {
+                            "feature_count": 2,
+                            "metric_keys": ["choice_score", "integration_score"],
+                            "sample_segments": [{"name": "麓山南路", "choice_score": 0.72}],
+                        },
+                        "population": {"cell_count": 1, "top_cells": [{"cell_id": "pop-1", "value": 1200}]},
+                        "nightlight": {"cell_count": 1, "top_cells": [{"cell_id": "ntl-1", "radiance": 31.2}]},
+                    },
+                },
+            )
+        )
+    )
+
+    pack = captured["answer_evidence_payload"]["finalizer_evidence_pack"]
+    assert response.status == "answered"
+    assert pack["status"] == "ready"
+    assert pack["search_queries"]
+    assert pack["read_chunks"]
+    assert any(chunk["title"] == "POI 地名锚点" for chunk in pack["read_chunks"])
+    assert "search_analysis_context" in response.diagnostics.used_tools
+    assert "read_analysis_chunk" in response.diagnostics.used_tools
+    assert any(item.id == "finalizer-evidence" and item.meta.get("read_count", 0) > 0 for item in response.diagnostics.thinking_timeline)
+
+
+def test_runtime_skips_finalizer_evidence_for_simple_metric_questions(monkeypatch):
+    captured = {}
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed"),
+        captured=captured,
+    )
+
+    response = asyncio.run(
+        process_agent_turn(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="夜光均值是什么意思")],
+                analysis_snapshot=_snapshot_with_scope(),
+                map_search_context={
+                    "place_anchors": {"names": ["后湖", "湖南师范大学"]},
+                    "spatial_anchors": {"nightlight": {"cell_count": 1, "top_cells": [{"cell_id": "ntl-1"}]}},
+                },
+            )
+        )
+    )
+
+    pack = captured["answer_evidence_payload"]["finalizer_evidence_pack"]
+    assert response.status == "answered"
+    assert pack["status"] == "skipped"
+    assert pack["reason"] == "not_required"
+    assert pack["read_chunks"] == []
+
+
+def test_runtime_continues_when_finalizer_evidence_retrieval_fails(monkeypatch):
+    captured = {}
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed"),
+        captured=captured,
+    )
+
+    def explode(*, question, snapshot, artifacts, answer_evidence_payload):
+        del question, snapshot, artifacts, answer_evidence_payload
+        raise RuntimeError("retrieval failed")
+
+    monkeypatch.setattr(agent_runtime, "build_finalizer_evidence_pack", explode)
+
+    response = asyncio.run(
+        process_agent_turn(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="总结这个区域的商业特征")],
+                analysis_snapshot=_snapshot_with_scope(),
+            )
+        )
+    )
+
+    pack = captured["answer_evidence_payload"]["finalizer_evidence_pack"]
+    assert response.status == "answered"
+    assert pack["status"] == "failed"
+    assert "最终证据检索失败" in pack["warnings"][0]
+    assert any("最终证据检索失败" in note for note in response.diagnostics.research_notes)
 
 
 def test_runtime_falls_back_to_server_side_answer_when_finalizer_fails(monkeypatch):

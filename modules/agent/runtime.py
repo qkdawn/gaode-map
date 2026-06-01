@@ -10,6 +10,7 @@ from core.config import settings
 from .auditor import audit_execution
 from .context_builder import build_context_bundle, build_context_summary
 from .gate import latest_user_message
+from .finalizer_evidence import build_finalizer_evidence_pack
 from .memory import create_working_memory
 from .llm_digest import summarize_tool_result
 from .providers.langgraph_react import run_langgraph_react_loop
@@ -645,6 +646,68 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
                 "state": "failed",
             },
             "translation-layer",
+        )
+    await emit_thinking(
+        {
+            "phase": "synthesizing",
+            "title": "最终证据检索",
+            "detail": "正在按需读取可检索地图证据，供最终回答引用具体空间对象。",
+            "state": "active",
+        },
+        "finalizer-evidence",
+    )
+    try:
+        finalizer_evidence_pack = build_finalizer_evidence_pack(
+            question=question,
+            snapshot=snapshot,
+            artifacts=memory.artifacts,
+            answer_evidence_payload=answer_evidence_payload,
+        )
+        answer_evidence_payload["finalizer_evidence_pack"] = finalizer_evidence_pack
+        finalizer_read_count = len(finalizer_evidence_pack.get("read_chunks") or [])
+        finalizer_search_count = len(finalizer_evidence_pack.get("search_queries") or [])
+        if finalizer_read_count:
+            for tool_name in ("search_analysis_context", "read_analysis_chunk"):
+                if tool_name not in used_tools:
+                    used_tools.append(tool_name)
+        await emit_thinking(
+            {
+                "phase": "synthesizing",
+                "title": "最终证据检索完成",
+                "detail": f"已执行 {finalizer_search_count} 次检索，读取 {finalizer_read_count} 个证据块。",
+                "display_text": f"已读取 {finalizer_read_count} 个最终回答证据块。",
+                "items": [
+                    str(item.get("title") or item.get("chunk_id") or "").strip()
+                    for item in list(finalizer_evidence_pack.get("read_chunks") or [])[:4]
+                    if str(item.get("title") or item.get("chunk_id") or "").strip()
+                ],
+                "meta": {
+                    "status": finalizer_evidence_pack.get("status"),
+                    "search_count": finalizer_search_count,
+                    "read_count": finalizer_read_count,
+                    "warnings": list(finalizer_evidence_pack.get("warnings") or [])[:4],
+                },
+                "state": "completed",
+            },
+            "finalizer-evidence",
+        )
+    except Exception as exc:
+        note = f"最终证据检索失败，已继续使用现有证据回答：{exc}"
+        memory.research_notes.append(note)
+        answer_evidence_payload["finalizer_evidence_pack"] = {
+            "status": "failed",
+            "warnings": [note],
+            "read_chunks": [],
+            "search_queries": [],
+        }
+        await emit_thinking(
+            {
+                "phase": "synthesizing",
+                "title": "最终证据检索失败",
+                "detail": note,
+                "state": "failed",
+            },
+            "finalizer-evidence",
         )
     citations = build_citations(snapshot, memory.artifacts)
     state.move_to("synthesizing")
