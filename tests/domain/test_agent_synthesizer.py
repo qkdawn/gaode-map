@@ -51,6 +51,10 @@ def test_build_answer_evidence_payload_includes_key_evidence_and_limits():
     assert "spatial_structure_summary" in payload
     assert "population_vitality_summary" in payload
     assert payload["evidence_highlights"]
+    assert payload["spatial_narrative_guidance"]["structure_first"] is True
+    assert "内圈/外圈" in payload["spatial_narrative_guidance"]["relationship_lenses"]
+    assert "不要逐项翻译指标面板" in payload["spatial_narrative_guidance"]["anti_patterns"]
+    assert "place_anchors" not in json.dumps(payload["spatial_narrative_guidance"], ensure_ascii=False)
 
 
 def test_build_answer_evidence_payload_uses_compact_tool_result_digest():

@@ -171,6 +171,11 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "不要输出一整坨文字" in system_prompt
     assert "不设置固定字数上限" in system_prompt
     assert "保留能支撑判断的关键数字" in system_prompt
+    assert "空间主结构" in system_prompt
+    assert "内圈/外圈" in system_prompt
+    assert "动线" in system_prompt
+    assert "不要按餐饮占比、科教占比、多核心、路网、夜光逐项翻译成指标总结" in system_prompt
+    assert "谁围着谁、谁带动谁、哪里是内圈、哪里是外圈" in system_prompt
     assert "只补最必要的证据支撑" not in system_prompt
     assert "review_contract" not in system_prompt
     assert "cards" not in system_prompt

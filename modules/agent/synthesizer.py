@@ -319,6 +319,16 @@ def _frontend_visual_snapshot_block(artifacts: Dict[str, object], research_notes
     }
 
 
+def _spatial_narrative_guidance() -> Dict[str, Any]:
+    return {
+        "structure_first": True,
+        "goal": "先提炼区域空间主结构，再让 POI、H3、路网、人口和夜光指标支撑这个结构。",
+        "relationship_lenses": ["主结构", "内圈/外圈", "锚点关系", "学生/社区/游逛动线", "界面", "串联", "夹持", "承托", "连续发生"],
+        "anti_patterns": ["不要逐项翻译指标面板", "不要只罗列地名", "不要把未读取 chunk 的地名或空间对象写进结论"],
+        "evidence_rule": "具体地名和空间对象仍只能来自已读取的 read_analysis_chunk 结果；本指南只约束叙事组织方式。",
+    }
+
+
 def build_answer_evidence_payload(
     *,
     question: str,
@@ -357,6 +367,7 @@ def build_answer_evidence_payload(
             "artifact_key": "frontend_map_search_context" if (artifacts or {}).get("frontend_map_search_context") else "",
             "evidence_rule": "具体地名、H3 格子、路网线段、人口/夜光 cell 只有通过 search_analysis_context 命中并 read_analysis_chunk 读取后，才能在最终回答中引用。",
         },
+        "spatial_narrative_guidance": _spatial_narrative_guidance(),
     }
     return {
         **base_payload,
