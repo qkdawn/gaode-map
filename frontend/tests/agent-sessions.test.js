@@ -2207,6 +2207,169 @@ test('agent visual snapshot capture restores panel and map state', async () => {
   assert.equal(ctx.poiSubTab, 'category')
 })
 
+test('agent visual snapshots use offscreen maps without changing visible panel state', async () => {
+  const originalDocument = global.document
+  const originalAMap = global.window.AMap
+  const originalHtml2canvas = global.html2canvas
+  const maps = []
+  const appended = []
+  const ctx = createAgentContext({
+    activeStep3Panel: 'agent',
+    poiSubTab: 'category',
+    allPoisDetails: [{ id: 'p1', type: '餐饮', lng: 112.94, lat: 28.16 }],
+    h3AnalysisSummary: { grid_count: 1 },
+    h3AnalysisGridFeatures: [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [[[112.93, 28.15], [112.95, 28.15], [112.95, 28.17], [112.93, 28.15]]] },
+      properties: { h3_id: 'h3-a', poi_count: 8 },
+    }],
+    buildAgentAnalysisSnapshot: () => ({
+      scope: { polygon: [[112.92, 28.14], [112.96, 28.14], [112.96, 28.18], [112.92, 28.14]] },
+    }),
+    applyPoiVisualState() {
+      throw new Error('main_poi_visibility_should_not_change')
+    },
+    _captureMapSnapshotBase64() {
+      throw new Error('main_map_capture_should_not_run')
+    },
+    _sleepForExport: async () => {},
+  })
+
+  const createNode = (tag) => ({
+    tag,
+    id: '',
+    type: '',
+    textContent: '',
+    style: { cssText: '', display: '', backgroundColor: '', backgroundImage: '' },
+    children: [],
+    parentNode: null,
+    setAttribute(name, value) { this[name] = value },
+    appendChild(node) {
+      node.parentNode = this
+      this.children.push(node)
+    },
+    removeChild(node) {
+      this.children = this.children.filter((item) => item !== node)
+      node.parentNode = null
+    },
+    querySelectorAll() { return [] },
+  })
+  global.document = {
+    getElementById() { return null },
+    createElement: createNode,
+    body: {
+      appendChild(node) {
+        node.parentNode = this
+        appended.push(node)
+      },
+      removeChild(node) {
+        node.parentNode = null
+      },
+    },
+  }
+
+  class FakeOverlay {
+    constructor(options = {}) {
+      this.options = options
+      this.kind = this.constructor.name
+    }
+    setMap(map) {
+      this.map = map
+      if (map && map.overlays) map.overlays.push(this)
+    }
+  }
+  class FakeMap {
+    constructor(el, options = {}) {
+      this.el = el
+      this.options = options
+      this.overlays = []
+      this.destroyed = false
+      maps.push(this)
+    }
+    setFitView(overlays, immediate, padding) {
+      this.fit = { overlays, immediate, padding }
+    }
+    setCenter(center) { this.center = center }
+    setZoom(zoom) { this.zoom = zoom }
+    getContainer() { return this.el }
+    destroy() { this.destroyed = true }
+  }
+  global.window.AMap = global.AMap = {
+    Map: FakeMap,
+    Polygon: class Polygon extends FakeOverlay {},
+    CircleMarker: class CircleMarker extends FakeOverlay {},
+    Polyline: class Polyline extends FakeOverlay {},
+  }
+  global.html2canvas = async (node) => ({
+    toDataURL: () => `data:image/png;base64,${Buffer.from(node.style.cssText || 'snapshot').toString('base64')}`,
+  })
+
+  try {
+    const snapshots = await ctx.captureAgentVisualSnapshots()
+
+    assert.deepEqual(snapshots.map((item) => item.kind), ['overview_map', 'poi_map', 'h3_map'])
+    assert.equal(snapshots.every((item) => item.data_url.startsWith('data:image/png;base64,')), true)
+    assert.equal(ctx.activeStep3Panel, 'agent')
+    assert.equal(ctx.poiSubTab, 'category')
+    assert.equal(maps.length, 3)
+    assert.equal(maps.every((map) => map.destroyed), true)
+    assert.equal(appended.length, 3)
+    assert.equal(maps[1].overlays.some((overlay) => overlay.kind === 'CircleMarker'), true)
+    assert.equal(maps[2].overlays.some((overlay) => overlay.kind === 'CircleMarker'), false)
+  } finally {
+    global.document = originalDocument
+    global.window.AMap = originalAMap
+    global.AMap = originalAMap
+    global.html2canvas = originalHtml2canvas
+  }
+})
+
+test('agent visual snapshot cache mirror is dev gated', () => {
+  const originalDocument = global.document
+  const created = []
+  const body = {
+    appendChild(node) {
+      created.push(node)
+      node.parentNode = this
+    },
+  }
+  global.document = {
+    getElementById() { return created.find((node) => node.id === '__agent_visual_snapshot_cache__') || null },
+    createElement(tag) {
+      return {
+        tag,
+        id: '',
+        type: '',
+        textContent: '',
+        style: { display: '' },
+      }
+    },
+    body,
+  }
+  try {
+    const ctx = createAgentContext()
+    ctx.shouldMirrorAgentVisualSnapshotCacheForDev = () => false
+    ctx.commitAgentVisualSnapshotCache({
+      status: 'ready',
+      fingerprint: 'a',
+      visual_snapshots: [{ snapshot_id: 's1', kind: 'overview_map', data_url: 'data:image/jpeg;base64,abc' }],
+    })
+    assert.equal(created.length, 0)
+
+    ctx.shouldMirrorAgentVisualSnapshotCacheForDev = () => true
+    ctx.commitAgentVisualSnapshotCache({
+      status: 'ready',
+      fingerprint: 'b',
+      visual_snapshots: [{ snapshot_id: 's2', kind: 'poi_map', data_url: 'data:image/jpeg;base64,def' }],
+    })
+    assert.equal(created.length, 1)
+    assert.equal(created[0].type, 'application/json')
+    assert.equal(JSON.parse(created[0].textContent).visual_snapshots[0].snapshot_id, 's2')
+  } finally {
+    global.document = originalDocument
+  }
+})
+
 test('submitAgentTurn ignores duplicate submit while active session is running', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true

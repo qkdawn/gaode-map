@@ -1829,6 +1829,473 @@ function createAgentRuntimeMethods() {
       }
       return targets.slice(0, snapshotLimit)
     },
+    canCaptureAgentOffscreenVisualSnapshots() {
+      const amap = this.getAgentAmapSdk()
+      return typeof document !== 'undefined'
+        && typeof window !== 'undefined'
+        && amap
+        && typeof amap.Map === 'function'
+        && typeof html2canvas === 'function'
+    },
+    getAgentAmapSdk() {
+      if (typeof window !== 'undefined' && window.AMap) return window.AMap
+      if (typeof globalThis !== 'undefined' && globalThis.AMap) return globalThis.AMap
+      return null
+    },
+    getAgentVisualSnapshotRenderSize() {
+      return { width: 960, height: 960 }
+    },
+    normalizeAgentSnapshotLngLat(value = null) {
+      if (Array.isArray(value) && value.length >= 2) {
+        const lng = Number(value[0])
+        const lat = Number(value[1])
+        return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null
+      }
+      if (value && typeof value === 'object') {
+        const lng = Number(value.lng ?? value.longitude ?? value.x)
+        const lat = Number(value.lat ?? value.latitude ?? value.y)
+        return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null
+      }
+      return null
+    },
+    normalizeAgentSnapshotRing(source = []) {
+      const ring = cloneArray(source).map((point) => this.normalizeAgentSnapshotLngLat(point)).filter(Boolean)
+      if (ring.length < 3) return []
+      const first = ring[0]
+      const last = ring[ring.length - 1]
+      if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+        ring.push([first[0], first[1]])
+      }
+      return ring
+    },
+    buildAgentSnapshotScopeRing() {
+      const snapshot = this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {}
+      const polygon = snapshot && snapshot.scope && Array.isArray(snapshot.scope.polygon) ? snapshot.scope.polygon : []
+      if (polygon.length && Array.isArray(polygon[0]) && this.normalizeAgentSnapshotLngLat(polygon[0])) {
+        return this.normalizeAgentSnapshotRing(polygon)
+      }
+      if (polygon.length && Array.isArray(polygon[0])) {
+        return this.normalizeAgentSnapshotRing(polygon[0])
+      }
+      return []
+    },
+    addAgentSnapshotScopeOverlay(map = null, overlays = [], options = {}) {
+      const ring = this.buildAgentSnapshotScopeRing()
+      const amap = this.getAgentAmapSdk()
+      if (!map || !ring.length || !amap || typeof amap.Polygon !== 'function') return null
+      const polygon = new amap.Polygon({
+        path: ring,
+        strokeColor: options.strokeColor || '#f97316',
+        strokeWeight: Number(options.strokeWeight || 2),
+        strokeOpacity: Number(options.strokeOpacity || 0.95),
+        fillColor: options.fillColor || '#f97316',
+        fillOpacity: Number(options.fillOpacity ?? 0.03),
+        zIndex: Number(options.zIndex || 120),
+        bubble: true,
+      })
+      polygon.setMap(map)
+      overlays.push(polygon)
+      return polygon
+    },
+    getAgentSnapshotFeatureRings(feature = null) {
+      const geometry = feature && feature.geometry ? feature.geometry : {}
+      const type = asText(geometry.type)
+      const coordinates = cloneArray(geometry.coordinates)
+      if (type === 'Polygon') {
+        return coordinates.slice(0, 1).map((ring) => this.normalizeAgentSnapshotRing(ring)).filter((ring) => ring.length >= 3)
+      }
+      if (type === 'MultiPolygon') {
+        return coordinates.flatMap((polygon) => cloneArray(polygon).slice(0, 1).map((ring) => this.normalizeAgentSnapshotRing(ring))).filter((ring) => ring.length >= 3)
+      }
+      return []
+    },
+    getAgentSnapshotFeatureLines(feature = null) {
+      const geometry = feature && feature.geometry ? feature.geometry : {}
+      const type = asText(geometry.type)
+      const coordinates = cloneArray(geometry.coordinates)
+      if (type === 'LineString') {
+        const line = coordinates.map((point) => this.normalizeAgentSnapshotLngLat(point)).filter(Boolean)
+        return line.length >= 2 ? [line] : []
+      }
+      if (type === 'MultiLineString') {
+        return coordinates.map((line) => cloneArray(line).map((point) => this.normalizeAgentSnapshotLngLat(point)).filter(Boolean)).filter((line) => line.length >= 2)
+      }
+      return []
+    },
+    agentSnapshotColorFromRatio(ratio = 0, palette = ['#dbeafe', '#60a5fa', '#22c55e', '#f59e0b', '#ef4444']) {
+      const value = Math.max(0, Math.min(1, Number(ratio) || 0))
+      const index = Math.max(0, Math.min(palette.length - 1, Math.floor(value * palette.length)))
+      return palette[index]
+    },
+    addAgentSnapshotPolygonFeatures(map = null, overlays = [], features = [], style = {}) {
+      const amap = this.getAgentAmapSdk()
+      if (!map || !amap || typeof amap.Polygon !== 'function') return 0
+      let count = 0
+      cloneArray(features).forEach((feature) => {
+        const props = feature && typeof feature === 'object' ? (feature.properties || {}) : {}
+        this.getAgentSnapshotFeatureRings(feature).forEach((ring) => {
+          const polygon = new amap.Polygon({
+            path: ring,
+            strokeColor: asText(props.strokeColor) || style.strokeColor || '#64748b',
+            strokeWeight: Number(props.strokeWeight ?? style.strokeWeight ?? 0.9),
+            strokeOpacity: Number(style.strokeOpacity ?? 0.78),
+            fillColor: asText(props.fillColor) || style.fillColor || '#93c5fd',
+            fillOpacity: Number(props.fillOpacity ?? style.fillOpacity ?? 0.28),
+            zIndex: Number(style.zIndex || 80),
+            clickable: false,
+            bubble: true,
+          })
+          polygon.setMap(map)
+          overlays.push(polygon)
+          count += 1
+        })
+      })
+      return count
+    },
+    getAgentSnapshotPoiColor(type = '') {
+      const text = asText(type)
+      if (/餐饮|美食|food|restaurant/i.test(text)) return '#a855f7'
+      if (/购物|shop|mall/i.test(text)) return '#facc15'
+      if (/科教|教育|文化|school|university/i.test(text)) return '#0ea5e9'
+      if (/交通|transport/i.test(text)) return '#14b8a6'
+      if (/公司|企业|office/i.test(text)) return '#64748b'
+      if (/医疗|hospital/i.test(text)) return '#ef4444'
+      if (/住宿|hotel/i.test(text)) return '#84cc16'
+      return '#10b981'
+    },
+    renderAgentOffscreenPoiLayer(map = null, overlays = []) {
+      const amap = this.getAgentAmapSdk()
+      if (!map || !amap) return 0
+      const pois = cloneArray(this.allPoisDetails)
+      let count = 0
+      pois.slice(0, 5000).forEach((poi) => {
+        const position = this.normalizeAgentSnapshotLngLat(poi && (poi.location || [poi.lng, poi.lat]))
+        if (!position) return
+        const color = this.getAgentSnapshotPoiColor(poi && (poi.type || poi.category || poi.type_name))
+        const marker = typeof amap.CircleMarker === 'function'
+          ? new amap.CircleMarker({
+              center: position,
+              radius: 4,
+              strokeColor: '#ffffff',
+              strokeWeight: 1,
+              strokeOpacity: 0.9,
+              fillColor: color,
+              fillOpacity: 0.78,
+              zIndex: 150,
+              bubble: true,
+            })
+          : (typeof amap.Marker === 'function' ? new amap.Marker({ position, zIndex: 150 }) : null)
+        if (!marker) return
+        marker.setMap(map)
+        overlays.push(marker)
+        count += 1
+      })
+      return count
+    },
+    buildAgentOffscreenH3Features() {
+      const source = Array.isArray(this.h3AnalysisGridFeatures) && this.h3AnalysisGridFeatures.length
+        ? this.h3AnalysisGridFeatures
+        : (Array.isArray(this.poiGridFeatures) ? this.poiGridFeatures : [])
+      const counts = cloneArray(source).map((feature) => Number(feature && feature.properties && (feature.properties.poi_count || feature.properties.count || 0))).filter((value) => Number.isFinite(value))
+      const maxCount = Math.max(1, ...counts, Number(this.h3AnalysisSummary && (this.h3AnalysisSummary.max_poi_count || this.h3AnalysisSummary.max_count) || 0))
+      return cloneArray(source).map((feature) => {
+        const props = Object.assign({}, feature && feature.properties)
+        const count = Number(props.poi_count || props.count || 0)
+        const ratio = maxCount > 0 ? count / maxCount : 0
+        return {
+          type: (feature && feature.type) || 'Feature',
+          geometry: feature && feature.geometry,
+          properties: Object.assign({}, props, {
+            fillColor: props.fillColor || this.agentSnapshotColorFromRatio(ratio, ['#eff6ff', '#bfdbfe', '#60a5fa', '#2563eb', '#1e3a8a']),
+            fillOpacity: props.fillOpacity ?? (count > 0 ? 0.42 : 0.10),
+            strokeColor: props.strokeColor || '#475569',
+            strokeWeight: props.strokeWeight ?? 0.75,
+          }),
+        }
+      })
+    },
+    buildAgentOffscreenPopulationFeatures() {
+      if (typeof this.buildPopulationStyledFeatures === 'function') {
+        const features = this.buildPopulationStyledFeatures()
+        if (features && features.length) return features
+      }
+      return cloneArray((this.populationGrid && this.populationGrid.features) || [])
+    },
+    buildAgentOffscreenNightlightFeatures() {
+      if (typeof this.buildNightlightStyledFeatures === 'function') {
+        const features = this.buildNightlightStyledFeatures()
+        if (features && features.length) return features
+      }
+      return cloneArray((this.nightlightGrid && this.nightlightGrid.features) || [])
+    },
+    getAgentRoadMetricField(metric = '') {
+      if (typeof this.resolveRoadSyntaxMetricField === 'function') {
+        return this.resolveRoadSyntaxMetricField(metric)
+      }
+      if (metric === 'control') return 'control_score'
+      if (metric === 'depth') return 'depth_score'
+      if (metric === 'choice') return 'choice_score'
+      if (metric === 'integration') return 'integration_score'
+      if (metric === 'intelligibility') return 'intelligibility_score'
+      return 'connectivity_score'
+    },
+    getAgentRoadFallbackField(metric = '') {
+      if (typeof this.resolveRoadSyntaxFallbackField === 'function') {
+        return this.resolveRoadSyntaxFallbackField(metric)
+      }
+      if (metric === 'choice') return 'choice_global'
+      if (metric === 'integration') return 'integration_global'
+      return this.getAgentRoadMetricField(metric)
+    },
+    getAgentRoadMetricScore(props = {}, metric = '') {
+      const fields = [
+        this.getAgentRoadMetricField(metric),
+        this.getAgentRoadFallbackField(metric),
+        `${metric}_score`,
+        metric,
+        'value',
+      ].filter(Boolean)
+      for (const field of fields) {
+        const value = Number(props && props[field])
+        if (Number.isFinite(value)) return Math.max(0, Math.min(1, value))
+      }
+      return NaN
+    },
+    getAgentRoadStyle(props = {}, metric = '') {
+      if (typeof this.buildRoadSyntaxStyleForMetric === 'function') {
+        return this.buildRoadSyntaxStyleForMetric(
+          props,
+          this.getAgentRoadMetricField(metric),
+          this.getAgentRoadFallbackField(metric),
+          metric,
+          false,
+        )
+      }
+      const score = this.getAgentRoadMetricScore(props, metric)
+      return {
+        strokeColor: this.agentSnapshotColorFromRatio(Number.isFinite(score) ? score : 0.35, ['#38bdf8', '#22c55e', '#facc15', '#fb923c', '#ef4444']),
+        strokeWeight: metric === 'intelligibility' ? 2 : 2.2,
+        strokeOpacity: metric === 'intelligibility' ? 0.62 : 0.86,
+        zIndex: 110,
+      }
+    },
+    renderAgentOffscreenRoadLayer(map = null, overlays = [], metric = '') {
+      const amap = this.getAgentAmapSdk()
+      if (!map || !amap || typeof amap.Polyline !== 'function') return 0
+      let count = 0
+      cloneArray(this.roadSyntaxRoadFeatures).forEach((feature) => {
+        const props = (feature && feature.properties) || {}
+        const style = this.getAgentRoadStyle(props, metric)
+        this.getAgentSnapshotFeatureLines(feature).forEach((path) => {
+          const line = new amap.Polyline({
+            path,
+            strokeColor: style.strokeColor || '#2563eb',
+            strokeWeight: Number(style.strokeWeight || 2),
+            strokeOpacity: Number(style.strokeOpacity ?? 0.82),
+            zIndex: Number(style.zIndex || 110),
+            bubble: true,
+          })
+          line.setMap(map)
+          overlays.push(line)
+          count += 1
+        })
+      })
+      return count
+    },
+    createAgentOffscreenSnapshotHost(size = {}) {
+      const width = Math.max(320, Number(size.width || 960))
+      const height = Math.max(320, Number(size.height || 960))
+      const host = document.createElement('div')
+      host.setAttribute('data-agent-offscreen-snapshot-host', '1')
+      host.style.cssText = [
+        'position:fixed',
+        'left:-20000px',
+        'top:0',
+        `width:${width}px`,
+        `height:${height}px`,
+        'background:#ffffff',
+        'overflow:hidden',
+        'pointer-events:none',
+        'z-index:-1',
+      ].join(';')
+      document.body.appendChild(host)
+      return host
+    },
+    cleanAgentOffscreenMapChrome(mapEl = null) {
+      if (!mapEl || typeof mapEl.querySelectorAll !== 'function') return
+      mapEl.querySelectorAll('.amap-logo,.amap-copyright,.amap-controlbar,.amap-toolbar,.amap-scalecontrol').forEach((node) => {
+        node.style.display = 'none'
+      })
+    },
+    waitForAgentOffscreenImages(root = null, timeoutMs = 3000) {
+      const images = Array.from(root && root.querySelectorAll ? root.querySelectorAll('img') : [])
+      if (!images.length) return Promise.resolve(true)
+      let pending = images.filter((img) => !(img.complete && img.naturalWidth > 0))
+      if (!pending.length) return Promise.resolve(true)
+      return new Promise((resolve) => {
+        let done = false
+        const finish = (ok) => {
+          if (done) return
+          done = true
+          pending.forEach((img) => {
+            img.removeEventListener('load', check)
+            img.removeEventListener('error', check)
+          })
+          resolve(ok)
+        }
+        const check = () => {
+          pending = pending.filter((img) => !(img.complete && img.naturalWidth > 0))
+          if (!pending.length) finish(true)
+        }
+        pending.forEach((img) => {
+          img.addEventListener('load', check, { once: true })
+          img.addEventListener('error', check, { once: true })
+        })
+        window.setTimeout(() => finish(false), Math.max(500, Number(timeoutMs) || 3000))
+        check()
+      })
+    },
+    async waitForAgentOffscreenSnapshotPaint(mapEl = null, waitMs = 900) {
+      await this.waitForAgentVisualSnapshotPaint()
+      await (this._sleepForExport ? this._sleepForExport(waitMs) : new Promise((resolve) => window.setTimeout(resolve, waitMs)))
+      this.cleanAgentOffscreenMapChrome(mapEl)
+      await this.waitForAgentOffscreenImages(mapEl, 3000)
+      await this.waitForAgentVisualSnapshotPaint()
+    },
+    fitAgentOffscreenSnapshotMap(map = null, fitOverlays = []) {
+      if (!map) return
+      const overlays = cloneArray(fitOverlays).filter(Boolean)
+      try {
+        if (overlays.length && typeof map.setFitView === 'function') {
+          map.setFitView(overlays, false, [42, 42, 42, 42])
+          return
+        }
+      } catch (_) {}
+      const bounds = this.getAgentScopeBounds()
+      const amap = this.getAgentAmapSdk()
+      if (bounds && amap && amap.LngLat && amap.Bounds && typeof map.setBounds === 'function') {
+        try {
+          map.setBounds(new amap.Bounds(new amap.LngLat(bounds.west, bounds.south), new amap.LngLat(bounds.east, bounds.north)))
+          return
+        } catch (_) {}
+      }
+      const view = this.getAgentMapViewState()
+      if (view && Array.isArray(view.center) && typeof map.setCenter === 'function') map.setCenter(view.center)
+      if (view && Number.isFinite(Number(view.zoom)) && typeof map.setZoom === 'function') map.setZoom(Number(view.zoom))
+    },
+    renderAgentOffscreenSnapshotTarget(map = null, target = {}, overlays = []) {
+      const fitOverlays = []
+      const scopeOverlay = this.addAgentSnapshotScopeOverlay(map, overlays, {
+        fillOpacity: asText(target.kind) === 'overview_map' ? 0.06 : 0.02,
+        strokeWeight: 2,
+        zIndex: 180,
+      })
+      if (scopeOverlay) fitOverlays.push(scopeOverlay)
+      const kind = asText(target.kind)
+      if (kind === 'poi_map') {
+        this.renderAgentOffscreenPoiLayer(map, overlays)
+      } else if (kind === 'h3_map') {
+        this.addAgentSnapshotPolygonFeatures(map, overlays, this.buildAgentOffscreenH3Features(), {
+          strokeColor: '#475569',
+          strokeWeight: 0.8,
+          fillColor: '#bfdbfe',
+          fillOpacity: 0.34,
+          zIndex: 90,
+        })
+      } else if (kind === 'population_map') {
+        this.addAgentSnapshotPolygonFeatures(map, overlays, this.buildAgentOffscreenPopulationFeatures(), {
+          strokeColor: '#ffffff',
+          strokeWeight: 0.7,
+          fillColor: '#f4f6f8',
+          fillOpacity: 0.20,
+          zIndex: 90,
+        })
+      } else if (kind === 'nightlight_map') {
+        const container = map && typeof map.getContainer === 'function' ? map.getContainer() : null
+        if (container) {
+          container.style.backgroundColor = '#162033'
+          container.style.backgroundImage = 'radial-gradient(circle at 52% 42%, rgba(251,191,36,0.1) 0%, rgba(35,49,74,0.82) 28%, rgba(22,32,51,0.94) 62%, rgba(10,15,27,1) 100%)'
+        }
+        this.addAgentSnapshotPolygonFeatures(map, overlays, this.buildAgentOffscreenNightlightFeatures(), {
+          strokeColor: '#94a3b8',
+          strokeWeight: 0.7,
+          fillColor: '#f59e0b',
+          fillOpacity: 0.36,
+          zIndex: 90,
+        })
+      } else if (kind === 'road_map') {
+        this.renderAgentOffscreenRoadLayer(map, overlays, asText(target.metric))
+      }
+      return fitOverlays
+    },
+    async captureAgentOffscreenVisualSnapshot(target = {}) {
+      const size = this.getAgentVisualSnapshotRenderSize()
+      const host = this.createAgentOffscreenSnapshotHost(size)
+      const overlays = []
+      let map = null
+      const amap = this.getAgentAmapSdk()
+      try {
+        if (!amap || typeof amap.Map !== 'function') {
+          throw new Error('offscreen_amap_unavailable')
+        }
+        map = new amap.Map(host, {
+          zoom: 13,
+          viewMode: '2D',
+          resizeEnable: false,
+          features: asText(target.kind) === 'nightlight_map' ? ['bg', 'road'] : ['bg', 'point', 'road', 'building'],
+        })
+        const fitOverlays = this.renderAgentOffscreenSnapshotTarget(map, target, overlays)
+        this.fitAgentOffscreenSnapshotMap(map, fitOverlays)
+        await this.waitForAgentOffscreenSnapshotPaint(host, 900)
+        const canvas = await html2canvas(host, {
+          useCORS: true,
+          backgroundColor: asText(target.kind) === 'nightlight_map' ? '#162033' : '#ffffff',
+          scale: 1,
+          logging: false,
+        })
+        const dataUrl = canvas && typeof canvas.toDataURL === 'function' ? canvas.toDataURL('image/png') : ''
+        if (!asText(dataUrl).startsWith('data:image/png')) {
+          throw new Error(`${asText(target.kind) || 'map'}_capture_unavailable`)
+        }
+        return dataUrl
+      } finally {
+        overlays.forEach((overlay) => {
+          try {
+            if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null)
+          } catch (_) {}
+        })
+        try {
+          if (map && typeof map.destroy === 'function') map.destroy()
+        } catch (_) {}
+        if (host && host.parentNode) host.parentNode.removeChild(host)
+      }
+    },
+    async captureAgentOffscreenVisualSnapshots(targets = []) {
+      const snapshots = []
+      for (const target of cloneArray(targets)) {
+        const warnings = []
+        let dataUrl = ''
+        try {
+          const rawDataUrl = await this.captureAgentOffscreenVisualSnapshot(target)
+          dataUrl = await this.compressAgentVisualSnapshotDataUrl(rawDataUrl)
+          if (!dataUrl) warnings.push(`${asText(target.kind) || 'map'}_capture_too_large`)
+        } catch (err) {
+          const message = err && err.message ? err.message : String(err)
+          warnings.push(`${asText(target.kind) || 'map'}_capture_failed: ${message}`)
+        }
+        snapshots.push({
+          snapshot_id: `visual-${Date.now().toString(36)}-${snapshots.length + 1}`,
+          kind: asText(target.kind),
+          title: asText(target.title),
+          data_url: dataUrl,
+          source: 'frontend_offscreen_map',
+          captured_at: new Date().toISOString(),
+          bounds: asText(target.fit) === 'road' ? (this.getAgentRoadFeatureBounds() || this.getAgentScopeBounds() || {}) : (this.getAgentScopeBounds() || {}),
+          warnings,
+        })
+      }
+      return snapshots.slice(0, 12)
+    },
     applyAgentVisualSnapshotPanelState(target = {}) {
       const key = asText(target.key)
       if (key === 'poi') {
@@ -1908,7 +2375,7 @@ function createAgentRuntimeMethods() {
         image.src = raw
       })
     },
-    async captureAgentVisualSnapshots() {
+    async captureAgentLegacyVisualSnapshots(targets = null) {
       if (typeof this._captureMapSnapshotBase64 !== 'function') {
         return [{
           snapshot_id: `visual-${Date.now().toString(36)}-missing-capture`,
@@ -1923,10 +2390,10 @@ function createAgentRuntimeMethods() {
       }
       const view = this.getAgentMapViewState()
       const layerState = this.getAgentVisualLayerState()
-      const targets = this.buildAgentVisualSnapshotTargets()
+      const snapshotTargets = cloneArray(targets).length ? cloneArray(targets) : this.buildAgentVisualSnapshotTargets()
       const snapshots = []
       try {
-        for (const target of targets) {
+        for (const target of snapshotTargets) {
           const warnings = []
           let bounds = {}
           try {
@@ -1980,6 +2447,20 @@ function createAgentRuntimeMethods() {
       }
       return snapshots.slice(0, 12)
     },
+    async captureAgentVisualSnapshots() {
+      const targets = this.buildAgentVisualSnapshotTargets()
+      if (this.canCaptureAgentOffscreenVisualSnapshots()) {
+        return this.captureAgentOffscreenVisualSnapshots(targets)
+      }
+      const snapshots = await this.captureAgentLegacyVisualSnapshots(targets)
+      return cloneArray(snapshots).map((snapshot) => ({
+        ...snapshot,
+        warnings: [
+          ...cloneArray(snapshot && snapshot.warnings).map((item) => asText(item)).filter(Boolean),
+          'offscreen_snapshot_unavailable_fallback_to_main_map',
+        ],
+      }))
+    },
     getCachedAgentVisualSnapshots(fingerprint = '') {
       const cache = this.agentVisualSnapshotCache && typeof this.agentVisualSnapshotCache === 'object'
         ? this.agentVisualSnapshotCache
@@ -2001,6 +2482,21 @@ function createAgentRuntimeMethods() {
         warnings: asText(reason) ? [asText(reason)] : [],
       }
     },
+    shouldMirrorAgentVisualSnapshotCacheForDev() {
+      return !!(import.meta && import.meta.env && import.meta.env.DEV)
+    },
+    mirrorAgentVisualSnapshotCacheForDev(cache = {}) {
+      if (typeof document === 'undefined' || !this.shouldMirrorAgentVisualSnapshotCacheForDev()) return
+      let mirror = document.getElementById('__agent_visual_snapshot_cache__')
+      if (!mirror) {
+        mirror = document.createElement('script')
+        mirror.id = '__agent_visual_snapshot_cache__'
+        mirror.type = 'application/json'
+        mirror.style.display = 'none'
+        document.body.appendChild(mirror)
+      }
+      mirror.textContent = JSON.stringify(cache)
+    },
     commitAgentVisualSnapshotCache(cache = {}) {
       const nextCache = this.normalizeAgentVisualSnapshotCache({
         status: asText(cache.status) || 'ready',
@@ -2010,6 +2506,7 @@ function createAgentRuntimeMethods() {
         warnings: cloneArray(cache.warnings).map((item) => asText(item)).filter(Boolean),
       })
       this.agentVisualSnapshotCache = nextCache
+      this.mirrorAgentVisualSnapshotCacheForDev(nextCache)
       return nextCache
     },
     normalizeAgentVisualSnapshotCache(cache = {}) {
