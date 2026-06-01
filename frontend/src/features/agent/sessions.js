@@ -88,6 +88,7 @@ function createAnalysisAgentInitialState() {
     agentHistoryCollapsedGroups: {},
     agentTurnAbortController: null,
     agentRunRegistry: {},
+    agentVisualSnapshotCache: {},
     agentSessionMenuId: '',
     agentRenameDialogOpen: false,
     agentRenameSessionId: '',

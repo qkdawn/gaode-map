@@ -1736,6 +1736,56 @@ function createAgentRuntimeMethods() {
       })
       return waitFrame().then(waitFrame).then(() => this._sleepForExport ? this._sleepForExport(120) : undefined)
     },
+    buildAgentVisualSnapshotFingerprint() {
+      const snapshot = typeof this.buildAgentAnalysisSnapshot === 'function'
+        ? this.buildAgentAnalysisSnapshot()
+        : {}
+      const summarizeObject = (value = null, keys = []) => {
+        const source = value && typeof value === 'object' ? value : {}
+        const output = {}
+        keys.forEach((key) => {
+          const nextValue = source[key]
+          if (nextValue !== undefined && nextValue !== null && nextValue !== '') output[key] = nextValue
+        })
+        return output
+      }
+      const roadTabs = (typeof this.roadSyntaxMetricTabs === 'function'
+        ? cloneArray(this.roadSyntaxMetricTabs())
+        : []
+      ).map((tab) => asText(tab && tab.value)).filter(Boolean)
+      const fingerprint = {
+        scope: {
+          polygon: cloneArray(snapshot && snapshot.scope && snapshot.scope.polygon),
+          bounds: this.getAgentScopeBounds() || {},
+        },
+        selected_point: summarizeObject(this.selectedPoint, ['name', 'lng', 'lat']),
+        poi: {
+          count: Array.isArray(this.allPoisDetails) ? this.allPoisDetails.length : 0,
+          total: (snapshot && snapshot.poi_summary && snapshot.poi_summary.total) || 0,
+        },
+        h3: {
+          available: !!(this.h3AnalysisSummary || (this.sharedGridMetrics && Object.keys(this.sharedGridMetrics || {}).length)),
+          grid_count: Number(this.h3GridCount || (this.h3AnalysisSummary && this.h3AnalysisSummary.grid_count) || 0) || 0,
+          feature_count: Array.isArray(this.h3AnalysisGridFeatures) ? this.h3AnalysisGridFeatures.length : 0,
+          mode: asText(this.h3StructureFillMode || this.h3MetricView),
+        },
+        population: {
+          available: !!(this.populationSummary || this.populationOverview || this.populationLayer || this.populationRaster || this.populationAnalysisResult),
+          summary: summarizeObject((this.populationSummary || this.populationOverview || {}).summary || this.populationSummary || this.populationOverview, ['total_population', 'cell_count', 'grid_count']),
+        },
+        nightlight: {
+          available: !!(this.nightlightSummary || this.nightlightOverview || this.nightlightLayer || this.nightlightRaster || this.nightlightAnalysisResult),
+          summary: summarizeObject((this.nightlightSummary || this.nightlightOverview || {}).summary || this.nightlightSummary || this.nightlightOverview, ['mean_radiance', 'max_radiance', 'lit_pixel_ratio', 'cell_count']),
+        },
+        road: {
+          available: !!(this.roadSyntaxSummary || (Array.isArray(this.roadSyntaxRoadFeatures) && this.roadSyntaxRoadFeatures.length)),
+          feature_count: Array.isArray(this.roadSyntaxRoadFeatures) ? this.roadSyntaxRoadFeatures.length : 0,
+          summary: summarizeObject(this.roadSyntaxSummary, ['node_count', 'edge_count', 'segment_count']),
+          metric_tabs: roadTabs,
+        },
+      }
+      return JSON.stringify(fingerprint)
+    },
     buildAgentVisualSnapshotTargets() {
       const snapshotLimit = 12
       const targets = [{ kind: 'overview_map', title: '当前地图总览', key: '' }]
@@ -1930,6 +1980,108 @@ function createAgentRuntimeMethods() {
       }
       return snapshots.slice(0, 12)
     },
+    getCachedAgentVisualSnapshots(fingerprint = '') {
+      const cache = this.agentVisualSnapshotCache && typeof this.agentVisualSnapshotCache === 'object'
+        ? this.agentVisualSnapshotCache
+        : {}
+      if (asText(cache.status) !== 'ready') return []
+      if (asText(cache.fingerprint) !== asText(fingerprint)) return []
+      return cloneArray(cache.visual_snapshots || cache.visualSnapshots)
+    },
+    invalidateAgentVisualSnapshotCache(reason = '') {
+      this.agentVisualSnapshotCache = {
+        status: 'invalidated',
+        fingerprint: '',
+        generated_at: '',
+        visual_snapshots: [],
+        warnings: asText(reason) ? [asText(reason)] : [],
+      }
+    },
+    commitAgentVisualSnapshotCache(cache = {}) {
+      const nextCache = {
+        status: asText(cache.status) || 'ready',
+        fingerprint: asText(cache.fingerprint),
+        generated_at: asText(cache.generated_at || cache.generatedAt) || new Date().toISOString(),
+        visual_snapshots: cloneArray(cache.visual_snapshots || cache.visualSnapshots),
+        warnings: cloneArray(cache.warnings).map((item) => asText(item)).filter(Boolean),
+      }
+      this.agentVisualSnapshotCache = nextCache
+      return nextCache
+    },
+    async ensureAgentVisualSnapshotCache() {
+      const fingerprint = this.buildAgentVisualSnapshotFingerprint()
+      const currentCache = this.agentVisualSnapshotCache && typeof this.agentVisualSnapshotCache === 'object'
+        ? this.agentVisualSnapshotCache
+        : {}
+      if (asText(currentCache.status) === 'failed' && asText(currentCache.fingerprint) === fingerprint) {
+        return []
+      }
+      const cached = this.getCachedAgentVisualSnapshots(fingerprint)
+      if (cached.length) return cached
+
+      const preparingItem = normalizeAgentThinkingItem({
+        id: 'frontend-visual-snapshot-cache',
+        phase: 'connecting',
+        title: '准备地图视觉证据',
+        detail: '第一次提问正在生成当前分析图层快照，后续追问会直接复用。',
+        state: 'active',
+      })
+      if (this.activeAgentSessionId) {
+        this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
+          ...session,
+          thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, preparingItem),
+        }))
+      }
+
+      try {
+        const snapshots = await this.captureAgentVisualSnapshots()
+        const warnings = cloneArray(snapshots)
+          .flatMap((item) => cloneArray(item && item.warnings))
+          .map((item) => asText(item))
+          .filter(Boolean)
+        this.commitAgentVisualSnapshotCache({
+          status: 'ready',
+          fingerprint,
+          visual_snapshots: snapshots,
+          warnings,
+        })
+        const completedItem = normalizeAgentThinkingItem({
+          ...preparingItem,
+          detail: snapshots.length
+            ? `已生成 ${snapshots.length} 张地图视觉快照，本轮和后续追问将复用这组证据。`
+            : '未生成可用地图视觉快照，本轮将继续使用结构化证据。',
+          state: 'completed',
+        })
+        if (this.activeAgentSessionId) {
+          this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
+            ...session,
+            thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, completedItem),
+          }))
+        }
+        return cloneArray(snapshots)
+      } catch (snapshotErr) {
+        const message = snapshotErr && snapshotErr.message ? snapshotErr.message : String(snapshotErr)
+        console.warn('Agent visual snapshots failed; continuing text-only', snapshotErr)
+        this.commitAgentVisualSnapshotCache({
+          status: 'failed',
+          fingerprint,
+          visual_snapshots: [],
+          warnings: [`地图视觉快照生成失败：${message}`],
+        })
+        const failedItem = normalizeAgentThinkingItem({
+          ...preparingItem,
+          detail: '地图视觉快照生成失败，本轮将继续使用文字与结构化证据。',
+          state: 'completed',
+        })
+        if (this.activeAgentSessionId) {
+          this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
+            ...session,
+            thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, failedItem),
+          }))
+        }
+        return []
+      }
+    },
     async commitTurnResult(turnContext = {}, finalResponse = null) {
       const targetSessionId = asText(turnContext.targetSessionId)
       this.stopAgentThinkingTimer(targetSessionId)
@@ -2025,13 +2177,7 @@ function createAgentRuntimeMethods() {
           this.maybeAutoScrollAgentThread({ sessionId: targetSessionId, force: true })
         }
 
-        let visualSnapshots = []
-        try {
-          visualSnapshots = await this.captureAgentVisualSnapshots()
-        } catch (snapshotErr) {
-          console.warn('Agent visual snapshots failed; continuing text-only', snapshotErr)
-          visualSnapshots = []
-        }
+        const visualSnapshots = await this.ensureAgentVisualSnapshotCache()
 
         const res = await fetch('/api/v1/analysis/agent/turn/stream', {
           method: 'POST',

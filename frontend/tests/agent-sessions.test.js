@@ -1807,27 +1807,31 @@ test('submitAgentTurn sends ready attachment ids without embedding file content'
   assert.equal(JSON.stringify(requestBody.messages).includes('plan.pdf'), false)
 })
 
-test('submitAgentTurn sends automatic visual snapshots when available', async () => {
+test('submitAgentTurn caches automatic visual snapshots after first capture', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域的商业特征'
-  ctx.captureAgentVisualSnapshots = async () => [
-    {
-      snapshot_id: 'visual-road',
-      kind: 'road_map',
-      title: '路网分析全范围图层',
-      data_url: 'data:image/jpeg;base64,abc',
-      source: 'frontend_map',
-      bounds: { west: 1, south: 2, east: 3, north: 4 },
-      warnings: [],
-    },
-  ]
+  let captureCount = 0
+  ctx.captureAgentVisualSnapshots = async () => {
+    captureCount += 1
+    return [
+      {
+        snapshot_id: 'visual-road',
+        kind: 'road_map',
+        title: '路网分析全范围图层',
+        data_url: 'data:image/jpeg;base64,abc',
+        source: 'frontend_map',
+        bounds: { west: 1, south: 2, east: 3, north: 4 },
+        warnings: [],
+      },
+    ]
+  }
 
-  let requestBody = null
+  const requestBodies = []
   global.fetch = async (url, options = {}) => {
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
-    requestBody = JSON.parse(String(options.body || '{}'))
+    requestBodies.push(JSON.parse(String(options.body || '{}')))
     return createSseResponse([
       {
         type: 'final',
@@ -1846,9 +1850,112 @@ test('submitAgentTurn sends automatic visual snapshots when available', async ()
   }
 
   await ctx.submitAgentTurn()
+  ctx.agentInput = '继续解释'
+  await ctx.submitAgentTurn()
 
-  assert.equal(requestBody.visual_snapshots[0].kind, 'road_map')
-  assert.equal(requestBody.visual_snapshots[0].data_url, 'data:image/jpeg;base64,abc')
+  assert.equal(captureCount, 1)
+  assert.equal(requestBodies.length, 2)
+  assert.equal(requestBodies[0].visual_snapshots[0].kind, 'road_map')
+  assert.equal(requestBodies[1].visual_snapshots[0].data_url, 'data:image/jpeg;base64,abc')
+  assert.equal(ctx.agentVisualSnapshotCache.status, 'ready')
+  assert.equal(ctx.agentVisualSnapshotCache.visual_snapshots[0].snapshot_id, 'visual-road')
+})
+
+test('submitAgentTurn refreshes visual snapshot cache when fingerprint changes', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '总结这个区域'
+  let captureCount = 0
+  ctx.captureAgentVisualSnapshots = async () => {
+    captureCount += 1
+    return [
+      { snapshot_id: `visual-${captureCount}`, kind: 'overview_map', title: '当前地图总览', data_url: `data:image/jpeg;base64,${captureCount}` },
+    ]
+  }
+
+  const requestBodies = []
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBodies.push(JSON.parse(String(options.body || '{}')))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: { answer: '已完成', panel_payloads: {} },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: {},
+            plan: {},
+          },
+        },
+      },
+    ])
+  }
+
+  await ctx.submitAgentTurn()
+  ctx.agentInput = '换了结果后再总结'
+  ctx.allPoisDetails = [{ id: 'poi-1' }]
+  await ctx.submitAgentTurn()
+
+  assert.equal(captureCount, 2)
+  assert.equal(requestBodies[0].visual_snapshots[0].snapshot_id, 'visual-1')
+  assert.equal(requestBodies[1].visual_snapshots[0].snapshot_id, 'visual-2')
+})
+
+test('submitAgentTurn continues when visual snapshot cache generation fails', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '总结这个区域'
+  ctx.captureAgentVisualSnapshots = async () => {
+    throw new Error('capture_failed')
+  }
+
+  let requestBody = null
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: { answer: '已完成', panel_payloads: {} },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: {},
+            plan: {},
+          },
+        },
+      },
+    ])
+  }
+
+  await ctx.submitAgentTurn()
+
+  assert.deepEqual(requestBody.visual_snapshots, [])
+  assert.equal(ctx.agentVisualSnapshotCache.status, 'failed')
+  assert.equal(ctx.agentVisualSnapshotCache.warnings[0].includes('capture_failed'), true)
+})
+
+test('ensureAgentVisualSnapshotCache does not retry failed cache for same fingerprint', async () => {
+  const ctx = createAgentContext()
+  let captureCount = 0
+  ctx.captureAgentVisualSnapshots = async () => {
+    captureCount += 1
+    throw new Error('capture_failed')
+  }
+
+  const first = await ctx.ensureAgentVisualSnapshotCache()
+  const second = await ctx.ensureAgentVisualSnapshotCache()
+
+  assert.deepEqual(first, [])
+  assert.deepEqual(second, [])
+  assert.equal(captureCount, 1)
 })
 
 test('submitAgentTurn sends map search context separately from analysis snapshot', async () => {
