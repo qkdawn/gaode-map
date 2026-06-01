@@ -9,6 +9,13 @@ from .schemas import AnalysisSnapshot
 _FULL_DEPTH_DOMAINS = ["poi", "h3", "road", "population", "nightlight"]
 _MAX_SEARCHES = 4
 _MAX_READS = 8
+_COVERAGE_QUERIES = {
+    "poi": "POI 结构 餐饮 科教文化 购物 业态占比 商业供给",
+    "h3": "H3 网格 多核心 热点 机会区 空间结构",
+    "road": "路网 句法 集成度 连接度 可达性 动线",
+    "population": "人口画像 人口总量 年龄 密度 客群",
+    "nightlight": "夜光 活力 夜间 均值 峰值 热点",
+}
 
 
 def _as_text(value: Any) -> str:
@@ -64,7 +71,7 @@ def _query_plan(question: str, payload: Dict[str, Any], available_domains: List[
         domains = [domain for domain in available_domains if domain][:5]
     queries: List[Dict[str, Any]] = []
     if domains:
-        queries.append({"query": text, "domains": domains, "top_k": 6})
+        broad_query = {"query": text, "domains": domains, "top_k": 6}
     if "poi" in available_domains:
         queries.append({"query": f"{text} 地名 锚点 商业 校园 社区 后湖", "domains": ["poi"], "top_k": 4})
     if "road" in available_domains:
@@ -72,6 +79,8 @@ def _query_plan(question: str, payload: Dict[str, Any], available_domains: List[
     vitality_domains = [domain for domain in ("population", "nightlight", "h3") if domain in available_domains]
     if vitality_domains:
         queries.append({"query": f"{text} 人口 夜光 H3 热点 活力 格网", "domains": vitality_domains, "top_k": 4})
+    if domains:
+        queries.append(broad_query)
 
     seen: set[str] = set()
     deduped: List[Dict[str, Any]] = []
@@ -82,6 +91,14 @@ def _query_plan(question: str, payload: Dict[str, Any], available_domains: List[
         seen.add(key)
         deduped.append(item)
     return deduped[:_MAX_SEARCHES]
+
+
+def _coverage_plan(available_domains: List[str]) -> List[Dict[str, Any]]:
+    return [
+        {"query": _COVERAGE_QUERIES[domain], "domains": [domain], "top_k": 3, "coverage_domain": domain}
+        for domain in _FULL_DEPTH_DOMAINS
+        if domain in available_domains
+    ]
 
 
 def _chunk_payload(chunk: KnowledgeChunk) -> Dict[str, Any]:
@@ -112,6 +129,8 @@ def build_finalizer_evidence_pack(
         "available_domains": available_domains,
         "search_queries": [],
         "read_chunks": [],
+        "coverage_domains": [],
+        "missing_coverage_domains": [],
         "warnings": [],
         "evidence_limits": [
             "最终回答只能引用 read_chunks 中实际读取到的具体地名、H3 格子、路网线段、人口/夜光 cell。",
@@ -129,7 +148,8 @@ def build_finalizer_evidence_pack(
     read_ids: set[str] = set()
     read_chunks: List[Dict[str, Any]] = []
     warnings: List[str] = []
-    for planned in _query_plan(question, answer_evidence_payload, available_domains):
+    coverage_domains: List[str] = []
+    for planned in _coverage_plan(available_domains) + _query_plan(question, answer_evidence_payload, available_domains):
         hits = service.search_analysis_context(
             query=_as_text(planned.get("query")),
             domains=[_as_text(item) for item in planned.get("domains") or []],
@@ -139,6 +159,7 @@ def build_finalizer_evidence_pack(
             {
                 "query": _as_text(planned.get("query")),
                 "domains": list(planned.get("domains") or []),
+                "coverage_domain": _as_text(planned.get("coverage_domain")),
                 "hit_count": len(hits),
                 "hit_ids": [hit.chunk_id for hit in hits[:4]],
             }
@@ -156,6 +177,11 @@ def build_finalizer_evidence_pack(
                 continue
             read_ids.add(hit.chunk_id)
             read_chunks.append(_chunk_payload(chunk))
+            coverage_domain = _as_text(planned.get("coverage_domain"))
+            if coverage_domain and coverage_domain not in coverage_domains:
+                coverage_domains.append(coverage_domain)
+            if coverage_domain:
+                break
         if len(read_chunks) >= _MAX_READS:
             break
 
@@ -163,5 +189,7 @@ def build_finalizer_evidence_pack(
         pack["status"] = "empty"
         warnings.append("最终证据检索未读取到可用 chunk，最终回答需保持保守。")
     pack["read_chunks"] = read_chunks
+    pack["coverage_domains"] = coverage_domains
+    pack["missing_coverage_domains"] = [domain for domain in _FULL_DEPTH_DOMAINS if domain in available_domains and domain not in coverage_domains]
     pack["warnings"] = warnings[:8]
     return pack

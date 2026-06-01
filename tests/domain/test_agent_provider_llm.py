@@ -182,6 +182,9 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "finalizer_evidence_pack" in system_prompt
     assert "read_chunks" in system_prompt
     assert "不要只改写压缩摘要" in system_prompt
+    assert "至少 5 个展开段" in system_prompt
+    assert "coverage_domains" in system_prompt
+    assert "不能只抓 POI" in system_prompt
     assert "学生高频低客单" in system_prompt
     assert "target_depth=full" in system_prompt
     assert "target_depth=concise" in system_prompt

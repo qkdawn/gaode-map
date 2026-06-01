@@ -393,6 +393,7 @@ def test_runtime_reads_finalizer_evidence_for_high_value_map_questions(monkeypat
                 map_search_context={
                     "place_anchors": {"names": ["后湖", "湖南师范大学", "中南大学"]},
                     "spatial_anchors": {
+                        "h3": {"feature_count": 1, "top_cells": [{"h3_id": "h3-a", "poi_count": 18}]},
                         "road": {
                             "feature_count": 2,
                             "metric_keys": ["choice_score", "integration_score"],
@@ -411,6 +412,8 @@ def test_runtime_reads_finalizer_evidence_for_high_value_map_questions(monkeypat
     assert pack["status"] == "ready"
     assert pack["search_queries"]
     assert pack["read_chunks"]
+    assert set(pack["coverage_domains"]) == {"poi", "h3", "road", "population", "nightlight"}
+    assert {chunk["domain"] for chunk in pack["read_chunks"]}.issuperset({"poi", "h3", "road", "population", "nightlight"})
     assert any(chunk["title"] == "POI 地名锚点" for chunk in pack["read_chunks"])
     assert "search_analysis_context" in response.diagnostics.used_tools
     assert "read_analysis_chunk" in response.diagnostics.used_tools

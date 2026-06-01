@@ -70,8 +70,8 @@ def _answer_depth_guidance(question: str) -> Dict[str, Any]:
     is_full = any(token in text for token in full_tokens)
     target_depth = "concise" if is_concise and not is_full else ("full" if is_full else "balanced")
     if target_depth == "full":
-        guidance = "高价值问题要充分展开：先给总判断，再解释空间矛盾、关键证据、边界和下一步判断标准。"
-        suggested_shape = "一个总判断 + 3 到 6 个展开段 + 一句话结论"
+        guidance = "高价值问题要充分展开：先给总判断，再解释空间矛盾、关键证据、边界和下一步判断标准；商业总结默认覆盖 POI/H3/路网/人口/夜光五类证据。"
+        suggested_shape = "一个总判断 + 至少 5 个展开段 + 一句话结论"
     elif target_depth == "concise":
         guidance = "简单问题保持短答：只回答关键结论、必要证据和解释边界，不扩展成报告。"
         suggested_shape = "一个直接结论 + 1 到 2 个必要说明"

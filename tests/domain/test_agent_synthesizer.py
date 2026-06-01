@@ -59,7 +59,7 @@ def test_build_answer_evidence_payload_includes_key_evidence_and_limits():
     assert "不要把行动建议写成工具流程" in payload["spatial_narrative_guidance"]["anti_patterns"]
     assert "place_anchors" not in json.dumps(payload["spatial_narrative_guidance"], ensure_ascii=False)
     assert payload["answer_depth_guidance"]["target_depth"] == "full"
-    assert "3 到 6 个展开段" in payload["answer_depth_guidance"]["suggested_shape"]
+    assert "至少 5 个展开段" in payload["answer_depth_guidance"]["suggested_shape"]
 
 
 def test_build_answer_evidence_payload_keeps_simple_metric_questions_concise():
