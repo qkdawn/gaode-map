@@ -1861,6 +1861,80 @@ test('submitAgentTurn caches automatic visual snapshots after first capture', as
   assert.equal(ctx.agentVisualSnapshotCache.visual_snapshots[0].snapshot_id, 'visual-road')
 })
 
+test('submitAgentTurn drops invalid visual snapshots from cache and request body', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.agentInput = '总结这个区域的商业特征'
+  ctx.captureAgentVisualSnapshots = async () => [
+    {
+      snapshot_id: 'visual-empty',
+      kind: 'overview_map',
+      title: '当前地图总览',
+      data_url: '',
+      warnings: ['地图截图方法未返回有效图片，已跳过该快照。'],
+    },
+    {
+      snapshot_id: 'visual-road',
+      kind: 'road_map',
+      title: '路网分析全范围图层',
+      data_url: 'data:image/jpeg;base64,abc',
+      warnings: [],
+    },
+  ]
+
+  let requestBody = null
+  global.fetch = async (url, options = {}) => {
+    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([
+      {
+        type: 'final',
+        payload: {
+          response: {
+            status: 'answered',
+            stage: 'answered',
+            output: { answer: '已完成', panel_payloads: {} },
+            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+            context_summary: {},
+            plan: {},
+          },
+        },
+      },
+    ])
+  }
+
+  await ctx.submitAgentTurn()
+
+  assert.equal(requestBody.visual_snapshots.length, 1)
+  assert.equal(requestBody.visual_snapshots[0].snapshot_id, 'visual-road')
+  assert.equal(ctx.agentVisualSnapshotCache.visual_snapshots.length, 1)
+  assert.equal(ctx.agentVisualSnapshotCache.visual_snapshots[0].snapshot_id, 'visual-road')
+  assert.equal(ctx.agentVisualSnapshotCache.warnings.some((item) => item.includes('当前地图总览 未传入有效图片')), true)
+})
+
+test('getCachedAgentVisualSnapshots self-heals old cache entries without image data', () => {
+  const ctx = createAgentContext()
+  const fingerprint = ctx.buildAgentVisualSnapshotFingerprint()
+  ctx.agentVisualSnapshotCache = {
+    status: 'ready',
+    fingerprint,
+    generated_at: '2026-06-01T00:00:00.000Z',
+    visual_snapshots: [
+      { snapshot_id: 'visual-empty', kind: 'overview_map', title: '当前地图总览', data_url: '' },
+      { snapshot_id: 'visual-road', kind: 'road_map', title: '路网分析全范围图层', data_url: 'data:image/jpeg;base64,abc' },
+    ],
+    warnings: [],
+  }
+
+  const cached = ctx.getCachedAgentVisualSnapshots(fingerprint)
+
+  assert.equal(cached.length, 1)
+  assert.equal(cached[0].snapshot_id, 'visual-road')
+  assert.equal(ctx.agentVisualSnapshotCache.visual_snapshots.length, 1)
+  assert.equal(ctx.agentVisualSnapshotCache.warnings.some((item) => item.includes('当前地图总览 未传入有效图片')), true)
+})
+
 test('submitAgentTurn refreshes visual snapshot cache when fingerprint changes', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true

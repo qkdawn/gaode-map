@@ -1986,7 +1986,11 @@ function createAgentRuntimeMethods() {
         : {}
       if (asText(cache.status) !== 'ready') return []
       if (asText(cache.fingerprint) !== asText(fingerprint)) return []
-      return cloneArray(cache.visual_snapshots || cache.visualSnapshots)
+      const normalized = this.normalizeAgentVisualSnapshotCache(cache)
+      if (normalized.visual_snapshots.length !== cloneArray(cache.visual_snapshots || cache.visualSnapshots).length) {
+        this.agentVisualSnapshotCache = normalized
+      }
+      return cloneArray(normalized.visual_snapshots)
     },
     invalidateAgentVisualSnapshotCache(reason = '') {
       this.agentVisualSnapshotCache = {
@@ -1998,15 +2002,43 @@ function createAgentRuntimeMethods() {
       }
     },
     commitAgentVisualSnapshotCache(cache = {}) {
-      const nextCache = {
+      const nextCache = this.normalizeAgentVisualSnapshotCache({
         status: asText(cache.status) || 'ready',
         fingerprint: asText(cache.fingerprint),
         generated_at: asText(cache.generated_at || cache.generatedAt) || new Date().toISOString(),
         visual_snapshots: cloneArray(cache.visual_snapshots || cache.visualSnapshots),
         warnings: cloneArray(cache.warnings).map((item) => asText(item)).filter(Boolean),
-      }
+      })
       this.agentVisualSnapshotCache = nextCache
       return nextCache
+    },
+    normalizeAgentVisualSnapshotCache(cache = {}) {
+      const snapshots = cloneArray(cache.visual_snapshots || cache.visualSnapshots)
+      const warnings = cloneArray(cache.warnings).map((item) => asText(item)).filter(Boolean)
+      const validSnapshots = []
+      snapshots.forEach((item) => {
+        const snapshot = item && typeof item === 'object' ? { ...item } : {}
+        const dataUrl = asText(snapshot.data_url || snapshot.dataUrl)
+        if (dataUrl.startsWith('data:image/')) {
+          snapshot.data_url = dataUrl
+          validSnapshots.push(snapshot)
+          return
+        }
+        const title = asText(snapshot.title || snapshot.kind || '地图快照')
+        cloneArray(snapshot.warnings).forEach((warning) => {
+          const text = asText(warning)
+          if (text && !warnings.includes(text)) warnings.push(text)
+        })
+        const skipped = `${title} 未传入有效图片，已从视觉快照缓存中移除。`
+        if (title && !warnings.includes(skipped)) warnings.push(skipped)
+      })
+      return {
+        status: asText(cache.status) || 'ready',
+        fingerprint: asText(cache.fingerprint),
+        generated_at: asText(cache.generated_at || cache.generatedAt) || new Date().toISOString(),
+        visual_snapshots: validSnapshots,
+        warnings,
+      }
     },
     async ensureAgentVisualSnapshotCache() {
       const fingerprint = this.buildAgentVisualSnapshotFingerprint()
@@ -2035,20 +2067,23 @@ function createAgentRuntimeMethods() {
 
       try {
         const snapshots = await this.captureAgentVisualSnapshots()
-        const warnings = cloneArray(snapshots)
-          .flatMap((item) => cloneArray(item && item.warnings))
-          .map((item) => asText(item))
-          .filter(Boolean)
-        this.commitAgentVisualSnapshotCache({
+        const normalizedCache = this.normalizeAgentVisualSnapshotCache({
           status: 'ready',
           fingerprint,
           visual_snapshots: snapshots,
+        })
+        const validSnapshots = cloneArray(normalizedCache.visual_snapshots)
+        const warnings = cloneArray(normalizedCache.warnings).map((item) => asText(item)).filter(Boolean)
+        this.commitAgentVisualSnapshotCache({
+          status: 'ready',
+          fingerprint,
+          visual_snapshots: validSnapshots,
           warnings,
         })
         const completedItem = normalizeAgentThinkingItem({
           ...preparingItem,
-          detail: snapshots.length
-            ? `已生成 ${snapshots.length} 张地图视觉快照，本轮和后续追问将复用这组证据。`
+          detail: validSnapshots.length
+            ? `已生成 ${validSnapshots.length} 张地图视觉快照，本轮和后续追问将复用这组证据。`
             : '未生成可用地图视觉快照，本轮将继续使用结构化证据。',
           state: 'completed',
         })
@@ -2058,7 +2093,7 @@ function createAgentRuntimeMethods() {
             thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, completedItem),
           }))
         }
-        return cloneArray(snapshots)
+        return cloneArray(validSnapshots)
       } catch (snapshotErr) {
         const message = snapshotErr && snapshotErr.message ? snapshotErr.message : String(snapshotErr)
         console.warn('Agent visual snapshots failed; continuing text-only', snapshotErr)
