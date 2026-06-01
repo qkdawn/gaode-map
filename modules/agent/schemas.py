@@ -60,6 +60,7 @@ PersistedAgentStatus = Literal[
     "failed",
 ]
 ToolStatus = Literal["success", "failed", "skipped"]
+ExecutionTraceStatus = Literal["success", "failed", "skipped", "blocked"]
 ToolLoopStatus = Literal["completed", "requires_risk_confirmation", "failed"]
 AgentSessionTitleSource = Literal["user", "ai", "fallback"]
 AgentTurnStreamEventType = Literal["meta", "status", "thinking", "reasoning_delta", "trace", "plan", "final", "error"]
@@ -422,7 +423,7 @@ class ExecutionTraceItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     tool_name: str
-    status: ToolStatus
+    status: ExecutionTraceStatus
     reason: str = ""
     message: str = ""
     cost_level: str = "safe"

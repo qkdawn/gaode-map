@@ -8,6 +8,7 @@ from modules.agent.schemas import (
     AgentTurnOutput,
     AgentTurnRequest,
     AnalysisSnapshot,
+    ExecutionTraceItem,
     GateDecision,
     PlanStep,
     ToolLoopResult,
@@ -231,6 +232,38 @@ def test_runtime_returns_risk_confirmation_from_tool_loop(monkeypatch):
     assert response.status == "requires_risk_confirmation"
     assert "compute_road_syntax_from_scope" in response.output.risk_prompt
     assert response.plan.steps[0].tool_name == "compute_road_syntax_from_scope"
+
+
+def test_runtime_accepts_blocked_execution_trace_without_failing_turn(monkeypatch):
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(
+            status="completed",
+            used_tools=["compute_road_syntax_from_scope"],
+            execution_trace=[
+                ExecutionTraceItem(
+                    tool_name="compute_road_syntax_from_scope",
+                    status="blocked",
+                    reason="需要确认高成本工具",
+                    message="工具需要确认后重试。",
+                )
+            ],
+        ),
+        answer_output=AgentTurnOutput(answer="已保留被阻断工具的轨迹，并继续回答。"),
+    )
+
+    response = asyncio.run(
+        process_agent_turn(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="总结这个区域的商业特征")],
+                analysis_snapshot=_snapshot_with_scope(poi_summary={"total": 12}),
+            )
+        )
+    )
+
+    assert response.status == "answered"
+    assert response.diagnostics.execution_trace[0].status == "blocked"
+    assert response.output.answer == "已保留被阻断工具的轨迹，并继续回答。"
 
 
 def test_runtime_passes_deep_thinking_mode_into_tool_loop_and_finalizer(monkeypatch):

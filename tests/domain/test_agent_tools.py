@@ -1,3 +1,7 @@
+import asyncio
+
+from modules.agent.providers.tool_call_execution import execute_tool_call_step
+from modules.agent.schemas import AnalysisSnapshot, ExecutionTraceItem, PlanStep
 from modules.agent.executor import validate_tool_arguments
 from modules.agent.tools import get_tool_registry
 from modules.providers.amap.utils.get_type_info import infer_type_info_from_text, resolve_type_info
@@ -19,10 +23,13 @@ def test_get_tool_registry_exposes_stage1_tools():
         "read_analysis_chunk",
         "search_report_context",
         "read_report_chunk",
+        "search_uploaded_attachment_context",
+        "read_uploaded_attachment_context",
         "get_area_data_bundle",
         "analyze_poi_structure",
         "rank_next_analysis_options",
         "analyze_spatial_structure",
+        "build_unified_spatial_cells",
         "infer_area_labels",
         "score_site_candidates",
         "run_area_character_pack",
@@ -79,10 +86,13 @@ def test_get_tool_registry_keeps_expected_tool_order():
         "read_analysis_chunk",
         "search_report_context",
         "read_report_chunk",
+        "search_uploaded_attachment_context",
+        "read_uploaded_attachment_context",
         "get_area_data_bundle",
         "analyze_poi_structure",
         "rank_next_analysis_options",
         "analyze_spatial_structure",
+        "build_unified_spatial_cells",
         "infer_area_labels",
         "score_site_candidates",
         "run_area_character_pack",
@@ -112,6 +122,34 @@ def test_validate_tool_arguments_rejects_unknown_keys():
     )
 
     assert "arguments.unexpected 不允许出现" in errors
+
+
+def test_execution_trace_item_accepts_blocked_status():
+    trace = ExecutionTraceItem(tool_name="compute_road_syntax_from_scope", status="blocked")
+
+    assert trace.status == "blocked"
+
+
+def test_governance_blocked_tool_call_keeps_result_failed_and_trace_blocked():
+    registry = get_tool_registry()
+    step = PlanStep(tool_name="compute_road_syntax_from_scope", reason="需要路网句法")
+
+    execution = asyncio.run(
+        execute_tool_call_step(
+            registered_tool=registry["compute_road_syntax_from_scope"],
+            step=step,
+            snapshot=AnalysisSnapshot(scope={"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}),
+            artifacts={},
+            question="为什么这里路网差",
+            governance_mode="guarded",
+            confirmed_tools=[],
+        )
+    )
+
+    assert execution.trace.status == "blocked"
+    assert execution.result.status == "failed"
+    assert execution.result.error == "governance_blocked"
+    assert execution.result.warnings
 
 
 def test_resolve_type_info_supports_aliases_for_site_advice():
