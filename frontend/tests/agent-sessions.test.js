@@ -34,6 +34,105 @@ function createSseResponse(events = []) {
   }
 }
 
+function createAbortError() {
+  const error = new Error('aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function createAbortablePendingResponse(signal) {
+  return new Promise((_resolve, reject) => {
+    const rejectAbort = () => reject(createAbortError())
+    if (signal && signal.aborted) {
+      rejectAbort()
+      return
+    }
+    if (signal && typeof signal.addEventListener === 'function') {
+      signal.addEventListener('abort', rejectAbort, { once: true })
+    }
+  })
+}
+
+function createDeferred() {
+  let resolve
+  let reject
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
+async function waitForDeferred(promise, label = 'expected async step did not start') {
+  let timer = null
+  try {
+    await Promise.race([
+      promise,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(label)), 1000)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+function getAgentSessionDetailId(url = '') {
+  const match = String(url).match(/^\/api\/v1\/analysis\/agent\/sessions\/([^/?]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
+function createAgentSessionDetailResponse(ctx, url = '') {
+  const sessionId = getAgentSessionDetailId(url) || ctx.activeAgentSessionId
+  const session = (typeof ctx.findAgentSession === 'function' ? ctx.findAgentSession(sessionId) : null) || {}
+  const plan = session.plan || ctx.agentPlan || {}
+  return {
+    ok: true,
+    async json() {
+      return {
+        id: sessionId,
+        title: session.title || '社区商业概览',
+        title_source: session.titleSource || 'ai',
+        preview: session.preview || session.answer || ctx.agentAnswer || '',
+        status: session.status || ctx.agentStatus || 'answered',
+        stage: session.stage || ctx.agentStage || 'answered',
+        panel_kind: session.panelKind || 'followup',
+        history_id: session.historyId || (typeof ctx.getCurrentAgentHistoryId === 'function' ? ctx.getCurrentAgentHistoryId() : ''),
+        is_pinned: !!session.isPinned,
+        created_at: session.createdAt || '2026-04-05T00:00:00Z',
+        updated_at: session.updatedAt || '2026-04-05T01:00:00Z',
+        pinned_at: session.pinnedAt || null,
+        input: session.input || '',
+        messages: Array.isArray(session.messages) ? session.messages : ctx.agentMessages,
+        output: {
+          answer: session.answer || ctx.agentAnswer || '',
+          clarification_question: session.clarificationQuestion || '',
+          clarification_options: session.clarificationOptions || [],
+          risk_prompt: session.riskPrompt || '',
+          panel_payloads: session.panelPayloads || ctx.agentPanelPayloads || {},
+        },
+        diagnostics: {
+          execution_trace: session.executionTrace || ctx.agentExecutionTrace || [],
+          used_tools: session.usedTools || ctx.agentUsedTools || [],
+          citations: session.citations || ctx.agentCitations || [],
+          research_notes: session.researchNotes || ctx.agentResearchNotes || [],
+          audit_issues: session.auditIssues || ctx.agentAuditIssues || [],
+          thinking_timeline: session.thinkingTimeline || ctx.agentThinkingTimeline || [],
+          error: session.error || ctx.agentError || '',
+        },
+        context_summary: session.contextSummary || ctx.agentContextSummary || {},
+        plan: {
+          steps: plan.steps || [],
+          followup_steps: plan.followupSteps || plan.followup_steps || [],
+          followup_applied: !!(plan.followupApplied || plan.followup_applied),
+          summary: plan.summary || '',
+        },
+        risk_confirmations: session.riskConfirmations || [],
+      }
+    },
+  }
+}
+
 function createAgentContext(overrides = {}) {
   const state = createAnalysisAgentInitialState()
 const defaultYearlyGridEvidence = {
@@ -393,6 +492,7 @@ test('deep analysis mode is included in prompt and result stays as natural answe
   let requestBody = null
   const previousFetch = global.fetch
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
@@ -456,6 +556,7 @@ test('composer plus menu selects one-shot deep thinking mode and keeps user mess
   let requestBody = null
   const previousFetch = global.fetch
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
@@ -1738,20 +1839,16 @@ test('cancelAgentTurn aborts in-flight agent request and restores idle state', a
   ctx.agentInput = '总结这个区域'
 
   let capturedSignal = null
+  const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     capturedSignal = options.signal
-    return new Promise((_resolve, reject) => {
-      options.signal.addEventListener('abort', () => {
-        const error = new Error('aborted')
-        error.name = 'AbortError'
-        reject(error)
-      }, { once: true })
-    })
+    streamStarted.resolve()
+    return createAbortablePendingResponse(options.signal)
   }
 
   const pending = ctx.submitAgentTurn()
-  await Promise.resolve()
+  await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before cancel test')
 
   assert.equal(ctx.agentLoading, true)
   assert.equal(typeof capturedSignal?.aborted, 'boolean')
@@ -1782,6 +1879,7 @@ test('submitAgentTurn sends ready attachment ids without embedding file content'
 
   let requestBody = null
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
@@ -1830,6 +1928,7 @@ test('submitAgentTurn caches automatic visual snapshots after first capture', as
 
   const requestBodies = []
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBodies.push(JSON.parse(String(options.body || '{}')))
     return createSseResponse([
@@ -1885,6 +1984,7 @@ test('submitAgentTurn drops invalid visual snapshots from cache and request body
 
   let requestBody = null
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
@@ -1950,6 +2050,7 @@ test('submitAgentTurn refreshes visual snapshot cache when fingerprint changes',
 
   const requestBodies = []
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBodies.push(JSON.parse(String(options.body || '{}')))
     return createSseResponse([
@@ -1990,6 +2091,7 @@ test('submitAgentTurn continues when visual snapshot cache generation fails', as
 
   let requestBody = null
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
@@ -2051,6 +2153,7 @@ test('submitAgentTurn sends map search context separately from analysis snapshot
 
   let requestBody = null
   global.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
@@ -2377,20 +2480,16 @@ test('submitAgentTurn ignores duplicate submit while active session is running',
   ctx.agentInput = '哪里适合补充餐饮'
 
   let runRequestCount = 0
+  const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     runRequestCount += 1
-    return new Promise((_resolve, reject) => {
-      options.signal.addEventListener('abort', () => {
-        const error = new Error('aborted')
-        error.name = 'AbortError'
-        reject(error)
-      }, { once: true })
-    })
+    streamStarted.resolve()
+    return createAbortablePendingResponse(options.signal)
   }
 
   const pending = ctx.submitAgentTurn()
-  await Promise.resolve()
+  await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before duplicate-submit test')
 
   assert.equal(ctx.agentLoading, true)
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['哪里适合补充餐饮'])
@@ -2412,23 +2511,20 @@ test('running session survives switching to a new report and can be revisited', 
   ctx.agentInput = '总结这个区域'
 
   const pendingBySessionId = new Map()
+  const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     const payload = JSON.parse(String(options.body || '{}'))
     const sessionId = String(payload.conversation_id || '')
-    return new Promise((_resolve, reject) => {
-      pendingBySessionId.set(sessionId, { signal: options.signal, reject })
-      options.signal.addEventListener('abort', () => {
-        const error = new Error('aborted')
-        error.name = 'AbortError'
-        reject(error)
-      }, { once: true })
-    })
+    const pending = createAbortablePendingResponse(options.signal)
+    pendingBySessionId.set(sessionId, { signal: options.signal })
+    streamStarted.resolve(sessionId)
+    return pending
   }
 
   const sessionAId = ctx.activeAgentSessionId
   const pendingA = ctx.submitAgentTurn()
-  await Promise.resolve()
+  await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before session-switch test')
 
   assert.equal(ctx.isAgentSessionRunning(sessionAId), true)
   assert.equal(ctx.agentLoading, true)
@@ -2459,29 +2555,30 @@ test('parallel agent turns can run concurrently and cancel only the active sessi
   ctx.agentInput = '总结这个区域'
 
   const pendingBySessionId = new Map()
+  const streamStartedA = createDeferred()
+  const streamStartedB = createDeferred()
+  let sessionAId = ''
+  let sessionBId = ''
   global.fetch = async (url, options = {}) => {
     assert.equal(url, '/api/v1/analysis/agent/turn/stream')
     const payload = JSON.parse(String(options.body || '{}'))
     const sessionId = String(payload.conversation_id || '')
-    return new Promise((_resolve, reject) => {
-      pendingBySessionId.set(sessionId, { signal: options.signal, reject })
-      options.signal.addEventListener('abort', () => {
-        const error = new Error('aborted')
-        error.name = 'AbortError'
-        reject(error)
-      }, { once: true })
-    })
+    const pending = createAbortablePendingResponse(options.signal)
+    pendingBySessionId.set(sessionId, { signal: options.signal })
+    if (sessionId === sessionAId) streamStartedA.resolve(sessionId)
+    if (sessionId === sessionBId) streamStartedB.resolve(sessionId)
+    return pending
   }
 
-  const sessionAId = ctx.activeAgentSessionId
+  sessionAId = ctx.activeAgentSessionId
   const pendingA = ctx.submitAgentTurn()
-  await Promise.resolve()
+  await waitForDeferred(streamStartedA.promise, 'first agent stream fetch did not start before parallel-turn test')
 
   ctx.startNewAgentReportSession()
   ctx.agentInput = '下一步做什么分析'
-  const sessionBId = ctx.activeAgentSessionId
+  sessionBId = ctx.activeAgentSessionId
   const pendingB = ctx.submitAgentTurn()
-  await Promise.resolve()
+  await waitForDeferred(streamStartedB.promise, 'second agent stream fetch did not start before parallel-turn test')
 
   assert.equal(ctx.getRunningAgentSessionCount(), 2)
   assert.equal(ctx.isAgentSessionRunning(sessionAId), true)
@@ -2642,6 +2739,7 @@ test('submitAgentTurn shows submit process before first stream event', async () 
   ctx.agentInput = '总结这个区域'
 
   let capturedSignal = null
+  const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
     if (url === '/api/v1/analysis/agent/summary/readiness') {
       return {
@@ -2658,34 +2756,33 @@ test('submitAgentTurn shows submit process before first stream event', async () 
       }
     }
     capturedSignal = options.signal
-    return new Promise((_resolve, reject) => {
-      options.signal.addEventListener('abort', () => {
-        const error = new Error('aborted')
-        error.name = 'AbortError'
-        reject(error)
-      }, { once: true })
-    })
+    streamStarted.resolve()
+    return createAbortablePendingResponse(options.signal)
   }
 
   const pending = ctx.submitAgentTurn()
-  await Promise.resolve()
+  try {
+    await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before process-steps test')
 
-  const steps = ctx.getAgentVisibleProcessSteps()
-  assert.equal(steps.length, 1)
-  assert.equal(steps[0].id, 'frontend-submit-request')
-  assert.equal(steps[0].title, '提交请求')
-  assert.equal(steps[0].detail.includes('正在建立 Agent 流式响应'), false)
-  assert.equal(ctx.agentThinkingTimeline.some((item) => item.id === 'stream-connect'), false)
-  assert.equal(ctx.agentThinkingExpanded, true)
-  assert.equal(ctx.shouldShowAgentThinkingLiveStatus(), true)
-  assert.equal(ctx.shouldShowAgentThinkingToggle(), false)
-  ctx.toggleAgentThinkingExpanded()
-  assert.equal(ctx.agentThinkingExpanded, false)
-  assert.equal(ctx.getAgentVisibleProcessSteps().length, 1)
-  assert.equal(typeof capturedSignal?.aborted, 'boolean')
-
-  ctx.cancelAgentTurn()
-  await pending
+    const steps = ctx.getAgentVisibleProcessSteps()
+    assert.equal(steps.length, 2)
+    assert.equal(steps[0].id, 'frontend-submit-request')
+    assert.equal(steps[0].title, '提交请求')
+    assert.equal(steps[0].detail.includes('正在建立 Agent 流式响应'), false)
+    assert.equal(steps[1].id, 'frontend-visual-snapshot-cache')
+    assert.equal(steps[1].title, '准备地图视觉证据')
+    assert.equal(ctx.agentThinkingTimeline.some((item) => item.id === 'stream-connect'), false)
+    assert.equal(ctx.agentThinkingExpanded, true)
+    assert.equal(ctx.shouldShowAgentThinkingLiveStatus(), true)
+    assert.equal(ctx.shouldShowAgentThinkingToggle(), false)
+    ctx.toggleAgentThinkingExpanded()
+    assert.equal(ctx.agentThinkingExpanded, false)
+    assert.equal(ctx.getAgentVisibleProcessSteps().length, 2)
+    assert.equal(typeof capturedSignal?.aborted, 'boolean')
+  } finally {
+    ctx.cancelAgentTurn()
+    await pending.catch(() => {})
+  }
 })
 
 test('submitAgentTurn collapses process when stream errors before final response', async () => {
@@ -3047,13 +3144,13 @@ test('status events create visible process fallback steps', async () => {
 
   assert.deepEqual(
     ctx.getAgentVisibleProcessSteps().map((item) => item.id),
-    ['frontend-submit-request', 'status-gating', 'status-planning', 'status-answered'],
+    ['frontend-submit-request', 'frontend-visual-snapshot-cache', 'status-gating', 'status-planning', 'status-answered'],
   )
   assert.equal(ctx.getAgentVisibleProcessSteps()[0].state, 'completed')
   assert.equal(ctx.getAgentVisibleProcessSteps()[1].state, 'completed')
   assert.equal(ctx.getAgentVisibleProcessSteps()[2].state, 'completed')
-  assert.equal(ctx.getAgentVisibleProcessSteps()[2].title, '工具判断')
-  assert.equal(ctx.getAgentVisibleProcessSteps()[3].state, 'completed')
+  assert.equal(ctx.getAgentVisibleProcessSteps()[3].title, '工具判断')
+  assert.equal(ctx.getAgentVisibleProcessSteps()[4].state, 'completed')
 })
 
 test('applyAgentSessionSnapshot collapses failed timeline but expands risk confirmation', () => {
@@ -3383,7 +3480,7 @@ test('submitAgentTurn appends user message immediately and updates thinking time
 
   await pending
 
-  assert.equal(ctx.agentThinkingTimeline.length, 5)
+  assert.equal(ctx.agentThinkingTimeline.length, 6)
   assert.equal(ctx.agentThinkingExpanded, false)
   assert.equal(ctx.agentPlanExpanded, false)
   assert.equal(ctx.agentTraceExpanded, false)
@@ -3393,9 +3490,9 @@ test('submitAgentTurn appends user message immediately and updates thinking time
   assert.deepEqual(ctx.getAgentMessagesAfterThinking().map((item) => item.content), ['这里以社区商业为主'])
   assert.deepEqual(
     ctx.getAgentVisibleProcessSteps().map((item) => item.id),
-    ['frontend-submit-request', 'status-gating', 'thinking-gating', 'tool-call-read-current-scope', 'status-answered'],
+    ['frontend-submit-request', 'frontend-visual-snapshot-cache', 'status-gating', 'thinking-gating', 'tool-call-read-current-scope', 'status-answered'],
   )
-  assert.equal(ctx.getAgentVisibleProcessSteps()[3].state, 'completed')
+  assert.equal(ctx.getAgentVisibleProcessSteps()[4].state, 'completed')
   const toolThinking = ctx.agentThinkingTimeline.find((item) => item.id === 'tool-call-read-current-scope')
   assert.equal(toolThinking.items.includes('参数：无参数'), true)
   assert.equal(toolThinking.items.includes('结果：scope_polygon 已读取'), true)
@@ -3410,7 +3507,7 @@ test('submitAgentTurn appends user message immediately and updates thinking time
   assert.equal(ctx.shouldShowAgentMessageProcess(ctx.agentMessages[1]), true)
   assert.deepEqual(
     ctx.agentMessages[1].process.thinkingTimeline.map((item) => item.id),
-    ['frontend-submit-request', 'status-gating', 'thinking-gating', 'tool-call-read-current-scope', 'status-answered'],
+    ['frontend-submit-request', 'frontend-visual-snapshot-cache', 'status-gating', 'thinking-gating', 'tool-call-read-current-scope', 'status-answered'],
   )
   assert.equal(
     ctx.findAgentSession(ctx.activeAgentSessionId).thinkingTimeline.some((item) => item.id === 'thinking-gating'),
@@ -3753,9 +3850,9 @@ test('submitAgentTurn keeps streamed timeline order when final diagnostics omit 
   const steps = ctx.getAgentVisibleProcessSteps()
   assert.deepEqual(
     steps.map((item) => item.title),
-    ['提交请求', '门卫判断', '门卫通过', '已列出本轮步骤', '执行成功 read_current_results', '回答生成完成'],
+    ['提交请求', '准备地图视觉证据', '门卫判断', '门卫通过', '已列出本轮步骤', '执行成功 read_current_results', '回答生成完成'],
   )
-  assert.equal(steps[3].detail, '先读取当前结果。')
+  assert.equal(steps[4].detail, '先读取当前结果。')
 })
 
 test('submitAgentTurn shows streamed plan above final response and keeps checklist expanded by default', async () => {
@@ -4704,7 +4801,7 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.isAgentPptPlanningTabActive(), true)
   assert.equal(ctx.isAgentReportDetailView(), true)
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '策划 PPT')
-  assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '先生成策划文档和逐页页面脚本，再进入幻灯片生成')
+  assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '先生成 PPT Spec 和逐页 Page Brief，再进入幻灯片生成')
   assert.equal(ctx.shouldShowAgentComposer(), false)
   assert.equal(ctx.openAgentPptPlanningFromReport(), pptId)
 
@@ -4905,7 +5002,7 @@ test('analysis task param bundles drive summary task params and cache keys', () 
   const rasterBundle = buildAnalysisTaskParamBundle(ctx, 'poi_raster_grid')
   const h3Bundle = buildAnalysisTaskParamBundle(ctx, 'poi_h3_grid')
   assert.equal(rasterBundle.task_key, 'poi_raster_grid')
-  assert.equal(rasterBundle.params.grid_type, 'raster')
+  assert.equal(rasterBundle.params.grid_type, 'shared_raster')
   assert.equal(rasterBundle.params.cell_id_source, 'population_nightlight_shared_cell_id')
   assert.match(rasterBundle.evidence_params.description, /POI 共享栅格/)
   assert.match(rasterBundle.evidence_params.description, /同一 cell_id/)
@@ -4941,7 +5038,7 @@ test('summary poi grid fill computes raster grid and h3 separately', async () =>
       fetched: [],
     },
   })
-  ctx.ensurePoiRasterGrid = async (force = false) => {
+  ctx.ensurePoiSharedGridAnalysis = async (force = false) => {
     calls.push({ task: 'raster', force })
     ctx.poiGridSummary = { grid_count: 2, active_cell_count: 1 }
     ctx.poiGridFeatures = [{ type: 'Feature', properties: { cell_id: 'cell-1', poi_count: 3 } }]
@@ -7662,7 +7759,7 @@ test('agent analysis snapshot keeps poi raster out of summary evidence', () => {
   assert.equal(snapshot.h3.poi_h3_evidence.params.min_overlap_ratio, 0.35)
   assert.equal(snapshot.h3.poi_h3_evidence.counts.grid_count, 8)
   assert.equal(snapshot.param_bundles.poi_h3_grid.params.h3_resolution, 9)
-  assert.equal(snapshot.param_bundles.poi_raster_grid.params.grid_type, 'raster')
+  assert.equal(snapshot.param_bundles.poi_raster_grid.params.grid_type, 'shared_raster')
   assert.equal(snapshot.param_bundles.poi_fetch.params.year, 2024)
   assert.equal(snapshot.param_bundles.population.task_key, 'population')
   assert.equal(snapshot.h3.grid_params.h3_resolution, 9)

@@ -19,6 +19,7 @@ from router.domains import (
     nightlight_router,
     poi_router,
     population_router,
+    ppt_planning_router,
     road_router,
     system_router,
     timeseries_router,
@@ -32,6 +33,7 @@ router.include_router(charting_router)
 router.include_router(map_router)
 router.include_router(poi_router)
 router.include_router(population_router)
+router.include_router(ppt_planning_router)
 router.include_router(nightlight_router)
 router.include_router(timeseries_router)
 router.include_router(tools_router)

@@ -1912,6 +1912,9 @@ label {
 }
 
 .agent-ppt-source-select-row {
+    width: 100%;
+    border: 0;
+    background: transparent;
     min-height: 38px;
     padding: 0 20px;
     color: #475569;
@@ -1959,12 +1962,13 @@ label {
 }
 
 .agent-ppt-source-select-row strong {
-    width: 22px;
+    min-width: 22px;
     height: 22px;
+    padding: 0 6px;
     border-radius: 5px;
     color: #111827;
     background: #e2e8f0;
-    font-size: 14px;
+    font-size: 12px;
     line-height: 22px;
     text-align: center;
     font-weight: 850;
@@ -1977,6 +1981,11 @@ label {
 }
 
 .agent-ppt-source-row {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    text-align: left;
     min-width: 0;
     min-height: 52px;
     padding: 0 20px;
@@ -1984,6 +1993,12 @@ label {
     grid-template-columns: 24px minmax(0, 1fr) 22px;
     gap: 12px;
     align-items: center;
+    cursor: pointer;
+}
+
+.agent-ppt-source-row:hover,
+.agent-ppt-source-row.is-selected {
+    background: #f8fafc;
 }
 
 .agent-ppt-source-row:last-child {
@@ -2051,6 +2066,7 @@ label {
 }
 
 .agent-ppt-brief-row {
+    width: 100%;
     min-width: 0;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
@@ -2060,6 +2076,8 @@ label {
     grid-template-columns: 38px minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
+    text-align: left;
+    cursor: pointer;
 }
 
 .agent-ppt-brief-row.is-active {
@@ -2123,6 +2141,77 @@ label {
 .agent-ppt-prompt-box button {
     min-height: 38px;
     padding: 0 18px;
+}
+
+.agent-ppt-spec-card {
+    margin: 14px 18px 12px;
+    min-height: 84px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 14px;
+    background: #f8fafc;
+    display: grid;
+    align-content: center;
+    gap: 8px;
+}
+
+.agent-ppt-spec-card span,
+.agent-ppt-spec-grid span,
+.agent-ppt-preview-brief span {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.agent-ppt-spec-card strong {
+    color: #111827;
+    font-size: 18px;
+    line-height: 1.35;
+    font-weight: 850;
+}
+
+.agent-ppt-spec-grid {
+    padding: 0 18px 10px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.agent-ppt-spec-grid div {
+    min-width: 0;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px;
+    display: grid;
+    gap: 7px;
+}
+
+.agent-ppt-spec-grid strong {
+    min-width: 0;
+    color: #111827;
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 850;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-ppt-preview-brief {
+    margin: 0 18px 18px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    padding: 14px;
+    background: #f8fafc;
+    display: grid;
+    gap: 8px;
+}
+
+.agent-ppt-preview-brief strong {
+    color: #111827;
+    font-size: 14px;
+    line-height: 1.45;
+    font-weight: 850;
 }
 
 .agent-ppt-studio-grid {

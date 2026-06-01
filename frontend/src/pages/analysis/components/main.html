@@ -1973,67 +1973,80 @@
                                             </div>
                                             <button type="button" disabled>搜索</button>
                                         </div>
-                                        <div class="agent-ppt-source-select-row">
+                                        <button type="button" class="agent-ppt-source-select-row" @click="toggleAllAgentPptPlanningSources()">
                                             <i aria-hidden="true"></i>
                                             <span>全选</span>
-                                            <strong>✓</strong>
-                                        </div>
+                                            <strong>{{ getAgentPptPlanningSourceSummary().selected }}/{{ getAgentPptPlanningSourceSummary().total }}</strong>
+                                        </button>
                                         <div class="agent-ppt-source-list">
-                                            <article class="agent-ppt-source-row is-ready">
-                                                <span class="agent-ppt-source-icon"></span>
-                                                <strong>区域总结.md</strong>
-                                                <em>✓</em>
-                                            </article>
-                                            <article class="agent-ppt-source-row is-ready">
-                                                <span class="agent-ppt-source-icon"></span>
-                                                <strong>当前地图范围.json</strong>
-                                                <em>✓</em>
-                                            </article>
-                                            <article class="agent-ppt-source-row is-ready">
-                                                <span class="agent-ppt-source-icon"></span>
-                                                <strong>POI 人口 夜光 路网证据.xlsx</strong>
-                                                <em>✓</em>
-                                            </article>
-                                            <article class="agent-ppt-source-row">
-                                                <span class="agent-ppt-source-icon"></span>
-                                                <strong>附件素材待接入.pptx</strong>
-                                                <em></em>
-                                            </article>
-                                            <article class="agent-ppt-source-row">
-                                                <span class="agent-ppt-source-icon is-web"></span>
-                                                <strong>联网来源待研究.url</strong>
-                                                <em></em>
-                                            </article>
+                                            <button
+                                                v-for="source in getAgentPptPlanningSources()"
+                                                :key="`ppt-source-${source.id}`"
+                                                type="button"
+                                                class="agent-ppt-source-row"
+                                                :class="[{ 'is-ready': source.status === 'ready', 'is-selected': source.selected }, `is-${source.type || 'file'}`]"
+                                                @click="toggleAgentPptPlanningSource(source.id)">
+                                                <span class="agent-ppt-source-icon" :class="`is-${source.type || 'file'}`"></span>
+                                                <strong>{{ source.title }}</strong>
+                                                <em>{{ source.selected ? '✓' : '' }}</em>
+                                            </button>
                                         </div>
                                     </aside>
 
-                                    <section class="agent-ppt-notebook-panel agent-ppt-document-panel" aria-label="策划文档">
+                                    <section class="agent-ppt-notebook-panel agent-ppt-document-panel" aria-label="PPT Spec">
                                         <div class="agent-ppt-notebook-head">
-                                            <h3>策划文档</h3>
-                                            <span>15 页 · 政府评审</span>
+                                            <h3>PPT Spec</h3>
+                                            <span>{{ getAgentPptPlanningSpec().pageCount }} 页（可配置） · {{ getAgentPptPlanningSpec().audience }}</span>
                                         </div>
-                                        <div class="agent-ppt-brief-list">
-                                            <article class="agent-ppt-brief-row is-active"><span>01</span><strong>封面</strong><em>项目命题</em></article>
-                                            <article class="agent-ppt-brief-row"><span>02</span><strong>区位判断</strong><em>地图与资源</em></article>
-                                            <article class="agent-ppt-brief-row"><span>03</span><strong>现状诊断</strong><em>指标证据</em></article>
-                                            <article class="agent-ppt-brief-row"><span>04</span><strong>更新策略</strong><em>功能与空间</em></article>
-                                            <article class="agent-ppt-brief-row"><span>05</span><strong>实施路径</strong><em>分期与运营</em></article>
+                                        <div class="agent-ppt-spec-card">
+                                            <span>主题</span>
+                                            <strong>{{ getAgentPptPlanningSpec().topic || '待输入' }}</strong>
+                                        </div>
+                                        <div class="agent-ppt-spec-grid">
+                                            <div>
+                                                <span>汇报类型</span>
+                                                <strong>{{ getAgentPptPlanningSpec().deckType }}</strong>
+                                            </div>
+                                            <div>
+                                                <span>资料来源</span>
+                                                <strong>{{ getAgentPptPlanningSourceSummary().selected }} 个已选</strong>
+                                            </div>
+                                            <div>
+                                                <span>联网研究</span>
+                                                <strong>{{ getAgentPptPlanningSpec().researchEnabled ? '开启' : '关闭' }}</strong>
+                                            </div>
+                                            <div>
+                                                <span>输出</span>
+                                                <strong>Page Brief</strong>
+                                            </div>
                                         </div>
                                         <div class="agent-ppt-prompt-box">
-                                            <span>输入主题或生成要求</span>
-                                            <button type="button" disabled>生成</button>
+                                            <span>生成 PPT Spec</span>
+                                            <button type="button" disabled>接口待接入</button>
                                         </div>
                                     </section>
 
                                     <aside class="agent-ppt-notebook-panel agent-ppt-studio-panel" aria-label="Studio">
                                         <div class="agent-ppt-notebook-head">
-                                            <h3>Studio</h3>
+                                            <h3>Page Brief</h3>
+                                            <span>{{ getAgentPptPlanningSlides().length }} 个示例页</span>
                                         </div>
-                                        <div class="agent-ppt-studio-grid">
-                                            <button type="button" disabled>页面脚本</button>
-                                            <button type="button" disabled>幻灯片预览</button>
-                                            <button type="button" disabled>导出 PPTX</button>
-                                            <button type="button" disabled>引用检查</button>
+                                        <div class="agent-ppt-brief-list">
+                                            <button
+                                                v-for="slide in getAgentPptPlanningSlides()"
+                                                :key="`ppt-slide-${slide.id}`"
+                                                type="button"
+                                                class="agent-ppt-brief-row"
+                                                :class="{ 'is-active': isAgentPptPlanningSlideActive(slide.id) }"
+                                                @click="selectAgentPptPlanningSlide(slide.id)">
+                                                <span>{{ String(slide.index).padStart(2, '0') }}</span>
+                                                <strong>{{ slide.title }}</strong>
+                                                <em>{{ slide.purpose }}</em>
+                                            </button>
+                                        </div>
+                                        <div class="agent-ppt-preview-brief">
+                                            <span>{{ getAgentPptPlanningActiveSlide().visualPlan }}</span>
+                                            <strong>{{ getAgentPptPlanningActiveSlide().keyMessage }}</strong>
                                         </div>
                                     </aside>
                                 </div>
