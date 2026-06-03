@@ -279,8 +279,8 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
     return {
       ok: true,
       json: async () => [
-        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-02', params: { year: 2020 }, payload: { year: 2020, features: [{ properties: { cell_id: 'wrong-year' } }], summary: { grid_count: 999 } } },
-        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-01', params: { year: 2024 }, payload: { year: 2024, features: [{ properties: { cell_id: 'cell-1' } }], summary: { grid_count: 1 } } },
+        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-02', params: { year: 2020, grid_type: 'shared_raster' }, payload: { year: 2020, grid: { type: 'FeatureCollection', grid_type: 'shared_raster', features: [{ properties: { cell_id: 'wrong-year' } }] }, summary: { grid_count: 999 } } },
+        { artifact_type: 'poi_raster_grid', updated_at: '2026-01-01', params: { year: 2024, grid_type: 'shared_raster' }, payload: { year: 2024, grid: { type: 'FeatureCollection', grid_type: 'shared_raster', features: [{ properties: { cell_id: 'cell-1' } }] }, summary: { grid_count: 1 } } },
         { artifact_type: 'poi_h3_grid', updated_at: '2026-01-01', params: { year: 2024 }, payload: { summary: { grid_count: 2 } } },
         { artifact_type: 'population', updated_at: '2026-01-01', payload: { year: '2026', overview: { summary: { total_population: 10 } }, layer_cells: [{ cell_id: 'p1' }] } },
         { artifact_type: 'nightlight', updated_at: '2026-01-01', payload: { year: 2025, overview: { summary: { mean_radiance: 3 } }, layer_cells: [{ cell_id: 'n1' }] } },
@@ -300,10 +300,10 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
     assert.equal(ctx.poiGridSummary.grid_count, 1)
     assert.equal(ctx.h3AnalysisSummary.grid_count, 2)
     assert.deepEqual(ctx.committedPoiGrid, [
-      { type: 'raster', year: 2020, status: 'ready' },
-      { type: 'raster', year: 2024, status: 'ready' },
+      { type: 'shared', year: 2020, status: 'ready' },
+      { type: 'shared', year: 2024, status: 'ready' },
     ])
-    assert.deepEqual(ctx.appliedPoiGrid, { type: 'raster', year: 2024 })
+    assert.deepEqual(ctx.appliedPoiGrid, { type: 'shared', year: 2024 })
     assert.equal(ctx.populationOverview.summary.total_population, 10)
     assert.equal(ctx.nightlightOverview.summary.mean_radiance, 3)
     assert.equal(ctx.roadSyntaxSummary.node_count, 5)

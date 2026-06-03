@@ -11,49 +11,127 @@ function cloneArray(items) {
 }
 
 export const DEFAULT_PPT_PAGE_COUNT = 15
+export const PPT_PLANNING_STEPS = Object.freeze({
+  MATERIALS: 'materials',
+  OUTLINE_GENERATING: 'outline_generating',
+  OUTLINE_READY: 'outline_ready',
+  DIRECTIVE_GENERATING: 'directive_generating',
+  DIRECTIVE_DRAFT: 'directive_draft',
+})
+
+const SYSTEM_SOURCE_DEFINITIONS = Object.freeze([
+  {
+    id: 'system:scope',
+    type: 'data',
+    title: '当前等时圈范围',
+    label: '空间范围',
+    taskKey: 'scope',
+  },
+  {
+    id: 'system:poi',
+    type: 'data',
+    title: 'POI 基础数据',
+    label: '系统数据',
+    taskKey: 'poi_fetch',
+  },
+  {
+    id: 'system:h3',
+    type: 'sheet',
+    title: 'H3 / 共享网格',
+    label: '空间网格',
+    taskKey: 'poi_h3_grid',
+  },
+  {
+    id: 'system:population',
+    type: 'data',
+    title: '人口结构分析',
+    label: '系统数据',
+    taskKey: 'population',
+  },
+  {
+    id: 'system:nightlight',
+    type: 'data',
+    title: '夜光强度分析',
+    label: '系统数据',
+    taskKey: 'nightlight',
+  },
+  {
+    id: 'system:road-syntax',
+    type: 'data',
+    title: '路网与可达性分析',
+    label: '系统数据',
+    taskKey: 'road_syntax',
+  },
+])
+
+function hasRing(value) {
+  return Array.isArray(value) && value.length >= 3
+}
+
+function hasScopeSource(context = {}) {
+  const scope = context.scope && typeof context.scope === 'object' ? context.scope : {}
+  return !!(
+    context.scopeReady
+    || hasRing(scope.polygon)
+    || hasRing(scope.drawn_polygon)
+    || hasRing(scope.drawnPolygon)
+    || scope.isochrone_feature
+    || scope.isochroneFeature
+  )
+}
+
+function hasSummarySource(context = {}) {
+  const payloads = context.panelPayloads && typeof context.panelPayloads === 'object' ? context.panelPayloads : {}
+  const summaryPack = context.summaryPack || payloads.summary_pack || payloads.summaryPack
+  return !!(
+    context.summaryReady
+    || (summaryPack && typeof summaryPack === 'object' && Object.keys(summaryPack).length)
+  )
+}
+
+function hasTaskSource(context = {}, taskKey = '') {
+  const results = context.taskResults && typeof context.taskResults === 'object' ? context.taskResults : {}
+  return !!results[taskKey]
+}
+
+function getSystemSourceReady(context = {}, taskKey = '') {
+  if (taskKey === 'scope') return hasScopeSource(context)
+  if (taskKey === 'summary') return hasSummarySource(context)
+  return hasTaskSource(context, taskKey)
+}
+
+function getSourceDetail(context = {}, taskKey = '') {
+  const details = context.sourceDetails && typeof context.sourceDetails === 'object' ? context.sourceDetails : {}
+  return asText(details[taskKey])
+}
+
+export function createPptSystemSources(context = {}) {
+  return SYSTEM_SOURCE_DEFINITIONS.map((item) => {
+    const ready = getSystemSourceReady(context, item.taskKey)
+    const detail = getSourceDetail(context, item.taskKey)
+    return {
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      status: ready ? 'ready' : 'pending',
+      selected: ready,
+      meta: {
+        label: detail || (ready ? '已生成' : '待生成'),
+        taskKey: item.taskKey,
+        sourceKind: 'system',
+      },
+    }
+  })
+}
+
+export function createDefaultUserPptSources() {
+  return []
+}
 
 export function createDefaultPptSources() {
   return [
-    {
-      id: 'summary',
-      type: 'report',
-      title: '区域总结.md',
-      status: 'ready',
-      selected: true,
-      meta: { label: '当前报告' },
-    },
-    {
-      id: 'scope',
-      type: 'data',
-      title: '当前地图范围.json',
-      status: 'ready',
-      selected: true,
-      meta: { label: '空间范围' },
-    },
-    {
-      id: 'evidence',
-      type: 'sheet',
-      title: 'POI 人口 夜光 路网证据.xlsx',
-      status: 'ready',
-      selected: true,
-      meta: { label: '分析指标' },
-    },
-    {
-      id: 'attachment',
-      type: 'file',
-      title: '附件素材待接入.pptx',
-      status: 'pending',
-      selected: false,
-      meta: { label: '待接入' },
-    },
-    {
-      id: 'web-research',
-      type: 'web',
-      title: '联网来源待研究.url',
-      status: 'pending',
-      selected: false,
-      meta: { label: '待研究' },
-    },
+    ...createPptSystemSources(),
+    ...createDefaultUserPptSources(),
   ]
 }
 
@@ -63,7 +141,7 @@ export function createDefaultPptSpec(seed = {}) {
     .filter(Boolean)
   return {
     topic: asText(seed.topic),
-    title: asText(seed.title) || 'PPT Spec',
+    title: asText(seed.title) || 'PPT 指令文件',
     goal: asText(seed.goal) || '形成面向评审的专业策划汇报结构',
     audience: asText(seed.audience) || '政府评审',
     deckType: asText(seed.deckType || seed.deck_type) || '城市更新概念策划',
@@ -91,8 +169,8 @@ export function createDefaultDeckBriefPreview() {
         purpose: '建立项目命题',
         keyMessage: '明确区域更新的汇报对象与核心命题',
         visualPlan: '项目名、区域底图、关键判断一句话',
-        requiredSources: ['summary', 'scope'],
-        speakerNotes: '第一阶段先生成 page brief，不直接生成 PPTX。',
+        requiredSources: ['system:scope'],
+        speakerNotes: '第一阶段先生成逐页指令，不直接生成 PPTX。',
       },
       {
         id: 'location',
@@ -101,8 +179,8 @@ export function createDefaultDeckBriefPreview() {
         purpose: '解释区域为什么值得讨论',
         keyMessage: '用交通、周边资源和城市关系建立区位价值',
         visualPlan: '区位图、圈层关系、交通节点',
-        requiredSources: ['scope', 'evidence'],
-        speakerNotes: '后续由 PPT Spec 决定完整页序。',
+        requiredSources: ['system:scope', 'system:poi', 'system:h3'],
+        speakerNotes: '后续由 PPT 指令文件决定完整页序。',
       },
       {
         id: 'diagnosis',
@@ -111,7 +189,7 @@ export function createDefaultDeckBriefPreview() {
         purpose: '把问题说清楚',
         keyMessage: '从 POI、人口、夜光、路网中提炼现状矛盾',
         visualPlan: '指标卡、热力图、问题清单',
-        requiredSources: ['evidence'],
+        requiredSources: ['system:poi', 'system:population', 'system:nightlight', 'system:road-syntax'],
         speakerNotes: '当前仅展示代表性页面。',
       },
       {
@@ -121,7 +199,7 @@ export function createDefaultDeckBriefPreview() {
         purpose: '提出空间和功能方向',
         keyMessage: '把诊断转成可讨论的更新策略',
         visualPlan: '策略分区、功能组合、空间结构',
-        requiredSources: ['summary', 'evidence'],
+        requiredSources: ['system:h3', 'system:road-syntax'],
         speakerNotes: '真实生成时会引用选中来源。',
       },
       {
@@ -131,7 +209,7 @@ export function createDefaultDeckBriefPreview() {
         purpose: '形成可推进的行动顺序',
         keyMessage: '用分期、运营和治理路径支撑落地',
         visualPlan: '时间轴、责任矩阵、近期行动',
-        requiredSources: ['summary'],
+        requiredSources: ['system:scope'],
         speakerNotes: 'PPTX 导出在后续阶段接入。',
       },
     ],
@@ -139,12 +217,13 @@ export function createDefaultDeckBriefPreview() {
 }
 
 export function normalizePptSource(seed = {}) {
+  const status = asText(seed.status) || 'pending'
   return {
     id: asText(seed.id),
     type: asText(seed.type) || 'file',
     title: asText(seed.title) || '未命名来源',
-    status: asText(seed.status) || 'pending',
-    selected: !!seed.selected,
+    status,
+    selected: status === 'ready' && !!seed.selected,
     meta: cloneObject(seed.meta),
   }
 }
@@ -161,6 +240,20 @@ export function normalizeDeckSlideBrief(seed = {}, fallbackIndex = 1) {
     requiredSources: cloneArray(seed.requiredSources || seed.required_sources).map((item) => asText(item)).filter(Boolean),
     speakerNotes: asText(seed.speakerNotes || seed.speaker_notes),
   }
+}
+
+export function normalizePptOutlineItem(seed = {}, fallbackIndex = 1) {
+  const pageNo = Number(seed.pageNo || seed.page_no || fallbackIndex) || fallbackIndex
+  return {
+    id: asText(seed.id) || `outline-${pageNo}`,
+    pageNo,
+    theme: asText(seed.theme) || `页面 ${pageNo}`,
+    purpose: asText(seed.purpose),
+  }
+}
+
+export function normalizePptOutline(seed = []) {
+  return cloneArray(seed).map((item, index) => normalizePptOutlineItem(item, index + 1))
 }
 
 export function normalizeDeckBrief(seed = {}) {

@@ -122,7 +122,10 @@ test('persistAnalysisArtifact posts canonical artifact payload after ensuring hi
     const rasterRequest = requests.find((item) => item.url === '/api/v1/analysis/history/history-artifact/artifacts' && item.body.artifact_type === 'poi_raster_grid')
     assert.ok(rasterRequest)
     assert.equal(rasterRequest.body.params.year, 2024)
-    assert.equal(rasterRequest.body.payload.features[0].properties.cell_id, 'cell-1')
+    assert.equal(rasterRequest.body.params.grid_type, 'shared_raster')
+    assert.equal(rasterRequest.body.params.cell_id_source, 'population_nightlight_shared_cell_id')
+    assert.equal(rasterRequest.body.payload.grid.grid_type, 'shared_raster')
+    assert.equal(rasterRequest.body.payload.grid.features[0].properties.cell_id, 'cell-1')
     assert.deepEqual(rasterRequest.body.summary, { grid_count: 1, assigned_poi_count: 3 })
   } finally {
     global.fetch = previousFetch

@@ -1,5 +1,6 @@
 import { createApp, markRaw } from 'vue'
 import { createAnalysisAgentInitialState, createAnalysisAgentSessionMethods } from '../../../features/agent/sessions'
+import PptPlanningWorkbench from '../../../features/ppt-planning/PptPlanningWorkbench.vue'
 import { createAnalysisBootstrapContext } from './bootstrap-context'
 import { mountAnalysisRuntimeApp } from '../views/runtime-mount'
 import { createAnalysisLifecycleHooks } from './lifecycle'
@@ -49,6 +50,9 @@ export function runAnalysisBootstrapApp() {
           const agentSessionMethods = createAnalysisAgentSessionMethods()
 
           const analysisApp = createApp({
+              components: {
+                  PptPlanningWorkbench,
+              },
               data() {
                   return {
                       loadingConfig: true,

@@ -1952,105 +1952,33 @@
                         </div>
 
                         <div v-else-if="isAgentPptPlanningTabActive()" class="agent-summary-tab-view is-detail">
-                            <div class="agent-ppt-planning-workbench">
-                                <div class="agent-ppt-notebook">
-                                    <aside class="agent-ppt-notebook-panel agent-ppt-sources-panel" aria-label="来源">
-                                        <div class="agent-ppt-notebook-head">
-                                            <h3>来源</h3>
-                                            <button type="button" class="agent-ppt-source-collapse-btn" disabled aria-label="折叠来源">
-                                                <span></span>
-                                                <span></span>
-                                            </button>
-                                        </div>
-                                        <button type="button" class="agent-ppt-add-source-btn" disabled>+ 添加来源</button>
-                                        <div class="agent-ppt-source-search">
-                                            <div class="agent-ppt-source-search-main">
-                                                <span>在网络中搜索新来源</span>
-                                                <div class="agent-ppt-source-search-chips">
-                                                    <button type="button" disabled>Web</button>
-                                                    <button type="button" disabled>Fast Research</button>
-                                                </div>
-                                            </div>
-                                            <button type="button" disabled>搜索</button>
-                                        </div>
-                                        <button type="button" class="agent-ppt-source-select-row" @click="toggleAllAgentPptPlanningSources()">
-                                            <i aria-hidden="true"></i>
-                                            <span>全选</span>
-                                            <strong>{{ getAgentPptPlanningSourceSummary().selected }}/{{ getAgentPptPlanningSourceSummary().total }}</strong>
-                                        </button>
-                                        <div class="agent-ppt-source-list">
-                                            <button
-                                                v-for="source in getAgentPptPlanningSources()"
-                                                :key="`ppt-source-${source.id}`"
-                                                type="button"
-                                                class="agent-ppt-source-row"
-                                                :class="[{ 'is-ready': source.status === 'ready', 'is-selected': source.selected }, `is-${source.type || 'file'}`]"
-                                                @click="toggleAgentPptPlanningSource(source.id)">
-                                                <span class="agent-ppt-source-icon" :class="`is-${source.type || 'file'}`"></span>
-                                                <strong>{{ source.title }}</strong>
-                                                <em>{{ source.selected ? '✓' : '' }}</em>
-                                            </button>
-                                        </div>
-                                    </aside>
-
-                                    <section class="agent-ppt-notebook-panel agent-ppt-document-panel" aria-label="PPT Spec">
-                                        <div class="agent-ppt-notebook-head">
-                                            <h3>PPT Spec</h3>
-                                            <span>{{ getAgentPptPlanningSpec().pageCount }} 页（可配置） · {{ getAgentPptPlanningSpec().audience }}</span>
-                                        </div>
-                                        <div class="agent-ppt-spec-card">
-                                            <span>主题</span>
-                                            <strong>{{ getAgentPptPlanningSpec().topic || '待输入' }}</strong>
-                                        </div>
-                                        <div class="agent-ppt-spec-grid">
-                                            <div>
-                                                <span>汇报类型</span>
-                                                <strong>{{ getAgentPptPlanningSpec().deckType }}</strong>
-                                            </div>
-                                            <div>
-                                                <span>资料来源</span>
-                                                <strong>{{ getAgentPptPlanningSourceSummary().selected }} 个已选</strong>
-                                            </div>
-                                            <div>
-                                                <span>联网研究</span>
-                                                <strong>{{ getAgentPptPlanningSpec().researchEnabled ? '开启' : '关闭' }}</strong>
-                                            </div>
-                                            <div>
-                                                <span>输出</span>
-                                                <strong>Page Brief</strong>
-                                            </div>
-                                        </div>
-                                        <div class="agent-ppt-prompt-box">
-                                            <span>生成 PPT Spec</span>
-                                            <button type="button" disabled>接口待接入</button>
-                                        </div>
-                                    </section>
-
-                                    <aside class="agent-ppt-notebook-panel agent-ppt-studio-panel" aria-label="Studio">
-                                        <div class="agent-ppt-notebook-head">
-                                            <h3>Page Brief</h3>
-                                            <span>{{ getAgentPptPlanningSlides().length }} 个示例页</span>
-                                        </div>
-                                        <div class="agent-ppt-brief-list">
-                                            <button
-                                                v-for="slide in getAgentPptPlanningSlides()"
-                                                :key="`ppt-slide-${slide.id}`"
-                                                type="button"
-                                                class="agent-ppt-brief-row"
-                                                :class="{ 'is-active': isAgentPptPlanningSlideActive(slide.id) }"
-                                                @click="selectAgentPptPlanningSlide(slide.id)">
-                                                <span>{{ String(slide.index).padStart(2, '0') }}</span>
-                                                <strong>{{ slide.title }}</strong>
-                                                <em>{{ slide.purpose }}</em>
-                                            </button>
-                                        </div>
-                                        <div class="agent-ppt-preview-brief">
-                                            <span>{{ getAgentPptPlanningActiveSlide().visualPlan }}</span>
-                                            <strong>{{ getAgentPptPlanningActiveSlide().keyMessage }}</strong>
-                                        </div>
-                                    </aside>
-                                </div>
-                            </div>
+                            <ppt-planning-workbench
+                                :sources="getAgentPptPlanningSources()"
+                                :source-groups="getAgentPptPlanningSourceGroups()"
+                                :source-summary="getAgentPptPlanningSourceSummary()"
+                                :spec="getAgentPptPlanningSpec()"
+                                :current-step="getAgentPptPlanningCurrentStep()"
+                                :outline="getAgentPptPlanningOutline()"
+                                :slides="getAgentPptPlanningSlides()"
+                                :generation-error="getAgentPptPlanningGenerationError()"
+                                :data-package-generating="isAgentPptPlanningDataPackageGenerating()"
+                                :source-grouping="isAgentPptPlanningSourceGrouping()"
+                                @classify-source-groups="classifyAgentPptPlanningSourceGroups"
+                                @toggle-source="toggleAgentPptPlanningSource"
+                                @toggle-all-sources="toggleAllAgentPptPlanningSources"
+                                @toggle-source-group-collapsed="toggleAgentPptPlanningSourceGroupCollapsed"
+                                @set-source-group-selected="setAgentPptPlanningSourceGroupSelected"
+                                @move-source-to-group="moveAgentPptPlanningSourceToGroup"
+                                @rename-source="renameAgentPptPlanningSource"
+                                @remove-source="removeAgentPptPlanningSource"
+                                @rename-source-group="renameAgentPptPlanningSourceGroup"
+                                @set-source-group-emoji="setAgentPptPlanningSourceGroupEmoji"
+                                @remove-source-group="removeAgentPptPlanningSourceGroup"
+                                @update-spec-field="updateAgentPptPlanningSpecField"
+                                @create-data-package="createAgentPptPlanningDataPackage"
+                                @generate-outline="generateAgentPptPlanningOutline"
+                                @generate-directive="generateAgentPptPlanningDirective">
+                            </ppt-planning-workbench>
                         </div>
 
                         <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">

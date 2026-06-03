@@ -160,7 +160,7 @@ test('poi grid matrix groups raster and h3 cells by year', () => {
   assert.deepEqual(groups.map((group) => group.year), [2020, 2024, 2026])
   assert.equal(groups[1].readyCount, 1)
   assert.equal(groups[1].totalCount, 2)
-  assert.deepEqual(groups[1].rows.map((row) => row.label), ['栅格', 'H3'])
+  assert.deepEqual(groups[1].rows.map((row) => row.label), ['共享栅格', 'H3'])
   assert.equal(groups[1].rows.find((row) => row.gridType === 'h3').count, 12)
   assert.equal(ctx.getPoiGridResultStatusLabel('pending'), '待生成')
   assert.equal(ctx.getPoiGridResultStatusLabel('ready'), '已就绪')
@@ -204,11 +204,11 @@ test('poi grid matrix can generate raster and h3 for every year', async () => {
   await ctx.ensureAllPoiGridMatrixResults(true)
 
   assert.deepEqual(calls, [
-    { year: 2020, gridType: 'raster', force: true },
+    { year: 2020, gridType: 'shared', force: true },
     { year: 2020, gridType: 'h3', force: true },
-    { year: 2024, gridType: 'raster', force: true },
+    { year: 2024, gridType: 'shared', force: true },
     { year: 2024, gridType: 'h3', force: true },
-    { year: 2026, gridType: 'raster', force: true },
+    { year: 2026, gridType: 'shared', force: true },
     { year: 2026, gridType: 'h3', force: true },
   ])
 })

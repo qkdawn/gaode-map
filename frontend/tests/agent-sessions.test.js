@@ -4801,7 +4801,7 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.isAgentPptPlanningTabActive(), true)
   assert.equal(ctx.isAgentReportDetailView(), true)
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '策划 PPT')
-  assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '先生成 PPT Spec 和逐页 Page Brief，再进入幻灯片生成')
+  assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '先生成 PPT 指令文件，再选择风格 Skill 生成页面')
   assert.equal(ctx.shouldShowAgentComposer(), false)
   assert.equal(ctx.openAgentPptPlanningFromReport(), pptId)
 

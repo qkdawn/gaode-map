@@ -456,7 +456,7 @@ export function createAgentTabsMethods() {
       const kind = asText(this.getAgentActiveTopTab().kind)
       if (kind === 'site_selection') return '从区域报告进入的开店位置判断'
       if (kind === 'iteration_change') return '从区域报告进入的时间变化分析'
-      if (kind === 'ppt_planning') return '先生成 PPT Spec 和逐页 Page Brief，再进入幻灯片生成'
+      if (kind === 'ppt_planning') return '先生成 PPT 指令文件，再选择风格 Skill 生成页面'
       if (kind === 'deep_analysis') return '基于当前报告对象继续跑工具、生成新证据'
       if (kind === 'followup') return '围绕当前区域报告继续追问'
       if (this.hasAgentSummaryPack()) return '先看判断，再追问、查证据或继续做任务'
@@ -594,6 +594,8 @@ export function createAgentTabsMethods() {
         if (target && target.panelPayloads && typeof target.panelPayloads === 'object') {
           this.agentPanelPayloads = cloneObject(target.panelPayloads)
         }
+        this.refreshAgentActivePptPlanningSources()
+        this.refreshAgentActivePptPlanningDataSources()
       } else if (tabs.deepAnalysisTabs.some((item) => item.id === nextId)) {
         const target = tabs.deepAnalysisTabs.find((item) => item.id === nextId)
         this.applyAgentFollowupThreadToCurrentState(target && target.thread)
