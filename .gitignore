@@ -19,6 +19,7 @@ frontend/*.tsbuildinfo
 static/frontend/
 runtime/generated_charts/
 runtime/agent_uploads/
+runtime/documents/
 /AGENTS.md
 
 # Data

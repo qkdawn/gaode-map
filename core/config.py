@@ -11,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CHART_OUTPUT_DIR = PROJECT_ROOT / "runtime" / "generated_charts"
+DEFAULT_DOCUMENT_UPLOAD_DIR = PROJECT_ROOT / "runtime" / "documents"
 
 
 class Settings(BaseSettings):
@@ -70,6 +71,11 @@ class Settings(BaseSettings):
     db_name: str = Field("gaode_deploy", validation_alias="DB_NAME", description="Database name")
     db_driver: str = Field("mysql+pymysql", validation_alias="DB_DRIVER", description="SQLAlchemy database driver")
     db_query: str = Field("charset=utf8mb4", validation_alias="DB_QUERY", description="Database URL query string")
+    postgres_database_url: str = Field(
+        "",
+        validation_alias="POSTGRES_DATABASE_URL",
+        description="Independent PostgreSQL database URL for AI document and evidence data",
+    )
 
     @property
     def sqlalchemy_database_uri(self) -> str:
@@ -83,6 +89,13 @@ class Settings(BaseSettings):
             raise ValueError("DB_URL is required, or configure DB_HOST with DB_USER/DB_PASSWORD/DB_NAME.")
         if db_url.lower().startswith("sqlite"):
             raise ValueError("SQLite is no longer supported. Configure DB_URL with mysql+pymysql://...")
+        return db_url
+
+    @property
+    def ai_sqlalchemy_database_uri(self) -> str:
+        db_url = str(self.postgres_database_url or "").strip()
+        if not db_url:
+            raise ValueError("POSTGRES_DATABASE_URL is required for AI document storage.")
         return db_url
 
     def _build_database_url_from_parts(self, host: str) -> str:
@@ -172,6 +185,7 @@ class Settings(BaseSettings):
         if not str(self.amap_js_api_key or "").strip() and str(self.amap_web_service_key or "").strip():
             self.amap_js_api_key = str(self.amap_web_service_key or "").split(",", 1)[0].strip()
         self.chart_output_dir = self._normalize_project_path(self.chart_output_dir, DEFAULT_CHART_OUTPUT_DIR)
+        self.document_upload_dir = self._normalize_project_path(self.document_upload_dir, DEFAULT_DOCUMENT_UPLOAD_DIR)
 
     @staticmethod
     def _normalize_project_path(raw_value: str, default_path: Path) -> str:
@@ -275,6 +289,16 @@ class Settings(BaseSettings):
         validation_alias="AGENT_ATTACHMENT_ALLOWED_EXTENSIONS",
         description="Allowed Agent chat attachment extensions",
     )
+    document_upload_dir: str = Field(
+        str(DEFAULT_DOCUMENT_UPLOAD_DIR),
+        validation_alias="DOCUMENT_UPLOAD_DIR",
+        description="Directory for uploaded document library files",
+    )
+    document_max_mb: int = Field(
+        50,
+        validation_alias="DOCUMENT_MAX_MB",
+        description="Maximum uploaded document size in MB",
+    )
     raganything_parser: Literal["mineru", "docling", "paddleocr"] = Field(
         "mineru",
         validation_alias="RAGANYTHING_PARSER",
@@ -294,6 +318,11 @@ class Settings(BaseSettings):
         3072,
         validation_alias="RAGANYTHING_EMBEDDING_DIM",
         description="Embedding dimension for the RAG-Anything embedding model",
+    )
+    evidence_embedding_model: str = Field(
+        "BAAI/bge-m3",
+        validation_alias="EVIDENCE_EMBEDDING_MODEL",
+        description="OpenAI-compatible BGE-M3 embedding model for evidence semantic search",
     )
 
     # 本地历史数据查询服务配置

@@ -1,10 +1,13 @@
 from .agent import router as agent_router
 from .charting import router as charting_router
+from .documents import router as documents_router
+from .evidence_retrieval import router as evidence_retrieval_router
 from .export import router as export_router
 from .gwr import router as gwr_router
 from .h3 import router as h3_router
 from .history import router as history_router
 from .isochrone import router as isochrone_router
+from .jobs import router as jobs_router
 from .map import router as map_router
 from .nightlight import router as nightlight_router
 from .poi import router as poi_router
@@ -20,9 +23,12 @@ __all__ = [
     "export_router",
     "gwr_router",
     "charting_router",
+    "documents_router",
+    "evidence_retrieval_router",
     "h3_router",
     "history_router",
     "isochrone_router",
+    "jobs_router",
     "map_router",
     "nightlight_router",
     "poi_router",

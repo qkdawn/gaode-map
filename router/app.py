@@ -10,11 +10,14 @@ from modules.road.core import analyze_road_syntax
 from router.domains import (
     agent_router,
     charting_router,
+    documents_router,
+    evidence_retrieval_router,
     export_router,
     gwr_router,
     h3_router,
     history_router,
     isochrone_router,
+    jobs_router,
     map_router,
     nightlight_router,
     poi_router,
@@ -30,6 +33,9 @@ router = APIRouter()
 router.include_router(system_router)
 router.include_router(agent_router)
 router.include_router(charting_router)
+router.include_router(documents_router)
+router.include_router(evidence_retrieval_router)
+router.include_router(jobs_router)
 router.include_router(map_router)
 router.include_router(poi_router)
 router.include_router(population_router)
