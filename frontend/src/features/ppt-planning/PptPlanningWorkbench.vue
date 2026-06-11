@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { buildPptCarrierPreviewModel } from './carrier-preview.js'
+import { getPendingPptPackageSources } from './ui-state.js'
 
 const props = defineProps({
   sources: {
@@ -38,6 +40,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  generationErrorSource: {
+    type: String,
+    default: '',
+  },
   dataPackageGenerating: {
     type: Boolean,
     default: false,
@@ -45,6 +51,30 @@ const props = defineProps({
   sourceGrouping: {
     type: Boolean,
     default: false,
+  },
+  activeRevisionTarget: {
+    type: Object,
+    default: () => ({}),
+  },
+  outlineRevisionDraft: {
+    type: Object,
+    default: () => ({}),
+  },
+  directiveRevisionDraft: {
+    type: Object,
+    default: () => ({}),
+  },
+  revisionSnapshots: {
+    type: Object,
+    default: () => ({}),
+  },
+  staleDirectivePageIds: {
+    type: Array,
+    default: () => [],
+  },
+  revisionGeneratingTarget: {
+    type: Object,
+    default: () => ({}),
   },
 })
 
@@ -64,12 +94,23 @@ const emit = defineEmits([
   'create-data-package',
   'generate-outline',
   'generate-directive',
+  'regenerate-outline',
+  'regenerate-directive',
+  'open-revision-target',
+  'close-revision-target',
+  'update-revision-draft',
+  'save-revision',
+  'regenerate-revision',
+  'undo-revision',
 ])
 
 const isSourcesCollapsed = ref(false)
 const sourceMenu = ref({ kind: '', id: '', placement: 'below', x: 0, y: 0 })
 const sourceDialog = ref({ mode: '', id: '', title: '', value: '', message: '' })
 const activePackageSourceId = ref('')
+const activePackageCarrierId = ref('')
+const activePackageCarrierPreviewMode = ref('local')
+const flowViewMode = ref('')
 const sourceMenuLockClass = 'agent-ppt-source-menu-open'
 
 const sourcePanelLabel = computed(() => (isSourcesCollapsed.value ? '展开来源' : '折叠来源'))
@@ -87,9 +128,31 @@ const isOutlineGenerating = computed(() => props.currentStep === 'outline_genera
 const isDirectiveGenerating = computed(() => props.currentStep === 'directive_generating')
 const hasOutline = computed(() => props.outline.length > 0)
 const hasDirective = computed(() => props.currentStep === 'directive_draft')
-const canGenerateOutline = computed(() => (props.sourceSummary.selected || 0) > 0 && !isOutlineGenerating.value && !isDirectiveGenerating.value)
+const pendingPackageSources = computed(() => getPendingPptPackageSources({ sources: props.sources }))
+const hasPendingPackageSources = computed(() => pendingPackageSources.value.length > 0)
+const outlineBlockReason = computed(() => {
+  if (!(props.sourceSummary.selected || 0)) return '请先选择至少一个已生成来源'
+  if (hasPendingPackageSources.value) {
+    const generating = pendingPackageSources.value.some((source) => String(source.status || '') === 'generating')
+    return generating ? '资料包仍在整理中，完成后再生成目录' : '资料包尚未生成完成，完成后再生成目录'
+  }
+  return ''
+})
+const canGenerateOutline = computed(() => !outlineBlockReason.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
 const canGenerateDirective = computed(() => hasOutline.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
 const canCreateDataPackage = computed(() => (props.sourceSummary.selected || 0) > 0 && !props.dataPackageGenerating)
+const generationErrorText = computed(() => String(props.generationError || '').trim())
+const generationErrorTitle = computed(() => {
+  if (!generationErrorText.value) return ''
+  const labels = {
+    source_refresh: '来源刷新失败，请检查历史数据或数据库连接后重试。',
+    source_grouping: '来源分组失败，当前来源仍可继续用于生成目录。',
+    data_package: '资料包生成失败，当前已选来源仍可继续用于生成目录。',
+    outline: '目录生成失败，请检查模型配置后重试。',
+    directive: '指令文件生成失败，请检查模型配置后重试。',
+  }
+  return labels[String(props.generationErrorSource || '')] || 'PPT 工作台请求失败，请稍后重试。'
+})
 const activePackageSource = computed(() => sourceById.value.get(String(activePackageSourceId.value || '')) || null)
 const activePackagePayload = computed(() => {
   const payload = ((activePackageSource.value || {}).meta || {}).package
@@ -98,6 +161,29 @@ const activePackagePayload = computed(() => {
 const activePackageItems = computed(() => {
   const items = activePackagePayload.value.items
   return Array.isArray(items) ? items.slice(0, 100) : []
+})
+const activePackageCarriers = computed(() => {
+  const carriers = activePackagePayload.value.carriers
+  return Array.isArray(carriers) ? carriers.slice(0, 30) : []
+})
+const activePackageRoadContext = computed(() => {
+  const context = activePackagePayload.value.road_context || activePackagePayload.value.roadContext
+  return context && typeof context === 'object' ? context : {}
+})
+const activePackageCarrierPreview = computed(() => buildPptCarrierPreviewModel(activePackageCarriers.value, {
+  roadContext: activePackageRoadContext.value,
+  focusId: activePackageCarrierId.value || String((activePackageCarriers.value[0] || {}).carrier_id || ''),
+  extentMode: activePackageCarrierPreviewMode.value,
+}))
+const activePackagePreviewCarriers = computed(() => activePackageCarrierPreview.value.items || [])
+const activePackagePreviewRoads = computed(() => activePackageCarrierPreview.value.roadItems || [])
+const activePackageSelectedCarrier = computed(() => {
+  const activeId = String(activePackageCarrierId.value || '')
+  return activePackageCarriers.value.find((carrier) => String(carrier.carrier_id || '') === activeId) || activePackageCarriers.value[0] || null
+})
+const activePackageCarrierSummary = computed(() => {
+  const summary = activePackagePayload.value.carrier_summary || activePackagePayload.value.carrierSummary
+  return summary && typeof summary === 'object' ? summary : {}
 })
 const activePackageEvidenceRefs = computed(() => {
   const refs = activePackagePayload.value.evidence_refs || activePackagePayload.value.evidenceRefs
@@ -114,7 +200,15 @@ const activePackageAlignment = computed(() => {
 const activePackageStats = computed(() => {
   const payload = activePackagePayload.value
   const alignment = activePackageAlignment.value
+  const carrierSummary = activePackageCarrierSummary.value
+  const carrierRows = activePackageCarriers.value.length ? [
+    ['空间载体', carrierSummary.carrier_count ?? activePackageCarriers.value.length],
+    ['路段', carrierSummary.segment_count],
+    ['廊道', carrierSummary.corridor_count],
+    ['街区 / loop', carrierSummary.block_loop_count],
+  ] : []
   return [
+    ...carrierRows,
     ['总候选', payload.total],
     ['入包点位', activePackageItems.value.length],
     ['已对齐', alignment.matched_item_count],
@@ -128,8 +222,15 @@ const activeFlowIndex = computed(() => {
   if (props.currentStep === 'directive_draft') return 3
   return 0
 })
+const canViewOutlineStep = computed(() => hasOutline.value)
+const canViewDirectiveStep = computed(() => hasDirective.value)
+const isViewingMaterials = computed(() => flowViewMode.value === 'materials' && (hasOutline.value || hasDirective.value))
+const isViewingOutline = computed(() => flowViewMode.value === 'outline' && hasOutline.value)
+const isViewingDirective = computed(() => flowViewMode.value === 'directive' && hasDirective.value)
+const shouldShowConfigPanel = computed(() => !hasOutline.value || isViewingMaterials.value)
+const shouldShowDirectiveRows = computed(() => hasDirective.value && !isViewingMaterials.value && !isViewingOutline.value)
 const outlineRows = computed(() => {
-  if (hasDirective.value && props.slides.length) {
+  if (shouldShowDirectiveRows.value && props.slides.length) {
     return props.slides.map((item, index) => ({
       id: item.id || `slide-${index + 1}`,
       pageNo: item.index || index + 1,
@@ -156,6 +257,79 @@ const outlineRows = computed(() => {
   }
   return []
 })
+
+function showFlowView(mode = '') {
+  if (mode === 'materials' && (hasOutline.value || hasDirective.value)) flowViewMode.value = 'materials'
+  if (mode === 'outline' && hasOutline.value) flowViewMode.value = 'outline'
+  if (mode === 'directive' && hasDirective.value) flowViewMode.value = 'directive'
+}
+const activeRevisionTarget = computed(() => props.activeRevisionTarget && typeof props.activeRevisionTarget === 'object' ? props.activeRevisionTarget : {})
+const activeRevisionType = computed(() => String(activeRevisionTarget.value.type || ''))
+const revisionDrawerOpen = computed(() => activeRevisionType.value === 'outline' || activeRevisionType.value === 'directive')
+const activeRevisionTitle = computed(() => activeRevisionType.value === 'directive' ? '修改逐页指令' : '修改目录小节')
+const activeRevisionDraft = computed(() => activeRevisionType.value === 'directive' ? props.directiveRevisionDraft : props.outlineRevisionDraft)
+const activeRevisionNote = computed(() => String((activeRevisionDraft.value || {}).revisionNote || '').trim())
+const canAiRegenerateRevision = computed(() => !!activeRevisionNote.value && !isCurrentRevisionGenerating.value)
+const staleDirectivePageIdSet = computed(() => new Set((props.staleDirectivePageIds || []).map((item) => String(Number(item) || item))))
+const revisionGeneratingKey = computed(() => revisionTargetKey(props.revisionGeneratingTarget || {}))
+const activeRevisionKey = computed(() => revisionTargetKey(activeRevisionTarget.value))
+const isCurrentRevisionGenerating = computed(() => !!activeRevisionKey.value && activeRevisionKey.value === revisionGeneratingKey.value)
+
+function revisionTargetKey(target = {}) {
+  const type = String(target.type || '')
+  if (type === 'directive') return `slide:${Number(target.index || target.pageNo || 0) || 0}`
+  if (type === 'outline') return `outline:${String(target.id || '') || (Number(target.pageNo || 0) || 0)}`
+  return ''
+}
+
+function rowRevisionKey(row = {}) {
+  if (row.mode === 'directive') return `slide:${Number(row.pageNo || 0) || 0}`
+  return `outline:${String(row.id || '') || (Number(row.pageNo || 0) || 0)}`
+}
+
+function canUndoRow(row = {}) {
+  return !!(props.revisionSnapshots || {})[rowRevisionKey(row)]
+}
+
+function isRowGenerating(row = {}) {
+  return rowRevisionKey(row) === revisionGeneratingKey.value
+}
+
+function isDirectiveRowStale(row = {}) {
+  return row.mode === 'directive' && staleDirectivePageIdSet.value.has(String(Number(row.pageNo || 0) || 0))
+}
+
+function openRevisionForRow(row = {}) {
+  emit('open-revision-target', row.mode === 'directive' ? 'directive' : 'outline', {
+    id: row.id,
+    pageNo: row.pageNo,
+    index: row.pageNo,
+  })
+}
+
+function updateRevisionDraft(field = '', value = '') {
+  if (!activeRevisionType.value) return
+  emit('update-revision-draft', activeRevisionType.value, field, value)
+}
+
+function saveCurrentRevision() {
+  if (!activeRevisionType.value || isCurrentRevisionGenerating.value) return
+  emit('save-revision', activeRevisionType.value)
+}
+
+function regenerateCurrentRevision() {
+  if (!canAiRegenerateRevision.value) return
+  emit('regenerate-revision', activeRevisionType.value)
+}
+
+function undoRowRevision(row = {}) {
+  if (!canUndoRow(row)) return
+  emit('undo-revision', row.mode === 'directive' ? 'directive' : 'outline', {
+    id: row.id,
+    pageNo: row.pageNo,
+    index: row.pageNo,
+  })
+}
 
 function isGroupSelected(group = {}) {
   const readyItems = (group.items || []).filter((source) => source.status === 'ready')
@@ -229,7 +403,11 @@ function groupTitle(groupId = '') {
 
 function isPackageSource(source = {}) {
   const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return source.type === 'package' || meta.sourceKind === 'package' || String(source.id || '').startsWith('package:')
+  return meta.sourceKind === 'package' || String(source.id || '').startsWith('package:')
+}
+
+function isGeneratingSource(source = {}) {
+  return String(source.status || '') === 'generating'
 }
 
 function openPackageDetail(source = {}) {
@@ -240,6 +418,8 @@ function openPackageDetail(source = {}) {
 
 function closePackageDetail() {
   activePackageSourceId.value = ''
+  activePackageCarrierId.value = ''
+  activePackageCarrierPreviewMode.value = 'local'
 }
 
 function handleSourceRowClick(source = {}) {
@@ -268,6 +448,70 @@ function packageItemRadiance(item = {}) {
   const nightlightCell = item.nightlight_cell && typeof item.nightlight_cell === 'object' ? item.nightlight_cell : {}
   return nightlightCell.class_label || nightlightCell.label || formatPackageMetric(nightlightCell.radiance)
 }
+
+function carrierMetric(carrier = {}, group = '', key = '') {
+  const payload = carrier[group] && typeof carrier[group] === 'object' ? carrier[group] : {}
+  return formatPackageMetric(payload[key])
+}
+
+function carrierPoiLabel(carrier = {}) {
+  const metrics = carrier.poi_metrics && typeof carrier.poi_metrics === 'object' ? carrier.poi_metrics : {}
+  const count = metrics.total_related_poi_count ?? 0
+  const categories = Array.isArray(metrics.dominant_categories) ? metrics.dominant_categories.slice(0, 2) : []
+  const label = categories.map((item) => item.category || item.name).filter(Boolean).join(' / ')
+  return label ? `${count} 个 · ${label}` : `${count} 个`
+}
+
+function carrierPopulationLabel(carrier = {}) {
+  const metrics = carrier.population_metrics && typeof carrier.population_metrics === 'object' ? carrier.population_metrics : {}
+  const strength = metrics.demand_strength || '-'
+  if (metrics.total_population !== undefined && metrics.total_population !== null) {
+    return `总人口 ${formatPackageMetric(metrics.total_population)} · ${strength}`
+  }
+  const label = metrics.view_label || '人口图层'
+  const unit = metrics.unit ? ` ${metrics.unit}` : ''
+  return `${label}均值 ${formatPackageMetric(metrics.mean_cell_value)}${unit} · ${strength}`
+}
+
+function carrierTypeLabel(carrier = {}) {
+  const type = String(carrier.carrier_type || carrier.type || '')
+  if (type === 'block_loop') return '街区 / loop'
+  if (type === 'corridor') return '廊道'
+  return '路段'
+}
+
+function selectPackageCarrier(carrierId = '') {
+  const normalized = String(carrierId || '')
+  if (normalized) activePackageCarrierId.value = normalized
+}
+
+function setPackageCarrierPreviewMode(mode = 'local') {
+  activePackageCarrierPreviewMode.value = String(mode || '') === 'all' ? 'all' : 'local'
+}
+
+function isPackageCarrierActive(carrier = {}) {
+  const carrierId = String(carrier.carrier_id || carrier.id || '')
+  return !!carrierId && carrierId === String(activePackageCarrierId.value || '')
+}
+
+function carrierPreviewClass(item = {}) {
+  const hasActive = String(activePackageCarrierId.value || '')
+  return {
+    'is-active': String(item.id || '') === hasActive,
+    'is-muted': !!hasActive && String(item.id || '') !== hasActive,
+    [`is-${String(item.type || 'segment')}`]: true,
+  }
+}
+
+watch(
+  activePackageCarriers,
+  (carriers) => {
+    const firstCarrierId = String(((carriers || [])[0] || {}).carrier_id || '')
+    const currentExists = (carriers || []).some((carrier) => String(carrier.carrier_id || '') === String(activePackageCarrierId.value || ''))
+    activePackageCarrierId.value = currentExists ? activePackageCarrierId.value : firstCarrierId
+  },
+  { immediate: true },
+)
 
 watch(
   () => props.sources,
@@ -457,7 +701,7 @@ function confirmSourceDialog() {
                   v-for="source in group.items"
                   :key="`ppt-source-${source.id}`"
                   class="agent-ppt-source-row"
-                  :class="[{ 'is-ready': source.status === 'ready', 'is-pending': source.status !== 'ready', 'is-selected': source.selected }, `is-${source.type || 'file'}`]">
+                  :class="[{ 'is-ready': source.status === 'ready', 'is-generating': isGeneratingSource(source), 'is-pending': source.status !== 'ready', 'is-selected': source.selected }, `is-${source.type || 'file'}`]">
                   <button
                     type="button"
                     class="agent-ppt-source-row-main"
@@ -488,7 +732,7 @@ function confirmSourceDialog() {
                     @click.stop="$emit('toggle-source', source.id)">
                     {{ source.selected ? '✓' : '' }}
                   </button>
-                  <span v-else class="agent-ppt-source-loading" aria-label="未就绪"></span>
+                  <span v-else class="agent-ppt-source-loading" :class="{ 'is-generating': isGeneratingSource(source) }" aria-label="未就绪"></span>
                   <div
                     v-if="sourceMenu.kind === 'source' && sourceMenu.id === source.id"
                     class="agent-ppt-source-menu"
@@ -537,12 +781,33 @@ function confirmSourceDialog() {
           <span>{{ spec.pageCount || 15 }} 页（可配置） · {{ spec.audience || '政府评审' }}</span>
         </div>
         <div class="agent-ppt-flow-strip" aria-label="PPT 生成流程">
-          <span :class="{ 'is-current': activeFlowIndex === 0 }">配置</span>
-          <span :class="{ 'is-current': activeFlowIndex === 1 }">生成目录</span>
-          <span :class="{ 'is-current': activeFlowIndex === 2 }">生成指令</span>
-          <span :class="{ 'is-current': activeFlowIndex === 3 }">选择风格</span>
-          <span :class="{ 'is-current': activeFlowIndex === 4 }">生成页面</span>
-          <span :class="{ 'is-current': activeFlowIndex === 5 }">导出</span>
+          <button
+            type="button"
+            :class="{ 'is-current': activeFlowIndex === 0 || isViewingMaterials, 'is-complete': activeFlowIndex > 0 && !isViewingMaterials }"
+            :disabled="activeFlowIndex === 0"
+            @click="showFlowView('materials')">
+            配置
+          </button>
+          <button
+            type="button"
+            :class="{
+              'is-current': !isViewingMaterials && (activeFlowIndex === 1 || isViewingOutline || (activeFlowIndex === 2 && !isViewingDirective)),
+              'is-complete': hasOutline && activeFlowIndex > 1 && !isViewingOutline
+            }"
+            :disabled="!canViewOutlineStep"
+            @click="showFlowView('outline')">
+            生成目录
+          </button>
+          <button
+            type="button"
+            :class="{ 'is-current': !isViewingMaterials && !isViewingOutline && (activeFlowIndex === 2 || activeFlowIndex === 3 || isViewingDirective), 'is-complete': hasDirective && !isViewingDirective }"
+            :disabled="!canViewDirectiveStep"
+            @click="showFlowView('directive')">
+            生成指令
+          </button>
+          <button type="button" disabled>选择风格</button>
+          <button type="button" :class="{ 'is-current': activeFlowIndex === 4 }" disabled>生成页面</button>
+          <button type="button" :class="{ 'is-current': activeFlowIndex === 5 }" disabled>导出</button>
         </div>
         <div class="agent-ppt-directive-summary">
           <div>
@@ -562,89 +827,247 @@ function confirmSourceDialog() {
             <strong>{{ sourceSummary.selected || 0 }} 个已选来源</strong>
           </div>
         </div>
-        <div v-if="!outlineRows.length" class="agent-ppt-target-config-panel">
-          <div class="agent-ppt-target-config-head">
-            <strong>配置生成目标</strong>
-            <span v-if="generationError">AI 生成暂不可用，请检查模型配置后重试。</span>
-            <span v-else>确认主题、页数、受众和来源后生成 PPT 目录。</span>
-          </div>
-          <label class="agent-ppt-config-field">
-            <span>主题</span>
-            <input
-              type="text"
-              :value="spec.topic || ''"
-              placeholder="输入 PPT 主题"
-              @input="$emit('update-spec-field', 'topic', $event.target.value)">
-          </label>
-          <div class="agent-ppt-target-config-grid">
+        <div class="agent-ppt-main-scroll">
+          <div v-if="shouldShowConfigPanel" class="agent-ppt-target-config-panel">
+            <div class="agent-ppt-target-config-head">
+              <strong>配置生成目标</strong>
+              <span v-if="generationErrorText">{{ generationErrorTitle }}</span>
+              <span v-else>确认主题、页数、受众和来源后生成 PPT 目录。</span>
+            </div>
             <label class="agent-ppt-config-field">
-              <span>页数</span>
-              <input
-                type="number"
-                min="1"
-                max="80"
-                :value="spec.pageCount || 15"
-                @input="$emit('update-spec-field', 'pageCount', $event.target.value)">
-            </label>
-            <label class="agent-ppt-config-field">
-              <span>受众</span>
+              <span>主题</span>
               <input
                 type="text"
-                :value="spec.audience || '政府评审'"
-                @input="$emit('update-spec-field', 'audience', $event.target.value)">
+                :value="spec.topic || ''"
+                placeholder="输入 PPT 主题"
+                @input="$emit('update-spec-field', 'topic', $event.target.value)">
             </label>
-            <div class="agent-ppt-config-field is-readonly">
-              <span>资料</span>
-              <strong>{{ sourceSummary.selected || 0 }} 个已选来源</strong>
+            <div class="agent-ppt-target-config-grid">
+              <label class="agent-ppt-config-field">
+                <span>页数</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="80"
+                  :value="spec.pageCount || 15"
+                  @input="$emit('update-spec-field', 'pageCount', $event.target.value)">
+              </label>
+              <label class="agent-ppt-config-field">
+                <span>受众</span>
+                <input
+                  type="text"
+                  :value="spec.audience || '政府评审'"
+                  @input="$emit('update-spec-field', 'audience', $event.target.value)">
+              </label>
+              <div class="agent-ppt-config-field is-readonly">
+                <span>资料</span>
+                <strong>{{ sourceSummary.selected || 0 }} 个已选来源</strong>
+              </div>
             </div>
           </div>
-        </div>
-        <div v-else class="agent-ppt-directive-doc">
-          <div
-            v-for="row in outlineRows"
-            :key="`ppt-directive-row-${row.id}`"
-            class="agent-ppt-directive-row"
-            :class="{ 'is-draft': row.mode === 'outline', 'is-directive': row.mode === 'directive' }">
-            <span class="agent-ppt-directive-page">{{ String(row.pageNo).padStart(2, '0') }}</span>
-            <div class="agent-ppt-directive-content">
-              <strong>{{ row.title }}</strong>
-              <em>{{ row.detail }}</em>
-              <dl v-if="row.fields.length" class="agent-ppt-directive-fields">
-                <div
-                  v-for="field in row.fields"
-                  :key="`ppt-directive-field-${row.id}-${field[0]}`">
-                  <dt>{{ field[0] }}</dt>
-                  <dd>{{ field[1] }}</dd>
-                </div>
-              </dl>
+          <div v-else class="agent-ppt-directive-doc">
+            <div
+              v-for="row in outlineRows"
+              :key="`ppt-directive-row-${row.id}`"
+              class="agent-ppt-directive-row"
+              :class="{ 'is-draft': row.mode === 'outline', 'is-directive': row.mode === 'directive' }">
+              <span class="agent-ppt-directive-page">{{ String(row.pageNo).padStart(2, '0') }}</span>
+              <div class="agent-ppt-directive-content">
+                <strong>{{ row.title }}</strong>
+                <em>{{ row.detail }}</em>
+                <span v-if="isDirectiveRowStale(row)" class="agent-ppt-revision-stale">目录已变更，建议重生成本页指令</span>
+                <dl v-if="row.fields.length" class="agent-ppt-directive-fields">
+                  <div
+                    v-for="field in row.fields"
+                    :key="`ppt-directive-field-${row.id}-${field[0]}`">
+                    <dt>{{ field[0] }}</dt>
+                    <dd>{{ field[1] }}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div class="agent-ppt-row-actions">
+                <button
+                  type="button"
+                  :disabled="isRowGenerating(row)"
+                  @click="openRevisionForRow(row)">
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  :disabled="isRowGenerating(row)"
+                  @click="openRevisionForRow(row)">
+                  AI 重生成
+                </button>
+                <button
+                  type="button"
+                  :disabled="!canUndoRow(row) || isRowGenerating(row)"
+                  @click="undoRowRevision(row)">
+                  撤回
+                </button>
+              </div>
             </div>
           </div>
         </div>
         <div class="agent-ppt-prompt-box">
-          <span v-if="generationError">{{ generationError }}</span>
+          <span v-if="generationErrorText">{{ generationErrorText }}</span>
+          <span v-else-if="!hasOutline && outlineBlockReason">{{ outlineBlockReason }}</span>
           <span v-else-if="!hasOutline">先生成目录，再生成逐页指令文件</span>
           <span v-else-if="!hasDirective">目录已生成，下一步生成逐页指令</span>
-          <span v-else>指令草稿已生成，可进入审核</span>
-          <button
-            v-if="!hasOutline"
-            type="button"
-            :disabled="!canGenerateOutline"
-            @click="$emit('generate-outline')">
-            {{ isOutlineGenerating ? '目录生成中' : '生成目录' }}
-          </button>
-          <button
-            v-else
-            type="button"
-            :disabled="!canGenerateDirective || hasDirective"
-            @click="$emit('generate-directive')">
-            {{ isDirectiveGenerating ? '指令生成中' : hasDirective ? '指令草稿已生成' : '生成指令文件' }}
+          <span v-else-if="isViewingOutline">正在查看目录；如需调整目录，可重新生成目录。</span>
+          <span v-else>指令草稿已生成；下一阶段暂未开放，可按需重新生成指令文件。</span>
+          <div class="agent-ppt-prompt-actions">
+            <button
+              v-if="!hasOutline"
+              type="button"
+              class="is-primary"
+              :disabled="!canGenerateOutline"
+              @click="$emit('generate-outline')">
+              {{ isOutlineGenerating ? '目录生成中' : '生成目录' }}
+            </button>
+            <template v-else-if="!hasDirective">
+              <button
+                type="button"
+                class="is-primary"
+                :disabled="!canGenerateDirective"
+                @click="$emit('generate-directive')">
+                {{ isDirectiveGenerating ? '指令生成中' : '生成指令文件' }}
+              </button>
+              <button
+                type="button"
+                :disabled="isOutlineGenerating || isDirectiveGenerating"
+                @click="$emit('regenerate-outline')">
+                重新生成目录
+              </button>
+            </template>
+            <template v-else-if="isViewingOutline">
+              <button
+                type="button"
+                :disabled="isOutlineGenerating || isDirectiveGenerating"
+                @click="$emit('regenerate-outline')">
+                重新生成目录
+              </button>
+            </template>
+            <template v-else>
+              <button type="button" class="is-primary" disabled>下一阶段暂未开放</button>
+              <button
+                type="button"
+                :disabled="isOutlineGenerating || isDirectiveGenerating"
+                @click="$emit('regenerate-directive')">
+                重新生成指令文件
+              </button>
+            </template>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="revisionDrawerOpen" class="agent-ppt-revision-backdrop" @click.self="$emit('close-revision-target')">
+      <section class="agent-ppt-revision-drawer" role="dialog" aria-modal="true" :aria-label="activeRevisionTitle">
+        <header class="agent-ppt-revision-head">
+          <div>
+            <span>{{ activeRevisionType === 'directive' ? '逐页指令' : '目录小节' }}</span>
+            <strong>{{ activeRevisionTitle }}</strong>
+          </div>
+          <button type="button" aria-label="关闭" title="关闭" @click="$emit('close-revision-target')">×</button>
+        </header>
+
+        <div v-if="activeRevisionType === 'outline'" class="agent-ppt-revision-fields">
+          <label class="agent-ppt-config-field">
+            <span>小节标题</span>
+            <input
+              type="text"
+              :value="outlineRevisionDraft.theme || ''"
+              :disabled="isCurrentRevisionGenerating"
+              @input="updateRevisionDraft('theme', $event.target.value)">
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>小节目的</span>
+            <textarea
+              rows="4"
+              :value="outlineRevisionDraft.purpose || ''"
+              :disabled="isCurrentRevisionGenerating"
+              @input="updateRevisionDraft('purpose', $event.target.value)"></textarea>
+          </label>
+        </div>
+
+        <div v-else class="agent-ppt-revision-fields">
+          <label class="agent-ppt-config-field">
+            <span>页面标题</span>
+            <input
+              type="text"
+              :value="directiveRevisionDraft.title || ''"
+              :disabled="isCurrentRevisionGenerating"
+              @input="updateRevisionDraft('title', $event.target.value)">
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>页面目的</span>
+            <textarea
+              rows="3"
+              :value="directiveRevisionDraft.purpose || ''"
+              :disabled="isCurrentRevisionGenerating"
+              @input="updateRevisionDraft('purpose', $event.target.value)"></textarea>
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>核心文案</span>
+            <textarea
+              rows="3"
+              :value="directiveRevisionDraft.keyMessage || ''"
+              :disabled="isCurrentRevisionGenerating"
+              @input="updateRevisionDraft('keyMessage', $event.target.value)"></textarea>
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>页面提示</span>
+            <textarea
+              rows="3"
+              :value="directiveRevisionDraft.visualPlan || ''"
+              :disabled="isCurrentRevisionGenerating"
+              @input="updateRevisionDraft('visualPlan', $event.target.value)"></textarea>
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>素材要求</span>
+            <input
+              type="text"
+              :value="directiveRevisionDraft.requiredSources || ''"
+              :disabled="isCurrentRevisionGenerating"
+              placeholder="用逗号分隔来源 id"
+              @input="updateRevisionDraft('requiredSources', $event.target.value)">
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>讲稿提示</span>
+            <textarea
+              rows="4"
+              :value="directiveRevisionDraft.speakerNotes || ''"
+              :disabled="isCurrentRevisionGenerating"
+              @input="updateRevisionDraft('speakerNotes', $event.target.value)"></textarea>
+          </label>
+        </div>
+
+        <label class="agent-ppt-config-field">
+          <span>AI 修改建议</span>
+          <textarea
+            rows="4"
+            :value="activeRevisionDraft.revisionNote || ''"
+            :disabled="isCurrentRevisionGenerating"
+            placeholder="写清楚希望这一小节如何调整"
+            @input="updateRevisionDraft('revisionNote', $event.target.value)"></textarea>
+        </label>
+
+        <div class="agent-ppt-revision-actions">
+          <button type="button" :disabled="isCurrentRevisionGenerating" @click="saveCurrentRevision">保存人工修改</button>
+          <button type="button" :disabled="!canAiRegenerateRevision" @click="regenerateCurrentRevision">
+            {{ isCurrentRevisionGenerating ? 'AI 重生成中' : 'AI 重生成此小节' }}
           </button>
         </div>
       </section>
     </div>
 
     <div v-if="activePackageSource" class="agent-ppt-package-detail-backdrop" @click.self="closePackageDetail">
-      <section class="agent-ppt-package-detail" role="dialog" aria-modal="true" aria-label="资料包内容">
+      <section
+        class="agent-ppt-package-detail"
+        :class="{ 'has-carrier-preview': activePackagePreviewCarriers.length }"
+        role="dialog"
+        aria-modal="true"
+        aria-label="资料包内容">
         <header class="agent-ppt-package-detail-head">
           <div>
             <span>资料包</span>
@@ -685,6 +1108,117 @@ function confirmSourceDialog() {
         <div v-if="activePackageWarnings.length" class="agent-ppt-package-warnings">
           <strong>提示</strong>
           <span v-for="warning in activePackageWarnings" :key="`package-warning-${warning}`">{{ warning }}</span>
+        </div>
+
+        <div v-if="activePackageCarriers.length" class="agent-ppt-package-section-head">
+          <strong>空间载体</strong>
+          <span>{{ activePackageCarriers.length }} 个</span>
+        </div>
+        <div v-if="activePackageCarriers.length" class="agent-ppt-carrier-workspace">
+          <div v-if="activePackagePreviewCarriers.length" class="agent-ppt-carrier-preview">
+            <div class="agent-ppt-carrier-preview-head">
+              <div class="agent-ppt-carrier-preview-title">
+                <strong>空间预览</strong>
+                <span>{{ activePackageSelectedCarrier?.carrier_id || '-' }} · {{ activePackageSelectedCarrier?.carrier_label || '空间载体' }}</span>
+              </div>
+              <div class="agent-ppt-carrier-preview-mode" aria-label="空间预览范围">
+                <button
+                  type="button"
+                  :class="{ 'is-active': activePackageCarrierPreviewMode === 'local' }"
+                  :aria-pressed="String(activePackageCarrierPreviewMode === 'local')"
+                  title="聚焦当前载体"
+                  @click="setPackageCarrierPreviewMode('local')">
+                  局部
+                </button>
+                <button
+                  type="button"
+                  :class="{ 'is-active': activePackageCarrierPreviewMode === 'all' }"
+                  :aria-pressed="String(activePackageCarrierPreviewMode === 'all')"
+                  title="显示全部载体"
+                  @click="setPackageCarrierPreviewMode('all')">
+                  全部
+                </button>
+              </div>
+            </div>
+            <svg
+              class="agent-ppt-carrier-preview-svg"
+              :viewBox="activePackageCarrierPreview.viewBox"
+              role="img"
+              aria-label="空间载体预览">
+              <rect class="agent-ppt-carrier-preview-bg" x="0" y="0" width="1000" height="620" rx="18" />
+              <g v-if="activePackagePreviewRoads.length" class="agent-ppt-carrier-preview-roads" aria-hidden="true">
+                <path
+                  v-for="road in activePackagePreviewRoads"
+                  :key="`carrier-preview-road-${road.id}`"
+                  class="agent-ppt-carrier-preview-road"
+                  :class="road.className"
+                  :d="road.path" />
+              </g>
+              <g
+                v-for="item in activePackagePreviewCarriers"
+                :key="`carrier-preview-${item.id}`"
+                class="agent-ppt-carrier-preview-shape"
+                :class="carrierPreviewClass(item)"
+                tabindex="0"
+                role="button"
+                :aria-label="`${item.id} ${item.label}`"
+                @click="selectPackageCarrier(item.id)"
+                @keydown.enter.prevent="selectPackageCarrier(item.id)"
+                @keydown.space.prevent="selectPackageCarrier(item.id)">
+                <path v-if="item.type === 'block_loop' && item.polygonPath" class="agent-ppt-carrier-preview-fill" :d="item.polygonPath" />
+                <path
+                  v-if="item.outlinePath || item.boundaryPath || item.polygonPath"
+                  class="agent-ppt-carrier-preview-line"
+                  :d="item.outlinePath || item.boundaryPath || item.polygonPath" />
+                <text
+                  v-if="item.isFocus || activePackagePreviewCarriers.length === 1"
+                  class="agent-ppt-carrier-preview-label"
+                  :x="item.labelX"
+                  :y="item.labelY">
+                  {{ item.id.replace('block_loop_', 'L').replace('corridor_', 'C').replace('segment_', 'S') }}
+                </text>
+              </g>
+            </svg>
+          </div>
+          <div class="agent-ppt-carrier-list">
+            <article
+              v-for="carrier in activePackageCarriers"
+              :key="`package-carrier-${carrier.carrier_id}`"
+              class="agent-ppt-carrier-row"
+              :class="[`is-${carrier.carrier_type || 'segment'}`, { 'is-active': isPackageCarrierActive(carrier) }]"
+              tabindex="0"
+              role="button"
+              @click="selectPackageCarrier(carrier.carrier_id)"
+              @keydown.enter.prevent="selectPackageCarrier(carrier.carrier_id)"
+              @keydown.space.prevent="selectPackageCarrier(carrier.carrier_id)">
+              <div class="agent-ppt-carrier-row-head">
+                <div>
+                  <span>{{ carrierTypeLabel(carrier) }}</span>
+                  <strong>{{ carrier.carrier_label || '空间载体' }}</strong>
+                </div>
+                <small>{{ carrier.carrier_id }}</small>
+              </div>
+              <p v-if="carrier.summary">{{ carrier.summary }}</p>
+              <dl class="agent-ppt-carrier-metrics">
+                <div>
+                  <dt>Choice / Integration</dt>
+                  <dd>{{ carrierMetric(carrier, 'road_metrics', 'choice_score') }} / {{ carrierMetric(carrier, 'road_metrics', 'integration_score') }}</dd>
+                </div>
+                <div>
+                  <dt>POI</dt>
+                  <dd>{{ carrierPoiLabel(carrier) }}</dd>
+                </div>
+                <div>
+                  <dt>人口</dt>
+                  <dd>{{ carrierPopulationLabel(carrier) }}</dd>
+                </div>
+                <div>
+                  <dt>夜光</dt>
+                  <dd>{{ carrierMetric(carrier, 'nightlight_metrics', 'mean_radiance') }} · {{ carrier.nightlight_metrics?.night_activity_level || '-' }}</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
         </div>
 
         <div class="agent-ppt-package-section-head">

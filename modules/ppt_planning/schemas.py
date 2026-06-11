@@ -104,6 +104,7 @@ class PptPoiNearbyRequest(BaseModel):
 
     area_id: str = ""
     center: List[float] = Field(default_factory=list)
+    center_coord_type: str = "wgs84"
     radius_m: float = Field(1000, gt=0, le=50000)
     filters: Dict[str, Any] = Field(default_factory=dict)
     limit: int = Field(50, ge=1, le=200)
@@ -163,6 +164,7 @@ class PptDataPackageRequest(BaseModel):
     limit: int = Field(50, ge=1, le=200)
     filters: Dict[str, Any] = Field(default_factory=dict)
     center: List[float] = Field(default_factory=list)
+    center_coord_type: str = "wgs84"
     radius_m: Optional[float] = Field(default=None, gt=0, le=50000)
 
     @field_validator("source_ids", mode="before")
@@ -230,6 +232,33 @@ class PptSpecResponse(BaseModel):
     missing_inputs: List[str] = Field(default_factory=list)
 
 
+class PptOutlineSectionRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    area_id: str = ""
+    spec: Optional[PptSpecResponse] = None
+    outline: List[PptOutlineItem] = Field(default_factory=list)
+    target: PptOutlineItem
+    revision_note: str = Field(..., min_length=1)
+    source_ids: List[str] = Field(default_factory=list)
+    sources: List[PptSource] = Field(default_factory=list)
+    analysis_context: Dict[str, Any] = Field(default_factory=dict)
+    topic: str = ""
+    audience: str = "政府评审"
+    deck_type: str = "城市更新概念策划"
+    page_count: int = Field(15, ge=1, le=80)
+    research_enabled: bool = True
+
+    @field_validator("source_ids", mode="before")
+    @classmethod
+    def _normalize_source_ids(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        return value
+
+
 class DeckSlideBrief(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -273,3 +302,32 @@ class DeckBriefResponse(BaseModel):
     slides: List[DeckSlideBrief] = Field(default_factory=list)
     source_summary: str = ""
     missing_inputs: List[str] = Field(default_factory=list)
+
+
+class DeckBriefSlideRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    area_id: str = ""
+    spec: Optional[PptSpecResponse] = None
+    outline: List[PptOutlineItem] = Field(default_factory=list)
+    slides: List[DeckSlideBrief] = Field(default_factory=list)
+    target: DeckSlideBrief
+    outline_item: Optional[PptOutlineItem] = None
+    revision_note: str = Field(..., min_length=1)
+    source_ids: List[str] = Field(default_factory=list)
+    sources: List[PptSource] = Field(default_factory=list)
+    analysis_context: Dict[str, Any] = Field(default_factory=dict)
+    topic: str = ""
+    audience: str = "政府评审"
+    deck_type: str = "城市更新概念策划"
+    page_count: int = Field(15, ge=1, le=80)
+    research_enabled: bool = True
+
+    @field_validator("source_ids", mode="before")
+    @classmethod
+    def _normalize_source_ids(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        return value

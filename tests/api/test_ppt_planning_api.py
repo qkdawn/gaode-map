@@ -1,12 +1,16 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from modules.ppt_planning.schemas import (
+    DeckBriefSlideRequest,
     DeckBriefResponse,
     DeckSlideBrief,
     PptDataPackageResponse,
     PptDataSourceSummary,
     PptOutlineItem,
+    PptOutlineSectionRequest,
     PptPoiPoint,
     PptPoiQueryResponse,
     PptSource,
@@ -60,6 +64,37 @@ def test_ppt_spec_api_returns_structured_json(monkeypatch):
     assert payload["outline"][0]["theme"] == "项目命题"
 
 
+def test_ppt_spec_section_api_returns_single_outline_item(monkeypatch):
+    async def fake_generate(payload: PptOutlineSectionRequest):
+        return PptOutlineItem(
+            id=payload.target.id,
+            page_no=payload.target.page_no,
+            theme="空间问题诊断",
+            purpose=payload.revision_note,
+        )
+
+    monkeypatch.setattr(ppt_planning, "regenerate_ppt_outline_section", fake_generate)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/spec/section",
+            json={
+                "area_id": "area-1",
+                "outline": [{"id": "page-2", "page_no": 2, "theme": "空间证据", "purpose": "说明现状"}],
+                "target": {"id": "page-2", "page_no": 2, "theme": "空间证据", "purpose": "说明现状"},
+                "revision_note": "更像问题诊断",
+                "source_ids": ["system:scope"],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "page-2"
+    assert payload["page_no"] == 2
+    assert payload["theme"] == "空间问题诊断"
+    assert payload["purpose"] == "更像问题诊断"
+
+
 def test_deck_brief_api_returns_slide_brief_json(monkeypatch):
     async def fake_generate(payload):
         return DeckBriefResponse(
@@ -94,6 +129,41 @@ def test_deck_brief_api_returns_slide_brief_json(monkeypatch):
     assert "PPTX" in payload["slides"][0]["speaker_notes"]
 
 
+def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
+    async def fake_generate(payload: DeckBriefSlideRequest):
+        return DeckSlideBrief(
+            index=payload.target.index,
+            title="项目命题重写",
+            purpose=payload.revision_note,
+            key_message="说明为什么要更新",
+            visual_plan="区域底图",
+            required_sources=["system:scope"],
+            speaker_notes="只生成单页指令。",
+        )
+
+    monkeypatch.setattr(ppt_planning, "regenerate_deck_brief_slide", fake_generate)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/deck-brief/slide",
+            json={
+                "area_id": "area-1",
+                "outline": [{"id": "page-1", "page_no": 1, "theme": "项目命题", "purpose": "建立汇报主线"}],
+                "slides": [{"index": 1, "title": "项目命题", "purpose": "建立汇报主线"}],
+                "target": {"index": 1, "title": "项目命题", "purpose": "建立汇报主线"},
+                "outline_item": {"id": "page-1", "page_no": 1, "theme": "项目命题", "purpose": "建立汇报主线"},
+                "revision_note": "更强调更新必要性",
+                "source_ids": ["system:scope"],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["index"] == 1
+    assert payload["title"] == "项目命题重写"
+    assert payload["required_sources"] == ["system:scope"]
+
+
 def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):
     def fake_list(area_id):
         return [
@@ -115,6 +185,19 @@ def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):
     payload = response.json()
     assert payload[0]["id"] == "system:poi"
     assert payload[0]["status"] == "ready"
+
+
+def test_ppt_data_sources_api_maps_database_errors(monkeypatch):
+    def fake_list(area_id):
+        raise SQLAlchemyError("db down")
+
+    monkeypatch.setattr(ppt_planning, "list_ppt_sources", fake_list)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.get("/api/v1/analysis/ppt/data/sources?area_id=area-1")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "ppt_database_unavailable"
 
 
 def test_ppt_query_poi_points_api_returns_paginated_points(monkeypatch):
@@ -212,6 +295,22 @@ def test_ppt_data_package_api_returns_llm_unavailable_error(monkeypatch):
     assert response.json()["detail"] == "ppt_data_intent_llm_unavailable"
 
 
+def test_ppt_data_package_api_maps_provider_timeout(monkeypatch):
+    async def fake_package(payload):
+        raise httpx.ReadTimeout("provider timed out")
+
+    monkeypatch.setattr(ppt_planning, "create_ppt_data_package", fake_package)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/data/packages",
+            json={"area_id": "area-1", "source_ids": ["system:poi"], "package_mode": "evidence"},
+        )
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "ppt_data_llm_timeout"
+
+
 def test_ppt_source_group_classification_api_returns_groups(monkeypatch):
     async def fake_classify(payload):
         return PptSourceGroupClassifyResponse(
@@ -262,3 +361,23 @@ def test_ppt_source_group_classification_api_returns_llm_unavailable(monkeypatch
 
     assert response.status_code == 503
     assert response.json()["detail"] == "ppt_planning_llm_unavailable"
+
+
+def test_ppt_spec_api_maps_invalid_llm_response(monkeypatch):
+    async def fake_generate(payload):
+        raise ValueError("invalid_llm_json_output")
+
+    monkeypatch.setattr(ppt_planning, "generate_ppt_spec", fake_generate)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/spec",
+            json={
+                "area_id": "area-1",
+                "source_ids": ["summary", "scope"],
+                "topic": "长沙县政府原址城市更新",
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "ppt_planning_llm_invalid_response"

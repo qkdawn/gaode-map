@@ -1,40 +1,147 @@
 import { asText, cloneArray, cloneObject } from './normalizers.js'
 import { getAnalysisTaskDefinition } from './analysis-task-registry.js'
 import { createPptSystemSources } from '../ppt-planning/model.js'
-import { classifyPptSourceGroups, createPptDataPackage, generateDeckBrief, generatePptSpec, listPptDataSources } from '../ppt-planning/api.js'
+import {
+  classifyPptSourceGroups,
+  createPptDataPackage,
+  generateDeckBrief,
+  generatePptSpec,
+  listPptDataSources,
+  regenerateDeckBriefSlide,
+  regeneratePptSpecSection,
+} from '../ppt-planning/api.js'
 import {
   addPptDataPackageSource,
+  applyDeckBriefSlideRevision,
   applyDeckBriefResponse,
+  applyPptOutlineSectionRevision,
   applyPptSpecResponse,
   applyPptSourceGroupsResponse,
+  buildDeckBriefSlidePayload,
   buildDeckBriefPayload,
+  buildPptOutlineSectionPayload,
   buildPptSpecPayload,
   createPptPlanningState,
   getActiveDeckSlideBrief,
+  getPptRevisionKey,
+  getPendingPptPackageSources,
   getPptSourceSummary,
+  isPptDirectivePageStale,
   mergePptPlanningSources,
   movePptSourceToGroup,
   removePptSource,
   removePptSourceGroup,
   renamePptSource,
   renamePptSourceGroup,
+  resetPptPlanningToMaterials,
+  resetPptPlanningToOutlineReady,
   selectDeckSlideBrief,
   setAllPptSourcesSelected,
   setPptDataPackageGenerating,
   setPptGenerationError,
   setPptDirectiveGenerating,
   setPptOutlineGenerating,
+  setPptActiveRevisionTarget,
+  setPptRevisionDraftField,
+  setPptRevisionGeneratingTarget,
   setPptSourceGroupEmoji,
   setPptSourceGrouping,
   setPptSpecField,
   setPptSourceGroupSelected,
+  syncPptPackagePlaceholderSources,
   togglePptSourceGroupCollapsed,
   togglePptSourceSelection,
+  undoPptSectionRevision,
 } from '../ppt-planning/ui-state.js'
 
 const DEFAULT_PPT_POI_EVIDENCE_INTENT = '为 PPT 指令生成整理当前区域代表性 POI 资料'
 const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 POI，并与夜光格子对应'
+const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
 const PPT_NIGHTLIFE_PACKAGE_VERSION = 'nightlife-evidence-v2'
+const PPT_CARRIER_PACKAGE_VERSION = 'road-carrier-evidence-v2'
+const PPT_AUTO_PACKAGE_DEFINITIONS = Object.freeze([
+  {
+    key: 'poi-evidence',
+    title: 'POI 资料包',
+    sourceIds: ['system:poi'],
+    packageMode: 'evidence',
+    intent: DEFAULT_PPT_POI_EVIDENCE_INTENT,
+    limit: 50,
+  },
+  {
+    key: 'nightlife-poi',
+    title: '夜生活 POI × 夜光格子资料包',
+    sourceIds: ['system:poi', 'system:nightlight'],
+    packageMode: 'evidence',
+    intent: DEFAULT_PPT_NIGHTLIFE_POI_INTENT,
+    packageVersion: PPT_NIGHTLIFE_PACKAGE_VERSION,
+    limit: 50,
+  },
+  {
+    key: 'road-carrier',
+    title: 'POI × 路网空间载体资料包',
+    sourceIds: ['system:poi', 'system:road-syntax', 'system:population', 'system:nightlight'],
+    packageMode: 'evidence',
+    intent: DEFAULT_PPT_CARRIER_EVIDENCE_INTENT,
+    packageVersion: PPT_CARRIER_PACKAGE_VERSION,
+    limit: 50,
+  },
+])
+
+function normalizePptLngLat(value = null) {
+  if (!value) return []
+  let lng = NaN
+  let lat = NaN
+  if (Array.isArray(value)) {
+    lng = Number(value[0])
+    lat = Number(value[1])
+  } else if (typeof value === 'object') {
+    if (typeof value.getLng === 'function' && typeof value.getLat === 'function') {
+      lng = Number(value.getLng())
+      lat = Number(value.getLat())
+    } else {
+      lng = Number(value.lng ?? value.longitude ?? value.lon ?? value.x)
+      lat = Number(value.lat ?? value.latitude ?? value.y)
+    }
+  }
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return []
+  if (lng < -180 || lng > 180 || lat < -90 || lat > 90) return []
+  return [lng, lat]
+}
+
+function resolvePptPlanningRadiusMeters(ctx = {}, featureProps = {}) {
+  const explicitRadius = Number(featureProps.radius_m ?? featureProps.radiusM ?? 0)
+  if (Number.isFinite(explicitRadius) && explicitRadius > 0) {
+    return Math.min(50000, Math.round(explicitRadius))
+  }
+  if (ctx && typeof ctx._resolveCircleRadiusMeters === 'function') {
+    const runtimeRadius = Number(ctx._resolveCircleRadiusMeters())
+    if (Number.isFinite(runtimeRadius) && runtimeRadius > 0) {
+      return Math.min(50000, Math.round(runtimeRadius))
+    }
+  }
+  const speedByMode = { walking: 5, bicycling: 15, driving: 30 }
+  const mode = asText(ctx && ctx.transportMode).toLowerCase()
+  const speedKmh = Number(speedByMode[mode]) || speedByMode.walking
+  const timeMin = Number((ctx && ctx.timeHorizon) || featureProps.time_min || featureProps.timeMin || 0) || 0
+  if (!Number.isFinite(timeMin) || timeMin <= 0) return null
+  return Math.min(50000, Math.round((speedKmh * 1000 * timeMin) / 60))
+}
+
+function buildPptDataPackageSpatialPayload(analysisContext = {}) {
+  const scope = cloneObject(analysisContext.scope)
+  const center = normalizePptLngLat(scope.center || scope.center_gcj02 || scope.centerGcj02)
+  const payload = {}
+  if (center.length) {
+    payload.center = center
+    payload.center_coord_type = asText(scope.center_coord_type || scope.centerCoordType) || 'gcj02'
+  }
+  const radiusM = Number(scope.radius_m ?? scope.radiusM ?? 0)
+  if (Number.isFinite(radiusM) && radiusM > 0) {
+    payload.radius_m = Math.min(50000, Math.round(radiusM))
+  }
+  return payload
+}
 
 function isReadySource(source = {}) {
   return asText(source && source.status) === 'ready'
@@ -86,6 +193,10 @@ function getPptEvidencePackageKey(areaId = '', options = {}) {
   const intent = asText(options.intent)
   const version = asText(options.packageVersion)
   return normalizedAreaId ? `${normalizedAreaId}::${sourceKey}::${mode}::${intent}::${version}` : ''
+}
+
+function getPptAutoPackageDefinition(key = '') {
+  return PPT_AUTO_PACKAGE_DEFINITIONS.find((item) => item.key === asText(key)) || null
 }
 
 function attachPptDataPackageRuntimeMeta(response = {}, areaId = '', options = {}) {
@@ -183,11 +294,22 @@ export function createAgentPptPlanningTabMethods() {
       const poiTotal = Array.isArray(this.allPoisDetails) ? this.allPoisDetails.length : 0
       const h3Summary = this.h3AnalysisSummary || {}
       const h3Count = Number(h3Summary.grid_count || this.h3GridCount || 0) || 0
+      const featureProps = cloneObject(siteSelectionScope.isochroneFeature && siteSelectionScope.isochroneFeature.properties)
+      const selectedCenter = normalizePptLngLat(this.selectedPoint)
+      const featureCenter = normalizePptLngLat(featureProps.center || featureProps.center_gcj02 || featureProps.centerGcj02)
+      const scopeCenter = selectedCenter.length ? selectedCenter : featureCenter
+      const timeMin = Number(this.timeHorizon || featureProps.time_min || featureProps.timeMin || 0) || 0
+      const radiusM = resolvePptPlanningRadiusMeters(this, featureProps)
       return {
         scope: {
           polygon: cloneArray(siteSelectionScope.polygon),
           drawn_polygon: cloneArray(siteSelectionScope.drawnPolygon),
           isochrone_feature: siteSelectionScope.isochroneFeature || null,
+          center: scopeCenter,
+          center_coord_type: scopeCenter.length ? 'gcj02' : '',
+          radius_m: radiusM,
+          time_min: timeMin,
+          mode: asText(this.transportMode),
         },
         panelPayloads,
         summaryPack: cloneObject(panelPayloads.summary_pack || panelPayloads.summaryPack),
@@ -195,6 +317,7 @@ export function createAgentPptPlanningTabMethods() {
         taskResults,
         sourceDetails: {
           scope: this.timeHorizon ? `${Number(this.timeHorizon)} 分钟范围` : '',
+          center: scopeCenter.length ? `${scopeCenter[0].toFixed(4)}, ${scopeCenter[1].toFixed(4)}` : '',
           summary: summaryReady ? '已生成' : '',
           poi_fetch: poiTotal ? `POI ${poiTotal} 条` : '',
           poi_h3_grid: h3Count ? `H3 ${h3Count} 个` : '',
@@ -222,7 +345,38 @@ export function createAgentPptPlanningTabMethods() {
         }
         return source
       })
-      return mergePptPlanningSources(state, systemSources)
+      return this.getAgentPptPlanningStateWithPackagePlaceholders(mergePptPlanningSources(state, systemSources), areaId)
+    },
+    getAgentPptPlanningStateWithPackagePlaceholders(state = {}, areaId = '') {
+      const normalized = createPptPlanningState(state)
+      const normalizedAreaId = asText(areaId || (this.buildAgentPptPlanningApiContext && this.buildAgentPptPlanningApiContext().areaId))
+      const activeKeys = this.agentPptPlanningAutoPackageKeys || {}
+      const placeholders = PPT_AUTO_PACKAGE_DEFINITIONS
+        .filter((definition) => !hasPptEvidencePackage(normalized, normalizedAreaId, definition))
+        .map((definition) => {
+          const packageKey = getPptEvidencePackageKey(normalizedAreaId, definition)
+          const generating = !!(packageKey && activeKeys[packageKey])
+          return {
+            id: `package-placeholder:${definition.key}`,
+            type: 'package',
+            title: definition.title,
+            status: generating ? 'generating' : 'pending',
+            selected: false,
+            meta: {
+              label: generating ? '整理中' : '待生成',
+              sourceKind: 'package-placeholder',
+              packagePlaceholder: true,
+              areaId: normalizedAreaId,
+              packageVersion: asText(definition.packageVersion),
+              package: {
+                package_mode: definition.packageMode,
+                intent: definition.intent,
+                source_ids: cloneArray(definition.sourceIds),
+              },
+            },
+          }
+        })
+      return syncPptPackagePlaceholderSources(normalized, placeholders)
     },
     refreshAgentActivePptPlanningSources() {
       const tabs = this.ensureAgentTabs(true)
@@ -249,13 +403,17 @@ export function createAgentPptPlanningTabMethods() {
         const tabs = this.ensureAgentTabs(true)
         if (asText(tabs.activeTabId) !== activeTabId) return
         const nextSources = cloneArray(backendSources).map((source) => normalizeBackendPptDataSource(source, areaId))
-        this.updateAgentActivePptPlanningState(mergePptPlanningSources(this.getAgentActivePptPlanningState(), nextSources))
+        this.updateAgentActivePptPlanningState(this.getAgentPptPlanningStateWithPackagePlaceholders(
+          mergePptPlanningSources(this.getAgentActivePptPlanningState(), nextSources),
+          areaId,
+        ))
         if (options.autoPackage !== false) {
           await this.autoCreateAgentPptPlanningPoiEvidencePackage({ areaId })
           await this.autoCreateAgentPptPlanningNightlifePoiPackage({ areaId })
+          await this.autoCreateAgentPptPlanningRoadCarrierPackage({ areaId })
         }
       } catch (error) {
-        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message))
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'))
       }
     },
     getAgentPptPlanningSources() {
@@ -278,6 +436,27 @@ export function createAgentPptPlanningTabMethods() {
     },
     getAgentPptPlanningGenerationError() {
       return asText(this.getAgentActivePptPlanningState().generationError)
+    },
+    getAgentPptPlanningGenerationErrorSource() {
+      return asText(this.getAgentActivePptPlanningState().generationErrorSource)
+    },
+    getAgentPptPlanningActiveRevisionTarget() {
+      return cloneObject(this.getAgentActivePptPlanningState().activeRevisionTarget)
+    },
+    getAgentPptPlanningOutlineRevisionDraft() {
+      return cloneObject(this.getAgentActivePptPlanningState().outlineRevisionDraft)
+    },
+    getAgentPptPlanningDirectiveRevisionDraft() {
+      return cloneObject(this.getAgentActivePptPlanningState().directiveRevisionDraft)
+    },
+    getAgentPptPlanningRevisionSnapshots() {
+      return cloneObject(this.getAgentActivePptPlanningState().revisionSnapshots)
+    },
+    getAgentPptPlanningStaleDirectivePageIds() {
+      return cloneArray(this.getAgentActivePptPlanningState().staleDirectivePageIds)
+    },
+    getAgentPptPlanningRevisionGeneratingTarget() {
+      return cloneObject(this.getAgentActivePptPlanningState().revisionGeneratingTarget)
     },
     isAgentPptPlanningDataPackageGenerating() {
       return !!this.getAgentActivePptPlanningState().dataPackageGenerating
@@ -345,6 +524,75 @@ export function createAgentPptPlanningTabMethods() {
     updateAgentPptPlanningSpecField(field = '', value = '') {
       this.updateAgentActivePptPlanningState(setPptSpecField(this.getAgentPptPlanningStateWithSystemSources(), field, value))
     },
+    openAgentPptPlanningRevisionTarget(type = '', target = {}) {
+      this.updateAgentActivePptPlanningState(setPptActiveRevisionTarget(this.getAgentPptPlanningStateWithSystemSources(), { ...target, type }))
+    },
+    closeAgentPptPlanningRevisionTarget() {
+      this.updateAgentActivePptPlanningState(setPptActiveRevisionTarget(this.getAgentActivePptPlanningState(), {}))
+    },
+    updateAgentPptPlanningRevisionDraft(type = '', field = '', value = '') {
+      this.updateAgentActivePptPlanningState(setPptRevisionDraftField(this.getAgentActivePptPlanningState(), type, field, value))
+    },
+    saveAgentPptPlanningRevision(type = '') {
+      const state = this.getAgentActivePptPlanningState()
+      const target = cloneObject(state.activeRevisionTarget)
+      if (asText(type) === 'directive') {
+        const draft = cloneObject(state.directiveRevisionDraft)
+        const requiredSources = asText(draft.requiredSources)
+          .split(/[,，\n]/)
+          .map((item) => asText(item))
+          .filter(Boolean)
+        this.updateAgentActivePptPlanningState(applyDeckBriefSlideRevision(state, {
+          index: Number(target.index || target.pageNo || 0) || 0,
+          title: asText(draft.title),
+          purpose: asText(draft.purpose),
+          keyMessage: asText(draft.keyMessage),
+          visualPlan: asText(draft.visualPlan),
+          requiredSources,
+          speakerNotes: asText(draft.speakerNotes),
+        }))
+        return
+      }
+      const draft = cloneObject(state.outlineRevisionDraft)
+      this.updateAgentActivePptPlanningState(applyPptOutlineSectionRevision(state, {
+        id: asText(target.id),
+        pageNo: Number(target.pageNo || 0) || 0,
+        theme: asText(draft.theme),
+        purpose: asText(draft.purpose),
+      }))
+    },
+    async regenerateAgentPptPlanningRevision(type = '') {
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const target = cloneObject(state.activeRevisionTarget)
+      const normalizedType = asText(type)
+      const draft = normalizedType === 'directive' ? cloneObject(state.directiveRevisionDraft) : cloneObject(state.outlineRevisionDraft)
+      const revisionNote = asText(draft.revisionNote)
+      if (!target.type || !revisionNote) return
+      this.updateAgentActivePptPlanningState(setPptRevisionGeneratingTarget(state, target))
+      try {
+        const context = this.buildAgentPptPlanningApiContext()
+        if (normalizedType === 'directive') {
+          const response = await this.requestAgentPptPlanningDirectiveSlide(buildDeckBriefSlidePayload(state, target, revisionNote, context))
+          this.updateAgentActivePptPlanningState(applyDeckBriefSlideRevision(this.getAgentActivePptPlanningState(), response))
+          return
+        }
+        const response = await this.requestAgentPptPlanningOutlineSection(buildPptOutlineSectionPayload(state, target, revisionNote, context))
+        this.updateAgentActivePptPlanningState(applyPptOutlineSectionRevision(this.getAgentActivePptPlanningState(), response))
+      } catch (error) {
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentActivePptPlanningState(), error && error.message, normalizedType === 'directive' ? 'directive' : 'outline'))
+      }
+    },
+    undoAgentPptPlanningRevision(type = '', target = {}) {
+      this.updateAgentActivePptPlanningState(undoPptSectionRevision(this.getAgentActivePptPlanningState(), type, target))
+    },
+    hasAgentPptPlanningRevisionSnapshot(type = '', target = {}) {
+      const state = this.getAgentActivePptPlanningState()
+      const key = getPptRevisionKey(type, target)
+      return !!(key && state.revisionSnapshots && state.revisionSnapshots[key])
+    },
+    isAgentPptPlanningDirectivePageStale(pageNo = 0) {
+      return isPptDirectivePageStale(this.getAgentActivePptPlanningState(), pageNo)
+    },
     buildAgentPptPlanningApiContext() {
       return {
         areaId: asText(
@@ -360,8 +608,14 @@ export function createAgentPptPlanningTabMethods() {
     requestAgentPptPlanningOutline(payload = {}) {
       return generatePptSpec(payload)
     },
+    requestAgentPptPlanningOutlineSection(payload = {}) {
+      return regeneratePptSpecSection(payload)
+    },
     requestAgentPptPlanningDirective(payload = {}) {
       return generateDeckBrief(payload)
+    },
+    requestAgentPptPlanningDirectiveSlide(payload = {}) {
+      return regenerateDeckBriefSlide(payload)
     },
     requestAgentPptPlanningDataSources(areaId = '') {
       return listPptDataSources(areaId)
@@ -393,11 +647,12 @@ export function createAgentPptPlanningTabMethods() {
         })
         this.updateAgentActivePptPlanningState(applyPptSourceGroupsResponse(this.getAgentPptPlanningStateWithSystemSources(), response))
       } catch (error) {
-        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message))
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_grouping'))
       }
     },
     async autoCreateAgentPptPlanningEvidencePackage(options = {}) {
-      const areaId = asText(options.areaId || (this.buildAgentPptPlanningApiContext && this.buildAgentPptPlanningApiContext().areaId))
+      const context = this.buildAgentPptPlanningApiContext ? this.buildAgentPptPlanningApiContext() : {}
+      const areaId = asText(options.areaId || context.areaId || context.area_id)
       const sourceIds = cloneArray(options.sourceIds).map((item) => asText(item)).filter(Boolean)
       const intent = asText(options.intent)
       const packageMode = asText(options.packageMode) || 'evidence'
@@ -417,8 +672,12 @@ export function createAgentPptPlanningTabMethods() {
       this.agentPptPlanningAutoPackageKeys = this.agentPptPlanningAutoPackageKeys || {}
       if (packageKey && this.agentPptPlanningAutoPackageKeys[packageKey]) return
       if (packageKey) this.agentPptPlanningAutoPackageKeys[packageKey] = true
-      this.updateAgentActivePptPlanningState(setPptDataPackageGenerating(state, true))
+      this.updateAgentActivePptPlanningState(this.getAgentPptPlanningStateWithPackagePlaceholders(
+        setPptDataPackageGenerating(state, true),
+        areaId,
+      ))
       try {
+        const spatialPayload = buildPptDataPackageSpatialPayload(context.analysisContext || context.analysis_context)
         const response = await this.requestAgentPptPlanningDataPackage({
           area_id: areaId,
           source_ids: sourceIds,
@@ -426,38 +685,58 @@ export function createAgentPptPlanningTabMethods() {
           intent,
           query: '',
           limit: Number(options.limit || 50) || 50,
+          ...spatialPayload,
         })
         this.updateAgentActivePptPlanningState(addPptDataPackageSource(
           this.getAgentPptPlanningStateWithSystemSources(),
           attachPptDataPackageRuntimeMeta(response, areaId, { autoGenerated: true, packageVersion }),
         ))
       } catch (error) {
-        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message))
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'data_package'))
       } finally {
         if (packageKey && this.agentPptPlanningAutoPackageKeys) {
           delete this.agentPptPlanningAutoPackageKeys[packageKey]
         }
+        this.updateAgentActivePptPlanningState(this.getAgentPptPlanningStateWithPackagePlaceholders(
+          this.getAgentActivePptPlanningState(),
+          areaId,
+        ))
       }
     },
     async autoCreateAgentPptPlanningPoiEvidencePackage(options = {}) {
       const areaId = asText(options.areaId || (this.buildAgentPptPlanningApiContext && this.buildAgentPptPlanningApiContext().areaId))
+      const definition = getPptAutoPackageDefinition('poi-evidence')
       return this.autoCreateAgentPptPlanningEvidencePackage({
         areaId,
-        sourceIds: ['system:poi'],
-        packageMode: 'evidence',
-        intent: DEFAULT_PPT_POI_EVIDENCE_INTENT,
-        limit: 50,
+        sourceIds: definition.sourceIds,
+        packageMode: definition.packageMode,
+        intent: definition.intent,
+        packageVersion: definition.packageVersion,
+        limit: definition.limit,
       })
     },
     async autoCreateAgentPptPlanningNightlifePoiPackage(options = {}) {
       const areaId = asText(options.areaId || (this.buildAgentPptPlanningApiContext && this.buildAgentPptPlanningApiContext().areaId))
+      const definition = getPptAutoPackageDefinition('nightlife-poi')
       return this.autoCreateAgentPptPlanningEvidencePackage({
         areaId,
-        sourceIds: ['system:poi', 'system:nightlight'],
-        packageMode: 'evidence',
-        intent: DEFAULT_PPT_NIGHTLIFE_POI_INTENT,
-        packageVersion: PPT_NIGHTLIFE_PACKAGE_VERSION,
-        limit: 50,
+        sourceIds: definition.sourceIds,
+        packageMode: definition.packageMode,
+        intent: definition.intent,
+        packageVersion: definition.packageVersion,
+        limit: definition.limit,
+      })
+    },
+    async autoCreateAgentPptPlanningRoadCarrierPackage(options = {}) {
+      const areaId = asText(options.areaId || (this.buildAgentPptPlanningApiContext && this.buildAgentPptPlanningApiContext().areaId))
+      const definition = getPptAutoPackageDefinition('road-carrier')
+      return this.autoCreateAgentPptPlanningEvidencePackage({
+        areaId,
+        sourceIds: definition.sourceIds,
+        packageMode: definition.packageMode,
+        intent: definition.intent,
+        packageVersion: definition.packageVersion,
+        limit: definition.limit,
       })
     },
     async createAgentPptPlanningDataPackage() {
@@ -470,6 +749,7 @@ export function createAgentPptPlanningTabMethods() {
       this.updateAgentActivePptPlanningState(setPptDataPackageGenerating(state, true))
       try {
         const context = this.buildAgentPptPlanningApiContext()
+        const spatialPayload = buildPptDataPackageSpatialPayload(context.analysisContext || context.analysis_context)
         const response = await this.requestAgentPptPlanningDataPackage({
           area_id: asText(context.areaId || context.area_id),
           source_ids: selectedSourceIds,
@@ -477,24 +757,26 @@ export function createAgentPptPlanningTabMethods() {
           intent: DEFAULT_PPT_POI_EVIDENCE_INTENT,
           query: '',
           limit: 50,
+          ...spatialPayload,
         })
         this.updateAgentActivePptPlanningState(addPptDataPackageSource(
           this.getAgentPptPlanningStateWithSystemSources(),
           attachPptDataPackageRuntimeMeta(response, asText(context.areaId || context.area_id)),
         ))
       } catch (error) {
-        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message))
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'data_package'))
       }
     },
     async generateAgentPptPlanningOutline() {
       const state = this.getAgentPptPlanningStateWithSystemSources()
       if (!getPptSourceSummary(state).selected) return
+      if (getPendingPptPackageSources(state).length) return
       this.updateAgentActivePptPlanningState(setPptOutlineGenerating(state))
       try {
         const response = await this.requestAgentPptPlanningOutline(buildPptSpecPayload(state, this.buildAgentPptPlanningApiContext()))
         this.updateAgentActivePptPlanningState(applyPptSpecResponse(this.getAgentPptPlanningStateWithSystemSources(), response))
       } catch (error) {
-        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message))
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'outline'))
       }
     },
     async generateAgentPptPlanningDirective() {
@@ -505,8 +787,36 @@ export function createAgentPptPlanningTabMethods() {
         const response = await this.requestAgentPptPlanningDirective(buildDeckBriefPayload(state, this.buildAgentPptPlanningApiContext()))
         this.updateAgentActivePptPlanningState(applyDeckBriefResponse(this.getAgentPptPlanningStateWithSystemSources(), response))
       } catch (error) {
-        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message))
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'directive'))
       }
+    },
+    confirmAgentPptPlanningStepReset(message = '') {
+      if (typeof this.confirmPptPlanningStepReset === 'function') {
+        return this.confirmPptPlanningStepReset(message)
+      }
+      if (typeof window === 'undefined' || typeof window.confirm !== 'function') return true
+      return window.confirm(message)
+    },
+    async regenerateAgentPptPlanningOutlineWithConfirm() {
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const hasOutline = cloneArray(state.outline).length > 0
+      const hasDirective = asText(state.currentStep) === 'directive_draft' && cloneArray((state.deckBrief || {}).slides).length > 0
+      if (!hasOutline && !hasDirective) return
+      if (!getPptSourceSummary(state).selected || getPendingPptPackageSources(state).length) return
+      const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成目录会清空旧目录和旧指令文件，确认继续？')
+      if (!confirmed) return
+      this.updateAgentActivePptPlanningState(resetPptPlanningToMaterials(this.getAgentPptPlanningStateWithSystemSources()))
+      await this.generateAgentPptPlanningOutline()
+    },
+    async regenerateAgentPptPlanningDirectiveWithConfirm() {
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const hasOutline = cloneArray(state.outline).length > 0
+      const hasDirective = asText(state.currentStep) === 'directive_draft' && cloneArray((state.deckBrief || {}).slides).length > 0
+      if (!hasOutline || !hasDirective) return
+      const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成指令文件会清空旧指令文件，但保留当前目录，确认继续？')
+      if (!confirmed) return
+      this.updateAgentActivePptPlanningState(resetPptPlanningToOutlineReady(this.getAgentPptPlanningStateWithSystemSources()))
+      await this.generateAgentPptPlanningDirective()
     },
     selectAgentPptPlanningSlide(slideId = '') {
       this.updateAgentActivePptPlanningState(selectDeckSlideBrief(this.getAgentActivePptPlanningState(), slideId))

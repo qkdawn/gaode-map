@@ -42,8 +42,16 @@ export function generatePptSpec(payload = {}) {
   return postJson('/api/v1/analysis/ppt/spec', payload)
 }
 
+export function regeneratePptSpecSection(payload = {}) {
+  return postJson('/api/v1/analysis/ppt/spec/section', payload)
+}
+
 export function generateDeckBrief(payload = {}) {
   return postJson('/api/v1/analysis/ppt/deck-brief', payload)
+}
+
+export function regenerateDeckBriefSlide(payload = {}) {
+  return postJson('/api/v1/analysis/ppt/deck-brief/slide', payload)
 }
 
 export function listPptDataSources(areaId = '') {

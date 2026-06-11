@@ -18,6 +18,24 @@ slides 每项字段为 index, title, purpose, key_message, visual_plan, required
 """.strip()
 
 
+PPT_OUTLINE_SECTION_SYSTEM_PROMPT = """
+你是专业城市更新与空间策划顾问。你的任务是根据用户修改建议，只重写 PPT 目录中的一个小节。
+必须保持该小节的 page_no 与 id 稳定；只改 theme 与 purpose，让它更符合用户建议、整份目录叙事和已有资料证据。
+不要编造未提供的地名、指标或精确数值。
+只输出 JSON 对象，字段必须为 id, page_no, theme, purpose。
+不要输出 markdown，不要输出解释性前后缀。
+""".strip()
+
+
+DECK_BRIEF_SLIDE_SYSTEM_PROMPT = """
+你是专业策划汇报的逐页指令设计师。你的任务是根据用户修改建议，只重写 PPT 逐页指令中的一页。
+必须保持该页 index 稳定；输出字段必须与逐页指令结构一致。
+内容需要匹配对应目录小节，并引用已有来源，不要编造未提供的地名、指标或精确数值。
+只输出 JSON 对象，字段必须为 index, title, purpose, key_message, visual_plan, required_sources, speaker_notes。
+不要输出 markdown，不要输出解释性前后缀。
+""".strip()
+
+
 PPT_SOURCE_GROUP_SYSTEM_PROMPT = """
 你是城市空间分析 PPT 的来源整理助手。你的任务是把用户当前可用的 PPT 来源分成 3 到 6 个中文标签组。
 只根据输入 sources 中已有来源进行归类，不得编造新的来源 id，不得改变来源标题。

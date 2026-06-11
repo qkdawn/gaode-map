@@ -6,12 +6,13 @@ import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from shapely.geometry import Point, shape
+from shapely.geometry import LineString, MultiLineString, Point, shape
+from shapely.ops import polygonize, unary_union
 from shapely.prepared import prep
 
 from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
 from modules.population.service import get_population_grid
-from modules.providers.amap.utils.transform_posi import wgs84_to_gcj02
+from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
 from store.analysis_artifact_repo import analysis_artifact_repo
 from store.history_repo import history_repo
 
@@ -66,6 +67,21 @@ TYPE_MAP_PATH = Path(__file__).resolve().parents[2] / "share" / "type_map.json"
 _TYPE_CODE_LABELS: Dict[str, Dict[str, str]] | None = None
 DEFAULT_EVIDENCE_INTENT = "为 PPT 指令生成整理当前区域代表性 POI 资料"
 NIGHTLIFE_EVIDENCE_INTENT = "整理夜生活与夜间消费相关 POI，并与夜光格子对应"
+CARRIER_EVIDENCE_INTENT = "识别当前区域 POI、路网、人口、夜光共同支撑的空间载体"
+CARRIER_REQUIRED_SOURCE_IDS = {"system:poi", "system:road-syntax", "system:population", "system:nightlight"}
+CARRIER_PACKAGE_TITLE = "POI × 路网空间载体资料包"
+CARRIER_BOUNDARY_BUFFER_M = 50.0
+BLOCK_LOOP_MIN_AREA_KM2 = 0.002
+BLOCK_LOOP_MAX_AREA_KM2 = 8.0
+CARRIER_MAX_BLOCK_LOOPS = 8
+CARRIER_MAX_CORRIDORS = 6
+CARRIER_MAX_SEGMENTS = 8
+CARRIER_REPRESENTATIVE_POI_LIMIT = 3
+CARRIER_MIN_BLOCK_LOOP_ROADS = 4
+CARRIER_MIN_CORRIDOR_ROADS = 2
+CARRIER_MIN_CORRIDOR_LENGTH_M = 160.0
+CARRIER_MIN_COMPACTNESS = 0.04
+CARRIER_MIN_SHORT_AXIS_M = 35.0
 NIGHTLIFE_QUERY_TERMS = [
     "酒吧",
     "夜店",
@@ -243,6 +259,45 @@ def _haversine_meters(a: List[float], b: List[float]) -> float:
     return 6371008.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
 
 
+def _normalize_lng_lat_pair(value: Any) -> List[float]:
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        return []
+    try:
+        lng = float(value[0])
+        lat = float(value[1])
+    except (TypeError, ValueError):
+        return []
+    if not math.isfinite(lng) or not math.isfinite(lat):
+        return []
+    if lng < -180 or lng > 180 or lat < -90 or lat > 90:
+        return []
+    return [lng, lat]
+
+
+def _normalize_history_center(value: Any, coord_type: str = "") -> List[float]:
+    center = _normalize_lng_lat_pair(value)
+    if not center:
+        return []
+    normalized_type = _clean_text(coord_type).lower()
+    if normalized_type in {"gcj02", "gcj-02", "amap", "gaode"}:
+        try:
+            lng, lat = gcj02_to_wgs84(center[0], center[1])
+            return [float(lng), float(lat)]
+        except Exception:
+            return center
+    return center
+
+
+def _normalize_package_request_center(request: PptDataPackageRequest) -> PptDataPackageRequest:
+    center = _normalize_history_center(request.center, request.center_coord_type)
+    if center == list(request.center or []) and _clean_text(request.center_coord_type).lower() == "wgs84":
+        return request
+    return request.model_copy(update={
+        "center": center,
+        "center_coord_type": "wgs84" if center else "",
+    })
+
+
 def _load_history_detail(area_id: str) -> Dict[str, Any]:
     normalized = _clean_text(area_id)
     if not normalized:
@@ -263,11 +318,15 @@ def _load_history_pois(area_id: str, year: Optional[int] = None) -> Dict[str, An
     return payload
 
 
-def _latest_artifact_payload(area_id: str, artifact_type: str) -> Dict[str, Any]:
+def _latest_artifact(area_id: str, artifact_type: str) -> Dict[str, Any]:
     artifacts = analysis_artifact_repo.list(area_id, artifact_type=artifact_type)
     if not artifacts:
         return {}
-    return _safe_dict(artifacts[0].get("payload"))
+    return _safe_dict(artifacts[0])
+
+
+def _latest_artifact_payload(area_id: str, artifact_type: str) -> Dict[str, Any]:
+    return _safe_dict(_latest_artifact(area_id, artifact_type).get("payload"))
 
 
 def _artifact_ready(area_id: str, source_id: str) -> bool:
@@ -472,7 +531,7 @@ def query_poi_points(request: PptPoiQueryRequest) -> PptPoiQueryResponse:
 
 
 def query_nearby_poi_points(request: PptPoiNearbyRequest) -> PptPoiQueryResponse:
-    center = request.center if isinstance(request.center, list) else []
+    center = _normalize_history_center(request.center, request.center_coord_type)
     if len(center) < 2:
         return PptPoiQueryResponse(
             area_id=_clean_text(request.area_id),
@@ -742,6 +801,922 @@ def _nightlight_value(cell: Dict[str, Any]) -> float:
         except (TypeError, ValueError):
             continue
     return 0.0
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _mean(values: List[float]) -> float:
+    finite = [float(value) for value in values if math.isfinite(float(value))]
+    if not finite:
+        return 0.0
+    return sum(finite) / float(len(finite))
+
+
+def _lng_lat_area_km2(geom: Any) -> float:
+    if not geom or geom.is_empty:
+        return 0.0
+    area_deg2 = float(getattr(geom, "area", 0.0) or 0.0)
+    centroid = geom.centroid
+    mean_lat = math.radians(float(centroid.y))
+    return abs(area_deg2) * 111.32 * 111.32 * max(0.1, math.cos(mean_lat))
+
+
+def _lng_lat_length_m(geom: Any) -> float:
+    if not geom or geom.is_empty:
+        return 0.0
+    if geom.geom_type == "MultiLineString":
+        return sum(_lng_lat_length_m(part) for part in geom.geoms)
+    coords = list(getattr(geom, "coords", []) or [])
+    if len(coords) < 2:
+        return 0.0
+    total = 0.0
+    for a, b in zip(coords, coords[1:]):
+        total += _haversine_meters([float(a[0]), float(a[1])], [float(b[0]), float(b[1])])
+    return total
+
+
+def _meters_to_degree_buffer(geom: Any, meters: float) -> float:
+    lat = math.radians(float(getattr(getattr(geom, "centroid", None), "y", 0.0) or 0.0))
+    x_scale = 111320.0 * max(0.1, math.cos(lat))
+    y_scale = 111320.0
+    return max(0.0, float(meters or 0.0)) / min(x_scale, y_scale)
+
+
+def _line_feature_geometry(feature: Dict[str, Any]) -> LineString | None:
+    geometry = _safe_dict(feature.get("geometry"))
+    if geometry.get("type") != "LineString":
+        return None
+    coords: List[tuple[float, float]] = []
+    for raw in _safe_list(geometry.get("coordinates")):
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            continue
+        try:
+            coords.append((float(raw[0]), float(raw[1])))
+        except (TypeError, ValueError):
+            continue
+    if len(coords) < 2:
+        return None
+    line = LineString(coords)
+    return line if not line.is_empty and line.length > 0 else None
+
+
+def _road_metric(props: Dict[str, Any], key: str) -> float:
+    if key == "choice":
+        return _safe_float(props.get("choice_score", props.get("choice_global")), 0.0)
+    if key == "integration":
+        return _safe_float(props.get("integration_score", props.get("integration_global", props.get("accessibility_score"))), 0.0)
+    return _safe_float(props.get(f"{key}_score", props.get(key)), 0.0)
+
+
+def _road_skeleton_score(props: Dict[str, Any]) -> float:
+    return max(0.0, min(1.0, (
+        0.45 * _road_metric(props, "choice")
+        + 0.40 * _road_metric(props, "integration")
+        + 0.15 * _road_metric(props, "connectivity")
+    )))
+
+
+def _load_road_syntax_payload(area_id: str) -> Dict[str, Any]:
+    return _latest_artifact_payload(area_id, "road_syntax")
+
+
+def _carrier_population_evidence(area_id: str) -> Dict[str, Any]:
+    artifact = _latest_artifact(area_id, "population")
+    payload = _safe_dict(artifact.get("payload"))
+    params = _safe_dict(artifact.get("params"))
+    selected = _safe_dict(payload.get("selected"))
+    legend = _safe_dict(payload.get("legend"))
+    view = (_clean_text(selected.get("view")) or _clean_text(payload.get("view")) or _clean_text(params.get("view"))).lower()
+    view_label = (
+        _clean_text(selected.get("view_label"))
+        or _clean_text(payload.get("view_label"))
+        or _clean_text(legend.get("title"))
+        or ("总人口" if view == "overview" else ("人口密度" if view in {"density", "sex"} else "人口图层"))
+    )
+    unit = (
+        _clean_text(selected.get("unit"))
+        or _clean_text(payload.get("unit"))
+        or _clean_text(legend.get("unit"))
+        or ("人口" if view == "overview" else ("人/平方公里" if view in {"density", "sex"} else ("%" if view == "age" else "")))
+    )
+    cells = _safe_list(payload.get("layer_cells"))
+    return {
+        "view": view,
+        "view_label": view_label,
+        "unit": unit,
+        "summary": _safe_dict(payload.get("summary") or artifact.get("summary")),
+        "cells_by_id": {
+            _clean_text(cell.get("cell_id")): _safe_dict(cell)
+            for cell in cells
+            if isinstance(cell, dict) and _clean_text(cell.get("cell_id"))
+        },
+    }
+
+
+def _cell_numeric_value(cell: Dict[str, Any], keys: List[str]) -> float:
+    for key in keys:
+        number = _safe_float(cell.get(key), math.nan)
+        if math.isfinite(number):
+            return number
+    return 0.0
+
+
+def _optional_cell_numeric_value(cell: Dict[str, Any], keys: List[str]) -> float | None:
+    for key in keys:
+        number = _safe_float(cell.get(key), math.nan)
+        if math.isfinite(number):
+            return number
+    return None
+
+
+def _road_feature_rows(road_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    features = _safe_list(_safe_dict(road_payload.get("roads")).get("features"))
+    rows: List[Dict[str, Any]] = []
+    for index, feature in enumerate(features):
+        feature_payload = _safe_dict(feature)
+        line = _line_feature_geometry(feature_payload)
+        if line is None:
+            continue
+        props = _safe_dict(feature_payload.get("properties"))
+        length_m = _safe_float(props.get("length_m"), 0.0) or _lng_lat_length_m(line)
+        score = _road_skeleton_score(props)
+        rows.append({
+            "id": _clean_text(props.get("id") or props.get("road_id") or props.get("name")) or f"road-{index + 1}",
+            "feature": feature_payload,
+            "line": line,
+            "length_m": max(0.0, length_m),
+            "skeleton_score": score,
+            "choice": _road_metric(props, "choice"),
+            "integration": _road_metric(props, "integration"),
+            "connectivity": _road_metric(props, "connectivity"),
+            "control": _road_metric(props, "control"),
+            "depth": _road_metric(props, "depth"),
+            "intelligibility": _road_metric(props, "intelligibility"),
+            "is_skeleton": bool(props.get("is_skeleton_choice_top20") or props.get("is_skeleton_integration_top20")),
+        })
+    return rows
+
+
+def _selected_carrier_skeleton_roads(roads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not roads:
+        return []
+    sorted_scores = sorted(float(row.get("skeleton_score") or 0.0) for row in roads)
+    threshold_index = max(0, int(math.floor(len(sorted_scores) * 0.70)) - 1)
+    score_threshold = sorted_scores[threshold_index] if sorted_scores else 0.0
+    selected = [
+        row for row in roads
+        if row.get("is_skeleton")
+        or float(row.get("choice") or 0.0) >= 0.72
+        or float(row.get("integration") or 0.0) >= 0.72
+        or float(row.get("skeleton_score") or 0.0) >= score_threshold
+    ]
+    if len(selected) < 4:
+        selected = sorted(roads, key=lambda row: float(row.get("skeleton_score") or 0.0), reverse=True)[: min(len(roads), 12)]
+    return selected
+
+
+def _shape_short_axis_m(geom: Any) -> float:
+    if not geom or geom.is_empty:
+        return 0.0
+    min_x, min_y, max_x, max_y = geom.bounds
+    lat = math.radians(float((min_y + max_y) / 2))
+    width_m = abs(float(max_x - min_x)) * 111320.0 * max(0.1, math.cos(lat))
+    height_m = abs(float(max_y - min_y)) * 111320.0
+    return min(width_m, height_m)
+
+
+def _shape_compactness(area_km2: float, perimeter_m: float) -> float:
+    if area_km2 <= 0 or perimeter_m <= 0:
+        return 0.0
+    return max(0.0, min(1.0, (4.0 * math.pi * area_km2 * 1_000_000.0) / (perimeter_m * perimeter_m)))
+
+
+def _line_buffer_polygon(line: Any, meters: float = CARRIER_BOUNDARY_BUFFER_M) -> Any:
+    if not line or line.is_empty:
+        return None
+    return line.buffer(_meters_to_degree_buffer(line, meters))
+
+
+def _block_loop_candidates(skeleton_roads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    lines = [row["line"] for row in skeleton_roads if row.get("line") is not None]
+    if len(lines) < 3:
+        return []
+    try:
+        network = unary_union(lines)
+        polygons = list(polygonize(network))
+    except Exception:
+        return []
+
+    candidates: List[Dict[str, Any]] = []
+    for polygon in polygons:
+        if polygon.is_empty:
+            continue
+        area_km2 = _lng_lat_area_km2(polygon)
+        if area_km2 < BLOCK_LOOP_MIN_AREA_KM2 or area_km2 > BLOCK_LOOP_MAX_AREA_KM2:
+            continue
+        boundary = polygon.boundary
+        boundary_length_m = _lng_lat_length_m(boundary)
+        if boundary_length_m <= 1:
+            continue
+        matched_roads = [
+            row for row in skeleton_roads
+            if row["line"].distance(boundary) <= _meters_to_degree_buffer(boundary, 35.0)
+        ]
+        if len(matched_roads) < CARRIER_MIN_BLOCK_LOOP_ROADS:
+            continue
+        coverage_length = sum(float(row.get("length_m") or 0.0) for row in matched_roads)
+        continuity = max(0.0, min(1.0, coverage_length / max(boundary_length_m, 1.0)))
+        compactness = _shape_compactness(area_km2, boundary_length_m)
+        short_axis_m = _shape_short_axis_m(polygon)
+        if continuity < 0.55 or compactness < CARRIER_MIN_COMPACTNESS or short_axis_m < CARRIER_MIN_SHORT_AXIS_M:
+            continue
+        candidates.append({
+            "status": "block_loop",
+            "carrier_type": "block_loop",
+            "polygon": polygon,
+            "boundary": boundary,
+            "roads": matched_roads,
+            "area_km2": area_km2,
+            "boundary_length_m": boundary_length_m,
+            "continuity": continuity,
+            "compactness": compactness,
+            "short_axis_m": short_axis_m,
+        })
+    candidates.sort(key=lambda item: (
+        -float(item.get("continuity") or 0.0),
+        -_mean([float(row.get("skeleton_score") or 0.0) for row in _safe_list(item.get("roads"))]),
+        float(item.get("area_km2") or 0.0),
+    ))
+    return candidates
+
+
+def _connected_road_components(roads: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    adjacency: Dict[tuple[float, float], List[int]] = {}
+    for index, row in enumerate(roads):
+        coords = list(row["line"].coords)
+        if len(coords) < 2:
+            continue
+        for point in (coords[0], coords[-1]):
+            adjacency.setdefault(_snap_key(point), []).append(index)
+
+    visited: set[int] = set()
+    components: List[List[Dict[str, Any]]] = []
+    for start_index in range(len(roads)):
+        if start_index in visited:
+            continue
+        stack = [start_index]
+        component_ids: set[int] = set()
+        while stack:
+            current = stack.pop()
+            if current in component_ids:
+                continue
+            component_ids.add(current)
+            coords = list(roads[current]["line"].coords)
+            if len(coords) < 2:
+                continue
+            for point in (coords[0], coords[-1]):
+                for neighbor in adjacency.get(_snap_key(point), []):
+                    if neighbor not in component_ids:
+                        stack.append(neighbor)
+        visited.update(component_ids)
+        components.append([roads[index] for index in sorted(component_ids)])
+    return components
+
+
+def _corridor_candidates(skeleton_roads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for component in _connected_road_components(skeleton_roads):
+        if len(component) < CARRIER_MIN_CORRIDOR_ROADS:
+            continue
+        component_length_m = sum(float(row.get("length_m") or 0.0) for row in component)
+        if component_length_m < CARRIER_MIN_CORRIDOR_LENGTH_M:
+            continue
+        merged = unary_union([row["line"] for row in component])
+        boundary = merged if isinstance(merged, (LineString, MultiLineString)) else MultiLineString([row["line"] for row in component])
+        polygon = _line_buffer_polygon(boundary)
+        if polygon is None or polygon.is_empty:
+            continue
+        candidates.append({
+            "status": "corridor",
+            "carrier_type": "corridor",
+            "polygon": polygon,
+            "boundary": boundary,
+            "roads": component,
+            "area_km2": _lng_lat_area_km2(polygon),
+            "boundary_length_m": component_length_m,
+            "continuity": 1.0,
+            "compactness": _shape_compactness(_lng_lat_area_km2(polygon), max(component_length_m, 1.0)),
+            "short_axis_m": _shape_short_axis_m(polygon),
+        })
+    candidates.sort(key=lambda item: (
+        -_mean([float(row.get("skeleton_score") or 0.0) for row in _safe_list(item.get("roads"))]),
+        -float(item.get("boundary_length_m") or 0.0),
+    ))
+    return candidates[:CARRIER_MAX_CORRIDORS]
+
+
+def _segment_candidates(road_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    ranked_roads = sorted(
+        road_rows,
+        key=lambda row: (
+            -float(row.get("skeleton_score") or 0.0),
+            -float(row.get("choice") or 0.0),
+            -float(row.get("integration") or 0.0),
+            _clean_text(row.get("id")),
+        ),
+    )
+    for row in ranked_roads[:CARRIER_MAX_SEGMENTS]:
+        line = row.get("line")
+        polygon = _line_buffer_polygon(line)
+        if polygon is None or polygon.is_empty:
+            continue
+        length_m = float(row.get("length_m") or 0.0) or _lng_lat_length_m(line)
+        candidates.append({
+            "status": "segment",
+            "carrier_type": "segment",
+            "polygon": polygon,
+            "boundary": line,
+            "roads": [row],
+            "area_km2": _lng_lat_area_km2(polygon),
+            "boundary_length_m": length_m,
+            "continuity": 1.0,
+            "compactness": 0.0,
+            "short_axis_m": _shape_short_axis_m(polygon),
+        })
+    return candidates
+
+
+def _snap_key(point: tuple[float, float], digits: int = 5) -> tuple[float, float]:
+    return (round(float(point[0]), digits), round(float(point[1]), digits))
+
+
+def _point_intersects_any(candidates: List[Point], geom: Any) -> bool:
+    return any(geom.contains(point) or geom.touches(point) for point in candidates)
+
+
+def _poi_function_group(point: PptPoiPoint) -> str:
+    text = " ".join([point.name, point.category, point.subcategory, point.typecode])
+    if _is_nightlife_point(point):
+        return "nightlife"
+    if any(term in text for term in ("餐饮", "购物", "商场", "商业", "便利店", "超市", "生活服务")):
+        return "commerce"
+    if any(term in text for term in ("科教", "文化", "学校", "博物馆", "展览", "图书", "公园", "风景")):
+        return "culture"
+    if any(term in text for term in ("医疗", "医院", "诊所", "社区", "政府", "公共", "教育")):
+        return "community"
+    return "other"
+
+
+def _category_counts_for_points(points: List[PptPoiPoint]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for point in points:
+        key = _clean_text(point.category) or "未分类"
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def _select_carrier_representative_pois(points: List[PptPoiPoint], limit: int = CARRIER_REPRESENTATIVE_POI_LIMIT) -> List[PptPoiPoint]:
+    target = max(1, int(limit or CARRIER_REPRESENTATIVE_POI_LIMIT))
+    unique_points: List[PptPoiPoint] = []
+    seen_keys: set[str] = set()
+    for point in points:
+        key = _point_key(point)
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            unique_points.append(point)
+
+    function_counts: Dict[str, int] = {}
+    category_counts: Dict[str, int] = {}
+    subcategory_counts: Dict[str, int] = {}
+    for point in unique_points:
+        function = _poi_function_group(point)
+        category = _clean_text(point.category) or "未分类"
+        subcategory = _clean_text(point.subcategory) or "未分类"
+        function_counts[function] = function_counts.get(function, 0) + 1
+        category_counts[category] = category_counts.get(category, 0) + 1
+        subcategory_counts[subcategory] = subcategory_counts.get(subcategory, 0) + 1
+
+    function_order = {"nightlife": 0, "commerce": 1, "culture": 2, "community": 3, "other": 4}
+    ranked = sorted(unique_points, key=lambda point: (
+        -function_counts.get(_poi_function_group(point), 0),
+        -category_counts.get(_clean_text(point.category) or "未分类", 0),
+        -subcategory_counts.get(_clean_text(point.subcategory) or "未分类", 0),
+        function_order.get(_poi_function_group(point), 9),
+        _clean_text(point.name),
+    ))
+    return _diverse_sample_points(ranked, target)
+
+
+def _carrier_poi_metrics(carrier: Dict[str, Any], points: List[PptPoiPoint]) -> Dict[str, Any]:
+    polygon = carrier["polygon"]
+    boundary = carrier["boundary"]
+    boundary_buffer = boundary.buffer(_meters_to_degree_buffer(boundary, CARRIER_BOUNDARY_BUFFER_M))
+    boundary_points: List[PptPoiPoint] = []
+    inside_points: List[PptPoiPoint] = []
+    for point in points:
+        candidates = _point_gcj02_candidates(point)
+        if not candidates:
+            continue
+        if _point_intersects_any(candidates, boundary_buffer):
+            boundary_points.append(point)
+        if _point_intersects_any(candidates, polygon):
+            inside_points.append(point)
+    unique_points: List[PptPoiPoint] = []
+    unique_keys: set[str] = set()
+    for point in boundary_points + inside_points:
+        key = _point_key(point)
+        if key and key not in unique_keys:
+            unique_keys.add(key)
+            unique_points.append(point)
+    function_counts: Dict[str, int] = {}
+    for point in unique_points:
+        group = _poi_function_group(point)
+        function_counts[group] = function_counts.get(group, 0) + 1
+    representative = _select_carrier_representative_pois(unique_points)
+    category_counts = _category_counts_for_points(unique_points)
+    dominant_categories = [
+        {"category": category, "count": count}
+        for category, count in sorted(category_counts.items(), key=lambda row: (-row[1], row[0]))[:5]
+    ]
+    total = len(unique_points)
+    entropy = 0.0
+    if category_counts:
+        values = [float(value) for value in category_counts.values() if value > 0]
+        base = sum(values)
+        entropy = sum(-(value / base) * math.log(value / base) for value in values) if base > 0 else 0.0
+    return {
+        "boundary_poi_count": len(boundary_points),
+        "inside_poi_count": len(inside_points),
+        "total_related_poi_count": total,
+        "poi_density_per_km2": round(total / max(float(carrier.get("area_km2") or 0.0), 1e-6), 3),
+        "category_mix_score": round(min(1.0, entropy / 2.2), 3),
+        "function_counts": function_counts,
+        "dominant_categories": dominant_categories,
+        "representative_pois": [point.model_dump(mode="json") for point in representative],
+    }
+
+
+def _carrier_cell_metrics(
+    carrier: Dict[str, Any],
+    prepared_cells: List[tuple[str, Any, Any]],
+    population_evidence: Dict[str, Any],
+    nightlight_by_cell: Dict[str, Dict[str, Any]],
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    polygon = carrier["polygon"]
+    boundary = carrier["boundary"]
+    boundary_buffer = boundary.buffer(_meters_to_degree_buffer(boundary, CARRIER_BOUNDARY_BUFFER_M))
+    inside_cell_ids: List[str] = []
+    boundary_cell_ids: List[str] = []
+    for cell_id, geom, _prepared in prepared_cells:
+        if polygon.intersects(geom):
+            inside_cell_ids.append(cell_id)
+        if boundary_buffer.intersects(geom):
+            boundary_cell_ids.append(cell_id)
+
+    cell_ids = sorted(set(inside_cell_ids + boundary_cell_ids))
+    population_by_cell = _safe_dict(population_evidence.get("cells_by_id"))
+    population_view = _clean_text(population_evidence.get("view"))
+    population_label = _clean_text(population_evidence.get("view_label")) or "人口图层"
+    population_unit = _clean_text(population_evidence.get("unit"))
+    explicit_population_values: List[float] = []
+    layer_values: List[float] = []
+    for cell_id in cell_ids:
+        population_cell = _safe_dict(population_by_cell.get(cell_id))
+        explicit_value = _optional_cell_numeric_value(population_cell, ["total_population", "population"])
+        if explicit_value is not None:
+            explicit_population_values.append(explicit_value)
+        elif population_view == "overview":
+            explicit_population_values.append(_cell_numeric_value(population_cell, ["value", "display_value", "raw_value"]))
+        layer_value = _optional_cell_numeric_value(population_cell, ["value", "display_value", "density", "raw_value"])
+        if layer_value is not None:
+            layer_values.append(layer_value)
+    nightlight_values = [_nightlight_value(nightlight_by_cell.get(cell_id, {})) for cell_id in cell_ids]
+    has_population_count = bool(explicit_population_values)
+    total_population = sum(explicit_population_values) if has_population_count else None
+    mean_population = _mean(explicit_population_values) if has_population_count else None
+    mean_cell_value = _mean(layer_values)
+    max_cell_value = max(layer_values) if layer_values else 0.0
+    mean_nightlight = _mean(nightlight_values)
+    max_nightlight = max(nightlight_values) if nightlight_values else 0.0
+    hotspot_count = sum(
+        1 for cell_id in cell_ids
+        if _clean_text(nightlight_by_cell.get(cell_id, {}).get("class_key")) in {"core_hotspot", "secondary_hotspot", "emerging_hotspot"}
+        or _clean_text(nightlight_by_cell.get(cell_id, {}).get("class_label")) in {"核心热点", "次级热点", "新兴热点"}
+    )
+    if has_population_count:
+        demand_strength = "强" if float(total_population or 0.0) >= 1500 else ("中" if float(total_population or 0.0) >= 500 else "弱")
+        population_density_level = "高" if float(mean_population or 0.0) >= 150 else ("中" if float(mean_population or 0.0) >= 50 else "低")
+        population_value_mode = "count"
+        demand_basis = "population_count"
+    else:
+        is_density_view = population_view in {"density", "sex"} or "密度" in population_label or "平方公里" in population_unit
+        high_threshold = 12000.0 if is_density_view else 60.0
+        mid_threshold = 4500.0 if is_density_view else 20.0
+        demand_strength = "强" if mean_cell_value >= high_threshold else ("中" if mean_cell_value >= mid_threshold else "弱")
+        population_density_level = demand_strength if is_density_view else "未知"
+        population_value_mode = "density_or_layer_value"
+        demand_basis = "population_layer_value"
+    return (
+        {
+            "inside_cell_count": len(set(inside_cell_ids)),
+            "boundary_cell_count": len(set(boundary_cell_ids)),
+            "cell_count": len(cell_ids),
+            "source_view": population_view,
+            "view_label": population_label,
+            "unit": population_unit,
+            "population_value_mode": population_value_mode,
+            "total_population": round(float(total_population), 3) if total_population is not None else None,
+            "mean_cell_population": round(float(mean_population), 3) if mean_population is not None else None,
+            "mean_cell_value": round(mean_cell_value, 3),
+            "max_cell_value": round(max_cell_value, 3),
+            "population_density_level": population_density_level,
+            "demand_strength": demand_strength,
+            "demand_basis": demand_basis,
+        },
+        {
+            "inside_cell_count": len(set(inside_cell_ids)),
+            "boundary_cell_count": len(set(boundary_cell_ids)),
+            "cell_count": len(cell_ids),
+            "mean_radiance": round(mean_nightlight, 6),
+            "max_radiance": round(max_nightlight, 6),
+            "hotspot_cell_count": hotspot_count,
+            "night_activity_level": "强" if hotspot_count >= 1 or mean_nightlight >= 20 else ("中" if mean_nightlight > 0 else "弱"),
+        },
+    )
+
+
+def _carrier_road_metrics(carrier: Dict[str, Any]) -> Dict[str, Any]:
+    roads = _safe_list(carrier.get("roads"))
+    return {
+        "road_count": len(roads),
+        "choice_score": round(_mean([float(row.get("choice") or 0.0) for row in roads]), 3),
+        "integration_score": round(_mean([float(row.get("integration") or 0.0) for row in roads]), 3),
+        "connectivity_score": round(_mean([float(row.get("connectivity") or 0.0) for row in roads]), 3),
+        "control_score": round(_mean([float(row.get("control") or 0.0) for row in roads]), 3),
+        "depth_score": round(_mean([float(row.get("depth") or 0.0) for row in roads]), 3),
+        "intelligibility_score": round(_mean([float(row.get("intelligibility") or 0.0) for row in roads]), 3),
+        "skeleton_score": round(_mean([float(row.get("skeleton_score") or 0.0) for row in roads]), 3),
+        "continuity": round(float(carrier.get("continuity") or 0.0), 3),
+        "boundary_length_m": round(float(carrier.get("boundary_length_m") or 0.0), 2),
+        "area_km2": round(float(carrier.get("area_km2") or 0.0), 4),
+        "compactness": round(float(carrier.get("compactness") or 0.0), 3),
+        "short_axis_m": round(float(carrier.get("short_axis_m") or 0.0), 2),
+    }
+
+
+def _carrier_label(
+    *,
+    carrier_type: str,
+    road_metrics: Dict[str, Any],
+    poi_metrics: Dict[str, Any],
+    population_metrics: Dict[str, Any],
+    nightlight_metrics: Dict[str, Any],
+) -> str:
+    functions = _safe_dict(poi_metrics.get("function_counts"))
+    commerce = int(functions.get("commerce") or 0)
+    nightlife = int(functions.get("nightlife") or 0)
+    culture = int(functions.get("culture") or 0)
+    community = int(functions.get("community") or 0)
+    total_poi = int(poi_metrics.get("total_related_poi_count") or 0)
+    choice = _safe_float(road_metrics.get("choice_score"), 0.0)
+    integration = _safe_float(road_metrics.get("integration_score"), 0.0)
+    connectivity = _safe_float(road_metrics.get("connectivity_score"), 0.0)
+    depth = _safe_float(road_metrics.get("depth_score"), 0.0)
+    road_potential = 0.5 * choice + 0.5 * integration
+    demand = _safe_float(population_metrics.get("total_population"), 0.0)
+    demand_strength = _clean_text(population_metrics.get("demand_strength"))
+    has_demand_support = demand_strength in {"中", "强"} or demand >= 500
+    night = _safe_float(nightlight_metrics.get("mean_radiance"), 0.0)
+    hotspots = int(nightlight_metrics.get("hotspot_cell_count") or 0)
+
+    if carrier_type == "segment":
+        if choice >= 0.65 and integration >= 0.65:
+            return "重要通达路段"
+        if choice >= 0.68:
+            return "高 choice 穿行路段"
+        if integration >= 0.68:
+            return "高 integration 到达路段"
+        if connectivity < 0.28 or depth >= 0.65:
+            return "隐蔽连接段"
+        return "高潜力路段"
+
+    if carrier_type == "corridor":
+        if nightlife >= 2 and (hotspots >= 1 or night >= 15) and road_potential >= 0.45:
+            return "夜间消费廊道"
+        if total_poi >= 6 and commerce >= max(2, culture + community) and road_potential >= 0.50:
+            return "商业活力廊道"
+        if choice >= integration + 0.08:
+            return "穿行骨架廊道"
+        if integration >= choice + 0.08:
+            return "到达通达廊道"
+        return "高分通达廊道"
+
+    if nightlife >= 2 and (hotspots >= 1 or night >= 15) and road_potential >= 0.45:
+        return "夜间消费街区"
+    if total_poi >= 6 and commerce >= max(2, culture + community) and road_potential >= 0.55 and has_demand_support:
+        return "成熟商业街区"
+    if culture >= 2 and culture >= commerce and integration >= 0.45:
+        return "文教游逛街区"
+    if community >= 2 and (demand_strength == "强" or demand >= 800) and connectivity >= 0.35:
+        return "社区生活街区"
+    if road_potential >= 0.58 and (has_demand_support or night > 0) and total_poi < 6:
+        return "潜力激活街区"
+    if commerce >= 2:
+        return "成熟商业街区"
+    return "潜力激活街区"
+
+
+def _carrier_population_phrase(population_metrics: Dict[str, Any]) -> str:
+    total_population = population_metrics.get("total_population")
+    if total_population is not None:
+        return f"服务人口约 {total_population}"
+    value = population_metrics.get("mean_cell_value")
+    label = _clean_text(population_metrics.get("view_label")) or "人口图层"
+    unit = _clean_text(population_metrics.get("unit"))
+    unit_text = f" {unit}" if unit else ""
+    return f"{label}均值 {value}{unit_text}"
+
+
+def _carrier_summary_text(
+    label: str,
+    carrier_type: str,
+    road_metrics: Dict[str, Any],
+    poi_metrics: Dict[str, Any],
+    population_metrics: Dict[str, Any],
+    nightlight_metrics: Dict[str, Any],
+) -> str:
+    road_count = int(road_metrics.get("road_count") or 0)
+    metric_phrase = (
+        f"choice {road_metrics.get('choice_score')} / integration {road_metrics.get('integration_score')}，"
+        f"关联 POI {poi_metrics.get('total_related_poi_count')} 个，"
+        f"{_carrier_population_phrase(population_metrics)}，"
+        f"夜光均值 {nightlight_metrics.get('mean_radiance')}。"
+    )
+    if carrier_type == "block_loop":
+        return f"{label}：{road_count} 条路段 polygonize 成街区围合面，{metric_phrase}"
+    if carrier_type == "corridor":
+        return f"{label}：连续 {road_count} 条高分路段形成廊道轴线，{metric_phrase}"
+    return f"{label}：单条 road feature 作为路段载体，{metric_phrase}"
+
+
+def _serialize_carrier_geometry(carrier: Dict[str, Any]) -> Dict[str, Any]:
+    polygon = carrier.get("polygon")
+    boundary = carrier.get("boundary")
+    polygon_coords: List[List[float]] = []
+    if polygon and not polygon.is_empty and getattr(polygon, "exterior", None):
+        polygon_coords = [[round(float(x), 6), round(float(y), 6)] for x, y in list(polygon.exterior.coords)[:120]]
+    boundary_coords: List[List[float]] = []
+    if isinstance(boundary, LineString):
+        boundary_coords = [[round(float(x), 6), round(float(y), 6)] for x, y in list(boundary.coords)[:160]]
+    elif isinstance(boundary, MultiLineString):
+        for part in boundary.geoms:
+            boundary_coords.extend([[round(float(x), 6), round(float(y), 6)] for x, y in list(part.coords)[:80]])
+            if len(boundary_coords) >= 160:
+                boundary_coords = boundary_coords[:160]
+                break
+    return {
+        "type": "carrier_geometry",
+        "polygon": polygon_coords,
+        "boundary": boundary_coords,
+    }
+
+
+def _serialize_line_path(line: Any, coord_limit: int = 80) -> List[List[float]]:
+    if isinstance(line, LineString):
+        return [[round(float(x), 6), round(float(y), 6)] for x, y in list(line.coords)[:coord_limit]]
+    if isinstance(line, MultiLineString):
+        coords: List[List[float]] = []
+        for part in line.geoms:
+            coords.extend([[round(float(x), 6), round(float(y), 6)] for x, y in list(part.coords)[:coord_limit]])
+            if len(coords) >= coord_limit:
+                return coords[:coord_limit]
+    return []
+
+
+def _serialize_road_context(road_rows: List[Dict[str, Any]], skeleton_roads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    skeleton_object_ids = {id(row) for row in skeleton_roads}
+    features: List[Dict[str, Any]] = []
+    for original_index, row in enumerate(road_rows):
+        path = _serialize_line_path(row.get("line"))
+        if len(path) < 2:
+            continue
+        is_skeleton = id(row) in skeleton_object_ids or bool(row.get("is_skeleton"))
+        features.append({
+            "id": _clean_text(row.get("id")) or f"road-{original_index + 1}",
+            "path": path,
+            "skeleton_score": round(float(row.get("skeleton_score") or 0.0), 3),
+            "choice_score": round(float(row.get("choice") or 0.0), 3),
+            "integration_score": round(float(row.get("integration") or 0.0), 3),
+            "connectivity_score": round(float(row.get("connectivity") or 0.0), 3),
+            "is_skeleton": is_skeleton,
+        })
+    return {
+        "type": "road_context",
+        "source": "road_syntax.roads.features",
+        "total": len(road_rows),
+        "included": len(features),
+        "coverage": "complete",
+        "features": features,
+    }
+
+
+def _build_poi_road_population_nightlight_carrier_package(request: PptDataPackageRequest, selected_sources: set[str]) -> PptDataPackageResponse:
+    missing_sources = sorted(source_id for source_id in CARRIER_REQUIRED_SOURCE_IDS if source_id not in selected_sources)
+    if missing_sources:
+        raise PptDataSourceNotFound(f"carrier_package_missing_sources:{','.join(missing_sources)}")
+
+    detail = _load_history_detail(request.area_id)
+    road_payload = _load_road_syntax_payload(request.area_id)
+    road_rows = _road_feature_rows(road_payload)
+    population_evidence = _carrier_population_evidence(request.area_id)
+    population_by_cell = _safe_dict(population_evidence.get("cells_by_id"))
+    nightlight_by_cell = _latest_nightlight_cells(request.area_id)
+    if not road_rows:
+        raise PptDataSourceNotFound("carrier_package_missing_road_syntax")
+    if not population_by_cell:
+        raise PptDataSourceNotFound("carrier_package_missing_population")
+    if not nightlight_by_cell:
+        raise PptDataSourceNotFound("carrier_package_missing_nightlight")
+
+    poi_payload = _load_history_pois(request.area_id)
+    selected_year = poi_payload.get("selected_year")
+    poi_source = _clean_text(_safe_dict(poi_payload.get("params")).get("source"))
+    points = [
+        _normalize_poi(poi, index, year=selected_year, source=poi_source)
+        for index, poi in enumerate(_safe_list(poi_payload.get("pois")))
+    ]
+    grid_features, grid_warnings = _load_shared_grid_features(request.area_id, detail)
+    prepared_cells = _prepared_grid_cells(grid_features)
+    if not prepared_cells:
+        raise PptDataSourceNotFound("carrier_package_missing_shared_grid")
+
+    skeleton_roads = _selected_carrier_skeleton_roads(road_rows)
+    block_loop_candidates = _block_loop_candidates(skeleton_roads)[:CARRIER_MAX_BLOCK_LOOPS]
+    loop_road_object_ids = {
+        id(row)
+        for candidate in block_loop_candidates
+        for row in _safe_list(candidate.get("roads"))
+    }
+    corridor_source_roads = [row for row in skeleton_roads if id(row) not in loop_road_object_ids]
+    corridor_candidates = _corridor_candidates(corridor_source_roads)
+    corridor_road_object_ids = {
+        id(row)
+        for candidate in corridor_candidates
+        for row in _safe_list(candidate.get("roads"))
+    }
+    segment_candidates = _segment_candidates([
+        row for row in road_rows
+        if id(row) not in loop_road_object_ids and id(row) not in corridor_road_object_ids
+    ])
+    raw_carriers = block_loop_candidates + corridor_candidates + segment_candidates
+    road_context = _serialize_road_context(road_rows, skeleton_roads)
+
+    carriers: List[Dict[str, Any]] = []
+    representative_items: List[Dict[str, Any]] = []
+    seen_poi_keys: set[str] = set()
+    type_indexes: Dict[str, int] = {}
+    for candidate in raw_carriers:
+        road_metrics = _carrier_road_metrics(candidate)
+        poi_metrics = _carrier_poi_metrics(candidate, points)
+        population_metrics, nightlight_metrics = _carrier_cell_metrics(candidate, prepared_cells, population_evidence, nightlight_by_cell)
+        carrier_type = _clean_text(candidate.get("carrier_type") or candidate.get("status")) or "segment"
+        type_indexes[carrier_type] = type_indexes.get(carrier_type, 0) + 1
+        label = _carrier_label(
+            carrier_type=carrier_type,
+            road_metrics=road_metrics,
+            poi_metrics=poi_metrics,
+            population_metrics=population_metrics,
+            nightlight_metrics=nightlight_metrics,
+        )
+        carrier_id = f"{carrier_type}_{type_indexes[carrier_type]:02d}"
+        carrier_refs = [
+            f"carrier:{carrier_id}:road",
+            f"carrier:{carrier_id}:poi",
+            f"carrier:{carrier_id}:population",
+            f"carrier:{carrier_id}:nightlight",
+        ]
+        representatives = _safe_list(poi_metrics.get("representative_pois"))
+        for item in representatives:
+            key = _clean_text(item.get("id")) or _clean_text(item.get("name"))
+            if key and key not in seen_poi_keys and len(representative_items) < request.limit:
+                seen_poi_keys.add(key)
+                item["carrier_id"] = carrier_id
+                item["carrier_type"] = carrier_type
+                item["carrier_label"] = label
+                representative_items.append(item)
+        carriers.append({
+            "carrier_id": carrier_id,
+            "carrier_type": carrier_type,
+            "carrier_label": label,
+            "summary": _carrier_summary_text(label, carrier_type, road_metrics, poi_metrics, population_metrics, nightlight_metrics),
+            "road_metrics": road_metrics,
+            "poi_metrics": {key: value for key, value in poi_metrics.items() if key != "representative_pois"},
+            "population_metrics": population_metrics,
+            "nightlight_metrics": nightlight_metrics,
+            "representative_pois": representatives,
+            "geometry": _serialize_carrier_geometry(candidate),
+            "evidence_refs": carrier_refs,
+        })
+
+    label_counts: Dict[str, int] = {}
+    type_counts: Dict[str, int] = {"segment": 0, "corridor": 0, "block_loop": 0}
+    for carrier in carriers:
+        carrier_type = _clean_text(carrier.get("carrier_type")) or "segment"
+        type_counts[carrier_type] = type_counts.get(carrier_type, 0) + 1
+        label = _clean_text(carrier.get("carrier_label")) or "空间载体"
+        label_counts[label] = label_counts.get(label, 0) + 1
+    top_carrier = carriers[0] if carriers else {}
+    evidence_refs = [
+        ref
+        for carrier in carriers
+        for ref in _safe_list(carrier.get("evidence_refs"))
+    ]
+    warnings = list(grid_warnings)
+    if not carriers:
+        warnings.append("未形成稳定空间载体：路网骨架没有构成可解释的街区 / 廊道 / 路段候选。")
+    package_payload = {
+        "area_id": _clean_text(request.area_id),
+        "source_ids": sorted(selected_sources),
+        "package_mode": "evidence",
+        "intent": _clean_text(request.intent) or CARRIER_EVIDENCE_INTENT,
+        "carrier_count": len(carriers),
+        "road_feature_count": len(road_rows),
+        "skeleton_road_count": len(skeleton_roads),
+        "road_context": road_context,
+        "carriers": carriers,
+    }
+    package_id = f"package:poi-road-carriers:{_stable_hash(package_payload)}"
+    summary = (
+        f"已识别 {len(carriers)} 个空间载体："
+        f"街区 / loop {type_counts.get('block_loop', 0)} 个、"
+        f"廊道 {type_counts.get('corridor', 0)} 个、"
+        f"路段 {type_counts.get('segment', 0)} 个。"
+    )
+    package_meta = {
+        "id": package_id,
+        "title": CARRIER_PACKAGE_TITLE,
+        "summary": summary,
+        "coordinate_system": "GCJ02",
+        "package_mode": "evidence",
+        "intent": _clean_text(request.intent) or CARRIER_EVIDENCE_INTENT,
+        "source_ids": sorted(selected_sources),
+        "evidence_layers": ["road_syntax", "poi", "population", "nightlight"],
+        "filters": {
+            "intent_type": "poi_road_population_nightlight_carrier_evidence",
+            "carrier_types": ["segment", "corridor", "block_loop"],
+            "boundary_buffer_m": CARRIER_BOUNDARY_BUFFER_M,
+        },
+        "total": len(carriers),
+        "items": representative_items,
+        "carriers": carriers,
+        "road_context": road_context,
+        "carrier_summary": {
+            "carrier_count": len(carriers),
+            "segment_count": type_counts.get("segment", 0),
+            "corridor_count": type_counts.get("corridor", 0),
+            "block_loop_count": type_counts.get("block_loop", 0),
+            "label_counts": label_counts,
+            "top_carrier_id": _clean_text(top_carrier.get("carrier_id")),
+            "top_carrier_label": _clean_text(top_carrier.get("carrier_label")),
+            "top_carrier_type": _clean_text(top_carrier.get("carrier_type")),
+        },
+        "alignment": {
+            "grid_type": "shared_raster",
+            "join_key": "cell_id",
+            "grid_cell_count": len(grid_features),
+            "population_cell_count": len(population_by_cell),
+            "nightlight_cell_count": len(nightlight_by_cell),
+            "alignment_level": "carrier_geometry_to_shared_cell_intersection",
+        },
+        "evidence_refs": evidence_refs,
+        "warnings": warnings,
+    }
+    source = PptSource(
+        id=package_id,
+        type="package",
+        title=CARRIER_PACKAGE_TITLE,
+        status="ready",
+        selected=True,
+        meta={
+            "label": f"空间载体 {len(carriers)} 个",
+            "sourceKind": "package",
+            "package": package_meta,
+        },
+    )
+    return PptDataPackageResponse(
+        source=source,
+        summary=summary,
+        items=representative_items,
+        evidence_refs=evidence_refs,
+        warnings=warnings,
+    )
 
 
 def _build_nightlife_poi_nightlight_package(
@@ -1047,6 +2022,7 @@ def _execute_evidence_query(*, request: PptDataPackageRequest, query: PptEvidenc
             PptPoiNearbyRequest(
                 area_id=request.area_id,
                 center=list(request.center),
+                center_coord_type=request.center_coord_type,
                 radius_m=query.radius_m or request.radius_m or 1000,
                 filters=filters,
                 limit=200,
@@ -1180,6 +2156,7 @@ def _build_poi_package_response(
         "limit": request.limit,
         "filters": filters,
         "center": list(request.center),
+        "center_coord_type": request.center_coord_type,
         "radius_m": request.radius_m,
         "intent_plan": intent_plan.model_dump(mode="json") if intent_plan else None,
         "total": poi_result.total,
@@ -1201,6 +2178,7 @@ def _build_poi_package_response(
         "source_ids": sorted(selected_sources),
         "filters": filters,
         "center": list(request.center),
+        "center_coord_type": request.center_coord_type,
         "radius_m": request.radius_m,
         "total": poi_result.total,
         "category_summary": _category_summary(items),
@@ -1248,14 +2226,31 @@ def _build_evidence_filters(plan: PptEvidenceIntentPlan) -> Dict[str, Any]:
 
 
 async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPackageResponse:
+    request = _normalize_package_request_center(request)
     selected_sources = {_clean_text(item) for item in request.source_ids if _clean_text(item)}
     include_poi = not selected_sources or "system:poi" in selected_sources
     intent_text = _clean_text(request.intent)
     include_nightlight = "system:nightlight" in selected_sources
+    package_mode = (_clean_text(request.package_mode) or "evidence").lower()
+    wants_carrier_package = package_mode == "evidence" and CARRIER_REQUIRED_SOURCE_IDS.issubset(selected_sources) and any(
+        keyword in intent_text
+        for keyword in (
+            "空间载体",
+            "路段",
+            "廊道",
+            "街区",
+            "block_loop",
+            "corridor",
+            "segment",
+            "共同支撑",
+        )
+    )
     wants_nightlife_alignment = include_nightlight and any(
         keyword in intent_text
         for keyword in ("夜生活", "夜间消费", "夜间活力", "夜光格子", "夜光")
     )
+    if wants_carrier_package:
+        return _build_poi_road_population_nightlight_carrier_package(request, selected_sources)
     if not include_poi:
         poi_result = PptPoiQueryResponse(area_id=request.area_id, warnings=["第一版资料包仅支持 POI 来源。"])
         return _build_poi_package_response(
@@ -1267,7 +2262,6 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
             title="资料包",
         )
 
-    package_mode = (_clean_text(request.package_mode) or "evidence").lower()
     filters = dict(_safe_dict(request.filters))
     if request.query:
         filters["query"] = request.query
@@ -1277,6 +2271,7 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
             PptPoiNearbyRequest(
                 area_id=request.area_id,
                 center=list(request.center),
+                center_coord_type=request.center_coord_type,
                 radius_m=request.radius_m or 1000,
                 filters=filters,
                 limit=request.limit,
@@ -1294,9 +2289,13 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
     if package_mode == "evidence":
         detail = _load_history_detail(request.area_id)
         params = _safe_dict(detail.get("params"))
+        context_center = list(request.center) if request.center else _normalize_history_center(params.get("center"), "wgs84")
         area_context = {
             "area_id": _clean_text(request.area_id),
-            "center": params.get("center"),
+            "center": context_center,
+            "center_coord_type": "wgs84" if context_center else "",
+            "center_source": "request_current_isochrone_center" if request.center else "history_params",
+            "radius_m": request.radius_m,
             "time_min": params.get("time_min") or params.get("duration") or params.get("minutes"),
             "source_ids": sorted(selected_sources),
         }

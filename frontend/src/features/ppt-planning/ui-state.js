@@ -23,6 +23,14 @@ function cloneObject(value, fallback = {}) {
 
 export const PPT_UNCATEGORIZED_GROUP_ID = 'group:uncategorized'
 
+const PPT_ERROR_SOURCE_LABELS = new Set([
+  'source_refresh',
+  'source_grouping',
+  'data_package',
+  'outline',
+  'directive',
+])
+
 function uniqueText(items = []) {
   const seen = new Set()
   const values = []
@@ -34,6 +42,39 @@ function uniqueText(items = []) {
     }
   })
   return values
+}
+
+function normalizePptErrorSource(value = '') {
+  const source = asText(value)
+  return PPT_ERROR_SOURCE_LABELS.has(source) ? source : ''
+}
+
+function normalizeRevisionTarget(value = {}) {
+  const type = asText(value.type)
+  if (!['outline', 'directive'].includes(type)) return { type: '', id: '', pageNo: 0, index: 0 }
+  const pageNo = Number(value.pageNo || value.page_no || 0) || 0
+  const index = Number(value.index || pageNo || 0) || 0
+  return {
+    type,
+    id: asText(value.id),
+    pageNo,
+    index,
+  }
+}
+
+function normalizeRevisionSnapshots(value = {}) {
+  const source = cloneObject(value)
+  return Object.fromEntries(Object.entries(source)
+    .map(([key, item]) => [asText(key), cloneObject(item)])
+    .filter(([key]) => key))
+}
+
+function normalizeRevisionDraft(value = {}) {
+  return cloneObject(value)
+}
+
+function normalizeStaleDirectivePageIds(value = []) {
+  return uniqueText(value).map((item) => String(Number(item) || item)).filter(Boolean)
 }
 
 function stableGroupId(title = '', fallback = '') {
@@ -52,7 +93,7 @@ function normalizeSources(seedSources = []) {
 function getDefaultGroupSpecForSource(source = {}) {
   const sourceId = asText(source.id)
   const sourceKind = asText((source.meta || {}).sourceKind)
-  if (sourceKind === 'package' || sourceId.startsWith('package:')) {
+  if (sourceKind === 'package' || sourceKind === 'package-placeholder' || sourceId.startsWith('package:') || sourceId.startsWith('package-placeholder:')) {
     return { id: 'group:packages', title: '资料包', emoji: '' }
   }
   if (['system:scope', 'system:h3'].includes(sourceId)) {
@@ -183,6 +224,41 @@ function getReadySelectedSourceIds(sources = []) {
     .filter(Boolean)
 }
 
+function isPptPackageSource(source = {}) {
+  const sourceKind = asText(source.meta && source.meta.sourceKind)
+  const sourceId = asText(source.id)
+  return sourceKind === 'package'
+    || sourceKind === 'package-placeholder'
+    || sourceId.startsWith('package:')
+    || sourceId.startsWith('package-placeholder:')
+}
+
+function outlineRevisionKey(item = {}) {
+  const id = asText(item.id)
+  const pageNo = Number(item.pageNo || item.page_no || 0) || 0
+  return `outline:${id || pageNo}`
+}
+
+function slideRevisionKey(item = {}) {
+  const index = Number(item.index || item.pageNo || item.page_no || 0) || 0
+  return `slide:${index}`
+}
+
+function findOutlineIndex(outline = [], target = {}) {
+  const targetId = asText(target.id)
+  const targetPageNo = Number(target.pageNo || target.page_no || 0) || 0
+  return cloneArray(outline).findIndex((item) => {
+    const itemId = asText(item.id)
+    const itemPageNo = Number(item.pageNo || item.page_no || 0) || 0
+    return (targetId && itemId === targetId) || (!!targetPageNo && itemPageNo === targetPageNo)
+  })
+}
+
+function findSlideIndex(slides = [], target = {}) {
+  const targetIndex = Number(target.index || target.pageNo || target.page_no || 0) || 0
+  return cloneArray(slides).findIndex((item) => Number(item.index || 0) === targetIndex)
+}
+
 function normalizeSelectedSlideId(seed = {}, deckBrief = null) {
   const slides = cloneArray(deckBrief && deckBrief.slides)
   const fallback = asText(slides[0] && slides[0].id)
@@ -214,8 +290,15 @@ export function createPptPlanningState(seed = {}) {
     deckBrief,
     selectedSlideId: normalizeSelectedSlideId(seed, deckBrief),
     generationError: asText(seed.generationError || seed.generation_error),
+    generationErrorSource: normalizePptErrorSource(seed.generationErrorSource || seed.generation_error_source),
     dataPackageGenerating: !!(seed.dataPackageGenerating || seed.data_package_generating),
     sourceGrouping: !!(seed.sourceGrouping || seed.source_grouping),
+    activeRevisionTarget: normalizeRevisionTarget(seed.activeRevisionTarget || seed.active_revision_target),
+    outlineRevisionDraft: normalizeRevisionDraft(seed.outlineRevisionDraft || seed.outline_revision_draft),
+    directiveRevisionDraft: normalizeRevisionDraft(seed.directiveRevisionDraft || seed.directive_revision_draft),
+    revisionSnapshots: normalizeRevisionSnapshots(seed.revisionSnapshots || seed.revision_snapshots),
+    staleDirectivePageIds: normalizeStaleDirectivePageIds(seed.staleDirectivePageIds || seed.stale_directive_page_ids),
+    revisionGeneratingTarget: normalizeRevisionTarget(seed.revisionGeneratingTarget || seed.revision_generating_target),
   }
 }
 
@@ -239,6 +322,25 @@ export function getPptSourceSummary(state = {}) {
     selected: selected.length,
     ready: ready.length,
   }
+}
+
+export function getPendingPptPackageSources(state = {}) {
+  const sources = cloneArray(createPptPlanningState(state).sources)
+  const readySourceIds = new Set(sources
+    .filter((item) => item && asText(item.status) === 'ready')
+    .map((item) => asText(item.id))
+    .filter(Boolean))
+  return sources.filter((item) => {
+    if (!item || !isPptPackageSource(item)) return false
+    const status = asText(item.status)
+    if (status === 'ready') return false
+    if (status === 'generating') return true
+    const sourceKind = asText(item.meta && item.meta.sourceKind)
+    if (sourceKind !== 'package-placeholder') return true
+    const pack = cloneObject(item.meta && item.meta.package)
+    const sourceIds = uniqueText(pack.source_ids || pack.sourceIds)
+    return sourceIds.length > 0 && sourceIds.every((sourceId) => readySourceIds.has(sourceId))
+  })
 }
 
 export function getActiveDeckSlideBrief(state = {}) {
@@ -274,6 +376,12 @@ export function applyPptSpecResponse(state = {}, response = {}) {
       missingInputs: cloneArray(response.missingInputs || response.missing_inputs),
     },
     generationError: '',
+    generationErrorSource: '',
+    revisionSnapshots: {},
+    staleDirectivePageIds: [],
+    activeRevisionTarget: {},
+    outlineRevisionDraft: {},
+    directiveRevisionDraft: {},
   })
 }
 
@@ -282,6 +390,7 @@ export function setPptOutlineGenerating(state = {}) {
     ...createPptPlanningState(state),
     currentStep: PPT_PLANNING_STEPS.OUTLINE_GENERATING,
     generationError: '',
+    generationErrorSource: '',
   })
 }
 
@@ -290,6 +399,54 @@ export function setPptDirectiveGenerating(state = {}) {
     ...createPptPlanningState(state),
     currentStep: PPT_PLANNING_STEPS.DIRECTIVE_GENERATING,
     generationError: '',
+    generationErrorSource: '',
+  })
+}
+
+export function resetPptPlanningToMaterials(state = {}) {
+  const normalized = createPptPlanningState(state)
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: PPT_PLANNING_STEPS.MATERIALS,
+    outline: [],
+    spec: {
+      ...normalized.spec,
+      outline: [],
+      missingInputs: [],
+    },
+    deckBrief: createDefaultDeckBriefPreview(),
+    selectedSlideId: '',
+    generationError: '',
+    generationErrorSource: '',
+    activeRevisionTarget: {},
+    outlineRevisionDraft: {},
+    directiveRevisionDraft: {},
+    revisionSnapshots: {},
+    staleDirectivePageIds: [],
+    revisionGeneratingTarget: {},
+  })
+}
+
+export function resetPptPlanningToOutlineReady(state = {}) {
+  const normalized = createPptPlanningState(state)
+  const outline = normalizePptOutline(normalized.outline)
+  if (!outline.length) return resetPptPlanningToMaterials(normalized)
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: PPT_PLANNING_STEPS.OUTLINE_READY,
+    outline,
+    spec: {
+      ...normalized.spec,
+      outline,
+    },
+    deckBrief: createDefaultDeckBriefPreview(),
+    selectedSlideId: '',
+    generationError: '',
+    generationErrorSource: '',
+    activeRevisionTarget: {},
+    directiveRevisionDraft: {},
+    revisionGeneratingTarget: {},
+    staleDirectivePageIds: [],
   })
 }
 
@@ -301,16 +458,206 @@ export function applyDeckBriefResponse(state = {}, response = {}) {
     currentStep: PPT_PLANNING_STEPS.DIRECTIVE_DRAFT,
     deckBrief,
     generationError: '',
+    generationErrorSource: '',
+    staleDirectivePageIds: [],
+    activeRevisionTarget: {},
+    outlineRevisionDraft: {},
+    directiveRevisionDraft: {},
   })
 }
 
-export function setPptGenerationError(state = {}, error = '') {
+export function getPptRevisionKey(type = '', target = {}) {
+  return asText(type) === 'directive' ? slideRevisionKey(target) : outlineRevisionKey(target)
+}
+
+export function isPptDirectivePageStale(state = {}, pageNo = 0) {
+  const normalized = createPptPlanningState(state)
+  const id = String(Number(pageNo) || pageNo || '')
+  return !!id && normalized.staleDirectivePageIds.includes(id)
+}
+
+export function setPptActiveRevisionTarget(state = {}, target = {}) {
+  const normalized = createPptPlanningState(state)
+  const active = normalizeRevisionTarget(target)
+  if (!active.type) {
+    return createPptPlanningState({
+      ...normalized,
+      activeRevisionTarget: {},
+      outlineRevisionDraft: {},
+      directiveRevisionDraft: {},
+    })
+  }
+  if (active.type === 'outline') {
+    const index = findOutlineIndex(normalized.outline, active)
+    const item = index >= 0 ? normalized.outline[index] : {}
+    return createPptPlanningState({
+      ...normalized,
+      activeRevisionTarget: {
+        type: 'outline',
+        id: asText(item.id) || active.id,
+        pageNo: Number(item.pageNo || active.pageNo || 0) || 0,
+      },
+      outlineRevisionDraft: {
+        theme: asText(item.theme),
+        purpose: asText(item.purpose),
+        revisionNote: '',
+      },
+      directiveRevisionDraft: {},
+    })
+  }
+  const index = findSlideIndex((normalized.deckBrief || {}).slides, active)
+  const item = index >= 0 ? (normalized.deckBrief.slides || [])[index] : {}
+  return createPptPlanningState({
+    ...normalized,
+    activeRevisionTarget: {
+      type: 'directive',
+      index: Number(item.index || active.index || 0) || 0,
+      pageNo: Number(item.index || active.pageNo || 0) || 0,
+    },
+    outlineRevisionDraft: {},
+    directiveRevisionDraft: {
+      title: asText(item.title),
+      purpose: asText(item.purpose),
+      keyMessage: asText(item.keyMessage || item.key_message),
+      visualPlan: asText(item.visualPlan || item.visual_plan),
+      requiredSources: cloneArray(item.requiredSources || item.required_sources).map((source) => asText(source)).filter(Boolean).join(', '),
+      speakerNotes: asText(item.speakerNotes || item.speaker_notes),
+      revisionNote: '',
+    },
+  })
+}
+
+export function setPptRevisionDraftField(state = {}, type = '', field = '', value = '') {
+  const normalized = createPptPlanningState(state)
+  const key = asText(field)
+  if (!key) return normalized
+  if (asText(type) === 'directive') {
+    return createPptPlanningState({
+      ...normalized,
+      directiveRevisionDraft: { ...normalized.directiveRevisionDraft, [key]: value },
+    })
+  }
+  return createPptPlanningState({
+    ...normalized,
+    outlineRevisionDraft: { ...normalized.outlineRevisionDraft, [key]: value },
+  })
+}
+
+export function setPptRevisionGeneratingTarget(state = {}, target = {}) {
+  return createPptPlanningState({
+    ...createPptPlanningState(state),
+    revisionGeneratingTarget: normalizeRevisionTarget(target),
+    generationError: '',
+    generationErrorSource: '',
+  })
+}
+
+export function applyPptOutlineSectionRevision(state = {}, section = {}) {
+  const normalized = createPptPlanningState(state)
+  const nextSection = normalizePptOutline([section])[0]
+  if (!nextSection) return normalized
+  const index = findOutlineIndex(normalized.outline, nextSection)
+  if (index < 0) return normalized
+  const previous = normalized.outline[index]
+  const nextOutline = normalized.outline.map((item, itemIndex) => (itemIndex === index ? nextSection : item))
+  const key = outlineRevisionKey(previous)
+  const stalePageId = String(Number(nextSection.pageNo || previous.pageNo || 0) || '')
+  return createPptPlanningState({
+    ...normalized,
+    outline: nextOutline,
+    spec: {
+      ...normalized.spec,
+      outline: nextOutline,
+    },
+    revisionSnapshots: {
+      ...normalized.revisionSnapshots,
+      [key]: { type: 'outline', item: previous },
+    },
+    staleDirectivePageIds: normalizeStaleDirectivePageIds([...normalized.staleDirectivePageIds, stalePageId]),
+    activeRevisionTarget: {},
+    outlineRevisionDraft: {},
+    revisionGeneratingTarget: {},
+    generationError: '',
+    generationErrorSource: '',
+  })
+}
+
+export function applyDeckBriefSlideRevision(state = {}, slide = {}) {
+  const normalized = createPptPlanningState(state)
+  const nextSlide = normalizeDeckBrief({ slides: [slide] }).slides[0]
+  if (!nextSlide) return normalized
+  const slides = cloneArray((normalized.deckBrief || {}).slides)
+  const index = findSlideIndex(slides, nextSlide)
+  if (index < 0) return normalized
+  const previous = slides[index]
+  const nextSlides = slides.map((item, itemIndex) => (itemIndex === index ? nextSlide : item))
+  const key = slideRevisionKey(previous)
+  const pageId = String(Number(nextSlide.index || 0) || '')
+  return createPptPlanningState({
+    ...normalized,
+    deckBrief: {
+      ...normalized.deckBrief,
+      slides: nextSlides,
+    },
+    revisionSnapshots: {
+      ...normalized.revisionSnapshots,
+      [key]: { type: 'directive', item: previous },
+    },
+    staleDirectivePageIds: normalized.staleDirectivePageIds.filter((item) => item !== pageId),
+    activeRevisionTarget: {},
+    directiveRevisionDraft: {},
+    revisionGeneratingTarget: {},
+    generationError: '',
+    generationErrorSource: '',
+  })
+}
+
+export function undoPptSectionRevision(state = {}, type = '', target = {}) {
+  const normalized = createPptPlanningState(state)
+  const key = getPptRevisionKey(type, target)
+  const snapshot = cloneObject(normalized.revisionSnapshots[key])
+  const item = cloneObject(snapshot.item)
+  if (!key || !item || !snapshot.type) return normalized
+  const nextSnapshots = { ...normalized.revisionSnapshots }
+  delete nextSnapshots[key]
+  if (snapshot.type === 'outline') {
+    const index = findOutlineIndex(normalized.outline, target)
+    if (index < 0) return normalized
+    const nextOutline = normalized.outline.map((outlineItem, itemIndex) => (itemIndex === index ? item : outlineItem))
+    const pageId = String(Number(item.pageNo || item.page_no || 0) || '')
+    return createPptPlanningState({
+      ...normalized,
+      outline: nextOutline,
+      spec: { ...normalized.spec, outline: nextOutline },
+      revisionSnapshots: nextSnapshots,
+      staleDirectivePageIds: normalized.staleDirectivePageIds.filter((staleId) => staleId !== pageId),
+      activeRevisionTarget: {},
+      outlineRevisionDraft: {},
+    })
+  }
+  const slides = cloneArray((normalized.deckBrief || {}).slides)
+  const index = findSlideIndex(slides, target)
+  if (index < 0) return normalized
+  const nextSlides = slides.map((slideItem, itemIndex) => (itemIndex === index ? item : slideItem))
+  const pageId = String(Number(item.index || 0) || '')
+  return createPptPlanningState({
+    ...normalized,
+    deckBrief: { ...normalized.deckBrief, slides: nextSlides },
+    revisionSnapshots: nextSnapshots,
+    staleDirectivePageIds: normalized.staleDirectivePageIds.filter((staleId) => staleId !== pageId),
+    activeRevisionTarget: {},
+    directiveRevisionDraft: {},
+  })
+}
+
+export function setPptGenerationError(state = {}, error = '', source = '') {
   const normalized = createPptPlanningState(state)
   const hasOutline = cloneArray(normalized.outline).length > 0
   return createPptPlanningState({
     ...normalized,
     currentStep: hasOutline ? PPT_PLANNING_STEPS.OUTLINE_READY : PPT_PLANNING_STEPS.MATERIALS,
     generationError: asText(error) || 'ppt_generation_failed',
+    generationErrorSource: normalizePptErrorSource(source),
     dataPackageGenerating: false,
     sourceGrouping: false,
   })
@@ -321,6 +668,43 @@ export function setPptDataPackageGenerating(state = {}, generating = true) {
     ...createPptPlanningState(state),
     dataPackageGenerating: !!generating,
     generationError: '',
+    generationErrorSource: '',
+  })
+}
+
+export function syncPptPackagePlaceholderSources(state = {}, placeholders = []) {
+  const normalized = createPptPlanningState(state)
+  const removedSet = new Set(normalized.removedSourceIds)
+  const nextPlaceholders = normalizeSources(placeholders)
+    .filter((item) => {
+      const sourceKind = asText(item.meta && item.meta.sourceKind)
+      const sourceId = asText(item.id)
+      return !removedSet.has(sourceId)
+        && (sourceKind === 'package-placeholder' || sourceId.startsWith('package-placeholder:'))
+    })
+    .map((item) => normalizePptSource({
+      ...item,
+      status: asText(item.status) === 'generating' ? 'generating' : 'pending',
+      selected: false,
+      meta: {
+        ...(item.meta || {}),
+        sourceKind: 'package-placeholder',
+        packagePlaceholder: true,
+      },
+    }))
+  const sources = [
+    ...normalized.sources.filter((item) => {
+      const sourceKind = asText(item.meta && item.meta.sourceKind)
+      const sourceId = asText(item.id)
+      return sourceKind !== 'package-placeholder' && !sourceId.startsWith('package-placeholder:')
+    }),
+    ...nextPlaceholders,
+  ]
+  return createPptPlanningState({
+    ...normalized,
+    sources,
+    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources),
+    spec: syncSpecSourceIds(normalized, sources),
   })
 }
 
@@ -329,6 +713,7 @@ export function setPptSourceGrouping(state = {}, grouping = true) {
     ...createPptPlanningState(state),
     sourceGrouping: !!grouping,
     generationError: '',
+    generationErrorSource: '',
   })
 }
 
@@ -554,7 +939,13 @@ export function addPptDataPackageSource(state = {}, response = {}) {
   const isSamePackageIntent = (source = {}) => {
     const meta = cloneObject(source.meta)
     const pack = cloneObject(meta.package)
-    if (asText(meta.sourceKind) !== 'package' && !asText(source.id).startsWith('package:')) return false
+    const sourceKind = asText(meta.sourceKind)
+    const sourceId = asText(source.id)
+    const packageLike = sourceKind === 'package'
+      || sourceKind === 'package-placeholder'
+      || sourceId.startsWith('package:')
+      || sourceId.startsWith('package-placeholder:')
+    if (!packageLike) return false
     if (asText(source.id) === packageSource.id) return true
     if (!nextPack.intent || !nextPack.package_mode) return false
     const sourceIds = uniqueText(pack.source_ids || pack.sourceIds).sort()
@@ -587,6 +978,7 @@ export function addPptDataPackageSource(state = {}, response = {}) {
     },
     dataPackageGenerating: false,
     generationError: '',
+    generationErrorSource: '',
   })
 }
 
@@ -642,5 +1034,88 @@ export function buildDeckBriefPayload(state = {}, context = {}) {
     deck_type: asText(normalized.spec.deckType),
     page_count: Number(normalized.spec.pageCount || 15),
     research_enabled: !!normalized.spec.researchEnabled,
+  }
+}
+
+export function buildPptOutlineSectionPayload(state = {}, target = {}, revisionNote = '', context = {}) {
+  const normalized = createPptPlanningState(state)
+  const sourceIds = getSelectedPptSourceIds(normalized)
+  const targetIndex = findOutlineIndex(normalized.outline, target)
+  const targetItem = targetIndex >= 0 ? normalized.outline[targetIndex] : target
+  return {
+    ...buildPptSpecPayload(normalized, context),
+    spec: {
+      title: normalized.spec.title,
+      goal: normalized.spec.goal,
+      audience: normalized.spec.audience,
+      deck_type: normalized.spec.deckType,
+      page_count: Number(normalized.spec.pageCount || 15),
+      outline: normalizePptOutline(normalized.outline).map((item) => ({
+        id: item.id,
+        page_no: item.pageNo,
+        theme: item.theme,
+        purpose: item.purpose,
+      })),
+      source_summary: '',
+      missing_inputs: cloneArray(normalized.spec.missingInputs),
+    },
+    outline: normalizePptOutline(normalized.outline).map((item) => ({
+      id: item.id,
+      page_no: item.pageNo,
+      theme: item.theme,
+      purpose: item.purpose,
+    })),
+    target: {
+      id: targetItem.id,
+      page_no: targetItem.pageNo,
+      theme: targetItem.theme,
+      purpose: targetItem.purpose,
+    },
+    revision_note: asText(revisionNote),
+    source_ids: sourceIds,
+  }
+}
+
+export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote = '', context = {}) {
+  const normalized = createPptPlanningState(state)
+  const sourceIds = getSelectedPptSourceIds(normalized)
+  const slides = cloneArray((normalized.deckBrief || {}).slides)
+  const targetIndex = findSlideIndex(slides, target)
+  const targetItem = targetIndex >= 0 ? slides[targetIndex] : target
+  const outlineItem = normalized.outline.find((item) => Number(item.pageNo || 0) === Number(targetItem.index || 0)) || null
+  return {
+    ...buildDeckBriefPayload(normalized, context),
+    outline: normalizePptOutline(normalized.outline).map((item) => ({
+      id: item.id,
+      page_no: item.pageNo,
+      theme: item.theme,
+      purpose: item.purpose,
+    })),
+    slides: slides.map((item) => ({
+      index: item.index,
+      title: item.title,
+      purpose: item.purpose,
+      key_message: item.keyMessage,
+      visual_plan: item.visualPlan,
+      required_sources: cloneArray(item.requiredSources),
+      speaker_notes: item.speakerNotes,
+    })),
+    target: {
+      index: targetItem.index,
+      title: targetItem.title,
+      purpose: targetItem.purpose,
+      key_message: targetItem.keyMessage,
+      visual_plan: targetItem.visualPlan,
+      required_sources: cloneArray(targetItem.requiredSources),
+      speaker_notes: targetItem.speakerNotes,
+    },
+    outline_item: outlineItem ? {
+      id: outlineItem.id,
+      page_no: outlineItem.pageNo,
+      theme: outlineItem.theme,
+      purpose: outlineItem.purpose,
+    } : null,
+    revision_note: asText(revisionNote),
+    source_ids: sourceIds,
   }
 }

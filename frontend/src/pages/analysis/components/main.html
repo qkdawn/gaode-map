@@ -1961,8 +1961,15 @@
                                 :outline="getAgentPptPlanningOutline()"
                                 :slides="getAgentPptPlanningSlides()"
                                 :generation-error="getAgentPptPlanningGenerationError()"
+                                :generation-error-source="getAgentPptPlanningGenerationErrorSource()"
                                 :data-package-generating="isAgentPptPlanningDataPackageGenerating()"
                                 :source-grouping="isAgentPptPlanningSourceGrouping()"
+                                :active-revision-target="getAgentPptPlanningActiveRevisionTarget()"
+                                :outline-revision-draft="getAgentPptPlanningOutlineRevisionDraft()"
+                                :directive-revision-draft="getAgentPptPlanningDirectiveRevisionDraft()"
+                                :revision-snapshots="getAgentPptPlanningRevisionSnapshots()"
+                                :stale-directive-page-ids="getAgentPptPlanningStaleDirectivePageIds()"
+                                :revision-generating-target="getAgentPptPlanningRevisionGeneratingTarget()"
                                 @classify-source-groups="classifyAgentPptPlanningSourceGroups"
                                 @toggle-source="toggleAgentPptPlanningSource"
                                 @toggle-all-sources="toggleAllAgentPptPlanningSources"
@@ -1977,7 +1984,15 @@
                                 @update-spec-field="updateAgentPptPlanningSpecField"
                                 @create-data-package="createAgentPptPlanningDataPackage"
                                 @generate-outline="generateAgentPptPlanningOutline"
-                                @generate-directive="generateAgentPptPlanningDirective">
+                                @generate-directive="generateAgentPptPlanningDirective"
+                                @regenerate-outline="regenerateAgentPptPlanningOutlineWithConfirm"
+                                @regenerate-directive="regenerateAgentPptPlanningDirectiveWithConfirm"
+                                @open-revision-target="openAgentPptPlanningRevisionTarget"
+                                @close-revision-target="closeAgentPptPlanningRevisionTarget"
+                                @update-revision-draft="updateAgentPptPlanningRevisionDraft"
+                                @save-revision="saveAgentPptPlanningRevision"
+                                @regenerate-revision="regenerateAgentPptPlanningRevision"
+                                @undo-revision="undoAgentPptPlanningRevision">
                             </ppt-planning-workbench>
                         </div>
 
