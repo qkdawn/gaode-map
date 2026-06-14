@@ -157,8 +157,10 @@ async def _stream_chat_completion(
     reasoning_id: str = "llm-reasoning",
     phase: str = "planned",
     title: str = "模型思考",
+    enable_thinking: bool = True,
 ) -> Dict[str, Any]:
-    body = _with_thinking_mode({**request_body, "stream": True})
+    base_body = {**request_body, "stream": True}
+    body = _with_thinking_mode(base_body) if enable_thinking else base_body
     response_id = ""
     finish_reason = ""
     content_parts: List[str] = []
@@ -248,6 +250,9 @@ async def _invoke_json_role(
     phase: str,
     title: str,
     reasoning_id: str,
+    enable_thinking: bool = True,
+    stream: bool = True,
+    timeout_s: float | None = None,
 ) -> Dict[str, Any]:
     base_url = str(settings.ai_base_url or "").rstrip("/")
     headers = {
@@ -278,17 +283,30 @@ async def _invoke_json_role(
             {"role": "user", "content": user_content},
         ],
     }
-    async with httpx.AsyncClient(timeout=float(settings.ai_timeout_s or 60)) as client:
-        payload = await _stream_chat_completion(
-            client=client,
-            base_url=base_url,
-            headers=headers,
-            request_body=request_body,
-            emit=emit,
-            reasoning_id=reasoning_id,
-            phase=phase,
-            title=title,
-        )
+    async with httpx.AsyncClient(timeout=float(timeout_s or settings.ai_timeout_s or 60)) as client:
+        if stream:
+            payload = await _stream_chat_completion(
+                client=client,
+                base_url=base_url,
+                headers=headers,
+                request_body=request_body,
+                emit=emit,
+                reasoning_id=reasoning_id,
+                phase=phase,
+                title=title,
+                enable_thinking=enable_thinking,
+            )
+        else:
+            body = _with_thinking_mode(request_body) if enable_thinking else request_body
+            response = await client.post(f"{base_url}/chat/completions", headers=headers, json=body)
+            if response.status_code >= 400:
+                detail = response.text[:800] if response.text else str(getattr(response, "reason_phrase", "LLM provider error"))
+                raise httpx.HTTPStatusError(
+                    f"LLM provider returned HTTP {response.status_code}: {detail}",
+                    request=response.request,
+                    response=response,
+                )
+            payload = response.json()
     return _extract_json_object(_extract_chat_completion_text_from_module(payload))
 
 

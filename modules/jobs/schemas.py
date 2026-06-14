@@ -8,8 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 JobType = Literal[
     "parse_document",
-    "build_evidence",
-    "build_embedding",
     "profile_dataset",
     "build_package",
     "generate_ppt",

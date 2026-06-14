@@ -19,12 +19,19 @@ from modules.ppt_planning.schemas import (
     PptSpecResponse,
 )
 from router.domains import ppt_planning
+from router.domains.charting import router as charting_router
 from router.domains.ppt_planning import router
 
 
 def _build_test_app():
     app = FastAPI()
     app.include_router(router)
+    return app
+
+
+def _build_charting_test_app():
+    app = FastAPI()
+    app.include_router(charting_router)
     return app
 
 
@@ -83,7 +90,7 @@ def test_ppt_spec_section_api_returns_single_outline_item(monkeypatch):
                 "outline": [{"id": "page-2", "page_no": 2, "theme": "空间证据", "purpose": "说明现状"}],
                 "target": {"id": "page-2", "page_no": 2, "theme": "空间证据", "purpose": "说明现状"},
                 "revision_note": "更像问题诊断",
-                "source_ids": ["system:scope"],
+                "source_ids": ["current:scope"],
             },
         )
 
@@ -137,7 +144,7 @@ def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
             purpose=payload.revision_note,
             key_message="说明为什么要更新",
             visual_plan="区域底图",
-            required_sources=["system:scope"],
+            required_sources=["current:scope"],
             speaker_notes="只生成单页指令。",
         )
 
@@ -153,7 +160,7 @@ def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
                 "target": {"index": 1, "title": "项目命题", "purpose": "建立汇报主线"},
                 "outline_item": {"id": "page-1", "page_no": 1, "theme": "项目命题", "purpose": "建立汇报主线"},
                 "revision_note": "更强调更新必要性",
-                "source_ids": ["system:scope"],
+                "source_ids": ["current:scope"],
             },
         )
 
@@ -161,14 +168,35 @@ def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
     payload = response.json()
     assert payload["index"] == 1
     assert payload["title"] == "项目命题重写"
-    assert payload["required_sources"] == ["system:scope"]
+    assert payload["required_sources"] == ["current:scope"]
+
+
+def test_ppt_chart_artifact_cleanup_api_deletes_only_safe_files(tmp_path, monkeypatch):
+    from modules.charting import storage
+
+    monkeypatch.setattr(storage, "CHART_DIR_PATH", tmp_path)
+    chart_file = tmp_path / "chart-1.svg"
+    chart_file.write_text("<svg></svg>", encoding="utf-8")
+
+    with TestClient(_build_charting_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/chart-artifacts/cleanup",
+            json={"filenames": ["chart-1.svg", "missing.svg", "../escape.svg", "notes.txt"]},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["deleted"] == ["chart-1.svg"]
+    assert payload["missing"] == ["missing.svg"]
+    assert payload["skipped"] == ["../escape.svg", "notes.txt"]
+    assert not chart_file.exists()
 
 
 def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):
     def fake_list(area_id):
         return [
             PptDataSourceSummary(
-                id="system:poi",
+                id="current:dataset:poi",
                 title="POI 基础数据",
                 status="ready",
                 summary="POI 2 条",
@@ -183,7 +211,7 @@ def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload[0]["id"] == "system:poi"
+    assert payload[0]["id"] == "current:dataset:poi"
     assert payload[0]["status"] == "ready"
 
 
@@ -270,7 +298,7 @@ def test_ppt_data_package_api_returns_visible_source(monkeypatch):
     with TestClient(_build_test_app()) as client:
         response = client.post(
             "/api/v1/analysis/ppt/data/packages",
-            json={"area_id": "area-1", "source_ids": ["system:poi"], "limit": 10},
+            json={"area_id": "area-1", "source_ids": ["current:dataset:poi"], "limit": 10},
         )
 
     assert response.status_code == 200
@@ -288,7 +316,7 @@ def test_ppt_data_package_api_returns_llm_unavailable_error(monkeypatch):
     with TestClient(_build_test_app()) as client:
         response = client.post(
             "/api/v1/analysis/ppt/data/packages",
-            json={"area_id": "area-1", "source_ids": ["system:poi"], "package_mode": "evidence"},
+            json={"area_id": "area-1", "source_ids": ["current:dataset:poi"], "package_mode": "evidence"},
         )
 
     assert response.status_code == 503
@@ -304,7 +332,7 @@ def test_ppt_data_package_api_maps_provider_timeout(monkeypatch):
     with TestClient(_build_test_app()) as client:
         response = client.post(
             "/api/v1/analysis/ppt/data/packages",
-            json={"area_id": "area-1", "source_ids": ["system:poi"], "package_mode": "evidence"},
+            json={"area_id": "area-1", "source_ids": ["current:dataset:poi"], "package_mode": "evidence"},
         )
 
     assert response.status_code == 504
@@ -318,7 +346,7 @@ def test_ppt_source_group_classification_api_returns_groups(monkeypatch):
                 PptSourceGroup(
                     id="group:vitality",
                     title="城市活力证据",
-                    source_ids=["system:poi"],
+                    source_ids=["current:dataset:poi"],
                     meta={"reason": "POI 支撑活力判断。"},
                 )
             ]
@@ -332,7 +360,7 @@ def test_ppt_source_group_classification_api_returns_groups(monkeypatch):
             json={
                 "area_id": "area-1",
                 "sources": [
-                    {"id": "system:poi", "type": "data", "title": "POI 基础数据", "status": "ready"},
+                    {"id": "current:dataset:poi", "type": "data", "title": "POI 基础数据", "status": "ready"},
                 ],
             },
         )
@@ -340,7 +368,7 @@ def test_ppt_source_group_classification_api_returns_groups(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["groups"][0]["id"] == "group:vitality"
-    assert payload["groups"][0]["source_ids"] == ["system:poi"]
+    assert payload["groups"][0]["source_ids"] == ["current:dataset:poi"]
 
 
 def test_ppt_source_group_classification_api_returns_llm_unavailable(monkeypatch):
@@ -354,7 +382,7 @@ def test_ppt_source_group_classification_api_returns_llm_unavailable(monkeypatch
             "/api/v1/analysis/ppt/source-groups/classify",
             json={
                 "sources": [
-                    {"id": "system:poi", "type": "data", "title": "POI 基础数据", "status": "ready"},
+                    {"id": "current:dataset:poi", "type": "data", "title": "POI 基础数据", "status": "ready"},
                 ],
             },
         )
@@ -380,4 +408,24 @@ def test_ppt_spec_api_maps_invalid_llm_response(monkeypatch):
         )
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "ppt_planning_llm_invalid_response"
+    assert response.json()["detail"] == "ppt_outline_invalid_response"
+
+
+def test_ppt_spec_api_maps_outline_timeout(monkeypatch):
+    async def fake_generate(payload):
+        raise httpx.TimeoutException("timed out")
+
+    monkeypatch.setattr(ppt_planning, "generate_ppt_spec", fake_generate)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/spec",
+            json={
+                "area_id": "area-1",
+                "source_ids": ["summary", "scope"],
+                "topic": "长沙县政府原址城市更新",
+            },
+        )
+
+    assert response.status_code == 504
+    assert response.json()["detail"] == "ppt_outline_llm_timeout"

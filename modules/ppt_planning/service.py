@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
+import time
+import uuid
 from typing import Any, Dict, List
 
 from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
@@ -13,6 +16,12 @@ from .prompts import (
     PPT_OUTLINE_SECTION_SYSTEM_PROMPT,
     PPT_SOURCE_GROUP_SYSTEM_PROMPT,
     PPT_SPEC_SYSTEM_PROMPT,
+)
+from .metric_context import (
+    build_metric_context,
+    compact_metric_context_for_llm,
+    render_chart_artifacts,
+    validate_metric_assets,
 )
 from .schemas import (
     DeckBriefSlideRequest,
@@ -38,12 +47,26 @@ class PptPlanningInvalidResponse(RuntimeError):
     pass
 
 
+logger = logging.getLogger(__name__)
+
 LLM_PACKAGE_ITEM_LIMIT = 8
 LLM_PACKAGE_GROUP_LIMIT = 8
 LLM_CARRIER_LIMIT = 12
 LLM_CARRIER_REPRESENTATIVE_POI_LIMIT = 3
 LLM_EVIDENCE_REF_LIMIT = 20
 LLM_WARNING_LIMIT = 6
+LLM_CONTEXT_METRIC_LIMIT = 120
+LLM_CONTEXT_EVIDENCE_LIMIT = 48
+PPT_LLM_TIMEOUT_SECONDS = 35
+
+
+async def _invoke_ppt_json_role(**kwargs: Any) -> Dict[str, Any]:
+    return await _invoke_json_role(
+        **kwargs,
+        enable_thinking=False,
+        stream=False,
+        timeout_s=PPT_LLM_TIMEOUT_SECONDS,
+    )
 
 
 def _clean_text(value: Any) -> str:
@@ -77,6 +100,8 @@ def _stable_group_id(title: str, source_ids: List[str], index: int) -> str:
 def _compact_source_for_grouping(source: PptSource) -> Dict[str, Any]:
     meta = source.meta if isinstance(source.meta, dict) else {}
     package = meta.get("package") if isinstance(meta.get("package"), dict) else {}
+    document = meta.get("document") if isinstance(meta.get("document"), dict) else {}
+    document_index_preview = _safe_list(meta.get("document_index_preview") or meta.get("documentIndexPreview"))[:8]
     return {
         "id": source.id,
         "type": source.type,
@@ -87,6 +112,11 @@ def _compact_source_for_grouping(source: PptSource) -> Dict[str, Any]:
         "task_key": _clean_text(meta.get("taskKey")),
         "package_summary": _clean_text(package.get("summary"))[:300],
         "package_mode": _clean_text(package.get("package_mode")),
+        "document": _copy_compact_keys(document, ["id", "title", "file_name", "file_type", "document_role", "status", "index_count"]),
+        "document_index_preview": [
+            _copy_compact_keys(_safe_dict(item), ["node_id", "parent_node_id", "title", "level", "summary", "page_start", "page_end"])
+            for item in document_index_preview
+        ],
     }
 
 
@@ -347,10 +377,17 @@ def _compact_package_for_llm(package: Any) -> Dict[str, Any]:
 
 def _compact_source_for_llm(source: PptSource) -> Dict[str, Any]:
     meta = _safe_dict(source.meta)
+    ai_payload = _ai_payload_for_source(source)
     compact_meta = _copy_compact_keys(meta, ["label", "sourceKind", "areaId", "taskKey"])
-    package = _compact_package_for_llm(meta.get("package")) if isinstance(meta.get("package"), dict) else {}
-    if package:
-        compact_meta["package"] = package
+    if ai_payload:
+        counts = _safe_dict(ai_payload.get("counts"))
+        compact_meta["aiPayload"] = {
+            "version": ai_payload.get("version"),
+            "included": _safe_list(ai_payload.get("included")),
+            "counts": counts,
+            "policy": _clean_text(ai_payload.get("policy")),
+            "excluded": _safe_list(ai_payload.get("excluded")),
+        }
     return {
         "id": source.id,
         "type": source.type,
@@ -359,6 +396,130 @@ def _compact_source_for_llm(source: PptSource) -> Dict[str, Any]:
         "selected": source.selected,
         "meta": compact_meta,
     }
+
+
+def _metric_source_ids(metric: Dict[str, Any]) -> List[str]:
+    source_ids = [_clean_text(item) for item in _safe_list(metric.get("source_ids") or metric.get("sourceIds")) if _clean_text(item)]
+    source_id = _clean_text(metric.get("source_id") or metric.get("sourceId"))
+    if source_id and source_id not in source_ids:
+        source_ids.append(source_id)
+    return source_ids
+
+
+def _ai_payload_for_source(source: PptSource | None) -> Dict[str, Any]:
+    if not source:
+        return {}
+    meta = _safe_dict(source.meta)
+    payload = _safe_dict(meta.get("aiPayload") or meta.get("ai_payload"))
+    if _clean_text(payload.get("version")) != "ppt_ai_input_block_v1":
+        return {}
+    return payload
+
+
+def _compact_metric_for_transport(metric: Dict[str, Any]) -> Dict[str, Any]:
+    return _copy_compact_keys(metric, [
+        "metric_id",
+        "domain",
+        "label",
+        "value",
+        "unit",
+        "scope",
+        "source_id",
+        "source_ids",
+        "source_path",
+        "calculation_method",
+        "method",
+        "status",
+        "description",
+        "display_text",
+    ])
+
+
+def _compact_evidence_item(*, source_id: str, source_title: str, evidence_type: str, title: str, text: str, citation: str = "", payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    item = {
+        "source_id": source_id,
+        "source_title": source_title,
+        "type": evidence_type,
+        "title": _truncated_text(title, 120),
+        "text": _truncated_text(text, 700),
+        "citation": _truncated_text(citation, 160),
+    }
+    extra = _safe_dict(payload)
+    if extra:
+        item["payload"] = extra
+    return {key: value for key, value in item.items() if value not in ("", [], {})}
+
+
+def _build_ppt_context_bundle(request: PptSpecRequest | PptOutlineSectionRequest | DeckBriefRequest | DeckBriefSlideRequest, metric_context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    request_source_ids = getattr(request, "source_ids", None)
+    if request_source_ids is None:
+        request_source_ids = [_clean_text(source.id) for source in (getattr(request, "sources", []) or []) if _clean_text(source.id)]
+    source_ids = [_clean_text(item) for item in (request_source_ids or []) if _clean_text(item)]
+    selected = set(source_ids)
+    sources = [source for source in (getattr(request, "sources", []) or []) if _clean_text(source.id) in selected]
+    metric_context = metric_context or build_metric_context(sources=sources, source_ids=source_ids, current={})
+    compact_metrics = compact_metric_context_for_llm(metric_context, limit=LLM_CONTEXT_METRIC_LIMIT)
+    all_metrics = _safe_list(metric_context.get("metrics"))
+    source_manifest: List[Dict[str, Any]] = []
+    evidence: List[Dict[str, Any]] = []
+    scopes: List[Dict[str, Any]] = []
+
+    for source_id in source_ids:
+        source = next((item for item in sources if _clean_text(item.id) == source_id), None)
+        title = (source.title if source else "") or source_id
+        meta = _safe_dict(source.meta if source else {})
+        ai_payload = _ai_payload_for_source(source)
+        source_kind = _clean_text(meta.get("sourceKind")) or ("document" if source_id.startswith("document:") else "package" if source_id.startswith("package:") else "system")
+        source_metrics = [metric for metric in all_metrics if source_id in _metric_source_ids(metric) or _clean_text(metric.get("source_id")) == source_id]
+        source_evidence = _safe_list(ai_payload.get("evidence"))
+        source_scope = _safe_dict(ai_payload.get("scope"))
+        if source_scope:
+            scopes.append({"source_id": source_id, "title": title, **source_scope})
+        if source_evidence:
+            evidence.extend(source_evidence)
+        included_types = _safe_list(ai_payload.get("included"))
+        counts = _safe_dict(ai_payload.get("counts"))
+        source_manifest.append({
+            "source_id": source_id,
+            "title": title,
+            "source_kind": source_kind,
+            "transport_status": "included" if included_types else "selected_no_payload",
+            "included": included_types,
+            "scope_count": int(counts.get("scope") or (1 if source_scope else 0)),
+            "metric_count": len(source_metrics),
+            "metric_gap_count": int(counts.get("metric_gaps") or counts.get("metricGaps") or 0),
+            "evidence_count": len(source_evidence),
+            "chart_spec_count": int(counts.get("chart_specs") or counts.get("chartSpecs") or 0),
+            "excluded": _safe_list(ai_payload.get("excluded")),
+            "policy": _clean_text(ai_payload.get("policy")) or "数字来自 aiPayload.metrics；文本/样本来自 aiPayload.evidence；完整原始数据不传给 LLM。",
+        })
+
+    evidence = evidence[:LLM_CONTEXT_EVIDENCE_LIMIT]
+    included_source_ids = {item.get("source_id") for item in evidence}
+    for item in source_manifest:
+        if "evidence" in item["included"] and item["source_id"] not in included_source_ids and item["evidence_count"] > 0:
+            item["evidence_omitted_by_limit"] = True
+
+    bundle = {
+        "version": "ppt_llm_context_bundle_v1",
+        "scope_brief": scopes[0] if scopes else {},
+        "scope_context": {"items": scopes, "item_count": len(scopes)},
+        "source_manifest": source_manifest,
+        "metric_context": compact_metrics,
+        "evidence_context": {
+            "policy": "只传所选来源 aiPayload.evidence；文档使用 PageIndex 章节摘要，资料包/current 分析使用轻量索引。",
+            "items": evidence,
+            "item_count": len(evidence),
+        },
+        "omitted_payloads": [
+            "current.datasets.poi.items",
+            "current.datasets.h3.features",
+            "current.analysis.*.features",
+            "package full items/geometries",
+            "document full text",
+        ],
+    }
+    return bundle
 
 
 def _selected_sources_payload(request: PptSpecRequest | DeckBriefRequest) -> List[Dict[str, Any]]:
@@ -402,7 +563,7 @@ def _validate_outline(raw_outline: Any, page_count: int) -> List[PptOutlineItem]
     return outline
 
 
-def _validate_slides(raw_slides: Any, page_count: int) -> List[DeckSlideBrief]:
+def _validate_slides(raw_slides: Any, page_count: int, metric_context: Dict[str, Any] | None = None) -> List[DeckSlideBrief]:
     if not isinstance(raw_slides, list):
         return []
     slides: List[DeckSlideBrief] = []
@@ -415,6 +576,8 @@ def _validate_slides(raw_slides: Any, page_count: int) -> List[DeckSlideBrief]:
         required_sources = item.get("required_sources") or item.get("requiredSources") or []
         if not isinstance(required_sources, list):
             required_sources = []
+        metric_assets = validate_metric_assets(item, metric_context or {})
+        chart_artifacts = render_chart_artifacts(metric_assets["chart_specs"])
         slides.append(
             DeckSlideBrief(
                 index=int(item.get("index") or index),
@@ -424,6 +587,10 @@ def _validate_slides(raw_slides: Any, page_count: int) -> List[DeckSlideBrief]:
                 visual_plan=_clean_text(item.get("visual_plan") or item.get("visualPlan")),
                 required_sources=[_clean_text(source) for source in required_sources if _clean_text(source)],
                 speaker_notes=_clean_text(item.get("speaker_notes") or item.get("speakerNotes")),
+                metric_claims=metric_assets["metric_claims"],
+                metric_gaps=metric_assets["metric_gaps"],
+                chart_specs=metric_assets["chart_specs"],
+                chart_artifacts=chart_artifacts,
             )
         )
     return slides
@@ -444,10 +611,10 @@ def _validate_outline_section(raw: Any, fallback: PptOutlineItem) -> PptOutlineI
     )
 
 
-def _validate_slide_section(raw: Any, fallback: DeckSlideBrief) -> DeckSlideBrief | None:
+def _validate_slide_section(raw: Any, fallback: DeckSlideBrief, metric_context: Dict[str, Any] | None = None) -> DeckSlideBrief | None:
     item = _safe_dict(raw.get("slide")) if isinstance(raw, dict) and isinstance(raw.get("slide"), dict) else _safe_dict(raw)
     index = int(item.get("index") or fallback.index)
-    slides = _validate_slides([{**fallback.model_dump(mode="json"), **item, "index": index}], index)
+    slides = _validate_slides([{**fallback.model_dump(mode="json"), **item, "index": index}], index, metric_context=metric_context)
     if not slides:
         return None
     normalized = slides[0]
@@ -459,6 +626,10 @@ def _validate_slide_section(raw: Any, fallback: DeckSlideBrief) -> DeckSlideBrie
         visual_plan=normalized.visual_plan,
         required_sources=normalized.required_sources,
         speaker_notes=normalized.speaker_notes,
+        metric_claims=normalized.metric_claims,
+        metric_gaps=normalized.metric_gaps,
+        chart_specs=normalized.chart_specs,
+        chart_artifacts=normalized.chart_artifacts,
     )
 
 
@@ -472,13 +643,17 @@ async def classify_ppt_source_groups(request: PptSourceGroupClassifyRequest) -> 
     if not sources:
         return PptSourceGroupClassifyResponse(groups=[])
     _ensure_llm_enabled()
-    raw = await _invoke_json_role(
+    context_bundle = _build_ppt_context_bundle(request)
+    raw = await _invoke_ppt_json_role(
         system_prompt=PPT_SOURCE_GROUP_SYSTEM_PROMPT,
         user_payload={
             "task": "ppt_source_group_classification",
             "area_id": request.area_id,
             "sources": [_compact_source_for_grouping(source) for source in sources],
-            "analysis_context": request.analysis_context,
+            "context_bundle": {
+                "scope_brief": context_bundle["scope_brief"],
+                "source_manifest": context_bundle["source_manifest"],
+            },
             "previous_groups": [group.model_dump(mode="json") for group in request.previous_groups],
         },
         emit=None,
@@ -491,6 +666,16 @@ async def classify_ppt_source_groups(request: PptSourceGroupClassifyRequest) -> 
 
 async def generate_ppt_spec(request: PptSpecRequest) -> PptSpecResponse:
     _ensure_llm_enabled()
+    request_id = uuid.uuid4().hex[:10]
+    total_started = time.perf_counter()
+    metrics: Dict[str, float | int | str] = {
+        "request_id": request_id,
+        "area_id": request.area_id,
+        "source_count": len(request.source_ids or []),
+        "page_count": request.page_count,
+    }
+    context_bundle = _build_ppt_context_bundle(request)
+    context_ready = time.perf_counter()
     user_payload = {
         "task": "ppt_outline_generation",
         "area_id": request.area_id,
@@ -502,38 +687,64 @@ async def generate_ppt_spec(request: PptSpecRequest) -> PptSpecResponse:
         "source_ids": request.source_ids,
         "sources": _selected_sources_payload(request),
         "source_summary": _source_summary(request.source_ids, request.research_enabled),
-        "analysis_context": request.analysis_context,
+        "scope_brief": context_bundle["scope_brief"],
+        "metric_context": context_bundle["metric_context"],
+        "evidence_context": context_bundle["evidence_context"],
+        "source_manifest": context_bundle["source_manifest"],
+        "omitted_payloads": context_bundle["omitted_payloads"],
         "missing_inputs_from_request": _missing_inputs_for_spec(request),
     }
-    raw = await _invoke_json_role(
-        system_prompt=PPT_SPEC_SYSTEM_PROMPT,
-        user_payload=user_payload,
-        emit=None,
-        phase="ppt_outline_generation",
-        title="生成 PPT 目录",
-        reasoning_id="ppt-outline-generation",
-    )
-    outline = _validate_outline(raw.get("outline"), request.page_count)
-    if not outline:
-        raise PptPlanningInvalidResponse("invalid_ppt_outline")
-    missing_inputs = raw.get("missing_inputs")
-    if not isinstance(missing_inputs, list):
-        missing_inputs = _missing_inputs_for_spec(request)
-    return PptSpecResponse(
-        title=_clean_text(raw.get("title")) or request.topic or "PPT 目录",
-        goal=_clean_text(raw.get("goal")) or "形成可继续生成逐页指令的汇报目录。",
-        audience=_clean_text(raw.get("audience")) or request.audience,
-        deck_type=_clean_text(raw.get("deck_type")) or request.deck_type,
-        page_count=int(raw.get("page_count") or request.page_count),
-        outline=outline,
-        source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.research_enabled),
-        missing_inputs=[_clean_text(item) for item in missing_inputs if _clean_text(item)],
-    )
+    payload_ready = time.perf_counter()
+    metrics["context_bundle_ms"] = round((context_ready - total_started) * 1000, 2)
+    metrics["payload_prepare_ms"] = round((payload_ready - context_ready) * 1000, 2)
+    metrics["payload_bytes"] = len(json.dumps(user_payload, ensure_ascii=False).encode("utf-8"))
+    try:
+        raw = await _invoke_ppt_json_role(
+            system_prompt=PPT_SPEC_SYSTEM_PROMPT,
+            user_payload=user_payload,
+            emit=None,
+            phase="ppt_outline_generation",
+            title="生成 PPT 目录",
+            reasoning_id="ppt-outline-generation",
+        )
+        llm_ready = time.perf_counter()
+        outline = _validate_outline(raw.get("outline"), request.page_count)
+        if not outline:
+            raise PptPlanningInvalidResponse("invalid_ppt_outline")
+        missing_inputs = raw.get("missing_inputs")
+        if not isinstance(missing_inputs, list):
+            missing_inputs = _missing_inputs_for_spec(request)
+        response = PptSpecResponse(
+            title=_clean_text(raw.get("title")) or request.topic or "PPT 目录",
+            goal=_clean_text(raw.get("goal")) or "形成可继续生成逐页指令的汇报目录。",
+            audience=_clean_text(raw.get("audience")) or request.audience,
+            deck_type=_clean_text(raw.get("deck_type")) or request.deck_type,
+            page_count=int(raw.get("page_count") or request.page_count),
+            outline=outline,
+            source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.research_enabled),
+            missing_inputs=[_clean_text(item) for item in missing_inputs if _clean_text(item)],
+            context_manifest=context_bundle,
+        )
+        done = time.perf_counter()
+        metrics["llm_ms"] = round((llm_ready - payload_ready) * 1000, 2)
+        metrics["validate_ms"] = round((done - llm_ready) * 1000, 2)
+        metrics["total_ms"] = round((done - total_started) * 1000, 2)
+        metrics["outline_count"] = len(outline)
+        logger.info("PPT outline generation completed %s", metrics)
+        return response
+    except Exception:
+        failed = time.perf_counter()
+        metrics["total_ms"] = round((failed - total_started) * 1000, 2)
+        if "llm_ms" not in metrics:
+            metrics["llm_ms"] = round((failed - payload_ready) * 1000, 2)
+        logger.warning("PPT outline generation failed %s", metrics, exc_info=True)
+        raise
 
 
 async def regenerate_ppt_outline_section(request: PptOutlineSectionRequest) -> PptOutlineItem:
     _ensure_llm_enabled()
-    raw = await _invoke_json_role(
+    context_bundle = _build_ppt_context_bundle(request)
+    raw = await _invoke_ppt_json_role(
         system_prompt=PPT_OUTLINE_SECTION_SYSTEM_PROMPT,
         user_payload={
             "task": "ppt_outline_section_regeneration",
@@ -546,7 +757,10 @@ async def regenerate_ppt_outline_section(request: PptOutlineSectionRequest) -> P
             "source_ids": request.source_ids,
             "sources": _selected_sources_payload(request),
             "source_summary": _source_summary(request.source_ids, request.research_enabled),
-            "analysis_context": request.analysis_context,
+            "scope_brief": context_bundle["scope_brief"],
+            "metric_context": context_bundle["metric_context"],
+            "evidence_context": context_bundle["evidence_context"],
+            "source_manifest": context_bundle["source_manifest"],
             "spec": request.spec.model_dump(mode="json") if request.spec else None,
             "outline": [item.model_dump(mode="json") for item in request.outline],
             "target": request.target.model_dump(mode="json"),
@@ -565,6 +779,12 @@ async def regenerate_ppt_outline_section(request: PptOutlineSectionRequest) -> P
 async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
     _ensure_llm_enabled()
     page_count = request.spec.page_count if request.spec else request.page_count
+    metric_context = build_metric_context(
+        sources=request.sources,
+        source_ids=request.source_ids,
+        current={},
+    )
+    context_bundle = _build_ppt_context_bundle(request, metric_context=metric_context)
     user_payload = {
         "task": "ppt_directive_generation",
         "area_id": request.area_id,
@@ -576,10 +796,14 @@ async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
         "source_ids": request.source_ids,
         "sources": _selected_sources_payload(request),
         "source_summary": _source_summary(request.source_ids, request.research_enabled),
-        "analysis_context": request.analysis_context,
+        "scope_brief": context_bundle["scope_brief"],
+        "metric_context": context_bundle["metric_context"],
+        "evidence_context": context_bundle["evidence_context"],
+        "source_manifest": context_bundle["source_manifest"],
+        "omitted_payloads": context_bundle["omitted_payloads"],
         "spec": request.spec.model_dump(mode="json") if request.spec else None,
     }
-    raw = await _invoke_json_role(
+    raw = await _invoke_ppt_json_role(
         system_prompt=DECK_BRIEF_SYSTEM_PROMPT,
         user_payload=user_payload,
         emit=None,
@@ -587,7 +811,7 @@ async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
         title="生成 PPT 逐页指令",
         reasoning_id="ppt-directive-generation",
     )
-    slides = _validate_slides(raw.get("slides"), page_count)
+    slides = _validate_slides(raw.get("slides"), page_count, metric_context=metric_context)
     if not slides:
         raise PptPlanningInvalidResponse("invalid_deck_brief")
     missing_inputs = raw.get("missing_inputs")
@@ -598,12 +822,19 @@ async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
         slides=slides,
         source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.research_enabled),
         missing_inputs=[_clean_text(item) for item in missing_inputs if _clean_text(item)],
+        context_manifest=context_bundle,
     )
 
 
 async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSlideBrief:
     _ensure_llm_enabled()
-    raw = await _invoke_json_role(
+    metric_context = build_metric_context(
+        sources=request.sources,
+        source_ids=request.source_ids,
+        current={},
+    )
+    context_bundle = _build_ppt_context_bundle(request, metric_context=metric_context)
+    raw = await _invoke_ppt_json_role(
         system_prompt=DECK_BRIEF_SLIDE_SYSTEM_PROMPT,
         user_payload={
             "task": "ppt_directive_slide_regeneration",
@@ -616,7 +847,10 @@ async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSli
             "source_ids": request.source_ids,
             "sources": _selected_sources_payload(request),
             "source_summary": _source_summary(request.source_ids, request.research_enabled),
-            "analysis_context": request.analysis_context,
+            "scope_brief": context_bundle["scope_brief"],
+            "metric_context": context_bundle["metric_context"],
+            "evidence_context": context_bundle["evidence_context"],
+            "source_manifest": context_bundle["source_manifest"],
             "spec": request.spec.model_dump(mode="json") if request.spec else None,
             "outline": [item.model_dump(mode="json") for item in request.outline],
             "slides": [item.model_dump(mode="json") for item in request.slides],
@@ -628,7 +862,7 @@ async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSli
         title="重生成 PPT 指令页",
         reasoning_id=f"ppt-directive-slide-{request.target.index}",
     )
-    slide = _validate_slide_section(raw, request.target)
+    slide = _validate_slide_section(raw, request.target, metric_context=metric_context)
     if not slide:
         raise PptPlanningInvalidResponse("invalid_deck_brief_slide")
     return slide

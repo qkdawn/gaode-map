@@ -11,18 +11,6 @@ from sqlalchemy.orm import declarative_base
 
 AiBase = declarative_base()
 
-try:
-    from pgvector.sqlalchemy import Vector
-except Exception:  # pragma: no cover - exercised when optional dependency is absent locally.
-    Vector = None
-
-
-def _embedding_column_type():
-    if Vector is None:
-        return JSON
-    return Vector(1024)
-
-
 class Document(AiBase):
     """
     Uploaded document library metadata.
@@ -58,47 +46,31 @@ class DocumentBlock(AiBase):
     )
 
 
-class EvidenceChunk(AiBase):
+class DocumentIndexNode(AiBase):
     """
-    Retrieval-ready deterministic evidence chunk derived from parsed documents.
+    PageIndex-style semantic outline node built from parsed document blocks.
     """
-    __tablename__ = "evidence_chunks"
+    __tablename__ = "document_index_nodes"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     document_id = Column(String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
-    document_role = Column(String(64), nullable=False, default="evidence_document", index=True)
-    text = Column(Text, nullable=False)
-    summary = Column(Text, nullable=False, default="")
+    node_id = Column(String(128), nullable=False)
+    parent_node_id = Column(String(128), nullable=False, default="", index=True)
+    title = Column(String(255), nullable=False)
+    level = Column(Integer, nullable=False, default=1, index=True)
+    ordinal = Column(Integer, nullable=False, default=0, index=True)
+    start_block_index = Column(Integer, nullable=False, default=0)
+    end_block_index = Column(Integer, nullable=False, default=0)
     page_start = Column(Integer, nullable=False, default=1, index=True)
-    page_end = Column(Integer, nullable=False, default=1, index=True)
-    section_path = Column(JSON, nullable=False, default=list)
-    chunk_type = Column(String(32), nullable=False, default="paragraph", index=True)
-    semantic_type = Column(String(64), nullable=False, default="background_statement", index=True)
-    tags = Column(JSON, nullable=False, default=list)
-    citation = Column(String(512), nullable=False, default="")
+    page_end = Column(Integer, nullable=False, default=1)
+    summary = Column(Text, nullable=False, default="")
+    text = Column(Text, nullable=False, default="")
+    meta = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     __table_args__ = (
-        Index("ix_evidence_chunks_document_pages", "document_id", "page_start", "page_end"),
-    )
-
-
-class EvidenceEmbedding(AiBase):
-    """
-    pgvector embedding for evidence chunk semantic retrieval.
-    """
-    __tablename__ = "evidence_embeddings"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    evidence_id = Column(Integer, ForeignKey("evidence_chunks.id", ondelete="CASCADE"), nullable=False, index=True)
-    document_id = Column(String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
-    embedding = Column(_embedding_column_type(), nullable=False)
-    embedding_model = Column(String(128), nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-
-    __table_args__ = (
-        UniqueConstraint("evidence_id", name="uq_evidence_embeddings_evidence_id"),
-        Index("ix_evidence_embeddings_document_model", "document_id", "embedding_model"),
+        UniqueConstraint("document_id", "node_id", name="uq_document_index_nodes_document_node"),
+        Index("ix_document_index_nodes_document_order", "document_id", "ordinal", "id"),
     )
 
 

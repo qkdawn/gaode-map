@@ -8,7 +8,6 @@ import logging
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine, make_url
-from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from core.config import settings
@@ -60,17 +59,5 @@ def SessionLocal():
 
 def init_ai_db() -> None:
     engine = get_ai_engine()
-    _ensure_pgvector_extension(engine)
     AiBase.metadata.create_all(bind=engine)
     logger.info("AI 文档数据库初始化完成")
-
-
-def _ensure_pgvector_extension(engine: Engine) -> None:
-    try:
-        drivername = make_url(str(engine.url)).drivername
-    except Exception:
-        drivername = ""
-    if not drivername.startswith("postgresql"):
-        return
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))

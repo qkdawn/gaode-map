@@ -17,8 +17,6 @@ JobHandler = Callable[[str], Awaitable[object]]
 
 SUPPORTED_JOB_TYPES: set[str] = {
     "parse_document",
-    "build_evidence",
-    "build_embedding",
     "profile_dataset",
     "build_package",
     "generate_ppt",

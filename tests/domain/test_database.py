@@ -53,48 +53,16 @@ def test_ai_db_initializes_document_pipeline_schema(monkeypatch):
 
     monkeypatch.setattr(ai_database, "_engine", None)
     monkeypatch.setattr(ai_database.settings, "postgres_database_url", "sqlite:///:memory:")
-    monkeypatch.setattr(ai_database, "_ensure_pgvector_extension", lambda bind: called.append("vector"))
     monkeypatch.setattr(AiBase.metadata, "create_all", lambda bind: called.append(sorted(AiBase.metadata.tables)))
 
     ai_database.init_ai_db()
 
-    assert called == ["vector", [
+    assert called == [[
         "document_blocks",
+        "document_index_nodes",
         "documents",
-        "evidence_chunks",
-        "evidence_embeddings",
         "jobs",
     ]]
-
-
-def test_ai_db_enables_pgvector_for_postgres(monkeypatch):
-    executed = []
-
-    class FakeUrl:
-        drivername = "postgresql+psycopg"
-
-    class FakeConnection:
-        def execute(self, statement):
-            executed.append(str(statement))
-
-    class FakeBegin:
-        def __enter__(self):
-            return FakeConnection()
-
-        def __exit__(self, *_args):
-            return False
-
-    class FakeEngine:
-        url = "postgresql+psycopg://example/db"
-
-        def begin(self):
-            return FakeBegin()
-
-    monkeypatch.setattr(ai_database, "make_url", lambda _url: FakeUrl())
-
-    ai_database._ensure_pgvector_extension(FakeEngine())
-
-    assert executed == ["CREATE EXTENSION IF NOT EXISTS vector"]
 
 
 def test_ai_engine_accepts_sqlite_for_tests(monkeypatch):

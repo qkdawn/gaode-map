@@ -128,6 +128,41 @@ def _empty_raster_payload(scope_id: str, year: int, unit: str) -> dict[str, Any]
     }
 
 
+def _build_complete_layer_analysis(
+    summary: dict[str, Any],
+    aggregated_cells: list,
+    unit: str,
+    center_gcj02: list[float] | None = None,
+    base_analysis: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    _, _, hotspot_analysis = build_hotspot_layer_cells(aggregated_cells, unit)
+    _, _, gradient_analysis = build_gradient_layer_cells(aggregated_cells, unit)
+    hotspot_cell_ids = set()
+    raw_hotspot_ids = hotspot_analysis.pop("_hotspot_cell_ids", set()) if isinstance(hotspot_analysis, dict) else set()
+    if isinstance(raw_hotspot_ids, set):
+        hotspot_cell_ids = {str(item) for item in raw_hotspot_ids}
+    analysis = dict(base_analysis or {})
+
+    def _merge_payload(payload: dict[str, Any]) -> None:
+        for key, value in payload.items():
+            if key == "_hotspot_cell_ids":
+                continue
+            current = analysis.get(key)
+            if current in (None, "", [], {}, 0, 0.0):
+                if value not in (None, "", [], {}, 0, 0.0):
+                    analysis[key] = value
+
+    _merge_payload(gradient_analysis if isinstance(gradient_analysis, dict) else {})
+    _merge_payload(hotspot_analysis if isinstance(hotspot_analysis, dict) else {})
+    return enrich_economic_activity_analysis(
+        summary,
+        analysis,
+        aggregated_cells,
+        center_gcj02=center_gcj02,
+        hotspot_cell_ids=hotspot_cell_ids,
+    )
+
+
 def get_nightlight_overview(
     polygon: list,
     coord_type: str = "gcj02",
@@ -188,23 +223,19 @@ def get_nightlight_layer(
     target_cells = load_target_cells(polygon, coord_type)
     aggregated_cells = aggregate_clip_to_target_cells(clip, target_cells)
     if safe_view == HOTSPOT_VIEW:
-        cells, legend, analysis = build_hotspot_layer_cells(aggregated_cells, str(dataset.unit))
+        cells, legend, view_analysis = build_hotspot_layer_cells(aggregated_cells, str(dataset.unit))
     elif safe_view == GRADIENT_VIEW:
-        cells, legend, analysis = build_gradient_layer_cells(aggregated_cells, str(dataset.unit))
+        cells, legend, view_analysis = build_gradient_layer_cells(aggregated_cells, str(dataset.unit))
     else:
         cells, legend = build_layer_cells(aggregated_cells, str(dataset.unit))
-        analysis = {}
+        view_analysis = {}
     summary = summarize_masked_values(clip.array)
-    hotspot_cell_ids = set()
-    raw_hotspot_ids = analysis.pop("_hotspot_cell_ids", set()) if isinstance(analysis, dict) else set()
-    if isinstance(raw_hotspot_ids, set):
-        hotspot_cell_ids = {str(item) for item in raw_hotspot_ids}
-    analysis = enrich_economic_activity_analysis(
+    analysis = _build_complete_layer_analysis(
         summary,
-        analysis,
         aggregated_cells,
+        str(dataset.unit),
         center_gcj02=_polygon_center_gcj02(polygon),
-        hotspot_cell_ids=hotspot_cell_ids,
+        base_analysis=view_analysis,
     )
     return {
         "scope_id": resolved_scope_id,

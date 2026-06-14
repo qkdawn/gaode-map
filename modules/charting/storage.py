@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from core.config import settings
 
@@ -60,3 +61,19 @@ def save_png(png_bytes: bytes) -> tuple[str, str]:
 def get_chart_path(filename: str) -> str:
     safe_name = Path(filename).name
     return str(CHART_DIR_PATH / safe_name)
+
+
+def delete_chart_file(filename: str) -> Literal["deleted", "missing", "skipped"]:
+    safe_name = Path(str(filename or "")).name
+    if not safe_name or safe_name != str(filename or "") or safe_name in {".", ".."}:
+        return "skipped"
+    filepath = (CHART_DIR_PATH / safe_name).resolve()
+    chart_dir = CHART_DIR_PATH.resolve()
+    if filepath.parent != chart_dir or filepath.suffix.lower() not in {".svg", ".png"}:
+        return "skipped"
+    if not filepath.exists():
+        return "missing"
+    if not filepath.is_file():
+        return "skipped"
+    filepath.unlink()
+    return "deleted"

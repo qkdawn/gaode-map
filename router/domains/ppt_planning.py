@@ -83,7 +83,8 @@ def _raise_ppt_planning_error(exc: Exception) -> None:
     if isinstance(exc, PptPlanningLlmUnavailable):
         raise HTTPException(status_code=503, detail="ppt_planning_llm_unavailable") from exc
     if isinstance(exc, PptPlanningInvalidResponse):
-        raise HTTPException(status_code=502, detail="ppt_planning_invalid_ai_response") from exc
+        detail = str(exc) or "ppt_planning_invalid_ai_response"
+        raise HTTPException(status_code=502, detail=detail) from exc
     if isinstance(exc, SQLAlchemyError):
         _raise_ppt_database_error(exc)
     if isinstance(exc, (httpx.HTTPError, ValueError)):
@@ -156,6 +157,12 @@ async def post_ppt_source_group_classification(payload: PptSourceGroupClassifyRe
 async def create_ppt_spec(payload: PptSpecRequest) -> PptSpecResponse:
     try:
         return await generate_ppt_spec(payload)
+    except PptPlanningInvalidResponse as exc:
+        raise HTTPException(status_code=502, detail=str(exc) or "invalid_ppt_outline") from exc
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="ppt_outline_llm_timeout") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="ppt_outline_invalid_response") from exc
     except Exception as exc:
         _raise_ppt_planning_error(exc)
 

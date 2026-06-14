@@ -158,7 +158,7 @@ const ANALYSIS_TASKS = Object.freeze({
     producedArtifacts: ['current_nightlight', 'current_nightlight_summary', 'nightlight_overview'],
     runningFlag: 'isComputingNightlight',
     hasResult(ctx) {
-      return !!(ctx && ctx.nightlightOverview)
+      return !!(ctx && (ctx.nightlightOverview || ctx.nightlightLayer))
     },
     focus(ctx) {
       focusStep2Panel(ctx, 'nightlight')

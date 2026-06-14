@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { buildPptCarrierPreviewModel } from './carrier-preview.js'
-import { getPendingPptPackageSources } from './ui-state.js'
+import { normalizePptPackageDetail } from './carrier-preview.js'
+import { getBlockingPptInputSources } from './ui-state.js'
 
 const props = defineProps({
   sources: {
@@ -87,9 +87,11 @@ const emit = defineEmits([
   'move-source-to-group',
   'rename-source',
   'remove-source',
+  'generate-package-source',
   'rename-source-group',
   'set-source-group-emoji',
   'remove-source-group',
+  'upload-document-source',
   'update-spec-field',
   'create-data-package',
   'generate-outline',
@@ -107,7 +109,10 @@ const emit = defineEmits([
 const isSourcesCollapsed = ref(false)
 const sourceMenu = ref({ kind: '', id: '', placement: 'below', x: 0, y: 0 })
 const sourceDialog = ref({ mode: '', id: '', title: '', value: '', message: '' })
+const documentSourceInput = ref(null)
+const activeDocumentSourceId = ref('')
 const activePackageSourceId = ref('')
+const activeCurrentSourceId = ref('')
 const activePackageCarrierId = ref('')
 const activePackageCarrierPreviewMode = ref('local')
 const flowViewMode = ref('')
@@ -124,17 +129,23 @@ const sourceGroupsForTree = computed(() => props.sourceGroups.map((group) => ({
     .map((sourceId) => sourceById.value.get(String(sourceId || '')))
     .filter(Boolean),
 })).filter((group) => group.items.length))
+const groupedSourceIds = computed(() => new Set(sourceGroupsForTree.value.flatMap((group) => (
+  Array.isArray(group.sourceIds) ? group.sourceIds.map((sourceId) => String(sourceId || '')) : []
+))))
+const ungroupedSources = computed(() => props.sources.filter((source) => (
+  source && source.id && !groupedSourceIds.value.has(String(source.id || ''))
+)))
+const hasVisibleSources = computed(() => sourceGroupsForTree.value.length > 0 || ungroupedSources.value.length > 0)
 const isOutlineGenerating = computed(() => props.currentStep === 'outline_generating')
 const isDirectiveGenerating = computed(() => props.currentStep === 'directive_generating')
 const hasOutline = computed(() => props.outline.length > 0)
 const hasDirective = computed(() => props.currentStep === 'directive_draft')
-const pendingPackageSources = computed(() => getPendingPptPackageSources({ sources: props.sources }))
-const hasPendingPackageSources = computed(() => pendingPackageSources.value.length > 0)
+const blockingInputSources = computed(() => getBlockingPptInputSources({ sources: props.sources }))
 const outlineBlockReason = computed(() => {
   if (!(props.sourceSummary.selected || 0)) return '请先选择至少一个已生成来源'
-  if (hasPendingPackageSources.value) {
-    const generating = pendingPackageSources.value.some((source) => String(source.status || '') === 'generating')
-    return generating ? '资料包仍在整理中，完成后再生成目录' : '资料包尚未生成完成，完成后再生成目录'
+  if (blockingInputSources.value.length) {
+    const generating = blockingInputSources.value.some((source) => String(source.status || '') === 'generating')
+    return generating ? '来源仍在构建中，完成后再生成目录' : '仍有来源未构建完成，完成后再生成目录'
   }
   return ''
 })
@@ -154,67 +165,54 @@ const generationErrorTitle = computed(() => {
   return labels[String(props.generationErrorSource || '')] || 'PPT 工作台请求失败，请稍后重试。'
 })
 const activePackageSource = computed(() => sourceById.value.get(String(activePackageSourceId.value || '')) || null)
-const activePackagePayload = computed(() => {
-  const payload = ((activePackageSource.value || {}).meta || {}).package
+const activeDocumentSource = computed(() => sourceById.value.get(String(activeDocumentSourceId.value || '')) || null)
+const activeCurrentSource = computed(() => sourceById.value.get(String(activeCurrentSourceId.value || '')) || null)
+const activeCurrentAiPayload = computed(() => {
+  const meta = activeCurrentSource.value && activeCurrentSource.value.meta && typeof activeCurrentSource.value.meta === 'object'
+    ? activeCurrentSource.value.meta
+    : {}
+  const payload = meta.aiPayload || meta.ai_payload
   return payload && typeof payload === 'object' ? payload : {}
 })
-const activePackageItems = computed(() => {
-  const items = activePackagePayload.value.items
-  return Array.isArray(items) ? items.slice(0, 100) : []
+const activeCurrentMetrics = computed(() => {
+  const metrics = activeCurrentAiPayload.value.metrics
+  return Array.isArray(metrics) ? metrics.slice(0, 80) : []
 })
-const activePackageCarriers = computed(() => {
-  const carriers = activePackagePayload.value.carriers
-  return Array.isArray(carriers) ? carriers.slice(0, 30) : []
+const activeCurrentReadyMetrics = computed(() => activeCurrentMetrics.value.filter((metric) => String(metric.status || '') === 'ready'))
+const activeCurrentGapMetrics = computed(() => {
+  const gaps = activeCurrentAiPayload.value.metric_gaps || activeCurrentAiPayload.value.metricGaps
+  return Array.isArray(gaps) ? gaps.slice(0, 80) : []
 })
-const activePackageRoadContext = computed(() => {
-  const context = activePackagePayload.value.road_context || activePackagePayload.value.roadContext
-  return context && typeof context === 'object' ? context : {}
+const activeCurrentEvidenceItems = computed(() => {
+  const evidence = activeCurrentAiPayload.value.evidence
+  return Array.isArray(evidence) ? evidence.slice(0, 80) : []
 })
-const activePackageCarrierPreview = computed(() => buildPptCarrierPreviewModel(activePackageCarriers.value, {
-  roadContext: activePackageRoadContext.value,
-  focusId: activePackageCarrierId.value || String((activePackageCarriers.value[0] || {}).carrier_id || ''),
+const activeCurrentChartSpecs = computed(() => {
+  const charts = activeCurrentAiPayload.value.chart_specs || activeCurrentAiPayload.value.chartSpecs
+  return Array.isArray(charts) ? charts.slice(0, 40) : []
+})
+const activeCurrentScopePayload = computed(() => (
+  activeCurrentAiPayload.value.scope && typeof activeCurrentAiPayload.value.scope === 'object'
+    ? activeCurrentAiPayload.value.scope
+    : null
+))
+const activeCurrentTransport = computed(() => sourceTransport(activeCurrentSource.value))
+const activeDocumentIndexItems = computed(() => {
+  const meta = activeDocumentSource.value && activeDocumentSource.value.meta && typeof activeDocumentSource.value.meta === 'object'
+    ? activeDocumentSource.value.meta
+    : {}
+  const items = meta.document_index_preview || meta.documentIndexPreview
+  return Array.isArray(items) ? items.slice(0, 40) : []
+})
+const activePackageDetail = computed(() => normalizePptPackageDetail(activePackageSource.value, {
+  focusId: activePackageCarrierId.value,
   extentMode: activePackageCarrierPreviewMode.value,
 }))
-const activePackagePreviewCarriers = computed(() => activePackageCarrierPreview.value.items || [])
-const activePackagePreviewRoads = computed(() => activePackageCarrierPreview.value.roadItems || [])
 const activePackageSelectedCarrier = computed(() => {
   const activeId = String(activePackageCarrierId.value || '')
-  return activePackageCarriers.value.find((carrier) => String(carrier.carrier_id || '') === activeId) || activePackageCarriers.value[0] || null
-})
-const activePackageCarrierSummary = computed(() => {
-  const summary = activePackagePayload.value.carrier_summary || activePackagePayload.value.carrierSummary
-  return summary && typeof summary === 'object' ? summary : {}
-})
-const activePackageEvidenceRefs = computed(() => {
-  const refs = activePackagePayload.value.evidence_refs || activePackagePayload.value.evidenceRefs
-  return Array.isArray(refs) ? refs.slice(0, 80) : []
-})
-const activePackageWarnings = computed(() => {
-  const warnings = activePackagePayload.value.warnings
-  return Array.isArray(warnings) ? warnings.filter(Boolean) : []
-})
-const activePackageAlignment = computed(() => {
-  const alignment = activePackagePayload.value.alignment
-  return alignment && typeof alignment === 'object' ? alignment : {}
-})
-const activePackageStats = computed(() => {
-  const payload = activePackagePayload.value
-  const alignment = activePackageAlignment.value
-  const carrierSummary = activePackageCarrierSummary.value
-  const carrierRows = activePackageCarriers.value.length ? [
-    ['空间载体', carrierSummary.carrier_count ?? activePackageCarriers.value.length],
-    ['路段', carrierSummary.segment_count],
-    ['廊道', carrierSummary.corridor_count],
-    ['街区 / loop', carrierSummary.block_loop_count],
-  ] : []
-  return [
-    ...carrierRows,
-    ['总候选', payload.total],
-    ['入包点位', activePackageItems.value.length],
-    ['已对齐', alignment.matched_item_count],
-    ['共享格子', alignment.grid_cell_count],
-    ['夜光格子', alignment.nightlight_cell_count],
-  ].filter((row) => row[1] !== undefined && row[1] !== null && row[1] !== '')
+  return activePackageDetail.value.carriers.find((carrier) => String(carrier.carrier_id || '') === activeId)
+    || activePackageDetail.value.carriers[0]
+    || null
 })
 const activeFlowIndex = computed(() => {
   if (props.currentStep === 'outline_generating') return 1
@@ -242,6 +240,10 @@ const outlineRows = computed(() => {
         ['素材要求', Array.isArray(item.requiredSources) ? item.requiredSources.join(' / ') : item.requiredSources],
         ['讲稿提示', item.speakerNotes],
       ].filter((field) => String(field[1] || '').trim()),
+      metricClaims: Array.isArray(item.metricClaims) ? item.metricClaims : [],
+      metricGaps: Array.isArray(item.metricGaps) ? item.metricGaps : [],
+      chartSpecs: Array.isArray(item.chartSpecs) ? item.chartSpecs : [],
+      chartArtifacts: Array.isArray(item.chartArtifacts) ? item.chartArtifacts : [],
       mode: 'directive',
     }))
   }
@@ -297,6 +299,45 @@ function isRowGenerating(row = {}) {
 
 function isDirectiveRowStale(row = {}) {
   return row.mode === 'directive' && staleDirectivePageIdSet.value.has(String(Number(row.pageNo || 0) || 0))
+}
+
+function formatMetricClaimValue(claim = {}) {
+  const value = claim.value
+  const unit = claim.unit || ''
+  if (value === undefined || value === null || value === '') return claim.text || ''
+  const number = Number(value)
+  const formatted = Number.isFinite(number)
+    ? (Math.abs(number) >= 100 ? number.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : number.toLocaleString('zh-CN', { maximumFractionDigits: 3 }))
+    : String(value)
+  return `${formatted}${unit || ''}`
+}
+
+function chartArtifactFor(row = {}, chart = {}) {
+  const chartId = String(chart.chart_id || chart.chartId || '')
+  return (row.chartArtifacts || []).find((item) => String(item.chart_id || item.chartId || '') === chartId) || {}
+}
+
+function chartPreviewUrl(row = {}, chart = {}) {
+  const artifact = chartArtifactFor(row, chart)
+  return artifact.url || ''
+}
+
+function chartRowsPreview(chart = {}) {
+  return Array.isArray(chart.rows) ? chart.rows.slice(0, 4) : []
+}
+
+function chartColumnsPreview(chart = {}) {
+  return Array.isArray(chart.columns) ? chart.columns.slice(0, 4) : []
+}
+
+function chartColumnKey(column = {}) {
+  if (column && typeof column === 'object') return column.key || column.field || column.label || ''
+  return String(column || '')
+}
+
+function chartColumnLabel(column = {}) {
+  if (column && typeof column === 'object') return column.label || column.key || column.field || ''
+  return String(column || '')
 }
 
 function openRevisionForRow(row = {}) {
@@ -380,6 +421,7 @@ function setSourceMenuScrollLock(isLocked = false) {
 
 function handleSourceMenuKeydown(event) {
   if (event.key === 'Escape' && activePackageSource.value) closePackageDetail()
+  else if (event.key === 'Escape' && activeCurrentSource.value) closeCurrentSourceDetail()
   else if (event.key === 'Escape' && sourceMenu.value.kind) closeSourceMenu()
 }
 
@@ -398,12 +440,105 @@ onBeforeUnmount(() => {
 })
 
 function groupTitle(groupId = '') {
-  return (props.sourceGroups.find((group) => String(group.id || '') === String(groupId || '')) || {}).title || '未分类来源'
+  return (props.sourceGroups.find((group) => String(group.id || '') === String(groupId || '')) || {}).title || '来源'
 }
 
 function isPackageSource(source = {}) {
   const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
   return meta.sourceKind === 'package' || String(source.id || '').startsWith('package:')
+}
+
+function isPackagePlaceholderSource(source = {}) {
+  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
+  return meta.sourceKind === 'package-placeholder' || String(source.id || '').startsWith('package-placeholder:')
+}
+
+function isDocumentSource(source = {}) {
+  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
+  return meta.sourceKind === 'document' || String(source.id || '').startsWith('document:')
+}
+
+function isCurrentSource(source = {}) {
+  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
+  return meta.sourceKind === 'system' && String(source.id || '').startsWith('current:')
+}
+
+function sourceTransport(source = {}) {
+  const meta = source && source.meta && typeof source.meta === 'object' ? source.meta : {}
+  const aiPayload = meta.aiPayload && typeof meta.aiPayload === 'object'
+    ? meta.aiPayload
+    : meta.ai_payload && typeof meta.ai_payload === 'object'
+      ? meta.ai_payload
+      : null
+  if (aiPayload && aiPayload.version === 'ppt_ai_input_block_v1') {
+    return {
+      source_id: aiPayload.source_id || source.id,
+      sourceId: aiPayload.sourceId || source.id,
+      title: aiPayload.title || source.title,
+      source_kind: aiPayload.source_kind || aiPayload.sourceKind || meta.sourceKind,
+      sourceKind: aiPayload.source_kind || aiPayload.sourceKind || meta.sourceKind,
+      transport_status: (Array.isArray(aiPayload.included) && aiPayload.included.length) ? 'ready_to_send' : 'selected_no_payload',
+      transportStatus: (Array.isArray(aiPayload.included) && aiPayload.included.length) ? 'ready_to_send' : 'selected_no_payload',
+      included: Array.isArray(aiPayload.included) ? aiPayload.included : [],
+      metric_count: Number((aiPayload.counts || {}).metrics || 0) || 0,
+      metricCount: Number((aiPayload.counts || {}).metrics || 0) || 0,
+      metric_gap_count: Number((aiPayload.counts || {}).metric_gaps || 0) || 0,
+      metricGapCount: Number((aiPayload.counts || {}).metric_gaps || 0) || 0,
+      evidence_count: Number((aiPayload.counts || {}).evidence || 0) || 0,
+      evidenceCount: Number((aiPayload.counts || {}).evidence || 0) || 0,
+      scope_count: Number((aiPayload.counts || {}).scope || 0) || 0,
+      scopeCount: Number((aiPayload.counts || {}).scope || 0) || 0,
+      chart_spec_count: Number((aiPayload.counts || {}).chart_specs || 0) || 0,
+      chartSpecCount: Number((aiPayload.counts || {}).chart_specs || 0) || 0,
+      excluded: Array.isArray(aiPayload.excluded) ? aiPayload.excluded : [],
+      policy: aiPayload.policy || '',
+      preview: true,
+    }
+  }
+  return meta.transport && typeof meta.transport === 'object' ? meta.transport : null
+}
+
+function sourceTransportLabel(source = {}) {
+  const transport = sourceTransport(source)
+  if (!transport) return ''
+  const metricCount = Number(transport.metric_count ?? transport.metricCount ?? 0) || 0
+  const evidenceCount = Number(transport.evidence_count ?? transport.evidenceCount ?? 0) || 0
+  const scopeCount = Number(transport.scope_count ?? transport.scopeCount ?? 0) || 0
+  const chartSpecCount = Number(transport.chart_spec_count ?? transport.chartSpecCount ?? 0) || 0
+  const included = Array.isArray(transport.included) ? transport.included : []
+  const status = String(transport.transport_status || transport.transportStatus || '')
+  if (status === 'ready_to_send') {
+    const parts = []
+    if (scopeCount || included.includes('scope')) parts.push(`范围 ${scopeCount || 1}`)
+    if (metricCount) parts.push(`metrics ${metricCount}`)
+    if (evidenceCount) parts.push(`evidence ${evidenceCount}`)
+    if (chartSpecCount) parts.push(`charts ${chartSpecCount}`)
+    return parts.length ? `已构建 ${parts.join(' / ')}` : '已构建可传内容'
+  }
+  if (status === 'included' || metricCount || evidenceCount || scopeCount || included.length) {
+    const parts = []
+    if (scopeCount || included.includes('scope')) parts.push(`范围 ${scopeCount || 1}`)
+    if (metricCount) parts.push(`metrics ${metricCount}`)
+    if (evidenceCount) parts.push(`evidence ${evidenceCount}`)
+    if (chartSpecCount) parts.push(`charts ${chartSpecCount}`)
+    return parts.length ? `已传 ${parts.join(' / ')}` : '已传可用内容'
+  }
+  return '未传：无可用指标/证据'
+}
+
+function sourceTransportExcludedItems(source = {}) {
+  const transport = sourceTransport(source)
+  return transport && Array.isArray(transport.excluded) ? transport.excluded : []
+}
+
+function removeSourceMessage(source = {}) {
+  if (isDocumentSource(source)) {
+    return '确认彻底删除该文档来源？文档库里的原文件、解析结果和 PageIndex 索引都会删除。'
+  }
+  if (isPackageSource(source)) {
+    return '确认从当前 PPT 来源列表删除该资料包？这只影响当前 PPT 工作台。'
+  }
+  return '确认从当前 PPT 来源列表删除该来源？刷新来源后可重新加入。'
 }
 
 function isGeneratingSource(source = {}) {
@@ -416,6 +551,26 @@ function openPackageDetail(source = {}) {
   closeSourceMenu()
 }
 
+function openDocumentEvidence(source = {}) {
+  if (!source.id || !isDocumentSource(source)) return
+  activeDocumentSourceId.value = source.id
+  closeSourceMenu()
+}
+
+function openCurrentSourceDetail(source = {}) {
+  if (!source.id || !isCurrentSource(source)) return
+  activeCurrentSourceId.value = source.id
+  closeSourceMenu()
+}
+
+function closeCurrentSourceDetail() {
+  activeCurrentSourceId.value = ''
+}
+
+function closeDocumentEvidence() {
+  activeDocumentSourceId.value = ''
+}
+
 function closePackageDetail() {
   activePackageSourceId.value = ''
   activePackageCarrierId.value = ''
@@ -423,8 +578,22 @@ function closePackageDetail() {
 }
 
 function handleSourceRowClick(source = {}) {
+  if (isPackagePlaceholderSource(source)) {
+    emit('generate-package-source', source.id)
+    return
+  }
   if (isPackageSource(source)) {
     openPackageDetail(source)
+    return
+  }
+  if (isCurrentSource(source)) {
+    openCurrentSourceDetail(source)
+    return
+  }
+  if (isDocumentSource(source) && (
+    (Array.isArray((source.meta || {}).document_index_preview) && (source.meta || {}).document_index_preview.length)
+  )) {
+    openDocumentEvidence(source)
     return
   }
   if (source.status === 'ready') emit('toggle-source', source.id)
@@ -434,6 +603,32 @@ function formatPackageMetric(value) {
   if (value === undefined || value === null || value === '') return '-'
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/\.?0+$/, '')
   return String(value)
+}
+
+function formatCurrentMetricValue(metric = {}) {
+  if (metric.value === undefined || metric.value === null || metric.value === '') return '-'
+  return `${formatPackageMetric(metric.value)}${metric.unit || ''}`
+}
+
+function currentMetricSourceIds(metric = {}) {
+  const sourceIds = metric.source_ids || metric.sourceIds
+  return Array.isArray(sourceIds) ? sourceIds.filter(Boolean).join(' / ') : (metric.source_id || metric.sourceId || '')
+}
+
+function currentGapTitle(gap = {}, index = 0) {
+  return gap.label || gap.needed_metric || gap.neededMetric || gap.metric_id || gap.metricId || `缺口指标 ${index + 1}`
+}
+
+function currentGapDescription(gap = {}) {
+  return gap.description || gap.text || gap.reason || '当前没有可用计算结果。'
+}
+
+function currentGapMeta(gap = {}) {
+  return [
+    gap.source_path || gap.sourcePath,
+    gap.source_id || gap.sourceId,
+    gap.metric_id || gap.metricId,
+  ].filter(Boolean).join(' / ')
 }
 
 function packageItemTitle(item = {}, index = 0) {
@@ -504,7 +699,7 @@ function carrierPreviewClass(item = {}) {
 }
 
 watch(
-  activePackageCarriers,
+  () => activePackageDetail.value.carriers,
   (carriers) => {
     const firstCarrierId = String(((carriers || [])[0] || {}).carrier_id || '')
     const currentExists = (carriers || []).some((carrier) => String(carrier.carrier_id || '') === String(activePackageCarrierId.value || ''))
@@ -517,6 +712,7 @@ watch(
   () => props.sources,
   () => {
     if (activePackageSourceId.value && !sourceById.value.has(String(activePackageSourceId.value))) closePackageDetail()
+    if (activeCurrentSourceId.value && !sourceById.value.has(String(activeCurrentSourceId.value))) closeCurrentSourceDetail()
   },
   { deep: true },
 )
@@ -530,9 +726,9 @@ function openRemoveSource(source = {}) {
   sourceDialog.value = {
     mode: 'remove-source',
     id: source.id,
-    title: '移除来源',
+    title: '删除来源',
     value: '',
-    message: `确认从本次 PPT 来源池移除“${source.title || '未命名来源'}”？底层分析数据不会被删除。`,
+    message: removeSourceMessage(source),
   }
   closeSourceMenu()
 }
@@ -553,7 +749,7 @@ function openRemoveGroup(group = {}) {
     id: group.id,
     title: '移除分类',
     value: '',
-    message: `确认移除“${group.title || '未分类来源'}”分类？组内来源会保留并移动到未分类来源。`,
+    message: `确认移除“${group.title || '未命名分类'}”分类？组内来源会保留并显示为顶层独立来源。`,
   }
   closeSourceMenu()
 }
@@ -563,8 +759,24 @@ function moveSourceToGroup(sourceId = '', groupId = '') {
   closeSourceMenu()
 }
 
+function moveSourceOutOfGroup(sourceId = '') {
+  emit('move-source-to-group', sourceId, '')
+  closeSourceMenu()
+}
+
 function closeSourceDialog() {
   sourceDialog.value = { mode: '', id: '', title: '', value: '', message: '' }
+}
+
+function openDocumentSourcePicker() {
+  documentSourceInput.value?.click()
+}
+
+function handleDocumentSourceSelected(event) {
+  const file = event?.target?.files?.[0]
+  if (event?.target) event.target.value = ''
+  if (!file) return
+  emit('upload-document-source', file)
 }
 
 function confirmSourceDialog() {
@@ -606,7 +818,13 @@ function confirmSourceDialog() {
           </button>
         </div>
         <template v-if="!isSourcesCollapsed">
-          <button type="button" class="agent-ppt-add-source-btn" disabled>+ 添加来源</button>
+          <input
+            ref="documentSourceInput"
+            class="agent-ppt-source-file-input"
+            type="file"
+            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            @change="handleDocumentSourceSelected">
+          <button type="button" class="agent-ppt-add-source-btn" @click="openDocumentSourcePicker">+ 添加来源</button>
           <div class="agent-ppt-source-search">
             <div class="agent-ppt-source-search-main">
               <span>搜索联网来源</span>
@@ -705,14 +923,15 @@ function confirmSourceDialog() {
                   <button
                     type="button"
                     class="agent-ppt-source-row-main"
-                    :class="{ 'is-inspectable': isPackageSource(source) }"
-                    :aria-pressed="source.status === 'ready' && !isPackageSource(source) ? String(!!source.selected) : undefined"
-                    :disabled="source.status !== 'ready' && !isPackageSource(source)"
+                    :class="{ 'is-inspectable': isPackageSource(source) || isCurrentSource(source) || isDocumentSource(source) }"
+                    :aria-pressed="source.status === 'ready' && !isPackageSource(source) && !isCurrentSource(source) && !isDocumentSource(source) ? String(!!source.selected) : undefined"
+                    :disabled="source.status !== 'ready' && !isPackageSource(source) && !isCurrentSource(source) && !isDocumentSource(source)"
                     @click="handleSourceRowClick(source)">
                     <span class="agent-ppt-source-icon" :class="`is-${source.type || 'file'}`"></span>
                     <span class="agent-ppt-source-name">
                       <strong>{{ source.title }}</strong>
                       <small>{{ (source.meta && source.meta.label) || (source.status === 'ready' ? '已生成' : '待生成') }}</small>
+                      <em v-if="sourceTransportLabel(source)">{{ sourceTransportLabel(source) }}</em>
                     </span>
                   </button>
                   <button
@@ -738,7 +957,16 @@ function confirmSourceDialog() {
                     class="agent-ppt-source-menu"
                     :class="{ 'is-above': sourceMenu.placement === 'above' }"
                     :style="{ left: `${sourceMenu.x}px`, top: `${sourceMenu.y}px` }">
-                    <button v-if="isPackageSource(source)" type="button" @click="openPackageDetail(source)">查看内容</button>
+                    <button v-if="isPackagePlaceholderSource(source)" type="button" @click="$emit('generate-package-source', source.id)">生成资料包</button>
+                    <button v-else-if="isPackageSource(source)" type="button" @click="openPackageDetail(source)">查看内容</button>
+                    <button v-if="isCurrentSource(source)" type="button" @click="openCurrentSourceDetail(source)">查看分析</button>
+                    <button
+                      v-if="isDocumentSource(source)"
+                      type="button"
+                      :disabled="!(((source.meta && source.meta.document_index_preview) || []).length)"
+                      @click="openDocumentEvidence(source)">
+                      查看结构
+                    </button>
                     <div class="agent-ppt-source-move-menu">
                       <button type="button" class="agent-ppt-source-move-trigger" aria-haspopup="true">
                         <span aria-hidden="true"></span>
@@ -755,13 +983,88 @@ function confirmSourceDialog() {
                         </button>
                       </div>
                     </div>
-                    <button type="button" @click="openRemoveSource(source)">移除来源</button>
+                    <button
+                      type="button"
+                      @click="moveSourceOutOfGroup(source.id)">
+                      移出分组
+                    </button>
                     <button type="button" @click="openRenameSource(source)">重命名来源</button>
                   </div>
                 </div>
               </div>
             </div>
-            <div v-if="!sourceGroupsForTree.length" class="agent-ppt-source-empty">暂无可用来源。</div>
+            <div
+              v-for="source in ungroupedSources"
+              :key="`ppt-source-ungrouped-${source.id}`"
+              class="agent-ppt-source-row"
+              :class="[{ 'is-ready': source.status === 'ready', 'is-generating': isGeneratingSource(source), 'is-pending': source.status !== 'ready', 'is-selected': source.selected }, `is-${source.type || 'file'}`]">
+              <button
+                type="button"
+                class="agent-ppt-source-row-main"
+                :class="{ 'is-inspectable': isPackageSource(source) || isCurrentSource(source) || isDocumentSource(source) }"
+                :aria-pressed="source.status === 'ready' && !isPackageSource(source) && !isCurrentSource(source) && !isDocumentSource(source) ? String(!!source.selected) : undefined"
+                :disabled="source.status !== 'ready' && !isPackageSource(source) && !isCurrentSource(source) && !isDocumentSource(source)"
+                @click="handleSourceRowClick(source)">
+                <span class="agent-ppt-source-icon" :class="`is-${source.type || 'file'}`"></span>
+                <span class="agent-ppt-source-name">
+                  <strong>{{ source.title }}</strong>
+                  <small>{{ (source.meta && source.meta.label) || (source.status === 'ready' ? '已生成' : '待生成') }}</small>
+                  <em v-if="sourceTransportLabel(source)">{{ sourceTransportLabel(source) }}</em>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="agent-ppt-source-menu-btn"
+                aria-label="更多选项"
+                title="更多选项"
+                @click.stop="toggleSourceMenu('source', source.id, $event)">
+                ⋮
+              </button>
+              <button
+                v-if="source.status === 'ready'"
+                type="button"
+                class="agent-ppt-source-checkbox"
+                :class="{ 'is-checked': source.selected }"
+                aria-label="切换来源选择"
+                @click.stop="$emit('toggle-source', source.id)">
+                {{ source.selected ? '✓' : '' }}
+              </button>
+              <span v-else class="agent-ppt-source-loading" :class="{ 'is-generating': isGeneratingSource(source) }" aria-label="未就绪"></span>
+              <div
+                v-if="sourceMenu.kind === 'source' && sourceMenu.id === source.id"
+                class="agent-ppt-source-menu"
+                :class="{ 'is-above': sourceMenu.placement === 'above' }"
+                :style="{ left: `${sourceMenu.x}px`, top: `${sourceMenu.y}px` }">
+                <button v-if="isPackagePlaceholderSource(source)" type="button" @click="$emit('generate-package-source', source.id)">生成资料包</button>
+                <button v-else-if="isPackageSource(source)" type="button" @click="openPackageDetail(source)">查看内容</button>
+                <button v-if="isCurrentSource(source)" type="button" @click="openCurrentSourceDetail(source)">查看分析</button>
+                <button
+                  v-if="isDocumentSource(source)"
+                  type="button"
+                  :disabled="!(((source.meta && source.meta.document_index_preview) || []).length)"
+                  @click="openDocumentEvidence(source)">
+                  查看结构
+                </button>
+                <div class="agent-ppt-source-move-menu">
+                  <button type="button" class="agent-ppt-source-move-trigger" aria-haspopup="true">
+                    <span aria-hidden="true"></span>
+                    移至
+                  </button>
+                  <div class="agent-ppt-source-move-panel">
+                    <button
+                      v-for="targetGroup in sourceGroupsForTree"
+                      :key="`move-ungrouped-${source.id}-${targetGroup.id}`"
+                      type="button"
+                      @click="moveSourceToGroup(source.id, targetGroup.id)">
+                      {{ groupTitle(targetGroup.id) }}
+                    </button>
+                  </div>
+                </div>
+                <button type="button" @click="openRemoveSource(source)">删除来源</button>
+                <button type="button" @click="openRenameSource(source)">重命名来源</button>
+              </div>
+            </div>
+            <div v-if="!hasVisibleSources" class="agent-ppt-source-empty">暂无可用来源。</div>
           </div>
         </template>
         <button
@@ -884,6 +1187,66 @@ function confirmSourceDialog() {
                     <dd>{{ field[1] }}</dd>
                   </div>
                 </dl>
+                <div v-if="row.metricClaims.length" class="agent-ppt-metric-claims">
+                  <span>数值证据</span>
+                  <article
+                    v-for="claim in row.metricClaims"
+                    :key="`metric-claim-${row.id}-${claim.claim_id || claim.claimId || claim.metric_id || claim.metricId}`">
+                    <strong>{{ formatMetricClaimValue(claim) }}</strong>
+                    <p>{{ claim.text || claim.usage || '已绑定数值证据' }}</p>
+                    <small>
+                      {{ claim.source_id || claim.sourceId || '来源' }}
+                      <template v-if="claim.status || claim.scope || claim.spatial_scope || claim.spatialScope"> · {{ claim.status || 'ready' }} · {{ claim.scope || claim.spatial_scope || claim.spatialScope }}</template>
+                      <template v-if="claim.source_path || claim.sourcePath"> · {{ claim.source_path || claim.sourcePath }}</template>
+                    </small>
+                    <small>{{ claim.calculation_method || claim.calculationMethod || claim.method || '已有分析指标' }}</small>
+                  </article>
+                </div>
+                <div v-if="row.metricGaps.length" class="agent-ppt-metric-gaps">
+                  <span>数值缺口</span>
+                  <p
+                    v-for="gap in row.metricGaps"
+                    :key="`metric-gap-${row.id}-${gap.gap_id || gap.gapId || gap.text}`">
+                    {{ gap.text || gap.reason || gap.needed_metric || gap.neededMetric }}
+                  </p>
+                </div>
+                <div v-if="row.chartSpecs.length" class="agent-ppt-chart-specs">
+                  <span>图表规格</span>
+                  <article
+                    v-for="chart in row.chartSpecs"
+                    :key="`chart-spec-${row.id}-${chart.chart_id || chart.chartId || chart.title}`">
+                    <header>
+                      <strong>{{ chart.title || '图表' }}</strong>
+                      <small>{{ chart.chart_type || chart.chartType || 'chart' }} · {{ (chart.rows || []).length }} 行</small>
+                    </header>
+                    <img
+                      v-if="chartPreviewUrl(row, chart)"
+                      :src="chartPreviewUrl(row, chart)"
+                      :alt="chart.title || '图表预览'">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th
+                            v-for="column in chartColumnsPreview(chart)"
+                            :key="`chart-column-${row.id}-${chart.chart_id || chart.chartId}-${chartColumnKey(column)}`">
+                            {{ chartColumnLabel(column) }}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="(chartRow, chartRowIndex) in chartRowsPreview(chart)"
+                          :key="`chart-row-${row.id}-${chart.chart_id || chart.chartId}-${chartRowIndex}`">
+                          <td
+                            v-for="column in chartColumnsPreview(chart)"
+                            :key="`chart-cell-${row.id}-${chart.chart_id || chart.chartId}-${chartRowIndex}-${chartColumnKey(column)}`">
+                            {{ chartRow[chartColumnKey(column)] }}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </article>
+                </div>
               </div>
               <div class="agent-ppt-row-actions">
                 <button
@@ -1061,61 +1424,260 @@ function confirmSourceDialog() {
       </section>
     </div>
 
+    <div v-if="activeCurrentSource" class="agent-ppt-package-detail-backdrop" @click.self="closeCurrentSourceDetail">
+      <section
+        class="agent-ppt-package-detail agent-ppt-current-source-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-label="当前分析来源">
+        <header class="agent-ppt-package-detail-head">
+          <div>
+            <span>当前分析来源</span>
+            <strong>{{ activeCurrentSource.title }}</strong>
+            <small>{{ (activeCurrentSource.meta && activeCurrentSource.meta.label) || (activeCurrentSource.status === 'ready' ? '已生成' : '待生成') }}</small>
+            <em v-if="sourceTransportLabel(activeCurrentSource)">{{ sourceTransportLabel(activeCurrentSource) }}</em>
+          </div>
+          <button type="button" aria-label="关闭" title="关闭" @click="closeCurrentSourceDetail">×</button>
+        </header>
+
+        <div class="agent-ppt-package-stats">
+          <div>
+            <span>Ready 指标</span>
+            <strong>{{ activeCurrentReadyMetrics.length }}</strong>
+          </div>
+          <div>
+            <span>缺口</span>
+            <strong>{{ activeCurrentGapMetrics.length }}</strong>
+          </div>
+          <div>
+            <span>状态</span>
+            <strong>{{ activeCurrentSource.status === 'ready' ? '已生成' : '待生成' }}</strong>
+          </div>
+          <div>
+            <span>本次传入</span>
+            <strong>{{ sourceTransportLabel(activeCurrentSource) || '尚未生成' }}</strong>
+          </div>
+        </div>
+
+        <div v-if="activeCurrentTransport" class="agent-ppt-current-transport">
+          <div class="agent-ppt-package-section-head">
+            <strong>传给 AI 的内容</strong>
+            <span>{{ activeCurrentTransport.policy || '数字只来自 current.metrics；原始大数据不直传。' }}</span>
+          </div>
+          <div class="agent-ppt-current-transport-grid">
+            <article>
+              <span>已包含</span>
+              <strong>{{ (activeCurrentTransport.included || []).join(' / ') || '无' }}</strong>
+            </article>
+            <article>
+              <span>范围</span>
+              <strong>{{ Number(activeCurrentTransport.scope_count ?? activeCurrentTransport.scopeCount ?? 0) || 0 }}</strong>
+            </article>
+            <article>
+              <span>指标</span>
+              <strong>{{ Number(activeCurrentTransport.metric_count ?? activeCurrentTransport.metricCount ?? 0) || 0 }}</strong>
+            </article>
+            <article>
+              <span>证据</span>
+              <strong>{{ Number(activeCurrentTransport.evidence_count ?? activeCurrentTransport.evidenceCount ?? 0) || 0 }}</strong>
+            </article>
+            <article>
+              <span>图表规格</span>
+              <strong>{{ Number(activeCurrentTransport.chart_spec_count ?? activeCurrentTransport.chartSpecCount ?? 0) || 0 }}</strong>
+            </article>
+          </div>
+          <div v-if="sourceTransportExcludedItems(activeCurrentSource).length" class="agent-ppt-current-transport-excluded">
+            <strong>未传内容</strong>
+            <p
+              v-for="(item, index) in sourceTransportExcludedItems(activeCurrentSource)"
+              :key="`current-excluded-${index}`">
+              {{ item.type || 'payload' }}：{{ item.reason || '为避免上下文超限，未直接传入。' }}
+            </p>
+          </div>
+        </div>
+
+        <div v-if="activeCurrentScopePayload" class="agent-ppt-package-section-head">
+          <strong>范围输入</strong>
+          <span>scope</span>
+        </div>
+        <div v-if="activeCurrentScopePayload" class="agent-ppt-current-metric-list">
+          <article class="agent-ppt-current-metric-card">
+            <dl>
+              <div v-for="(value, key) in activeCurrentScopePayload" :key="`scope-${key}`">
+                <dt>{{ key }}</dt>
+                <dd>{{ Array.isArray(value) ? value.join(', ') : value }}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+
+        <div v-if="activeCurrentReadyMetrics.length" class="agent-ppt-package-section-head">
+          <strong>可用于 PPT 的数值指标</strong>
+          <span>{{ activeCurrentReadyMetrics.length }} 项</span>
+        </div>
+        <div v-if="activeCurrentReadyMetrics.length" class="agent-ppt-current-metric-list">
+          <article
+            v-for="metric in activeCurrentReadyMetrics"
+            :key="`current-ready-${metric.metric_id}`"
+            class="agent-ppt-current-metric-card">
+            <header>
+              <div>
+                <span>{{ metric.domain || 'analysis' }}</span>
+                <strong>{{ metric.label }}</strong>
+              </div>
+              <b>{{ formatCurrentMetricValue(metric) }}</b>
+            </header>
+            <dl>
+              <div v-if="metric.calculation_method || metric.calculationMethod || metric.method">
+                <dt>口径</dt>
+                <dd>{{ metric.calculation_method || metric.calculationMethod || metric.method }}</dd>
+              </div>
+              <div v-if="metric.scope">
+                <dt>范围</dt>
+                <dd>{{ metric.scope }}</dd>
+              </div>
+              <div v-if="metric.source_path || metric.sourcePath">
+                <dt>路径</dt>
+                <dd>{{ metric.source_path || metric.sourcePath }}</dd>
+              </div>
+              <div v-if="currentMetricSourceIds(metric)">
+                <dt>绑定来源</dt>
+                <dd>{{ currentMetricSourceIds(metric) }}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+
+        <div v-if="activeCurrentEvidenceItems.length" class="agent-ppt-package-section-head">
+          <strong>会传给 AI 的 evidence</strong>
+          <span>{{ activeCurrentEvidenceItems.length }} 条</span>
+        </div>
+        <div v-if="activeCurrentEvidenceItems.length" class="agent-ppt-current-metric-list">
+          <article
+            v-for="(item, index) in activeCurrentEvidenceItems"
+            :key="`current-evidence-${index}`"
+            class="agent-ppt-current-metric-card">
+            <header>
+              <div>
+                <span>{{ item.type || 'evidence' }}</span>
+                <strong>{{ item.title || '证据' }}</strong>
+              </div>
+            </header>
+            <p>{{ item.text || item.summary || '无摘要' }}</p>
+            <dl v-if="item.payload">
+              <div v-for="(value, key) in item.payload" :key="`evidence-${index}-${key}`">
+                <dt>{{ key }}</dt>
+                <dd>{{ typeof value === 'object' ? JSON.stringify(value) : value }}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+
+        <div v-if="activeCurrentChartSpecs.length" class="agent-ppt-package-section-head">
+          <strong>图表规格</strong>
+          <span>{{ activeCurrentChartSpecs.length }} 个</span>
+        </div>
+        <div v-if="activeCurrentChartSpecs.length" class="agent-ppt-current-metric-list">
+          <article
+            v-for="(chart, index) in activeCurrentChartSpecs"
+            :key="`current-chart-${chart.chart_id || chart.chartId || index}`"
+            class="agent-ppt-current-metric-card">
+            <header>
+              <div>
+                <span>{{ chart.chart_type || chart.chartType || 'chart' }}</span>
+                <strong>{{ chart.title || '图表' }}</strong>
+              </div>
+            </header>
+            <dl>
+              <div>
+                <dt>columns</dt>
+                <dd>{{ (chart.columns || []).length }}</dd>
+              </div>
+              <div>
+                <dt>rows</dt>
+                <dd>{{ (chart.rows || []).length }}</dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+
+        <div v-if="activeCurrentGapMetrics.length" class="agent-ppt-package-section-head">
+          <strong>缺口指标</strong>
+          <span>{{ activeCurrentGapMetrics.length }} 项</span>
+        </div>
+        <div v-if="activeCurrentGapMetrics.length" class="agent-ppt-current-gap-list">
+          <article
+            v-for="(gap, index) in activeCurrentGapMetrics"
+            :key="`current-gap-${gap.metric_id || gap.metricId || gap.gap_id || gap.gapId || index}`"
+            class="agent-ppt-current-gap-card">
+            <strong>{{ currentGapTitle(gap, index) }}</strong>
+            <span>{{ gap.status || 'missing' }}</span>
+            <p>{{ currentGapDescription(gap) }}</p>
+            <small v-if="currentGapMeta(gap)">{{ currentGapMeta(gap) }}</small>
+          </article>
+        </div>
+
+        <div v-if="!activeCurrentMetrics.length" class="agent-ppt-package-empty">
+          这个来源目前没有可展示的标准指标。完成对应分析后会在这里显示。
+        </div>
+      </section>
+    </div>
+
     <div v-if="activePackageSource" class="agent-ppt-package-detail-backdrop" @click.self="closePackageDetail">
       <section
         class="agent-ppt-package-detail"
-        :class="{ 'has-carrier-preview': activePackagePreviewCarriers.length }"
+        :class="{ 'has-carrier-preview': activePackageDetail.previewCarriers.length }"
         role="dialog"
         aria-modal="true"
         aria-label="资料包内容">
         <header class="agent-ppt-package-detail-head">
           <div>
             <span>资料包</span>
-            <strong>{{ activePackagePayload.title || activePackageSource.title }}</strong>
-            <small>{{ (activePackageSource.meta && activePackageSource.meta.label) || activePackagePayload.summary || '已生成' }}</small>
+            <strong>{{ activePackageDetail.title || activePackageSource.title }}</strong>
+            <small>{{ activePackageDetail.summary || '已生成' }}</small>
           </div>
           <button type="button" aria-label="关闭" title="关闭" @click="closePackageDetail">×</button>
         </header>
 
-        <p v-if="activePackagePayload.summary" class="agent-ppt-package-summary">{{ activePackagePayload.summary }}</p>
+        <p v-if="activePackageDetail.payload.summary" class="agent-ppt-package-summary">{{ activePackageDetail.payload.summary }}</p>
 
-        <div v-if="activePackageStats.length" class="agent-ppt-package-stats">
-          <div v-for="stat in activePackageStats" :key="`package-stat-${stat[0]}`">
+        <div v-if="activePackageDetail.stats.length" class="agent-ppt-package-stats">
+          <div v-for="stat in activePackageDetail.stats" :key="`package-stat-${stat[0]}`">
             <span>{{ stat[0] }}</span>
             <strong>{{ formatPackageMetric(stat[1]) }}</strong>
           </div>
         </div>
 
         <dl class="agent-ppt-package-meta">
-          <div v-if="activePackagePayload.intent">
+          <div v-if="activePackageDetail.payload.intent">
             <dt>意图</dt>
-            <dd>{{ activePackagePayload.intent }}</dd>
+            <dd>{{ activePackageDetail.payload.intent }}</dd>
           </div>
-          <div v-if="activePackageAlignment.alignment_level">
+          <div v-if="activePackageDetail.alignment.alignment_level">
             <dt>对齐等级</dt>
-            <dd>{{ activePackageAlignment.alignment_level }}</dd>
+            <dd>{{ activePackageDetail.alignment.alignment_level }}</dd>
           </div>
-          <div v-if="activePackageAlignment.join_key">
+          <div v-if="activePackageDetail.alignment.join_key">
             <dt>连接键</dt>
-            <dd>{{ activePackageAlignment.join_key }}</dd>
+            <dd>{{ activePackageDetail.alignment.join_key }}</dd>
           </div>
-          <div v-if="Array.isArray(activePackagePayload.source_ids) && activePackagePayload.source_ids.length">
+          <div v-if="activePackageDetail.sourceIds.length">
             <dt>来源</dt>
-            <dd>{{ activePackagePayload.source_ids.join(' / ') }}</dd>
+            <dd>{{ activePackageDetail.sourceIds.join(' / ') }}</dd>
           </div>
         </dl>
 
-        <div v-if="activePackageWarnings.length" class="agent-ppt-package-warnings">
+        <div v-if="activePackageDetail.warnings.length" class="agent-ppt-package-warnings">
           <strong>提示</strong>
-          <span v-for="warning in activePackageWarnings" :key="`package-warning-${warning}`">{{ warning }}</span>
+          <span v-for="warning in activePackageDetail.warnings" :key="`package-warning-${warning}`">{{ warning }}</span>
         </div>
 
-        <div v-if="activePackageCarriers.length" class="agent-ppt-package-section-head">
+        <div v-if="activePackageDetail.carriers.length" class="agent-ppt-package-section-head">
           <strong>空间载体</strong>
-          <span>{{ activePackageCarriers.length }} 个</span>
+          <span>{{ activePackageDetail.carriers.length }} 个</span>
         </div>
-        <div v-if="activePackageCarriers.length" class="agent-ppt-carrier-workspace">
-          <div v-if="activePackagePreviewCarriers.length" class="agent-ppt-carrier-preview">
+        <div v-if="activePackageDetail.carriers.length" class="agent-ppt-carrier-workspace">
+          <div v-if="activePackageDetail.previewCarriers.length" class="agent-ppt-carrier-preview">
             <div class="agent-ppt-carrier-preview-head">
               <div class="agent-ppt-carrier-preview-title">
                 <strong>空间预览</strong>
@@ -1142,20 +1704,20 @@ function confirmSourceDialog() {
             </div>
             <svg
               class="agent-ppt-carrier-preview-svg"
-              :viewBox="activePackageCarrierPreview.viewBox"
+              :viewBox="activePackageDetail.preview.viewBox"
               role="img"
               aria-label="空间载体预览">
               <rect class="agent-ppt-carrier-preview-bg" x="0" y="0" width="1000" height="620" rx="18" />
-              <g v-if="activePackagePreviewRoads.length" class="agent-ppt-carrier-preview-roads" aria-hidden="true">
+              <g v-if="activePackageDetail.previewRoads.length" class="agent-ppt-carrier-preview-roads" aria-hidden="true">
                 <path
-                  v-for="road in activePackagePreviewRoads"
+                  v-for="road in activePackageDetail.previewRoads"
                   :key="`carrier-preview-road-${road.id}`"
                   class="agent-ppt-carrier-preview-road"
                   :class="road.className"
                   :d="road.path" />
               </g>
               <g
-                v-for="item in activePackagePreviewCarriers"
+                v-for="item in activePackageDetail.previewCarriers"
                 :key="`carrier-preview-${item.id}`"
                 class="agent-ppt-carrier-preview-shape"
                 :class="carrierPreviewClass(item)"
@@ -1171,7 +1733,7 @@ function confirmSourceDialog() {
                   class="agent-ppt-carrier-preview-line"
                   :d="item.outlinePath || item.boundaryPath || item.polygonPath" />
                 <text
-                  v-if="item.isFocus || activePackagePreviewCarriers.length === 1"
+                  v-if="item.isFocus || activePackageDetail.previewCarriers.length === 1"
                   class="agent-ppt-carrier-preview-label"
                   :x="item.labelX"
                   :y="item.labelY">
@@ -1182,7 +1744,7 @@ function confirmSourceDialog() {
           </div>
           <div class="agent-ppt-carrier-list">
             <article
-              v-for="carrier in activePackageCarriers"
+              v-for="carrier in activePackageDetail.carriers"
               :key="`package-carrier-${carrier.carrier_id}`"
               class="agent-ppt-carrier-row"
               :class="[`is-${carrier.carrier_type || 'segment'}`, { 'is-active': isPackageCarrierActive(carrier) }]"
@@ -1223,9 +1785,9 @@ function confirmSourceDialog() {
 
         <div class="agent-ppt-package-section-head">
           <strong>点位明细</strong>
-          <span>{{ activePackageItems.length }} 条</span>
+          <span>{{ activePackageDetail.items.length }} 条</span>
         </div>
-        <div v-if="activePackageItems.length" class="agent-ppt-package-table" role="table" aria-label="资料包点位明细">
+        <div v-if="activePackageDetail.items.length" class="agent-ppt-package-table" role="table" aria-label="资料包点位明细">
           <div class="agent-ppt-package-table-head" role="row">
             <span role="columnheader">POI</span>
             <span role="columnheader">分类</span>
@@ -1233,7 +1795,7 @@ function confirmSourceDialog() {
             <span role="columnheader">夜光</span>
           </div>
           <div
-            v-for="(item, index) in activePackageItems"
+            v-for="(item, index) in activePackageDetail.items"
             :key="`package-item-${item.id || item.name || index}`"
             class="agent-ppt-package-table-row"
             role="row">
@@ -1245,13 +1807,46 @@ function confirmSourceDialog() {
         </div>
         <div v-else class="agent-ppt-package-empty">这个资料包没有返回点位明细。</div>
 
-        <div v-if="activePackageEvidenceRefs.length" class="agent-ppt-package-section-head">
+        <div v-if="activePackageDetail.evidenceRefs.length" class="agent-ppt-package-section-head">
           <strong>Evidence refs</strong>
-          <span>{{ activePackageEvidenceRefs.length }} 条</span>
+          <span>{{ activePackageDetail.evidenceRefs.length }} 条</span>
         </div>
-        <div v-if="activePackageEvidenceRefs.length" class="agent-ppt-package-ref-list">
-          <span v-for="refItem in activePackageEvidenceRefs" :key="`package-ref-${refItem}`">{{ refItem }}</span>
+        <div v-if="activePackageDetail.evidenceRefs.length" class="agent-ppt-package-ref-list">
+          <span v-for="refItem in activePackageDetail.evidenceRefs" :key="`package-ref-${refItem}`">{{ refItem }}</span>
         </div>
+      </section>
+    </div>
+
+    <div v-if="activeDocumentSource" class="agent-ppt-package-detail-backdrop" @click.self="closeDocumentEvidence">
+      <section
+        class="agent-ppt-package-detail agent-ppt-document-evidence-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-label="PageIndex 文档结构">
+        <header class="agent-ppt-package-detail-head">
+          <div>
+            <span>PageIndex 文档结构</span>
+            <strong>{{ activeDocumentSource.title }}</strong>
+            <small>{{ (activeDocumentSource.meta && activeDocumentSource.meta.label) || '已生成' }}</small>
+          </div>
+          <button type="button" aria-label="关闭" title="关闭" @click="closeDocumentEvidence">×</button>
+        </header>
+
+        <div v-if="activeDocumentIndexItems.length" class="agent-ppt-document-index-list">
+          <article
+            v-for="(item, index) in activeDocumentIndexItems"
+            :key="`document-index-${item.node_id || item.nodeId || index}`"
+            class="agent-ppt-document-index-card"
+            :style="{ '--node-depth': Math.max(0, Number(item.level || 0) - 1) }">
+            <header>
+              <strong>{{ item.title || `章节 ${index + 1}` }}</strong>
+              <span>p.{{ item.page_start || item.pageStart || 1 }}{{ (item.page_end || item.pageEnd) && (item.page_end || item.pageEnd) !== (item.page_start || item.pageStart) ? `-${item.page_end || item.pageEnd}` : '' }}</span>
+            </header>
+            <p v-if="item.summary">{{ item.summary }}</p>
+          </article>
+        </div>
+        <div v-else class="agent-ppt-package-empty">这个文档暂时没有生成 PageIndex 章节结构。</div>
+
       </section>
     </div>
 

@@ -13,6 +13,8 @@ from shapely.prepared import prep
 from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
 from modules.population.service import get_population_grid
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
+from store.ai_database import SessionLocal as AiSessionLocal
+from store.ai_models import Document, DocumentIndexNode
 from store.analysis_artifact_repo import analysis_artifact_repo
 from store.history_repo import history_repo
 
@@ -48,19 +50,21 @@ class PptDataInvalidIntentPlan(RuntimeError):
 
 
 SYSTEM_SOURCE_TITLES = {
-    "system:scope": "当前等时圈范围",
-    "system:poi": "POI 基础数据",
-    "system:h3": "H3 / 共享网格",
-    "system:population": "人口结构分析",
-    "system:nightlight": "夜光强度分析",
-    "system:road-syntax": "路网与可达性分析",
+    "current:scope": "当前等时圈范围",
+    "current:dataset:h3": "H3 / 共享网格",
+    "current:dataset:poi": "POI 基础数据",
+    "current:analysis:poi_h3": "POI / H3 空间结构分析",
+    "current:analysis:nightlight": "夜光强度分析",
+    "current:analysis:population": "人口结构分析",
+    "current:analysis:road": "路网与可达性分析",
 }
 
 ARTIFACT_SOURCE_TYPES = {
-    "system:h3": "poi_h3_grid",
-    "system:population": "population",
-    "system:nightlight": "nightlight",
-    "system:road-syntax": "road_syntax",
+    "current:dataset:h3": "poi_h3_grid",
+    "current:analysis:poi_h3": "poi_h3_grid",
+    "current:analysis:population": "population",
+    "current:analysis:nightlight": "nightlight",
+    "current:analysis:road": "road_syntax",
 }
 
 TYPE_MAP_PATH = Path(__file__).resolve().parents[2] / "share" / "type_map.json"
@@ -68,7 +72,7 @@ _TYPE_CODE_LABELS: Dict[str, Dict[str, str]] | None = None
 DEFAULT_EVIDENCE_INTENT = "为 PPT 指令生成整理当前区域代表性 POI 资料"
 NIGHTLIFE_EVIDENCE_INTENT = "整理夜生活与夜间消费相关 POI，并与夜光格子对应"
 CARRIER_EVIDENCE_INTENT = "识别当前区域 POI、路网、人口、夜光共同支撑的空间载体"
-CARRIER_REQUIRED_SOURCE_IDS = {"system:poi", "system:road-syntax", "system:population", "system:nightlight"}
+CARRIER_REQUIRED_SOURCE_IDS = {"current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"}
 CARRIER_PACKAGE_TITLE = "POI × 路网空间载体资料包"
 CARRIER_BOUNDARY_BUFFER_M = 50.0
 BLOCK_LOOP_MIN_AREA_KM2 = 0.002
@@ -143,6 +147,7 @@ NIGHTLIFE_EXCLUDED_TERMS = [
     "超级市场",
 ]
 NIGHTLIFE_NEAREST_CELL_TOLERANCE_M = 30.0
+PPT_DOCUMENT_INDEX_PREVIEW_LIMIT = 10
 
 
 def _clean_text(value: Any) -> str:
@@ -337,9 +342,102 @@ def _artifact_ready(area_id: str, source_id: str) -> bool:
 
 
 def _source_label(source_id: str, ready: bool, count: int = 0) -> str:
-    if source_id == "system:poi" and count:
+    if source_id == "current:dataset:poi" and count:
         return f"POI {count} 条"
     return "已生成" if ready else "待生成"
+
+
+def _document_source_status(document: Document) -> str:
+    status = _clean_text(document.status)
+    if status == "failed":
+        return "failed"
+    if status == "parsed":
+        return "ready"
+    return "pending"
+
+
+def _document_source_label(document: Document, index_count: int = 0) -> str:
+    status = _clean_text(document.status)
+    if index_count > 0:
+        return f"章节 {index_count} 个"
+    if status == "failed":
+        return "解析失败"
+    if status in {"uploaded", "parsing"}:
+        return "待解析"
+    if status == "parsed":
+        return "待生成结构"
+    return "待处理"
+
+
+def _compact_document_index_node(node: DocumentIndexNode) -> Dict[str, Any]:
+    return {
+        "node_id": _clean_text(node.node_id),
+        "parent_node_id": _clean_text(node.parent_node_id),
+        "title": _clean_text(node.title),
+        "level": int(node.level or 0),
+        "summary": _clean_text(node.summary)[:320],
+        "text": _clean_text(node.text)[:1200],
+        "page_start": int(node.page_start or 1),
+        "page_end": int(node.page_end or node.page_start or 1),
+    }
+
+
+def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
+    try:
+        session = AiSessionLocal()
+    except Exception:
+        return []
+    try:
+        documents = (
+            session.query(Document)
+            .order_by(Document.upload_time.desc(), Document.id.desc())
+            .all()
+        )
+        sources: List[PptDataSourceSummary] = []
+        for document in documents:
+            index_rows = (
+                session.query(DocumentIndexNode)
+                .filter_by(document_id=document.id)
+                .order_by(DocumentIndexNode.ordinal.asc(), DocumentIndexNode.id.asc())
+                .all()
+            )
+            index_count = len([node for node in index_rows if _clean_text(node.node_id) != "root"])
+            status = _document_source_status(document)
+            label = _document_source_label(document, index_count)
+            index_preview = [
+                _compact_document_index_node(node)
+                for node in index_rows
+                if _clean_text(node.node_id) != "root"
+            ][:PPT_DOCUMENT_INDEX_PREVIEW_LIMIT]
+            sources.append(
+                PptDataSourceSummary(
+                    id=f"document:{document.id}",
+                    type="document",
+                    title=_clean_text(document.title) or _clean_text(document.file_name) or "文档资料",
+                    status=status,
+                    summary=label,
+                    count=index_count,
+                    meta={
+                        "label": label,
+                        "sourceKind": "document",
+                        "document": {
+                            "id": _clean_text(document.id),
+                            "title": _clean_text(document.title),
+                            "file_name": _clean_text(document.file_name),
+                            "file_type": _clean_text(document.file_type),
+                            "document_role": _clean_text(document.document_role),
+                            "status": _clean_text(document.status),
+                            "index_count": index_count,
+                        },
+                        "document_index_preview": index_preview,
+                    },
+                )
+            )
+        return sources
+    except Exception:
+        return []
+    finally:
+        session.close()
 
 
 def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
@@ -351,10 +449,10 @@ def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
 
     sources: List[PptDataSourceSummary] = []
     for source_id, title in SYSTEM_SOURCE_TITLES.items():
-        if source_id == "system:scope":
+        if source_id == "current:scope":
             ready = scope_ready
             count = 1 if ready else 0
-        elif source_id == "system:poi":
+        elif source_id == "current:dataset:poi":
             ready = poi_count > 0
             count = poi_count
         else:
@@ -375,6 +473,7 @@ def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
                 },
             )
         )
+    sources.extend(_list_document_ppt_sources())
     return sources
 
 
@@ -2228,9 +2327,9 @@ def _build_evidence_filters(plan: PptEvidenceIntentPlan) -> Dict[str, Any]:
 async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPackageResponse:
     request = _normalize_package_request_center(request)
     selected_sources = {_clean_text(item) for item in request.source_ids if _clean_text(item)}
-    include_poi = not selected_sources or "system:poi" in selected_sources
+    include_poi = not selected_sources or "current:dataset:poi" in selected_sources
     intent_text = _clean_text(request.intent)
-    include_nightlight = "system:nightlight" in selected_sources
+    include_nightlight = "current:analysis:nightlight" in selected_sources
     package_mode = (_clean_text(request.package_mode) or "evidence").lower()
     wants_carrier_package = package_mode == "evidence" and CARRIER_REQUIRED_SOURCE_IDS.issubset(selected_sources) and any(
         keyword in intent_text

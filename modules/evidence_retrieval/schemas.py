@@ -5,10 +5,6 @@ from typing import List
 from pydantic import BaseModel, Field
 
 
-class EvidenceIndexRequest(BaseModel):
-    document_id: str | None = None
-
-
 class EvidenceSearchRequest(BaseModel):
     question: str
     top_k: int = Field(default=8, ge=1, le=50)

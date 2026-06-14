@@ -175,3 +175,76 @@ export function buildPptCarrierPreviewModel(carriers = [], options = {}) {
 
   return { viewBox, width, height, extentMode, items, roadItems }
 }
+
+function objectOrEmpty(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function arraySlice(value, limit = 0) {
+  if (!Array.isArray(value)) return []
+  return limit > 0 ? value.slice(0, limit) : value.slice()
+}
+
+function compactArray(value, limit = 0) {
+  return arraySlice(value, limit).filter(Boolean)
+}
+
+function buildPackageStats({ payload, items, carriers, alignment, carrierSummary }) {
+  const carrierRows = carriers.length ? [
+    ['空间载体', carrierSummary.carrier_count ?? carriers.length],
+    ['路段', carrierSummary.segment_count],
+    ['廊道', carrierSummary.corridor_count],
+    ['街区 / loop', carrierSummary.block_loop_count],
+  ] : []
+  return [
+    ...carrierRows,
+    ['总候选', payload.total],
+    ['入包点位', items.length],
+    ['已对齐', alignment.matched_item_count],
+    ['共享格子', alignment.grid_cell_count],
+    ['夜光格子', alignment.nightlight_cell_count],
+  ].filter((row) => row[1] !== undefined && row[1] !== null && row[1] !== '')
+}
+
+export function normalizePptPackageDetail(source = {}, options = {}) {
+  const safeSource = objectOrEmpty(source)
+  const meta = objectOrEmpty(safeSource.meta)
+  const payload = objectOrEmpty(meta.package)
+  const items = arraySlice(payload.items, Number(options.itemLimit || 100) || 100)
+  const carriers = arraySlice(payload.carriers, Number(options.carrierLimit || 30) || 30)
+  const sourceIds = arraySlice(payload.source_ids || payload.sourceIds)
+  const evidenceRefs = arraySlice(payload.evidence_refs || payload.evidenceRefs, Number(options.evidenceLimit || 80) || 80)
+  const warnings = compactArray(payload.warnings)
+  const alignment = objectOrEmpty(payload.alignment)
+  const carrierSummary = objectOrEmpty(payload.carrier_summary || payload.carrierSummary)
+  const roadContext = objectOrEmpty(payload.road_context || payload.roadContext)
+  const focusId = String(options.focusId || (carriers[0] && carriers[0].carrier_id) || '')
+  const preview = buildPptCarrierPreviewModel(carriers, {
+    roadContext,
+    focusId,
+    extentMode: options.extentMode,
+  })
+  const previewCarriers = arraySlice(preview && preview.items)
+  const previewRoads = arraySlice(preview && preview.roadItems)
+  const stats = buildPackageStats({ payload, items, carriers, alignment, carrierSummary })
+  const title = String(payload.title || safeSource.title || '')
+  const summary = String(payload.summary || meta.label || '')
+
+  return {
+    payload,
+    title,
+    summary,
+    items,
+    carriers,
+    preview,
+    previewCarriers,
+    previewRoads,
+    evidenceRefs,
+    warnings,
+    alignment,
+    carrierSummary,
+    roadContext,
+    sourceIds,
+    stats,
+  }
+}

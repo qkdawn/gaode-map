@@ -39,7 +39,7 @@ class PptSourceGroupClassifyRequest(BaseModel):
 
     area_id: str = ""
     sources: List[PptSource] = Field(default_factory=list)
-    analysis_context: Dict[str, Any] = Field(default_factory=dict)
+    current: Dict[str, Any] = Field(default_factory=dict)
     previous_groups: List[PptSourceGroup] = Field(default_factory=list)
 
 
@@ -198,7 +198,7 @@ class PptSpecRequest(BaseModel):
     page_count: int = Field(15, ge=1, le=80)
     research_enabled: bool = True
     sources: List[PptSource] = Field(default_factory=list)
-    analysis_context: Dict[str, Any] = Field(default_factory=dict)
+    current: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("source_ids", mode="before")
     @classmethod
@@ -230,6 +230,7 @@ class PptSpecResponse(BaseModel):
     outline: List[PptOutlineItem] = Field(default_factory=list)
     source_summary: str = ""
     missing_inputs: List[str] = Field(default_factory=list)
+    context_manifest: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PptOutlineSectionRequest(BaseModel):
@@ -242,7 +243,7 @@ class PptOutlineSectionRequest(BaseModel):
     revision_note: str = Field(..., min_length=1)
     source_ids: List[str] = Field(default_factory=list)
     sources: List[PptSource] = Field(default_factory=list)
-    analysis_context: Dict[str, Any] = Field(default_factory=dict)
+    current: Dict[str, Any] = Field(default_factory=dict)
     topic: str = ""
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"
@@ -269,6 +270,10 @@ class DeckSlideBrief(BaseModel):
     visual_plan: str = ""
     required_sources: List[str] = Field(default_factory=list)
     speaker_notes: str = ""
+    metric_claims: List[Dict[str, Any]] = Field(default_factory=list)
+    metric_gaps: List[Dict[str, Any]] = Field(default_factory=list)
+    chart_specs: List[Dict[str, Any]] = Field(default_factory=list)
+    chart_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class DeckBriefRequest(BaseModel):
@@ -278,7 +283,7 @@ class DeckBriefRequest(BaseModel):
     spec: Optional[PptSpecResponse] = None
     source_ids: List[str] = Field(default_factory=list)
     sources: List[PptSource] = Field(default_factory=list)
-    analysis_context: Dict[str, Any] = Field(default_factory=dict)
+    current: Dict[str, Any] = Field(default_factory=dict)
     topic: str = ""
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"
@@ -302,6 +307,7 @@ class DeckBriefResponse(BaseModel):
     slides: List[DeckSlideBrief] = Field(default_factory=list)
     source_summary: str = ""
     missing_inputs: List[str] = Field(default_factory=list)
+    context_manifest: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DeckBriefSlideRequest(BaseModel):
@@ -316,7 +322,7 @@ class DeckBriefSlideRequest(BaseModel):
     revision_note: str = Field(..., min_length=1)
     source_ids: List[str] = Field(default_factory=list)
     sources: List[PptSource] = Field(default_factory=list)
-    analysis_context: Dict[str, Any] = Field(default_factory=dict)
+    current: Dict[str, Any] = Field(default_factory=dict)
     topic: str = ""
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"

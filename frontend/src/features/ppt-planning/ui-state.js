@@ -3,6 +3,7 @@ import {
   createDefaultPptSources,
   createDefaultPptSpec,
   createDefaultUserPptSources,
+  createPptTransportFromAiPayload,
   normalizeDeckBrief,
   normalizePptOutline,
   normalizePptSource,
@@ -73,6 +74,170 @@ function normalizeRevisionDraft(value = {}) {
   return cloneObject(value)
 }
 
+function normalizeContextManifest(value = {}) {
+  const manifest = cloneObject(value)
+  const sourceManifest = cloneArray(manifest.source_manifest || manifest.sourceManifest)
+    .map((item) => {
+      const entry = cloneObject(item)
+      const sourceId = asText(entry.source_id || entry.sourceId)
+      if (!sourceId) return null
+      return {
+        ...entry,
+        source_id: sourceId,
+        sourceId,
+        title: asText(entry.title),
+        source_kind: asText(entry.source_kind || entry.sourceKind),
+        sourceKind: asText(entry.source_kind || entry.sourceKind),
+        transport_status: asText(entry.transport_status || entry.transportStatus),
+        transportStatus: asText(entry.transport_status || entry.transportStatus),
+        included: uniqueText(entry.included),
+        excluded: cloneArray(entry.excluded),
+        metric_count: Number(entry.metric_count ?? entry.metricCount ?? 0) || 0,
+        metricCount: Number(entry.metric_count ?? entry.metricCount ?? 0) || 0,
+        evidence_count: Number(entry.evidence_count ?? entry.evidenceCount ?? 0) || 0,
+        evidenceCount: Number(entry.evidence_count ?? entry.evidenceCount ?? 0) || 0,
+        policy: asText(entry.policy),
+      }
+    })
+    .filter(Boolean)
+  return {
+    ...manifest,
+    version: asText(manifest.version),
+    source_manifest: sourceManifest,
+    sourceManifest,
+    omitted_payloads: cloneArray(manifest.omitted_payloads || manifest.omittedPayloads),
+    omittedPayloads: cloneArray(manifest.omitted_payloads || manifest.omittedPayloads),
+  }
+}
+
+function mergeSourceTransportManifest(sources = [], contextManifest = {}) {
+  const manifest = normalizeContextManifest(contextManifest)
+  const bySourceId = new Map(cloneArray(manifest.source_manifest).map((item) => [asText(item.source_id || item.sourceId), item]))
+  if (!bySourceId.size) return cloneArray(sources)
+  return cloneArray(sources).map((source) => {
+    const sourceId = asText(source.id)
+    const transport = bySourceId.get(sourceId)
+    if (!transport) return source
+    return {
+      ...source,
+      meta: {
+        ...(source.meta || {}),
+        transport,
+      },
+    }
+  })
+}
+
+function aiPayloadFromSource(source = {}) {
+  const meta = cloneObject(source.meta)
+  const payload = cloneObject(meta.aiPayload || meta.ai_payload)
+  return payload.version === 'ppt_ai_input_block_v1' ? payload : {}
+}
+
+function sourceForPptRequest(source = {}) {
+  const meta = cloneObject(source.meta)
+  const aiPayload = aiPayloadFromSource(source)
+  return normalizePptSource({
+    id: source.id,
+    type: source.type,
+    title: source.title,
+    status: source.status,
+    selected: source.selected,
+    meta: {
+      label: asText(meta.label),
+      sourceKind: asText(meta.sourceKind),
+      areaId: asText(meta.areaId),
+      aiPayload,
+      ai_payload: aiPayload,
+      transport: aiPayload.version ? createPptTransportFromAiPayload(aiPayload) : cloneObject(meta.transport),
+    },
+  })
+}
+
+function packageAiPayloadFromSource(source = {}) {
+  const meta = cloneObject(source.meta)
+  const pack = cloneObject(meta.package)
+  const sourceId = asText(source.id)
+  const title = asText(source.title)
+  const evidence = []
+  if (pack.summary) {
+    evidence.push({
+      source_id: sourceId,
+      sourceId,
+      source_title: title,
+      sourceTitle: title,
+      type: 'package_summary',
+      title: asText(pack.title) || title,
+      text: asText(pack.summary),
+      payload: {
+        package_mode: asText(pack.package_mode),
+        intent: asText(pack.intent),
+        total: pack.total,
+      },
+    })
+  }
+  cloneArray(pack.items).slice(0, 6).forEach((item) => {
+    evidence.push({
+      source_id: sourceId,
+      sourceId,
+      source_title: title,
+      sourceTitle: title,
+      type: 'package_poi_sample',
+      title: asText(item.name) || '代表性 POI',
+      text: [item.category, item.subcategory, item.address].map((value) => asText(value)).filter(Boolean).join(' / '),
+      payload: {
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        subcategory: item.subcategory,
+        address: item.address,
+      },
+    })
+  })
+  cloneArray(pack.carriers).slice(0, 8).forEach((item) => {
+    evidence.push({
+      source_id: sourceId,
+      sourceId,
+      source_title: title,
+      sourceTitle: title,
+      type: 'package_carrier',
+      title: asText(item.carrier_label || item.carrierLabel || item.carrier_id || item.carrierId) || '空间载体',
+      text: asText(item.summary),
+      payload: {
+        carrier_id: item.carrier_id || item.carrierId,
+        carrier_type: item.carrier_type || item.carrierType,
+        road_metrics: item.road_metrics || item.roadMetrics,
+        poi_metrics: item.poi_metrics || item.poiMetrics,
+        population_metrics: item.population_metrics || item.populationMetrics,
+        nightlight_metrics: item.nightlight_metrics || item.nightlightMetrics,
+      },
+    })
+  })
+  const included = evidence.length ? ['evidence'] : []
+  return {
+    version: 'ppt_ai_input_block_v1',
+    source_id: sourceId,
+    sourceId,
+    title,
+    source_kind: 'package',
+    sourceKind: 'package',
+    included,
+    scope: null,
+    metrics: [],
+    metric_gaps: [],
+    metricGaps: [],
+    evidence,
+    chart_specs: [],
+    chartSpecs: [],
+    excluded: [
+      { type: 'package_full_items', reason: '不传资料包完整 POI 明细，只传摘要和代表样本。', count: cloneArray(pack.items).length },
+      { type: 'package_carrier_geometries', reason: '不传载体完整 geometry，只传载体摘要和指标摘要。', count: cloneArray(pack.carriers).length },
+    ],
+    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, chart_specs: 0 },
+    policy: '资料包只通过摘要、代表样本、载体摘要进入 evidence；不传完整明细。',
+  }
+}
+
 function normalizeStaleDirectivePageIds(value = []) {
   return uniqueText(value).map((item) => String(Number(item) || item)).filter(Boolean)
 }
@@ -96,19 +261,22 @@ function getDefaultGroupSpecForSource(source = {}) {
   if (sourceKind === 'package' || sourceKind === 'package-placeholder' || sourceId.startsWith('package:') || sourceId.startsWith('package-placeholder:')) {
     return { id: 'group:packages', title: '资料包', emoji: '' }
   }
-  if (['system:scope', 'system:h3'].includes(sourceId)) {
+  if (sourceKind === 'document' || sourceId.startsWith('document:')) {
+    return { id: 'group:document-evidence', title: '文档库', emoji: '' }
+  }
+  if (['current:scope', 'current:dataset:h3'].includes(sourceId)) {
     return { id: 'group:spatial-scope', title: '空间范围与网格', emoji: '' }
   }
-  if (['system:poi', 'system:nightlight'].includes(sourceId)) {
+  if (['current:dataset:poi', 'current:analysis:poi_h3', 'current:analysis:nightlight'].includes(sourceId)) {
     return { id: 'group:urban-vitality', title: '城市活力证据', emoji: '' }
   }
-  if (sourceId === 'system:population') {
+  if (sourceId === 'current:analysis:population') {
     return { id: 'group:population-demand', title: '人群与需求', emoji: '' }
   }
-  if (sourceId === 'system:road-syntax') {
+  if (sourceId === 'current:analysis:road') {
     return { id: 'group:accessibility', title: '交通与可达性', emoji: '' }
   }
-  return { id: PPT_UNCATEGORIZED_GROUP_ID, title: '未分类来源', emoji: '' }
+  return { id: '', title: '', emoji: '' }
 }
 
 function normalizePptSourceGroup(seed = {}) {
@@ -128,6 +296,7 @@ function createDefaultPptSourceGroups(sources = []) {
   const groupMap = new Map()
   cloneArray(sources).forEach((source) => {
     const spec = getDefaultGroupSpecForSource(source)
+    if (!spec.id) return
     if (!groupMap.has(spec.id)) {
       groupMap.set(spec.id, {
         id: spec.id,
@@ -143,15 +312,17 @@ function createDefaultPptSourceGroups(sources = []) {
   return Array.from(groupMap.values()).filter((group) => group.sourceIds.length)
 }
 
-function reconcilePptSourceGroups(seedGroups = [], sources = []) {
+function reconcilePptSourceGroups(seedGroups = [], sources = [], ungroupedSourceIds = []) {
   const sourceIds = cloneArray(sources).map((item) => asText(item.id)).filter(Boolean)
   const allowed = new Set(sourceIds)
+  const ungrouped = new Set(uniqueText(ungroupedSourceIds))
   const seen = new Set()
   const normalizedGroups = cloneArray(seedGroups)
     .map(normalizePptSourceGroup)
+    .filter((group) => group.id !== PPT_UNCATEGORIZED_GROUP_ID)
     .map((group) => {
       const groupSourceIds = group.sourceIds.filter((sourceId) => {
-        if (!allowed.has(sourceId) || seen.has(sourceId)) return false
+        if (!allowed.has(sourceId) || seen.has(sourceId) || ungrouped.has(sourceId)) return false
         seen.add(sourceId)
         return true
       })
@@ -161,9 +332,10 @@ function reconcilePptSourceGroups(seedGroups = [], sources = []) {
 
   const groupById = new Map(normalizedGroups.map((group) => [group.id, group]))
   sourceIds.forEach((sourceId) => {
-    if (seen.has(sourceId)) return
+    if (seen.has(sourceId) || ungrouped.has(sourceId)) return
     const source = cloneArray(sources).find((item) => asText(item.id) === sourceId)
     const spec = getDefaultGroupSpecForSource(source)
+    if (!spec.id) return
     const group = groupById.get(spec.id) || {
       id: spec.id,
       title: spec.title,
@@ -194,11 +366,13 @@ function syncSpecSourceIds(normalized = {}, sources = []) {
   }
 }
 
-function ensureUncategorizedGroup(groups = [], sourceIds = []) {
+function ensureGroupForSourceIds(groups = [], groupId = '', sourceIds = []) {
   const ids = uniqueText(sourceIds)
+  const id = asText(groupId)
   if (!ids.length) return cloneArray(groups)
+  if (!id || id === PPT_UNCATEGORIZED_GROUP_ID) return cloneArray(groups)
   const nextGroups = cloneArray(groups).map(normalizePptSourceGroup)
-  const existing = nextGroups.find((group) => group.id === PPT_UNCATEGORIZED_GROUP_ID)
+  const existing = nextGroups.find((group) => group.id === id)
   if (existing) {
     existing.sourceIds = uniqueText([...existing.sourceIds, ...ids])
     existing.collapsed = false
@@ -207,7 +381,7 @@ function ensureUncategorizedGroup(groups = [], sourceIds = []) {
   return [
     ...nextGroups,
     {
-      id: PPT_UNCATEGORIZED_GROUP_ID,
+      id,
       title: '未分类来源',
       emoji: '',
       sourceIds: ids,
@@ -231,6 +405,13 @@ function isPptPackageSource(source = {}) {
     || sourceKind === 'package-placeholder'
     || sourceId.startsWith('package:')
     || sourceId.startsWith('package-placeholder:')
+}
+
+function isRetainedUserSource(source = {}) {
+  const sourceKind = asText(source.meta && source.meta.sourceKind)
+  const sourceId = asText(source.id)
+  return ['user', 'package', 'document'].includes(sourceKind)
+    || sourceId.startsWith('document:')
 }
 
 function outlineRevisionKey(item = {}) {
@@ -268,8 +449,23 @@ function normalizeSelectedSlideId(seed = {}, deckBrief = null) {
 
 export function createPptPlanningState(seed = {}) {
   const removedSourceIds = uniqueText(seed.removedSourceIds || seed.removed_source_ids)
+  const seedSourceGroups = seed.sourceGroups || seed.source_groups || []
+  const legacyUngroupedSourceIds = cloneArray(seedSourceGroups)
+    .map(normalizePptSourceGroup)
+    .filter((group) => group.id === PPT_UNCATEGORIZED_GROUP_ID)
+    .flatMap((group) => group.sourceIds)
+  const ungroupedSourceIds = uniqueText([
+    ...(seed.ungroupedSourceIds || seed.ungrouped_source_ids || []),
+    ...legacyUngroupedSourceIds,
+  ])
+  const contextManifest = normalizeContextManifest(seed.contextManifest || seed.context_manifest)
   const removedSet = new Set(removedSourceIds)
-  const sources = normalizeSources(seed.sources).filter((item) => !removedSet.has(asText(item.id)))
+  const sources = mergeSourceTransportManifest(
+    normalizeSources(seed.sources).filter((item) => !removedSet.has(asText(item.id))),
+    contextManifest,
+  )
+  const allowedSourceIds = new Set(sourceIdsFromSources(sources))
+  const normalizedUngroupedSourceIds = ungroupedSourceIds.filter((sourceId) => allowedSourceIds.has(sourceId))
   const selectedSourceIds = getReadySelectedSourceIds(sources)
   const spec = createDefaultPptSpec({
     ...seed.spec,
@@ -279,12 +475,14 @@ export function createPptPlanningState(seed = {}) {
   })
   const outline = normalizePptOutline(seed.outline || seed.deckOutline || seed.deck_outline || spec.outline)
   const deckBrief = normalizeDeckBrief(seed.deckBrief || seed.deck_brief || createDefaultDeckBriefPreview())
-  const sourceGroups = reconcilePptSourceGroups(seed.sourceGroups || seed.source_groups || createDefaultPptSourceGroups(sources), sources)
+  const sourceGroups = reconcilePptSourceGroups(seedSourceGroups.length ? seedSourceGroups : createDefaultPptSourceGroups(sources), sources, normalizedUngroupedSourceIds)
   return {
     currentStep: asText(seed.currentStep || seed.current_step) || PPT_PLANNING_STEPS.MATERIALS,
     sources,
     sourceGroups,
+    contextManifest,
     removedSourceIds,
+    ungroupedSourceIds: normalizedUngroupedSourceIds,
     spec,
     outline,
     deckBrief,
@@ -343,10 +541,86 @@ export function getPendingPptPackageSources(state = {}) {
   })
 }
 
+export function getBlockingPptInputSources(state = {}) {
+  const sources = cloneArray(createPptPlanningState(state).sources)
+  const pendingPackageIds = new Set(getPendingPptPackageSources({ sources }).map((item) => asText(item.id)))
+  return sources.filter((item) => {
+    if (!item) return false
+    const sourceId = asText(item.id)
+    const status = asText(item.status)
+    if (status === 'ready') return false
+    if (status === 'generating') return true
+    if (item.selected) return true
+    return pendingPackageIds.has(sourceId)
+  })
+}
+
 export function getActiveDeckSlideBrief(state = {}) {
   const selectedId = asText(state.selectedSlideId)
   const slides = cloneArray((state.deckBrief || {}).slides)
   return slides.find((item) => asText(item && item.id) === selectedId) || slides[0] || null
+}
+
+function filenameFromChartArtifact(artifact = {}) {
+  const explicit = asText(artifact.filename)
+  if (explicit) return explicit.split(/[\\/]/).pop()
+  const url = asText(artifact.url)
+  if (!url) return ''
+  const path = url.split('?')[0].split('#')[0]
+  try {
+    return decodeURIComponent(path.split('/').pop() || '')
+  } catch (_) {
+    return path.split('/').pop() || ''
+  }
+}
+
+export function collectPptChartArtifactFilenames(value = {}) {
+  const filenames = []
+  const visitSlide = (slide = {}) => {
+    cloneArray(slide.chartArtifacts || slide.chart_artifacts).forEach((artifact) => {
+      const filename = filenameFromChartArtifact(cloneObject(artifact))
+      if (filename) filenames.push(filename)
+    })
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item) => visitSlide(item))
+  } else if (value && typeof value === 'object') {
+    if (Array.isArray(value.slides)) {
+      value.slides.forEach((item) => visitSlide(item))
+    } else if (value.deckBrief || value.deck_brief) {
+      collectPptChartArtifactFilenames(value.deckBrief || value.deck_brief).forEach((filename) => filenames.push(filename))
+    } else {
+      visitSlide(value)
+    }
+  }
+  return uniqueText(filenames)
+}
+
+function sourceIdsForSlide(slide = {}) {
+  const ids = []
+  cloneArray(slide.requiredSources || slide.required_sources).forEach((item) => ids.push(asText(item)))
+  cloneArray(slide.metricClaims || slide.metric_claims).forEach((claim) => {
+    ids.push(asText(claim && (claim.source_id || claim.sourceId)))
+  })
+  cloneArray(slide.chartSpecs || slide.chart_specs).forEach((chart) => {
+    cloneArray(chart && (chart.source_ids || chart.sourceIds)).forEach((sourceId) => ids.push(asText(sourceId)))
+  })
+  return uniqueText(ids).filter(Boolean)
+}
+
+export function markPptDirectiveStaleForSources(state = {}, sourceIds = []) {
+  const normalized = createPptPlanningState(state)
+  const changed = new Set(uniqueText(sourceIds))
+  if (!changed.size) return normalized
+  const stalePageIds = cloneArray(normalized.staleDirectivePageIds)
+  cloneArray((normalized.deckBrief || {}).slides).forEach((slide) => {
+    if (!sourceIdsForSlide(slide).some((sourceId) => changed.has(sourceId))) return
+    stalePageIds.push(String(Number(slide.index || 0) || slide.index || ''))
+  })
+  return createPptPlanningState({
+    ...normalized,
+    staleDirectivePageIds: normalizeStaleDirectivePageIds([...normalized.staleDirectivePageIds, ...stalePageIds]),
+  })
 }
 
 export function setPptSpecField(state = {}, field = '', value = '') {
@@ -361,8 +635,12 @@ export function setPptSpecField(state = {}, field = '', value = '') {
 export function applyPptSpecResponse(state = {}, response = {}) {
   const normalized = createPptPlanningState(state)
   const outline = normalizePptOutline(response.outline)
+  const contextManifest = normalizeContextManifest(response.contextManifest || response.context_manifest)
+  const sources = mergeSourceTransportManifest(normalized.sources, contextManifest)
   return createPptPlanningState({
     ...normalized,
+    sources,
+    contextManifest,
     currentStep: PPT_PLANNING_STEPS.OUTLINE_READY,
     outline,
     spec: {
@@ -415,6 +693,7 @@ export function resetPptPlanningToMaterials(state = {}) {
       missingInputs: [],
     },
     deckBrief: createDefaultDeckBriefPreview(),
+    contextManifest: {},
     selectedSlideId: '',
     generationError: '',
     generationErrorSource: '',
@@ -440,6 +719,7 @@ export function resetPptPlanningToOutlineReady(state = {}) {
       outline,
     },
     deckBrief: createDefaultDeckBriefPreview(),
+    contextManifest: {},
     selectedSlideId: '',
     generationError: '',
     generationErrorSource: '',
@@ -453,8 +733,12 @@ export function resetPptPlanningToOutlineReady(state = {}) {
 export function applyDeckBriefResponse(state = {}, response = {}) {
   const normalized = createPptPlanningState(state)
   const deckBrief = normalizeDeckBrief(response)
+  const contextManifest = normalizeContextManifest(response.contextManifest || response.context_manifest)
+  const sources = mergeSourceTransportManifest(normalized.sources, contextManifest)
   return createPptPlanningState({
     ...normalized,
+    sources,
+    contextManifest,
     currentStep: PPT_PLANNING_STEPS.DIRECTIVE_DRAFT,
     deckBrief,
     generationError: '',
@@ -684,7 +968,7 @@ export function syncPptPackagePlaceholderSources(state = {}, placeholders = []) 
     })
     .map((item) => normalizePptSource({
       ...item,
-      status: asText(item.status) === 'generating' ? 'generating' : 'pending',
+      status: ['generating', 'failed'].includes(asText(item.status)) ? asText(item.status) : 'pending',
       selected: false,
       meta: {
         ...(item.meta || {}),
@@ -703,7 +987,7 @@ export function syncPptPackagePlaceholderSources(state = {}, placeholders = []) 
   return createPptPlanningState({
     ...normalized,
     sources,
-    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources),
+    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources, normalized.ungroupedSourceIds),
     spec: syncSpecSourceIds(normalized, sources),
   })
 }
@@ -773,12 +1057,12 @@ export function applyPptSourceGroupsResponse(state = {}, response = {}) {
     })
     .filter((group) => group.sourceIds.length)
   const missingSourceIds = sourceIds.filter((sourceId) => !assigned.has(sourceId))
-  const sourceGroups = groups.length
-    ? ensureUncategorizedGroup(groups, missingSourceIds)
-    : reconcilePptSourceGroups([], normalized.sources)
+  const ungroupedSourceIds = uniqueText([...normalized.ungroupedSourceIds, ...missingSourceIds])
+  const sourceGroups = reconcilePptSourceGroups(groups, normalized.sources, ungroupedSourceIds)
   return createPptPlanningState({
     ...normalized,
     sourceGroups,
+    ungroupedSourceIds,
     removedSourceIds: normalized.removedSourceIds,
     sourceGrouping: false,
     spec: syncSpecSourceIds(normalized, normalized.sources),
@@ -814,12 +1098,20 @@ export function setPptSourceGroupSelected(state = {}, groupId = '', selected = t
 export function movePptSourceToGroup(state = {}, sourceId = '', groupId = '') {
   const normalized = createPptPlanningState(state)
   const id = asText(sourceId)
-  const targetGroupId = asText(groupId) || PPT_UNCATEGORIZED_GROUP_ID
+  const targetGroupId = asText(groupId)
   if (!normalized.sources.some((source) => source.id === id)) return normalized
   const sourceGroups = normalized.sourceGroups.map((group) => ({
     ...group,
     sourceIds: group.sourceIds.filter((item) => item !== id),
   })).filter((group) => group.sourceIds.length || group.id === targetGroupId)
+  const ungroupedSourceIds = normalized.ungroupedSourceIds.filter((item) => item !== id)
+  if (!targetGroupId || targetGroupId === PPT_UNCATEGORIZED_GROUP_ID) {
+    return createPptPlanningState({
+      ...normalized,
+      sourceGroups,
+      ungroupedSourceIds: uniqueText([...ungroupedSourceIds, id]),
+    })
+  }
   let foundTarget = false
   const movedGroups = sourceGroups.map((group) => {
     if (group.id !== targetGroupId) return group
@@ -828,10 +1120,12 @@ export function movePptSourceToGroup(state = {}, sourceId = '', groupId = '') {
   })
   const nextGroups = foundTarget
     ? movedGroups
-    : ensureUncategorizedGroup(movedGroups, [id]).map((group) => (
-      group.id === PPT_UNCATEGORIZED_GROUP_ID ? { ...group, id: targetGroupId } : group
-    ))
-  return createPptPlanningState({ ...normalized, sourceGroups: reconcilePptSourceGroups(nextGroups, normalized.sources) })
+    : ensureGroupForSourceIds(movedGroups, targetGroupId, [id])
+  return createPptPlanningState({
+    ...normalized,
+    sourceGroups: nextGroups,
+    ungroupedSourceIds,
+  })
 }
 
 export function renamePptSource(state = {}, sourceId = '', title = '') {
@@ -862,6 +1156,7 @@ export function removePptSource(state = {}, sourceId = '') {
     ...normalized,
     sources,
     sourceGroups,
+    ungroupedSourceIds: normalized.ungroupedSourceIds.filter((item) => item !== id),
     removedSourceIds: uniqueText([...normalized.removedSourceIds, id]),
     spec: syncSpecSourceIds(normalized, sources),
   })
@@ -894,8 +1189,11 @@ export function removePptSourceGroup(state = {}, groupId = '') {
   const targetGroup = normalized.sourceGroups.find((group) => group.id === id)
   if (!targetGroup) return normalized
   const remainingGroups = normalized.sourceGroups.filter((group) => group.id !== id)
-  const sourceGroups = ensureUncategorizedGroup(remainingGroups, targetGroup.sourceIds)
-  return createPptPlanningState({ ...normalized, sourceGroups })
+  return createPptPlanningState({
+    ...normalized,
+    sourceGroups: remainingGroups,
+    ungroupedSourceIds: uniqueText([...normalized.ungroupedSourceIds, ...targetGroup.sourceIds]),
+  })
 }
 
 export function mergePptPlanningSources(state = {}, nextSources = []) {
@@ -905,7 +1203,7 @@ export function mergePptPlanningSources(state = {}, nextSources = []) {
   const normalizedNext = normalizeSources(nextSources).filter((item) => !removedSet.has(asText(item.id)))
   const mergedIds = new Set(normalizedNext.map((item) => item.id))
   const retainedSources = cloneArray(normalized.sources)
-    .filter((item) => ['user', 'package'].includes(asText((item.meta || {}).sourceKind)) && !mergedIds.has(asText(item.id)))
+    .filter((item) => isRetainedUserSource(item) && !mergedIds.has(asText(item.id)))
   const fallbackUserSources = retainedSources.length ? retainedSources : createDefaultUserPptSources()
   const sources = [...normalizedNext, ...fallbackUserSources].map((item) => {
     const previous = previousById.get(item.id)
@@ -919,7 +1217,7 @@ export function mergePptPlanningSources(state = {}, nextSources = []) {
   return createPptPlanningState({
     ...normalized,
     sources,
-    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources),
+    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources, normalized.ungroupedSourceIds),
     removedSourceIds: normalized.removedSourceIds,
     outline: normalized.outline,
     spec: {
@@ -929,10 +1227,112 @@ export function mergePptPlanningSources(state = {}, nextSources = []) {
   })
 }
 
+export function upsertPptDocumentSource(state = {}, document = {}, options = {}) {
+  const normalized = createPptPlanningState(state)
+  const documentId = asText(document.id || document.document_id || document.documentId)
+  const sourceId = asText(options.sourceId) || (documentId ? `document:${documentId}` : '')
+  if (!sourceId) return normalized
+  const status = asText(options.status || document.status) || 'pending'
+  const ready = status === 'ready'
+  const title = asText(document.title || document.file_name || document.fileName || options.title) || '文档资料'
+  const label = asText(options.label)
+    || (ready
+      ? asText(options.count) ? `PageIndex 章节 ${Number(options.count) || 0} 个` : 'PageIndex 已生成'
+      : status === 'generating' ? '整理中' : '待生成')
+  const previousById = new Map(normalized.sources.map((item) => [asText(item.id), item]))
+  const previous = previousById.get(sourceId)
+  const indexPreview = cloneArray(options.documentIndexPreview || options.document_index_preview || (previous && previous.meta && previous.meta.document_index_preview))
+  const evidence = ready ? indexPreview.slice(0, 40).map((node, index) => {
+    const item = cloneObject(node)
+    return {
+      source_id: sourceId,
+      sourceId,
+      source_title: title,
+      sourceTitle: title,
+      type: 'pageindex_node',
+      title: asText(item.title) || `文档章节 ${index + 1}`,
+      text: asText(item.summary || item.text),
+      citation: item.page_start || item.pageStart ? `PageIndex p.${item.page_start || item.pageStart}` : '',
+      payload: {
+        node_id: asText(item.node_id || item.nodeId),
+        parent_node_id: asText(item.parent_node_id || item.parentNodeId),
+        level: item.level,
+        page_start: item.page_start || item.pageStart,
+        page_end: item.page_end || item.pageEnd,
+      },
+    }
+  }).filter((item) => asText(item.text)) : []
+  const aiPayload = {
+    version: 'ppt_ai_input_block_v1',
+    source_id: sourceId,
+    sourceId,
+    title,
+    source_kind: 'document',
+    sourceKind: 'document',
+    included: evidence.length ? ['evidence'] : [],
+    scope: null,
+    metrics: [],
+    metric_gaps: [],
+    metricGaps: [],
+    evidence,
+    chart_specs: [],
+    chartSpecs: [],
+    excluded: [{ type: 'document_full_text', reason: '不传文档全文，只传 PageIndex 节点/章节摘要。', count: Number(options.count || indexPreview.length || 0) || 0 }],
+    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, chart_specs: 0 },
+    policy: '文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。',
+  }
+  const transport = ready ? createPptTransportFromAiPayload(aiPayload) : cloneObject(previous && previous.meta && previous.meta.transport)
+  const nextSource = normalizePptSource({
+    ...(previous || {}),
+    id: sourceId,
+    type: 'document',
+    title,
+    status,
+    selected: ready ? (previous ? !!previous.selected : true) : false,
+    meta: {
+      ...cloneObject(previous && previous.meta),
+      label,
+      sourceKind: 'document',
+      documentId,
+      fileName: asText(document.file_name || document.fileName),
+      count: Number(options.count ?? (previous && previous.meta && previous.meta.count) ?? 0) || 0,
+      document_index_preview: indexPreview,
+      aiPayload: ready ? aiPayload : cloneObject(previous && previous.meta && previous.meta.aiPayload),
+      ai_payload: ready ? aiPayload : cloneObject(previous && previous.meta && previous.meta.ai_payload),
+      transport,
+    },
+  })
+  const sources = normalized.sources.some((source) => asText(source.id) === sourceId)
+    ? normalized.sources.map((source) => (asText(source.id) === sourceId ? nextSource : source))
+    : [...normalized.sources, nextSource]
+  return createPptPlanningState({
+    ...normalized,
+    sources,
+    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources, normalized.ungroupedSourceIds),
+    spec: syncSpecSourceIds(normalized, sources),
+    generationError: '',
+    generationErrorSource: '',
+  })
+}
+
 export function addPptDataPackageSource(state = {}, response = {}) {
   const normalized = createPptPlanningState(state)
-  const packageSource = normalizePptSource(response.source || response)
+  let packageSource = normalizePptSource(response.source || response)
   if (!packageSource.id) return createPptPlanningState({ ...normalized, dataPackageGenerating: false })
+  const packageMeta = cloneObject(packageSource.meta)
+  const existingPayload = cloneObject(packageMeta.aiPayload || packageMeta.ai_payload)
+  const aiPayload = existingPayload.version === 'ppt_ai_input_block_v1'
+    ? existingPayload
+    : packageAiPayloadFromSource(packageSource)
+  packageSource = normalizePptSource({
+    ...packageSource,
+    meta: {
+      ...packageMeta,
+      aiPayload,
+      ai_payload: aiPayload,
+      transport: createPptTransportFromAiPayload(aiPayload),
+    },
+  })
   const nextMeta = cloneObject(packageSource.meta)
   const nextPack = cloneObject(nextMeta.package)
   const nextSourceIds = uniqueText(nextPack.source_ids || nextPack.sourceIds).sort()
@@ -970,7 +1370,7 @@ export function addPptDataPackageSource(state = {}, response = {}) {
   return createPptPlanningState({
     ...normalized,
     sources,
-    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources),
+    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources, normalized.ungroupedSourceIds),
     removedSourceIds: normalized.removedSourceIds,
     spec: {
       ...normalized.spec,
@@ -993,6 +1393,9 @@ export function selectDeckSlideBrief(state = {}, slideId = '') {
 export function buildPptSpecPayload(state = {}, context = {}) {
   const normalized = createPptPlanningState(state)
   const sourceIds = getSelectedPptSourceIds(normalized)
+  const sources = cloneArray(normalized.sources)
+    .filter((item) => sourceIds.includes(asText(item.id)))
+    .map(sourceForPptRequest)
   return {
     area_id: asText(context.areaId || context.area_id),
     source_ids: sourceIds,
@@ -1001,14 +1404,16 @@ export function buildPptSpecPayload(state = {}, context = {}) {
     deck_type: asText(normalized.spec.deckType),
     page_count: Number(normalized.spec.pageCount || 15),
     research_enabled: !!normalized.spec.researchEnabled,
-    sources: cloneArray(normalized.sources).filter((item) => sourceIds.includes(asText(item.id))),
-    analysis_context: cloneObject(context.analysisContext || context.analysis_context),
+    sources,
   }
 }
 
 export function buildDeckBriefPayload(state = {}, context = {}) {
   const normalized = createPptPlanningState(state)
   const sourceIds = getSelectedPptSourceIds(normalized)
+  const sources = cloneArray(normalized.sources)
+    .filter((item) => sourceIds.includes(asText(item.id)))
+    .map(sourceForPptRequest)
   return {
     area_id: asText(context.areaId || context.area_id),
     spec: {
@@ -1027,8 +1432,7 @@ export function buildDeckBriefPayload(state = {}, context = {}) {
       missing_inputs: cloneArray(normalized.spec.missingInputs),
     },
     source_ids: sourceIds,
-    sources: cloneArray(normalized.sources).filter((item) => sourceIds.includes(asText(item.id))),
-    analysis_context: cloneObject(context.analysisContext || context.analysis_context),
+    sources,
     topic: asText(normalized.spec.topic),
     audience: asText(normalized.spec.audience),
     deck_type: asText(normalized.spec.deckType),
@@ -1099,6 +1503,10 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
       visual_plan: item.visualPlan,
       required_sources: cloneArray(item.requiredSources),
       speaker_notes: item.speakerNotes,
+      metric_claims: cloneArray(item.metricClaims),
+      metric_gaps: cloneArray(item.metricGaps),
+      chart_specs: cloneArray(item.chartSpecs),
+      chart_artifacts: cloneArray(item.chartArtifacts),
     })),
     target: {
       index: targetItem.index,
@@ -1108,6 +1516,10 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
       visual_plan: targetItem.visualPlan,
       required_sources: cloneArray(targetItem.requiredSources),
       speaker_notes: targetItem.speakerNotes,
+      metric_claims: cloneArray(targetItem.metricClaims),
+      metric_gaps: cloneArray(targetItem.metricGaps),
+      chart_specs: cloneArray(targetItem.chartSpecs),
+      chart_artifacts: cloneArray(targetItem.chartArtifacts),
     },
     outline_item: outlineItem ? {
       id: outlineItem.id,

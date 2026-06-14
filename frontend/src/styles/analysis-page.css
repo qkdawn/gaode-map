@@ -1902,7 +1902,20 @@ label {
     background: #ffffff;
     font-size: 13px;
     font-weight: 850;
-    cursor: not-allowed;
+    cursor: pointer;
+}
+
+.agent-ppt-add-source-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+}
+
+.agent-ppt-source-file-input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    opacity: 0;
+    pointer-events: none;
 }
 
 .agent-ppt-source-search {
@@ -2435,6 +2448,15 @@ body.agent-ppt-source-menu-open {
     box-shadow: 0 4px 0 #111827;
 }
 
+.agent-ppt-source-icon.is-document {
+    border-color: #7c3aed;
+}
+
+.agent-ppt-source-icon.is-document::after {
+    background: #7c3aed;
+    box-shadow: 0 4px 0 #7c3aed;
+}
+
 .agent-ppt-source-name {
     min-width: 0;
     display: grid;
@@ -2458,6 +2480,19 @@ body.agent-ppt-source-menu-open {
     font-size: 11px;
     line-height: 1.2;
     font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-ppt-source-name em,
+.agent-ppt-package-detail-head em {
+    min-width: 0;
+    color: #0f766e;
+    font-size: 11px;
+    line-height: 1.25;
+    font-style: normal;
+    font-weight: 750;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2592,6 +2627,10 @@ body.agent-ppt-source-menu-open {
     width: min(1180px, calc(100vw - 40px));
 }
 
+.agent-ppt-current-source-detail {
+    width: min(860px, calc(100vw - 40px));
+}
+
 .agent-ppt-package-detail-head {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 32px;
@@ -2685,6 +2724,160 @@ body.agent-ppt-source-menu-open {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.agent-ppt-current-metric-list {
+    display: grid;
+    gap: 10px;
+}
+
+.agent-ppt-current-transport {
+    display: grid;
+    gap: 10px;
+}
+
+.agent-ppt-current-transport-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.agent-ppt-current-transport-grid article,
+.agent-ppt-current-transport-excluded {
+    min-width: 0;
+    border: 1px solid #ccfbf1;
+    border-radius: 10px;
+    padding: 10px;
+    background: #f0fdfa;
+    display: grid;
+    gap: 4px;
+}
+
+.agent-ppt-current-transport-grid span,
+.agent-ppt-current-transport-excluded strong {
+    color: #0f766e;
+    font-size: 11px;
+    line-height: 1.25;
+    font-weight: 780;
+}
+
+.agent-ppt-current-transport-grid strong {
+    min-width: 0;
+    color: #134e4a;
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.agent-ppt-current-transport-excluded {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+}
+
+.agent-ppt-current-transport-excluded p {
+    margin: 0;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.agent-ppt-current-metric-card,
+.agent-ppt-current-gap-card {
+    min-width: 0;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px;
+    background: #ffffff;
+    display: grid;
+    gap: 10px;
+}
+
+.agent-ppt-current-metric-card header {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: start;
+}
+
+.agent-ppt-current-metric-card header > div {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.agent-ppt-current-metric-card header span,
+.agent-ppt-current-gap-card span {
+    color: #64748b;
+    font-size: 11px;
+    line-height: 1.2;
+    font-weight: 750;
+}
+
+.agent-ppt-current-metric-card header strong,
+.agent-ppt-current-gap-card strong {
+    min-width: 0;
+    color: #111827;
+    font-size: 14px;
+    line-height: 1.35;
+    font-weight: 780;
+    overflow-wrap: anywhere;
+}
+
+.agent-ppt-current-metric-card header b {
+    color: #0f766e;
+    font-size: 16px;
+    line-height: 1.2;
+    font-weight: 820;
+    white-space: nowrap;
+}
+
+.agent-ppt-current-metric-card dl {
+    margin: 0;
+    display: grid;
+    gap: 7px;
+}
+
+.agent-ppt-current-metric-card dl div {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    gap: 8px;
+}
+
+.agent-ppt-current-metric-card dt {
+    color: #94a3b8;
+    font-size: 11px;
+    line-height: 1.45;
+    font-weight: 750;
+}
+
+.agent-ppt-current-metric-card dd {
+    margin: 0;
+    color: #334155;
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.agent-ppt-current-gap-list {
+    display: grid;
+    gap: 8px;
+}
+
+.agent-ppt-current-gap-card {
+    gap: 5px;
+    background: #fff7ed;
+    border-color: #fed7aa;
+}
+
+.agent-ppt-current-gap-card p {
+    margin: 0;
+    color: #7c2d12;
+    font-size: 12px;
+    line-height: 1.5;
 }
 
 .agent-ppt-package-meta {
@@ -3140,6 +3333,59 @@ body.agent-ppt-source-menu-open {
     line-height: 1.4;
     font-weight: 700;
     text-align: center;
+}
+
+.agent-ppt-document-evidence-detail {
+    width: min(860px, calc(100vw - 40px));
+}
+
+.agent-ppt-document-index-list {
+    display: grid;
+    gap: 10px;
+}
+
+.agent-ppt-document-index-card {
+    margin-left: calc(min(var(--node-depth, 0), 4) * 16px);
+    border: 1px solid #dbe4ee;
+    border-left: 3px solid #0f766e;
+    border-radius: 8px;
+    padding: 11px 12px;
+    background: #ffffff;
+    display: grid;
+    gap: 7px;
+}
+
+.agent-ppt-document-index-card header {
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.agent-ppt-document-index-card header strong {
+    min-width: 0;
+    color: #111827;
+    font-size: 14px;
+    line-height: 1.25;
+    font-weight: 850;
+    overflow-wrap: anywhere;
+}
+
+.agent-ppt-document-index-card header span {
+    flex: 0 0 auto;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.3;
+    font-weight: 760;
+}
+
+.agent-ppt-document-index-card p {
+    margin: 0;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.55;
+    font-weight: 620;
 }
 
 @media (max-width: 720px) {
@@ -3639,6 +3885,96 @@ body.agent-ppt-source-menu-open {
     line-height: 1.65;
     font-weight: 650;
     overflow-wrap: anywhere;
+}
+
+.agent-ppt-metric-claims,
+.agent-ppt-metric-gaps,
+.agent-ppt-chart-specs {
+    display: grid;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.agent-ppt-metric-claims > span,
+.agent-ppt-metric-gaps > span,
+.agent-ppt-chart-specs > span {
+    font-size: 11px;
+    font-weight: 850;
+    color: #64748b;
+}
+
+.agent-ppt-metric-claims article,
+.agent-ppt-chart-specs article {
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+    border-radius: 8px;
+    padding: 9px 10px;
+}
+
+.agent-ppt-metric-claims article strong {
+    display: block;
+    font-size: 16px;
+    color: #0f766e;
+}
+
+.agent-ppt-metric-claims article p,
+.agent-ppt-metric-gaps p {
+    margin: 4px 0;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #334155;
+}
+
+.agent-ppt-metric-claims article small,
+.agent-ppt-chart-specs article small {
+    font-size: 11px;
+    color: #94a3b8;
+}
+
+.agent-ppt-metric-gaps p {
+    border-left: 3px solid #f59e0b;
+    background: #fff7ed;
+    border-radius: 6px;
+    padding: 7px 9px;
+}
+
+.agent-ppt-chart-specs article header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.agent-ppt-chart-specs article header strong {
+    font-size: 13px;
+    color: #1f2937;
+}
+
+.agent-ppt-chart-specs img {
+    display: block;
+    width: 100%;
+    max-height: 220px;
+    object-fit: contain;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    background: #f8fafc;
+    margin-bottom: 8px;
+}
+
+.agent-ppt-chart-specs table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    color: #334155;
+}
+
+.agent-ppt-chart-specs th,
+.agent-ppt-chart-specs td {
+    border-top: 1px solid #eef2f7;
+    padding: 5px 4px;
+    text-align: left;
+    vertical-align: top;
 }
 
 .agent-ppt-revision-stale {

@@ -12,11 +12,11 @@ export default defineConfig(({ command }) => ({
     },
     proxy: {
       '/api': {
-        target: process.env.VITE_BACKEND_ORIGIN || 'http://127.0.0.1:8000',
+        target: process.env.VITE_BACKEND_ORIGIN || 'http://127.0.0.1:8001',
         changeOrigin: true,
       },
       '/static': {
-        target: process.env.VITE_BACKEND_ORIGIN || 'http://127.0.0.1:8000',
+        target: process.env.VITE_BACKEND_ORIGIN || 'http://127.0.0.1:8001',
         changeOrigin: true,
       },
     },

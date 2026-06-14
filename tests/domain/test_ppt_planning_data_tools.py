@@ -1,6 +1,9 @@
 import asyncio
+from datetime import datetime
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from modules.ppt_planning.data_tools import (
     PptDataIntentLlmUnavailable,
@@ -13,6 +16,7 @@ from modules.ppt_planning.data_tools import (
 )
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
 from modules.ppt_planning.schemas import PptDataPackageRequest, PptPoiNearbyRequest, PptPoiQueryRequest
+from store.ai_models import AiBase, Document, DocumentIndexNode
 
 
 def _fake_detail():
@@ -832,3 +836,60 @@ def test_list_ppt_sources_marks_scope_and_poi_ready(monkeypatch):
     assert sources["system:poi"].status == "ready"
     assert sources["system:poi"].count == 3
     assert sources["system:h3"].status == "pending"
+
+
+def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, future=True)
+    AiBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = factory()
+    try:
+        session.add(
+            Document(
+                id="doc-1",
+                title="更新政策研究",
+                file_name="policy.pdf",
+                file_type="pdf",
+                file_path="/tmp/policy.pdf",
+                document_role="policy_document",
+                upload_time=datetime(2026, 6, 12, 1, 0, 0),
+                status="parsed",
+            )
+        )
+        session.add(
+            DocumentIndexNode(
+                document_id="doc-1",
+                node_id="n1",
+                parent_node_id="root",
+                title="政策要求",
+                level=1,
+                ordinal=1,
+                start_block_index=0,
+                end_block_index=1,
+                page_start=3,
+                page_end=3,
+                summary="政策要求完善公共服务设施。",
+                text="政策要求完善公共服务设施。",
+                created_at=datetime(2026, 6, 12, 1, 0, 0),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    monkeypatch.setattr("modules.ppt_planning.data_tools.AiSessionLocal", factory)
+    monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_detail", lambda area_id, include_pois=False: _fake_detail())
+    monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_pois", lambda area_id, year=None: _fake_pois())
+    monkeypatch.setattr("modules.ppt_planning.data_tools.analysis_artifact_repo.list", lambda *args, **kwargs: [])
+
+    sources = {item.id: item for item in list_ppt_sources("history-1")}
+
+    source = sources["document:doc-1"]
+    assert source.type == "document"
+    assert source.status == "ready"
+    assert source.count == 1
+    assert source.summary == "章节 1 个"
+    assert source.meta["sourceKind"] == "document"
+    assert source.meta["document"]["document_role"] == "policy_document"
+    assert source.meta["document"]["index_count"] == 1
+    assert source.meta["document_index_preview"][0]["title"] == "政策要求"

@@ -11,7 +11,7 @@ from uuid import uuid4
 from core.config import settings
 from modules.jobs import JobCreateResponse, create_job, schedule_job
 from store.ai_database import SessionLocal
-from store.ai_models import Document, DocumentBlock
+from store.ai_models import Document, DocumentBlock, DocumentIndexNode
 
 from .docling_parser import ParsedDocumentBlock, parse_document_with_docling
 from .schemas import DocumentBlockResponse, DocumentBlocksResponse, DocumentRecord
@@ -175,6 +175,39 @@ def get_document(document_id: str) -> DocumentRecord:
         session.close()
 
 
+def delete_document(document_id: str) -> DocumentRecord:
+    normalized_id = str(document_id or "").strip()
+    if not normalized_id:
+        raise DocumentNotFound("document_not_found")
+    session = SessionLocal()
+    file_root: Path | None = None
+    try:
+        record = session.get(Document, normalized_id)
+        if record is None:
+            raise DocumentNotFound("document_not_found")
+        payload = _record_payload(record)
+        file_path = Path(str(record.file_path or "")).resolve() if record.file_path else None
+        document_root = _document_root()
+        if file_path:
+            try:
+                file_path.relative_to(document_root)
+                file_root = file_path.parent.parent if file_path.parent.name == "source" else file_path.parent
+            except ValueError:
+                file_root = None
+        session.query(DocumentIndexNode).filter_by(document_id=normalized_id).delete()
+        session.query(DocumentBlock).filter_by(document_id=normalized_id).delete()
+        session.delete(record)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+    if file_root is not None and file_root.exists():
+        shutil.rmtree(file_root, ignore_errors=True)
+    return payload
+
+
 def schedule_document_parse(document_id: str) -> JobCreateResponse:
     normalized_id = str(document_id or "").strip()
     if not normalized_id:
@@ -216,7 +249,11 @@ async def parse_document(document_id: str) -> DocumentRecord:
         _mark_document_failed(normalized_id)
         raise
 
-    return _replace_document_blocks(normalized_id, parsed_blocks)
+    record = _replace_document_blocks(normalized_id, parsed_blocks)
+    from .pageindex import rebuild_document_index
+
+    await asyncio.to_thread(rebuild_document_index, normalized_id)
+    return record
 
 
 def _mark_document_failed(document_id: str) -> None:
@@ -226,6 +263,7 @@ def _mark_document_failed(document_id: str) -> None:
         if record is not None:
             record.status = "failed"
         session.query(DocumentBlock).filter_by(document_id=document_id).delete()
+        session.query(DocumentIndexNode).filter_by(document_id=document_id).delete()
         session.commit()
     except Exception:
         session.rollback()
@@ -240,6 +278,7 @@ def _replace_document_blocks(document_id: str, blocks: List[ParsedDocumentBlock]
         record = session.get(Document, document_id)
         if record is None:
             raise DocumentNotFound("document_not_found")
+        session.query(DocumentIndexNode).filter_by(document_id=document_id).delete()
         session.query(DocumentBlock).filter_by(document_id=document_id).delete()
         for block in blocks:
             session.add(

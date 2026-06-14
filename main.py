@@ -20,6 +20,7 @@ from core.exceptions import BizError
 from core.middleware import SelectiveGZipMiddleware
 from modules.population.runtime_check import run_population_runtime_check
 from router import admin_router, app_router
+from store.ai_database import init_ai_db
 from store import init_db
 
 # ==================== 配置日志 ====================
@@ -43,6 +44,11 @@ async def lifespan(_: FastAPI):
         await asyncio.to_thread(init_db)
     except Exception:
         logger.exception("数据库初始化失败，应用将以降级模式继续启动")
+
+    try:
+        await asyncio.to_thread(init_ai_db)
+    except Exception:
+        logger.exception("AI 文档数据库初始化失败，文档来源将以降级模式不可用")
 
     # 确保静态文件目录存在
     os.makedirs(settings.static_dir, exist_ok=True)

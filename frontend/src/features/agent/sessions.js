@@ -109,6 +109,8 @@ function createAnalysisAgentInitialState() {
     basisPromptError: '',
     basisPromptNotice: '',
     agentPromptConfigs: {},
+    agentPptPlanningAutoPackageKeys: {},
+    agentPptPlanningPackageErrors: {},
     agentTabs: {
       summaryTab: {
         id: 'summary',

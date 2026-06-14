@@ -89,6 +89,23 @@ def test_documents_api_lists_and_reads_records(monkeypatch):
     assert detail.json()["id"] == "doc-1"
 
 
+def test_document_delete_api_removes_document(monkeypatch):
+    deleted = {}
+
+    def fake_delete(document_id):
+        deleted["document_id"] = document_id
+        return _record(document_id)
+
+    monkeypatch.setattr(documents, "delete_document", fake_delete)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.delete("/documents/doc-1")
+
+    assert response.status_code == 200
+    assert deleted["document_id"] == "doc-1"
+    assert response.json()["id"] == "doc-1"
+
+
 def test_documents_api_maps_not_found_and_database_errors(monkeypatch):
     def fake_get(_document_id):
         from modules.documents.service import DocumentNotFound
@@ -170,69 +187,37 @@ def test_document_blocks_api_returns_status_object(monkeypatch):
     assert payload["blocks"][0]["blockType"] == "title"
 
 
-def test_document_build_evidence_api_schedules_background_job(monkeypatch):
-    def fake_schedule(document_id):
-        assert document_id == "doc-1"
-        return JobCreateResponse(job_id="job-2", status="pending")
-
-    monkeypatch.setattr(documents, "schedule_document_evidence_build", fake_schedule)
-
-    with TestClient(_build_test_app()) as client:
-        response = client.post("/documents/doc-1/build-evidence")
-
-    assert response.status_code == 200
-    assert response.json() == {"job_id": "job-2", "status": "pending"}
-
-
-def test_document_build_evidence_api_maps_missing_document(monkeypatch):
-    def fake_schedule(_document_id):
-        from modules.documents.service import DocumentNotFound
-
-        raise DocumentNotFound("document_not_found")
-
-    monkeypatch.setattr(documents, "schedule_document_evidence_build", fake_schedule)
-
-    with TestClient(_build_test_app()) as client:
-        response = client.post("/documents/missing/build-evidence")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "document_not_found"
-
-
-def test_document_evidence_api_returns_query_contract(monkeypatch):
-    from modules.documents.schemas import EvidenceChunkRecord
+def test_document_index_api_returns_pageindex_nodes(monkeypatch):
+    from modules.documents.schemas import DocumentIndexNodeRecord
 
     monkeypatch.setattr(
         documents,
-        "list_evidence_chunks",
+        "list_document_index_nodes",
         lambda document_id: [
-            EvidenceChunkRecord(
+            DocumentIndexNodeRecord(
                 id=1,
                 document_id=document_id,
-                document_role="evidence_document",
-                text="原文",
-                summary="摘要",
+                node_id="n1",
+                parent_node_id="root",
+                title="区域功能再定义问题：",
+                level=2,
+                ordinal=1,
+                start_block_index=3,
+                end_block_index=4,
                 page_start=1,
-                page_end=2,
-                section_path=["背景"],
-                chunk_type="paragraph",
-                semantic_type="background_statement",
-                tags=["project_background"],
-                citation="《报告》p.1",
-                created_at=datetime(2026, 6, 12, 1, 0, 0),
+                page_end=1,
+                summary="项目需要明确社区、综合体、街区之间的关系。",
+                text="项目需要明确社区、综合体、街区之间的关系。",
+                created_at=datetime(2026, 6, 13, 1, 0, 0),
             )
         ],
     )
 
     with TestClient(_build_test_app()) as client:
-        response = client.get("/documents/doc-1/evidence")
+        response = client.get("/documents/doc-1/index")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["document_id"] == "doc-1"
-    assert payload["chunks"][0]["summary"] == "摘要"
-    assert payload["chunks"][0]["semantic_type"] == "background_statement"
-    assert payload["chunks"][0]["tags"] == ["project_background"]
-    assert payload["chunks"][0]["page_start"] == 1
-    assert payload["chunks"][0]["page_end"] == 2
-    assert payload["chunks"][0]["citation"] == "《报告》p.1"
+    assert payload["nodes"][0]["title"] == "区域功能再定义问题："
+    assert payload["nodes"][0]["parent_node_id"] == "root"

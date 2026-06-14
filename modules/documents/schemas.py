@@ -55,24 +55,32 @@ class DocumentBlocksResponse(BaseModel):
     blocks: List[DocumentBlockResponse]
 
 
-class EvidenceChunkRecord(BaseModel):
+class DocumentIndexNodeRecord(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     document_id: str
-    document_role: str
-    text: str
-    summary: str = ""
+    node_id: str
+    parent_node_id: str = ""
+    title: str
+    level: int
+    ordinal: int
+    start_block_index: int
+    end_block_index: int
     page_start: int
     page_end: int
-    section_path: List[str] = Field(default_factory=list)
-    chunk_type: Literal["paragraph", "table", "title", "figure", "caption"]
-    semantic_type: str = "background_statement"
-    tags: List[str] = Field(default_factory=list)
-    citation: str
+    summary: str = ""
+    text: str = ""
+    meta: dict = Field(default_factory=dict)
     created_at: datetime
 
 
-class EvidenceChunksResponse(BaseModel):
+class DocumentIndexResponse(BaseModel):
     document_id: str
-    chunks: List[EvidenceChunkRecord]
+    nodes: List[DocumentIndexNodeRecord]
+
+
+class PageIndexContentResponse(BaseModel):
+    document_id: str
+    pages: str
+    items: List[dict] = Field(default_factory=list)
