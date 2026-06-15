@@ -19,6 +19,14 @@ from modules.ppt_planning.schemas import PptDataPackageRequest, PptPoiNearbyRequ
 from store.ai_models import AiBase, Document, DocumentIndexNode
 
 
+@pytest.fixture(autouse=True)
+def _disable_ppt_package_artifact_writes(monkeypatch):
+    def fake_upsert(**kwargs):
+        return {"id": 1, **kwargs}
+
+    monkeypatch.setattr("modules.ppt_planning.data_tools.analysis_artifact_repo.upsert", fake_upsert)
+
+
 def _fake_detail():
     return {
         "id": "history-1",
@@ -290,20 +298,26 @@ def _fake_carrier_artifacts(*, road_mode="block_loop", missing_population=False,
                     "params": {"view": "density"},
                     "payload": {
                         "view": "density",
-                        "legend": {"title": "人口密度", "unit": "人/平方公里"},
-                        "layer_cells": [{"cell_id": "r0_c0", "value": 8800}],
+                        "layer": {
+                            "view": "density",
+                            "legend": {"title": "人口密度", "unit": "人/平方公里"},
+                            "cells": [{"cell_id": "r0_c0", "value": 8800}],
+                        },
                     },
                 }]
             return [{
                 "params": {"view": "overview"},
                 "payload": {
                     "view": "overview",
-                    "selected": {"view": "overview", "view_label": "总人口", "unit": "人口"},
-                    "layer_cells": [{"cell_id": "r0_c0", "value": 1800}],
+                    "layer": {
+                        "view": "overview",
+                        "selected": {"view": "overview", "view_label": "总人口", "unit": "人口"},
+                        "cells": [{"cell_id": "r0_c0", "value": 1800}],
+                    },
                 },
             }]
         if artifact_type == "nightlight" and not missing_nightlight:
-            return [{"payload": {"layer_cells": [{"cell_id": "r0_c0", "value": 24.5, "class_key": "core_hotspot", "class_label": "核心热点"}]}}]
+            return [{"payload": {"layer": {"cells": [{"cell_id": "r0_c0", "value": 24.5, "class_key": "core_hotspot", "class_label": "核心热点"}]}}}]
         return []
     return fake_artifacts
 
@@ -359,7 +373,7 @@ def test_create_ppt_data_package_returns_ready_source(monkeypatch):
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi"],
+        source_ids=["current:dataset:poi"],
         package_mode="query",
         limit=2,
     )))
@@ -396,7 +410,7 @@ def test_create_ppt_evidence_package_uses_llm_plan(monkeypatch):
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi"],
+        source_ids=["current:dataset:poi"],
         package_mode="evidence",
         intent="文教资源",
         limit=10,
@@ -446,7 +460,7 @@ def test_create_ppt_evidence_package_uses_current_request_center(monkeypatch):
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi"],
+        source_ids=["current:dataset:poi"],
         package_mode="evidence",
         intent="中心周边文教资源",
         limit=10,
@@ -503,7 +517,7 @@ def test_create_ppt_evidence_package_merges_group_queries(monkeypatch):
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi"],
+        source_ids=["current:dataset:poi"],
         package_mode="evidence",
         intent="夜间消费",
         limit=4,
@@ -546,13 +560,15 @@ def test_create_ppt_nightlife_package_aligns_poi_with_nightlight_cells(monkeypat
         if artifact_type == "nightlight":
             return [{
                 "payload": {
-                    "layer_cells": [{
-                        "cell_id": "r0_c0",
-                        "value": 12.5,
-                        "class_key": "core_hotspot",
-                        "class_label": "核心热点",
-                        "has_data": True,
-                    }],
+                    "layer": {
+                        "cells": [{
+                            "cell_id": "r0_c0",
+                            "value": 12.5,
+                            "class_key": "core_hotspot",
+                            "class_label": "核心热点",
+                            "has_data": True,
+                        }],
+                    },
                 },
             }]
         return []
@@ -563,7 +579,7 @@ def test_create_ppt_nightlife_package_aligns_poi_with_nightlight_cells(monkeypat
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi", "system:nightlight"],
+        source_ids=["current:dataset:poi", "current:analysis:nightlight"],
         package_mode="evidence",
         intent="整理夜生活与夜间消费相关 POI，并与夜光格子对应",
         limit=10,
@@ -573,7 +589,7 @@ def test_create_ppt_nightlife_package_aligns_poi_with_nightlight_cells(monkeypat
     items_by_id = {item["id"]: item for item in package["items"]}
 
     assert response.source.title == "夜生活 POI × 夜光格子资料包"
-    assert package["source_ids"] == ["system:nightlight", "system:poi"]
+    assert package["source_ids"] == ["current:analysis:nightlight", "current:dataset:poi"]
     assert package["alignment"]["join_key"] == "cell_id"
     assert package["alignment"]["matched_item_count"] >= 2
     assert "intent_plan" in package
@@ -613,12 +629,14 @@ def test_create_ppt_nightlife_package_uses_nearest_cell_for_edge_poi(monkeypatch
         if artifact_type == "nightlight":
             return [{
                 "payload": {
-                    "layer_cells": [{
-                        "cell_id": "r0_c0",
-                        "value": 18.25,
-                        "class_label": "边缘热点",
-                        "has_data": True,
-                    }],
+                    "layer": {
+                        "cells": [{
+                            "cell_id": "r0_c0",
+                            "value": 18.25,
+                            "class_label": "边缘热点",
+                            "has_data": True,
+                        }],
+                    },
                 },
             }]
         return []
@@ -629,7 +647,7 @@ def test_create_ppt_nightlife_package_uses_nearest_cell_for_edge_poi(monkeypatch
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi", "system:nightlight"],
+        source_ids=["current:dataset:poi", "current:analysis:nightlight"],
         package_mode="evidence",
         intent="整理夜生活与夜间消费相关 POI，并与夜光格子对应",
         limit=10,
@@ -647,15 +665,29 @@ def test_create_ppt_nightlife_package_uses_nearest_cell_for_edge_poi(monkeypatch
 
 
 def test_create_ppt_carrier_package_detects_block_loop_and_layers(monkeypatch):
+    upserts = []
     monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_detail", lambda area_id, include_pois=False: _fake_detail())
     monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_pois", lambda area_id, year=None: _fake_carrier_pois())
-    monkeypatch.setattr("modules.ppt_planning.data_tools.analysis_artifact_repo.list", _fake_carrier_artifacts())
+    fake_carrier_artifacts = _fake_carrier_artifacts()
+
+    def fake_list(area_id, artifact_type="", params_hash=""):
+        if artifact_type == "ppt_data_package":
+            return []
+        return fake_carrier_artifacts(area_id, artifact_type=artifact_type, params_hash=params_hash)
+
+    def fake_upsert(**kwargs):
+        upserts.append(kwargs)
+        return {"id": len(upserts), **kwargs}
+
+    monkeypatch.setattr("modules.ppt_planning.data_tools.analysis_artifact_repo.list", fake_list)
+    monkeypatch.setattr("modules.ppt_planning.data_tools.analysis_artifact_repo.upsert", fake_upsert)
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi", "system:road-syntax", "system:population", "system:nightlight"],
+        source_ids=["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
         package_mode="evidence",
         intent="识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
+        package_version="road-carrier-evidence-v2",
         limit=10,
     )))
 
@@ -679,10 +711,20 @@ def test_create_ppt_carrier_package_detects_block_loop_and_layers(monkeypatch):
     assert carrier["poi_metrics"]["total_related_poi_count"] >= 3
     assert carrier["population_metrics"]["total_population"] == 1800
     assert carrier["nightlight_metrics"]["hotspot_cell_count"] == 1
+    assert carrier["nightlight_metrics"]["mean_radiance"] == 24.5
     assert carrier["carrier_label"] in {"成熟商业街区", "夜间消费街区"}
     assert carrier["geometry"]["polygon"]
     assert package["items"]
     assert package["alignment"]["alignment_level"] == "carrier_geometry_to_shared_cell_intersection"
+    assert package["area_id"] == "history-1"
+    assert package["package_version"] == "road-carrier-evidence-v2"
+    assert response.source.meta["areaId"] == "history-1"
+    assert response.source.meta["packageVersion"] == "road-carrier-evidence-v2"
+    assert upserts
+    assert upserts[0]["history_id"] == "history-1"
+    assert upserts[0]["artifact_type"] == "ppt_data_package"
+    assert upserts[0]["params"]["package_version"] == "road-carrier-evidence-v2"
+    assert upserts[0]["payload"]["source"]["meta"]["package"]["carriers"]
 
 
 def test_create_ppt_carrier_package_limits_representative_pois_per_carrier(monkeypatch):
@@ -692,7 +734,7 @@ def test_create_ppt_carrier_package_limits_representative_pois_per_carrier(monke
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi", "system:road-syntax", "system:population", "system:nightlight"],
+        source_ids=["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
         package_mode="evidence",
         intent="识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
         limit=50,
@@ -707,6 +749,57 @@ def test_create_ppt_carrier_package_limits_representative_pois_per_carrier(monke
     assert package["carrier_summary"]["carrier_count"] == len(package["carriers"])
 
 
+def test_list_ppt_sources_restores_package_artifacts(monkeypatch):
+    package_source = {
+        "id": "package:poi-road-carriers:test",
+        "type": "package",
+        "title": "POI × 路网空间载体资料包",
+        "status": "ready",
+        "selected": True,
+        "meta": {
+            "label": "空间载体 2 个",
+            "sourceKind": "package",
+            "areaId": "history-1",
+            "packageVersion": "road-carrier-evidence-v2",
+            "package": {
+                "id": "package:poi-road-carriers:test",
+                "area_id": "history-1",
+                "package_version": "road-carrier-evidence-v2",
+                "package_mode": "evidence",
+                "intent": "识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
+                "source_ids": ["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
+                "carriers": [{"carrier_id": "corridor_01"}],
+                "total": 2,
+            },
+        },
+    }
+
+    def fake_list(area_id, artifact_type="", params_hash=""):
+        if artifact_type == "ppt_data_package":
+            return [{
+                "payload": {
+                    "source": package_source,
+                    "summary": "空间载体 2 个",
+                    "items": [],
+                    "evidence_refs": [],
+                    "warnings": [],
+                },
+            }]
+        return []
+
+    monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_detail", lambda area_id, include_pois=False: _fake_detail())
+    monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_pois", lambda area_id, year=None: _fake_pois())
+    monkeypatch.setattr("modules.ppt_planning.data_tools.analysis_artifact_repo.list", fake_list)
+
+    sources = list_ppt_sources("history-1")
+    restored = next(item for item in sources if item.id == "package:poi-road-carriers:test")
+
+    assert restored.status == "ready"
+    assert restored.meta["areaId"] == "history-1"
+    assert restored.meta["packageVersion"] == "road-carrier-evidence-v2"
+    assert restored.meta["package"]["carriers"][0]["carrier_id"] == "corridor_01"
+
+
 def test_create_ppt_carrier_package_does_not_claim_density_as_total_population(monkeypatch):
     monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_detail", lambda area_id, include_pois=False: _fake_detail())
     monkeypatch.setattr("modules.ppt_planning.data_tools.history_repo.get_pois", lambda area_id, year=None: _fake_carrier_pois())
@@ -717,7 +810,7 @@ def test_create_ppt_carrier_package_does_not_claim_density_as_total_population(m
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi", "system:road-syntax", "system:population", "system:nightlight"],
+        source_ids=["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
         package_mode="evidence",
         intent="识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
         limit=10,
@@ -741,7 +834,7 @@ def test_create_ppt_carrier_package_turns_open_roads_into_corridor_not_loop(monk
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi", "system:road-syntax", "system:population", "system:nightlight"],
+        source_ids=["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
         package_mode="evidence",
         intent="识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
         limit=10,
@@ -765,7 +858,7 @@ def test_create_ppt_carrier_package_turns_single_road_into_segment(monkeypatch):
 
     response = asyncio.run(create_ppt_data_package(PptDataPackageRequest(
         area_id="history-1",
-        source_ids=["system:poi", "system:road-syntax", "system:population", "system:nightlight"],
+        source_ids=["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
         package_mode="evidence",
         intent="识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
         limit=10,
@@ -790,7 +883,7 @@ def test_create_ppt_carrier_package_requires_population_and_nightlight(monkeypat
     with pytest.raises(PptDataSourceNotFound, match="carrier_package_missing_population"):
         asyncio.run(create_ppt_data_package(PptDataPackageRequest(
             area_id="history-1",
-            source_ids=["system:poi", "system:road-syntax", "system:population", "system:nightlight"],
+                source_ids=["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
             package_mode="evidence",
             intent="识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
             limit=10,
@@ -804,7 +897,7 @@ def test_create_ppt_evidence_package_requires_llm(monkeypatch):
     with pytest.raises(PptDataIntentLlmUnavailable):
         asyncio.run(create_ppt_data_package(PptDataPackageRequest(
             area_id="history-1",
-            source_ids=["system:poi"],
+            source_ids=["current:dataset:poi"],
             package_mode="evidence",
         )))
 
@@ -820,7 +913,7 @@ def test_create_ppt_evidence_package_rejects_empty_llm_plan(monkeypatch):
     with pytest.raises(PptDataInvalidIntentPlan):
         asyncio.run(create_ppt_data_package(PptDataPackageRequest(
             area_id="history-1",
-            source_ids=["system:poi"],
+            source_ids=["current:dataset:poi"],
             package_mode="evidence",
         )))
 
@@ -832,10 +925,10 @@ def test_list_ppt_sources_marks_scope_and_poi_ready(monkeypatch):
 
     sources = {item.id: item for item in list_ppt_sources("history-1")}
 
-    assert sources["system:scope"].status == "ready"
-    assert sources["system:poi"].status == "ready"
-    assert sources["system:poi"].count == 3
-    assert sources["system:h3"].status == "pending"
+    assert sources["current:scope"].status == "ready"
+    assert sources["current:dataset:poi"].status == "ready"
+    assert sources["current:dataset:poi"].count == 3
+    assert sources["current:dataset:h3"].status == "pending"
 
 
 def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):

@@ -141,6 +141,74 @@ def _analysis_metric_gap(metric: Dict[str, Any], index: int) -> Dict[str, Any]:
     }
 
 
+def _carrier_scope(carrier: Dict[str, Any]) -> str:
+    carrier_id = _clean_text(carrier.get("carrier_id") or carrier.get("carrierId"))
+    label = _clean_text(carrier.get("carrier_label") or carrier.get("carrierLabel"))
+    carrier_type = _clean_text(carrier.get("carrier_type") or carrier.get("carrierType"))
+    if label and carrier_id:
+        return f"{label} / {carrier_id}"
+    if label:
+        return label
+    if carrier_id:
+        return carrier_id
+    return carrier_type or "空间载体"
+
+
+def _append_carrier_package_metrics(metrics: List[Dict[str, Any]], *, source: PptSource, package: Dict[str, Any]) -> None:
+    for index, raw_carrier in enumerate(_safe_list(package.get("carriers")), start=1):
+        carrier = _safe_dict(raw_carrier)
+        carrier_id = _clean_text(carrier.get("carrier_id") or carrier.get("carrierId")) or f"carrier_{index:02d}"
+        scope = _carrier_scope(carrier)
+        poi_metrics = _safe_dict(carrier.get("poi_metrics") or carrier.get("poiMetrics"))
+        nightlight_metrics = _safe_dict(carrier.get("nightlight_metrics") or carrier.get("nightlightMetrics"))
+        road_metrics = _safe_dict(carrier.get("road_metrics") or carrier.get("roadMetrics"))
+        _metric(
+            metrics,
+            source_id=source.id,
+            domain="carrier",
+            key=f"{carrier_id}:poi_density_per_km2",
+            label=f"{scope} POI 密度",
+            value=poi_metrics.get("poi_density_per_km2"),
+            unit="个/km²",
+            method="来自空间载体资料包 poi_metrics.poi_density_per_km2。",
+            spatial_scope=scope,
+            source_path=f"package.carriers.{carrier_id}.poi_metrics.poi_density_per_km2",
+        )
+        _metric(
+            metrics,
+            source_id=source.id,
+            domain="carrier",
+            key=f"{carrier_id}:nightlight_mean_radiance",
+            label=f"{scope} 夜光均值",
+            value=nightlight_metrics.get("mean_radiance"),
+            method="来自空间载体资料包 nightlight_metrics.mean_radiance。",
+            spatial_scope=scope,
+            source_path=f"package.carriers.{carrier_id}.nightlight_metrics.mean_radiance",
+        )
+        _metric(
+            metrics,
+            source_id=source.id,
+            domain="carrier",
+            key=f"{carrier_id}:road_choice_score",
+            label=f"{scope} choice",
+            value=road_metrics.get("choice_score"),
+            method="来自空间载体资料包 road_metrics.choice_score。",
+            spatial_scope=scope,
+            source_path=f"package.carriers.{carrier_id}.road_metrics.choice_score",
+        )
+        _metric(
+            metrics,
+            source_id=source.id,
+            domain="carrier",
+            key=f"{carrier_id}:road_integration_score",
+            label=f"{scope} integration",
+            value=road_metrics.get("integration_score"),
+            method="来自空间载体资料包 road_metrics.integration_score。",
+            spatial_scope=scope,
+            source_path=f"package.carriers.{carrier_id}.road_metrics.integration_score",
+        )
+
+
 def build_metric_context(*, sources: List[PptSource], source_ids: List[str], current: Dict[str, Any]) -> Dict[str, Any]:
     selected = set(source_ids or [])
     metrics: List[Dict[str, Any]] = []
@@ -158,6 +226,9 @@ def build_metric_context(*, sources: List[PptSource], source_ids: List[str], cur
         if selected and source.id not in selected:
             continue
         meta = _safe_dict(source.meta)
+        package = _safe_dict(meta.get("package"))
+        if _safe_list(package.get("carriers")):
+            _append_carrier_package_metrics(metrics, source=source, package=package)
         ai_payload = _safe_dict(meta.get("aiPayload") or meta.get("ai_payload"))
         for raw_metric in _safe_list(ai_payload.get("metrics")):
             metric = _normalize_analysis_metric(raw_metric)

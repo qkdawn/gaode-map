@@ -29,7 +29,9 @@ import {
   createPptPlanningState,
   getActiveDeckSlideBrief,
   getBlockingPptInputSources,
+  hasPptBlockingInputs,
   getPendingPptPackageSources,
+  getPptSourceDeliveryManifest,
   getPptSourceSummary,
   markPptDirectiveStaleForSources,
   mergePptPlanningSources,
@@ -40,6 +42,7 @@ import {
   resetPptPlanningToOutlineReady,
   setAllPptSourcesSelected,
   setPptGenerationError,
+  setPptSourceRefreshing,
   setPptActiveRevisionTarget,
   setPptRevisionDraftField,
   setPptSourceGroupSelected,
@@ -640,6 +643,64 @@ test('ppt source selection only includes ready sources in the spec payload', () 
   assert.equal(payload.source_ids.includes('current:analysis:nightlight'), false)
 })
 
+test('ppt payload uses only selected sources with deliverable ai payload', () => {
+  const state = createPptPlanningState({
+    sources: [
+      {
+        id: 'summary',
+        type: 'data',
+        title: 'summary',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'system', transport: { transport_status: 'selected_no_payload', included: [] } },
+      },
+      {
+        id: 'current:scope',
+        type: 'data',
+        title: '当前等时圈范围',
+        status: 'ready',
+        selected: true,
+        meta: {
+          sourceKind: 'system',
+          aiPayload: {
+            version: 'ppt_ai_input_block_v1',
+            source_id: 'current:scope',
+            included: ['scope'],
+            scope: { type: 'scope_brief' },
+          },
+        },
+      },
+      {
+        id: 'package:poi:test',
+        type: 'package',
+        title: 'POI 资料包',
+        status: 'ready',
+        selected: true,
+        meta: {
+          sourceKind: 'package',
+          aiPayload: {
+            version: 'ppt_ai_input_block_v1',
+            source_id: 'package:poi:test',
+            included: ['evidence'],
+            evidence: [{ title: '样本', text: '代表性 POI' }],
+          },
+        },
+      },
+    ],
+  })
+  const summary = getPptSourceSummary(state)
+  const manifest = getPptSourceDeliveryManifest(state)
+  const payload = buildPptSpecPayload(state, { areaId: 'area-1' })
+
+  assert.equal(summary.selected, 3)
+  assert.equal(summary.deliverable, 2)
+  assert.equal(summary.emptyPayload, 1)
+  assert.deepEqual(manifest.emptyPayloadSourceIds, ['summary'])
+  assert.deepEqual(payload.source_ids.sort(), ['current:scope', 'package:poi:test'].sort())
+  assert.equal(payload.sources.length, 2)
+  assert.equal(payload.sources.some((source) => source.id === 'summary'), false)
+})
+
 test('ppt state can select all sources and keep an active page brief', () => {
   const systemSources = createPptSystemSources({
     scope: { polygon: [[0, 0], [1, 0], [1, 1]] },
@@ -743,6 +804,46 @@ test('ppt data package source is visible and survives system source refresh', ()
   assert.equal(packageSource.selected, true)
   assert.equal(packageSource.meta.sourceKind, 'package')
   assert.ok(getPptSourceSummary(refreshed).selected >= 3)
+})
+
+test('agent ppt refresh rebuilds package ai payload from persisted package meta', async () => {
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDataSources(areaId) {
+      return Promise.resolve([
+        {
+          id: 'package:poi-road-carriers:restored',
+          type: 'package',
+          title: 'POI × 路网空间载体资料包',
+          status: 'ready',
+          summary: '空间载体 1 个',
+          count: 1,
+          meta: {
+            label: '空间载体 1 个',
+            sourceKind: 'package',
+            areaId,
+            package: {
+              package_mode: 'evidence',
+              intent: DEFAULT_PPT_CARRIER_EVIDENCE_INTENT,
+              summary: '已识别 1 个路网空间载体。',
+              source_ids: ['current:dataset:poi', 'current:analysis:road'],
+              carriers: [{ carrier_id: 'corridor_01', carrier_type: 'corridor', summary: '主街走廊。' }],
+              items: [{ id: 'poi-1', name: '样本 POI', category: '餐饮', address: '示例路' }],
+            },
+          },
+        },
+      ])
+    },
+  })
+
+  await ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const source = state.sources.find((item) => item.id === 'package:poi-road-carriers:restored')
+
+  assert.equal(source.selected, true)
+  assert.ok(source.meta.aiPayload)
+  assert.equal(source.meta.transport.transportStatus, 'ready_to_send')
+  assert.equal(source.meta.transport.evidenceCount, 3)
+  assert.equal(getPptSourceSummary(state).selectedDeliverable, 1)
 })
 
 test('agent ppt source refresh adds pending package placeholders without selecting them', async () => {
@@ -1427,7 +1528,15 @@ test('agent ppt planning api context includes standardized analysis metrics', ()
     populationOverview: {
       summary: {
         total_population: 12000,
-        population_density: 8000,
+      },
+      age_distribution: [
+        { age_band: '20', age_band_label: '20-24岁', total: 3000, male: 1500, female: 1500 },
+        { age_band: '30', age_band_label: '30-34岁', total: 4200, male: 2100, female: 2100 },
+      ],
+    },
+    populationLayer: {
+      summary: {
+        average_density_per_km2: 8000,
       },
     },
     nightlightOverview: {
@@ -1448,10 +1557,53 @@ test('agent ppt planning api context includes standardized analysis metrics', ()
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:poi:poi_count' && item.status === 'ready' && item.value === 2))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:h3:avg_density_poi_per_km2' && item.status === 'ready'))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:population:total_population' && item.status === 'ready'))
+  assert.ok(metrics.find((item) => item.metric_id === 'analysis:population:population_density' && item.status === 'ready' && item.value === 8000))
+  assert.ok(metrics.find((item) => item.metric_id === 'analysis:population:age_structure' && item.status === 'ready' && item.value === 35))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:nightlight:max_radiance' && item.status === 'ready'))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:road:avg_integration' && item.status === 'ready'))
-  assert.ok(metrics.find((item) => item.metric_id === 'analysis:population:age_structure' && item.status === 'missing'))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:h3:lq' && item.status === 'missing'))
+})
+
+test('agent ppt population age structure reads overview age distribution without layer', () => {
+  const ctx = createPptPlanningTestContext({
+    populationOverview: {
+      summary: {
+        total_population: 1000,
+      },
+      age_distribution: [
+        { age_band: '10', age_band_label: '10-14岁', total: 250 },
+        { age_band: '25', age_band_label: '25-29岁', total: 400 },
+      ],
+    },
+    populationLayer: null,
+  })
+
+  const metrics = ctx.buildAgentPptPlanningCurrent().metrics.metrics
+  const age = metrics.find((item) => item.metric_id === 'analysis:population:age_structure')
+  const density = metrics.find((item) => item.metric_id === 'analysis:population:population_density')
+
+  assert.equal(age.status, 'ready')
+  assert.equal(age.value, 40)
+  assert.equal(age.unit, '%')
+  assert.match(age.description, /25-29岁/)
+  assert.equal(density.status, 'missing')
+})
+
+test('agent ppt population age structure remains missing when age distribution is empty', () => {
+  const ctx = createPptPlanningTestContext({
+    populationOverview: {
+      summary: {
+        total_population: 1000,
+      },
+      age_distribution: [],
+    },
+  })
+
+  const metrics = ctx.buildAgentPptPlanningCurrent().metrics.metrics
+  const age = metrics.find((item) => item.metric_id === 'analysis:population:age_structure')
+
+  assert.equal(age.status, 'missing')
+  assert.equal(age.source_path, 'populationOverview.age_distribution')
 })
 
 test('agent ppt h3 metrics use derived typing lq and neighbor results', () => {
@@ -2380,6 +2532,102 @@ test('agent top tab switch refreshes backend ppt data sources when activating pp
   assert.equal(sourceRefreshCalls, 1)
 })
 
+test('ppt source refresh immediately marks planning state as blocked', async () => {
+  let resolveSources
+  const sourcePromise = new Promise((resolve) => {
+    resolveSources = resolve
+  })
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDataSources(areaId) {
+      assert.equal(areaId, 'history-1')
+      return sourcePromise
+    },
+  })
+
+  const refreshPromise = ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+  const refreshingState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+
+  assert.equal(refreshingState.sourceRefreshing, true)
+  assert.equal(hasPptBlockingInputs(refreshingState), true)
+
+  resolveSources([])
+  await refreshPromise
+
+  const settledState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(settledState.sourceRefreshing, false)
+})
+
+test('ppt outline generation does not call api while sources are refreshing', async () => {
+  let outlineCalls = 0
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningOutlineWithDebug() {
+      outlineCalls += 1
+      return Promise.resolve({ outline: [] })
+    },
+  })
+  const systemState = mergePptPlanningSources(createPptPlanningState(), createPptSystemSources({
+    scope: { polygon: [[0, 0], [1, 0], [1, 1]] },
+    taskResults: { poi_fetch: true },
+  }))
+  ctx.updateAgentActivePptPlanningState(setPptSourceRefreshing(systemState, true))
+
+  await ctx.generateAgentPptPlanningOutline()
+
+  assert.equal(outlineCalls, 0)
+})
+
+test('ppt outline generation does not call api without deliverable selected sources', async () => {
+  let outlineCalls = 0
+  const staleState = createPptPlanningState({
+    sources: [{
+      id: 'summary',
+      type: 'data',
+      title: 'summary',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'system',
+        transport: {
+          source_id: 'summary',
+          transport_status: 'selected_no_payload',
+          included: [],
+        },
+      },
+    }],
+  })
+  const ctx = createPptPlanningTestContext({
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        source: 'current',
+        pptPlanningState: staleState,
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    getAgentPptPlanningStateWithSystemSources() {
+      return createPptPlanningState(this.agentTabs.pptPlanningTabs[0].pptPlanningState)
+    },
+    requestAgentPptPlanningOutlineWithDebug() {
+      outlineCalls += 1
+      return Promise.resolve({})
+    },
+  })
+
+  await ctx.generateAgentPptPlanningOutline()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(outlineCalls, 0)
+  assert.equal(finalState.generationJob.phase, 'failed')
+  assert.match(finalState.generationError, /没有可发送给 AI/)
+  assert.equal(finalState.generationJob.events.some((event) => event.name === 'source_payload_preflight_failed'), true)
+})
+
 test('agent ppt auto poi evidence package is not created twice for same area', async () => {
   let packageCalls = 0
   const stateWithPackage = addPptDataPackageSource(createPptPlanningState({
@@ -2531,4 +2779,96 @@ test('agent ppt auto package failure keeps ready sources and visible error', asy
   assert.equal(placeholder.meta.error, 'ppt_data_intent_llm_unavailable')
   assert.equal(state.generationError, '')
   assert.equal(state.dataPackageGenerating, false)
+})
+
+test('agent ppt auto carrier package sends package version', async () => {
+  let payload = null
+  const ctx = createPptPlanningTestContext({
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        source: 'current',
+        pptPlanningState: createPptPlanningState({
+          sources: [
+            { id: 'current:dataset:poi', type: 'data', title: 'POI', status: 'ready', selected: true, meta: { sourceKind: 'system', areaId: 'history-1' } },
+            { id: 'current:analysis:road', type: 'data', title: '路网', status: 'ready', selected: true, meta: { sourceKind: 'system', areaId: 'history-1' } },
+            { id: 'current:analysis:population', type: 'data', title: '人口', status: 'ready', selected: true, meta: { sourceKind: 'system', areaId: 'history-1' } },
+            { id: 'current:analysis:nightlight', type: 'data', title: '夜光', status: 'ready', selected: true, meta: { sourceKind: 'system', areaId: 'history-1' } },
+          ],
+        }),
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    requestAgentPptPlanningDataPackage(nextPayload) {
+      payload = nextPayload
+      return Promise.resolve({
+        source: {
+          id: 'package:poi-road-carriers:auto',
+          type: 'package',
+          title: 'POI × 路网空间载体资料包',
+          status: 'ready',
+          selected: true,
+          meta: {
+            label: '空间载体 1 个',
+            sourceKind: 'package',
+            package: {
+              package_mode: 'evidence',
+              intent: DEFAULT_PPT_CARRIER_EVIDENCE_INTENT,
+              source_ids: ['current:dataset:poi', 'current:analysis:road', 'current:analysis:population', 'current:analysis:nightlight'],
+              carriers: [],
+            },
+          },
+        },
+      })
+    },
+  })
+
+  await ctx.autoCreateAgentPptPlanningRoadCarrierPackage({ areaId: 'history-1' })
+
+  assert.equal(payload.package_version, 'road-carrier-evidence-v2')
+})
+
+test('agent ppt restored package source satisfies auto package placeholder', async () => {
+  const restoredPackage = {
+    id: 'package:poi-road-carriers:restored',
+    type: 'package',
+    title: 'POI × 路网空间载体资料包',
+    status: 'ready',
+    summary: '空间载体 1 个',
+    meta: {
+      label: '空间载体 1 个',
+      sourceKind: 'package',
+      area_id: 'history-1',
+      package: {
+        package_mode: 'evidence',
+        intent: DEFAULT_PPT_CARRIER_EVIDENCE_INTENT,
+        package_version: 'road-carrier-evidence-v2',
+        source_ids: ['current:dataset:poi', 'current:analysis:road', 'current:analysis:population', 'current:analysis:nightlight'],
+        carriers: [],
+      },
+    },
+  }
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDataSources() {
+      return Promise.resolve([
+        { id: 'current:dataset:poi', type: 'data', title: 'POI', status: 'ready', meta: { sourceKind: 'system', areaId: 'history-1' } },
+        { id: 'current:analysis:road', type: 'data', title: '路网', status: 'ready', meta: { sourceKind: 'system', areaId: 'history-1' } },
+        { id: 'current:analysis:population', type: 'data', title: '人口', status: 'ready', meta: { sourceKind: 'system', areaId: 'history-1' } },
+        { id: 'current:analysis:nightlight', type: 'data', title: '夜光', status: 'ready', meta: { sourceKind: 'system', areaId: 'history-1' } },
+        restoredPackage,
+      ])
+    },
+  })
+
+  await ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+
+  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.ok(state.sources.some((item) => item.id === 'package:poi-road-carriers:restored'))
+  assert.equal(state.sources.some((item) => item.id === 'package-placeholder:road-carrier'), false)
 })

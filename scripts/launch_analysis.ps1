@@ -1,6 +1,7 @@
 param(
     [switch]$Restart,
-    [switch]$NoOpen
+    [switch]$NoOpen,
+    [string]$PublicDbHost
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,6 +9,7 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RuntimeDir = Join-Path $RepoRoot "runtime"
 $FrontendRoot = Join-Path $RepoRoot "frontend"
 $BackendPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+$EnvPath = Join-Path $RepoRoot ".env"
 $AnalysisUrl = "http://127.0.0.1:8000/analysis"
 
 function Ensure-RuntimeDir {
@@ -54,10 +56,98 @@ function Wait-Http {
     return $false
 }
 
+function Set-PublicDbHost {
+    param([string]$HostValue)
+
+    $hostClean = ""
+    if ($null -ne $HostValue) {
+        $hostClean = $HostValue.Trim()
+    }
+    if (-not ($hostClean -match '^(?:\d{1,3}\.){3}\d{1,3}$')) {
+        throw "Invalid public DB host: $HostValue"
+    }
+    $octets = $hostClean.Split(".") | ForEach-Object { [int]$_ }
+    if (($octets | Where-Object { $_ -lt 0 -or $_ -gt 255 }).Count -gt 0) {
+        throw "Invalid public DB host: $HostValue"
+    }
+    if (-not (Test-Path $EnvPath)) {
+        throw "Missing env file: $EnvPath"
+    }
+
+    $lines = Get-Content -LiteralPath $EnvPath
+    $hasDbHost = $false
+    $hasDbUrl = $false
+    $updated = foreach ($line in $lines) {
+        if ($line -match '^DB_HOST=') {
+            $hasDbHost = $true
+            "DB_HOST=$hostClean"
+        } elseif ($line -match '^(DB_URL=.*@)([^:/?]+)(.*)$') {
+            $hasDbUrl = $true
+            $line -replace '^(DB_URL=.*@)([^:/?]+)(.*)$', "`$1$hostClean`$3"
+        } else {
+            $line
+        }
+    }
+
+    if (-not $hasDbHost) {
+        $updated += "DB_HOST=$hostClean"
+    }
+    if (-not $hasDbUrl) {
+        Write-Warning ".env does not contain DB_URL; only DB_HOST was updated."
+    }
+
+    Set-Content -LiteralPath $EnvPath -Value $updated -Encoding UTF8
+    Write-Host "Updated .env public DB host: $hostClean"
+}
+
+function Test-BackendImports {
+    if (-not (Test-Path $BackendPython)) {
+        return $false
+    }
+    Push-Location $RepoRoot
+    try {
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $BackendPython -c "from pydantic_core import __version__; import fastapi; import main" > $null 2>&1
+            return ($LASTEXITCODE -eq 0)
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
+function Repair-BackendVenv {
+    Write-Host "Backend Python environment looks incomplete; repairing with uv sync..."
+    Push-Location $RepoRoot
+    try {
+        uv sync
+        if ($LASTEXITCODE -ne 0) {
+            throw "uv sync failed"
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 Ensure-RuntimeDir
 
+if ($PublicDbHost) {
+    Set-PublicDbHost -HostValue $PublicDbHost
+    $Restart = $true
+}
+
 if (-not (Test-Path $BackendPython)) {
-    throw "Missing Python venv: $BackendPython"
+    Repair-BackendVenv
+}
+
+if (-not (Test-BackendImports)) {
+    Repair-BackendVenv
+    if (-not (Test-BackendImports)) {
+        throw "Backend Python environment is still not importable after repair. Check .venv and runtime\launch_backend.err.log."
+    }
 }
 
 if ($Restart) {
@@ -110,7 +200,7 @@ if (-not (Test-RepoBackend)) {
 }
 
 if (-not (Wait-Http -Url $AnalysisUrl -Seconds 45)) {
-    Write-Warning "Services were started, but $AnalysisUrl did not respond within 45 seconds."
+    throw "Services were started, but $AnalysisUrl did not respond within 45 seconds. Check runtime\launch_backend.err.log."
 }
 
 if (-not $NoOpen) {

@@ -304,6 +304,26 @@ function sourceForPptRequest(source = {}) {
   })
 }
 
+function sourceHasDeliverableAiPayload(source = {}) {
+  const aiPayload = aiPayloadFromSource(source)
+  return cloneArray(aiPayload.included).map((item) => asText(item)).filter(Boolean).length > 0
+}
+
+export function getPptSourceDeliveryManifest(state = {}) {
+  const sources = cloneArray(createPptPlanningState(state).sources)
+  const selectedSources = sources.filter((item) => item && item.selected && asText(item.status) === 'ready')
+  const deliverableSources = selectedSources.filter(sourceHasDeliverableAiPayload)
+  const emptyPayloadSources = selectedSources.filter((item) => !sourceHasDeliverableAiPayload(item))
+  return {
+    selectedSources,
+    deliverableSources,
+    emptyPayloadSources,
+    sourceIds: selectedSources.map((item) => asText(item.id)).filter(Boolean),
+    deliverableSourceIds: deliverableSources.map((item) => asText(item.id)).filter(Boolean),
+    emptyPayloadSourceIds: emptyPayloadSources.map((item) => asText(item.id)).filter(Boolean),
+  }
+}
+
 function packageAiPayloadFromSource(source = {}) {
   const meta = cloneObject(source.meta)
   const pack = cloneObject(meta.package)
@@ -642,6 +662,7 @@ export function createPptPlanningState(seed = {}) {
     generationResponse: normalizeGenerationResponse(seed.generationResponse || seed.generation_response),
     generationJob: normalizeGenerationJob(seed.generationJob || seed.generation_job),
     dataPackageGenerating: !!(seed.dataPackageGenerating || seed.data_package_generating),
+    sourceRefreshing: !!(seed.sourceRefreshing || seed.source_refreshing),
     sourceGrouping: !!(seed.sourceGrouping || seed.source_grouping),
     activeRevisionTarget: normalizeRevisionTarget(seed.activeRevisionTarget || seed.active_revision_target),
     outlineRevisionDraft: normalizeRevisionDraft(seed.outlineRevisionDraft || seed.outline_revision_draft),
@@ -666,12 +687,22 @@ export function getSelectedPptSourceIds(state = {}) {
 export function getPptSourceSummary(state = {}) {
   const sources = cloneArray(createPptPlanningState(state).sources)
   const ready = sources.filter((item) => item && asText(item.status) === 'ready')
-  const selected = ready.filter((item) => item && item.selected)
+  const manifest = getPptSourceDeliveryManifest({ sources })
   return {
     total: sources.length,
-    selected: selected.length,
+    selected: manifest.selectedSources.length,
     ready: ready.length,
+    deliverable: manifest.deliverableSources.length,
+    selectedDeliverable: manifest.deliverableSources.length,
+    emptyPayload: manifest.emptyPayloadSources.length,
+    sourceIds: manifest.sourceIds,
+    deliverableSourceIds: manifest.deliverableSourceIds,
+    emptyPayloadSourceIds: manifest.emptyPayloadSourceIds,
   }
+}
+
+export function isPptSourceRefreshing(state = {}) {
+  return !!createPptPlanningState(state).sourceRefreshing
 }
 
 export function getPendingPptPackageSources(state = {}) {
@@ -705,6 +736,16 @@ export function getBlockingPptInputSources(state = {}) {
     if (item.selected) return true
     return pendingPackageIds.has(sourceId)
   })
+}
+
+export function hasPptBlockingInputs(state = {}) {
+  const normalized = createPptPlanningState(state)
+  return !!(
+    normalized.sourceRefreshing
+    || normalized.dataPackageGenerating
+    || normalized.sourceGrouping
+    || getBlockingPptInputSources(normalized).length
+  )
 }
 
 export function getActiveDeckSlideBrief(state = {}) {
@@ -963,6 +1004,7 @@ export function completePptGenerationJob(state = {}, requestId = '', response = 
         responseSummary: summary,
       }, 'failed', { error: message, source: job.type }),
       dataPackageGenerating: false,
+      sourceRefreshing: false,
       sourceGrouping: false,
     })
   }
@@ -992,6 +1034,7 @@ export function failPptGenerationJob(state = {}, requestId = '', error = '', opt
       responseSummary,
     }, 'failed', { error: message, source }),
     dataPackageGenerating: false,
+    sourceRefreshing: false,
     sourceGrouping: false,
   })
 }
@@ -1301,6 +1344,7 @@ export function setPptGenerationError(state = {}, error = '', source = '', optio
     generationErrorSource: normalizePptErrorSource(source),
     generationResponse,
     dataPackageGenerating: false,
+    sourceRefreshing: false,
     sourceGrouping: false,
   })
 }
@@ -1309,6 +1353,15 @@ export function setPptDataPackageGenerating(state = {}, generating = true) {
   return createPptPlanningState({
     ...createPptPlanningState(state),
     dataPackageGenerating: !!generating,
+    generationError: '',
+    generationErrorSource: '',
+  })
+}
+
+export function setPptSourceRefreshing(state = {}, refreshing = true) {
+  return createPptPlanningState({
+    ...createPptPlanningState(state),
+    sourceRefreshing: !!refreshing,
     generationError: '',
     generationErrorSource: '',
   })
@@ -1735,6 +1788,7 @@ export function addPptDataPackageSource(state = {}, response = {}) {
       sourceIds: getReadySelectedSourceIds(sources),
     },
     dataPackageGenerating: false,
+    sourceRefreshing: false,
     generationError: '',
     generationErrorSource: '',
   })
@@ -1750,9 +1804,9 @@ export function selectDeckSlideBrief(state = {}, slideId = '') {
 
 export function buildPptSpecPayload(state = {}, context = {}) {
   const normalized = createPptPlanningState(state)
-  const sourceIds = getSelectedPptSourceIds(normalized)
-  const sources = cloneArray(normalized.sources)
-    .filter((item) => sourceIds.includes(asText(item.id)))
+  const manifest = getPptSourceDeliveryManifest(normalized)
+  const sourceIds = manifest.deliverableSourceIds
+  const sources = cloneArray(manifest.deliverableSources)
     .map(sourceForPptRequest)
   return {
     area_id: asText(context.areaId || context.area_id),
@@ -1768,9 +1822,9 @@ export function buildPptSpecPayload(state = {}, context = {}) {
 
 export function buildDeckBriefPayload(state = {}, context = {}) {
   const normalized = createPptPlanningState(state)
-  const sourceIds = getSelectedPptSourceIds(normalized)
-  const sources = cloneArray(normalized.sources)
-    .filter((item) => sourceIds.includes(asText(item.id)))
+  const manifest = getPptSourceDeliveryManifest(normalized)
+  const sourceIds = manifest.deliverableSourceIds
+  const sources = cloneArray(manifest.deliverableSources)
     .map(sourceForPptRequest)
   return {
     area_id: asText(context.areaId || context.area_id),
@@ -1801,7 +1855,7 @@ export function buildDeckBriefPayload(state = {}, context = {}) {
 
 export function buildPptOutlineSectionPayload(state = {}, target = {}, revisionNote = '', context = {}) {
   const normalized = createPptPlanningState(state)
-  const sourceIds = getSelectedPptSourceIds(normalized)
+  const sourceIds = getPptSourceDeliveryManifest(normalized).deliverableSourceIds
   const targetIndex = findOutlineIndex(normalized.outline, target)
   const targetItem = targetIndex >= 0 ? normalized.outline[targetIndex] : target
   return {
@@ -1840,7 +1894,7 @@ export function buildPptOutlineSectionPayload(state = {}, target = {}, revisionN
 
 export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote = '', context = {}) {
   const normalized = createPptPlanningState(state)
-  const sourceIds = getSelectedPptSourceIds(normalized)
+  const sourceIds = getPptSourceDeliveryManifest(normalized).deliverableSourceIds
   const slides = cloneArray((normalized.deckBrief || {}).slides)
   const targetIndex = findSlideIndex(slides, target)
   const targetItem = targetIndex >= 0 ? slides[targetIndex] : target

@@ -466,30 +466,62 @@ function createAnalysisNightlightMethods() {
       this.nightlightScopeId = String(data.scope_id || this.nightlightScopeId || '')
       return data
     },
-    async computeNightlightAnalysis() {
+    hasCompleteNightlightAnalysis() {
+      return !!(this.nightlightOverview && this.nightlightGrid && this.nightlightLayer && this.nightlightRaster)
+    },
+    async ensureNightlightAnalysisBundle(options = {}) {
       const rawRing = this.getIsochronePolygonRing()
-      if (!rawRing || this.isComputingNightlight) return
-      this.isComputingNightlight = true
-      this.nightlightStatus = '正在计算夜光分析...'
+      if (!rawRing) return false
+      const showStatus = options.showStatus !== false
+      const persist = options.persist !== false
+      const wasComputing = !!this.isComputingNightlight
+      if (!wasComputing) {
+        this.isComputingNightlight = true
+      }
+      if (showStatus) {
+        this.nightlightStatus = '正在计算夜光分析...'
+      }
       try {
+        await this.loadNightlightMeta(false)
         await this.ensureNightlightBaseGrid(false)
-        await this.fetchNightlightOverview()
+        if (!this.nightlightOverview) {
+          await this.fetchNightlightOverview()
+        }
         this.nightlightAnalysisView = 'radiance'
-        await this.fetchNightlightLayer('radiance')
-        await this.fetchNightlightRaster()
-        this.nightlightStatus = `夜光分析完成：${this.getNightlightSelectedYearLabel()}`
+        const currentLayerView = String((this.nightlightLayer && this.nightlightLayer.view) || '').trim().toLowerCase()
+        if (!this.nightlightLayer || currentLayerView !== 'radiance') {
+          await this.fetchNightlightLayer('radiance')
+        }
+        if (!this.nightlightRaster) {
+          await this.fetchNightlightRaster()
+        }
+        if (showStatus) {
+          this.nightlightStatus = `夜光分析完成：${this.getNightlightSelectedYearLabel()}`
+        }
         if (this.isNightlightDisplayActive()) {
           this.applyNightlightGridToMap()
         }
-        if (typeof this.persistAnalysisArtifactQuietly === 'function') {
+        if (persist && typeof this.persistAnalysisArtifactQuietly === 'function') {
           this.persistAnalysisArtifactQuietly('nightlight')
         }
+        return true
       } catch (e) {
         console.error(e)
-        this.nightlightStatus = '夜光分析失败: ' + (e && e.message ? e.message : String(e))
+        if (showStatus) {
+          this.nightlightStatus = '夜光分析失败: ' + (e && e.message ? e.message : String(e))
+        }
+        throw e
       } finally {
-        this.isComputingNightlight = false
+        if (!wasComputing) {
+          this.isComputingNightlight = false
+        }
       }
+    },
+    async computeNightlightAnalysis() {
+      if (this.isComputingNightlight) return
+      try {
+        await this.ensureNightlightAnalysisBundle({ showStatus: true, persist: true })
+      } catch (_) {}
     },
     async ensureNightlightPanelEntryState() {
       const rawRing = this.getIsochronePolygonRing()
@@ -499,15 +531,9 @@ function createAnalysisNightlightMethods() {
         return
       }
       try {
-        await this.loadNightlightMeta(false)
-        await this.ensureNightlightBaseGrid(false)
+        await this.ensureNightlightAnalysisBundle({ showStatus: true, persist: true })
       } catch (e) {
-        this.nightlightStatus = '夜光格子加载失败: ' + (e && e.message ? e.message : String(e))
         this.restoreNightlightDisplayOnEnter()
-        return
-      }
-      if (!this.nightlightOverview || !this.nightlightLayer || !this.nightlightRaster) {
-        await this.computeNightlightAnalysis()
         return
       }
       this.nightlightStatus = this.nightlightStatus || `夜光分析完成：${this.getNightlightSelectedYearLabel()}`

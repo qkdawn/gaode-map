@@ -374,7 +374,7 @@ function createAnalysisHistoryOrchestratorMethods() {
             overview: this.cloneArtifactValue(this.populationOverview || {}),
             summary: this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {}),
             grid_evidence: typeof this.buildAgentPopulationGridEvidence === 'function' ? this.buildAgentPopulationGridEvidence() : {},
-            layer_cells: this.cloneArtifactValue(layer.cells || layer.features || []),
+            layer: this.cloneArtifactValue(layer),
             year: params.year,
             view: params.view,
           },
@@ -392,7 +392,7 @@ function createAnalysisHistoryOrchestratorMethods() {
           payload: {
             overview: this.cloneArtifactValue(this.nightlightOverview || {}),
             summary: this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {}),
-            layer_cells: this.cloneArtifactValue(layer.cells || layer.features || []),
+            layer: this.cloneArtifactValue(layer),
             raster: this.cloneArtifactValue(this.nightlightRaster || {}),
             year: params.year,
             view: params.view,

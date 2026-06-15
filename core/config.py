@@ -10,6 +10,7 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
 DEFAULT_CHART_OUTPUT_DIR = PROJECT_ROOT / "runtime" / "generated_charts"
 DEFAULT_DOCUMENT_UPLOAD_DIR = PROJECT_ROOT / "runtime" / "documents"
 
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=str(PROJECT_ROOT / ".env"),
+        env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",  # 未声明的 env 变量忽略，不抛出校验错误
     )
@@ -493,3 +494,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def reload_settings_from_env() -> Settings:
+    fresh = Settings()
+    for name in Settings.model_fields:
+        setattr(settings, name, getattr(fresh, name))
+    return settings

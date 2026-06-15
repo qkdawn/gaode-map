@@ -32,6 +32,8 @@ import {
   createPptPlanningState,
   getActiveDeckSlideBrief,
   getBlockingPptInputSources,
+  hasPptBlockingInputs,
+  getPptSourceDeliveryManifest,
   getPptRevisionKey,
   getPptSourceSummary,
   isPptDirectivePageStale,
@@ -49,6 +51,7 @@ import {
   setAllPptSourcesSelected,
   setPptDataPackageGenerating,
   setPptGenerationError,
+  setPptSourceRefreshing,
   startPptGenerationJob,
   setPptActiveRevisionTarget,
   setPptRevisionDraftField,
@@ -214,6 +217,28 @@ function addMissingAnalysisMetric(metrics, options = {}) {
     status: asText(options.status) || 'missing',
     value: null,
   })
+}
+
+function buildPopulationAgeStructureMetric(ageRows = [], totalPopulation = null) {
+  const rows = cloneArray(ageRows)
+    .map((item) => ({
+      age_band: asText(item && (item.age_band || item.ageBand)),
+      age_band_label: asText(item && (item.age_band_label || item.ageBandLabel)),
+      total: finiteMetricValue(item && item.total),
+    }))
+    .filter((item) => item.total !== null && item.total > 0)
+    .sort((left, right) => right.total - left.total)
+  if (!rows.length) return null
+  const top = rows[0]
+  const total = finiteMetricValue(totalPopulation)
+  const ratio = total && total > 0 ? top.total / total : null
+  return {
+    value: ratio !== null ? Number((ratio * 100).toFixed(2)) : top.total,
+    unit: ratio !== null ? '%' : '人',
+    description: ratio !== null
+      ? `主导年龄段为${top.age_band_label || top.age_band}，占总人口 ${Number((ratio * 100).toFixed(1))}%。`
+      : `主导年龄段为${top.age_band_label || top.age_band}，人口约 ${Math.round(top.total)} 人。`,
+  }
 }
 
 function buildCurrentNightlightAnalysis(ctx = {}) {
@@ -390,13 +415,19 @@ function buildPptAnalysisMetrics(ctx = {}, scope = {}, taskResults = {}) {
 
   const populationOverview = cloneObject(ctx.populationOverview || {})
   const populationSummary = cloneObject(populationOverview.summary || populationOverview)
+  const populationLayerSummary = cloneObject(ctx.populationLayer && ctx.populationLayer.summary)
   const populationReady = !!ctx.populationOverview
+  const populationDensity = populationLayerSummary.average_density_per_km2
+    ?? populationLayerSummary.population_density
+    ?? populationLayerSummary.density
+    ?? populationSummary.population_density
+    ?? populationSummary.density
   ;[
     ['total_population', '总人口', '人', populationSummary.total_population || populationSummary.population_total || populationSummary.total],
-    ['population_density', '人口密度', '人/km²', populationSummary.population_density || populationSummary.density],
+    ['population_density', '人口密度', '人/km²', populationDensity, Object.prototype.hasOwnProperty.call(populationLayerSummary, 'average_density_per_km2') ? 'populationLayer.summary.average_density_per_km2' : 'populationOverview.summary.population_density'],
     ['male_ratio', '男性占比', '%', populationSummary.male_ratio],
     ['female_ratio', '女性占比', '%', populationSummary.female_ratio],
-  ].forEach(([key, label, unit, value]) => addNumericAnalysisMetric(metrics, {
+  ].forEach(([key, label, unit, value, sourcePath]) => addNumericAnalysisMetric(metrics, {
     domain: 'population',
     key,
     label,
@@ -405,22 +436,39 @@ function buildPptAnalysisMetrics(ctx = {}, scope = {}, taskResults = {}) {
     scope: scopeText,
     sourceId: 'current:analysis:population',
     sourceIds: ['current:analysis:population'],
-    sourcePath: `populationOverview.summary.${key}`,
+    sourcePath: sourcePath || `populationOverview.summary.${key}`,
     calculationMethod: `${label}来自当前范围人口分析汇总。`,
     missingStatus: populationReady ? 'missing' : 'not_ready',
     description: populationReady ? `${label}当前结果未返回。` : '请先完成人口计算。',
   }))
-  addMissingAnalysisMetric(metrics, {
-    domain: 'population',
-    key: 'age_structure',
-    label: '年龄结构',
-    scope: scopeText,
-    sourceId: 'current:analysis:population',
-    sourceIds: ['current:analysis:population'],
-    sourcePath: 'populationOverview.age_structure',
-    status: populationReady ? 'missing' : 'not_ready',
-    description: populationReady ? '当前人口分析未提供年龄结构。' : '请先完成人口计算。',
-  })
+  const ageStructure = buildPopulationAgeStructureMetric(populationOverview.age_distribution, populationSummary.total_population)
+  if (ageStructure) {
+    addNumericAnalysisMetric(metrics, {
+      domain: 'population',
+      key: 'age_structure',
+      label: '年龄结构',
+      value: ageStructure.value,
+      unit: ageStructure.unit,
+      scope: scopeText,
+      sourceId: 'current:analysis:population',
+      sourceIds: ['current:analysis:population'],
+      sourcePath: 'populationOverview.age_distribution',
+      calculationMethod: '从人口年龄分布中选取人口数最高的主导年龄段，并计算其占比。',
+      description: ageStructure.description,
+    })
+  } else {
+    addMissingAnalysisMetric(metrics, {
+      domain: 'population',
+      key: 'age_structure',
+      label: '年龄结构',
+      scope: scopeText,
+      sourceId: 'current:analysis:population',
+      sourceIds: ['current:analysis:population'],
+      sourcePath: 'populationOverview.age_distribution',
+      status: populationReady ? 'missing' : 'not_ready',
+      description: populationReady ? '当前人口分析未提供年龄结构。' : '请先完成人口计算。',
+    })
+  }
 
   const nightlightAnalysis = buildCurrentNightlightAnalysis(ctx)
   const nightlightLayerAnalysis = cloneObject(nightlightAnalysis.analysis || {})
@@ -732,6 +780,8 @@ function normalizeBackendPptDataSource(source = {}, areaId = '') {
   const status = asText(source.status) || 'pending'
   const summary = asText(source.summary)
   const meta = cloneObject(source.meta)
+  const pack = cloneObject(meta.package)
+  const packageVersion = asText(meta.packageVersion || meta.package_version || pack.package_version)
   const sourceKind = asText(meta.sourceKind) || (asText(source.type) === 'document' || asText(source.id).startsWith('document:') ? 'document' : 'system')
   const sourceId = asText(source.id)
   const indexPreview = cloneArray(meta.document_index_preview || meta.documentIndexPreview)
@@ -739,9 +789,12 @@ function normalizeBackendPptDataSource(source = {}, areaId = '') {
     ? (indexPreview.length || Number(source.count || meta.count || 0) || 0)
     : 0
   const title = asText(source.title) || '未命名来源'
+  const persistedAiPayload = cloneObject(meta.aiPayload || meta.ai_payload)
   const aiPayload = sourceKind === 'document'
     ? createDocumentAiPayload(sourceId, title, meta, status, Number(source.count || meta.count || evidenceCount || 0) || 0)
-    : cloneObject(meta.aiPayload || meta.ai_payload)
+    : sourceKind === 'package' && persistedAiPayload.version !== 'ppt_ai_input_block_v1'
+      ? createPackageAiPayload(sourceId, title, pack)
+      : persistedAiPayload
   return {
     id: sourceId,
     type: asText(source.type) || 'data',
@@ -752,7 +805,11 @@ function normalizeBackendPptDataSource(source = {}, areaId = '') {
       ...meta,
       label: asText(meta.label) || summary || (status === 'ready' ? '已生成' : '待生成'),
       sourceKind,
-      areaId: sourceKind === 'system' ? (asText(meta.areaId) || asText(areaId)) : asText(meta.areaId),
+      areaId: sourceKind === 'system' || sourceKind === 'package' ? (asText(meta.areaId) || asText(meta.area_id) || asText(areaId)) : asText(meta.areaId),
+      packageVersion,
+      package: sourceKind === 'package'
+        ? { ...pack, package_version: packageVersion, area_id: asText(pack.area_id) || asText(meta.areaId) || asText(areaId) }
+        : pack,
       count: Number(source.count || meta.count || 0) || 0,
       aiPayload,
       ai_payload: aiPayload,
@@ -1166,16 +1223,22 @@ export function createAgentPptPlanningTabMethods() {
       const activeTab = this.getAgentActiveTopTab()
       const activeTabId = asText(activeTab && activeTab.id)
       if (!areaId || asText(activeTab && activeTab.kind) !== 'ppt_planning') return
+      const initialState = this.getAgentPptPlanningStateWithPackagePlaceholders(
+        this.getAgentPptPlanningStateWithSystemSources(),
+        areaId,
+      )
+      this.updateAgentPptPlanningTabRuntimeState(activeTabId, setPptSourceRefreshing(initialState, true))
       try {
         const backendSources = await this.requestAgentPptPlanningDataSources(areaId)
         const tabs = this.ensureAgentTabs(true)
         if (asText(tabs.activeTabId) !== activeTabId) return
         const nextSources = cloneArray(backendSources).map((source) => normalizeBackendPptDataSource(source, areaId))
         const currentState = this.getAgentActivePptPlanningState()
-        this.updateAgentActivePptPlanningStateWithSourceStale(this.getAgentPptPlanningStateWithPackagePlaceholders(
+        const refreshedState = this.getAgentPptPlanningStateWithPackagePlaceholders(
           mergePptPlanningSources(currentState, nextSources),
           areaId,
-        ), currentState)
+        )
+        this.updateAgentActivePptPlanningStateWithSourceStale(setPptSourceRefreshing(refreshedState, false), currentState)
         if (options.autoPackage !== false) {
           await Promise.allSettled([
             this.autoCreateAgentPptPlanningPoiEvidencePackage({ areaId }),
@@ -1184,7 +1247,10 @@ export function createAgentPptPlanningTabMethods() {
           ])
         }
       } catch (error) {
-        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'))
+        this.updateAgentActivePptPlanningState(setPptSourceRefreshing(
+          setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'),
+          false,
+        ))
       }
     },
     getAgentPptPlanningSources() {
@@ -1216,6 +1282,9 @@ export function createAgentPptPlanningTabMethods() {
     },
     getAgentPptPlanningGenerationJob() {
       return cloneObject(this.getAgentActivePptPlanningState().generationJob)
+    },
+    isAgentPptPlanningSourceRefreshing() {
+      return !!this.getAgentActivePptPlanningState().sourceRefreshing
     },
     getAgentPptPlanningActiveRevisionTarget() {
       return cloneObject(this.getAgentActivePptPlanningState().activeRevisionTarget)
@@ -1604,6 +1673,7 @@ export function createAgentPptPlanningTabMethods() {
       const activePackageKeys = this.agentPptPlanningAutoPackageKeys || {}
       const packageErrors = this.agentPptPlanningPackageErrors || {}
       if (packageKey && activePackageKeys[packageKey]) return
+      if (packageKey) delete packageErrors[packageKey]
       if (packageKey) activePackageKeys[packageKey] = true
       this.updateAgentActivePptPlanningState(this.getAgentPptPlanningStateWithPackagePlaceholders(
         state,
@@ -1615,6 +1685,7 @@ export function createAgentPptPlanningTabMethods() {
           area_id: areaId,
           source_ids: sourceIds,
           package_mode: packageMode,
+          package_version: packageVersion,
           intent,
           query: '',
           limit: Number(options.limit || 50) || 50,
@@ -1725,7 +1796,23 @@ export function createAgentPptPlanningTabMethods() {
       if (!tabId) return
       const state = this.getAgentPptPlanningStateWithSystemSources()
       if (!getPptSourceSummary(state).selected) return
-      if (getBlockingPptInputSources(state).length) return
+      if (hasPptBlockingInputs(state)) return
+      const manifest = getPptSourceDeliveryManifest(state)
+      if (!manifest.deliverableSources.length) {
+        const requestId = createPptGenerationRequestId('outline-preflight')
+        const failedState = failPptGenerationJob(
+          startPptGenerationJob(state, { requestId, type: 'outline', tabId }),
+          requestId,
+          '当前已选来源没有可发送给 AI 的指标或证据，请刷新来源或重新选择来源。',
+          { source: 'outline' },
+        )
+        this.updateAgentPptPlanningTabState(tabId, appendPptDebugEventToState(failedState, 'source_payload_preflight_failed', {
+          selectedSourceIds: manifest.sourceIds,
+          deliverableSourceIds: manifest.deliverableSourceIds,
+          emptyPayloadSourceIds: manifest.emptyPayloadSourceIds,
+        }))
+        return
+      }
       const requestId = createPptGenerationRequestId('outline')
       const writeRuntimeState = (nextState = {}) => this.updateAgentPptPlanningTabRuntimeState(tabId, nextState)
       const writeRuntimeEvent = (name = '', details = {}) => {
@@ -1751,8 +1838,15 @@ export function createAgentPptPlanningTabMethods() {
         writeRuntimeEvent(name, details)
       }
       try {
+        const payload = buildPptSpecPayload(state, this.buildAgentPptPlanningApiContext())
+        writeRuntimeEvent('source_payload_preflight', {
+          selectedSourceIds: manifest.sourceIds,
+          deliverableSourceIds: manifest.deliverableSourceIds,
+          emptyPayloadSourceIds: manifest.emptyPayloadSourceIds,
+          payloadSourceCount: cloneArray(payload.sources).length,
+        })
         response = await this.requestAgentPptPlanningOutlineWithDebug(
-          buildPptSpecPayload(state, this.buildAgentPptPlanningApiContext()),
+          payload,
           { onDebugEvent: emitRequestDebugEvent },
         )
         writeRuntimeEvent('fetch_resolved')
@@ -1857,7 +1951,7 @@ export function createAgentPptPlanningTabMethods() {
       const hasOutline = cloneArray(state.outline).length > 0
       const hasDirective = asText(state.currentStep) === 'directive_draft' && cloneArray((state.deckBrief || {}).slides).length > 0
       if (!hasOutline && !hasDirective) return
-      if (!getPptSourceSummary(state).selected || getBlockingPptInputSources(state).length) return
+      if (!getPptSourceSummary(state).selected || hasPptBlockingInputs(state)) return
       const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成目录会清空旧目录和旧指令文件，确认继续？')
       if (!confirmed) return
       const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)

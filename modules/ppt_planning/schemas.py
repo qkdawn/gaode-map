@@ -160,6 +160,7 @@ class PptDataPackageRequest(BaseModel):
     source_ids: List[str] = Field(default_factory=list)
     package_mode: str = "evidence"
     intent: str = ""
+    package_version: str = ""
     query: str = ""
     limit: int = Field(50, ge=1, le=200)
     filters: Dict[str, Any] = Field(default_factory=dict)

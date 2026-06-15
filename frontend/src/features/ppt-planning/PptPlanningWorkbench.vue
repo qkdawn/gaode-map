@@ -56,6 +56,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  sourceRefreshing: {
+    type: Boolean,
+    default: false,
+  },
   sourceGrouping: {
     type: Boolean,
     default: false,
@@ -151,6 +155,8 @@ const hasDirective = computed(() => props.currentStep === 'directive_draft')
 const blockingInputSources = computed(() => getBlockingPptInputSources({ sources: props.sources }))
 const outlineBlockReason = computed(() => {
   if (!(props.sourceSummary.selected || 0)) return '请先选择至少一个已生成来源'
+  if (!(props.sourceSummary.deliverable || props.sourceSummary.selectedDeliverable || 0)) return '当前已选来源没有可发送给 AI 的指标或证据'
+  if (props.sourceRefreshing || props.dataPackageGenerating || props.sourceGrouping) return '来源仍在构建中，完成后再生成目录'
   if (blockingInputSources.value.length) {
     const generating = blockingInputSources.value.some((source) => String(source.status || '') === 'generating')
     return generating ? '来源仍在构建中，完成后再生成目录' : '仍有来源未构建完成，完成后再生成目录'
@@ -160,6 +166,8 @@ const outlineBlockReason = computed(() => {
 const canGenerateOutline = computed(() => !outlineBlockReason.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
 const canGenerateDirective = computed(() => hasOutline.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
 const canCreateDataPackage = computed(() => (props.sourceSummary.selected || 0) > 0 && !props.dataPackageGenerating)
+const deliverableSourceCount = computed(() => props.sourceSummary.deliverable || props.sourceSummary.selectedDeliverable || 0)
+const emptyPayloadSourceCount = computed(() => props.sourceSummary.emptyPayload || 0)
 const activeGenerationJob = computed(() => (props.generationJob && typeof props.generationJob === 'object' ? props.generationJob : {}))
 const generationJobPhase = computed(() => String(activeGenerationJob.value.phase || 'idle'))
 const generationJobType = computed(() => String(activeGenerationJob.value.type || 'outline'))
@@ -927,15 +935,21 @@ function confirmSourceDialog() {
             {{ dataPackageGenerating ? '整理中' : '生成资料包' }}
           </button>
           <div class="agent-ppt-source-tree-toolbar">
-            <button
-              type="button"
-              class="agent-ppt-source-tag-btn"
-              :disabled="sourceGrouping || !sources.length"
-              title="重新为来源加标签"
-              aria-label="重新为来源加标签"
-              @click="$emit('classify-source-groups')">
-              <span aria-hidden="true">✧</span>
-            </button>
+            <div class="agent-ppt-source-toolbar-status">
+              <button
+                type="button"
+                class="agent-ppt-source-tag-btn"
+                :disabled="sourceGrouping || !sources.length"
+                title="重新为来源加标签"
+                aria-label="重新为来源加标签"
+                @click="$emit('classify-source-groups')">
+                <span aria-hidden="true">✧</span>
+              </button>
+              <div class="agent-ppt-source-toolbar-copy">
+                <strong>{{ sourceSummary.selected || 0 }}/{{ sourceSummary.total || 0 }}</strong>
+                <small>{{ deliverableSourceCount }} 个可用于 AI</small>
+              </div>
+            </div>
             <button
               type="button"
               class="agent-ppt-source-select-row"
@@ -948,7 +962,6 @@ function confirmSourceDialog() {
                 aria-hidden="true">
                 {{ sourceSummary.ready > 0 && sourceSummary.selected === sourceSummary.ready ? '✓' : '' }}
               </span>
-              <strong>{{ sourceSummary.selected || 0 }}/{{ sourceSummary.total || 0 }}</strong>
             </button>
           </div>
           <div class="agent-ppt-source-list agent-ppt-source-tree">
@@ -1159,6 +1172,7 @@ function confirmSourceDialog() {
           @click="isSourcesCollapsed = false">
           <span>来源</span>
           <strong>{{ sourceSummary.selected || 0 }}</strong>
+          <small>{{ deliverableSourceCount }} AI</small>
         </button>
       </aside>
 
@@ -1211,7 +1225,8 @@ function confirmSourceDialog() {
           </div>
           <div>
             <span>资料</span>
-            <strong>{{ sourceSummary.selected || 0 }} 个已选来源</strong>
+            <strong>{{ sourceSummary.selected || 0 }} 个已选来源 · {{ deliverableSourceCount }} 个可用于 AI</strong>
+            <small v-if="emptyPayloadSourceCount">{{ emptyPayloadSourceCount }} 个未进入模型</small>
           </div>
         </div>
         <div class="agent-ppt-main-scroll">
@@ -1263,7 +1278,8 @@ function confirmSourceDialog() {
               </label>
               <div class="agent-ppt-config-field is-readonly">
                 <span>资料</span>
-                <strong>{{ sourceSummary.selected || 0 }} 个已选来源</strong>
+                <strong>{{ sourceSummary.selected || 0 }} 个已选来源 · {{ deliverableSourceCount }} 个可用于 AI</strong>
+                <small v-if="emptyPayloadSourceCount">{{ emptyPayloadSourceCount }} 个未进入模型</small>
               </div>
             </div>
           </div>

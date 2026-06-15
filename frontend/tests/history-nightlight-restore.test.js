@@ -282,8 +282,35 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
         { artifact_type: 'poi_raster_grid', updated_at: '2026-01-02', params: { year: 2020, grid_type: 'shared_raster' }, payload: { year: 2020, grid: { type: 'FeatureCollection', grid_type: 'shared_raster', features: [{ properties: { cell_id: 'wrong-year' } }] }, summary: { grid_count: 999 } } },
         { artifact_type: 'poi_raster_grid', updated_at: '2026-01-01', params: { year: 2024, grid_type: 'shared_raster' }, payload: { year: 2024, grid: { type: 'FeatureCollection', grid_type: 'shared_raster', features: [{ properties: { cell_id: 'cell-1' } }] }, summary: { grid_count: 1 } } },
         { artifact_type: 'poi_h3_grid', updated_at: '2026-01-01', params: { year: 2024 }, payload: { summary: { grid_count: 2 } } },
-        { artifact_type: 'population', updated_at: '2026-01-01', payload: { year: '2026', overview: { summary: { total_population: 10 } }, layer_cells: [{ cell_id: 'p1' }] } },
-        { artifact_type: 'nightlight', updated_at: '2026-01-01', payload: { year: 2025, overview: { summary: { mean_radiance: 3 } }, layer_cells: [{ cell_id: 'n1' }] } },
+        {
+          artifact_type: 'population',
+          updated_at: '2026-01-01',
+          payload: {
+            year: '2026',
+            overview: { summary: { total_population: 10 } },
+            layer: {
+              view: 'density',
+              summary: { average_density_per_km2: 8000 },
+              legend: { title: '人口密度' },
+              cells: [{ cell_id: 'p1' }],
+            },
+          },
+        },
+        {
+          artifact_type: 'nightlight',
+          updated_at: '2026-01-01',
+          payload: {
+            year: 2025,
+            overview: { summary: { mean_radiance: 3 } },
+            layer: {
+              view: 'radiance',
+              summary: { total_radiance: 30 },
+              analysis: { core_hotspot_count: 2, hotspot_cell_ratio: 0.25, peak_to_edge_ratio: 3.2 },
+              legend: { title: '夜光' },
+              cells: [{ cell_id: 'n1' }],
+            },
+          },
+        },
         { artifact_type: 'road_syntax', updated_at: '2026-01-01', payload: { summary: { node_count: 5 } } },
       ],
     }
@@ -305,12 +332,46 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
     ])
     assert.deepEqual(ctx.appliedPoiGrid, { type: 'shared', year: 2024 })
     assert.equal(ctx.populationOverview.summary.total_population, 10)
+    assert.equal(ctx.populationLayer.summary.average_density_per_km2, 8000)
+    assert.equal(ctx.populationLayer.cells[0].cell_id, 'p1')
     assert.equal(ctx.nightlightOverview.summary.mean_radiance, 3)
+    assert.equal(ctx.nightlightLayer.analysis.core_hotspot_count, 2)
+    assert.equal(ctx.nightlightLayer.analysis.hotspot_cell_ratio, 0.25)
+    assert.equal(ctx.nightlightLayer.analysis.peak_to_edge_ratio, 3.2)
+    assert.equal(ctx.nightlightLayer.cells[0].cell_id, 'n1')
     assert.equal(ctx.roadSyntaxSummary.node_count, 5)
     assert.deepEqual(ctx.summaryTaskBoardSyncs, [{ sync: false }])
   } finally {
     global.fetch = originalFetch
   }
+})
+
+test('history restore ignores old population and nightlight artifacts without layer payload', async () => {
+  const ctx = createHistoryRestoreContext({
+    historyDetailLoadToken: 1,
+    populationLayer: { cells: [{ cell_id: 'existing-p' }] },
+    nightlightLayer: { cells: [{ cell_id: 'existing-n' }] },
+  })
+
+  const populationRestored = await historyMethods.restoreHistoryPopulationArtifact.call(ctx, {
+    payload: {
+      year: '2026',
+      overview: { summary: { total_population: 10 } },
+      layer_cells: [{ cell_id: 'legacy-p1' }],
+    },
+  }, 1)
+  const nightlightRestored = await historyMethods.restoreHistoryNightlightArtifact.call(ctx, {
+    payload: {
+      year: 2025,
+      overview: { summary: { mean_radiance: 3 } },
+      layer_cells: [{ cell_id: 'legacy-n1' }],
+    },
+  }, 1)
+
+  assert.equal(populationRestored, false)
+  assert.equal(nightlightRestored, false)
+  assert.deepEqual(ctx.populationLayer, { cells: [{ cell_id: 'existing-p' }] })
+  assert.deepEqual(ctx.nightlightLayer, { cells: [{ cell_id: 'existing-n' }] })
 })
 
 test('_restoreHistoryH3ResultAsync restores h3 data and recomputes derived stats', async () => {
@@ -409,7 +470,9 @@ test('ensureNightlightPanelEntryState recomputes after history reset cleared pre
       simplifyTargets: ['map', 'nightlight'],
       loadNightlightMetaCalls: 0,
       ensureNightlightBaseGridCalls: 0,
-      computeNightlightAnalysisCalls: 0,
+      fetchNightlightOverviewCalls: 0,
+      fetchNightlightLayerCalls: [],
+      fetchNightlightRasterCalls: 0,
       restoredNightlightDisplays: 0,
       getIsochronePolygonRing() {
         return [[121.47, 31.22], [121.49, 31.22], [121.49, 31.24], [121.47, 31.22]]
@@ -431,11 +494,29 @@ test('ensureNightlightPanelEntryState recomputes after history reset cleared pre
         this.nightlightScopeId = 'new-scope'
         return this.nightlightGrid
       },
-      async computeNightlightAnalysis() {
-        this.computeNightlightAnalysisCalls += 1
+      async fetchNightlightOverview() {
+        this.fetchNightlightOverviewCalls += 1
         this.nightlightOverview = { summary: { total_radiance: 15 } }
-        this.nightlightLayer = { cells: [{ cell_id: 'new-cell' }] }
+        return this.nightlightOverview
+      },
+      async fetchNightlightLayer(view) {
+        this.fetchNightlightLayerCalls.push(view)
+        this.nightlightAnalysisView = view
+        this.nightlightLayer = {
+          view,
+          analysis: {
+            core_hotspot_count: 2,
+            hotspot_cell_ratio: 0.25,
+            peak_to_edge_ratio: 3.5,
+          },
+          cells: [{ cell_id: 'new-cell' }],
+        }
+        return this.nightlightLayer
+      },
+      async fetchNightlightRaster() {
+        this.fetchNightlightRasterCalls += 1
         this.nightlightRaster = { image_url: 'data:image/png;base64,new', bounds_gcj02: [] }
+        return this.nightlightRaster
       },
       restoreNightlightDisplayOnEnter() {
         this.restoredNightlightDisplays += 1
@@ -447,7 +528,89 @@ test('ensureNightlightPanelEntryState recomputes after history reset cleared pre
 
   assert.equal(ctx.loadNightlightMetaCalls, 1)
   assert.equal(ctx.ensureNightlightBaseGridCalls, 1)
-  assert.equal(ctx.computeNightlightAnalysisCalls, 1)
+  assert.equal(ctx.fetchNightlightOverviewCalls, 1)
+  assert.deepEqual(ctx.fetchNightlightLayerCalls, ['radiance'])
+  assert.equal(ctx.fetchNightlightRasterCalls, 1)
   assert.equal(ctx.nightlightScopeId, 'new-scope')
   assert.deepEqual(ctx.nightlightOverview, { summary: { total_radiance: 15 } })
+  assert.equal(ctx.nightlightLayer.analysis.core_hotspot_count, 2)
+  assert.equal(ctx.nightlightLayer.analysis.hotspot_cell_ratio, 0.25)
+  assert.equal(ctx.nightlightLayer.analysis.peak_to_edge_ratio, 3.5)
+})
+
+test('ensureNightlightPanelEntryState fills missing layer and raster when overview already exists', async () => {
+  const ctx = Object.assign(
+    createAnalysisNightlightInitialState(),
+    nightlightMethods,
+    {
+      step: 2,
+      activeStep3Panel: 'nightlight',
+      nightlightOverview: { scope_id: 'old-scope', summary: { total_radiance: 20 } },
+      loadNightlightMetaCalls: 0,
+      ensureNightlightBaseGridCalls: 0,
+      fetchNightlightOverviewCalls: 0,
+      fetchNightlightLayerCalls: [],
+      fetchNightlightRasterCalls: 0,
+      persistedArtifacts: [],
+      getIsochronePolygonRing() {
+        return [[121.47, 31.22], [121.49, 31.22], [121.49, 31.24], [121.47, 31.22]]
+      },
+      hasSimplifyDisplayTarget(target) {
+        return target === 'nightlight'
+      },
+      applyNightlightGridToMap() {},
+      clearNightlightDisplayOnLeave() {},
+      async loadNightlightMeta() {
+        this.loadNightlightMetaCalls += 1
+        return this.nightlightMeta
+      },
+      async ensureNightlightBaseGrid() {
+        this.ensureNightlightBaseGridCalls += 1
+        this.nightlightGrid = { features: [{ id: 'grid' }] }
+        this.nightlightGridCount = 1
+        this.nightlightScopeId = 'scope-2025'
+        return this.nightlightGrid
+      },
+      async fetchNightlightOverview() {
+        this.fetchNightlightOverviewCalls += 1
+        throw new Error('overview should not refetch')
+      },
+      async fetchNightlightLayer(view) {
+        this.fetchNightlightLayerCalls.push(view)
+        this.nightlightAnalysisView = view
+        this.nightlightLayer = {
+          view,
+          analysis: {
+            core_hotspot_count: 4,
+            hotspot_cell_ratio: 0.4,
+            peak_to_edge_ratio: 2.8,
+          },
+          cells: [{ cell_id: 'n1' }],
+        }
+        return this.nightlightLayer
+      },
+      async fetchNightlightRaster() {
+        this.fetchNightlightRasterCalls += 1
+        this.nightlightRaster = { image_url: 'data:image/png;base64,new', bounds_gcj02: [] }
+        return this.nightlightRaster
+      },
+      persistAnalysisArtifactQuietly(kind) {
+        this.persistedArtifacts.push(kind)
+      },
+      restoreNightlightDisplayOnEnter() {
+        this.restoredNightlightDisplays = Number(this.restoredNightlightDisplays || 0) + 1
+      },
+    },
+  )
+
+  await nightlightMethods.ensureNightlightPanelEntryState.call(ctx)
+
+  assert.equal(ctx.fetchNightlightOverviewCalls, 0)
+  assert.deepEqual(ctx.fetchNightlightLayerCalls, ['radiance'])
+  assert.equal(ctx.fetchNightlightRasterCalls, 1)
+  assert.equal(ctx.nightlightLayer.analysis.core_hotspot_count, 4)
+  assert.equal(ctx.nightlightLayer.analysis.hotspot_cell_ratio, 0.4)
+  assert.equal(ctx.nightlightLayer.analysis.peak_to_edge_ratio, 2.8)
+  assert.deepEqual(ctx.persistedArtifacts, ['nightlight'])
+  assert.match(ctx.nightlightStatus, /夜光分析完成/)
 })

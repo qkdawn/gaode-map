@@ -52,6 +52,7 @@ class PptDataInvalidIntentPlan(RuntimeError):
 
 logger = logging.getLogger(__name__)
 PPT_DATA_PACKAGE_DIR = Path("runtime") / "ppt-data-packages"
+PPT_DATA_PACKAGE_ARTIFACT_TYPE = "ppt_data_package"
 
 
 def _safe_filename(value: str) -> str:
@@ -61,7 +62,81 @@ def _safe_filename(value: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "-" for ch in text)[:96].strip("-") or "unknown"
 
 
-def _persist_ppt_data_package_response(response: PptDataPackageResponse) -> PptDataPackageResponse:
+def _normalize_ppt_package_response_for_artifact(request: PptDataPackageRequest, response: PptDataPackageResponse) -> PptDataPackageResponse:
+    payload = response.model_dump(mode="json")
+    source = _safe_dict(payload.get("source"))
+    meta = _safe_dict(source.get("meta"))
+    package = _safe_dict(meta.get("package"))
+    area_id = _clean_text(request.area_id)
+    package_version = _clean_text(request.package_version or package.get("package_version") or meta.get("packageVersion"))
+    package = {
+        **package,
+        "area_id": area_id,
+        "package_version": package_version,
+    }
+    meta = {
+        **meta,
+        "sourceKind": "package",
+        "areaId": area_id,
+        "packageVersion": package_version,
+        "package": package,
+    }
+    source = {
+        **source,
+        "status": _clean_text(source.get("status")) or "ready",
+        "selected": bool(source.get("selected", True)),
+        "meta": meta,
+    }
+    payload["source"] = source
+    return PptDataPackageResponse.model_validate(payload)
+
+
+def _ppt_package_artifact_params(request: PptDataPackageRequest, response: PptDataPackageResponse) -> Dict[str, Any]:
+    package = _safe_dict(_safe_dict(response.source.meta).get("package"))
+    source_ids = sorted(_clean_text(item) for item in _safe_list(package.get("source_ids") or request.source_ids) if _clean_text(item))
+    return {
+        "package_mode": _clean_text(package.get("package_mode") or request.package_mode) or "evidence",
+        "intent": _clean_text(package.get("intent") or request.intent),
+        "source_ids": source_ids,
+        "package_version": _clean_text(package.get("package_version") or request.package_version),
+    }
+
+
+def _ppt_package_artifact_summary(response: PptDataPackageResponse) -> Dict[str, Any]:
+    source = response.source
+    meta = _safe_dict(source.meta)
+    package = _safe_dict(meta.get("package"))
+    source_payload = source.model_dump(mode="json")
+    return {
+        "id": _clean_text(source.id),
+        "title": _clean_text(source.title or package.get("title")),
+        "label": _clean_text(meta.get("label") or response.summary),
+        "source_ids": [_clean_text(item) for item in _safe_list(package.get("source_ids")) if _clean_text(item)],
+        "package_version": _clean_text(package.get("package_version") or meta.get("packageVersion")),
+        "item_count": int(package.get("total") or source_payload.get("count") or len(response.items) or 0),
+    }
+
+
+def _persist_ppt_data_package_response(request: PptDataPackageRequest, response: PptDataPackageResponse) -> PptDataPackageResponse:
+    response = _normalize_ppt_package_response_for_artifact(request, response)
+    payload = response.model_dump(mode="json")
+    area_id = _clean_text(request.area_id)
+    if area_id:
+        try:
+            analysis_artifact_repo.upsert(
+                history_id=area_id,
+                artifact_type=PPT_DATA_PACKAGE_ARTIFACT_TYPE,
+                params=_ppt_package_artifact_params(request, response),
+                payload=payload,
+                summary=_ppt_package_artifact_summary(response),
+                data_version="v1",
+            )
+        except Exception:
+            logger.exception("PPT data package artifact persist failed")
+    return response
+
+
+def _write_ppt_data_package_debug_dump(response: PptDataPackageResponse) -> PptDataPackageResponse:
     try:
         payload = response.model_dump(mode="json")
         source = _safe_dict(payload.get("source"))
@@ -476,18 +551,10 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
 
 
 def _list_persisted_ppt_package_sources(area_id: str) -> List[PptDataSourceSummary]:
-    area_dir = PPT_DATA_PACKAGE_DIR / _safe_filename(area_id or "global")
-    if not area_dir.exists():
-        return []
     sources: List[PptDataSourceSummary] = []
     seen: set[str] = set()
-    for path in sorted(area_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
-        if path.name.startswith("_latest_"):
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
+    for artifact in analysis_artifact_repo.list(area_id, artifact_type=PPT_DATA_PACKAGE_ARTIFACT_TYPE):
+        payload = _safe_dict(artifact.get("payload"))
         source = _safe_dict(payload.get("source"))
         source_id = _clean_text(source.get("id"))
         if not source_id or source_id in seen:
@@ -495,6 +562,7 @@ def _list_persisted_ppt_package_sources(area_id: str) -> List[PptDataSourceSumma
         seen.add(source_id)
         meta = _safe_dict(source.get("meta"))
         package = _safe_dict(meta.get("package"))
+        package_version = _clean_text(package.get("package_version") or meta.get("packageVersion"))
         label = _clean_text(meta.get("label") or package.get("label") or payload.get("summary")) or "已构建资料包"
         count = int(package.get("item_count") or source.get("count") or len(_safe_list(payload.get("items"))) or 0)
         sources.append(
@@ -510,8 +578,13 @@ def _list_persisted_ppt_package_sources(area_id: str) -> List[PptDataSourceSumma
                     "label": label,
                     "sourceKind": "package",
                     "areaId": _clean_text(area_id),
+                    "packageVersion": package_version,
                     "persistedPackage": True,
-                    "package": package,
+                    "package": {
+                        **package,
+                        "area_id": _clean_text(area_id),
+                        "package_version": package_version,
+                    },
                 },
             )
         )
@@ -962,7 +1035,8 @@ def _match_point_cell(point: PptPoiPoint, prepared_cells: List[tuple[str, Any, A
 
 def _latest_nightlight_cells(area_id: str) -> Dict[str, Dict[str, Any]]:
     payload = _latest_artifact_payload(area_id, "nightlight")
-    cells = _safe_list(payload.get("layer_cells"))
+    layer = _safe_dict(payload.get("layer"))
+    cells = _safe_list(layer.get("cells"))
     return {
         _clean_text(cell.get("cell_id")): _safe_dict(cell)
         for cell in cells
@@ -1067,23 +1141,26 @@ def _load_road_syntax_payload(area_id: str) -> Dict[str, Any]:
 def _carrier_population_evidence(area_id: str) -> Dict[str, Any]:
     artifact = _latest_artifact(area_id, "population")
     payload = _safe_dict(artifact.get("payload"))
+    layer = _safe_dict(payload.get("layer"))
     params = _safe_dict(artifact.get("params"))
-    selected = _safe_dict(payload.get("selected"))
-    legend = _safe_dict(payload.get("legend"))
-    view = (_clean_text(selected.get("view")) or _clean_text(payload.get("view")) or _clean_text(params.get("view"))).lower()
+    selected = _safe_dict(layer.get("selected") or payload.get("selected"))
+    legend = _safe_dict(layer.get("legend") or payload.get("legend"))
+    view = (_clean_text(selected.get("view")) or _clean_text(layer.get("view")) or _clean_text(payload.get("view")) or _clean_text(params.get("view"))).lower()
     view_label = (
         _clean_text(selected.get("view_label"))
+        or _clean_text(layer.get("view_label"))
         or _clean_text(payload.get("view_label"))
         or _clean_text(legend.get("title"))
         or ("总人口" if view == "overview" else ("人口密度" if view in {"density", "sex"} else "人口图层"))
     )
     unit = (
         _clean_text(selected.get("unit"))
+        or _clean_text(layer.get("unit"))
         or _clean_text(payload.get("unit"))
         or _clean_text(legend.get("unit"))
         or ("人口" if view == "overview" else ("人/平方公里" if view in {"density", "sex"} else ("%" if view == "age" else "")))
     )
-    cells = _safe_list(payload.get("layer_cells"))
+    cells = _safe_list(layer.get("cells"))
     return {
         "view": view,
         "view_label": view_label,
@@ -1824,6 +1901,7 @@ def _build_poi_road_population_nightlight_carrier_package(request: PptDataPackag
         "source_ids": sorted(selected_sources),
         "package_mode": "evidence",
         "intent": _clean_text(request.intent) or CARRIER_EVIDENCE_INTENT,
+        "package_version": _clean_text(request.package_version),
         "carrier_count": len(carriers),
         "road_feature_count": len(road_rows),
         "skeleton_road_count": len(skeleton_roads),
@@ -1844,6 +1922,8 @@ def _build_poi_road_population_nightlight_carrier_package(request: PptDataPackag
         "coordinate_system": "GCJ02",
         "package_mode": "evidence",
         "intent": _clean_text(request.intent) or CARRIER_EVIDENCE_INTENT,
+        "area_id": _clean_text(request.area_id),
+        "package_version": _clean_text(request.package_version),
         "source_ids": sorted(selected_sources),
         "evidence_layers": ["road_syntax", "poi", "population", "nightlight"],
         "filters": {
@@ -1974,6 +2054,7 @@ def _build_nightlife_poi_nightlight_package(
         "source_ids": sorted(selected_sources),
         "package_mode": "evidence",
         "intent": _clean_text(request.intent) or NIGHTLIFE_EVIDENCE_INTENT,
+        "package_version": _clean_text(request.package_version),
         "filters": filters,
         "limit": request.limit,
         "items": limited_items,
@@ -2008,6 +2089,8 @@ def _build_nightlife_poi_nightlight_package(
         "coordinate_system": "WGS84",
         "package_mode": "evidence",
         "intent": _clean_text(request.intent) or NIGHTLIFE_EVIDENCE_INTENT,
+        "area_id": _clean_text(request.area_id),
+        "package_version": _clean_text(request.package_version),
         "source_ids": sorted(selected_sources),
         "filters": filters,
         "total": len(nightlife_points),
@@ -2330,6 +2413,7 @@ def _build_poi_package_response(
         "source_ids": sorted(selected_sources),
         "package_mode": package_mode,
         "intent": _clean_text(intent),
+        "package_version": _clean_text(request.package_version),
         "query": _clean_text(request.query),
         "limit": request.limit,
         "filters": filters,
@@ -2352,6 +2436,8 @@ def _build_poi_package_response(
         "coordinate_system": "WGS84",
         "package_mode": package_mode,
         "intent": _clean_text(intent),
+        "area_id": _clean_text(request.area_id),
+        "package_version": _clean_text(request.package_version),
         "query": _clean_text(request.query),
         "source_ids": sorted(selected_sources),
         "filters": filters,
@@ -2428,10 +2514,10 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
         for keyword in ("夜生活", "夜间消费", "夜间活力", "夜光格子", "夜光")
     )
     if wants_carrier_package:
-        return _persist_ppt_data_package_response(_build_poi_road_population_nightlight_carrier_package(request, selected_sources))
+        return _persist_ppt_data_package_response(request, _build_poi_road_population_nightlight_carrier_package(request, selected_sources))
     if not include_poi:
         poi_result = PptPoiQueryResponse(area_id=request.area_id, warnings=["第一版资料包仅支持 POI 来源。"])
-        return _persist_ppt_data_package_response(_build_poi_package_response(
+        return _persist_ppt_data_package_response(request, _build_poi_package_response(
             request=request,
             poi_result=poi_result,
             selected_sources=selected_sources,
@@ -2455,7 +2541,7 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
                 limit=request.limit,
             )
         )
-        return _persist_ppt_data_package_response(_build_poi_package_response(
+        return _persist_ppt_data_package_response(request, _build_poi_package_response(
             request=request,
             poi_result=poi_result,
             selected_sources=selected_sources,
@@ -2494,7 +2580,7 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
             for group, repairs in repaired_groups
         ]
         if wants_nightlife_alignment:
-            return _persist_ppt_data_package_response(_build_nightlife_poi_nightlight_package(
+            return _persist_ppt_data_package_response(request, _build_nightlife_poi_nightlight_package(
                 request=request,
                 selected_sources=selected_sources,
                 plan=plan,
@@ -2520,7 +2606,7 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
                 if _clean_text(warning)
             ],
         )
-        return _persist_ppt_data_package_response(_build_poi_package_response(
+        return _persist_ppt_data_package_response(request, _build_poi_package_response(
             request=request,
             poi_result=poi_result,
             selected_sources=selected_sources,
@@ -2549,7 +2635,7 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
             offset=0,
         )
     )
-    return _persist_ppt_data_package_response(_build_poi_package_response(
+    return _persist_ppt_data_package_response(request, _build_poi_package_response(
         request=request,
         poi_result=poi_result,
         selected_sources=selected_sources,

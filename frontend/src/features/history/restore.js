@@ -386,9 +386,10 @@
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
                 const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
-                if (!Object.keys(overview).length && !Object.keys(summary).length) return false;
+                const layer = payload.layer && typeof payload.layer === 'object' ? payload.layer : {};
+                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !Array.isArray(layer.cells)) return false;
                 this.populationOverview = Object.keys(overview).length ? overview : { summary };
-                this.populationLayer = { cells: Array.isArray(payload.layer_cells) ? payload.layer_cells : [] };
+                this.populationLayer = layer;
                 this.populationGridCount = this.populationLayer.cells.length;
                 if (payload.year) this.populationSelectedYear = String(payload.year);
                 if (payload.view) this.populationAnalysisView = String(payload.view);
@@ -403,9 +404,10 @@
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
                 const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
-                if (!Object.keys(overview).length && !Object.keys(summary).length) return false;
+                const layer = payload.layer && typeof payload.layer === 'object' ? payload.layer : {};
+                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !Array.isArray(layer.cells)) return false;
                 this.nightlightOverview = Object.keys(overview).length ? overview : { summary };
-                this.nightlightLayer = { cells: Array.isArray(payload.layer_cells) ? payload.layer_cells : [] };
+                this.nightlightLayer = layer;
                 this.nightlightGridCount = this.nightlightLayer.cells.length;
                 this.nightlightRaster = payload.raster && typeof payload.raster === 'object' ? payload.raster : null;
                 if (payload.year) this.nightlightSelectedYear = Number(payload.year);

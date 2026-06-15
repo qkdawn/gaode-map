@@ -111,7 +111,7 @@ def test_generate_ppt_spec_returns_ai_outline(monkeypatch):
     assert response.missing_inputs == []
     assert seen_kwargs["stream"] is False
     assert seen_kwargs["enable_thinking"] is False
-    assert seen_kwargs["timeout_s"] == 35
+    assert seen_kwargs["timeout_s"] == 0.0
 
 
 def test_generate_ppt_spec_fails_without_llm(monkeypatch):
@@ -642,6 +642,55 @@ def test_ppt_metric_context_extracts_metrics_and_filters_unknown_claims():
     assert len(assets["metric_claims"]) == 1
     assert assets["chart_specs"][0]["source_metric_ids"] == [valid_id]
     assert assets["chart_specs"][0]["rows"][0]["value"] == metrics[0]["value"]
+
+
+def test_ppt_metric_context_adds_selected_carrier_package_metrics():
+    package_source = {
+        "id": "package:poi-road-carriers:test",
+        "type": "package",
+        "title": "POI × 路网空间载体资料包",
+        "status": "ready",
+        "selected": True,
+        "meta": {
+            "sourceKind": "package",
+            "package": {
+                "carriers": [
+                    {
+                        "carrier_id": "corridor_01",
+                        "carrier_type": "corridor",
+                        "carrier_label": "商业活力廊道",
+                        "poi_metrics": {"poi_density_per_km2": 128.5},
+                        "nightlight_metrics": {"mean_radiance": 8.6},
+                        "road_metrics": {"choice_score": 0.72, "integration_score": 0.81},
+                    },
+                ],
+            },
+        },
+    }
+
+    metric_context = build_metric_context(
+        sources=[package_source],
+        source_ids=["package:poi-road-carriers:test"],
+        current={},
+    )
+
+    metrics = metric_context["metrics"]
+    labels = {item["label"]: item for item in metrics}
+    assert labels["商业活力廊道 / corridor_01 POI 密度"]["value"] == 128.5
+    assert labels["商业活力廊道 / corridor_01 夜光均值"]["value"] == 8.6
+    assert labels["商业活力廊道 / corridor_01 choice"]["value"] == 0.72
+    assert labels["商业活力廊道 / corridor_01 integration"]["value"] == 0.81
+    assert all(item["domain"] == "carrier" for item in metrics)
+    assert all(item["status"] == "ready" for item in metrics)
+    assert all(item["source_id"] == "package:poi-road-carriers:test" for item in metrics)
+    assert all(item["scope"] == "商业活力廊道 / corridor_01" for item in metrics)
+
+    unselected_context = build_metric_context(
+        sources=[package_source],
+        source_ids=["current:analysis:road"],
+        current={},
+    )
+    assert unselected_context["metrics"] == []
 
 
 def test_ppt_context_bundle_includes_source_manifest_and_excludes_full_current():

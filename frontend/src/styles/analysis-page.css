@@ -2021,28 +2021,82 @@ label {
 }
 
 .agent-ppt-source-select-row {
-    width: 100%;
-    border: 0;
-    background: transparent;
-    min-height: 34px;
+    width: auto;
+    border: 1px solid #dbe4f0;
+    border-radius: 8px;
+    background: #ffffff;
+    min-height: 32px;
     margin: 0;
-    padding: 0;
-    color: #475569;
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr) 22px;
+    padding: 0 7px 0 10px;
+    color: #334155;
+    display: inline-flex;
     align-items: center;
-    gap: 12px;
+    justify-content: center;
+    gap: 7px;
     cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.agent-ppt-source-select-row:hover:not(:disabled) {
+    border-color: #c5d2e3;
+    background: #f8fafc;
+}
+
+.agent-ppt-source-select-row:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+.agent-ppt-source-select-row.is-selected {
+    border-color: #cbd5e1;
+    background: #f8fafc;
 }
 
 .agent-ppt-source-tree-toolbar {
     flex: 0 0 auto;
-    min-height: 36px;
-    margin: 0 14px 2px;
+    min-height: 42px;
+    margin: 0 14px 6px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+}
+
+.agent-ppt-source-toolbar-status {
+    min-width: 0;
     display: grid;
     grid-template-columns: 34px minmax(0, 1fr);
     align-items: center;
-    gap: 10px;
+    gap: 9px;
+    padding: 5px 8px 5px 5px;
+    border: 1px solid #e5ecf5;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.agent-ppt-source-toolbar-copy {
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+}
+
+.agent-ppt-source-toolbar-copy strong {
+    color: #0f172a;
+    font-size: 13px;
+    line-height: 1.05;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.agent-ppt-source-toolbar-copy small {
+    min-width: 0;
+    color: #0f766e;
+    font-size: 11px;
+    line-height: 1.15;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .agent-ppt-source-tag-btn {
@@ -2072,13 +2126,13 @@ label {
 }
 
 .agent-ppt-source-checkbox {
-    grid-column: 3;
     width: 22px;
     height: 22px;
     border: 1px solid #cbd5e1;
     border-radius: 4px;
     background: #ffffff;
-    display: block;
+    display: inline-block;
+    flex: 0 0 auto;
     position: relative;
     color: #475569;
     font-size: 14px;
@@ -2101,12 +2155,11 @@ label {
 }
 
 .agent-ppt-source-select-row > span:first-child {
-    grid-column: 2;
-    justify-self: end;
     color: #111827;
     font-size: 13px;
     line-height: 1;
-    font-weight: 500;
+    font-weight: 700;
+    white-space: nowrap;
 }
 
 .agent-ppt-source-select-row strong {
