@@ -32,6 +32,20 @@ const PPT_ERROR_SOURCE_LABELS = new Set([
   'directive',
 ])
 
+const PPT_GENERATION_JOB_EVENT_LIMIT = 20
+const PPT_GENERATION_JOB_TYPES = new Set(['outline', 'directive'])
+const PPT_GENERATION_JOB_PHASES = new Set([
+  'idle',
+  'requesting',
+  'response_received',
+  'applying',
+  'ready',
+  'failed',
+  'timed_out',
+  'superseded',
+])
+const PPT_GENERATION_TERMINAL_PHASES = new Set(['ready', 'failed', 'superseded'])
+
 function uniqueText(items = []) {
   const seen = new Set()
   const values = []
@@ -72,6 +86,143 @@ function normalizeRevisionSnapshots(value = {}) {
 
 function normalizeRevisionDraft(value = {}) {
   return cloneObject(value)
+}
+
+function cloneSerializable(value = {}) {
+  try {
+    return JSON.parse(JSON.stringify(value ?? {}))
+  } catch (_) {
+    return { unserializable: asText(value) || 'unserializable_response' }
+  }
+}
+
+function normalizeGenerationResponse(value = {}) {
+  const response = cloneObject(value)
+  const payload = response.payload && typeof response.payload === 'object'
+    ? cloneSerializable(response.payload)
+    : cloneSerializable(value)
+  return {
+    source: asText(response.source || response.responseSource || response.response_source),
+    receivedAt: asText(response.receivedAt || response.received_at),
+    payload,
+  }
+}
+
+function createGenerationResponseSnapshot(source = '', payload = {}) {
+  return normalizeGenerationResponse({
+    source,
+    receivedAt: new Date().toISOString(),
+    payload,
+  })
+}
+
+function normalizeGenerationJobType(value = '') {
+  const type = asText(value)
+  return PPT_GENERATION_JOB_TYPES.has(type) ? type : ''
+}
+
+function normalizeGenerationJobPhase(value = '') {
+  const phase = asText(value)
+  return PPT_GENERATION_JOB_PHASES.has(phase) ? phase : 'idle'
+}
+
+function summarizeGenerationResponse(type = '', response = {}) {
+  const payload = response && typeof response === 'object' ? response : {}
+  const outline = normalizeGenerationJobType(type) === 'outline' || Array.isArray(payload.outline)
+    ? normalizePptOutline(payload.outline)
+    : []
+  const deckBrief = normalizeGenerationJobType(type) === 'directive' || Array.isArray(payload.slides)
+    ? normalizeDeckBrief(payload)
+    : { slides: [] }
+  const keys = Object.keys(payload).slice(0, 12)
+  return {
+    type: normalizeGenerationJobType(type),
+    title: asText(payload.title),
+    outlineCount: outline.length,
+    slideCount: cloneArray(deckBrief.slides).length,
+    keys,
+  }
+}
+
+function createGenerationEvent(name = '', details = {}) {
+  return {
+    name: asText(name) || 'event',
+    at: new Date().toISOString(),
+    details: cloneSerializable(details),
+  }
+}
+
+function normalizeGenerationEvents(events = []) {
+  return cloneArray(events)
+    .map((event) => {
+      const item = cloneObject(event)
+      const name = asText(item.name)
+      if (!name) return null
+      return {
+        name,
+        at: asText(item.at),
+        details: cloneObject(item.details),
+      }
+    })
+    .filter(Boolean)
+    .slice(-PPT_GENERATION_JOB_EVENT_LIMIT)
+}
+
+function normalizeGenerationJob(value = {}) {
+  const job = cloneObject(value)
+  const type = normalizeGenerationJobType(job.type)
+  const phase = normalizeGenerationJobPhase(job.phase)
+  if (!asText(job.id) && phase === 'idle') {
+    return {
+      id: '',
+      type: '',
+      phase: 'idle',
+      tabId: '',
+      startedAt: '',
+      completedAt: '',
+      error: '',
+      responseSummary: {},
+      events: [],
+    }
+  }
+  return {
+    id: asText(job.id),
+    type,
+    phase,
+    tabId: asText(job.tabId || job.tab_id),
+    startedAt: asText(job.startedAt || job.started_at),
+    completedAt: asText(job.completedAt || job.completed_at),
+    error: asText(job.error),
+    responseSummary: cloneObject(job.responseSummary || job.response_summary),
+    events: normalizeGenerationEvents(job.events),
+  }
+}
+
+function appendGenerationEvent(job = {}, name = '', details = {}) {
+  const normalized = normalizeGenerationJob(job)
+  return {
+    ...normalized,
+    events: [
+      ...normalizeGenerationEvents(normalized.events),
+      createGenerationEvent(name, details),
+    ].slice(-PPT_GENERATION_JOB_EVENT_LIMIT),
+  }
+}
+
+function isCurrentGenerationJob(state = {}, requestId = '') {
+  const job = normalizeGenerationJob(state.generationJob || state.generation_job)
+  return !!asText(requestId) && asText(job.id) === asText(requestId)
+}
+
+function generationStepForType(type = '') {
+  return normalizeGenerationJobType(type) === 'directive'
+    ? PPT_PLANNING_STEPS.DIRECTIVE_GENERATING
+    : PPT_PLANNING_STEPS.OUTLINE_GENERATING
+}
+
+function generationReadyStepForState(state = {}, type = '') {
+  if (normalizeGenerationJobType(type) === 'directive') return PPT_PLANNING_STEPS.DIRECTIVE_DRAFT
+  return cloneArray(state.outline).length ? PPT_PLANNING_STEPS.OUTLINE_READY : PPT_PLANNING_STEPS.MATERIALS
 }
 
 function normalizeContextManifest(value = {}) {
@@ -489,6 +640,8 @@ export function createPptPlanningState(seed = {}) {
     selectedSlideId: normalizeSelectedSlideId(seed, deckBrief),
     generationError: asText(seed.generationError || seed.generation_error),
     generationErrorSource: normalizePptErrorSource(seed.generationErrorSource || seed.generation_error_source),
+    generationResponse: normalizeGenerationResponse(seed.generationResponse || seed.generation_response),
+    generationJob: normalizeGenerationJob(seed.generationJob || seed.generation_job),
     dataPackageGenerating: !!(seed.dataPackageGenerating || seed.data_package_generating),
     sourceGrouping: !!(seed.sourceGrouping || seed.source_grouping),
     activeRevisionTarget: normalizeRevisionTarget(seed.activeRevisionTarget || seed.active_revision_target),
@@ -655,11 +808,150 @@ export function applyPptSpecResponse(state = {}, response = {}) {
     },
     generationError: '',
     generationErrorSource: '',
+    generationResponse: createGenerationResponseSnapshot('outline', response),
     revisionSnapshots: {},
     staleDirectivePageIds: [],
     activeRevisionTarget: {},
     outlineRevisionDraft: {},
     directiveRevisionDraft: {},
+  })
+}
+
+export function startPptGenerationJob(state = {}, options = {}) {
+  const normalized = createPptPlanningState(state)
+  const requestId = asText(options.requestId || options.request_id)
+  const type = normalizeGenerationJobType(options.type)
+  const tabId = asText(options.tabId || options.tab_id)
+  if (!requestId || !type || !tabId) return normalized
+  const previousJob = normalizeGenerationJob(normalized.generationJob)
+  const previousEvents = previousJob.id && !PPT_GENERATION_TERMINAL_PHASES.has(previousJob.phase)
+    ? appendGenerationEvent({ ...previousJob, phase: 'superseded', completedAt: new Date().toISOString() }, 'superseded', { byRequestId: requestId }).events
+    : []
+  const job = appendGenerationEvent({
+    id: requestId,
+    type,
+    phase: 'requesting',
+    tabId,
+    startedAt: new Date().toISOString(),
+    completedAt: '',
+    error: '',
+    responseSummary: {},
+    events: previousEvents,
+  }, 'requesting', { tabId, type })
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: generationStepForType(type),
+    generationError: '',
+    generationErrorSource: '',
+    generationResponse: {},
+    generationJob: job,
+  })
+}
+
+export function markPptGenerationResponseReceived(state = {}, requestId = '', response = {}) {
+  const normalized = createPptPlanningState(state)
+  if (!isCurrentGenerationJob(normalized, requestId)) return normalized
+  const job = normalizeGenerationJob(normalized.generationJob)
+  const summary = summarizeGenerationResponse(job.type, response)
+  return createPptPlanningState({
+    ...normalized,
+    generationJob: appendGenerationEvent({
+      ...job,
+      phase: 'response_received',
+      responseSummary: summary,
+    }, 'response_received', summary),
+    generationResponse: createGenerationResponseSnapshot(job.type, response),
+  })
+}
+
+export function markPptGenerationApplying(state = {}, requestId = '') {
+  const normalized = createPptPlanningState(state)
+  if (!isCurrentGenerationJob(normalized, requestId)) return normalized
+  const job = normalizeGenerationJob(normalized.generationJob)
+  return createPptPlanningState({
+    ...normalized,
+    generationJob: appendGenerationEvent({
+      ...job,
+      phase: 'applying',
+    }, 'applying', { type: job.type }),
+  })
+}
+
+export function applyPptGenerationSuccess(state = {}, requestId = '', response = {}) {
+  const normalized = createPptPlanningState(state)
+  if (!isCurrentGenerationJob(normalized, requestId)) return normalized
+  const job = normalizeGenerationJob(normalized.generationJob)
+  const applied = job.type === 'directive'
+    ? applyDeckBriefResponse(normalized, response)
+    : applyPptSpecResponse(normalized, response)
+  const summary = summarizeGenerationResponse(job.type, response)
+  return createPptPlanningState({
+    ...applied,
+    generationJob: appendGenerationEvent({
+      ...job,
+      phase: 'ready',
+      completedAt: new Date().toISOString(),
+      error: '',
+      responseSummary: summary,
+    }, 'ready', summary),
+  })
+}
+
+export function failPptGenerationJob(state = {}, requestId = '', error = '', options = {}) {
+  const normalized = createPptPlanningState(state)
+  if (!isCurrentGenerationJob(normalized, requestId)) return normalized
+  const job = normalizeGenerationJob(normalized.generationJob)
+  const source = normalizePptErrorSource(options.source || job.type)
+  const message = asText(error && error.message ? error.message : error) || 'ppt_generation_failed'
+  const response = options && (options.generationResponse || options.generation_response)
+  const responseSummary = response && typeof response === 'object'
+    ? summarizeGenerationResponse(job.type, response)
+    : job.responseSummary
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: generationReadyStepForState(normalized, job.type),
+    generationError: message,
+    generationErrorSource: source,
+    generationResponse: response && typeof response === 'object' ? createGenerationResponseSnapshot(job.type, response) : normalized.generationResponse,
+    generationJob: appendGenerationEvent({
+      ...job,
+      phase: 'failed',
+      completedAt: new Date().toISOString(),
+      error: message,
+      responseSummary,
+    }, 'failed', { error: message, source }),
+    dataPackageGenerating: false,
+    sourceGrouping: false,
+  })
+}
+
+export function timeoutPptGenerationJob(state = {}, requestId = '') {
+  const normalized = createPptPlanningState(state)
+  if (!isCurrentGenerationJob(normalized, requestId)) return normalized
+  const job = normalizeGenerationJob(normalized.generationJob)
+  return createPptPlanningState({
+    ...normalized,
+    generationJob: appendGenerationEvent({
+      ...job,
+      phase: 'timed_out',
+      error: 'ppt_planning_request_timeout',
+    }, 'timed_out', { requestId }),
+  })
+}
+
+export function supersedePptGenerationJob(state = {}, requestId = '') {
+  const normalized = createPptPlanningState(state)
+  if (!isCurrentGenerationJob(normalized, requestId)) return normalized
+  const job = normalizeGenerationJob(normalized.generationJob)
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: generationReadyStepForState(normalized, job.type),
+    generationJob: appendGenerationEvent({
+      ...job,
+      phase: 'superseded',
+      completedAt: new Date().toISOString(),
+      error: 'ppt_generation_superseded',
+    }, 'superseded', { requestId }),
   })
 }
 
@@ -669,6 +961,7 @@ export function setPptOutlineGenerating(state = {}) {
     currentStep: PPT_PLANNING_STEPS.OUTLINE_GENERATING,
     generationError: '',
     generationErrorSource: '',
+    generationResponse: {},
   })
 }
 
@@ -678,6 +971,7 @@ export function setPptDirectiveGenerating(state = {}) {
     currentStep: PPT_PLANNING_STEPS.DIRECTIVE_GENERATING,
     generationError: '',
     generationErrorSource: '',
+    generationResponse: {},
   })
 }
 
@@ -697,6 +991,7 @@ export function resetPptPlanningToMaterials(state = {}) {
     selectedSlideId: '',
     generationError: '',
     generationErrorSource: '',
+    generationResponse: {},
     activeRevisionTarget: {},
     outlineRevisionDraft: {},
     directiveRevisionDraft: {},
@@ -723,6 +1018,7 @@ export function resetPptPlanningToOutlineReady(state = {}) {
     selectedSlideId: '',
     generationError: '',
     generationErrorSource: '',
+    generationResponse: normalized.generationResponse,
     activeRevisionTarget: {},
     directiveRevisionDraft: {},
     revisionGeneratingTarget: {},
@@ -743,6 +1039,7 @@ export function applyDeckBriefResponse(state = {}, response = {}) {
     deckBrief,
     generationError: '',
     generationErrorSource: '',
+    generationResponse: createGenerationResponseSnapshot('directive', response),
     staleDirectivePageIds: [],
     activeRevisionTarget: {},
     outlineRevisionDraft: {},
@@ -934,14 +1231,18 @@ export function undoPptSectionRevision(state = {}, type = '', target = {}) {
   })
 }
 
-export function setPptGenerationError(state = {}, error = '', source = '') {
+export function setPptGenerationError(state = {}, error = '', source = '', options = {}) {
   const normalized = createPptPlanningState(state)
   const hasOutline = cloneArray(normalized.outline).length > 0
+  const generationResponse = options && (options.generationResponse || options.generation_response)
+    ? normalizeGenerationResponse(options.generationResponse || options.generation_response)
+    : normalized.generationResponse
   return createPptPlanningState({
     ...normalized,
     currentStep: hasOutline ? PPT_PLANNING_STEPS.OUTLINE_READY : PPT_PLANNING_STEPS.MATERIALS,
     generationError: asText(error) || 'ppt_generation_failed',
     generationErrorSource: normalizePptErrorSource(source),
+    generationResponse,
     dataPackageGenerating: false,
     sourceGrouping: false,
   })

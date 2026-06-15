@@ -44,6 +44,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  generationResponse: {
+    type: Object,
+    default: () => ({}),
+  },
+  generationJob: {
+    type: Object,
+    default: () => ({}),
+  },
   dataPackageGenerating: {
     type: Boolean,
     default: false,
@@ -152,7 +160,80 @@ const outlineBlockReason = computed(() => {
 const canGenerateOutline = computed(() => !outlineBlockReason.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
 const canGenerateDirective = computed(() => hasOutline.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
 const canCreateDataPackage = computed(() => (props.sourceSummary.selected || 0) > 0 && !props.dataPackageGenerating)
+const activeGenerationJob = computed(() => (props.generationJob && typeof props.generationJob === 'object' ? props.generationJob : {}))
+const generationJobPhase = computed(() => String(activeGenerationJob.value.phase || 'idle'))
+const generationJobType = computed(() => String(activeGenerationJob.value.type || 'outline'))
+const generationJobEvents = computed(() => (Array.isArray(activeGenerationJob.value.events) ? activeGenerationJob.value.events.slice(-20) : []))
+const isGenerationJobActive = computed(() => ['requesting', 'response_received', 'applying', 'timed_out'].includes(generationJobPhase.value))
+const generationJobTitle = computed(() => {
+  const isDirective = generationJobType.value === 'directive'
+  const labels = {
+    requesting: isDirective ? '指令生成中' : '目录生成中',
+    response_received: isDirective ? '后端已返回，正在应用指令' : '后端已返回，正在应用目录',
+    applying: isDirective ? '正在写入指令' : '正在写入目录',
+    ready: isDirective ? '指令已写入' : '目录已写入',
+    failed: isDirective ? '指令生成失败' : '目录生成失败',
+    timed_out: isDirective ? '指令请求已超时，仍等待可能晚到的返回' : '目录请求已超时，仍等待可能晚到的返回',
+    superseded: '已有新请求接管',
+  }
+  return labels[generationJobPhase.value] || ''
+})
+const generationJobSummary = computed(() => {
+  const summary = activeGenerationJob.value.responseSummary && typeof activeGenerationJob.value.responseSummary === 'object'
+    ? activeGenerationJob.value.responseSummary
+    : {}
+  return [
+    summary.outlineCount ? `outline ${summary.outlineCount} 页` : '',
+    summary.slideCount ? `slides ${summary.slideCount} 页` : '',
+    Array.isArray(summary.keys) && summary.keys.length ? `keys: ${summary.keys.slice(0, 8).join(', ')}` : '',
+    activeGenerationJob.value.error ? `error: ${activeGenerationJob.value.error}` : '',
+  ].filter(Boolean).join(' / ')
+})
+const shouldShowGenerationJobPanel = computed(() => (
+  generationJobTitle.value
+  && (isGenerationJobActive.value || ['failed', 'timed_out', 'superseded'].includes(generationJobPhase.value) || generationJobEvents.value.length)
+))
 const generationErrorText = computed(() => String(props.generationError || '').trim())
+const generationResponsePayload = computed(() => {
+  const response = props.generationResponse && typeof props.generationResponse === 'object'
+    ? props.generationResponse
+    : {}
+  const payload = response.payload && typeof response.payload === 'object' ? response.payload : {}
+  return Object.keys(payload).length ? payload : {}
+})
+const hasGenerationResponsePayload = computed(() => Object.keys(generationResponsePayload.value).length > 0)
+const generationResponseTitle = computed(() => {
+  const response = props.generationResponse && typeof props.generationResponse === 'object'
+    ? props.generationResponse
+    : {}
+  const source = String(response.source || '').trim()
+  const receivedAt = String(response.receivedAt || response.received_at || '').trim()
+  const label = source === 'directive' ? '指令返回' : source === 'outline' ? '目录返回' : '生成返回'
+  return receivedAt ? `${label} · ${receivedAt}` : label
+})
+const generationResponseSummary = computed(() => {
+  const payload = generationResponsePayload.value
+  const outline = Array.isArray(payload.outline) ? payload.outline : []
+  const slides = Array.isArray(payload.slides) ? payload.slides : []
+  const chartSpecs = slides.reduce((sum, slide) => {
+    const specs = slide && (slide.chartSpecs || slide.chart_specs)
+    return sum + (Array.isArray(specs) ? specs.length : 0)
+  }, 0)
+  const keys = Object.keys(payload)
+  return [
+    outline.length ? `outline ${outline.length} 页` : '',
+    slides.length ? `slides ${slides.length} 页` : '',
+    chartSpecs ? `chart_specs ${chartSpecs} 个` : '',
+    keys.length ? `keys: ${keys.slice(0, 8).join(', ')}` : '',
+  ].filter(Boolean).join(' / ')
+})
+const generationResponseJson = computed(() => {
+  try {
+    return JSON.stringify(generationResponsePayload.value, null, 2)
+  } catch (_) {
+    return '无法序列化生成返回。'
+  }
+})
 const generationErrorTitle = computed(() => {
   if (!generationErrorText.value) return ''
   const labels = {
@@ -1131,6 +1212,20 @@ function confirmSourceDialog() {
           </div>
         </div>
         <div class="agent-ppt-main-scroll">
+          <details v-if="shouldShowGenerationJobPanel" class="agent-ppt-generation-job" open>
+            <summary>
+              <span>{{ generationJobTitle }}</span>
+              <small>{{ generationJobSummary || activeGenerationJob.id || '等待状态更新' }}</small>
+            </summary>
+            <ol>
+              <li
+                v-for="(event, eventIndex) in generationJobEvents"
+                :key="`ppt-generation-event-${eventIndex}-${event.name}`">
+                <strong>{{ event.name }}</strong>
+                <span>{{ event.at }}</span>
+              </li>
+            </ol>
+          </details>
           <div v-if="shouldShowConfigPanel" class="agent-ppt-target-config-panel">
             <div class="agent-ppt-target-config-head">
               <strong>配置生成目标</strong>
@@ -1169,6 +1264,13 @@ function confirmSourceDialog() {
             </div>
           </div>
           <div v-else class="agent-ppt-directive-doc">
+            <details v-if="hasGenerationResponsePayload" class="agent-ppt-generation-response">
+              <summary>
+                <span>{{ generationResponseTitle }}</span>
+                <small>{{ generationResponseSummary || '点击查看原始 JSON' }}</small>
+              </summary>
+              <pre>{{ generationResponseJson }}</pre>
+            </details>
             <div
               v-for="row in outlineRows"
               :key="`ppt-directive-row-${row.id}`"
@@ -1273,6 +1375,7 @@ function confirmSourceDialog() {
         </div>
         <div class="agent-ppt-prompt-box">
           <span v-if="generationErrorText">{{ generationErrorText }}</span>
+          <span v-else-if="isGenerationJobActive">{{ generationJobTitle }}</span>
           <span v-else-if="!hasOutline && outlineBlockReason">{{ outlineBlockReason }}</span>
           <span v-else-if="!hasOutline">先生成目录，再生成逐页指令文件</span>
           <span v-else-if="!hasDirective">目录已生成，下一步生成逐页指令</span>
@@ -1285,7 +1388,7 @@ function confirmSourceDialog() {
               class="is-primary"
               :disabled="!canGenerateOutline"
               @click="$emit('generate-outline')">
-              {{ isOutlineGenerating ? '目录生成中' : '生成目录' }}
+              {{ isOutlineGenerating || (isGenerationJobActive && generationJobType === 'outline') ? (generationJobTitle || '目录生成中') : '生成目录' }}
             </button>
             <template v-else-if="!hasDirective">
               <button
@@ -1293,7 +1396,7 @@ function confirmSourceDialog() {
                 class="is-primary"
                 :disabled="!canGenerateDirective"
                 @click="$emit('generate-directive')">
-                {{ isDirectiveGenerating ? '指令生成中' : '生成指令文件' }}
+                {{ isDirectiveGenerating || (isGenerationJobActive && generationJobType === 'directive') ? (generationJobTitle || '指令生成中') : '生成指令文件' }}
               </button>
               <button
                 type="button"

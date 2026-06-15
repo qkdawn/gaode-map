@@ -3938,6 +3938,118 @@ body.agent-ppt-source-menu-open {
     padding: 7px 9px;
 }
 
+.agent-ppt-generation-response {
+    margin: 0 18px 12px;
+    border: 1px solid rgba(59, 130, 246, 0.18);
+    border-radius: 12px;
+    background: rgba(239, 246, 255, 0.72);
+    padding: 12px 14px;
+}
+
+.agent-ppt-generation-response summary {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.agent-ppt-generation-response summary::-webkit-details-marker {
+    display: none;
+}
+
+.agent-ppt-generation-response summary span {
+    font-size: 13px;
+    font-weight: 700;
+    color: #1e3a8a;
+}
+
+.agent-ppt-generation-response summary small {
+    color: #6b7280;
+    font-size: 12px;
+}
+
+.agent-ppt-generation-response pre {
+    margin: 10px 0 0;
+    padding: 12px;
+    overflow: auto;
+    max-height: 240px;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.95);
+    color: #e5e7eb;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.agent-ppt-generation-job {
+    margin: 0 18px 12px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 10px;
+    background: #f8fafc;
+    padding: 11px 13px;
+}
+
+.agent-ppt-generation-job summary {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.agent-ppt-generation-job summary::-webkit-details-marker {
+    display: none;
+}
+
+.agent-ppt-generation-job summary span {
+    font-size: 13px;
+    font-weight: 750;
+    color: #111827;
+}
+
+.agent-ppt-generation-job summary small {
+    min-width: 0;
+    color: #64748b;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-ppt-generation-job ol {
+    display: grid;
+    gap: 6px;
+    margin: 10px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.agent-ppt-generation-job li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-radius: 8px;
+    background: #ffffff;
+    padding: 7px 9px;
+    color: #475569;
+    font-size: 12px;
+}
+
+.agent-ppt-generation-job li strong {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.agent-ppt-generation-job li span {
+    color: #94a3b8;
+    white-space: nowrap;
+}
+
 .agent-ppt-chart-specs article header {
     display: flex;
     align-items: center;

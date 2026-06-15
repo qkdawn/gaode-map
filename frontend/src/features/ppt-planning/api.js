@@ -1,4 +1,4 @@
-const PPT_REQUEST_TIMEOUT_MS = 45000
+const PPT_REQUEST_TIMEOUT_MS = 120000
 
 function requestWithTimeout(url, options = {}, timeoutMs = PPT_REQUEST_TIMEOUT_MS) {
   const controller = new AbortController()
@@ -36,21 +36,49 @@ async function postJsonWithTimeout(url, payload = {}, timeoutMs = PPT_REQUEST_TI
     }, timeoutMs)
   } catch (error) {
     if (error && error.name === 'AbortError') {
-      throw new Error('ppt_planning_request_timeout')
+      const timeoutError = new Error('ppt_planning_request_timeout')
+      timeoutError.kind = 'aborted_by_timeout'
+      timeoutError.code = 'ppt_planning_request_timeout'
+      timeoutError.url = url
+      timeoutError.timeoutMs = timeoutMs
+      throw timeoutError
     }
-    throw error
+    const networkError = new Error(error && error.message ? error.message : 'ppt_planning_network_error')
+    networkError.kind = 'network_error'
+    networkError.code = 'ppt_planning_network_error'
+    networkError.url = url
+    networkError.cause = error
+    throw networkError
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     let detail = text
+    let data = null
     try {
-      detail = JSON.parse(text).detail || text
+      data = JSON.parse(text)
+      detail = data.detail || text
     } catch (_) {
       detail = text
     }
-    throw new Error(detail || `ppt_planning_request_failed:${response.status}`)
+    const httpError = new Error(detail || `ppt_planning_request_failed:${response.status}`)
+    httpError.kind = 'http_error'
+    httpError.code = 'ppt_planning_request_failed'
+    httpError.status = response.status
+    httpError.url = url
+    httpError.responseText = text
+    httpError.data = data
+    throw httpError
   }
-  return response.json()
+  try {
+    return await response.json()
+  } catch (error) {
+    const jsonError = new Error('ppt_planning_invalid_json')
+    jsonError.kind = 'invalid_json'
+    jsonError.code = 'ppt_planning_invalid_json'
+    jsonError.url = url
+    jsonError.cause = error
+    throw jsonError
+  }
 }
 
 async function getJson(url, params = {}) {
