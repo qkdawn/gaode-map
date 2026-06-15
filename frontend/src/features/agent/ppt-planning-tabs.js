@@ -7,7 +7,9 @@ import {
   createPptDataPackage,
   deleteDocumentSource,
   generateDeckBrief,
+  generateDeckBriefWithDebug,
   generatePptSpec,
+  generatePptSpecWithDebug,
   getJobStatus,
   listPptDataSources,
   regenerateDeckBriefSlide,
@@ -17,8 +19,8 @@ import {
 } from '../ppt-planning/api.js'
 import {
   addPptDataPackageSource,
+  appendPptGenerationDebugEvent,
   applyDeckBriefSlideRevision,
-  applyPptGenerationSuccess,
   applyPptOutlineSectionRevision,
   applyPptSourceGroupsResponse,
   buildDeckBriefSlidePayload,
@@ -26,6 +28,7 @@ import {
   buildPptOutlineSectionPayload,
   buildPptSpecPayload,
   collectPptChartArtifactFilenames,
+  completePptGenerationJob,
   createPptPlanningState,
   getActiveDeckSlideBrief,
   getBlockingPptInputSources,
@@ -33,8 +36,6 @@ import {
   getPptSourceSummary,
   isPptDirectivePageStale,
   failPptGenerationJob,
-  markPptGenerationApplying,
-  markPptGenerationResponseReceived,
   markPptDirectiveStaleForSources,
   mergePptPlanningSources,
   movePptSourceToGroup,
@@ -56,7 +57,6 @@ import {
   setPptSourceGrouping,
   setPptSpecField,
   setPptSourceGroupSelected,
-  timeoutPptGenerationJob,
   syncPptPackagePlaceholderSources,
   togglePptSourceGroupCollapsed,
   togglePptSourceSelection,
@@ -69,8 +69,6 @@ const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 P
 const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
 const PPT_NIGHTLIFE_PACKAGE_VERSION = 'nightlife-evidence-v2'
 const PPT_CARRIER_PACKAGE_VERSION = 'road-carrier-evidence-v2'
-const PPT_OUTLINE_UI_TIMEOUT_MS = 50000
-const PPT_DIRECTIVE_UI_TIMEOUT_MS = 50000
 const PPT_AUTO_PACKAGE_DEFINITIONS = Object.freeze([
   {
     key: 'poi-evidence',
@@ -104,9 +102,6 @@ function normalizePptGenerationErrorMessage(error = null, source = '') {
   const raw = asText(error && error.message ? error.message : error)
   const type = asText(source)
   const messages = {
-    ppt_planning_request_timeout: type === 'outline'
-      ? '目录生成超时，请稍后重试或减少来源数量。'
-      : '指令生成超时，请稍后重试或减少来源数量。',
     ppt_outline_llm_timeout: '目录生成超时，请稍后重试或减少来源数量。',
     ppt_planning_llm_timeout: 'AI 接口响应超时，请稍后重试。',
     ppt_outline_invalid_response: 'AI 返回的目录格式不完整，请重试。',
@@ -871,16 +866,40 @@ function createPptGenerationRequestId(type = '') {
   return `ppt-${asText(type) || 'generation'}-${random}`
 }
 
+function pptGenerationJobDebug(job = {}) {
+  const source = cloneObject(job)
+  return {
+    id: asText(source.id),
+    phase: asText(source.phase),
+    type: asText(source.type),
+  }
+}
+
+function appendPptDebugEventToState(state = {}, eventName = '', details = {}) {
+  return appendPptGenerationDebugEvent(createPptPlanningState(state), eventName, details)
+}
+
 export function normalizeAgentPptPlanningTab(item = {}, options = {}) {
   const source = asText(item && item.source) || 'draft'
   let pptPlanningState = createPptPlanningState(item && (item.ppt_planning_state || item.pptPlanningState))
   const generationJob = cloneObject(pptPlanningState.generationJob)
-  if (options.restore && ['requesting', 'response_received', 'applying', 'timed_out'].includes(asText(generationJob.phase))) {
+  if (options.restore && ['requesting', 'response_received', 'applying'].includes(asText(generationJob.phase))) {
     pptPlanningState = failPptGenerationJob(
       pptPlanningState,
       generationJob.id,
       '页面已重新加载，请重新发起生成请求。',
       { source: generationJob.type },
+    )
+    pptPlanningState = appendPptDebugEventToState(
+      pptPlanningState,
+      'tabs_restored_from_session',
+      {
+        sessionId: asText(options.sessionId || options.session_id),
+        tabId: asText(item && item.id),
+        restoredAsFailed: true,
+        before: pptGenerationJobDebug(generationJob),
+        after: pptGenerationJobDebug(pptPlanningState.generationJob),
+      },
     )
   }
   return {
@@ -912,6 +931,9 @@ export function serializeAgentPptPlanningTab(item = {}, fallbackPanelPayloads = 
 
 export function createAgentPptPlanningTabMethods() {
   return {
+    appendPptPlanningDebugEvent(state = {}, eventName = '', details = {}) {
+      return appendPptDebugEventToState(state, eventName, details)
+    },
     createAgentPptPlanningViewId() {
       return `ppt-planning-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     },
@@ -1234,22 +1256,84 @@ export function createAgentPptPlanningTabMethods() {
       if (asText(activeTab.kind) !== 'ppt_planning') return
       this.updateAgentPptPlanningTabState(activeTab.id, nextState)
     },
-    updateAgentPptPlanningTabState(tabId = '', nextState = {}) {
+    patchAgentPptPlanningTabState(tabId = '', nextState = {}, options = {}) {
       const targetId = asText(tabId)
-      if (!targetId) return
+      if (!targetId) return false
       const tabs = this.ensureAgentTabs(true)
+      const tabIds = cloneArray(tabs.pptPlanningTabs).map((item) => asText(item && item.id)).filter(Boolean)
+      const targetTab = cloneArray(tabs.pptPlanningTabs).find((item) => asText(item && item.id) === targetId) || null
+      const normalizedNextState = createPptPlanningState(nextState)
+      const shouldSync = options.sync !== false
+      const includeUpdateDebug = options.debug !== false
+      const updateDetails = {
+        targetId,
+        tabIds,
+        matched: !!targetTab,
+        readonly: !!(targetTab && targetTab.readonly),
+        before: pptGenerationJobDebug(targetTab && targetTab.pptPlanningState && targetTab.pptPlanningState.generationJob),
+        next: pptGenerationJobDebug(normalizedNextState.generationJob),
+      }
+      const fallbackActiveId = asText(tabs.activeTabId)
+      const writeDebugToTab = (eventName = '', details = {}) => {
+        const debugTargetId = targetTab ? targetId : fallbackActiveId
+        if (!debugTargetId) return
+        const debugTabs = this.ensureAgentTabs(true)
+        let debugChanged = false
+        const nextTabs = cloneArray(debugTabs.pptPlanningTabs).map((item) => {
+          if (asText(item.id) !== debugTargetId) return item
+          debugChanged = true
+          return {
+            ...item,
+            pptPlanningState: appendPptDebugEventToState(item.pptPlanningState, eventName, details),
+          }
+        })
+        if (debugChanged) {
+          this.agentTabs = { ...debugTabs, summaryTabs: cloneArray(debugTabs.summaryTabs), iterationChangeTabs: cloneArray(debugTabs.iterationChangeTabs), siteSelectionTabs: cloneArray(debugTabs.siteSelectionTabs), pptPlanningTabs: nextTabs, deepAnalysisTabs: cloneArray(debugTabs.deepAnalysisTabs), followupTabs: cloneArray(debugTabs.followupTabs) }
+        }
+      }
+      if (includeUpdateDebug) writeDebugToTab('tab_update_attempt', updateDetails)
+      if (!targetTab) {
+        if (includeUpdateDebug) writeDebugToTab('tab_update_noop_missing_tab', updateDetails)
+        return false
+      }
+      if (targetTab.readonly) {
+        if (includeUpdateDebug) writeDebugToTab('tab_update_noop_readonly', updateDetails)
+        return false
+      }
       let changed = false
-      const nextPptPlanningTabs = cloneArray(tabs.pptPlanningTabs).map((item) => {
+      const refreshedTabs = this.ensureAgentTabs(true)
+      const nextPptPlanningTabs = cloneArray(refreshedTabs.pptPlanningTabs).map((item) => {
         if (asText(item.id) !== targetId || item.readonly) return item
         changed = true
+        const stateWithAttempt = includeUpdateDebug
+          ? appendPptDebugEventToState(normalizedNextState, 'tab_update_attempt', updateDetails)
+          : normalizedNextState
         return {
           ...item,
-          pptPlanningState: createPptPlanningState(nextState),
+          pptPlanningState: includeUpdateDebug
+            ? appendPptDebugEventToState(stateWithAttempt, 'tab_update_applied', updateDetails)
+            : stateWithAttempt,
         }
       })
-      if (!changed) return
-      this.agentTabs = { ...tabs, summaryTabs: cloneArray(tabs.summaryTabs), iterationChangeTabs: cloneArray(tabs.iterationChangeTabs), siteSelectionTabs: cloneArray(tabs.siteSelectionTabs), pptPlanningTabs: nextPptPlanningTabs, deepAnalysisTabs: cloneArray(tabs.deepAnalysisTabs), followupTabs: cloneArray(tabs.followupTabs) }
-      this.syncCurrentAgentSession()
+      if (!changed) return false
+      this.agentTabs = { ...refreshedTabs, summaryTabs: cloneArray(refreshedTabs.summaryTabs), iterationChangeTabs: cloneArray(refreshedTabs.iterationChangeTabs), siteSelectionTabs: cloneArray(refreshedTabs.siteSelectionTabs), pptPlanningTabs: nextPptPlanningTabs, deepAnalysisTabs: cloneArray(refreshedTabs.deepAnalysisTabs), followupTabs: cloneArray(refreshedTabs.followupTabs) }
+      if (shouldSync) {
+        this.syncCurrentAgentSession()
+        if (includeUpdateDebug) {
+          const afterSync = this.getAgentPptPlanningTabState(targetId)
+          writeDebugToTab('tab_update_after_sync', {
+            ...updateDetails,
+            afterSync: pptGenerationJobDebug(afterSync.generationJob),
+          })
+        }
+      }
+      return true
+    },
+    updateAgentPptPlanningTabRuntimeState(tabId = '', nextState = {}) {
+      return this.patchAgentPptPlanningTabState(tabId, nextState, { sync: false, debug: false })
+    },
+    updateAgentPptPlanningTabState(tabId = '', nextState = {}) {
+      return this.patchAgentPptPlanningTabState(tabId, nextState, { sync: true, debug: true })
     },
     cleanupAgentPptPlanningChartArtifacts(filenames = []) {
       const uniqueFilenames = uniquePptText(filenames)
@@ -1410,11 +1494,17 @@ export function createAgentPptPlanningTabMethods() {
     requestAgentPptPlanningOutline(payload = {}) {
       return generatePptSpec(payload)
     },
+    requestAgentPptPlanningOutlineWithDebug(payload = {}, options = {}) {
+      return generatePptSpecWithDebug(payload, options)
+    },
     requestAgentPptPlanningOutlineSection(payload = {}) {
       return regeneratePptSpecSection(payload)
     },
     requestAgentPptPlanningDirective(payload = {}) {
       return generateDeckBrief(payload)
+    },
+    requestAgentPptPlanningDirectiveWithDebug(payload = {}, options = {}) {
+      return generateDeckBriefWithDebug(payload, options)
     },
     requestAgentPptPlanningDirectiveSlide(payload = {}) {
       return regenerateDeckBriefSlide(payload)
@@ -1637,40 +1727,48 @@ export function createAgentPptPlanningTabMethods() {
       if (!getPptSourceSummary(state).selected) return
       if (getBlockingPptInputSources(state).length) return
       const requestId = createPptGenerationRequestId('outline')
-      this.updateAgentPptPlanningTabState(tabId, startPptGenerationJob(state, { requestId, type: 'outline', tabId }))
-      const timeoutId = globalThis.setTimeout(() => {
-        this.updateAgentPptPlanningTabState(tabId, timeoutPptGenerationJob(
-          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-          requestId,
-        ))
-      }, PPT_OUTLINE_UI_TIMEOUT_MS)
-      let response = null
-      try {
-        response = await this.requestAgentPptPlanningOutline(buildPptSpecPayload(state, this.buildAgentPptPlanningApiContext()))
-        this.updateAgentPptPlanningTabState(tabId, markPptGenerationResponseReceived(
-          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-          requestId,
-          response,
-        ))
-        this.updateAgentPptPlanningTabState(tabId, markPptGenerationApplying(
-          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-          requestId,
-        ))
+      const writeRuntimeState = (nextState = {}) => this.updateAgentPptPlanningTabRuntimeState(tabId, nextState)
+      const writeRuntimeEvent = (name = '', details = {}) => {
         try {
-          this.updateAgentPptPlanningTabState(tabId, applyPptGenerationSuccess(
-            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-            requestId,
-            response,
+          return writeRuntimeState(appendPptDebugEventToState(
+            this.getAgentPptPlanningTabState(tabId),
+            name,
+            { requestId, tabId, type: 'outline', ...cloneObject(details) },
           ))
-        } catch (applyError) {
-          this.updateAgentPptPlanningTabState(tabId, failPptGenerationJob(
-            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-            requestId,
-            `目录返回已收到，但前端应用失败：${applyError && applyError.message ? applyError.message : String(applyError)}`,
-            { source: 'outline', generationResponse: response || {} },
-          ))
+        } catch (error) {
+          if (typeof console !== 'undefined' && console.error) console.error('PPT outline runtime event failed', error)
+          return false
         }
+      }
+      writeRuntimeState(startPptGenerationJob(state, { requestId, type: 'outline', tabId }))
+      writeRuntimeEvent('outline_start_dispatched')
+      const heartbeatId = globalThis.setInterval(() => {
+        writeRuntimeEvent('generation_heartbeat')
+      }, 10000)
+      writeRuntimeEvent('heartbeat_scheduled', { intervalMs: 10000 })
+      let response = null
+      const emitRequestDebugEvent = (name = '', details = {}) => {
+        writeRuntimeEvent(name, details)
+      }
+      try {
+        response = await this.requestAgentPptPlanningOutlineWithDebug(
+          buildPptSpecPayload(state, this.buildAgentPptPlanningApiContext()),
+          { onDebugEvent: emitRequestDebugEvent },
+        )
+        writeRuntimeEvent('fetch_resolved')
+        writeRuntimeEvent('json_or_api_returned', {
+          outlineCount: cloneArray(response && response.outline).length,
+          keys: Object.keys(response || {}).slice(0, 8),
+        })
+        const currentState = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
+        const completedState = completePptGenerationJob(currentState, requestId, response)
+        this.updateAgentPptPlanningTabState(tabId, completedState)
       } catch (error) {
+        writeRuntimeEvent('fetch_failed', {
+          kind: asText(error && error.kind),
+          code: asText(error && error.code),
+          message: asText(error && error.message ? error.message : error),
+        })
         this.updateAgentPptPlanningTabState(tabId, failPptGenerationJob(
           this.getAgentPptPlanningTabStateWithSystemSources(tabId),
           requestId,
@@ -1678,7 +1776,7 @@ export function createAgentPptPlanningTabMethods() {
           { source: 'outline', generationResponse: response || error?.response || error?.data || {} },
         ))
       } finally {
-        globalThis.clearTimeout(timeoutId)
+        globalThis.clearInterval(heartbeatId)
       }
     },
     async generateAgentPptPlanningDirective() {
@@ -1689,41 +1787,54 @@ export function createAgentPptPlanningTabMethods() {
       if (!cloneArray(state.outline).length) return
       const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
       const requestId = createPptGenerationRequestId('directive')
-      this.updateAgentPptPlanningTabState(tabId, startPptGenerationJob(state, { requestId, type: 'directive', tabId }))
-      const timeoutId = globalThis.setTimeout(() => {
-        this.updateAgentPptPlanningTabState(tabId, timeoutPptGenerationJob(
-          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-          requestId,
-        ))
-      }, PPT_DIRECTIVE_UI_TIMEOUT_MS)
+      const writeRuntimeState = (nextState = {}) => this.updateAgentPptPlanningTabRuntimeState(tabId, nextState)
+      const writeRuntimeEvent = (name = '', details = {}) => {
+        try {
+          return writeRuntimeState(appendPptDebugEventToState(
+            this.getAgentPptPlanningTabState(tabId),
+            name,
+            { requestId, tabId, type: 'directive', ...cloneObject(details) },
+          ))
+        } catch (error) {
+          if (typeof console !== 'undefined' && console.error) console.error('PPT directive runtime event failed', error)
+          return false
+        }
+      }
+      writeRuntimeState(startPptGenerationJob(state, { requestId, type: 'directive', tabId }))
+      writeRuntimeEvent('directive_start_dispatched')
+      const heartbeatId = globalThis.setInterval(() => {
+        writeRuntimeEvent('generation_heartbeat')
+      }, 10000)
+      writeRuntimeEvent('heartbeat_scheduled', { intervalMs: 10000 })
       let response = null
+      const emitRequestDebugEvent = (name = '', details = {}) => {
+        writeRuntimeEvent(name, details)
+      }
       try {
-        response = await this.requestAgentPptPlanningDirective(buildDeckBriefPayload(state, this.buildAgentPptPlanningApiContext()))
-        this.updateAgentPptPlanningTabState(tabId, markPptGenerationResponseReceived(
+        response = await this.requestAgentPptPlanningDirectiveWithDebug(
+          buildDeckBriefPayload(state, this.buildAgentPptPlanningApiContext()),
+          { onDebugEvent: emitRequestDebugEvent },
+        )
+        writeRuntimeEvent('fetch_resolved')
+        writeRuntimeEvent('json_or_api_returned', {
+          slideCount: cloneArray(response && response.slides).length,
+          keys: Object.keys(response || {}).slice(0, 8),
+        })
+        const completedState = completePptGenerationJob(
           this.getAgentPptPlanningTabStateWithSystemSources(tabId),
           requestId,
           response,
-        ))
-        this.updateAgentPptPlanningTabState(tabId, markPptGenerationApplying(
-          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-          requestId,
-        ))
-        try {
-          this.updateAgentPptPlanningTabState(tabId, applyPptGenerationSuccess(
-            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-            requestId,
-            response,
-          ))
+        )
+        this.updateAgentPptPlanningTabState(tabId, completedState)
+        if (asText(completedState.generationJob && completedState.generationJob.phase) === 'ready') {
           this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
-        } catch (applyError) {
-          this.updateAgentPptPlanningTabState(tabId, failPptGenerationJob(
-            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-            requestId,
-            `指令返回已收到，但前端应用失败：${applyError && applyError.message ? applyError.message : String(applyError)}`,
-            { source: 'directive', generationResponse: response || {} },
-          ))
         }
       } catch (error) {
+        writeRuntimeEvent('fetch_failed', {
+          kind: asText(error && error.kind),
+          code: asText(error && error.code),
+          message: asText(error && error.message ? error.message : error),
+        })
         this.updateAgentPptPlanningTabState(tabId, failPptGenerationJob(
           this.getAgentPptPlanningTabStateWithSystemSources(tabId),
           requestId,
@@ -1731,7 +1842,7 @@ export function createAgentPptPlanningTabMethods() {
           { source: 'directive', generationResponse: response || error?.response || error?.data || {} },
         ))
       } finally {
-        globalThis.clearTimeout(timeoutId)
+        globalThis.clearInterval(heartbeatId)
       }
     },
     confirmAgentPptPlanningStepReset(message = '') {

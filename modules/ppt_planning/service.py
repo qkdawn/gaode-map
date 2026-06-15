@@ -6,8 +6,10 @@ import logging
 import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List
 
+from core.config import settings
 from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
 
 from .prompts import (
@@ -57,7 +59,17 @@ LLM_EVIDENCE_REF_LIMIT = 20
 LLM_WARNING_LIMIT = 6
 LLM_CONTEXT_METRIC_LIMIT = 120
 LLM_CONTEXT_EVIDENCE_LIMIT = 48
-PPT_LLM_TIMEOUT_SECONDS = 35
+PPT_DEBUG_DIR = Path("runtime")
+
+
+def _dump_generation_response(filename: str, payload: Dict[str, Any]) -> None:
+    try:
+        PPT_DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        path = PPT_DEBUG_DIR / filename
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("PPT generation response dumped to %s", path.as_posix())
+    except Exception:
+        logger.debug("Failed to dump PPT generation response", exc_info=True)
 
 
 async def _invoke_ppt_json_role(**kwargs: Any) -> Dict[str, Any]:
@@ -65,7 +77,7 @@ async def _invoke_ppt_json_role(**kwargs: Any) -> Dict[str, Any]:
         **kwargs,
         enable_thinking=False,
         stream=False,
-        timeout_s=PPT_LLM_TIMEOUT_SECONDS,
+        timeout_s=float(settings.ppt_llm_timeout_s),
     )
 
 
@@ -730,6 +742,7 @@ async def generate_ppt_spec(request: PptSpecRequest) -> PptSpecResponse:
         metrics["validate_ms"] = round((done - llm_ready) * 1000, 2)
         metrics["total_ms"] = round((done - total_started) * 1000, 2)
         metrics["outline_count"] = len(outline)
+        _dump_generation_response("_last_ppt_spec_response.json", response.model_dump(mode="json"))
         logger.info("PPT outline generation completed %s", metrics)
         return response
     except Exception:
@@ -817,13 +830,15 @@ async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
     missing_inputs = raw.get("missing_inputs")
     if not isinstance(missing_inputs, list):
         missing_inputs = [] if request.topic or request.spec else ["topic"]
-    return DeckBriefResponse(
+    response = DeckBriefResponse(
         status="draft",
         slides=slides,
         source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.research_enabled),
         missing_inputs=[_clean_text(item) for item in missing_inputs if _clean_text(item)],
         context_manifest=context_bundle,
     )
+    _dump_generation_response("_last_ppt_deck_brief_response.json", response.model_dump(mode="json"))
+    return response
 
 
 async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSlideBrief:

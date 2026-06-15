@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -47,6 +48,40 @@ class PptDataIntentLlmUnavailable(RuntimeError):
 
 class PptDataInvalidIntentPlan(RuntimeError):
     pass
+
+
+logger = logging.getLogger(__name__)
+PPT_DATA_PACKAGE_DIR = Path("runtime") / "ppt-data-packages"
+
+
+def _safe_filename(value: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        return "unknown"
+    return "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "-" for ch in text)[:96].strip("-") or "unknown"
+
+
+def _persist_ppt_data_package_response(response: PptDataPackageResponse) -> PptDataPackageResponse:
+    try:
+        payload = response.model_dump(mode="json")
+        source = _safe_dict(payload.get("source"))
+        meta = _safe_dict(source.get("meta"))
+        package = _safe_dict(meta.get("package"))
+        area_id = _clean_text(package.get("area_id"))
+        source_id = _clean_text(source.get("id") or package.get("id"))
+        package_mode = _clean_text(package.get("package_mode")) or "package"
+        if not source_id:
+            return response
+        area_dir = PPT_DATA_PACKAGE_DIR / _safe_filename(area_id or "global")
+        area_dir.mkdir(parents=True, exist_ok=True)
+        package_path = area_dir / f"{_safe_filename(source_id)}.json"
+        package_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        latest_path = area_dir / f"_latest_{_safe_filename(package_mode)}.json"
+        latest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("PPT data package persisted to %s", package_path.as_posix())
+    except Exception:
+        pass
+    return response
 
 
 SYSTEM_SOURCE_TITLES = {
@@ -440,6 +475,49 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
         session.close()
 
 
+def _list_persisted_ppt_package_sources(area_id: str) -> List[PptDataSourceSummary]:
+    area_dir = PPT_DATA_PACKAGE_DIR / _safe_filename(area_id or "global")
+    if not area_dir.exists():
+        return []
+    sources: List[PptDataSourceSummary] = []
+    seen: set[str] = set()
+    for path in sorted(area_dir.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+        if path.name.startswith("_latest_"):
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        source = _safe_dict(payload.get("source"))
+        source_id = _clean_text(source.get("id"))
+        if not source_id or source_id in seen:
+            continue
+        seen.add(source_id)
+        meta = _safe_dict(source.get("meta"))
+        package = _safe_dict(meta.get("package"))
+        label = _clean_text(meta.get("label") or package.get("label") or payload.get("summary")) or "已构建资料包"
+        count = int(package.get("item_count") or source.get("count") or len(_safe_list(payload.get("items"))) or 0)
+        sources.append(
+            PptDataSourceSummary(
+                id=source_id,
+                type=_clean_text(source.get("type")) or "package",
+                title=_clean_text(source.get("title") or package.get("title") or package.get("package_title")) or "资料包",
+                status="ready",
+                summary=label,
+                count=count,
+                meta={
+                    **meta,
+                    "label": label,
+                    "sourceKind": "package",
+                    "areaId": _clean_text(area_id),
+                    "persistedPackage": True,
+                    "package": package,
+                },
+            )
+        )
+    return sources
+
+
 def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
     detail = _load_history_detail(area_id)
     poi_payload = _load_history_pois(area_id)
@@ -474,6 +552,7 @@ def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
             )
         )
     sources.extend(_list_document_ppt_sources())
+    sources.extend(_list_persisted_ppt_package_sources(area_id))
     return sources
 
 
@@ -2349,17 +2428,17 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
         for keyword in ("夜生活", "夜间消费", "夜间活力", "夜光格子", "夜光")
     )
     if wants_carrier_package:
-        return _build_poi_road_population_nightlight_carrier_package(request, selected_sources)
+        return _persist_ppt_data_package_response(_build_poi_road_population_nightlight_carrier_package(request, selected_sources))
     if not include_poi:
         poi_result = PptPoiQueryResponse(area_id=request.area_id, warnings=["第一版资料包仅支持 POI 来源。"])
-        return _build_poi_package_response(
+        return _persist_ppt_data_package_response(_build_poi_package_response(
             request=request,
             poi_result=poi_result,
             selected_sources=selected_sources,
             package_mode=_clean_text(request.package_mode) or "query",
             filters={},
             title="资料包",
-        )
+        ))
 
     filters = dict(_safe_dict(request.filters))
     if request.query:
@@ -2376,14 +2455,14 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
                 limit=request.limit,
             )
         )
-        return _build_poi_package_response(
+        return _persist_ppt_data_package_response(_build_poi_package_response(
             request=request,
             poi_result=poi_result,
             selected_sources=selected_sources,
             package_mode="nearby",
             filters=filters,
             title="附近 POI 资料包",
-        )
+        ))
 
     if package_mode == "evidence":
         detail = _load_history_detail(request.area_id)
@@ -2415,13 +2494,13 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
             for group, repairs in repaired_groups
         ]
         if wants_nightlife_alignment:
-            return _build_nightlife_poi_nightlight_package(
+            return _persist_ppt_data_package_response(_build_nightlife_poi_nightlight_package(
                 request=request,
                 selected_sources=selected_sources,
                 plan=plan,
                 group_payloads=group_payloads,
                 repaired_groups=repaired_groups,
-            )
+            ))
         flat_items = [
             item
             for group_payload in group_payloads
@@ -2441,7 +2520,7 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
                 if _clean_text(warning)
             ],
         )
-        return _build_poi_package_response(
+        return _persist_ppt_data_package_response(_build_poi_package_response(
             request=request,
             poi_result=poi_result,
             selected_sources=selected_sources,
@@ -2460,7 +2539,7 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
             intent_plan=plan,
             selection_reason=_clean_text(plan.selection_reason),
             package_groups=group_payloads,
-        )
+        ))
 
     poi_result = query_poi_points(
         PptPoiQueryRequest(
@@ -2470,11 +2549,11 @@ async def create_ppt_data_package(request: PptDataPackageRequest) -> PptDataPack
             offset=0,
         )
     )
-    return _build_poi_package_response(
+    return _persist_ppt_data_package_response(_build_poi_package_response(
         request=request,
         poi_result=poi_result,
         selected_sources=selected_sources,
         package_mode="query",
         filters=filters,
         title="POI 资料包",
-    )
+    ))

@@ -1,12 +1,3 @@
-const PPT_REQUEST_TIMEOUT_MS = 120000
-
-function requestWithTimeout(url, options = {}, timeoutMs = PPT_REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController()
-  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs)
-  return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => globalThis.clearTimeout(timer))
-}
-
 async function postJson(url, payload = {}) {
   const response = await fetch(url, {
     method: 'POST',
@@ -26,23 +17,32 @@ async function postJson(url, payload = {}) {
   return response.json()
 }
 
-async function postJsonWithTimeout(url, payload = {}, timeoutMs = PPT_REQUEST_TIMEOUT_MS) {
+async function postJsonWithTimeout(url, payload = {}, options = {}) {
+  const onDebugEvent = typeof options.onDebugEvent === 'function' ? options.onDebugEvent : null
+  const emitDebug = (name = '', details = {}) => {
+    if (!onDebugEvent) return
+    try {
+      onDebugEvent(name, { url, ...details })
+    } catch (_) {
+      // Debug hooks must never affect product behavior.
+    }
+  }
   let response
   try {
-    response = await requestWithTimeout(url, {
+    response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    }, timeoutMs)
+    })
+    emitDebug('fetch_response_headers_received', {
+      ok: !!(response && response.ok),
+      status: response && response.status,
+    })
   } catch (error) {
-    if (error && error.name === 'AbortError') {
-      const timeoutError = new Error('ppt_planning_request_timeout')
-      timeoutError.kind = 'aborted_by_timeout'
-      timeoutError.code = 'ppt_planning_request_timeout'
-      timeoutError.url = url
-      timeoutError.timeoutMs = timeoutMs
-      throw timeoutError
-    }
+    emitDebug('fetch_rejected_before_response', {
+      name: error && error.name,
+      message: error && error.message,
+    })
     const networkError = new Error(error && error.message ? error.message : 'ppt_planning_network_error')
     networkError.kind = 'network_error'
     networkError.code = 'ppt_planning_network_error'
@@ -51,7 +51,9 @@ async function postJsonWithTimeout(url, payload = {}, timeoutMs = PPT_REQUEST_TI
     throw networkError
   }
   if (!response.ok) {
+    emitDebug('fetch_http_error_body_read_start', { status: response.status })
     const text = await response.text().catch(() => '')
+    emitDebug('fetch_http_error_body_read_done', { status: response.status, textLength: text.length })
     let detail = text
     let data = null
     try {
@@ -70,8 +72,19 @@ async function postJsonWithTimeout(url, payload = {}, timeoutMs = PPT_REQUEST_TI
     throw httpError
   }
   try {
-    return await response.json()
+    emitDebug('fetch_json_read_start', { status: response.status })
+    const data = await response.json()
+    emitDebug('fetch_json_read_done', {
+      status: response.status,
+      keys: Object.keys(data || {}).slice(0, 8),
+    })
+    emitDebug('api_returning_data', { status: response.status })
+    return data
   } catch (error) {
+    emitDebug('fetch_json_read_failed', {
+      name: error && error.name,
+      message: error && error.message,
+    })
     const jsonError = new Error('ppt_planning_invalid_json')
     jsonError.kind = 'invalid_json'
     jsonError.code = 'ppt_planning_invalid_json'
@@ -127,6 +140,14 @@ export function regeneratePptSpecSection(payload = {}) {
 
 export function generateDeckBrief(payload = {}) {
   return postJsonWithTimeout('/api/v1/analysis/ppt/deck-brief', payload)
+}
+
+export function generatePptSpecWithDebug(payload = {}, options = {}) {
+  return postJsonWithTimeout('/api/v1/analysis/ppt/spec', payload, options)
+}
+
+export function generateDeckBriefWithDebug(payload = {}, options = {}) {
+  return postJsonWithTimeout('/api/v1/analysis/ppt/deck-brief', payload, options)
 }
 
 export function regenerateDeckBriefSlide(payload = {}) {

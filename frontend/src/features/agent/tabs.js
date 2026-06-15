@@ -1195,7 +1195,21 @@ export function createAgentTabsMethods() {
         createdAt: asText(item && item.created_at) || new Date().toISOString(),
         panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
       })).filter((item) => item.id)
-      const pptPlanningTabs = cloneArray(uiState.ppt_planning_tabs || uiState.pptPlanningTabs).map((item) => normalizeAgentPptPlanningTab(item, { restore: true })).filter((item) => item.id)
+      const pptPlanningTabs = cloneArray(uiState.ppt_planning_tabs || uiState.pptPlanningTabs)
+        .map((item) => normalizeAgentPptPlanningTab(item, { restore: true, sessionId: session && session.id }))
+        .map((item) => ({
+          ...item,
+          pptPlanningState: this.appendPptPlanningDebugEvent
+            ? this.appendPptPlanningDebugEvent(item.pptPlanningState, 'tabs_restored_from_session', {
+              sessionId: session && session.id,
+              activeTabId: asText(uiState.active_tab_id),
+              tabIds: cloneArray(uiState.ppt_planning_tabs || uiState.pptPlanningTabs).map((tab) => asText(tab && tab.id)).filter(Boolean),
+              tabId: asText(item && item.id),
+              job: item && item.pptPlanningState ? item.pptPlanningState.generationJob : {},
+            })
+            : item.pptPlanningState,
+        }))
+        .filter((item) => item.id)
       const deepAnalysisTabs = cloneArray(uiState.deep_analysis_tabs || uiState.deepAnalysisTabs).map((item) => ({
         id: asText(item && item.id),
         kind: 'deep_analysis',

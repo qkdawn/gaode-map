@@ -1401,8 +1401,8 @@ test('agent ppt outline timeout restores materials state with readable error', a
         isochroneFeature: null,
       }
     },
-    requestAgentPptPlanningOutline() {
-      return Promise.reject(new Error('ppt_planning_request_timeout'))
+    requestAgentPptPlanningOutlineWithDebug() {
+      return Promise.reject(new Error('ppt_planning_network_error'))
     },
     syncCurrentAgentSession() {},
   }
@@ -1412,7 +1412,7 @@ test('agent ppt outline timeout restores materials state with readable error', a
   const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
   assert.equal(state.currentStep, 'materials')
   assert.equal(state.generationErrorSource, 'outline')
-  assert.equal(state.generationError, '目录生成超时，请稍后重试或减少来源数量。')
+  assert.equal(state.generationError, 'ppt_planning_network_error')
 })
 
 test('agent ppt planning api context includes standardized analysis metrics', () => {

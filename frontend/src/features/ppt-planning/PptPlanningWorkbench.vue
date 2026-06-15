@@ -163,8 +163,8 @@ const canCreateDataPackage = computed(() => (props.sourceSummary.selected || 0) 
 const activeGenerationJob = computed(() => (props.generationJob && typeof props.generationJob === 'object' ? props.generationJob : {}))
 const generationJobPhase = computed(() => String(activeGenerationJob.value.phase || 'idle'))
 const generationJobType = computed(() => String(activeGenerationJob.value.type || 'outline'))
-const generationJobEvents = computed(() => (Array.isArray(activeGenerationJob.value.events) ? activeGenerationJob.value.events.slice(-20) : []))
-const isGenerationJobActive = computed(() => ['requesting', 'response_received', 'applying', 'timed_out'].includes(generationJobPhase.value))
+const generationJobEvents = computed(() => (Array.isArray(activeGenerationJob.value.events) ? activeGenerationJob.value.events.slice(-60) : []))
+const isGenerationJobActive = computed(() => ['requesting', 'response_received', 'applying'].includes(generationJobPhase.value))
 const generationJobTitle = computed(() => {
   const isDirective = generationJobType.value === 'directive'
   const labels = {
@@ -173,7 +173,6 @@ const generationJobTitle = computed(() => {
     applying: isDirective ? '正在写入指令' : '正在写入目录',
     ready: isDirective ? '指令已写入' : '目录已写入',
     failed: isDirective ? '指令生成失败' : '目录生成失败',
-    timed_out: isDirective ? '指令请求已超时，仍等待可能晚到的返回' : '目录请求已超时，仍等待可能晚到的返回',
     superseded: '已有新请求接管',
   }
   return labels[generationJobPhase.value] || ''
@@ -191,7 +190,7 @@ const generationJobSummary = computed(() => {
 })
 const shouldShowGenerationJobPanel = computed(() => (
   generationJobTitle.value
-  && (isGenerationJobActive.value || ['failed', 'timed_out', 'superseded'].includes(generationJobPhase.value) || generationJobEvents.value.length)
+  && (isGenerationJobActive.value || ['failed', 'superseded'].includes(generationJobPhase.value) || generationJobEvents.value.length)
 ))
 const generationErrorText = computed(() => String(props.generationError || '').trim())
 const generationResponsePayload = computed(() => {
@@ -335,6 +334,10 @@ const outlineRows = computed(() => {
       title: item.theme || `页面 ${index + 1}`,
       detail: item.purpose || '目录草稿',
       fields: [],
+      metricClaims: [],
+      metricGaps: [],
+      chartSpecs: [],
+      chartArtifacts: [],
       mode: 'outline',
     }))
   }
@@ -1223,6 +1226,7 @@ function confirmSourceDialog() {
                 :key="`ppt-generation-event-${eventIndex}-${event.name}`">
                 <strong>{{ event.name }}</strong>
                 <span>{{ event.at }}</span>
+                <code v-if="event.details && Object.keys(event.details).length">{{ JSON.stringify(event.details) }}</code>
               </li>
             </ol>
           </details>

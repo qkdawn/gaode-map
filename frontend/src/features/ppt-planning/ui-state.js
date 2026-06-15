@@ -32,7 +32,7 @@ const PPT_ERROR_SOURCE_LABELS = new Set([
   'directive',
 ])
 
-const PPT_GENERATION_JOB_EVENT_LIMIT = 20
+const PPT_GENERATION_JOB_EVENT_LIMIT = 60
 const PPT_GENERATION_JOB_TYPES = new Set(['outline', 'directive'])
 const PPT_GENERATION_JOB_PHASES = new Set([
   'idle',
@@ -41,7 +41,6 @@ const PPT_GENERATION_JOB_PHASES = new Set([
   'applying',
   'ready',
   'failed',
-  'timed_out',
   'superseded',
 ])
 const PPT_GENERATION_TERMINAL_PHASES = new Set(['ready', 'failed', 'superseded'])
@@ -848,6 +847,16 @@ export function startPptGenerationJob(state = {}, options = {}) {
   })
 }
 
+export function appendPptGenerationDebugEvent(state = {}, name = '', details = {}) {
+  const normalized = createPptPlanningState(state)
+  const job = normalizeGenerationJob(normalized.generationJob)
+  if (!job.id) return normalized
+  return createPptPlanningState({
+    ...normalized,
+    generationJob: appendGenerationEvent(job, name, details),
+  })
+}
+
 export function markPptGenerationResponseReceived(state = {}, requestId = '', response = {}) {
   const normalized = createPptPlanningState(state)
   if (!isCurrentGenerationJob(normalized, requestId)) return normalized
@@ -897,6 +906,68 @@ export function applyPptGenerationSuccess(state = {}, requestId = '', response =
   })
 }
 
+export function completePptGenerationJob(state = {}, requestId = '', response = {}) {
+  const normalized = createPptPlanningState(state)
+  const job = normalizeGenerationJob(normalized.generationJob)
+  if (!isCurrentGenerationJob(normalized, requestId)) {
+    return createPptPlanningState({
+      ...normalized,
+      generationJob: appendGenerationEvent(job, 'stale_response_ignored', {
+        requestId: asText(requestId),
+        currentRequestId: job.id,
+      }),
+    })
+  }
+  const summary = summarizeGenerationResponse(job.type, response)
+  const responseReceivedJob = appendGenerationEvent({
+    ...job,
+    phase: 'response_received',
+    responseSummary: summary,
+  }, 'response_received', summary)
+  const applyingJob = appendGenerationEvent({
+    ...responseReceivedJob,
+    phase: 'applying',
+  }, 'applying', { type: job.type })
+  try {
+    const baseState = createPptPlanningState({
+      ...normalized,
+      generationJob: applyingJob,
+      generationResponse: createGenerationResponseSnapshot(job.type, response),
+    })
+    const applied = job.type === 'directive'
+      ? applyDeckBriefResponse(baseState, response)
+      : applyPptSpecResponse(baseState, response)
+    return createPptPlanningState({
+      ...applied,
+      generationJob: appendGenerationEvent({
+        ...applyingJob,
+        phase: 'ready',
+        completedAt: new Date().toISOString(),
+        error: '',
+        responseSummary: summary,
+      }, 'ready', summary),
+    })
+  } catch (error) {
+    const message = `${job.type === 'directive' ? '指令' : '目录'}返回已收到，但前端应用失败：${error && error.message ? error.message : String(error)}`
+    return createPptPlanningState({
+      ...normalized,
+      currentStep: generationReadyStepForState(normalized, job.type),
+      generationError: message,
+      generationErrorSource: normalizePptErrorSource(job.type),
+      generationResponse: createGenerationResponseSnapshot(job.type, response),
+      generationJob: appendGenerationEvent({
+        ...applyingJob,
+        phase: 'failed',
+        completedAt: new Date().toISOString(),
+        error: message,
+        responseSummary: summary,
+      }, 'failed', { error: message, source: job.type }),
+      dataPackageGenerating: false,
+      sourceGrouping: false,
+    })
+  }
+}
+
 export function failPptGenerationJob(state = {}, requestId = '', error = '', options = {}) {
   const normalized = createPptPlanningState(state)
   if (!isCurrentGenerationJob(normalized, requestId)) return normalized
@@ -922,20 +993,6 @@ export function failPptGenerationJob(state = {}, requestId = '', error = '', opt
     }, 'failed', { error: message, source }),
     dataPackageGenerating: false,
     sourceGrouping: false,
-  })
-}
-
-export function timeoutPptGenerationJob(state = {}, requestId = '') {
-  const normalized = createPptPlanningState(state)
-  if (!isCurrentGenerationJob(normalized, requestId)) return normalized
-  const job = normalizeGenerationJob(normalized.generationJob)
-  return createPptPlanningState({
-    ...normalized,
-    generationJob: appendGenerationEvent({
-      ...job,
-      phase: 'timed_out',
-      error: 'ppt_planning_request_timeout',
-    }, 'timed_out', { requestId }),
   })
 }
 

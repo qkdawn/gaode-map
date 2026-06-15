@@ -231,6 +231,11 @@ class Settings(BaseSettings):
         validation_alias="AI_TIMEOUT_S",
         description="AI provider 请求超时时间（秒）",
     )
+    ppt_llm_timeout_s: int = Field(
+        0,
+        validation_alias="PPT_LLM_TIMEOUT_S",
+        description="PPT 生成 LLM 请求超时时间（秒）；0 表示不设置超时",
+    )
     ai_max_context_turns: int = Field(
         12,
         validation_alias="AI_MAX_CONTEXT_TURNS",

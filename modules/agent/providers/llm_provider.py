@@ -115,6 +115,14 @@ def _with_thinking_mode(request_body: Dict[str, Any]) -> Dict[str, Any]:
     return body
 
 
+def _resolve_httpx_timeout(timeout_s: float | None) -> float | None:
+    if timeout_s is not None:
+        timeout_value = float(timeout_s)
+        return None if timeout_value <= 0 else timeout_value
+    settings_timeout = float(settings.ai_timeout_s or 60)
+    return None if settings_timeout <= 0 else settings_timeout
+
+
 async def _iter_sse_data(response: httpx.Response):
     data_lines: List[str] = []
     async for line in response.aiter_lines():
@@ -283,7 +291,7 @@ async def _invoke_json_role(
             {"role": "user", "content": user_content},
         ],
     }
-    async with httpx.AsyncClient(timeout=float(timeout_s or settings.ai_timeout_s or 60)) as client:
+    async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(timeout_s)) as client:
         if stream:
             payload = await _stream_chat_completion(
                 client=client,
