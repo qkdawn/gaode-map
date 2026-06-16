@@ -2,8 +2,10 @@ import logging
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
+from modules.charting import delete_chart_file
 from modules.ppt_planning.schemas import (
     DeckBriefSlideRequest,
     DeckBriefRequest,
@@ -23,6 +25,8 @@ from modules.ppt_planning.schemas import (
     PptSourceGroupClassifyResponse,
     PptSpecRequest,
     PptSpecResponse,
+    PptVisualArtifactRequest,
+    PptVisualArtifactResponse,
 )
 from modules.ppt_planning.data_tools import (
     PptDataAreaNotFound,
@@ -42,12 +46,17 @@ from modules.ppt_planning.service import (
     generate_deck_brief,
     generate_narrative_plan,
     generate_ppt_spec,
+    generate_visual_artifacts_for_slide,
     regenerate_deck_brief_slide,
     regenerate_ppt_outline_section,
 )
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class PptVisualArtifactCleanupRequest(BaseModel):
+    filenames: list[str] = Field(default_factory=list)
 
 
 def _raise_ppt_database_error(exc: SQLAlchemyError) -> None:
@@ -200,3 +209,35 @@ async def create_deck_brief_slide(payload: DeckBriefSlideRequest) -> DeckSlideBr
         return await regenerate_deck_brief_slide(payload)
     except Exception as exc:
         _raise_ppt_planning_error(exc)
+
+
+@router.post("/api/v1/analysis/ppt/visual-artifacts", response_model=PptVisualArtifactResponse)
+async def create_ppt_visual_artifacts(payload: PptVisualArtifactRequest) -> PptVisualArtifactResponse:
+    try:
+        return generate_visual_artifacts_for_slide(payload)
+    except Exception as exc:
+        _raise_ppt_planning_error(exc)
+
+
+@router.post("/api/v1/analysis/ppt/visual-artifacts/cleanup")
+async def cleanup_ppt_visual_artifacts(payload: PptVisualArtifactCleanupRequest):
+    deleted: list[str] = []
+    missing: list[str] = []
+    skipped: list[str] = []
+    seen: set[str] = set()
+    for filename in payload.filenames:
+        name = str(filename or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        try:
+            result = delete_chart_file(name)
+        except OSError:
+            result = "skipped"
+        if result == "deleted":
+            deleted.append(name)
+        elif result == "missing":
+            missing.append(name)
+        else:
+            skipped.append(name)
+    return {"deleted": deleted, "missing": missing, "skipped": skipped}

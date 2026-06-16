@@ -19,10 +19,14 @@ DECK_BRIEF_SYSTEM_PROMPT = """
 current.metrics 是主数值来源；资料包和文档数字只能作为补充来源，不要替代分析指标。
 不得从 evidence_context 的自然语言里临时抽取或推断数字；图表和 metric_claims 的数字必须来自 metric_context.metrics。
 如果页面确实需要数字但 metric_context 没有足够 ready 指标，必须写 metric_gaps 说明缺口，可参考 metric_context.metric_gaps，不要硬凑数字。
-如果 visual_plan 提到图表、表格、大数字、地图叠加、空间示意、指标对比或诊断矩阵，必须生成 chart_specs；chart_specs 可以是多种可视化方案，chart_type 应按表达需要选择，例如 metric_table、bar、grouped_bar、line、radar、histogram、heatmap_grid、map_overlay、diagram 或 matrix。chart_specs 必须包含 columns 与 rows，source_metric_ids 只能引用 metric_context.metrics 中 ready 的 metric_id。
+如果 visual_plan 提到图表、表格、大数字、地图叠加、空间示意、指标对比、架构图或诊断矩阵，必须生成 visual_specs。
+visual_specs 每项必须包含 visual_type, title, intent, status, source_ids, data；visual_type 只能是 figure, diagram, matrix, existing_asset, table, metric_card。
+figure/table/metric_card 只能引用 metric_context.metrics 中 ready 的 source_metric_ids；数据不足时 status=missing_data，不要硬画空坐标轴。
+diagram/matrix 用 nodes, groups, links, layout_hint, design_notes 表达语义结构，status=needs_design_render，不要降级成柱状图。
+existing_asset 用 asset_kind, source, asset_id, caption, overlay_requirements 引用现有地图/H3/路网/夜光/POI截图；没有可用资产时 status=needs_existing_asset，不要想象一张图。
 封面、目录、方法说明、愿景叙事、章节过渡页可以没有 metric_claims。
 只输出 JSON 对象，字段必须为 status, slides, source_summary, missing_inputs。
-slides 每项字段为 index, title, purpose, key_message, visual_plan, required_sources, metric_claims, metric_gaps, chart_specs。
+slides 每项字段为 index, title, purpose, key_message, visual_plan, required_sources, metric_claims, metric_gaps, visual_specs。
 不要输出 markdown，不要输出解释性前后缀。
 """.strip()
 
@@ -59,8 +63,12 @@ previous_outline_item、next_outline_item、previous_slide、next_slide 只用�
 evidence_context 只能用于背景、样本、载体和文本证据；不得从 evidence_context 的自然语言里临时抽取或推断数字。
 如果用户要求增加数字支撑、图表表达、诊断判断或 KPI，必须从 metric_context.metrics 中选择 ready 的 metric_id 生成 metric_claims；没有足够数据就写 metric_gaps。
 current.metrics 是主数值来源；资料包和文档数字只能作为补充来源，不要替代分析指标。
-如果 visual_plan 提到图表、表格、大数字、地图叠加、空间示意、指标对比或诊断矩阵，必须生成 chart_specs；chart_specs 可以是多种可视化方案，chart_type 应按表达需要选择，例如 metric_table、bar、grouped_bar、line、radar、histogram、heatmap_grid、map_overlay、diagram 或 matrix。chart_specs 必须包含 columns 与 rows，source_metric_ids 只能引用 metric_context.metrics 中 ready 的 metric_id。
-只输出 JSON 对象，字段必须为 index, title, purpose, key_message, visual_plan, required_sources, metric_claims, metric_gaps, chart_specs。
+如果 visual_plan 提到图表、表格、大数字、地图叠加、空间示意、指标对比、架构图或诊断矩阵，必须生成 visual_specs。
+visual_specs 每项必须包含 visual_type, title, intent, status, source_ids, data；visual_type 只能是 figure, diagram, matrix, existing_asset, table, metric_card。
+figure/table/metric_card 只能引用 metric_context.metrics 中 ready 的 source_metric_ids；数据不足时 status=missing_data，不要硬画空坐标轴。
+diagram/matrix 用 nodes, groups, links, layout_hint, design_notes 表达语义结构，status=needs_design_render，不要降级成柱状图。
+existing_asset 用 asset_kind, source, asset_id, caption, overlay_requirements 引用现有地图/H3/路网/夜光/POI截图；没有可用资产时 status=needs_existing_asset，不要想象一张图。
+只输出 JSON 对象，字段必须为 index, title, purpose, key_message, visual_plan, required_sources, metric_claims, metric_gaps, visual_specs。
 不要输出 markdown，不要输出解释性前后缀。
 """.strip()
 

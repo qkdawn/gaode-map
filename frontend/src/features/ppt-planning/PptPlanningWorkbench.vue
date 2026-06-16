@@ -44,6 +44,10 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  visualGenerationBySlide: {
+    type: Object,
+    default: () => ({}),
+  },
   slides: {
     type: Array,
     default: () => [],
@@ -121,6 +125,8 @@ const emit = defineEmits([
   'generate-outline',
   'generate-narrative-plan',
   'generate-slides',
+  'generate-slide-visuals',
+  'generate-all-visuals',
   'regenerate-outline',
   'regenerate-narrative-plan',
   'regenerate-slides',
@@ -166,6 +172,8 @@ const isSlidesGenerating = computed(() => props.currentStep === 'slides_generati
 const hasOutline = computed(() => props.outline.length > 0)
 const hasNarrativePlan = computed(() => Array.isArray(props.narrativePlan && props.narrativePlan.slideRoles) && props.narrativePlan.slideRoles.length > 0)
 const hasDirective = computed(() => props.slides.length > 0)
+const hasVisualArtifacts = computed(() => props.slides.some((slide) => Array.isArray(slide.visualArtifacts) && slide.visualArtifacts.length))
+const hasVisualSpecs = computed(() => props.slides.some((slide) => Array.isArray(slide.visualSpecs) && slide.visualSpecs.length))
 const blockingInputSources = computed(() => getBlockingPptInputSources({ sources: props.sources }))
 const outlineBlockReason = computed(() => {
   if (!(props.sourceSummary.selected || 0)) return '请先选择至少一个已生成来源'
@@ -239,15 +247,15 @@ const generationResponseSummary = computed(() => {
   const payload = generationResponsePayload.value
   const outline = Array.isArray(payload.outline) ? payload.outline : []
   const slides = Array.isArray(payload.slides) ? payload.slides : []
-  const chartSpecs = slides.reduce((sum, slide) => {
-    const specs = slide && (slide.chartSpecs || slide.chart_specs)
+  const visualSpecs = slides.reduce((sum, slide) => {
+    const specs = slide && (slide.visualSpecs || slide.visual_specs)
     return sum + (Array.isArray(specs) ? specs.length : 0)
   }, 0)
   const keys = Object.keys(payload)
   return [
     outline.length ? `outline ${outline.length} 页` : '',
     slides.length ? `slides ${slides.length} 页` : '',
-    chartSpecs ? `chart_specs ${chartSpecs} 个` : '',
+    visualSpecs ? `visual_specs ${visualSpecs} 个` : '',
     keys.length ? `keys: ${keys.slice(0, 8).join(', ')}` : '',
   ].filter(Boolean).join(' / ')
 })
@@ -293,6 +301,8 @@ const promptStageText = computed(() => {
   if (!hasOutline.value) return '先生成目录，确定 15 页结构。'
   if (!hasNarrativePlan.value) return '目录已生成，下一步生成全局叙事方案。'
   if (!hasDirective.value) return '叙事方案已生成，下一步逐页生成 brief。'
+  if (hasVisualSpecs.value && !hasVisualArtifacts.value) return 'brief 已生成，下一步生成可视化图片。'
+  if (isAnyVisualGenerating.value) return '正在生成可视化图片。'
   if (isViewingOutline.value) return '目录已生成；如需调整目录，可重新生成目录。'
   return 'brief 草稿已生成，可继续重生成单页或重新逐页生成。'
 })
@@ -311,13 +321,15 @@ const promptActions = computed(() => getPptPromptActions({
   deckBrief: { slides: props.slides },
   slideGenerationQueue: props.slideGenerationQueue,
   slideGenerationJob: props.slideGenerationJob,
+  visualGenerationBySlide: props.visualGenerationBySlide,
 }))
 function isPromptActionDisabled(action = {}) {
   const event = String(action.event || '')
-  if (isGenerationJobActive.value || isSlidesGenerating.value) return true
+  if (isGenerationJobActive.value || isSlidesGenerating.value || isAnyVisualGenerating.value) return true
   if (event === 'generate-outline') return !canGenerateOutline.value
   if (event === 'generate-narrative-plan') return !canGenerateNarrativePlan.value
   if (event === 'generate-slides') return !canGenerateSlides.value
+  if (event === 'generate-all-visuals') return !hasVisualSpecs.value
   if (event === 'regenerate-outline') return !hasOutline.value
   if (event === 'regenerate-narrative-plan') return !hasOutline.value
   if (event === 'regenerate-slides') return !hasNarrativePlan.value
@@ -351,9 +363,9 @@ const activeCurrentEvidenceItems = computed(() => {
   const evidence = activeCurrentAiPayload.value.evidence
   return Array.isArray(evidence) ? evidence.slice(0, 80) : []
 })
-const activeCurrentChartSpecs = computed(() => {
-  const charts = activeCurrentAiPayload.value.chart_specs || activeCurrentAiPayload.value.chartSpecs
-  return Array.isArray(charts) ? charts.slice(0, 40) : []
+const activeCurrentVisualSpecs = computed(() => {
+  const visuals = activeCurrentAiPayload.value.visual_specs || activeCurrentAiPayload.value.visualSpecs
+  return Array.isArray(visuals) ? visuals.slice(0, 40) : []
 })
 const activeCurrentScopePayload = computed(() => (
   activeCurrentAiPayload.value.scope && typeof activeCurrentAiPayload.value.scope === 'object'
@@ -381,6 +393,7 @@ const activePackageSelectedCarrier = computed(() => {
 const activeFlowIndex = computed(() => {
   if (props.currentStep === 'outline_generating') return 1
   if (['outline_ready', 'narrative_generating', 'narrative_ready', 'slides_generating'].includes(props.currentStep)) return 2
+  if (props.currentStep === 'visuals_ready' || (hasDirective.value && hasVisualSpecs.value && !hasVisualArtifacts.value)) return 4
   if (props.currentStep === 'directive_draft') return 3
   return 0
 })
@@ -427,8 +440,9 @@ const outlineRows = computed(() => {
       ].filter((field) => String(field[1] || '').trim()),
       metricClaims: Array.isArray(item.metricClaims) ? item.metricClaims : [],
       metricGaps: Array.isArray(item.metricGaps) ? item.metricGaps : [],
-      chartSpecs: Array.isArray(item.chartSpecs) ? item.chartSpecs : [],
-      chartArtifacts: Array.isArray(item.chartArtifacts) ? item.chartArtifacts : [],
+      visualSpecs: Array.isArray(item.visualSpecs) ? item.visualSpecs : [],
+      visualArtifacts: Array.isArray(item.visualArtifacts) ? item.visualArtifacts : [],
+      visualStatus: visualGenerationStatus(item.index || index + 1),
       mode: 'directive',
     }))
   }
@@ -441,8 +455,8 @@ const outlineRows = computed(() => {
       fields: [],
       metricClaims: [],
       metricGaps: [],
-      chartSpecs: [],
-      chartArtifacts: [],
+      visualSpecs: [],
+      visualArtifacts: [],
       mode: 'outline',
     }))
   }
@@ -501,32 +515,84 @@ function formatMetricClaimValue(claim = {}) {
   return `${formatted}${unit || ''}`
 }
 
-function chartArtifactFor(row = {}, chart = {}) {
-  const chartId = String(chart.chart_id || chart.chartId || '')
-  return (row.chartArtifacts || []).find((item) => String(item.chart_id || item.chartId || '') === chartId) || {}
+function visualArtifactFor(row = {}, visual = {}) {
+  const visualId = String(visual.visual_id || visual.visualId || '')
+  return (row.visualArtifacts || []).find((item) => String(item.visual_id || item.visualId || '') === visualId) || {}
 }
 
-function chartPreviewUrl(row = {}, chart = {}) {
-  const artifact = chartArtifactFor(row, chart)
-  return artifact.url || ''
+const isAnyVisualGenerating = computed(() => Object.values(props.visualGenerationBySlide || {}).some((item) => String(item && item.status) === 'generating'))
+
+function visualGenerationStatus(slideIndex = 0) {
+  const status = (props.visualGenerationBySlide || {})[String(Number(slideIndex || 0) || 0)]
+  return status && typeof status === 'object' ? status : { status: 'idle', error: '' }
 }
 
-function chartRowsPreview(chart = {}) {
-  return Array.isArray(chart.rows) ? chart.rows.slice(0, 4) : []
+function isVisualGenerating(row = {}) {
+  return String((row.visualStatus || {}).status || '') === 'generating'
 }
 
-function chartColumnsPreview(chart = {}) {
-  return Array.isArray(chart.columns) ? chart.columns.slice(0, 4) : []
+function canGenerateRowVisuals(row = {}) {
+  return row.mode === 'directive' && Array.isArray(row.visualSpecs) && row.visualSpecs.length > 0 && !isGenerationJobActive.value && !isSlidesGenerating.value && !isVisualGenerating(row)
 }
 
-function chartColumnKey(column = {}) {
+function visualPreviewUrl(row = {}, visual = {}) {
+  const artifact = visualArtifactFor(row, visual)
+  const asset = visual.asset && typeof visual.asset === 'object' ? visual.asset : {}
+  return artifact.url || asset.url || asset.data_url || asset.dataUrl || ''
+}
+
+function visualData(visual = {}) {
+  const data = visual.data && typeof visual.data === 'object' ? visual.data : {}
+  return data
+}
+
+function visualRowsPreview(visual = {}) {
+  const data = visualData(visual)
+  return Array.isArray(data.rows) ? data.rows.slice(0, 4) : []
+}
+
+function visualColumnsPreview(visual = {}) {
+  const data = visualData(visual)
+  return Array.isArray(data.columns) ? data.columns.slice(0, 4) : []
+}
+
+function visualColumnKey(column = {}) {
   if (column && typeof column === 'object') return column.key || column.field || column.label || ''
   return String(column || '')
 }
 
-function chartColumnLabel(column = {}) {
+function visualColumnLabel(column = {}) {
   if (column && typeof column === 'object') return column.label || column.key || column.field || ''
   return String(column || '')
+}
+
+function visualTypeLabel(visual = {}) {
+  const labels = {
+    figure: '数值图表',
+    table: '指标表',
+    metric_card: '指标卡',
+    diagram: '语义图',
+    matrix: '诊断矩阵',
+    existing_asset: '已有空间图',
+  }
+  return labels[String(visual.visual_type || visual.visualType || '')] || '可视化'
+}
+
+function visualNodeSummary(visual = {}) {
+  return cloneArray(visual.nodes).slice(0, 6).map((node) => node && (node.title || node.label || node.name || node.id)).filter(Boolean)
+}
+
+function visualGroupSummary(visual = {}) {
+  return cloneArray(visual.groups).slice(0, 4).map((group) => group && (group.title || group.label || group.name || group.id)).filter(Boolean)
+}
+
+function visualLinkSummary(visual = {}) {
+  return cloneArray(visual.links).slice(0, 6).map((link) => {
+    if (!link || typeof link !== 'object') return ''
+    const source = link.source || link.from || ''
+    const target = link.target || link.to || ''
+    return source || target ? `${source} → ${target}`.trim() : ''
+  }).filter(Boolean)
 }
 
 function openRevisionForRow(row = {}) {
@@ -677,8 +743,8 @@ function sourceTransport(source = {}) {
       evidenceCount: Number((aiPayload.counts || {}).evidence || 0) || 0,
       scope_count: Number((aiPayload.counts || {}).scope || 0) || 0,
       scopeCount: Number((aiPayload.counts || {}).scope || 0) || 0,
-      chart_spec_count: Number((aiPayload.counts || {}).chart_specs || 0) || 0,
-      chartSpecCount: Number((aiPayload.counts || {}).chart_specs || 0) || 0,
+      visual_spec_count: Number((aiPayload.counts || {}).visual_specs || 0) || 0,
+      visualSpecCount: Number((aiPayload.counts || {}).visual_specs || 0) || 0,
       excluded: Array.isArray(aiPayload.excluded) ? aiPayload.excluded : [],
       policy: aiPayload.policy || '',
       preview: true,
@@ -693,7 +759,7 @@ function sourceTransportLabel(source = {}) {
   const metricCount = Number(transport.metric_count ?? transport.metricCount ?? 0) || 0
   const evidenceCount = Number(transport.evidence_count ?? transport.evidenceCount ?? 0) || 0
   const scopeCount = Number(transport.scope_count ?? transport.scopeCount ?? 0) || 0
-  const chartSpecCount = Number(transport.chart_spec_count ?? transport.chartSpecCount ?? 0) || 0
+  const visualSpecCount = Number(transport.visual_spec_count ?? transport.visualSpecCount ?? 0) || 0
   const included = Array.isArray(transport.included) ? transport.included : []
   const status = String(transport.transport_status || transport.transportStatus || '')
   if (status === 'ready_to_send') {
@@ -701,7 +767,7 @@ function sourceTransportLabel(source = {}) {
     if (scopeCount || included.includes('scope')) parts.push(`范围 ${scopeCount || 1}`)
     if (metricCount) parts.push(`metrics ${metricCount}`)
     if (evidenceCount) parts.push(`evidence ${evidenceCount}`)
-    if (chartSpecCount) parts.push(`charts ${chartSpecCount}`)
+    if (visualSpecCount) parts.push(`visuals ${visualSpecCount}`)
     return parts.length ? `已构建 ${parts.join(' / ')}` : '已构建可传内容'
   }
   if (status === 'included' || metricCount || evidenceCount || scopeCount || included.length) {
@@ -709,7 +775,7 @@ function sourceTransportLabel(source = {}) {
     if (scopeCount || included.includes('scope')) parts.push(`范围 ${scopeCount || 1}`)
     if (metricCount) parts.push(`metrics ${metricCount}`)
     if (evidenceCount) parts.push(`evidence ${evidenceCount}`)
-    if (chartSpecCount) parts.push(`charts ${chartSpecCount}`)
+    if (visualSpecCount) parts.push(`visuals ${visualSpecCount}`)
     return parts.length ? `已传 ${parts.join(' / ')}` : '已传可用内容'
   }
   return '未传：无可用指标/证据'
@@ -1304,14 +1370,20 @@ function confirmSourceDialog() {
           </button>
           <button
             type="button"
-            :class="{ 'is-current': !isViewingMaterials && !isViewingOutline && ((hasNarrativePlan && !hasDirective) || activeFlowIndex === 3 || isViewingDirective), 'is-complete': hasDirective && !isViewingDirective }"
+            :class="{ 'is-current': !isViewingMaterials && !isViewingOutline && ((hasNarrativePlan && !hasDirective) || activeFlowIndex === 3 || isViewingDirective), 'is-complete': hasDirective && activeFlowIndex > 3 && !isViewingDirective }"
             :disabled="!canViewDirectiveStep"
             @click="showFlowView('directive')">
             生成指令
           </button>
+          <button
+            type="button"
+            :class="{ 'is-current': activeFlowIndex === 4 && !isViewingDirective, 'is-complete': hasVisualArtifacts }"
+            :disabled="!hasDirective">
+            生成图片
+          </button>
           <button type="button" disabled>选择风格</button>
-          <button type="button" :class="{ 'is-current': activeFlowIndex === 5 }" disabled>生成页面</button>
-          <button type="button" :class="{ 'is-current': activeFlowIndex === 6 }" disabled>导出</button>
+          <button type="button" :class="{ 'is-current': activeFlowIndex === 6 }" disabled>生成页面</button>
+          <button type="button" :class="{ 'is-current': activeFlowIndex === 7 }" disabled>导出</button>
         </div>
         <div class="agent-ppt-directive-summary">
           <div>
@@ -1498,42 +1570,70 @@ function confirmSourceDialog() {
                     {{ gap.text || gap.reason || gap.needed_metric || gap.neededMetric }}
                   </p>
                 </div>
-                <div v-if="row.chartSpecs.length" class="agent-ppt-chart-specs">
-                  <span>可视化方案</span>
+                <div v-if="row.visualSpecs.length" class="agent-ppt-chart-specs">
+                  <span>
+                    可视化方案
+                    <small v-if="row.visualStatus && row.visualStatus.status === 'generating'">生成中</small>
+                    <small v-else-if="row.visualStatus && row.visualStatus.status === 'failed'">{{ row.visualStatus.error || '生成失败' }}</small>
+                    <small v-else-if="row.visualArtifacts.length">已生成 {{ row.visualArtifacts.length }} 个</small>
+                  </span>
                   <article
-                    v-for="chart in row.chartSpecs"
-                    :key="`chart-spec-${row.id}-${chart.chart_id || chart.chartId || chart.title}`">
+                    v-for="visual in row.visualSpecs"
+                    :key="`visual-spec-${row.id}-${visual.visual_id || visual.visualId || visual.title}`">
                     <header>
-                      <strong>{{ chart.title || '图表' }}</strong>
-                      <small>{{ chart.chart_type || chart.chartType || 'chart' }} · {{ (chart.rows || []).length }} 行</small>
+                      <strong>{{ visual.title || '可视化' }}</strong>
+                      <small>{{ visualTypeLabel(visual) }} · {{ visual.status || 'draft' }}</small>
                     </header>
+                    <p v-if="visual.intent || visual.caption">{{ visual.intent || visual.caption }}</p>
                     <img
-                      v-if="chartPreviewUrl(row, chart)"
-                      :src="chartPreviewUrl(row, chart)"
-                      :alt="chart.title || '图表预览'">
-                    <table>
+                      v-if="visual.visual_type === 'existing_asset' && visualPreviewUrl(row, visual)"
+                      :src="visualPreviewUrl(row, visual)"
+                      :alt="visual.title || '可视化预览'">
+                    <p v-if="visual.visual_type === 'existing_asset'">
+                      {{ visual.asset_kind || visual.assetKind || '空间图资产' }}
+                      <template v-if="visual.source || (visual.asset && visual.asset.source)"> · {{ visual.source || (visual.asset && visual.asset.source) }}</template>
+                      <template v-if="visual.caption"> · {{ visual.caption }}</template>
+                    </p>
+                    <p v-if="visual.status === 'needs_design_render'">语义结构已生成，等待设计渲染。</p>
+                    <p v-if="visual.status === 'needs_existing_asset'">需要复用现有空间图截图，当前未绑定资产。</p>
+                    <table v-if="['figure', 'table', 'metric_card'].includes(String(visual.visual_type || visual.visualType || '')) && visualRowsPreview(visual).length && visualColumnsPreview(visual).length">
                       <thead>
                         <tr>
                           <th
-                            v-for="column in chartColumnsPreview(chart)"
-                            :key="`chart-column-${row.id}-${chart.chart_id || chart.chartId}-${chartColumnKey(column)}`">
-                            {{ chartColumnLabel(column) }}
+                            v-for="column in visualColumnsPreview(visual)"
+                            :key="`visual-column-${row.id}-${visual.visual_id || visual.visualId}-${visualColumnKey(column)}`">
+                            {{ visualColumnLabel(column) }}
                           </th>
                         </tr>
                       </thead>
                       <tbody>
                         <tr
-                          v-for="(chartRow, chartRowIndex) in chartRowsPreview(chart)"
-                          :key="`chart-row-${row.id}-${chart.chart_id || chart.chartId}-${chartRowIndex}`">
+                          v-for="(visualRow, visualRowIndex) in visualRowsPreview(visual)"
+                          :key="`visual-row-${row.id}-${visual.visual_id || visual.visualId}-${visualRowIndex}`">
                           <td
-                            v-for="column in chartColumnsPreview(chart)"
-                            :key="`chart-cell-${row.id}-${chart.chart_id || chart.chartId}-${chartRowIndex}-${chartColumnKey(column)}`">
-                            {{ chartRow[chartColumnKey(column)] }}
+                            v-for="column in visualColumnsPreview(visual)"
+                            :key="`visual-cell-${row.id}-${visual.visual_id || visual.visualId}-${visualRowIndex}-${visualColumnKey(column)}`">
+                            {{ visualRow[visualColumnKey(column)] }}
                           </td>
                         </tr>
                       </tbody>
                     </table>
+                    <ul v-if="['diagram', 'matrix'].includes(String(visual.visual_type || visual.visualType || ''))" class="agent-ppt-visual-outline">
+                      <li v-if="visual.diagram_kind || visual.diagramKind">{{ visual.diagram_kind || visual.diagramKind }}</li>
+                      <li v-for="item in visualNodeSummary(visual)" :key="`visual-node-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
+                      <li v-for="item in visualGroupSummary(visual)" :key="`visual-group-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
+                      <li v-for="item in visualLinkSummary(visual)" :key="`visual-link-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
+                      <li v-if="visual.design_notes">{{ visual.design_notes }}</li>
+                      <li v-if="visual.layout_hint">{{ visual.layout_hint }}</li>
+                    </ul>
                   </article>
+                  <button
+                    type="button"
+                    class="agent-ppt-visual-generate-btn"
+                    :disabled="!canGenerateRowVisuals(row)"
+                    @click="$emit('generate-slide-visuals', row.pageNo)">
+                    {{ row.visualArtifacts.length ? '重新生成本页可视化' : '生成本页可视化' }}
+                  </button>
                 </div>
               </div>
               <div class="agent-ppt-row-actions">
@@ -1729,7 +1829,7 @@ function confirmSourceDialog() {
             </article>
             <article>
               <span>可视化方案</span>
-              <strong>{{ Number(activeCurrentTransport.chart_spec_count ?? activeCurrentTransport.chartSpecCount ?? 0) || 0 }}</strong>
+              <strong>{{ Number(activeCurrentTransport.visual_spec_count ?? activeCurrentTransport.visualSpecCount ?? 0) || 0 }}</strong>
             </article>
           </div>
           <div v-if="sourceTransportExcludedItems(activeCurrentSource).length" class="agent-ppt-current-transport-excluded">
@@ -1819,29 +1919,29 @@ function confirmSourceDialog() {
           </article>
         </div>
 
-        <div v-if="activeCurrentChartSpecs.length" class="agent-ppt-package-section-head">
+        <div v-if="activeCurrentVisualSpecs.length" class="agent-ppt-package-section-head">
           <strong>可视化方案</strong>
-          <span>{{ activeCurrentChartSpecs.length }} 个</span>
+          <span>{{ activeCurrentVisualSpecs.length }} 个</span>
         </div>
-        <div v-if="activeCurrentChartSpecs.length" class="agent-ppt-current-metric-list">
+        <div v-if="activeCurrentVisualSpecs.length" class="agent-ppt-current-metric-list">
           <article
-            v-for="(chart, index) in activeCurrentChartSpecs"
-            :key="`current-chart-${chart.chart_id || chart.chartId || index}`"
+            v-for="(visual, index) in activeCurrentVisualSpecs"
+            :key="`current-visual-${visual.visual_id || visual.visualId || index}`"
             class="agent-ppt-current-metric-card">
             <header>
               <div>
-                <span>{{ chart.chart_type || chart.chartType || 'chart' }}</span>
-                <strong>{{ chart.title || '图表' }}</strong>
+                <span>{{ visualTypeLabel(visual) }}</span>
+                <strong>{{ visual.title || '可视化' }}</strong>
               </div>
             </header>
             <dl>
               <div>
-                <dt>columns</dt>
-                <dd>{{ (chart.columns || []).length }}</dd>
+                <dt>状态</dt>
+                <dd>{{ visual.status || 'draft' }}</dd>
               </div>
               <div>
-                <dt>rows</dt>
-                <dd>{{ (chart.rows || []).length }}</dd>
+                <dt>来源</dt>
+                <dd>{{ (visual.sourceIds || visual.source_ids || []).length }}</dd>
               </div>
             </dl>
           </article>

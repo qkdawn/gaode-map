@@ -23,8 +23,8 @@ from .prompts import (
 from .metric_context import (
     build_metric_context,
     compact_metric_context_for_llm,
-    render_chart_artifacts,
-    validate_metric_assets,
+    render_visual_artifacts,
+    validate_visual_assets,
 )
 from .schemas import (
     DeckBriefSlideRequest,
@@ -36,6 +36,8 @@ from .schemas import (
     DeckSlideBrief,
     PptOutlineSectionRequest,
     PptOutlineItem,
+    PptVisualArtifactRequest,
+    PptVisualArtifactResponse,
     PptSource,
     PptSourceGroup,
     PptSourceGroupClassifyRequest,
@@ -199,6 +201,34 @@ def _copy_compact_keys(payload: Dict[str, Any], keys: List[str]) -> Dict[str, An
         if value not in (None, "", [], {}):
             compact[key] = value
     return compact
+
+
+def _visual_assets_from_request(request: DeckBriefRequest | DeckBriefSlideRequest) -> List[Dict[str, Any]]:
+    current = _safe_dict(getattr(request, "current", {}))
+    raw_assets = _safe_list(
+        current.get("visual_assets")
+        or current.get("visualAssets")
+        or current.get("visual_snapshots")
+        or current.get("visualSnapshots")
+    )
+    assets: List[Dict[str, Any]] = []
+    for index, raw in enumerate(raw_assets, start=1):
+        item = _safe_dict(raw)
+        asset_id = _clean_text(item.get("asset_id") or item.get("assetId") or item.get("snapshot_id") or item.get("snapshotId")) or f"visual-asset-{index}"
+        data_url = _clean_text(item.get("data_url") or item.get("dataUrl") or item.get("image_url") or item.get("imageUrl"))
+        url = _clean_text(item.get("url"))
+        assets.append({
+            "asset_id": asset_id,
+            "asset_kind": _clean_text(item.get("asset_kind") or item.get("assetKind") or item.get("kind")) or "map_snapshot",
+            "source": _clean_text(item.get("source")) or _clean_text(item.get("kind")),
+            "title": _clean_text(item.get("title")) or _clean_text(item.get("caption")) or f"可视化资产 {index}",
+            "caption": _clean_text(item.get("caption") or item.get("title")),
+            "url": url,
+            "data_url": data_url,
+            "captured_at": _clean_text(item.get("captured_at") or item.get("capturedAt")),
+            "status": "ready" if (url or data_url) else "missing",
+        })
+    return assets
 
 
 def _compact_warning_list(items: Any, limit: int = LLM_WARNING_LIMIT) -> List[str]:
@@ -508,7 +538,7 @@ def _build_ppt_context_bundle(
             "metric_count": len(source_metrics),
             "metric_gap_count": int(counts.get("metric_gaps") or counts.get("metricGaps") or 0),
             "evidence_count": len(source_evidence),
-            "chart_spec_count": int(counts.get("chart_specs") or counts.get("chartSpecs") or 0),
+            "visual_spec_count": int(counts.get("visual_specs") or counts.get("visualSpecs") or 0),
             "excluded": _safe_list(ai_payload.get("excluded")),
             "policy": _clean_text(ai_payload.get("policy")) or "数字来自 aiPayload.metrics；文本/样本来自 aiPayload.evidence；完整原始数据不传给 LLM。",
         })
@@ -582,7 +612,7 @@ def _validate_outline(raw_outline: Any, page_count: int) -> List[PptOutlineItem]
     return outline
 
 
-def _validate_slides(raw_slides: Any, page_count: int, metric_context: Dict[str, Any] | None = None) -> List[DeckSlideBrief]:
+def _validate_slides(raw_slides: Any, page_count: int, metric_context: Dict[str, Any] | None = None, visual_assets: List[Dict[str, Any]] | None = None) -> List[DeckSlideBrief]:
     if not isinstance(raw_slides, list):
         return []
     slides: List[DeckSlideBrief] = []
@@ -595,8 +625,7 @@ def _validate_slides(raw_slides: Any, page_count: int, metric_context: Dict[str,
         required_sources = item.get("required_sources") or item.get("requiredSources") or []
         if not isinstance(required_sources, list):
             required_sources = []
-        metric_assets = validate_metric_assets(item, metric_context or {})
-        chart_artifacts = render_chart_artifacts(metric_assets["chart_specs"])
+        metric_assets = validate_visual_assets(item, metric_context or {}, visual_assets)
         slides.append(
             DeckSlideBrief(
                 index=int(item.get("index") or index),
@@ -607,11 +636,41 @@ def _validate_slides(raw_slides: Any, page_count: int, metric_context: Dict[str,
                 required_sources=[_clean_text(source) for source in required_sources if _clean_text(source)],
                 metric_claims=metric_assets["metric_claims"],
                 metric_gaps=metric_assets["metric_gaps"],
-                chart_specs=metric_assets["chart_specs"],
-                chart_artifacts=chart_artifacts,
+                visual_specs=metric_assets["visual_specs"],
+                visual_artifacts=[],
             )
         )
     return slides
+
+
+def generate_visual_artifacts_for_slide(request: PptVisualArtifactRequest) -> PptVisualArtifactResponse:
+    metric_assets = validate_visual_assets(
+        {"visual_specs": request.visual_specs},
+        request.metric_context or {},
+        request.existing_assets,
+    )
+    renderable_specs = [
+        spec
+        for spec in metric_assets["visual_specs"]
+        if _clean_text(spec.get("status")) == "renderable"
+        and _clean_text(spec.get("visual_type")) in {"figure", "table", "metric_card"}
+    ]
+    return PptVisualArtifactResponse(
+        slide_index=request.slide_index,
+        visual_artifacts=render_visual_artifacts(renderable_specs),
+    )
+
+
+def _has_slide_brief_content(slide: DeckSlideBrief) -> bool:
+    return bool(
+        _clean_text(slide.key_message)
+        or _clean_text(slide.visual_plan)
+        or slide.required_sources
+        or slide.metric_claims
+        or slide.metric_gaps
+        or slide.visual_specs
+        or slide.visual_artifacts
+    )
 
 
 def _validate_outline_section(raw: Any, fallback: PptOutlineItem) -> PptOutlineItem | None:
@@ -694,13 +753,15 @@ def _find_narrative_role(plan: DeckNarrativePlanResponse | None, page_no: int) -
     return role.model_dump(mode="json") if role else None
 
 
-def _validate_slide_section(raw: Any, fallback: DeckSlideBrief, metric_context: Dict[str, Any] | None = None) -> DeckSlideBrief | None:
+def _validate_slide_section(raw: Any, fallback: DeckSlideBrief, metric_context: Dict[str, Any] | None = None, visual_assets: List[Dict[str, Any]] | None = None) -> DeckSlideBrief | None:
     item = _safe_dict(raw.get("slide")) if isinstance(raw, dict) and isinstance(raw.get("slide"), dict) else _safe_dict(raw)
     index = int(item.get("index") or fallback.index)
-    slides = _validate_slides([{**fallback.model_dump(mode="json"), **item, "index": index}], index, metric_context=metric_context)
+    slides = _validate_slides([{**fallback.model_dump(mode="json"), **item, "index": index}], index, metric_context=metric_context, visual_assets=visual_assets)
     if not slides:
         return None
     normalized = slides[0]
+    if not _has_slide_brief_content(normalized):
+        return None
     return DeckSlideBrief(
         index=fallback.index,
         title=normalized.title,
@@ -710,8 +771,8 @@ def _validate_slide_section(raw: Any, fallback: DeckSlideBrief, metric_context: 
         required_sources=normalized.required_sources,
         metric_claims=normalized.metric_claims,
         metric_gaps=normalized.metric_gaps,
-        chart_specs=normalized.chart_specs,
-        chart_artifacts=normalized.chart_artifacts,
+        visual_specs=normalized.visual_specs,
+        visual_artifacts=normalized.visual_artifacts,
     )
 
 
@@ -951,7 +1012,7 @@ async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
         title="生成 PPT 逐页指令",
         reasoning_id="ppt-directive-generation",
     )
-    slides = _validate_slides(raw.get("slides"), page_count, metric_context=metric_context)
+    slides = _validate_slides(raw.get("slides"), page_count, metric_context=metric_context, visual_assets=_visual_assets_from_request(request))
     if not slides:
         raise PptPlanningInvalidResponse("invalid_deck_brief")
     missing_inputs = raw.get("missing_inputs")
@@ -1015,7 +1076,7 @@ async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSli
         title="重生成 PPT 指令页",
         reasoning_id=f"ppt-directive-slide-{request.target.index}",
     )
-    slide = _validate_slide_section(raw, request.target, metric_context=metric_context)
+    slide = _validate_slide_section(raw, request.target, metric_context=metric_context, visual_assets=_visual_assets_from_request(request))
     if not slide:
         raise PptPlanningInvalidResponse("invalid_deck_brief_slide")
     return slide

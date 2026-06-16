@@ -56,7 +56,7 @@ function createAiPayload({
   metrics = [],
   metricGaps = [],
   evidence = [],
-  chartSpecs = [],
+  visualSpecs = [],
   excluded = [],
   policy = '',
 } = {}) {
@@ -64,13 +64,13 @@ function createAiPayload({
   const readyMetrics = cloneArray(metrics).filter((metric) => asText(metric.status) === 'ready')
   const gaps = cloneArray(metricGaps)
   const evidenceItems = cloneArray(evidence).filter((item) => asText(item.title || item.text))
-  const charts = cloneArray(chartSpecs).filter((item) => asText(item.chart_id || item.chartId || item.title))
+  const visuals = cloneArray(visualSpecs).filter((item) => asText(item.visual_id || item.visualId || item.title))
   const included = []
   if (normalizedScope) included.push('scope')
   if (readyMetrics.length) included.push('metrics')
   if (gaps.length) included.push('metric_gaps')
   if (evidenceItems.length) included.push('evidence')
-  if (charts.length) included.push('chart_specs')
+  if (visuals.length) included.push('visual_specs')
   return {
     version: 'ppt_ai_input_block_v1',
     source_id: asText(sourceId),
@@ -84,15 +84,15 @@ function createAiPayload({
     metric_gaps: gaps,
     metricGaps: gaps,
     evidence: evidenceItems,
-    chart_specs: charts,
-    chartSpecs: charts,
+    visual_specs: visuals,
+    visualSpecs: visuals,
     excluded: cloneArray(excluded),
     counts: {
       scope: normalizedScope ? 1 : 0,
       metrics: readyMetrics.length,
       metric_gaps: gaps.length,
       evidence: evidenceItems.length,
-      chart_specs: charts.length,
+      visual_specs: visuals.length,
     },
     policy: asText(policy) || '生成时只发送这个 AI 输入块；原始大数据不进入 LLM。',
   }
@@ -105,7 +105,7 @@ export function createPptTransportFromAiPayload(aiPayload = {}) {
   const metricCount = Number(counts.metrics ?? payload.metric_count ?? payload.metricCount ?? 0) || 0
   const metricGapCount = Number(counts.metric_gaps ?? counts.metricGaps ?? 0) || 0
   const evidenceCount = Number(counts.evidence ?? payload.evidence_count ?? payload.evidenceCount ?? 0) || 0
-  const chartSpecCount = Number(counts.chart_specs ?? counts.chartSpecs ?? 0) || 0
+  const visualSpecCount = Number(counts.visual_specs ?? counts.visualSpecs ?? 0) || 0
   const included = cloneArray(payload.included)
   return {
     source_id: asText(payload.source_id || payload.sourceId),
@@ -124,8 +124,8 @@ export function createPptTransportFromAiPayload(aiPayload = {}) {
     evidenceCount,
     scope_count: scopeCount,
     scopeCount,
-    chart_spec_count: chartSpecCount,
-    chartSpecCount,
+    visual_spec_count: visualSpecCount,
+    visualSpecCount,
     excluded: cloneArray(payload.excluded),
     policy: asText(payload.policy),
     preview: true,
@@ -141,6 +141,7 @@ export const PPT_PLANNING_STEPS = Object.freeze({
   NARRATIVE_READY: 'narrative_ready',
   SLIDES_GENERATING: 'slides_generating',
   DIRECTIVE_DRAFT: 'directive_draft',
+  VISUALS_READY: 'visuals_ready',
 })
 
 const SYSTEM_SOURCE_DEFINITIONS = Object.freeze([
@@ -526,8 +527,8 @@ export function normalizeDeckSlideBrief(seed = {}, fallbackIndex = 1) {
     requiredSources: cloneArray(seed.requiredSources || seed.required_sources).map((item) => asText(item)).filter(Boolean),
     metricClaims: cloneArray(seed.metricClaims || seed.metric_claims).map((item) => cloneObject(item)).filter((item) => item.metric_id || item.metricId || item.text),
     metricGaps: cloneArray(seed.metricGaps || seed.metric_gaps).map((item) => (item && typeof item === 'object' ? cloneObject(item) : { text: asText(item) })).filter((item) => asText(item.text || item.reason || item.needed_metric || item.neededMetric)),
-    chartSpecs: cloneArray(seed.chartSpecs || seed.chart_specs).map((item) => cloneObject(item)).filter((item) => item.chart_id || item.chartId || item.title),
-    chartArtifacts: cloneArray(seed.chartArtifacts || seed.chart_artifacts).map((item) => cloneObject(item)).filter((item) => item.chart_id || item.chartId || item.url || item.filename),
+    visualSpecs: cloneArray(seed.visualSpecs || seed.visual_specs).map((item) => cloneObject(item)).filter((item) => item.visual_id || item.visualId || item.title),
+    visualArtifacts: cloneArray(seed.visualArtifacts || seed.visual_artifacts).map((item) => cloneObject(item)).filter((item) => item.visual_id || item.visualId || item.url || item.filename),
   }
 }
 

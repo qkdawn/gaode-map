@@ -11,7 +11,9 @@ from modules.charting import save_svg
 from .schemas import PptSource
 
 
-SUPPORTED_CHART_TYPES = {"bar", "grouped_bar", "line", "radar", "metric_table", "histogram", "heatmap_grid"}
+RENDERABLE_FIGURE_TYPES = {"bar", "grouped_bar", "line", "radar", "histogram", "heatmap_grid"}
+VISUAL_TYPES = {"figure", "diagram", "matrix", "existing_asset", "table", "metric_card"}
+VISUAL_STATUSES = {"renderable", "needs_existing_asset", "needs_design_render", "missing_data"}
 
 
 def _clean_text(value: Any) -> str:
@@ -338,19 +340,85 @@ def _normalize_gaps(raw_gaps: Any) -> List[Dict[str, Any]]:
     return gaps
 
 
-def _normalize_chart(raw: Any, metric_by_id: Dict[str, Dict[str, Any]], index: int) -> Optional[Dict[str, Any]]:
+def _visual_id(item: Dict[str, Any], index: int) -> str:
+    return _clean_text(
+        item.get("visual_id")
+        or item.get("visualId")
+        or item.get("chart_id")
+        or item.get("chartId")
+        or item.get("asset_id")
+        or item.get("assetId")
+    ) or f"visual-{index}"
+
+
+def _normalize_visual(raw: Any, metric_by_id: Dict[str, Dict[str, Any]], asset_by_id: Dict[str, Dict[str, Any]], index: int) -> Optional[Dict[str, Any]]:
     item = _safe_dict(raw)
-    chart_type = _clean_text(item.get("chart_type") or item.get("chartType")) or "bar"
-    if chart_type not in SUPPORTED_CHART_TYPES:
-        chart_type = "bar"
-    columns = _safe_list(item.get("columns"))
-    rows = _safe_list(item.get("rows"))
+    visual_type = _clean_text(item.get("visual_type") or item.get("visualType"))
+    if visual_type not in VISUAL_TYPES:
+        visual_id = _visual_id(item, index)
+        return {
+            "visual_id": visual_id,
+            "visual_type": "metric_card",
+            "title": _clean_text(item.get("title")) or f"可视化 {index}",
+            "intent": _clean_text(item.get("intent") or item.get("render_intent") or item.get("renderIntent")),
+            "status": "missing_data",
+            "source_ids": [_clean_text(source_id) for source_id in _safe_list(item.get("source_ids") or item.get("sourceIds")) if _clean_text(source_id)],
+            "data": {
+                **_safe_dict(item.get("data")),
+                "reason": f"{visual_type or 'unknown'} 不是支持的 visual_type，未生成数值图 fallback。",
+            },
+        }
+    visual_id = _visual_id(item, index)
+    title = _clean_text(item.get("title")) or f"可视化 {index}"
+    source_ids = [_clean_text(source_id) for source_id in _safe_list(item.get("source_ids") or item.get("sourceIds")) if _clean_text(source_id)]
+    base = {
+        "visual_id": visual_id,
+        "visual_type": visual_type,
+        "title": title,
+        "intent": _clean_text(item.get("intent") or item.get("render_intent") or item.get("renderIntent")),
+        "status": _clean_text(item.get("status")) if _clean_text(item.get("status")) in VISUAL_STATUSES else "",
+        "source_ids": source_ids,
+        "data": _safe_dict(item.get("data")),
+    }
+
+    if visual_type in {"diagram", "matrix"}:
+        return {
+            **base,
+            "status": "needs_design_render",
+            "diagram_kind": _clean_text(item.get("diagram_kind") or item.get("diagramKind") or item.get("matrix_kind") or item.get("matrixKind")),
+            "nodes": _safe_list(item.get("nodes")),
+            "groups": _safe_list(item.get("groups")),
+            "links": _safe_list(item.get("links")),
+            "layout_hint": _clean_text(item.get("layout_hint") or item.get("layoutHint")),
+            "design_notes": _clean_text(item.get("design_notes") or item.get("designNotes")),
+        }
+
+    if visual_type == "existing_asset":
+        asset_id = _clean_text(item.get("asset_id") or item.get("assetId"))
+        asset = asset_by_id.get(asset_id) if asset_id else {}
+        asset = asset or {}
+        asset_source = _clean_text(item.get("source")) or _clean_text(asset.get("source"))
+        return {
+            **base,
+            "status": "renderable" if asset else "needs_existing_asset",
+            "asset_kind": _clean_text(item.get("asset_kind") or item.get("assetKind") or asset.get("asset_kind") or asset.get("assetKind")),
+            "source": asset_source,
+            "asset_id": asset_id,
+            "caption": _clean_text(item.get("caption") or asset.get("caption")),
+            "overlay_requirements": [_clean_text(value) for value in _safe_list(item.get("overlay_requirements") or item.get("overlayRequirements")) if _clean_text(value)],
+            "asset": asset,
+        }
+
+    data = _safe_dict(item.get("data"))
+    figure_kind = _clean_text(item.get("figure_kind") or item.get("figureKind") or item.get("chart_type") or item.get("chartType") or data.get("figure_kind") or data.get("chart_type")) or "bar"
+    columns = _safe_list(item.get("columns") or data.get("columns"))
+    rows = _safe_list(item.get("rows") or data.get("rows"))
     source_metric_ids = [
         _clean_text(metric_id)
         for metric_id in _safe_list(item.get("source_metric_ids") or item.get("sourceMetricIds"))
         if metric_by_id.get(_clean_text(metric_id)) and _clean_text(metric_by_id[_clean_text(metric_id)].get("status")) == "ready"
     ]
-    source_ids = list(dict.fromkeys(
+    metric_source_ids = list(dict.fromkeys(
         _clean_text(metric_by_id[metric_id].get("source_id"))
         for metric_id in source_metric_ids
         if _clean_text(metric_by_id[metric_id].get("source_id"))
@@ -373,41 +441,76 @@ def _normalize_chart(raw: Any, metric_by_id: Dict[str, Dict[str, Any]], index: i
                 if key not in keys:
                     keys.append(key)
         columns = [{"key": key, "label": key} for key in keys]
+
     if not rows or not columns:
-        return None
+        return {
+            **base,
+            "visual_type": "metric_card" if visual_type == "figure" else visual_type,
+            "status": "missing_data",
+            "source_metric_ids": source_metric_ids,
+            "source_ids": list(dict.fromkeys(source_ids + metric_source_ids)),
+            "data": {
+                **data,
+                "reason": "缺少可复核的 rows/columns，未生成空图表。",
+            },
+        }
+
+    if visual_type == "figure" and figure_kind not in RENDERABLE_FIGURE_TYPES:
+        return {
+            **base,
+            "visual_type": "metric_card",
+            "status": "missing_data",
+            "source_metric_ids": source_metric_ids,
+            "source_ids": list(dict.fromkeys(source_ids + metric_source_ids)),
+            "data": {
+                **data,
+                "columns": columns,
+                "rows": rows,
+                "reason": f"{figure_kind} 不是可渲染数值图类型，已降级为指标卡。",
+            },
+        }
+
     return {
-        "chart_id": _clean_text(item.get("chart_id") or item.get("chartId")) or f"chart-{index}",
-        "title": _clean_text(item.get("title")) or f"图表 {index}",
-        "chart_type": chart_type,
-        "columns": columns,
-        "rows": rows,
+        **base,
+        "status": "renderable",
+        "figure_kind": "metric_table" if visual_type == "table" else figure_kind,
         "source_metric_ids": source_metric_ids,
-        "source_ids": source_ids,
+        "source_ids": list(dict.fromkeys(source_ids + metric_source_ids)),
         "unit": _clean_text(item.get("unit")),
         "render_hint": _clean_text(item.get("render_hint") or item.get("renderHint")),
+        "data": {
+            **data,
+            "columns": columns,
+            "rows": rows,
+        },
     }
 
 
-def validate_metric_assets(slide_payload: Dict[str, Any], metric_context: Dict[str, Any]) -> Dict[str, Any]:
+def validate_visual_assets(slide_payload: Dict[str, Any], metric_context: Dict[str, Any], existing_assets: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
     metric_by_id = {
         _clean_text(metric.get("metric_id")): metric
         for metric in _safe_list(metric_context.get("metrics"))
         if _clean_text(metric.get("status")) == "ready"
+    }
+    asset_by_id = {
+        _clean_text(asset.get("asset_id") or asset.get("assetId")): _safe_dict(asset)
+        for asset in _safe_list(existing_assets)
+        if _clean_text(_safe_dict(asset).get("asset_id") or _safe_dict(asset).get("assetId"))
     }
     claims = [
         claim
         for index, raw in enumerate(_safe_list(slide_payload.get("metric_claims") or slide_payload.get("metricClaims")), start=1)
         if (claim := _normalize_claim(raw, metric_by_id, index))
     ]
-    charts = [
-        chart
-        for index, raw in enumerate(_safe_list(slide_payload.get("chart_specs") or slide_payload.get("chartSpecs")), start=1)
-        if (chart := _normalize_chart(raw, metric_by_id, index))
+    visuals = [
+        visual
+        for index, raw in enumerate(_safe_list(slide_payload.get("visual_specs") or slide_payload.get("visualSpecs")), start=1)
+        if (visual := _normalize_visual(raw, metric_by_id, asset_by_id, index))
     ]
     gaps = _normalize_gaps(slide_payload.get("metric_gaps") or slide_payload.get("metricGaps"))
     requested_claims = bool(_safe_list(slide_payload.get("metric_claims") or slide_payload.get("metricClaims")))
-    requested_charts = bool(_safe_list(slide_payload.get("chart_specs") or slide_payload.get("chartSpecs")))
-    if (requested_claims and not claims) or (requested_charts and not charts):
+    requested_visuals = bool(_safe_list(slide_payload.get("visual_specs") or slide_payload.get("visualSpecs")))
+    if (requested_claims and not claims) or (requested_visuals and not visuals):
         known_gap_ids = {_clean_text(gap.get("metric_id")) for gap in gaps}
         for gap in _safe_list(metric_context.get("metric_gaps"))[:6]:
             metric_id = _clean_text(gap.get("metric_id"))
@@ -417,7 +520,7 @@ def validate_metric_assets(slide_payload: Dict[str, Any], metric_context: Dict[s
     return {
         "metric_claims": claims,
         "metric_gaps": gaps,
-        "chart_specs": charts,
+        "visual_specs": visuals,
     }
 
 
@@ -433,14 +536,16 @@ def _column_label(column: Any) -> str:
     return _clean_text(column)
 
 
-def _chart_svg(spec: Dict[str, Any]) -> str:
-    title = html.escape(_clean_text(spec.get("title")) or "图表")
-    chart_type = _clean_text(spec.get("chart_type"))
-    columns = _safe_list(spec.get("columns"))
-    rows = [_safe_dict(row) for row in _safe_list(spec.get("rows"))[:40]]
+def _visual_svg(spec: Dict[str, Any]) -> str:
+    title = html.escape(_clean_text(spec.get("title")) or "可视化")
+    visual_type = _clean_text(spec.get("visual_type"))
+    figure_kind = _clean_text(spec.get("figure_kind"))
+    data = _safe_dict(spec.get("data"))
+    columns = _safe_list(data.get("columns"))
+    rows = [_safe_dict(row) for row in _safe_list(data.get("rows"))[:40]]
     width = 980
     height = 560
-    if chart_type == "metric_table":
+    if visual_type in {"table", "metric_card"} or figure_kind == "metric_table":
         line_height = 34
         table_height = min(420, max(80, len(rows) * line_height))
         parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}">', '<rect width="100%" height="100%" fill="#f8f6f2" />']
@@ -475,7 +580,7 @@ def _chart_svg(spec: Dict[str, Any]) -> str:
     parts.append(f'<line x1="{plot_left}" y1="{plot_top + plot_height}" x2="{plot_left + plot_width}" y2="{plot_top + plot_height}" stroke="#334155" />')
     parts.append(f'<line x1="{plot_left}" y1="{plot_top}" x2="{plot_left}" y2="{plot_top + plot_height}" stroke="#334155" />')
     colors = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed"]
-    if chart_type in {"line", "radar"}:
+    if figure_kind in {"line", "radar"}:
         for series_index, series in enumerate(values):
             points = []
             for idx, value in enumerate(series):
@@ -503,16 +608,19 @@ def _chart_svg(spec: Dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def render_chart_artifacts(chart_specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def render_visual_artifacts(visual_specs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     artifacts: List[Dict[str, Any]] = []
-    for spec in chart_specs:
-        svg = _chart_svg(spec)
-        chart_id, filename = save_svg(svg)
+    for spec in visual_specs:
+        if _clean_text(spec.get("status")) != "renderable" or _clean_text(spec.get("visual_type")) not in {"figure", "table", "metric_card"}:
+            continue
+        svg = _visual_svg(spec)
+        visual_id, filename = save_svg(svg)
         artifacts.append({
-            "chart_id": spec.get("chart_id") or chart_id,
+            "visual_id": spec.get("visual_id") or visual_id,
+            "visual_type": spec.get("visual_type"),
             "format": "svg",
             "filename": filename,
             "url": f"/download/{filename}",
-            "source_chart_id": chart_id,
+            "source_visual_id": visual_id,
         })
     return artifacts

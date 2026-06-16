@@ -5,6 +5,7 @@ import pytest
 
 from modules.ppt_planning.schemas import (
     DeckBriefRequest,
+    PptVisualArtifactRequest,
     DeckBriefSlideRequest,
     DeckNarrativePlanRequest,
     DeckNarrativePlanResponse,
@@ -17,6 +18,7 @@ from modules.ppt_planning.schemas import (
     PptSpecResponse,
 )
 from modules.ppt_planning.service import (
+    PptPlanningInvalidResponse,
     PptPlanningLlmUnavailable,
     _build_ppt_context_bundle,
     classify_ppt_source_groups,
@@ -26,7 +28,7 @@ from modules.ppt_planning.service import (
     regenerate_deck_brief_slide,
     regenerate_ppt_outline_section,
 )
-from modules.ppt_planning.metric_context import build_metric_context, validate_metric_assets
+from modules.ppt_planning.metric_context import build_metric_context, validate_visual_assets
 
 
 def _ai_payload(
@@ -62,14 +64,14 @@ def _ai_payload(
         "metrics": metrics,
         "metric_gaps": metric_gaps,
         "evidence": evidence,
-        "chart_specs": [],
+        "visual_specs": [],
         "excluded": excluded or [{"type": "raw_payload", "reason": "不传原始数据。"}],
         "counts": {
             "scope": 1 if scope else 0,
             "metrics": len(metrics),
             "metric_gaps": len(metric_gaps),
             "evidence": len(evidence),
-            "chart_specs": 0,
+            "visual_specs": 0,
         },
         "policy": "test ai payload only",
     }
@@ -457,13 +459,16 @@ def test_generate_deck_brief_returns_ai_directive_not_pptx(monkeypatch):
                             "unit": "个",
                         }
                     ],
-                    "chart_specs": [
+                    "visual_specs": [
                         {
-                            "chart_id": "chart-poi",
+                            "visual_id": "visual-poi",
+                            "visual_type": "figure",
+                            "status": "renderable",
                             "title": "POI 数量",
-                            "chart_type": "bar",
-                            "columns": [{"key": "label", "label": "指标"}, {"key": "value", "label": "数值"}],
-                            "rows": [{"label": "POI 总数", "value": 120}],
+                            "data": {
+                                "columns": [{"key": "label", "label": "指标"}, {"key": "value", "label": "数值"}],
+                                "rows": [{"label": "POI 总数", "value": 120}],
+                            },
                             "source_metric_ids": [poi_metric["metric_id"]],
                         }
                     ],
@@ -526,13 +531,76 @@ def test_generate_deck_brief_returns_ai_directive_not_pptx(monkeypatch):
     assert response.slides
     assert response.slides[0].title == "项目命题"
     assert response.slides[0].metric_claims[0]["value"] == 120
-    assert response.slides[0].chart_specs[0]["rows"][0]["value"] == 120
-    assert response.slides[0].chart_artifacts[0]["url"].endswith(".svg")
+    assert response.slides[0].visual_specs[0]["data"]["rows"][0]["value"] == 120
+    assert response.slides[0].visual_artifacts == []
     assert seen_directive_payload["metric_context"]["metric_count"] >= 1
     assert "current" not in seen_directive_payload
     assert seen_directive_payload["sources"][0]["id"] == "package:poi:test"
     assert seen_directive_payload["evidence_context"]["item_count"] >= 1
     assert seen_directive_payload["source_manifest"][0]["transport_status"] in {"included", "selected_no_payload"}
+
+
+def test_generate_visual_artifacts_for_slide_renders_only_supported_visuals():
+    from modules.ppt_planning.service import generate_visual_artifacts_for_slide
+
+    response = generate_visual_artifacts_for_slide(PptVisualArtifactRequest(
+        slide_index=1,
+        visual_specs=[
+            {
+                "visual_id": "visual-poi",
+                "visual_type": "figure",
+                "status": "renderable",
+                "title": "POI 数量",
+                "data": {
+                    "columns": [{"key": "label", "label": "指标"}, {"key": "value", "label": "数值"}],
+                    "rows": [{"label": "POI 总数", "value": 120}],
+                },
+            },
+            {
+                "visual_id": "visual-framework",
+                "visual_type": "diagram",
+                "status": "needs_design_render",
+                "title": "策略框架",
+                "nodes": [{"id": "a", "label": "现状"}],
+            },
+            {
+                "visual_id": "visual-map",
+                "visual_type": "existing_asset",
+                "status": "needs_existing_asset",
+                "title": "空间图",
+                "asset_id": "missing-map",
+            },
+        ],
+        metric_context={},
+    ))
+
+    assert response.slide_index == 1
+    assert len(response.visual_artifacts) == 1
+    assert response.visual_artifacts[0]["visual_id"] == "visual-poi"
+    assert response.visual_artifacts[0]["url"].endswith(".svg")
+
+
+def test_generate_visual_artifacts_for_slide_does_not_fallback_unknown_to_bar():
+    from modules.ppt_planning.service import generate_visual_artifacts_for_slide
+
+    response = generate_visual_artifacts_for_slide(PptVisualArtifactRequest(
+        slide_index=1,
+        visual_specs=[
+            {
+                "visual_id": "visual-map-overlay",
+                "visual_type": "map_overlay",
+                "status": "renderable",
+                "title": "等时圈叠加",
+                "data": {
+                    "columns": [{"key": "label"}, {"key": "value"}],
+                    "rows": [{"label": "范围", "value": 1}],
+                },
+            }
+        ],
+        metric_context={},
+    ))
+
+    assert response.visual_artifacts == []
 
 
 def test_regenerate_deck_brief_slide_returns_single_slide(monkeypatch):
@@ -621,6 +689,36 @@ def test_regenerate_deck_brief_slide_returns_single_slide(monkeypatch):
     assert response.metric_claims[0]["value"] == 9.8
 
 
+def test_regenerate_deck_brief_slide_rejects_outline_only_response(monkeypatch):
+    monkeypatch.setattr("modules.ppt_planning.service.is_llm_enabled", lambda: True)
+
+    async def fake_invoke(**kwargs):
+        return {
+            "index": 1,
+            "title": "封面与汇报主旨",
+            "purpose": "确立项目名称、评审对象与核心汇报逻辑。",
+        }
+
+    monkeypatch.setattr("modules.ppt_planning.service._invoke_json_role", fake_invoke)
+    target = DeckSlideBrief(index=1, title="封面与汇报主旨", purpose="确立项目名称、评审对象与核心汇报逻辑。")
+    outline_item = PptOutlineItem(id="page-1", page_no=1, theme=target.title, purpose=target.purpose)
+
+    with pytest.raises(PptPlanningInvalidResponse, match="invalid_deck_brief_slide"):
+        asyncio.run(regenerate_deck_brief_slide(DeckBriefSlideRequest(
+            area_id="area-1",
+            outline=[outline_item],
+            slides=[target],
+            target=target,
+            outline_item=outline_item,
+            narrative_plan=DeckNarrativePlanResponse(
+                storyline="问题到证据",
+                slide_roles=[DeckNarrativeSlideRole(page_no=1, role="开题", objective="建立问题")],
+            ),
+            revision_note="按已确认目录和叙事方案生成这一页 brief。",
+            source_ids=["current:scope"],
+        )))
+
+
 def test_ppt_metric_context_extracts_metrics_and_filters_unknown_claims():
     ready_metric = {
         "metric_id": "analysis:h3:avg_density_poi_per_km2",
@@ -677,24 +775,28 @@ def test_ppt_metric_context_extracts_metrics_and_filters_unknown_claims():
     assert metric_context["missing_metric_count"] == 1
 
     valid_id = metric_ids[0]
-    assets = validate_metric_assets({
+    assets = validate_visual_assets({
         "metric_claims": [
             {"metric_id": valid_id, "value": metrics[0]["value"], "text": "有效声明"},
             {"metric_id": "analysis:h3:lq", "value": 2.5, "text": "缺失声明"},
             {"metric_id": "missing", "value": 999, "text": "无效声明"},
         ],
-        "chart_specs": [
+        "visual_specs": [
             {
                 "title": "有效图表",
-                "columns": [{"key": "label"}, {"key": "value"}],
-                "rows": [{"label": "A", "value": 999999}],
+                "visual_type": "figure",
+                "status": "renderable",
+                "data": {
+                    "columns": [{"key": "label"}, {"key": "value"}],
+                    "rows": [{"label": "A", "value": 999999}],
+                },
                 "source_metric_ids": [valid_id, "analysis:h3:lq", "missing"],
             }
         ],
     }, metric_context)
     assert len(assets["metric_claims"]) == 1
-    assert assets["chart_specs"][0]["source_metric_ids"] == [valid_id]
-    assert assets["chart_specs"][0]["rows"][0]["value"] == metrics[0]["value"]
+    assert assets["visual_specs"][0]["source_metric_ids"] == [valid_id]
+    assert assets["visual_specs"][0]["data"]["rows"][0]["value"] == metrics[0]["value"]
 
 
 def test_ppt_metric_context_adds_selected_carrier_package_metrics():

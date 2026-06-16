@@ -3,7 +3,7 @@ import { getAnalysisTaskDefinition } from './analysis-task-registry.js'
 import { createPptSystemSources, createPptTransportFromAiPayload } from '../ppt-planning/model.js'
 import {
   classifyPptSourceGroups,
-  cleanupPptChartArtifacts,
+  cleanupPptVisualArtifacts,
   createPptDataPackage,
   deleteDocumentSource,
   generateDeckBrief,
@@ -12,6 +12,7 @@ import {
   generateNarrativePlanWithDebug,
   generatePptSpec,
   generatePptSpecWithDebug,
+  generatePptVisualArtifacts,
   getJobStatus,
   listPptDataSources,
   regenerateDeckBriefSlide,
@@ -24,14 +25,16 @@ import {
   appendPptGenerationDebugEvent,
   applyDeckBriefSlideRevision,
   applyGeneratedSlideBrief,
+  applyPptVisualArtifactsResponse,
   applyPptOutlineSectionRevision,
   applyPptSourceGroupsResponse,
   buildDeckBriefSlidePayload,
   buildDeckBriefPayload,
+  buildPptVisualArtifactsPayload,
   buildPptOutlineSectionPayload,
   buildNarrativePlanPayload,
   buildPptSpecPayload,
-  collectPptChartArtifactFilenames,
+  collectPptVisualArtifactFilenames,
   completePptGenerationJob,
   createPptPlanningState,
   getActiveDeckSlideBrief,
@@ -42,6 +45,7 @@ import {
   getPptSourceSummary,
   isPptDirectivePageStale,
   failPptGenerationJob,
+  failPptVisualArtifacts,
   failSlideGenerationQueue,
   markPptDirectiveStaleForSources,
   mergePptPlanningSources,
@@ -59,6 +63,7 @@ import {
   setPptGenerationError,
   setPptSourceRefreshing,
   startPptGenerationJob,
+  startPptVisualArtifactsGeneration,
   startSlideGenerationQueue,
   setPptActiveRevisionTarget,
   setPptRevisionDraftField,
@@ -597,7 +602,7 @@ function createPptSourceTransportPreview({
   sourceKind = '',
   metricCount = 0,
   evidenceCount = 0,
-  chartSpecCount = 0,
+  visualSpecCount = 0,
   excludedType = '',
   excludedReason = '',
   policy = '',
@@ -618,8 +623,8 @@ function createPptSourceTransportPreview({
     metricCount: Number(metricCount || 0) || 0,
     evidence_count: Number(evidenceCount || 0) || 0,
     evidenceCount: Number(evidenceCount || 0) || 0,
-    chart_spec_count: Number(chartSpecCount || 0) || 0,
-    chartSpecCount: Number(chartSpecCount || 0) || 0,
+    visual_spec_count: Number(visualSpecCount || 0) || 0,
+    visualSpecCount: Number(visualSpecCount || 0) || 0,
     excluded: excludedType ? [{ type: excludedType, reason: excludedReason }] : [],
     policy: asText(policy) || '生成时发送这里显示的 metrics/evidence；完整原始数据不进入 LLM。',
     preview: true,
@@ -634,7 +639,7 @@ function createPptAiInputBlock({
   metrics = [],
   metricGaps = [],
   evidence = [],
-  chartSpecs = [],
+  visualSpecs = [],
   excluded = [],
   policy = '',
 } = {}) {
@@ -642,13 +647,13 @@ function createPptAiInputBlock({
   const readyMetrics = cloneArray(metrics).filter((metric) => asText(metric.status) === 'ready')
   const gaps = cloneArray(metricGaps)
   const evidenceItems = cloneArray(evidence).filter((item) => asText(item.title || item.text))
-  const charts = cloneArray(chartSpecs).filter((item) => asText(item.chart_id || item.chartId || item.title))
+  const visuals = cloneArray(visualSpecs).filter((item) => asText(item.visual_id || item.visualId || item.title))
   const included = []
   if (normalizedScope) included.push('scope')
   if (readyMetrics.length) included.push('metrics')
   if (gaps.length) included.push('metric_gaps')
   if (evidenceItems.length) included.push('evidence')
-  if (charts.length) included.push('chart_specs')
+  if (visuals.length) included.push('visual_specs')
   return {
     version: 'ppt_ai_input_block_v1',
     source_id: asText(sourceId),
@@ -662,15 +667,15 @@ function createPptAiInputBlock({
     metric_gaps: gaps,
     metricGaps: gaps,
     evidence: evidenceItems,
-    chart_specs: charts,
-    chartSpecs: charts,
+    visual_specs: visuals,
+    visualSpecs: visuals,
     excluded: cloneArray(excluded),
     counts: {
       scope: normalizedScope ? 1 : 0,
       metrics: readyMetrics.length,
       metric_gaps: gaps.length,
       evidence: evidenceItems.length,
-      chart_specs: charts.length,
+      visual_specs: visuals.length,
     },
     policy: asText(policy) || '生成时只发送这个 AI 输入块；原始数据不进入 LLM。',
   }
@@ -1284,6 +1289,9 @@ export function createAgentPptPlanningTabMethods() {
     getAgentPptPlanningSlideGenerationJob() {
       return cloneObject(this.getAgentActivePptPlanningState().slideGenerationJob)
     },
+    getAgentPptPlanningVisualGenerationBySlide() {
+      return cloneObject(this.getAgentActivePptPlanningState().visualGenerationBySlide)
+    },
     getAgentPptPlanningSlides() {
       return cloneArray((this.getAgentActivePptPlanningState().deckBrief || {}).slides)
     },
@@ -1420,15 +1428,15 @@ export function createAgentPptPlanningTabMethods() {
     updateAgentPptPlanningTabState(tabId = '', nextState = {}) {
       return this.patchAgentPptPlanningTabState(tabId, nextState, { sync: true, debug: true })
     },
-    cleanupAgentPptPlanningChartArtifacts(filenames = []) {
+    cleanupAgentPptPlanningVisualArtifacts(filenames = []) {
       const uniqueFilenames = uniquePptText(filenames)
       if (!uniqueFilenames.length) return Promise.resolve(null)
-      const request = typeof this.requestAgentPptPlanningChartArtifactCleanup === 'function'
-        ? this.requestAgentPptPlanningChartArtifactCleanup(uniqueFilenames)
-        : cleanupPptChartArtifacts(uniqueFilenames)
+      const request = typeof this.requestAgentPptPlanningVisualArtifactCleanup === 'function'
+        ? this.requestAgentPptPlanningVisualArtifactCleanup(uniqueFilenames)
+        : cleanupPptVisualArtifacts(uniqueFilenames)
       return Promise.resolve(request).catch((error) => {
         if (typeof console !== 'undefined' && console.warn) {
-          console.warn('PPT chart artifact cleanup failed', error)
+          console.warn('PPT visual artifact cleanup failed', error)
         }
         return null
       })
@@ -1532,15 +1540,16 @@ export function createAgentPptPlanningTabMethods() {
       if (!target.type || !revisionNote) return
       this.updateAgentActivePptPlanningState(setPptRevisionGeneratingTarget(state, target))
       try {
-        const context = this.buildAgentPptPlanningApiContext()
         if (normalizedType === 'directive') {
-          const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief.slides
+          const context = await this.buildAgentPptPlanningVisualApiContext()
+          const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief.slides
             .filter((slide) => Number(slide.index || 0) === Number(target.index || target.pageNo || 0)))
           const response = await this.requestAgentPptPlanningDirectiveSlide(buildDeckBriefSlidePayload(state, target, revisionNote, context))
           this.updateAgentActivePptPlanningState(applyDeckBriefSlideRevision(this.getAgentActivePptPlanningState(), response))
-          this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+          this.cleanupAgentPptPlanningVisualArtifacts(staleFilenames)
           return
         }
+        const context = this.buildAgentPptPlanningApiContext()
         const response = await this.requestAgentPptPlanningOutlineSection(buildPptOutlineSectionPayload(state, target, revisionNote, context))
         this.updateAgentActivePptPlanningState(applyPptOutlineSectionRevision(this.getAgentActivePptPlanningState(), response))
       } catch (error) {
@@ -1575,6 +1584,26 @@ export function createAgentPptPlanningTabMethods() {
         current: this.buildAgentPptPlanningCurrent(),
       }
     },
+    async buildAgentPptPlanningVisualApiContext() {
+      const context = this.buildAgentPptPlanningApiContext()
+      let visualSnapshots = []
+      if (typeof this.ensureAgentVisualSnapshotCache === 'function') {
+        try {
+          visualSnapshots = await this.ensureAgentVisualSnapshotCache()
+        } catch (error) {
+          if (typeof console !== 'undefined' && console.warn) {
+            console.warn('PPT visual snapshots failed; continuing without existing assets', error)
+          }
+        }
+      }
+      return {
+        ...context,
+        current: {
+          ...cloneObject(context.current),
+          visual_snapshots: cloneArray(visualSnapshots),
+        },
+      }
+    },
     requestAgentPptPlanningOutline(payload = {}) {
       return generatePptSpec(payload)
     },
@@ -1598,6 +1627,9 @@ export function createAgentPptPlanningTabMethods() {
     },
     requestAgentPptPlanningDirectiveSlide(payload = {}) {
       return regenerateDeckBriefSlide(payload)
+    },
+    requestAgentPptPlanningVisualArtifacts(payload = {}) {
+      return generatePptVisualArtifacts(payload)
     },
     requestAgentPptPlanningDataSources(areaId = '') {
       return listPptDataSources(areaId)
@@ -1693,6 +1725,8 @@ export function createAgentPptPlanningTabMethods() {
       ) return
       const activePackageKeys = this.agentPptPlanningAutoPackageKeys || {}
       const packageErrors = this.agentPptPlanningPackageErrors || {}
+      this.agentPptPlanningAutoPackageKeys = activePackageKeys
+      this.agentPptPlanningPackageErrors = packageErrors
       if (packageKey && activePackageKeys[packageKey]) return
       if (packageKey) delete packageErrors[packageKey]
       if (packageKey) activePackageKeys[packageKey] = true
@@ -1717,9 +1751,11 @@ export function createAgentPptPlanningTabMethods() {
           attachPptDataPackageRuntimeMeta(response, areaId, { autoGenerated: true, packageVersion }),
         ))
         if (packageKey) delete packageErrors[packageKey]
+        this.agentPptPlanningPackageErrors = packageErrors
       } catch (error) {
         const message = asText(error && error.message) || 'data_package_failed'
         if (packageKey) packageErrors[packageKey] = message
+        this.agentPptPlanningPackageErrors = packageErrors
         this.updateAgentActivePptPlanningState(this.getAgentPptPlanningStateWithPackagePlaceholders(
           this.getAgentPptPlanningStateWithSystemSources(),
           areaId,
@@ -1900,7 +1936,7 @@ export function createAgentPptPlanningTabMethods() {
       if (!tabId) return
       const state = this.getAgentPptPlanningStateWithSystemSources()
       if (!cloneArray(state.outline).length) return
-      const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
+      const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief)
       const requestId = createPptGenerationRequestId('directive')
       const writeRuntimeState = (nextState = {}) => this.updateAgentPptPlanningTabRuntimeState(tabId, nextState)
       const writeRuntimeEvent = (name = '', details = {}) => {
@@ -1927,7 +1963,7 @@ export function createAgentPptPlanningTabMethods() {
       }
       try {
         response = await this.requestAgentPptPlanningDirectiveWithDebug(
-          buildDeckBriefPayload(state, this.buildAgentPptPlanningApiContext()),
+          buildDeckBriefPayload(state, await this.buildAgentPptPlanningVisualApiContext()),
           { onDebugEvent: emitRequestDebugEvent },
         )
         writeRuntimeEvent('fetch_resolved')
@@ -1942,7 +1978,7 @@ export function createAgentPptPlanningTabMethods() {
         )
         this.updateAgentPptPlanningTabState(tabId, completedState)
         if (asText(completedState.generationJob && completedState.generationJob.phase) === 'ready') {
-          this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+          this.cleanupAgentPptPlanningVisualArtifacts(staleFilenames)
         }
       } catch (error) {
         writeRuntimeEvent('fetch_failed', {
@@ -2025,6 +2061,7 @@ export function createAgentPptPlanningTabMethods() {
       const outline = cloneArray(state.outline).sort((a, b) => (Number(a.pageNo || 0) || 0) - (Number(b.pageNo || 0) || 0))
       if (!outline.length || !cloneArray(state.narrativePlan && state.narrativePlan.slideRoles).length) return
       this.updateAgentPptPlanningTabState(tabId, startSlideGenerationQueue(state))
+      const visualContext = await this.buildAgentPptPlanningVisualApiContext()
       for (const outlineItem of outline) {
         state = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
         const existing = cloneArray((state.deckBrief || {}).slides).find((slide) => Number(slide.index || 0) === Number(outlineItem.pageNo || 0))
@@ -2034,7 +2071,7 @@ export function createAgentPptPlanningTabMethods() {
             state,
             { index: Number(outlineItem.pageNo || 0), title: outlineItem.theme, purpose: outlineItem.purpose },
             '按已确认目录和叙事方案生成这一页 brief。',
-            this.buildAgentPptPlanningApiContext(),
+            visualContext,
           ))
           this.updateAgentPptPlanningTabState(tabId, applyGeneratedSlideBrief(
             this.getAgentPptPlanningTabStateWithSystemSources(tabId),
@@ -2048,6 +2085,46 @@ export function createAgentPptPlanningTabMethods() {
           ))
           break
         }
+      }
+    },
+    async generateAgentPptPlanningSlideVisuals(slideIndex = 0) {
+      const activeTab = this.getAgentActivePptPlanningTab()
+      const tabId = asText(activeTab && activeTab.id)
+      const index = Number(slideIndex || 0) || 0
+      if (!tabId || !index) return
+      let state = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
+      const slide = cloneArray((state.deckBrief || {}).slides).find((item) => Number(item.index || 0) === index)
+      if (!slide || !cloneArray(slide.visualSpecs).length) return
+      this.updateAgentPptPlanningTabState(tabId, startPptVisualArtifactsGeneration(state, index))
+      try {
+        const response = await this.requestAgentPptPlanningVisualArtifacts(buildPptVisualArtifactsPayload(
+          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+          slide,
+          await this.buildAgentPptPlanningVisualApiContext(),
+        ))
+        this.updateAgentPptPlanningTabState(tabId, applyPptVisualArtifactsResponse(
+          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+          response,
+        ))
+      } catch (error) {
+        this.updateAgentPptPlanningTabState(tabId, failPptVisualArtifacts(
+          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+          index,
+          normalizePptGenerationErrorMessage(error, 'visuals'),
+        ))
+      }
+    },
+    async generateAgentPptPlanningAllVisuals() {
+      const activeTab = this.getAgentActivePptPlanningTab()
+      const tabId = asText(activeTab && activeTab.id)
+      if (!tabId) return
+      const initialState = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
+      const slides = cloneArray((initialState.deckBrief || {}).slides)
+        .filter((slide) => cloneArray(slide.visualSpecs).length)
+        .sort((left, right) => (Number(left.index || 0) || 0) - (Number(right.index || 0) || 0))
+      if (!slides.length) return
+      for (const slide of slides) {
+        await this.generateAgentPptPlanningSlideVisuals(Number(slide.index || 0) || 0)
       }
     },
     confirmAgentPptPlanningStepReset(message = '') {
@@ -2065,9 +2142,9 @@ export function createAgentPptPlanningTabMethods() {
       if (!getPptSourceSummary(state).selected || hasPptBlockingInputs(state)) return
       const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成目录会清空旧目录和旧指令文件，确认继续？')
       if (!confirmed) return
-      const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
+      const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief)
       this.updateAgentActivePptPlanningState(resetPptPlanningToMaterials(this.getAgentPptPlanningStateWithSystemSources()))
-      this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+      this.cleanupAgentPptPlanningVisualArtifacts(staleFilenames)
       await this.generateAgentPptPlanningOutline()
     },
     async regenerateAgentPptPlanningDirectiveWithConfirm() {
@@ -2077,9 +2154,9 @@ export function createAgentPptPlanningTabMethods() {
       if (!hasOutline || !hasDirective) return
       const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成指令文件会清空旧指令文件，但保留当前目录，确认继续？')
       if (!confirmed) return
-      const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
+      const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief)
       this.updateAgentActivePptPlanningState(resetPptPlanningToOutlineReady(this.getAgentPptPlanningStateWithSystemSources()))
-      this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+      this.cleanupAgentPptPlanningVisualArtifacts(staleFilenames)
       await this.generateAgentPptPlanningDirective()
     },
     async regenerateAgentPptPlanningNarrativePlanWithConfirm() {
@@ -2088,9 +2165,9 @@ export function createAgentPptPlanningTabMethods() {
       if (!hasOutline) return
       const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成叙事方案会清空旧叙事方案和逐页 brief，但保留当前目录，确认继续？')
       if (!confirmed) return
-      const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
+      const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief)
       this.updateAgentActivePptPlanningState(resetPptPlanningToOutlineReady(this.getAgentPptPlanningStateWithSystemSources()))
-      this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+      this.cleanupAgentPptPlanningVisualArtifacts(staleFilenames)
       await this.generateAgentPptPlanningNarrativePlan()
     },
     async regenerateAgentPptPlanningSlidesWithConfirm() {
@@ -2099,9 +2176,9 @@ export function createAgentPptPlanningTabMethods() {
       if (!hasNarrativePlan) return
       const confirmed = await this.confirmAgentPptPlanningStepReset('重新逐页生成 brief 会清空旧 brief，但保留当前目录和叙事方案，确认继续？')
       if (!confirmed) return
-      const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
+      const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief)
       this.updateAgentActivePptPlanningState(resetPptPlanningToNarrativeReady(this.getAgentPptPlanningStateWithSystemSources()))
-      this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+      this.cleanupAgentPptPlanningVisualArtifacts(staleFilenames)
       await this.generateAgentPptPlanningSlides()
     },
     selectAgentPptPlanningSlide(slideId = '') {

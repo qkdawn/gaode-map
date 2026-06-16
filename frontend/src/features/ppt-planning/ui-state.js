@@ -126,6 +126,26 @@ function normalizeSlideGenerationJob(value = {}) {
   }
 }
 
+function normalizeVisualGenerationStatus(value = {}) {
+  const item = cloneObject(value)
+  const status = asText(item.status)
+  return {
+    status: ['idle', 'generating', 'ready', 'failed'].includes(status) ? status : 'idle',
+    error: asText(item.error),
+    updatedAt: asText(item.updatedAt || item.updated_at),
+  }
+}
+
+function normalizeVisualGenerationBySlide(value = {}) {
+  const source = cloneObject(value)
+  return Object.fromEntries(Object.entries(source)
+    .map(([key, item]) => {
+      const slideIndex = Number(key) || Number(item && (item.slideIndex || item.slide_index || item.index || 0)) || 0
+      return slideIndex ? [String(slideIndex), normalizeVisualGenerationStatus(item)] : null
+    })
+    .filter(Boolean))
+}
+
 function cloneSerializable(value = {}) {
   try {
     return JSON.parse(JSON.stringify(value ?? {}))
@@ -443,13 +463,13 @@ function packageAiPayloadFromSource(source = {}) {
     metric_gaps: [],
     metricGaps: [],
     evidence,
-    chart_specs: [],
-    chartSpecs: [],
+    visual_specs: [],
+    visualSpecs: [],
     excluded: [
       { type: 'package_full_items', reason: '不传资料包完整 POI 明细，只传摘要和代表样本。', count: cloneArray(pack.items).length },
       { type: 'package_carrier_geometries', reason: '不传载体完整 geometry，只传载体摘要和指标摘要。', count: cloneArray(pack.carriers).length },
     ],
-    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, chart_specs: 0 },
+    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, visual_specs: 0 },
     policy: '资料包只通过摘要、代表样本、载体摘要进入 evidence；不传完整明细。',
   }
 }
@@ -707,6 +727,7 @@ export function createPptPlanningState(seed = {}) {
     narrativeRevisionDraft: normalizeRevisionDraft(seed.narrativeRevisionDraft || seed.narrative_revision_draft),
     slideGenerationQueue,
     slideGenerationJob: normalizeSlideGenerationJob(seed.slideGenerationJob || seed.slide_generation_job),
+    visualGenerationBySlide: normalizeVisualGenerationBySlide(seed.visualGenerationBySlide || seed.visual_generation_by_slide),
     deckBrief,
     selectedSlideId: normalizeSelectedSlideId(seed, deckBrief),
     generationError: asText(seed.generationError || seed.generation_error),
@@ -806,7 +827,7 @@ export function getActiveDeckSlideBrief(state = {}) {
   return slides.find((item) => asText(item && item.id) === selectedId) || slides[0] || null
 }
 
-function filenameFromChartArtifact(artifact = {}) {
+function filenameFromVisualArtifact(artifact = {}) {
   const explicit = asText(artifact.filename)
   if (explicit) return explicit.split(/[\\/]/).pop()
   const url = asText(artifact.url)
@@ -819,11 +840,11 @@ function filenameFromChartArtifact(artifact = {}) {
   }
 }
 
-export function collectPptChartArtifactFilenames(value = {}) {
+export function collectPptVisualArtifactFilenames(value = {}) {
   const filenames = []
   const visitSlide = (slide = {}) => {
-    cloneArray(slide.chartArtifacts || slide.chart_artifacts).forEach((artifact) => {
-      const filename = filenameFromChartArtifact(cloneObject(artifact))
+    cloneArray(slide.visualArtifacts || slide.visual_artifacts).forEach((artifact) => {
+      const filename = filenameFromVisualArtifact(cloneObject(artifact))
       if (filename) filenames.push(filename)
     })
   }
@@ -833,12 +854,52 @@ export function collectPptChartArtifactFilenames(value = {}) {
     if (Array.isArray(value.slides)) {
       value.slides.forEach((item) => visitSlide(item))
     } else if (value.deckBrief || value.deck_brief) {
-      collectPptChartArtifactFilenames(value.deckBrief || value.deck_brief).forEach((filename) => filenames.push(filename))
+      collectPptVisualArtifactFilenames(value.deckBrief || value.deck_brief).forEach((filename) => filenames.push(filename))
     } else {
       visitSlide(value)
     }
   }
   return uniqueText(filenames)
+}
+
+function visualKey(visual = {}) {
+  return asText(visual.visual_id || visual.visualId || visual.title)
+}
+
+function artifactKey(artifact = {}) {
+  return asText(artifact.visual_id || artifact.visualId || artifact.source_visual_id || artifact.sourceVisualId)
+}
+
+function hasVisualArtifactForSpec(slide = {}, visual = {}) {
+  const key = visualKey(visual)
+  if (!key) return false
+  return cloneArray(slide.visualArtifacts || slide.visual_artifacts).some((artifact) => artifactKey(artifact) === key)
+}
+
+function slideHasVisualSpecs(slide = {}) {
+  return cloneArray(slide.visualSpecs || slide.visual_specs).length > 0
+}
+
+function slideHasPendingVisualSpecs(slide = {}) {
+  return cloneArray(slide.visualSpecs || slide.visual_specs).some((visual) => !hasVisualArtifactForSpec(slide, visual))
+}
+
+function slideVisualStatusKey(slideIndex = 0) {
+  return String(Number(slideIndex || 0) || 0)
+}
+
+function metricContextForVisualPayload(sources = []) {
+  const metrics = []
+  const metricGaps = []
+  cloneArray(sources).forEach((source) => {
+    const payload = aiPayloadFromSource(source)
+    cloneArray(payload.metrics).forEach((metric) => metrics.push(cloneObject(metric)))
+    cloneArray(payload.metric_gaps || payload.metricGaps).forEach((gap) => metricGaps.push(cloneObject(gap)))
+  })
+  return {
+    metrics,
+    metric_gaps: metricGaps,
+  }
 }
 
 function sourceIdsForSlide(slide = {}) {
@@ -847,8 +908,8 @@ function sourceIdsForSlide(slide = {}) {
   cloneArray(slide.metricClaims || slide.metric_claims).forEach((claim) => {
     ids.push(asText(claim && (claim.source_id || claim.sourceId)))
   })
-  cloneArray(slide.chartSpecs || slide.chart_specs).forEach((chart) => {
-    cloneArray(chart && (chart.source_ids || chart.sourceIds)).forEach((sourceId) => ids.push(asText(sourceId)))
+  cloneArray(slide.visualSpecs || slide.visual_specs).forEach((visual) => {
+    cloneArray(visual && (visual.source_ids || visual.sourceIds)).forEach((sourceId) => ids.push(asText(sourceId)))
   })
   return uniqueText(ids).filter(Boolean)
 }
@@ -1153,6 +1214,7 @@ export function resetPptPlanningToMaterials(state = {}) {
     narrativeRevisionDraft: {},
     slideGenerationQueue: [],
     slideGenerationJob: {},
+    visualGenerationBySlide: {},
     deckBrief: normalizeDeckBrief({}),
     contextManifest: {},
     selectedSlideId: '',
@@ -1184,6 +1246,7 @@ export function resetPptPlanningToOutlineReady(state = {}) {
     narrativeRevisionDraft: {},
     slideGenerationQueue: normalizeSlideGenerationQueue([], outline),
     slideGenerationJob: {},
+    visualGenerationBySlide: {},
     deckBrief: normalizeDeckBrief({}),
     contextManifest: {},
     selectedSlideId: '',
@@ -1214,6 +1277,7 @@ export function resetPptPlanningToNarrativeReady(state = {}) {
     narrativePlan,
     slideGenerationQueue: normalizeSlideGenerationQueue([], outline),
     slideGenerationJob: {},
+    visualGenerationBySlide: {},
     deckBrief: normalizeDeckBrief({}),
     selectedSlideId: '',
     generationError: '',
@@ -1231,6 +1295,8 @@ export function getPptPromptActions(state = {}) {
   const hasNarrativePlan = normalizeNarrativePlan(normalized.narrativePlan).slideRoles.length > 0
   const slides = cloneArray((normalized.deckBrief || {}).slides)
   const hasSlides = slides.length > 0
+  const hasVisualSpecs = slides.some(slideHasVisualSpecs)
+  const hasPendingVisuals = slides.some(slideHasPendingVisualSpecs)
   const failedPageNo = Number(normalized.slideGenerationJob.failedPageNo || 0)
     || Number((normalizeSlideGenerationQueue(normalized.slideGenerationQueue, normalized.outline).find((item) => item.status === 'failed') || {}).pageNo || 0)
     || 0
@@ -1255,6 +1321,14 @@ export function getPptPromptActions(state = {}) {
       { id: 'regenerate-narrative-plan', label: '重新生成叙事方案', event: 'regenerate-narrative-plan', primary: false },
     ]
   }
+  if (hasVisualSpecs) {
+    return [{
+      id: hasPendingVisuals ? 'generate-visuals' : 'regenerate-visuals',
+      label: hasPendingVisuals ? '批量生成可视化' : '重新生成可视化',
+      event: 'generate-all-visuals',
+      primary: true,
+    }]
+  }
   return [{ id: 'regenerate-slides', label: '重新逐页生成 brief', event: 'regenerate-slides', primary: true }]
 }
 
@@ -1272,6 +1346,7 @@ export function applyNarrativePlanResponse(state = {}, response = {}) {
     narrativeRevisionDraft: {},
     slideGenerationQueue: normalizeSlideGenerationQueue([], normalized.outline),
     slideGenerationJob: {},
+    visualGenerationBySlide: {},
     deckBrief: normalizeDeckBrief({}),
     selectedSlideId: '',
     generationError: '',
@@ -1294,6 +1369,7 @@ export function applyDeckBriefResponse(state = {}, response = {}) {
     contextManifest,
     currentStep: PPT_PLANNING_STEPS.DIRECTIVE_DRAFT,
     deckBrief,
+    visualGenerationBySlide: {},
     generationError: '',
     generationErrorSource: '',
     generationResponse: createGenerationResponseSnapshot('directive', response),
@@ -1381,10 +1457,99 @@ export function applyGeneratedSlideBrief(state = {}, slide = {}) {
       total: outline.length,
       completedAt: nextPending ? '' : new Date().toISOString(),
     },
+    visualGenerationBySlide: {
+      ...normalized.visualGenerationBySlide,
+      [slideVisualStatusKey(nextSlide.index)]: normalizeVisualGenerationStatus({ status: 'idle' }),
+    },
     generationError: '',
     generationErrorSource: '',
     generationResponse: createGenerationResponseSnapshot('slides', { slides: nextSlides }),
     staleDirectivePageIds: normalized.staleDirectivePageIds.filter((item) => item !== String(nextSlide.index)),
+  })
+}
+
+export function buildPptVisualArtifactsPayload(state = {}, slide = {}, context = {}) {
+  const normalized = createPptPlanningState(state)
+  const target = normalizeDeckSlideBrief(slide, Number(slide.index || slide.pageNo || slide.page_no || 1) || 1)
+  const manifest = getPptSourceDeliveryManifest(normalized)
+  const sources = cloneArray(manifest.deliverableSources).map(sourceForPptRequest)
+  const current = cloneObject(context.current)
+  return {
+    slide_index: Number(target.index || 1) || 1,
+    visual_specs: cloneArray(target.visualSpecs).map((item) => cloneObject(item)),
+    source_ids: uniqueText([
+      ...manifest.deliverableSourceIds,
+      ...sourceIdsForSlide(target),
+    ]),
+    existing_assets: cloneArray(
+      current.visual_snapshots
+      || current.visualSnapshots
+      || current.visual_assets
+      || current.visualAssets,
+    ).map((item) => cloneObject(item)),
+    metric_context: metricContextForVisualPayload(sources),
+  }
+}
+
+export function startPptVisualArtifactsGeneration(state = {}, slideIndex = 0) {
+  const normalized = createPptPlanningState(state)
+  const key = slideVisualStatusKey(slideIndex)
+  if (!key || key === '0') return normalized
+  return createPptPlanningState({
+    ...normalized,
+    visualGenerationBySlide: {
+      ...normalized.visualGenerationBySlide,
+      [key]: normalizeVisualGenerationStatus({ status: 'generating', updatedAt: new Date().toISOString() }),
+    },
+  })
+}
+
+export function applyPptVisualArtifactsResponse(state = {}, response = {}) {
+  const normalized = createPptPlanningState(state)
+  const slideIndex = Number(response.slideIndex || response.slide_index || 0) || 0
+  if (!slideIndex) return normalized
+  const incomingArtifacts = cloneArray(response.visualArtifacts || response.visual_artifacts).map((item) => cloneObject(item))
+  const nextSlides = cloneArray((normalized.deckBrief || {}).slides).map((slide) => {
+    if (Number(slide.index || 0) !== slideIndex) return slide
+    const incomingKeys = new Set(incomingArtifacts.map(artifactKey).filter(Boolean))
+    const retained = cloneArray(slide.visualArtifacts).filter((artifact) => {
+      const key = artifactKey(artifact)
+      return key && !incomingKeys.has(key)
+    })
+    return {
+      ...slide,
+      visualArtifacts: [...retained, ...incomingArtifacts],
+    }
+  })
+  const allVisualsReady = nextSlides.some(slideHasVisualSpecs) && !nextSlides.some(slideHasPendingVisualSpecs)
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: allVisualsReady ? PPT_PLANNING_STEPS.VISUALS_READY : normalized.currentStep,
+    deckBrief: {
+      ...normalizeDeckBrief(normalized.deckBrief),
+      slides: nextSlides,
+    },
+    visualGenerationBySlide: {
+      ...normalized.visualGenerationBySlide,
+      [slideVisualStatusKey(slideIndex)]: normalizeVisualGenerationStatus({ status: 'ready', updatedAt: new Date().toISOString() }),
+    },
+  })
+}
+
+export function failPptVisualArtifacts(state = {}, slideIndex = 0, error = '') {
+  const normalized = createPptPlanningState(state)
+  const key = slideVisualStatusKey(slideIndex)
+  if (!key || key === '0') return normalized
+  return createPptPlanningState({
+    ...normalized,
+    visualGenerationBySlide: {
+      ...normalized.visualGenerationBySlide,
+      [key]: normalizeVisualGenerationStatus({
+        status: 'failed',
+        error: asText(error && error.message ? error.message : error) || 'ppt_visual_artifact_failed',
+        updatedAt: new Date().toISOString(),
+      }),
+    },
   })
 }
 
@@ -1954,10 +2119,10 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
     metric_gaps: [],
     metricGaps: [],
     evidence,
-    chart_specs: [],
-    chartSpecs: [],
+    visual_specs: [],
+    visualSpecs: [],
     excluded: [{ type: 'document_full_text', reason: '不传文档全文，只传 PageIndex 节点/章节摘要。', count: Number(options.count || indexPreview.length || 0) || 0 }],
-    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, chart_specs: 0 },
+    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, visual_specs: 0 },
     policy: '文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。',
   }
   const transport = ready ? createPptTransportFromAiPayload(aiPayload) : cloneObject(previous && previous.meta && previous.meta.transport)
@@ -2113,6 +2278,7 @@ export function buildDeckBriefPayload(state = {}, context = {}) {
     },
     source_ids: sourceIds,
     sources,
+    current: cloneObject(context.current),
     topic: asText(normalized.spec.topic),
     audience: asText(normalized.spec.audience),
     deck_type: asText(normalized.spec.deckType),
@@ -2211,8 +2377,8 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
         requiredSources: [],
         metricClaims: [],
         metricGaps: [],
-        chartSpecs: [],
-        chartArtifacts: [],
+        visualSpecs: [],
+        visualArtifacts: [],
       }
   return {
     ...buildDeckBriefPayload(normalized, context),
@@ -2231,8 +2397,8 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
       required_sources: cloneArray(item.requiredSources),
       metric_claims: cloneArray(item.metricClaims),
       metric_gaps: cloneArray(item.metricGaps),
-      chart_specs: cloneArray(item.chartSpecs),
-      chart_artifacts: cloneArray(item.chartArtifacts),
+      visual_specs: cloneArray(item.visualSpecs),
+      visual_artifacts: cloneArray(item.visualArtifacts),
     })),
     target: {
       index: targetItem.index,
@@ -2243,8 +2409,8 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
       required_sources: cloneArray(targetItem.requiredSources),
       metric_claims: cloneArray(targetItem.metricClaims),
       metric_gaps: cloneArray(targetItem.metricGaps),
-      chart_specs: cloneArray(targetItem.chartSpecs),
-      chart_artifacts: cloneArray(targetItem.chartArtifacts),
+      visual_specs: cloneArray(targetItem.visualSpecs),
+      visual_artifacts: cloneArray(targetItem.visualArtifacts),
     },
     outline_item: outlineItem ? {
       id: outlineItem.id,

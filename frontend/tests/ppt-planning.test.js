@@ -5,6 +5,7 @@ import {
   createAgentTabsMethods,
 } from '../src/features/agent/tabs.js'
 import {
+  createDefaultDeckBriefPreview,
   createPptSystemSources,
   normalizeDeckBrief,
   normalizeDeckSlideBrief,
@@ -19,6 +20,7 @@ import { createAgentPptPlanningTabMethods } from '../src/features/agent/ppt-plan
 import {
   applyDeckBriefResponse,
   applyGeneratedSlideBrief,
+  applyPptVisualArtifactsResponse,
   applyNarrativePlanResponse,
   applyPptSpecResponse,
   applyPptSourceGroupsResponse,
@@ -27,11 +29,13 @@ import {
   applyPptOutlineSectionRevision,
   buildDeckBriefPayload,
   buildDeckBriefSlidePayload,
+  buildPptVisualArtifactsPayload,
   buildNarrativePlanPayload,
   buildPptOutlineSectionPayload,
   buildPptSpecPayload,
-  collectPptChartArtifactFilenames,
+  collectPptVisualArtifactFilenames,
   createPptPlanningState,
+  failPptVisualArtifacts,
   getActiveDeckSlideBrief,
   getBlockingPptInputSources,
   hasPptBlockingInputs,
@@ -47,6 +51,7 @@ import {
   resetPptPlanningToMaterials,
   resetPptPlanningToNarrativeReady,
   resetPptPlanningToOutlineReady,
+  startPptVisualArtifactsGeneration,
   startSlideGenerationQueue,
   setAllPptSourcesSelected,
   setPptGenerationError,
@@ -399,7 +404,7 @@ test('ppt package detail normalizer keeps stable arrays with partial payloads', 
   assert.deepEqual(detail.warnings, ['缺少载体'])
 })
 
-test('ppt slide normalizer keeps metric claims and chart specs', () => {
+test('ppt slide normalizer keeps metric claims and visual specs', () => {
   const slide = normalizeDeckSlideBrief({
     index: 2,
     title: '空间诊断',
@@ -409,44 +414,48 @@ test('ppt slide normalizer keeps metric claims and chart specs', () => {
     metric_gaps: [
       { gap_id: 'g1', text: '缺少夜光梯度数据' },
     ],
-    chart_specs: [
+    visual_specs: [
       {
-        chart_id: 'chart-1',
+        visual_id: 'visual-1',
+        visual_type: 'figure',
+        status: 'renderable',
         title: 'POI 数量',
-        columns: [{ key: 'label' }, { key: 'value' }],
-        rows: [{ label: 'POI', value: 120 }],
+        data: {
+          columns: [{ key: 'label' }, { key: 'value' }],
+          rows: [{ label: 'POI', value: 120 }],
+        },
       },
     ],
-    chart_artifacts: [
-      { chart_id: 'chart-1', url: '/download/chart.svg' },
+    visual_artifacts: [
+      { visual_id: 'visual-1', url: '/download/visual.svg' },
     ],
   })
 
   assert.equal(slide.metricClaims[0].value, 120)
   assert.equal(slide.metricGaps[0].text, '缺少夜光梯度数据')
-  assert.equal(slide.chartSpecs[0].rows[0].value, 120)
-  assert.equal(slide.chartArtifacts[0].url, '/download/chart.svg')
+  assert.equal(slide.visualSpecs[0].data.rows[0].value, 120)
+  assert.equal(slide.visualArtifacts[0].url, '/download/visual.svg')
 })
 
-test('ppt chart artifact filename collection reads filenames and download urls', () => {
-  const filenames = collectPptChartArtifactFilenames({
+test('ppt visual artifact filename collection reads filenames and download urls', () => {
+  const filenames = collectPptVisualArtifactFilenames({
     slides: [
       {
-        chartArtifacts: [
-          { filename: 'chart-a.svg' },
-          { url: '/download/chart-b.svg?cache=1' },
-          { url: 'http://localhost:5173/download/chart-c.svg#preview' },
+        visualArtifacts: [
+          { filename: 'visual-a.svg' },
+          { url: '/download/visual-b.svg?cache=1' },
+          { url: 'http://localhost:5173/download/visual-c.svg#preview' },
         ],
       },
       {
-        chart_artifacts: [
-          { filename: 'chart-a.svg' },
+        visual_artifacts: [
+          { filename: 'visual-a.svg' },
         ],
       },
     ],
   })
 
-  assert.deepEqual(filenames, ['chart-a.svg', 'chart-b.svg', 'chart-c.svg'])
+  assert.deepEqual(filenames, ['visual-a.svg', 'visual-b.svg', 'visual-c.svg'])
 })
 
 test('ppt source changes mark only dependent directive pages stale', () => {
@@ -593,6 +602,18 @@ function createPptPlanningTestContext(overrides = {}) {
     requestAgentPptPlanningDataPackage() {
       return Promise.resolve({})
     },
+    requestAgentPptPlanningOutlineWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningOutline(payload, options)
+    },
+    requestAgentPptPlanningDirectiveWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningDirective(payload, options)
+    },
+    requestAgentPptPlanningNarrativePlanWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningNarrativePlan(payload, options)
+    },
+    ensureAgentVisualSnapshotCache() {
+      return Promise.resolve([])
+    },
     ...overrides,
   }
 }
@@ -606,7 +627,9 @@ test('ppt planning state creates NotebookLM-style system sources and default spe
   assert.ok(state.sourceGroups.length >= 4)
   assert.equal(state.removedSourceIds.length, 0)
   assert.equal(state.ungroupedSourceIds.length, 0)
-  assert.deepEqual(getPptSourceSummary(state), { total: 7, selected: 0, ready: 0 })
+  assert.equal(getPptSourceSummary(state).total, 7)
+  assert.equal(getPptSourceSummary(state).selected, 0)
+  assert.equal(getPptSourceSummary(state).ready, 0)
 })
 
 test('ppt system sources expose prebuilt transport preview before generation', () => {
@@ -891,7 +914,10 @@ test('ppt state can select all sources and keep an active page brief', () => {
     scope: { polygon: [[0, 0], [1, 0], [1, 1]] },
     taskResults: { poi_fetch: true, population: true },
   })
-  const state = setAllPptSourcesSelected(mergePptPlanningSources(createPptPlanningState(), systemSources), true)
+  const state = applyDeckBriefResponse(
+    setAllPptSourcesSelected(mergePptPlanningSources(createPptPlanningState(), systemSources), true),
+    createDefaultDeckBriefPreview(),
+  )
   const active = getActiveDeckSlideBrief(state)
 
   assert.equal(getPptSourceSummary(state).selected, 3)
@@ -1297,7 +1323,7 @@ test('agent ppt auto package payload uses current isochrone center', async () =>
   assert.equal(seenPayload.radius_m, 9999)
 })
 
-test('deck brief payload sends selected source ai input blocks without current context', () => {
+test('deck brief payload sends selected source ai input blocks with lightweight visual context', () => {
   const state = addPptDataPackageSource(createPptPlanningState(), {
     source: {
       id: 'package:poi:test',
@@ -1318,7 +1344,9 @@ test('deck brief payload sends selected source ai input blocks without current c
 
   assert.equal(payload.area_id, 'history-1')
   assert.equal(payload.sources[0].id, 'package:poi:test')
-  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'current'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'current'), true)
+  assert.deepEqual(payload.current.visual_snapshots || [], [])
+  assert.equal(payload.current.scope.time_min, 35)
   assert.equal(payload.sources[0].meta.aiPayload.version, 'ppt_ai_input_block_v1')
   assert.equal(payload.sources[0].meta.aiPayload.evidence[0].text, '已整理 POI。')
   assert.equal(payload.sources[0].meta.package, undefined)
@@ -1373,13 +1401,13 @@ test('ppt planning reset helpers clear downstream generated sections', () => {
   assert.equal(outlineReady.currentStep, 'outline_ready')
   assert.equal(outlineReady.outline.length, 1)
   assert.equal(outlineReady.spec.outline.length, 1)
-  assert.notEqual(outlineReady.deckBrief.slides[0].title, '旧指令')
+  assert.deepEqual(outlineReady.deckBrief.slides, [])
 
   const materials = resetPptPlanningToMaterials(directiveState)
   assert.equal(materials.currentStep, 'materials')
   assert.deepEqual(materials.outline, [])
   assert.deepEqual(materials.spec.outline, [])
-  assert.notEqual(materials.deckBrief.slides[0].title, '旧指令')
+  assert.deepEqual(materials.deckBrief.slides, [])
 })
 
 test('ppt outline section revision marks directive stale and supports one-step undo', () => {
@@ -1509,8 +1537,17 @@ test('ppt revision drafts and section payloads keep single target context', () =
       required_sources: ['current:scope'],
       metric_claims: [{ metric_id: 'poi:total:1', value: 120, unit: '个', text: 'POI 总数 120 个' }],
       metric_gaps: [{ text: '缺少人口年龄结构' }],
-      chart_specs: [{ chart_id: 'chart-1', title: 'POI 总量', columns: [{ key: 'label' }, { key: 'value' }], rows: [{ label: 'POI', value: 120 }] }],
-      chart_artifacts: [{ chart_id: 'chart-1', url: '/download/chart.svg' }],
+      visual_specs: [{
+        visual_id: 'visual-1',
+        visual_type: 'figure',
+        status: 'renderable',
+        title: 'POI 总量',
+        data: {
+          columns: [{ key: 'label' }, { key: 'value' }],
+          rows: [{ label: 'POI', value: 120 }],
+        },
+      }],
+      visual_artifacts: [{ visual_id: 'visual-1', url: '/download/visual.svg' }],
     }],
   })
   const slidePayload = buildDeckBriefSlidePayload(withSlide, { index: 1 }, '重写这一页', {
@@ -1522,8 +1559,98 @@ test('ppt revision drafts and section payloads keep single target context', () =
   assert.equal(slidePayload.outline_item.page_no, 1)
   assert.equal(slidePayload.revision_note, '重写这一页')
   assert.equal(slidePayload.target.metric_claims[0].value, 120)
-  assert.equal(slidePayload.slides[0].chart_specs[0].rows[0].value, 120)
-  assert.equal(slidePayload.target.chart_artifacts[0].url, '/download/chart.svg')
+  assert.equal(slidePayload.slides[0].visual_specs[0].data.rows[0].value, 120)
+  assert.equal(slidePayload.target.visual_artifacts[0].url, '/download/visual.svg')
+})
+
+test('ppt visual artifact payload and response are independent from brief generation', () => {
+  const state = createPptPlanningState({
+    sources: [
+      {
+        id: 'current:dataset:poi',
+        type: 'data',
+        title: 'POI 基础数据',
+        status: 'ready',
+        selected: true,
+        meta: {
+          aiPayload: {
+            version: 'ppt_ai_input_block_v1',
+            source_id: 'current:dataset:poi',
+            sourceId: 'current:dataset:poi',
+            title: 'POI 基础数据',
+            included: ['metrics'],
+            metrics: [{
+              metric_id: 'analysis:poi:poi_count',
+              label: 'POI 数量',
+              value: 120,
+              unit: '个',
+              status: 'ready',
+              source_id: 'current:dataset:poi',
+            }],
+            metric_gaps: [],
+            evidence: [],
+            counts: { metrics: 1, metric_gaps: 0, evidence: 0, visual_specs: 0 },
+          },
+        },
+      },
+    ],
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '项目命题',
+        purpose: '建立汇报主线',
+        visualSpecs: [{
+          visual_id: 'visual-1',
+          visual_type: 'figure',
+          status: 'renderable',
+          title: 'POI 总量',
+          source_metric_ids: ['analysis:poi:poi_count'],
+          data: { columns: [], rows: [] },
+        }],
+        visualArtifacts: [],
+      }],
+    },
+  })
+
+  const payload = buildPptVisualArtifactsPayload(state, state.deckBrief.slides[0], {
+    current: {
+      visual_snapshots: [{ asset_id: 'map-1', url: '/download/map.png' }],
+    },
+  })
+  assert.equal(payload.slide_index, 1)
+  assert.equal(payload.metric_context.metrics[0].metric_id, 'analysis:poi:poi_count')
+  assert.equal(payload.existing_assets[0].asset_id, 'map-1')
+
+  const generating = startPptVisualArtifactsGeneration(state, 1)
+  assert.equal(generating.visualGenerationBySlide['1'].status, 'generating')
+
+  const applied = applyPptVisualArtifactsResponse(generating, {
+    slide_index: 1,
+    visual_artifacts: [{ visual_id: 'visual-1', url: '/download/visual-1.svg' }],
+  })
+  assert.equal(applied.deckBrief.slides[0].visualArtifacts[0].url, '/download/visual-1.svg')
+  assert.equal(applied.visualGenerationBySlide['1'].status, 'ready')
+})
+
+test('ppt visual artifact failure does not change generated brief slides', () => {
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '项目命题',
+        purpose: '建立汇报主线',
+        visualSpecs: [{ visual_id: 'visual-1', visual_type: 'figure', status: 'renderable', title: 'POI' }],
+        visualArtifacts: [],
+      }],
+    },
+  })
+
+  const failed = failPptVisualArtifacts(state, 1, 'renderer timeout')
+
+  assert.equal(failed.deckBrief.slides[0].title, '项目命题')
+  assert.equal(failed.deckBrief.slides[0].visualArtifacts.length, 0)
+  assert.equal(failed.visualGenerationBySlide['1'].status, 'failed')
+  assert.equal(failed.visualGenerationBySlide['1'].error, 'renderer timeout')
 })
 
 test('ppt planning errors keep their operation source', () => {
@@ -1621,6 +1748,9 @@ test('agent ppt generation actions write outline and directive into the active t
         ],
       })
     },
+    requestAgentPptPlanningOutlineWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningOutline(payload, options)
+    },
     requestAgentPptPlanningDirective() {
       return Promise.resolve({
         status: 'draft',
@@ -1635,6 +1765,12 @@ test('agent ppt generation actions write outline and directive into the active t
           },
         ],
       })
+    },
+    requestAgentPptPlanningDirectiveWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningDirective(payload, options)
+    },
+    ensureAgentVisualSnapshotCache() {
+      return Promise.resolve([])
     },
     syncCurrentAgentSession() {},
   }
@@ -1838,7 +1974,7 @@ test('agent ppt road metrics use local and global syntax summary fields', () => 
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:road:avg_intelligibility' && item.status === 'ready' && item.value === 0.64))
 })
 
-test('agent ppt directive regeneration cleans previous deck chart artifacts', async () => {
+test('agent ppt directive regeneration cleans previous deck visual artifacts', async () => {
   const cleaned = []
   const initialState = applyDeckBriefResponse(applyPptSpecResponse(createPptPlanningState(), {
     title: '目录',
@@ -1851,7 +1987,7 @@ test('agent ppt directive regeneration cleans previous deck chart artifacts', as
       {
         index: 1,
         title: '旧指令',
-        chart_artifacts: [{ filename: 'old-deck.svg' }],
+        visual_artifacts: [{ filename: 'old-deck.svg' }],
       },
     ],
   })
@@ -1877,12 +2013,12 @@ test('agent ppt directive regeneration cleans previous deck chart artifacts', as
           {
             index: 1,
             title: '新指令',
-            chart_artifacts: [{ filename: 'new-deck.svg' }],
+            visual_artifacts: [{ filename: 'new-deck.svg' }],
           },
         ],
       })
     },
-    requestAgentPptPlanningChartArtifactCleanup(filenames) {
+    requestAgentPptPlanningVisualArtifactCleanup(filenames) {
       cleaned.push(...filenames)
       return Promise.resolve({ deleted: filenames, missing: [], skipped: [] })
     },
@@ -1892,7 +2028,7 @@ test('agent ppt directive regeneration cleans previous deck chart artifacts', as
   const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
 
   assert.deepEqual(cleaned, ['old-deck.svg'])
-  assert.equal(state.deckBrief.slides[0].chartArtifacts[0].filename, 'new-deck.svg')
+  assert.equal(state.deckBrief.slides[0].visualArtifacts[0].filename, 'new-deck.svg')
 })
 
 test('agent ppt regenerate outline confirms and clears downstream output', async () => {
@@ -1953,9 +2089,15 @@ test('agent ppt regenerate outline confirms and clears downstream output', async
         ],
       })
     },
+    requestAgentPptPlanningOutlineWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningOutline(payload, options)
+    },
     requestAgentPptPlanningDirective() {
       directiveCalls += 1
       return Promise.resolve({ slides: [{ index: 1, title: '不应调用' }] })
+    },
+    requestAgentPptPlanningDirectiveWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningDirective(payload, options)
     },
     syncCurrentAgentSession() {},
   }
@@ -1967,7 +2109,7 @@ test('agent ppt regenerate outline confirms and clears downstream output', async
   assert.equal(directiveCalls, 0)
   assert.equal(state.currentStep, 'outline_ready')
   assert.equal(state.outline[0].theme, '新目录页')
-  assert.notEqual(state.deckBrief.slides[0].title, '旧指令')
+  assert.deepEqual(state.deckBrief.slides, [])
 })
 
 test('agent ppt regenerate directive confirms and keeps outline', async () => {
@@ -2025,6 +2167,12 @@ test('agent ppt regenerate directive confirms and keeps outline', async () => {
           { index: 1, title: '新指令', purpose: '新指令目的' },
         ],
       })
+    },
+    requestAgentPptPlanningDirectiveWithDebug(payload, options = {}) {
+      return this.requestAgentPptPlanningDirective(payload, options)
+    },
+    ensureAgentVisualSnapshotCache() {
+      return Promise.resolve([])
     },
     syncCurrentAgentSession() {},
   }
@@ -2102,7 +2250,7 @@ test('agent ppt regenerate slides keeps outline and narrative while clearing old
   const cleaned = []
   const initialState = applyDeckBriefResponse(createPptStateWithOutlineNarrativeAndSlides(), {
     slides: [
-      { index: 1, title: '旧 brief', purpose: '旧目的', chart_artifacts: [{ filename: 'old-brief.svg' }] },
+      { index: 1, title: '旧 brief', purpose: '旧目的', visual_artifacts: [{ filename: 'old-brief.svg' }] },
     ],
   })
   const ctx = {
@@ -2142,7 +2290,7 @@ test('agent ppt regenerate slides keeps outline and narrative while clearing old
         purpose: payload.target.purpose,
       })
     },
-    requestAgentPptPlanningChartArtifactCleanup(filenames) {
+    requestAgentPptPlanningVisualArtifactCleanup(filenames) {
       cleaned.push(...filenames)
       return Promise.resolve({ deleted: filenames, missing: [], skipped: [] })
     },
@@ -2234,8 +2382,8 @@ test('agent ppt revision actions replace only the active section', async () => {
     ],
   }), {
     slides: [
-      { index: 1, title: '项目命题', purpose: '建立汇报主线', chart_artifacts: [{ filename: 'keep.svg' }] },
-      { index: 2, title: '空间证据', purpose: '说明现状', chart_artifacts: [{ filename: 'old-slide-2.svg' }] },
+      { index: 1, title: '项目命题', purpose: '建立汇报主线', visual_artifacts: [{ filename: 'keep.svg' }] },
+      { index: 2, title: '空间证据', purpose: '说明现状', visual_artifacts: [{ filename: 'old-slide-2.svg' }] },
     ],
   })
   const ctx = {
@@ -2279,10 +2427,10 @@ test('agent ppt revision actions replace only the active section', async () => {
         key_message: '说明空间矛盾',
         visual_plan: '诊断图',
         required_sources: ['current:scope'],
-        chart_artifacts: [{ filename: 'new-slide-2.svg' }],
+        visual_artifacts: [{ filename: 'new-slide-2.svg' }],
       })
     },
-    requestAgentPptPlanningChartArtifactCleanup(filenames) {
+    requestAgentPptPlanningVisualArtifactCleanup(filenames) {
       cleaned.push(...filenames)
       return Promise.resolve({ deleted: filenames, missing: [], skipped: [] })
     },
@@ -2305,8 +2453,8 @@ test('agent ppt revision actions replace only the active section', async () => {
 
   assert.equal(state.deckBrief.slides[0].title, '项目命题')
   assert.equal(state.deckBrief.slides[1].title, '空间问题诊断')
-  assert.equal(state.deckBrief.slides[0].chartArtifacts[0].filename, 'keep.svg')
-  assert.equal(state.deckBrief.slides[1].chartArtifacts[0].filename, 'new-slide-2.svg')
+  assert.equal(state.deckBrief.slides[0].visualArtifacts[0].filename, 'keep.svg')
+  assert.equal(state.deckBrief.slides[1].visualArtifacts[0].filename, 'new-slide-2.svg')
   assert.deepEqual(cleaned, ['old-slide-2.svg'])
   assert.deepEqual(state.staleDirectivePageIds, [])
 })
@@ -3172,3 +3320,4 @@ test('agent ppt restored package source satisfies auto package placeholder', asy
   assert.ok(state.sources.some((item) => item.id === 'package:poi-road-carriers:restored'))
   assert.equal(state.sources.some((item) => item.id === 'package-placeholder:road-carrier'), false)
 })
+

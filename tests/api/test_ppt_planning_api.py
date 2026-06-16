@@ -19,21 +19,15 @@ from modules.ppt_planning.schemas import (
     PptSourceGroup,
     PptSourceGroupClassifyResponse,
     PptSpecResponse,
+    PptVisualArtifactResponse,
 )
 from router.domains import ppt_planning
-from router.domains.charting import router as charting_router
 from router.domains.ppt_planning import router
 
 
 def _build_test_app():
     app = FastAPI()
     app.include_router(router)
-    return app
-
-
-def _build_charting_test_app():
-    app = FastAPI()
-    app.include_router(charting_router)
     return app
 
 
@@ -208,25 +202,53 @@ def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
     assert payload["required_sources"] == ["current:scope"]
 
 
-def test_ppt_chart_artifact_cleanup_api_deletes_only_safe_files(tmp_path, monkeypatch):
-    from modules.charting import storage
+def test_ppt_visual_artifacts_api_returns_slide_artifacts(monkeypatch):
+    def fake_generate(payload):
+        assert payload.slide_index == 2
+        assert payload.visual_specs[0]["visual_id"] == "visual-1"
+        return PptVisualArtifactResponse(
+            slide_index=payload.slide_index,
+            visual_artifacts=[{"visual_id": "visual-1", "url": "/download/visual-1.svg"}],
+        )
 
-    monkeypatch.setattr(storage, "CHART_DIR_PATH", tmp_path)
-    chart_file = tmp_path / "chart-1.svg"
-    chart_file.write_text("<svg></svg>", encoding="utf-8")
+    monkeypatch.setattr(ppt_planning, "generate_visual_artifacts_for_slide", fake_generate)
 
-    with TestClient(_build_charting_test_app()) as client:
+    with TestClient(_build_test_app()) as client:
         response = client.post(
-            "/api/v1/analysis/ppt/chart-artifacts/cleanup",
-            json={"filenames": ["chart-1.svg", "missing.svg", "../escape.svg", "notes.txt"]},
+            "/api/v1/analysis/ppt/visual-artifacts",
+            json={
+                "slide_index": 2,
+                "visual_specs": [{"visual_id": "visual-1", "visual_type": "figure", "status": "renderable"}],
+                "source_ids": ["current:dataset:poi"],
+                "metric_context": {"metrics": []},
+            },
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["deleted"] == ["chart-1.svg"]
+    assert payload["slide_index"] == 2
+    assert payload["visual_artifacts"][0]["url"] == "/download/visual-1.svg"
+
+
+def test_ppt_visual_artifact_cleanup_api_deletes_only_safe_files(tmp_path, monkeypatch):
+    from modules.charting import storage
+
+    monkeypatch.setattr(storage, "CHART_DIR_PATH", tmp_path)
+    visual_file = tmp_path / "visual-1.svg"
+    visual_file.write_text("<svg></svg>", encoding="utf-8")
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/visual-artifacts/cleanup",
+            json={"filenames": ["visual-1.svg", "missing.svg", "../escape.svg", "notes.txt"]},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["deleted"] == ["visual-1.svg"]
     assert payload["missing"] == ["missing.svg"]
     assert payload["skipped"] == ["../escape.svg", "notes.txt"]
-    assert not chart_file.exists()
+    assert not visual_file.exists()
 
 
 def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):

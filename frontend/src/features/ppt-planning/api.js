@@ -162,8 +162,12 @@ export function regenerateDeckBriefSlide(payload = {}) {
   return postJson('/api/v1/analysis/ppt/deck-brief/slide', payload)
 }
 
-export function cleanupPptChartArtifacts(filenames = []) {
-  return postJson('/api/v1/analysis/ppt/chart-artifacts/cleanup', { filenames })
+export function generatePptVisualArtifacts(payload = {}) {
+  return postJson('/api/v1/analysis/ppt/visual-artifacts', payload)
+}
+
+export function cleanupPptVisualArtifacts(filenames = []) {
+  return postJson('/api/v1/analysis/ppt/visual-artifacts/cleanup', { filenames })
 }
 
 export function listPptDataSources(areaId = '') {

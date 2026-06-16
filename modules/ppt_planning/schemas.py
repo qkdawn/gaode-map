@@ -272,8 +272,8 @@ class DeckSlideBrief(BaseModel):
     required_sources: List[str] = Field(default_factory=list)
     metric_claims: List[Dict[str, Any]] = Field(default_factory=list)
     metric_gaps: List[Dict[str, Any]] = Field(default_factory=list)
-    chart_specs: List[Dict[str, Any]] = Field(default_factory=list)
-    chart_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
+    visual_specs: List[Dict[str, Any]] = Field(default_factory=list)
+    visual_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class DeckBriefRequest(BaseModel):
@@ -387,3 +387,29 @@ class DeckBriefSlideRequest(BaseModel):
         if isinstance(value, str):
             return [value] if value.strip() else []
         return value
+
+
+class PptVisualArtifactRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    slide_index: int = Field(..., ge=1)
+    visual_specs: List[Dict[str, Any]] = Field(default_factory=list)
+    source_ids: List[str] = Field(default_factory=list)
+    existing_assets: List[Dict[str, Any]] = Field(default_factory=list)
+    metric_context: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("source_ids", mode="before")
+    @classmethod
+    def _normalize_source_ids(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        return value
+
+
+class PptVisualArtifactResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    slide_index: int
+    visual_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
