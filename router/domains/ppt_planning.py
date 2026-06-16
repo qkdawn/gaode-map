@@ -8,6 +8,8 @@ from modules.ppt_planning.schemas import (
     DeckBriefSlideRequest,
     DeckBriefRequest,
     DeckBriefResponse,
+    DeckNarrativePlanRequest,
+    DeckNarrativePlanResponse,
     PptDataPackageRequest,
     PptDataPackageResponse,
     PptDataSourceSummary,
@@ -38,6 +40,7 @@ from modules.ppt_planning.service import (
     PptPlanningLlmUnavailable,
     classify_ppt_source_groups,
     generate_deck_brief,
+    generate_narrative_plan,
     generate_ppt_spec,
     regenerate_deck_brief_slide,
     regenerate_ppt_outline_section,
@@ -171,6 +174,14 @@ async def create_ppt_spec(payload: PptSpecRequest) -> PptSpecResponse:
 async def create_ppt_spec_section(payload: PptOutlineSectionRequest) -> PptOutlineItem:
     try:
         return await regenerate_ppt_outline_section(payload)
+    except Exception as exc:
+        _raise_ppt_planning_error(exc)
+
+
+@router.post("/api/v1/analysis/ppt/narrative-plan", response_model=DeckNarrativePlanResponse)
+async def create_deck_narrative_plan(payload: DeckNarrativePlanRequest) -> DeckNarrativePlanResponse:
+    try:
+        return await generate_narrative_plan(payload)
     except Exception as exc:
         _raise_ppt_planning_error(exc)
 

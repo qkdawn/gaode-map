@@ -15,6 +15,7 @@ from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabl
 from .prompts import (
     DECK_BRIEF_SLIDE_SYSTEM_PROMPT,
     DECK_BRIEF_SYSTEM_PROMPT,
+    DECK_NARRATIVE_PLAN_SYSTEM_PROMPT,
     PPT_OUTLINE_SECTION_SYSTEM_PROMPT,
     PPT_SOURCE_GROUP_SYSTEM_PROMPT,
     PPT_SPEC_SYSTEM_PROMPT,
@@ -29,6 +30,9 @@ from .schemas import (
     DeckBriefSlideRequest,
     DeckBriefRequest,
     DeckBriefResponse,
+    DeckNarrativePlanRequest,
+    DeckNarrativePlanResponse,
+    DeckNarrativeSlideRole,
     DeckSlideBrief,
     PptOutlineSectionRequest,
     PptOutlineItem,
@@ -462,7 +466,10 @@ def _compact_evidence_item(*, source_id: str, source_title: str, evidence_type: 
     return {key: value for key, value in item.items() if value not in ("", [], {})}
 
 
-def _build_ppt_context_bundle(request: PptSpecRequest | PptOutlineSectionRequest | DeckBriefRequest | DeckBriefSlideRequest, metric_context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+def _build_ppt_context_bundle(
+    request: PptSpecRequest | PptOutlineSectionRequest | DeckNarrativePlanRequest | DeckBriefRequest | DeckBriefSlideRequest,
+    metric_context: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     request_source_ids = getattr(request, "source_ids", None)
     if request_source_ids is None:
         request_source_ids = [_clean_text(source.id) for source in (getattr(request, "sources", []) or []) if _clean_text(source.id)]
@@ -534,7 +541,7 @@ def _build_ppt_context_bundle(request: PptSpecRequest | PptOutlineSectionRequest
     return bundle
 
 
-def _selected_sources_payload(request: PptSpecRequest | DeckBriefRequest) -> List[Dict[str, Any]]:
+def _selected_sources_payload(request: PptSpecRequest | PptOutlineSectionRequest | DeckNarrativePlanRequest | DeckBriefRequest | DeckBriefSlideRequest) -> List[Dict[str, Any]]:
     source_ids = set(request.source_ids or [])
     sources = getattr(request, "sources", []) or []
     return [
@@ -598,7 +605,6 @@ def _validate_slides(raw_slides: Any, page_count: int, metric_context: Dict[str,
                 key_message=_clean_text(item.get("key_message") or item.get("keyMessage")),
                 visual_plan=_clean_text(item.get("visual_plan") or item.get("visualPlan")),
                 required_sources=[_clean_text(source) for source in required_sources if _clean_text(source)],
-                speaker_notes=_clean_text(item.get("speaker_notes") or item.get("speakerNotes")),
                 metric_claims=metric_assets["metric_claims"],
                 metric_gaps=metric_assets["metric_gaps"],
                 chart_specs=metric_assets["chart_specs"],
@@ -623,6 +629,71 @@ def _validate_outline_section(raw: Any, fallback: PptOutlineItem) -> PptOutlineI
     )
 
 
+def _outline_for_narrative_request(request: DeckNarrativePlanRequest) -> List[PptOutlineItem]:
+    outline = request.spec.outline if request.spec and request.spec.outline else request.outline
+    return _validate_outline([item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in outline], request.spec.page_count if request.spec else request.page_count)
+
+
+def _validate_narrative_slide_roles(raw_roles: Any, outline: List[PptOutlineItem]) -> List[DeckNarrativeSlideRole]:
+    if not outline:
+        return []
+    raw_items = raw_roles if isinstance(raw_roles, list) else []
+    roles_by_page: Dict[int, Dict[str, Any]] = {}
+    for index, raw in enumerate(raw_items, start=1):
+        item = _safe_dict(raw)
+        if not item:
+            continue
+        page_no = int(item.get("page_no") or item.get("pageNo") or index)
+        roles_by_page[page_no] = item
+
+    roles: List[DeckNarrativeSlideRole] = []
+    for outline_item in outline:
+        raw = roles_by_page.get(outline_item.page_no, {})
+        evidence_focus = raw.get("evidence_focus") or raw.get("evidenceFocus") or []
+        if not isinstance(evidence_focus, list):
+            evidence_focus = [_clean_text(evidence_focus)] if _clean_text(evidence_focus) else []
+        roles.append(
+            DeckNarrativeSlideRole(
+                page_no=outline_item.page_no,
+                role=_clean_text(raw.get("role")) or outline_item.theme,
+                objective=_clean_text(raw.get("objective")) or outline_item.purpose,
+                evidence_focus=[_clean_text(item) for item in evidence_focus if _clean_text(item)],
+                visual_direction=_clean_text(raw.get("visual_direction") or raw.get("visualDirection")),
+                chart_intent=_clean_text(raw.get("chart_intent") or raw.get("chartIntent")),
+                transition_note=_clean_text(raw.get("transition_note") or raw.get("transitionNote")),
+            )
+        )
+    return roles
+
+
+def _find_outline_context(outline: List[PptOutlineItem], page_no: int) -> Dict[str, Any]:
+    index = next((idx for idx, item in enumerate(outline) if item.page_no == page_no), -1)
+    if index < 0:
+        return {"previous_outline_item": None, "next_outline_item": None}
+    previous_item = outline[index - 1] if index > 0 else None
+    next_item = outline[index + 1] if index + 1 < len(outline) else None
+    return {
+        "previous_outline_item": previous_item.model_dump(mode="json") if previous_item else None,
+        "next_outline_item": next_item.model_dump(mode="json") if next_item else None,
+    }
+
+
+def _find_slide_context(slides: List[DeckSlideBrief], page_no: int) -> Dict[str, Any]:
+    previous_slide = next((slide for slide in slides if slide.index == page_no - 1), None)
+    next_slide = next((slide for slide in slides if slide.index == page_no + 1), None)
+    return {
+        "previous_slide": previous_slide.model_dump(mode="json") if previous_slide else None,
+        "next_slide": next_slide.model_dump(mode="json") if next_slide else None,
+    }
+
+
+def _find_narrative_role(plan: DeckNarrativePlanResponse | None, page_no: int) -> Dict[str, Any] | None:
+    if not plan:
+        return None
+    role = next((item for item in plan.slide_roles if item.page_no == page_no), None)
+    return role.model_dump(mode="json") if role else None
+
+
 def _validate_slide_section(raw: Any, fallback: DeckSlideBrief, metric_context: Dict[str, Any] | None = None) -> DeckSlideBrief | None:
     item = _safe_dict(raw.get("slide")) if isinstance(raw, dict) and isinstance(raw.get("slide"), dict) else _safe_dict(raw)
     index = int(item.get("index") or fallback.index)
@@ -637,7 +708,6 @@ def _validate_slide_section(raw: Any, fallback: DeckSlideBrief, metric_context: 
         key_message=normalized.key_message,
         visual_plan=normalized.visual_plan,
         required_sources=normalized.required_sources,
-        speaker_notes=normalized.speaker_notes,
         metric_claims=normalized.metric_claims,
         metric_gaps=normalized.metric_gaps,
         chart_specs=normalized.chart_specs,
@@ -789,6 +859,63 @@ async def regenerate_ppt_outline_section(request: PptOutlineSectionRequest) -> P
     return section
 
 
+async def generate_narrative_plan(request: DeckNarrativePlanRequest) -> DeckNarrativePlanResponse:
+    _ensure_llm_enabled()
+    outline = _outline_for_narrative_request(request)
+    if not outline:
+        raise PptPlanningInvalidResponse("invalid_ppt_outline")
+    page_count = request.spec.page_count if request.spec else request.page_count
+    metric_context = build_metric_context(
+        sources=request.sources,
+        source_ids=request.source_ids,
+        current={},
+    )
+    context_bundle = _build_ppt_context_bundle(request, metric_context=metric_context)
+    raw = await _invoke_ppt_json_role(
+        system_prompt=DECK_NARRATIVE_PLAN_SYSTEM_PROMPT,
+        user_payload={
+            "task": "ppt_narrative_plan_generation",
+            "area_id": request.area_id,
+            "topic": request.topic or (request.spec.title if request.spec else ""),
+            "audience": request.audience,
+            "deck_type": request.deck_type,
+            "page_count": page_count,
+            "research_enabled": request.research_enabled,
+            "source_ids": request.source_ids,
+            "sources": _selected_sources_payload(request),
+            "source_summary": _source_summary(request.source_ids, request.research_enabled),
+            "scope_brief": context_bundle["scope_brief"],
+            "metric_context": context_bundle["metric_context"],
+            "evidence_context": context_bundle["evidence_context"],
+            "source_manifest": context_bundle["source_manifest"],
+            "omitted_payloads": context_bundle["omitted_payloads"],
+            "spec": request.spec.model_dump(mode="json") if request.spec else None,
+            "outline": [item.model_dump(mode="json") for item in outline],
+        },
+        emit=None,
+        phase="ppt_narrative_plan_generation",
+        title="生成 PPT 叙事方案",
+        reasoning_id="ppt-narrative-plan-generation",
+    )
+    slide_roles = _validate_narrative_slide_roles(raw.get("slide_roles") or raw.get("slideRoles"), outline)
+    if len(slide_roles) != len(outline):
+        raise PptPlanningInvalidResponse("invalid_ppt_narrative_slide_roles")
+    missing_inputs = raw.get("missing_inputs")
+    if not isinstance(missing_inputs, list):
+        missing_inputs = []
+    response = DeckNarrativePlanResponse(
+        storyline=_clean_text(raw.get("storyline")),
+        style_guide=_clean_text(raw.get("style_guide") or raw.get("styleGuide")),
+        evidence_strategy=_clean_text(raw.get("evidence_strategy") or raw.get("evidenceStrategy")),
+        chart_strategy=_clean_text(raw.get("chart_strategy") or raw.get("chartStrategy")),
+        slide_roles=slide_roles,
+        missing_inputs=[_clean_text(item) for item in missing_inputs if _clean_text(item)],
+        context_manifest=context_bundle,
+    )
+    _dump_generation_response("_last_ppt_narrative_plan_response.json", response.model_dump(mode="json"))
+    return response
+
+
 async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
     _ensure_llm_enabled()
     page_count = request.spec.page_count if request.spec else request.page_count
@@ -849,6 +976,11 @@ async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSli
         current={},
     )
     context_bundle = _build_ppt_context_bundle(request, metric_context=metric_context)
+    outline = _validate_outline([item.model_dump(mode="json") for item in request.outline], request.spec.page_count if request.spec else request.page_count)
+    page_no = int(request.outline_item.page_no if request.outline_item else request.target.index)
+    outline_context = _find_outline_context(outline, page_no)
+    slide_context = _find_slide_context(request.slides, page_no)
+    target_slide_role = _find_narrative_role(request.narrative_plan, page_no)
     raw = await _invoke_ppt_json_role(
         system_prompt=DECK_BRIEF_SLIDE_SYSTEM_PROMPT,
         user_payload={
@@ -870,6 +1002,12 @@ async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSli
             "outline": [item.model_dump(mode="json") for item in request.outline],
             "slides": [item.model_dump(mode="json") for item in request.slides],
             "outline_item": request.outline_item.model_dump(mode="json") if request.outline_item else None,
+            "previous_outline_item": outline_context["previous_outline_item"],
+            "next_outline_item": outline_context["next_outline_item"],
+            "previous_slide": slide_context["previous_slide"],
+            "next_slide": slide_context["next_slide"],
+            "narrative_plan": request.narrative_plan.model_dump(mode="json") if request.narrative_plan else None,
+            "target_slide_role": target_slide_role,
             "target": request.target.model_dump(mode="json"),
         },
         emit=None,

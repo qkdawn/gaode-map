@@ -6,6 +6,9 @@ import pytest
 from modules.ppt_planning.schemas import (
     DeckBriefRequest,
     DeckBriefSlideRequest,
+    DeckNarrativePlanRequest,
+    DeckNarrativePlanResponse,
+    DeckNarrativeSlideRole,
     DeckSlideBrief,
     PptOutlineItem,
     PptOutlineSectionRequest,
@@ -18,6 +21,7 @@ from modules.ppt_planning.service import (
     _build_ppt_context_bundle,
     classify_ppt_source_groups,
     generate_deck_brief,
+    generate_narrative_plan,
     generate_ppt_spec,
     regenerate_deck_brief_slide,
     regenerate_ppt_outline_section,
@@ -157,6 +161,47 @@ def test_regenerate_ppt_outline_section_returns_single_item(monkeypatch):
     assert response.id == "page-2"
     assert response.page_no == 2
     assert response.theme == "空间问题诊断"
+
+
+def test_generate_narrative_plan_aligns_roles_to_outline(monkeypatch):
+    monkeypatch.setattr("modules.ppt_planning.service.is_llm_enabled", lambda: True)
+
+    async def fake_invoke(**kwargs):
+        return {
+            "storyline": "问题到证据",
+            "style_guide": "克制清晰",
+            "evidence_strategy": "范围与指标分工",
+            "chart_strategy": "第二页用图表",
+            "slide_roles": [
+                {"page_no": 1, "role": "开题", "objective": "建立问题"},
+                {"page_no": 2, "role": "证据", "objective": "说明判断", "chart_intent": "指标对比"},
+            ],
+            "missing_inputs": [],
+        }
+
+    monkeypatch.setattr("modules.ppt_planning.service._invoke_json_role", fake_invoke)
+    outline = [
+        PptOutlineItem(id="page-1", page_no=1, theme="开题", purpose="建立问题"),
+        PptOutlineItem(id="page-2", page_no=2, theme="证据", purpose="说明判断"),
+    ]
+
+    response = asyncio.run(generate_narrative_plan(DeckNarrativePlanRequest(
+        area_id="area-1",
+        spec=PptSpecResponse(
+            title="测试目录",
+            goal="测试",
+            audience="政府评审",
+            deck_type="城市更新概念策划",
+            page_count=2,
+            outline=outline,
+        ),
+        outline=outline,
+        source_ids=["current:scope"],
+    )))
+
+    assert response.storyline == "问题到证据"
+    assert [role.page_no for role in response.slide_roles] == [1, 2]
+    assert response.slide_roles[1].chart_intent == "指标对比"
 
 
 def test_generate_ppt_spec_sends_compact_carrier_package_to_llm(monkeypatch):
@@ -403,7 +448,6 @@ def test_generate_deck_brief_returns_ai_directive_not_pptx(monkeypatch):
                     "key_message": "说明为什么要更新，POI 共 120 个。",
                     "visual_plan": "区域底图与 POI 数量柱状图",
                     "required_sources": ["current:scope"],
-                    "speaker_notes": "第一阶段先生成逐页指令，不直接生成 PPTX。",
                     "metric_claims": [
                         {
                             "claim_id": "c1",
@@ -481,7 +525,6 @@ def test_generate_deck_brief_returns_ai_directive_not_pptx(monkeypatch):
     assert response.status == "draft"
     assert response.slides
     assert response.slides[0].title == "项目命题"
-    assert "不直接生成 PPTX" in response.slides[0].speaker_notes
     assert response.slides[0].metric_claims[0]["value"] == 120
     assert response.slides[0].chart_specs[0]["rows"][0]["value"] == 120
     assert response.slides[0].chart_artifacts[0]["url"].endswith(".svg")
@@ -509,7 +552,6 @@ def test_regenerate_deck_brief_slide_returns_single_slide(monkeypatch):
             "key_message": "更新必要性来自夜光峰值 9.8。",
             "visual_plan": "区位底图 + 夜光峰值指标卡",
             "required_sources": ["current:scope"],
-            "speaker_notes": "强调本页不是最终 PPTX。",
             "metric_claims": [
                 {"metric_id": nightlight_metric["metric_id"], "value": 9.8, "unit": "", "text": "夜光峰值 9.8"}
             ],
@@ -518,6 +560,7 @@ def test_regenerate_deck_brief_slide_returns_single_slide(monkeypatch):
     monkeypatch.setattr("modules.ppt_planning.service._invoke_json_role", fake_invoke)
     target = DeckSlideBrief(index=1, title="项目命题", purpose="建立汇报主线")
     outline_item = PptOutlineItem(id="page-1", page_no=1, theme="项目命题", purpose="建立汇报主线")
+    next_outline_item = PptOutlineItem(id="page-2", page_no=2, theme="空间证据", purpose="承接判断")
     nightlight_metric_payload = {
         "metric_id": "analysis:nightlight:max_radiance",
         "domain": "nightlight",
@@ -535,10 +578,17 @@ def test_regenerate_deck_brief_slide_returns_single_slide(monkeypatch):
 
     response = asyncio.run(regenerate_deck_brief_slide(DeckBriefSlideRequest(
         area_id="area-1",
-        outline=[outline_item],
+        outline=[outline_item, next_outline_item],
         slides=[target],
         target=target,
         outline_item=outline_item,
+        narrative_plan=DeckNarrativePlanResponse(
+            storyline="问题到证据",
+            slide_roles=[
+                DeckNarrativeSlideRole(page_no=1, role="开题", objective="建立问题"),
+                DeckNarrativeSlideRole(page_no=2, role="证据", objective="承接判断"),
+            ],
+        ),
         revision_note="更强调评审关注的问题",
         source_ids=["current:analysis:nightlight"],
         sources=[{
@@ -561,6 +611,9 @@ def test_regenerate_deck_brief_slide_returns_single_slide(monkeypatch):
 
     assert seen_payload["task"] == "ppt_directive_slide_regeneration"
     assert seen_payload["outline_item"]["page_no"] == 1
+    assert seen_payload["next_outline_item"]["page_no"] == 2
+    assert seen_payload["narrative_plan"]["slide_roles"][0]["page_no"] == 1
+    assert seen_payload["target_slide_role"]["role"] == "开题"
     assert "current" not in seen_payload
     assert response.index == 1
     assert response.title == "项目命题重写"

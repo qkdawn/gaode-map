@@ -6,6 +6,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from modules.ppt_planning.schemas import (
     DeckBriefSlideRequest,
     DeckBriefResponse,
+    DeckNarrativePlanResponse,
+    DeckNarrativeSlideRole,
     DeckSlideBrief,
     PptDataPackageResponse,
     PptDataSourceSummary,
@@ -110,7 +112,6 @@ def test_deck_brief_api_returns_slide_brief_json(monkeypatch):
                 DeckSlideBrief(
                     index=1,
                     title="项目命题",
-                    speaker_notes="第一阶段先生成逐页指令，不直接生成 PPTX。",
                 )
             ],
             source_summary="已选择 1 个来源",
@@ -133,7 +134,44 @@ def test_deck_brief_api_returns_slide_brief_json(monkeypatch):
     payload = response.json()
     assert payload["status"] == "draft"
     assert payload["slides"][0]["title"] == "项目命题"
-    assert "PPTX" in payload["slides"][0]["speaker_notes"]
+    assert "speaker_notes" not in payload["slides"][0]
+
+
+def test_narrative_plan_api_returns_slide_roles(monkeypatch):
+    async def fake_generate(payload):
+        return DeckNarrativePlanResponse(
+            storyline="问题到证据",
+            style_guide="克制",
+            evidence_strategy="范围支撑问题",
+            chart_strategy="第二页图表",
+            slide_roles=[
+                DeckNarrativeSlideRole(page_no=1, role="开题", objective="建立问题"),
+                DeckNarrativeSlideRole(page_no=2, role="证据", objective="说明判断"),
+            ],
+            missing_inputs=[],
+        )
+
+    monkeypatch.setattr(ppt_planning, "generate_narrative_plan", fake_generate)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/narrative-plan",
+            json={
+                "area_id": "area-1",
+                "outline": [
+                    {"id": "page-1", "page_no": 1, "theme": "开题", "purpose": "建立问题"},
+                    {"id": "page-2", "page_no": 2, "theme": "证据", "purpose": "说明判断"},
+                ],
+                "source_ids": ["current:scope"],
+                "topic": "更新策划",
+                "page_count": 2,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["storyline"] == "问题到证据"
+    assert [item["page_no"] for item in payload["slide_roles"]] == [1, 2]
 
 
 def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
@@ -145,7 +183,6 @@ def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
             key_message="说明为什么要更新",
             visual_plan="区域底图",
             required_sources=["current:scope"],
-            speaker_notes="只生成单页指令。",
         )
 
     monkeypatch.setattr(ppt_planning, "regenerate_deck_brief_slide", fake_generate)

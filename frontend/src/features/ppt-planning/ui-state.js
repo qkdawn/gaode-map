@@ -1,10 +1,11 @@
 import {
-  createDefaultDeckBriefPreview,
   createDefaultPptSources,
   createDefaultPptSpec,
   createDefaultUserPptSources,
   createPptTransportFromAiPayload,
   normalizeDeckBrief,
+  normalizeDeckSlideBrief,
+  normalizeNarrativePlan,
   normalizePptOutline,
   normalizePptSource,
   PPT_PLANNING_STEPS,
@@ -29,11 +30,13 @@ const PPT_ERROR_SOURCE_LABELS = new Set([
   'source_grouping',
   'data_package',
   'outline',
+  'narrative',
+  'slides',
   'directive',
 ])
 
 const PPT_GENERATION_JOB_EVENT_LIMIT = 60
-const PPT_GENERATION_JOB_TYPES = new Set(['outline', 'directive'])
+const PPT_GENERATION_JOB_TYPES = new Set(['outline', 'narrative', 'slides', 'directive'])
 const PPT_GENERATION_JOB_PHASES = new Set([
   'idle',
   'requesting',
@@ -87,6 +90,42 @@ function normalizeRevisionDraft(value = {}) {
   return cloneObject(value)
 }
 
+function normalizeSlideQueueItem(value = {}, fallbackPageNo = 1) {
+  const item = cloneObject(value)
+  const pageNo = Number(item.pageNo || item.page_no || item.index || fallbackPageNo) || fallbackPageNo
+  const status = asText(item.status)
+  return {
+    pageNo,
+    status: ['pending', 'generating', 'ready', 'failed'].includes(status) ? status : 'pending',
+    error: asText(item.error),
+    updatedAt: asText(item.updatedAt || item.updated_at),
+  }
+}
+
+function normalizeSlideGenerationQueue(value = [], outline = []) {
+  const source = cloneArray(value)
+  const byPage = new Map(source.map((item, index) => {
+    const normalized = normalizeSlideQueueItem(item, index + 1)
+    return [normalized.pageNo, normalized]
+  }))
+  const outlineItems = normalizePptOutline(outline)
+  if (!outlineItems.length) return source.map((item, index) => normalizeSlideQueueItem(item, index + 1))
+  return outlineItems.map((item) => byPage.get(item.pageNo) || normalizeSlideQueueItem({ pageNo: item.pageNo }, item.pageNo))
+}
+
+function normalizeSlideGenerationJob(value = {}) {
+  const job = cloneObject(value)
+  return {
+    active: !!job.active,
+    currentPageNo: Number(job.currentPageNo || job.current_page_no || 0) || 0,
+    total: Number(job.total || 0) || 0,
+    failedPageNo: Number(job.failedPageNo || job.failed_page_no || 0) || 0,
+    error: asText(job.error),
+    startedAt: asText(job.startedAt || job.started_at),
+    completedAt: asText(job.completedAt || job.completed_at),
+  }
+}
+
 function cloneSerializable(value = {}) {
   try {
     return JSON.parse(JSON.stringify(value ?? {}))
@@ -130,6 +169,9 @@ function summarizeGenerationResponse(type = '', response = {}) {
   const outline = normalizeGenerationJobType(type) === 'outline' || Array.isArray(payload.outline)
     ? normalizePptOutline(payload.outline)
     : []
+  const narrative = normalizeGenerationJobType(type) === 'narrative' || Array.isArray(payload.slide_roles) || Array.isArray(payload.slideRoles)
+    ? normalizeNarrativePlan(payload)
+    : { slideRoles: [] }
   const deckBrief = normalizeGenerationJobType(type) === 'directive' || Array.isArray(payload.slides)
     ? normalizeDeckBrief(payload)
     : { slides: [] }
@@ -138,6 +180,7 @@ function summarizeGenerationResponse(type = '', response = {}) {
     type: normalizeGenerationJobType(type),
     title: asText(payload.title),
     outlineCount: outline.length,
+    narrativeRoleCount: cloneArray(narrative.slideRoles).length,
     slideCount: cloneArray(deckBrief.slides).length,
     keys,
   }
@@ -214,13 +257,16 @@ function isCurrentGenerationJob(state = {}, requestId = '') {
 }
 
 function generationStepForType(type = '') {
-  return normalizeGenerationJobType(type) === 'directive'
-    ? PPT_PLANNING_STEPS.DIRECTIVE_GENERATING
-    : PPT_PLANNING_STEPS.OUTLINE_GENERATING
+  const normalizedType = normalizeGenerationJobType(type)
+  if (normalizedType === 'narrative') return PPT_PLANNING_STEPS.NARRATIVE_GENERATING
+  if (normalizedType === 'slides' || normalizedType === 'directive') return PPT_PLANNING_STEPS.SLIDES_GENERATING
+  return PPT_PLANNING_STEPS.OUTLINE_GENERATING
 }
 
 function generationReadyStepForState(state = {}, type = '') {
-  if (normalizeGenerationJobType(type) === 'directive') return PPT_PLANNING_STEPS.DIRECTIVE_DRAFT
+  const normalizedType = normalizeGenerationJobType(type)
+  if (normalizedType === 'slides' || normalizedType === 'directive') return cloneArray((state.deckBrief || {}).slides).length ? PPT_PLANNING_STEPS.DIRECTIVE_DRAFT : PPT_PLANNING_STEPS.NARRATIVE_READY
+  if (normalizedType === 'narrative') return normalizeNarrativePlan(state.narrativePlan || state.narrative_plan).slideRoles.length ? PPT_PLANNING_STEPS.NARRATIVE_READY : PPT_PLANNING_STEPS.OUTLINE_READY
   return cloneArray(state.outline).length ? PPT_PLANNING_STEPS.OUTLINE_READY : PPT_PLANNING_STEPS.MATERIALS
 }
 
@@ -644,7 +690,9 @@ export function createPptPlanningState(seed = {}) {
       : selectedSourceIds,
   })
   const outline = normalizePptOutline(seed.outline || seed.deckOutline || seed.deck_outline || spec.outline)
-  const deckBrief = normalizeDeckBrief(seed.deckBrief || seed.deck_brief || createDefaultDeckBriefPreview())
+  const deckBrief = normalizeDeckBrief(seed.deckBrief || seed.deck_brief || {})
+  const narrativePlan = normalizeNarrativePlan(seed.narrativePlan || seed.narrative_plan || {})
+  const slideGenerationQueue = normalizeSlideGenerationQueue(seed.slideGenerationQueue || seed.slide_generation_queue || [], outline)
   const sourceGroups = reconcilePptSourceGroups(seedSourceGroups.length ? seedSourceGroups : createDefaultPptSourceGroups(sources), sources, normalizedUngroupedSourceIds)
   return {
     currentStep: asText(seed.currentStep || seed.current_step) || PPT_PLANNING_STEPS.MATERIALS,
@@ -655,6 +703,10 @@ export function createPptPlanningState(seed = {}) {
     ungroupedSourceIds: normalizedUngroupedSourceIds,
     spec,
     outline,
+    narrativePlan,
+    narrativeRevisionDraft: normalizeRevisionDraft(seed.narrativeRevisionDraft || seed.narrative_revision_draft),
+    slideGenerationQueue,
+    slideGenerationJob: normalizeSlideGenerationJob(seed.slideGenerationJob || seed.slide_generation_job),
     deckBrief,
     selectedSlideId: normalizeSelectedSlideId(seed, deckBrief),
     generationError: asText(seed.generationError || seed.generation_error),
@@ -836,6 +888,12 @@ export function applyPptSpecResponse(state = {}, response = {}) {
     contextManifest,
     currentStep: PPT_PLANNING_STEPS.OUTLINE_READY,
     outline,
+    narrativePlan: normalizeNarrativePlan({}),
+    narrativeRevisionDraft: {},
+    slideGenerationQueue: normalizeSlideGenerationQueue([], outline),
+    slideGenerationJob: {},
+    deckBrief: normalizeDeckBrief({}),
+    selectedSlideId: '',
     spec: {
       ...normalized.spec,
       title: asText(response.title) || normalized.spec.title,
@@ -931,9 +989,11 @@ export function applyPptGenerationSuccess(state = {}, requestId = '', response =
   const normalized = createPptPlanningState(state)
   if (!isCurrentGenerationJob(normalized, requestId)) return normalized
   const job = normalizeGenerationJob(normalized.generationJob)
-  const applied = job.type === 'directive'
-    ? applyDeckBriefResponse(normalized, response)
-    : applyPptSpecResponse(normalized, response)
+  const applied = job.type === 'narrative'
+    ? applyNarrativePlanResponse(normalized, response)
+    : job.type === 'directive'
+      ? applyDeckBriefResponse(normalized, response)
+      : applyPptSpecResponse(normalized, response)
   const summary = summarizeGenerationResponse(job.type, response)
   return createPptPlanningState({
     ...applied,
@@ -975,9 +1035,11 @@ export function completePptGenerationJob(state = {}, requestId = '', response = 
       generationJob: applyingJob,
       generationResponse: createGenerationResponseSnapshot(job.type, response),
     })
-    const applied = job.type === 'directive'
-      ? applyDeckBriefResponse(baseState, response)
-      : applyPptSpecResponse(baseState, response)
+    const applied = job.type === 'narrative'
+      ? applyNarrativePlanResponse(baseState, response)
+      : job.type === 'directive'
+        ? applyDeckBriefResponse(baseState, response)
+        : applyPptSpecResponse(baseState, response)
     return createPptPlanningState({
       ...applied,
       generationJob: appendGenerationEvent({
@@ -989,7 +1051,8 @@ export function completePptGenerationJob(state = {}, requestId = '', response = 
       }, 'ready', summary),
     })
   } catch (error) {
-    const message = `${job.type === 'directive' ? '指令' : '目录'}返回已收到，但前端应用失败：${error && error.message ? error.message : String(error)}`
+    const label = job.type === 'narrative' ? '叙事方案' : job.type === 'directive' ? '指令' : '目录'
+    const message = `${label}返回已收到，但前端应用失败：${error && error.message ? error.message : String(error)}`
     return createPptPlanningState({
       ...normalized,
       currentStep: generationReadyStepForState(normalized, job.type),
@@ -1068,7 +1131,7 @@ export function setPptOutlineGenerating(state = {}) {
 export function setPptDirectiveGenerating(state = {}) {
   return createPptPlanningState({
     ...createPptPlanningState(state),
-    currentStep: PPT_PLANNING_STEPS.DIRECTIVE_GENERATING,
+    currentStep: PPT_PLANNING_STEPS.SLIDES_GENERATING,
     generationError: '',
     generationErrorSource: '',
     generationResponse: {},
@@ -1086,7 +1149,11 @@ export function resetPptPlanningToMaterials(state = {}) {
       outline: [],
       missingInputs: [],
     },
-    deckBrief: createDefaultDeckBriefPreview(),
+    narrativePlan: normalizeNarrativePlan({}),
+    narrativeRevisionDraft: {},
+    slideGenerationQueue: [],
+    slideGenerationJob: {},
+    deckBrief: normalizeDeckBrief({}),
     contextManifest: {},
     selectedSlideId: '',
     generationError: '',
@@ -1113,7 +1180,11 @@ export function resetPptPlanningToOutlineReady(state = {}) {
       ...normalized.spec,
       outline,
     },
-    deckBrief: createDefaultDeckBriefPreview(),
+    narrativePlan: normalizeNarrativePlan({}),
+    narrativeRevisionDraft: {},
+    slideGenerationQueue: normalizeSlideGenerationQueue([], outline),
+    slideGenerationJob: {},
+    deckBrief: normalizeDeckBrief({}),
     contextManifest: {},
     selectedSlideId: '',
     generationError: '',
@@ -1123,6 +1194,92 @@ export function resetPptPlanningToOutlineReady(state = {}) {
     directiveRevisionDraft: {},
     revisionGeneratingTarget: {},
     staleDirectivePageIds: [],
+  })
+}
+
+export function resetPptPlanningToNarrativeReady(state = {}) {
+  const normalized = createPptPlanningState(state)
+  const outline = normalizePptOutline(normalized.outline)
+  const narrativePlan = normalizeNarrativePlan(normalized.narrativePlan)
+  if (!outline.length) return resetPptPlanningToMaterials(normalized)
+  if (!narrativePlan.slideRoles.length) return resetPptPlanningToOutlineReady(normalized)
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: PPT_PLANNING_STEPS.NARRATIVE_READY,
+    outline,
+    spec: {
+      ...normalized.spec,
+      outline,
+    },
+    narrativePlan,
+    slideGenerationQueue: normalizeSlideGenerationQueue([], outline),
+    slideGenerationJob: {},
+    deckBrief: normalizeDeckBrief({}),
+    selectedSlideId: '',
+    generationError: '',
+    generationErrorSource: '',
+    activeRevisionTarget: {},
+    directiveRevisionDraft: {},
+    revisionGeneratingTarget: {},
+    staleDirectivePageIds: [],
+  })
+}
+
+export function getPptPromptActions(state = {}) {
+  const normalized = createPptPlanningState(state)
+  const hasOutline = normalizePptOutline(normalized.outline).length > 0
+  const hasNarrativePlan = normalizeNarrativePlan(normalized.narrativePlan).slideRoles.length > 0
+  const slides = cloneArray((normalized.deckBrief || {}).slides)
+  const hasSlides = slides.length > 0
+  const failedPageNo = Number(normalized.slideGenerationJob.failedPageNo || 0)
+    || Number((normalizeSlideGenerationQueue(normalized.slideGenerationQueue, normalized.outline).find((item) => item.status === 'failed') || {}).pageNo || 0)
+    || 0
+
+  if (!hasOutline) {
+    return [{ id: 'generate-outline', label: '生成目录', event: 'generate-outline', primary: true }]
+  }
+  if (!hasNarrativePlan) {
+    return [
+      { id: 'generate-narrative-plan', label: '生成叙事方案', event: 'generate-narrative-plan', primary: true },
+      { id: 'regenerate-outline', label: '重新生成目录', event: 'regenerate-outline', primary: false },
+    ]
+  }
+  if (!hasSlides || failedPageNo) {
+    return [
+      {
+        id: 'generate-slides',
+        label: failedPageNo ? '继续逐页生成 brief' : '逐页生成 brief',
+        event: 'generate-slides',
+        primary: true,
+      },
+      { id: 'regenerate-narrative-plan', label: '重新生成叙事方案', event: 'regenerate-narrative-plan', primary: false },
+    ]
+  }
+  return [{ id: 'regenerate-slides', label: '重新逐页生成 brief', event: 'regenerate-slides', primary: true }]
+}
+
+export function applyNarrativePlanResponse(state = {}, response = {}) {
+  const normalized = createPptPlanningState(state)
+  const narrativePlan = normalizeNarrativePlan(response)
+  const contextManifest = normalizeContextManifest(response.contextManifest || response.context_manifest)
+  const sources = mergeSourceTransportManifest(normalized.sources, contextManifest)
+  return createPptPlanningState({
+    ...normalized,
+    sources,
+    contextManifest,
+    currentStep: PPT_PLANNING_STEPS.NARRATIVE_READY,
+    narrativePlan,
+    narrativeRevisionDraft: {},
+    slideGenerationQueue: normalizeSlideGenerationQueue([], normalized.outline),
+    slideGenerationJob: {},
+    deckBrief: normalizeDeckBrief({}),
+    selectedSlideId: '',
+    generationError: '',
+    generationErrorSource: '',
+    generationResponse: createGenerationResponseSnapshot('narrative', response),
+    staleDirectivePageIds: [],
+    activeRevisionTarget: {},
+    directiveRevisionDraft: {},
   })
 }
 
@@ -1144,6 +1301,118 @@ export function applyDeckBriefResponse(state = {}, response = {}) {
     activeRevisionTarget: {},
     outlineRevisionDraft: {},
     directiveRevisionDraft: {},
+  })
+}
+
+export function startSlideGenerationQueue(state = {}, options = {}) {
+  const normalized = createPptPlanningState(state)
+  const outline = normalizePptOutline(normalized.outline)
+  const slidesByIndex = new Set(cloneArray((normalized.deckBrief || {}).slides).map((slide) => Number(slide.index || 0)).filter(Boolean))
+  const existingQueue = normalizeSlideGenerationQueue(normalized.slideGenerationQueue, outline)
+  const queue = outline.map((item) => {
+    const existing = existingQueue.find((entry) => entry.pageNo === item.pageNo)
+    if (slidesByIndex.has(item.pageNo)) {
+      return normalizeSlideQueueItem({ ...existing, pageNo: item.pageNo, status: 'ready', error: '' }, item.pageNo)
+    }
+    return normalizeSlideQueueItem({
+      ...existing,
+      pageNo: item.pageNo,
+      status: existing && existing.status === 'ready' ? 'ready' : 'pending',
+      error: existing && existing.status === 'failed' ? existing.error : '',
+    }, item.pageNo)
+  })
+  const firstPending = queue.find((item) => item.status !== 'ready')
+  if (firstPending) {
+    firstPending.status = 'generating'
+    firstPending.error = ''
+    firstPending.updatedAt = new Date().toISOString()
+  }
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: firstPending ? PPT_PLANNING_STEPS.SLIDES_GENERATING : PPT_PLANNING_STEPS.DIRECTIVE_DRAFT,
+    slideGenerationQueue: queue,
+    slideGenerationJob: {
+      active: !!firstPending,
+      currentPageNo: firstPending ? firstPending.pageNo : 0,
+      total: outline.length,
+      failedPageNo: 0,
+      error: '',
+      startedAt: asText(options.startedAt || options.started_at) || new Date().toISOString(),
+      completedAt: '',
+    },
+    generationError: '',
+    generationErrorSource: '',
+  })
+}
+
+export function applyGeneratedSlideBrief(state = {}, slide = {}) {
+  const normalized = createPptPlanningState(state)
+  const nextSlide = normalizeDeckSlideBrief(slide, Number(slide.index || 1) || 1)
+  const slides = cloneArray((normalized.deckBrief || {}).slides)
+  const index = findSlideIndex(slides, nextSlide)
+  const nextSlides = index >= 0
+    ? slides.map((item, itemIndex) => (itemIndex === index ? nextSlide : item))
+    : [...slides, nextSlide].sort((a, b) => (Number(a.index || 0) || 0) - (Number(b.index || 0) || 0))
+  const outline = normalizePptOutline(normalized.outline)
+  const queue = normalizeSlideGenerationQueue(normalized.slideGenerationQueue, outline).map((item) => (
+    item.pageNo === nextSlide.index
+      ? { ...item, status: 'ready', error: '', updatedAt: new Date().toISOString() }
+      : item
+  ))
+  const nextPending = queue.find((item) => item.status !== 'ready')
+  if (nextPending) {
+    nextPending.status = 'generating'
+    nextPending.error = ''
+    nextPending.updatedAt = new Date().toISOString()
+  }
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: nextPending ? PPT_PLANNING_STEPS.SLIDES_GENERATING : PPT_PLANNING_STEPS.DIRECTIVE_DRAFT,
+    deckBrief: {
+      ...normalizeDeckBrief(normalized.deckBrief),
+      slides: nextSlides,
+    },
+    selectedSlideId: normalized.selectedSlideId || asText(nextSlide.id),
+    slideGenerationQueue: queue,
+    slideGenerationJob: {
+      ...normalizeSlideGenerationJob(normalized.slideGenerationJob),
+      active: !!nextPending,
+      currentPageNo: nextPending ? nextPending.pageNo : 0,
+      total: outline.length,
+      completedAt: nextPending ? '' : new Date().toISOString(),
+    },
+    generationError: '',
+    generationErrorSource: '',
+    generationResponse: createGenerationResponseSnapshot('slides', { slides: nextSlides }),
+    staleDirectivePageIds: normalized.staleDirectivePageIds.filter((item) => item !== String(nextSlide.index)),
+  })
+}
+
+export function failSlideGenerationQueue(state = {}, pageNo = 0, error = '') {
+  const normalized = createPptPlanningState(state)
+  const failedPageNo = Number(pageNo || 0) || Number(normalized.slideGenerationJob.currentPageNo || 0) || 0
+  const message = asText(error && error.message ? error.message : error) || 'ppt_slide_generation_failed'
+  const queue = normalizeSlideGenerationQueue(normalized.slideGenerationQueue, normalized.outline).map((item) => (
+    item.pageNo === failedPageNo
+      ? { ...item, status: 'failed', error: message, updatedAt: new Date().toISOString() }
+      : item.status === 'generating'
+        ? { ...item, status: 'pending' }
+        : item
+  ))
+  return createPptPlanningState({
+    ...normalized,
+    currentStep: cloneArray((normalized.deckBrief || {}).slides).length ? PPT_PLANNING_STEPS.DIRECTIVE_DRAFT : PPT_PLANNING_STEPS.NARRATIVE_READY,
+    slideGenerationQueue: queue,
+    slideGenerationJob: {
+      ...normalizeSlideGenerationJob(normalized.slideGenerationJob),
+      active: false,
+      currentPageNo: 0,
+      failedPageNo,
+      error: message,
+      completedAt: new Date().toISOString(),
+    },
+    generationError: message,
+    generationErrorSource: 'slides',
   })
 }
 
@@ -1202,7 +1471,6 @@ export function setPptActiveRevisionTarget(state = {}, target = {}) {
       keyMessage: asText(item.keyMessage || item.key_message),
       visualPlan: asText(item.visualPlan || item.visual_plan),
       requiredSources: cloneArray(item.requiredSources || item.required_sources).map((source) => asText(source)).filter(Boolean).join(', '),
-      speakerNotes: asText(item.speakerNotes || item.speaker_notes),
       revisionNote: '',
     },
   })
@@ -1853,6 +2121,39 @@ export function buildDeckBriefPayload(state = {}, context = {}) {
   }
 }
 
+function narrativePlanForRequest(plan = {}) {
+  const normalized = normalizeNarrativePlan(plan)
+  return {
+    storyline: normalized.storyline,
+    style_guide: normalized.styleGuide,
+    evidence_strategy: normalized.evidenceStrategy,
+    chart_strategy: normalized.chartStrategy,
+    slide_roles: normalized.slideRoles.map((role) => ({
+      page_no: role.pageNo,
+      role: role.role,
+      objective: role.objective,
+      evidence_focus: cloneArray(role.evidenceFocus),
+      visual_direction: role.visualDirection,
+      chart_intent: role.chartIntent,
+      transition_note: role.transitionNote,
+    })),
+    missing_inputs: cloneArray(normalized.missingInputs),
+  }
+}
+
+export function buildNarrativePlanPayload(state = {}, context = {}) {
+  const normalized = createPptPlanningState(state)
+  return {
+    ...buildDeckBriefPayload(normalized, context),
+    outline: normalizePptOutline(normalized.outline).map((item) => ({
+      id: item.id,
+      page_no: item.pageNo,
+      theme: item.theme,
+      purpose: item.purpose,
+    })),
+  }
+}
+
 export function buildPptOutlineSectionPayload(state = {}, target = {}, revisionNote = '', context = {}) {
   const normalized = createPptPlanningState(state)
   const sourceIds = getPptSourceDeliveryManifest(normalized).deliverableSourceIds
@@ -1897,8 +2198,22 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
   const sourceIds = getPptSourceDeliveryManifest(normalized).deliverableSourceIds
   const slides = cloneArray((normalized.deckBrief || {}).slides)
   const targetIndex = findSlideIndex(slides, target)
-  const targetItem = targetIndex >= 0 ? slides[targetIndex] : target
-  const outlineItem = normalized.outline.find((item) => Number(item.pageNo || 0) === Number(targetItem.index || 0)) || null
+  const requestedIndex = Number(target.index || target.pageNo || target.page_no || 0) || 0
+  const outlineItem = normalized.outline.find((item) => Number(item.pageNo || 0) === Number((targetIndex >= 0 ? slides[targetIndex].index : requestedIndex) || 0)) || null
+  const targetItem = targetIndex >= 0
+    ? slides[targetIndex]
+    : {
+        index: requestedIndex || Number(outlineItem && outlineItem.pageNo) || 1,
+        title: asText(target.title) || asText(outlineItem && outlineItem.theme) || `页面 ${requestedIndex || 1}`,
+        purpose: asText(target.purpose) || asText(outlineItem && outlineItem.purpose),
+        keyMessage: '',
+        visualPlan: '',
+        requiredSources: [],
+        metricClaims: [],
+        metricGaps: [],
+        chartSpecs: [],
+        chartArtifacts: [],
+      }
   return {
     ...buildDeckBriefPayload(normalized, context),
     outline: normalizePptOutline(normalized.outline).map((item) => ({
@@ -1914,7 +2229,6 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
       key_message: item.keyMessage,
       visual_plan: item.visualPlan,
       required_sources: cloneArray(item.requiredSources),
-      speaker_notes: item.speakerNotes,
       metric_claims: cloneArray(item.metricClaims),
       metric_gaps: cloneArray(item.metricGaps),
       chart_specs: cloneArray(item.chartSpecs),
@@ -1927,7 +2241,6 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
       key_message: targetItem.keyMessage,
       visual_plan: targetItem.visualPlan,
       required_sources: cloneArray(targetItem.requiredSources),
-      speaker_notes: targetItem.speakerNotes,
       metric_claims: cloneArray(targetItem.metricClaims),
       metric_gaps: cloneArray(targetItem.metricGaps),
       chart_specs: cloneArray(targetItem.chartSpecs),
@@ -1939,6 +2252,7 @@ export function buildDeckBriefSlidePayload(state = {}, target = {}, revisionNote
       theme: outlineItem.theme,
       purpose: outlineItem.purpose,
     } : null,
+    narrative_plan: narrativePlanForRequest(normalized.narrativePlan),
     revision_note: asText(revisionNote),
     source_ids: sourceIds,
   }

@@ -142,8 +142,16 @@ export function generateDeckBrief(payload = {}) {
   return postJsonWithTimeout('/api/v1/analysis/ppt/deck-brief', payload)
 }
 
+export function generateNarrativePlan(payload = {}) {
+  return postJsonWithTimeout('/api/v1/analysis/ppt/narrative-plan', payload)
+}
+
 export function generatePptSpecWithDebug(payload = {}, options = {}) {
   return postJsonWithTimeout('/api/v1/analysis/ppt/spec', payload, options)
+}
+
+export function generateNarrativePlanWithDebug(payload = {}, options = {}) {
+  return postJsonWithTimeout('/api/v1/analysis/ppt/narrative-plan', payload, options)
 }
 
 export function generateDeckBriefWithDebug(payload = {}, options = {}) {

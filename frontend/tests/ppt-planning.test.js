@@ -6,7 +6,9 @@ import {
 } from '../src/features/agent/tabs.js'
 import {
   createPptSystemSources,
+  normalizeDeckBrief,
   normalizeDeckSlideBrief,
+  normalizeNarrativePlan,
 } from '../src/features/ppt-planning/model.js'
 import {
   buildPptCarrierPreviewModel,
@@ -16,6 +18,8 @@ import { createAgentPptPlanningTabMethods } from '../src/features/agent/ppt-plan
 
 import {
   applyDeckBriefResponse,
+  applyGeneratedSlideBrief,
+  applyNarrativePlanResponse,
   applyPptSpecResponse,
   applyPptSourceGroupsResponse,
   addPptDataPackageSource,
@@ -23,6 +27,7 @@ import {
   applyPptOutlineSectionRevision,
   buildDeckBriefPayload,
   buildDeckBriefSlidePayload,
+  buildNarrativePlanPayload,
   buildPptOutlineSectionPayload,
   buildPptSpecPayload,
   collectPptChartArtifactFilenames,
@@ -31,6 +36,7 @@ import {
   getBlockingPptInputSources,
   hasPptBlockingInputs,
   getPendingPptPackageSources,
+  getPptPromptActions,
   getPptSourceDeliveryManifest,
   getPptSourceSummary,
   markPptDirectiveStaleForSources,
@@ -39,7 +45,9 @@ import {
   removePptSource,
   removePptSourceGroup,
   resetPptPlanningToMaterials,
+  resetPptPlanningToNarrativeReady,
   resetPptPlanningToOutlineReady,
+  startSlideGenerationQueue,
   setAllPptSourcesSelected,
   setPptGenerationError,
   setPptSourceRefreshing,
@@ -53,6 +61,183 @@ import {
 const DEFAULT_PPT_POI_EVIDENCE_INTENT = '为 PPT 指令生成整理当前区域代表性 POI 资料'
 const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 POI，并与夜光格子对应'
 const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
+
+test('ppt normalizeDeckBrief keeps empty responses empty', () => {
+  const brief = normalizeDeckBrief({})
+  assert.equal(brief.status, 'draft')
+  assert.deepEqual(brief.slides, [])
+})
+
+test('ppt narrative plan and slide queue feed single slide payloads', () => {
+  let state = createPptPlanningState({
+    sources: [
+      {
+        id: 'current:scope',
+        title: '当前等时圈范围',
+        type: 'data',
+        status: 'ready',
+        selected: true,
+        meta: {
+          aiPayload: {
+            included: ['scope'],
+            scope: { area_name: '测试范围' },
+            counts: { scope: 1 },
+          },
+        },
+      },
+    ],
+  })
+  state = applyPptSpecResponse(state, {
+    title: '测试目录',
+    goal: '测试',
+    audience: '政府评审',
+    deck_type: '城市更新概念策划',
+    page_count: 2,
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  const narrativePayload = buildNarrativePlanPayload(state, { areaId: 'area-1' })
+  assert.equal(narrativePayload.outline.length, 2)
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    style_guide: '克制',
+    evidence_strategy: '范围支撑问题',
+    chart_strategy: '第二页使用图表',
+    slide_roles: [
+      { page_no: 1, role: '开题', objective: '建立问题' },
+      { page_no: 2, role: '证据页', objective: '说明判断', chart_intent: '指标图' },
+    ],
+    context_manifest: {
+      metric_context: {
+        metrics: [{ metric_id: 'analysis:test:large', description: 'x'.repeat(10_000) }],
+      },
+      evidence_context: {
+        items: [{ text: 'y'.repeat(10_000) }],
+      },
+    },
+  })
+  state = startSlideGenerationQueue(state)
+  assert.equal(state.currentStep, 'slides_generating')
+  assert.equal(state.slideGenerationQueue[0].status, 'generating')
+  const slidePayload = buildDeckBriefSlidePayload(state, { index: 1 }, '生成第一页', { areaId: 'area-1' })
+  assert.equal(slidePayload.narrative_plan.slide_roles.length, 2)
+  assert.equal(Object.hasOwn(slidePayload.narrative_plan, 'context_manifest'), false)
+  assert.equal(slidePayload.target.index, 1)
+  state = applyGeneratedSlideBrief(state, { index: 1, title: '开场', purpose: '建立问题' })
+  assert.equal(state.deckBrief.slides.length, 1)
+  assert.equal(state.slideGenerationQueue[0].status, 'ready')
+  assert.equal(state.slideGenerationQueue[1].status, 'generating')
+})
+
+test('ppt narrative plan normalizer preserves strategy and role fields for display', () => {
+  const plan = normalizeNarrativePlan({
+    storyline: '从问题到证据',
+    style_guide: '克制理性',
+    evidence_strategy: '按诊断维度分配证据',
+    chart_strategy: '空间图与指标卡结合',
+    slide_roles: [
+      {
+        page_no: 2,
+        role: '空间底座',
+        objective: '说明研究边界',
+        evidence_focus: ['等时圈', 'POI'],
+        visual_direction: '底图叠加网格',
+        chart_intent: '范围指标卡',
+        transition_note: '承接诊断页',
+      },
+    ],
+  })
+
+  assert.equal(plan.storyline, '从问题到证据')
+  assert.equal(plan.styleGuide, '克制理性')
+  assert.equal(plan.evidenceStrategy, '按诊断维度分配证据')
+  assert.equal(plan.chartStrategy, '空间图与指标卡结合')
+  assert.equal(plan.slideRoles[0].pageNo, 2)
+  assert.deepEqual(plan.slideRoles[0].evidenceFocus, ['等时圈', 'POI'])
+  assert.equal(plan.slideRoles[0].chartIntent, '范围指标卡')
+})
+
+function createPptStateWithOutlineNarrativeAndSlides() {
+  let state = createPptPlanningState({
+    sources: [
+      {
+        id: 'current:scope',
+        title: '当前范围',
+        type: 'data',
+        status: 'ready',
+        selected: true,
+        meta: { aiPayload: { included: ['scope'], counts: { scope: 1 } } },
+      },
+    ],
+  })
+  state = applyPptSpecResponse(state, {
+    title: '测试目录',
+    page_count: 2,
+    audience: '政府评审',
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', objective: '建立问题' },
+      { page_no: 2, role: '证据页', objective: '说明判断' },
+    ],
+  })
+  return applyGeneratedSlideBrief(state, { index: 1, title: '开场', purpose: '建立问题' })
+}
+
+test('ppt reset to narrative ready keeps outline and narrative but clears generated briefs', () => {
+  const state = createPptStateWithOutlineNarrativeAndSlides()
+  const reset = resetPptPlanningToNarrativeReady(startSlideGenerationQueue(state))
+
+  assert.equal(reset.currentStep, 'narrative_ready')
+  assert.equal(reset.outline.length, 2)
+  assert.equal(reset.narrativePlan.slideRoles.length, 2)
+  assert.deepEqual(reset.deckBrief.slides, [])
+  assert.deepEqual(reset.slideGenerationQueue.map((item) => item.status), ['pending', 'pending'])
+  assert.equal(reset.slideGenerationJob.active, false)
+  assert.equal(reset.slideGenerationJob.currentPageNo, 0)
+})
+
+test('ppt reset to outline ready clears narrative plan and downstream briefs', () => {
+  const state = createPptStateWithOutlineNarrativeAndSlides()
+  const reset = resetPptPlanningToOutlineReady(state)
+
+  assert.equal(reset.currentStep, 'outline_ready')
+  assert.equal(reset.outline.length, 2)
+  assert.equal(reset.narrativePlan.slideRoles.length, 0)
+  assert.deepEqual(reset.deckBrief.slides, [])
+  assert.deepEqual(reset.slideGenerationQueue.map((item) => item.status), ['pending', 'pending'])
+})
+
+test('ppt prompt actions expose only the current stage actions', () => {
+  const empty = createPptPlanningState()
+  assert.deepEqual(getPptPromptActions(empty).map((item) => item.event), ['generate-outline'])
+
+  const outlineReady = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [{ id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' }],
+  })
+  assert.deepEqual(getPptPromptActions(outlineReady).map((item) => item.event), ['generate-narrative-plan', 'regenerate-outline'])
+
+  const narrativeReady = applyNarrativePlanResponse(outlineReady, {
+    slide_roles: [{ page_no: 1, role: '开题', objective: '建立问题' }],
+  })
+  assert.deepEqual(getPptPromptActions(narrativeReady).map((item) => item.event), ['generate-slides', 'regenerate-narrative-plan'])
+
+  const failedSlides = {
+    ...startSlideGenerationQueue(narrativeReady),
+    slideGenerationJob: { failedPageNo: 1 },
+  }
+  assert.equal(getPptPromptActions(failedSlides)[0].label, '继续逐页生成 brief')
+
+  const briefReady = applyGeneratedSlideBrief(narrativeReady, { index: 1, title: '开场', purpose: '建立问题' })
+  assert.deepEqual(getPptPromptActions(briefReady).map((item) => item.event), ['regenerate-slides'])
+})
 
 test('ppt carrier preview model projects road context and carrier geometries into svg paths', () => {
   const preview = buildPptCarrierPreviewModel([
@@ -711,7 +896,7 @@ test('ppt state can select all sources and keep an active page brief', () => {
 
   assert.equal(getPptSourceSummary(state).selected, 3)
   assert.equal(active.title, '封面')
-  assert.equal(active.speakerNotes.includes('不直接生成 PPTX'), true)
+  assert.equal(Object.hasOwn(active, 'speakerNotes'), false)
 })
 
 test('ppt system sources refresh preserves ready selections and blocks pending sources', () => {
@@ -1161,7 +1346,6 @@ test('ppt planning applies AI outline before directive draft', () => {
         key_message: '解释项目为什么成立',
         visual_plan: '区域底图',
         required_sources: ['current:scope'],
-        speaker_notes: '第一阶段先生成逐页指令，不直接生成 PPTX。',
       },
     ],
   })
@@ -1252,7 +1436,6 @@ test('ppt directive slide revision clears stale flag and supports undo', () => {
     keyMessage: '解释更新必要性',
     visualPlan: '区域底图',
     requiredSources: ['current:scope'],
-    speakerNotes: '讲清楚背景。',
   })
 
   assert.equal(revised.deckBrief.slides[0].title, '项目命题重写')
@@ -1277,7 +1460,6 @@ test('ppt directive undo locates the edited current slide by target', () => {
           keyMessage: '解释更新必要性',
           visualPlan: '区域底图',
           required_sources: ['current:scope'],
-          speakerNotes: '讲清楚背景。',
         },
       ],
     },
@@ -1290,7 +1472,6 @@ test('ppt directive undo locates the edited current slide by target', () => {
     keyMessage: '解释更新必要性',
     visualPlan: '11',
     requiredSources: ['current:scope'],
-    speakerNotes: '讲清楚背景。',
   })
 
   const undone = undoPptSectionRevision(revised, 'directive', { index: 1 })
@@ -1451,7 +1632,6 @@ test('agent ppt generation actions write outline and directive into the active t
             key_message: '解释项目为什么成立',
             visual_plan: '区域底图',
             required_sources: ['current:scope'],
-            speaker_notes: '第一阶段先生成逐页指令，不直接生成 PPTX。',
           },
         ],
       })
@@ -1858,6 +2038,127 @@ test('agent ppt regenerate directive confirms and keeps outline', async () => {
   assert.equal(state.deckBrief.slides[0].title, '新指令')
 })
 
+test('agent ppt regenerate narrative clears downstream and uses narrative endpoint', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  let narrativeCalls = 0
+  let slideCalls = 0
+  const initialState = createPptStateWithOutlineNarrativeAndSlides()
+  const ctx = {
+    ...methods,
+    agentPanelPayloads: {},
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        source: 'current',
+        pptPlanningState: initialState,
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    ensureAgentTabs() {
+      return this.agentTabs
+    },
+    getAgentActiveTopTab() {
+      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+    },
+    normalizeAgentSiteSelectionScope() {
+      return { polygon: [[0, 0], [1, 0], [1, 1]], drawnPolygon: [], isochroneFeature: null }
+    },
+    confirmPptPlanningStepReset() {
+      return true
+    },
+    requestAgentPptPlanningNarrativePlanWithDebug() {
+      narrativeCalls += 1
+      return Promise.resolve({
+        storyline: '新叙事',
+        slide_roles: [{ page_no: 1, role: '新开题', objective: '新目标' }],
+      })
+    },
+    requestAgentPptPlanningDirectiveSlide() {
+      slideCalls += 1
+      return Promise.resolve({ index: 1, title: '不应调用' })
+    },
+    syncCurrentAgentSession() {},
+  }
+
+  await ctx.regenerateAgentPptPlanningNarrativePlanWithConfirm()
+  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+
+  assert.equal(narrativeCalls, 1)
+  assert.equal(slideCalls, 0)
+  assert.equal(state.currentStep, 'narrative_ready')
+  assert.equal(state.narrativePlan.storyline, '新叙事')
+  assert.deepEqual(state.deckBrief.slides, [])
+})
+
+test('agent ppt regenerate slides keeps outline and narrative while clearing old briefs', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  let slideCalls = 0
+  const cleaned = []
+  const initialState = applyDeckBriefResponse(createPptStateWithOutlineNarrativeAndSlides(), {
+    slides: [
+      { index: 1, title: '旧 brief', purpose: '旧目的', chart_artifacts: [{ filename: 'old-brief.svg' }] },
+    ],
+  })
+  const ctx = {
+    ...methods,
+    agentPanelPayloads: {},
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        source: 'current',
+        pptPlanningState: initialState,
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    ensureAgentTabs() {
+      return this.agentTabs
+    },
+    getAgentActiveTopTab() {
+      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+    },
+    normalizeAgentSiteSelectionScope() {
+      return { polygon: [[0, 0], [1, 0], [1, 1]], drawnPolygon: [], isochroneFeature: null }
+    },
+    confirmPptPlanningStepReset() {
+      return true
+    },
+    requestAgentPptPlanningDirectiveSlide(payload) {
+      slideCalls += 1
+      return Promise.resolve({
+        index: payload.target.index,
+        title: `新 brief ${payload.target.index}`,
+        purpose: payload.target.purpose,
+      })
+    },
+    requestAgentPptPlanningChartArtifactCleanup(filenames) {
+      cleaned.push(...filenames)
+      return Promise.resolve({ deleted: filenames, missing: [], skipped: [] })
+    },
+    syncCurrentAgentSession() {},
+  }
+
+  await ctx.regenerateAgentPptPlanningSlidesWithConfirm()
+  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+
+  assert.equal(slideCalls, 2)
+  assert.deepEqual(cleaned, ['old-brief.svg'])
+  assert.equal(state.currentStep, 'directive_draft')
+  assert.equal(state.narrativePlan.slideRoles.length, 2)
+  assert.deepEqual(state.deckBrief.slides.map((slide) => slide.title), ['新 brief 1', '新 brief 2'])
+})
+
 test('agent ppt regenerate cancellation keeps generated state unchanged', async () => {
   const methods = createAgentPptPlanningTabMethods()
   let outlineCalls = 0
@@ -1978,7 +2279,6 @@ test('agent ppt revision actions replace only the active section', async () => {
         key_message: '说明空间矛盾',
         visual_plan: '诊断图',
         required_sources: ['current:scope'],
-        speaker_notes: '讲清楚问题。',
         chart_artifacts: [{ filename: 'new-slide-2.svg' }],
       })
     },

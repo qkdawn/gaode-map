@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizePptPackageDetail } from './carrier-preview.js'
-import { getBlockingPptInputSources } from './ui-state.js'
+import { getBlockingPptInputSources, getPptPromptActions } from './ui-state.js'
 
 const props = defineProps({
   sources: {
@@ -31,6 +31,18 @@ const props = defineProps({
   outline: {
     type: Array,
     default: () => [],
+  },
+  narrativePlan: {
+    type: Object,
+    default: () => ({}),
+  },
+  slideGenerationQueue: {
+    type: Array,
+    default: () => [],
+  },
+  slideGenerationJob: {
+    type: Object,
+    default: () => ({}),
   },
   slides: {
     type: Array,
@@ -107,9 +119,11 @@ const emit = defineEmits([
   'update-spec-field',
   'create-data-package',
   'generate-outline',
-  'generate-directive',
+  'generate-narrative-plan',
+  'generate-slides',
   'regenerate-outline',
-  'regenerate-directive',
+  'regenerate-narrative-plan',
+  'regenerate-slides',
   'open-revision-target',
   'close-revision-target',
   'update-revision-draft',
@@ -148,10 +162,10 @@ const ungroupedSources = computed(() => props.sources.filter((source) => (
   source && source.id && !groupedSourceIds.value.has(String(source.id || ''))
 )))
 const hasVisibleSources = computed(() => sourceGroupsForTree.value.length > 0 || ungroupedSources.value.length > 0)
-const isOutlineGenerating = computed(() => props.currentStep === 'outline_generating')
-const isDirectiveGenerating = computed(() => props.currentStep === 'directive_generating')
+const isSlidesGenerating = computed(() => props.currentStep === 'slides_generating')
 const hasOutline = computed(() => props.outline.length > 0)
-const hasDirective = computed(() => props.currentStep === 'directive_draft')
+const hasNarrativePlan = computed(() => Array.isArray(props.narrativePlan && props.narrativePlan.slideRoles) && props.narrativePlan.slideRoles.length > 0)
+const hasDirective = computed(() => props.slides.length > 0)
 const blockingInputSources = computed(() => getBlockingPptInputSources({ sources: props.sources }))
 const outlineBlockReason = computed(() => {
   if (!(props.sourceSummary.selected || 0)) return '请先选择至少一个已生成来源'
@@ -163,8 +177,9 @@ const outlineBlockReason = computed(() => {
   }
   return ''
 })
-const canGenerateOutline = computed(() => !outlineBlockReason.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
-const canGenerateDirective = computed(() => hasOutline.value && !isOutlineGenerating.value && !isDirectiveGenerating.value)
+const canGenerateOutline = computed(() => !outlineBlockReason.value && !isGenerationJobActive.value && !isSlidesGenerating.value)
+const canGenerateNarrativePlan = computed(() => hasOutline.value && !isGenerationJobActive.value && !isSlidesGenerating.value)
+const canGenerateSlides = computed(() => hasOutline.value && hasNarrativePlan.value && !isGenerationJobActive.value && !isSlidesGenerating.value)
 const canCreateDataPackage = computed(() => (props.sourceSummary.selected || 0) > 0 && !props.dataPackageGenerating)
 const deliverableSourceCount = computed(() => props.sourceSummary.deliverable || props.sourceSummary.selectedDeliverable || 0)
 const emptyPayloadSourceCount = computed(() => props.sourceSummary.emptyPayload || 0)
@@ -174,13 +189,14 @@ const generationJobType = computed(() => String(activeGenerationJob.value.type |
 const generationJobEvents = computed(() => (Array.isArray(activeGenerationJob.value.events) ? activeGenerationJob.value.events.slice(-60) : []))
 const isGenerationJobActive = computed(() => ['requesting', 'response_received', 'applying'].includes(generationJobPhase.value))
 const generationJobTitle = computed(() => {
-  const isDirective = generationJobType.value === 'directive'
+  const isNarrative = generationJobType.value === 'narrative'
+  const isDirective = generationJobType.value === 'directive' || generationJobType.value === 'slides'
   const labels = {
-    requesting: isDirective ? '指令生成中' : '目录生成中',
-    response_received: isDirective ? '后端已返回，正在应用指令' : '后端已返回，正在应用目录',
-    applying: isDirective ? '正在写入指令' : '正在写入目录',
-    ready: isDirective ? '指令已写入' : '目录已写入',
-    failed: isDirective ? '指令生成失败' : '目录生成失败',
+    requesting: isNarrative ? '叙事方案生成中' : isDirective ? '逐页生成中' : '目录生成中',
+    response_received: isNarrative ? '后端已返回，正在应用叙事方案' : isDirective ? '后端已返回，正在应用 brief' : '后端已返回，正在应用目录',
+    applying: isNarrative ? '正在写入叙事方案' : isDirective ? '正在写入 brief' : '正在写入目录',
+    ready: isNarrative ? '叙事方案已写入' : isDirective ? 'brief 已写入' : '目录已写入',
+    failed: isNarrative ? '叙事方案生成失败' : isDirective ? '逐页生成失败' : '目录生成失败',
     superseded: '已有新请求接管',
   }
   return labels[generationJobPhase.value] || ''
@@ -200,6 +216,7 @@ const shouldShowGenerationJobPanel = computed(() => (
   generationJobTitle.value
   && (isGenerationJobActive.value || ['failed', 'superseded'].includes(generationJobPhase.value) || generationJobEvents.value.length)
 ))
+const shouldOpenGenerationJobPanel = computed(() => ['failed', 'superseded'].includes(generationJobPhase.value))
 const generationErrorText = computed(() => String(props.generationError || '').trim())
 const generationResponsePayload = computed(() => {
   const response = props.generationResponse && typeof props.generationResponse === 'object'
@@ -248,10 +265,69 @@ const generationErrorTitle = computed(() => {
     source_grouping: '来源分组失败，当前来源仍可继续用于生成目录。',
     data_package: '资料包生成失败，当前已选来源仍可继续用于生成目录。',
     outline: '目录生成失败，请检查模型配置后重试。',
+    narrative: '叙事方案生成失败，请检查模型配置后重试。',
+    slides: '逐页 brief 生成失败，可重新点击逐页生成继续。',
     directive: '指令文件生成失败，请检查模型配置后重试。',
   }
   return labels[String(props.generationErrorSource || '')] || 'PPT 工作台请求失败，请稍后重试。'
 })
+const slideGenerationActiveJob = computed(() => (props.slideGenerationJob && typeof props.slideGenerationJob === 'object' ? props.slideGenerationJob : {}))
+const slideGenerationFailedPage = computed(() => {
+  const failedFromJob = Number(slideGenerationActiveJob.value.failedPageNo || slideGenerationActiveJob.value.failed_page_no || 0) || 0
+  if (failedFromJob) return failedFromJob
+  const failedItem = Array.isArray(props.slideGenerationQueue)
+    ? props.slideGenerationQueue.find((item) => String(item && item.status) === 'failed')
+    : null
+  return Number(failedItem && (failedItem.pageNo || failedItem.page_no || 0)) || 0
+})
+const slideGenerationProgressText = computed(() => {
+  const current = Number(slideGenerationActiveJob.value.currentPageNo || slideGenerationActiveJob.value.current_page_no || 0) || 0
+  const total = Number(slideGenerationActiveJob.value.total || props.outline.length || 0) || 0
+  if (isSlidesGenerating.value && current && total) return `正在生成第 ${current}/${total} 页 brief`
+  if (slideGenerationFailedPage.value) return `第 ${slideGenerationFailedPage.value} 页生成失败，可重新点击逐页生成继续。`
+  return ''
+})
+const promptStageText = computed(() => {
+  if (slideGenerationProgressText.value) return slideGenerationProgressText.value
+  if (!hasOutline.value && outlineBlockReason.value) return outlineBlockReason.value
+  if (!hasOutline.value) return '先生成目录，确定 15 页结构。'
+  if (!hasNarrativePlan.value) return '目录已生成，下一步生成全局叙事方案。'
+  if (!hasDirective.value) return '叙事方案已生成，下一步逐页生成 brief。'
+  if (isViewingOutline.value) return '目录已生成；如需调整目录，可重新生成目录。'
+  return 'brief 草稿已生成，可继续重生成单页或重新逐页生成。'
+})
+const configCheckStatus = computed(() => {
+  if (!outlineBlockReason.value) return '资料已就绪，可以生成目录。'
+  return outlineBlockReason.value
+})
+const configCheckItems = computed(() => [
+  ['页数', `${props.spec.pageCount || 15} 页`],
+  ['受众', props.spec.audience || '政府评审'],
+  ['资料', `${props.sourceSummary.selected || 0} 个已选来源 · ${deliverableSourceCount.value} 个可用于 AI`],
+])
+const promptActions = computed(() => getPptPromptActions({
+  outline: props.outline,
+  narrativePlan: props.narrativePlan,
+  deckBrief: { slides: props.slides },
+  slideGenerationQueue: props.slideGenerationQueue,
+  slideGenerationJob: props.slideGenerationJob,
+}))
+function isPromptActionDisabled(action = {}) {
+  const event = String(action.event || '')
+  if (isGenerationJobActive.value || isSlidesGenerating.value) return true
+  if (event === 'generate-outline') return !canGenerateOutline.value
+  if (event === 'generate-narrative-plan') return !canGenerateNarrativePlan.value
+  if (event === 'generate-slides') return !canGenerateSlides.value
+  if (event === 'regenerate-outline') return !hasOutline.value
+  if (event === 'regenerate-narrative-plan') return !hasOutline.value
+  if (event === 'regenerate-slides') return !hasNarrativePlan.value
+  return false
+}
+function emitPromptAction(action = {}) {
+  const event = String(action.event || '')
+  if (!event || isPromptActionDisabled(action)) return
+  emit(event)
+}
 const activePackageSource = computed(() => sourceById.value.get(String(activePackageSourceId.value || '')) || null)
 const activeDocumentSource = computed(() => sourceById.value.get(String(activeDocumentSourceId.value || '')) || null)
 const activeCurrentSource = computed(() => sourceById.value.get(String(activeCurrentSourceId.value || '')) || null)
@@ -304,7 +380,7 @@ const activePackageSelectedCarrier = computed(() => {
 })
 const activeFlowIndex = computed(() => {
   if (props.currentStep === 'outline_generating') return 1
-  if (['outline_ready', 'directive_generating'].includes(props.currentStep)) return 2
+  if (['outline_ready', 'narrative_generating', 'narrative_ready', 'slides_generating'].includes(props.currentStep)) return 2
   if (props.currentStep === 'directive_draft') return 3
   return 0
 })
@@ -314,7 +390,29 @@ const isViewingMaterials = computed(() => flowViewMode.value === 'materials' && 
 const isViewingOutline = computed(() => flowViewMode.value === 'outline' && hasOutline.value)
 const isViewingDirective = computed(() => flowViewMode.value === 'directive' && hasDirective.value)
 const shouldShowConfigPanel = computed(() => !hasOutline.value || isViewingMaterials.value)
+const shouldShowNarrativePanel = computed(() => hasNarrativePlan.value && !hasDirective.value && !isViewingMaterials.value && !isViewingOutline.value)
 const shouldShowDirectiveRows = computed(() => hasDirective.value && !isViewingMaterials.value && !isViewingOutline.value)
+const narrativeStrategyCards = computed(() => [
+  ['总叙事主线', props.narrativePlan.storyline],
+  ['风格约束', props.narrativePlan.styleGuide],
+  ['证据策略', props.narrativePlan.evidenceStrategy],
+  ['图表策略', props.narrativePlan.chartStrategy],
+].filter((item) => String(item[1] || '').trim()))
+const narrativeRoleRows = computed(() => {
+  const roles = Array.isArray(props.narrativePlan && props.narrativePlan.slideRoles)
+    ? props.narrativePlan.slideRoles
+    : []
+  return roles.map((role, index) => ({
+    id: `narrative-role-${Number(role.pageNo || 0) || index + 1}`,
+    pageNo: Number(role.pageNo || 0) || index + 1,
+    title: role.role || `页面 ${index + 1}`,
+    objective: role.objective || '',
+    evidenceFocus: Array.isArray(role.evidenceFocus) ? role.evidenceFocus.filter(Boolean) : [],
+    visualDirection: role.visualDirection || '',
+    chartIntent: role.chartIntent || '',
+    transitionNote: role.transitionNote || '',
+  }))
+})
 const outlineRows = computed(() => {
   if (shouldShowDirectiveRows.value && props.slides.length) {
     return props.slides.map((item, index) => ({
@@ -326,7 +424,6 @@ const outlineRows = computed(() => {
         ['核心文案', item.keyMessage],
         ['页面提示', item.visualPlan],
         ['素材要求', Array.isArray(item.requiredSources) ? item.requiredSources.join(' / ') : item.requiredSources],
-        ['讲稿提示', item.speakerNotes],
       ].filter((field) => String(field[1] || '').trim()),
       metricClaims: Array.isArray(item.metricClaims) ? item.metricClaims : [],
       metricGaps: Array.isArray(item.metricGaps) ? item.metricGaps : [],
@@ -1192,7 +1289,7 @@ function confirmSourceDialog() {
           <button
             type="button"
             :class="{
-              'is-current': !isViewingMaterials && (activeFlowIndex === 1 || isViewingOutline || (activeFlowIndex === 2 && !isViewingDirective)),
+              'is-current': !isViewingMaterials && (activeFlowIndex === 1 || isViewingOutline),
               'is-complete': hasOutline && activeFlowIndex > 1 && !isViewingOutline
             }"
             :disabled="!canViewOutlineStep"
@@ -1201,14 +1298,20 @@ function confirmSourceDialog() {
           </button>
           <button
             type="button"
-            :class="{ 'is-current': !isViewingMaterials && !isViewingOutline && (activeFlowIndex === 2 || activeFlowIndex === 3 || isViewingDirective), 'is-complete': hasDirective && !isViewingDirective }"
+            :class="{ 'is-current': !isViewingMaterials && !isViewingOutline && activeFlowIndex === 2 && !hasNarrativePlan, 'is-complete': hasNarrativePlan }"
+            :disabled="!hasNarrativePlan">
+            生成叙事
+          </button>
+          <button
+            type="button"
+            :class="{ 'is-current': !isViewingMaterials && !isViewingOutline && ((hasNarrativePlan && !hasDirective) || activeFlowIndex === 3 || isViewingDirective), 'is-complete': hasDirective && !isViewingDirective }"
             :disabled="!canViewDirectiveStep"
             @click="showFlowView('directive')">
             生成指令
           </button>
           <button type="button" disabled>选择风格</button>
-          <button type="button" :class="{ 'is-current': activeFlowIndex === 4 }" disabled>生成页面</button>
-          <button type="button" :class="{ 'is-current': activeFlowIndex === 5 }" disabled>导出</button>
+          <button type="button" :class="{ 'is-current': activeFlowIndex === 5 }" disabled>生成页面</button>
+          <button type="button" :class="{ 'is-current': activeFlowIndex === 6 }" disabled>导出</button>
         </div>
         <div class="agent-ppt-directive-summary">
           <div>
@@ -1230,7 +1333,7 @@ function confirmSourceDialog() {
           </div>
         </div>
         <div class="agent-ppt-main-scroll">
-          <details v-if="shouldShowGenerationJobPanel" class="agent-ppt-generation-job" open>
+          <details v-if="shouldShowGenerationJobPanel" class="agent-ppt-generation-job" :open="shouldOpenGenerationJobPanel">
             <summary>
               <span>{{ generationJobTitle }}</span>
               <small>{{ generationJobSummary || activeGenerationJob.id || '等待状态更新' }}</small>
@@ -1247,18 +1350,32 @@ function confirmSourceDialog() {
           </details>
           <div v-if="shouldShowConfigPanel" class="agent-ppt-target-config-panel">
             <div class="agent-ppt-target-config-head">
-              <strong>配置生成目标</strong>
-              <span v-if="generationErrorText">{{ generationErrorTitle }}</span>
-              <span v-else>确认主题、页数、受众和来源后生成 PPT 目录。</span>
+              <div>
+                <span>生成前检查</span>
+                <strong>配置目录生成目标</strong>
+              </div>
+              <small :class="{ 'is-blocked': !!outlineBlockReason }">
+                {{ generationErrorText ? generationErrorTitle : configCheckStatus }}
+              </small>
             </div>
-            <label class="agent-ppt-config-field">
-              <span>主题</span>
-              <input
-                type="text"
-                :value="spec.topic || ''"
-                placeholder="输入 PPT 主题"
-                @input="$emit('update-spec-field', 'topic', $event.target.value)">
-            </label>
+            <div class="agent-ppt-target-config-body">
+              <label class="agent-ppt-config-field is-topic">
+                <span>主题</span>
+                <input
+                  type="text"
+                  :value="spec.topic || ''"
+                  placeholder="输入 PPT 主题"
+                  @input="$emit('update-spec-field', 'topic', $event.target.value)">
+              </label>
+              <div class="agent-ppt-config-checks" aria-label="生成前检查项">
+                <article
+                  v-for="item in configCheckItems"
+                  :key="`ppt-config-check-${item[0]}`">
+                  <span>{{ item[0] }}</span>
+                  <strong>{{ item[1] }}</strong>
+                </article>
+              </div>
+            </div>
             <div class="agent-ppt-target-config-grid">
               <label class="agent-ppt-config-field">
                 <span>页数</span>
@@ -1280,6 +1397,7 @@ function confirmSourceDialog() {
                 <span>资料</span>
                 <strong>{{ sourceSummary.selected || 0 }} 个已选来源 · {{ deliverableSourceCount }} 个可用于 AI</strong>
                 <small v-if="emptyPayloadSourceCount">{{ emptyPayloadSourceCount }} 个未进入模型</small>
+                <small v-if="blockingInputSources.length">{{ blockingInputSources.length }} 个来源仍未就绪</small>
               </div>
             </div>
           </div>
@@ -1291,7 +1409,55 @@ function confirmSourceDialog() {
               </summary>
               <pre>{{ generationResponseJson }}</pre>
             </details>
+            <section v-if="shouldShowNarrativePanel" class="agent-ppt-narrative-panel" aria-label="叙事方案">
+              <header class="agent-ppt-narrative-head">
+                <div>
+                  <span>叙事方案</span>
+                  <strong>全局叙事与逐页角色分配</strong>
+                </div>
+                <small>{{ narrativeRoleRows.length }} 页角色</small>
+              </header>
+              <div v-if="narrativeStrategyCards.length" class="agent-ppt-narrative-strategy">
+                <article
+                  v-for="card in narrativeStrategyCards"
+                  :key="`narrative-strategy-${card[0]}`">
+                  <span>{{ card[0] }}</span>
+                  <p>{{ card[1] }}</p>
+                </article>
+              </div>
+              <div class="agent-ppt-narrative-roles">
+                <article
+                  v-for="role in narrativeRoleRows"
+                  :key="role.id"
+                  class="agent-ppt-narrative-role">
+                  <span class="agent-ppt-directive-page">{{ String(role.pageNo).padStart(2, '0') }}</span>
+                  <div class="agent-ppt-directive-content">
+                    <strong>{{ role.title }}</strong>
+                    <em>{{ role.objective || '未提供页面目标' }}</em>
+                    <dl class="agent-ppt-directive-fields">
+                      <div v-if="role.evidenceFocus.length">
+                        <dt>证据重点</dt>
+                        <dd>{{ role.evidenceFocus.join(' / ') }}</dd>
+                      </div>
+                      <div v-if="role.visualDirection">
+                        <dt>视觉方向</dt>
+                        <dd>{{ role.visualDirection }}</dd>
+                      </div>
+                      <div v-if="role.chartIntent">
+                        <dt>图表意图</dt>
+                        <dd>{{ role.chartIntent }}</dd>
+                      </div>
+                      <div v-if="role.transitionNote">
+                        <dt>承接关系</dt>
+                        <dd>{{ role.transitionNote }}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </article>
+              </div>
+            </section>
             <div
+              v-else
               v-for="row in outlineRows"
               :key="`ppt-directive-row-${row.id}`"
               class="agent-ppt-directive-row"
@@ -1333,7 +1499,7 @@ function confirmSourceDialog() {
                   </p>
                 </div>
                 <div v-if="row.chartSpecs.length" class="agent-ppt-chart-specs">
-                  <span>图表规格</span>
+                  <span>可视化方案</span>
                   <article
                     v-for="chart in row.chartSpecs"
                     :key="`chart-spec-${row.id}-${chart.chart_id || chart.chartId || chart.title}`">
@@ -1396,52 +1562,17 @@ function confirmSourceDialog() {
         <div class="agent-ppt-prompt-box">
           <span v-if="generationErrorText">{{ generationErrorText }}</span>
           <span v-else-if="isGenerationJobActive">{{ generationJobTitle }}</span>
-          <span v-else-if="!hasOutline && outlineBlockReason">{{ outlineBlockReason }}</span>
-          <span v-else-if="!hasOutline">先生成目录，再生成逐页指令文件</span>
-          <span v-else-if="!hasDirective">目录已生成，下一步生成逐页指令</span>
-          <span v-else-if="isViewingOutline">正在查看目录；如需调整目录，可重新生成目录。</span>
-          <span v-else>指令草稿已生成；下一阶段暂未开放，可按需重新生成指令文件。</span>
+          <span v-else>{{ promptStageText }}</span>
           <div class="agent-ppt-prompt-actions">
             <button
-              v-if="!hasOutline"
+              v-for="action in promptActions"
+              :key="`ppt-prompt-action-${action.id}`"
               type="button"
-              class="is-primary"
-              :disabled="!canGenerateOutline"
-              @click="$emit('generate-outline')">
-              {{ isOutlineGenerating || (isGenerationJobActive && generationJobType === 'outline') ? (generationJobTitle || '目录生成中') : '生成目录' }}
+              :class="{ 'is-primary': action.primary }"
+              :disabled="isPromptActionDisabled(action)"
+              @click="emitPromptAction(action)">
+              {{ action.label }}
             </button>
-            <template v-else-if="!hasDirective">
-              <button
-                type="button"
-                class="is-primary"
-                :disabled="!canGenerateDirective"
-                @click="$emit('generate-directive')">
-                {{ isDirectiveGenerating || (isGenerationJobActive && generationJobType === 'directive') ? (generationJobTitle || '指令生成中') : '生成指令文件' }}
-              </button>
-              <button
-                type="button"
-                :disabled="isOutlineGenerating || isDirectiveGenerating"
-                @click="$emit('regenerate-outline')">
-                重新生成目录
-              </button>
-            </template>
-            <template v-else-if="isViewingOutline">
-              <button
-                type="button"
-                :disabled="isOutlineGenerating || isDirectiveGenerating"
-                @click="$emit('regenerate-outline')">
-                重新生成目录
-              </button>
-            </template>
-            <template v-else>
-              <button type="button" class="is-primary" disabled>下一阶段暂未开放</button>
-              <button
-                type="button"
-                :disabled="isOutlineGenerating || isDirectiveGenerating"
-                @click="$emit('regenerate-directive')">
-                重新生成指令文件
-              </button>
-            </template>
           </div>
         </div>
       </section>
@@ -1517,14 +1648,6 @@ function confirmSourceDialog() {
               :disabled="isCurrentRevisionGenerating"
               placeholder="用逗号分隔来源 id"
               @input="updateRevisionDraft('requiredSources', $event.target.value)">
-          </label>
-          <label class="agent-ppt-config-field">
-            <span>讲稿提示</span>
-            <textarea
-              rows="4"
-              :value="directiveRevisionDraft.speakerNotes || ''"
-              :disabled="isCurrentRevisionGenerating"
-              @input="updateRevisionDraft('speakerNotes', $event.target.value)"></textarea>
           </label>
         </div>
 
@@ -1605,7 +1728,7 @@ function confirmSourceDialog() {
               <strong>{{ Number(activeCurrentTransport.evidence_count ?? activeCurrentTransport.evidenceCount ?? 0) || 0 }}</strong>
             </article>
             <article>
-              <span>图表规格</span>
+              <span>可视化方案</span>
               <strong>{{ Number(activeCurrentTransport.chart_spec_count ?? activeCurrentTransport.chartSpecCount ?? 0) || 0 }}</strong>
             </article>
           </div>
@@ -1697,7 +1820,7 @@ function confirmSourceDialog() {
         </div>
 
         <div v-if="activeCurrentChartSpecs.length" class="agent-ppt-package-section-head">
-          <strong>图表规格</strong>
+          <strong>可视化方案</strong>
           <span>{{ activeCurrentChartSpecs.length }} 个</span>
         </div>
         <div v-if="activeCurrentChartSpecs.length" class="agent-ppt-current-metric-list">

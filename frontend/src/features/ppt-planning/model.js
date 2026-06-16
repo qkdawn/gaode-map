@@ -137,7 +137,9 @@ export const PPT_PLANNING_STEPS = Object.freeze({
   MATERIALS: 'materials',
   OUTLINE_GENERATING: 'outline_generating',
   OUTLINE_READY: 'outline_ready',
-  DIRECTIVE_GENERATING: 'directive_generating',
+  NARRATIVE_GENERATING: 'narrative_generating',
+  NARRATIVE_READY: 'narrative_ready',
+  SLIDES_GENERATING: 'slides_generating',
   DIRECTIVE_DRAFT: 'directive_draft',
 })
 
@@ -459,7 +461,6 @@ export function createDefaultDeckBriefPreview() {
         keyMessage: '明确区域更新的汇报对象与核心命题',
         visualPlan: '项目名、区域底图、关键判断一句话',
         requiredSources: ['current:scope'],
-        speakerNotes: '第一阶段先生成逐页指令，不直接生成 PPTX。',
       },
       {
         id: 'location',
@@ -469,7 +470,6 @@ export function createDefaultDeckBriefPreview() {
         keyMessage: '用交通、周边资源和城市关系建立区位价值',
         visualPlan: '区位图、圈层关系、交通节点',
         requiredSources: ['current:scope', 'current:dataset:poi', 'current:dataset:h3'],
-        speakerNotes: '后续由 PPT 指令文件决定完整页序。',
       },
       {
         id: 'diagnosis',
@@ -479,7 +479,6 @@ export function createDefaultDeckBriefPreview() {
         keyMessage: '从 POI、人口、夜光、路网中提炼现状矛盾',
         visualPlan: '指标卡、热力图、问题清单',
         requiredSources: ['current:dataset:poi', 'current:analysis:population', 'current:analysis:nightlight', 'current:analysis:road'],
-        speakerNotes: '当前仅展示代表性页面。',
       },
       {
         id: 'strategy',
@@ -489,7 +488,6 @@ export function createDefaultDeckBriefPreview() {
         keyMessage: '把诊断转成可讨论的更新策略',
         visualPlan: '策略分区、功能组合、空间结构',
         requiredSources: ['current:dataset:h3', 'current:analysis:road'],
-        speakerNotes: '真实生成时会引用选中来源。',
       },
       {
         id: 'implementation',
@@ -499,7 +497,6 @@ export function createDefaultDeckBriefPreview() {
         keyMessage: '用分期、运营和治理路径支撑落地',
         visualPlan: '时间轴、责任矩阵、近期行动',
         requiredSources: ['current:scope'],
-        speakerNotes: 'PPTX 导出在后续阶段接入。',
       },
     ],
   }
@@ -527,7 +524,6 @@ export function normalizeDeckSlideBrief(seed = {}, fallbackIndex = 1) {
     keyMessage: asText(seed.keyMessage || seed.key_message),
     visualPlan: asText(seed.visualPlan || seed.visual_plan),
     requiredSources: cloneArray(seed.requiredSources || seed.required_sources).map((item) => asText(item)).filter(Boolean),
-    speakerNotes: asText(seed.speakerNotes || seed.speaker_notes),
     metricClaims: cloneArray(seed.metricClaims || seed.metric_claims).map((item) => cloneObject(item)).filter((item) => item.metric_id || item.metricId || item.text),
     metricGaps: cloneArray(seed.metricGaps || seed.metric_gaps).map((item) => (item && typeof item === 'object' ? cloneObject(item) : { text: asText(item) })).filter((item) => asText(item.text || item.reason || item.needed_metric || item.neededMetric)),
     chartSpecs: cloneArray(seed.chartSpecs || seed.chart_specs).map((item) => cloneObject(item)).filter((item) => item.chart_id || item.chartId || item.title),
@@ -550,12 +546,39 @@ export function normalizePptOutline(seed = []) {
 }
 
 export function normalizeDeckBrief(seed = {}) {
-  const fallback = createDefaultDeckBriefPreview()
   const slides = cloneArray(seed.slides).length
     ? cloneArray(seed.slides).map((item, index) => normalizeDeckSlideBrief(item, index + 1))
-    : fallback.slides
+    : []
   return {
-    status: asText(seed.status) || fallback.status,
+    status: asText(seed.status) || 'draft',
     slides,
+  }
+}
+
+export function normalizeNarrativeSlideRole(seed = {}, fallbackPageNo = 1) {
+  const pageNo = Number(seed.pageNo || seed.page_no || fallbackPageNo) || fallbackPageNo
+  return {
+    pageNo,
+    role: asText(seed.role),
+    objective: asText(seed.objective),
+    evidenceFocus: cloneArray(seed.evidenceFocus || seed.evidence_focus).map((item) => asText(item)).filter(Boolean),
+    visualDirection: asText(seed.visualDirection || seed.visual_direction),
+    chartIntent: asText(seed.chartIntent || seed.chart_intent),
+    transitionNote: asText(seed.transitionNote || seed.transition_note),
+  }
+}
+
+export function normalizeNarrativePlan(seed = {}) {
+  const roles = cloneArray(seed.slideRoles || seed.slide_roles)
+    .map((item, index) => normalizeNarrativeSlideRole(item, index + 1))
+    .filter((item) => item.pageNo)
+  return {
+    storyline: asText(seed.storyline),
+    styleGuide: asText(seed.styleGuide || seed.style_guide),
+    evidenceStrategy: asText(seed.evidenceStrategy || seed.evidence_strategy),
+    chartStrategy: asText(seed.chartStrategy || seed.chart_strategy),
+    slideRoles: roles,
+    missingInputs: cloneArray(seed.missingInputs || seed.missing_inputs).map((item) => asText(item)).filter(Boolean),
+    contextManifest: cloneObject(seed.contextManifest || seed.context_manifest),
   }
 }

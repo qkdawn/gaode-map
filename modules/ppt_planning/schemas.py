@@ -270,7 +270,6 @@ class DeckSlideBrief(BaseModel):
     key_message: str = ""
     visual_plan: str = ""
     required_sources: List[str] = Field(default_factory=list)
-    speaker_notes: str = ""
     metric_claims: List[Dict[str, Any]] = Field(default_factory=list)
     metric_gaps: List[Dict[str, Any]] = Field(default_factory=list)
     chart_specs: List[Dict[str, Any]] = Field(default_factory=list)
@@ -301,6 +300,55 @@ class DeckBriefRequest(BaseModel):
         return value
 
 
+class DeckNarrativeSlideRole(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    page_no: int = Field(..., ge=1)
+    role: str = ""
+    objective: str = ""
+    evidence_focus: List[str] = Field(default_factory=list)
+    visual_direction: str = ""
+    chart_intent: str = ""
+    transition_note: str = ""
+
+
+class DeckNarrativePlanRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    area_id: str = ""
+    spec: Optional[PptSpecResponse] = None
+    outline: List[PptOutlineItem] = Field(default_factory=list)
+    source_ids: List[str] = Field(default_factory=list)
+    sources: List[PptSource] = Field(default_factory=list)
+    current: Dict[str, Any] = Field(default_factory=dict)
+    topic: str = ""
+    audience: str = "政府评审"
+    deck_type: str = "城市更新概念策划"
+    page_count: int = Field(15, ge=1, le=80)
+    research_enabled: bool = True
+
+    @field_validator("source_ids", mode="before")
+    @classmethod
+    def _normalize_source_ids(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        return value
+
+
+class DeckNarrativePlanResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    storyline: str = ""
+    style_guide: str = ""
+    evidence_strategy: str = ""
+    chart_strategy: str = ""
+    slide_roles: List[DeckNarrativeSlideRole] = Field(default_factory=list)
+    missing_inputs: List[str] = Field(default_factory=list)
+    context_manifest: Dict[str, Any] = Field(default_factory=dict)
+
+
 class DeckBriefResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -320,6 +368,7 @@ class DeckBriefSlideRequest(BaseModel):
     slides: List[DeckSlideBrief] = Field(default_factory=list)
     target: DeckSlideBrief
     outline_item: Optional[PptOutlineItem] = None
+    narrative_plan: Optional[DeckNarrativePlanResponse] = None
     revision_note: str = Field(..., min_length=1)
     source_ids: List[str] = Field(default_factory=list)
     sources: List[PptSource] = Field(default_factory=list)

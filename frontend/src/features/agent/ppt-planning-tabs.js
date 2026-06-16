@@ -8,6 +8,8 @@ import {
   deleteDocumentSource,
   generateDeckBrief,
   generateDeckBriefWithDebug,
+  generateNarrativePlan,
+  generateNarrativePlanWithDebug,
   generatePptSpec,
   generatePptSpecWithDebug,
   getJobStatus,
@@ -21,11 +23,13 @@ import {
   addPptDataPackageSource,
   appendPptGenerationDebugEvent,
   applyDeckBriefSlideRevision,
+  applyGeneratedSlideBrief,
   applyPptOutlineSectionRevision,
   applyPptSourceGroupsResponse,
   buildDeckBriefSlidePayload,
   buildDeckBriefPayload,
   buildPptOutlineSectionPayload,
+  buildNarrativePlanPayload,
   buildPptSpecPayload,
   collectPptChartArtifactFilenames,
   completePptGenerationJob,
@@ -38,6 +42,7 @@ import {
   getPptSourceSummary,
   isPptDirectivePageStale,
   failPptGenerationJob,
+  failSlideGenerationQueue,
   markPptDirectiveStaleForSources,
   mergePptPlanningSources,
   movePptSourceToGroup,
@@ -46,6 +51,7 @@ import {
   renamePptSource,
   renamePptSourceGroup,
   resetPptPlanningToMaterials,
+  resetPptPlanningToNarrativeReady,
   resetPptPlanningToOutlineReady,
   selectDeckSlideBrief,
   setAllPptSourcesSelected,
@@ -53,6 +59,7 @@ import {
   setPptGenerationError,
   setPptSourceRefreshing,
   startPptGenerationJob,
+  startSlideGenerationQueue,
   setPptActiveRevisionTarget,
   setPptRevisionDraftField,
   setPptRevisionGeneratingTarget,
@@ -1268,6 +1275,15 @@ export function createAgentPptPlanningTabMethods() {
     getAgentPptPlanningOutline() {
       return cloneArray(this.getAgentPptPlanningStateWithSystemSources().outline)
     },
+    getAgentPptPlanningNarrativePlan() {
+      return cloneObject(this.getAgentActivePptPlanningState().narrativePlan)
+    },
+    getAgentPptPlanningSlideGenerationQueue() {
+      return cloneArray(this.getAgentActivePptPlanningState().slideGenerationQueue)
+    },
+    getAgentPptPlanningSlideGenerationJob() {
+      return cloneObject(this.getAgentActivePptPlanningState().slideGenerationJob)
+    },
     getAgentPptPlanningSlides() {
       return cloneArray((this.getAgentActivePptPlanningState().deckBrief || {}).slides)
     },
@@ -1496,7 +1512,6 @@ export function createAgentPptPlanningTabMethods() {
           keyMessage: asText(draft.keyMessage),
           visualPlan: asText(draft.visualPlan),
           requiredSources,
-          speakerNotes: asText(draft.speakerNotes),
         }))
         return
       }
@@ -1574,6 +1589,12 @@ export function createAgentPptPlanningTabMethods() {
     },
     requestAgentPptPlanningDirectiveWithDebug(payload = {}, options = {}) {
       return generateDeckBriefWithDebug(payload, options)
+    },
+    requestAgentPptPlanningNarrativePlan(payload = {}) {
+      return generateNarrativePlan(payload)
+    },
+    requestAgentPptPlanningNarrativePlanWithDebug(payload = {}, options = {}) {
+      return generateNarrativePlanWithDebug(payload, options)
     },
     requestAgentPptPlanningDirectiveSlide(payload = {}) {
       return regenerateDeckBriefSlide(payload)
@@ -1939,6 +1960,96 @@ export function createAgentPptPlanningTabMethods() {
         globalThis.clearInterval(heartbeatId)
       }
     },
+    async generateAgentPptPlanningNarrativePlan() {
+      const activeTab = this.getAgentActivePptPlanningTab()
+      const tabId = asText(activeTab && activeTab.id)
+      if (!tabId) return
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      if (!cloneArray(state.outline).length) return
+      const requestId = createPptGenerationRequestId('narrative')
+      const writeRuntimeState = (nextState = {}) => this.updateAgentPptPlanningTabRuntimeState(tabId, nextState)
+      const writeRuntimeEvent = (name = '', details = {}) => {
+        try {
+          return writeRuntimeState(appendPptDebugEventToState(
+            this.getAgentPptPlanningTabState(tabId),
+            name,
+            { requestId, tabId, type: 'narrative', ...cloneObject(details) },
+          ))
+        } catch (error) {
+          if (typeof console !== 'undefined' && console.error) console.error('PPT narrative runtime event failed', error)
+          return false
+        }
+      }
+      writeRuntimeState(startPptGenerationJob(state, { requestId, type: 'narrative', tabId }))
+      writeRuntimeEvent('narrative_start_dispatched')
+      const heartbeatId = globalThis.setInterval(() => {
+        writeRuntimeEvent('generation_heartbeat')
+      }, 10000)
+      let response = null
+      try {
+        response = await this.requestAgentPptPlanningNarrativePlanWithDebug(
+          buildNarrativePlanPayload(state, this.buildAgentPptPlanningApiContext()),
+          { onDebugEvent: (name = '', details = {}) => writeRuntimeEvent(name, details) },
+        )
+        writeRuntimeEvent('json_or_api_returned', {
+          roleCount: cloneArray(response && (response.slide_roles || response.slideRoles)).length,
+          keys: Object.keys(response || {}).slice(0, 8),
+        })
+        const completedState = completePptGenerationJob(
+          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+          requestId,
+          response,
+        )
+        this.updateAgentPptPlanningTabState(tabId, completedState)
+      } catch (error) {
+        writeRuntimeEvent('fetch_failed', {
+          kind: asText(error && error.kind),
+          code: asText(error && error.code),
+          message: asText(error && error.message ? error.message : error),
+        })
+        this.updateAgentPptPlanningTabState(tabId, failPptGenerationJob(
+          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+          requestId,
+          normalizePptGenerationErrorMessage(error, 'narrative'),
+          { source: 'narrative', generationResponse: response || error?.response || error?.data || {} },
+        ))
+      } finally {
+        globalThis.clearInterval(heartbeatId)
+      }
+    },
+    async generateAgentPptPlanningSlides() {
+      const activeTab = this.getAgentActivePptPlanningTab()
+      const tabId = asText(activeTab && activeTab.id)
+      if (!tabId) return
+      let state = this.getAgentPptPlanningStateWithSystemSources()
+      const outline = cloneArray(state.outline).sort((a, b) => (Number(a.pageNo || 0) || 0) - (Number(b.pageNo || 0) || 0))
+      if (!outline.length || !cloneArray(state.narrativePlan && state.narrativePlan.slideRoles).length) return
+      this.updateAgentPptPlanningTabState(tabId, startSlideGenerationQueue(state))
+      for (const outlineItem of outline) {
+        state = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
+        const existing = cloneArray((state.deckBrief || {}).slides).find((slide) => Number(slide.index || 0) === Number(outlineItem.pageNo || 0))
+        if (existing) continue
+        try {
+          const response = await this.requestAgentPptPlanningDirectiveSlide(buildDeckBriefSlidePayload(
+            state,
+            { index: Number(outlineItem.pageNo || 0), title: outlineItem.theme, purpose: outlineItem.purpose },
+            '按已确认目录和叙事方案生成这一页 brief。',
+            this.buildAgentPptPlanningApiContext(),
+          ))
+          this.updateAgentPptPlanningTabState(tabId, applyGeneratedSlideBrief(
+            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+            response,
+          ))
+        } catch (error) {
+          this.updateAgentPptPlanningTabState(tabId, failSlideGenerationQueue(
+            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+            Number(outlineItem.pageNo || 0),
+            normalizePptGenerationErrorMessage(error, 'slides'),
+          ))
+          break
+        }
+      }
+    },
     confirmAgentPptPlanningStepReset(message = '') {
       if (typeof this.confirmPptPlanningStepReset === 'function') {
         return this.confirmPptPlanningStepReset(message)
@@ -1970,6 +2081,28 @@ export function createAgentPptPlanningTabMethods() {
       this.updateAgentActivePptPlanningState(resetPptPlanningToOutlineReady(this.getAgentPptPlanningStateWithSystemSources()))
       this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
       await this.generateAgentPptPlanningDirective()
+    },
+    async regenerateAgentPptPlanningNarrativePlanWithConfirm() {
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const hasOutline = cloneArray(state.outline).length > 0
+      if (!hasOutline) return
+      const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成叙事方案会清空旧叙事方案和逐页 brief，但保留当前目录，确认继续？')
+      if (!confirmed) return
+      const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
+      this.updateAgentActivePptPlanningState(resetPptPlanningToOutlineReady(this.getAgentPptPlanningStateWithSystemSources()))
+      this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+      await this.generateAgentPptPlanningNarrativePlan()
+    },
+    async regenerateAgentPptPlanningSlidesWithConfirm() {
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const hasNarrativePlan = cloneArray(state.narrativePlan && state.narrativePlan.slideRoles).length > 0
+      if (!hasNarrativePlan) return
+      const confirmed = await this.confirmAgentPptPlanningStepReset('重新逐页生成 brief 会清空旧 brief，但保留当前目录和叙事方案，确认继续？')
+      if (!confirmed) return
+      const staleFilenames = collectPptChartArtifactFilenames(state.deckBrief)
+      this.updateAgentActivePptPlanningState(resetPptPlanningToNarrativeReady(this.getAgentPptPlanningStateWithSystemSources()))
+      this.cleanupAgentPptPlanningChartArtifacts(staleFilenames)
+      await this.generateAgentPptPlanningSlides()
     },
     selectAgentPptPlanningSlide(slideId = '') {
       this.updateAgentActivePptPlanningState(selectDeckSlideBrief(this.getAgentActivePptPlanningState(), slideId))
