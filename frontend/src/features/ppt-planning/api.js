@@ -158,8 +158,8 @@ export function generateDeckBriefWithDebug(payload = {}, options = {}) {
   return postJsonWithTimeout('/api/v1/analysis/ppt/deck-brief', payload, options)
 }
 
-export function regenerateDeckBriefSlide(payload = {}) {
-  return postJson('/api/v1/analysis/ppt/deck-brief/slide', payload)
+export function regenerateDeckBriefSlide(payload = {}, options = {}) {
+  return postJsonWithTimeout('/api/v1/analysis/ppt/deck-brief/slide', payload, options)
 }
 
 export function generatePptVisualArtifacts(payload = {}) {

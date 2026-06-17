@@ -2,7 +2,24 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List
+
+
+DEBUG_DIR = Path("runtime")
+
+
+def _dump_invalid_llm_output(name: str, text: str, error: Exception | None = None) -> None:
+    try:
+        DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+        path = DEBUG_DIR / name
+        parts = []
+        if error is not None:
+            parts.append(f"error: {error!r}")
+        parts.append(text)
+        path.write_text("\n\n".join(parts), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _strip_json_trailing_commas(text: str) -> str:
@@ -69,7 +86,15 @@ def extract_json_object(raw_text: str) -> Dict[str, Any]:
         start = text.find("{")
         end = text.rfind("}")
         if start >= 0 and end > start:
-            return _load_json_object(text[start:end + 1])
+            try:
+                return _load_json_object(text[start:end + 1])
+            except Exception as exc:
+                _dump_invalid_llm_output("_last_invalid_llm_json_object.txt", text[start:end + 1], exc)
+                raise
+        _dump_invalid_llm_output("_last_invalid_llm_json_text.txt", text)
+        raise
+    except Exception as exc:
+        _dump_invalid_llm_output("_last_invalid_llm_json_text.txt", text, exc)
         raise
 
 

@@ -1042,40 +1042,56 @@ async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSli
     outline_context = _find_outline_context(outline, page_no)
     slide_context = _find_slide_context(request.slides, page_no)
     target_slide_role = _find_narrative_role(request.narrative_plan, page_no)
-    raw = await _invoke_ppt_json_role(
-        system_prompt=DECK_BRIEF_SLIDE_SYSTEM_PROMPT,
-        user_payload={
-            "task": "ppt_directive_slide_regeneration",
-            "area_id": request.area_id,
-            "revision_note": request.revision_note,
-            "topic": request.topic,
-            "audience": request.audience,
-            "deck_type": request.deck_type,
-            "page_count": request.spec.page_count if request.spec else request.page_count,
-            "source_ids": request.source_ids,
-            "sources": _selected_sources_payload(request),
-            "source_summary": _source_summary(request.source_ids, request.research_enabled),
-            "scope_brief": context_bundle["scope_brief"],
-            "metric_context": context_bundle["metric_context"],
-            "evidence_context": context_bundle["evidence_context"],
-            "source_manifest": context_bundle["source_manifest"],
-            "spec": request.spec.model_dump(mode="json") if request.spec else None,
-            "outline": [item.model_dump(mode="json") for item in request.outline],
-            "slides": [item.model_dump(mode="json") for item in request.slides],
-            "outline_item": request.outline_item.model_dump(mode="json") if request.outline_item else None,
-            "previous_outline_item": outline_context["previous_outline_item"],
-            "next_outline_item": outline_context["next_outline_item"],
-            "previous_slide": slide_context["previous_slide"],
-            "next_slide": slide_context["next_slide"],
-            "narrative_plan": request.narrative_plan.model_dump(mode="json") if request.narrative_plan else None,
-            "target_slide_role": target_slide_role,
-            "target": request.target.model_dump(mode="json"),
-        },
-        emit=None,
-        phase="ppt_directive_slide_regeneration",
-        title="重生成 PPT 指令页",
-        reasoning_id=f"ppt-directive-slide-{request.target.index}",
-    )
+    user_payload = {
+        "task": "ppt_directive_slide_regeneration",
+        "area_id": request.area_id,
+        "revision_note": request.revision_note,
+        "topic": request.topic,
+        "audience": request.audience,
+        "deck_type": request.deck_type,
+        "page_count": request.spec.page_count if request.spec else request.page_count,
+        "source_ids": request.source_ids,
+        "sources": _selected_sources_payload(request),
+        "source_summary": _source_summary(request.source_ids, request.research_enabled),
+        "scope_brief": context_bundle["scope_brief"],
+        "metric_context": context_bundle["metric_context"],
+        "evidence_context": context_bundle["evidence_context"],
+        "source_manifest": context_bundle["source_manifest"],
+        "spec": request.spec.model_dump(mode="json") if request.spec else None,
+        "outline": [item.model_dump(mode="json") for item in request.outline],
+        "slides": [item.model_dump(mode="json") for item in request.slides],
+        "outline_item": request.outline_item.model_dump(mode="json") if request.outline_item else None,
+        "previous_outline_item": outline_context["previous_outline_item"],
+        "next_outline_item": outline_context["next_outline_item"],
+        "previous_slide": slide_context["previous_slide"],
+        "next_slide": slide_context["next_slide"],
+        "narrative_plan": request.narrative_plan.model_dump(mode="json") if request.narrative_plan else None,
+        "target_slide_role": target_slide_role,
+        "target": request.target.model_dump(mode="json"),
+    }
+    raw: Dict[str, Any] = {}
+    for attempt in range(2):
+        try:
+            raw = await _invoke_ppt_json_role(
+                system_prompt=DECK_BRIEF_SLIDE_SYSTEM_PROMPT,
+                user_payload={
+                    **user_payload,
+                    **({"retry_instruction": "上一轮返回不是合法 JSON。请只返回一个严格 JSON 对象，不要包含注释、尾随逗号、markdown 或解释文字。"} if attempt else {}),
+                },
+                emit=None,
+                phase="ppt_directive_slide_regeneration",
+                title="重生成 PPT 指令页",
+                reasoning_id=f"ppt-directive-slide-{request.target.index}",
+            )
+            break
+        except json.JSONDecodeError:
+            if attempt >= 1:
+                raise
+            logger.warning(
+                "PPT directive slide returned invalid JSON; retrying once page=%s",
+                request.target.index,
+                exc_info=True,
+            )
     slide = _validate_slide_section(raw, request.target, metric_context=metric_context, visual_assets=_visual_assets_from_request(request))
     if not slide:
         raise PptPlanningInvalidResponse("invalid_deck_brief_slide")

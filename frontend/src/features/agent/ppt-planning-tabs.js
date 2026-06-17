@@ -122,6 +122,7 @@ function normalizePptGenerationErrorMessage(error = null, source = '') {
     ppt_outline_invalid_response: 'AI 返回的目录格式不完整，请重试。',
     invalid_ppt_outline: 'AI 返回的目录为空或格式不正确，请重试。',
     ppt_planning_invalid_ai_response: 'AI 返回内容不符合要求，请重试。',
+    ppt_planning_llm_invalid_response: 'AI 返回的单页 brief 不是合法 JSON，已停止在当前页，请点击继续重试。',
     ppt_planning_llm_http_error: 'AI 接口返回错误，请稍后重试。',
     ppt_planning_llm_request_failed: 'AI 接口请求失败，请检查网络或接口配置。',
     ppt_planning_llm_unavailable: 'AI 接口未启用或配置不可用。',
