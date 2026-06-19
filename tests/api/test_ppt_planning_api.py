@@ -6,8 +6,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from modules.ppt_planning.schemas import (
     DeckBriefSlideRequest,
     DeckBriefResponse,
+    DeckNarrativeChapter,
+    DeckNarrativeEvidenceBucket,
     DeckNarrativePlanResponse,
     DeckNarrativeSlideRole,
+    DeckNarrativeVisualStrategy,
     DeckSlideBrief,
     PptDataPackageResponse,
     PptDataSourceSummary,
@@ -135,13 +138,16 @@ def test_narrative_plan_api_returns_slide_roles(monkeypatch):
     async def fake_generate(payload):
         return DeckNarrativePlanResponse(
             storyline="问题到证据",
-            style_guide="克制",
-            evidence_strategy="范围支撑问题",
-            chart_strategy="第二页图表",
-            slide_roles=[
-                DeckNarrativeSlideRole(page_no=1, role="开题", objective="建立问题"),
-                DeckNarrativeSlideRole(page_no=2, role="证据", objective="说明判断"),
+            chapters=[DeckNarrativeChapter(name="开篇定调", page_range="01", job="建立问题", output="明确主线")],
+            evidence_buckets=[
+                DeckNarrativeEvidenceBucket(id="scope", label="范围", allowed_sources=["current:scope"]),
+                DeckNarrativeEvidenceBucket(id="metrics", label="指标", allowed_sources=["current:scope"]),
             ],
+            slide_roles=[
+                DeckNarrativeSlideRole(page_no=1, role="开题", job="建立问题", evidence_bucket="scope", visual_family="existing_map_layer"),
+                DeckNarrativeSlideRole(page_no=2, role="证据", job="说明判断", evidence_bucket="metrics", visual_family="map_metric_card"),
+            ],
+            visual_rules=DeckNarrativeVisualStrategy(spatial_first=True, numeric_charts_require_data=True, diagram_for_strategy_pages=True, no_fallback_bar=True),
             missing_inputs=[],
         )
 
@@ -166,6 +172,9 @@ def test_narrative_plan_api_returns_slide_roles(monkeypatch):
     payload = response.json()
     assert payload["storyline"] == "问题到证据"
     assert [item["page_no"] for item in payload["slide_roles"]] == [1, 2]
+    assert payload["slide_roles"][1]["visual_family"] == "map_metric_card"
+    assert payload["slide_roles"][1]["evidence_bucket"] == "metrics"
+    assert "style_guide" not in payload
 
 
 def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
@@ -175,6 +184,8 @@ def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
             title="项目命题重写",
             purpose=payload.revision_note,
             key_message="说明为什么要更新",
+            insight="这说明更新必要性已经具备可解释依据。",
+            evidence_explanation=["范围口径来自当前等时圈", "可信度取决于已选择来源"],
             visual_plan="区域底图",
             required_sources=["current:scope"],
         )
@@ -199,7 +210,54 @@ def test_deck_brief_slide_api_returns_single_slide(monkeypatch):
     payload = response.json()
     assert payload["index"] == 1
     assert payload["title"] == "项目命题重写"
+    assert payload["insight"] == "这说明更新必要性已经具备可解释依据。"
+    assert payload["evidence_explanation"] == ["范围口径来自当前等时圈", "可信度取决于已选择来源"]
     assert payload["required_sources"] == ["current:scope"]
+
+
+def test_deck_brief_slide_api_returns_structured_invalid_detail(monkeypatch):
+    async def fake_generate(_payload: DeckBriefSlideRequest):
+        raise ppt_planning.PptPlanningInvalidResponse(
+            "invalid_deck_brief_slide",
+            detail={
+                "code": "invalid_deck_brief_slide",
+                "page_no": 2,
+                "reason": "missing_required_brief_content",
+                "missing_fields": ["key_message"],
+                "payload_bytes": 1024,
+                "repaired": False,
+                "retried": False,
+                "content_retried": True,
+            },
+        )
+
+    monkeypatch.setattr(ppt_planning, "regenerate_deck_brief_slide", fake_generate)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/deck-brief/slide",
+            json={
+                "area_id": "area-1",
+                "outline": [{"id": "page-2", "page_no": 2, "theme": "证据", "purpose": "说明判断"}],
+                "slides": [],
+                "target": {"index": 2, "title": "证据", "purpose": "说明判断"},
+                "outline_item": {"id": "page-2", "page_no": 2, "theme": "证据", "purpose": "说明判断"},
+                "revision_note": "生成第二页",
+                "source_ids": ["current:scope"],
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "invalid_deck_brief_slide",
+        "page_no": 2,
+        "reason": "missing_required_brief_content",
+        "missing_fields": ["key_message"],
+        "payload_bytes": 1024,
+        "repaired": False,
+        "retried": False,
+        "content_retried": True,
+    }
 
 
 def test_ppt_visual_artifacts_api_returns_slide_artifacts(monkeypatch):
@@ -208,6 +266,7 @@ def test_ppt_visual_artifacts_api_returns_slide_artifacts(monkeypatch):
         assert payload.visual_specs[0]["visual_id"] == "visual-1"
         return PptVisualArtifactResponse(
             slide_index=payload.slide_index,
+            visual_specs=[{"visual_id": "visual-1", "visual_type": "figure", "status": "renderable"}],
             visual_artifacts=[{"visual_id": "visual-1", "url": "/download/visual-1.svg"}],
         )
 
@@ -227,6 +286,7 @@ def test_ppt_visual_artifacts_api_returns_slide_artifacts(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["slide_index"] == 2
+    assert payload["visual_specs"][0]["status"] == "renderable"
     assert payload["visual_artifacts"][0]["url"] == "/download/visual-1.svg"
 
 

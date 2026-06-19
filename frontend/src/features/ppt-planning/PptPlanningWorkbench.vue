@@ -52,6 +52,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  selectedSlideId: {
+    type: String,
+    default: '',
+  },
   generationError: {
     type: String,
     default: '',
@@ -127,6 +131,7 @@ const emit = defineEmits([
   'generate-slides',
   'generate-slide-visuals',
   'generate-all-visuals',
+  'select-slide',
   'regenerate-outline',
   'regenerate-narrative-plan',
   'regenerate-slides',
@@ -148,12 +153,23 @@ const activeCurrentSourceId = ref('')
 const activePackageCarrierId = ref('')
 const activePackageCarrierPreviewMode = ref('local')
 const flowViewMode = ref('')
+const localActivePageNo = ref(0)
+const directiveRowRefs = {}
+const failedVisualPreviewUrls = ref(new Set())
+const visualPreviewDialog = ref({ url: '', title: '' })
 const sourceMenuLockClass = 'agent-ppt-source-menu-open'
+const nowTick = ref(Date.now())
+let nowTickTimer = null
 
 const sourcePanelLabel = computed(() => (isSourcesCollapsed.value ? '展开来源' : '折叠来源'))
 const sourceCollapseIconPoints = computed(() => (
   isSourcesCollapsed.value ? '14.5,12 12,9.5 12,14.5 14.5,12' : '11.5,12 14,9.5 14,14.5 11.5,12'
 ))
+
+function asArray(items) {
+  return Array.isArray(items) ? items : []
+}
+
 const sourceById = computed(() => new Map(props.sources.map((source) => [String(source.id || ''), source])))
 const sourceGroupsForTree = computed(() => props.sourceGroups.map((group) => ({
   ...group,
@@ -168,7 +184,6 @@ const ungroupedSources = computed(() => props.sources.filter((source) => (
   source && source.id && !groupedSourceIds.value.has(String(source.id || ''))
 )))
 const hasVisibleSources = computed(() => sourceGroupsForTree.value.length > 0 || ungroupedSources.value.length > 0)
-const isSlidesGenerating = computed(() => props.currentStep === 'slides_generating')
 const hasOutline = computed(() => props.outline.length > 0)
 const hasNarrativePlan = computed(() => Array.isArray(props.narrativePlan && props.narrativePlan.slideRoles) && props.narrativePlan.slideRoles.length > 0)
 const hasDirective = computed(() => props.slides.length > 0)
@@ -185,9 +200,9 @@ const outlineBlockReason = computed(() => {
   }
   return ''
 })
-const canGenerateOutline = computed(() => !outlineBlockReason.value && !isGenerationJobActive.value && !isSlidesGenerating.value)
-const canGenerateNarrativePlan = computed(() => hasOutline.value && !isGenerationJobActive.value && !isSlidesGenerating.value)
-const canGenerateSlides = computed(() => hasOutline.value && hasNarrativePlan.value && !isGenerationJobActive.value && !isSlidesGenerating.value)
+const canGenerateOutline = computed(() => !outlineBlockReason.value && !isGenerationJobActive.value && !isSlideGenerationActive.value)
+const canGenerateNarrativePlan = computed(() => hasOutline.value && !isGenerationJobActive.value && !isSlideGenerationActive.value)
+const canGenerateSlides = computed(() => hasOutline.value && hasNarrativePlan.value && !isGenerationJobActive.value && !isSlideGenerationActive.value)
 const canCreateDataPackage = computed(() => (props.sourceSummary.selected || 0) > 0 && !props.dataPackageGenerating)
 const deliverableSourceCount = computed(() => props.sourceSummary.deliverable || props.sourceSummary.selectedDeliverable || 0)
 const emptyPayloadSourceCount = computed(() => props.sourceSummary.emptyPayload || 0)
@@ -195,16 +210,30 @@ const activeGenerationJob = computed(() => (props.generationJob && typeof props.
 const generationJobPhase = computed(() => String(activeGenerationJob.value.phase || 'idle'))
 const generationJobType = computed(() => String(activeGenerationJob.value.type || 'outline'))
 const generationJobEvents = computed(() => (Array.isArray(activeGenerationJob.value.events) ? activeGenerationJob.value.events.slice(-60) : []))
-const isGenerationJobActive = computed(() => ['requesting', 'response_received', 'applying'].includes(generationJobPhase.value))
+const slideGenerationActiveJob = computed(() => (props.slideGenerationJob && typeof props.slideGenerationJob === 'object' ? props.slideGenerationJob : {}))
+const hasPageQueue = computed(() => Array.isArray(props.slideGenerationQueue) && props.slideGenerationQueue.length > 0)
+const hasActivePageQueueItem = computed(() => (
+  hasPageQueue.value
+  && props.slideGenerationQueue.some((item) => ['requesting', 'response_received', 'applying', 'generating', 'repairing', 'retrying'].includes(String(item && item.status || '')))
+))
+const isSlideGenerationActive = computed(() => !!slideGenerationActiveJob.value.active || hasActivePageQueueItem.value)
+const isGenerationJobActive = computed(() => ['requesting', 'response_received', 'applying'].includes(generationJobPhase.value) && generationJobType.value !== 'slides')
+const isBulkBriefGenerating = computed(() => (
+  generationJobType.value === 'directive'
+  && ['requesting', 'response_received', 'applying'].includes(generationJobPhase.value)
+  && !hasDirective.value
+  && !hasPageQueue.value
+))
+const isBriefGenerating = computed(() => isBulkBriefGenerating.value || isSlideGenerationActive.value)
 const generationJobTitle = computed(() => {
   const isNarrative = generationJobType.value === 'narrative'
   const isDirective = generationJobType.value === 'directive' || generationJobType.value === 'slides'
   const labels = {
-    requesting: isNarrative ? '叙事方案生成中' : isDirective ? '逐页生成中' : '目录生成中',
+    requesting: isNarrative ? '叙事方案生成中' : isDirective ? 'brief 生成中' : '目录生成中',
     response_received: isNarrative ? '后端已返回，正在应用叙事方案' : isDirective ? '后端已返回，正在应用 brief' : '后端已返回，正在应用目录',
     applying: isNarrative ? '正在写入叙事方案' : isDirective ? '正在写入 brief' : '正在写入目录',
     ready: isNarrative ? '叙事方案已写入' : isDirective ? 'brief 已写入' : '目录已写入',
-    failed: isNarrative ? '叙事方案生成失败' : isDirective ? '逐页生成失败' : '目录生成失败',
+    failed: isNarrative ? '叙事方案生成失败' : isDirective ? 'brief 生成失败' : '目录生成失败',
     superseded: '已有新请求接管',
   }
   return labels[generationJobPhase.value] || ''
@@ -230,6 +259,8 @@ const generationResponsePayload = computed(() => {
   const response = props.generationResponse && typeof props.generationResponse === 'object'
     ? props.generationResponse
     : {}
+  const source = String(response.source || '').trim()
+  if (props.currentStep === 'slides_generating' && source === 'narrative') return {}
   const payload = response.payload && typeof response.payload === 'object' ? response.payload : {}
   return Object.keys(payload).length ? payload : {}
 })
@@ -274,12 +305,11 @@ const generationErrorTitle = computed(() => {
     data_package: '资料包生成失败，当前已选来源仍可继续用于生成目录。',
     outline: '目录生成失败，请检查模型配置后重试。',
     narrative: '叙事方案生成失败，请检查模型配置后重试。',
-    slides: '逐页 brief 生成失败，可重新点击逐页生成继续。',
+    slides: 'brief 生成失败，可重新点击生成 brief 继续。',
     directive: '指令文件生成失败，请检查模型配置后重试。',
   }
   return labels[String(props.generationErrorSource || '')] || 'PPT 工作台请求失败，请稍后重试。'
 })
-const slideGenerationActiveJob = computed(() => (props.slideGenerationJob && typeof props.slideGenerationJob === 'object' ? props.slideGenerationJob : {}))
 const slideGenerationFailedPage = computed(() => {
   const failedFromJob = Number(slideGenerationActiveJob.value.failedPageNo || slideGenerationActiveJob.value.failed_page_no || 0) || 0
   if (failedFromJob) return failedFromJob
@@ -288,23 +318,112 @@ const slideGenerationFailedPage = computed(() => {
     : null
   return Number(failedItem && (failedItem.pageNo || failedItem.page_no || 0)) || 0
 })
-const slideGenerationProgressText = computed(() => {
+const activeSlideQueueItem = computed(() => {
+  if (!Array.isArray(props.slideGenerationQueue)) return null
+  const activeStatuses = new Set(['requesting', 'response_received', 'applying', 'repairing', 'retrying'])
+  const activeItem = props.slideGenerationQueue.find((item) => activeStatuses.has(String(item && item.status || '')))
+  if (activeItem) return activeItem
+  const failedItem = props.slideGenerationQueue.find((item) => ['failed', 'timed_out'].includes(String(item && item.status || '')))
+  if (failedItem) return failedItem
   const current = Number(slideGenerationActiveJob.value.currentPageNo || slideGenerationActiveJob.value.current_page_no || 0) || 0
+  if (current) {
+    return props.slideGenerationQueue.find((item) => Number(item && (item.pageNo || item.page_no || 0)) === current) || null
+  }
+  return props.slideGenerationQueue.find((item) => String(item && item.status || '') === 'pending') || null
+})
+const activeSlideWaitSeconds = computed(() => {
+  if (!isSlideGenerationActive.value) return 0
+  const startedAt = String(slideGenerationActiveJob.value.activePageStartedAt || slideGenerationActiveJob.value.active_page_started_at || '').trim()
+  const startedMs = startedAt ? Date.parse(startedAt) : NaN
+  if (!Number.isFinite(startedMs)) return 0
+  return Math.max(0, Math.floor((nowTick.value - startedMs) / 1000))
+})
+const lastCompletedSlidePage = computed(() => {
+  if (!Array.isArray(props.slideGenerationQueue)) return 0
+  return props.slideGenerationQueue.reduce((max, item) => {
+    const status = String(item && item.status || '')
+    const pageNo = Number(item && (item.pageNo || item.page_no || 0)) || 0
+    return status === 'ready' && pageNo > max ? pageNo : max
+  }, 0)
+})
+const visibleGeneratedSlidePagesText = computed(() => {
+  const pages = Array.isArray(props.slides)
+    ? props.slides.map((slide) => Number(slide && slide.index || 0) || 0).filter(Boolean).sort((a, b) => a - b)
+    : []
+  if (!pages.length) return '暂无已生成页'
+  const preview = pages.slice(0, 5).map((pageNo) => `第 ${pageNo} 页`).join('、')
+  return pages.length > 5 ? `${preview} 等 ${pages.length} 页` : preview
+})
+const slideGenerationQueueChips = computed(() => {
+  if (!Array.isArray(props.slideGenerationQueue)) return []
+  return props.slideGenerationQueue.map((item) => {
+    const pageNo = Number(item && (item.pageNo || item.page_no || 0)) || 0
+    const status = String(item && item.status || 'pending')
+    const labels = {
+      ready: '完成',
+      requesting: '请求中',
+      response_received: '已返回',
+      applying: '写入中',
+      generating: '生成中',
+      repairing: '修复中',
+      retrying: '重试中',
+      failed: '失败',
+      timed_out: '超时',
+      stale: '旧响应',
+      pending: '待生成',
+    }
+    return {
+      pageNo,
+      status,
+      label: labels[status] || '待生成',
+      error: String(item && item.error || ''),
+    }
+  }).filter((item) => item.pageNo)
+})
+const slideGenerationQueueSummary = computed(() => {
+  const total = slideGenerationQueueChips.value.length
+  const ready = slideGenerationQueueChips.value.filter((item) => item.status === 'ready').length
+  const failed = slideGenerationQueueChips.value.filter((item) => item.status === 'failed').length
+  if (!total) return ''
+  return failed ? `${ready}/${total} 页完成 · ${failed} 页失败` : `${ready}/${total} 页完成`
+})
+const slideGenerationProgressText = computed(() => {
+  const queueItem = activeSlideQueueItem.value
+  const current = Number(queueItem && (queueItem.pageNo || queueItem.page_no || 0)) || Number(slideGenerationActiveJob.value.currentPageNo || slideGenerationActiveJob.value.current_page_no || 0) || 0
   const total = Number(slideGenerationActiveJob.value.total || props.outline.length || 0) || 0
-  if (isSlidesGenerating.value && current && total) return `正在生成第 ${current}/${total} 页 brief`
-  if (slideGenerationFailedPage.value) return `第 ${slideGenerationFailedPage.value} 页生成失败，可重新点击逐页生成继续。`
+  if (isSlideGenerationActive.value && current && total) {
+    const status = String(queueItem && queueItem.status || 'pending')
+    const verb = status === 'response_received'
+      ? '后端已返回，准备写入'
+      : status === 'applying'
+        ? '正在写入 brief'
+        : status === 'repairing'
+          ? '正在修复 AI JSON'
+          : status === 'retrying'
+            ? '正在重试'
+            : status === 'requesting'
+              ? '请求已发出，等待 AI 返回'
+              : status === 'pending'
+                ? '准备请求'
+                : '等待 AI 返回'
+    const waited = activeSlideWaitSeconds.value ? `，已等待 ${activeSlideWaitSeconds.value} 秒` : ''
+    const completed = lastCompletedSlidePage.value ? `，已完成到第 ${lastCompletedSlidePage.value} 页` : ''
+    return `后台正在生成第 ${current}/${total} 页 brief：${verb}${waited}${completed}。当前内容区显示 ${visibleGeneratedSlidePagesText.value}，AI 返回后会自动校验并尝试修复 JSON。`
+  }
+  if (slideGenerationFailedPage.value) return `第 ${slideGenerationFailedPage.value} 页生成失败，可重新点击生成 brief 继续。`
   return ''
 })
 const promptStageText = computed(() => {
   if (slideGenerationProgressText.value) return slideGenerationProgressText.value
+  if (isBulkBriefGenerating.value) return '正在生成整套 brief，返回后会写入中心列表。'
   if (!hasOutline.value && outlineBlockReason.value) return outlineBlockReason.value
   if (!hasOutline.value) return '先生成目录，确定 15 页结构。'
   if (!hasNarrativePlan.value) return '目录已生成，下一步生成全局叙事方案。'
-  if (!hasDirective.value) return '叙事方案已生成，下一步逐页生成 brief。'
+  if (!hasDirective.value) return '叙事方案已生成，下一步生成 brief。'
   if (hasVisualSpecs.value && !hasVisualArtifacts.value) return 'brief 已生成，下一步生成可视化图片。'
   if (isAnyVisualGenerating.value) return '正在生成可视化图片。'
   if (isViewingOutline.value) return '目录已生成；如需调整目录，可重新生成目录。'
-  return 'brief 草稿已生成，可继续重生成单页或重新逐页生成。'
+  return 'brief 草稿已生成，可重新生成 brief。'
 })
 const configCheckStatus = computed(() => {
   if (!outlineBlockReason.value) return '资料已就绪，可以生成目录。'
@@ -325,10 +444,11 @@ const promptActions = computed(() => getPptPromptActions({
 }))
 function isPromptActionDisabled(action = {}) {
   const event = String(action.event || '')
-  if (isGenerationJobActive.value || isSlidesGenerating.value || isAnyVisualGenerating.value) return true
+  if (isAnyVisualGenerating.value) return true
+  if (['generate-slides', 'regenerate-slides'].includes(event)) return isGenerationJobActive.value || !hasNarrativePlan.value
+  if (isGenerationJobActive.value || isSlideGenerationActive.value) return true
   if (event === 'generate-outline') return !canGenerateOutline.value
   if (event === 'generate-narrative-plan') return !canGenerateNarrativePlan.value
-  if (event === 'generate-slides') return !canGenerateSlides.value
   if (event === 'generate-all-visuals') return !hasVisualSpecs.value
   if (event === 'regenerate-outline') return !hasOutline.value
   if (event === 'regenerate-narrative-plan') return !hasOutline.value
@@ -391,26 +511,62 @@ const activePackageSelectedCarrier = computed(() => {
     || null
 })
 const activeFlowIndex = computed(() => {
+  if (hasDirective.value && hasVisualSpecs.value && !hasVisualArtifacts.value) return 4
+  if (hasDirective.value) return 3
   if (props.currentStep === 'outline_generating') return 1
-  if (['outline_ready', 'narrative_generating', 'narrative_ready', 'slides_generating'].includes(props.currentStep)) return 2
-  if (props.currentStep === 'visuals_ready' || (hasDirective.value && hasVisualSpecs.value && !hasVisualArtifacts.value)) return 4
-  if (props.currentStep === 'directive_draft') return 3
+  if (['outline_ready', 'narrative_generating', 'narrative_ready'].includes(props.currentStep)) return 2
+  if (props.currentStep === 'slides_generating' || props.currentStep === 'directive_draft') return 3
+  if (props.currentStep === 'visuals_ready') return 4
   return 0
 })
 const canViewOutlineStep = computed(() => hasOutline.value)
-const canViewDirectiveStep = computed(() => hasDirective.value)
+const canViewDirectiveStep = computed(() => hasNarrativePlan.value || hasDirective.value || isBriefGenerating.value)
 const isViewingMaterials = computed(() => flowViewMode.value === 'materials' && (hasOutline.value || hasDirective.value))
 const isViewingOutline = computed(() => flowViewMode.value === 'outline' && hasOutline.value)
-const isViewingDirective = computed(() => flowViewMode.value === 'directive' && hasDirective.value)
+const isViewingDirective = computed(() => flowViewMode.value === 'directive' && (hasDirective.value || isBriefGenerating.value || hasNarrativePlan.value))
+const isBriefPhase = computed(() => (
+  hasDirective.value
+  || isBriefGenerating.value
+  || isViewingDirective.value
+))
 const shouldShowConfigPanel = computed(() => !hasOutline.value || isViewingMaterials.value)
-const shouldShowNarrativePanel = computed(() => hasNarrativePlan.value && !hasDirective.value && !isViewingMaterials.value && !isViewingOutline.value)
-const shouldShowDirectiveRows = computed(() => hasDirective.value && !isViewingMaterials.value && !isViewingOutline.value)
-const narrativeStrategyCards = computed(() => [
-  ['总叙事主线', props.narrativePlan.storyline],
-  ['风格约束', props.narrativePlan.styleGuide],
-  ['证据策略', props.narrativePlan.evidenceStrategy],
-  ['图表策略', props.narrativePlan.chartStrategy],
-].filter((item) => String(item[1] || '').trim()))
+const shouldShowNarrativePanel = computed(() => (
+  hasNarrativePlan.value
+  && !isBriefPhase.value
+  && !isViewingMaterials.value
+  && !isViewingOutline.value
+))
+const shouldShowDirectiveRows = computed(() => isBriefPhase.value && !isViewingMaterials.value && !isViewingOutline.value)
+const narrativeStorylineText = computed(() => String(props.narrativePlan.storyline || '').trim())
+const narrativeChapterRows = computed(() => {
+  const chapters = Array.isArray(props.narrativePlan.chapters) ? props.narrativePlan.chapters : []
+  return chapters.map((chapter, index) => ({
+    id: `narrative-chapter-${index + 1}`,
+    name: chapter.name || `章节 ${index + 1}`,
+    pageRange: chapter.pageRange || '',
+    job: chapter.job || '',
+    output: chapter.output || '',
+  }))
+})
+const narrativeEvidenceBuckets = computed(() => {
+  const items = Array.isArray(props.narrativePlan.evidenceBuckets) ? props.narrativePlan.evidenceBuckets : []
+  return items.map((item, index) => ({
+    id: item.id || `narrative-bucket-${index + 1}`,
+    label: item.label || item.id || `证据桶 ${index + 1}`,
+    allowedSources: Array.isArray(item.allowedSources) ? item.allowedSources : [],
+  })).filter((item) => item.id)
+})
+const narrativeVisualRules = computed(() => {
+  const rules = props.narrativePlan.visualRules && typeof props.narrativePlan.visualRules === 'object'
+    ? props.narrativePlan.visualRules
+    : {}
+  return [
+    ['空间优先', rules.spatialFirst],
+    ['数值图必须有数据', rules.numericChartsRequireData],
+    ['策略页使用语义图', rules.diagramForStrategyPages],
+    ['禁止降级柱状图', rules.noFallbackBar],
+  ].map(([label, enabled]) => ({ label, enabled: !!enabled }))
+})
 const narrativeRoleRows = computed(() => {
   const roles = Array.isArray(props.narrativePlan && props.narrativePlan.slideRoles)
     ? props.narrativePlan.slideRoles
@@ -419,32 +575,120 @@ const narrativeRoleRows = computed(() => {
     id: `narrative-role-${Number(role.pageNo || 0) || index + 1}`,
     pageNo: Number(role.pageNo || 0) || index + 1,
     title: role.role || `页面 ${index + 1}`,
-    objective: role.objective || '',
-    evidenceFocus: Array.isArray(role.evidenceFocus) ? role.evidenceFocus.filter(Boolean) : [],
-    visualDirection: role.visualDirection || '',
-    chartIntent: role.chartIntent || '',
+    job: role.job || '',
+    evidenceBucket: role.evidenceBucket || '',
+    visualFamily: role.visualFamily || '',
     transitionNote: role.transitionNote || '',
   }))
 })
 const outlineRows = computed(() => {
-  if (shouldShowDirectiveRows.value && props.slides.length) {
-    return props.slides.map((item, index) => ({
+  if (shouldShowDirectiveRows.value) {
+    const slidesByPage = new Map((Array.isArray(props.slides) ? props.slides : [])
+      .map((slide, index) => [Number(slide && slide.index || index + 1) || index + 1, slide]))
+    const queueByPage = new Map((Array.isArray(props.slideGenerationQueue) ? props.slideGenerationQueue : [])
+      .map((item) => [Number(item && (item.pageNo || item.page_no || 0)) || 0, item])
+      .filter(([pageNo]) => pageNo))
+    if (!slidesByPage.size && isBulkBriefGenerating.value) {
+      const statusLabel = generationJobPhase.value === 'response_received'
+        ? '已返回'
+        : generationJobPhase.value === 'applying'
+          ? '写入中'
+          : '生成中'
+      const detail = generationJobPhase.value === 'response_received'
+        ? '后端已返回 brief，正在准备写入中心列表。'
+        : generationJobPhase.value === 'applying'
+          ? '正在写入 brief，完成后会替换为真实页面列表。'
+          : '正在生成整套 brief，返回后会写入中心列表。'
+      return [{
+        id: 'brief-bulk-generating',
+        pageNo: 0,
+        title: '正在生成整套 brief',
+        detail,
+        fields: [
+          ['生成状态', statusLabel],
+          ['目录页数', props.outline.length ? `${props.outline.length} 页` : '按当前目录生成'],
+          ['返回摘要', generationJobSummary.value],
+        ].filter((field) => String(field[1] || '').trim()),
+        metricClaims: [],
+        metricGaps: [],
+        visualSpecs: [],
+        visualArtifacts: [],
+        visualStatus: { status: 'idle', error: '' },
+        mode: 'generating',
+        statusLabel,
+        statusClass: generationJobPhase.value || 'requesting',
+      }]
+    }
+    const baseRows = slidesByPage.size
+      ? Array.from(slidesByPage.values()).sort((left, right) => (Number(left && left.index || 0) || 0) - (Number(right && right.index || 0) || 0))
+      : hasOutline.value
+        ? props.outline
+        : (Array.isArray(props.slides) ? props.slides : []).map((slide, index) => ({
+          id: slide.id || `slide-${index + 1}`,
+          pageNo: Number(slide.index || 0) || index + 1,
+          theme: slide.title,
+          purpose: slide.purpose,
+        }))
+    return baseRows.map((outlineItem, index) => {
+      const pageNo = Number(outlineItem.pageNo || outlineItem.page_no || outlineItem.index || 0) || index + 1
+      const item = slidesByPage.get(pageNo)
+      const queueItem = queueByPage.get(pageNo) || {}
+      const queueStatus = String(queueItem.status || '')
+      if (!item) {
+        if (!hasPageQueue.value) return null
+        const isGenerating = ['requesting', 'response_received', 'applying', 'generating', 'repairing', 'retrying'].includes(queueStatus)
+        const isFailed = ['failed', 'timed_out', 'stale'].includes(queueStatus)
+        const statusLabel = isFailed
+          ? (queueStatus === 'timed_out' ? '超时' : queueStatus === 'stale' ? '旧响应' : '失败')
+          : isGenerating
+            ? (queueStatus === 'response_received' ? '已返回' : queueStatus === 'applying' ? '写入中' : queueStatus === 'repairing' ? '修复中' : queueStatus === 'retrying' ? '重试中' : '请求中')
+            : '待生成'
+        const detail = isFailed
+          ? (queueItem.error || (queueStatus === 'timed_out' ? '等待超时，可继续重试。' : queueStatus === 'stale' ? '旧响应已忽略，可继续重试。' : '本页 brief 生成失败，可点击生成 brief 继续。'))
+          : isGenerating
+            ? (queueStatus === 'response_received' ? '后端已返回，正在写入前端。' : queueStatus === 'applying' ? '正在写入 brief。' : '请求已发出，等待 AI 返回。')
+            : '待生成 brief。'
+        return {
+          id: outlineItem.id || `brief-placeholder-${pageNo}`,
+          pageNo,
+          title: outlineItem.theme || outlineItem.title || `页面 ${pageNo}`,
+          detail,
+          fields: [
+            ['目录目的', outlineItem.purpose],
+            ['生成状态', isFailed ? '失败' : isGenerating ? '生成中' : '待生成'],
+          ].filter((field) => String(field[1] || '').trim()),
+          metricClaims: [],
+          metricGaps: [],
+          visualSpecs: [],
+          visualArtifacts: [],
+          visualStatus: visualGenerationStatus(pageNo),
+          mode: isFailed ? 'failed' : isGenerating ? 'generating' : 'pending',
+          statusLabel,
+          statusClass: queueStatus || (isFailed ? 'failed' : isGenerating ? 'requesting' : 'pending'),
+        }
+      }
+      return {
       id: item.id || `slide-${index + 1}`,
-      pageNo: item.index || index + 1,
-      title: item.title || `页面 ${index + 1}`,
-      detail: item.purpose || '逐页指令草稿',
+      pageNo,
+      title: item.title || `页面 ${pageNo}`,
+      detail: item.purpose || '页面 brief 草稿',
       fields: [
-        ['核心文案', item.keyMessage],
-        ['页面提示', item.visualPlan],
-        ['素材要求', Array.isArray(item.requiredSources) ? item.requiredSources.join(' / ') : item.requiredSources],
+        ['核心表达', item.keyMessage],
+        ['见地', item.insight || '暂未生成见地，可在重写抽屉补充。'],
+        ['证据解释', (Array.isArray(item.evidenceExplanation) && item.evidenceExplanation.length) ? item.evidenceExplanation.join(' / ') : '暂无证据解释，可补充口径、阈值或来源说明。'],
+        ['页面布局指令', item.visualPlan],
+        ['素材与证据', Array.isArray(item.requiredSources) ? item.requiredSources.join(' / ') : item.requiredSources],
       ].filter((field) => String(field[1] || '').trim()),
       metricClaims: Array.isArray(item.metricClaims) ? item.metricClaims : [],
       metricGaps: Array.isArray(item.metricGaps) ? item.metricGaps : [],
       visualSpecs: Array.isArray(item.visualSpecs) ? item.visualSpecs : [],
       visualArtifacts: Array.isArray(item.visualArtifacts) ? item.visualArtifacts : [],
-      visualStatus: visualGenerationStatus(item.index || index + 1),
+      visualStatus: visualGenerationStatus(pageNo),
       mode: 'directive',
-    }))
+      statusLabel: '已写入',
+      statusClass: 'directive',
+      }
+    }).filter(Boolean)
   }
   if (hasOutline.value) {
     return props.outline.map((item, index) => ({
@@ -458,20 +702,63 @@ const outlineRows = computed(() => {
       visualSpecs: [],
       visualArtifacts: [],
       mode: 'outline',
+      statusLabel: '目录草稿',
+      statusClass: 'outline',
     }))
   }
   return []
+})
+const directiveRowList = computed(() => outlineRows.value.filter((row) => row && row.mode === 'directive'))
+const flowNavigableRows = computed(() => outlineRows.value.filter((row) => row && ['outline', 'directive', 'pending', 'generating', 'failed'].includes(row.mode) && Number(row.pageNo || 0) > 0))
+const externalSelectedFlowPageNo = computed(() => {
+  const selectedId = String(props.selectedSlideId || '').trim()
+  if (!selectedId) return 0
+  const selectedRow = flowNavigableRows.value.find((row) => String(row.id || '') === selectedId)
+  return Number(selectedRow && selectedRow.pageNo) || 0
+})
+const activeFlowPageNo = computed(() => (
+  Number(localActivePageNo.value || externalSelectedFlowPageNo.value || 0) || 0
+))
+const selectedFlowRowId = computed(() => {
+  const pageNo = activeFlowPageNo.value
+  if (!pageNo) return ''
+  const selectedRow = flowNavigableRows.value.find((row) => Number(row.pageNo || 0) === pageNo)
+  return String(selectedRow && selectedRow.id || '')
+})
+const activeFlowRow = computed(() => {
+  const pageNo = activeFlowPageNo.value
+  if (pageNo) {
+    const selectedRow = flowNavigableRows.value.find((row) => Number(row.pageNo || 0) === pageNo)
+    if (selectedRow) return selectedRow
+  }
+  return directiveRowList.value[0] || flowNavigableRows.value[0] || null
+})
+const flowNavigationRows = computed(() => flowNavigableRows.value.map((row) => ({
+  id: row.id,
+  pageNo: row.pageNo,
+  mode: row.mode,
+  title: row.title,
+  statusLabel: row.statusLabel || (row.mode === 'outline' ? '目录草稿' : ''),
+  statusClass: row.statusClass || row.mode,
+  active: Number(row.pageNo || 0) === activeFlowPageNo.value,
+})))
+const shouldShowFlowNavigation = computed(() => !isViewingMaterials.value && !shouldShowNarrativePanel.value && flowNavigationRows.value.length > 0)
+watch(flowNavigableRows, (rows) => {
+  if (!localActivePageNo.value) return
+  if (!rows.some((row) => Number(row.pageNo || 0) === Number(localActivePageNo.value || 0))) {
+    localActivePageNo.value = 0
+  }
 })
 
 function showFlowView(mode = '') {
   if (mode === 'materials' && (hasOutline.value || hasDirective.value)) flowViewMode.value = 'materials'
   if (mode === 'outline' && hasOutline.value) flowViewMode.value = 'outline'
-  if (mode === 'directive' && hasDirective.value) flowViewMode.value = 'directive'
+  if (mode === 'directive' && canViewDirectiveStep.value) flowViewMode.value = 'directive'
 }
 const activeRevisionTarget = computed(() => props.activeRevisionTarget && typeof props.activeRevisionTarget === 'object' ? props.activeRevisionTarget : {})
 const activeRevisionType = computed(() => String(activeRevisionTarget.value.type || ''))
 const revisionDrawerOpen = computed(() => activeRevisionType.value === 'outline' || activeRevisionType.value === 'directive')
-const activeRevisionTitle = computed(() => activeRevisionType.value === 'directive' ? '修改逐页指令' : '修改目录小节')
+const activeRevisionTitle = computed(() => activeRevisionType.value === 'directive' ? '修改页面 brief' : '修改目录小节')
 const activeRevisionDraft = computed(() => activeRevisionType.value === 'directive' ? props.directiveRevisionDraft : props.outlineRevisionDraft)
 const activeRevisionNote = computed(() => String((activeRevisionDraft.value || {}).revisionNote || '').trim())
 const canAiRegenerateRevision = computed(() => !!activeRevisionNote.value && !isCurrentRevisionGenerating.value)
@@ -504,6 +791,52 @@ function isDirectiveRowStale(row = {}) {
   return row.mode === 'directive' && staleDirectivePageIdSet.value.has(String(Number(row.pageNo || 0) || 0))
 }
 
+function setFlowRowRef(pageNo = 0, element = null) {
+  const key = String(Number(pageNo || 0) || pageNo)
+  if (!key) return
+  if (element) {
+    directiveRowRefs[key] = element
+  } else {
+    delete directiveRowRefs[key]
+  }
+}
+
+function scrollFlowRowIntoView(pageNo = 0, options = {}) {
+  const key = String(Number(pageNo || 0) || pageNo)
+  const element = directiveRowRefs[key]
+  if (!element) return
+  const behavior = options.behavior || 'auto'
+  const container = element.closest('.agent-ppt-main-scroll')
+  if (!container || typeof container.scrollTo !== 'function') {
+    element.scrollIntoView({ block: 'nearest', behavior })
+    return
+  }
+  const containerRect = container.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+  const topGap = elementRect.top - containerRect.top
+  const bottomGap = elementRect.bottom - containerRect.bottom
+  if (topGap >= 12 && bottomGap <= -12) return
+  const nextTop = container.scrollTop + topGap - 12
+  container.scrollTo({ top: Math.max(0, nextTop), behavior })
+}
+
+function selectFlowRow(row = {}) {
+  if (!row || !row.id) return
+  localActivePageNo.value = Number(row.pageNo || 0) || 0
+  if (row.mode === 'directive') emit('select-slide', row.id)
+  scrollFlowRowIntoView(row.pageNo, { behavior: 'auto' })
+}
+
+function openActiveFlowRevision() {
+  if (!activeFlowRow.value || isRowGenerating(activeFlowRow.value)) return
+  openRevisionForRow(activeFlowRow.value)
+}
+
+function undoActiveFlowRevision() {
+  if (!activeFlowRow.value || isRowGenerating(activeFlowRow.value)) return
+  undoRowRevision(activeFlowRow.value)
+}
+
 function formatMetricClaimValue(claim = {}) {
   const value = claim.value
   const unit = claim.unit || ''
@@ -532,7 +865,7 @@ function isVisualGenerating(row = {}) {
 }
 
 function canGenerateRowVisuals(row = {}) {
-  return row.mode === 'directive' && Array.isArray(row.visualSpecs) && row.visualSpecs.length > 0 && !isGenerationJobActive.value && !isSlidesGenerating.value && !isVisualGenerating(row)
+  return row.mode === 'directive' && Array.isArray(row.visualSpecs) && row.visualSpecs.length > 0 && !isGenerationJobActive.value && !isSlideGenerationActive.value && !isVisualGenerating(row)
 }
 
 function visualPreviewUrl(row = {}, visual = {}) {
@@ -541,9 +874,82 @@ function visualPreviewUrl(row = {}, visual = {}) {
   return artifact.url || asset.url || asset.data_url || asset.dataUrl || ''
 }
 
+function isVisualPreviewFailed(row = {}, visual = {}) {
+  const url = visualPreviewUrl(row, visual)
+  return !!url && failedVisualPreviewUrls.value.has(url)
+}
+
+function markVisualPreviewFailed(row = {}, visual = {}) {
+  const url = visualPreviewUrl(row, visual)
+  if (!url) return
+  failedVisualPreviewUrls.value = new Set([...failedVisualPreviewUrls.value, url])
+}
+
+function openVisualPreview(row = {}, visual = {}) {
+  const url = visualPreviewUrl(row, visual)
+  if (!url) return
+  visualPreviewDialog.value = {
+    url,
+    title: visual.title || visual.caption || '可视化预览',
+  }
+}
+
+function closeVisualPreview() {
+  visualPreviewDialog.value = { url: '', title: '' }
+}
+
 function visualData(visual = {}) {
   const data = visual.data && typeof visual.data === 'object' ? visual.data : {}
   return data
+}
+
+function visualComposition(visual = {}) {
+  return String(visualData(visual).composition || '')
+}
+
+function visualMetricOverlays(visual = {}) {
+  const overlays = visualData(visual).metric_overlays || visualData(visual).metricOverlays
+  return asArray(overlays).map((item) => (item && typeof item === 'object' ? item : {})).filter((item) => item.label || item.metric_id || item.metricId)
+}
+
+function formatVisualOverlayValue(item = {}) {
+  const value = item.value
+  const unit = item.unit || ''
+  if (value === undefined || value === null || value === '') return '—'
+  const number = Number(value)
+  const formatted = Number.isFinite(number)
+    ? (Math.abs(number) >= 100 ? number.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : number.toLocaleString('zh-CN', { maximumFractionDigits: 3 }))
+    : String(value)
+  return `${formatted}${unit || ''}`
+}
+
+function visualEvidenceSummary(visual = {}) {
+  const metricIds = asArray(visual.source_metric_ids || visual.sourceMetricIds).filter(Boolean)
+  const sourceIds = asArray(visual.source_ids || visual.sourceIds).filter(Boolean)
+  if (metricIds.length) return `指标：${metricIds.slice(0, 3).join(' / ')}${metricIds.length > 3 ? ` 等 ${metricIds.length} 个` : ''}`
+  if (sourceIds.length) return `来源：${sourceIds.slice(0, 3).join(' / ')}${sourceIds.length > 3 ? ` 等 ${sourceIds.length} 个` : ''}`
+  return ''
+}
+
+function visualReasonText(visual = {}) {
+  const data = visualData(visual)
+  return data.reason || visual.reason || ''
+}
+
+function visualCaptureError(visual = {}) {
+  const data = visualData(visual)
+  const error = data.capture_error || data.captureError
+  return error && typeof error === 'object' ? error : {}
+}
+
+function visualExistingAssetMissingText(visual = {}) {
+  const error = visualCaptureError(visual)
+  if (error.message) {
+    const code = error.code ? `（${error.code}）` : ''
+    const detail = error.detail ? `：${error.detail}` : ''
+    return `上次地图截图失败：${error.message}${code}${detail}`
+  }
+  return '需要复用现有空间图截图，当前未绑定资产。'
 }
 
 function visualRowsPreview(visual = {}) {
@@ -579,15 +985,15 @@ function visualTypeLabel(visual = {}) {
 }
 
 function visualNodeSummary(visual = {}) {
-  return cloneArray(visual.nodes).slice(0, 6).map((node) => node && (node.title || node.label || node.name || node.id)).filter(Boolean)
+  return asArray(visual.nodes).slice(0, 6).map((node) => node && (node.title || node.label || node.name || node.id)).filter(Boolean)
 }
 
 function visualGroupSummary(visual = {}) {
-  return cloneArray(visual.groups).slice(0, 4).map((group) => group && (group.title || group.label || group.name || group.id)).filter(Boolean)
+  return asArray(visual.groups).slice(0, 4).map((group) => group && (group.title || group.label || group.name || group.id)).filter(Boolean)
 }
 
 function visualLinkSummary(visual = {}) {
-  return cloneArray(visual.links).slice(0, 6).map((link) => {
+  return asArray(visual.links).slice(0, 6).map((link) => {
     if (!link || typeof link !== 'object') return ''
     const source = link.source || link.from || ''
     const target = link.target || link.to || ''
@@ -687,10 +1093,17 @@ watch(
 
 onMounted(() => {
   window.addEventListener('keydown', handleSourceMenuKeydown)
+  nowTickTimer = window.setInterval(() => {
+    nowTick.value = Date.now()
+  }, 1000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleSourceMenuKeydown)
+  if (nowTickTimer) {
+    window.clearInterval(nowTickTimer)
+    nowTickTimer = null
+  }
   setSourceMenuScrollLock(false)
 })
 
@@ -1405,21 +1818,6 @@ function confirmSourceDialog() {
           </div>
         </div>
         <div class="agent-ppt-main-scroll">
-          <details v-if="shouldShowGenerationJobPanel" class="agent-ppt-generation-job" :open="shouldOpenGenerationJobPanel">
-            <summary>
-              <span>{{ generationJobTitle }}</span>
-              <small>{{ generationJobSummary || activeGenerationJob.id || '等待状态更新' }}</small>
-            </summary>
-            <ol>
-              <li
-                v-for="(event, eventIndex) in generationJobEvents"
-                :key="`ppt-generation-event-${eventIndex}-${event.name}`">
-                <strong>{{ event.name }}</strong>
-                <span>{{ event.at }}</span>
-                <code v-if="event.details && Object.keys(event.details).length">{{ JSON.stringify(event.details) }}</code>
-              </li>
-            </ol>
-          </details>
           <div v-if="shouldShowConfigPanel" class="agent-ppt-target-config-panel">
             <div class="agent-ppt-target-config-head">
               <div>
@@ -1474,27 +1872,28 @@ function confirmSourceDialog() {
             </div>
           </div>
           <div v-else class="agent-ppt-directive-doc">
-            <details v-if="hasGenerationResponsePayload" class="agent-ppt-generation-response">
-              <summary>
-                <span>{{ generationResponseTitle }}</span>
-                <small>{{ generationResponseSummary || '点击查看原始 JSON' }}</small>
-              </summary>
-              <pre>{{ generationResponseJson }}</pre>
-            </details>
             <section v-if="shouldShowNarrativePanel" class="agent-ppt-narrative-panel" aria-label="叙事方案">
               <header class="agent-ppt-narrative-head">
                 <div>
                   <span>叙事方案</span>
-                  <strong>全局叙事与逐页角色分配</strong>
+                  <strong>编剧分镜表</strong>
                 </div>
                 <small>{{ narrativeRoleRows.length }} 页角色</small>
               </header>
-              <div v-if="narrativeStrategyCards.length" class="agent-ppt-narrative-strategy">
+              <div v-if="narrativeStorylineText" class="agent-ppt-narrative-strategy">
+                <article>
+                  <span>一句话主线</span>
+                  <p>{{ narrativeStorylineText }}</p>
+                </article>
+              </div>
+              <div v-if="narrativeChapterRows.length" class="agent-ppt-narrative-strategy">
                 <article
-                  v-for="card in narrativeStrategyCards"
-                  :key="`narrative-strategy-${card[0]}`">
-                  <span>{{ card[0] }}</span>
-                  <p>{{ card[1] }}</p>
+                  v-for="chapter in narrativeChapterRows"
+                  :key="chapter.id">
+                  <span>{{ chapter.name }}</span>
+                  <p v-if="chapter.pageRange">页码：{{ chapter.pageRange }}</p>
+                  <p>任务：{{ chapter.job || '待补充' }}</p>
+                  <p>输出：{{ chapter.output || '待补充' }}</p>
                 </article>
               </div>
               <div class="agent-ppt-narrative-roles">
@@ -1505,19 +1904,15 @@ function confirmSourceDialog() {
                   <span class="agent-ppt-directive-page">{{ String(role.pageNo).padStart(2, '0') }}</span>
                   <div class="agent-ppt-directive-content">
                     <strong>{{ role.title }}</strong>
-                    <em>{{ role.objective || '未提供页面目标' }}</em>
+                    <em>{{ role.job || '未提供页面任务' }}</em>
                     <dl class="agent-ppt-directive-fields">
-                      <div v-if="role.evidenceFocus.length">
-                        <dt>证据重点</dt>
-                        <dd>{{ role.evidenceFocus.join(' / ') }}</dd>
+                      <div v-if="role.evidenceBucket">
+                        <dt>证据桶</dt>
+                        <dd>{{ role.evidenceBucket }}</dd>
                       </div>
-                      <div v-if="role.visualDirection">
-                        <dt>视觉方向</dt>
-                        <dd>{{ role.visualDirection }}</dd>
-                      </div>
-                      <div v-if="role.chartIntent">
-                        <dt>图表意图</dt>
-                        <dd>{{ role.chartIntent }}</dd>
+                      <div v-if="role.visualFamily">
+                        <dt>视觉家族</dt>
+                        <dd>{{ role.visualFamily }}</dd>
                       </div>
                       <div v-if="role.transitionNote">
                         <dt>承接关系</dt>
@@ -1527,153 +1922,306 @@ function confirmSourceDialog() {
                   </div>
                 </article>
               </div>
-            </section>
-            <div
-              v-else
-              v-for="row in outlineRows"
-              :key="`ppt-directive-row-${row.id}`"
-              class="agent-ppt-directive-row"
-              :class="{ 'is-draft': row.mode === 'outline', 'is-directive': row.mode === 'directive' }">
-              <span class="agent-ppt-directive-page">{{ String(row.pageNo).padStart(2, '0') }}</span>
-              <div class="agent-ppt-directive-content">
-                <strong>{{ row.title }}</strong>
-                <em>{{ row.detail }}</em>
-                <span v-if="isDirectiveRowStale(row)" class="agent-ppt-revision-stale">目录已变更，建议重生成本页指令</span>
-                <dl v-if="row.fields.length" class="agent-ppt-directive-fields">
-                  <div
-                    v-for="field in row.fields"
-                    :key="`ppt-directive-field-${row.id}-${field[0]}`">
-                    <dt>{{ field[0] }}</dt>
-                    <dd>{{ field[1] }}</dd>
-                  </div>
-                </dl>
-                <div v-if="row.metricClaims.length" class="agent-ppt-metric-claims">
-                  <span>数值证据</span>
-                  <article
-                    v-for="claim in row.metricClaims"
-                    :key="`metric-claim-${row.id}-${claim.claim_id || claim.claimId || claim.metric_id || claim.metricId}`">
-                    <strong>{{ formatMetricClaimValue(claim) }}</strong>
-                    <p>{{ claim.text || claim.usage || '已绑定数值证据' }}</p>
-                    <small>
-                      {{ claim.source_id || claim.sourceId || '来源' }}
-                      <template v-if="claim.status || claim.scope || claim.spatial_scope || claim.spatialScope"> · {{ claim.status || 'ready' }} · {{ claim.scope || claim.spatial_scope || claim.spatialScope }}</template>
-                      <template v-if="claim.source_path || claim.sourcePath"> · {{ claim.source_path || claim.sourcePath }}</template>
-                    </small>
-                    <small>{{ claim.calculation_method || claim.calculationMethod || claim.method || '已有分析指标' }}</small>
-                  </article>
-                </div>
-                <div v-if="row.metricGaps.length" class="agent-ppt-metric-gaps">
-                  <span>数值缺口</span>
+              <div v-if="narrativeEvidenceBuckets.length" class="agent-ppt-narrative-strategy">
+                <article
+                  v-for="item in narrativeEvidenceBuckets"
+                  :key="item.id">
+                  <span>{{ item.label }}</span>
+                  <p>ID：{{ item.id }}</p>
+                  <p v-if="item.allowedSources.length">可用来源：{{ item.allowedSources.join(' / ') }}</p>
+                </article>
+              </div>
+              <div class="agent-ppt-narrative-strategy">
+                <article>
+                  <span>视觉规则</span>
                   <p
-                    v-for="gap in row.metricGaps"
-                    :key="`metric-gap-${row.id}-${gap.gap_id || gap.gapId || gap.text}`">
-                    {{ gap.text || gap.reason || gap.needed_metric || gap.neededMetric }}
+                    v-for="rule in narrativeVisualRules"
+                    :key="`narrative-rule-${rule.label}`">
+                    {{ rule.label }}：{{ rule.enabled ? '启用' : '关闭' }}
                   </p>
-                </div>
-                <div v-if="row.visualSpecs.length" class="agent-ppt-chart-specs">
-                  <span>
-                    可视化方案
-                    <small v-if="row.visualStatus && row.visualStatus.status === 'generating'">生成中</small>
-                    <small v-else-if="row.visualStatus && row.visualStatus.status === 'failed'">{{ row.visualStatus.error || '生成失败' }}</small>
-                    <small v-else-if="row.visualArtifacts.length">已生成 {{ row.visualArtifacts.length }} 个</small>
-                  </span>
-                  <article
-                    v-for="visual in row.visualSpecs"
-                    :key="`visual-spec-${row.id}-${visual.visual_id || visual.visualId || visual.title}`">
-                    <header>
-                      <strong>{{ visual.title || '可视化' }}</strong>
-                      <small>{{ visualTypeLabel(visual) }} · {{ visual.status || 'draft' }}</small>
-                    </header>
-                    <p v-if="visual.intent || visual.caption">{{ visual.intent || visual.caption }}</p>
-                    <img
-                      v-if="visual.visual_type === 'existing_asset' && visualPreviewUrl(row, visual)"
-                      :src="visualPreviewUrl(row, visual)"
-                      :alt="visual.title || '可视化预览'">
-                    <p v-if="visual.visual_type === 'existing_asset'">
-                      {{ visual.asset_kind || visual.assetKind || '空间图资产' }}
-                      <template v-if="visual.source || (visual.asset && visual.asset.source)"> · {{ visual.source || (visual.asset && visual.asset.source) }}</template>
-                      <template v-if="visual.caption"> · {{ visual.caption }}</template>
+                </article>
+              </div>
+            </section>
+            <template v-else>
+              <div
+                v-for="row in outlineRows"
+                :key="`ppt-flow-row-${row.mode}-${row.pageNo}-${row.id}`"
+                :ref="(element) => setFlowRowRef(row.pageNo, element)"
+                class="agent-ppt-directive-row"
+                :class="{ 'is-draft': row.mode === 'outline', 'is-directive': row.mode === 'directive', 'is-active': row.pageNo === activeFlowPageNo }">
+                <span class="agent-ppt-directive-page">{{ String(row.pageNo).padStart(2, '0') }}</span>
+                <div class="agent-ppt-directive-content">
+                  <strong>
+                    {{ row.title }}
+                    <small
+                      v-if="row.statusLabel"
+                      class="agent-ppt-row-status"
+                      :class="`is-${row.statusClass || row.mode}`">
+                      {{ row.statusLabel }}
+                    </small>
+                  </strong>
+                  <em>{{ row.detail }}</em>
+                  <span v-if="isDirectiveRowStale(row)" class="agent-ppt-revision-stale">目录已变更，建议重生成本页指令</span>
+                  <dl v-if="row.fields.length" class="agent-ppt-directive-fields">
+                    <div
+                      v-for="field in row.fields"
+                      :key="`ppt-directive-field-${row.id}-${field[0]}`">
+                      <dt>{{ field[0] }}</dt>
+                      <dd>{{ field[1] }}</dd>
+                    </div>
+                  </dl>
+                  <div v-if="row.metricClaims.length" class="agent-ppt-metric-claims">
+                    <span>数值证据</span>
+                    <article
+                      v-for="claim in row.metricClaims"
+                      :key="`metric-claim-${row.id}-${claim.claim_id || claim.claimId || claim.metric_id || claim.metricId}`">
+                      <strong>{{ formatMetricClaimValue(claim) }}</strong>
+                      <p>{{ claim.text || claim.usage || '已绑定数值证据' }}</p>
+                      <small class="agent-ppt-metric-source">
+                        {{ claim.source_id || claim.sourceId || '来源' }}
+                        <template v-if="claim.status || claim.scope || claim.spatial_scope || claim.spatialScope"> · {{ claim.status || 'ready' }} · {{ claim.scope || claim.spatial_scope || claim.spatialScope }}</template>
+                      </small>
+                      <small v-if="claim.source_path || claim.sourcePath || claim.calculation_method || claim.calculationMethod || claim.method" class="agent-ppt-metric-detail">
+                        {{ claim.source_path || claim.sourcePath || claim.calculation_method || claim.calculationMethod || claim.method }}
+                      </small>
+                    </article>
+                  </div>
+                  <div v-if="row.metricGaps.length" class="agent-ppt-metric-gaps">
+                    <span>数值缺口</span>
+                    <p
+                      v-for="gap in row.metricGaps"
+                      :key="`metric-gap-${row.id}-${gap.gap_id || gap.gapId || gap.text}`">
+                      {{ gap.text || gap.reason || gap.needed_metric || gap.neededMetric }}
                     </p>
-                    <p v-if="visual.status === 'needs_design_render'">语义结构已生成，等待设计渲染。</p>
-                    <p v-if="visual.status === 'needs_existing_asset'">需要复用现有空间图截图，当前未绑定资产。</p>
-                    <table v-if="['figure', 'table', 'metric_card'].includes(String(visual.visual_type || visual.visualType || '')) && visualRowsPreview(visual).length && visualColumnsPreview(visual).length">
-                      <thead>
-                        <tr>
-                          <th
-                            v-for="column in visualColumnsPreview(visual)"
-                            :key="`visual-column-${row.id}-${visual.visual_id || visual.visualId}-${visualColumnKey(column)}`">
-                            {{ visualColumnLabel(column) }}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr
-                          v-for="(visualRow, visualRowIndex) in visualRowsPreview(visual)"
-                          :key="`visual-row-${row.id}-${visual.visual_id || visual.visualId}-${visualRowIndex}`">
-                          <td
-                            v-for="column in visualColumnsPreview(visual)"
-                            :key="`visual-cell-${row.id}-${visual.visual_id || visual.visualId}-${visualRowIndex}-${visualColumnKey(column)}`">
-                            {{ visualRow[visualColumnKey(column)] }}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    <ul v-if="['diagram', 'matrix'].includes(String(visual.visual_type || visual.visualType || ''))" class="agent-ppt-visual-outline">
-                      <li v-if="visual.diagram_kind || visual.diagramKind">{{ visual.diagram_kind || visual.diagramKind }}</li>
-                      <li v-for="item in visualNodeSummary(visual)" :key="`visual-node-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
-                      <li v-for="item in visualGroupSummary(visual)" :key="`visual-group-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
-                      <li v-for="item in visualLinkSummary(visual)" :key="`visual-link-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
-                      <li v-if="visual.design_notes">{{ visual.design_notes }}</li>
-                      <li v-if="visual.layout_hint">{{ visual.layout_hint }}</li>
-                    </ul>
-                  </article>
-                  <button
-                    type="button"
-                    class="agent-ppt-visual-generate-btn"
-                    :disabled="!canGenerateRowVisuals(row)"
-                    @click="$emit('generate-slide-visuals', row.pageNo)">
-                    {{ row.visualArtifacts.length ? '重新生成本页可视化' : '生成本页可视化' }}
-                  </button>
+                  </div>
+                  <div v-if="row.visualSpecs.length" class="agent-ppt-chart-specs">
+                    <span>
+                      可视化方案
+                      <small v-if="row.visualStatus && row.visualStatus.status === 'generating'">生成中</small>
+                      <small v-else-if="row.visualStatus && row.visualStatus.status === 'failed'">{{ row.visualStatus.error || '生成失败' }}</small>
+                      <small v-else-if="row.visualArtifacts.length">已生成 {{ row.visualArtifacts.length }} 个</small>
+                    </span>
+                    <article
+                      v-for="visual in row.visualSpecs"
+                      :key="`visual-spec-${row.id}-${visual.visual_id || visual.visualId || visual.title}`">
+                      <header>
+                        <strong>{{ visual.title || '可视化' }}</strong>
+                        <small :class="`is-${visual.status || 'draft'}`">{{ visualTypeLabel(visual) }} · {{ visual.status || 'draft' }}</small>
+                      </header>
+                      <p v-if="visual.intent || visual.caption">
+                        <b>证明：</b>{{ visual.intent || visual.caption }}
+                      </p>
+                      <p v-if="visualEvidenceSummary(visual)">
+                        <b>证据：</b>{{ visualEvidenceSummary(visual) }}
+                      </p>
+                      <p v-if="visualReasonText(visual)" class="agent-ppt-visual-missing-reason">
+                        <b>缺口：</b>{{ visualReasonText(visual) }}
+                      </p>
+                      <button
+                        v-if="visualPreviewUrl(row, visual)"
+                        type="button"
+                        class="agent-ppt-visual-preview-link"
+                        @click="openVisualPreview(row, visual)">
+                        <img
+                          :src="visualPreviewUrl(row, visual)"
+                          :alt="visual.title || '可视化预览'"
+                          @error="markVisualPreviewFailed(row, visual)">
+                      </button>
+                      <p v-if="isVisualPreviewFailed(row, visual)" class="agent-ppt-visual-preview-error">
+                        图片已生成，但预览被浏览器拦截或加载失败。
+                        <button type="button" @click="openVisualPreview(row, visual)">查看大图</button>
+                      </p>
+                      <div
+                        v-if="visualComposition(visual) === 'map_with_metric_overlays' && visualMetricOverlays(visual).length"
+                        class="agent-ppt-visual-metric-overlays">
+                        <article
+                          v-for="overlay in visualMetricOverlays(visual)"
+                          :key="`visual-overlay-${row.id}-${visual.visual_id || visual.visualId}-${overlay.metric_id || overlay.metricId || overlay.label}`">
+                          <span>{{ overlay.label || overlay.metric_id || overlay.metricId }}</span>
+                          <strong>{{ formatVisualOverlayValue(overlay) }}</strong>
+                        </article>
+                      </div>
+                      <p v-if="visual.visual_type === 'existing_asset'">
+                        {{ visual.asset_kind || visual.assetKind || '空间图资产' }}
+                        <template v-if="visual.source || (visual.asset && visual.asset.source)"> · {{ visual.source || (visual.asset && visual.asset.source) }}</template>
+                        <template v-if="visual.caption"> · {{ visual.caption }}</template>
+                      </p>
+                      <p v-if="visual.status === 'needs_design_render'">语义结构已生成，等待设计渲染。</p>
+                      <p v-if="visual.status === 'needs_existing_asset'">{{ visualExistingAssetMissingText(visual) }}</p>
+                      <div
+                        v-if="visualComposition(visual) === 'metric_dashboard' && visualMetricOverlays(visual).length"
+                        class="agent-ppt-visual-metric-dashboard">
+                        <article
+                          v-for="overlay in visualMetricOverlays(visual)"
+                          :key="`visual-dashboard-${row.id}-${visual.visual_id || visual.visualId}-${overlay.metric_id || overlay.metricId || overlay.label}`">
+                          <span>{{ overlay.label || overlay.metric_id || overlay.metricId }}</span>
+                          <strong>{{ formatVisualOverlayValue(overlay) }}</strong>
+                        </article>
+                      </div>
+                      <table v-if="visualComposition(visual) !== 'metric_dashboard' && ['figure', 'table', 'metric_card'].includes(String(visual.visual_type || visual.visualType || '')) && visualRowsPreview(visual).length && visualColumnsPreview(visual).length">
+                        <thead>
+                          <tr>
+                            <th
+                              v-for="column in visualColumnsPreview(visual)"
+                              :key="`visual-column-${row.id}-${visual.visual_id || visual.visualId}-${visualColumnKey(column)}`">
+                              {{ visualColumnLabel(column) }}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr
+                            v-for="(visualRow, visualRowIndex) in visualRowsPreview(visual)"
+                            :key="`visual-row-${row.id}-${visual.visual_id || visual.visualId}-${visualRowIndex}`">
+                            <td
+                              v-for="column in visualColumnsPreview(visual)"
+                              :key="`visual-cell-${row.id}-${visual.visual_id || visual.visualId}-${visualRowIndex}-${visualColumnKey(column)}`">
+                              {{ visualRow[visualColumnKey(column)] }}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <ul v-if="['diagram', 'matrix'].includes(String(visual.visual_type || visual.visualType || ''))" class="agent-ppt-visual-outline">
+                        <li v-if="visual.diagram_kind || visual.diagramKind">{{ visual.diagram_kind || visual.diagramKind }}</li>
+                        <li v-for="item in visualNodeSummary(visual)" :key="`visual-node-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
+                        <li v-for="item in visualGroupSummary(visual)" :key="`visual-group-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
+                        <li v-for="item in visualLinkSummary(visual)" :key="`visual-link-${row.id}-${visual.visual_id || visual.visualId}-${item}`">{{ item }}</li>
+                        <li v-if="visual.design_notes">{{ visual.design_notes }}</li>
+                        <li v-if="visual.layout_hint">{{ visual.layout_hint }}</li>
+                      </ul>
+                    </article>
+                    <button
+                      type="button"
+                      class="agent-ppt-visual-generate-btn"
+                      :disabled="!canGenerateRowVisuals(row)"
+                      @click="$emit('generate-slide-visuals', row.pageNo)">
+                      {{ row.visualArtifacts.length ? '重新生成本页可视化' : '生成本页可视化' }}
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div class="agent-ppt-row-actions">
+            </template>
+            <div v-if="shouldShowGenerationJobPanel || hasGenerationResponsePayload" class="agent-ppt-debug-section">
+              <details v-if="shouldShowGenerationJobPanel" class="agent-ppt-generation-job" :open="shouldOpenGenerationJobPanel">
+                <summary>
+                  <span>{{ generationJobTitle }}</span>
+                  <small>{{ generationJobSummary || activeGenerationJob.id || '等待状态更新' }}</small>
+                </summary>
+                <div v-if="slideGenerationQueueChips.length" class="agent-ppt-slide-queue-strip" :aria-label="slideGenerationQueueSummary">
+                  <span
+                    v-for="item in slideGenerationQueueChips"
+                    :key="`ppt-slide-queue-chip-${item.pageNo}`"
+                    class="agent-ppt-slide-queue-chip"
+                    :class="`is-${item.status}`"
+                    :title="item.error || item.label">
+                    <strong>{{ String(item.pageNo).padStart(2, '0') }}</strong>
+                    <small>{{ item.label }}</small>
+                  </span>
+                </div>
+                <ol>
+                  <li
+                    v-for="(event, eventIndex) in generationJobEvents"
+                    :key="`ppt-generation-event-${eventIndex}-${event.name}`">
+                    <strong>{{ event.name }}</strong>
+                    <span>{{ event.at }}</span>
+                    <code v-if="event.details && Object.keys(event.details).length">{{ JSON.stringify(event.details) }}</code>
+                  </li>
+                </ol>
+              </details>
+              <details v-if="hasGenerationResponsePayload" class="agent-ppt-generation-response">
+                <summary>
+                  <span>{{ generationResponseTitle }}</span>
+                  <small>{{ generationResponseSummary || '点击查看原始 JSON' }}</small>
+                </summary>
+                <pre>{{ generationResponseJson }}</pre>
+              </details>
+            </div>
+          </div>
+        </div>
+        <div
+          class="agent-ppt-brief-control-dock"
+          :class="{ 'has-brief-navigation': shouldShowFlowNavigation }">
+          <div
+            v-if="shouldShowFlowNavigation"
+            class="agent-ppt-brief-navigation"
+            :aria-label="isViewingOutline ? '目录页码导航' : 'brief 页码导航'">
+            <div class="agent-ppt-page-nav">
+              <button
+                v-for="item in flowNavigationRows"
+                :key="`ppt-flow-nav-${item.mode}-${item.pageNo}-${item.id}`"
+                type="button"
+                :class="[{ 'is-active': item.active }, `is-${item.statusClass || 'pending'}`]"
+                :title="`${item.pageNo}. ${item.title || '页面'} · ${item.statusLabel || '待生成'}`"
+                @click="selectFlowRow(item)">
+                {{ item.pageNo }}
+              </button>
+            </div>
+            <div class="agent-ppt-brief-actions">
+              <div class="agent-ppt-brief-active-page">
+                <span v-if="activeFlowRow">{{ String(activeFlowRow.pageNo).padStart(2, '0') }}</span>
+                <strong>{{ activeFlowRow ? activeFlowRow.title : '未选中页面' }}</strong>
+                <small v-if="activeFlowRow">{{ activeFlowRow.statusLabel || (activeFlowRow.mode === 'outline' ? '目录草稿' : '待生成') }}</small>
+              </div>
+              <div class="agent-ppt-brief-action-buttons">
                 <button
                   type="button"
-                  :disabled="isRowGenerating(row)"
-                  @click="openRevisionForRow(row)">
+                  :disabled="!activeFlowRow || isRowGenerating(activeFlowRow)"
+                  @click="openActiveFlowRevision">
                   编辑
                 </button>
                 <button
                   type="button"
-                  :disabled="isRowGenerating(row)"
-                  @click="openRevisionForRow(row)">
+                  :disabled="!activeFlowRow || isRowGenerating(activeFlowRow)"
+                  @click="openActiveFlowRevision">
                   AI 重生成
                 </button>
                 <button
                   type="button"
-                  :disabled="!canUndoRow(row) || isRowGenerating(row)"
-                  @click="undoRowRevision(row)">
+                  :disabled="!activeFlowRow || !canUndoRow(activeFlowRow) || isRowGenerating(activeFlowRow)"
+                  @click="undoActiveFlowRevision">
                   撤回
                 </button>
               </div>
             </div>
           </div>
-        </div>
-        <div class="agent-ppt-prompt-box">
-          <span v-if="generationErrorText">{{ generationErrorText }}</span>
-          <span v-else-if="isGenerationJobActive">{{ generationJobTitle }}</span>
-          <span v-else>{{ promptStageText }}</span>
-          <div class="agent-ppt-prompt-actions">
-            <button
-              v-for="action in promptActions"
-              :key="`ppt-prompt-action-${action.id}`"
-              type="button"
-              :class="{ 'is-primary': action.primary }"
-              :disabled="isPromptActionDisabled(action)"
-              @click="emitPromptAction(action)">
-              {{ action.label }}
-            </button>
+          <div class="agent-ppt-prompt-box">
+            <div v-if="hasPageQueue && (isSlideGenerationActive || slideGenerationFailedPage)" class="agent-ppt-slide-queue-strip is-bottom" :aria-label="slideGenerationQueueSummary">
+              <span
+                v-for="item in slideGenerationQueueChips"
+                :key="`ppt-bottom-slide-queue-chip-${item.pageNo}`"
+                class="agent-ppt-slide-queue-chip"
+                :class="`is-${item.status}`"
+                :title="item.error || item.label">
+                <strong>{{ String(item.pageNo).padStart(2, '0') }}</strong>
+                <small>{{ item.label }}</small>
+              </span>
+            </div>
+            <span v-if="generationErrorText">{{ generationErrorText }}</span>
+            <span v-else-if="isGenerationJobActive">{{ generationJobTitle }}</span>
+            <span v-else>{{ promptStageText }}</span>
+            <div class="agent-ppt-prompt-actions">
+              <button
+                v-for="action in promptActions"
+                :key="`ppt-prompt-action-${action.id}`"
+                type="button"
+                :class="{ 'is-primary': action.primary }"
+                :disabled="isPromptActionDisabled(action)"
+                @click="emitPromptAction(action)">
+                {{ action.label }}
+              </button>
+            </div>
           </div>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="visualPreviewDialog.url" class="agent-ppt-visual-preview-backdrop" @click.self="closeVisualPreview">
+      <section class="agent-ppt-visual-preview-dialog" role="dialog" aria-modal="true" :aria-label="visualPreviewDialog.title || '可视化预览'">
+        <header>
+          <strong>{{ visualPreviewDialog.title || '可视化预览' }}</strong>
+          <button type="button" aria-label="关闭预览" title="关闭" @click="closeVisualPreview">×</button>
+        </header>
+        <div class="agent-ppt-visual-preview-stage">
+          <img :src="visualPreviewDialog.url" :alt="visualPreviewDialog.title || '可视化预览'">
         </div>
       </section>
     </div>
@@ -1682,7 +2230,7 @@ function confirmSourceDialog() {
       <section class="agent-ppt-revision-drawer" role="dialog" aria-modal="true" :aria-label="activeRevisionTitle">
         <header class="agent-ppt-revision-head">
           <div>
-            <span>{{ activeRevisionType === 'directive' ? '逐页指令' : '目录小节' }}</span>
+            <span>{{ activeRevisionType === 'directive' ? '页面 brief' : '目录小节' }}</span>
             <strong>{{ activeRevisionTitle }}</strong>
           </div>
           <button type="button" aria-label="关闭" title="关闭" @click="$emit('close-revision-target')">×</button>
@@ -1725,7 +2273,7 @@ function confirmSourceDialog() {
               @input="updateRevisionDraft('purpose', $event.target.value)"></textarea>
           </label>
           <label class="agent-ppt-config-field">
-            <span>核心文案</span>
+            <span>页面核心表达</span>
             <textarea
               rows="3"
               :value="directiveRevisionDraft.keyMessage || ''"
@@ -1733,7 +2281,25 @@ function confirmSourceDialog() {
               @input="updateRevisionDraft('keyMessage', $event.target.value)"></textarea>
           </label>
           <label class="agent-ppt-config-field">
-            <span>页面提示</span>
+            <span>见地</span>
+            <textarea
+              rows="3"
+              :value="directiveRevisionDraft.insight || ''"
+              :disabled="isCurrentRevisionGenerating"
+              placeholder="补充该页判断、推断或分析结论"
+              @input="updateRevisionDraft('insight', $event.target.value)"></textarea>
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>证据解释</span>
+            <textarea
+              rows="3"
+              :value="directiveRevisionDraft.evidenceExplanation || ''"
+              :disabled="isCurrentRevisionGenerating"
+              placeholder="每行一条，说明口径、阈值、来源或可信度"
+              @input="updateRevisionDraft('evidenceExplanation', $event.target.value)"></textarea>
+          </label>
+          <label class="agent-ppt-config-field">
+            <span>页面布局指令</span>
             <textarea
               rows="3"
               :value="directiveRevisionDraft.visualPlan || ''"

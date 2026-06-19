@@ -10,6 +10,22 @@ function cloneArray(items) {
   return Array.isArray(items) ? items.map((item) => (item && typeof item === 'object' ? { ...item } : item)) : []
 }
 
+function normalizeTextList(value, limit = 3, itemLimit = 120) {
+  const rawItems = Array.isArray(value) ? value : [value]
+  const items = []
+  rawItems.forEach((raw) => {
+    const text = raw && typeof raw === 'object'
+      ? asText(raw.text || raw.description || raw.source || raw.method)
+      : asText(raw)
+    if (!text) return
+    text.split(/[\n；;]+/).forEach((part) => {
+      const clean = asText(part).replace(/^[\-*\d.、)\s]+/, '').trim()
+      if (clean && items.length < limit) items.push(clean.slice(0, itemLimit))
+    })
+  })
+  return items
+}
+
 function compactObject(value = {}, keys = []) {
   const source = cloneObject(value)
   const compact = {}
@@ -459,8 +475,10 @@ export function createDefaultDeckBriefPreview() {
         index: 1,
         title: '封面',
         purpose: '建立项目命题',
-        keyMessage: '明确区域更新的汇报对象与核心命题',
-        visualPlan: '项目名、区域底图、关键判断一句话',
+    keyMessage: '明确区域更新的汇报对象与核心命题',
+    insight: '',
+    evidenceExplanation: [],
+    visualPlan: '项目名、区域底图、关键判断一句话',
         requiredSources: ['current:scope'],
       },
       {
@@ -469,6 +487,8 @@ export function createDefaultDeckBriefPreview() {
         title: '区位判断',
         purpose: '解释区域为什么值得讨论',
         keyMessage: '用交通、周边资源和城市关系建立区位价值',
+        insight: '',
+        evidenceExplanation: [],
         visualPlan: '区位图、圈层关系、交通节点',
         requiredSources: ['current:scope', 'current:dataset:poi', 'current:dataset:h3'],
       },
@@ -478,6 +498,8 @@ export function createDefaultDeckBriefPreview() {
         title: '现状诊断',
         purpose: '把问题说清楚',
         keyMessage: '从 POI、人口、夜光、路网中提炼现状矛盾',
+        insight: '',
+        evidenceExplanation: [],
         visualPlan: '指标卡、热力图、问题清单',
         requiredSources: ['current:dataset:poi', 'current:analysis:population', 'current:analysis:nightlight', 'current:analysis:road'],
       },
@@ -487,6 +509,8 @@ export function createDefaultDeckBriefPreview() {
         title: '更新策略',
         purpose: '提出空间和功能方向',
         keyMessage: '把诊断转成可讨论的更新策略',
+        insight: '',
+        evidenceExplanation: [],
         visualPlan: '策略分区、功能组合、空间结构',
         requiredSources: ['current:dataset:h3', 'current:analysis:road'],
       },
@@ -496,6 +520,8 @@ export function createDefaultDeckBriefPreview() {
         title: '实施路径',
         purpose: '形成可推进的行动顺序',
         keyMessage: '用分期、运营和治理路径支撑落地',
+        insight: '',
+        evidenceExplanation: [],
         visualPlan: '时间轴、责任矩阵、近期行动',
         requiredSources: ['current:scope'],
       },
@@ -523,6 +549,8 @@ export function normalizeDeckSlideBrief(seed = {}, fallbackIndex = 1) {
     title: asText(seed.title) || `页面 ${index}`,
     purpose: asText(seed.purpose),
     keyMessage: asText(seed.keyMessage || seed.key_message),
+    insight: asText(seed.insight),
+    evidenceExplanation: normalizeTextList(seed.evidenceExplanation || seed.evidence_explanation),
     visualPlan: asText(seed.visualPlan || seed.visual_plan),
     requiredSources: cloneArray(seed.requiredSources || seed.required_sources).map((item) => asText(item)).filter(Boolean),
     metricClaims: cloneArray(seed.metricClaims || seed.metric_claims).map((item) => cloneObject(item)).filter((item) => item.metric_id || item.metricId || item.text),
@@ -561,10 +589,9 @@ export function normalizeNarrativeSlideRole(seed = {}, fallbackPageNo = 1) {
   return {
     pageNo,
     role: asText(seed.role),
-    objective: asText(seed.objective),
-    evidenceFocus: cloneArray(seed.evidenceFocus || seed.evidence_focus).map((item) => asText(item)).filter(Boolean),
-    visualDirection: asText(seed.visualDirection || seed.visual_direction),
-    chartIntent: asText(seed.chartIntent || seed.chart_intent),
+    job: asText(seed.job),
+    evidenceBucket: asText(seed.evidenceBucket || seed.evidence_bucket),
+    visualFamily: asText(seed.visualFamily || seed.visual_family),
     transitionNote: asText(seed.transitionNote || seed.transition_note),
   }
 }
@@ -575,11 +602,27 @@ export function normalizeNarrativePlan(seed = {}) {
     .filter((item) => item.pageNo)
   return {
     storyline: asText(seed.storyline),
-    styleGuide: asText(seed.styleGuide || seed.style_guide),
-    evidenceStrategy: asText(seed.evidenceStrategy || seed.evidence_strategy),
-    chartStrategy: asText(seed.chartStrategy || seed.chart_strategy),
+    chapters: cloneArray(seed.chapters).map((item) => ({
+      name: asText(item && item.name),
+      pageRange: asText(item && (item.pageRange || item.page_range)),
+      job: asText(item && item.job),
+      output: asText(item && item.output),
+    })).filter((item) => item.name),
+    evidenceBuckets: cloneArray(seed.evidenceBuckets || seed.evidence_buckets).map((item) => ({
+      id: asText(item && item.id),
+      label: asText(item && item.label),
+      allowedSources: cloneArray(item && (item.allowedSources || item.allowed_sources)).map((value) => asText(value)).filter(Boolean),
+    })).filter((item) => item.id),
     slideRoles: roles,
+    visualRules: (() => {
+      const rules = cloneObject(seed.visualRules || seed.visual_rules)
+      return {
+        spatialFirst: !!(rules.spatialFirst ?? rules.spatial_first),
+        numericChartsRequireData: rules.numericChartsRequireData ?? rules.numeric_charts_require_data ?? true,
+        diagramForStrategyPages: rules.diagramForStrategyPages ?? rules.diagram_for_strategy_pages ?? true,
+        noFallbackBar: rules.noFallbackBar ?? rules.no_fallback_bar ?? true,
+      }
+    })(),
     missingInputs: cloneArray(seed.missingInputs || seed.missing_inputs).map((item) => asText(item)).filter(Boolean),
-    contextManifest: cloneObject(seed.contextManifest || seed.context_manifest),
   }
 }

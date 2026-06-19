@@ -16,10 +16,22 @@ import {
   normalizePptPackageDetail,
 } from '../src/features/ppt-planning/carrier-preview.js'
 import { createAgentPptPlanningTabMethods } from '../src/features/agent/ppt-planning-tabs.js'
+import { createAgentRuntimeMethods } from '../src/features/agent/runtime.js'
+import { regenerateDeckBriefSlide } from '../src/features/ppt-planning/api.js'
+import {
+  MAP_LAYER_RENDERERS,
+  capturePptMapRequestAsset,
+  isPptMapSnapshotRequest,
+} from '../src/features/ppt-planning/map-snapshot.js'
+import {
+  capturePptCarrierSnapshotAsset,
+  isPptCarrierSnapshotRequest,
+} from '../src/features/ppt-planning/carrier-snapshot.js'
 
 import {
   applyDeckBriefResponse,
-  applyGeneratedSlideBrief,
+  applyDirectiveResponseAndMarkReady,
+  applySlideResponseAndMarkReady,
   applyPptVisualArtifactsResponse,
   applyNarrativePlanResponse,
   applyPptSpecResponse,
@@ -33,6 +45,7 @@ import {
   buildNarrativePlanPayload,
   buildPptOutlineSectionPayload,
   buildPptSpecPayload,
+  clearPptSlideMapSnapshotCaptureErrors,
   collectPptVisualArtifactFilenames,
   createPptPlanningState,
   failPptVisualArtifacts,
@@ -43,6 +56,12 @@ import {
   getPptPromptActions,
   getPptSourceDeliveryManifest,
   getPptSourceSummary,
+  markSlideApplying,
+  markSlideFailed,
+  markSlideGenerationPageActive,
+  markSlideRequestStarted,
+  markSlideResponseReceived,
+  markSlideTimedOut,
   markPptDirectiveStaleForSources,
   mergePptPlanningSources,
   movePptSourceToGroup,
@@ -52,6 +71,7 @@ import {
   resetPptPlanningToNarrativeReady,
   resetPptPlanningToOutlineReady,
   startPptVisualArtifactsGeneration,
+  startPptGenerationJob,
   startSlideGenerationQueue,
   setAllPptSourcesSelected,
   setPptGenerationError,
@@ -106,14 +126,25 @@ test('ppt narrative plan and slide queue feed single slide payloads', () => {
   const narrativePayload = buildNarrativePlanPayload(state, { areaId: 'area-1' })
   assert.equal(narrativePayload.outline.length, 2)
   state = applyNarrativePlanResponse(state, {
-    storyline: '从问题到证据',
-    style_guide: '克制',
-    evidence_strategy: '范围支撑问题',
-    chart_strategy: '第二页使用图表',
-    slide_roles: [
-      { page_no: 1, role: '开题', objective: '建立问题' },
-      { page_no: 2, role: '证据页', objective: '说明判断', chart_intent: '指标图' },
+    storyline: '问题界定到决策请示',
+    chapters: [
+      { name: '开篇定调', page_range: '01', job: '建立问题', output: '明确主线' },
+      { name: '结构诊断', page_range: '02', job: '说明判断', output: '形成结论' },
     ],
+    evidence_buckets: [
+      { id: 'scope', label: '范围', allowed_sources: ['current:scope'] },
+      { id: 'metrics', label: '指标', allowed_sources: ['current:scope'] },
+    ],
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题', evidence_bucket: 'scope', visual_family: 'existing_map_layer' },
+      { page_no: 2, role: '证据页', job: '说明判断', evidence_bucket: 'metrics', visual_family: 'dashboard' },
+    ],
+    visual_rules: {
+      spatial_first: true,
+      numeric_charts_require_data: true,
+      diagram_for_strategy_pages: true,
+      no_fallback_bar: true,
+    },
     context_manifest: {
       metric_context: {
         metrics: [{ metric_id: 'analysis:test:large', description: 'x'.repeat(10_000) }],
@@ -125,43 +156,197 @@ test('ppt narrative plan and slide queue feed single slide payloads', () => {
   })
   state = startSlideGenerationQueue(state)
   assert.equal(state.currentStep, 'slides_generating')
-  assert.equal(state.slideGenerationQueue[0].status, 'generating')
+  state = markSlideRequestStarted(state, 1, 'req-1')
+  assert.equal(state.slideGenerationQueue[0].status, 'requesting')
   const slidePayload = buildDeckBriefSlidePayload(state, { index: 1 }, '生成第一页', { areaId: 'area-1' })
   assert.equal(slidePayload.narrative_plan.slide_roles.length, 2)
   assert.equal(Object.hasOwn(slidePayload.narrative_plan, 'context_manifest'), false)
+  assert.equal(Object.hasOwn(slidePayload.narrative_plan, 'style_guide'), false)
+  assert.equal(Object.hasOwn(slidePayload.narrative_plan, 'evidence_strategy'), false)
+  assert.equal(Object.hasOwn(slidePayload.narrative_plan, 'chart_strategy'), false)
+  assert.equal(slidePayload.narrative_plan.slide_roles[1].evidence_bucket, 'metrics')
+  assert.equal(slidePayload.narrative_plan.slide_roles[1].visual_family, 'dashboard')
   assert.equal(slidePayload.target.index, 1)
-  state = applyGeneratedSlideBrief(state, { index: 1, title: '开场', purpose: '建立问题' })
+  state = markSlideResponseReceived(state, 1, 'req-1', { responseIndex: 1 })
+  state = markSlideApplying(state, 1, 'req-1')
+  state = applySlideResponseAndMarkReady(state, 1, 'req-1', { index: 1, title: '开场', purpose: '建立问题' })
   assert.equal(state.deckBrief.slides.length, 1)
   assert.equal(state.slideGenerationQueue[0].status, 'ready')
-  assert.equal(state.slideGenerationQueue[1].status, 'generating')
+  assert.equal(state.slideGenerationQueue[1].status, 'pending')
+  const secondPayload = buildDeckBriefSlidePayload(state, { index: 2 }, '生成第二页', { areaId: 'area-1' })
+  assert.equal(secondPayload.page_no, 2)
+  assert.match(secondPayload.context_id, /^ppt-brief-/)
+  assert.deepEqual(secondPayload.slides, [])
+  assert.equal(secondPayload.previous_slide_summary.index, 1)
+  assert.equal(secondPayload.previous_slide_summary.title, '开场')
+  assert.equal(secondPayload.deck_progress_summary.page_count, 2)
+  assert.deepEqual(secondPayload.deck_progress_summary.generated_pages, [1])
 })
 
-test('ppt narrative plan normalizer preserves strategy and role fields for display', () => {
+test('ppt narrative plan normalizer preserves structured narrative fields for display', () => {
   const plan = normalizeNarrativePlan({
     storyline: '从问题到证据',
-    style_guide: '克制理性',
-    evidence_strategy: '按诊断维度分配证据',
-    chart_strategy: '空间图与指标卡结合',
+    chapters: [
+      { name: '开篇定调', page_range: '01', job: '建立问题', output: '明确主线' },
+    ],
+    evidence_buckets: [
+      { id: 'scope_population', label: '范围与人口底座', allowed_sources: ['current:scope'] },
+    ],
     slide_roles: [
       {
         page_no: 2,
         role: '空间底座',
-        objective: '说明研究边界',
-        evidence_focus: ['等时圈', 'POI'],
-        visual_direction: '底图叠加网格',
-        chart_intent: '范围指标卡',
+        job: '说明研究边界',
+        evidence_bucket: 'scope_population',
+        visual_family: 'map_metric_card',
         transition_note: '承接诊断页',
       },
     ],
+    visual_rules: {
+      spatial_first: true,
+      numeric_charts_require_data: true,
+      diagram_for_strategy_pages: true,
+      no_fallback_bar: true,
+    },
   })
 
   assert.equal(plan.storyline, '从问题到证据')
-  assert.equal(plan.styleGuide, '克制理性')
-  assert.equal(plan.evidenceStrategy, '按诊断维度分配证据')
-  assert.equal(plan.chartStrategy, '空间图与指标卡结合')
+  assert.equal(plan.chapters[0].name, '开篇定调')
+  assert.equal(plan.chapters[0].job, '建立问题')
   assert.equal(plan.slideRoles[0].pageNo, 2)
-  assert.deepEqual(plan.slideRoles[0].evidenceFocus, ['等时圈', 'POI'])
-  assert.equal(plan.slideRoles[0].chartIntent, '范围指标卡')
+  assert.equal(plan.slideRoles[0].evidenceBucket, 'scope_population')
+  assert.equal(plan.slideRoles[0].visualFamily, 'map_metric_card')
+  assert.equal(plan.evidenceBuckets[0].id, 'scope_population')
+  assert.equal(plan.visualRules.noFallbackBar, true)
+})
+
+test('ppt slide queue tracks active page timing and preserves briefs after failure', () => {
+  let state = createPptPlanningState()
+  state = applyPptSpecResponse(state, {
+    title: '测试目录',
+    page_count: 2,
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+
+  state = startSlideGenerationQueue(state)
+  state = markSlideRequestStarted(state, 1, 'req-1')
+  assert.equal(state.slideGenerationJob.currentPageNo, 1)
+  assert.ok(state.slideGenerationJob.activePageStartedAt)
+
+  state = markSlideResponseReceived(state, 1, 'req-1', { responseIndex: 1 })
+  state = markSlideApplying(state, 1, 'req-1')
+  state = applySlideResponseAndMarkReady(state, 1, 'req-1', {
+    index: 1,
+    title: '开场',
+    purpose: '建立问题',
+    key_message: '问题成立',
+  })
+  assert.equal(state.deckBrief.slides.length, 1)
+  assert.equal(state.slideGenerationJob.currentPageNo, 2)
+  assert.equal(state.slideGenerationQueue[1].status, 'pending')
+
+  state = markSlideFailed(state, 2, '', '第 2 页 brief JSON 格式错误', 'http_error')
+  assert.equal(state.deckBrief.slides.length, 1)
+  assert.equal(state.slideGenerationJob.active, false)
+  assert.equal(state.slideGenerationJob.failedPageNo, 2)
+  assert.equal(state.slideGenerationJob.activePageStartedAt, '')
+  assert.equal(state.slideGenerationQueue[1].status, 'failed')
+})
+
+test('ppt slide writeback failure keeps brief workspace visible', () => {
+  let state = createPptPlanningState()
+  state = applyPptSpecResponse(state, {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+  state = startSlideGenerationQueue(state)
+
+  state = markSlideFailed(state, 1, '', '第 1 页已返回但未写入前端状态', 'writeback_lost')
+
+  assert.equal(state.currentStep, 'slides_generating')
+  assert.equal(state.slideGenerationJob.active, false)
+  assert.equal(state.slideGenerationJob.failedPageNo, 1)
+  assert.equal(state.slideGenerationQueue[0].status, 'failed')
+  assert.match(state.generationError, /未写入前端状态/)
+})
+
+test('ppt slide queue can mark each requested page active before the response returns', () => {
+  let state = createPptPlanningState()
+  state = applyPptSpecResponse(state, {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+      { id: 'p3', page_no: 3, theme: '策略', purpose: '给出路径' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+      { page_no: 3, role: '策略页', job: '给出路径' },
+    ],
+  })
+  state = startSlideGenerationQueue(state)
+  state = markSlideRequestStarted(state, 1, 'req-1')
+  state = applySlideResponseAndMarkReady(state, 1, 'req-1', { index: 1, title: '开场', purpose: '建立问题', key_message: '问题成立' })
+
+  state = markSlideGenerationPageActive(state, 3)
+
+  assert.equal(state.currentStep, 'slides_generating')
+  assert.equal(state.slideGenerationJob.active, true)
+  assert.equal(state.slideGenerationJob.currentPageNo, 3)
+  assert.ok(state.slideGenerationJob.activePageStartedAt)
+  assert.deepEqual(state.slideGenerationQueue.map((item) => item.status), ['ready', 'pending', 'requesting'])
+})
+
+test('ppt slide queue marks timeout and ignores stale response ids', () => {
+  let state = createPptPlanningState()
+  state = applyPptSpecResponse(state, {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+  state = startSlideGenerationQueue(state)
+  state = markSlideRequestStarted(state, 1, 'req-live')
+
+  const stale = markSlideResponseReceived(state, 1, 'req-old', { responseIndex: 1 })
+  assert.equal(stale.slideGenerationQueue[0].status, 'requesting')
+  assert.ok(stale.generationJob.events.find((event) => event.name === 'stale_slide_response_ignored'))
+
+  const timedOut = markSlideTimedOut(state, 1, 'req-live')
+  assert.equal(timedOut.slideGenerationQueue[0].status, 'timed_out')
+  assert.equal(timedOut.slideGenerationQueue[0].errorKind, 'timeout')
+  assert.equal(timedOut.slideGenerationJob.status, 'failed')
+  assert.equal(timedOut.slideGenerationJob.failedPageNo, 1)
+  assert.match(timedOut.generationError, /请求超时/)
 })
 
 function createPptStateWithOutlineNarrativeAndSlides() {
@@ -189,11 +374,12 @@ function createPptStateWithOutlineNarrativeAndSlides() {
   state = applyNarrativePlanResponse(state, {
     storyline: '从问题到证据',
     slide_roles: [
-      { page_no: 1, role: '开题', objective: '建立问题' },
-      { page_no: 2, role: '证据页', objective: '说明判断' },
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
     ],
   })
-  return applyGeneratedSlideBrief(state, { index: 1, title: '开场', purpose: '建立问题' })
+  state = markSlideRequestStarted(state, 1, 'req-1')
+  return applySlideResponseAndMarkReady(state, 1, 'req-1', { index: 1, title: '开场', purpose: '建立问题' })
 }
 
 test('ppt reset to narrative ready keeps outline and narrative but clears generated briefs', () => {
@@ -204,7 +390,7 @@ test('ppt reset to narrative ready keeps outline and narrative but clears genera
   assert.equal(reset.outline.length, 2)
   assert.equal(reset.narrativePlan.slideRoles.length, 2)
   assert.deepEqual(reset.deckBrief.slides, [])
-  assert.deepEqual(reset.slideGenerationQueue.map((item) => item.status), ['pending', 'pending'])
+  assert.deepEqual(reset.slideGenerationQueue, [])
   assert.equal(reset.slideGenerationJob.active, false)
   assert.equal(reset.slideGenerationJob.currentPageNo, 0)
 })
@@ -217,7 +403,7 @@ test('ppt reset to outline ready clears narrative plan and downstream briefs', (
   assert.equal(reset.outline.length, 2)
   assert.equal(reset.narrativePlan.slideRoles.length, 0)
   assert.deepEqual(reset.deckBrief.slides, [])
-  assert.deepEqual(reset.slideGenerationQueue.map((item) => item.status), ['pending', 'pending'])
+  assert.deepEqual(reset.slideGenerationQueue, [])
 })
 
 test('ppt prompt actions expose only the current stage actions', () => {
@@ -230,7 +416,7 @@ test('ppt prompt actions expose only the current stage actions', () => {
   assert.deepEqual(getPptPromptActions(outlineReady).map((item) => item.event), ['generate-narrative-plan', 'regenerate-outline'])
 
   const narrativeReady = applyNarrativePlanResponse(outlineReady, {
-    slide_roles: [{ page_no: 1, role: '开题', objective: '建立问题' }],
+    slide_roles: [{ page_no: 1, role: '开题', job: '建立问题' }],
   })
   assert.deepEqual(getPptPromptActions(narrativeReady).map((item) => item.event), ['generate-slides', 'regenerate-narrative-plan'])
 
@@ -238,10 +424,12 @@ test('ppt prompt actions expose only the current stage actions', () => {
     ...startSlideGenerationQueue(narrativeReady),
     slideGenerationJob: { failedPageNo: 1 },
   }
-  assert.equal(getPptPromptActions(failedSlides)[0].label, '继续逐页生成 brief')
+  assert.equal(getPptPromptActions(failedSlides)[0].label, '生成 brief')
 
-  const briefReady = applyGeneratedSlideBrief(narrativeReady, { index: 1, title: '开场', purpose: '建立问题' })
+  const started = markSlideRequestStarted(startSlideGenerationQueue(narrativeReady), 1, 'req-1')
+  const briefReady = applySlideResponseAndMarkReady(started, 1, 'req-1', { index: 1, title: '开场', purpose: '建立问题' })
   assert.deepEqual(getPptPromptActions(briefReady).map((item) => item.event), ['regenerate-slides'])
+  assert.equal(getPptPromptActions(briefReady)[0].label, '重新生成 brief')
 })
 
 test('ppt carrier preview model projects road context and carrier geometries into svg paths', () => {
@@ -408,6 +596,13 @@ test('ppt slide normalizer keeps metric claims and visual specs', () => {
   const slide = normalizeDeckSlideBrief({
     index: 2,
     title: '空间诊断',
+    insight: '这说明片区不是单点优势，而是具备成片承接条件。',
+    evidence_explanation: [
+      'POI 数量来自当前范围去重统计',
+      '仅使用 ready 指标，不读取原始明细',
+      '第三条保留',
+      '第四条会被截断',
+    ],
     metric_claims: [
       { claim_id: 'c1', metric_id: 'poi:total', value: 120, unit: '个', text: 'POI 共 120 个' },
     ],
@@ -431,6 +626,12 @@ test('ppt slide normalizer keeps metric claims and visual specs', () => {
     ],
   })
 
+  assert.equal(slide.insight, '这说明片区不是单点优势，而是具备成片承接条件。')
+  assert.deepEqual(slide.evidenceExplanation, [
+    'POI 数量来自当前范围去重统计',
+    '仅使用 ready 指标，不读取原始明细',
+    '第三条保留',
+  ])
   assert.equal(slide.metricClaims[0].value, 120)
   assert.equal(slide.metricGaps[0].text, '缺少夜光梯度数据')
   assert.equal(slide.visualSpecs[0].data.rows[0].value, 120)
@@ -1462,17 +1663,55 @@ test('ppt directive slide revision clears stale flag and supports undo', () => {
     title: '项目命题重写',
     purpose: '更聚焦评审',
     keyMessage: '解释更新必要性',
+    insight: '这说明更新议题已经具备明确评审价值。',
+    evidenceExplanation: ['范围口径来自当前等时圈'],
     visualPlan: '区域底图',
     requiredSources: ['current:scope'],
   })
 
   assert.equal(revised.deckBrief.slides[0].title, '项目命题重写')
+  assert.equal(revised.deckBrief.slides[0].insight, '这说明更新议题已经具备明确评审价值。')
+  assert.deepEqual(revised.deckBrief.slides[0].evidenceExplanation, ['范围口径来自当前等时圈'])
   assert.deepEqual(revised.staleDirectivePageIds, [])
   assert.ok(revised.revisionSnapshots['slide:1'])
 
   const undone = undoPptSectionRevision(revised, 'directive', { index: 1 })
   assert.equal(undone.deckBrief.slides[0].title, '项目命题')
   assert.equal(Boolean(undone.revisionSnapshots['slide:1']), false)
+})
+
+test('ppt directive manual revision keeps existing visual specs and artifacts', () => {
+  const state = createPptPlanningState({
+    currentStep: 'directive_draft',
+    deckBrief: {
+      status: 'draft',
+      slides: [
+        {
+          index: 1,
+          title: '项目命题',
+          purpose: '建立汇报主线',
+          keyMessage: '解释更新必要性',
+          visualPlan: '区域底图',
+          required_sources: ['current:scope'],
+          visual_specs: [{ visual_id: 'visual-1', visual_type: 'figure', title: 'POI 结构', status: 'renderable' }],
+          visual_artifacts: [{ visual_id: 'visual-1', filename: 'poi.svg', url: '/download/poi.svg' }],
+        },
+      ],
+    },
+  })
+
+  const revised = applyDeckBriefSlideRevision(state, {
+    index: 1,
+    title: '项目命题重写',
+    purpose: '更聚焦评审',
+    keyMessage: '解释更新必要性',
+    visualPlan: '区域底图和重点指标',
+    requiredSources: ['current:scope'],
+  })
+
+  assert.equal(revised.deckBrief.slides[0].title, '项目命题重写')
+  assert.equal(revised.deckBrief.slides[0].visualSpecs[0].title, 'POI 结构')
+  assert.equal(revised.deckBrief.slides[0].visualArtifacts[0].url, '/download/poi.svg')
 })
 
 test('ppt directive undo locates the edited current slide by target', () => {
@@ -1534,6 +1773,7 @@ test('ppt revision drafts and section payloads keep single target context', () =
       index: 1,
       title: '项目命题',
       purpose: '建立汇报主线',
+      insight: '这说明空间证据已经足以支撑更新判断。',
       required_sources: ['current:scope'],
       metric_claims: [{ metric_id: 'poi:total:1', value: 120, unit: '个', text: 'POI 总数 120 个' }],
       metric_gaps: [{ text: '缺少人口年龄结构' }],
@@ -1558,8 +1798,11 @@ test('ppt revision drafts and section payloads keep single target context', () =
   assert.equal(slidePayload.target.index, 1)
   assert.equal(slidePayload.outline_item.page_no, 1)
   assert.equal(slidePayload.revision_note, '重写这一页')
+  assert.equal(slidePayload.target.insight, '这说明空间证据已经足以支撑更新判断。')
   assert.equal(slidePayload.target.metric_claims[0].value, 120)
-  assert.equal(slidePayload.slides[0].visual_specs[0].data.rows[0].value, 120)
+  assert.deepEqual(slidePayload.slides, [])
+  assert.equal(slidePayload.page_no, 1)
+  assert.equal(slidePayload.deck_progress_summary.page_count, 1)
   assert.equal(slidePayload.target.visual_artifacts[0].url, '/download/visual.svg')
 })
 
@@ -1630,6 +1873,1456 @@ test('ppt visual artifact payload and response are independent from brief genera
   })
   assert.equal(applied.deckBrief.slides[0].visualArtifacts[0].url, '/download/visual-1.svg')
   assert.equal(applied.visualGenerationBySlide['1'].status, 'ready')
+})
+
+test('ppt visual artifact payload clears stale map snapshot capture errors before retry', () => {
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: 'POI-H3空间结构与混合度诊断',
+        visualSpecs: [{
+          visual_id: 'visual-map',
+          visual_type: 'existing_asset',
+          status: 'needs_existing_asset',
+          title: 'POI-H3空间结构与混合度诊断',
+          source_ids: ['current:analysis:poi_h3'],
+          data: {
+            composition: 'map_snapshot_request',
+            capture_error: {
+              code: 'ppt_map_snapshot_capture_failed',
+              message: '地图截图导出失败',
+            },
+            captureError: {
+              code: 'legacy_error',
+            },
+            map_request: {
+              composition: 'h3',
+              layers: [{ layer_type: 'h3_grid', source: 'current:analysis:poi_h3' }],
+            },
+            metric_overlays: [{ label: '混合度', value: 0.62 }],
+          },
+        }],
+      }],
+    },
+  })
+
+  const clearedState = clearPptSlideMapSnapshotCaptureErrors(state, 1)
+  const clearedVisual = clearedState.deckBrief.slides[0].visualSpecs[0]
+  assert.equal(clearedVisual.data.capture_error, undefined)
+  assert.equal(clearedVisual.data.captureError, undefined)
+  assert.equal(clearedVisual.data.map_request.composition, 'h3')
+  assert.equal(clearedVisual.data.metric_overlays[0].label, '混合度')
+
+  const payload = buildPptVisualArtifactsPayload(state, state.deckBrief.slides[0], { current: {} })
+  assert.equal(payload.visual_specs[0].data.capture_error, undefined)
+  assert.equal(payload.visual_specs[0].data.captureError, undefined)
+  assert.equal(payload.visual_specs[0].data.map_request.layers[0].layer_type, 'h3_grid')
+})
+
+test('ppt visual artifact payload includes current ready metrics when source payload is stale', () => {
+  const state = createPptPlanningState({
+    sources: [{
+      id: 'current:analysis:population',
+      type: 'data',
+      title: '人口结构分析',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'system',
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'current:analysis:population',
+          included: ['metrics'],
+          metrics: [],
+          metric_gaps: [],
+        },
+      },
+    }],
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '人口密度',
+        visualSpecs: [{
+          visual_id: 'visual-density',
+          visual_type: 'metric_card',
+          status: 'renderable',
+          title: '人口密度',
+          source_ids: ['current:analysis:population'],
+          source_metric_ids: ['analysis:population:population_density'],
+          data: {},
+        }],
+      }],
+    },
+  })
+
+  const payload = buildPptVisualArtifactsPayload(state, state.deckBrief.slides[0], {
+    current: {
+      metrics: {
+        metrics: [{
+          metric_id: 'analysis:population:population_density',
+          source_id: 'current:analysis:population',
+          source_ids: ['current:analysis:population'],
+          label: '人口密度',
+          value: 8000,
+          unit: '人/km²',
+          status: 'ready',
+        }],
+      },
+    },
+  })
+
+  assert.ok(payload.metric_context.metrics.find((item) => (
+    item.metric_id === 'analysis:population:population_density'
+    && item.status === 'ready'
+    && item.value === 8000
+  )))
+})
+
+test('ppt visual artifact response refreshes visual specs alongside artifacts', () => {
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '人口密度',
+        purpose: '展示空间居住性与活动密度',
+        visualSpecs: [{
+          visual_id: 'visual-1',
+          visual_type: 'metric_card',
+          status: 'missing_data',
+          title: '人口密度',
+          source_ids: ['current:analysis:population'],
+        }],
+        visualArtifacts: [],
+      }],
+    },
+  })
+
+  const applied = applyPptVisualArtifactsResponse(state, {
+    slide_index: 1,
+    visual_specs: [{
+      visual_id: 'visual-1',
+      visual_type: 'existing_asset',
+      status: 'renderable',
+      title: '人口密度',
+      source_ids: ['current:analysis:population'],
+      asset_id: 'population-map-1',
+      asset: { asset_id: 'population-map-1', data_url: 'data:image/png;base64,population' },
+      data: {
+        composition: 'map_with_metric_overlays',
+        metric_overlays: [
+          { label: '人口密度', value: 8000, unit: '人/km²', metric_id: 'analysis:population:population_density' },
+        ],
+      },
+    }],
+    visual_artifacts: [{
+      visual_id: 'visual-1',
+      visual_type: 'existing_asset',
+      asset_id: 'population-map-1',
+      url: 'data:image/png;base64,population',
+    }],
+  })
+
+  assert.equal(applied.deckBrief.slides[0].visualSpecs[0].status, 'renderable')
+  assert.equal(applied.deckBrief.slides[0].visualSpecs[0].visual_type, 'existing_asset')
+  assert.equal(applied.deckBrief.slides[0].visualSpecs[0].data.composition, 'map_with_metric_overlays')
+  assert.equal(applied.deckBrief.slides[0].visualSpecs[0].data.metric_overlays[0].label, '人口密度')
+  assert.equal(applied.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,population')
+})
+
+test('ppt map snapshot request helpers validate and preserve source request', async () => {
+  assert.equal(typeof MAP_LAYER_RENDERERS.population_grid, 'function')
+  const visual = {
+    visual_type: 'existing_asset',
+    status: 'needs_existing_asset',
+    data: {
+      composition: 'map_snapshot_request',
+      map_request: {
+        composition: 'population',
+        title: '人口密度',
+        layers: [
+          { layer_type: 'scope_boundary', source: 'current:scope' },
+          { layer_type: 'population_grid', source: 'current:analysis:population' },
+        ],
+      },
+    },
+  }
+  assert.equal(isPptMapSnapshotRequest(visual), true)
+
+  const asset = await capturePptMapRequestAsset(visual.data.map_request, {
+    renderMapRequest: async (request) => {
+      assert.equal(request.layers.length, 2)
+      return 'data:image/png;base64,map'
+    },
+  })
+  assert.equal(asset.asset_kind, 'map_snapshot')
+  assert.equal(asset.data_url, 'data:image/png;base64,map')
+  assert.equal(asset.data.map_request.composition, 'population')
+
+  const jpegAsset = await capturePptMapRequestAsset(visual.data.map_request, {
+    renderMapRequest: async () => 'data:image/jpeg;base64,map',
+  })
+  assert.equal(jpegAsset.asset_kind, 'map_snapshot')
+  assert.equal(jpegAsset.data_url, 'data:image/jpeg;base64,map')
+
+  const overviewAsset = await capturePptMapRequestAsset({
+    composition: 'overview',
+    layers: [{ layer_type: 'scope_boundary', source: 'current:scope' }],
+  }, { renderMapRequest: async () => 'data:image/png;base64,overview' })
+  assert.equal(overviewAsset.asset_kind, 'map_snapshot')
+  assert.equal(overviewAsset.data.map_request.composition, 'overview')
+
+  await assert.rejects(
+    () => capturePptMapRequestAsset({
+      composition: 'population',
+      layers: [{ layer_type: 'scope_boundary', source: 'current:scope' }],
+    }, { renderMapRequest: async () => 'data:image/png;base64,map' }),
+    /ppt_map_request_missing_renderable_layer/,
+  )
+
+  await assert.rejects(
+    () => capturePptMapRequestAsset(visual.data.map_request, {
+      renderMapRequest: async () => 'data:text/plain;base64,map',
+    }),
+    /ppt_map_asset_invalid_data_url/,
+  )
+})
+
+test('ppt map request runtime maps protocol layers to real offscreen targets', () => {
+  const runtime = createAgentRuntimeMethods()
+  const ctx = {}
+  Object.assign(ctx, runtime, {
+    roadSyntaxSummary: { edge_count: 1 },
+    roadSyntaxRoadFeatures: [{ properties: { choice_score: 0.8 }, geometry: { type: 'LineString', coordinates: [[112, 28], [112.1, 28.1]] } }],
+  })
+
+  assert.deepEqual(ctx.pptMapRequestLayerTarget({}, { layer_type: 'population_grid' }), {
+    kind: 'population_map',
+    title: '人口图层',
+    key: 'population',
+  })
+  assert.equal(ctx.pptMapRequestLayerTarget({}, { layer_type: 'nightlight_grid' }).kind, 'nightlight_map')
+  assert.equal(ctx.pptMapRequestLayerTarget({}, { layer_type: 'h3_grid' }).kind, 'h3_map')
+  assert.equal(ctx.pptMapRequestLayerTarget({}, { layer_type: 'poi_points' }).kind, 'poi_map')
+  assert.equal(ctx.pptMapRequestLayerTarget({}, { layer_type: 'scope_boundary' }).kind, 'overview_map')
+  assert.deepEqual(ctx.pptMapRequestLayerTarget({
+    annotations: [{ metric_id: 'analysis:road:avg_choice', label: '平均选择度' }],
+  }, { layer_type: 'road_syntax' }), {
+    kind: 'road_map',
+    title: '路网句法图层',
+    key: 'syntax',
+    fit: 'road',
+    metric: 'choice',
+  })
+})
+
+test('ppt map request runtime captures from main map and restores map state', async () => {
+  const runtime = createAgentRuntimeMethods()
+  const events = []
+  const ctx = {}
+  Object.assign(ctx, runtime, {
+    populationOverview: { summary: { total_population: 1200 } },
+    roadSyntaxMainTab: 'integration',
+    roadSyntaxMetric: 'integration',
+    roadSyntaxLastMetricTab: 'integration',
+    getAgentScopeBounds: () => ({ west: 112.9, south: 28.1, east: 113.1, north: 28.3 }),
+    getAgentMapViewState: () => ({ center: [113, 28.2], zoom: 12 }),
+    getAgentVisualLayerState: () => ({
+      panel: 'poi',
+      subTab: 'category',
+      roadSyntaxMainTab: ctx.roadSyntaxMainTab,
+      roadSyntaxMetric: ctx.roadSyntaxMetric,
+      roadSyntaxLastMetricTab: ctx.roadSyntaxLastMetricTab,
+    }),
+    restoreAgentVisualLayerState(state) {
+      events.push(`restore-layer:${state.panel}:${state.subTab}`)
+      this.roadSyntaxMainTab = state.roadSyntaxMainTab
+      this.roadSyntaxMetric = state.roadSyntaxMetric
+      this.roadSyntaxLastMetricTab = state.roadSyntaxLastMetricTab
+      return Promise.resolve(true)
+    },
+    restoreAgentMapViewState(view) {
+      events.push(`restore-view:${view.zoom}`)
+    },
+    prepareAgentVisualSnapshotTarget(target) {
+      events.push(`prepare:${target.kind}:${target.key}`)
+      return Promise.resolve({ west: 112.9, south: 28.1, east: 113.1, north: 28.3 })
+    },
+    waitForAgentVisualSnapshotPaint() {
+      events.push('paint')
+      return Promise.resolve(true)
+    },
+    _captureMapSnapshotBase64() {
+      events.push('capture-main')
+      return Promise.resolve('data:image/png;base64,main-map')
+    },
+  })
+
+  const dataUrl = await ctx.renderPptMapRequestMainMapSnapshot({
+    composition: 'population',
+    title: '人口密度',
+    layers: [
+      { layer_type: 'scope_boundary', source: 'current:scope' },
+      { layer_type: 'population_grid', source: 'current:analysis:population' },
+    ],
+  })
+
+  assert.equal(dataUrl, 'data:image/png;base64,main-map')
+  assert.equal(ctx.roadSyntaxMainTab, 'integration')
+  assert.equal(ctx.roadSyntaxMetric, 'integration')
+  assert.equal(ctx.roadSyntaxLastMetricTab, 'integration')
+  assert.deepEqual(events, [
+    'prepare:population_map:population',
+    'capture-main',
+    'restore-layer:poi:category',
+    'restore-view:12',
+    'paint',
+  ])
+})
+
+test('ppt map snapshot renderer readiness loads html2canvas and AMap before capture', async () => {
+  const runtime = createAgentRuntimeMethods()
+  const appendedScripts = []
+  const loadCalls = []
+  const originalDocument = globalThis.document
+  const originalWindow = globalThis.window
+  const originalHtml2canvas = globalThis.html2canvas
+  const originalAmap = globalThis.AMap
+  const windowMock = { __ANALYSIS_BOOTSTRAP__: { config: { amap_js_api_key: 'key-1', amap_js_security_code: 'sec-1' } } }
+  globalThis.window = windowMock
+  delete globalThis.html2canvas
+  delete globalThis.AMap
+  globalThis.document = {
+    querySelector: () => null,
+    createElement: () => ({
+      dataset: {},
+      addEventListener() {},
+    }),
+    head: {
+      appendChild(script) {
+        appendedScripts.push(script.src)
+        globalThis.html2canvas = async () => ({ toDataURL: () => 'data:image/png;base64,canvas' })
+        if (typeof script.onload === 'function') script.onload()
+      },
+    },
+  }
+  const ctx = {}
+  Object.assign(ctx, runtime, {
+    config: { amap_js_api_key: 'key-ctx', amap_js_security_code: 'sec-ctx' },
+    loadAMapScript(key, securityCode) {
+      loadCalls.push({ key, securityCode })
+      windowMock.AMap = { Map() {} }
+      return Promise.resolve(true)
+    },
+  })
+
+  try {
+    await ctx.ensurePptMapSnapshotRendererReady()
+    assert.deepEqual(appendedScripts, ['/static/vendor/html2canvas.min.js'])
+    assert.deepEqual(loadCalls, [{ key: 'key-ctx', securityCode: 'sec-ctx' }])
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+    if (originalHtml2canvas === undefined) delete globalThis.html2canvas
+    else globalThis.html2canvas = originalHtml2canvas
+    if (originalAmap === undefined) delete globalThis.AMap
+    else globalThis.AMap = originalAmap
+  }
+})
+
+test('ppt map request renderer draws analysis layers as svg over offscreen AMap basemap', async () => {
+  const runtime = createAgentRuntimeMethods()
+  const originalDocument = globalThis.document
+  const originalWindow = globalThis.window
+  const originalHtml2canvas = globalThis.html2canvas
+  const originalAmap = globalThis.AMap
+  const createdMaps = []
+  const appendedHosts = []
+  const svgNodes = []
+
+  const createNode = (tag) => ({
+    tag,
+    attrs: {},
+    style: { cssText: '', position: '', backgroundColor: '' },
+    children: [],
+    parentNode: null,
+    setAttribute(name, value) { this.attrs[name] = String(value) },
+    getAttribute(name) { return this.attrs[name] },
+    appendChild(node) {
+      node.parentNode = this
+      this.children.push(node)
+    },
+    removeChild(node) {
+      this.children = this.children.filter((item) => item !== node)
+      node.parentNode = null
+    },
+    querySelectorAll() { return [] },
+  })
+  const findNode = (node, predicate) => {
+    if (!node) return null
+    if (predicate(node)) return node
+    for (const child of node.children || []) {
+      const found = findNode(child, predicate)
+      if (found) return found
+    }
+    return null
+  }
+  const collectNodes = (node, tag, out = []) => {
+    if (!node) return out
+    if (node.tag === tag) out.push(node)
+    ;(node.children || []).forEach((child) => collectNodes(child, tag, out))
+    return out
+  }
+
+  class FakeOverlay {
+    constructor(options = {}) {
+      this.options = options
+    }
+    setMap(map) {
+      this.map = map
+      if (map && map.overlays) map.overlays.push(this)
+    }
+  }
+  class FakeMap {
+    constructor(host, options = {}) {
+      this.host = host
+      this.options = options
+      this.overlays = []
+      createdMaps.push(this)
+    }
+    setFitView(overlays, immediate, padding) {
+      this.fit = { overlays, immediate, padding }
+    }
+    lngLatToContainer(point) {
+      const lng = Number(point.lng ?? point[0])
+      const lat = Number(point.lat ?? point[1])
+      return { x: Math.round((lng - 112) * 1000), y: Math.round((29 - lat) * 1000) }
+    }
+    destroy() {
+      this.destroyed = true
+    }
+  }
+
+  globalThis.document = {
+    createElement: createNode,
+    createElementNS: (_ns, tag) => createNode(tag),
+    body: {
+      appendChild(node) {
+        node.parentNode = this
+        appendedHosts.push(node)
+      },
+      removeChild(node) {
+        node.parentNode = null
+      },
+    },
+  }
+  globalThis.window = {
+    setTimeout: (fn) => {
+      fn()
+      return 1
+    },
+    clearTimeout() {},
+    AMap: {
+      Map: FakeMap,
+      Polygon: class Polygon extends FakeOverlay {},
+      LngLat: class LngLat {
+        constructor(lng, lat) {
+          this.lng = lng
+          this.lat = lat
+        }
+      },
+    },
+  }
+  globalThis.AMap = globalThis.window.AMap
+  globalThis.html2canvas = async (host) => {
+    const svg = findNode(host, (node) => node.attrs && node.attrs['data-agent-ppt-svg-overlay'] === '1')
+    assert.ok(svg)
+    const paths = svgNodes.filter((node) => node.tag === 'path')
+    const circles = svgNodes.filter((node) => node.tag === 'circle')
+    assert.ok(paths.length >= 4, `expected at least 4 paths, got ${paths.length}: ${paths.map((node) => `${node.attrs.fill || node.attrs.stroke}:${node.attrs.d}`).join('|')}`)
+    assert.ok(circles.length >= 1)
+    assert.equal(paths.some((node) => String(node.attrs.d || '').startsWith('M900 900 L920 900')), true)
+    assert.equal(paths.some((node) => node.attrs.fill === 'none'), true)
+    return {
+      width: 960,
+      height: 960,
+      toDataURL: () => 'data:image/png;base64,svg-map',
+    }
+  }
+
+  const ctx = {}
+  Object.assign(ctx, runtime, {
+    _sleepForExport: async () => {},
+    waitForAgentVisualSnapshotPaint: async () => true,
+    getAgentVisualSnapshotRenderSize: () => ({ width: 960, height: 960 }),
+    appendPptMapSvgNode(svg, tag, attrs = {}) {
+      svgNodes.push({ tag, attrs: { ...attrs } })
+      return runtime.appendPptMapSvgNode.call(this, svg, tag, attrs)
+    },
+    buildAgentAnalysisSnapshot: () => ({
+      scope: { polygon: [[112.9, 28.1], [113.1, 28.1], [113.1, 28.3], [112.9, 28.1]] },
+    }),
+    getAgentScopeBounds: () => ({ west: 112.9, south: 28.1, east: 113.1, north: 28.3 }),
+    populationOverview: { summary: { total_population: 1200 } },
+    buildPopulationStyledFeatures: () => [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [[[112.9, 28.1], [112.92, 28.1], [112.92, 28.12], [112.9, 28.1]]] },
+      properties: { fillColor: '#0ea5e9', fillOpacity: 0.45 },
+    }],
+    nightlightOverview: { summary: { mean_radiance: 12 } },
+    buildNightlightStyledFeatures: () => [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [[[112.93, 28.13], [112.95, 28.13], [112.95, 28.15], [112.93, 28.13]]] },
+      properties: { fillColor: '#f59e0b', fillOpacity: 0.42 },
+    }],
+    h3AnalysisSummary: { grid_count: 1 },
+    h3AnalysisGridFeatures: [{
+      type: 'Feature',
+      geometry: { type: 'Polygon', coordinates: [[[112.96, 28.16], [112.98, 28.16], [112.98, 28.18], [112.96, 28.16]]] },
+      properties: { poi_count: 8 },
+    }],
+    roadSyntaxSummary: { edge_count: 1 },
+    roadSyntaxRoadFeatures: [{
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [[112.9, 28.1], [112.98, 28.18]] },
+      properties: { choice_score: 0.8 },
+    }],
+    allPoisDetails: [{ id: 'poi-1', type: '餐饮', lng: 112.94, lat: 28.14 }],
+    renderPptMapRequestMainMapSnapshot() {
+      throw new Error('main_map_should_not_be_called')
+    },
+  })
+
+  try {
+    const directMap = new FakeMap(createNode('div'))
+    assert.deepEqual(ctx.projectPptMapSvgPoint(directMap, [112.9, 28.1]), [900, 900])
+    assert.match(ctx.pptMapSvgPathForRing(directMap, [[112.9, 28.1], [112.92, 28.1], [112.92, 28.12], [112.9, 28.1]]), /^M900 900 L920 900/)
+    const dataUrl = await ctx.renderPptMapRequestSnapshot({
+      composition: 'composite_nightlife',
+      title: '复合空间诊断',
+      layers: [
+        { layer_type: 'scope_boundary', source: 'current:scope' },
+        { layer_type: 'population_grid', source: 'current:analysis:population' },
+        { layer_type: 'nightlight_grid', source: 'current:analysis:nightlight' },
+        { layer_type: 'h3_grid', source: 'current:analysis:h3' },
+        { layer_type: 'road_syntax', source: 'current:analysis:road', metric: 'choice' },
+        { layer_type: 'poi_points', source: 'current:dataset:poi' },
+      ],
+    })
+
+    assert.equal(dataUrl, 'data:image/png;base64,svg-map')
+    assert.equal(createdMaps.length, 2)
+    assert.equal(createdMaps[1].destroyed, true)
+    assert.equal(appendedHosts[0].parentNode, null)
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+    if (originalHtml2canvas === undefined) delete globalThis.html2canvas
+    else globalThis.html2canvas = originalHtml2canvas
+    if (originalAmap === undefined) delete globalThis.AMap
+    else globalThis.AMap = originalAmap
+  }
+})
+
+test('ppt visual api context disables main map snapshot fallback', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  let seenOptions = null
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    buildAgentPptPlanningApiContext: () => ({ current: { area_id: 'area-1' } }),
+    ensureAgentVisualSnapshotCache: async (options = {}) => {
+      seenOptions = options
+      return [{ kind: 'population_map', data_url: 'data:image/png;base64,map' }]
+    },
+  })
+
+  const context = await ctx.buildAgentPptPlanningVisualApiContext()
+
+  assert.equal(seenOptions.allowMainMapFallback, false)
+  assert.equal(context.current.visual_snapshots.length, 1)
+})
+
+test('agent visual snapshot capture can disable legacy main map fallback', async () => {
+  const runtime = createAgentRuntimeMethods()
+  let legacyCalls = 0
+  const ctx = {}
+  Object.assign(ctx, runtime, {
+    buildAgentVisualSnapshotTargets: () => [{ kind: 'population_map', key: 'population' }],
+    canCaptureAgentOffscreenVisualSnapshots: () => false,
+    captureAgentLegacyVisualSnapshots: async () => {
+      legacyCalls += 1
+      return [{ kind: 'population_map', data_url: 'data:image/png;base64,legacy' }]
+    },
+  })
+
+  const snapshots = await ctx.captureAgentVisualSnapshots({ allowMainMapFallback: false })
+
+  assert.equal(legacyCalls, 0)
+  assert.equal(snapshots[0].data_url, '')
+  assert.deepEqual(snapshots[0].warnings, ['offscreen_snapshot_unavailable_main_map_fallback_disabled'])
+})
+
+test('ppt map request runtime hydrates history scope and missing layer data before capture', async () => {
+  const runtime = createAgentRuntimeMethods()
+  const ctx = {}
+  const calls = []
+  const originalFetch = globalThis.fetch
+  Object.assign(ctx, runtime, {
+    currentHistoryRecordId: 'history-1',
+    historyDetailLoadToken: 7,
+    restoreHistoryArtifactsAsync(historyId, token) {
+      calls.push({ type: 'artifacts', historyId, token })
+      this.populationOverview = { summary: { total_population: 1200 } }
+      this.populationLayer = { cells: [{ cell_id: 'cell-1' }] }
+      return Promise.resolve({ populationRestored: true })
+    },
+    _restoreHistoryPoisAsync(historyId, token, signal, hint, year) {
+      calls.push({ type: 'pois', historyId, token, signal, hint, year })
+      this.allPoisDetails = [{ id: 'poi-1', location: [112.9, 28.2] }]
+      return Promise.resolve(true)
+    },
+  })
+  globalThis.fetch = async (url) => {
+    calls.push({ type: 'fetch', url: String(url) })
+    return {
+      ok: true,
+      json: async () => ({
+        polygon: [[112.9, 28.2], [113.0, 28.2], [113.0, 28.3], [112.9, 28.2]],
+        polygon_wgs84: [[112.89, 28.19], [112.99, 28.19], [112.99, 28.29], [112.89, 28.19]],
+      }),
+    }
+  }
+  try {
+    const restored = await ctx.ensurePptMapRequestHistoryData({
+      composition: 'population',
+      layers: [
+        { layer_type: 'scope_boundary', source: 'current:scope' },
+        { layer_type: 'population_grid', source: 'current:analysis:population' },
+        { layer_type: 'poi_points', source: 'current:dataset:poi' },
+      ],
+    })
+    assert.equal(restored, true)
+    assert.equal(ctx.currentHistoryRecordId, 'history-1')
+    assert.equal(ctx.currentHistoryPolygon.length, 4)
+    assert.equal(ctx.getAgentScopeBounds().west, 112.9)
+    assert.equal(ctx.populationLayer.cells.length, 1)
+    assert.equal(ctx.allPoisDetails.length, 1)
+    assert.deepEqual(calls.map((item) => item.type), ['fetch', 'artifacts', 'pois'])
+    assert.equal(calls[1].token, 7)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('ppt map snapshot capture errors expose readable layer failure messages', () => {
+  const runtime = createAgentRuntimeMethods()
+  const ctx = {}
+  Object.assign(ctx, runtime)
+
+  const population = ctx.normalizePptMapSnapshotCaptureError(new Error('ppt_map_request_layer_data_missing:population_grid'))
+  assert.equal(population.message, '人口图层数据未恢复')
+  assert.equal(population.layer_type, 'population_grid')
+  assert.equal(population.renderer_ready, true)
+
+  const h3 = ctx.normalizePptMapSnapshotCaptureError(new Error('ppt_map_request_layer_data_missing:h3_grid'))
+  assert.equal(h3.message, 'H3 网格数据未恢复')
+
+  const renderer = ctx.normalizePptMapSnapshotCaptureError(new Error('ppt_map_renderer_amap_unavailable'))
+  assert.equal(renderer.message, '地图截图环境未就绪：高德地图脚本未加载')
+  assert.equal(renderer.renderer_ready, false)
+
+  const empty = ctx.normalizePptMapSnapshotCaptureError(new Error('ppt_map_snapshot_data_url_empty'))
+  assert.equal(empty.message, '地图截图导出为空')
+})
+
+test('ppt carrier snapshot request renders package geometry into map asset', async () => {
+  const visual = {
+    visual_type: 'existing_asset',
+    status: 'needs_existing_asset',
+    source_ids: ['package:poi-road-carriers:test'],
+    data: {
+      composition: 'carrier_snapshot_request',
+      package_source_id: 'package:poi-road-carriers:test',
+      carrier_snapshot_request: {
+        title: '核心空间载体分布图',
+        package_source_id: 'package:poi-road-carriers:test',
+        extent_mode: 'all',
+      },
+    },
+  }
+  assert.equal(isPptCarrierSnapshotRequest(visual), true)
+
+  const asset = await capturePptCarrierSnapshotAsset(visual.data.carrier_snapshot_request, {
+    sources: [{
+      id: 'package:poi-road-carriers:test',
+      meta: {
+        package: {
+          title: '核心空间载体',
+          summary: '真实资料包几何',
+          road_context: {
+            features: [{ id: 'r1', path: [[116.1, 39.1], [116.2, 39.2]], is_skeleton: true }],
+          },
+          carriers: [{
+            carrier_id: 'corridor_01',
+            carrier_type: 'corridor',
+            carrier_label: '商业活力廊道',
+            geometry: { boundary: [[116.1, 39.1], [116.16, 39.15], [116.2, 39.2]] },
+          }],
+        },
+      },
+    }],
+  })
+
+  assert.equal(asset.asset_kind, 'map_snapshot')
+  assert.equal(asset.source, 'frontend_carrier_package_snapshot')
+  assert.match(asset.data_url, /^data:image\/svg\+xml;base64,/)
+  assert.equal(asset.data.composition, 'carrier_snapshot')
+  assert.equal(asset.data.package_source_id, 'package:poi-road-carriers:test')
+})
+
+test('ppt carrier snapshot refuses package without geometry', async () => {
+  await assert.rejects(
+    () => capturePptCarrierSnapshotAsset({
+      package_source_id: 'package:poi-road-carriers:test',
+    }, {
+      sources: [{
+        id: 'package:poi-road-carriers:test',
+        meta: { package: { carriers: [{ carrier_id: 'corridor_01', geometry: {} }] } },
+      }],
+    }),
+    /ppt_carrier_geometry_missing/,
+  )
+})
+
+test('ppt visual artifact generation captures map requests before writeback', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '人口密度',
+        visualSpecs: [{
+          visual_id: 'visual-map',
+          visual_type: 'existing_asset',
+          status: 'needs_existing_asset',
+          title: '人口密度',
+          data: {
+            composition: 'map_snapshot_request',
+            capture_error: { code: 'ppt_map_snapshot_capture_failed', message: '旧错误' },
+            map_request: {
+              composition: 'population',
+              layers: [{ layer_type: 'population_grid', source: 'current:analysis:population' }],
+            },
+          },
+        }],
+        visualArtifacts: [],
+      }],
+    },
+  })
+  const calls = []
+  let mainMapRenderCalls = 0
+  let offscreenRenderCalls = 0
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    activeStep3Panel: 'agent',
+    poiSubTab: 'category',
+    roadSyntaxMainTab: 'params',
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    updateAgentPptPlanningTabState: (_tabId, nextState) => {
+      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+    },
+    buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
+    ensurePptMapRequestHistoryData: async () => true,
+    renderPptMapRequestMainMapSnapshot: async () => {
+      mainMapRenderCalls += 1
+      return 'data:image/png;base64,main'
+    },
+    requestAgentPptPlanningVisualArtifacts: async (payload) => {
+      calls.push(payload)
+      if (calls.length === 1) {
+        assert.equal(payload.visual_specs[0].data.capture_error, undefined)
+        return {
+          slide_index: 1,
+          visual_specs: [{
+            visual_id: 'visual-map',
+            visual_type: 'existing_asset',
+            status: 'needs_existing_asset',
+            data: {
+              composition: 'map_snapshot_request',
+              map_request: {
+                composition: 'population',
+                title: '人口密度',
+                layers: [{ layer_type: 'population_grid', source: 'current:analysis:population' }],
+              },
+            },
+          }],
+          visual_artifacts: [],
+        }
+      }
+      assert.equal(payload.existing_assets[0].asset_kind, 'map_snapshot')
+      return {
+        slide_index: 1,
+        visual_specs: [{ visual_id: 'visual-map', visual_type: 'existing_asset', status: 'renderable' }],
+        visual_artifacts: [{ visual_id: 'visual-map', url: payload.existing_assets[0].data_url }],
+      }
+    },
+    ensurePptMapSnapshotRendererReady: async () => {
+      return true
+    },
+    renderPptMapRequestSnapshot: async () => {
+      offscreenRenderCalls += 1
+      return 'data:image/png;base64,offscreen'
+    },
+  })
+
+  await ctx.generateAgentPptPlanningSlideVisuals(1)
+  assert.equal(calls.length, 2)
+  assert.equal(mainMapRenderCalls, 1)
+  assert.equal(offscreenRenderCalls, 0)
+  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,main')
+  assert.equal(ctx.activeStep3Panel, 'agent')
+  assert.equal(ctx.poiSubTab, 'category')
+  assert.equal(ctx.roadSyntaxMainTab, 'params')
+})
+
+test('ppt visual artifact generation captures carrier package snapshot requests before writeback', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const state = createPptPlanningState({
+    sources: [{
+      id: 'package:poi-road-carriers:test',
+      type: 'package',
+      selected: true,
+      meta: {
+        package: {
+          carriers: [{
+            carrier_id: 'corridor_01',
+            carrier_type: 'corridor',
+            carrier_label: '商业活力廊道',
+            geometry: { boundary: [[116.1, 39.1], [116.16, 39.15], [116.2, 39.2]] },
+          }],
+          road_context: {
+            features: [{ id: 'road-1', path: [[116.1, 39.1], [116.2, 39.2]], is_skeleton: true }],
+          },
+        },
+      },
+    }],
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '核心空间载体',
+        visualSpecs: [{
+          visual_id: 'visual-carrier-map',
+          visual_type: 'existing_asset',
+          status: 'needs_existing_asset',
+          title: '核心空间载体分布图',
+          source_ids: ['package:poi-road-carriers:test'],
+          data: {
+            composition: 'carrier_snapshot_request',
+            package_source_id: 'package:poi-road-carriers:test',
+            carrier_snapshot_request: {
+              title: '核心空间载体分布图',
+              package_source_id: 'package:poi-road-carriers:test',
+              extent_mode: 'all',
+            },
+          },
+        }],
+        visualArtifacts: [],
+      }],
+    },
+  })
+  const calls = []
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    getAgentPptPlanningStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    updateAgentPptPlanningTabState: (_tabId, nextState) => {
+      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+    },
+    buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
+    requestAgentPptPlanningVisualArtifacts: async (payload) => {
+      calls.push(payload)
+      if (calls.length === 1) {
+        return {
+          slide_index: 1,
+          visual_specs: [{
+            visual_id: 'visual-carrier-map',
+            visual_type: 'existing_asset',
+            status: 'needs_existing_asset',
+            title: '核心空间载体分布图',
+            source_ids: ['package:poi-road-carriers:test'],
+            data: {
+              composition: 'carrier_snapshot_request',
+              package_source_id: 'package:poi-road-carriers:test',
+              carrier_snapshot_request: {
+                title: '核心空间载体分布图',
+                package_source_id: 'package:poi-road-carriers:test',
+                extent_mode: 'all',
+              },
+            },
+          }],
+          visual_artifacts: [],
+        }
+      }
+      assert.equal(payload.existing_assets[0].source, 'frontend_carrier_package_snapshot')
+      assert.match(payload.existing_assets[0].data_url, /^data:image\/svg\+xml;base64,/)
+      return {
+        slide_index: 1,
+        visual_specs: [{ visual_id: 'visual-carrier-map', visual_type: 'existing_asset', status: 'renderable' }],
+        visual_artifacts: [{ visual_id: 'visual-carrier-map', url: payload.existing_assets[0].data_url }],
+      }
+    },
+  })
+
+  await ctx.generateAgentPptPlanningSlideVisuals(1)
+  assert.equal(calls.length, 2)
+  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualSpecs[0].status, 'renderable')
+})
+
+test('ppt visual artifact generation captures maps from main map by default', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '人口密度',
+        visualSpecs: [{ visual_id: 'visual-map', visual_type: 'metric_card', title: '人口密度' }],
+        visualArtifacts: [],
+      }],
+    },
+  })
+  const events = []
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    updateAgentPptPlanningTabState: (_tabId, nextState) => {
+      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+    },
+    buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
+    ensurePptMapRequestHistoryData: async () => true,
+    ensurePptMapSnapshotRendererReady: async () => {
+      events.push('ready-offscreen')
+    },
+    renderPptMapRequestMainMapSnapshot: async () => {
+      events.push('render-main')
+      return 'data:image/png;base64,main-map'
+    },
+    renderPptMapRequestSnapshot: async () => {
+      events.push('render-offscreen')
+      return 'data:image/png;base64,offscreen'
+    },
+    requestAgentPptPlanningVisualArtifacts: async (payload) => {
+      if (!payload.existing_assets.length) {
+        return {
+          slide_index: 1,
+          visual_specs: [{
+            visual_id: 'visual-map',
+            visual_type: 'existing_asset',
+            status: 'needs_existing_asset',
+            data: {
+              composition: 'map_snapshot_request',
+              map_request: {
+                composition: 'population',
+                layers: [{ layer_type: 'population_grid', source: 'current:analysis:population' }],
+              },
+            },
+          }],
+          visual_artifacts: [],
+        }
+      }
+      return {
+        slide_index: 1,
+        visual_specs: [{ visual_id: 'visual-map', visual_type: 'existing_asset', status: 'renderable' }],
+        visual_artifacts: [{ visual_id: 'visual-map', url: payload.existing_assets[0].data_url }],
+      }
+    },
+  })
+
+  await ctx.generateAgentPptPlanningSlideVisuals(1)
+
+  assert.deepEqual(events, ['render-main'])
+  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,main-map')
+})
+
+test('ppt map request capture can explicitly prefer offscreen renderer', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const visual = {
+    visual_id: 'visual-map',
+    visual_type: 'existing_asset',
+    status: 'needs_existing_asset',
+    data: {
+      composition: 'map_snapshot_request',
+      map_request: {
+        composition: 'population',
+        layers: [{ layer_type: 'population_grid', source: 'current:analysis:population' }],
+      },
+    },
+  }
+  const events = []
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    ensurePptMapRequestHistoryData: async () => true,
+    ensurePptMapSnapshotRendererReady: async () => {
+      events.push('ready-offscreen')
+    },
+    renderPptMapRequestSnapshot: async () => {
+      events.push('render-offscreen')
+      return 'data:image/png;base64,offscreen'
+    },
+    renderPptMapRequestMainMapSnapshot: async () => {
+      events.push('render-main')
+      return 'data:image/png;base64,main'
+    },
+  })
+
+  const result = await ctx.captureAgentPptMapRequestAssets([visual], { preferOffscreenMapCapture: true })
+
+  assert.deepEqual(events, ['ready-offscreen', 'render-offscreen'])
+  assert.equal(result.assets[0].data_url, 'data:image/png;base64,offscreen')
+})
+
+test('ppt map request capture deduplicates identical scenes and reuses cache', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const visuals = [
+    {
+      visual_id: 'visual-map-a',
+      visual_type: 'existing_asset',
+      status: 'needs_existing_asset',
+      title: '人口分布 A',
+      source_ids: ['current:analysis:population'],
+      data: {
+        composition: 'map_snapshot_request',
+        map_request: {
+          composition: 'population',
+          title: '人口分布 A',
+          layers: [
+            { layer_type: 'scope_boundary', source: 'current:scope' },
+            { layer_type: 'population_grid', source: 'current:analysis:population' },
+          ],
+        },
+      },
+    },
+    {
+      visual_id: 'visual-map-b',
+      visual_type: 'existing_asset',
+      status: 'needs_existing_asset',
+      title: '人口分布 B',
+      source_ids: ['current:analysis:population'],
+      data: {
+        composition: 'map_snapshot_request',
+        map_request: {
+          composition: 'population',
+          title: '人口分布 B',
+          layers: [
+            { layer_type: 'population_grid', source: 'current:analysis:population' },
+            { layer_type: 'scope_boundary', source: 'current:scope' },
+          ],
+        },
+      },
+    },
+  ]
+  let captureCount = 0
+  let hydrateCount = 0
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    buildAgentVisualSnapshotFingerprint: () => 'fingerprint-1',
+    ensurePptMapRequestHistoryData: async () => {
+      hydrateCount += 1
+      return true
+    },
+    renderPptMapRequestMainMapSnapshot: async () => {
+      captureCount += 1
+      return 'data:image/png;base64,deduped-map'
+    },
+  })
+
+  const first = await ctx.captureAgentPptMapRequestAssets(visuals)
+  const second = await ctx.captureAgentPptMapRequestAssets(visuals)
+
+  assert.equal(captureCount, 1)
+  assert.equal(hydrateCount, 1)
+  assert.equal(first.assets.length, 2)
+  assert.deepEqual(first.assets.map((asset) => asset.visual_id).sort(), ['visual-map-a', 'visual-map-b'])
+  assert.equal(first.assets[0].data_url, 'data:image/png;base64,deduped-map')
+  assert.equal(first.assets[1].data_url, 'data:image/png;base64,deduped-map')
+  assert.equal(second.assets.length, 2)
+  assert.equal(second.assets[0].data_url, 'data:image/png;base64,deduped-map')
+  assert.equal(Object.keys(ctx.pptMapSnapshotAssetCache || {}).length, 1)
+})
+
+test('ppt map request capture keeps different scenes separate', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const visuals = [
+    {
+      visual_id: 'visual-road-choice',
+      visual_type: 'existing_asset',
+      status: 'needs_existing_asset',
+      data: {
+        composition: 'map_snapshot_request',
+        map_request: {
+          composition: 'road',
+          layers: [{ layer_type: 'road_syntax', source: 'current:analysis:road', metric: 'choice' }],
+        },
+      },
+    },
+    {
+      visual_id: 'visual-road-integration',
+      visual_type: 'existing_asset',
+      status: 'needs_existing_asset',
+      data: {
+        composition: 'map_snapshot_request',
+        map_request: {
+          composition: 'road',
+          layers: [{ layer_type: 'road_syntax', source: 'current:analysis:road', metric: 'integration' }],
+        },
+      },
+    },
+  ]
+  let captureCount = 0
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    buildAgentVisualSnapshotFingerprint: () => 'fingerprint-1',
+    ensurePptMapRequestHistoryData: async () => true,
+    renderPptMapRequestMainMapSnapshot: async () => {
+      captureCount += 1
+      return `data:image/png;base64,road-${captureCount}`
+    },
+  })
+
+  const result = await ctx.captureAgentPptMapRequestAssets(visuals)
+
+  assert.equal(captureCount, 2)
+  assert.equal(result.assets.length, 2)
+  assert.equal(result.assets[0].data_url, 'data:image/png;base64,road-1')
+  assert.equal(result.assets[1].data_url, 'data:image/png;base64,road-2')
+})
+
+test('ppt carrier snapshots do not use map scene cache', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const visual = {
+    visual_id: 'visual-carrier-map',
+    visual_type: 'existing_asset',
+    status: 'needs_existing_asset',
+    source_ids: ['package:poi-road-carriers:test'],
+    data: {
+      composition: 'carrier_snapshot_request',
+      package_source_id: 'package:poi-road-carriers:test',
+      carrier_snapshot_request: {
+        title: '核心空间载体分布图',
+        package_source_id: 'package:poi-road-carriers:test',
+        extent_mode: 'all',
+      },
+    },
+  }
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    pptMapSnapshotAssetCache: {
+      stale: { data_url: 'data:image/png;base64,map-cache' },
+    },
+    getAgentPptPlanningStateWithSystemSources: () => ({
+      sources: [{
+        id: 'package:poi-road-carriers:test',
+        meta: {
+          package: {
+            carriers: [{
+              carrier_id: 'corridor_01',
+              carrier_type: 'corridor',
+              carrier_label: '商业活力廊道',
+              geometry: { boundary: [[116.1, 39.1], [116.16, 39.15], [116.2, 39.2]] },
+            }],
+          },
+        },
+      }],
+    }),
+    renderPptMapRequestMainMapSnapshot() {
+      throw new Error('map_capture_should_not_run_for_carrier')
+    },
+  })
+
+  const result = await ctx.captureAgentPptMapRequestAssets([visual])
+
+  assert.equal(result.assets.length, 1)
+  assert.equal(result.assets[0].source, 'frontend_carrier_package_snapshot')
+  assert.match(result.assets[0].data_url, /^data:image\/svg\+xml;base64,/)
+  assert.equal(Object.keys(ctx.pptMapSnapshotAssetCache).length, 1)
+})
+
+test('ppt visual artifact generation hydrates map request data before rendering snapshot', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '人口密度',
+        visualSpecs: [{ visual_id: 'visual-map', visual_type: 'metric_card', title: '人口密度' }],
+      }],
+    },
+  })
+  const events = []
+  const ctx = {}
+  Object.assign(ctx, methods, {
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    updateAgentPptPlanningTabState: (_tabId, nextState) => {
+      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+    },
+    buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
+    ensurePptMapRequestHistoryData: async (mapRequest) => {
+      events.push(`hydrate:${mapRequest.composition}`)
+      return true
+    },
+    requestAgentPptPlanningVisualArtifacts: async (payload) => {
+      if (events.length === 0) events.push('request-initial')
+      if (events.filter((item) => item === 'request-initial').length === 1 && !payload.existing_assets.length) {
+        return {
+          slide_index: 1,
+          visual_specs: [{
+            visual_id: 'visual-map',
+            visual_type: 'existing_asset',
+            status: 'needs_existing_asset',
+            data: {
+              composition: 'map_snapshot_request',
+              map_request: {
+                composition: 'population',
+                layers: [{ layer_type: 'population_grid', source: 'current:analysis:population' }],
+              },
+            },
+          }],
+          visual_artifacts: [],
+        }
+      }
+      events.push('request-writeback')
+      return {
+        slide_index: 1,
+        visual_specs: [{ visual_id: 'visual-map', visual_type: 'existing_asset', status: 'renderable' }],
+        visual_artifacts: [{ visual_id: 'visual-map', url: payload.existing_assets[0].data_url }],
+      }
+    },
+    renderPptMapRequestMainMapSnapshot: async () => {
+      events.push('render-main')
+      return 'data:image/png;base64,captured'
+    },
+    ensurePptMapSnapshotRendererReady: async () => {
+      events.push('ready-offscreen')
+    },
+    renderPptMapRequestSnapshot: async () => {
+      events.push('render-offscreen')
+      return 'data:image/png;base64,offscreen'
+    },
+  })
+
+  await ctx.generateAgentPptPlanningSlideVisuals(1)
+
+  assert.deepEqual(events, ['request-initial', 'hydrate:population', 'render-main', 'request-writeback'])
+  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,captured')
+})
+
+test('ppt visual artifact generation isolates failed map captures per visual', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const runtime = createAgentRuntimeMethods()
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '空间诊断',
+        visualSpecs: [
+          { visual_id: 'visual-pop', visual_type: 'metric_card', title: '人口密度' },
+          { visual_id: 'visual-h3', visual_type: 'metric_card', title: 'H3 网格' },
+        ],
+        visualArtifacts: [],
+      }],
+    },
+  })
+  const calls = []
+  const ctx = {}
+  Object.assign(ctx, methods, runtime, {
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    updateAgentPptPlanningTabState: (_tabId, nextState) => {
+      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+    },
+    buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
+    ensurePptMapRequestHistoryData: async () => true,
+    renderPptMapRequestMainMapSnapshot: async (mapRequest) => {
+      if (mapRequest.composition === 'population') {
+        throw new Error('ppt_map_request_layer_data_missing:population_grid')
+      }
+      return 'data:image/png;base64,h3'
+    },
+    requestAgentPptPlanningVisualArtifacts: async (payload) => {
+      calls.push(payload)
+      if (calls.length === 1) {
+        return {
+          slide_index: 1,
+          visual_specs: [
+            {
+              visual_id: 'visual-pop',
+              visual_type: 'existing_asset',
+              status: 'needs_existing_asset',
+              data: {
+                composition: 'map_snapshot_request',
+                map_request: {
+                  composition: 'population',
+                  layers: [{ layer_type: 'population_grid', source: 'current:analysis:population' }],
+                },
+              },
+            },
+            {
+              visual_id: 'visual-h3',
+              visual_type: 'existing_asset',
+              status: 'needs_existing_asset',
+              data: {
+                composition: 'map_snapshot_request',
+                map_request: {
+                  composition: 'h3',
+                  layers: [{ layer_type: 'h3_grid', source: 'current:analysis:h3' }],
+                },
+              },
+            },
+          ],
+          visual_artifacts: [],
+        }
+      }
+      assert.equal(payload.existing_assets.length, 1)
+      assert.equal(payload.existing_assets[0].visual_id, 'visual-h3')
+      const failed = payload.visual_specs.find((visual) => visual.visual_id === 'visual-pop')
+      assert.equal(failed.data.capture_error.message, '人口图层数据未恢复')
+      assert.equal(failed.data.capture_error.code, 'ppt_map_request_layer_data_missing')
+      return {
+        slide_index: 1,
+        visual_specs: [
+          failed,
+          { visual_id: 'visual-h3', visual_type: 'existing_asset', status: 'renderable' },
+        ],
+        visual_artifacts: [{ visual_id: 'visual-h3', url: payload.existing_assets[0].data_url }],
+      }
+    },
+  })
+
+  await ctx.generateAgentPptPlanningSlideVisuals(1)
+
+  const slide = ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0]
+  assert.equal(calls.length, 2)
+  assert.equal(slide.visualArtifacts[0].url, 'data:image/png;base64,h3')
+  assert.equal(slide.visualSpecs[0].data.capture_error.message, '人口图层数据未恢复')
+  assert.equal(slide.visualSpecs[1].status, 'renderable')
+})
+
+test('ppt visual artifact generation does not create css fallback maps without real renderer', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const runtime = createAgentRuntimeMethods()
+  const state = createPptPlanningState({
+    deckBrief: {
+      slides: [{
+        index: 1,
+        title: '人口密度',
+        visualSpecs: [{ visual_id: 'visual-map', visual_type: 'metric_card', title: '人口密度' }],
+        visualArtifacts: [],
+      }],
+    },
+  })
+  const calls = []
+  const ctx = {}
+  Object.assign(ctx, methods, runtime, {
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    updateAgentPptPlanningTabState: (_tabId, nextState) => {
+      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+    },
+    buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
+    renderPptMapRequestMainMapSnapshot: async () => {
+      throw new Error('ppt_map_main_capture_unavailable')
+    },
+    requestAgentPptPlanningVisualArtifacts: async (payload) => {
+      calls.push(payload)
+      return {
+        slide_index: 1,
+        visual_specs: [{
+          visual_id: 'visual-map',
+          visual_type: 'existing_asset',
+          status: 'needs_existing_asset',
+          data: {
+            composition: 'map_snapshot_request',
+            map_request: {
+              composition: 'population',
+              title: '人口密度',
+              layers: [{ layer_type: 'population_grid', source: 'current:analysis:population' }],
+            },
+          },
+        }],
+        visual_artifacts: [],
+      }
+    },
+  })
+
+  await ctx.generateAgentPptPlanningSlideVisuals(1)
+  assert.equal(calls.length, 1)
+  const slide = ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0]
+  assert.equal(slide.visualSpecs[0].status, 'needs_existing_asset')
+  assert.equal(slide.visualSpecs[0].data.capture_error.message, '主地图截图方法不可用')
+  assert.equal(slide.visualSpecs[0].data.capture_error.code, 'ppt_map_main_capture_unavailable')
+  assert.equal(slide.visualSpecs[0].data.capture_error.renderer_ready, true)
+  assert.equal(slide.visualArtifacts.length, 0)
 })
 
 test('ppt visual artifact failure does not change generated brief slides', () => {
@@ -1751,26 +3444,30 @@ test('agent ppt generation actions write outline and directive into the active t
     requestAgentPptPlanningOutlineWithDebug(payload, options = {}) {
       return this.requestAgentPptPlanningOutline(payload, options)
     },
-    requestAgentPptPlanningDirective() {
+    requestAgentPptPlanningDeckBriefJob() {
+      return Promise.resolve({ job_id: 'brief-job-active', status: 'queued' })
+    },
+    requestAgentPptPlanningDeckBriefJobStatus() {
       return Promise.resolve({
-        status: 'draft',
-        slides: [
-          {
-            index: 1,
-            title: '项目命题',
-            purpose: '建立汇报主线',
-            key_message: '解释项目为什么成立',
-            visual_plan: '区域底图',
-            required_sources: ['current:scope'],
-          },
-        ],
+        job_id: 'brief-job-active',
+        status: 'completed',
+        result: {
+          status: 'draft',
+          slides: [
+            {
+              index: 1,
+              title: '项目命题',
+              purpose: '建立汇报主线',
+              key_message: '解释项目为什么成立',
+              visual_plan: '区域底图',
+              required_sources: ['current:scope'],
+            },
+          ],
+        },
       })
     },
-    requestAgentPptPlanningDirectiveWithDebug(payload, options = {}) {
-      return this.requestAgentPptPlanningDirective(payload, options)
-    },
-    ensureAgentVisualSnapshotCache() {
-      return Promise.resolve([])
+    buildAgentPptPlanningVisualApiContext() {
+      throw new Error('visual context should not block full brief generation')
     },
     syncCurrentAgentSession() {},
   }
@@ -1784,6 +3481,505 @@ test('agent ppt generation actions write outline and directive into the active t
   state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
   assert.equal(state.currentStep, 'directive_draft')
   assert.equal(state.deckBrief.slides.length, state.outline.length)
+  assert.ok(state.generationJob.events.find((event) => event.name === 'directive_response_unwrapped' && event.details.slideCount === 1))
+  assert.ok(state.generationJob.events.find((event) => event.name === 'directive_apply_done' && event.details.slideCount === 1))
+  assert.equal(state.generationError, '')
+})
+
+test('agent ppt deck brief job completed writes slides into the active tab', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const ctx = {
+    ...methods,
+    agentPanelPayloads: {},
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        source: 'current',
+        pptPlanningState: createPptPlanningState(),
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    ensureAgentTabs() {
+      return this.agentTabs
+    },
+    getAgentActiveTopTab() {
+      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+    },
+    normalizeAgentSiteSelectionScope() {
+      return {
+        polygon: [[0, 0], [1, 0], [1, 1]],
+        drawnPolygon: [],
+        isochroneFeature: null,
+      }
+    },
+    requestAgentPptPlanningDeckBriefJob() {
+      return Promise.resolve({
+        job_id: 'brief-job-1',
+        status: 'queued',
+        updated_at: '2026-06-18T00:00:00.000Z',
+      })
+    },
+    requestAgentPptPlanningDeckBriefJobStatus() {
+      return Promise.resolve({
+        job_id: 'brief-job-1',
+        status: 'completed',
+        updated_at: '2026-06-18T00:00:01.000Z',
+        result: {
+          status: 'draft',
+          slides: [
+            { index: 1, title: '项目命题', purpose: '建立汇报主线', key_message: '问题成立' },
+          ],
+        },
+      })
+    },
+    syncCurrentAgentSession() {},
+    buildAgentPptPlanningVisualApiContext() {
+      return Promise.resolve({
+        areaId: 'history-1',
+        current: { visual_snapshots: [] },
+      })
+    },
+  }
+
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'page-1', page_no: 1, theme: '项目命题', purpose: '建立汇报主线' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [{ page_no: 1, role: '开题', job: '建立问题' }],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningDirective()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(finalState.currentStep, 'directive_draft')
+  assert.equal(finalState.deckBrief.slides.length, 1)
+  assert.equal(finalState.deckBrief.slides[0].title, '项目命题')
+  assert.ok(finalState.generationJob.events.find((event) => event.name === 'directive_apply_done'))
+})
+
+test('agent ppt deck brief job failed does not write slides', async () => {
+  const methods = createAgentPptPlanningTabMethods()
+  const ctx = {
+    ...methods,
+    agentPanelPayloads: {},
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        source: 'current',
+        pptPlanningState: createPptPlanningState(),
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    ensureAgentTabs() {
+      return this.agentTabs
+    },
+    getAgentActiveTopTab() {
+      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+    },
+    normalizeAgentSiteSelectionScope() {
+      return {
+        polygon: [[0, 0], [1, 0], [1, 1]],
+        drawnPolygon: [],
+        isochroneFeature: null,
+      }
+    },
+    requestAgentPptPlanningDeckBriefJob() {
+      return Promise.resolve({
+        job_id: 'brief-job-2',
+        status: 'queued',
+        updated_at: '2026-06-18T00:00:00.000Z',
+      })
+    },
+    requestAgentPptPlanningDeckBriefJobStatus() {
+      return Promise.resolve({
+        job_id: 'brief-job-2',
+        status: 'failed',
+        updated_at: '2026-06-18T00:00:01.000Z',
+        error: {
+          code: 'ppt_deck_brief_job_failed',
+          message: 'brief 生成失败',
+        },
+      })
+    },
+    syncCurrentAgentSession() {},
+    buildAgentPptPlanningVisualApiContext() {
+      return Promise.resolve({
+        areaId: 'history-1',
+        current: { visual_snapshots: [] },
+      })
+    },
+  }
+
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'page-1', page_no: 1, theme: '项目命题', purpose: '建立汇报主线' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [{ page_no: 1, role: '开题', job: '建立问题' }],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningDirective()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(finalState.deckBrief.slides.length, 0)
+  assert.equal(finalState.currentStep, 'slides_generating')
+  assert.match(finalState.generationError, /brief 生成失败/)
+})
+
+test('ppt directive response helper fails stale or empty writebacks explicitly', () => {
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [{ id: 'page-1', page_no: 1, theme: '项目命题', purpose: '建立汇报主线' }],
+  })
+  state = startPptGenerationJob(state, { requestId: 'req-live', type: 'directive', tabId: 'ppt-1' })
+
+  const stale = applyDirectiveResponseAndMarkReady(state, 'req-old', {
+    status: 'draft',
+    slides: [{ index: 1, title: '旧响应' }],
+  })
+  assert.equal(stale.deckBrief.slides.length, 0)
+  assert.equal(stale.generationJob.phase, 'failed')
+  assert.match(stale.generationError, /请求已不是当前任务/)
+  assert.ok(stale.generationJob.events.find((event) => event.name === 'stale_response_ignored'))
+
+  const missing = applyDirectiveResponseAndMarkReady(state, 'req-live', {
+    status: 'draft',
+    slides: [],
+  })
+  assert.equal(missing.deckBrief.slides.length, 0)
+  assert.equal(missing.generationJob.phase, 'failed')
+  assert.match(missing.generationError, /未写入前端状态/)
+  assert.ok(missing.generationJob.events.find((event) => event.name === 'directive_writeback_missing'))
+})
+
+test('agent ppt slide generation marks each page active before sending its request', async () => {
+  const activePageNos = []
+  const activeStatuses = []
+  const requestPageNos = []
+  const ctx = createPptPlanningTestContext({
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        source: 'current',
+        pptPlanningState: createPptPlanningState(),
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    requestAgentPptPlanningDirectiveSlide(payload) {
+      const state = createPptPlanningState(this.agentTabs.pptPlanningTabs[0].pptPlanningState)
+      activePageNos.push(state.slideGenerationJob.currentPageNo)
+      const pageNo = Number(payload.target && payload.target.index)
+      const queueItem = state.slideGenerationQueue.find((item) => Number(item.pageNo || 0) === pageNo)
+      activeStatuses.push(queueItem && queueItem.status)
+      requestPageNos.push(Number(payload.target && payload.target.index))
+      return Promise.resolve({
+        index: Number(payload.target && payload.target.index),
+        title: `页面 ${payload.target.index}`,
+        purpose: '生成 brief',
+        key_message: '已生成',
+      })
+    },
+  })
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningSlides()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.deepEqual(requestPageNos, [1, 2])
+  assert.deepEqual(activePageNos, [1, 2])
+  assert.deepEqual(activeStatuses, ['requesting', 'requesting'])
+  assert.equal(finalState.deckBrief.slides.length, 2)
+  assert.equal(finalState.slideGenerationJob.active, false)
+  const appliedEvents = finalState.generationJob.events.filter((event) => event.name === 'slide_page_applied')
+  assert.equal(appliedEvents.length, 2)
+  assert.equal(appliedEvents[0].details.beforeSlideCount, 0)
+  assert.equal(appliedEvents[0].details.afterSlideCount, 1)
+  assert.deepEqual(appliedEvents[1].details.slideIndexes, [1, 2])
+  assert.ok(finalState.generationJob.events.find((event) => event.name === 'tab_update_after_sync' && event.details.afterSyncSlideCount === 2))
+})
+
+test('agent ppt slide generation syncs only stable slide states', async () => {
+  let syncCount = 0
+  const ctx = createPptPlanningTestContext({
+    syncCurrentAgentSession() {
+      syncCount += 1
+    },
+    requestAgentPptPlanningDirectiveSlide(payload, options = {}) {
+      if (typeof options.onDebugEvent === 'function') {
+        options.onDebugEvent('fetch_response_headers_received', { status: 200, ok: true })
+      }
+      return Promise.resolve({
+        index: Number(payload.target && payload.target.index),
+        title: `页面 ${payload.target.index}`,
+        purpose: '生成 brief',
+        key_message: '已生成',
+      })
+    },
+  })
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningSlides()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(finalState.deckBrief.slides.length, 2)
+  assert.equal(syncCount, 2)
+})
+
+test('agent ppt slide generation starts without visual snapshot context', async () => {
+  let visualContextCalls = 0
+  const seenPayloads = []
+  const ctx = createPptPlanningTestContext({
+    buildAgentPptPlanningVisualApiContext() {
+      visualContextCalls += 1
+      throw new Error('visual context should not block brief generation')
+    },
+    requestAgentPptPlanningDirectiveSlide(payload) {
+      seenPayloads.push(payload)
+      return Promise.resolve({
+        index: Number(payload.target && payload.target.index),
+        title: `页面 ${payload.target.index}`,
+        purpose: '生成 brief',
+        key_message: '已生成',
+      })
+    },
+  })
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+    ],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningSlides()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(visualContextCalls, 0)
+  assert.equal(seenPayloads.length, 1)
+  assert.deepEqual((seenPayloads[0].current || {}).visual_snapshots || [], [])
+  assert.equal(finalState.deckBrief.slides.length, 1)
+})
+
+test('agent ppt slide generation rejects mismatched slide response index', async () => {
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDirectiveSlide(payload) {
+      return Promise.resolve({
+        index: Number(payload.target && payload.target.index) + 1,
+        title: '错页 brief',
+        purpose: '不应写入',
+        key_message: '错页',
+      })
+    },
+  })
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningSlides()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(finalState.deckBrief.slides.length, 0)
+  assert.equal(finalState.slideGenerationQueue[0].status, 'failed')
+  assert.match(finalState.generationError, /返回页码异常/)
+  assert.ok(finalState.generationJob.events.find((event) => event.name === 'slide_page_response_received' && event.details.responseIndex === 2))
+})
+
+test('agent ppt slide generation fails when applied slide is lost after sync', async () => {
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDirectiveSlide(payload) {
+      return Promise.resolve({
+        index: Number(payload.target && payload.target.index),
+        title: '开场 brief',
+        purpose: '生成 brief',
+        key_message: '已生成',
+      })
+    },
+    syncCurrentAgentSession() {
+      const tab = this.agentTabs.pptPlanningTabs[0]
+      const slides = ((tab.pptPlanningState || {}).deckBrief || {}).slides || []
+      if (slides.length) {
+        this.agentTabs.pptPlanningTabs[0] = {
+          ...tab,
+          pptPlanningState: {
+            ...tab.pptPlanningState,
+            deckBrief: {
+              ...(tab.pptPlanningState.deckBrief || {}),
+              slides: [],
+            },
+          },
+        }
+      }
+    },
+  })
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningSlides()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(finalState.deckBrief.slides.length, 0)
+  assert.equal(finalState.slideGenerationQueue[0].status, 'failed')
+  assert.match(finalState.generationError, /写入后被同步覆盖/)
+  assert.ok(finalState.generationJob.events.find((event) => event.name === 'slide_writeback_lost_after_sync'))
+})
+
+test('agent ppt slide generation records structured validation failures by page', async () => {
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDirectiveSlide(payload, options = {}) {
+      if (typeof options.onDebugEvent === 'function') {
+        options.onDebugEvent('fetch_response_headers_received', { status: 502, ok: false })
+      }
+      const error = new Error('invalid_deck_brief_slide')
+      error.kind = 'http_error'
+      error.status = 502
+      error.data = {
+        detail: {
+          code: 'invalid_deck_brief_slide',
+          page_no: Number(payload.target && payload.target.index),
+          reason: 'missing_required_brief_content',
+          repaired: false,
+          retried: false,
+        },
+      }
+      return Promise.reject(error)
+    },
+  })
+  let state = applyPptSpecResponse(createPptPlanningState(), {
+    outline: [
+      { id: 'p1', page_no: 1, theme: '开场', purpose: '建立问题' },
+      { id: 'p2', page_no: 2, theme: '证据', purpose: '说明判断' },
+    ],
+  })
+  state = applyNarrativePlanResponse(state, {
+    storyline: '从问题到证据',
+    slide_roles: [
+      { page_no: 1, role: '开题', job: '建立问题' },
+      { page_no: 2, role: '证据页', job: '说明判断' },
+    ],
+  })
+  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+
+  await ctx.generateAgentPptPlanningSlides()
+
+  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  assert.equal(finalState.deckBrief.slides.length, 0)
+  assert.equal(finalState.slideGenerationJob.active, false)
+  assert.equal(finalState.slideGenerationJob.failedPageNo, 1)
+  assert.equal(finalState.slideGenerationQueue[0].status, 'failed')
+  assert.match(finalState.generationError, /第 1 页 brief 校验失败/)
+  assert.match(finalState.generationError, /AI 返回内容不完整/)
+  assert.notEqual(finalState.generationError, '[object Object]')
+  assert.equal(finalState.generationJob.phase, 'failed')
+  assert.ok(finalState.generationJob.events.find((event) => event.name === 'slide_page_request_started' && event.details.pageNo === 1))
+  assert.ok(finalState.generationJob.events.find((event) => event.name === 'slide_page_request_failed' && event.details.detailCode === 'invalid_deck_brief_slide'))
+  assert.ok(finalState.generationJob.events.find((event) => event.name === 'slide_fetch_response_headers_received' && event.details.status === 502))
+})
+
+test('ppt planning api keeps object error detail structured', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 502,
+    text: async () => JSON.stringify({
+      detail: {
+        code: 'invalid_deck_brief_slide',
+        page_no: 2,
+        reason: 'missing_required_brief_content',
+      },
+    }),
+  })
+  try {
+    await assert.rejects(
+      () => regenerateDeckBriefSlide({ target: { index: 2 } }),
+      (error) => {
+        assert.equal(error.message, 'invalid_deck_brief_slide')
+        assert.equal(error.status, 502)
+        assert.equal(error.data.detail.page_no, 2)
+        assert.equal(error.data.detail.reason, 'missing_required_brief_content')
+        return true
+      },
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('agent ppt outline timeout restores materials state with readable error', async () => {
@@ -1976,7 +4172,7 @@ test('agent ppt road metrics use local and global syntax summary fields', () => 
 
 test('agent ppt directive regeneration cleans previous deck visual artifacts', async () => {
   const cleaned = []
-  const initialState = applyDeckBriefResponse(applyPptSpecResponse(createPptPlanningState(), {
+  let initialState = applyDeckBriefResponse(applyPptSpecResponse(createPptPlanningState(), {
     title: '目录',
     page_count: 1,
     outline: [
@@ -2006,16 +4202,23 @@ test('agent ppt directive regeneration cleans previous deck visual artifacts', a
       deepAnalysisTabs: [],
       followupTabs: [],
     },
-    requestAgentPptPlanningDirective() {
+    requestAgentPptPlanningDeckBriefJob() {
+      return Promise.resolve({ job_id: 'brief-job-cleanup', status: 'queued' })
+    },
+    requestAgentPptPlanningDeckBriefJobStatus() {
       return Promise.resolve({
-        status: 'draft',
-        slides: [
-          {
-            index: 1,
-            title: '新指令',
-            visual_artifacts: [{ filename: 'new-deck.svg' }],
-          },
-        ],
+        job_id: 'brief-job-cleanup',
+        status: 'completed',
+        result: {
+          status: 'draft',
+          slides: [
+            {
+              index: 1,
+              title: '新指令',
+              visual_artifacts: [{ filename: 'new-deck.svg' }],
+            },
+          ],
+        },
       })
     },
     requestAgentPptPlanningVisualArtifactCleanup(filenames) {
@@ -2035,7 +4238,7 @@ test('agent ppt regenerate outline confirms and clears downstream output', async
   const methods = createAgentPptPlanningTabMethods()
   let outlineCalls = 0
   let directiveCalls = 0
-  const initialState = applyDeckBriefResponse(applyPptSpecResponse(createPptPlanningState(), {
+  let initialState = applyDeckBriefResponse(applyPptSpecResponse(createPptPlanningState(), {
     title: '旧目录',
     page_count: 1,
     outline: [
@@ -2046,6 +4249,7 @@ test('agent ppt regenerate outline confirms and clears downstream output', async
       { index: 1, title: '旧指令', purpose: '旧指令目的' },
     ],
   })
+  initialState = startSlideGenerationQueue(initialState)
   const ctx = {
     ...methods,
     agentPanelPayloads: {},
@@ -2159,17 +4363,21 @@ test('agent ppt regenerate directive confirms and keeps outline', async () => {
     confirmPptPlanningStepReset() {
       return true
     },
-    requestAgentPptPlanningDirective() {
+    requestAgentPptPlanningDeckBriefJob() {
       directiveCalls += 1
-      return Promise.resolve({
-        status: 'draft',
-        slides: [
-          { index: 1, title: '新指令', purpose: '新指令目的' },
-        ],
-      })
+      return Promise.resolve({ job_id: 'brief-job-regenerate', status: 'queued' })
     },
-    requestAgentPptPlanningDirectiveWithDebug(payload, options = {}) {
-      return this.requestAgentPptPlanningDirective(payload, options)
+    requestAgentPptPlanningDeckBriefJobStatus() {
+      return Promise.resolve({
+        job_id: 'brief-job-regenerate',
+        status: 'completed',
+        result: {
+          status: 'draft',
+          slides: [
+            { index: 1, title: '新指令', purpose: '新指令目的' },
+          ],
+        },
+      })
     },
     ensureAgentVisualSnapshotCache() {
       return Promise.resolve([])
@@ -2184,6 +4392,8 @@ test('agent ppt regenerate directive confirms and keeps outline', async () => {
   assert.equal(state.currentStep, 'directive_draft')
   assert.equal(state.outline[0].theme, '保留目录页')
   assert.equal(state.deckBrief.slides[0].title, '新指令')
+  assert.deepEqual(state.slideGenerationQueue, [])
+  assert.equal(state.slideGenerationJob.active, false)
 })
 
 test('agent ppt regenerate narrative clears downstream and uses narrative endpoint', async () => {
@@ -2224,7 +4434,7 @@ test('agent ppt regenerate narrative clears downstream and uses narrative endpoi
       narrativeCalls += 1
       return Promise.resolve({
         storyline: '新叙事',
-        slide_roles: [{ page_no: 1, role: '新开题', objective: '新目标' }],
+        slide_roles: [{ page_no: 1, role: '新开题', job: '新目标' }],
       })
     },
     requestAgentPptPlanningDirectiveSlide() {

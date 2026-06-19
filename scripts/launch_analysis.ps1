@@ -1,6 +1,7 @@
 param(
     [switch]$Restart,
     [switch]$NoOpen,
+    [switch]$UpdateEnvOnly,
     [string]$PublicDbHost
 )
 
@@ -81,9 +82,16 @@ function Set-PublicDbHost {
         if ($line -match '^DB_HOST=') {
             $hasDbHost = $true
             "DB_HOST=$hostClean"
-        } elseif ($line -match '^(DB_URL=.*@)([^:/?]+)(.*)$') {
+        } elseif ($line -match '^DB_URL=') {
             $hasDbUrl = $true
-            $line -replace '^(DB_URL=.*@)([^:/?]+)(.*)$', "`$1$hostClean`$3"
+            $dbUrl = $line.Substring(7).Trim()
+            try {
+                $builder = [System.UriBuilder]::new($dbUrl)
+                $builder.Host = $hostClean
+                "DB_URL=$($builder.Uri.AbsoluteUri)"
+            } catch {
+                throw "Failed to rewrite DB_URL host. Please check .env DB_URL format."
+            }
         } else {
             $line
         }
@@ -98,6 +106,39 @@ function Set-PublicDbHost {
 
     Set-Content -LiteralPath $EnvPath -Value $updated -Encoding UTF8
     Write-Host "Updated .env public DB host: $hostClean"
+}
+
+function Get-EnvValue {
+    param([string]$Name)
+
+    if (-not (Test-Path $EnvPath)) {
+        return ""
+    }
+    $pattern = "^$([regex]::Escape($Name))=(.*)$"
+    $line = Get-Content -LiteralPath $EnvPath |
+        Where-Object { $_ -match $pattern } |
+        Select-Object -First 1
+    if (-not $line) {
+        return ""
+    }
+    return ($line -replace $pattern, '$1').Trim()
+}
+
+function Test-DatabaseConfig {
+    $dbUrl = Get-EnvValue -Name "DB_URL"
+    if ($dbUrl) {
+        return $true
+    }
+    $dbHost = Get-EnvValue -Name "DB_HOST"
+    $dbPassword = Get-EnvValue -Name "DB_PASSWORD"
+    return [bool]($dbHost -and $dbPassword)
+}
+
+function Assert-DatabaseConfig {
+    if (Test-DatabaseConfig) {
+        return
+    }
+    throw "Missing database config: .env must contain DB_URL, or DB_HOST together with DB_PASSWORD. Current .env has DB_HOST but no DB_URL/DB_PASSWORD, so the backend cannot start."
 }
 
 function Test-BackendImports {
@@ -123,9 +164,29 @@ function Repair-BackendVenv {
     Write-Host "Backend Python environment looks incomplete; repairing with uv sync..."
     Push-Location $RepoRoot
     try {
-        uv sync
-        if ($LASTEXITCODE -ne 0) {
-            throw "uv sync failed"
+        $attempts = 0
+        while ($true) {
+            $attempts += 1
+            uv sync
+            if ($LASTEXITCODE -eq 0) {
+                return
+            }
+            if ($attempts -ge 2) {
+                throw "uv sync failed"
+            }
+            Write-Warning "uv sync failed, stopping repo-local Python processes and retrying once..."
+            Get-CimInstance Win32_Process |
+                Where-Object {
+                    $_.Name -eq "python.exe" -and (
+                        ($_.CommandLine -like "*$RepoRoot*") -or
+                        ($_.ExecutablePath -like "*$RepoRoot*") -or
+                        ($_.CommandLine -like "*uvicorn*main:app*")
+                    )
+                } |
+                ForEach-Object {
+                    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                }
+            Start-Sleep -Seconds 2
         }
     } finally {
         Pop-Location
@@ -136,12 +197,18 @@ Ensure-RuntimeDir
 
 if ($PublicDbHost) {
     Set-PublicDbHost -HostValue $PublicDbHost
+    if ($UpdateEnvOnly) {
+        Write-Host "Only .env was updated; services were not restarted."
+        exit 0
+    }
     $Restart = $true
 }
 
 if (-not (Test-Path $BackendPython)) {
     Repair-BackendVenv
 }
+
+Assert-DatabaseConfig
 
 if (-not (Test-BackendImports)) {
     Repair-BackendVenv

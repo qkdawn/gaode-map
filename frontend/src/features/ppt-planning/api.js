@@ -19,6 +19,7 @@ async function postJson(url, payload = {}) {
 
 async function postJsonWithTimeout(url, payload = {}, options = {}) {
   const onDebugEvent = typeof options.onDebugEvent === 'function' ? options.onDebugEvent : null
+  const timeoutMs = Number(options.timeoutMs || options.timeout_ms || 0) || 0
   const emitDebug = (name = '', details = {}) => {
     if (!onDebugEvent) return
     try {
@@ -28,27 +29,45 @@ async function postJsonWithTimeout(url, payload = {}, options = {}) {
     }
   }
   let response
+  const controller = timeoutMs > 0 && typeof AbortController !== 'undefined' ? new AbortController() : null
+  let timeoutId = null
+  if (controller) {
+    timeoutId = globalThis.setTimeout(() => {
+      try {
+        controller.abort()
+      } catch (_) {
+        // Abort errors are normalized below.
+      }
+    }, timeoutMs)
+  }
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: controller ? controller.signal : undefined,
     })
     emitDebug('fetch_response_headers_received', {
       ok: !!(response && response.ok),
       status: response && response.status,
     })
   } catch (error) {
+    if (timeoutId) globalThis.clearTimeout(timeoutId)
     emitDebug('fetch_rejected_before_response', {
       name: error && error.name,
       message: error && error.message,
+      timeoutMs,
     })
-    const networkError = new Error(error && error.message ? error.message : 'ppt_planning_network_error')
-    networkError.kind = 'network_error'
-    networkError.code = 'ppt_planning_network_error'
+    const timedOut = controller && error && error.name === 'AbortError'
+    const networkError = new Error(timedOut ? 'ppt_slide_request_timeout' : (error && error.message ? error.message : 'ppt_planning_network_error'))
+    networkError.kind = timedOut ? 'timeout' : 'network_error'
+    networkError.code = timedOut ? 'ppt_slide_request_timeout' : 'ppt_planning_network_error'
     networkError.url = url
+    networkError.timeoutMs = timeoutMs
     networkError.cause = error
     throw networkError
+  } finally {
+    if (timeoutId) globalThis.clearTimeout(timeoutId)
   }
   if (!response.ok) {
     emitDebug('fetch_http_error_body_read_start', { status: response.status })
@@ -62,12 +81,18 @@ async function postJsonWithTimeout(url, payload = {}, options = {}) {
     } catch (_) {
       detail = text
     }
-    const httpError = new Error(detail || `ppt_planning_request_failed:${response.status}`)
+    const message = typeof detail === 'string'
+      ? detail
+      : (detail && typeof detail === 'object'
+          ? (detail.code || detail.reason || `ppt_planning_request_failed:${response.status}`)
+          : `ppt_planning_request_failed:${response.status}`)
+    const httpError = new Error(message || `ppt_planning_request_failed:${response.status}`)
     httpError.kind = 'http_error'
     httpError.code = 'ppt_planning_request_failed'
     httpError.status = response.status
     httpError.url = url
     httpError.responseText = text
+    httpError.detail = detail
     httpError.data = data
     throw httpError
   }
@@ -78,7 +103,7 @@ async function postJsonWithTimeout(url, payload = {}, options = {}) {
       status: response.status,
       keys: Object.keys(data || {}).slice(0, 8),
     })
-    emitDebug('api_returning_data', { status: response.status })
+    emitDebug('fetch_json_parsed', { status: response.status })
     return data
   } catch (error) {
     emitDebug('fetch_json_read_failed', {
@@ -140,6 +165,14 @@ export function regeneratePptSpecSection(payload = {}) {
 
 export function generateDeckBrief(payload = {}) {
   return postJsonWithTimeout('/api/v1/analysis/ppt/deck-brief', payload)
+}
+
+export function createDeckBriefJob(payload = {}) {
+  return postJsonWithTimeout('/api/v1/analysis/ppt/deck-brief/jobs', payload)
+}
+
+export function getDeckBriefJob(jobId = '') {
+  return getJson(`/api/v1/analysis/ppt/deck-brief/jobs/${encodeURIComponent(jobId)}`)
 }
 
 export function generateNarrativePlan(payload = {}) {

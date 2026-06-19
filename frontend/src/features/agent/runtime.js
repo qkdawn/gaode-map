@@ -130,7 +130,10 @@ function createAgentRuntimeMethods() {
       if (geometry && Array.isArray(geometry.coordinates)) {
         featurePolygon = normalizePayload(geometry.type === 'Polygon' ? geometry.coordinates[0] : geometry.coordinates)
       }
-      const activePolygon = polygon.length ? polygon : (drawnPolygon.length ? drawnPolygon : featurePolygon)
+      const historyPolygon = normalizePayload(this.currentHistoryPolygon || this.currentHistoryPolygonGcj02 || [])
+      const activePolygon = polygon.length
+        ? polygon
+        : (drawnPolygon.length ? drawnPolygon : (featurePolygon.length ? featurePolygon : historyPolygon))
       return {
         hasScope: Array.isArray(activePolygon) && activePolygon.length > 0,
         polygon: activePolygon,
@@ -1831,11 +1834,97 @@ function createAgentRuntimeMethods() {
     },
     canCaptureAgentOffscreenVisualSnapshots() {
       const amap = this.getAgentAmapSdk()
+      const hasHtml2canvas = (typeof globalThis !== 'undefined' && typeof globalThis.html2canvas === 'function')
+        || (typeof window !== 'undefined' && typeof window.html2canvas === 'function')
       return typeof document !== 'undefined'
         && typeof window !== 'undefined'
         && amap
         && typeof amap.Map === 'function'
-        && typeof html2canvas === 'function'
+        && hasHtml2canvas
+    },
+    async waitForPptMapSnapshotRendererStep(promise, code = 'ppt_map_renderer_timeout', timeoutMs = 8000) {
+      let timeoutId = null
+      const timeout = new Promise((_, reject) => {
+        const timerHost = (typeof window !== 'undefined' && typeof window.setTimeout === 'function') ? window : globalThis
+        timeoutId = timerHost.setTimeout(() => reject(new Error(code)), Math.max(500, Number(timeoutMs) || 8000))
+      })
+      try {
+        return await Promise.race([promise, timeout])
+      } finally {
+        if (timeoutId !== null) {
+          const timerHost = (typeof window !== 'undefined' && typeof window.clearTimeout === 'function') ? window : globalThis
+          timerHost.clearTimeout(timeoutId)
+        }
+      }
+    },
+    async loadPptMapSnapshotScript(src = '', errorCode = 'ppt_map_renderer_script_unavailable') {
+      const normalizedSrc = asText(src)
+      if (!normalizedSrc) throw new Error(errorCode)
+      if (typeof document === 'undefined') throw new Error('ppt_map_renderer_dom_unavailable')
+      const cacheKey = `script:${normalizedSrc}`
+      const cache = cloneObject(this.pptMapSnapshotRendererReadyCache)
+      if (cache[cacheKey]) return true
+      await this.waitForPptMapSnapshotRendererStep(new Promise((resolve, reject) => {
+        const selector = `script[data-ppt-map-snapshot-src="${normalizedSrc}"]`
+        const existing = document.querySelector(selector)
+        if (existing) {
+          if (existing.__loaded) {
+            resolve(true)
+            return
+          }
+          existing.addEventListener('load', () => resolve(true), { once: true })
+          existing.addEventListener('error', () => reject(new Error(errorCode)), { once: true })
+          return
+        }
+        const script = document.createElement('script')
+        script.src = normalizedSrc
+        script.async = false
+        script.dataset.pptMapSnapshotSrc = normalizedSrc
+        script.onload = () => {
+          script.__loaded = true
+          resolve(true)
+        }
+        script.onerror = () => reject(new Error(errorCode))
+        document.head.appendChild(script)
+      }), 'ppt_map_renderer_timeout')
+      this.pptMapSnapshotRendererReadyCache = {
+        ...cloneObject(this.pptMapSnapshotRendererReadyCache),
+        [cacheKey]: true,
+      }
+      return true
+    },
+    async ensurePptMapSnapshotRendererReady() {
+      if (typeof document === 'undefined' || typeof window === 'undefined') {
+        throw new Error('ppt_map_renderer_dom_unavailable')
+      }
+      const getHtml2canvas = () => (typeof globalThis !== 'undefined' && typeof globalThis.html2canvas === 'function')
+        ? globalThis.html2canvas
+        : (typeof window !== 'undefined' && typeof window.html2canvas === 'function' ? window.html2canvas : null)
+      if (!getHtml2canvas()) {
+        await this.loadPptMapSnapshotScript('/static/vendor/html2canvas.min.js', 'ppt_map_renderer_html2canvas_unavailable')
+      }
+      if (!getHtml2canvas()) {
+        throw new Error('ppt_map_renderer_html2canvas_unavailable')
+      }
+      let amap = this.getAgentAmapSdk()
+      if (!amap || typeof amap.Map !== 'function') {
+        if (typeof this.loadAMapScript !== 'function') {
+          throw new Error('ppt_map_renderer_amap_unavailable')
+        }
+        const config = cloneObject(this.config || (typeof window !== 'undefined' ? window.__ANALYSIS_BOOTSTRAP__ && window.__ANALYSIS_BOOTSTRAP__.config : null))
+        await this.waitForPptMapSnapshotRendererStep(
+          Promise.resolve(this.loadAMapScript(config.amap_js_api_key || '', config.amap_js_security_code || '')),
+          'ppt_map_renderer_timeout',
+        ).catch((error) => {
+          if (asText(error && error.message) === 'ppt_map_renderer_timeout') throw error
+          throw new Error('ppt_map_renderer_amap_unavailable')
+        })
+        amap = this.getAgentAmapSdk()
+      }
+      if (!amap || typeof amap.Map !== 'function') {
+        throw new Error('ppt_map_renderer_amap_unavailable')
+      }
+      return { ready: true }
     },
     getAgentAmapSdk() {
       if (typeof window !== 'undefined' && window.AMap) return window.AMap
@@ -1852,8 +1941,8 @@ function createAgentRuntimeMethods() {
         return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null
       }
       if (value && typeof value === 'object') {
-        const lng = Number(value.lng ?? value.longitude ?? value.x)
-        const lat = Number(value.lat ?? value.latitude ?? value.y)
+        const lng = Number(value.lng ?? value.longitude ?? value.x ?? value[0])
+        const lat = Number(value.lat ?? value.latitude ?? value.y ?? value[1])
         return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null
       }
       return null
@@ -1900,25 +1989,25 @@ function createAgentRuntimeMethods() {
     getAgentSnapshotFeatureRings(feature = null) {
       const geometry = feature && feature.geometry ? feature.geometry : {}
       const type = asText(geometry.type)
-      const coordinates = cloneArray(geometry.coordinates)
+      const coordinates = Array.isArray(geometry.coordinates) ? geometry.coordinates : []
       if (type === 'Polygon') {
         return coordinates.slice(0, 1).map((ring) => this.normalizeAgentSnapshotRing(ring)).filter((ring) => ring.length >= 3)
       }
       if (type === 'MultiPolygon') {
-        return coordinates.flatMap((polygon) => cloneArray(polygon).slice(0, 1).map((ring) => this.normalizeAgentSnapshotRing(ring))).filter((ring) => ring.length >= 3)
+        return coordinates.flatMap((polygon) => (Array.isArray(polygon) ? polygon : []).slice(0, 1).map((ring) => this.normalizeAgentSnapshotRing(ring))).filter((ring) => ring.length >= 3)
       }
       return []
     },
     getAgentSnapshotFeatureLines(feature = null) {
       const geometry = feature && feature.geometry ? feature.geometry : {}
       const type = asText(geometry.type)
-      const coordinates = cloneArray(geometry.coordinates)
+      const coordinates = Array.isArray(geometry.coordinates) ? geometry.coordinates : []
       if (type === 'LineString') {
         const line = coordinates.map((point) => this.normalizeAgentSnapshotLngLat(point)).filter(Boolean)
         return line.length >= 2 ? [line] : []
       }
       if (type === 'MultiLineString') {
-        return coordinates.map((line) => cloneArray(line).map((point) => this.normalizeAgentSnapshotLngLat(point)).filter(Boolean)).filter((line) => line.length >= 2)
+        return coordinates.map((line) => (Array.isArray(line) ? line : []).map((point) => this.normalizeAgentSnapshotLngLat(point)).filter(Boolean)).filter((line) => line.length >= 2)
       }
       return []
     },
@@ -2102,21 +2191,24 @@ function createAgentRuntimeMethods() {
       })
       return count
     },
-    createAgentOffscreenSnapshotHost(size = {}) {
+    createAgentOffscreenSnapshotHost(size = {}, options = {}) {
       const width = Math.max(320, Number(size.width || 960))
       const height = Math.max(320, Number(size.height || 960))
+      const captureInViewport = !!(options && options.captureInViewport)
       const host = document.createElement('div')
       host.setAttribute('data-agent-offscreen-snapshot-host', '1')
       host.style.cssText = [
         'position:fixed',
-        'left:-20000px',
+        `left:${captureInViewport ? 0 : -20000}px`,
         'top:0',
         `width:${width}px`,
         `height:${height}px`,
         'background:#ffffff',
         'overflow:hidden',
         'pointer-events:none',
-        'z-index:-1',
+        `z-index:${captureInViewport ? -1 : -1}`,
+        'visibility:visible',
+        'transform:translateZ(0)',
       ].join(';')
       document.body.appendChild(host)
       return host
@@ -2227,6 +2319,665 @@ function createAgentRuntimeMethods() {
         this.renderAgentOffscreenRoadLayer(map, overlays, asText(target.metric))
       }
       return fitOverlays
+    },
+    pptMapRequestLayerType(layer = {}) {
+      return asText(layer && (layer.layer_type || layer.layerType || layer.type))
+    },
+    inferPptRoadSnapshotMetric(mapRequest = {}, layer = {}) {
+      const explicit = asText(layer.metric || layer.metric_key || layer.metricKey || mapRequest.metric || mapRequest.metric_key || mapRequest.metricKey)
+      if (explicit) return explicit.replace(/^avg_/, '')
+      const text = [
+        ...cloneArray(mapRequest.annotations).map((item) => `${asText(item && (item.metric_id || item.metricId))} ${asText(item && item.label)}`),
+        asText(mapRequest.title),
+      ].join(' ').toLowerCase()
+      if (/choice|选择/.test(text)) return 'choice'
+      if (/integration|整合/.test(text)) return 'integration'
+      if (/depth|深度/.test(text)) return 'depth'
+      if (/control|控制/.test(text)) return 'control'
+      if (/intelligibility|理解/.test(text)) return 'intelligibility'
+      return 'connectivity'
+    },
+    pptMapRequestLayerTarget(mapRequest = {}, layer = {}) {
+      const type = this.pptMapRequestLayerType(layer)
+      if (type === 'scope_boundary') {
+        return { kind: 'overview_map', title: asText(mapRequest.title) || '空间边界与基底概貌', key: 'scope' }
+      }
+      if (type === 'poi_points') return { kind: 'poi_map', title: asText(mapRequest.title) || 'POI 点位图层', key: 'poi' }
+      if (type === 'h3_grid') return { kind: 'h3_map', title: asText(mapRequest.title) || 'H3 网格图层', key: 'h3' }
+      if (type === 'population_grid') return { kind: 'population_map', title: asText(mapRequest.title) || '人口图层', key: 'population' }
+      if (type === 'nightlight_grid') return { kind: 'nightlight_map', title: asText(mapRequest.title) || '夜光图层', key: 'nightlight' }
+      if (type === 'road_syntax') {
+        return {
+          kind: 'road_map',
+          title: asText(mapRequest.title) || '路网句法图层',
+          key: 'syntax',
+          fit: 'road',
+          metric: this.inferPptRoadSnapshotMetric(mapRequest, layer),
+        }
+      }
+      return null
+    },
+    pptMapRequestHistoryId(mapRequest = {}) {
+      const request = cloneObject(mapRequest)
+      const scope = cloneObject(request.scope || request.focus || request.bounds)
+      const direct = asText(
+        request.history_id
+        || request.historyId
+        || request.area_id
+        || request.areaId
+        || scope.history_id
+        || scope.historyId
+        || scope.area_id
+        || scope.areaId,
+      )
+      if (direct) return direct
+      for (const layer of cloneArray(request.layers)) {
+        const source = asText(layer && (layer.source || layer.source_id || layer.sourceId))
+        const match = source.match(/^history:([^:]+):/)
+        if (match && match[1]) return match[1]
+      }
+      return asText(typeof this.getCurrentAgentHistoryId === 'function'
+        ? this.getCurrentAgentHistoryId()
+        : this.currentHistoryRecordId)
+    },
+    pptMapRequestLayerTargets(mapRequest = {}) {
+      return cloneArray(mapRequest.layers)
+        .map((layer) => ({ layer, target: this.pptMapRequestLayerTarget(mapRequest, layer) }))
+        .filter((item) => item.target)
+    },
+    pptMapRequestPrimarySnapshotTarget(mapRequest = {}) {
+      const targets = this.pptMapRequestLayerTargets(mapRequest)
+        .map((item) => cloneObject(item.target))
+      return targets.find((target) => asText(target.kind) !== 'overview_map') || targets[0] || null
+    },
+    pptMapRequestMissingLayers(mapRequest = {}) {
+      return this.pptMapRequestLayerTargets(mapRequest)
+        .filter((item) => !this.hasPptMapRequestLayerData(item.target))
+    },
+    hasPptMapRequestLayerData(target = {}) {
+      const kind = asText(target.kind)
+      if (kind === 'overview_map') return !!this.getAgentScopeBounds()
+      if (kind === 'poi_map') return Array.isArray(this.allPoisDetails) && this.allPoisDetails.length > 0
+      if (kind === 'h3_map') return !!(this.h3AnalysisSummary || (this.sharedGridMetrics && Object.keys(this.sharedGridMetrics || {}).length) || (Array.isArray(this.h3AnalysisGridFeatures) && this.h3AnalysisGridFeatures.length))
+      if (kind === 'population_map') return !!(this.populationSummary || this.populationOverview || this.populationLayer || this.populationRaster || this.populationAnalysisResult || (this.populationGrid && Array.isArray(this.populationGrid.features) && this.populationGrid.features.length))
+      if (kind === 'nightlight_map') return !!(this.nightlightSummary || this.nightlightOverview || this.nightlightLayer || this.nightlightRaster || this.nightlightAnalysisResult || (this.nightlightGrid && Array.isArray(this.nightlightGrid.features) && this.nightlightGrid.features.length))
+      if (kind === 'road_map') return !!(this.roadSyntaxSummary || (Array.isArray(this.roadSyntaxRoadFeatures) && this.roadSyntaxRoadFeatures.length))
+      return false
+    },
+    normalizePptMapSnapshotCaptureError(error = null) {
+      const rawMessage = asText(error && error.message ? error.message : error)
+      const [rawCode, layerType = ''] = rawMessage.split(':')
+      const code = asText(rawCode) || 'ppt_map_snapshot_capture_failed'
+      const detail = error && typeof error === 'object'
+        ? asText(error.detail || error.cause && error.cause.message || error.reason)
+        : ''
+      const messages = {
+        ppt_map_renderer_dom_unavailable: '地图截图环境不可用：浏览器 DOM 未就绪',
+        ppt_map_renderer_amap_unavailable: '地图截图环境未就绪：高德地图脚本未加载',
+        ppt_map_renderer_html2canvas_unavailable: '地图截图环境未就绪：截图组件未加载',
+        ppt_map_renderer_timeout: '地图截图环境加载超时',
+        ppt_map_request_renderer_unavailable: '地图截图环境未就绪：高德地图或截图组件不可用',
+        ppt_map_request_no_supported_layers: '地图请求没有可渲染图层',
+        ppt_map_request_no_rendered_features: '地图图层渲染为空',
+        ppt_map_main_capture_unavailable: '主地图截图方法不可用',
+        ppt_map_main_capture_empty: '主地图截图返回空',
+        ppt_map_main_capture_invalid_data_url: '主地图截图不是有效图片',
+        ppt_map_main_capture_failed: '主地图截图失败',
+        ppt_map_offscreen_capture_failed: '离屏地图截图失败',
+        ppt_map_asset_invalid_data_url: '地图截图不是有效图片',
+        ppt_map_snapshot_capture_failed: '地图截图导出失败',
+        ppt_map_snapshot_canvas_empty: '地图截图画布为空',
+        ppt_map_snapshot_data_url_empty: '地图截图导出为空',
+        ppt_map_snapshot_canvas_tainted: '地图截图被跨域瓦片阻止导出',
+        ppt_carrier_package_missing: '载体资料包未恢复',
+        ppt_carrier_package_carriers_missing: '载体资料包没有载体记录',
+        ppt_carrier_geometry_missing: '载体资料包缺少空间几何',
+        ppt_carrier_snapshot_empty: '载体分布图渲染为空',
+        ppt_carrier_snapshot_render_failed: '载体分布图导出失败',
+        ppt_carrier_snapshot_encoder_unavailable: '载体分布图编码组件不可用',
+      }
+      const layerMessages = {
+        population_grid: '人口图层数据未恢复',
+        h3_grid: 'H3 网格数据未恢复',
+        nightlight_grid: '夜光图层数据未恢复',
+        road_syntax: '路网句法图层数据未恢复',
+        poi_points: 'POI 点位数据未恢复',
+        scope_boundary: '空间范围边界未恢复',
+      }
+      const message = code === 'ppt_map_request_layer_data_missing'
+        ? (layerMessages[layerType] || '地图图层数据未恢复')
+        : (messages[code] || rawMessage || '地图截图失败')
+      return {
+        code,
+        message,
+        layer_type: layerType,
+        detail,
+        renderer_ready: ![
+          'ppt_map_renderer_dom_unavailable',
+          'ppt_map_renderer_amap_unavailable',
+          'ppt_map_renderer_html2canvas_unavailable',
+          'ppt_map_renderer_timeout',
+          'ppt_map_request_renderer_unavailable',
+          'ppt_map_offscreen_capture_failed',
+        ].includes(code),
+        captured_at: new Date().toISOString(),
+      }
+    },
+    attachPptMapSnapshotCaptureError(visual = {}, error = null) {
+      const data = cloneObject(visual && visual.data)
+      return {
+        ...cloneObject(visual),
+        status: asText(visual && visual.status) || 'needs_existing_asset',
+        data: {
+          ...data,
+          capture_error: this.normalizePptMapSnapshotCaptureError(error),
+        },
+      }
+    },
+    async renderPptMapRequestMainMapSnapshot(mapRequest = {}) {
+      if (typeof this._captureMapSnapshotBase64 !== 'function') {
+        throw new Error('ppt_map_main_capture_unavailable')
+      }
+      const layers = this.pptMapRequestLayerTargets(mapRequest)
+      if (!layers.length) throw new Error('ppt_map_request_no_supported_layers')
+      const missing = this.pptMapRequestMissingLayers(mapRequest)[0]
+      if (missing) {
+        throw new Error(`ppt_map_request_layer_data_missing:${this.pptMapRequestLayerType(missing.layer)}`)
+      }
+      const target = this.pptMapRequestPrimarySnapshotTarget(mapRequest)
+      if (!target) throw new Error('ppt_map_request_no_supported_layers')
+      const view = typeof this.getAgentMapViewState === 'function' ? this.getAgentMapViewState() : null
+      const layerState = typeof this.getAgentVisualLayerState === 'function' ? this.getAgentVisualLayerState() : null
+      try {
+        if (typeof this.prepareAgentVisualSnapshotTarget === 'function') {
+          await this.prepareAgentVisualSnapshotTarget(target)
+        }
+        const rawDataUrl = await this._captureMapSnapshotBase64()
+        if (!asText(rawDataUrl).startsWith('data:image/')) {
+          throw new Error('ppt_map_main_capture_empty')
+        }
+        if (typeof this.compressAgentVisualSnapshotDataUrl === 'function') {
+          return await this.compressAgentVisualSnapshotDataUrl(rawDataUrl) || rawDataUrl
+        }
+        return rawDataUrl
+      } catch (error) {
+        const message = asText(error && error.message ? error.message : error)
+        if (message.startsWith('ppt_map_')) throw error
+        throw Object.assign(new Error('ppt_map_main_capture_failed'), {
+          cause: error,
+          detail: message,
+        })
+      } finally {
+        try {
+          if (typeof this.restoreAgentVisualLayerState === 'function') {
+            await this.restoreAgentVisualLayerState(layerState)
+          }
+        } catch (_) {}
+        try {
+          if (typeof this.restoreAgentMapViewState === 'function') {
+            this.restoreAgentMapViewState(view)
+          }
+        } catch (_) {}
+        try {
+          if (typeof this.waitForAgentVisualSnapshotPaint === 'function') {
+            await this.waitForAgentVisualSnapshotPaint()
+          }
+        } catch (_) {}
+      }
+    },
+    normalizePptMapRequestHistoryPolygon(source = []) {
+      const normalizeRing = (raw) => {
+        if (!Array.isArray(raw) || !raw.length) return []
+        const points = raw
+          .map((point) => this.normalizeAgentSnapshotLngLat(point))
+          .filter(Boolean)
+        if (points.length < 3) return []
+        const first = points[0]
+        const last = points[points.length - 1]
+        if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+          points.push([first[0], first[1]])
+        }
+        return points.length >= 4 ? points : []
+      }
+      if (!Array.isArray(source) || !source.length) return []
+      const direct = normalizeRing(source)
+      if (direct.length) return direct
+      const rings = []
+      source.forEach((item) => {
+        const ring = normalizeRing(item)
+        if (ring.length) rings.push(ring)
+        else if (Array.isArray(item) && Array.isArray(item[0])) {
+          const outer = normalizeRing(item[0])
+          if (outer.length) rings.push(outer)
+        }
+      })
+      return rings.length === 1 ? rings[0] : rings
+    },
+    applyPptMapRequestHistoryScope(detail = {}, historyId = '') {
+      const polygon = this.normalizePptMapRequestHistoryPolygon(detail && detail.polygon)
+      const polygonWgs84 = JSON.parse(JSON.stringify((detail && detail.polygon_wgs84) || []))
+      if (!polygon.length) return false
+      const polygonCopy = JSON.parse(JSON.stringify(polygon))
+      this.currentHistoryRecordId = asText(historyId) || asText(this.currentHistoryRecordId)
+      this.currentHistoryPolygon = polygonCopy
+      this.currentHistoryPolygonWgs84 = polygonWgs84
+      this.scopeSource = 'history'
+      this.lastIsochroneGeoJSON = Array.isArray(polygon[0]) && this.normalizeAgentSnapshotLngLat(polygon[0])
+        ? {
+            type: 'Feature',
+            properties: { mode: 'history' },
+            geometry: { type: 'Polygon', coordinates: [polygonCopy] },
+          }
+        : {
+            type: 'Feature',
+            properties: { mode: 'history' },
+            geometry: { type: 'MultiPolygon', coordinates: polygonCopy.map((ring) => [ring]) },
+          }
+      return true
+    },
+    async ensurePptMapRequestHistoryScope(historyId = '') {
+      const normalizedHistoryId = asText(historyId)
+      if (!normalizedHistoryId) return false
+      const scopeBounds = this.getAgentScopeBounds()
+      if (scopeBounds && asText(this.currentHistoryRecordId) === normalizedHistoryId) return true
+      const cacheKey = `scope:${normalizedHistoryId}`
+      if (this.pptMapRequestHistoryRestoreCache && this.pptMapRequestHistoryRestoreCache[cacheKey]) {
+        return true
+      }
+      if (typeof fetch !== 'function') return false
+      const res = await fetch(`/api/v1/analysis/history/${encodeURIComponent(normalizedHistoryId)}?include_pois=false`)
+      if (!res.ok) throw new Error(`ppt_map_request_history_detail_failed:${res.status}`)
+      const detail = await res.json()
+      const applied = this.applyPptMapRequestHistoryScope(detail, normalizedHistoryId)
+      if (applied) {
+        this.pptMapRequestHistoryRestoreCache = {
+          ...cloneObject(this.pptMapRequestHistoryRestoreCache),
+          [cacheKey]: true,
+        }
+      }
+      return applied
+    },
+    async ensurePptMapRequestHistoryData(mapRequest = {}) {
+      const historyId = this.pptMapRequestHistoryId(mapRequest)
+      if (!historyId) return false
+      const beforeMissing = this.pptMapRequestMissingLayers(mapRequest)
+      const needsPoi = beforeMissing.some((item) => asText(item.target.kind) === 'poi_map')
+      const needsArtifacts = beforeMissing.some((item) => asText(item.target.kind) !== 'poi_map')
+      if (!beforeMissing.length && this.getAgentScopeBounds()) return true
+      await this.ensurePptMapRequestHistoryScope(historyId)
+      const token = Number(this.historyDetailLoadToken || 0) || 0
+      const cache = cloneObject(this.pptMapRequestHistoryRestoreCache)
+      if (needsArtifacts && typeof this.restoreHistoryArtifactsAsync === 'function') {
+        const artifactKey = `artifacts:${historyId}`
+        if (!cache[artifactKey]) {
+          await this.restoreHistoryArtifactsAsync(historyId, token)
+          cache[artifactKey] = true
+        }
+      }
+      if (needsPoi && typeof this._restoreHistoryPoisAsync === 'function') {
+        const poiKey = `pois:${historyId}:${asText(this.currentHistorySelectedPoiYear || this.resultPoiYear || '')}`
+        if (!cache[poiKey]) {
+          await this._restoreHistoryPoisAsync(historyId, token, null, 0, this.currentHistorySelectedPoiYear || this.resultPoiYear || null)
+          cache[poiKey] = true
+        }
+      }
+      this.pptMapRequestHistoryRestoreCache = cache
+      return this.pptMapRequestMissingLayers(mapRequest).length === 0
+    },
+    renderPptMapRequestLayer(map = null, overlays = [], target = {}) {
+      const kind = asText(target.kind)
+      if (kind === 'overview_map') return this.getAgentScopeBounds() ? 1 : 0
+      if (kind === 'poi_map') return this.renderAgentOffscreenPoiLayer(map, overlays)
+      if (kind === 'h3_map') {
+        return this.addAgentSnapshotPolygonFeatures(map, overlays, this.buildAgentOffscreenH3Features(), {
+          strokeColor: '#475569',
+          strokeWeight: 0.8,
+          fillColor: '#bfdbfe',
+          fillOpacity: 0.34,
+          zIndex: 90,
+        })
+      }
+      if (kind === 'population_map') {
+        return this.addAgentSnapshotPolygonFeatures(map, overlays, this.buildAgentOffscreenPopulationFeatures(), {
+          strokeColor: '#ffffff',
+          strokeWeight: 0.7,
+          fillColor: '#f4f6f8',
+          fillOpacity: 0.20,
+          zIndex: 90,
+        })
+      }
+      if (kind === 'nightlight_map') {
+        const container = map && typeof map.getContainer === 'function' ? map.getContainer() : null
+        if (container) {
+          container.style.backgroundColor = '#162033'
+          container.style.backgroundImage = 'radial-gradient(circle at 52% 42%, rgba(251,191,36,0.1) 0%, rgba(35,49,74,0.82) 28%, rgba(22,32,51,0.94) 62%, rgba(10,15,27,1) 100%)'
+        }
+        return this.addAgentSnapshotPolygonFeatures(map, overlays, this.buildAgentOffscreenNightlightFeatures(), {
+          strokeColor: '#94a3b8',
+          strokeWeight: 0.7,
+          fillColor: '#f59e0b',
+          fillOpacity: 0.36,
+          zIndex: 90,
+        })
+      }
+      if (kind === 'road_map') return this.renderAgentOffscreenRoadLayer(map, overlays, asText(target.metric))
+      return 0
+    },
+    createPptMapContainer(host = null, size = {}, options = {}) {
+      if (!host || typeof document === 'undefined') return null
+      const width = Math.max(320, Number(size.width || 960))
+      const height = Math.max(320, Number(size.height || 960))
+      const mapEl = document.createElement('div')
+      mapEl.setAttribute('data-agent-ppt-map-container', '1')
+      mapEl.style.cssText = [
+        'position:relative',
+        `width:${width}px`,
+        `height:${height}px`,
+        `background:${options.backgroundColor || '#ffffff'}`,
+        'overflow:hidden',
+        'transform:translateZ(0)',
+      ].join(';')
+      host.appendChild(mapEl)
+      return mapEl
+    },
+    createPptMapSvgOverlay(mapEl = null, size = {}) {
+      if (!mapEl || typeof document === 'undefined' || typeof document.createElementNS !== 'function') return null
+      const width = Math.max(320, Number(size.width || 960))
+      const height = Math.max(320, Number(size.height || 960))
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+      svg.setAttribute('width', String(width))
+      svg.setAttribute('height', String(height))
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+      svg.setAttribute('data-agent-ppt-svg-overlay', '1')
+      svg.style.cssText = [
+        'position:absolute',
+        'inset:0',
+        `width:${width}px`,
+        `height:${height}px`,
+        'pointer-events:none',
+        'z-index:20',
+        'overflow:hidden',
+      ].join(';')
+      if (mapEl.style) {
+        mapEl.style.position = mapEl.style.position || 'relative'
+      }
+      mapEl.appendChild(svg)
+      return svg
+    },
+    appendPptMapSvgNode(svg = null, tag = '', attrs = {}) {
+      if (!svg || typeof document === 'undefined' || typeof document.createElementNS !== 'function') return null
+      const node = document.createElementNS('http://www.w3.org/2000/svg', tag)
+      Object.entries(attrs || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        node.setAttribute(key, String(value))
+      })
+      svg.appendChild(node)
+      return node
+    },
+    projectPptMapSvgPoint(map = null, lngLat = null) {
+      const point = this.normalizeAgentSnapshotLngLat(lngLat)
+      if (!map || !point || typeof map.lngLatToContainer !== 'function') return null
+      try {
+        const amap = this.getAgentAmapSdk()
+        const input = amap && typeof amap.LngLat === 'function'
+          ? new amap.LngLat(point[0], point[1])
+          : point
+        const projected = map.lngLatToContainer(input)
+        const rawX = projected && projected.x !== undefined
+          ? projected.x
+          : (projected && typeof projected.getX === 'function' ? projected.getX() : (projected && projected[0]))
+        const rawY = projected && projected.y !== undefined
+          ? projected.y
+          : (projected && typeof projected.getY === 'function' ? projected.getY() : (projected && projected[1]))
+        const x = Number(rawX)
+        const y = Number(rawY)
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+        return [Math.round(x * 10) / 10, Math.round(y * 10) / 10]
+      } catch (_) {
+        return null
+      }
+    },
+    pptMapSvgPathForRing(map = null, ring = []) {
+      const points = (Array.isArray(ring) ? ring : []).map((point) => this.projectPptMapSvgPoint(map, point)).filter(Boolean)
+      if (points.length < 3) return ''
+      return points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point[0]} ${point[1]}`).join(' ') + ' Z'
+    },
+    pptMapSvgPathForLine(map = null, line = []) {
+      const points = (Array.isArray(line) ? line : []).map((point) => this.projectPptMapSvgPoint(map, point)).filter(Boolean)
+      if (points.length < 2) return ''
+      return points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point[0]} ${point[1]}`).join(' ')
+    },
+    renderPptMapSvgScopeLayer(svg = null, map = null, options = {}) {
+      const ring = this.buildAgentSnapshotScopeRing()
+      const path = this.pptMapSvgPathForRing(map, ring)
+      if (!path) return { renderedCount: 0, boundsCount: 0, warnings: ['scope_boundary_empty'] }
+      this.appendPptMapSvgNode(svg, 'path', {
+        d: path,
+        fill: options.fill || '#f97316',
+        'fill-opacity': options.fillOpacity ?? 0.055,
+        stroke: options.stroke || '#ea580c',
+        'stroke-width': options.strokeWidth || 3,
+        'stroke-opacity': options.strokeOpacity ?? 0.92,
+        'stroke-linejoin': 'round',
+      })
+      return { renderedCount: 1, boundsCount: 1, warnings: [] }
+    },
+    renderPptMapSvgPolygonFeatures(svg = null, map = null, features = [], style = {}) {
+      let renderedCount = 0
+      cloneArray(features).forEach((feature) => {
+        const props = feature && typeof feature === 'object' ? (feature.properties || {}) : {}
+        this.getAgentSnapshotFeatureRings(feature).forEach((ring) => {
+          const path = this.pptMapSvgPathForRing(map, ring)
+          if (!path) return
+          this.appendPptMapSvgNode(svg, 'path', {
+            d: path,
+            fill: asText(props.fillColor) || style.fillColor || '#60a5fa',
+            'fill-opacity': Number(props.fillOpacity ?? style.fillOpacity ?? 0.32),
+            stroke: asText(props.strokeColor) || style.strokeColor || '#ffffff',
+            'stroke-width': Number(props.strokeWeight ?? style.strokeWidth ?? style.strokeWeight ?? 0.8),
+            'stroke-opacity': Number(props.strokeOpacity ?? style.strokeOpacity ?? 0.82),
+            'stroke-linejoin': 'round',
+            'vector-effect': 'non-scaling-stroke',
+          })
+          renderedCount += 1
+        })
+      })
+      return { renderedCount, boundsCount: renderedCount, warnings: [] }
+    },
+    renderPptMapSvgPoiLayer(svg = null, map = null) {
+      let renderedCount = 0
+      cloneArray(this.allPoisDetails).slice(0, 5000).forEach((poi) => {
+        const point = this.projectPptMapSvgPoint(map, poi && (poi.location || [poi.lng, poi.lat]))
+        if (!point) return
+        const color = this.getAgentSnapshotPoiColor(poi && (poi.type || poi.category || poi.type_name))
+        this.appendPptMapSvgNode(svg, 'circle', {
+          cx: point[0],
+          cy: point[1],
+          r: 4.2,
+          fill: color,
+          'fill-opacity': 0.82,
+          stroke: '#ffffff',
+          'stroke-width': 1.2,
+          'stroke-opacity': 0.96,
+        })
+        renderedCount += 1
+      })
+      return { renderedCount, boundsCount: renderedCount, warnings: [] }
+    },
+    renderPptMapSvgRoadLayer(svg = null, map = null, metric = '') {
+      let renderedCount = 0
+      cloneArray(this.roadSyntaxRoadFeatures).forEach((feature) => {
+        const props = (feature && feature.properties) || {}
+        const style = this.getAgentRoadStyle(props, metric)
+        this.getAgentSnapshotFeatureLines(feature).forEach((line) => {
+          const path = this.pptMapSvgPathForLine(map, line)
+          if (!path) return
+          this.appendPptMapSvgNode(svg, 'path', {
+            d: path,
+            fill: 'none',
+            stroke: style.strokeColor || '#2563eb',
+            'stroke-width': Math.max(1.4, Number(style.strokeWeight || 2.2)),
+            'stroke-opacity': Number(style.strokeOpacity ?? 0.82),
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'vector-effect': 'non-scaling-stroke',
+          })
+          renderedCount += 1
+        })
+      })
+      return { renderedCount, boundsCount: renderedCount, warnings: [] }
+    },
+    getPptMapSvgLayerRenderers() {
+      return {
+        overview_map: (svg, map) => this.renderPptMapSvgScopeLayer(svg, map, { fillOpacity: 0.07, strokeWidth: 3.4 }),
+        poi_map: (svg, map) => this.renderPptMapSvgPoiLayer(svg, map),
+        h3_map: (svg, map) => this.renderPptMapSvgPolygonFeatures(svg, map, this.buildAgentOffscreenH3Features(), {
+          strokeColor: '#334155',
+          strokeWidth: 0.9,
+          fillColor: '#60a5fa',
+          fillOpacity: 0.36,
+        }),
+        population_map: (svg, map) => this.renderPptMapSvgPolygonFeatures(svg, map, this.buildAgentOffscreenPopulationFeatures(), {
+          strokeColor: '#ffffff',
+          strokeWidth: 0.75,
+          fillColor: '#38bdf8',
+          fillOpacity: 0.34,
+        }),
+        nightlight_map: (svg, map) => this.renderPptMapSvgPolygonFeatures(svg, map, this.buildAgentOffscreenNightlightFeatures(), {
+          strokeColor: '#fde68a',
+          strokeWidth: 0.7,
+          fillColor: '#f59e0b',
+          fillOpacity: 0.42,
+          strokeOpacity: 0.72,
+        }),
+        road_map: (svg, map, target) => this.renderPptMapSvgRoadLayer(svg, map, asText(target && target.metric)),
+      }
+    },
+    renderPptMapRequestSvgLayer(svg = null, map = null, target = {}, size = {}, mapRequest = {}) {
+      const kind = asText(target.kind)
+      const renderer = this.getPptMapSvgLayerRenderers()[kind]
+      if (typeof renderer !== 'function') return { renderedCount: 0, boundsCount: 0, warnings: [`unsupported_layer:${kind}`] }
+      return renderer(svg, map, target, size, mapRequest) || { renderedCount: 0, boundsCount: 0, warnings: [] }
+    },
+    async renderPptMapRequestSnapshot(mapRequest = {}) {
+      if (!this.canCaptureAgentOffscreenVisualSnapshots()) {
+        throw new Error('ppt_map_request_renderer_unavailable')
+      }
+      const layers = this.pptMapRequestLayerTargets(mapRequest)
+      if (!layers.length) throw new Error('ppt_map_request_no_supported_layers')
+      const missing = this.pptMapRequestMissingLayers(mapRequest)[0]
+      if (missing) {
+        throw new Error(`ppt_map_request_layer_data_missing:${this.pptMapRequestLayerType(missing.layer)}`)
+      }
+      const primaryTarget = (layers.find((item) => asText(item.target.kind) !== 'overview_map') || layers[0]).target
+      const size = this.getAgentVisualSnapshotRenderSize()
+      const host = this.createAgentOffscreenSnapshotHost(size)
+      const overlays = []
+      const fitOverlays = []
+      let map = null
+      let mapEl = null
+      let svgOverlay = null
+      const amap = this.getAgentAmapSdk()
+      const capture = (typeof globalThis !== 'undefined' && typeof globalThis.html2canvas === 'function')
+        ? globalThis.html2canvas
+        : (typeof window !== 'undefined' && typeof window.html2canvas === 'function' ? window.html2canvas : null)
+      try {
+        const isNightlight = layers.some((item) => asText(item.target.kind) === 'nightlight_map')
+        mapEl = this.createPptMapContainer(host, size, {
+          backgroundColor: isNightlight ? '#162033' : '#ffffff',
+        })
+        if (!mapEl) throw new Error('ppt_map_request_renderer_unavailable')
+        map = new amap.Map(mapEl, {
+          zoom: 13,
+          viewMode: '2D',
+          resizeEnable: false,
+          features: isNightlight ? ['bg', 'road'] : ['bg', 'point', 'road', 'building'],
+        })
+        const scopeOverlay = this.addAgentSnapshotScopeOverlay(map, overlays, {
+          fillOpacity: 0,
+          strokeOpacity: 0,
+          strokeWeight: 0,
+          zIndex: 180,
+        })
+        if (scopeOverlay) fitOverlays.push(scopeOverlay)
+        this.fitAgentOffscreenSnapshotMap(map, asText(primaryTarget.fit) === 'road' ? [] : fitOverlays)
+        if (map && typeof map.resize === 'function') {
+          try { map.resize() } catch (_) {}
+        }
+        await this.waitForAgentOffscreenSnapshotPaint(mapEl, 1200)
+        svgOverlay = this.createPptMapSvgOverlay(mapEl, size)
+        if (!svgOverlay) throw new Error('ppt_map_request_renderer_unavailable')
+        const scopeResult = this.renderPptMapSvgScopeLayer(svgOverlay, map, {
+          fillOpacity: layers.length === 1 ? 0.075 : 0.035,
+          strokeWidth: 3,
+        })
+        let renderedCount = Number(scopeResult.renderedCount || 0)
+        let businessRenderedCount = 0
+        layers.forEach((item) => {
+          if (asText(item.target.kind) === 'overview_map') return
+          const result = this.renderPptMapRequestSvgLayer(svgOverlay, map, item.target, size, mapRequest)
+          const count = Number(result && result.renderedCount || 0)
+          renderedCount += count
+          businessRenderedCount += count
+        })
+        const hasBusinessLayer = layers.some((item) => asText(item.target.kind) !== 'overview_map')
+        if (hasBusinessLayer ? businessRenderedCount <= 0 : renderedCount <= 0) {
+          throw new Error('ppt_map_request_no_rendered_features')
+        }
+        await this.waitForAgentVisualSnapshotPaint()
+        await this.waitForAgentOffscreenImages(mapEl, 3000)
+        const canvas = await capture(mapEl, {
+          useCORS: true,
+          backgroundColor: isNightlight ? '#162033' : '#ffffff',
+          scale: 1,
+          logging: false,
+          width: size.width,
+          height: size.height,
+          windowWidth: size.width,
+          windowHeight: size.height,
+          scrollX: 0,
+          scrollY: 0,
+          onclone: (clonedDocument) => {
+            const clonedMap = clonedDocument && typeof clonedDocument.querySelector === 'function'
+              ? clonedDocument.querySelector('[data-agent-ppt-map-container="1"]')
+              : null
+            if (clonedMap && clonedMap.style) {
+              clonedMap.style.left = '0px'
+              clonedMap.style.top = '0px'
+              clonedMap.style.zIndex = '1'
+            }
+          },
+        })
+        if (!canvas || !Number(canvas.width) || !Number(canvas.height) || typeof canvas.toDataURL !== 'function') {
+          throw new Error('ppt_map_snapshot_canvas_empty')
+        }
+        let rawDataUrl = ''
+        try {
+          rawDataUrl = canvas.toDataURL('image/png')
+        } catch (error) {
+          throw Object.assign(new Error('ppt_map_snapshot_canvas_tainted'), {
+            cause: error,
+            detail: asText(error && error.message ? error.message : error),
+          })
+        }
+        if (!asText(rawDataUrl) || asText(rawDataUrl) === 'data:,') throw new Error('ppt_map_snapshot_data_url_empty')
+        if (!asText(rawDataUrl).startsWith('data:image/png')) throw new Error('ppt_map_snapshot_capture_failed')
+        if (typeof this.compressAgentVisualSnapshotDataUrl === 'function') {
+          return await this.compressAgentVisualSnapshotDataUrl(rawDataUrl) || rawDataUrl
+        }
+        return rawDataUrl
+      } finally {
+        overlays.forEach((overlay) => {
+          try {
+            if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null)
+          } catch (_) {}
+        })
+        try {
+          if (map && typeof map.destroy === 'function') map.destroy()
+        } catch (_) {}
+        if (host && host.parentNode) host.parentNode.removeChild(host)
+      }
     },
     async captureAgentOffscreenVisualSnapshot(target = {}) {
       const size = this.getAgentVisualSnapshotRenderSize()
@@ -2447,10 +3198,22 @@ function createAgentRuntimeMethods() {
       }
       return snapshots.slice(0, 12)
     },
-    async captureAgentVisualSnapshots() {
+    async captureAgentVisualSnapshots(options = {}) {
       const targets = this.buildAgentVisualSnapshotTargets()
       if (this.canCaptureAgentOffscreenVisualSnapshots()) {
         return this.captureAgentOffscreenVisualSnapshots(targets)
+      }
+      if (options.allowMainMapFallback === false) {
+        return [{
+          snapshot_id: `visual-${Date.now().toString(36)}-offscreen-unavailable`,
+          kind: 'overview_map',
+          title: '地图视觉快照',
+          data_url: '',
+          source: 'frontend_offscreen_map',
+          captured_at: new Date().toISOString(),
+          bounds: {},
+          warnings: ['offscreen_snapshot_unavailable_main_map_fallback_disabled'],
+        }]
       }
       const snapshots = await this.captureAgentLegacyVisualSnapshots(targets)
       return cloneArray(snapshots).map((snapshot) => ({
@@ -2537,7 +3300,7 @@ function createAgentRuntimeMethods() {
         warnings,
       }
     },
-    async ensureAgentVisualSnapshotCache() {
+    async ensureAgentVisualSnapshotCache(options = {}) {
       const fingerprint = this.buildAgentVisualSnapshotFingerprint()
       const currentCache = this.agentVisualSnapshotCache && typeof this.agentVisualSnapshotCache === 'object'
         ? this.agentVisualSnapshotCache
@@ -2563,7 +3326,7 @@ function createAgentRuntimeMethods() {
       }
 
       try {
-        const snapshots = await this.captureAgentVisualSnapshots()
+        const snapshots = await this.captureAgentVisualSnapshots(options)
         const normalizedCache = this.normalizeAgentVisualSnapshotCache({
           status: 'ready',
           fingerprint,

@@ -2,9 +2,18 @@ import { asText, cloneArray, cloneObject } from './normalizers.js'
 import { getAnalysisTaskDefinition } from './analysis-task-registry.js'
 import { createPptSystemSources, createPptTransportFromAiPayload } from '../ppt-planning/model.js'
 import {
+  capturePptMapRequestAsset,
+  isPptMapSnapshotRequest,
+} from '../ppt-planning/map-snapshot.js'
+import {
+  capturePptCarrierSnapshotAsset,
+  isPptCarrierSnapshotRequest,
+} from '../ppt-planning/carrier-snapshot.js'
+import {
   classifyPptSourceGroups,
   cleanupPptVisualArtifacts,
   createPptDataPackage,
+  createDeckBriefJob,
   deleteDocumentSource,
   generateDeckBrief,
   generateDeckBriefWithDebug,
@@ -14,6 +23,7 @@ import {
   generatePptSpecWithDebug,
   generatePptVisualArtifacts,
   getJobStatus,
+  getDeckBriefJob,
   listPptDataSources,
   regenerateDeckBriefSlide,
   regeneratePptSpecSection,
@@ -24,7 +34,8 @@ import {
   addPptDataPackageSource,
   appendPptGenerationDebugEvent,
   applyDeckBriefSlideRevision,
-  applyGeneratedSlideBrief,
+  applyDirectiveResponseAndMarkReady,
+  applySlideResponseAndMarkReady,
   applyPptVisualArtifactsResponse,
   applyPptOutlineSectionRevision,
   applyPptSourceGroupsResponse,
@@ -46,7 +57,11 @@ import {
   isPptDirectivePageStale,
   failPptGenerationJob,
   failPptVisualArtifacts,
-  failSlideGenerationQueue,
+  markSlideApplying,
+  markSlideFailed,
+  markSlideRequestStarted,
+  markSlideResponseReceived,
+  markSlideTimedOut,
   markPptDirectiveStaleForSources,
   mergePptPlanningSources,
   movePptSourceToGroup,
@@ -63,6 +78,7 @@ import {
   setPptGenerationError,
   setPptSourceRefreshing,
   startPptGenerationJob,
+  startPptDeckBriefJob,
   startPptVisualArtifactsGeneration,
   startSlideGenerationQueue,
   setPptActiveRevisionTarget,
@@ -73,6 +89,8 @@ import {
   setPptSpecField,
   setPptSourceGroupSelected,
   syncPptPackagePlaceholderSources,
+  clearPptSlideMapSnapshotCaptureErrors,
+  updatePptDeckBriefJobState,
   togglePptSourceGroupCollapsed,
   togglePptSourceSelection,
   undoPptSectionRevision,
@@ -84,6 +102,7 @@ const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 P
 const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
 const PPT_NIGHTLIFE_PACKAGE_VERSION = 'nightlife-evidence-v2'
 const PPT_CARRIER_PACKAGE_VERSION = 'road-carrier-evidence-v2'
+const PPT_SLIDE_REQUEST_TIMEOUT_MS = 90000
 const PPT_AUTO_PACKAGE_DEFINITIONS = Object.freeze([
   {
     key: 'poi-evidence',
@@ -114,7 +133,52 @@ const PPT_AUTO_PACKAGE_DEFINITIONS = Object.freeze([
 ])
 
 function normalizePptGenerationErrorMessage(error = null, source = '') {
+  const detail = error && error.data && typeof error.data.detail === 'object' && error.data.detail
+    ? error.data.detail
+    : error && error.detail && typeof error.detail === 'object'
+      ? error.detail
+      : null
+  if (detail && asText(detail.code) === 'invalid_deck_brief_slide') {
+    const pageNo = Number(detail.page_no || detail.pageNo || 0) || 0
+    const reason = asText(detail.reason)
+    const reasonText = reason === 'missing_required_brief_content'
+      ? 'AI 返回内容不完整'
+      : 'AI 返回内容未通过 brief 校验'
+    return `第 ${pageNo || '当前'} 页 brief 校验失败：${reasonText}，已停止在当前页，请点击继续重试。`
+  }
+  if (detail && asText(detail.code) === 'ppt_planning_llm_invalid_response') {
+    const pageNo = Number(detail.page_no || detail.pageNo || 0) || 0
+    const jsonError = detail.json_error && typeof detail.json_error === 'object' ? detail.json_error : {}
+    const line = Number(jsonError.line || 0) || 0
+    const column = Number(jsonError.column || 0) || 0
+    const retryText = detail.retried ? '已自动修复/重试后仍失败' : '已停止在当前页'
+    const location = line && column ? `（JSON 第 ${line} 行第 ${column} 列）` : ''
+    return `第 ${pageNo || '当前'} 页 brief JSON 格式错误${location}，${retryText}，请点击继续重试。`
+  }
+  if (asText(error && error.code) === 'ppt_slide_request_timeout') {
+    const pageNo = Number(error && error.pageNo || error && error.page_no || 0) || 0
+    return `第 ${pageNo || '当前'} 页请求超时，后端可能仍在处理，请点击继续重试。`
+  }
+  const rawDetail = error && error.data && typeof error.data.detail === 'string'
+    ? error.data.detail
+    : ''
   const raw = asText(error && error.message ? error.message : error)
+  if (raw === 'ppt_slide_response_index_mismatch' || asText(error && error.code) === 'ppt_slide_response_index_mismatch') {
+    const mismatch = error && error.detail && typeof error.detail === 'object' ? error.detail : {}
+    const pageNo = Number(mismatch.pageNo || mismatch.page_no || 0) || 0
+    const responseIndex = Number(mismatch.responseIndex || mismatch.response_index || 0) || 0
+    return `第 ${pageNo || '当前'} 页 brief 返回页码异常（收到第 ${responseIndex || '未知'} 页），已停止写入，请点击继续重试。`
+  }
+  if (raw === 'ppt_slide_writeback_missing' || asText(error && error.code) === 'ppt_slide_writeback_missing') {
+    const detail = error && error.detail && typeof error.detail === 'object' ? error.detail : {}
+    const pageNo = Number(detail.pageNo || detail.page_no || 0) || 0
+    return `第 ${pageNo || '当前'} 页已返回但未写入前端状态，已停止在当前页，请点击继续重试。`
+  }
+  if (raw === 'ppt_slide_writeback_lost_after_sync' || asText(error && error.code) === 'ppt_slide_writeback_lost_after_sync') {
+    const detail = error && error.detail && typeof error.detail === 'object' ? error.detail : {}
+    const pageNo = Number(detail.pageNo || detail.page_no || 0) || 0
+    return `第 ${pageNo || '当前'} 页 brief 写入后被同步覆盖，已停止在当前页，请点击继续重试。`
+  }
   const type = asText(source)
   const messages = {
     ppt_outline_llm_timeout: '目录生成超时，请稍后重试或减少来源数量。',
@@ -127,7 +191,7 @@ function normalizePptGenerationErrorMessage(error = null, source = '') {
     ppt_planning_llm_request_failed: 'AI 接口请求失败，请检查网络或接口配置。',
     ppt_planning_llm_unavailable: 'AI 接口未启用或配置不可用。',
   }
-  return messages[raw] || raw || 'PPT 生成失败，请稍后重试。'
+  return messages[rawDetail] || messages[raw] || rawDetail || raw || 'PPT 生成失败，请稍后重试。'
 }
 
 function normalizePptLngLat(value = null) {
@@ -888,6 +952,18 @@ async function waitForPptPlanningJob(jobId = '', { attempts = 20, intervalMs = 1
   return null
 }
 
+async function waitForPptDeckBriefJob(jobId = '', { attempts = 80, intervalMs = 1500, getJob = getDeckBriefJob } = {}) {
+  const normalizedJobId = asText(jobId)
+  if (!normalizedJobId) return null
+  for (let index = 0; index < attempts; index += 1) {
+    const job = await getJob(normalizedJobId)
+    const status = asText(job && job.status)
+    if (status === 'completed' || status === 'failed') return job
+    await delay(intervalMs)
+  }
+  return null
+}
+
 function attachPptDataPackageRuntimeMeta(response = {}, areaId = '', options = {}) {
   const source = cloneObject(response.source || response)
   if (!source.id) return response
@@ -949,11 +1025,17 @@ function appendPptDebugEventToState(state = {}, eventName = '', details = {}) {
   return appendPptGenerationDebugEvent(createPptPlanningState(state), eventName, details)
 }
 
+function isRecoverablePptDeckBriefJobStatus(status = '') {
+  return ['queued', 'running', 'validating'].includes(asText(status))
+}
+
 export function normalizeAgentPptPlanningTab(item = {}, options = {}) {
   const source = asText(item && item.source) || 'draft'
   let pptPlanningState = createPptPlanningState(item && (item.ppt_planning_state || item.pptPlanningState))
   const generationJob = cloneObject(pptPlanningState.generationJob)
-  if (options.restore && ['requesting', 'response_received', 'applying'].includes(asText(generationJob.phase))) {
+  const hasRecoverableBriefJob = asText(pptPlanningState.briefJobId || pptPlanningState.brief_job_id)
+    && isRecoverablePptDeckBriefJobStatus(pptPlanningState.briefJobStatus || pptPlanningState.brief_job_status)
+  if (options.restore && ['requesting', 'response_received', 'applying'].includes(asText(generationJob.phase)) && !hasRecoverableBriefJob) {
     pptPlanningState = failPptGenerationJob(
       pptPlanningState,
       generationJob.id,
@@ -1366,6 +1448,8 @@ export function createAgentPptPlanningTabMethods() {
         readonly: !!(targetTab && targetTab.readonly),
         before: pptGenerationJobDebug(targetTab && targetTab.pptPlanningState && targetTab.pptPlanningState.generationJob),
         next: pptGenerationJobDebug(normalizedNextState.generationJob),
+        beforeSlideCount: cloneArray((targetTab && targetTab.pptPlanningState && targetTab.pptPlanningState.deckBrief || {}).slides).length,
+        nextSlideCount: cloneArray((normalizedNextState.deckBrief || {}).slides).length,
       }
       const fallbackActiveId = asText(tabs.activeTabId)
       const writeDebugToTab = (eventName = '', details = {}) => {
@@ -1418,7 +1502,20 @@ export function createAgentPptPlanningTabMethods() {
           writeDebugToTab('tab_update_after_sync', {
             ...updateDetails,
             afterSync: pptGenerationJobDebug(afterSync.generationJob),
+            afterSyncSlideCount: cloneArray((afterSync.deckBrief || {}).slides).length,
           })
+          const nextSlideCount = Number(updateDetails.nextSlideCount || 0) || 0
+          const afterSyncSlideCount = cloneArray((afterSync.deckBrief || {}).slides).length
+          if (nextSlideCount > 0 && afterSyncSlideCount === 0) {
+            const expectedIndexes = cloneArray((normalizedNextState.deckBrief || {}).slides)
+              .map((slide) => Number(slide && slide.index || 0) || 0)
+              .filter(Boolean)
+            writeDebugToTab('slide_writeback_lost_after_sync', {
+              ...updateDetails,
+              expectedIndexes,
+              afterSyncSlideCount,
+            })
+          }
         }
       }
       return true
@@ -1590,7 +1687,7 @@ export function createAgentPptPlanningTabMethods() {
       let visualSnapshots = []
       if (typeof this.ensureAgentVisualSnapshotCache === 'function') {
         try {
-          visualSnapshots = await this.ensureAgentVisualSnapshotCache()
+          visualSnapshots = await this.ensureAgentVisualSnapshotCache({ allowMainMapFallback: false })
         } catch (error) {
           if (typeof console !== 'undefined' && console.warn) {
             console.warn('PPT visual snapshots failed; continuing without existing assets', error)
@@ -1620,17 +1717,241 @@ export function createAgentPptPlanningTabMethods() {
     requestAgentPptPlanningDirectiveWithDebug(payload = {}, options = {}) {
       return generateDeckBriefWithDebug(payload, options)
     },
+    requestAgentPptPlanningDeckBriefJob(payload = {}) {
+      return createDeckBriefJob(payload)
+    },
+    requestAgentPptPlanningDeckBriefJobStatus(jobId = '') {
+      return getDeckBriefJob(jobId)
+    },
     requestAgentPptPlanningNarrativePlan(payload = {}) {
       return generateNarrativePlan(payload)
     },
     requestAgentPptPlanningNarrativePlanWithDebug(payload = {}, options = {}) {
       return generateNarrativePlanWithDebug(payload, options)
     },
-    requestAgentPptPlanningDirectiveSlide(payload = {}) {
-      return regenerateDeckBriefSlide(payload)
+    requestAgentPptPlanningDirectiveSlide(payload = {}, options = {}) {
+      return regenerateDeckBriefSlide(payload, options)
     },
     requestAgentPptPlanningVisualArtifacts(payload = {}) {
       return generatePptVisualArtifacts(payload)
+    },
+    stableAgentPptMapSnapshotJson(value = null) {
+      if (Array.isArray(value)) {
+        return `[${value.map((item) => this.stableAgentPptMapSnapshotJson(item)).join(',')}]`
+      }
+      if (value && typeof value === 'object') {
+        return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${this.stableAgentPptMapSnapshotJson(value[key])}`).join(',')}}`
+      }
+      return JSON.stringify(value ?? null)
+    },
+    buildAgentPptMapSnapshotSceneKey(mapRequest = {}, visual = {}) {
+      const request = cloneObject(mapRequest)
+      const layers = cloneArray(request.layers)
+        .map((layer) => {
+          const item = cloneObject(layer)
+          return {
+            layer_type: asText(item.layer_type || item.layerType || item.type),
+            source: asText(item.source || item.source_id || item.sourceId),
+            role: asText(item.role),
+            metric: asText(item.metric || item.metric_key || item.metricKey),
+          }
+        })
+        .filter((layer) => layer.layer_type || layer.source)
+        .sort((a, b) => this.stableAgentPptMapSnapshotJson(a).localeCompare(this.stableAgentPptMapSnapshotJson(b)))
+      const scope = cloneObject(request.scope || request.focus || request.bounds)
+      const sourceIds = cloneArray(visual.source_ids || visual.sourceIds || request.source_ids || request.sourceIds)
+        .map((item) => asText(item))
+        .filter(Boolean)
+        .sort()
+      const fingerprint = asText(
+        typeof this.buildAgentVisualSnapshotFingerprint === 'function'
+          ? this.buildAgentVisualSnapshotFingerprint()
+          : '',
+      ) || asText(
+        (typeof this.getCurrentAgentHistoryId === 'function' && this.getCurrentAgentHistoryId())
+        || this.currentHistoryRecordId
+        || this.currentAnalysisId
+        || this.analysisId,
+      )
+      return this.stableAgentPptMapSnapshotJson({
+        version: 'ppt-map-scene-v1',
+        fingerprint,
+        composition: asText(request.composition),
+        history_id: asText(request.history_id || request.historyId || request.area_id || request.areaId || scope.history_id || scope.historyId || scope.area_id || scope.areaId),
+        scope,
+        metric: asText(request.metric || request.metric_key || request.metricKey),
+        basemap: cloneObject(request.basemap),
+        layers,
+        source_ids: sourceIds,
+      })
+    },
+    getCachedAgentPptMapSnapshotAsset(sceneKey = '') {
+      const cache = this.pptMapSnapshotAssetCache && typeof this.pptMapSnapshotAssetCache === 'object'
+        ? this.pptMapSnapshotAssetCache
+        : {}
+      const asset = cloneObject(cache[asText(sceneKey)])
+      return asText(asset.data_url || asset.dataUrl).startsWith('data:image/') ? asset : null
+    },
+    setCachedAgentPptMapSnapshotAsset(sceneKey = '', asset = {}) {
+      const key = asText(sceneKey)
+      const dataUrl = asText(asset && (asset.data_url || asset.dataUrl))
+      if (!key || !dataUrl.startsWith('data:image/')) return null
+      const cached = cloneObject(asset)
+      this.pptMapSnapshotAssetCache = {
+        ...(this.pptMapSnapshotAssetCache && typeof this.pptMapSnapshotAssetCache === 'object' ? this.pptMapSnapshotAssetCache : {}),
+        [key]: cached,
+      }
+      return cached
+    },
+    cloneAgentPptMapSnapshotAssetForVisual(asset = {}, visual = {}) {
+      return {
+        ...cloneObject(asset),
+        visual_id: asText(visual.visual_id || visual.visualId),
+      }
+    },
+    async captureAgentPptMapRequestSceneAsset(mapRequest = {}, visual = {}, sceneKey = '', options = {}) {
+      const cached = this.getCachedAgentPptMapSnapshotAsset(sceneKey)
+      if (cached) return cached
+      if (typeof this.ensurePptMapRequestHistoryData === 'function') {
+        await this.ensurePptMapRequestHistoryData(mapRequest)
+      }
+      let asset = null
+      let offscreenError = null
+      const preferOffscreen = !!options.preferOffscreenMapCapture
+      try {
+        if (!preferOffscreen && typeof this.renderPptMapRequestMainMapSnapshot === 'function') {
+          asset = await capturePptMapRequestAsset(mapRequest, {
+            renderMapRequest: (request, renderOptions) => this.renderPptMapRequestMainMapSnapshot(request, renderOptions),
+            requireRenderer: true,
+          })
+        } else if (preferOffscreen && typeof this.ensurePptMapSnapshotRendererReady === 'function') {
+          await this.ensurePptMapSnapshotRendererReady()
+          asset = await capturePptMapRequestAsset(mapRequest, {
+            renderMapRequest: typeof this.renderPptMapRequestSnapshot === 'function'
+              ? (request, renderOptions) => this.renderPptMapRequestSnapshot(request, renderOptions)
+              : undefined,
+            requireRenderer: true,
+            html2canvas: typeof globalThis !== 'undefined' && typeof globalThis.html2canvas === 'function'
+              ? globalThis.html2canvas
+              : (typeof window !== 'undefined' && typeof window.html2canvas === 'function' ? window.html2canvas : undefined),
+          })
+        } else {
+          throw new Error('ppt_map_main_capture_unavailable')
+        }
+      } catch (error) {
+        if (!preferOffscreen || !options.allowMainMapCapture) {
+          throw error
+        }
+        offscreenError = error
+        if (typeof console !== 'undefined' && console.warn) {
+          console.warn('PPT offscreen map snapshot request capture failed; trying explicit main map fallback', asText(visual.visual_id || visual.visualId), error)
+        }
+      }
+      if (!asset && preferOffscreen && options.allowMainMapCapture && typeof this.renderPptMapRequestMainMapSnapshot === 'function') {
+        try {
+          asset = await capturePptMapRequestAsset(mapRequest, {
+            renderMapRequest: (request, fallbackOptions) => this.renderPptMapRequestMainMapSnapshot(request, fallbackOptions),
+            requireRenderer: true,
+          })
+        } catch (error) {
+          if (offscreenError) {
+            throw Object.assign(new Error('ppt_map_main_capture_failed'), {
+              cause: error,
+              detail: `${asText(offscreenError && offscreenError.message ? offscreenError.message : offscreenError)}; ${asText(error && error.message ? error.message : error)}`,
+            })
+          }
+          throw error
+        }
+      }
+      if (!asset) throw new Error('ppt_map_snapshot_capture_failed')
+      return this.setCachedAgentPptMapSnapshotAsset(sceneKey, asset) || asset
+    },
+    async captureAgentPptMapRequestAssets(visualSpecs = [], options = {}) {
+      const assets = []
+      const nextVisualSpecs = []
+      const mapGroups = new Map()
+      for (const visual of cloneArray(visualSpecs)) {
+        if (!isPptMapSnapshotRequest(visual)) continue
+        const data = cloneObject(visual.data)
+        const mapRequest = cloneObject(data.map_request || data.mapRequest)
+        const sceneKey = this.buildAgentPptMapSnapshotSceneKey(mapRequest, visual)
+        if (!mapGroups.has(sceneKey)) {
+          mapGroups.set(sceneKey, { sceneKey, mapRequest, visuals: [] })
+        }
+        mapGroups.get(sceneKey).visuals.push(cloneObject(visual))
+      }
+
+      for (const group of mapGroups.values()) {
+        try {
+          const asset = await this.captureAgentPptMapRequestSceneAsset(group.mapRequest, group.visuals[0], group.sceneKey, options)
+          group.visuals.forEach((visual) => {
+            assets.push(this.cloneAgentPptMapSnapshotAssetForVisual(asset, visual))
+            nextVisualSpecs.push(cloneObject(visual))
+          })
+        } catch (error) {
+          group.visuals.forEach((visual) => {
+            const failedVisual = typeof this.attachPptMapSnapshotCaptureError === 'function'
+              ? this.attachPptMapSnapshotCaptureError(visual, error)
+              : {
+                  ...cloneObject(visual),
+                  data: {
+                    ...cloneObject(visual.data),
+                    capture_error: {
+                      code: asText(error && error.message ? error.message : error) || 'ppt_map_snapshot_capture_failed',
+                      message: asText(error && error.message ? error.message : error) || '地图截图失败',
+                      captured_at: new Date().toISOString(),
+                    },
+                  },
+                }
+            nextVisualSpecs.push(failedVisual)
+            if (typeof console !== 'undefined' && console.warn) {
+              console.warn('PPT map snapshot request capture failed for visual', asText(visual.visual_id || visual.visualId), error)
+            }
+          })
+        }
+      }
+
+      for (const visual of cloneArray(visualSpecs)) {
+        if (!isPptCarrierSnapshotRequest(visual)) continue
+        try {
+          const data = cloneObject(visual.data)
+          const carrierRequest = {
+            ...cloneObject(data.carrier_snapshot_request || data.carrierSnapshotRequest),
+            package_source_id: asText(data.package_source_id || data.packageSourceId || cloneObject(data.carrier_snapshot_request || data.carrierSnapshotRequest).package_source_id || cloneObject(data.carrier_snapshot_request || data.carrierSnapshotRequest).packageSourceId),
+            title: asText(data.title) || asText(visual.title),
+          }
+          const state = typeof this.getAgentPptPlanningStateWithSystemSources === 'function'
+            ? this.getAgentPptPlanningStateWithSystemSources()
+            : {}
+          const asset = await capturePptCarrierSnapshotAsset(carrierRequest, {
+            sources: cloneArray(state.sources),
+          })
+          assets.push({
+            ...asset,
+            visual_id: asText(visual.visual_id || visual.visualId),
+          })
+          nextVisualSpecs.push(cloneObject(visual))
+        } catch (error) {
+          const failedVisual = typeof this.attachPptMapSnapshotCaptureError === 'function'
+            ? this.attachPptMapSnapshotCaptureError(visual, error)
+            : {
+                ...cloneObject(visual),
+                data: {
+                  ...cloneObject(visual.data),
+                  capture_error: {
+                    code: asText(error && error.message ? error.message : error) || 'ppt_map_snapshot_capture_failed',
+                    message: asText(error && error.message ? error.message : error) || '地图截图失败',
+                    captured_at: new Date().toISOString(),
+                  },
+                },
+              }
+          nextVisualSpecs.push(failedVisual)
+          if (typeof console !== 'undefined' && console.warn) {
+            console.warn('PPT map snapshot request capture failed for visual', asText(visual.visual_id || visual.visualId), error)
+          }
+        }
+      }
+      return { assets, visualSpecs: nextVisualSpecs }
     },
     requestAgentPptPlanningDataSources(areaId = '') {
       return listPptDataSources(areaId)
@@ -1952,33 +2273,113 @@ export function createAgentPptPlanningTabMethods() {
           return false
         }
       }
-      writeRuntimeState(startPptGenerationJob(state, { requestId, type: 'directive', tabId }))
-      writeRuntimeEvent('directive_start_dispatched')
-      const heartbeatId = globalThis.setInterval(() => {
-        writeRuntimeEvent('generation_heartbeat')
-      }, 10000)
-      writeRuntimeEvent('heartbeat_scheduled', { intervalMs: 10000 })
-      let response = null
-      const emitRequestDebugEvent = (name = '', details = {}) => {
-        writeRuntimeEvent(name, details)
-      }
       try {
-        response = await this.requestAgentPptPlanningDirectiveWithDebug(
-          buildDeckBriefPayload(state, await this.buildAgentPptPlanningVisualApiContext()),
-          { onDebugEvent: emitRequestDebugEvent },
-        )
-        writeRuntimeEvent('fetch_resolved')
-        writeRuntimeEvent('json_or_api_returned', {
-          slideCount: cloneArray(response && response.slides).length,
-          keys: Object.keys(response || {}).slice(0, 8),
+        const payload = buildDeckBriefPayload(state, this.buildAgentPptPlanningApiContext())
+        const createResponse = await this.requestAgentPptPlanningDeckBriefJob(payload)
+        const briefJobId = asText(createResponse && createResponse.job_id)
+        if (!briefJobId) {
+          throw Object.assign(new Error('ppt_deck_brief_job_missing_id'), {
+            kind: 'invalid_response',
+            code: 'ppt_deck_brief_job_missing_id',
+          })
+        }
+        const createdState = startPptDeckBriefJob(state, { jobId: briefJobId, updatedAt: createResponse.updated_at })
+        this.updateAgentPptPlanningTabState(tabId, appendPptDebugEventToState(
+          createdState,
+          'directive_job_created',
+          { requestId, briefJobId, status: createResponse.status || 'queued' },
+        ))
+        writeRuntimeEvent('directive_job_created', { briefJobId, status: createResponse.status || 'queued' })
+        const heartbeatId = globalThis.setInterval(() => {
+          writeRuntimeEvent('generation_heartbeat')
+        }, 10000)
+        writeRuntimeEvent('heartbeat_scheduled', { intervalMs: 10000 })
+        let polled = null
+        try {
+          polled = await waitForPptDeckBriefJob(briefJobId, {
+            getJob: (jobId) => this.requestAgentPptPlanningDeckBriefJobStatus(jobId),
+          })
+        } finally {
+          globalThis.clearInterval(heartbeatId)
+        }
+        if (!polled) {
+          throw Object.assign(new Error('ppt_deck_brief_job_poll_timeout'), {
+            kind: 'timeout',
+            code: 'ppt_deck_brief_job_poll_timeout',
+            detail: { briefJobId },
+          })
+        }
+        if (asText(polled.status) === 'failed') {
+          const jobError = cloneObject(polled.error)
+          throw Object.assign(new Error(asText(jobError.message || jobError.code) || 'ppt_deck_brief_job_failed'), {
+            kind: 'job_failed',
+            code: asText(jobError.code) || 'ppt_deck_brief_job_failed',
+            detail: cloneObject(jobError.detail),
+            jobError,
+          })
+        }
+        if (asText(polled.status) !== 'completed') {
+          throw Object.assign(new Error('ppt_deck_brief_job_unexpected_status'), {
+            kind: 'invalid_response',
+            code: 'ppt_deck_brief_job_unexpected_status',
+            detail: { briefJobId, status: asText(polled.status) },
+          })
+        }
+        const currentState = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
+        const result = polled.result || {}
+        writeRuntimeEvent('directive_response_unwrapped', {
+          currentJobId: asText(currentState.briefJobId || currentState.brief_job_id),
+          briefJobId,
+          slideCount: cloneArray(result && result.slides).length,
+          keys: Object.keys(result || {}).slice(0, 8),
         })
-        const completedState = completePptGenerationJob(
-          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-          requestId,
-          response,
+        writeRuntimeEvent('directive_apply_start', {
+          briefJobId,
+          slideCount: cloneArray(result && result.slides).length,
+          keys: Object.keys(result || {}).slice(0, 8),
+        })
+        const expectedSlideCount = cloneArray(result && result.slides).length
+        const appliedState = updatePptDeckBriefJobState(
+          appendPptDebugEventToState(
+            appendPptDebugEventToState(currentState, 'directive_response_unwrapped', {
+              requestId,
+              briefJobId,
+              slideCount: expectedSlideCount,
+              keys: Object.keys(result || {}).slice(0, 8),
+            }),
+            'directive_apply_start',
+            {
+              requestId,
+              briefJobId,
+              slideCount: expectedSlideCount,
+              keys: Object.keys(result || {}).slice(0, 8),
+            },
+          ),
+          {
+            job_id: briefJobId,
+            status: 'completed',
+            progress: polled.progress || { stage: 'completed' },
+            result,
+            updated_at: polled.updated_at || new Date().toISOString(),
+          },
         )
+        const completedState = cloneArray((appliedState.deckBrief || {}).slides).length
+          ? appendPptDebugEventToState(
+            appliedState,
+            'directive_apply_done',
+            { requestId, briefJobId, slideCount: cloneArray((appliedState.deckBrief || {}).slides).length },
+          )
+          : appliedState
         this.updateAgentPptPlanningTabState(tabId, completedState)
-        if (asText(completedState.generationJob && completedState.generationJob.phase) === 'ready') {
+        const syncedSlides = cloneArray((this.getAgentPptPlanningTabState(tabId).deckBrief || {}).slides)
+        if (expectedSlideCount > 0 && !syncedSlides.length) {
+          throw Object.assign(new Error('ppt_deck_brief_writeback_missing'), {
+            kind: 'invalid_writeback',
+            code: 'ppt_deck_brief_writeback_missing',
+            detail: { briefJobId, expectedSlideCount },
+          })
+        }
+        if (cloneArray((completedState.deckBrief || {}).slides).length) {
           this.cleanupAgentPptPlanningVisualArtifacts(staleFilenames)
         }
       } catch (error) {
@@ -1987,14 +2388,28 @@ export function createAgentPptPlanningTabMethods() {
           code: asText(error && error.code),
           message: asText(error && error.message ? error.message : error),
         })
-        this.updateAgentPptPlanningTabState(tabId, failPptGenerationJob(
-          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-          requestId,
-          normalizePptGenerationErrorMessage(error, 'directive'),
-          { source: 'directive', generationResponse: response || error?.response || error?.data || {} },
-        ))
-      } finally {
-        globalThis.clearInterval(heartbeatId)
+        const currentState = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
+        const jobId = asText(currentState.briefJobId || currentState.brief_job_id)
+        if (jobId) {
+          this.updateAgentPptPlanningTabState(tabId, updatePptDeckBriefJobState(currentState, {
+            job_id: jobId,
+            status: 'failed',
+            error: {
+              code: asText(error && error.code) || 'ppt_deck_brief_job_failed',
+              message: normalizePptGenerationErrorMessage(error, 'directive'),
+              detail: error && error.detail ? error.detail : {},
+            },
+            progress: { stage: 'failed', message: 'brief 生成失败' },
+            updated_at: new Date().toISOString(),
+          }))
+        } else {
+          this.updateAgentPptPlanningTabState(tabId, failPptGenerationJob(
+            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+            requestId,
+            normalizePptGenerationErrorMessage(error, 'directive'),
+            { source: 'directive' },
+          ))
+        }
       }
     },
     async generateAgentPptPlanningNarrativePlan() {
@@ -2061,29 +2476,191 @@ export function createAgentPptPlanningTabMethods() {
       let state = this.getAgentPptPlanningStateWithSystemSources()
       const outline = cloneArray(state.outline).sort((a, b) => (Number(a.pageNo || 0) || 0) - (Number(b.pageNo || 0) || 0))
       if (!outline.length || !cloneArray(state.narrativePlan && state.narrativePlan.slideRoles).length) return
-      this.updateAgentPptPlanningTabState(tabId, startSlideGenerationQueue(state))
-      const visualContext = await this.buildAgentPptPlanningVisualApiContext()
-      for (const outlineItem of outline) {
+      const writeRuntimeSlideState = (nextState) => {
+        this.updateAgentPptPlanningTabRuntimeState(tabId, nextState)
+      }
+      const appendRuntimeSlideEvent = (name, details = {}) => {
+        writeRuntimeSlideState(appendPptDebugEventToState(
+          this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+          name,
+          details,
+        ))
+      }
+      writeRuntimeSlideState(startSlideGenerationQueue(state))
+      const briefContext = this.buildAgentPptPlanningApiContext()
+      for (;;) {
         state = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
-        const existing = cloneArray((state.deckBrief || {}).slides).find((slide) => Number(slide.index || 0) === Number(outlineItem.pageNo || 0))
-        if (existing) continue
+        if (!cloneArray(this.ensureAgentTabs(false).pptPlanningTabs).some((item) => asText(item && item.id) === tabId)) break
+        const nextItem = cloneArray(state.slideGenerationQueue)
+          .find((item) => String(item && item.status) !== 'ready')
+        if (!nextItem) break
+        const pageNo = Number(nextItem.pageNo || nextItem.page_no || 0) || 0
+        const outlineItem = outline.find((item) => Number(item.pageNo || 0) === pageNo) || {}
+        if (!pageNo) break
+        const requestId = `slide-${pageNo}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        writeRuntimeSlideState(markSlideRequestStarted(state, pageNo, requestId))
+        state = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
         try {
+          appendRuntimeSlideEvent('slide_page_request_started', { pageNo, requestId, payloadSource: 'brief_context' })
           const response = await this.requestAgentPptPlanningDirectiveSlide(buildDeckBriefSlidePayload(
             state,
-            { index: Number(outlineItem.pageNo || 0), title: outlineItem.theme, purpose: outlineItem.purpose },
+            { index: pageNo, title: outlineItem.theme, purpose: outlineItem.purpose },
             '按已确认目录和叙事方案生成这一页 brief。',
-            visualContext,
+            briefContext,
+          ), {
+            onDebugEvent: (name, details = {}) => {
+              appendRuntimeSlideEvent(`slide_${name}`, { pageNo, requestId, ...details })
+            },
+            timeoutMs: PPT_SLIDE_REQUEST_TIMEOUT_MS,
+          })
+          const responseIndex = Number(response && response.index || response && response.page_no || response && response.pageNo || 0) || 0
+          const responseSummary = {
+            responseIndex,
+            responseKeys: Object.keys(response || {}).slice(0, 12),
+            title: asText(response && response.title),
+            hasKeyMessage: !!asText(response && (response.key_message || response.keyMessage)),
+            visualSpecs: cloneArray(response && (response.visual_specs || response.visualSpecs)).length,
+            metricClaims: cloneArray(response && (response.metric_claims || response.metricClaims)).length,
+          }
+          writeRuntimeSlideState(appendPptDebugEventToState(
+            markSlideResponseReceived(
+              this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+              pageNo,
+              requestId,
+              responseSummary,
+            ),
+            'slide_page_response_received',
+            {
+              pageNo,
+              requestId,
+              responseIndex,
+              responseKeys: Object.keys(response || {}).slice(0, 12),
+              payloadSummary: {
+                title: asText(response && response.title),
+                hasKeyMessage: !!asText(response && (response.key_message || response.keyMessage)),
+                visualSpecs: cloneArray(response && (response.visual_specs || response.visualSpecs)).length,
+                metricClaims: cloneArray(response && (response.metric_claims || response.metricClaims)).length,
+              },
+            },
           ))
-          this.updateAgentPptPlanningTabState(tabId, applyGeneratedSlideBrief(
+          if (!responseIndex || responseIndex !== pageNo) {
+            throw Object.assign(new Error('ppt_slide_response_index_mismatch'), {
+              kind: 'invalid_slide_response',
+              code: 'ppt_slide_response_index_mismatch',
+              detail: { pageNo, responseIndex, requestId },
+            })
+          }
+          writeRuntimeSlideState(markSlideApplying(
             this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+            pageNo,
+            requestId,
+          ))
+          const beforeSlideCount = cloneArray((this.getAgentPptPlanningTabStateWithSystemSources(tabId).deckBrief || {}).slides).length
+          const nextAppliedState = applySlideResponseAndMarkReady(
+            this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+            pageNo,
+            requestId,
             response,
-          ))
+          )
+          const appliedSlides = cloneArray((nextAppliedState.deckBrief || {}).slides)
+          if (!appliedSlides.some((slide) => Number(slide && slide.index || 0) === pageNo)) {
+            throw Object.assign(new Error('ppt_slide_writeback_missing'), {
+              kind: 'invalid_slide_writeback',
+              code: 'ppt_slide_writeback_missing',
+              detail: {
+                pageNo,
+                requestId,
+                beforeSlideCount,
+                afterSlideCount: appliedSlides.length,
+                slideIndexes: appliedSlides.map((slide) => Number(slide && slide.index || 0) || 0).filter(Boolean),
+              },
+            })
+          }
+          const nextPage = cloneArray(nextAppliedState.slideGenerationQueue).find((item) => String(item && item.status) !== 'ready')
+          this.updateAgentPptPlanningTabState(tabId, appendPptDebugEventToState(nextAppliedState, 'slide_page_applied', {
+            pageNo,
+            requestId,
+            beforeSlideCount,
+            afterSlideCount: appliedSlides.length,
+            slideIndexes: appliedSlides.map((slide) => Number(slide.index || 0) || 0).filter(Boolean),
+            nextPageNo: Number(nextPage && nextPage.pageNo || 0) || 0,
+          }))
+          const syncedState = this.getAgentPptPlanningTabState(tabId)
+          const syncedSlides = cloneArray((syncedState.deckBrief || {}).slides)
+          if (!syncedSlides.some((slide) => Number(slide && slide.index || 0) === pageNo)) {
+            this.updateAgentPptPlanningTabState(tabId, appendPptDebugEventToState(
+              nextAppliedState,
+              'slide_writeback_recovered_after_sync',
+              {
+                pageNo,
+                requestId,
+                beforeSlideCount,
+                afterSlideCount: appliedSlides.length,
+                afterSyncSlideCount: syncedSlides.length,
+                slideIndexes: appliedSlides.map((slide) => Number(slide && slide.index || 0) || 0).filter(Boolean),
+              },
+            ))
+            const recoveredState = this.getAgentPptPlanningTabState(tabId)
+            const recoveredSlides = cloneArray((recoveredState.deckBrief || {}).slides)
+            if (recoveredSlides.some((slide) => Number(slide && slide.index || 0) === pageNo)) {
+              continue
+            }
+            const error = Object.assign(new Error('ppt_slide_writeback_lost_after_sync'), {
+              kind: 'invalid_slide_writeback',
+              code: 'ppt_slide_writeback_lost_after_sync',
+              detail: {
+                pageNo,
+                requestId,
+                beforeSlideCount,
+                afterSlideCount: appliedSlides.length,
+                afterSyncSlideCount: syncedSlides.length,
+                slideIndexes: syncedSlides.map((slide) => Number(slide && slide.index || 0) || 0).filter(Boolean),
+              },
+            })
+            this.updateAgentPptPlanningTabState(tabId, appendPptDebugEventToState(
+              markSlideFailed(
+                this.getAgentPptPlanningTabStateWithSystemSources(tabId),
+                pageNo,
+                requestId,
+                normalizePptGenerationErrorMessage(error, 'slides'),
+                'writeback_lost',
+              ),
+              'slide_writeback_lost_after_sync',
+              error.detail,
+            ))
+            break
+          }
         } catch (error) {
-          this.updateAgentPptPlanningTabState(tabId, failSlideGenerationQueue(
+          const detail = error && error.data && typeof error.data.detail === 'object' ? error.data.detail : null
+          if (asText(error && error.code) === 'ppt_slide_request_timeout') {
+            error.pageNo = pageNo
+          }
+          const failedWithEvent = appendPptDebugEventToState(
             this.getAgentPptPlanningTabStateWithSystemSources(tabId),
-            Number(outlineItem.pageNo || 0),
-            normalizePptGenerationErrorMessage(error, 'slides'),
-          ))
+            'slide_page_request_failed',
+            {
+              pageNo,
+              requestId,
+              status: Number(error && error.status || 0) || 0,
+              detailCode: asText(detail && detail.code),
+              detailReason: asText(detail && detail.reason),
+              errorCode: asText(error && error.code),
+            },
+          )
+          const errorCode = asText(error && error.code)
+          const errorKind = errorCode === 'ppt_slide_request_timeout'
+            ? 'timeout'
+            : errorCode === 'ppt_slide_response_index_mismatch'
+              ? 'invalid_response'
+              : errorCode === 'ppt_slide_writeback_missing'
+                ? 'writeback_missing'
+                : errorCode === 'ppt_slide_writeback_lost_after_sync'
+                  ? 'writeback_lost'
+                  : 'http_error'
+          const failState = errorKind === 'timeout'
+            ? markSlideTimedOut(failedWithEvent, pageNo, requestId, normalizePptGenerationErrorMessage(error, 'slides'))
+            : markSlideFailed(failedWithEvent, pageNo, requestId, normalizePptGenerationErrorMessage(error, 'slides'), errorKind)
+          this.updateAgentPptPlanningTabState(tabId, failState)
           break
         }
       }
@@ -2094,15 +2671,57 @@ export function createAgentPptPlanningTabMethods() {
       const index = Number(slideIndex || 0) || 0
       if (!tabId || !index) return
       let state = this.getAgentPptPlanningTabStateWithSystemSources(tabId)
-      const slide = cloneArray((state.deckBrief || {}).slides).find((item) => Number(item.index || 0) === index)
+      let slide = cloneArray((state.deckBrief || {}).slides).find((item) => Number(item.index || 0) === index)
       if (!slide || !cloneArray(slide.visualSpecs).length) return
+      state = clearPptSlideMapSnapshotCaptureErrors(state, index)
+      slide = cloneArray((state.deckBrief || {}).slides).find((item) => Number(item.index || 0) === index) || slide
       this.updateAgentPptPlanningTabState(tabId, startPptVisualArtifactsGeneration(state, index))
       try {
-        const response = await this.requestAgentPptPlanningVisualArtifacts(buildPptVisualArtifactsPayload(
+        const initialPayload = buildPptVisualArtifactsPayload(
           this.getAgentPptPlanningTabStateWithSystemSources(tabId),
           slide,
           await this.buildAgentPptPlanningVisualApiContext(),
-        ))
+        )
+        let response = await this.requestAgentPptPlanningVisualArtifacts(initialPayload)
+        const mapRequestSpecs = cloneArray(response && (response.visual_specs || response.visualSpecs))
+          .filter((visual) => isPptMapSnapshotRequest(visual) || isPptCarrierSnapshotRequest(visual))
+        if (mapRequestSpecs.length && typeof this.captureAgentPptMapRequestAssets === 'function') {
+          try {
+            const captureResult = await this.captureAgentPptMapRequestAssets(mapRequestSpecs)
+            const capturedAssets = Array.isArray(captureResult)
+              ? captureResult
+              : cloneArray(captureResult && captureResult.assets)
+            const capturedVisualSpecs = Array.isArray(captureResult)
+              ? mapRequestSpecs.map((item) => cloneObject(item))
+              : cloneArray(captureResult && (captureResult.visualSpecs || captureResult.visual_specs))
+            if (capturedVisualSpecs.length) {
+              response = {
+                ...cloneObject(response),
+                visual_specs: cloneArray(response && (response.visual_specs || response.visualSpecs)).map((visual) => {
+                  const visualId = asText(visual && (visual.visual_id || visual.visualId))
+                  const captured = capturedVisualSpecs.find((item) => asText(item && (item.visual_id || item.visualId)) === visualId)
+                  return captured ? cloneObject(captured) : cloneObject(visual)
+                }),
+              }
+            }
+            if (capturedAssets.length) {
+              response = await this.requestAgentPptPlanningVisualArtifacts({
+                ...initialPayload,
+                visual_specs: capturedVisualSpecs.length
+                  ? capturedVisualSpecs.map((item) => cloneObject(item))
+                  : mapRequestSpecs.map((item) => cloneObject(item)),
+                existing_assets: [
+                  ...cloneArray(initialPayload.existing_assets).map((item) => cloneObject(item)),
+                  ...capturedAssets,
+                ],
+              })
+            }
+          } catch (captureError) {
+            if (typeof console !== 'undefined' && console.warn) {
+              console.warn('PPT map snapshot request capture failed; keeping needs_existing_asset state', captureError)
+            }
+          }
+        }
         this.updateAgentPptPlanningTabState(tabId, applyPptVisualArtifactsResponse(
           this.getAgentPptPlanningTabStateWithSystemSources(tabId),
           response,
@@ -2153,7 +2772,7 @@ export function createAgentPptPlanningTabMethods() {
       const hasOutline = cloneArray(state.outline).length > 0
       const hasDirective = asText(state.currentStep) === 'directive_draft' && cloneArray((state.deckBrief || {}).slides).length > 0
       if (!hasOutline || !hasDirective) return
-      const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成指令文件会清空旧指令文件，但保留当前目录，确认继续？')
+      const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成 brief 会清空旧 brief，但保留当前目录和叙事方案，确认继续？')
       if (!confirmed) return
       const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief)
       this.updateAgentActivePptPlanningState(resetPptPlanningToOutlineReady(this.getAgentPptPlanningStateWithSystemSources()))
@@ -2175,7 +2794,7 @@ export function createAgentPptPlanningTabMethods() {
       const state = this.getAgentPptPlanningStateWithSystemSources()
       const hasNarrativePlan = cloneArray(state.narrativePlan && state.narrativePlan.slideRoles).length > 0
       if (!hasNarrativePlan) return
-      const confirmed = await this.confirmAgentPptPlanningStepReset('重新逐页生成 brief 会清空旧 brief，但保留当前目录和叙事方案，确认继续？')
+      const confirmed = await this.confirmAgentPptPlanningStepReset('重新生成 brief 会清空旧 brief，但保留当前目录和叙事方案，确认继续？')
       if (!confirmed) return
       const staleFilenames = collectPptVisualArtifactFilenames(state.deckBrief)
       this.updateAgentActivePptPlanningState(resetPptPlanningToNarrativeReady(this.getAgentPptPlanningStateWithSystemSources()))

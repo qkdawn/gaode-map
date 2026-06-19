@@ -268,6 +268,8 @@ class DeckSlideBrief(BaseModel):
     title: str
     purpose: str = ""
     key_message: str = ""
+    insight: str = ""
+    evidence_explanation: List[str] = Field(default_factory=list)
     visual_plan: str = ""
     required_sources: List[str] = Field(default_factory=list)
     metric_claims: List[Dict[str, Any]] = Field(default_factory=list)
@@ -305,11 +307,36 @@ class DeckNarrativeSlideRole(BaseModel):
 
     page_no: int = Field(..., ge=1)
     role: str = ""
-    objective: str = ""
-    evidence_focus: List[str] = Field(default_factory=list)
-    visual_direction: str = ""
-    chart_intent: str = ""
+    job: str = ""
+    evidence_bucket: str = ""
+    visual_family: str = ""
     transition_note: str = ""
+
+
+class DeckNarrativeChapter(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = ""
+    page_range: str = ""
+    job: str = ""
+    output: str = ""
+
+
+class DeckNarrativeEvidenceBucket(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = ""
+    label: str = ""
+    allowed_sources: List[str] = Field(default_factory=list)
+
+
+class DeckNarrativeVisualStrategy(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    spatial_first: bool = False
+    numeric_charts_require_data: bool = True
+    diagram_for_strategy_pages: bool = True
+    no_fallback_bar: bool = True
 
 
 class DeckNarrativePlanRequest(BaseModel):
@@ -341,12 +368,11 @@ class DeckNarrativePlanResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     storyline: str = ""
-    style_guide: str = ""
-    evidence_strategy: str = ""
-    chart_strategy: str = ""
+    chapters: List[DeckNarrativeChapter] = Field(default_factory=list)
+    evidence_buckets: List[DeckNarrativeEvidenceBucket] = Field(default_factory=list)
     slide_roles: List[DeckNarrativeSlideRole] = Field(default_factory=list)
+    visual_rules: DeckNarrativeVisualStrategy = Field(default_factory=DeckNarrativeVisualStrategy)
     missing_inputs: List[str] = Field(default_factory=list)
-    context_manifest: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DeckBriefResponse(BaseModel):
@@ -359,16 +385,40 @@ class DeckBriefResponse(BaseModel):
     context_manifest: Dict[str, Any] = Field(default_factory=dict)
 
 
+class DeckBriefJobCreateResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    status: Literal["queued", "running", "validating", "completed", "failed"] = "queued"
+
+
+class DeckBriefJobStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    job_id: str
+    status: Literal["queued", "running", "validating", "completed", "failed"] = "queued"
+    progress: Dict[str, Any] = Field(default_factory=dict)
+    result: Optional[DeckBriefResponse] = None
+    error: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class DeckBriefSlideRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     area_id: str = ""
+    context_id: str = ""
+    page_no: int = Field(0, ge=0)
     spec: Optional[PptSpecResponse] = None
     outline: List[PptOutlineItem] = Field(default_factory=list)
     slides: List[DeckSlideBrief] = Field(default_factory=list)
     target: DeckSlideBrief
     outline_item: Optional[PptOutlineItem] = None
     narrative_plan: Optional[DeckNarrativePlanResponse] = None
+    previous_slide_summary: Dict[str, Any] = Field(default_factory=dict)
+    next_outline_summary: Dict[str, Any] = Field(default_factory=dict)
+    deck_progress_summary: Dict[str, Any] = Field(default_factory=dict)
     revision_note: str = Field(..., min_length=1)
     source_ids: List[str] = Field(default_factory=list)
     sources: List[PptSource] = Field(default_factory=list)
@@ -412,4 +462,5 @@ class PptVisualArtifactResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     slide_index: int
+    visual_specs: List[Dict[str, Any]] = Field(default_factory=list)
     visual_artifacts: List[Dict[str, Any]] = Field(default_factory=list)

@@ -9,6 +9,25 @@ from typing import Any, Dict, List
 DEBUG_DIR = Path("runtime")
 
 
+class LlmJsonParseError(json.JSONDecodeError):
+    def __init__(self, original: json.JSONDecodeError, text: str):
+        super().__init__(original.msg, original.doc, original.pos)
+        self.text = text
+        self.original = original
+
+    @property
+    def summary(self) -> Dict[str, Any]:
+        start = max(0, int(self.pos or 0) - 120)
+        end = min(len(self.text), int(self.pos or 0) + 120)
+        return {
+            "message": self.msg,
+            "line": self.lineno,
+            "column": self.colno,
+            "char": self.pos,
+            "snippet": self.text[start:end],
+        }
+
+
 def _dump_invalid_llm_output(name: str, text: str, error: Exception | None = None) -> None:
     try:
         DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -38,6 +57,8 @@ def _load_json_object(text: str) -> Dict[str, Any]:
         except Exception as exc:
             last_error = exc
     if last_error:
+        if isinstance(last_error, json.JSONDecodeError):
+            raise LlmJsonParseError(last_error, text) from last_error
         raise last_error
     raise ValueError("invalid_llm_json_output")
 

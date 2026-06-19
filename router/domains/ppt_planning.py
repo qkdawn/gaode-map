@@ -8,6 +8,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from modules.charting import delete_chart_file
 from modules.ppt_planning.schemas import (
     DeckBriefSlideRequest,
+    DeckBriefJobCreateResponse,
+    DeckBriefJobStatusResponse,
     DeckBriefRequest,
     DeckBriefResponse,
     DeckNarrativePlanRequest,
@@ -44,6 +46,8 @@ from modules.ppt_planning.service import (
     PptPlanningLlmUnavailable,
     classify_ppt_source_groups,
     generate_deck_brief,
+    create_deck_brief_job,
+    get_deck_brief_job,
     generate_narrative_plan,
     generate_ppt_spec,
     generate_visual_artifacts_for_slide,
@@ -95,7 +99,16 @@ def _raise_ppt_planning_error(exc: Exception) -> None:
     if isinstance(exc, PptPlanningLlmUnavailable):
         raise HTTPException(status_code=503, detail="ppt_planning_llm_unavailable") from exc
     if isinstance(exc, PptPlanningInvalidResponse):
-        detail = str(exc) or "ppt_planning_invalid_ai_response"
+        detail = exc.detail if getattr(exc, "detail", None) else str(exc) or "ppt_planning_invalid_ai_response"
+        logger.warning(
+            "PPT planning invalid response",
+            extra={
+                "ppt_planning_error": {
+                    "message": str(exc) or "ppt_planning_invalid_ai_response",
+                    "detail": detail,
+                },
+            },
+        )
         raise HTTPException(status_code=502, detail=detail) from exc
     if isinstance(exc, SQLAlchemyError):
         _raise_ppt_database_error(exc)
@@ -199,6 +212,22 @@ async def create_deck_narrative_plan(payload: DeckNarrativePlanRequest) -> DeckN
 async def create_deck_brief(payload: DeckBriefRequest) -> DeckBriefResponse:
     try:
         return await generate_deck_brief(payload)
+    except Exception as exc:
+        _raise_ppt_planning_error(exc)
+
+
+@router.post("/api/v1/analysis/ppt/deck-brief/jobs", response_model=DeckBriefJobCreateResponse)
+async def create_deck_brief_job_route(payload: DeckBriefRequest) -> DeckBriefJobCreateResponse:
+    try:
+        return await create_deck_brief_job(payload)
+    except Exception as exc:
+        _raise_ppt_planning_error(exc)
+
+
+@router.get("/api/v1/analysis/ppt/deck-brief/jobs/{job_id}", response_model=DeckBriefJobStatusResponse)
+async def get_deck_brief_job_route(job_id: str) -> DeckBriefJobStatusResponse:
+    try:
+        return await get_deck_brief_job(job_id)
     except Exception as exc:
         _raise_ppt_planning_error(exc)
 
