@@ -16,7 +16,6 @@ import {
   normalizeAgentCounterpoint,
   normalizeAgentDecision,
   normalizeAgentDecisionEvidence,
-  normalizeAgentAttachments,
   normalizeAgentMessageProcess,
   normalizeAgentPanelPreloadNotes,
   normalizeAgentPlanEnvelope,
@@ -1184,7 +1183,7 @@ function createAgentRuntimeMethods() {
       return {
         evidence_version: 'frontend_map_search_context_v1',
         source: 'frontend_current_map_layers',
-        rule: '这些结构化空间对象只作为本轮可检索证据源；Agent 必须先 search_analysis_context 再 read_analysis_chunk，才能在最终回答中引用具体地名、格子、线段或 cell。',
+        rule: '这些结构化空间对象只作为本轮可检索证据源；Agent 必须先 search_analysis_context 再 read_analysis_evidence_node，才能在最终回答中引用具体地名、格子、线段或 cell。',
         place_anchors: this.buildAgentPlaceAnchors(),
         spatial_anchors: this.buildAgentSpatialAnchors(),
       }
@@ -1318,7 +1317,6 @@ function createAgentRuntimeMethods() {
           summary: String((merged.plan && merged.plan.summary) || ''),
         },
         risk_confirmations: cloneArray(merged.riskConfirmations),
-        attachment_ids: cloneArray(merged.attachmentIds || merged.attachment_ids || this.agentAttachmentIds),
       }
     },
     async putAgentSession(sessionId = '', overrides = {}) {
@@ -1338,135 +1336,6 @@ function createAgentRuntimeMethods() {
       }
       const detail = await res.json()
       return this.mergeAgentSessionDetail(detail)
-    },
-    getAgentReadyAttachmentIds() {
-      return normalizeAgentAttachments(this.agentAttachments)
-        .filter((item) => item.status === 'ready')
-        .map((item) => item.attachmentId)
-    },
-    agentHasProcessingAttachments() {
-      return normalizeAgentAttachments(this.agentAttachments)
-        .some((item) => ['uploaded', 'processing'].includes(item.status))
-    },
-    syncAgentAttachmentState(sessionId = '') {
-      const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId) return
-      this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-        ...session,
-        attachments: normalizeAgentAttachments(this.agentAttachments),
-        attachmentIds: this.getAgentReadyAttachmentIds(),
-      }), { syncActive: false })
-    },
-    async refreshAgentAttachments(sessionId = '') {
-      const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId) return []
-      const res = await fetch(`/api/v1/analysis/agent/attachments?conversation_id=${encodeURIComponent(targetSessionId)}`, {
-        cache: 'no-store',
-      })
-      if (!res.ok) {
-        throw new Error(`/api/v1/analysis/agent/attachments 请求失败(${res.status})`)
-      }
-      const rows = normalizeAgentAttachments(await res.json())
-      if (targetSessionId === asText(this.activeAgentSessionId)) {
-        this.agentAttachments = rows
-        this.agentAttachmentIds = rows.filter((item) => item.status === 'ready').map((item) => item.attachmentId)
-      }
-      this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-        ...session,
-        attachments: rows,
-        attachmentIds: rows.filter((item) => item.status === 'ready').map((item) => item.attachmentId),
-      }), { syncActive: targetSessionId === asText(this.activeAgentSessionId) })
-      if (rows.some((item) => ['uploaded', 'processing'].includes(item.status))) {
-        this.startAgentAttachmentPolling(targetSessionId)
-      } else {
-        this.stopAgentAttachmentPolling()
-      }
-      return rows
-    },
-    startAgentAttachmentPolling(sessionId = '') {
-      const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId || typeof window === 'undefined' || typeof window.setInterval !== 'function') return
-      this.stopAgentAttachmentPolling()
-      this.agentAttachmentPollTimer = window.setInterval(() => {
-        this.refreshAgentAttachments(targetSessionId).catch((err) => {
-          this.agentAttachmentError = err && err.message ? err.message : String(err)
-          this.stopAgentAttachmentPolling()
-        })
-      }, 1600)
-    },
-    stopAgentAttachmentPolling() {
-      if (this.agentAttachmentPollTimer && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
-        window.clearInterval(this.agentAttachmentPollTimer)
-      }
-      this.agentAttachmentPollTimer = null
-    },
-    async uploadAgentAttachment(file = null) {
-      if (!file || this.agentAttachmentUploading) return null
-      this.ensureAgentPanelReady()
-      const targetSessionId = this.getActiveAgentSessionId(this.activeAgentSessionId) || (this.createAgentSession().id)
-      const form = new FormData()
-      form.append('conversation_id', targetSessionId)
-      form.append('history_id', this.getCurrentAgentHistoryId())
-      form.append('file', file)
-      this.agentAttachmentUploading = true
-      this.agentAttachmentError = ''
-      try {
-        const res = await fetch('/api/v1/analysis/agent/attachments', {
-          method: 'POST',
-          body: form,
-        })
-        if (!res.ok) {
-          throw new Error(`/api/v1/analysis/agent/attachments 上传失败(${res.status})`)
-        }
-        const record = normalizeAgentAttachments([await res.json()])[0]
-        const current = normalizeAgentAttachments(this.agentAttachments)
-        const next = [record, ...current.filter((item) => item.attachmentId !== record.attachmentId)]
-        this.agentAttachments = next
-        this.agentAttachmentIds = next.filter((item) => item.status === 'ready').map((item) => item.attachmentId)
-        this.syncAgentAttachmentState(targetSessionId)
-        this.startAgentAttachmentPolling(targetSessionId)
-        return record
-      } catch (err) {
-        this.agentAttachmentError = err && err.message ? err.message : String(err)
-        return null
-      } finally {
-        this.agentAttachmentUploading = false
-      }
-    },
-    async removeAgentAttachment(attachmentId = '') {
-      const targetSessionId = this.getActiveAgentSessionId(this.activeAgentSessionId)
-      const nextId = asText(attachmentId)
-      if (!targetSessionId || !nextId) return false
-      const previous = normalizeAgentAttachments(this.agentAttachments)
-      this.agentAttachments = previous.filter((item) => item.attachmentId !== nextId)
-      this.agentAttachmentIds = this.getAgentReadyAttachmentIds()
-      this.syncAgentAttachmentState(targetSessionId)
-      try {
-        const res = await fetch(`/api/v1/analysis/agent/attachments/${encodeURIComponent(nextId)}?conversation_id=${encodeURIComponent(targetSessionId)}`, {
-          method: 'DELETE',
-        })
-        if (!res.ok && res.status !== 404) {
-          throw new Error(`/api/v1/analysis/agent/attachments/${nextId} 删除失败(${res.status})`)
-        }
-        return true
-      } catch (err) {
-        this.agentAttachments = previous
-        this.agentAttachmentIds = this.getAgentReadyAttachmentIds()
-        this.agentAttachmentError = err && err.message ? err.message : String(err)
-        this.syncAgentAttachmentState(targetSessionId)
-        return false
-      }
-    },
-    onAgentAttachmentInputChange(event = null) {
-      const input = event && event.target
-      const files = input && input.files ? Array.from(input.files) : []
-      if (input) input.value = ''
-      files.forEach((file) => {
-        this.uploadAgentAttachment(file).catch((err) => {
-          this.agentAttachmentError = err && err.message ? err.message : String(err)
-        })
-      })
-      this.closeAgentComposerMenu()
     },
     async patchAgentSessionMetadata(sessionId = '', payload = {}) {
       const nextId = asText(sessionId)
@@ -1567,13 +1436,8 @@ function createAgentRuntimeMethods() {
       if (!rawQuestion || !requestQuestion || this.agentSessionHydrating) return null
       const activeSessionId = this.getActiveAgentSessionId(this.activeAgentSessionId)
       if (this.agentLoading || (activeSessionId && this.isAgentSessionRunning(activeSessionId))) return null
-      const composerAttachments = normalizeAgentAttachments(this.agentAttachments)
       this.ensureAgentPanelReady()
-      if (composerAttachments.length && !normalizeAgentAttachments(this.agentAttachments).length) {
-        this.agentAttachments = composerAttachments
-        this.agentAttachmentIds = composerAttachments.filter((item) => item.status === 'ready').map((item) => item.attachmentId)
-      }
-      if (panelKind !== 'deep_analysis' && typeof this.ensureAgentFollowupTabForPrompt === 'function') {
+      if (!['deep_analysis', 'ppt_planning'].includes(panelKind) && typeof this.ensureAgentFollowupTabForPrompt === 'function') {
         this.ensureAgentFollowupTabForPrompt(rawQuestion)
       }
       const currentSession = this.syncCurrentAgentSession() || this.readSessionState(this.activeAgentSessionId)
@@ -1584,9 +1448,6 @@ function createAgentRuntimeMethods() {
       const requestRiskConfirmations = Array.isArray(options && options.riskConfirmations)
         ? options.riskConfirmations
         : this.agentRiskConfirmations
-      const requestAttachmentIds = typeof this.getAgentReadyAttachmentIds === 'function'
-        ? this.getAgentReadyAttachmentIds()
-        : cloneArray(this.agentAttachmentIds)
       let baseMessages = cloneArray((currentSession && currentSession.messages) || [])
       if (!baseMessages.length && typeof this.getAgentActiveFollowupTab === 'function') {
         const activeFollowupTab = this.getAgentActiveFollowupTab()
@@ -1616,9 +1477,25 @@ function createAgentRuntimeMethods() {
         historyId,
         requestAbortController,
         requestRiskConfirmations,
-        requestAttachmentIds,
         nextMessages,
       }
+    },
+    async submitAgentComposer(options = {}) {
+      const activeKind = typeof this.getAgentActiveTopTab === 'function'
+        ? asText(this.getAgentActiveTopTab().kind)
+        : ''
+      const requestedMode = asText((options && options.mode) || this.agentComposerMode || this.agentDeepAnalysisMode) === 'deep' ? 'deep' : 'quick'
+      if (activeKind === 'ppt_planning' && requestedMode !== 'deep' && typeof this.submitAgentPptQuickAsk === 'function') {
+        return this.submitAgentPptQuickAsk(options)
+      }
+      const panelKind = options && Object.prototype.hasOwnProperty.call(options, 'panelKind')
+        ? options.panelKind
+        : (activeKind === 'deep_analysis' ? 'deep_analysis' : (activeKind === 'ppt_planning' ? 'ppt_planning' : undefined))
+      return this.submitAgentTurn({
+        ...options,
+        panelKind,
+        mode: requestedMode,
+      })
     },
     async consumeTurnStream(res, handler) {
       await consumeSseStream(res, handler)
@@ -3414,7 +3291,6 @@ function createAgentRuntimeMethods() {
         historyId,
         requestAbortController,
         requestRiskConfirmations,
-        requestAttachmentIds,
         nextMessages,
       } = turnContext
       this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
@@ -3487,7 +3363,6 @@ function createAgentRuntimeMethods() {
             analysis_snapshot: this.buildAgentAnalysisSnapshot(),
             map_search_context: typeof this.buildAgentMapSearchContext === 'function' ? this.buildAgentMapSearchContext() : {},
             risk_confirmations: requestRiskConfirmations,
-            attachment_ids: requestAttachmentIds,
             visual_snapshots: visualSnapshots,
           }),
         })
@@ -3709,8 +3584,6 @@ function createAgentRuntimeMethods() {
             })(),
             messages: nextStatus === 'answered' ? cloneArray(finalMessages) : cloneArray(session.messages),
             riskConfirmations: nextStatus === 'answered' ? [] : cloneArray(requestRiskConfirmations),
-            attachmentIds: cloneArray(requestAttachmentIds),
-            attachments: normalizeAgentAttachments(session.attachments),
           }))
           if (targetSessionId === asText(this.activeAgentSessionId) && turn.output.panelPayloads && turn.output.panelPayloads.h3_result) {
             this.preloadAgentPanelContent({ key: 'h3', label: '已预加载 H3 面板内容' }).catch((err) => {

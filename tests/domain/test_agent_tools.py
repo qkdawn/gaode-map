@@ -20,11 +20,9 @@ def test_get_tool_registry_exposes_stage1_tools():
         "compute_nightlight_overview_from_scope",
         "compute_road_syntax_from_scope",
         "search_analysis_context",
-        "read_analysis_chunk",
+        "read_analysis_evidence_node",
         "search_report_context",
-        "read_report_chunk",
-        "search_uploaded_attachment_context",
-        "read_uploaded_attachment_context",
+        "read_report_evidence_node",
         "get_area_data_bundle",
         "analyze_poi_structure",
         "rank_next_analysis_options",
@@ -60,6 +58,8 @@ def test_get_tool_registry_exposes_stage1_tools():
     assert registry["run_business_site_advice"].spec.requires == ["scope_polygon"]
     assert registry["compute_population_overview_from_scope"].spec.requires == ["scope_polygon"]
     assert registry["compute_nightlight_overview_from_scope"].spec.requires == ["scope_polygon"]
+    assert "search_database_context" not in registry
+    assert "read_database_record" not in registry
     assert registry["compute_h3_metrics_from_scope_and_pois"].spec.produces == [
         "current_poi_h3",
         "current_poi_h3_grid",
@@ -83,11 +83,9 @@ def test_get_tool_registry_keeps_expected_tool_order():
         "compute_nightlight_overview_from_scope",
         "compute_road_syntax_from_scope",
         "search_analysis_context",
-        "read_analysis_chunk",
+        "read_analysis_evidence_node",
         "search_report_context",
-        "read_report_chunk",
-        "search_uploaded_attachment_context",
-        "read_uploaded_attachment_context",
+        "read_report_evidence_node",
         "get_area_data_bundle",
         "analyze_poi_structure",
         "rank_next_analysis_options",

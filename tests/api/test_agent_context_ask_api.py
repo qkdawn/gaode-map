@@ -98,3 +98,103 @@ def test_context_ask_ai_provider_exception_falls_back(monkeypatch):
     data = response.json()
     assert data["status"] == "success"
     assert "AI 调用失败" in "；".join(data["warnings"])
+
+
+def test_context_ask_require_ai_fails_when_ai_disabled(monkeypatch):
+    import modules.agent.context_ask_service as service
+
+    payload = _payload()
+    payload["require_ai"] = True
+    monkeypatch.setattr(service, "is_llm_enabled", lambda: False)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["error"] == "ai_unavailable"
+    assert data["answer"] == ""
+
+
+def test_context_ask_require_ai_provider_exception_fails(monkeypatch):
+    import modules.agent.context_ask_service as service
+
+    class BrokenClient:
+        async def chat_json(self, **kwargs):
+            raise RuntimeError("boom")
+
+    payload = _payload()
+    payload["require_ai"] = True
+    monkeypatch.setattr(service, "is_llm_enabled", lambda: True)
+    monkeypatch.setattr(service, "get_llm_provider_client", lambda: BrokenClient())
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["error"] == "ai_call_failed"
+    assert data["answer"] == ""
+
+
+def test_context_ask_accepts_ppt_sources_and_sends_target_payload(monkeypatch):
+    import modules.agent.context_ask_service as service
+
+    captured = {}
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            captured.update(kwargs)
+            return {
+                "answer": "已基于 PPT 已选来源回答。",
+                "evidence": [{"source_id": "current:scope"}],
+                "citations": ["current:scope"],
+                "warnings": [],
+            }
+
+    payload = _payload()
+    payload["require_ai"] = True
+    payload["target"] = {
+        "type": "ppt_sources",
+        "id": "ppt-selected-sources",
+        "title": "PPT 已选来源",
+        "source": "ppt_planning",
+        "summary": "已选择 1 个来源。",
+        "evidence": [{"source_id": "current:scope", "title": "当前等时圈范围", "text": "范围摘要"}],
+        "payload": {
+            "sources": [{
+                "source_id": "current:scope",
+                "title": "当前等时圈范围",
+                "included": ["scope", "evidence"],
+                "scope": {"has_polygon": True},
+                "evidence_nodes": [{
+                    "id": "current:scope:evidence:1",
+                    "source_id": "current:scope",
+                    "source_type": "system",
+                    "title": "范围",
+                    "content": "当前区域",
+                }],
+            }],
+        },
+    }
+    monkeypatch.setattr(service, "is_llm_enabled", lambda: True)
+    monkeypatch.setattr(service, "get_llm_provider_client", lambda: FakeClient())
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["answer"] == "已基于 PPT 已选来源回答。"
+    target = captured["user_payload"]["target"]
+    assert target["type"] == "ppt_sources"
+    assert target["source"] == "ppt_planning"
+    assert target["evidence"][0]["source_id"] == "current:scope"
+    assert target["payload"]["sources"][0]["source_id"] == "current:scope"
+    assert captured["user_payload"]["ppt_sources_summary"]["source_count"] == 1
+    assert captured["user_payload"]["ppt_sources_summary"]["sources"][0]["source_id"] == "current:scope"
+    assert captured["user_payload"]["ppt_sources_summary"]["sources"][0]["evidence_count"] == 1
+    assert captured["user_payload"]["ppt_sources_summary"]["sources"][0]["evidence_nodes"][0]["id"] == "current:scope:evidence:1"

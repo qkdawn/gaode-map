@@ -343,13 +343,6 @@
                                         @click="openAgentPptPlanningFromReport()">
                                         PPT
                                     </button>
-                                    <button
-                                        type="button"
-                                        class="agent-report-switch-btn"
-                                        :class="{ active: isAgentDeepAnalysisTabActive() }"
-                                        @click="openAgentDeepAnalysisFromTarget(buildReportSectionContextAskTarget({ sectionKey: 'report', title: '区域报告', summary: ((getAgentSummaryPack().headline_judgment || {}).summary) || '基于当前区域报告继续分析' }))">
-                                        继续分析
-                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -607,7 +600,7 @@
                                     </div>
                                 </section>
                                 <section class="agent-summary-card agent-summary-card-wide">
-                                    <div class="agent-summary-card-title">继续分析</div>
+                                    <div class="agent-summary-card-title">后续操作</div>
                                     <div class="agent-summary-actions">
                                         <button
                                             type="button"
@@ -626,12 +619,6 @@
                                             class="agent-shortcut-chip"
                                             @click="openContextAsk(buildReportSectionContextAskTarget({ sectionKey: 'report_evidence_chain', title: '区域报告证据链', summary: ((getAgentSummaryPack().headline_judgment || {}).summary) || '请解释这份区域总结背后的证据链与判断依据' }), { question: '请解释这份区域总结背后的证据链与判断依据', resetMessages: true })">
                                             解释报告依据
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="agent-shortcut-chip"
-                                            @click="openAgentDeepAnalysisFromTarget(buildReportSectionContextAskTarget({ sectionKey: 'report_continue', title: '区域报告', summary: ((getAgentSummaryPack().headline_judgment || {}).summary) || '基于当前区域报告继续分析' }))">
-                                            继续深度分析
                                         </button>
                                         <button
                                             type="button"
@@ -1856,13 +1843,6 @@
                                                 @click="openContextAsk(buildSiteCandidateContextAskTarget(getAgentSiteSelectionSelectedCandidate()), { resetMessages: true })">
                                                 追问这个点
                                             </button>
-                                            <button
-                                                v-if="getAgentSiteSelectionSelectedCandidate()"
-                                                type="button"
-                                                class="agent-mini-action-btn"
-                                                @click="openAgentDeepAnalysisFromTarget(buildSiteCandidateContextAskTarget(getAgentSiteSelectionSelectedCandidate()))">
-                                                继续分析
-                                            </button>
                                         </div>
                                         <div v-if="getAgentSiteSelectionSelectedCandidate()" class="agent-site-selection-selected">
                                             <strong>{{ getAgentSiteSelectionSelectedCandidate().title }}</strong>
@@ -1970,6 +1950,8 @@
                                 :generation-response="getAgentPptPlanningGenerationResponse()"
                                 :generation-job="getAgentPptPlanningGenerationJob()"
                                 :data-package-generating="isAgentPptPlanningDataPackageGenerating()"
+                                :web-source-generating="isAgentPptPlanningWebSourceGenerating()"
+                                :source-deleting="isAgentPptPlanningSourceDeleting()"
                                 :source-refreshing="isAgentPptPlanningSourceRefreshing()"
                                 :source-grouping="isAgentPptPlanningSourceGrouping()"
                                 :active-revision-target="getAgentPptPlanningActiveRevisionTarget()"
@@ -1986,11 +1968,15 @@
                                 @move-source-to-group="moveAgentPptPlanningSourceToGroup"
                                 @rename-source="renameAgentPptPlanningSource"
                                 @remove-source="removeAgentPptPlanningSource"
+                                @remove-selected-sources="removeSelectedAgentPptPlanningSources"
+                                @retry-source="retryAgentPptPlanningSource"
                                 @generate-package-source="generateAgentPptPlanningPackageSource"
                                 @rename-source-group="renameAgentPptPlanningSourceGroup"
                                 @set-source-group-emoji="setAgentPptPlanningSourceGroupEmoji"
                                 @remove-source-group="removeAgentPptPlanningSourceGroup"
                                 @upload-document-source="uploadAgentPptPlanningDocumentSource"
+                                @upload-image-source="uploadAgentPptPlanningImageSource"
+                                @manage-web-source="manageAgentPptPlanningWebSource"
                                 @update-spec-field="updateAgentPptPlanningSpecField"
                                 @create-data-package="createAgentPptPlanningDataPackage"
                                 @generate-outline="generateAgentPptPlanningOutline"
@@ -2008,6 +1994,246 @@
                                 @save-revision="saveAgentPptPlanningRevision"
                                 @regenerate-revision="regenerateAgentPptPlanningRevision"
                                 @undo-revision="undoAgentPptPlanningRevision">
+                                <template #center>
+                                    <div class="agent-thread-shell agent-ppt-thread-shell" :class="{ 'agent-deep-analysis-thread': isAgentDeepAnalysisTabActive() }">
+                                        <div
+                                            ref="agentReportThreadBody"
+                                            class="agent-report-thread-body agent-report-thread-body-main"
+                                            @scroll.passive="onAgentReportThreadScroll"
+                                            @wheel.passive="onAgentReportThreadWheel"
+                                            @touchmove.passive="onAgentReportThreadTouchMove">
+                                            <div v-if="agentSessionHydrating" class="agent-session-skeleton" aria-hidden="true">
+                                                <div class="agent-session-skeleton-row is-user">
+                                                    <div class="agent-session-skeleton-bubble is-user"></div>
+                                                </div>
+                                                <div class="agent-session-skeleton-row is-assistant">
+                                                    <div class="agent-session-skeleton-bubble is-assistant is-wide"></div>
+                                                </div>
+                                                <div class="agent-session-skeleton-row is-assistant">
+                                                    <div class="agent-session-skeleton-card">
+                                                        <div class="agent-session-skeleton-line short"></div>
+                                                        <div class="agent-session-skeleton-line"></div>
+                                                        <div class="agent-session-skeleton-line"></div>
+                                                        <div class="agent-session-skeleton-line medium"></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <template v-else>
+                                                <div
+                                                    v-if="!getAgentThreadMessages().length && !shouldShowAgentThinkingProcessBlock() && !agentClarificationQuestion && !agentRiskPrompt && !agentError && !agentResearchNotes.length && !agentCitations.length"
+                                                    class="agent-ppt-center-empty">
+                                                    <strong>继续分析这份 PPT</strong>
+                                                    <span>底部输入框已准备好，可以围绕来源、目录、叙事或指令继续追问。</span>
+                                                </div>
+
+                                                <template v-for="(message, index) in getAgentThreadMessages()" :key="`agent-message-ppt-${index}`">
+                                                    <div v-if="shouldShowAgentMessageProcess(message)" class="agent-message-row is-assistant">
+                                                        <div
+                                                            class="agent-message-bubble is-assistant agent-thinking-bubble"
+                                                            :class="{ 'is-debug-open': isAgentMessageProcessExpanded(message, index), 'is-collapsed': !isAgentMessageProcessExpanded(message, index) }">
+                                                            <div class="agent-thinking-head">
+                                                                <button
+                                                                    type="button"
+                                                                    class="agent-thinking-toggle"
+                                                                    @click="toggleAgentMessageProcessExpanded(message, index)">
+                                                                    <span class="agent-thinking-dot"></span>
+                                                                    <span class="agent-thinking-toggle-label">{{ getAgentMessageProcessStatusLabel(message) }}</span>
+                                                                    <span class="agent-thinking-toggle-icon">
+                                                                        <span class="agent-thinking-chevron" :class="{ 'is-open': isAgentMessageProcessExpanded(message, index) }">⌄</span>
+                                                                    </span>
+                                                                </button>
+                                                            </div>
+
+                                                            <div
+                                                                v-if="isAgentMessageProcessExpanded(message, index)"
+                                                                class="agent-process-flow"
+                                                                data-agent-scroll-inner
+                                                                @wheel.stop.passive="onAgentInnerScrollIntent"
+                                                                @touchmove.stop.passive="onAgentInnerScrollIntent"
+                                                                @scroll.passive="onAgentInnerScrollIntent">
+                                                                <div
+                                                                    v-for="processItem in getAgentMessageNaturalProcessItems(message)"
+                                                                    :key="`agent-message-process-${getAgentMessageProcessKey(message, index)}-${processItem.id}`"
+                                                                    class="agent-process-flow-item"
+                                                                    :class="[`is-${processItem.kind}`, `is-${processItem.state}`]">
+                                                                    <div class="agent-process-flow-text">{{ processItem.text }}</div>
+                                                                    <div v-if="processItem.metaText" class="agent-process-flow-meta">{{ processItem.metaText }}</div>
+                                                                </div>
+                                                                <div v-if="getAgentMessageTaskConfirmation(message, index)" class="agent-process-task-actions">
+                                                                    <button
+                                                                        v-if="getAgentMessageTaskConfirmation(message, index).canReuse && getAgentMessageTaskConfirmation(message, index).status === 'reuse_available'"
+                                                                        type="button"
+                                                                        class="agent-task-confirmation-btn is-primary"
+                                                                        :disabled="agentLoading || agentSessionHydrating"
+                                                                        @click="onAgentTaskReuseClick(getAgentMessageTaskConfirmation(message, index))">
+                                                                        复用已有结果
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        class="agent-task-confirmation-btn is-primary"
+                                                                        :disabled="agentLoading || agentSessionHydrating || !getAgentMessageTaskConfirmation(message, index).canStart || ['blocked','running','executing','completed','cancelled'].includes(getAgentMessageTaskConfirmation(message, index).status)"
+                                                                        @click="onAgentTaskStartClick(getAgentMessageTaskConfirmation(message, index))">
+                                                                        {{ getAgentMessageTaskConfirmation(message, index).status === 'reuse_available' ? '重新计算' : '开始计算' }}
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        class="agent-task-confirmation-btn"
+                                                                        @click="onAgentTaskAdjustClick(getAgentMessageTaskConfirmation(message, index))">
+                                                                        调整参数
+                                                                    </button>
+                                                                    <button
+                                                                        v-if="!['completed','cancelled','executing'].includes(getAgentMessageTaskConfirmation(message, index).status)"
+                                                                        type="button"
+                                                                        class="agent-task-confirmation-btn"
+                                                                        @click="onAgentTaskCancelClick(getAgentMessageTaskConfirmation(message, index))">
+                                                                        取消
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="agent-message-row" :class="`is-${message.role}`">
+                                                        <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
+                                                    </div>
+                                                </template>
+
+                                                <div v-if="shouldShowAgentThinkingProcessBlock()" class="agent-message-row is-assistant">
+                                                    <div
+                                                        class="agent-message-bubble is-assistant agent-thinking-bubble"
+                                                        :class="{ 'is-debug-open': agentThinkingExpanded, 'is-collapsed': !agentThinkingExpanded && !agentLoading }">
+                                                        __AGENT_THINKING_HEADER__
+                                                        __AGENT_REASONING_PANEL__
+                                                        <div
+                                                            v-if="agentThinkingExpanded || agentLoading"
+                                                            class="agent-process-flow"
+                                                            data-agent-scroll-inner
+                                                            @wheel.stop.passive="onAgentInnerScrollIntent"
+                                                            @touchmove.stop.passive="onAgentInnerScrollIntent"
+                                                            @scroll.passive="onAgentInnerScrollIntent">
+                                                            <div
+                                                                v-for="processItem in getAgentNaturalProcessItems()"
+                                                                :key="`agent-natural-process-ppt-${processItem.id}`"
+                                                                class="agent-process-flow-item"
+                                                                :class="[`is-${processItem.kind}`, `is-${processItem.state}`]">
+                                                                <div class="agent-process-flow-text">{{ processItem.text }}</div>
+                                                                <div v-if="processItem.metaText" class="agent-process-flow-meta">{{ processItem.metaText }}</div>
+                                                            </div>
+                                                            <div v-if="getAgentTaskConfirmation()" class="agent-process-task-actions">
+                                                                <button
+                                                                    v-if="getAgentTaskConfirmation().canReuse && getAgentTaskConfirmation().status === 'reuse_available'"
+                                                                    type="button"
+                                                                    class="agent-task-confirmation-btn is-primary"
+                                                                    :disabled="agentLoading || agentSessionHydrating"
+                                                                    @click="onAgentTaskReuseClick(getAgentTaskConfirmation())">
+                                                                    复用已有结果
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    class="agent-task-confirmation-btn is-primary"
+                                                                    :disabled="agentLoading || agentSessionHydrating || !getAgentTaskConfirmation().canStart || ['blocked','running','executing','completed','cancelled'].includes(getAgentTaskConfirmation().status)"
+                                                                    @click="onAgentTaskStartClick(getAgentTaskConfirmation())">
+                                                                    {{ getAgentTaskConfirmation().status === 'reuse_available' ? '重新计算' : '开始计算' }}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    class="agent-task-confirmation-btn"
+                                                                    @click="onAgentTaskAdjustClick(getAgentTaskConfirmation())">
+                                                                    调整参数
+                                                                </button>
+                                                                <button
+                                                                    v-if="!['completed','cancelled','executing'].includes(getAgentTaskConfirmation().status)"
+                                                                    type="button"
+                                                                    class="agent-task-confirmation-btn"
+                                                                    @click="onAgentTaskCancelClick(getAgentTaskConfirmation())">
+                                                                    取消
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                __AGENT_CLARIFICATION_CARD__
+
+                                                <div v-if="agentRiskPrompt && !agentClarificationQuestion" class="agent-message-row is-assistant">
+                                                    <div class="agent-message-bubble is-assistant agent-message-bubble-note">
+                                                        <div>{{ agentRiskPrompt }}</div>
+                                                    </div>
+                                                </div>
+
+                                                <div v-if="agentError && !agentClarificationQuestion && !agentRiskPrompt" class="agent-message-row is-assistant">
+                                                    <div class="agent-message-bubble is-assistant agent-message-bubble-error">
+                                                        {{ agentError }}
+                                                    </div>
+                                                </div>
+
+                                                <div v-if="agentResearchNotes.length || agentCitations.length" class="agent-meta-inline">
+                                                    <div v-if="agentResearchNotes.length" class="agent-meta-group">
+                                                        <div class="agent-meta-title">研究笔记</div>
+                                                        <ul class="agent-meta-list">
+                                                            <li v-for="(item, index) in agentResearchNotes" :key="`agent-ppt-note-${index}`">{{ item }}</li>
+                                                        </ul>
+                                                    </div>
+                                                    <div v-if="agentCitations.length" class="agent-meta-group">
+                                                        <div class="agent-meta-title">引用</div>
+                                                        <ul class="agent-meta-list">
+                                                            <li v-for="(item, index) in agentCitations" :key="`agent-ppt-citation-${index}`">{{ item }}</li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+
+                                        <div class="agent-app-composer-wrap agent-ppt-composer-wrap">
+                                            <div class="agent-report-prompts">
+                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '总结这个区域的商业特征' })">总结区域</button>
+                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '哪里适合补充餐饮' })">补充餐饮</button>
+                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '为什么这里路网较差' })">路网原因</button>
+                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '下一步做什么分析' })">下一步建议</button>
+                                            </div>
+
+                                            <div class="agent-composer-card">
+                                                <div class="agent-composer-menu-wrap">
+                                                    <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" :disabled="!shouldShowAgentComposer()" @click="toggleAgentComposerMenu" title="更多操作">+</button>
+                                                    <div v-if="agentComposerMenuOpen" class="agent-composer-menu">
+                                                        <button type="button" class="agent-composer-menu-item" :disabled="!shouldShowAgentComposer()" @click="startAgentComposerNewReportSession">
+                                                            <span>新报告</span>
+                                                            <small>开启新的追问上下文</small>
+                                                        </button>
+                                                        <button type="button" class="agent-composer-menu-item" :disabled="!shouldShowAgentComposer()" @click="selectAgentComposerMode('deep')">
+                                                            <span>深度思考</span>
+                                                            <small>本次发送展示分析过程</small>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
+                                                    深度思考
+                                                    <button type="button" aria-label="取消深度思考" @click="clearAgentComposerMode">×</button>
+                                                </div>
+                                                <textarea
+                                                    v-model="agentInput"
+                                                    class="agent-composer-input"
+                                                    placeholder="继续追问这份报告..."
+                                                    :disabled="!shouldShowAgentComposer() || agentSessionHydrating"
+                                                    @keydown.enter.exact.prevent="submitAgentComposer()"
+                                                ></textarea>
+                                                <div class="agent-composer-actions">
+                                                    <button
+                                                        type="button"
+                                                        class="agent-composer-send"
+                                                        :class="{ 'is-loading': agentLoading }"
+                                                        :disabled="!shouldShowAgentComposer() || agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
+                                                        :title="agentLoading ? '暂停执行' : '发送'"
+                                                        @click="agentLoading ? cancelAgentTurn() : submitAgentComposer()">
+                                                        <span v-if="!agentLoading">发送</span>
+                                                        <span v-else class="agent-composer-send-loading" aria-hidden="true">
+                                                            <span class="agent-composer-send-stop"></span>
+                                                        </span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
                             </ppt-planning-workbench>
                         </div>
 
@@ -2202,10 +2428,10 @@
 
                         <div v-if="shouldShowAgentComposer()" class="agent-app-composer-wrap">
                             <div class="agent-report-prompts">
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '总结这个区域的商业特征' })">总结区域</button>
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '哪里适合补充餐饮' })">补充餐饮</button>
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '为什么这里路网较差' })">路网原因</button>
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentTurn({ prompt: '下一步做什么分析' })">下一步建议</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '总结这个区域的商业特征' })">总结区域</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '哪里适合补充餐饮' })">补充餐饮</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '为什么这里路网较差' })">路网原因</button>
+                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '下一步做什么分析' })">下一步建议</button>
                             </div>
 
                             <div class="agent-composer-card">
@@ -2220,41 +2446,18 @@
                                             <span>深度思考</span>
                                             <small>本次发送展示分析过程</small>
                                         </button>
-                                        <label class="agent-composer-menu-item agent-composer-upload-item">
-                                            <span>上传文件/图片</span>
-                                            <small>解析为本次聊天证据</small>
-                                            <input
-                                                type="file"
-                                                multiple
-                                                accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.tif,.gif,.webp,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md"
-                                                @change="onAgentAttachmentInputChange">
-                                        </label>
                                     </div>
                                 </div>
                                 <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
                                     深度思考
                                     <button type="button" aria-label="取消深度思考" @click="clearAgentComposerMode">×</button>
                                 </div>
-                                <div v-if="agentAttachments.length || agentAttachmentUploading || agentAttachmentError" class="agent-attachment-strip">
-                                    <span v-if="agentAttachmentUploading" class="agent-attachment-chip is-processing">上传中</span>
-                                    <span
-                                        v-for="item in agentAttachments"
-                                        :key="`agent-attachment-${item.attachmentId}`"
-                                        class="agent-attachment-chip"
-                                        :class="`is-${item.status || 'uploaded'}`"
-                                        :title="item.error || item.summary || item.filename">
-                                        <span class="agent-attachment-name">{{ item.filename }}</span>
-                                        <span class="agent-attachment-status">{{ item.status === 'ready' ? '已解析' : (item.status === 'failed' ? '失败' : '解析中') }}</span>
-                                        <button type="button" aria-label="移除附件" @click.stop="removeAgentAttachment(item.attachmentId)">×</button>
-                                    </span>
-                                    <span v-if="agentAttachmentError" class="agent-attachment-error">{{ agentAttachmentError }}</span>
-                                </div>
                                 <textarea
                                     v-model="agentInput"
                                     class="agent-composer-input"
                                     placeholder="继续追问这份报告..."
                                     :disabled="agentSessionHydrating"
-                                    @keydown.enter.exact.prevent="submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined })"
+                                    @keydown.enter.exact.prevent="submitAgentComposer()"
                                 ></textarea>
                             <div class="agent-composer-actions">
                                 <button
@@ -2263,7 +2466,7 @@
                                         :class="{ 'is-loading': agentLoading }"
                                         :disabled="agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
                                         :title="agentLoading ? '暂停执行' : '发送'"
-                                        @click="agentLoading ? cancelAgentTurn() : submitAgentTurn({ panelKind: isAgentDeepAnalysisTabActive() ? 'deep_analysis' : undefined })">
+                                        @click="agentLoading ? cancelAgentTurn() : submitAgentComposer()">
                                         <span v-if="!agentLoading">发送</span>
                                         <span v-else class="agent-composer-send-loading" aria-hidden="true">
                                             <span class="agent-composer-send-stop"></span>

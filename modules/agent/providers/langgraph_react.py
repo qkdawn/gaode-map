@@ -74,7 +74,7 @@ def _artifact_catalog(artifacts: Dict[str, Any]) -> Dict[str, Any]:
         spatial = context.get("spatial_anchors") if isinstance(context.get("spatial_anchors"), dict) else {}
         place = context.get("place_anchors") if isinstance(context.get("place_anchors"), dict) else {}
         catalog["frontend_map_search_context"] = {
-            "purpose": "本轮前端地图结构化对象可检索源，需要 search_analysis_context/read_analysis_chunk 才能引用具体对象。",
+            "purpose": "本轮前端地图结构化对象可检索源，需要 search_analysis_context/read_analysis_evidence_node 读取 EvidenceNode 后才能引用具体对象。",
             "place_group_count": len(place.get("groups") or []) if isinstance(place, dict) else 0,
             "place_name_count": len(place.get("names") or []) if isinstance(place, dict) else 0,
             "domains": [

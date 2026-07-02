@@ -24,13 +24,14 @@ from modules.ppt_planning.schemas import (
     PptSpecResponse,
     PptVisualArtifactResponse,
 )
-from router.domains import ppt_planning
+from router.domains import ppt_planning, ppt_web_source
 from router.domains.ppt_planning import router
 
 
 def _build_test_app():
     app = FastAPI()
     app.include_router(router)
+    app.include_router(ppt_web_source.router)
     return app
 
 
@@ -43,7 +44,7 @@ def test_ppt_spec_api_returns_structured_json(monkeypatch):
             deck_type=payload.deck_type,
             page_count=payload.page_count,
             outline=[PptOutlineItem(id="page-1", page_no=1, theme="项目命题", purpose="建立汇报主线")],
-            source_summary="已选择 2 个来源，包含联网研究",
+            source_summary="已选择 2 个来源，包含联网来源",
             missing_inputs=[],
         )
 
@@ -59,7 +60,7 @@ def test_ppt_spec_api_returns_structured_json(monkeypatch):
                 "audience": "政府评审",
                 "deck_type": "城市更新概念策划",
                 "page_count": 15,
-                "research_enabled": True,
+                "web_sources_enabled": True,
             },
         )
 
@@ -312,7 +313,11 @@ def test_ppt_visual_artifact_cleanup_api_deletes_only_safe_files(tmp_path, monke
 
 
 def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):
-    def fake_list(area_id):
+    captured = {}
+
+    def fake_list(area_id, conversation_id=""):
+        captured["area_id"] = area_id
+        captured["conversation_id"] = conversation_id
         return [
             PptDataSourceSummary(
                 id="current:dataset:poi",
@@ -326,16 +331,17 @@ def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):
     monkeypatch.setattr(ppt_planning, "list_ppt_sources", fake_list)
 
     with TestClient(_build_test_app()) as client:
-        response = client.get("/api/v1/analysis/ppt/data/sources?area_id=area-1")
+        response = client.get("/api/v1/analysis/ppt/data/sources?area_id=area-1&conversation_id=ppt-tab-1")
 
     assert response.status_code == 200
     payload = response.json()
     assert payload[0]["id"] == "current:dataset:poi"
     assert payload[0]["status"] == "ready"
+    assert captured == {"area_id": "area-1", "conversation_id": "ppt-tab-1"}
 
 
 def test_ppt_data_sources_api_maps_database_errors(monkeypatch):
-    def fake_list(area_id):
+    def fake_list(area_id, conversation_id=""):
         raise SQLAlchemyError("db down")
 
     monkeypatch.setattr(ppt_planning, "list_ppt_sources", fake_list)
@@ -345,6 +351,27 @@ def test_ppt_data_sources_api_maps_database_errors(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["detail"] == "ppt_database_unavailable"
+
+
+def test_ppt_data_source_delete_api_removes_persisted_source(monkeypatch):
+    deleted = {}
+
+    def fake_delete(area_id, source_id):
+        deleted["area_id"] = area_id
+        deleted["source_id"] = source_id
+        return {"area_id": area_id, "source_id": source_id, "deleted": 1}
+
+    monkeypatch.setattr(ppt_planning, "delete_ppt_persisted_source", fake_delete)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.delete(
+            "/api/v1/analysis/ppt/data/sources",
+            params={"area_id": "area-1", "source_id": "package:area-1:abc"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1
+    assert deleted == {"area_id": "area-1", "source_id": "package:area-1:abc"}
 
 
 def test_ppt_query_poi_points_api_returns_paginated_points(monkeypatch):
@@ -456,6 +483,86 @@ def test_ppt_data_package_api_maps_provider_timeout(monkeypatch):
 
     assert response.status_code == 504
     assert response.json()["detail"] == "ppt_data_llm_timeout"
+
+
+def test_ppt_web_source_preview_api_returns_candidate(monkeypatch):
+    from modules.ppt_planning.schemas import PptDataPackageResponse, PptSource
+    from router.domains import ppt_web_source
+
+    async def fake_preview(payload):
+        return PptDataPackageResponse(
+            source=PptSource(
+                id="web:area-1:abc",
+                type="web",
+                title="地区资料",
+                status="ready",
+                selected=True,
+                meta={"sourceKind": "web"},
+            ),
+            summary="预览完成",
+            items=[{"title": "网页", "url": "https://gov.cn/demo", "parse_status": "parsed"}],
+        )
+
+    monkeypatch.setattr(ppt_web_source, "preview_ppt_web_source", fake_preview)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/web-sources/preview",
+            json={"area_id": "area-1", "region_name": "岳麓区", "topic": "文旅"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"]["id"] == "web:area-1:abc"
+    assert payload["items"][0]["parse_status"] == "parsed"
+
+
+def test_ppt_web_source_preview_api_maps_searxng_unavailable(monkeypatch):
+    from router.domains import ppt_web_source
+
+    async def fake_preview(payload):
+        raise ppt_web_source.PptWebSourceSearchUnavailable("searxng_unavailable")
+
+    monkeypatch.setattr(ppt_web_source, "preview_ppt_web_source", fake_preview)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/web-sources/preview",
+            json={"area_id": "area-1", "region_name": "岳麓区", "topic": "文旅"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "searxng_unavailable"
+
+
+def test_ppt_web_source_commit_api_returns_persisted_source(monkeypatch):
+    from modules.ppt_planning.schemas import PptDataPackageResponse, PptSource
+    from router.domains import ppt_web_source
+
+    def fake_commit(payload):
+        return PptDataPackageResponse(
+            source=PptSource(
+                id="web:area-1:abc",
+                type="web",
+                title="地区资料",
+                status="ready",
+                selected=True,
+                meta={"sourceKind": "web", "persistedWebSource": True},
+            ),
+            summary="已添加",
+            items=[],
+        )
+
+    monkeypatch.setattr(ppt_web_source, "commit_ppt_web_source", fake_commit)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/ppt/web-sources/commit",
+            json={"area_id": "area-1", "preview": {"source": {"id": "web:area-1:abc", "title": "地区资料"}}},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["source"]["meta"]["persistedWebSource"] is True
 
 
 def test_ppt_source_group_classification_api_returns_groups(monkeypatch):

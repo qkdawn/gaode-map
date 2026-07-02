@@ -11,9 +11,20 @@ from shapely.geometry import LineString, MultiLineString, Point, shape
 from shapely.ops import polygonize, unary_union
 from shapely.prepared import prep
 
+from modules.evidence_retrieval import (
+    attachment_source_id,
+    attachment_source_kind,
+    evidence_node_from_attachment_chunk,
+    evidence_node_from_document_index_node,
+    evidence_node_payloads_from_nodes,
+    evidence_nodes_from_package,
+)
 from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
 from modules.population.service import get_population_grid
+from modules.ppt_database.service import list_persisted_database_sources
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
+from modules.retrieval.attachments import list_attachments, read_attachment_chunks
+from modules.retrieval.schemas import AttachmentRecord
 from store.ai_database import SessionLocal as AiSessionLocal
 from store.ai_models import Document, DocumentIndexNode
 from store.analysis_artifact_repo import analysis_artifact_repo
@@ -53,6 +64,8 @@ class PptDataInvalidIntentPlan(RuntimeError):
 logger = logging.getLogger(__name__)
 PPT_DATA_PACKAGE_DIR = Path("runtime") / "ppt-data-packages"
 PPT_DATA_PACKAGE_ARTIFACT_TYPE = "ppt_data_package"
+PPT_WEB_SOURCE_ARTIFACT_TYPE = "ppt_web_source"
+PPT_DATABASE_ARTIFACT_TYPE = "ppt_database_package"
 
 
 def _safe_filename(value: str) -> str:
@@ -272,6 +285,12 @@ def _safe_list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
 
 
+def _ai_payload_evidence_count(ai_payload: Dict[str, Any]) -> int:
+    payload = _safe_dict(ai_payload)
+    evidence_nodes = _safe_list(payload.get("evidence_nodes") or payload.get("evidenceNodes"))
+    return len(evidence_nodes)
+
+
 def _stable_hash(payload: Any) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
@@ -479,6 +498,58 @@ def _document_source_label(document: Document, index_count: int = 0) -> str:
     return "待处理"
 
 
+def _document_source_availability(status: str, index_count: int = 0) -> str:
+    normalized = _clean_text(status)
+    if normalized == "failed":
+        return "failed:document_parse_failed"
+    if normalized in {"uploaded", "parsing"}:
+        return "building:document_parse_pending"
+    if normalized == "parsed" and index_count <= 0:
+        return "empty_evidence:pageindex_empty"
+    if normalized == "parsed":
+        return "available"
+    return "pending:document_not_ready"
+
+
+def _document_locator_summary(document: Document, index_preview: List[Dict[str, Any]], index_count: int = 0) -> str:
+    file_name = _clean_text(document.file_name)
+    page_values = [
+        int(item.get("page_start") or 0)
+        for item in index_preview
+        if int(item.get("page_start") or 0) > 0
+    ]
+    if page_values:
+        return f"{file_name or '文档'} / 第 {min(page_values)}-{max(page_values)} 页 / PageIndex {index_count} 节"
+    if index_count > 0:
+        return f"{file_name or '文档'} / PageIndex {index_count} 节"
+    return file_name or "文档"
+
+
+def _package_locator_summary(package: Dict[str, Any], fallback: str = "") -> str:
+    source_ids = [_clean_text(item) for item in _safe_list(package.get("source_ids")) if _clean_text(item)]
+    version = _clean_text(package.get("package_version"))
+    total = package.get("total")
+    parts = []
+    if version:
+        parts.append(version)
+    if source_ids:
+        parts.append(f"依赖来源 {len(source_ids)} 个")
+    if total not in (None, ""):
+        parts.append(f"结果 {total} 条")
+    return " / ".join(parts) or _clean_text(fallback)
+
+
+def _evidence_availability(status: str, evidence_count: int, *, empty_reason: str = "empty_evidence") -> str:
+    normalized = _clean_text(status)
+    if normalized == "failed":
+        return "failed"
+    if normalized in {"pending", "generating"}:
+        return "building" if normalized == "generating" else "pending"
+    if evidence_count <= 0:
+        return empty_reason
+    return "available"
+
+
 def _compact_document_index_node(node: DocumentIndexNode) -> Dict[str, Any]:
     return {
         "node_id": _clean_text(node.node_id),
@@ -490,6 +561,135 @@ def _compact_document_index_node(node: DocumentIndexNode) -> Dict[str, Any]:
         "page_start": int(node.page_start or 1),
         "page_end": int(node.page_end or node.page_start or 1),
     }
+
+
+def _document_ai_payload(source_id: str, title: str, index_preview: List[Dict[str, Any]], *, count: int = 0) -> Dict[str, Any]:
+    nodes = [
+        evidence_node
+        for index, item in enumerate(index_preview[:40], start=1)
+        for evidence_node in [evidence_node_from_document_index_node(source_id, title, item, index=index)]
+        if evidence_node is not None
+    ]
+    evidence_nodes = evidence_node_payloads_from_nodes(nodes)
+    return {
+        "version": "ppt_ai_input_block_v1",
+        "source_id": source_id,
+        "sourceId": source_id,
+        "title": title,
+        "source_kind": "document",
+        "sourceKind": "document",
+        "included": ["evidence"] if evidence_nodes else [],
+        "scope": None,
+        "metrics": [],
+        "metric_gaps": [],
+        "metricGaps": [],
+        "evidence_nodes": evidence_nodes,
+        "evidenceNodes": evidence_nodes,
+        "visual_specs": [],
+        "visualSpecs": [],
+        "excluded": [{"type": "document_full_text", "reason": "不传文档全文，只传 PageIndex 节点/章节摘要。", "count": int(count or len(index_preview) or 0)}],
+        "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
+        "policy": "文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。",
+    }
+
+
+def _package_ai_payload(source_id: str, title: str, package: Dict[str, Any]) -> Dict[str, Any]:
+    nodes = evidence_nodes_from_package(source_id, title, package)
+    evidence_nodes = evidence_node_payloads_from_nodes(nodes)
+    return {
+        "version": "ppt_ai_input_block_v1",
+        "source_id": source_id,
+        "sourceId": source_id,
+        "title": title,
+        "source_kind": "package",
+        "sourceKind": "package",
+        "included": ["evidence"] if evidence_nodes else [],
+        "scope": None,
+        "metrics": [],
+        "metric_gaps": [],
+        "metricGaps": [],
+        "evidence_nodes": evidence_nodes,
+        "evidenceNodes": evidence_nodes,
+        "visual_specs": [],
+        "visualSpecs": [],
+        "excluded": [
+            {"type": "package_full_items", "reason": "不传资料包完整 POI 明细，只传摘要和代表样本。", "count": len(_safe_list(package.get("items")))},
+            {"type": "package_carrier_geometries", "reason": "不传载体完整 geometry，只传载体摘要和指标摘要。", "count": len(_safe_list(package.get("carriers")))},
+        ],
+        "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
+        "policy": "资料包来源只通过 EvidenceNode 派生的摘要、代表样本、载体摘要进入 evidence；不传完整明细。",
+    }
+
+
+def _image_attachment_status(record: AttachmentRecord) -> str:
+    status = _clean_text(record.status)
+    if status == "ready":
+        return "ready"
+    if status == "failed":
+        return "failed"
+    if status == "processing":
+        return "generating"
+    return "pending"
+
+
+def _image_attachment_availability(record: AttachmentRecord, evidence_count: int = 0) -> str:
+    status = _clean_text(record.status)
+    if status == "ready" and evidence_count > 0:
+        return "available"
+    if status == "ready":
+        return "empty_evidence:image_parse_empty"
+    if status == "failed":
+        return f"failed:{_clean_text(record.error) or 'image_parse_failed'}"
+    if status == "processing":
+        return "building:image_parse_pending"
+    return "pending:image_uploaded"
+
+
+def _image_attachment_ai_payload(record: AttachmentRecord, source_id: str, title: str) -> Dict[str, Any]:
+    chunks = [
+        chunk
+        for chunk in read_attachment_chunks(record)
+        if attachment_source_kind(chunk.filename, _safe_dict(chunk.metadata).get("mime_type") or record.mime_type) == "image"
+    ]
+    nodes = [evidence_node_from_attachment_chunk(chunk, source_id=source_id) for chunk in chunks[:40]]
+    evidence_nodes = evidence_node_payloads_from_nodes(nodes)
+    return {
+        "version": "ppt_ai_input_block_v1",
+        "source_id": source_id,
+        "sourceId": source_id,
+        "title": title,
+        "source_kind": "image",
+        "sourceKind": "image",
+        "included": ["evidence"] if evidence_nodes else [],
+        "scope": None,
+        "metrics": [],
+        "metric_gaps": [],
+        "metricGaps": [],
+        "evidence_nodes": evidence_nodes,
+        "evidenceNodes": evidence_nodes,
+        "visual_specs": [],
+        "visualSpecs": [],
+        "excluded": [{"type": "image_binary", "reason": "不直接传图片二进制，只传 OCR、图像描述和视觉理解生成的证据节点。"}],
+        "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
+        "policy": "图片来源只通过 OCR、caption、visual_analysis 等 EvidenceNode 进入生成；视觉判断需保留来源和置信度。",
+    }
+
+
+def _attach_package_ai_payload(source: PptSource) -> PptSource:
+    meta = _safe_dict(source.meta)
+    package = _safe_dict(meta.get("package"))
+    ai_payload = _package_ai_payload(source.id, source.title, package)
+    source.meta = {
+        **meta,
+        "aiPayload": ai_payload,
+        "ai_payload": ai_payload,
+    }
+    source.source_kind = "package"
+    source.summary = source.summary or _clean_text(package.get("summary") or meta.get("label"))
+    source.evidence_count = _ai_payload_evidence_count(ai_payload)
+    source.locator_summary = _package_locator_summary(package, _clean_text(meta.get("label")))
+    source.availability = _evidence_availability(source.status, source.evidence_count, empty_reason="empty_evidence:package_empty")
+    return source
 
 
 def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
@@ -519,14 +719,22 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
                 for node in index_rows
                 if _clean_text(node.node_id) != "root"
             ][:PPT_DOCUMENT_INDEX_PREVIEW_LIMIT]
+            source_id = f"document:{document.id}"
+            title = _clean_text(document.title) or _clean_text(document.file_name) or "文档资料"
+            ai_payload = _document_ai_payload(source_id, title, index_preview, count=index_count) if status == "ready" else {}
+            evidence_count = _ai_payload_evidence_count(ai_payload)
             sources.append(
                 PptDataSourceSummary(
-                    id=f"document:{document.id}",
+                    id=source_id,
                     type="document",
-                    title=_clean_text(document.title) or _clean_text(document.file_name) or "文档资料",
+                    title=title,
                     status=status,
                     summary=label,
                     count=index_count,
+                    source_kind="document",
+                    evidence_count=evidence_count,
+                    locator_summary=_document_locator_summary(document, index_preview, index_count),
+                    availability=_document_source_availability(_clean_text(document.status), evidence_count),
                     meta={
                         "label": label,
                         "sourceKind": "document",
@@ -540,6 +748,8 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
                             "index_count": index_count,
                         },
                         "document_index_preview": index_preview,
+                        "aiPayload": ai_payload,
+                        "ai_payload": ai_payload,
                     },
                 )
             )
@@ -565,14 +775,26 @@ def _list_persisted_ppt_package_sources(area_id: str) -> List[PptDataSourceSumma
         package_version = _clean_text(package.get("package_version") or meta.get("packageVersion"))
         label = _clean_text(meta.get("label") or package.get("label") or payload.get("summary")) or "已构建资料包"
         count = int(package.get("item_count") or source.get("count") or len(_safe_list(payload.get("items"))) or 0)
+        title = _clean_text(source.get("title") or package.get("title") or package.get("package_title")) or "资料包"
+        package = {
+            **package,
+            "area_id": _clean_text(area_id),
+            "package_version": package_version,
+        }
+        ai_payload = _package_ai_payload(source_id, title, package)
+        evidence_count = _ai_payload_evidence_count(ai_payload)
         sources.append(
             PptDataSourceSummary(
                 id=source_id,
                 type=_clean_text(source.get("type")) or "package",
-                title=_clean_text(source.get("title") or package.get("title") or package.get("package_title")) or "资料包",
+                title=title,
                 status="ready",
                 summary=label,
                 count=count,
+                source_kind="package",
+                evidence_count=evidence_count,
+                locator_summary=_package_locator_summary(package, label),
+                availability=_evidence_availability("ready", evidence_count, empty_reason="empty_evidence:package_empty"),
                 meta={
                     **meta,
                     "label": label,
@@ -580,18 +802,73 @@ def _list_persisted_ppt_package_sources(area_id: str) -> List[PptDataSourceSumma
                     "areaId": _clean_text(area_id),
                     "packageVersion": package_version,
                     "persistedPackage": True,
-                    "package": {
-                        **package,
-                        "area_id": _clean_text(area_id),
-                        "package_version": package_version,
-                    },
+                    "package": package,
+                    "aiPayload": ai_payload,
+                    "ai_payload": ai_payload,
                 },
             )
         )
     return sources
 
 
-def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
+def _list_persisted_database_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
+    return [PptDataSourceSummary.model_validate(item) for item in list_persisted_database_sources(area_id)]
+
+
+def _list_image_attachment_ppt_sources(conversation_id: str) -> List[PptDataSourceSummary]:
+    normalized_conversation_id = _clean_text(conversation_id)
+    if not normalized_conversation_id:
+        return []
+    sources: List[PptDataSourceSummary] = []
+    for record in list_attachments(normalized_conversation_id):
+        if attachment_source_kind(record.filename, record.mime_type) != "image":
+            continue
+        source_id = attachment_source_id(record.attachment_id, record.filename, record.mime_type)
+        title = _clean_text(record.filename) or "图片来源"
+        status = _image_attachment_status(record)
+        ai_payload = _image_attachment_ai_payload(record, source_id, title) if status == "ready" else {}
+        evidence_count = _ai_payload_evidence_count(ai_payload)
+        sources.append(
+            PptDataSourceSummary(
+                id=source_id,
+                type="image",
+                title=title,
+                status=status,
+                summary=_clean_text(record.summary) or ("图片解析完成" if status == "ready" else "图片解析中"),
+                count=evidence_count,
+                source_kind="image",
+                evidence_count=evidence_count,
+                locator_summary=f"{title} / {record.mime_type or 'image'}",
+                availability=_image_attachment_availability(record, evidence_count),
+                meta={
+                    "label": _clean_text(record.summary) or ("图片解析完成" if status == "ready" else "图片解析中"),
+                    "sourceKind": "image",
+                    "conversationId": normalized_conversation_id,
+                    "attachmentId": record.attachment_id,
+                    "fileName": record.filename,
+                    "mimeType": record.mime_type,
+                    "image": {
+                        "attachment_id": record.attachment_id,
+                        "conversation_id": normalized_conversation_id,
+                        "history_id": record.history_id,
+                        "filename": record.filename,
+                        "mime_type": record.mime_type,
+                        "size_bytes": record.size_bytes,
+                        "status": record.status,
+                        "warnings": list(record.warnings or []),
+                        "error": record.error,
+                    },
+                    "aiPayload": ai_payload,
+                    "ai_payload": ai_payload,
+                },
+            )
+        )
+    return sources
+
+
+def list_ppt_sources(area_id: str, conversation_id: str = "") -> List[PptDataSourceSummary]:
+    from modules.ppt_web_source.service import list_persisted_web_sources
+
     detail = _load_history_detail(area_id)
     poi_payload = _load_history_pois(area_id)
     poi_count = int(poi_payload.get("count") or len(_safe_list(poi_payload.get("pois"))))
@@ -617,6 +894,10 @@ def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
                 status="ready" if ready else "pending",
                 summary=_source_label(source_id, ready, count),
                 count=count,
+                source_kind="system",
+                evidence_count=count,
+                locator_summary="当前分析范围" if source_id == "current:scope" else f"analysis:{source_id}",
+                availability="available" if ready else "pending:analysis_not_ready",
                 meta={
                     "label": _source_label(source_id, ready, count),
                     "sourceKind": "system",
@@ -626,7 +907,27 @@ def list_ppt_sources(area_id: str) -> List[PptDataSourceSummary]:
         )
     sources.extend(_list_document_ppt_sources())
     sources.extend(_list_persisted_ppt_package_sources(area_id))
+    sources.extend(_list_persisted_database_ppt_sources(area_id))
+    sources.extend(PptDataSourceSummary.model_validate(item) for item in list_persisted_web_sources(area_id))
+    sources.extend(_list_image_attachment_ppt_sources(conversation_id))
     return sources
+
+
+def delete_ppt_persisted_source(area_id: str, source_id: str) -> Dict[str, Any]:
+    normalized_area_id = _clean_text(area_id)
+    normalized_source_id = _clean_text(source_id)
+    if not normalized_area_id:
+        raise PptDataAreaNotFound("area_id_required")
+    if not normalized_source_id:
+        raise PptDataSourceNotFound("source_id_required")
+    deleted = analysis_artifact_repo.delete_by_source_id(
+        normalized_area_id,
+        source_id=normalized_source_id,
+        artifact_types=[PPT_DATA_PACKAGE_ARTIFACT_TYPE, PPT_WEB_SOURCE_ARTIFACT_TYPE, PPT_DATABASE_ARTIFACT_TYPE],
+    )
+    if not deleted:
+        raise PptDataSourceNotFound("source_not_found")
+    return {"area_id": normalized_area_id, "source_id": normalized_source_id, "deleted": deleted}
 
 
 def read_ppt_source_summary(area_id: str, source_id: str) -> PptDataSourceSummary:
@@ -1968,6 +2269,7 @@ def _build_poi_road_population_nightlight_carrier_package(request: PptDataPackag
             "package": package_meta,
         },
     )
+    source = _attach_package_ai_payload(source)
     return PptDataPackageResponse(
         source=source,
         summary=summary,
@@ -2115,6 +2417,7 @@ def _build_nightlife_poi_nightlight_package(
             "package": package_meta,
         },
     )
+    source = _attach_package_ai_payload(source)
     return PptDataPackageResponse(
         source=source,
         summary=summary,
@@ -2467,6 +2770,7 @@ def _build_poi_package_response(
             "package": package_meta,
         },
     )
+    source = _attach_package_ai_payload(source)
     return PptDataPackageResponse(
         source=source,
         summary=summary,

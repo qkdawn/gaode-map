@@ -52,16 +52,145 @@ function createEvidenceItem({
   text = '',
   payload = {},
 } = {}) {
+  const node = createEvidenceNode({
+    sourceId,
+    sourceTitle,
+    sourceType: 'system',
+    evidenceLevel: type,
+    title,
+    content: text,
+    metadata: payload,
+  })
+  return pptEvidenceFromNode(node, sourceTitle)
+}
+
+function createEvidenceNode({
+  sourceId = '',
+  sourceTitle = '',
+  sourceType = 'system',
+  evidenceLevel = 'source_evidence',
+  title = '',
+  content = '',
+  summary = '',
+  metadata = {},
+  locator = '',
+  citation = '',
+} = {}) {
+  const resolvedSourceId = asText(sourceId)
+  const resolvedTitle = asText(title) || asText(sourceTitle) || '证据'
+  const resolvedLevel = asText(evidenceLevel) || 'source_evidence'
+  const safeMetadata = cloneObject(metadata)
+  const stableKey = asText(safeMetadata.metric_ids && safeMetadata.metric_ids[0])
+    || asText(safeMetadata.summary_key)
+    || asText(safeMetadata.count ? `count:${safeMetadata.count}` : '')
+    || resolvedTitle
+  const nodeId = `${resolvedSourceId}:evidence:${resolvedLevel}:${stableKey}`.replace(/\s+/g, '-')
   return {
-    source_id: asText(sourceId),
-    sourceId: asText(sourceId),
-    source_title: asText(sourceTitle),
-    sourceTitle: asText(sourceTitle),
-    type: asText(type),
-    title: asText(title),
-    text: asText(text),
-    payload: cloneObject(payload),
+    id: nodeId,
+    source_id: resolvedSourceId,
+    sourceId: resolvedSourceId,
+    source_type: asText(sourceType) || 'system',
+    sourceType: asText(sourceType) || 'system',
+    title: resolvedTitle,
+    content: asText(content),
+    summary: asText(summary || content).slice(0, 260),
+    metadata: safeMetadata,
+    locator: asText(locator || safeMetadata.locator),
+    score: 0,
+    evidence_level: resolvedLevel,
+    evidenceLevel: resolvedLevel,
+    warnings: cloneArray(safeMetadata.warnings),
+    citation: asText(citation),
   }
+}
+
+function pptEvidenceFromNode(node = {}, sourceTitle = '') {
+  const metadata = cloneObject(node.metadata)
+  metadata.evidence_node_id = asText(node.id)
+  metadata.source_id = asText(node.source_id || node.sourceId)
+  metadata.source_type = asText(node.source_type || node.sourceType)
+  metadata.locator = asText(node.locator)
+  return {
+    source_id: asText(node.source_id || node.sourceId),
+    sourceId: asText(node.source_id || node.sourceId),
+    source_title: asText(sourceTitle || node.title),
+    sourceTitle: asText(sourceTitle || node.title),
+    type: asText(node.evidence_level || node.evidenceLevel),
+    title: asText(node.title),
+    text: asText(node.content),
+    citation: asText(node.citation),
+    payload: metadata,
+  }
+}
+
+export function evidenceNodesFromAiPayload(aiPayload = {}) {
+  const payload = cloneObject(aiPayload)
+  const sourceId = asText(payload.source_id || payload.sourceId)
+  const sourceKind = canonicalPptSourceKind(payload.source_kind || payload.sourceKind, sourceId, 'unknown')
+  return cloneArray(payload.evidence_nodes || payload.evidenceNodes)
+    .map((item, index) => {
+      const node = cloneObject(item)
+      const nodeSourceId = asText(node.source_id || node.sourceId || sourceId)
+      const nodeSourceType = canonicalPptSourceKind(node.source_type || node.sourceType || sourceKind, nodeSourceId, sourceKind)
+      const content = asText(node.content || node.text || node.summary)
+      const title = asText(node.title) || asText(payload.title) || '证据'
+      if (!nodeSourceId || (!content && !title)) return null
+      const nodeId = asText(node.id || node.node_id || node.nodeId) || `${nodeSourceId}:evidence:${index + 1}`
+      return {
+        id: nodeId,
+        source_id: nodeSourceId,
+        sourceId: nodeSourceId,
+        source_type: nodeSourceType,
+        sourceType: nodeSourceType,
+        title,
+        content,
+        summary: asText(node.summary || content).slice(0, 260),
+        metadata: cloneObject(node.metadata || node.payload),
+        locator: asText(node.locator),
+        score: Number(node.score || 0) || 0,
+        evidence_level: asText(node.evidence_level || node.evidenceLevel || 'source_evidence'),
+        evidenceLevel: asText(node.evidence_level || node.evidenceLevel || 'source_evidence'),
+        warnings: cloneArray(node.warnings).map((warning) => asText(warning)).filter(Boolean),
+        citation: asText(node.citation),
+      }
+    })
+    .filter(Boolean)
+}
+
+export function evidenceNodesFromPptEvidenceItems(aiPayload = {}, items = []) {
+  const payload = cloneObject(aiPayload)
+  const sourceId = asText(payload.source_id || payload.sourceId)
+  const sourceKind = canonicalPptSourceKind(payload.source_kind || payload.sourceKind, sourceId, 'unknown')
+  return cloneArray(items)
+    .map((item, index) => {
+      const evidence = item && typeof item === 'object' ? cloneObject(item) : { text: asText(item) }
+      const metadata = cloneObject(evidence.payload)
+      const nodeId = asText(metadata.evidence_node_id || metadata.node_id || evidence.evidence_node_id)
+        || `${sourceId}:evidence:${index + 1}`
+      const nodeSourceId = asText(metadata.source_id || evidence.source_id || evidence.sourceId || sourceId)
+      const nodeSourceType = canonicalPptSourceKind(metadata.source_type || evidence.source_type || sourceKind, nodeSourceId, sourceKind)
+      const content = asText(evidence.text || evidence.content || evidence.summary)
+      const title = asText(evidence.title) || asText(payload.title) || '证据'
+      if (!nodeSourceId || (!content && !title)) return null
+      return {
+        id: nodeId,
+        source_id: nodeSourceId,
+        sourceId: nodeSourceId,
+        source_type: nodeSourceType,
+        sourceType: nodeSourceType,
+        title,
+        content,
+        summary: asText(evidence.summary || content).slice(0, 260),
+        metadata,
+        locator: asText(metadata.locator || evidence.locator),
+        score: Number(evidence.score || 0) || 0,
+        evidence_level: asText(metadata.evidence_level || evidence.type || evidence.evidence_level || 'source_evidence'),
+        evidenceLevel: asText(metadata.evidence_level || evidence.type || evidence.evidence_level || 'source_evidence'),
+        warnings: cloneArray(metadata.warnings || evidence.warnings).map((warning) => asText(warning)).filter(Boolean),
+        citation: asText(evidence.citation),
+      }
+    })
+    .filter(Boolean)
 }
 
 function createAiPayload({
@@ -87,7 +216,7 @@ function createAiPayload({
   if (gaps.length) included.push('metric_gaps')
   if (evidenceItems.length) included.push('evidence')
   if (visuals.length) included.push('visual_specs')
-  return {
+  const payload = {
     version: 'ppt_ai_input_block_v1',
     source_id: asText(sourceId),
     sourceId: asText(sourceId),
@@ -99,7 +228,6 @@ function createAiPayload({
     metrics: readyMetrics,
     metric_gaps: gaps,
     metricGaps: gaps,
-    evidence: evidenceItems,
     visual_specs: visuals,
     visualSpecs: visuals,
     excluded: cloneArray(excluded),
@@ -112,17 +240,27 @@ function createAiPayload({
     },
     policy: asText(policy) || '生成时只发送这个 AI 输入块；原始大数据不进入 LLM。',
   }
+  const evidenceNodes = evidenceNodesFromPptEvidenceItems(payload, evidenceItems)
+  return {
+    ...payload,
+    evidence_nodes: evidenceNodes,
+    evidenceNodes,
+  }
 }
 
 export function createPptTransportFromAiPayload(aiPayload = {}) {
   const payload = cloneObject(aiPayload)
   const counts = cloneObject(payload.counts)
+  const evidenceNodes = evidenceNodesFromAiPayload(payload)
   const scopeCount = Number(counts.scope ?? payload.scope_count ?? payload.scopeCount ?? 0) || 0
   const metricCount = Number(counts.metrics ?? payload.metric_count ?? payload.metricCount ?? 0) || 0
   const metricGapCount = Number(counts.metric_gaps ?? counts.metricGaps ?? 0) || 0
-  const evidenceCount = Number(counts.evidence ?? payload.evidence_count ?? payload.evidenceCount ?? 0) || 0
+  const evidenceCount = Number(payload.evidence_count ?? payload.evidenceCount ?? evidenceNodes.length ?? counts.evidence ?? 0) || 0
   const visualSpecCount = Number(counts.visual_specs ?? counts.visualSpecs ?? 0) || 0
   const included = cloneArray(payload.included)
+    .map((item) => asText(item))
+    .filter(Boolean)
+  if (evidenceNodes.length && !included.includes('evidence')) included.push('evidence')
   return {
     source_id: asText(payload.source_id || payload.sourceId),
     sourceId: asText(payload.source_id || payload.sourceId),
@@ -246,6 +384,60 @@ function getSystemSourceReady(context = {}, taskKey = '') {
   if (taskKey === 'scope') return hasScopeSource(context)
   if (taskKey === 'summary') return hasSummarySource(context)
   return hasTaskSource(context, taskKey)
+}
+
+function canonicalPptSourceKind(rawKind = '', sourceId = '', fallback = '') {
+  const allowed = new Set(['system', 'document', 'image', 'web', 'database', 'package'])
+  const kind = asText(rawKind)
+  const id = asText(sourceId)
+  if (allowed.has(kind)) return kind
+  if (id.startsWith('current:')) return 'system'
+  if (id.includes(':')) {
+    const prefix = id.split(':')[0]
+    return allowed.has(prefix) ? prefix : 'unknown'
+  }
+  const fallbackKind = asText(fallback)
+  return allowed.has(fallbackKind) ? fallbackKind : 'unknown'
+}
+
+function getDefaultGroupSpecForSource(source = {}) {
+  const sourceId = asText(source.id)
+  const sourceKind = canonicalPptSourceKind(source.source_kind || source.sourceKind || (source.meta || {}).sourceKind, sourceId)
+  if (sourceKind === 'package' || sourceKind === 'package-placeholder' || sourceId.startsWith('package:') || sourceId.startsWith('package-placeholder:')) {
+    return { id: 'group:packages', title: '资料包', emoji: '' }
+  }
+  if (sourceKind === 'document' || sourceId.startsWith('document:')) {
+    return { id: 'group:document-evidence', title: '文档库', emoji: '' }
+  }
+  if (sourceKind === 'web') {
+    return { id: 'group:web', title: '联网资料', emoji: '' }
+  }
+  if (sourceKind === 'database' || sourceId.startsWith('database:')) {
+    return { id: 'group:database', title: '数据库源', emoji: '' }
+  }
+  if (['current:scope', 'current:dataset:h3'].includes(sourceId)) {
+    return { id: 'group:spatial-scope', title: '空间范围与网格', emoji: '' }
+  }
+  if (['current:dataset:poi', 'current:analysis:poi_h3', 'current:analysis:nightlight'].includes(sourceId)) {
+    return { id: 'group:urban-vitality', title: '城市活力证据', emoji: '' }
+  }
+  if (sourceId === 'current:analysis:population') {
+    return { id: 'group:population-demand', title: '人群与需求', emoji: '' }
+  }
+  if (sourceId === 'current:analysis:road') {
+    return { id: 'group:accessibility', title: '交通与可达性', emoji: '' }
+  }
+  return { id: '', title: '', emoji: '' }
+}
+
+function isRetainedUserSource(source = {}) {
+  const sourceKind = canonicalPptSourceKind(source.source_kind || source.sourceKind || (source.meta && source.meta.sourceKind), source.id)
+  const sourceId = asText(source.id)
+  return ['package', 'document', 'image', 'web', 'database'].includes(sourceKind)
+    || sourceId.startsWith('document:')
+    || sourceId.startsWith('image:')
+    || sourceId.startsWith('package:')
+    || sourceId.startsWith('database:')
 }
 
 function getSourceDetail(context = {}, taskKey = '') {
@@ -455,10 +647,10 @@ export function createDefaultPptSpec(seed = {}) {
     deckType: asText(seed.deckType || seed.deck_type) || '城市更新概念策划',
     pageCount: Number(seed.pageCount ?? seed.page_count ?? DEFAULT_PPT_PAGE_COUNT) || DEFAULT_PPT_PAGE_COUNT,
     style: asText(seed.style) || '专业策划汇报',
-    researchEnabled: Object.prototype.hasOwnProperty.call(seed, 'researchEnabled')
-      ? !!seed.researchEnabled
-      : Object.prototype.hasOwnProperty.call(seed, 'research_enabled')
-        ? !!seed.research_enabled
+    webSourcesEnabled: Object.prototype.hasOwnProperty.call(seed, 'webSourcesEnabled')
+      ? !!seed.webSourcesEnabled
+      : Object.prototype.hasOwnProperty.call(seed, 'web_sources_enabled')
+        ? !!seed.web_sources_enabled
         : true,
     sourceIds: selectedSourceIds,
     outline: cloneArray(seed.outline),
@@ -531,13 +723,36 @@ export function createDefaultDeckBriefPreview() {
 
 export function normalizePptSource(seed = {}) {
   const status = asText(seed.status) || 'pending'
+  const meta = cloneObject(seed.meta)
+  const sourceKind = canonicalPptSourceKind(seed.source_kind || seed.sourceKind || meta.sourceKind, seed.id, seed.type)
+  const aiPayload = cloneObject(meta.aiPayload || meta.ai_payload)
+  const counts = cloneObject(aiPayload.counts)
+  const transport = cloneObject(meta.transport)
+  const evidenceNodes = evidenceNodesFromAiPayload(aiPayload)
+  const evidenceCount = Number(
+    seed.evidence_count
+    ?? seed.evidenceCount
+    ?? transport.evidence_count
+    ?? transport.evidenceCount
+    ?? evidenceNodes.length
+    ?? counts.evidence
+    ?? 0
+  ) || 0
   return {
     id: asText(seed.id),
-    type: asText(seed.type) || 'file',
+    type: asText(seed.type) || 'source',
     title: asText(seed.title) || '未命名来源',
     status,
     selected: status === 'ready' && !!seed.selected,
-    meta: cloneObject(seed.meta),
+    source_kind: sourceKind,
+    sourceKind,
+    summary: asText(seed.summary || meta.label),
+    evidence_count: evidenceCount,
+    evidenceCount,
+    locator_summary: asText(seed.locator_summary || seed.locatorSummary),
+    locatorSummary: asText(seed.locator_summary || seed.locatorSummary),
+    availability: asText(seed.availability) || (status === 'ready' ? 'available' : ''),
+    meta,
   }
 }
 

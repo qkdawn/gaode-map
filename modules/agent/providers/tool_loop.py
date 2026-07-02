@@ -52,12 +52,10 @@ def tool_catalog(registry: Dict[str, RegisteredTool]) -> List[Dict[str, Any]]:
 
 
 def _tool_argument_hints(name: str) -> Dict[str, Any]:
-    if name == "search_uploaded_attachment_context":
-        return {"query": "用户原问题", "top_k": 5}
     if name in {"search_analysis_context", "search_report_context"}:
         return {"query": "用户原问题", "top_k": 8}
-    if name in {"read_analysis_chunk", "read_report_chunk", "read_uploaded_attachment_context"}:
-        return {"id": "来自 search 命中的 chunk id"}
+    if name in {"read_analysis_evidence_node", "read_report_evidence_node"}:
+        return {"node_id": "来自 search 命中的 node_id"}
     if name == "run_area_character_pack":
         return {"policy_key": "district_summary", "analysis_mode": "district_summary"}
     if name == "run_site_selection_pack":
@@ -168,11 +166,9 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
                 "read_current_scope",
                 "read_current_results",
                 "search_analysis_context",
-                "read_analysis_chunk",
+                "read_analysis_evidence_node",
                 "search_report_context",
-                "read_report_chunk",
-                "search_uploaded_attachment_context",
-                "read_uploaded_attachment_context",
+                "read_report_evidence_node",
                 "fetch_pois_in_scope",
                 "compute_h3_metrics_from_scope_and_pois",
                 "compute_population_overview_from_scope",
@@ -192,8 +188,8 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
         },
         "priority_rules": [
             "先读 scope 和 current_results，再决定是否需要重算基础数据。",
-            "涉及已有分析结论或报告追问时，优先 search 对应上下文，再 read 命中的 chunk。",
-            "用户提到附件、文件、图片、报告、图纸、表格时，优先 search_uploaded_attachment_context，再 read_uploaded_attachment_context；附件证据必须标注文件名。",
+            "涉及已有分析结论或报告追问时，优先 search 对应上下文，再 read 命中的 EvidenceNode。",
+            "用户提到文件、图片、报告、图纸、表格时，只使用已进入来源区并可检索的 EvidenceNode。",
             "下一步分析建议类问题只排序分析方向，不直接调用区域画像或选址场景工具。",
             "区域画像类问题优先使用 run_area_character_pack，并补充 build_unified_spatial_cells 作为空间同格证据。",
             "选址评估类问题优先使用 run_site_selection_pack。",

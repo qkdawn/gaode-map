@@ -385,6 +385,13 @@ def test_create_ppt_data_package_returns_ready_source(monkeypatch):
     assert response.source.meta["package"]["coordinate_system"] == "WGS84"
     assert response.source.meta["package"]["items"][0]["name"] == "长沙县政府原址"
     assert response.source.meta["package"]["package_mode"] == "query"
+    ai_payload = response.source.meta["aiPayload"]
+    assert ai_payload["source_kind"] == "package"
+    assert ai_payload["counts"]["evidence"] >= 2
+    assert ai_payload["evidence_nodes"][0]["source_type"] == "package"
+    assert ai_payload["evidence_nodes"][0]["source_id"] == response.source.id
+    assert "evidence" not in ai_payload
+    assert ai_payload["evidence_nodes"][0]["id"].startswith(f"{response.source.id}:package:")
 
 
 def test_create_ppt_evidence_package_uses_llm_plan(monkeypatch):
@@ -423,6 +430,10 @@ def test_create_ppt_evidence_package_uses_llm_plan(monkeypatch):
     assert package["selection_reason"] == "用于说明区域文化展示资源。"
     assert package["groups"][0]["name"] == "文教展示资源"
     assert package["items"][0]["id"] == "poi-2"
+    evidence_nodes = response.source.meta["aiPayload"]["evidence_nodes"]
+    assert evidence_nodes
+    assert {item["source_type"] for item in evidence_nodes} == {"package"}
+    assert "evidence" not in response.source.meta["aiPayload"]
 
 
 def test_create_ppt_evidence_package_uses_current_request_center(monkeypatch):
@@ -720,6 +731,10 @@ def test_create_ppt_carrier_package_detects_block_loop_and_layers(monkeypatch):
     assert package["package_version"] == "road-carrier-evidence-v2"
     assert response.source.meta["areaId"] == "history-1"
     assert response.source.meta["packageVersion"] == "road-carrier-evidence-v2"
+    ai_payload = response.source.meta["aiPayload"]
+    assert ai_payload["source_kind"] == "package"
+    assert any(item["evidence_level"] == "package_carrier" for item in ai_payload["evidence_nodes"])
+    assert all(item["source_type"] == "package" for item in ai_payload["evidence_nodes"])
     assert upserts
     assert upserts[0]["history_id"] == "history-1"
     assert upserts[0]["artifact_type"] == "ppt_data_package"
@@ -768,7 +783,8 @@ def test_list_ppt_sources_restores_package_artifacts(monkeypatch):
                 "package_mode": "evidence",
                 "intent": "识别当前区域 POI、路网、人口、夜光共同支撑的空间载体",
                 "source_ids": ["current:dataset:poi", "current:analysis:road", "current:analysis:population", "current:analysis:nightlight"],
-                "carriers": [{"carrier_id": "corridor_01"}],
+                "summary": "已识别 2 个空间载体。",
+                "carriers": [{"carrier_id": "corridor_01", "summary": "廊道串联 POI、人口与夜光热点。"}],
                 "total": 2,
             },
         },
@@ -798,6 +814,11 @@ def test_list_ppt_sources_restores_package_artifacts(monkeypatch):
     assert restored.meta["areaId"] == "history-1"
     assert restored.meta["packageVersion"] == "road-carrier-evidence-v2"
     assert restored.meta["package"]["carriers"][0]["carrier_id"] == "corridor_01"
+    assert restored.source_kind == "package"
+    assert restored.evidence_count == 2
+    assert restored.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "package"
+    assert restored.meta["aiPayload"]["evidence_nodes"][0]["id"] == "package:poi-road-carriers:test:package:summary"
+    assert "evidence" not in restored.meta["aiPayload"]
 
 
 def test_create_ppt_carrier_package_does_not_claim_density_as_total_population(monkeypatch):
@@ -926,9 +947,17 @@ def test_list_ppt_sources_marks_scope_and_poi_ready(monkeypatch):
     sources = {item.id: item for item in list_ppt_sources("history-1")}
 
     assert sources["current:scope"].status == "ready"
+    assert sources["current:scope"].source_kind == "system"
+    assert sources["current:scope"].evidence_count == 1
+    assert sources["current:scope"].availability == "available"
+    assert sources["current:scope"].locator_summary == "当前分析范围"
     assert sources["current:dataset:poi"].status == "ready"
     assert sources["current:dataset:poi"].count == 3
+    assert sources["current:dataset:poi"].source_kind == "system"
+    assert sources["current:dataset:poi"].evidence_count == 3
+    assert sources["current:dataset:poi"].availability == "available"
     assert sources["current:dataset:h3"].status == "pending"
+    assert sources["current:dataset:h3"].availability == "pending:analysis_not_ready"
 
 
 def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
@@ -982,7 +1011,15 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
     assert source.status == "ready"
     assert source.count == 1
     assert source.summary == "章节 1 个"
+    assert source.source_kind == "document"
+    assert source.evidence_count == 1
+    assert source.availability == "available"
+    assert source.locator_summary == "policy.pdf / 第 3-3 页 / PageIndex 1 节"
     assert source.meta["sourceKind"] == "document"
     assert source.meta["document"]["document_role"] == "policy_document"
     assert source.meta["document"]["index_count"] == 1
     assert source.meta["document_index_preview"][0]["title"] == "政策要求"
+    assert source.meta["aiPayload"]["sourceKind"] == "document"
+    assert source.meta["aiPayload"]["evidence_nodes"][0]["id"] == "document:doc-1:pageindex:n1"
+    assert source.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "document"
+    assert "evidence" not in source.meta["aiPayload"]

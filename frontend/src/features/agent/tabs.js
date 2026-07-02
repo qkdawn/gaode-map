@@ -1034,7 +1034,7 @@ export function createAgentTabsMethods() {
     },
     shouldShowAgentComposer() {
       const activeTab = this.getAgentActiveTopTab()
-      return ['followup', 'deep_analysis'].includes(asText(activeTab.kind))
+      return asText(activeTab.kind) === 'ppt_planning'
     },
     buildAgentTabsUiState() {
       this.captureAgentActiveSummaryTabState()

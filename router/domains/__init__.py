@@ -13,6 +13,7 @@ from .nightlight import router as nightlight_router
 from .poi import router as poi_router
 from .population import router as population_router
 from .ppt_planning import router as ppt_planning_router
+from .ppt_web_source import router as ppt_web_source_router
 from .road import router as road_router
 from .system import router as system_router
 from .timeseries import router as timeseries_router
@@ -34,6 +35,7 @@ __all__ = [
     "poi_router",
     "population_router",
     "ppt_planning_router",
+    "ppt_web_source_router",
     "road_router",
     "system_router",
     "timeseries_router",

@@ -144,5 +144,56 @@ class AnalysisArtifactRepo:
         finally:
             session.close()
 
+    def get_by_id(self, artifact_id: Any) -> Optional[Dict[str, Any]]:
+        normalized_id = str(artifact_id or "").strip()
+        if not normalized_id:
+            return None
+        try:
+            record_id = int(normalized_id)
+        except (TypeError, ValueError):
+            return None
+        session: Session = SessionLocal()
+        try:
+            record = session.get(AnalysisArtifact, record_id)
+            if record is None:
+                return None
+            return _artifact_payload(record)
+        finally:
+            session.close()
+
+    def delete_by_source_id(
+        self,
+        history_id: str,
+        *,
+        source_id: str,
+        artifact_types: Optional[List[str]] = None,
+    ) -> int:
+        normalized_history_id = str(history_id or "").strip()
+        normalized_source_id = str(source_id or "").strip()
+        if not normalized_history_id or not normalized_source_id:
+            return 0
+        allowed_types = {str(item or "").strip() for item in (artifact_types or []) if str(item or "").strip()}
+        session: Session = SessionLocal()
+        try:
+            query = session.query(AnalysisArtifact).filter_by(history_id=normalized_history_id)
+            if allowed_types:
+                query = query.filter(AnalysisArtifact.artifact_type.in_(sorted(allowed_types)))
+            records = query.all()
+            deleted = 0
+            for record in records:
+                payload = _clone_json_payload(record.payload if isinstance(record.payload, dict) else {}) or {}
+                source = payload.get("source") if isinstance(payload, dict) else {}
+                if not isinstance(source, dict) or str(source.get("id") or "").strip() != normalized_source_id:
+                    continue
+                session.delete(record)
+                deleted += 1
+            session.commit()
+            return deleted
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
 
 analysis_artifact_repo = AnalysisArtifactRepo()

@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 from core.config import settings
 from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
 from modules.agent.providers.chat_parser import LlmJsonParseError, extract_json_object
+from modules.evidence_retrieval import SourceRecord, evidence_node_from_node_payload
 
 from .prompts import (
     DECK_BRIEF_SLIDE_SYSTEM_PROMPT,
@@ -354,9 +355,9 @@ def _normalize_source_groups(raw_groups: Any, sources: List[PptSource]) -> List[
     return normalized
 
 
-def _source_summary(source_ids: List[str], research_enabled: bool) -> str:
+def _source_summary(source_ids: List[str], web_sources_enabled: bool) -> str:
     selected_count = len([item for item in source_ids if item])
-    research_note = "包含联网研究" if research_enabled else "不包含联网研究"
+    research_note = "包含联网来源" if web_sources_enabled else "不包含联网来源"
     if selected_count <= 0:
         return f"暂未选择来源，{research_note}"
     return f"已选择 {selected_count} 个来源，{research_note}"
@@ -664,6 +665,45 @@ def _compact_evidence_item(*, source_id: str, source_title: str, evidence_type: 
     return {key: value for key, value in item.items() if value not in ("", [], {})}
 
 
+def _compact_evidence_node(node: Any) -> Dict[str, Any]:
+    payload = node.model_dump(mode="python") if hasattr(node, "model_dump") else _safe_dict(node)
+    metadata = _safe_dict(payload.get("metadata"))
+    return {
+        "id": _clean_text(payload.get("id")),
+        "source_id": _clean_text(payload.get("source_id") or payload.get("sourceId")),
+        "source_type": _clean_text(payload.get("source_type") or payload.get("sourceType")),
+        "title": _truncated_text(payload.get("title"), 120),
+        "content": _truncated_text(payload.get("content"), 700),
+        "summary": _truncated_text(payload.get("summary"), 260),
+        "locator": _truncated_text(payload.get("locator"), 160),
+        "evidence_level": _clean_text(payload.get("evidence_level") or payload.get("evidenceLevel")),
+        "citation": _truncated_text(payload.get("citation"), 160),
+        "warnings": _safe_list(payload.get("warnings"))[:4],
+        "metadata": {
+            key: value
+            for key, value in metadata.items()
+            if key in {"domain", "page", "page_no", "url", "record_id", "record_type", "confidence", "locator", "node_id", "carrier_id"}
+        },
+    }
+
+
+def _evidence_nodes_from_ai_payload(source_id: str, title: str, source_kind: str, ai_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    source = SourceRecord.model_validate({
+        "id": source_id,
+        "title": title,
+        "source_kind": source_kind,
+        "status": "ready",
+        "meta": {"aiPayload": ai_payload, "sourceKind": source_kind},
+    })
+    nodes: List[Dict[str, Any]] = []
+    explicit_nodes = _safe_list(ai_payload.get("evidence_nodes") or ai_payload.get("evidenceNodes"))
+    for index, item in enumerate(explicit_nodes, start=1):
+        node = evidence_node_from_node_payload("", source, item, index=index)
+        if node is not None:
+            nodes.append(_compact_evidence_node(node))
+    return nodes
+
+
 def _build_ppt_context_bundle(
     request: PptSpecRequest | PptOutlineSectionRequest | DeckNarrativePlanRequest | DeckBriefRequest | DeckBriefSlideRequest,
     metric_context: Dict[str, Any] | None = None,
@@ -678,7 +718,7 @@ def _build_ppt_context_bundle(
     compact_metrics = compact_metric_context_for_llm(metric_context, limit=LLM_CONTEXT_METRIC_LIMIT)
     all_metrics = _safe_list(metric_context.get("metrics"))
     source_manifest: List[Dict[str, Any]] = []
-    evidence: List[Dict[str, Any]] = []
+    evidence_nodes: List[Dict[str, Any]] = []
     scopes: List[Dict[str, Any]] = []
 
     for source_id in source_ids:
@@ -688,12 +728,12 @@ def _build_ppt_context_bundle(
         ai_payload = _ai_payload_for_source(source)
         source_kind = _clean_text(meta.get("sourceKind")) or ("document" if source_id.startswith("document:") else "package" if source_id.startswith("package:") else "system")
         source_metrics = [metric for metric in all_metrics if source_id in _metric_source_ids(metric) or _clean_text(metric.get("source_id")) == source_id]
-        source_evidence = _safe_list(ai_payload.get("evidence"))
+        source_evidence_nodes = _evidence_nodes_from_ai_payload(source_id, title, source_kind, ai_payload)
         source_scope = _safe_dict(ai_payload.get("scope"))
         if source_scope:
             scopes.append({"source_id": source_id, "title": title, **source_scope})
-        if source_evidence:
-            evidence.extend(source_evidence)
+        if source_evidence_nodes:
+            evidence_nodes.extend(source_evidence_nodes)
         included_types = _safe_list(ai_payload.get("included"))
         counts = _safe_dict(ai_payload.get("counts"))
         source_manifest.append({
@@ -705,14 +745,14 @@ def _build_ppt_context_bundle(
             "scope_count": int(counts.get("scope") or (1 if source_scope else 0)),
             "metric_count": len(source_metrics),
             "metric_gap_count": int(counts.get("metric_gaps") or counts.get("metricGaps") or 0),
-            "evidence_count": len(source_evidence),
+            "evidence_count": len(source_evidence_nodes),
             "visual_spec_count": int(counts.get("visual_specs") or counts.get("visualSpecs") or 0),
             "excluded": _safe_list(ai_payload.get("excluded")),
-            "policy": _clean_text(ai_payload.get("policy")) or "数字来自 aiPayload.metrics；文本/样本来自 aiPayload.evidence；完整原始数据不传给 LLM。",
+            "policy": _clean_text(ai_payload.get("policy")) or "数字来自 aiPayload.metrics；文本/样本来自 EvidenceNode；完整原始数据不传给 LLM。",
         })
 
-    evidence = evidence[:LLM_CONTEXT_EVIDENCE_LIMIT]
-    included_source_ids = {item.get("source_id") for item in evidence}
+    evidence_nodes = evidence_nodes[:LLM_CONTEXT_EVIDENCE_LIMIT]
+    included_source_ids = {item.get("source_id") for item in evidence_nodes}
     for item in source_manifest:
         if "evidence" in item["included"] and item["source_id"] not in included_source_ids and item["evidence_count"] > 0:
             item["evidence_omitted_by_limit"] = True
@@ -724,9 +764,13 @@ def _build_ppt_context_bundle(
         "source_manifest": source_manifest,
         "metric_context": compact_metrics,
         "evidence_context": {
-            "policy": "只传所选来源 aiPayload.evidence；文档使用 PageIndex 章节摘要，资料包/current 分析使用轻量索引。",
-            "items": evidence,
-            "item_count": len(evidence),
+            "policy": "只传所选来源的紧凑 EvidenceNode；文档使用 PageIndex 节点，资料包/current 分析使用轻量节点。",
+            "items": evidence_nodes,
+            "item_count": len(evidence_nodes),
+        },
+        "evidence_node_context": {
+            "items": evidence_nodes,
+            "item_count": len(evidence_nodes),
         },
         "omitted_payloads": [
             "current.datasets.poi.items",
@@ -1204,6 +1248,7 @@ def _build_brief_generation_context(
         },
         "metric_context": page_metric_context,
         "evidence_context": page_evidence_context,
+        "evidence_node_context": page_evidence_context,
         "source_manifest": _filter_page_source_manifest(context_bundle, source_ids),
     }
 
@@ -1299,13 +1344,14 @@ async def generate_ppt_spec(request: PptSpecRequest) -> PptSpecResponse:
         "audience": request.audience,
         "deck_type": request.deck_type,
         "page_count": request.page_count,
-        "research_enabled": request.research_enabled,
+        "web_sources_enabled": request.web_sources_enabled,
         "source_ids": request.source_ids,
         "sources": _selected_sources_payload(request),
-        "source_summary": _source_summary(request.source_ids, request.research_enabled),
+        "source_summary": _source_summary(request.source_ids, request.web_sources_enabled),
         "scope_brief": context_bundle["scope_brief"],
         "metric_context": context_bundle["metric_context"],
         "evidence_context": context_bundle["evidence_context"],
+        "evidence_node_context": context_bundle["evidence_node_context"],
         "source_manifest": context_bundle["source_manifest"],
         "omitted_payloads": context_bundle["omitted_payloads"],
         "missing_inputs_from_request": _missing_inputs_for_spec(request),
@@ -1337,7 +1383,7 @@ async def generate_ppt_spec(request: PptSpecRequest) -> PptSpecResponse:
             deck_type=_clean_text(raw.get("deck_type")) or request.deck_type,
             page_count=int(raw.get("page_count") or request.page_count),
             outline=outline,
-            source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.research_enabled),
+            source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.web_sources_enabled),
             missing_inputs=[_clean_text(item) for item in missing_inputs if _clean_text(item)],
             context_manifest=context_bundle,
         )
@@ -1373,10 +1419,11 @@ async def regenerate_ppt_outline_section(request: PptOutlineSectionRequest) -> P
             "page_count": request.spec.page_count if request.spec else request.page_count,
             "source_ids": request.source_ids,
             "sources": _selected_sources_payload(request),
-            "source_summary": _source_summary(request.source_ids, request.research_enabled),
+            "source_summary": _source_summary(request.source_ids, request.web_sources_enabled),
             "scope_brief": context_bundle["scope_brief"],
             "metric_context": context_bundle["metric_context"],
             "evidence_context": context_bundle["evidence_context"],
+            "evidence_node_context": context_bundle["evidence_node_context"],
             "source_manifest": context_bundle["source_manifest"],
             "spec": request.spec.model_dump(mode="json") if request.spec else None,
             "outline": [item.model_dump(mode="json") for item in request.outline],
@@ -1414,13 +1461,14 @@ async def generate_narrative_plan(request: DeckNarrativePlanRequest) -> DeckNarr
             "audience": request.audience,
             "deck_type": request.deck_type,
             "page_count": page_count,
-            "research_enabled": request.research_enabled,
+            "web_sources_enabled": request.web_sources_enabled,
             "source_ids": request.source_ids,
             "sources": _selected_sources_payload(request),
-            "source_summary": _source_summary(request.source_ids, request.research_enabled),
+            "source_summary": _source_summary(request.source_ids, request.web_sources_enabled),
             "scope_brief": context_bundle["scope_brief"],
             "metric_context": context_bundle["metric_context"],
             "evidence_context": context_bundle["evidence_context"],
+            "evidence_node_context": context_bundle["evidence_node_context"],
             "source_manifest": context_bundle["source_manifest"],
             "omitted_payloads": context_bundle["omitted_payloads"],
             "spec": request.spec.model_dump(mode="json") if request.spec else None,
@@ -1470,13 +1518,14 @@ async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
         "audience": request.audience,
         "deck_type": request.deck_type,
         "page_count": page_count,
-        "research_enabled": request.research_enabled,
+        "web_sources_enabled": request.web_sources_enabled,
         "source_ids": request.source_ids,
         "sources": _selected_sources_payload(request),
-        "source_summary": _source_summary(request.source_ids, request.research_enabled),
+        "source_summary": _source_summary(request.source_ids, request.web_sources_enabled),
         "scope_brief": context_bundle["scope_brief"],
         "metric_context": context_bundle["metric_context"],
         "evidence_context": context_bundle["evidence_context"],
+        "evidence_node_context": context_bundle["evidence_node_context"],
         "source_manifest": context_bundle["source_manifest"],
         "omitted_payloads": context_bundle["omitted_payloads"],
         "spec": request.spec.model_dump(mode="json") if request.spec else None,
@@ -1498,7 +1547,7 @@ async def generate_deck_brief(request: DeckBriefRequest) -> DeckBriefResponse:
     response = DeckBriefResponse(
         status="draft",
         slides=slides,
-        source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.research_enabled),
+        source_summary=_clean_text(raw.get("source_summary")) or _source_summary(request.source_ids, request.web_sources_enabled),
         missing_inputs=[_clean_text(item) for item in missing_inputs if _clean_text(item)],
         context_manifest=context_bundle,
     )
@@ -1569,10 +1618,11 @@ async def regenerate_deck_brief_slide(request: DeckBriefSlideRequest) -> DeckSli
         "page_count": brief_generation_context["page_count"],
         "source_ids": page_context_packet.get("recommended_source_ids") or request.source_ids,
         "sources": _selected_sources_payload(request),
-        "source_summary": _source_summary(request.source_ids, request.research_enabled),
+        "source_summary": _source_summary(request.source_ids, request.web_sources_enabled),
         "scope_brief": context_bundle["scope_brief"],
         "metric_context": brief_generation_context["metric_context"],
         "evidence_context": brief_generation_context["evidence_context"],
+        "evidence_node_context": brief_generation_context["evidence_node_context"],
         "source_manifest": brief_generation_context["source_manifest"],
         "brief_generation_context": {
             "deck_id": brief_generation_context["deck_id"],

@@ -43,7 +43,7 @@ async def _proxy_vite_dev(path: str, request: Request | None = None) -> Response
     if request and request.url.query:
         url = f"{url}?{request.url.query}"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             proxied = await client.get(url)
     except httpx.RequestError as exc:
         raise HTTPException(status_code=503, detail=f"Vite 开发服务不可用: {origin}") from exc

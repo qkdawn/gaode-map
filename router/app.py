@@ -23,6 +23,7 @@ from router.domains import (
     poi_router,
     population_router,
     ppt_planning_router,
+    ppt_web_source_router,
     road_router,
     system_router,
     timeseries_router,
@@ -40,6 +41,7 @@ router.include_router(map_router)
 router.include_router(poi_router)
 router.include_router(population_router)
 router.include_router(ppt_planning_router)
+router.include_router(ppt_web_source_router)
 router.include_router(nightlight_router)
 router.include_router(timeseries_router)
 router.include_router(tools_router)

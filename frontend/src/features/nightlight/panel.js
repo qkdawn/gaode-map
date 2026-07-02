@@ -12,6 +12,13 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+function isAbortError(error) {
+  return !!error && (
+    error.name === 'AbortError'
+    || String(error.message || '').toLowerCase().includes('aborted')
+  )
+}
+
 function createAnalysisNightlightInitialState() {
   const meta = createNightlightFallbackMeta()
   return {
@@ -506,6 +513,7 @@ function createAnalysisNightlightMethods() {
         }
         return true
       } catch (e) {
+        if (isAbortError(e)) return false
         console.error(e)
         if (showStatus) {
           this.nightlightStatus = '夜光分析失败: ' + (e && e.message ? e.message : String(e))
@@ -533,6 +541,7 @@ function createAnalysisNightlightMethods() {
       try {
         await this.ensureNightlightAnalysisBundle({ showStatus: true, persist: true })
       } catch (e) {
+        if (isAbortError(e)) return
         this.restoreNightlightDisplayOnEnter()
         return
       }

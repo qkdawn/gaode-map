@@ -60,6 +60,7 @@ class AttachmentSearchHit(BaseModel):
     chunk_id: str
     attachment_id: str
     filename: str
+    mime_type: str = ""
     snippet: str
     evidence_level: str = "uploaded_attachment"
     score: float = 1.0

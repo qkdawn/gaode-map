@@ -86,7 +86,7 @@ def build_context_bundle(snapshot: AnalysisSnapshot) -> ContextBundle:
         "不能把推测写成事实。",
         "不能直接从 GIS 指标推断客流、消费能力、经营收益。",
         "人口、夜光、路网等结论必须基于对应 summary 字段。",
-        "需要解释分析结论时，优先通过 search_analysis_context/read_analysis_chunk 或 search_report_context/read_report_chunk 获取证据块。",
+        "需要解释分析结论时，优先通过 search_analysis_context/read_analysis_evidence_node 或 search_report_context/read_report_evidence_node 获取 EvidenceNode。",
     ]
     return ContextBundle(
         facts=facts,

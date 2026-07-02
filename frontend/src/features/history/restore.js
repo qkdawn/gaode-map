@@ -386,11 +386,21 @@
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
                 const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
+                const grid = payload.grid && typeof payload.grid === 'object' ? payload.grid : {};
                 const layer = payload.layer && typeof payload.layer === 'object' ? payload.layer : {};
-                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !Array.isArray(layer.cells)) return false;
+                const features = Array.isArray(grid.features) ? grid.features : [];
+                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !features.length || !Array.isArray(layer.cells)) return false;
                 this.populationOverview = Object.keys(overview).length ? overview : { summary };
+                this.populationGrid = {
+                    type: 'FeatureCollection',
+                    features,
+                    count: Number.isFinite(Number(grid.count)) ? Number(grid.count) : features.length,
+                    cell_count: Number.isFinite(Number(grid.cell_count)) ? Number(grid.cell_count) : features.length,
+                    scope_id: String(grid.scope_id || payload.scope_id || ''),
+                };
                 this.populationLayer = layer;
-                this.populationGridCount = this.populationLayer.cells.length;
+                this.populationGridCount = this.populationGrid.cell_count;
+                this.populationScopeId = String(grid.scope_id || layer.scope_id || payload.scope_id || '');
                 if (payload.year) this.populationSelectedYear = String(payload.year);
                 if (payload.view) this.populationAnalysisView = String(payload.view);
                 this.populationSubTab = 'analysis';
@@ -404,11 +414,21 @@
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
                 const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
+                const grid = payload.grid && typeof payload.grid === 'object' ? payload.grid : {};
                 const layer = payload.layer && typeof payload.layer === 'object' ? payload.layer : {};
-                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !Array.isArray(layer.cells)) return false;
+                const features = Array.isArray(grid.features) ? grid.features : [];
+                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !features.length || !Array.isArray(layer.cells)) return false;
                 this.nightlightOverview = Object.keys(overview).length ? overview : { summary };
+                this.nightlightGrid = {
+                    type: 'FeatureCollection',
+                    features,
+                    count: Number.isFinite(Number(grid.count)) ? Number(grid.count) : features.length,
+                    cell_count: Number.isFinite(Number(grid.cell_count)) ? Number(grid.cell_count) : features.length,
+                    scope_id: String(grid.scope_id || payload.scope_id || ''),
+                };
                 this.nightlightLayer = layer;
-                this.nightlightGridCount = this.nightlightLayer.cells.length;
+                this.nightlightGridCount = this.nightlightGrid.cell_count;
+                this.nightlightScopeId = String(grid.scope_id || layer.scope_id || payload.scope_id || '');
                 this.nightlightRaster = payload.raster && typeof payload.raster === 'object' ? payload.raster : null;
                 if (payload.year) this.nightlightSelectedYear = Number(payload.year);
                 if (payload.view) this.nightlightAnalysisView = String(payload.view);
@@ -418,7 +438,15 @@
                 if (token !== this.historyDetailLoadToken) {
                     return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
                 }
-                const artifacts = await this.fetchHistoryArtifacts(historyId, signal);
+                let artifacts;
+                try {
+                    artifacts = await this.fetchHistoryArtifacts(historyId, signal);
+                } catch (e) {
+                    if (e && (e.name === 'AbortError' || String(e.message || '').toLowerCase().includes('aborted'))) {
+                        return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
+                    }
+                    throw e;
+                }
                 if (token !== this.historyDetailLoadToken) {
                     return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
                 }

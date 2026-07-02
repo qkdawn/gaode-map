@@ -379,8 +379,8 @@ def _spatial_narrative_guidance() -> Dict[str, Any]:
         "relationship_lenses": ["主结构", "内圈/外圈", "锚点关系", "学生/社区/游逛动线", "界面", "串联", "夹持", "承托", "连续发生"],
         "action_lenses": ["先说片区矛盾或机会", "再说动作为什么重要", "最后说用什么证据筛掉伪机会"],
         "scenario_lenses": ["学生高频低客单", "社区晚间刚需", "文创游逛停留", "夜间社交消费", "外来目的性到访"],
-        "anti_patterns": ["不要逐项翻译指标面板", "不要只罗列地名", "不要把行动建议写成工具流程", "不要把未读取 chunk 的地名或空间对象写进结论"],
-        "evidence_rule": "具体地名和空间对象仍只能来自已读取的 read_analysis_chunk 结果；本指南只约束叙事组织方式。",
+        "anti_patterns": ["不要逐项翻译指标面板", "不要只罗列地名", "不要把行动建议写成工具流程", "不要把未读取 EvidenceNode 的地名或空间对象写进结论"],
+        "evidence_rule": "具体地名和空间对象仍只能来自已读取的 read_analysis_evidence_node EvidenceNode；本指南只约束叙事组织方式。",
     }
 
 
@@ -420,7 +420,7 @@ def build_answer_evidence_payload(
         "map_search_context": {
             "available": bool((artifacts or {}).get("frontend_map_search_context")),
             "artifact_key": "frontend_map_search_context" if (artifacts or {}).get("frontend_map_search_context") else "",
-            "evidence_rule": "具体地名、H3 格子、路网线段、人口/夜光 cell 只有通过 search_analysis_context 命中并 read_analysis_chunk 读取后，才能在最终回答中引用。",
+            "evidence_rule": "具体地名、H3 格子、路网线段、人口/夜光 cell 只有通过 search_analysis_context 命中并 read_analysis_evidence_node 读取 EvidenceNode 后，才能在最终回答中引用。",
         },
         "spatial_narrative_guidance": _spatial_narrative_guidance(),
         "answer_depth_guidance": _answer_depth_guidance(question),

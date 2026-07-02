@@ -3,6 +3,8 @@ import {
   createDefaultPptSpec,
   createDefaultUserPptSources,
   createPptTransportFromAiPayload,
+  evidenceNodesFromAiPayload,
+  evidenceNodesFromPptEvidenceItems,
   normalizeDeckBrief,
   normalizeDeckSlideBrief,
   normalizeNarrativePlan,
@@ -378,15 +380,35 @@ function aiPayloadFromSource(source = {}) {
   return payload.version === 'ppt_ai_input_block_v1' ? payload : {}
 }
 
+function canonicalPptSourceKind(rawKind = '', sourceId = '', fallback = '') {
+  const allowed = new Set(['system', 'document', 'image', 'web', 'database', 'package'])
+  const kind = asText(rawKind)
+  const id = asText(sourceId)
+  if (allowed.has(kind)) return kind
+  if (id.startsWith('current:')) return 'system'
+  if (id.includes(':')) {
+    const prefix = id.split(':')[0]
+    return allowed.has(prefix) ? prefix : 'unknown'
+  }
+  const fallbackKind = asText(fallback)
+  return allowed.has(fallbackKind) ? fallbackKind : 'unknown'
+}
+
 function sourceForPptRequest(source = {}) {
   const meta = cloneObject(source.meta)
   const aiPayload = aiPayloadFromSource(source)
+  const sourceKind = canonicalPptSourceKind(source.source_kind || source.sourceKind || meta.sourceKind, source.id, source.type)
   return normalizePptSource({
     id: source.id,
     type: source.type,
     title: source.title,
     status: source.status,
     selected: source.selected,
+    source_kind: sourceKind,
+    summary: asText(source.summary || meta.label),
+    evidence_count: Number(source.evidence_count ?? source.evidenceCount ?? 0) || 0,
+    locator_summary: asText(source.locator_summary || source.locatorSummary),
+    availability: asText(source.availability),
     meta: {
       label: asText(meta.label),
       sourceKind: asText(meta.sourceKind),
@@ -400,7 +422,67 @@ function sourceForPptRequest(source = {}) {
 
 function sourceHasDeliverableAiPayload(source = {}) {
   const aiPayload = aiPayloadFromSource(source)
+  if (evidenceNodesFromAiPayload(aiPayload).length) return true
   return cloneArray(aiPayload.included).map((item) => asText(item)).filter(Boolean).length > 0
+}
+
+export function getPptSourceHealth(source = {}) {
+  const normalized = normalizePptSource(source)
+  const meta = cloneObject(normalized.meta)
+  const status = asText(normalized.status)
+  const availability = asText(normalized.availability)
+  if (status === 'failed') {
+    return {
+      healthStatus: 'failed',
+      healthLabel: '构建失败',
+      healthReason: asText(meta.error || normalized.summary || meta.label) || '来源构建失败，可重试或删除后重新添加。',
+      availability: 'unavailable',
+      retryable: true,
+    }
+  }
+  if (status === 'generating') {
+    return {
+      healthStatus: 'building',
+      healthLabel: '构建中',
+      healthReason: asText(normalized.summary || meta.label) || '来源正在解析或构建证据。',
+      availability: 'building',
+      retryable: false,
+    }
+  }
+  if (status !== 'ready') {
+    return {
+      healthStatus: 'pending',
+      healthLabel: '待构建',
+      healthReason: asText(normalized.summary || meta.label) || '来源尚未完成构建。',
+      availability: 'pending',
+      retryable: false,
+    }
+  }
+  if (availability && availability !== 'available') {
+    return {
+      healthStatus: 'unavailable',
+      healthLabel: '不可用',
+      healthReason: availability,
+      availability,
+      retryable: true,
+    }
+  }
+  if (!sourceHasDeliverableAiPayload(normalized)) {
+    return {
+      healthStatus: 'empty_evidence',
+      healthLabel: '证据为空',
+      healthReason: '来源已就绪，但没有可发送给 AI 的证据或指标。',
+      availability: 'empty_evidence',
+      retryable: true,
+    }
+  }
+  return {
+    healthStatus: 'available',
+    healthLabel: '可用于 AI',
+    healthReason: '',
+    availability: 'available',
+    retryable: false,
+  }
 }
 
 export function getPptSourceDeliveryManifest(state = {}) {
@@ -478,7 +560,7 @@ function packageAiPayloadFromSource(source = {}) {
     })
   })
   const included = evidence.length ? ['evidence'] : []
-  return {
+  const payload = {
     version: 'ppt_ai_input_block_v1',
     source_id: sourceId,
     sourceId,
@@ -490,7 +572,6 @@ function packageAiPayloadFromSource(source = {}) {
     metrics: [],
     metric_gaps: [],
     metricGaps: [],
-    evidence,
     visual_specs: [],
     visualSpecs: [],
     excluded: [
@@ -499,6 +580,12 @@ function packageAiPayloadFromSource(source = {}) {
     ],
     counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, visual_specs: 0 },
     policy: '资料包只通过摘要、代表样本、载体摘要进入 evidence；不传完整明细。',
+  }
+  const evidenceNodes = evidenceNodesFromPptEvidenceItems(payload, evidence)
+  return {
+    ...payload,
+    evidence_nodes: evidenceNodes,
+    evidenceNodes,
   }
 }
 
@@ -530,12 +617,18 @@ function normalizeSources(seedSources = []) {
 
 function getDefaultGroupSpecForSource(source = {}) {
   const sourceId = asText(source.id)
-  const sourceKind = asText((source.meta || {}).sourceKind)
+  const sourceKind = canonicalPptSourceKind(source.source_kind || source.sourceKind || (source.meta || {}).sourceKind, sourceId)
   if (sourceKind === 'package' || sourceKind === 'package-placeholder' || sourceId.startsWith('package:') || sourceId.startsWith('package-placeholder:')) {
     return { id: 'group:packages', title: '资料包', emoji: '' }
   }
   if (sourceKind === 'document' || sourceId.startsWith('document:')) {
     return { id: 'group:document-evidence', title: '文档库', emoji: '' }
+  }
+  if (sourceKind === 'web') {
+    return { id: 'group:web', title: '联网资料', emoji: '' }
+  }
+  if (sourceKind === 'database' || sourceId.startsWith('database:')) {
+    return { id: 'group:database', title: '数据库源', emoji: '' }
   }
   if (['current:scope', 'current:dataset:h3'].includes(sourceId)) {
     return { id: 'group:spatial-scope', title: '空间范围与网格', emoji: '' }
@@ -681,10 +774,12 @@ function isPptPackageSource(source = {}) {
 }
 
 function isRetainedUserSource(source = {}) {
-  const sourceKind = asText(source.meta && source.meta.sourceKind)
+  const sourceKind = canonicalPptSourceKind(source.source_kind || source.sourceKind || (source.meta && source.meta.sourceKind), source.id)
   const sourceId = asText(source.id)
-  return ['user', 'package', 'document'].includes(sourceKind)
+  return ['package', 'document', 'image', 'web', 'database'].includes(sourceKind)
     || sourceId.startsWith('document:')
+    || sourceId.startsWith('image:')
+    || sourceId.startsWith('database:')
 }
 
 function outlineRevisionKey(item = {}) {
@@ -2123,10 +2218,12 @@ export function applyPptVisualArtifactsResponse(state = {}, response = {}) {
       visualArtifacts: [...retained, ...incomingArtifacts],
     }
   })
+  const targetSlide = nextSlides.find((slide) => Number(slide.index || 0) === slideIndex) || {}
+  const hasReadyVisualArtifacts = incomingArtifacts.length > 0 || cloneArray(targetSlide.visualArtifacts || targetSlide.visual_artifacts).length > 0
   const allVisualsReady = nextSlides.some(slideHasVisualSpecs) && !nextSlides.some(slideHasPendingVisualSpecs)
   return createPptPlanningState({
     ...normalized,
-    currentStep: allVisualsReady ? PPT_PLANNING_STEPS.VISUALS_READY : normalized.currentStep,
+    currentStep: (hasReadyVisualArtifacts || allVisualsReady) ? PPT_PLANNING_STEPS.VISUALS_READY : normalized.currentStep,
     deckBrief: {
       ...normalizeDeckBrief(normalized.deckBrief),
       slides: nextSlides,
@@ -2689,7 +2786,7 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
       },
     }
   }).filter((item) => asText(item.text)) : []
-  const aiPayload = {
+  const aiPayloadBase = {
     version: 'ppt_ai_input_block_v1',
     source_id: sourceId,
     sourceId,
@@ -2701,12 +2798,17 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
     metrics: [],
     metric_gaps: [],
     metricGaps: [],
-    evidence,
     visual_specs: [],
     visualSpecs: [],
     excluded: [{ type: 'document_full_text', reason: '不传文档全文，只传 PageIndex 节点/章节摘要。', count: Number(options.count || indexPreview.length || 0) || 0 }],
     counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, visual_specs: 0 },
     policy: '文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。',
+  }
+  const evidenceNodes = evidenceNodesFromPptEvidenceItems(aiPayloadBase, evidence)
+  const aiPayload = {
+    ...aiPayloadBase,
+    evidence_nodes: evidenceNodes,
+    evidenceNodes,
   }
   const transport = ready ? createPptTransportFromAiPayload(aiPayload) : cloneObject(previous && previous.meta && previous.meta.transport)
   const nextSource = normalizePptSource({
@@ -2742,11 +2844,94 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
   })
 }
 
+export function upsertPptImageSource(state = {}, attachment = {}, options = {}) {
+  const normalized = createPptPlanningState(state)
+  const attachmentId = asText(attachment.attachment_id || attachment.attachmentId || attachment.id)
+  const sourceId = asText(options.sourceId) || (attachmentId ? `image:${attachmentId}` : '')
+  if (!sourceId) return normalized
+  const status = asText(options.status || attachment.status) || 'pending'
+  const ready = status === 'ready'
+  const title = asText(attachment.filename || attachment.fileName || options.title) || '图片来源'
+  const mimeType = asText(attachment.mime_type || attachment.mimeType)
+  const previousById = new Map(normalized.sources.map((item) => [asText(item.id), item]))
+  const previous = previousById.get(sourceId)
+  const previousPayload = cloneObject(previous && previous.meta && (previous.meta.aiPayload || previous.meta.ai_payload))
+  const aiPayload = previousPayload.version === 'ppt_ai_input_block_v1'
+    ? previousPayload
+    : {
+        version: 'ppt_ai_input_block_v1',
+        source_id: sourceId,
+        sourceId,
+        title,
+        source_kind: 'image',
+        sourceKind: 'image',
+        included: [],
+        scope: null,
+        metrics: [],
+        metric_gaps: [],
+        metricGaps: [],
+        evidence: [],
+        visual_specs: [],
+        visualSpecs: [],
+        excluded: [{ type: 'image_binary', reason: '图片解析完成前不直接进入生成。' }],
+        counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: 0, visual_specs: 0 },
+        policy: '图片来源只通过 OCR、图像描述和视觉理解证据节点进入生成。',
+      }
+  const evidenceCount = Number((aiPayload.counts || {}).evidence || evidenceNodesFromAiPayload(aiPayload).length || 0) || 0
+  const nextSource = normalizePptSource({
+    ...(previous || {}),
+    id: sourceId,
+    type: 'image',
+    title,
+    status,
+    selected: ready ? (previous ? !!previous.selected : true) : false,
+    source_kind: 'image',
+    summary: asText(attachment.summary || options.label) || (ready ? '图片解析完成' : status === 'generating' || status === 'processing' ? '图片解析中' : '待解析'),
+    evidence_count: evidenceCount,
+    locator_summary: `${title}${mimeType ? ` / ${mimeType}` : ''}`,
+    availability: ready
+      ? (evidenceCount > 0 ? 'available' : 'empty_evidence:image_parse_empty')
+      : status === 'failed' ? 'failed:image_parse_failed' : 'building:image_parse_pending',
+    meta: {
+      ...cloneObject(previous && previous.meta),
+      label: asText(attachment.summary || options.label) || (ready ? '图片解析完成' : '图片解析中'),
+      sourceKind: 'image',
+      attachmentId,
+      conversationId: asText(attachment.conversation_id || attachment.conversationId || options.conversationId),
+      fileName: title,
+      mimeType,
+      image: {
+        attachment_id: attachmentId,
+        conversation_id: asText(attachment.conversation_id || attachment.conversationId || options.conversationId),
+        history_id: asText(attachment.history_id || attachment.historyId),
+        filename: title,
+        mime_type: mimeType,
+        status,
+      },
+      aiPayload,
+      ai_payload: aiPayload,
+      transport: evidenceCount > 0 ? createPptTransportFromAiPayload(aiPayload) : cloneObject(previous && previous.meta && previous.meta.transport),
+    },
+  })
+  const sources = normalized.sources.some((source) => asText(source.id) === sourceId)
+    ? normalized.sources.map((source) => (asText(source.id) === sourceId ? nextSource : source))
+    : [...normalized.sources, nextSource]
+  return createPptPlanningState({
+    ...normalized,
+    sources,
+    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources, normalized.ungroupedSourceIds),
+    spec: syncSpecSourceIds(normalized, sources),
+    generationError: '',
+    generationErrorSource: '',
+  })
+}
+
 export function addPptDataPackageSource(state = {}, response = {}) {
   const normalized = createPptPlanningState(state)
   let packageSource = normalizePptSource(response.source || response)
   if (!packageSource.id) return createPptPlanningState({ ...normalized, dataPackageGenerating: false })
   const packageMeta = cloneObject(packageSource.meta)
+  const sourceKind = canonicalPptSourceKind(packageMeta.sourceKind || packageSource.source_kind || packageSource.sourceKind, packageSource.id, 'package')
   const existingPayload = cloneObject(packageMeta.aiPayload || packageMeta.ai_payload)
   const aiPayload = existingPayload.version === 'ppt_ai_input_block_v1'
     ? existingPayload
@@ -2766,14 +2951,16 @@ export function addPptDataPackageSource(state = {}, response = {}) {
   const isSamePackageIntent = (source = {}) => {
     const meta = cloneObject(source.meta)
     const pack = cloneObject(meta.package)
-    const sourceKind = asText(meta.sourceKind)
+    const sourceKind = canonicalPptSourceKind(source.source_kind || source.sourceKind || meta.sourceKind, source.id)
     const sourceId = asText(source.id)
     const packageLike = sourceKind === 'package'
       || sourceKind === 'package-placeholder'
       || sourceId.startsWith('package:')
       || sourceId.startsWith('package-placeholder:')
+      || (sourceKind === 'web' && asText(packageSource.id) === sourceId)
     if (!packageLike) return false
     if (asText(source.id) === packageSource.id) return true
+    if (canonicalPptSourceKind(packageSource.source_kind || packageSource.sourceKind || nextMeta.sourceKind, packageSource.id) === 'web') return false
     if (!nextPack.intent || !nextPack.package_mode) return false
     const sourceIds = uniqueText(pack.source_ids || pack.sourceIds).sort()
     return asText(meta.areaId) === asText(nextMeta.areaId)
@@ -2790,7 +2977,7 @@ export function addPptDataPackageSource(state = {}, response = {}) {
       selected: true,
       meta: {
         ...(packageSource.meta || {}),
-        sourceKind: 'package',
+        sourceKind,
       },
     },
   ]
@@ -2831,7 +3018,7 @@ export function buildPptSpecPayload(state = {}, context = {}) {
     audience: asText(normalized.spec.audience),
     deck_type: asText(normalized.spec.deckType),
     page_count: Number(normalized.spec.pageCount || 15),
-    research_enabled: !!normalized.spec.researchEnabled,
+    web_sources_enabled: !!normalized.spec.webSourcesEnabled,
     sources,
   }
 }
@@ -2866,7 +3053,7 @@ export function buildDeckBriefPayload(state = {}, context = {}) {
     audience: asText(normalized.spec.audience),
     deck_type: asText(normalized.spec.deckType),
     page_count: Number(normalized.spec.pageCount || 15),
-    research_enabled: !!normalized.spec.researchEnabled,
+    web_sources_enabled: !!normalized.spec.webSourcesEnabled,
   }
 }
 

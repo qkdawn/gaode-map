@@ -57,6 +57,25 @@ def _ai_payload(
         included.append("metric_gaps")
     if evidence:
         included.append("evidence")
+    evidence_nodes = []
+    for index, item in enumerate(evidence, start=1):
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        node_source_id = item.get("source_id") or payload.get("source_id") or source_id
+        node_type = item.get("type") or item.get("evidence_level") or "source_evidence"
+        evidence_nodes.append({
+            "id": item.get("id") or payload.get("evidence_node_id") or f"{node_source_id}:evidence:{index}",
+            "source_id": node_source_id,
+            "source_type": payload.get("source_type") or source_kind,
+            "title": item.get("title") or title,
+            "content": item.get("content") or item.get("text") or item.get("summary") or "",
+            "summary": item.get("summary") or item.get("text") or item.get("content") or "",
+            "metadata": payload,
+            "locator": item.get("locator") or payload.get("locator") or "",
+            "score": item.get("score") or 0,
+            "evidence_level": node_type,
+            "warnings": item.get("warnings") or [],
+            "citation": item.get("citation") or "",
+        })
     return {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
@@ -66,7 +85,8 @@ def _ai_payload(
         "scope": scope,
         "metrics": metrics,
         "metric_gaps": metric_gaps,
-        "evidence": evidence,
+        "evidence_nodes": evidence_nodes,
+        "evidenceNodes": evidence_nodes,
         "visual_specs": [],
         "excluded": excluded or [{"type": "raw_payload", "reason": "不传原始数据。"}],
         "counts": {
@@ -96,7 +116,7 @@ def test_generate_ppt_spec_returns_ai_outline(monkeypatch):
                 {"id": "page-1", "page_no": 1, "theme": "项目命题", "purpose": "建立汇报主线"},
                 {"id": "page-2", "page_no": 2, "theme": "空间证据", "purpose": "说明等时圈数据依据"},
             ],
-            "source_summary": "已选择 2 个来源，包含联网研究",
+            "source_summary": "已选择 2 个来源，包含联网来源",
             "missing_inputs": [],
         }
 
@@ -109,7 +129,7 @@ def test_generate_ppt_spec_returns_ai_outline(monkeypatch):
             topic="长沙县政府原址城市更新",
             audience="政府评审",
             page_count=15,
-            research_enabled=True,
+            web_sources_enabled=True,
         )
     ))
 
@@ -238,7 +258,7 @@ def test_generate_ppt_spec_sends_compact_carrier_package_to_llm(monkeypatch):
             "outline": [
                 {"id": "page-1", "page_no": 1, "theme": "空间载体判断", "purpose": "说明载体类型"},
             ],
-            "source_summary": "已选择 1 个来源，包含联网研究",
+            "source_summary": "已选择 1 个来源，包含联网来源",
             "missing_inputs": [],
         }
 
@@ -339,7 +359,9 @@ def test_generate_ppt_spec_sends_compact_carrier_package_to_llm(monkeypatch):
     assert "package" not in source_meta
     assert source_meta["aiPayload"]["counts"]["evidence"] == 2
     assert seen_payload["source_manifest"][0]["excluded"][0]["type"] == "package_full_items"
-    assert seen_payload["evidence_context"]["items"][0]["type"] == "package_summary"
+    assert seen_payload["evidence_context"]["items"][0]["evidence_level"] == "package_summary"
+    assert seen_payload["evidence_context"]["items"][0]["source_type"] == "package"
+    assert seen_payload["evidence_node_context"]["items"][1]["metadata"]["carrier_id"] == "corridor_01"
 
     serialized = json.dumps(seen_payload["sources"], ensure_ascii=False)
     assert "raw_payload" not in serialized
@@ -363,7 +385,7 @@ def test_generate_ppt_spec_sends_document_index_preview_to_llm(monkeypatch):
             "outline": [
                 {"id": "page-1", "page_no": 1, "theme": "政策要求", "purpose": "说明政策依据"},
             ],
-            "source_summary": "已选择 1 个来源，包含联网研究",
+            "source_summary": "已选择 1 个来源，包含联网来源",
             "missing_inputs": [],
         }
 
@@ -426,7 +448,9 @@ def test_generate_ppt_spec_sends_document_index_preview_to_llm(monkeypatch):
     assert source_payload["type"] == "document"
     assert "document" not in source_payload["meta"]
     assert "document_index_preview" not in source_payload["meta"]
-    assert seen_payload["evidence_context"]["items"][0]["text"] == "政策要求完善公共服务设施。"
+    assert seen_payload["evidence_context"]["items"][0]["content"] == "政策要求完善公共服务设施。"
+    assert seen_payload["evidence_context"]["items"][0]["source_type"] == "document"
+    assert seen_payload["evidence_node_context"]["items"][0]["id"] == "document:doc-1:evidence:1"
     serialized = json.dumps(source_payload, ensure_ascii=False)
     assert "不应进入 LLM 的长原文" not in serialized
 
@@ -448,7 +472,7 @@ def test_generate_deck_brief_returns_ai_directive_not_pptx(monkeypatch):
                 "outline": [
                     {"id": "page-1", "page_no": 1, "theme": "项目命题", "purpose": "建立汇报主线"},
                 ],
-                "source_summary": "已选择 1 个来源，不包含联网研究",
+                "source_summary": "已选择 1 个来源，不包含联网来源",
                 "missing_inputs": [],
             }
         seen_directive_payload.update(kwargs.get("user_payload") or {})
@@ -492,7 +516,7 @@ def test_generate_deck_brief_returns_ai_directive_not_pptx(monkeypatch):
                     ],
                 }
             ],
-            "source_summary": "已选择 1 个来源，不包含联网研究",
+            "source_summary": "已选择 1 个来源，不包含联网来源",
             "missing_inputs": [],
         }
 

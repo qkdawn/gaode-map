@@ -177,6 +177,16 @@ def delete_attachment(conversation_id: str, attachment_id: str) -> bool:
     return True
 
 
+def retry_attachment_ingest(conversation_id: str, attachment_id: str) -> AttachmentRecord | None:
+    record = _find_record(_safe_segment(conversation_id, ""), _safe_segment(attachment_id, ""))
+    if not record:
+        return None
+    current = record.model_copy(update={"status": "processing", "error": "", "updated_at": _utc_now()})
+    _write_record(current)
+    schedule_attachment_ingest(current)
+    return current
+
+
 async def ingest_attachment(record: AttachmentRecord) -> AttachmentRecord:
     current = record.model_copy(update={"status": "processing", "updated_at": _utc_now(), "error": ""})
     _write_record(current)
@@ -343,7 +353,11 @@ def _chunks_from_context(record: AttachmentRecord, context: str) -> List[Attachm
                 content=part[:4000],
                 locator=_extract_locator(part),
                 source_artifacts=[record.filename],
-                metadata={"conversation_id": record.conversation_id},
+                metadata={
+                    "conversation_id": record.conversation_id,
+                    "history_id": record.history_id,
+                    "mime_type": record.mime_type,
+                },
             )
         )
     return chunks
@@ -372,6 +386,10 @@ def _read_chunks(record: AttachmentRecord) -> List[AttachmentChunk]:
         return []
 
 
+def read_attachment_chunks(record: AttachmentRecord) -> List[AttachmentChunk]:
+    return _read_chunks(record)
+
+
 def _summarize_chunks(chunks: List[AttachmentChunk]) -> str:
     if not chunks:
         return ""
@@ -384,6 +402,7 @@ def _search_hit_from_chunk(chunk: AttachmentChunk, *, score: float, snippet: str
         chunk_id=chunk.chunk_id,
         attachment_id=chunk.attachment_id,
         filename=chunk.filename,
+        mime_type=str((chunk.metadata or {}).get("mime_type") or ""),
         snippet=snippet,
         evidence_level=chunk.evidence_level,
         score=score,

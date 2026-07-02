@@ -1,7 +1,7 @@
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -36,11 +36,13 @@ from modules.ppt_planning.data_tools import (
     PptDataInvalidIntentPlan,
     PptDataSourceNotFound,
     create_ppt_data_package,
+    delete_ppt_persisted_source,
     list_ppt_sources,
     query_nearby_poi_points,
     query_poi_points,
     read_ppt_source_summary,
 )
+from modules.ppt_database.service import build_database_data_package
 from modules.ppt_planning.service import (
     PptPlanningInvalidResponse,
     PptPlanningLlmUnavailable,
@@ -54,6 +56,14 @@ from modules.ppt_planning.service import (
     regenerate_deck_brief_slide,
     regenerate_ppt_outline_section,
 )
+from modules.retrieval.attachments import (
+    delete_attachment,
+    list_attachments,
+    retry_attachment_ingest,
+    save_attachment_upload,
+    schedule_attachment_ingest,
+)
+from modules.retrieval.schemas import AttachmentRecord
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -61,6 +71,50 @@ logger = logging.getLogger(__name__)
 
 class PptVisualArtifactCleanupRequest(BaseModel):
     filenames: list[str] = Field(default_factory=list)
+
+
+@router.post("/api/v1/analysis/ppt/image-sources", response_model=AttachmentRecord)
+async def post_ppt_image_source(
+    conversation_id: str = Form(...),
+    history_id: str = Form(""),
+    file: UploadFile = File(...),
+):
+    try:
+        record = save_attachment_upload(
+            conversation_id=conversation_id,
+            history_id=history_id,
+            filename=file.filename or "image-source",
+            content_type=file.content_type or "",
+            fileobj=file.file,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 413 if detail == "attachment_too_large" else 400
+        raise HTTPException(status_code=status_code, detail=detail)
+    finally:
+        await file.close()
+    schedule_attachment_ingest(record)
+    return record.model_copy(update={"status": "processing"})
+
+
+@router.get("/api/v1/analysis/ppt/image-sources", response_model=list[AttachmentRecord])
+async def get_ppt_image_sources(conversation_id: str):
+    return list_attachments(conversation_id)
+
+
+@router.delete("/api/v1/analysis/ppt/image-sources/{attachment_id}")
+async def remove_ppt_image_source(attachment_id: str, conversation_id: str):
+    if not delete_attachment(conversation_id, attachment_id):
+        raise HTTPException(status_code=404, detail="image_source_not_found")
+    return {"status": "success", "id": attachment_id}
+
+
+@router.post("/api/v1/analysis/ppt/image-sources/{attachment_id}/ingest", response_model=AttachmentRecord)
+async def retry_ppt_image_source_ingest(attachment_id: str, conversation_id: str):
+    record = retry_attachment_ingest(conversation_id, attachment_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="image_source_not_found")
+    return record
 
 
 def _raise_ppt_database_error(exc: SQLAlchemyError) -> None:
@@ -119,9 +173,9 @@ def _raise_ppt_planning_error(exc: Exception) -> None:
 
 
 @router.get("/api/v1/analysis/ppt/data/sources", response_model=list[PptDataSourceSummary])
-async def get_ppt_data_sources(area_id: str):
+async def get_ppt_data_sources(area_id: str, conversation_id: str = ""):
     try:
-        return list_ppt_sources(area_id)
+        return list_ppt_sources(area_id, conversation_id=conversation_id)
     except SQLAlchemyError as exc:
         _raise_ppt_database_error(exc)
     except RuntimeError as exc:
@@ -132,6 +186,16 @@ async def get_ppt_data_sources(area_id: str):
 async def get_ppt_data_source_summary(area_id: str, source_id: str):
     try:
         return read_ppt_source_summary(area_id, source_id)
+    except SQLAlchemyError as exc:
+        _raise_ppt_database_error(exc)
+    except RuntimeError as exc:
+        _raise_ppt_data_error(exc)
+
+
+@router.delete("/api/v1/analysis/ppt/data/sources")
+async def delete_ppt_data_source(area_id: str, source_id: str):
+    try:
+        return delete_ppt_persisted_source(area_id, source_id)
     except SQLAlchemyError as exc:
         _raise_ppt_database_error(exc)
     except RuntimeError as exc:
@@ -168,6 +232,21 @@ async def post_ppt_data_package(payload: PptDataPackageRequest):
         _raise_ppt_data_error(exc)
     except (httpx.HTTPError, ValueError) as exc:
         _raise_ppt_llm_error(exc, detail_prefix="ppt_data_llm")
+
+
+class PptDatabasePackageRequest(BaseModel):
+    area_id: str = Field(default="")
+    title: str = Field(default="")
+
+
+@router.post("/api/v1/analysis/ppt/data/database-package", response_model=PptDataPackageResponse)
+async def post_ppt_database_package(payload: PptDatabasePackageRequest):
+    try:
+        return build_database_data_package(payload.area_id, title=payload.title)
+    except SQLAlchemyError as exc:
+        _raise_ppt_database_error(exc)
+    except RuntimeError as exc:
+        _raise_ppt_data_error(exc)
 
 
 @router.post("/api/v1/analysis/ppt/source-groups/classify", response_model=PptSourceGroupClassifyResponse)

@@ -11,7 +11,7 @@ from .schemas import AgentContextAskRequest, AgentContextAskResponse, ContextAsk
 
 CONTEXT_ASK_SYSTEM_PROMPT = """
 你是 Geo-Agent 的上下文解释器。只解释用户当前点击的 target，不重新规划、不调用工具、不虚构新数据。
-回答必须围绕当前区域上下文，引用已有 evidence 或 artifact_refs；如果证据不足，要明确说明缺口。
+回答必须围绕当前区域上下文，引用已有 EvidenceNode、source_id 或 artifact_refs；如果证据不足，要明确说明缺口。
 输出 JSON：answer, evidence, citations, warnings。answer 包含直接回答、依据、不确定性、可继续追问建议。
 """.strip()
 
@@ -29,6 +29,44 @@ def _compact_items(items: List[Any], limit: int = 8) -> List[Any]:
             text = _as_text(item)
             if text:
                 compacted.append(text[:500])
+    return compacted
+
+
+def _source_evidence_nodes(item: Dict[str, Any]) -> List[Any]:
+    nodes = item.get("evidence_nodes") if isinstance(item.get("evidence_nodes"), list) else item.get("evidenceNodes")
+    if isinstance(nodes, list) and nodes:
+        return nodes
+    evidence = item.get("evidence") if isinstance(item.get("evidence"), list) else []
+    return evidence
+
+
+def _compact_evidence_nodes(nodes: List[Any], *, limit: int = 3) -> List[Dict[str, Any]]:
+    compacted: List[Dict[str, Any]] = []
+    for node in list(nodes or [])[:limit]:
+        if not isinstance(node, dict):
+            text = _as_text(node)
+            if text:
+                compacted.append({"content": text[:220]})
+            continue
+        summary = _as_text(node.get("summary"))
+        content = _as_text(node.get("content") or node.get("text"))
+        compacted_node: Dict[str, Any] = {
+            "id": _as_text(node.get("id") or node.get("node_id") or node.get("nodeId")),
+            "source_id": _as_text(node.get("source_id") or node.get("sourceId")),
+            "source_type": _as_text(node.get("source_type") or node.get("sourceType")),
+            "title": _as_text(node.get("title"))[:160],
+        }
+        if summary:
+            compacted_node["summary"] = summary[:220]
+        elif content:
+            compacted_node["content"] = content[:220]
+        locator = node.get("locator")
+        if isinstance(locator, dict):
+            compacted_node["locator"] = _compact_value(locator, depth=1, list_limit=4, string_limit=120)
+        citation = node.get("citation")
+        if isinstance(citation, dict):
+            compacted_node["citation"] = _compact_value(citation, depth=1, list_limit=4, string_limit=120)
+        compacted.append({key: value for key, value in compacted_node.items() if value not in ("", None, [], {})})
     return compacted
 
 
@@ -73,8 +111,35 @@ def _compact_target(target: ContextAskTarget) -> Dict[str, Any]:
     data = target.model_dump(mode="json")
     data["summary"] = _as_text(data.get("summary"))[:1200]
     data["evidence"] = _compact_items(list(target.evidence or []), limit=6)
-    data["payload"] = _compact_value(target.payload, depth=2, list_limit=6, string_limit=400)
+    data["payload"] = _compact_value(target.payload, depth=3, list_limit=6, string_limit=400)
     return data
+
+
+def _compact_ppt_sources(target: ContextAskTarget) -> Dict[str, Any]:
+    payload = target.payload if isinstance(target.payload, dict) else {}
+    sources = list(payload.get("sources") or [])
+    compacted_sources: List[Dict[str, Any]] = []
+    for item in sources[:24]:
+        if not isinstance(item, dict):
+            continue
+        compacted_sources.append({
+            "source_id": _as_text(item.get("source_id") or item.get("sourceId") or item.get("id")),
+            "title": _as_text(item.get("title")),
+            "source_kind": _as_text(item.get("source_kind") or item.get("sourceKind")),
+            "included": list(item.get("included") or [])[:8],
+            "scope": _compact_value(item.get("scope"), depth=2, list_limit=4, string_limit=200),
+            "metrics": _compact_value(item.get("metrics"), depth=1, list_limit=4, string_limit=160),
+            "metric_gaps": _compact_value(item.get("metric_gaps") or item.get("metricGaps"), depth=1, list_limit=4, string_limit=160),
+            "evidence_count": len(_source_evidence_nodes(item)),
+            "evidence_nodes": _compact_evidence_nodes(_source_evidence_nodes(item), limit=3),
+            "visual_specs_count": len(list(item.get("visual_specs") or item.get("visualSpecs") or [])),
+            "policy": _as_text(item.get("policy"))[:240],
+            "transport_status": _as_text(item.get("transport_status") or item.get("transportStatus")),
+        })
+    return {
+        "source_count": len(sources),
+        "sources": compacted_sources,
+    }
 
 
 def _json_size(value: Dict[str, Any]) -> int:
@@ -111,12 +176,14 @@ def _fallback_answer(question: str, target: ContextAskTarget, reason: str = "") 
 
 def _build_user_payload(payload: AgentContextAskRequest) -> Dict[str, Any]:
     target = payload.target
+    is_ppt_sources = _as_text(target.type) == "ppt_sources"
     user_payload = {
         "question": payload.question,
         "conversation_id": payload.conversation_id,
         "history_id": payload.history_id,
         "target": _compact_target(target),
         "analysis_snapshot_summary": _compact_snapshot(payload),
+        "ppt_sources_summary": _compact_ppt_sources(target) if is_ppt_sources else {},
         "instructions": [
             "只解释 target，不延伸到无关区域。",
             "不能说使用了没有出现在 evidence/artifact_refs/payload/snapshot_summary 中的数据。",
@@ -143,6 +210,11 @@ def _format_ai_error(exc: Exception) -> str:
     return f"AI 调用失败：{type(exc).__name__}"
 
 
+def _strict_ai_failure(error: str, warning: str = "") -> AgentContextAskResponse:
+    warnings = [warning] if warning else []
+    return AgentContextAskResponse(status="failed", error=error, warnings=warnings)
+
+
 async def answer_context_ask(payload: AgentContextAskRequest) -> AgentContextAskResponse:
     question = _as_text(payload.question)
     if not question:
@@ -152,11 +224,17 @@ async def answer_context_ask(payload: AgentContextAskRequest) -> AgentContextAsk
     if not _as_text(target.title):
         target.title = "当前上下文"
 
+    require_ai = bool(payload.require_ai)
+
     if not is_llm_enabled():
+        if require_ai:
+            return _strict_ai_failure("ai_unavailable", "AI 未启用，无法回答。")
         return _fallback_answer(question, target, "AI 未启用，已返回规则解释。")
 
     client = get_llm_provider_client()
     if not client:
+        if require_ai:
+            return _strict_ai_failure("ai_unavailable", "AI provider 未配置，无法回答。")
         return _fallback_answer(question, target, "AI provider 未配置，已返回规则解释。")
 
     try:
@@ -168,13 +246,20 @@ async def answer_context_ask(payload: AgentContextAskRequest) -> AgentContextAsk
             reasoning_id="context-ask",
         )
     except Exception as exc:
-        return _fallback_answer(question, target, f"{_format_ai_error(exc)}，已返回规则解释。")
+        message = _format_ai_error(exc)
+        if require_ai:
+            return _strict_ai_failure("ai_call_failed", message)
+        return _fallback_answer(question, target, f"{message}，已返回规则解释。")
 
     if not isinstance(data, dict):
+        if require_ai:
+            return _strict_ai_failure("ai_invalid_response", "AI 返回格式异常。")
         return _fallback_answer(question, target, "AI 返回格式异常，已返回规则解释。")
 
     answer = _as_text(data.get("answer"))
     if not answer:
+        if require_ai:
+            return _strict_ai_failure("ai_invalid_response", "AI 返回缺少 answer。")
         return _fallback_answer(question, target, "AI 返回缺少 answer，已返回规则解释。")
 
     return AgentContextAskResponse(

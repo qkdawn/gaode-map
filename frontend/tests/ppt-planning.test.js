@@ -5,11 +5,13 @@ import {
   createAgentTabsMethods,
 } from '../src/features/agent/tabs.js'
 import {
+  createPptTransportFromAiPayload,
   createDefaultDeckBriefPreview,
   createPptSystemSources,
   normalizeDeckBrief,
   normalizeDeckSlideBrief,
   normalizeNarrativePlan,
+  normalizePptSource,
 } from '../src/features/ppt-planning/model.js'
 import {
   buildPptCarrierPreviewModel,
@@ -55,6 +57,7 @@ import {
   getPendingPptPackageSources,
   getPptPromptActions,
   getPptSourceDeliveryManifest,
+  getPptSourceHealth,
   getPptSourceSummary,
   markSlideApplying,
   markSlideFailed,
@@ -81,6 +84,7 @@ import {
   setPptSourceGroupSelected,
   togglePptSourceSelection,
   undoPptSectionRevision,
+  upsertPptImageSource,
 } from '../src/features/ppt-planning/ui-state.js'
 
 const DEFAULT_PPT_POI_EVIDENCE_INTENT = '为 PPT 指令生成整理当前区域代表性 POI 资料'
@@ -866,6 +870,9 @@ test('ppt system sources expose prebuilt transport preview before generation', (
   assert.equal(poiH3.meta.transport.transportStatus, 'ready_to_send')
   assert.equal(poiH3.meta.transport.metricCount, 1)
   assert.equal(poiH3.meta.transport.evidenceCount, 1)
+  assert.equal(Object.prototype.hasOwnProperty.call(poiH3.meta.aiPayload, 'evidence'), false)
+  assert.ok(String(poiH3.meta.aiPayload.evidence_nodes[0].id || '').startsWith('current:analysis:poi_h3:evidence:'))
+  assert.equal(poiH3.meta.aiPayload.evidence_nodes[0].source_type, 'system')
 })
 
 test('agent ppt system source refresh replaces stale empty transport preview', () => {
@@ -958,6 +965,547 @@ test('agent ppt document source delete removes backend document before source', 
   assert.deepEqual(deleted, ['doc-1'])
   assert.equal(state.sources.some((source) => source.id === 'document:doc-1'), false)
   assert.equal(state.removedSourceIds.includes('document:doc-1'), true)
+})
+
+test('agent ppt package source delete removes persisted artifact before source', async () => {
+  const deleted = []
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningPersistedSourceDelete(areaId, sourceId) {
+      deleted.push({ areaId, sourceId })
+      return Promise.resolve({ area_id: areaId, source_id: sourceId, deleted: 1 })
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'package:history-1:abc',
+        type: 'package',
+        title: '资料包',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'package', areaId: 'history-1' },
+      },
+    ],
+    ungroupedSourceIds: ['package:history-1:abc'],
+  }))
+
+  await ctx.removeAgentPptPlanningSource('package:history-1:abc')
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.deepEqual(deleted, [{ areaId: 'history-1', sourceId: 'package:history-1:abc' }])
+  assert.equal(state.sources.some((source) => source.id === 'package:history-1:abc'), false)
+  assert.equal(state.removedSourceIds.includes('package:history-1:abc'), true)
+})
+
+test('agent ppt selected source delete removes explicit documents and packages while skipping system sources', async () => {
+  const deletedDocuments = []
+  const deletedPersisted = []
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDocumentDelete(documentId) {
+      deletedDocuments.push(documentId)
+      return Promise.resolve({ id: documentId })
+    },
+    requestAgentPptPlanningPersistedSourceDelete(areaId, sourceId) {
+      deletedPersisted.push({ areaId, sourceId })
+      return Promise.resolve({ area_id: areaId, source_id: sourceId, deleted: 1 })
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'document:doc-1',
+        type: 'document',
+        title: '项目文档',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'document', documentId: 'doc-1' },
+      },
+      {
+        id: 'package:history-1:abc',
+        type: 'package',
+        title: '资料包',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'package', areaId: 'history-1' },
+      },
+      {
+        id: 'current:dataset:poi',
+        type: 'data',
+        title: 'POI 基础数据',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'system' },
+      },
+    ],
+    ungroupedSourceIds: ['document:doc-1', 'package:history-1:abc', 'current:dataset:poi'],
+  }))
+
+  await ctx.removeSelectedAgentPptPlanningSources({ source_ids: ['document:doc-1', 'package:history-1:abc', 'current:dataset:poi'] })
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.deepEqual(deletedDocuments, ['doc-1'])
+  assert.deepEqual(deletedPersisted, [{ areaId: 'history-1', sourceId: 'package:history-1:abc' }])
+  assert.equal(state.sources.some((source) => source.id === 'document:doc-1'), false)
+  assert.equal(state.sources.some((source) => source.id === 'package:history-1:abc'), false)
+  assert.equal(state.sources.some((source) => source.id === 'current:dataset:poi'), true)
+  assert.equal(state.generationError, '')
+})
+
+test('agent ppt selected source delete keeps failed sources and reports partial failure', async () => {
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDocumentDelete(documentId) {
+      return Promise.resolve({ id: documentId })
+    },
+    requestAgentPptPlanningPersistedSourceDelete() {
+      return Promise.reject(new Error('artifact_delete_failed'))
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'document:doc-1',
+        type: 'document',
+        title: '项目文档',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'document', documentId: 'doc-1' },
+      },
+      {
+        id: 'package:history-1:abc',
+        type: 'package',
+        title: '资料包',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'package', areaId: 'history-1' },
+      },
+    ],
+    ungroupedSourceIds: ['document:doc-1', 'package:history-1:abc'],
+  }))
+
+  await ctx.removeSelectedAgentPptPlanningSources({ source_ids: ['document:doc-1', 'package:history-1:abc'] })
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.equal(state.sources.some((source) => source.id === 'document:doc-1'), false)
+  assert.equal(state.sources.some((source) => source.id === 'package:history-1:abc'), true)
+  assert.match(state.generationError, /批量删除部分失败/)
+  assert.match(state.generationError, /artifact_delete_failed/)
+})
+
+test('agent ppt selected source delete ignores explicit system-only sources', async () => {
+  let deleteCalls = 0
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDocumentDelete() {
+      deleteCalls += 1
+      return Promise.resolve({})
+    },
+    requestAgentPptPlanningPersistedSourceDelete() {
+      deleteCalls += 1
+      return Promise.resolve({})
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'current:dataset:poi',
+        type: 'data',
+        title: 'POI 基础数据',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'system' },
+      },
+    ],
+  }))
+
+  await ctx.removeSelectedAgentPptPlanningSources({ source_ids: ['current:dataset:poi'] })
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.equal(deleteCalls, 0)
+  assert.equal(state.sources.length, 1)
+  assert.equal(state.generationError, '')
+})
+
+test('agent ppt selected source delete does not reuse ppt selected sources without explicit ids', async () => {
+  let deleteCalls = 0
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDocumentDelete() {
+      deleteCalls += 1
+      return Promise.resolve({})
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'document:doc-1',
+        type: 'document',
+        title: '项目文档',
+        status: 'ready',
+        selected: true,
+        meta: { sourceKind: 'document', documentId: 'doc-1' },
+      },
+    ],
+  }))
+
+  await ctx.removeSelectedAgentPptPlanningSources()
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.equal(deleteCalls, 0)
+  assert.equal(state.sources.some((source) => source.id === 'document:doc-1'), true)
+})
+
+test('agent ppt retry document source schedules parse from source panel state', async () => {
+  const parsed = []
+  let refreshCalls = 0
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDocumentParse(documentId) {
+      parsed.push(documentId)
+      return Promise.resolve({})
+    },
+    refreshAgentActivePptPlanningDataSources() {
+      refreshCalls += 1
+      return Promise.resolve()
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'document:doc-1',
+        type: 'document',
+        title: '项目文档',
+        status: 'failed',
+        selected: true,
+        meta: { sourceKind: 'document', documentId: 'doc-1' },
+      },
+    ],
+    ungroupedSourceIds: ['document:doc-1'],
+  }))
+
+  await ctx.retryAgentPptPlanningSource('document:doc-1')
+
+  const state = ctx.getAgentActivePptPlanningState()
+  const source = state.sources.find((item) => item.id === 'document:doc-1')
+  assert.deepEqual(parsed, ['doc-1'])
+  assert.equal(refreshCalls, 1)
+  assert.equal(source.status, 'generating')
+  assert.equal(source.meta.label, '重新解析中')
+})
+
+test('agent ppt retry image source restarts attachment ingest', async () => {
+  const retried = []
+  let refreshCalls = 0
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningImageRetry(attachmentId, conversationId) {
+      retried.push({ attachmentId, conversationId })
+      return Promise.resolve({
+        attachment_id: attachmentId,
+        conversation_id: conversationId,
+        filename: '现场照片.png',
+        status: 'processing',
+      })
+    },
+    refreshAgentActivePptPlanningDataSources() {
+      refreshCalls += 1
+      return Promise.resolve()
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'image:att-1',
+        type: 'image',
+        title: '现场照片.png',
+        status: 'failed',
+        selected: true,
+        meta: {
+          sourceKind: 'image',
+          attachmentId: 'att-1',
+          conversationId: 'ppt-1',
+        },
+      },
+    ],
+    ungroupedSourceIds: ['image:att-1'],
+  }))
+
+  await ctx.retryAgentPptPlanningSource('image:att-1')
+
+  const state = ctx.getAgentActivePptPlanningState()
+  const source = state.sources.find((item) => item.id === 'image:att-1')
+  assert.deepEqual(retried, [{ attachmentId: 'att-1', conversationId: 'ppt-1' }])
+  assert.equal(refreshCalls, 1)
+  assert.equal(source.status, 'generating')
+  assert.equal(source.meta.label, '图片重新解析中')
+})
+
+test('agent ppt retry web source rebuilds preview and committed source', async () => {
+  let previewPayload = null
+  let commitPayload = null
+  let refreshCalls = 0
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptWebSourcePreview(payload) {
+      previewPayload = payload
+      return Promise.resolve({
+        source: {
+          id: 'web:history-1:url',
+          type: 'web',
+          title: '政策网页',
+          status: 'ready',
+          selected: true,
+          meta: {
+            sourceKind: 'web',
+            web_source: { urls: payload.urls },
+            aiPayload: {
+              evidence_nodes: [{
+                id: 'web:history-1:url:node:1',
+                source_id: 'web:history-1:url',
+                source_type: 'web',
+                title: '政策网页',
+                content: '正文段落',
+              }],
+            },
+          },
+        },
+        items: [{ title: '政策网页', url: 'https://www.gov.cn/demo.html', parse_status: 'parsed' }],
+      })
+    },
+    requestAgentPptWebSourceCommit(payload) {
+      commitPayload = payload
+      return Promise.resolve(payload.preview.source)
+    },
+    refreshAgentActivePptPlanningDataSources() {
+      refreshCalls += 1
+      return Promise.resolve()
+    },
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [
+      {
+        id: 'web:history-1:url',
+        type: 'web',
+        title: '政策网页',
+        status: 'ready',
+        selected: true,
+        availability: 'empty_evidence',
+        meta: {
+          sourceKind: 'web',
+          areaId: 'history-1',
+          web_source: {
+            topic: '政策背景',
+            urls: ['https://www.gov.cn/demo.html'],
+          },
+        },
+      },
+    ],
+    ungroupedSourceIds: ['web:history-1:url'],
+  }))
+
+  await ctx.retryAgentPptPlanningSource('web:history-1:url')
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.equal(previewPayload.area_id, 'history-1')
+  assert.equal(previewPayload.topic, '政策背景')
+  assert.deepEqual(previewPayload.urls, ['https://www.gov.cn/demo.html'])
+  assert.equal(commitPayload.area_id, 'history-1')
+  assert.equal(commitPayload.preview.source.id, 'web:history-1:url')
+  assert.equal(refreshCalls, 1)
+  assert.equal(state.sources.some((source) => source.id === 'web:history-1:url'), true)
+})
+
+test('agent ppt web source preview does not add source until commit', async () => {
+  let receivedPayload = null
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptWebSourcePreview(payload) {
+      receivedPayload = payload
+      return Promise.resolve({
+        source: {
+          id: 'web:history-1:abc',
+          type: 'web',
+          title: '地区资料',
+          status: 'ready',
+          selected: true,
+          meta: {
+            sourceKind: 'web',
+            aiPayload: {
+              evidence_nodes: [{
+                id: 'web:history-1:abc:node:1',
+                source_id: 'web:history-1:abc',
+                source_type: 'web',
+                title: '网页',
+                content: '摘要',
+              }],
+            },
+          },
+        },
+        items: [{ title: '网页', url: 'https://gov.cn/demo', parse_status: 'parsed' }],
+        summary: '预览完成',
+      })
+    },
+  })
+
+  let resolved = null
+  await ctx.manageAgentPptPlanningWebSource({
+    mode: 'preview',
+    region_name: '岳麓区',
+    topic: '文旅',
+    source_modes: ['trusted', 'market', 'community'],
+    resolve(value) {
+      resolved = value
+    },
+  })
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.deepEqual(receivedPayload.source_modes, ['trusted', 'market', 'community'])
+  assert.equal(resolved.source.id, 'web:history-1:abc')
+  assert.equal(state.sources.some((source) => source.id === 'web:history-1:abc'), false)
+})
+
+test('agent ppt web source preview passes direct urls for web source', async () => {
+  let receivedPayload = null
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptWebSourcePreview(payload) {
+      receivedPayload = payload
+      return Promise.resolve({
+        source: {
+          id: 'web:history-1:url',
+          type: 'web',
+          title: '政策网页',
+          status: 'ready',
+          selected: true,
+          meta: {
+            sourceKind: 'web',
+            web_source: { input_mode: 'direct_url', urls: payload.urls },
+            aiPayload: {
+              evidence_nodes: [{
+                id: 'web:history-1:url:node:1',
+                source_id: 'web:history-1:url',
+                source_type: 'web',
+                title: '政策网页',
+                content: '正文段落',
+              }],
+            },
+          },
+        },
+        items: [{ title: '政策网页', url: 'https://www.gov.cn/demo.html', parse_status: 'parsed' }],
+        summary: '预览完成',
+      })
+    },
+  })
+
+  let resolved = null
+  await ctx.manageAgentPptPlanningWebSource({
+    mode: 'preview',
+    topic: '政策背景',
+    urls: ['https://www.gov.cn/demo.html'],
+    resolve(value) {
+      resolved = value
+    },
+  })
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.deepEqual(receivedPayload.urls, ['https://www.gov.cn/demo.html'])
+  assert.equal(receivedPayload.region_name, '当前分析区域')
+  assert.equal(resolved.source.id, 'web:history-1:url')
+  assert.equal(state.sources.some((source) => source.id === 'web:history-1:url'), false)
+})
+
+test('agent ppt web source requires preview or commit mode', async () => {
+  let previewCalls = 0
+  let commitCalls = 0
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptWebSourcePreview() {
+      previewCalls += 1
+      return Promise.resolve({})
+    },
+    requestAgentPptWebSourceCommit() {
+      commitCalls += 1
+      return Promise.resolve({})
+    },
+  })
+
+  await assert.rejects(
+    () => ctx.manageAgentPptPlanningWebSource({
+      region_name: '岳麓区',
+      topic: '文旅',
+    }),
+    /ppt_web_source_mode_required/,
+  )
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.equal(previewCalls, 0)
+  assert.equal(commitCalls, 0)
+  assert.equal(state.sources.some((source) => String(source.id || '').startsWith('research:')), false)
+})
+
+test('agent ppt web source maps local search service errors to readable messages', async () => {
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptWebSourcePreview() {
+      return Promise.reject(new Error('searxng_base_url_required'))
+    },
+  })
+
+  await assert.rejects(
+    () => ctx.manageAgentPptPlanningWebSource({
+      mode: 'preview',
+      region_name: '岳麓区',
+      topic: '文旅',
+    }),
+    /searxng_base_url_required/,
+  )
+
+  let state = ctx.getAgentActivePptPlanningState()
+  assert.equal(state.generationError, '本地搜索服务未启动，请用一键脚本启动或检查 SearXNG。')
+
+  ctx.requestAgentPptWebSourcePreview = () => Promise.reject(new Error('searxng_unavailable'))
+  await assert.rejects(
+    () => ctx.manageAgentPptPlanningWebSource({
+      mode: 'preview',
+      region_name: '岳麓区',
+      topic: '文旅',
+    }),
+    /searxng_unavailable/,
+  )
+
+  state = ctx.getAgentActivePptPlanningState()
+  assert.equal(state.generationError, '本地搜索服务暂不可用，请检查 8004 端口。')
+})
+
+test('agent ppt web source commit adds preview source', async () => {
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptWebSourceCommit(payload) {
+      return Promise.resolve({
+        source: {
+          id: 'web:history-1:abc',
+          type: 'web',
+          title: '地区资料',
+          status: 'ready',
+          selected: true,
+          meta: {
+            sourceKind: 'web',
+            aiPayload: {
+              evidence_nodes: [{
+                id: 'web:history-1:abc:node:1',
+                source_id: 'web:history-1:abc',
+                source_type: 'web',
+                title: '网页',
+                content: '摘要',
+              }],
+            },
+          },
+        },
+        items: payload.preview.items || [],
+        summary: '已添加',
+      })
+    },
+  })
+
+  await ctx.manageAgentPptPlanningWebSource({
+    mode: 'commit',
+    preview: {
+      source: { id: 'web:history-1:abc', title: '地区资料' },
+      items: [{ title: '网页', url: 'https://gov.cn/demo' }],
+    },
+  })
+
+  const state = ctx.getAgentActivePptPlanningState()
+  assert.equal(state.sources.some((source) => source.id === 'web:history-1:abc'), true)
 })
 
 test('ppt source group selection toggles only ready group sources', () => {
@@ -1108,6 +1656,249 @@ test('ppt payload uses only selected sources with deliverable ai payload', () =>
   assert.deepEqual(payload.source_ids.sort(), ['current:scope', 'package:poi:test'].sort())
   assert.equal(payload.sources.length, 2)
   assert.equal(payload.sources.some((source) => source.id === 'summary'), false)
+})
+
+test('ppt source health classifies availability and evidence gaps', () => {
+  const available = getPptSourceHealth({
+    id: 'web:area:url',
+    type: 'web',
+    title: '网页',
+    status: 'ready',
+    selected: true,
+    meta: {
+      sourceKind: 'web',
+      aiPayload: {
+        version: 'ppt_ai_input_block_v1',
+        source_id: 'web:area:url',
+        included: ['evidence'],
+        evidence: [{ title: '段落', text: '正文' }],
+      },
+    },
+  })
+  const empty = getPptSourceHealth({
+    id: 'web:area:empty',
+    type: 'web',
+    title: '空网页',
+    status: 'ready',
+    selected: true,
+    meta: { sourceKind: 'web', aiPayload: { version: 'ppt_ai_input_block_v1', included: [] } },
+  })
+  const failed = getPptSourceHealth({
+    id: 'document:bad',
+    type: 'document',
+    title: '坏文档',
+    status: 'failed',
+    meta: { sourceKind: 'document', error: 'parse_failed' },
+  })
+  const building = getPptSourceHealth({
+    id: 'image:uploading',
+    type: 'image',
+    title: '图片',
+    status: 'generating',
+    summary: 'OCR 处理中',
+    meta: { sourceKind: 'image' },
+  })
+
+  assert.equal(available.healthStatus, 'available')
+  assert.equal(empty.healthStatus, 'empty_evidence')
+  assert.match(empty.healthReason, /没有可发送给 AI/)
+  assert.equal(failed.healthStatus, 'failed')
+  assert.equal(failed.healthReason, 'parse_failed')
+  assert.equal(failed.retryable, true)
+  assert.equal(building.healthStatus, 'building')
+  assert.equal(building.healthReason, 'OCR 处理中')
+})
+
+test('ppt source model treats evidence nodes as canonical deliverable evidence', () => {
+  const aiPayload = {
+    version: 'ppt_ai_input_block_v1',
+    source_id: 'web:area:url',
+    source_kind: 'web',
+    included: [],
+    counts: { evidence: 0 },
+    evidence_nodes: [
+      {
+        id: 'web:area:url:evidence:1',
+        source_id: 'web:area:url',
+        source_type: 'web',
+        title: '政策网页',
+        content: '正文段落',
+        evidence_level: 'web_chunk',
+      },
+    ],
+  }
+  const transport = createPptTransportFromAiPayload(aiPayload)
+  const source = normalizePptSource({
+    id: 'web:area:url',
+    type: 'web',
+    title: '网页',
+    status: 'ready',
+    selected: true,
+    meta: { sourceKind: 'web', aiPayload, transport },
+  })
+  const health = getPptSourceHealth(source)
+  const manifest = getPptSourceDeliveryManifest(createPptPlanningState({ sources: [source] }))
+
+  assert.equal(source.evidenceCount, 1)
+  assert.equal(transport.evidenceCount, 1)
+  assert.deepEqual(transport.included, ['evidence'])
+  assert.equal(health.healthStatus, 'available')
+  assert.deepEqual(manifest.deliverableSourceIds, ['web:area:url'])
+})
+
+test('ppt image source upsert creates selectable source object', () => {
+  const state = upsertPptImageSource(createPptPlanningState(), {
+    attachment_id: 'img-1',
+    conversation_id: 'ppt-tab-1',
+    history_id: 'area-1',
+    filename: 'site-photo.png',
+    mime_type: 'image/png',
+    status: 'processing',
+  }, { status: 'generating', conversationId: 'ppt-tab-1' })
+  const source = state.sources.find((item) => item.id === 'image:img-1')
+
+  assert.equal(source.source_kind, 'image')
+  assert.equal(source.status, 'generating')
+  assert.equal(source.selected, false)
+  assert.equal(source.availability, 'building:image_parse_pending')
+  assert.equal(source.meta.sourceKind, 'image')
+  assert.equal(source.meta.image.attachment_id, 'img-1')
+})
+
+test('ppt source merge retains user image source until backend returns it', () => {
+  const withImage = upsertPptImageSource(createPptPlanningState(), {
+    attachment_id: 'img-1',
+    conversation_id: 'ppt-tab-1',
+    filename: 'site-photo.png',
+    mime_type: 'image/png',
+    status: 'processing',
+  }, { status: 'generating', conversationId: 'ppt-tab-1' })
+  const refreshed = mergePptPlanningSources(withImage, createPptSystemSources({
+    hasScope: true,
+    poiCount: 2,
+  }))
+
+  assert.ok(refreshed.sources.some((item) => item.id === 'image:img-1'))
+  assert.ok(refreshed.sources.some((item) => item.id === 'current:scope'))
+})
+
+test('ppt quick ask target uses only selected ready deliverable sources', () => {
+  const ctx = {
+    ...createAgentTabsMethods(),
+    ...createAgentRuntimeMethods(),
+    ...createAgentPptPlanningTabMethods(),
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      pptPlanningTabs: [{
+        id: 'ppt-1',
+        kind: 'ppt_planning',
+        pptPlanningState: createPptPlanningState({
+          sources: [
+            {
+              id: 'package:scope:test',
+              type: 'data',
+              title: '当前等时圈范围',
+              status: 'ready',
+              selected: true,
+              meta: {
+                sourceKind: 'system',
+                aiPayload: {
+                  version: 'ppt_ai_input_block_v1',
+                  source_id: 'package:scope:test',
+                  title: '当前等时圈范围',
+                  source_kind: 'package',
+                  included: ['scope', 'evidence'],
+                  scope: { has_polygon: true },
+                  evidence_nodes: [{
+                    id: 'package:scope:test:package:summary',
+                    source_id: 'package:scope:test',
+                    source_type: 'package',
+                    title: '资料包摘要',
+                    content: '范围覆盖后湖片区。',
+                    summary: '范围覆盖后湖片区。',
+                    metadata: {},
+                    locator: 'package:summary',
+                    score: 0,
+                    evidence_level: 'package_summary',
+                    warnings: [],
+                    citation: '资料包摘要',
+                  }],
+                  counts: { scope: 1, evidence: 1 },
+                },
+              },
+            },
+            {
+              id: 'current:poi',
+              type: 'data',
+              title: '未勾选 POI',
+              status: 'ready',
+              selected: false,
+              meta: {
+                aiPayload: {
+                  version: 'ppt_ai_input_block_v1',
+                  source_id: 'current:poi',
+                  included: ['evidence'],
+                  evidence_nodes: [{ id: 'current:poi:node:1', source_id: 'current:poi', source_type: 'system', title: 'POI', content: '不应发送' }],
+                },
+              },
+            },
+            {
+              id: 'pending-source',
+              type: 'data',
+              title: '未完成来源',
+              status: 'pending',
+              selected: true,
+              meta: {
+                aiPayload: {
+                  version: 'ppt_ai_input_block_v1',
+                  source_id: 'pending-source',
+                  included: ['evidence'],
+                  evidence_nodes: [{ id: 'pending-source:node:1', source_id: 'pending-source', source_type: 'system', title: 'pending', content: '不应发送' }],
+                },
+              },
+            },
+            {
+              id: 'empty-source',
+              type: 'data',
+              title: '空 payload 来源',
+              status: 'ready',
+              selected: true,
+              meta: {
+                aiPayload: {
+                  version: 'ppt_ai_input_block_v1',
+                  source_id: 'empty-source',
+                  included: [],
+                },
+              },
+            },
+          ],
+        }),
+      }],
+      deepAnalysisTabs: [],
+      followupTabs: [],
+    },
+    agentPanelPayloads: {},
+    getAgentSummaryPack() { return {} },
+    getAgentSummaryStatus() { return {} },
+    hasAgentSummaryPack() { return false },
+    getAgentPptPlanningStateWithSystemSources() {
+      return this.getAgentActivePptPlanningState()
+    },
+  }
+
+  const target = ctx.buildAgentPptQuickAskTarget()
+
+  assert.equal(target.type, 'ppt_sources')
+  assert.equal(target.source, 'ppt_planning')
+  assert.deepEqual(target.payload.sources.map((source) => source.source_id), ['package:scope:test'])
+  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'evidence'), false)
+  assert.equal(target.payload.sources[0].evidence_nodes[0].id, 'package:scope:test:package:summary')
+  assert.equal(target.payload.sources[0].evidence_nodes[0].source_type, 'package')
+  assert.deepEqual(target.evidence.map((item) => item.source_id), ['package:scope:test'])
+  assert.equal(target.evidence[0].text.includes('1 条证据'), true)
 })
 
 test('ppt state can select all sources and keep an active page brief', () => {
@@ -1434,6 +2225,46 @@ test('agent ppt auto package marks placeholder generating then replaces it with 
       meta: {
         label: 'POI 8 条',
         sourceKind: 'package',
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'package:poi:auto',
+          sourceId: 'package:poi:auto',
+          title: 'POI 资料包',
+          source_kind: 'package',
+          sourceKind: 'package',
+          included: ['evidence'],
+          evidence_nodes: [{
+            id: 'package:poi:auto:package:summary',
+            source_id: 'package:poi:auto',
+            sourceId: 'package:poi:auto',
+            source_type: 'package',
+            sourceType: 'package',
+            title: 'POI 资料包',
+            content: '后端已生成 canonical package evidence。',
+            summary: '后端已生成 canonical package evidence。',
+            metadata: {},
+            locator: '',
+            score: 0,
+            evidence_level: 'package_summary',
+            warnings: [],
+            citation: '',
+          }],
+          evidenceNodes: [{
+            id: 'package:poi:auto:package:summary',
+            source_id: 'package:poi:auto',
+            source_type: 'package',
+            title: 'POI 资料包',
+            content: '后端已生成 canonical package evidence。',
+            summary: '后端已生成 canonical package evidence。',
+            metadata: {},
+            locator: '',
+            score: 0,
+            evidence_level: 'package_summary',
+            warnings: [],
+            citation: '',
+          }],
+          counts: { evidence: 1 },
+        },
         package: {
           package_mode: 'evidence',
           intent: DEFAULT_PPT_POI_EVIDENCE_INTENT,
@@ -1450,6 +2281,9 @@ test('agent ppt auto package marks placeholder generating then replaces it with 
   assert.equal(finalState.sources.some((item) => item.id === 'package-placeholder:poi-evidence'), false)
   assert.equal(packageSource.selected, true)
   assert.equal(packageSource.meta.sourceKind, 'package')
+  assert.equal(packageSource.meta.aiPayload.evidence_nodes[0].id, 'package:poi:auto:package:summary')
+  assert.equal(packageSource.meta.aiPayload.evidence_nodes[0].source_type, 'package')
+  assert.equal(Object.prototype.hasOwnProperty.call(packageSource.meta.aiPayload, 'evidence'), false)
   assert.equal(finalState.dataPackageGenerating, false)
 })
 
@@ -1549,7 +2383,8 @@ test('deck brief payload sends selected source ai input blocks with lightweight 
   assert.deepEqual(payload.current.visual_snapshots || [], [])
   assert.equal(payload.current.scope.time_min, 35)
   assert.equal(payload.sources[0].meta.aiPayload.version, 'ppt_ai_input_block_v1')
-  assert.equal(payload.sources[0].meta.aiPayload.evidence[0].text, '已整理 POI。')
+  assert.equal(payload.sources[0].meta.aiPayload.evidence_nodes[0].content, '已整理 POI。')
+  assert.equal(Object.prototype.hasOwnProperty.call(payload.sources[0].meta.aiPayload, 'evidence'), false)
   assert.equal(payload.sources[0].meta.package, undefined)
 })
 
@@ -1873,6 +2708,7 @@ test('ppt visual artifact payload and response are independent from brief genera
   })
   assert.equal(applied.deckBrief.slides[0].visualArtifacts[0].url, '/download/visual-1.svg')
   assert.equal(applied.visualGenerationBySlide['1'].status, 'ready')
+  assert.equal(applied.currentStep, 'visuals_ready')
 })
 
 test('ppt visual artifact payload clears stale map snapshot capture errors before retry', () => {
@@ -5530,4 +6366,3 @@ test('agent ppt restored package source satisfies auto package placeholder', asy
   assert.ok(state.sources.some((item) => item.id === 'package:poi-road-carriers:restored'))
   assert.equal(state.sources.some((item) => item.id === 'package-placeholder:road-carrier'), false)
 })
-

@@ -10,6 +10,9 @@ class FakeQuery:
         self.filters.update(kwargs)
         return self
 
+    def filter(self, *_args):
+        return self
+
     def order_by(self, *args):
         return self
 
@@ -43,6 +46,9 @@ class FakeSession:
         record.id = self.next_id
         self.next_id += 1
         self.rows.append(record)
+
+    def delete(self, record):
+        self.rows = [row for row in self.rows if row is not record]
 
     def commit(self):
         pass
@@ -106,3 +112,32 @@ def test_artifact_repo_upserts_by_identity(monkeypatch):
     assert third["id"] != first["id"]
     assert len(repo.list("history-1", artifact_type="poi_h3_grid")) == 2
     assert repo.list("other-history") == []
+
+
+def test_artifact_repo_deletes_by_payload_source_id(monkeypatch):
+    fake_session = FakeSession()
+    monkeypatch.setattr("store.analysis_artifact_repo.SessionLocal", lambda: fake_session)
+    repo = AnalysisArtifactRepo()
+
+    repo.upsert(
+        history_id="history-1",
+        artifact_type="ppt_data_package",
+        params={"intent": "a"},
+        payload={"source": {"id": "package:history-1:a"}},
+    )
+    repo.upsert(
+        history_id="history-1",
+        artifact_type="ppt_web_source",
+        params={"intent": "b"},
+        payload={"source": {"id": "web:history-1:b"}},
+    )
+
+    deleted = repo.delete_by_source_id(
+        "history-1",
+        source_id="package:history-1:a",
+        artifact_types=["ppt_data_package", "ppt_web_source"],
+    )
+
+    assert deleted == 1
+    remaining = repo.list("history-1")
+    assert [item["payload"]["source"]["id"] for item in remaining] == ["web:history-1:b"]

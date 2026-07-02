@@ -18,7 +18,7 @@
 | `Tool Loop` | `langgraph_react.py` 中的 `run_langgraph_react_loop(...)` | `question`、`analysis_snapshot_digest`、`context_digest`、`tool_catalog`、工具历史观察、`thinking_mode`、当前治理状态 | 是否继续调用工具、工具调用轨迹、工具结果、停止原因、风险确认请求 | 它是当前主链路内部的 ReAct 风格工具循环，不是独立产品入口；目标是按需补证据，不是无限扩展分析链。 |
 | `Rule Audit` | `runtime.py` 中的规则审查逻辑与 `audit_execution(...)` | 用户问题、`snapshot`、`context`、`memory.artifacts`、工具结果摘要、缺失证据、问题边界 | `issues`、`missing_evidence`、`required_evidence`、能否支持更稳妥的回答表达 | 它是规则层证据检查，不是旧式 LLM 审计员；不再承担 replan 主导角色，也不向用户输出独立审查栏目。 |
 | `Finalizer` | `llm_provider.py` 中的 `generate_answer_output_with_llm(...)`，以及 `synthesizer.py` 的证据整理逻辑 | `messages`、`analysis_snapshot_digest`、`context_digest`、`answer_evidence_payload`、`thinking_mode` | 自然语言主回答 `answer`，以及必要的引用、研究笔记、面板增强信息 | 最终只负责自然回答，不再产出结构化 answered 契约，也不再按固定四段或固定栏目交卷。 |
-| `Session / Attachment Evidence Layer` | `session_service.py`、`retrieval/attachments.py`、附件检索工具 | 会话消息、assistant canonical message、已上传附件 ID、附件检索结果、当前 `conversation_id` | 会话持久化、assistant 消息恢复、附件状态、可被 Tool Loop 调用的附件证据 | 它是上下文输入层，不是主决策节点；附件只在需要时通过 `search_uploaded_attachment_context` / `read_uploaded_attachment_context` 进入工具循环。 |
+| `Session / Evidence Source Context` | `session_service.py`、`modules/evidence_retrieval/`、来源区选择状态 | 会话消息、assistant canonical message、已选 `source_ids`、统一证据节点、当前 `conversation_id` | 会话持久化、assistant 消息恢复、来源选择恢复、可被 Tool Loop / Finalizer 使用的证据包 | 它是上下文输入层，不是主决策节点；外部材料必须先成为来源，再由统一证据层召回，不能通过独立附件工具进入工具循环。 |
 
 ## 各节点当前怎么衔接
 
@@ -30,7 +30,7 @@
 -> Tool Loop
 -> Rule Audit
 -> Finalizer
--> Session / Attachment Evidence Layer 持久化与恢复
+-> Session / Evidence Source Context 持久化与恢复
 ```
 
 这条链路的产品语义很明确：
@@ -39,7 +39,7 @@
 - `Tool Loop` 负责按需补证据
 - `Rule Audit` 负责收紧证据边界
 - `Finalizer` 负责把证据翻译成自然回答
-- `Session / Attachment Evidence Layer` 负责让对话和附件证据可恢复、可继续引用
+- `Session / Evidence Source Context` 负责让对话、已选来源和证据节点可恢复、可继续引用
 
 ## 阶段状态
 
@@ -62,21 +62,22 @@
 - `deep` 不是报告模式，只是允许多做一轮证据检查和边界校验
 - answered 最终主契约只有自然回答 `answer`
 
-## 附件证据如何进入上下文
+## 来源证据如何进入上下文
 
-当前附件能力是上下文输入来源之一，但不会默认全文通读。
+当前外部材料不会以“附件工具”的形式直接进入 Agent。用户可见、Agent 可消费的资料对象统一叫来源。
 
 它的进入方式是：
 
 ```text
-用户上传附件
--> uploaded / processing / ready / failed
--> ready 后进入当前会话附件列表
--> Tool Loop 在用户提到文件、报告、图纸、图片、表格时按需检索
--> 命中片段后作为证据进入回答
+来源区上传文档 / 图片，或添加网页 / 数据库 / 资料包
+-> 后端解析、清洗、索引或构建
+-> 形成 Source 条目
+-> Source 背后挂 EvidenceNode
+-> Tool Loop / Finalizer 按已选 source_ids 召回证据
+-> 命中节点后作为带来源证据进入回答
 ```
 
-这意味着附件在当前架构里是“证据补充层”，而不是独立文件问答主链路。
+这意味着文档、图片、网页、数据库记录和资料包都是同一种来源语义。附件解析能力可以作为文档 / 图片来源构建的内部管线存在，但不再是用户可见或 Agent 工具可调用的独立产品入口。
 
 ## 为什么不再拆成更多角色
 

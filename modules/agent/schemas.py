@@ -20,7 +20,6 @@ ToolDataDomain = Literal[
     "policy",
     "competitor",
     "general",
-    "attachment",
 ]
 ToolCapabilityType = Literal["fetch", "transform", "analyze", "interpret", "decide", "none"]
 ToolSceneType = Literal[
@@ -124,7 +123,6 @@ class AgentTurnRequest(BaseModel):
     risk_confirmations: List[str] = Field(default_factory=list)
     governance_mode: GovernanceMode = "auto"
     thinking_mode: ThinkingMode = "quick"
-    attachment_ids: List[str] = Field(default_factory=list)
     visual_snapshots: List[AgentVisualSnapshot] = Field(default_factory=list)
     map_search_context: Dict[str, Any] = Field(default_factory=dict)
 
@@ -175,10 +173,10 @@ class AgentSiteSelectionResponse(BaseModel):
 class ContextAskTarget(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate"] = "report_section"
+    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate", "ppt_sources"] = "report_section"
     id: str = ""
     title: str = ""
-    source: Literal["report", "iteration", "site_selection"] = "report"
+    source: Literal["report", "iteration", "site_selection", "ppt_planning"] = "report"
     summary: str = ""
     evidence: List[Any] = Field(default_factory=list)
     artifact_refs: List[str] = Field(default_factory=list)
@@ -193,6 +191,7 @@ class AgentContextAskRequest(BaseModel):
     question: str = ""
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     target: ContextAskTarget = Field(default_factory=ContextAskTarget)
+    require_ai: bool = False
 
 
 class AgentContextAskResponse(BaseModel):
@@ -809,7 +808,6 @@ class AgentSessionSnapshotRequest(BaseModel):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
-    attachment_ids: List[str] = Field(default_factory=list)
 
 
 class AgentSessionMetadataPatchRequest(BaseModel):
@@ -828,4 +826,3 @@ class AgentSessionDetail(AgentSessionSummary):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
-    attachment_ids: List[str] = Field(default_factory=list)

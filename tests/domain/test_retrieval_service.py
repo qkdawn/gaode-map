@@ -3,8 +3,8 @@ import asyncio
 from modules.agent.schemas import AnalysisSnapshot
 from modules.agent.tools import get_tool_registry
 from modules.agent.tool_adapters.retrieval_tools import (
-    read_analysis_chunk,
-    read_report_chunk,
+    read_analysis_evidence_node,
+    read_report_evidence_node,
     search_analysis_context,
     search_report_context,
 )
@@ -145,10 +145,10 @@ def test_search_analysis_context_hits_frontend_place_anchor_chunk():
     assert hits[0].chunk_id == "session:current:analysis:poi.place_anchors"
 
 
-def test_read_analysis_chunk_returns_metrics_and_warnings():
+def test_read_analysis_evidence_node_returns_metrics_and_warnings():
     result = asyncio.run(
-        read_analysis_chunk(
-            arguments={"chunk_id": "session:current:analysis:nightlight.summary"},
+        read_analysis_evidence_node(
+            arguments={"node_id": "current:analysis:nightlight:node:session:current:analysis:nightlight.summary"},
             snapshot=_snapshot(),
             artifacts={},
             question="活力依据是什么",
@@ -156,14 +156,17 @@ def test_read_analysis_chunk_returns_metrics_and_warnings():
     )
 
     assert result.status == "success"
-    assert result.result["metrics"]["mean_radiance"] == 3.15
-    assert "夜光仅作为活力 proxy" in result.result["warnings"][0]
+    assert result.result["evidence_node"]["metadata"]["metrics"]["mean_radiance"] == 3.15
+    assert "夜光仅作为活力 proxy" in result.result["evidence_node"]["warnings"][0]
+    assert result.result["evidence_node"]["source_id"] == "current:analysis:nightlight"
+    assert result.result["evidence_node"]["source_type"] == "system"
+    assert result.result["node_id"] == result.result["evidence_node"]["id"]
 
 
-def test_read_analysis_chunk_returns_frontend_map_anchor_limits():
+def test_read_analysis_evidence_node_returns_frontend_map_anchor_limits():
     result = asyncio.run(
-        read_analysis_chunk(
-            arguments={"chunk_id": "session:current:analysis:poi.place_anchors"},
+        read_analysis_evidence_node(
+            arguments={"node_id": "current:analysis:poi:node:session:current:analysis:poi.place_anchors"},
             snapshot=_snapshot(),
             artifacts=_map_search_artifacts(),
             question="总结后湖周边商业特征",
@@ -171,9 +174,9 @@ def test_read_analysis_chunk_returns_frontend_map_anchor_limits():
     )
 
     assert result.status == "success"
-    assert "湖南师范大学" in result.result["content"]
-    assert result.result["source_artifacts"] == ["frontend_map_search_context"]
-    assert any("不能扩展成完整地名数据库" in warning for warning in result.result["warnings"])
+    assert "湖南师范大学" in result.result["evidence_node"]["content"]
+    assert result.result["evidence_node"]["metadata"]["source_artifacts"] == ["frontend_map_search_context"]
+    assert any("不能扩展成完整地名数据库" in warning for warning in result.result["evidence_node"]["warnings"])
 
 
 def test_report_context_search_and_read():
@@ -195,29 +198,30 @@ def test_report_context_search_and_read():
     assert search.result["hits"]
 
     read = asyncio.run(
-        read_report_chunk(
-            arguments={"chunk_id": "session:current:report:section.consumption_vitality"},
+        read_report_evidence_node(
+            arguments={"node_id": "current:report:report:node:session:current:report:section.consumption_vitality"},
             snapshot=snapshot,
             artifacts=artifacts,
             question="读报告段落",
         )
     )
     assert read.status == "success"
-    assert "夜光均值较低" in read.result["content"]
+    assert "夜光均值较低" in read.result["evidence_node"]["content"]
+    assert read.result["evidence_node"]["source_id"] == "current:report:report"
 
 
-def test_missing_chunk_returns_chunk_not_found():
+def test_missing_evidence_node_returns_evidence_node_not_found():
     result = asyncio.run(
-        read_analysis_chunk(
-            arguments={"chunk_id": "session:current:analysis:missing"},
+        read_analysis_evidence_node(
+            arguments={"node_id": "session:current:analysis:missing"},
             snapshot=_snapshot(),
             artifacts={},
-            question="读不存在的 chunk",
+            question="读不存在的证据节点",
         )
     )
 
     assert result.status == "failed"
-    assert result.error == "chunk_not_found"
+    assert result.error == "evidence_node_not_found"
 
 
 def test_search_analysis_tool_shape():
@@ -231,7 +235,13 @@ def test_search_analysis_tool_shape():
     )
 
     assert result.status == "success"
-    assert set(result.result["hits"][0]) == {"chunk_id", "title", "domain", "snippet", "evidence_level", "score"}
+    hit = result.result["hits"][0]
+    assert {"node_id", "source_id", "source_type", "evidence_node"}.issubset(set(hit))
+    assert "legacy_hit" not in hit
+    assert hit["source_id"] == "current:analysis:h3"
+    assert hit["source_type"] == "system"
+    assert hit["evidence_node"]["id"] == hit["node_id"]
+    assert hit["evidence_node"]["metadata"]["domain"] == "h3"
 
 
 def test_retrieval_tools_are_registered_with_expected_contracts():
@@ -239,14 +249,13 @@ def test_retrieval_tools_are_registered_with_expected_contracts():
 
     assert registry["search_analysis_context"].spec.readonly is True
     assert registry["search_analysis_context"].spec.input_schema["required"] == ["query"]
-    assert registry["read_analysis_chunk"].spec.input_schema["required"] == ["chunk_id"]
+    assert registry["read_analysis_evidence_node"].spec.input_schema["required"] == ["node_id"]
     assert registry["search_report_context"].spec.output_schema["properties"]["hits"]["type"] == "array"
-    assert registry["read_report_chunk"].spec.output_schema["required"] == [
-        "title",
-        "content",
-        "metrics",
-        "source_artifacts",
-        "warnings",
+    assert registry["read_report_evidence_node"].spec.output_schema["required"] == [
+        "node_id",
+        "source_id",
+        "source_type",
+        "evidence_node",
     ]
 
 
@@ -254,7 +263,7 @@ def test_retrieval_tools_are_available_to_main_agent_loop():
     registry = get_tool_registry()
     assert {
         "search_analysis_context",
-        "read_analysis_chunk",
+        "read_analysis_evidence_node",
         "search_report_context",
-        "read_report_chunk",
+        "read_report_evidence_node",
     }.issubset(set(registry.keys()))

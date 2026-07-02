@@ -62,8 +62,10 @@ def test_internal_agent_tools_still_list_full_registry():
     assert response.status_code == 200
     payload = response.json()
     names = [item["name"] for item in payload]
-    assert len(names) == 29
+    assert len(names) == 35
     assert names[:3] == ["read_current_scope", "read_current_results", "fetch_pois_in_scope"]
+    assert "search_database_context" not in names
+    assert "read_database_record" not in names
     assert "run_business_site_advice" in names
 
 

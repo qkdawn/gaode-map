@@ -4,7 +4,9 @@ param(
     [string]$BackendHost = "0.0.0.0",
     [int]$BackendPort = 8000,
     [string]$FrontendHost = "0.0.0.0",
-    [int]$FrontendPort = 5173
+    [int]$FrontendPort = 5173,
+    [int]$SearxngPort = 8004,
+    [switch]$SkipSearxng
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +15,7 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $FrontendRoot = Join-Path $RepoRoot "frontend"
 $RuntimeDir = Join-Path $RepoRoot "runtime"
 $BackendUrl = "http://127.0.0.1:$BackendPort/analysis"
+$SearxngUrl = "http://127.0.0.1:$SearxngPort"
 
 function Ensure-Directory {
     param([string]$Path)
@@ -55,6 +58,21 @@ function Wait-Http {
     return $false
 }
 
+function Test-SearxngSearch {
+    param([string]$BaseUrl)
+    try {
+        $url = "$($BaseUrl.TrimEnd('/'))/search?q=test&format=json"
+        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5
+        if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 500) {
+            return $false
+        }
+        $payload = $response.Content | ConvertFrom-Json -ErrorAction Stop
+        return $null -ne $payload
+    } catch {
+        return $false
+    }
+}
+
 function Stop-RepoDevProcesses {
     Get-CimInstance Win32_Process |
         Where-Object {
@@ -62,6 +80,8 @@ function Stop-RepoDevProcesses {
             $_.CommandLine -like "*$RepoRoot*" -and
             (
                 ($_.CommandLine -match "uvicorn" -and $_.CommandLine -match "main:app") -or
+                ($_.CommandLine -match "searx.webapp" -and $_.CommandLine -like "*$RepoRoot*") -or
+                ($_.CommandLine -match [regex]::Escape("runtime\start_one_click_searxng.ps1")) -or
                 ($_.CommandLine -match "vite" -and $_.CommandLine -like "*$FrontendRoot*") -or
                 ($_.CommandLine -match [regex]::Escape("runtime\start_one_click_backend.ps1")) -or
                 ($_.CommandLine -match [regex]::Escape("runtime\start_one_click_frontend.ps1"))
@@ -86,6 +106,9 @@ if (-not (Test-CommandAvailable "uv")) {
 if (-not (Test-CommandAvailable "npm")) {
     throw "Missing command: npm. Install Node.js/npm or add it to PATH before running this script."
 }
+if (-not $SkipSearxng -and -not (Test-CommandAvailable "git")) {
+    throw "Missing command: git. Install git or use -SkipSearxng before running this script."
+}
 
 if ($Restart) {
     Stop-RepoDevProcesses
@@ -102,8 +125,79 @@ if ($frontendOwner) {
     throw "Port $FrontendPort is already used by PID $($frontendOwner.ProcessId): $($frontendOwner.CommandLine)"
 }
 
+$searxngAvailable = $false
+$searxngOwner = if ($SkipSearxng) { $null } else { Get-PortOwner $SearxngPort }
+if (-not $SkipSearxng -and $searxngOwner) {
+    if (Test-SearxngSearch -BaseUrl $SearxngUrl) {
+        $searxngAvailable = $true
+        Write-Host "Reusing existing SearXNG at $SearxngUrl"
+    } else {
+        throw "Port $SearxngPort is already used by PID $($searxngOwner.ProcessId): $($searxngOwner.CommandLine). Use -SearxngPort to choose another port."
+    }
+}
+
 $backendScript = Join-Path $RuntimeDir "start_one_click_backend.ps1"
 $frontendScript = Join-Path $RuntimeDir "start_one_click_frontend.ps1"
+$searxngScript = Join-Path $RuntimeDir "start_one_click_searxng.ps1"
+
+if (-not $SkipSearxng -and -not $searxngAvailable) {
+    $searxngRoot = Join-Path $RuntimeDir "searxng"
+    $searxngSource = Join-Path $searxngRoot "source"
+    $searxngSettings = Join-Path $searxngRoot "settings.yml"
+    $searxngVenv = Join-Path $searxngRoot ".venv"
+    Ensure-Directory $searxngRoot
+
+@"
+`$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath "$searxngRoot"
+if (-not (Test-Path -LiteralPath "$searxngSource")) {
+    Write-Host "Cloning SearXNG into $searxngSource"
+    git clone --depth 1 https://github.com/searxng/searxng.git "$searxngSource"
+    if (`$LASTEXITCODE -ne 0) {
+        throw "git clone SearXNG failed"
+    }
+}
+if (-not (Test-Path -LiteralPath "$searxngVenv")) {
+    Write-Host "Creating SearXNG virtual environment"
+    uv venv "$searxngVenv"
+    if (`$LASTEXITCODE -ne 0) {
+        throw "uv venv for SearXNG failed"
+    }
+}
+Set-Location -LiteralPath "$searxngSource"
+Write-Host "Installing/updating SearXNG dependencies"
+uv pip install --python "$searxngVenv\Scripts\python.exe" -e .
+if (`$LASTEXITCODE -ne 0) {
+    throw "SearXNG dependency install failed"
+}
+@'
+use_default_settings: true
+
+server:
+  bind_address: "127.0.0.1"
+  port: $SearxngPort
+  secret_key: "gaode-map-dev-searxng"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true
+
+outgoing:
+  request_timeout: 5.0
+'@ | Set-Content -Path "$searxngSettings" -Encoding UTF8
+`$env:SEARXNG_SETTINGS_PATH = "$searxngSettings"
+Write-Host "SearXNG: $SearxngUrl"
+& "$searxngVenv\Scripts\python.exe" "$searxngSource\searx\webapp.py"
+"@ | Set-Content -Path $searxngScript -Encoding UTF8
+}
 
 @"
 `$ErrorActionPreference = "Stop"
@@ -113,6 +207,8 @@ Set-Location -LiteralPath "$RepoRoot"
 `$env:LOCAL_QUERY_BASE_URL = "http://127.0.0.1:8001"
 `$env:VALHALLA_BASE_URL = "http://127.0.0.1:8002"
 `$env:OVERPASS_ENDPOINT = "http://127.0.0.1:8003/api/interpreter"
+`$env:SEARXNG_BASE_URL = "$SearxngUrl"
+`$env:SEARXNG_TIMEOUT_MS = "8000"
 Write-Host "Backend: uv run uvicorn main:app --host $BackendHost --port $BackendPort --reload"
 uv run uvicorn main:app --host $BackendHost --port $BackendPort --reload
 "@ | Set-Content -Path $backendScript -Encoding UTF8
@@ -131,6 +227,23 @@ if (-not (Test-Path "node_modules")) {
 Write-Host "Frontend: npm run dev -- --host $FrontendHost --port $FrontendPort"
 npm run dev -- --host $FrontendHost --port $FrontendPort
 "@ | Set-Content -Path $frontendScript -Encoding UTF8
+
+if (-not $SkipSearxng -and -not $searxngAvailable) {
+    Start-Process `
+        -FilePath "powershell.exe" `
+        -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-File", $searxngScript) `
+        -WorkingDirectory $RuntimeDir `
+        -WindowStyle Normal
+
+    if (Wait-Http -Url "$SearxngUrl/search?q=test&format=json" -Seconds 90) {
+        if (Test-SearxngSearch -BaseUrl $SearxngUrl) {
+            $searxngAvailable = $true
+        }
+    }
+    if (-not $searxngAvailable) {
+        Write-Warning "SearXNG was started, but $SearxngUrl did not return JSON within 90 seconds. AI 搜索地区资料 may be unavailable."
+    }
+}
 
 Start-Process `
     -FilePath "powershell.exe" `
@@ -157,6 +270,11 @@ Write-Host "Gaode Map demo started."
 Write-Host "  Backend:  http://127.0.0.1:$BackendPort"
 Write-Host "  Analysis: $BackendUrl"
 Write-Host "  Frontend: http://127.0.0.1:$FrontendPort"
+if ($SkipSearxng) {
+    Write-Host "  SearXNG:  skipped"
+} else {
+    Write-Host "  SearXNG:  $SearxngUrl"
+}
 Write-Host ""
 Write-Host "LAN access uses this machine's IP with ports $BackendPort and $FrontendPort."
 Write-Host "Use -Restart to stop matching repo dev processes and start fresh."

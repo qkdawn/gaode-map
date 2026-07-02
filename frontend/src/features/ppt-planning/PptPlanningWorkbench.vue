@@ -1,7 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizePptPackageDetail } from './carrier-preview.js'
-import { getBlockingPptInputSources, getPptPromptActions } from './ui-state.js'
+import { evidenceNodesFromAiPayload } from './model.js'
+import { getBlockingPptInputSources, getPptPromptActions, getPptSourceHealth } from './ui-state.js'
 
 const props = defineProps({
   sources: {
@@ -76,6 +77,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  webSourceGenerating: {
+    type: Boolean,
+    default: false,
+  },
+  sourceDeleting: {
+    type: Boolean,
+    default: false,
+  },
   sourceRefreshing: {
     type: Boolean,
     default: false,
@@ -119,11 +128,15 @@ const emit = defineEmits([
   'move-source-to-group',
   'rename-source',
   'remove-source',
+  'remove-selected-sources',
+  'retry-source',
   'generate-package-source',
   'rename-source-group',
   'set-source-group-emoji',
   'remove-source-group',
   'upload-document-source',
+  'upload-image-source',
+  'manage-web-source',
   'update-spec-field',
   'create-data-package',
   'generate-outline',
@@ -146,6 +159,25 @@ const emit = defineEmits([
 const isSourcesCollapsed = ref(false)
 const sourceMenu = ref({ kind: '', id: '', placement: 'below', x: 0, y: 0 })
 const sourceDialog = ref({ mode: '', id: '', title: '', value: '', message: '' })
+const webSourceDialog = ref({
+  open: false,
+  step: 'form',
+  inputMode: 'search',
+  loadingDefault: false,
+  searching: false,
+  adding: false,
+  regionName: '',
+  administrativeArea: '',
+  topic: '',
+  urlText: '',
+  categories: ['政策背景', '区域概况', '产业商业', '文旅案例', '竞品项目', '周边房租'],
+  sourceModes: ['trusted', 'market'],
+  preview: null,
+  selectedItemKeys: [],
+  activeItemIndex: 0,
+  error: '',
+  warnings: [],
+})
 const documentSourceInput = ref(null)
 const activeDocumentSourceId = ref('')
 const activePackageSourceId = ref('')
@@ -154,6 +186,8 @@ const activePackageCarrierId = ref('')
 const activePackageCarrierPreviewMode = ref('local')
 const flowViewMode = ref('')
 const localActivePageNo = ref(0)
+const bulkDeleteMode = ref(false)
+const bulkDeleteSourceIds = ref(new Set())
 const directiveRowRefs = {}
 const failedVisualPreviewUrls = ref(new Set())
 const visualPreviewDialog = ref({ url: '', title: '' })
@@ -165,6 +199,7 @@ const sourcePanelLabel = computed(() => (isSourcesCollapsed.value ? '展开来�
 const sourceCollapseIconPoints = computed(() => (
   isSourcesCollapsed.value ? '14.5,12 12,9.5 12,14.5 14.5,12' : '11.5,12 14,9.5 14,14.5 11.5,12'
 ))
+const centerThreadBodyRef = ref(null)
 
 function asArray(items) {
   return Array.isArray(items) ? items : []
@@ -204,6 +239,29 @@ const canGenerateOutline = computed(() => !outlineBlockReason.value && !isGenera
 const canGenerateNarrativePlan = computed(() => hasOutline.value && !isGenerationJobActive.value && !isSlideGenerationActive.value)
 const canGenerateSlides = computed(() => hasOutline.value && hasNarrativePlan.value && !isGenerationJobActive.value && !isSlideGenerationActive.value)
 const canCreateDataPackage = computed(() => (props.sourceSummary.selected || 0) > 0 && !props.dataPackageGenerating)
+const canSearchWebSource = computed(() => !props.webSourceGenerating && !webSourceDialog.value.loadingDefault && !webSourceDialog.value.searching && !webSourceDialog.value.adding)
+const webSourcePreviewItems = computed(() => {
+  const preview = webSourceDialog.value.preview && typeof webSourceDialog.value.preview === 'object' ? webSourceDialog.value.preview : {}
+  return Array.isArray(preview.items) ? preview.items : []
+})
+const webSourcePreviewItemsByCategory = computed(() => {
+  const grouped = new Map()
+  webSourcePreviewItems.value.forEach((item, index) => {
+    const category = String(item.category || '区域概况')
+    if (!grouped.has(category)) grouped.set(category, [])
+    grouped.get(category).push({ item, index })
+  })
+  return Array.from(grouped.entries()).map(([category, rows]) => ({ category, rows }))
+})
+const activeWebSourcePreviewItem = computed(() => webSourcePreviewItems.value[Math.max(0, Number(webSourceDialog.value.activeItemIndex || 0))] || null)
+const selectedWebSourcePreviewItems = computed(() => {
+  const selected = new Set(Array.isArray(webSourceDialog.value.selectedItemKeys) ? webSourceDialog.value.selectedItemKeys : [])
+  return webSourcePreviewItems.value.filter((item, index) => selected.has(webSourceItemKey(item, index)))
+})
+const canCommitWebSource = computed(() => !!webSourceDialog.value.preview && selectedWebSourcePreviewItems.value.length > 0 && !props.webSourceGenerating && !webSourceDialog.value.adding)
+const bulkDeleteSelectedSources = computed(() => props.sources.filter((source) => source && bulkDeleteSourceIds.value.has(String(source.id || '')) && isDeletableSource(source)))
+const canStartBulkDelete = computed(() => props.sources.some((source) => source && isDeletableSource(source)) && !props.sourceDeleting)
+const canConfirmBulkDelete = computed(() => bulkDeleteSelectedSources.value.length > 0 && !props.sourceDeleting)
 const deliverableSourceCount = computed(() => props.sourceSummary.deliverable || props.sourceSummary.selectedDeliverable || 0)
 const emptyPayloadSourceCount = computed(() => props.sourceSummary.emptyPayload || 0)
 const activeGenerationJob = computed(() => (props.generationJob && typeof props.generationJob === 'object' ? props.generationJob : {}))
@@ -1126,9 +1184,56 @@ function isDocumentSource(source = {}) {
   return meta.sourceKind === 'document' || String(source.id || '').startsWith('document:')
 }
 
+function isImageSource(source = {}) {
+  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
+  return meta.sourceKind === 'image' || String(source.id || '').startsWith('image:')
+}
+
+function isWebSource(source = {}) {
+  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
+  return source.source_kind === 'web'
+    || source.sourceKind === 'web'
+    || meta.sourceKind === 'web'
+}
+
 function isCurrentSource(source = {}) {
   const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
   return meta.sourceKind === 'system' && String(source.id || '').startsWith('current:')
+}
+
+function isDatabaseSource(source = {}) {
+  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
+  return meta.sourceKind === 'database' || String(source.id || '').startsWith('database:')
+}
+
+function isDeletableSource(source = {}) {
+  return isDocumentSource(source) || isImageSource(source) || isPackageSource(source) || isWebSource(source) || isDatabaseSource(source)
+}
+
+function isBulkDeleteSelected(source = {}) {
+  return bulkDeleteSourceIds.value.has(String(source.id || ''))
+}
+
+function enterBulkDeleteMode() {
+  if (!canStartBulkDelete.value) return
+  bulkDeleteMode.value = true
+  bulkDeleteSourceIds.value = new Set()
+  closeSourceMenu()
+}
+
+function exitBulkDeleteMode() {
+  bulkDeleteMode.value = false
+  bulkDeleteSourceIds.value = new Set()
+}
+
+function toggleBulkDeleteSource(source = {}) {
+  if (!bulkDeleteMode.value || props.sourceDeleting || !isDeletableSource(source)) return
+  const sourceId = String(source.id || '')
+  if (!sourceId) return
+  const next = new Set(bulkDeleteSourceIds.value)
+  if (next.has(sourceId)) next.delete(sourceId)
+  else next.add(sourceId)
+  bulkDeleteSourceIds.value = next
 }
 
 function sourceTransport(source = {}) {
@@ -1139,6 +1244,8 @@ function sourceTransport(source = {}) {
       ? meta.ai_payload
       : null
   if (aiPayload && aiPayload.version === 'ppt_ai_input_block_v1') {
+    const evidenceNodes = evidenceNodesFromAiPayload(aiPayload)
+    const evidenceCount = Number(aiPayload.evidence_count ?? aiPayload.evidenceCount ?? evidenceNodes.length ?? (aiPayload.counts || {}).evidence ?? 0) || 0
     return {
       source_id: aiPayload.source_id || source.id,
       sourceId: aiPayload.sourceId || source.id,
@@ -1152,8 +1259,8 @@ function sourceTransport(source = {}) {
       metricCount: Number((aiPayload.counts || {}).metrics || 0) || 0,
       metric_gap_count: Number((aiPayload.counts || {}).metric_gaps || 0) || 0,
       metricGapCount: Number((aiPayload.counts || {}).metric_gaps || 0) || 0,
-      evidence_count: Number((aiPayload.counts || {}).evidence || 0) || 0,
-      evidenceCount: Number((aiPayload.counts || {}).evidence || 0) || 0,
+      evidence_count: evidenceCount,
+      evidenceCount,
       scope_count: Number((aiPayload.counts || {}).scope || 0) || 0,
       scopeCount: Number((aiPayload.counts || {}).scope || 0) || 0,
       visual_spec_count: Number((aiPayload.counts || {}).visual_specs || 0) || 0,
@@ -1194,6 +1301,23 @@ function sourceTransportLabel(source = {}) {
   return '未传：无可用指标/证据'
 }
 
+function sourceHealth(source = {}) {
+  return getPptSourceHealth(source)
+}
+
+function sourceHealthLabel(source = {}) {
+  return sourceHealth(source).healthLabel || ''
+}
+
+function sourceHealthReason(source = {}) {
+  return sourceHealth(source).healthReason || ''
+}
+
+function isRetryableSource(source = {}) {
+  return !!sourceHealth(source).retryable
+    && (isDocumentSource(source) || isImageSource(source) || isWebSource(source))
+}
+
 function sourceTransportExcludedItems(source = {}) {
   const transport = sourceTransport(source)
   return transport && Array.isArray(transport.excluded) ? transport.excluded : []
@@ -1203,8 +1327,11 @@ function removeSourceMessage(source = {}) {
   if (isDocumentSource(source)) {
     return '确认彻底删除该文档来源？文档库里的原文件、解析结果和 PageIndex 索引都会删除。'
   }
+  if (isImageSource(source)) {
+    return '确认彻底删除该图片来源？图片文件、OCR 和视觉理解结果都会删除。'
+  }
   if (isPackageSource(source)) {
-    return '确认从当前 PPT 来源列表删除该资料包？这只影响当前 PPT 工作台。'
+    return '确认彻底删除该资料包？已持久化的资料包记录会从数据库删除，刷新后不会再出现。'
   }
   return '确认从当前 PPT 来源列表删除该来源？刷新来源后可重新加入。'
 }
@@ -1246,6 +1373,10 @@ function closePackageDetail() {
 }
 
 function handleSourceRowClick(source = {}) {
+  if (bulkDeleteMode.value) {
+    toggleBulkDeleteSource(source)
+    return
+  }
   if (isPackagePlaceholderSource(source)) {
     emit('generate-package-source', source.id)
     return
@@ -1381,6 +1512,11 @@ watch(
   () => {
     if (activePackageSourceId.value && !sourceById.value.has(String(activePackageSourceId.value))) closePackageDetail()
     if (activeCurrentSourceId.value && !sourceById.value.has(String(activeCurrentSourceId.value))) closeCurrentSourceDetail()
+    if (bulkDeleteSourceIds.value.size) {
+      const allowed = new Set(props.sources.map((source) => String(source && source.id || '')).filter(Boolean))
+      const next = new Set(Array.from(bulkDeleteSourceIds.value).filter((sourceId) => allowed.has(sourceId)))
+      if (next.size !== bulkDeleteSourceIds.value.size) bulkDeleteSourceIds.value = next
+    }
   },
   { deep: true },
 )
@@ -1397,6 +1533,19 @@ function openRemoveSource(source = {}) {
     title: '删除来源',
     value: '',
     message: removeSourceMessage(source),
+  }
+  closeSourceMenu()
+}
+
+function openRemoveSelectedSources() {
+  if (!bulkDeleteSelectedSources.value.length || props.sourceDeleting) return
+  const deleteCount = bulkDeleteSelectedSources.value.length
+  sourceDialog.value = {
+    mode: 'remove-selected-sources',
+    id: '',
+    title: '批量删除来源',
+    value: '',
+    message: `确认彻底删除 ${deleteCount} 个来源？文档、资料包和 AI 搜索资料会从数据库删除。`,
   }
   closeSourceMenu()
 }
@@ -1436,6 +1585,291 @@ function closeSourceDialog() {
   sourceDialog.value = { mode: '', id: '', title: '', value: '', message: '' }
 }
 
+async function openWebSourceDialog(mode = 'search') {
+  const inputMode = String(mode || '') === 'url' ? 'url' : 'search'
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    open: true,
+    step: 'form',
+    inputMode,
+    loadingDefault: true,
+    searching: false,
+    adding: false,
+    topic: props.spec.topic || '',
+    urlText: '',
+    sourceModes: ['trusted', 'market'],
+    preview: null,
+    selectedItemKeys: [],
+    activeItemIndex: 0,
+    error: '',
+    warnings: [],
+  }
+  try {
+    const defaults = await new Promise((resolve) => {
+      emit('manage-web-source', {
+        mode: 'location-default',
+        resolve,
+      })
+    })
+    webSourceDialog.value = {
+      ...webSourceDialog.value,
+      loadingDefault: false,
+      regionName: defaults && defaults.region_name ? defaults.region_name : '当前分析区域',
+      administrativeArea: defaults && defaults.administrative_area ? defaults.administrative_area : '',
+      warnings: Array.isArray(defaults && defaults.warnings) ? defaults.warnings : [],
+    }
+  } catch (_) {
+    webSourceDialog.value = {
+      ...webSourceDialog.value,
+      loadingDefault: false,
+      regionName: '当前分析区域',
+      administrativeArea: '',
+      warnings: ['默认地区名生成失败，请手动输入。'],
+    }
+  }
+}
+
+function closeWebSourceDialog() {
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    open: false,
+    step: 'form',
+    inputMode: 'search',
+    loadingDefault: false,
+    searching: false,
+    adding: false,
+    urlText: '',
+    sourceModes: ['trusted', 'market'],
+    preview: null,
+    selectedItemKeys: [],
+    activeItemIndex: 0,
+    error: '',
+    warnings: [],
+  }
+}
+
+function backToWebSourceForm() {
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    step: 'form',
+    error: '',
+  }
+}
+
+function webSourceItemKey(item = {}, index = 0) {
+  return String(item.url || item.title || `web-source-item-${index}`)
+}
+
+function webSourceItemUrlLabel(item = {}, index = 0) {
+  return String(item.url || item.source_domain || item.source_name || `网页 ${index + 1}`)
+}
+
+function webSourceTierLabel(item = {}) {
+  const tier = String(item.source_tier || item.sourceTier || '').trim()
+  if (tier === 'community') return '低可信线索'
+  if (tier === 'market') return '市场线索'
+  return '可信来源'
+}
+
+function isWebSourceModeSelected(mode = '') {
+  const selected = Array.isArray(webSourceDialog.value.sourceModes) ? webSourceDialog.value.sourceModes : []
+  return selected.includes(String(mode || '').trim())
+}
+
+function isWebSourceItemSelected(item = {}, index = 0) {
+  const selected = Array.isArray(webSourceDialog.value.selectedItemKeys) ? webSourceDialog.value.selectedItemKeys : []
+  return selected.includes(webSourceItemKey(item, index))
+}
+
+function isWebSourceItemActive(index = 0) {
+  return Math.max(0, Number(webSourceDialog.value.activeItemIndex || 0)) === Math.max(0, Number(index || 0))
+}
+
+function selectWebSourcePreviewItem(index = 0) {
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    activeItemIndex: Math.max(0, Number(index || 0)),
+  }
+}
+
+function toggleWebSourcePreviewItem(index = 0) {
+  const item = webSourcePreviewItems.value[index]
+  if (!item) return
+  const key = webSourceItemKey(item, index)
+  const selected = Array.isArray(webSourceDialog.value.selectedItemKeys) ? webSourceDialog.value.selectedItemKeys : []
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    selectedItemKeys: selected.includes(key)
+      ? selected.filter((itemKey) => itemKey !== key)
+      : [...selected, key],
+  }
+}
+
+function selectAllWebSourcePreviewItems() {
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    selectedItemKeys: webSourcePreviewItems.value.map((item, index) => webSourceItemKey(item, index)),
+  }
+}
+
+function clearWebSourcePreviewSelection() {
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    selectedItemKeys: [],
+  }
+}
+
+function toggleWebSourceCategory(category = '') {
+  const normalized = String(category || '').trim()
+  if (!normalized) return
+  const current = Array.isArray(webSourceDialog.value.categories) ? webSourceDialog.value.categories : []
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    categories: current.includes(normalized)
+      ? current.filter((item) => item !== normalized)
+      : [...current, normalized],
+  }
+}
+
+function toggleWebSourceMode(mode = '') {
+  const normalized = String(mode || '').trim()
+  if (!normalized) return
+  const current = Array.isArray(webSourceDialog.value.sourceModes) ? webSourceDialog.value.sourceModes : []
+  if (normalized === 'trusted') return
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    sourceModes: current.includes(normalized)
+      ? current.filter((item) => item !== normalized)
+      : [...current, normalized],
+  }
+}
+
+function setWebSourceInputMode(mode = 'search') {
+  const inputMode = String(mode || '') === 'url' ? 'url' : 'search'
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    inputMode,
+    error: '',
+    preview: null,
+    selectedItemKeys: [],
+    activeItemIndex: 0,
+  }
+}
+
+function webSourceUrlList() {
+  const seen = new Set()
+  return String(webSourceDialog.value.urlText || '')
+    .split(/[\n,，\s]+/)
+    .map((item) => item.trim())
+    .filter((item) => /^https?:\/\/[^/\s]+\S*$/i.test(item))
+    .filter((item) => {
+      if (seen.has(item)) return false
+      seen.add(item)
+      return true
+    })
+}
+
+async function submitWebSourceDialog() {
+  if (!canSearchWebSource.value) return
+  const urls = webSourceDialog.value.inputMode === 'url' ? webSourceUrlList() : []
+  if (webSourceDialog.value.inputMode === 'url' && !urls.length) {
+    webSourceDialog.value = {
+      ...webSourceDialog.value,
+      error: '请输入以 http:// 或 https:// 开头的网页 URL。',
+    }
+    return
+  }
+  const payload = {
+    mode: 'preview',
+    region_name: webSourceDialog.value.regionName || '当前分析区域',
+    administrative_area: webSourceDialog.value.administrativeArea || '',
+    topic: webSourceDialog.value.topic || props.spec.topic || '',
+    categories: webSourceDialog.value.categories,
+    source_modes: Array.isArray(webSourceDialog.value.sourceModes) && webSourceDialog.value.sourceModes.length
+      ? webSourceDialog.value.sourceModes
+      : ['trusted', 'market'],
+    urls,
+  }
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    searching: true,
+    error: '',
+    warnings: [],
+  }
+  try {
+    const preview = await new Promise((resolve, reject) => {
+      emit('manage-web-source', { ...payload, resolve, reject })
+    })
+    webSourceDialog.value = {
+      ...webSourceDialog.value,
+      step: 'preview',
+      searching: false,
+      preview,
+      activeItemIndex: 0,
+      selectedItemKeys: Array.isArray(preview && preview.items) ? preview.items.map((item, index) => webSourceItemKey(item, index)) : [],
+      warnings: Array.isArray(preview && preview.warnings) ? preview.warnings : [],
+    }
+  } catch (error) {
+    webSourceDialog.value = {
+      ...webSourceDialog.value,
+      searching: false,
+      error: error && error.message ? error.message : '搜索失败',
+    }
+  }
+}
+
+async function commitWebSourceDialog() {
+  if (!canCommitWebSource.value) return
+  webSourceDialog.value = {
+    ...webSourceDialog.value,
+    adding: true,
+    error: '',
+  }
+  try {
+    const preview = webSourceDialog.value.preview && typeof webSourceDialog.value.preview === 'object' ? webSourceDialog.value.preview : {}
+    const selectedItems = selectedWebSourcePreviewItems.value
+    const selectedUrls = new Set(selectedItems.map((item) => String(item && item.url || '')))
+    const selectedTitles = new Set(selectedItems.map((item) => String(item && item.title || '')))
+    const nextEvidenceRefs = Array.isArray(preview.evidence_refs)
+      ? preview.evidence_refs.filter((url) => selectedUrls.has(String(url || '')))
+      : []
+    const commitPreview = {
+      ...preview,
+      items: selectedItems,
+      evidence_refs: nextEvidenceRefs,
+      summary: `已选择 ${selectedItems.length} 条地区资料。`,
+      warnings: Array.isArray(preview.warnings) ? preview.warnings : [],
+      source: {
+        ...(preview.source || {}),
+        meta: {
+          ...((preview.source && preview.source.meta) || {}),
+          web_source: {
+            ...(((preview.source && preview.source.meta && preview.source.meta.web_source) || {})),
+            selected_item_count: selectedItems.length,
+            selected_urls: Array.from(selectedUrls).filter(Boolean),
+            selected_titles: Array.from(selectedTitles).filter(Boolean),
+          },
+        },
+      },
+    }
+    await new Promise((resolve, reject) => {
+      emit('manage-web-source', {
+        mode: 'commit',
+        preview: commitPreview,
+        resolve,
+        reject,
+      })
+    })
+    closeWebSourceDialog()
+  } catch (error) {
+    webSourceDialog.value = {
+      ...webSourceDialog.value,
+      adding: false,
+      error: error && error.message ? error.message : '添加失败',
+    }
+  }
+}
+
 function openDocumentSourcePicker() {
   documentSourceInput.value?.click()
 }
@@ -1444,13 +1878,39 @@ function handleDocumentSourceSelected(event) {
   const file = event?.target?.files?.[0]
   if (event?.target) event.target.value = ''
   if (!file) return
-  emit('upload-document-source', file)
+  const mimeType = String(file.type || '').toLowerCase()
+  const fileName = String(file.name || '').toLowerCase()
+  if (mimeType.startsWith('image/') || /\.(png|jpe?g|webp|bmp|tiff?)$/.test(fileName)) {
+    emit('upload-image-source', file)
+    return
+  }
+  if (mimeType === 'application/pdf' || /\.(pdf|docx)$/.test(fileName)) {
+    emit('upload-document-source', file)
+    return
+  }
+  sourceDialog.value = {
+    mode: 'unsupported-source',
+    id: '',
+    title: '不支持的来源文件',
+    value: '',
+    message: '来源区目前支持 PDF、DOCX 和常见图片格式。',
+  }
 }
 
-function confirmSourceDialog() {
+async function confirmSourceDialog() {
   const dialog = sourceDialog.value
   if (dialog.mode === 'rename-source') emit('rename-source', dialog.id, dialog.value)
   if (dialog.mode === 'remove-source') emit('remove-source', dialog.id)
+  if (dialog.mode === 'remove-selected-sources') {
+    const sourceIds = Array.from(bulkDeleteSourceIds.value)
+    const done = new Promise((resolve) => {
+      emit('remove-selected-sources', { source_ids: sourceIds, resolve })
+    })
+    closeSourceDialog()
+    await done
+    exitBulkDeleteMode()
+    return
+  }
   if (dialog.mode === 'rename-group') emit('rename-source-group', dialog.id, dialog.value)
   if (dialog.mode === 'group-emoji') emit('set-source-group-emoji', dialog.id, dialog.value)
   if (dialog.mode === 'remove-group') emit('remove-source-group', dialog.id)
@@ -1490,18 +1950,23 @@ function confirmSourceDialog() {
             ref="documentSourceInput"
             class="agent-ppt-source-file-input"
             type="file"
-            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
             @change="handleDocumentSourceSelected">
           <button type="button" class="agent-ppt-add-source-btn" @click="openDocumentSourcePicker">+ 添加来源</button>
           <div class="agent-ppt-source-search">
             <div class="agent-ppt-source-search-main">
-              <span>搜索联网来源</span>
+              <span>联网来源</span>
               <div class="agent-ppt-source-search-chips">
-                <button type="button" disabled>Web</button>
-                <button type="button" disabled>深度研究</button>
+                <button type="button" disabled>可信优先</button>
+                <button type="button" disabled>带引用</button>
               </div>
             </div>
-            <button type="button" disabled>搜索</button>
+            <button type="button" :disabled="webSourceGenerating" @click="openWebSourceDialog('search')">
+              {{ webSourceGenerating ? '搜索中' : '搜索' }}
+            </button>
+            <button type="button" :disabled="webSourceGenerating" @click="openWebSourceDialog('url')">
+              添加 URL
+            </button>
           </div>
           <button
             type="button"
@@ -1529,6 +1994,7 @@ function confirmSourceDialog() {
             <button
               type="button"
               class="agent-ppt-source-select-row"
+              v-if="!bulkDeleteMode"
               :class="{ 'is-selected': sourceSummary.ready > 0 && sourceSummary.selected === sourceSummary.ready }"
               @click="$emit('toggle-all-sources')">
               <span>全选</span>
@@ -1538,6 +2004,30 @@ function confirmSourceDialog() {
                 aria-hidden="true">
                 {{ sourceSummary.ready > 0 && sourceSummary.selected === sourceSummary.ready ? '✓' : '' }}
               </span>
+            </button>
+            <button
+              v-if="!bulkDeleteMode"
+              type="button"
+              class="agent-ppt-source-select-row agent-ppt-source-delete-selected"
+              :disabled="!canStartBulkDelete"
+              @click="enterBulkDeleteMode">
+              <span>批量删除</span>
+            </button>
+            <button
+              v-if="bulkDeleteMode"
+              type="button"
+              class="agent-ppt-source-select-row"
+              :disabled="sourceDeleting"
+              @click="exitBulkDeleteMode">
+              <span>取消</span>
+            </button>
+            <button
+              v-if="bulkDeleteMode"
+              type="button"
+              class="agent-ppt-source-select-row agent-ppt-source-delete-selected"
+              :disabled="!canConfirmBulkDelete"
+              @click="openRemoveSelectedSources">
+              <span>{{ sourceDeleting ? '删除中' : `删除 ${bulkDeleteSelectedSources.length} 项` }}</span>
             </button>
           </div>
           <div class="agent-ppt-source-list agent-ppt-source-tree">
@@ -1562,6 +2052,7 @@ function confirmSourceDialog() {
                   <strong>{{ group.title }}</strong>
                 </button>
                 <button
+                  v-if="!bulkDeleteMode"
                   type="button"
                   class="agent-ppt-source-menu-btn"
                   aria-label="更多选项"
@@ -1570,6 +2061,7 @@ function confirmSourceDialog() {
                   ⋮
                 </button>
                 <button
+                  v-if="!bulkDeleteMode"
                   type="button"
                   class="agent-ppt-source-checkbox"
                   :class="{ 'is-checked': isGroupSelected(group) }"
@@ -1592,7 +2084,7 @@ function confirmSourceDialog() {
                   v-for="source in group.items"
                   :key="`ppt-source-${source.id}`"
                   class="agent-ppt-source-row"
-                  :class="[{ 'is-ready': source.status === 'ready', 'is-generating': isGeneratingSource(source), 'is-pending': source.status !== 'ready', 'is-selected': source.selected }, `is-${source.type || 'file'}`]">
+                  :class="[{ 'is-ready': source.status === 'ready', 'is-generating': isGeneratingSource(source), 'is-pending': source.status !== 'ready', 'is-selected': bulkDeleteMode ? isBulkDeleteSelected(source) : source.selected }, `is-${source.type || 'file'}`, `is-health-${sourceHealth(source).healthStatus}`]">
                   <button
                     type="button"
                     class="agent-ppt-source-row-main"
@@ -1604,10 +2096,14 @@ function confirmSourceDialog() {
                     <span class="agent-ppt-source-name">
                       <strong>{{ source.title }}</strong>
                       <small>{{ (source.meta && source.meta.label) || (source.status === 'ready' ? '已生成' : '待生成') }}</small>
+                      <span class="agent-ppt-source-health" :class="`is-${sourceHealth(source).healthStatus}`" :title="sourceHealthReason(source)">
+                        {{ sourceHealthLabel(source) }}
+                      </span>
                       <em v-if="sourceTransportLabel(source)">{{ sourceTransportLabel(source) }}</em>
                     </span>
                   </button>
                   <button
+                    v-if="!bulkDeleteMode"
                     type="button"
                     class="agent-ppt-source-menu-btn"
                     aria-label="更多选项"
@@ -1619,10 +2115,11 @@ function confirmSourceDialog() {
                     v-if="source.status === 'ready'"
                     type="button"
                     class="agent-ppt-source-checkbox"
-                    :class="{ 'is-checked': source.selected }"
-                    aria-label="切换来源选择"
-                    @click.stop="$emit('toggle-source', source.id)">
-                    {{ source.selected ? '✓' : '' }}
+                    :class="{ 'is-checked': bulkDeleteMode ? isBulkDeleteSelected(source) : source.selected }"
+                    :disabled="bulkDeleteMode && !isDeletableSource(source)"
+                    :aria-label="bulkDeleteMode ? '选择删除来源' : '切换来源选择'"
+                    @click.stop="bulkDeleteMode ? toggleBulkDeleteSource(source) : $emit('toggle-source', source.id)">
+                    {{ (bulkDeleteMode ? isBulkDeleteSelected(source) : source.selected) ? '✓' : '' }}
                   </button>
                   <span v-else class="agent-ppt-source-loading" :class="{ 'is-generating': isGeneratingSource(source) }" aria-label="未就绪"></span>
                   <div
@@ -1631,7 +2128,8 @@ function confirmSourceDialog() {
                     :class="{ 'is-above': sourceMenu.placement === 'above' }"
                     :style="{ left: `${sourceMenu.x}px`, top: `${sourceMenu.y}px` }">
                     <button v-if="isPackagePlaceholderSource(source)" type="button" @click="$emit('generate-package-source', source.id)">生成资料包</button>
-                    <button v-else-if="isPackageSource(source)" type="button" @click="openPackageDetail(source)">查看内容</button>
+                    <button v-if="isRetryableSource(source)" type="button" @click="$emit('retry-source', source.id)">重试构建</button>
+                    <button v-if="isPackageSource(source)" type="button" @click="openPackageDetail(source)">查看内容</button>
                     <button v-if="isCurrentSource(source)" type="button" @click="openCurrentSourceDetail(source)">查看分析</button>
                     <button
                       v-if="isDocumentSource(source)"
@@ -1670,7 +2168,7 @@ function confirmSourceDialog() {
               v-for="source in ungroupedSources"
               :key="`ppt-source-ungrouped-${source.id}`"
               class="agent-ppt-source-row"
-              :class="[{ 'is-ready': source.status === 'ready', 'is-generating': isGeneratingSource(source), 'is-pending': source.status !== 'ready', 'is-selected': source.selected }, `is-${source.type || 'file'}`]">
+              :class="[{ 'is-ready': source.status === 'ready', 'is-generating': isGeneratingSource(source), 'is-pending': source.status !== 'ready', 'is-selected': bulkDeleteMode ? isBulkDeleteSelected(source) : source.selected }, `is-${source.type || 'file'}`, `is-health-${sourceHealth(source).healthStatus}`]">
               <button
                 type="button"
                 class="agent-ppt-source-row-main"
@@ -1682,10 +2180,14 @@ function confirmSourceDialog() {
                 <span class="agent-ppt-source-name">
                   <strong>{{ source.title }}</strong>
                   <small>{{ (source.meta && source.meta.label) || (source.status === 'ready' ? '已生成' : '待生成') }}</small>
+                  <span class="agent-ppt-source-health" :class="`is-${sourceHealth(source).healthStatus}`" :title="sourceHealthReason(source)">
+                    {{ sourceHealthLabel(source) }}
+                  </span>
                   <em v-if="sourceTransportLabel(source)">{{ sourceTransportLabel(source) }}</em>
                 </span>
               </button>
               <button
+                v-if="!bulkDeleteMode"
                 type="button"
                 class="agent-ppt-source-menu-btn"
                 aria-label="更多选项"
@@ -1697,10 +2199,11 @@ function confirmSourceDialog() {
                 v-if="source.status === 'ready'"
                 type="button"
                 class="agent-ppt-source-checkbox"
-                :class="{ 'is-checked': source.selected }"
-                aria-label="切换来源选择"
-                @click.stop="$emit('toggle-source', source.id)">
-                {{ source.selected ? '✓' : '' }}
+                :class="{ 'is-checked': bulkDeleteMode ? isBulkDeleteSelected(source) : source.selected }"
+                :disabled="bulkDeleteMode && !isDeletableSource(source)"
+                :aria-label="bulkDeleteMode ? '选择删除来源' : '切换来源选择'"
+                @click.stop="bulkDeleteMode ? toggleBulkDeleteSource(source) : $emit('toggle-source', source.id)">
+                {{ (bulkDeleteMode ? isBulkDeleteSelected(source) : source.selected) ? '✓' : '' }}
               </button>
               <span v-else class="agent-ppt-source-loading" :class="{ 'is-generating': isGeneratingSource(source) }" aria-label="未就绪"></span>
               <div
@@ -1709,7 +2212,8 @@ function confirmSourceDialog() {
                 :class="{ 'is-above': sourceMenu.placement === 'above' }"
                 :style="{ left: `${sourceMenu.x}px`, top: `${sourceMenu.y}px` }">
                 <button v-if="isPackagePlaceholderSource(source)" type="button" @click="$emit('generate-package-source', source.id)">生成资料包</button>
-                <button v-else-if="isPackageSource(source)" type="button" @click="openPackageDetail(source)">查看内容</button>
+                <button v-if="isRetryableSource(source)" type="button" @click="$emit('retry-source', source.id)">重试构建</button>
+                <button v-if="isPackageSource(source)" type="button" @click="openPackageDetail(source)">查看内容</button>
                 <button v-if="isCurrentSource(source)" type="button" @click="openCurrentSourceDetail(source)">查看分析</button>
                 <button
                   v-if="isDocumentSource(source)"
@@ -1737,8 +2241,8 @@ function confirmSourceDialog() {
                 <button type="button" @click="openRenameSource(source)">重命名来源</button>
               </div>
             </div>
-            <div v-if="!hasVisibleSources" class="agent-ppt-source-empty">暂无可用来源。</div>
-          </div>
+          <div v-if="!hasVisibleSources" class="agent-ppt-source-empty">暂无可用来源。</div>
+        </div>
         </template>
         <button
           v-else
@@ -1751,6 +2255,15 @@ function confirmSourceDialog() {
           <small>{{ deliverableSourceCount }} AI</small>
         </button>
       </aside>
+
+      <section class="agent-ppt-notebook-panel agent-ppt-center-panel" aria-label="聊天工作区">
+        <slot name="center">
+          <div class="agent-ppt-center-empty">
+            <strong>聊天区</strong>
+            <span>把完整对话放在这里，围绕来源继续发问。</span>
+          </div>
+        </slot>
+      </section>
 
       <section class="agent-ppt-notebook-panel agent-ppt-document-panel" aria-label="指令文件">
         <div class="agent-ppt-notebook-head">
@@ -2184,17 +2697,6 @@ function confirmSourceDialog() {
             </div>
           </div>
           <div class="agent-ppt-prompt-box">
-            <div v-if="hasPageQueue && (isSlideGenerationActive || slideGenerationFailedPage)" class="agent-ppt-slide-queue-strip is-bottom" :aria-label="slideGenerationQueueSummary">
-              <span
-                v-for="item in slideGenerationQueueChips"
-                :key="`ppt-bottom-slide-queue-chip-${item.pageNo}`"
-                class="agent-ppt-slide-queue-chip"
-                :class="`is-${item.status}`"
-                :title="item.error || item.label">
-                <strong>{{ String(item.pageNo).padStart(2, '0') }}</strong>
-                <small>{{ item.label }}</small>
-              </span>
-            </div>
             <span v-if="generationErrorText">{{ generationErrorText }}</span>
             <span v-else-if="isGenerationJobActive">{{ generationJobTitle }}</span>
             <span v-else>{{ promptStageText }}</span>
@@ -2772,8 +3274,190 @@ function confirmSourceDialog() {
         </label>
         <div class="agent-ppt-source-dialog-actions">
           <button type="button" @click="closeSourceDialog">取消</button>
-          <button type="button" class="is-primary" @click="confirmSourceDialog">确认</button>
+          <button
+            type="button"
+            class="is-primary"
+            :disabled="sourceDialog.mode === 'remove-selected-sources' && sourceDeleting"
+            @click="confirmSourceDialog">
+            {{ sourceDialog.mode === 'remove-selected-sources' && sourceDeleting ? '删除中' : '确认' }}
+          </button>
         </div>
+      </div>
+    </div>
+    <div v-if="webSourceDialog.open" class="agent-ppt-source-dialog-backdrop" @click.self="closeWebSourceDialog">
+      <div class="agent-ppt-source-dialog agent-ppt-research-dialog" role="dialog" aria-modal="true">
+        <strong>{{ webSourceDialog.inputMode === 'url' ? '添加网页来源' : 'AI 搜索地区资料' }}</strong>
+        <p v-if="webSourceDialog.error" class="agent-ppt-research-error">{{ webSourceDialog.error }}</p>
+        <p v-else-if="webSourceDialog.loadingDefault">正在根据当前范围生成地区默认值...</p>
+        <p v-else-if="webSourceDialog.warnings.length">{{ webSourceDialog.warnings.join('；') }}</p>
+
+        <template v-if="webSourceDialog.step === 'form'">
+          <div class="agent-ppt-research-source-list">
+            <span>接入方式</span>
+            <button
+              type="button"
+              :class="{ 'is-selected': webSourceDialog.inputMode === 'search' }"
+              @click="setWebSourceInputMode('search')">
+              AI 搜索
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-selected': webSourceDialog.inputMode === 'url' }"
+              @click="setWebSourceInputMode('url')">
+              添加 URL
+            </button>
+          </div>
+          <label>
+            <span>地区名</span>
+            <input v-model="webSourceDialog.regionName" type="text" autofocus>
+          </label>
+          <label>
+            <span>城市/行政区</span>
+            <input v-model="webSourceDialog.administrativeArea" type="text">
+          </label>
+          <label>
+            <span>{{ webSourceDialog.inputMode === 'url' ? '资料主题' : '搜索目标' }}</span>
+            <input v-model="webSourceDialog.topic" type="text">
+          </label>
+          <label v-if="webSourceDialog.inputMode === 'url'">
+            <span>网页 URL</span>
+            <textarea
+              v-model="webSourceDialog.urlText"
+              rows="4"
+              placeholder="每行一个 URL，例如 https://www.gov.cn/..."></textarea>
+          </label>
+          <div v-if="webSourceDialog.inputMode === 'search'" class="agent-ppt-web-source-category-list">
+            <button
+              v-for="category in ['政策背景', '区域概况', '产业商业', '文旅案例', '竞品项目', '周边房租']"
+              :key="`web-source-category-${category}`"
+              type="button"
+              :class="{ 'is-selected': webSourceDialog.categories.includes(category) }"
+              @click="toggleWebSourceCategory(category)">
+              {{ category }}
+            </button>
+          </div>
+          <div v-if="webSourceDialog.inputMode === 'search'" class="agent-ppt-research-source-list">
+            <span>来源范围</span>
+            <button type="button" class="is-selected" disabled>官方/专业来源</button>
+            <button
+              type="button"
+              :class="{ 'is-selected': isWebSourceModeSelected('market') }"
+              @click="toggleWebSourceMode('market')">
+              包含市场平台
+            </button>
+            <button
+              type="button"
+              :class="{ 'is-selected': isWebSourceModeSelected('community') }"
+              @click="toggleWebSourceMode('community')">
+              包含社媒/问答
+            </button>
+          </div>
+          <div class="agent-ppt-source-dialog-actions">
+            <button type="button" @click="closeWebSourceDialog">取消</button>
+            <button type="button" :disabled="!canSearchWebSource" @click="submitWebSourceDialog">
+              {{ webSourceDialog.loadingDefault ? '准备中' : webSourceDialog.searching ? '处理中' : webSourceDialog.inputMode === 'url' ? '抓取 URL' : '搜索' }}
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="agent-ppt-research-preview">
+            <div class="agent-ppt-web-source-preview-toolbar">
+              <strong>检索到 {{ webSourcePreviewItems.length }} 条资料</strong>
+              <span>已选择 {{ selectedWebSourcePreviewItems.length }} 条</span>
+              <button type="button" :disabled="!webSourcePreviewItems.length || webSourceDialog.adding" @click="selectAllWebSourcePreviewItems">全选</button>
+              <button type="button" :disabled="!selectedWebSourcePreviewItems.length || webSourceDialog.adding" @click="clearWebSourcePreviewSelection">清空</button>
+            </div>
+            <section class="agent-ppt-research-result-list" aria-label="搜索资料列表">
+              <div class="agent-ppt-web-source-preview-grid">
+                <div class="agent-ppt-research-result-column">
+                  <template v-for="group in webSourcePreviewItemsByCategory" :key="`web-source-group-${group.category}`">
+                    <div class="agent-ppt-web-source-category-label">{{ group.category }}</div>
+                    <article
+                      v-for="row in group.rows"
+                      :key="`web-source-preview-${row.item.url || row.item.title || row.index}`"
+                      class="agent-ppt-research-result-card"
+                      :class="{ 'is-selected': isWebSourceItemSelected(row.item, row.index), 'is-active': isWebSourceItemActive(row.index) }"
+                      @click="selectWebSourcePreviewItem(row.index)">
+                      <label @click.stop>
+                        <input
+                          type="checkbox"
+                          :checked="isWebSourceItemSelected(row.item, row.index)"
+                          :disabled="webSourceDialog.adding"
+                          @click.stop
+                          @change="toggleWebSourcePreviewItem(row.index)">
+                        <span>{{ webSourceItemUrlLabel(row.item, row.index) }}</span>
+                      </label>
+                      <div class="agent-ppt-research-result-meta">
+                        <span>{{ row.item.source_name || row.item.source_domain || '网页来源' }}</span>
+                        <span>{{ webSourceTierLabel(row.item) }}</span>
+                        <span>{{ row.item.confidence || 'unknown' }}</span>
+                        <span :class="`is-${row.item.parse_status || 'unknown'}`">{{ row.item.parse_status === 'parsed' ? '已解析' : '待核验' }}</span>
+                      </div>
+                    </article>
+                  </template>
+                  <div v-if="!webSourcePreviewItems.length" class="agent-ppt-package-empty">没有检索到可添加资料。</div>
+                </div>
+                <aside class="agent-ppt-research-detail-panel" aria-label="搜索资料处理详情">
+                  <template v-if="activeWebSourcePreviewItem">
+                    <div class="agent-ppt-research-detail-head">
+                      <strong>{{ activeWebSourcePreviewItem.title || '网页资料详情' }}</strong>
+                      <a v-if="activeWebSourcePreviewItem.url" :href="activeWebSourcePreviewItem.url" target="_blank" rel="noreferrer">打开网页</a>
+                    </div>
+                    <dl>
+                      <div>
+                        <dt>来源</dt>
+                        <dd>{{ activeWebSourcePreviewItem.source_name || activeWebSourcePreviewItem.source_domain || '网页来源' }}</dd>
+                      </div>
+                      <div>
+                        <dt>来源等级</dt>
+                        <dd>{{ webSourceTierLabel(activeWebSourcePreviewItem) }}</dd>
+                      </div>
+                      <div>
+                        <dt>处理状态</dt>
+                        <dd>{{ activeWebSourcePreviewItem.parse_status === 'parsed' ? 'Crawl4AI 已解析正文' : `待核验${activeWebSourcePreviewItem.parse_error ? `：${activeWebSourcePreviewItem.parse_error}` : ''}` }}</dd>
+                      </div>
+                      <div v-if="activeWebSourcePreviewItem.url">
+                        <dt>原网页</dt>
+                        <dd><a :href="activeWebSourcePreviewItem.url" target="_blank" rel="noreferrer">{{ activeWebSourcePreviewItem.url }}</a></dd>
+                      </div>
+                    </dl>
+                    <div class="agent-ppt-research-detail-section">
+                      <strong>摘要</strong>
+                      <p>{{ activeWebSourcePreviewItem.summary || '暂无摘要，可打开网页人工核验。' }}</p>
+                    </div>
+                    <div v-if="Array.isArray(activeWebSourcePreviewItem.supported_claims) && activeWebSourcePreviewItem.supported_claims.length" class="agent-ppt-research-detail-section">
+                      <strong>支持论点</strong>
+                      <ul>
+                        <li v-for="claim in activeWebSourcePreviewItem.supported_claims.slice(0, 3)" :key="`web-source-active-claim-${claim}`">{{ claim }}</li>
+                      </ul>
+                    </div>
+                    <div v-if="Array.isArray(activeWebSourcePreviewItem.web_evidence_nodes) && activeWebSourcePreviewItem.web_evidence_nodes.length" class="agent-ppt-research-detail-section">
+                      <strong>关键段落</strong>
+                      <ul>
+                        <li v-for="node in activeWebSourcePreviewItem.web_evidence_nodes.slice(0, 5)" :key="`web-source-active-node-${node.node_id || node.title || node.summary}`">
+                          <span>{{ node.title || '网页证据' }}</span>
+                          <p>{{ node.summary || node.text }}</p>
+                        </li>
+                      </ul>
+                    </div>
+                    <div v-if="activeWebSourcePreviewItem.parse_status !== 'parsed'" class="agent-ppt-research-detail-warning">
+                      网页正文未成功解析，这条资料只作为待核验线索；加入后不会把它当成已确认事实。
+                    </div>
+                  </template>
+                  <div v-else class="agent-ppt-package-empty">选择左侧资料查看处理详情。</div>
+                </aside>
+              </div>
+            </section>
+          </div>
+          <div class="agent-ppt-source-dialog-actions">
+            <button type="button" :disabled="webSourceDialog.adding" @click="backToWebSourceForm">返回修改</button>
+            <button type="button" :disabled="webSourceDialog.adding" @click="closeWebSourceDialog">取消</button>
+            <button type="button" :disabled="!canCommitWebSource" @click="commitWebSourceDialog">
+              {{ webSourceDialog.adding ? '添加中' : `添加已选 ${selectedWebSourcePreviewItems.length} 项` }}
+            </button>
+          </div>
+        </template>
       </div>
     </div>
   </div>

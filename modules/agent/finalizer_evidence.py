@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from modules.retrieval import KnowledgeChunk, RetrievalService
+from modules.evidence_retrieval import evidence_node_from_knowledge_chunk
+from modules.retrieval import RetrievalService
 
 from .schemas import AnalysisSnapshot
 
@@ -16,6 +17,11 @@ _COVERAGE_QUERIES = {
     "population": "人口画像 人口总量 年龄 密度 客群",
     "nightlight": "夜光 活力 夜间 均值 峰值 热点",
 }
+
+
+def _node_id_from_chunk(chunk: Any) -> str:
+    node = evidence_node_from_knowledge_chunk(chunk)
+    return node.id
 
 
 def _as_text(value: Any) -> str:
@@ -101,19 +107,6 @@ def _coverage_plan(available_domains: List[str]) -> List[Dict[str, Any]]:
     ]
 
 
-def _chunk_payload(chunk: KnowledgeChunk) -> Dict[str, Any]:
-    return {
-        "chunk_id": chunk.chunk_id,
-        "domain": chunk.domain,
-        "title": chunk.title,
-        "content": chunk.content,
-        "metrics": dict(chunk.metrics or {}),
-        "source_artifacts": list(chunk.source_artifacts or []),
-        "warnings": list(chunk.warnings or []),
-        "evidence_level": chunk.evidence_level,
-    }
-
-
 def build_finalizer_evidence_pack(
     *,
     question: str,
@@ -128,13 +121,13 @@ def build_finalizer_evidence_pack(
         "reason": "not_required",
         "available_domains": available_domains,
         "search_queries": [],
-        "read_chunks": [],
+        "evidence_nodes": [],
         "coverage_domains": [],
         "missing_coverage_domains": [],
         "warnings": [],
         "evidence_limits": [
-            "最终回答只能引用 read_chunks 中实际读取到的具体地名、H3 格子、路网线段、人口/夜光 cell。",
-            "地图快照可支持视觉观察，但不能替代结构化 chunk。",
+            "最终回答只能引用 evidence_nodes 中实际读取到的具体地名、H3 格子、路网线段、人口/夜光 cell。",
+            "地图快照可支持视觉观察，但不能替代结构化 EvidenceNode。",
         ],
     }
     if not available_domains:
@@ -146,7 +139,7 @@ def build_finalizer_evidence_pack(
     pack["status"] = "ready"
     pack["reason"] = "high_value_spatial_question"
     read_ids: set[str] = set()
-    read_chunks: List[Dict[str, Any]] = []
+    evidence_nodes: List[Dict[str, Any]] = []
     warnings: List[str] = []
     coverage_domains: List[str] = []
     for planned in _coverage_plan(available_domains) + _query_plan(question, answer_evidence_payload, available_domains):
@@ -155,40 +148,48 @@ def build_finalizer_evidence_pack(
             domains=[_as_text(item) for item in planned.get("domains") or []],
             top_k=int(planned.get("top_k") or 6),
         )
+        chunks_by_id: Dict[str, Any] = {}
+        for hit in hits[:4]:
+            chunk = service.read_analysis_chunk(hit.chunk_id)
+            if chunk is not None:
+                chunks_by_id[hit.chunk_id] = chunk
+        search_node_ids = [_node_id_from_chunk(chunk) for chunk in chunks_by_id.values()]
         pack["search_queries"].append(
             {
                 "query": _as_text(planned.get("query")),
                 "domains": list(planned.get("domains") or []),
                 "coverage_domain": _as_text(planned.get("coverage_domain")),
                 "hit_count": len(hits),
-                "hit_ids": [hit.chunk_id for hit in hits[:4]],
+                "node_ids": search_node_ids,
             }
         )
         if not hits:
             warnings.append(f"未命中：{_as_text(planned.get('query'))}")
         for hit in hits:
-            if len(read_chunks) >= _MAX_READS:
+            if len(evidence_nodes) >= _MAX_READS:
                 break
             if hit.chunk_id in read_ids:
                 continue
-            chunk = service.read_analysis_chunk(hit.chunk_id)
+            chunk = chunks_by_id.get(hit.chunk_id)
             if chunk is None:
-                warnings.append(f"chunk_not_found: {hit.chunk_id}")
+                chunk = service.read_analysis_chunk(hit.chunk_id)
+            if chunk is None:
+                warnings.append(f"evidence_node_not_found: {_as_text(hit.title) or 'unknown_node'}")
                 continue
             read_ids.add(hit.chunk_id)
-            read_chunks.append(_chunk_payload(chunk))
+            evidence_nodes.append(evidence_node_from_knowledge_chunk(chunk).model_dump(mode="python"))
             coverage_domain = _as_text(planned.get("coverage_domain"))
             if coverage_domain and coverage_domain not in coverage_domains:
                 coverage_domains.append(coverage_domain)
             if coverage_domain:
                 break
-        if len(read_chunks) >= _MAX_READS:
+        if len(evidence_nodes) >= _MAX_READS:
             break
 
-    if not read_chunks:
+    if not evidence_nodes:
         pack["status"] = "empty"
-        warnings.append("最终证据检索未读取到可用 chunk，最终回答需保持保守。")
-    pack["read_chunks"] = read_chunks
+        warnings.append("最终证据检索未读取到可用 EvidenceNode，最终回答需保持保守。")
+    pack["evidence_nodes"] = evidence_nodes
     pack["coverage_domains"] = coverage_domains
     pack["missing_coverage_domains"] = [domain for domain in _FULL_DEPTH_DOMAINS if domain in available_domains and domain not in coverage_domains]
     pack["warnings"] = warnings[:8]

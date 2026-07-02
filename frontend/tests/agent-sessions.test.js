@@ -1867,15 +1867,11 @@ test('cancelAgentTurn aborts in-flight agent request and restores idle state', a
   assert.equal(ctx.agentInput, '总结这个区域')
 })
 
-test('submitAgentTurn sends ready attachment ids without embedding file content', async () => {
+test('submitAgentTurn does not send standalone attachment ids', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
   ctx.agentInput = '结合附件看这个区域'
-  ctx.agentAttachments = [
-    { attachmentId: 'att-ready', filename: 'plan.pdf', status: 'ready' },
-    { attachmentId: 'att-processing', filename: 'draft.png', status: 'processing' },
-  ]
 
   let requestBody = null
   global.fetch = async (url, options = {}) => {
@@ -1901,8 +1897,7 @@ test('submitAgentTurn sends ready attachment ids without embedding file content'
 
   await ctx.submitAgentTurn()
 
-  assert.deepEqual(requestBody.attachment_ids, ['att-ready'])
-  assert.equal(JSON.stringify(requestBody.messages).includes('plan.pdf'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(requestBody, 'attachment_ids'), false)
 })
 
 test('submitAgentTurn caches automatic visual snapshots after first capture', async () => {
@@ -4802,7 +4797,7 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.isAgentReportDetailView(), true)
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '策划 PPT')
   assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '先生成 PPT 指令文件，再选择风格 Skill 生成页面')
-  assert.equal(ctx.shouldShowAgentComposer(), false)
+  assert.equal(ctx.shouldShowAgentComposer(), true)
   assert.equal(ctx.openAgentPptPlanningFromReport(), pptId)
 
   ctx.returnToAgentReportHome()
@@ -4818,7 +4813,7 @@ test('agent report navigation opens drill-down views and returns to report home'
   ctx.openAgentFollowupFromSummary('为什么这样判断？')
   assert.equal(ctx.getAgentActiveTopTab().kind, 'followup')
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '追问解释')
-  assert.equal(ctx.shouldShowAgentComposer(), true)
+  assert.equal(ctx.shouldShowAgentComposer(), false)
 
   const deepId = ctx.openAgentDeepAnalysisFromTarget(ctx.buildReportSectionContextAskTarget({
     sectionKey: 'headline',
@@ -4828,7 +4823,157 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
   assert.equal(ctx.agentTabs.activeTabId, deepId)
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '继续分析')
-  assert.equal(ctx.shouldShowAgentComposer(), true)
+  assert.equal(ctx.shouldShowAgentComposer(), false)
+})
+
+test('ppt planning keeps center composer turns in the ppt tab', () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+
+  const pptId = ctx.openAgentPptPlanningFromReport()
+  ctx.agentInput = '继续分析这份 PPT 资料'
+
+  const turnContext = ctx.buildTurnContext()
+
+  assert.equal(turnContext.panelKind, 'ppt_planning')
+  assert.equal(ctx.agentTabs.activeTabId, pptId)
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'ppt_planning')
+  assert.deepEqual(
+    ctx.agentTabs.followupTabs.map((item) => item.title),
+    [],
+  )
+  assert.deepEqual(
+    turnContext.nextMessages.map((item) => item.content),
+    ['继续分析这份 PPT 资料'],
+  )
+})
+
+test('ppt planning quick composer uses lightweight ask without agent tool turn', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  const pptId = ctx.openAgentPptPlanningFromReport()
+  ctx.updateAgentActivePptPlanningState({
+    ...ctx.getAgentActivePptPlanningState(),
+    sources: [{
+      id: 'current:scope',
+      type: 'data',
+      title: '当前等时圈范围',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'system',
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'current:scope',
+          title: '当前等时圈范围',
+          included: ['scope', 'evidence'],
+          scope: { has_polygon: true },
+          evidence: [{ title: '范围', text: '当前区域' }],
+          counts: { scope: 1, evidence: 1 },
+        },
+      },
+    }],
+  })
+  let submitAgentTurnCalled = false
+  ctx.submitAgentTurn = async () => {
+    submitAgentTurnCalled = true
+  }
+  const calls = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, body: JSON.parse(options.body || '{}') })
+    return {
+      ok: true,
+      async json() {
+        return { status: 'success', answer: '范围证据可用于 PPT。', evidence: [], citations: [], warnings: [] }
+      },
+    }
+  }
+
+  try {
+    ctx.agentInput = '这些资料能说明什么？'
+    await ctx.submitAgentComposer()
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(submitAgentTurnCalled, false)
+  assert.equal(ctx.agentTabs.activeTabId, pptId)
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'ppt_planning')
+  assert.deepEqual(ctx.agentTabs.followupTabs, [])
+  assert.equal(calls[0].url, '/api/v1/analysis/agent/context-ask')
+  assert.equal(calls[0].body.require_ai, true)
+  assert.equal(calls[0].body.target.type, 'ppt_sources')
+  assert.equal(calls[0].body.target.source, 'ppt_planning')
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['这些资料能说明什么？', '范围证据可用于 PPT。'])
+  assert.equal(ctx.agentMessages.some((item) => item.process), false)
+  assert.deepEqual(ctx.agentThinkingTimeline, [])
+  assert.deepEqual(ctx.agentExecutionTrace, [])
+  assert.deepEqual(ctx.agentPlan.steps, [])
+})
+
+test('ppt planning deep composer keeps existing agent turn flow', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.openAgentPptPlanningFromReport()
+  let seenOptions = null
+  ctx.submitAgentTurn = async (options = {}) => {
+    seenOptions = options
+  }
+
+  ctx.agentInput = '深度检查这些资料'
+  ctx.selectAgentComposerMode('deep')
+  await ctx.submitAgentComposer()
+
+  assert.equal(seenOptions.panelKind, 'ppt_planning')
+  assert.equal(seenOptions.mode, 'deep')
+})
+
+test('ppt planning quick composer blocks when no selected deliverable source exists', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.openAgentPptPlanningFromReport()
+  ctx.getAgentPptPlanningStateWithSystemSources = () => ctx.getAgentActivePptPlanningState()
+  ctx.updateAgentActivePptPlanningState({
+    ...ctx.getAgentActivePptPlanningState(),
+    selectedSlideId: '',
+    sources: [{
+      id: 'empty-source',
+      type: 'data',
+      title: '空来源',
+      status: 'ready',
+      selected: true,
+      meta: {
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'empty-source',
+          included: [],
+        },
+      },
+    }],
+  })
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(url)
+    throw new Error('should_not_fetch')
+  }
+
+  try {
+    ctx.agentInput = '能回答吗？'
+    await ctx.submitAgentComposer()
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(calls.some((url) => String(url).includes('/api/v1/analysis/agent/context-ask')), false)
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['能回答吗？', '请先勾选可用于 AI 的来源'])
+  assert.deepEqual(ctx.agentExecutionTrace, [])
+  assert.deepEqual(ctx.agentPlan.steps, [])
 })
 
 test('summary session history persists tourism cross analysis in summary pack and tabs', () => {
@@ -7800,4 +7945,3 @@ test.after(() => {
 global.window = globalThis
 global.alert = () => {}
 global.confirm = () => true
-

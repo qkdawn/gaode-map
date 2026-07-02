@@ -1,6 +1,6 @@
 import { asText, cloneArray, cloneObject } from './normalizers.js'
 import { getAnalysisTaskDefinition } from './analysis-task-registry.js'
-import { createPptSystemSources, createPptTransportFromAiPayload } from '../ppt-planning/model.js'
+import { createPptSystemSources, createPptTransportFromAiPayload, evidenceNodesFromAiPayload, evidenceNodesFromPptEvidenceItems } from '../ppt-planning/model.js'
 import {
   capturePptMapRequestAsset,
   isPptMapSnapshotRequest,
@@ -11,10 +11,13 @@ import {
 } from '../ppt-planning/carrier-snapshot.js'
 import {
   classifyPptSourceGroups,
+  commitPptWebSource,
   cleanupPptVisualArtifacts,
   createPptDataPackage,
   createDeckBriefJob,
+  deleteImageSource,
   deleteDocumentSource,
+  deletePptDataSource,
   generateDeckBrief,
   generateDeckBriefWithDebug,
   generateNarrativePlan,
@@ -22,13 +25,17 @@ import {
   generatePptSpec,
   generatePptSpecWithDebug,
   generatePptVisualArtifacts,
+  getPptWebSourceLocationDefault,
   getJobStatus,
   getDeckBriefJob,
   listPptDataSources,
+  previewPptWebSource,
   regenerateDeckBriefSlide,
   regeneratePptSpecSection,
+  retryImageSourceIngest,
   scheduleDocumentParse,
   uploadDocumentSource,
+  uploadImageSource,
 } from '../ppt-planning/api.js'
 import {
   addPptDataPackageSource,
@@ -95,6 +102,7 @@ import {
   togglePptSourceSelection,
   undoPptSectionRevision,
   upsertPptDocumentSource,
+  upsertPptImageSource,
 } from '../ppt-planning/ui-state.js'
 
 const DEFAULT_PPT_POI_EVIDENCE_INTENT = '为 PPT 指令生成整理当前区域代表性 POI 资料'
@@ -190,6 +198,8 @@ function normalizePptGenerationErrorMessage(error = null, source = '') {
     ppt_planning_llm_http_error: 'AI 接口返回错误，请稍后重试。',
     ppt_planning_llm_request_failed: 'AI 接口请求失败，请检查网络或接口配置。',
     ppt_planning_llm_unavailable: 'AI 接口未启用或配置不可用。',
+    searxng_base_url_required: '本地搜索服务未启动，请用一键脚本启动或检查 SearXNG。',
+    searxng_unavailable: '本地搜索服务暂不可用，请检查 8004 端口。',
   }
   return messages[rawDetail] || messages[raw] || rawDetail || raw || 'PPT 生成失败，请稍后重试。'
 }
@@ -652,6 +662,53 @@ function isPptDocumentSource(source = {}) {
   return asText(meta.sourceKind) === 'document' || asText(source && source.id).startsWith('document:')
 }
 
+function isPptImageSource(source = {}) {
+  const meta = cloneObject(source && source.meta)
+  return asText(meta.sourceKind) === 'image' || asText(source && source.id).startsWith('image:')
+}
+
+function isPptPersistedArtifactSource(source = {}) {
+  const meta = cloneObject(source && source.meta)
+  const sourceKind = asText(meta.sourceKind)
+  const sourceId = asText(source && source.id)
+  return sourceKind === 'package'
+    || sourceKind === 'web'
+    || sourceKind === 'database'
+    || sourceId.startsWith('package:')
+    || sourceId.startsWith('database:')
+}
+
+function imageAttachmentIdFromPptSource(source = {}) {
+  const meta = cloneObject(source && source.meta)
+  const image = cloneObject(meta.image)
+  const explicit = asText(meta.attachmentId || meta.attachment_id || image.attachment_id || image.attachmentId)
+  if (explicit) return explicit
+  const sourceId = asText(source && source.id)
+  return sourceId.startsWith('image:') ? sourceId.slice('image:'.length) : ''
+}
+
+function imageConversationIdFromPptSource(source = {}) {
+  const meta = cloneObject(source && source.meta)
+  const image = cloneObject(meta.image)
+  return asText(meta.conversationId || meta.conversation_id || image.conversation_id || image.conversationId)
+}
+
+function webSourceRetryPayloadFromPptSource(source = {}, areaId = '') {
+  const meta = cloneObject(source && source.meta)
+  const webSource = cloneObject(meta.web_source)
+  const urls = cloneArray(webSource.urls).map((item) => asText(item)).filter(Boolean)
+  return {
+    area_id: asText(areaId || meta.areaId || meta.area_id),
+    region_name: asText(webSource.region_name) || '当前分析区域',
+    administrative_area: asText(webSource.administrative_area),
+    topic: asText(webSource.topic || webSource.intent || source.title),
+    intent: asText(webSource.intent),
+    categories: cloneArray(webSource.categories).map((item) => asText(item)).filter(Boolean),
+    source_modes: cloneArray(webSource.source_modes || webSource.sourceModes).map((item) => asText(item)).filter(Boolean),
+    urls,
+  }
+}
+
 function documentIdFromPptSource(source = {}) {
   const meta = cloneObject(source && source.meta)
   const document = cloneObject(meta.document)
@@ -696,6 +753,89 @@ function createPptSourceTransportPreview({
   }
 }
 
+function compactPptQuickAskValue(value, depth = 2) {
+  if (depth <= 0) {
+    if (Array.isArray(value)) return value.length ? `array(${value.length})` : []
+    if (value && typeof value === 'object') return `object(${Object.keys(value).length})`
+    return typeof value === 'string' ? value.slice(0, 500) : value
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 8).map((item) => compactPptQuickAskValue(item, depth - 1))
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value).slice(0, 16).reduce((result, [key, item]) => {
+      if (item === undefined || item === null || item === '') return result
+      result[key] = compactPptQuickAskValue(item, depth - 1)
+      return result
+    }, {})
+  }
+  return typeof value === 'string' ? value.slice(0, 800) : value
+}
+
+function pptQuickAskAiPayloadFromSource(source = {}) {
+  const meta = cloneObject(source && source.meta)
+  const payload = cloneObject(meta.aiPayload || meta.ai_payload)
+  const included = cloneArray(payload.included).map((item) => asText(item)).filter(Boolean)
+  if (payload.version !== 'ppt_ai_input_block_v1' || !included.length) return null
+  const evidenceNodes = evidenceNodesFromAiPayload(payload).slice(0, 8)
+  return {
+    source_id: asText(payload.source_id || payload.sourceId || source.id),
+    sourceId: asText(payload.source_id || payload.sourceId || source.id),
+    title: asText(payload.title || source.title),
+    source_kind: asText(payload.source_kind || payload.sourceKind || meta.sourceKind),
+    sourceKind: asText(payload.source_kind || payload.sourceKind || meta.sourceKind),
+    included,
+    scope: compactPptQuickAskValue(payload.scope, 2),
+    metrics: compactPptQuickAskValue(cloneArray(payload.metrics).slice(0, 12), 2),
+    metric_gaps: compactPptQuickAskValue(cloneArray(payload.metric_gaps || payload.metricGaps).slice(0, 8), 2),
+    evidence_nodes: compactPptQuickAskValue(evidenceNodes, 2),
+    evidenceNodes: compactPptQuickAskValue(evidenceNodes, 2),
+    visual_specs: compactPptQuickAskValue(cloneArray(payload.visual_specs || payload.visualSpecs).slice(0, 8), 2),
+    counts: {
+      ...cloneObject(payload.counts),
+      evidence: evidenceNodes.length,
+    },
+    policy: asText(payload.policy),
+  }
+}
+
+function buildPptQuickAskEvidence(source = {}, payload = {}) {
+  const evidenceNodes = cloneArray(payload.evidence_nodes || payload.evidenceNodes)
+    .map((item) => (item && typeof item === 'object' ? cloneObject(item) : null))
+    .filter((item) => item && asText(item.title || item.content || item.summary))
+  const metricCount = cloneArray(payload.metrics).length || Number((payload.counts || {}).metrics || 0) || 0
+  const scopeCount = payload.scope && typeof payload.scope === 'object' && Object.keys(payload.scope).length ? 1 : 0
+  const visualCount = cloneArray(payload.visual_specs).length || Number((payload.counts || {}).visual_specs || 0) || 0
+  const parts = []
+  if (scopeCount) parts.push('范围摘要')
+  if (metricCount) parts.push(`${metricCount} 个指标`)
+  if (evidenceNodes.length) parts.push(`${evidenceNodes.length} 条证据`)
+  if (visualCount) parts.push(`${visualCount} 个图表规格`)
+  return {
+    source_id: asText(payload.source_id || source.id),
+    sourceId: asText(payload.source_id || source.id),
+    title: asText(payload.title || source.title),
+    source_title: asText(source.title),
+    sourceTitle: asText(source.title),
+    type: asText(source.type),
+    text: parts.length ? parts.join('；') : '该来源包含可用于 AI 的 PPT 输入块。',
+    payload: {
+      included: cloneArray(payload.included),
+      counts: cloneObject(payload.counts),
+    },
+  }
+}
+
+function getPptQuickAskDeliverableSources(state = {}) {
+  return cloneArray(createPptPlanningState(state).sources)
+    .filter((source) => source && source.selected && asText(source.status) === 'ready')
+    .map((source) => {
+      const aiPayload = pptQuickAskAiPayloadFromSource(source)
+      return aiPayload ? { source, aiPayload } : null
+    })
+    .filter(Boolean)
+}
+
 function createPptAiInputBlock({
   sourceId = '',
   title = '',
@@ -719,7 +859,7 @@ function createPptAiInputBlock({
   if (gaps.length) included.push('metric_gaps')
   if (evidenceItems.length) included.push('evidence')
   if (visuals.length) included.push('visual_specs')
-  return {
+  const payload = {
     version: 'ppt_ai_input_block_v1',
     source_id: asText(sourceId),
     sourceId: asText(sourceId),
@@ -731,7 +871,6 @@ function createPptAiInputBlock({
     metrics: readyMetrics,
     metric_gaps: gaps,
     metricGaps: gaps,
-    evidence: evidenceItems,
     visual_specs: visuals,
     visualSpecs: visuals,
     excluded: cloneArray(excluded),
@@ -743,6 +882,12 @@ function createPptAiInputBlock({
       visual_specs: visuals.length,
     },
     policy: asText(policy) || '生成时只发送这个 AI 输入块；原始数据不进入 LLM。',
+  }
+  const evidenceNodes = evidenceNodesFromPptEvidenceItems(payload, evidenceItems)
+  return {
+    ...payload,
+    evidence_nodes: evidenceNodes,
+    evidenceNodes,
   }
 }
 
@@ -868,7 +1013,9 @@ function normalizeBackendPptDataSource(source = {}, areaId = '') {
   const title = asText(source.title) || '未命名来源'
   const persistedAiPayload = cloneObject(meta.aiPayload || meta.ai_payload)
   const aiPayload = sourceKind === 'document'
-    ? createDocumentAiPayload(sourceId, title, meta, status, Number(source.count || meta.count || evidenceCount || 0) || 0)
+    ? (persistedAiPayload.version === 'ppt_ai_input_block_v1'
+      ? persistedAiPayload
+      : createDocumentAiPayload(sourceId, title, meta, status, Number(source.count || meta.count || evidenceCount || 0) || 0))
     : sourceKind === 'package' && persistedAiPayload.version !== 'ppt_ai_input_block_v1'
       ? createPackageAiPayload(sourceId, title, pack)
       : persistedAiPayload
@@ -970,7 +1117,10 @@ function attachPptDataPackageRuntimeMeta(response = {}, areaId = '', options = {
   const meta = cloneObject(source.meta)
   const pack = cloneObject(meta.package)
   const title = asText(source.title)
-  const aiPayload = createPackageAiPayload(asText(source.id), title, pack)
+  const persistedAiPayload = cloneObject(meta.aiPayload || meta.ai_payload)
+  const aiPayload = persistedAiPayload.version === 'ppt_ai_input_block_v1'
+    ? persistedAiPayload
+    : createPackageAiPayload(asText(source.id), title, pack)
   return {
     ...response,
     source: {
@@ -1324,7 +1474,7 @@ export function createAgentPptPlanningTabMethods() {
       )
       this.updateAgentPptPlanningTabRuntimeState(activeTabId, setPptSourceRefreshing(initialState, true))
       try {
-        const backendSources = await this.requestAgentPptPlanningDataSources(areaId)
+        const backendSources = await this.requestAgentPptPlanningDataSources(areaId, { conversationId: activeTabId })
         const tabs = this.ensureAgentTabs(true)
         if (asText(tabs.activeTabId) !== activeTabId) return
         const nextSources = cloneArray(backendSources).map((source) => normalizeBackendPptDataSource(source, areaId))
@@ -1414,11 +1564,165 @@ export function createAgentPptPlanningTabMethods() {
     isAgentPptPlanningDataPackageGenerating() {
       return !!this.getAgentActivePptPlanningState().dataPackageGenerating
     },
+    isAgentPptPlanningWebSourceGenerating() {
+      return !!this.agentPptPlanningWebSourceGenerating
+    },
+    isAgentPptPlanningSourceDeleting() {
+      return !!this.agentPptPlanningSourceDeleting
+    },
     isAgentPptPlanningSourceGrouping() {
       return !!this.getAgentActivePptPlanningState().sourceGrouping
     },
     getAgentPptPlanningSourceSummary() {
       return getPptSourceSummary(this.getAgentPptPlanningStateWithSystemSources())
+    },
+    buildAgentPptQuickAskTarget() {
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const deliverable = getPptQuickAskDeliverableSources(state)
+      const sources = deliverable.map((item) => item.aiPayload)
+      const evidence = deliverable.map((item) => buildPptQuickAskEvidence(item.source, item.aiPayload))
+      return {
+        type: 'ppt_sources',
+        id: 'ppt-selected-sources',
+        title: 'PPT 已选来源',
+        source: 'ppt_planning',
+        summary: sources.length ? `当前已选择 ${sources.length} 个可用于 AI 的 PPT 来源。` : '',
+        evidence,
+        artifactRefs: sources.map((item) => asText(item.source_id)).filter(Boolean),
+        payload: {
+          sources,
+        },
+      }
+    },
+    buildAgentPptQuickAskRequest(question = '') {
+      const target = this.buildAgentPptQuickAskTarget()
+      if (!cloneArray(target.payload && target.payload.sources).length) return null
+      return {
+        conversation_id: this.getActiveAgentSessionId ? this.getActiveAgentSessionId() : asText(this.activeAgentSessionId),
+        history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
+        question: asText(question),
+        analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
+        target: {
+          ...target,
+          artifact_refs: cloneArray(target.artifactRefs),
+        },
+        require_ai: true,
+      }
+    },
+    appendAgentPptQuickAskMessage(message = {}) {
+      this.agentMessages = [...cloneArray(this.agentMessages), {
+        role: asText(message.role) || 'assistant',
+        content: String(message.content || ''),
+      }]
+      if (this.activeAgentSessionId && typeof this.updateAgentSessionSnapshot === 'function') {
+        this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
+          ...session,
+          panelKind: 'ppt_planning',
+          status: asText(message.status || session.status || 'idle'),
+          stage: asText(message.stage || session.stage || 'answered'),
+          input: '',
+          messages: cloneArray(this.agentMessages),
+          executionTrace: [],
+          usedTools: [],
+          citations: [],
+          researchNotes: [],
+          auditIssues: [],
+          thinkingTimeline: [],
+          plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
+          pendingTaskConfirmation: null,
+          error: asText(message.error || ''),
+        }), { syncActive: true })
+      }
+    },
+    replaceAgentPptQuickAskPendingMessage(content = '', options = {}) {
+      const messages = cloneArray(this.agentMessages)
+      const pendingIndex = messages.findIndex((item) => asText(item && item.id) === 'ppt-quick-ask-pending')
+      const nextMessage = {
+        role: 'assistant',
+        content: asText(content),
+      }
+      if (pendingIndex >= 0) {
+        messages.splice(pendingIndex, 1, nextMessage)
+      } else {
+        messages.push(nextMessage)
+      }
+      this.agentMessages = messages
+      if (this.activeAgentSessionId && typeof this.updateAgentSessionSnapshot === 'function') {
+        this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
+          ...session,
+          panelKind: 'ppt_planning',
+          status: options.failed ? 'failed' : 'answered',
+          stage: options.failed ? 'failed' : 'answered',
+          answer: options.failed ? '' : asText(content),
+          input: '',
+          messages,
+          executionTrace: [],
+          usedTools: [],
+          citations: [],
+          researchNotes: [],
+          auditIssues: [],
+          thinkingTimeline: [],
+          plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
+          pendingTaskConfirmation: null,
+          error: options.failed ? asText(content) : '',
+        }), { syncActive: true })
+      }
+    },
+    async submitAgentPptQuickAsk(options = {}) {
+      const text = asText((options && options.prompt) || this.agentInput)
+      if (!text || this.agentSessionHydrating || this.agentLoading) return null
+      const request = this.buildAgentPptQuickAskRequest(text)
+      this.agentInput = ''
+      this.agentError = ''
+      this.appendAgentPptQuickAskMessage({ role: 'user', content: text, status: 'running', stage: 'answered' })
+      if (!request) {
+        this.appendAgentPptQuickAskMessage({ role: 'assistant', content: '请先勾选可用于 AI 的来源', status: 'failed', stage: 'failed', error: 'no_ppt_ai_sources' })
+        return null
+      }
+      this.agentMessages = [...cloneArray(this.agentMessages), {
+        id: 'ppt-quick-ask-pending',
+        role: 'assistant',
+        content: 'AI 正在读取已选来源...',
+      }]
+      if (this.activeAgentSessionId && typeof this.updateAgentSessionSnapshot === 'function') {
+        this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
+          ...session,
+          panelKind: 'ppt_planning',
+          status: 'running',
+          stage: 'answered',
+          input: '',
+          messages: cloneArray(this.agentMessages),
+          executionTrace: [],
+          usedTools: [],
+          citations: [],
+          researchNotes: [],
+          auditIssues: [],
+          thinkingTimeline: [],
+          plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
+          pendingTaskConfirmation: null,
+          error: '',
+        }), { syncActive: true })
+      }
+      try {
+        const response = await fetch('/api/v1/analysis/agent/context-ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request),
+        })
+        let data = {}
+        try { data = await response.json() } catch (_) { data = {} }
+        if (!response.ok || asText(data.status) === 'failed') {
+          throw new Error(asText(data.error || data.detail) || `ppt_context_ask_failed_${response.status}`)
+        }
+        const answer = asText(data.answer)
+        if (!answer) throw new Error('ai_invalid_response')
+        this.replaceAgentPptQuickAskPendingMessage(answer)
+        return { role: 'assistant', content: answer, evidence: cloneArray(data.evidence), citations: cloneArray(data.citations), warnings: cloneArray(data.warnings) }
+      } catch (error) {
+        const message = `PPT 问答失败：${asText(error && error.message) || 'AI 不可用'}`
+        this.replaceAgentPptQuickAskPendingMessage(message, { failed: true })
+        return null
+      }
     },
     getAgentPptPlanningActiveSlide() {
       return getActiveDeckSlideBrief(this.getAgentActivePptPlanningState()) || {}
@@ -1562,18 +1866,92 @@ export function createAgentPptPlanningTabMethods() {
     renameAgentPptPlanningSource(sourceId = '', title = '') {
       this.updateAgentActivePptPlanningState(renamePptSource(this.getAgentPptPlanningStateWithSystemSources(), sourceId, title))
     },
+    async deleteAgentPptPlanningSourceRecord(source = {}, sourceId = '') {
+      const id = asText(sourceId || (source && source.id))
+      if (!id) return null
+      if (isPptDocumentSource(source)) {
+        const documentId = documentIdFromPptSource(source)
+        if (documentId) return this.requestAgentPptPlanningDocumentDelete(documentId)
+        return null
+      }
+      if (isPptImageSource(source)) {
+        const attachmentId = imageAttachmentIdFromPptSource(source)
+        const conversationId = imageConversationIdFromPptSource(source)
+        if (attachmentId && conversationId) return this.requestAgentPptPlanningImageDelete(attachmentId, conversationId)
+        return null
+      }
+      if (isPptPersistedArtifactSource(source)) {
+        const context = this.buildAgentPptPlanningApiContext ? this.buildAgentPptPlanningApiContext() : {}
+        const areaId = asText((source && source.meta && (source.meta.areaId || source.meta.area_id)) || context.areaId || context.area_id)
+        if (areaId) return this.requestAgentPptPlanningPersistedSourceDelete(areaId, id)
+      }
+      return null
+    },
     async removeAgentPptPlanningSource(sourceId = '') {
       const state = this.getAgentPptPlanningStateWithSystemSources()
       const id = asText(sourceId)
       const source = cloneArray(state.sources).find((item) => asText(item && item.id) === id)
       try {
-        if (isPptDocumentSource(source)) {
-          const documentId = documentIdFromPptSource(source)
-          if (documentId) await this.requestAgentPptPlanningDocumentDelete(documentId)
-        }
+        await this.deleteAgentPptPlanningSourceRecord(source, id)
         this.updateAgentActivePptPlanningStateWithSourceStale(removePptSource(state, id), state, [id])
       } catch (error) {
         this.updateAgentActivePptPlanningState(setPptGenerationError(state, error && error.message, 'source_refresh'))
+      }
+    },
+    async removeSelectedAgentPptPlanningSources(payload = {}) {
+      const resolve = typeof payload.resolve === 'function' ? payload.resolve : null
+      if (this.agentPptPlanningSourceDeleting) {
+        if (resolve) resolve({ deleted: 0, failed: 0 })
+        return
+      }
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const requestedIds = new Set(cloneArray(payload.source_ids || payload.sourceIds).map((item) => asText(item)).filter(Boolean))
+      const deletableSources = cloneArray(state.sources).filter((source) => (
+        source
+        && requestedIds.has(asText(source.id))
+        && (isPptDocumentSource(source) || isPptImageSource(source) || isPptPersistedArtifactSource(source))
+      ))
+      if (!deletableSources.length) {
+        if (resolve) resolve({ deleted: 0, failed: 0 })
+        return
+      }
+      this.agentPptPlanningSourceDeleting = true
+      try {
+        const results = await Promise.allSettled(deletableSources.map(async (source) => {
+          const sourceId = asText(source && source.id)
+          await this.deleteAgentPptPlanningSourceRecord(source, sourceId)
+          return sourceId
+        }))
+        const deletedIds = []
+        const failures = []
+        results.forEach((result, index) => {
+          const source = deletableSources[index]
+          const sourceId = asText(source && source.id)
+          if (result.status === 'fulfilled') {
+            deletedIds.push(sourceId)
+          } else {
+            failures.push({
+              sourceId,
+              message: asText(result.reason && result.reason.message) || asText(result.reason) || 'delete_failed',
+            })
+          }
+        })
+        let nextState = state
+        deletedIds.forEach((sourceId) => {
+          nextState = removePptSource(nextState, sourceId)
+        })
+        if (deletedIds.length) {
+          nextState = markPptDirectiveStaleForSources(nextState, deletedIds)
+        }
+        if (failures.length) {
+          const first = failures[0]
+          const message = `批量删除部分失败：${failures.length} 个来源未删除（${first.sourceId || '来源'}：${first.message}）`
+          nextState = setPptGenerationError(nextState, message, 'source_refresh')
+        }
+        this.updateAgentActivePptPlanningState(nextState)
+        if (resolve) resolve({ deleted: deletedIds.length, failed: failures.length })
+      } finally {
+        this.agentPptPlanningSourceDeleting = false
       }
     },
     renameAgentPptPlanningSourceGroup(groupId = '', title = '') {
@@ -1953,14 +2331,35 @@ export function createAgentPptPlanningTabMethods() {
       }
       return { assets, visualSpecs: nextVisualSpecs }
     },
-    requestAgentPptPlanningDataSources(areaId = '') {
-      return listPptDataSources(areaId)
+    requestAgentPptPlanningDataSources(areaId = '', options = {}) {
+      return listPptDataSources(areaId, options)
     },
     requestAgentPptPlanningDataPackage(payload = {}) {
       return createPptDataPackage(payload)
     },
+    requestAgentPptWebSourceLocationDefault(payload = {}) {
+      return getPptWebSourceLocationDefault(payload)
+    },
+    requestAgentPptWebSourcePreview(payload = {}) {
+      return previewPptWebSource(payload)
+    },
+    requestAgentPptWebSourceCommit(payload = {}) {
+      return commitPptWebSource(payload)
+    },
     requestAgentPptPlanningDocumentDelete(documentId = '') {
       return deleteDocumentSource(documentId)
+    },
+    requestAgentPptPlanningDocumentParse(documentId = '') {
+      return scheduleDocumentParse(documentId)
+    },
+    requestAgentPptPlanningImageDelete(attachmentId = '', conversationId = '') {
+      return deleteImageSource(attachmentId, conversationId)
+    },
+    requestAgentPptPlanningImageRetry(attachmentId = '', conversationId = '') {
+      return retryImageSourceIngest(attachmentId, conversationId)
+    },
+    requestAgentPptPlanningPersistedSourceDelete(areaId = '', sourceId = '') {
+      return deletePptDataSource(areaId, sourceId)
     },
     requestAgentPptSourceGroupClassification(payload = {}) {
       return classifyPptSourceGroups(payload)
@@ -1979,7 +2378,7 @@ export function createAgentPptPlanningTabMethods() {
           ))
         }
         if (documentId) {
-          const parseJob = await scheduleDocumentParse(documentId)
+          const parseJob = await this.requestAgentPptPlanningDocumentParse(documentId)
           await waitForPptPlanningJob(parseJob && parseJob.job_id)
           this.updateAgentActivePptPlanningState(upsertPptDocumentSource(
             this.getAgentPptPlanningStateWithSystemSources(),
@@ -2001,6 +2400,139 @@ export function createAgentPptPlanningTabMethods() {
           ))
         }
         this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'))
+      }
+    },
+    async uploadAgentPptPlanningImageSource(file) {
+      if (!file) return
+      const context = this.buildAgentPptPlanningApiContext ? this.buildAgentPptPlanningApiContext() : {}
+      const areaId = asText(context.areaId || context.area_id)
+      const activeTab = this.getAgentActiveTopTab()
+      const conversationId = asText(activeTab && activeTab.id)
+      let attachment = null
+      try {
+        attachment = await uploadImageSource(file, conversationId, areaId)
+        if (attachment) {
+          this.updateAgentActivePptPlanningState(upsertPptImageSource(
+            this.getAgentPptPlanningStateWithSystemSources(),
+            attachment,
+            { status: 'generating', label: '图片解析中', conversationId },
+          ))
+        }
+        await this.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+      } catch (error) {
+        if (attachment) {
+          this.updateAgentActivePptPlanningState(upsertPptImageSource(
+            this.getAgentPptPlanningStateWithSystemSources(),
+            attachment,
+            { status: 'failed', label: '图片解析失败', conversationId },
+          ))
+        }
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'))
+      }
+    },
+    async retryAgentPptPlanningSource(sourceId = '') {
+      const state = this.getAgentPptPlanningStateWithSystemSources()
+      const id = asText(sourceId)
+      const source = cloneArray(state.sources).find((item) => asText(item && item.id) === id)
+      if (!source) return
+      const context = this.buildAgentPptPlanningApiContext ? this.buildAgentPptPlanningApiContext() : {}
+      const areaId = asText(context.areaId || context.area_id)
+      try {
+        if (isPptDocumentSource(source)) {
+          const documentId = documentIdFromPptSource(source)
+          if (!documentId) throw new Error('document_source_id_missing')
+          this.updateAgentActivePptPlanningState(upsertPptDocumentSource(state, { id: documentId, title: source.title }, { status: 'generating', label: '重新解析中' }))
+          const parseJob = await this.requestAgentPptPlanningDocumentParse(documentId)
+          await waitForPptPlanningJob(parseJob && parseJob.job_id)
+          await this.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+          return
+        }
+        if (isPptImageSource(source)) {
+          const attachmentId = imageAttachmentIdFromPptSource(source)
+          const conversationId = imageConversationIdFromPptSource(source)
+          if (!attachmentId || !conversationId) throw new Error('image_source_id_missing')
+          const attachment = await this.requestAgentPptPlanningImageRetry(attachmentId, conversationId)
+          this.updateAgentActivePptPlanningState(upsertPptImageSource(state, attachment || { attachment_id: attachmentId }, { status: 'generating', label: '图片重新解析中', conversationId }))
+          await this.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+          return
+        }
+        if (isPptPersistedArtifactSource(source)) {
+          const meta = cloneObject(source.meta)
+          if (asText(meta.sourceKind) !== 'web' && !asText(source.id).startsWith('web:')) {
+            throw new Error('source_retry_not_supported')
+          }
+          const preview = await this.requestAgentPptWebSourcePreview(webSourceRetryPayloadFromPptSource(source, areaId))
+          const committed = await this.requestAgentPptWebSourceCommit({
+            area_id: areaId,
+            preview: preview && typeof preview.model_dump === 'function' ? preview.model_dump() : preview,
+          })
+          this.updateAgentActivePptPlanningState(addPptDataPackageSource(this.getAgentPptPlanningStateWithSystemSources(), committed))
+          await this.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+          return
+        }
+        throw new Error('source_retry_not_supported')
+      } catch (error) {
+        this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'))
+      }
+    },
+    async manageAgentPptPlanningWebSource(payload = {}) {
+      const mode = asText(payload.mode)
+      const context = this.buildAgentPptPlanningApiContext ? this.buildAgentPptPlanningApiContext() : {}
+      const areaId = asText(context.areaId || context.area_id)
+      if (mode === 'location-default') {
+        const resolve = typeof payload.resolve === 'function' ? payload.resolve : null
+        try {
+          const defaults = await this.requestAgentPptWebSourceLocationDefault({ area_id: areaId })
+          if (resolve) resolve(defaults)
+          return defaults
+        } catch (error) {
+          const fallback = { area_id: areaId, region_name: '当前分析区域', administrative_area: '', warnings: ['默认地区名生成失败，请手动输入。'] }
+          if (resolve) resolve(fallback)
+          return fallback
+        }
+      }
+      if (!areaId || this.agentPptPlanningWebSourceGenerating) return
+      this.agentPptPlanningWebSourceGenerating = true
+      try {
+        const requestPayload = {
+          area_id: areaId,
+          region_name: asText(payload.region_name) || '当前分析区域',
+          administrative_area: asText(payload.administrative_area),
+          topic: asText(payload.topic || this.getAgentPptPlanningSpec().topic),
+          intent: asText(payload.topic || this.getAgentPptPlanningSpec().topic),
+          categories: cloneArray(payload.categories).map((item) => asText(item)).filter(Boolean),
+          source_modes: cloneArray(payload.source_modes || payload.sourceModes).map((item) => asText(item)).filter(Boolean),
+          urls: cloneArray(payload.urls).map((item) => asText(item)).filter(Boolean),
+          limit: 8,
+        }
+        if (mode === 'preview') {
+          const response = await this.requestAgentPptWebSourcePreview(requestPayload)
+          if (typeof payload.resolve === 'function') payload.resolve(response)
+          return response
+        }
+        if (mode !== 'commit') {
+          throw new Error('ppt_web_source_mode_required')
+        }
+        const response = await this.requestAgentPptWebSourceCommit({
+          area_id: areaId,
+          preview: cloneObject(payload.preview),
+        })
+        this.updateAgentActivePptPlanningState(addPptDataPackageSource(
+          this.getAgentPptPlanningStateWithSystemSources(),
+          response,
+        ))
+        if (typeof payload.resolve === 'function') payload.resolve(response)
+        return response
+      } catch (error) {
+        if (typeof payload.reject === 'function') payload.reject(error)
+        this.updateAgentActivePptPlanningState(setPptGenerationError(
+          this.getAgentPptPlanningStateWithSystemSources(),
+          normalizePptGenerationErrorMessage(error, 'source_refresh'),
+          'source_refresh',
+        ))
+        throw error
+      } finally {
+        this.agentPptPlanningWebSourceGenerating = false
       }
     },
     async classifyAgentPptPlanningSourceGroups() {

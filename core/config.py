@@ -237,6 +237,31 @@ class Settings(BaseSettings):
         validation_alias="PPT_LLM_TIMEOUT_S",
         description="PPT 生成 LLM 请求超时时间（秒）；0 表示不设置超时",
     )
+    searxng_base_url: str = Field(
+        "",
+        validation_alias="SEARXNG_BASE_URL",
+        description="SearXNG API base URL used by PPT research web search.",
+    )
+    searxng_timeout_ms: int = Field(
+        8000,
+        validation_alias="SEARXNG_TIMEOUT_MS",
+        description="SearXNG search request timeout in milliseconds.",
+    )
+    research_search_top_k: int = Field(
+        8,
+        validation_alias="RESEARCH_SEARCH_TOP_K",
+        description="Maximum raw SearXNG candidates to request per query.",
+    )
+    research_crawl_top_k: int = Field(
+        5,
+        validation_alias="RESEARCH_CRAWL_TOP_K",
+        description="Maximum selected research URLs to parse with Crawl4AI.",
+    )
+    research_source_modes: List[str] = Field(
+        default_factory=lambda: ["trusted", "market"],
+        validation_alias="RESEARCH_SOURCE_MODES",
+        description="Enabled PPT research source tiers: trusted, market, community.",
+    )
     ai_max_context_turns: int = Field(
         12,
         validation_alias="AI_MAX_CONTEXT_TURNS",

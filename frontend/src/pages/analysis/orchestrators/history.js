@@ -368,11 +368,26 @@ function createAnalysisHistoryOrchestratorMethods() {
           view: String(this.populationAnalysisView || 'density'),
         }
         const layer = this.populationLayer && typeof this.populationLayer === 'object' ? this.populationLayer : {}
+        const features = Array.isArray(this.populationGrid && this.populationGrid.features)
+          ? this.populationGrid.features
+          : []
+        const scopeId = String(
+          (this.populationGrid && this.populationGrid.scope_id)
+          || this.populationScopeId
+          || ''
+        )
         return {
           params,
           payload: {
             overview: this.cloneArtifactValue(this.populationOverview || {}),
             summary: this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {}),
+            grid: {
+              type: 'FeatureCollection',
+              features,
+              count: features.length,
+              cell_count: features.length,
+              scope_id: scopeId,
+            },
             grid_evidence: typeof this.buildAgentPopulationGridEvidence === 'function' ? this.buildAgentPopulationGridEvidence() : {},
             layer: this.cloneArtifactValue(layer),
             year: params.year,
@@ -387,11 +402,26 @@ function createAnalysisHistoryOrchestratorMethods() {
           view: String(this.nightlightAnalysisView || 'radiance'),
         }
         const layer = this.nightlightLayer && typeof this.nightlightLayer === 'object' ? this.nightlightLayer : {}
+        const features = Array.isArray(this.nightlightGrid && this.nightlightGrid.features)
+          ? this.nightlightGrid.features
+          : []
+        const scopeId = String(
+          (this.nightlightGrid && this.nightlightGrid.scope_id)
+          || this.nightlightScopeId
+          || ''
+        )
         return {
           params,
           payload: {
             overview: this.cloneArtifactValue(this.nightlightOverview || {}),
             summary: this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {}),
+            grid: {
+              type: 'FeatureCollection',
+              features,
+              count: features.length,
+              cell_count: features.length,
+              scope_id: scopeId,
+            },
             layer: this.cloneArtifactValue(layer),
             raster: this.cloneArtifactValue(this.nightlightRaster || {}),
             year: params.year,

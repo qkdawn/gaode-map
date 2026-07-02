@@ -6,7 +6,8 @@ from typing import List
 
 from modules.documents.pageindex import get_pageindex_document_structure, get_pageindex_page_content
 
-from .schemas import EvidenceSearchRequest, EvidenceSearchResponse, EvidenceSearchResult
+from .adapters import evidence_nodes_from_source
+from .schemas import EvidenceNode, EvidenceSearchRequest, EvidenceSearchResponse, SourceRecord
 
 
 class EmptySearchQuestion(ValueError):
@@ -17,14 +18,41 @@ async def search_evidence(request: EvidenceSearchRequest) -> EvidenceSearchRespo
     question = str(request.question or "").strip()
     if not question:
         raise EmptySearchQuestion("empty_search_question")
-    pageindex_results = _search_document_pageindex(question, [item for item in (str(value).strip() for value in request.document_ids or []) if item])
-    return EvidenceSearchResponse(results=pageindex_results[: max(1, min(int(request.top_k or 8), 50))])
+    nodes = _nodes_from_sources(question, request.sources, request.source_ids)
+    nodes.extend(_search_document_pageindex(question, _document_ids_from_source_ids(request.source_ids)))
+    nodes.sort(key=lambda item: item.score, reverse=True)
+    top_k = max(1, min(int(request.top_k or 8), 50))
+    return EvidenceSearchResponse(nodes=nodes[:top_k])
 
 
-def _search_document_pageindex(question: str, document_ids: List[str]) -> List[EvidenceSearchResult]:
+def _document_ids_from_source_ids(source_ids: List[str]) -> List[str]:
+    document_ids: List[str] = []
+    for source_id in source_ids or []:
+        text = str(source_id or "").strip()
+        if not text.startswith("document:"):
+            continue
+        document_id = text.split(":", 1)[1].strip()
+        if document_id and document_id not in document_ids:
+            document_ids.append(document_id)
+    return document_ids
+
+
+def _nodes_from_sources(question: str, sources: List[SourceRecord], source_ids: List[str]) -> List[EvidenceNode]:
+    allowed = {str(item or "").strip() for item in (source_ids or []) if str(item or "").strip()}
+    nodes: List[EvidenceNode] = []
+    for source in sources or []:
+        source_id = str(source.source_id or "").strip()
+        if allowed and source_id not in allowed:
+            continue
+        nodes.extend(evidence_nodes_from_source(question, source))
+    nodes.sort(key=lambda item: item.score, reverse=True)
+    return [node for node in nodes if node.score > 0]
+
+
+def _search_document_pageindex(question: str, document_ids: List[str]) -> List[EvidenceNode]:
     if not document_ids:
         return []
-    results: List[EvidenceSearchResult] = []
+    nodes: List[EvidenceNode] = []
     for document_id in document_ids:
         try:
             structure = json.loads(get_pageindex_document_structure(document_id))
@@ -58,21 +86,28 @@ def _search_document_pageindex(question: str, document_ids: List[str]) -> List[E
             text = str(node.get("text") or content or node.get("summary") or "")
             if not text.strip():
                 continue
-            results.append(
-                EvidenceSearchResult(
-                    evidence_id=abs(hash((document_id, node.get("node_id"), line_num))) % 1000000,
-                    document_id=document_id,
-                    text=text[:1800],
+            nodes.append(
+                EvidenceNode(
+                    id=f"document:{document_id}:pageindex:{node.get('node_id') or line_num}",
+                    source_id=f"document:{document_id}",
+                    source_type="document",
+                    title=str(node.get("title") or "PageIndex 节点"),
+                    content=text[:1800],
                     summary=str(node.get("summary") or text[:260]),
-                    semantic_type="pageindex_node",
-                    tags=["pageindex", "document"],
-                    page_start=max(1, line_num),
-                    page_end=max(1, line_num),
-                    citation=f"PageIndex line {line_num}",
+                    metadata={
+                        "document_id": document_id,
+                        "node_id": node.get("node_id"),
+                        "line_num": line_num,
+                        "page_start": max(1, line_num),
+                        "page_end": max(1, line_num),
+                    },
+                    locator=f"pageindex:{line_num}",
                     score=float(score),
+                    evidence_level="pageindex_node",
+                    citation=f"PageIndex line {line_num}",
                 )
             )
-    return results
+    return nodes
 
 
 def _pageindex_collect_nodes(structure: object) -> List[dict]:
@@ -109,6 +144,20 @@ def _pageindex_score(question: str, node: dict) -> float:
         score += 2.0
     if summary and summary in q:
         score += 1.0
+    return score
+
+
+def _score_text(question: str, text: str) -> float:
+    haystack = _normalize_text(text)
+    if not haystack:
+        return 0.0
+    score = 0.0
+    normalized_question = _normalize_text(question)
+    if normalized_question and normalized_question in haystack:
+        score += 3.0
+    for token in _pageindex_query_tokens(normalized_question):
+        if token and token in haystack:
+            score += 1.0
     return score
 
 

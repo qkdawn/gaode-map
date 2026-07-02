@@ -202,7 +202,7 @@ def test_runtime_uses_tool_loop_then_answers(monkeypatch):
     assert response.output.answer == "这里更接近生活服务导向的社区商业片区。"
     assert response.used_tools[:2] == ["read_current_scope", "read_current_results"]
     assert "search_analysis_context" in response.used_tools
-    assert "read_analysis_chunk" in response.used_tools
+    assert "read_analysis_evidence_node" in response.used_tools
     assert response.plan.steps[0].tool_name == "read_current_scope"
     assert "本轮按需调用工具补证据" in response.diagnostics.planning_summary
     assert response.diagnostics.translation_pack.status == "ready"
@@ -411,12 +411,13 @@ def test_runtime_reads_finalizer_evidence_for_high_value_map_questions(monkeypat
     assert response.status == "answered"
     assert pack["status"] == "ready"
     assert pack["search_queries"]
-    assert pack["read_chunks"]
+    assert pack["evidence_nodes"]
     assert set(pack["coverage_domains"]) == {"poi", "h3", "road", "population", "nightlight"}
-    assert {chunk["domain"] for chunk in pack["read_chunks"]}.issuperset({"poi", "h3", "road", "population", "nightlight"})
-    assert any(chunk["title"] == "POI 地名锚点" for chunk in pack["read_chunks"])
+    assert {node["metadata"]["domain"] for node in pack["evidence_nodes"]}.issuperset({"poi", "h3", "road", "population", "nightlight"})
+    assert any(node["title"] == "POI 地名锚点" for node in pack["evidence_nodes"])
+    assert all(node.get("source_type") == "system" for node in pack["evidence_nodes"])
     assert "search_analysis_context" in response.diagnostics.used_tools
-    assert "read_analysis_chunk" in response.diagnostics.used_tools
+    assert "read_analysis_evidence_node" in response.diagnostics.used_tools
     assert any(item.id == "finalizer-evidence" and item.meta.get("read_count", 0) > 0 for item in response.diagnostics.thinking_timeline)
 
 
@@ -445,7 +446,7 @@ def test_runtime_skips_finalizer_evidence_for_simple_metric_questions(monkeypatc
     assert response.status == "answered"
     assert pack["status"] == "skipped"
     assert pack["reason"] == "not_required"
-    assert pack["read_chunks"] == []
+    assert pack["evidence_nodes"] == []
 
 
 def test_runtime_continues_when_finalizer_evidence_retrieval_fails(monkeypatch):

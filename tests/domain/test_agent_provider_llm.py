@@ -180,7 +180,8 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "关键矛盾/机会 -> 为什么此动作重要 -> 用什么证据筛掉伪机会" in system_prompt
     assert "不要写成“系统可以跑哪些工具”的流程说明" in system_prompt
     assert "finalizer_evidence_pack" in system_prompt
-    assert "read_chunks" in system_prompt
+    assert "evidence_nodes" in system_prompt
+    assert "统一 EvidenceNode" in system_prompt
     assert "不要只改写压缩摘要" in system_prompt
     assert "至少 5 个展开段" in system_prompt
     assert "coverage_domains" in system_prompt

@@ -312,7 +312,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         context.available_artifacts.append("frontend_map_search_context")
         context.context_summary.available_context_sources.append("analysis:frontend_map_search_context")
         context.limits.append(
-            "frontend_map_search_context 是本轮可检索地图空间对象源；最终回答只能引用 search_analysis_context/read_analysis_chunk 已读取到的具体地名、格子、线段或 cell。"
+            "frontend_map_search_context 是本轮可检索地图空间对象源；最终回答只能引用 search_analysis_context/read_analysis_evidence_node 已读取到的 EvidenceNode 中的具体地名、格子、线段或 cell。"
         )
     visual_image_inputs, visual_snapshot_meta, visual_snapshot_warnings = _visual_snapshot_inputs(payload)
     if visual_snapshot_meta:
@@ -322,13 +322,6 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         context.limits.append("地图视觉快照只能作为可见图层证据，不能伪装成后端指标计算结果。")
     for warning in visual_snapshot_warnings:
         memory.research_notes.append(warning)
-    attachment_ids = [str(item).strip() for item in (payload.attachment_ids or []) if str(item).strip()]
-    if attachment_ids:
-        memory.artifacts["uploaded_attachment_ids"] = attachment_ids
-        memory.artifacts["uploaded_attachment_conversation_id"] = str(payload.conversation_id or "")
-        context.available_artifacts.append("uploaded_attachments")
-        context.context_summary.available_context_sources.append("attachment:uploaded")
-        context.limits.append("用户上传附件只能作为附件证据引用，不能伪装成地图分析计算结果。")
     used_tools: List[str] = []
     planning_summary = ""
     audit_summary = ""
@@ -664,22 +657,23 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             answer_evidence_payload=answer_evidence_payload,
         )
         answer_evidence_payload["finalizer_evidence_pack"] = finalizer_evidence_pack
-        finalizer_read_count = len(finalizer_evidence_pack.get("read_chunks") or [])
+        finalizer_nodes = list(finalizer_evidence_pack.get("evidence_nodes") or [])
+        finalizer_read_count = len(finalizer_nodes)
         finalizer_search_count = len(finalizer_evidence_pack.get("search_queries") or [])
         if finalizer_read_count:
-            for tool_name in ("search_analysis_context", "read_analysis_chunk"):
+            for tool_name in ("search_analysis_context", "read_analysis_evidence_node"):
                 if tool_name not in used_tools:
                     used_tools.append(tool_name)
         await emit_thinking(
             {
                 "phase": "synthesizing",
                 "title": "最终证据检索完成",
-                "detail": f"已执行 {finalizer_search_count} 次检索，读取 {finalizer_read_count} 个证据块。",
-                "display_text": f"已读取 {finalizer_read_count} 个最终回答证据块。",
+                "detail": f"已执行 {finalizer_search_count} 次检索，读取 {finalizer_read_count} 个 EvidenceNode。",
+                "display_text": f"已读取 {finalizer_read_count} 个最终回答证据节点。",
                 "items": [
-                    str(item.get("title") or item.get("chunk_id") or "").strip()
-                    for item in list(finalizer_evidence_pack.get("read_chunks") or [])[:4]
-                    if str(item.get("title") or item.get("chunk_id") or "").strip()
+                    str(item.get("title") or item.get("id") or "").strip()
+                    for item in finalizer_nodes[:4]
+                    if str(item.get("title") or item.get("id") or "").strip()
                 ],
                 "meta": {
                     "status": finalizer_evidence_pack.get("status"),
@@ -697,7 +691,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         answer_evidence_payload["finalizer_evidence_pack"] = {
             "status": "failed",
             "warnings": [note],
-            "read_chunks": [],
+            "evidence_nodes": [],
             "search_queries": [],
         }
         await emit_thinking(

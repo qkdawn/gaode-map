@@ -51,11 +51,6 @@ function createAnalysisAgentInitialState() {
     agentPanelPreloadNotes: [],
     agentPreloadedPanelKeys: [],
     agentRiskConfirmations: [],
-    agentAttachments: [],
-    agentAttachmentIds: [],
-    agentAttachmentUploading: false,
-    agentAttachmentError: '',
-    agentAttachmentPollTimer: null,
     agentMessages: [],
     agentDeepAnalysisMode: 'quick',
     agentComposerMenuOpen: false,
@@ -111,6 +106,8 @@ function createAnalysisAgentInitialState() {
     agentPromptConfigs: {},
     agentPptPlanningAutoPackageKeys: {},
     agentPptPlanningPackageErrors: {},
+    agentPptPlanningWebSourceGenerating: false,
+    agentPptPlanningSourceDeleting: false,
     agentTabs: {
       summaryTab: {
         id: 'summary',

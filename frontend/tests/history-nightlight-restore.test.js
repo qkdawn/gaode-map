@@ -2,12 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { createAnalysisHistoryMethods } from '../src/features/history/restore.js'
+import { createAnalysisHistoryOrchestratorMethods } from '../src/pages/analysis/orchestrators/history.js'
 import {
   createAnalysisNightlightInitialState,
   createAnalysisNightlightMethods,
 } from '../src/features/nightlight/panel.js'
 
 const historyMethods = createAnalysisHistoryMethods()
+const historyOrchestratorMethods = createAnalysisHistoryOrchestratorMethods()
 const nightlightMethods = createAnalysisNightlightMethods()
 
 function createHistoryRestoreContext(overrides = {}) {
@@ -111,6 +113,55 @@ function createHistoryRestoreContext(overrides = {}) {
   return Object.assign(ctx, overrides)
 }
 
+function createArtifactBundleContext(overrides = {}) {
+  const ctx = {
+    cloneArtifactValue: historyOrchestratorMethods.cloneArtifactValue,
+    normalizePoiSource(source, fallback) {
+      return String(source || fallback || '')
+    },
+    getPopulationSelectedYear() {
+      return String(this.populationSelectedYear || '2026')
+    },
+    buildAgentPopulationGridEvidence() {
+      return { evidence_level: 'test_population_grid' }
+    },
+    populationSelectedYear: '2026',
+    populationAnalysisView: 'density',
+    populationScopeId: 'population-scope',
+    populationOverview: { summary: { total_population: 100 } },
+    populationGrid: {
+      scope_id: 'population-grid-scope',
+      features: [{ type: 'Feature', properties: { cell_id: 'p1' }, geometry: { type: 'Polygon', coordinates: [] } }],
+    },
+    populationLayer: {
+      scope_id: 'population-layer-scope',
+      cells: [{ cell_id: 'p1', value: 10 }],
+    },
+    nightlightSelectedYear: 2025,
+    nightlightAnalysisView: 'radiance',
+    nightlightScopeId: 'nightlight-scope',
+    nightlightOverview: { summary: { mean_radiance: 3 } },
+    nightlightGrid: {
+      scope_id: 'nightlight-grid-scope',
+      features: [{ type: 'Feature', properties: { cell_id: 'n1' }, geometry: { type: 'Polygon', coordinates: [] } }],
+    },
+    nightlightLayer: {
+      scope_id: 'nightlight-layer-scope',
+      cells: [{ cell_id: 'n1', value: 4 }],
+    },
+    nightlightRaster: { image_url: 'data:image/png;base64,test' },
+    roadSyntaxGraphModel: 'segment',
+    transportMode: 'walking',
+    roadSyntaxMetric: 'choice',
+    roadSyntaxSummary: { road_count: 1 },
+    roadSyntaxDiagnostics: { status: 'ok' },
+    roadSyntaxRoadFeatures: [{ type: 'Feature', properties: { road_id: 'r1' }, geometry: { type: 'LineString', coordinates: [] } }],
+    roadSyntaxNodes: [{ type: 'Feature', properties: { node_id: 'node1' }, geometry: { type: 'Point', coordinates: [0, 0] } }],
+    roadSyntaxWebglPayload: { layer: 'road' },
+  }
+  return Object.assign(ctx, overrides)
+}
+
 test('_applyHistoryDetailBaseResult resets nightlight analysis state while preserving meta and year', () => {
   const ctx = createHistoryRestoreContext({
     nightlightMetaLoaded: true,
@@ -158,6 +209,35 @@ test('_applyHistoryDetailBaseResult resets nightlight analysis state while prese
   assert.deepEqual(ctx.poiGridResultsByYearType, {})
   assert.equal(ctx.activePoiGridResultKey, '')
   assert.deepEqual(ctx.resetPanelCalls, [{ panelId: 'poi', options: { apply: false } }])
+})
+
+test('buildAnalysisArtifactBundle stores full population nightlight and road datasets', () => {
+  const ctx = createArtifactBundleContext()
+
+  const populationBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'population')
+  const nightlightBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'nightlight')
+  const roadBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'road_syntax')
+
+  assert.equal(populationBundle.payload.grid.type, 'FeatureCollection')
+  assert.equal(populationBundle.payload.grid.scope_id, 'population-grid-scope')
+  assert.equal(populationBundle.payload.grid.count, 1)
+  assert.equal(populationBundle.payload.grid.cell_count, 1)
+  assert.equal(populationBundle.payload.grid.features[0].properties.cell_id, 'p1')
+  assert.equal(populationBundle.payload.layer.cells[0].cell_id, 'p1')
+  assert.equal(populationBundle.payload.grid_evidence.evidence_level, 'test_population_grid')
+
+  assert.equal(nightlightBundle.payload.grid.type, 'FeatureCollection')
+  assert.equal(nightlightBundle.payload.grid.scope_id, 'nightlight-grid-scope')
+  assert.equal(nightlightBundle.payload.grid.count, 1)
+  assert.equal(nightlightBundle.payload.grid.cell_count, 1)
+  assert.equal(nightlightBundle.payload.grid.features[0].properties.cell_id, 'n1')
+  assert.equal(nightlightBundle.payload.layer.cells[0].cell_id, 'n1')
+  assert.equal(nightlightBundle.payload.raster.image_url, 'data:image/png;base64,test')
+
+  assert.equal(roadBundle.payload.roads.type, 'FeatureCollection')
+  assert.equal(roadBundle.payload.roads.features[0].properties.road_id, 'r1')
+  assert.equal(roadBundle.payload.nodes.type, 'FeatureCollection')
+  assert.equal(roadBundle.payload.nodes.features[0].properties.node_id, 'node1')
 })
 
 test('loadHistoryDetail keeps restored history id and history scope source', async () => {
@@ -288,7 +368,15 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
           payload: {
             year: '2026',
             overview: { summary: { total_population: 10 } },
+            grid: {
+              type: 'FeatureCollection',
+              scope_id: 'population-scope',
+              features: [{ type: 'Feature', properties: { cell_id: 'p1' }, geometry: { type: 'Polygon', coordinates: [] } }],
+              count: 1,
+              cell_count: 1,
+            },
             layer: {
+              scope_id: 'population-scope',
               view: 'density',
               summary: { average_density_per_km2: 8000 },
               legend: { title: '人口密度' },
@@ -302,7 +390,15 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
           payload: {
             year: 2025,
             overview: { summary: { mean_radiance: 3 } },
+            grid: {
+              type: 'FeatureCollection',
+              scope_id: 'nightlight-scope',
+              features: [{ type: 'Feature', properties: { cell_id: 'n1' }, geometry: { type: 'Polygon', coordinates: [] } }],
+              count: 1,
+              cell_count: 1,
+            },
             layer: {
+              scope_id: 'nightlight-scope',
               view: 'radiance',
               summary: { total_radiance: 30 },
               analysis: { core_hotspot_count: 2, hotspot_cell_ratio: 0.25, peak_to_edge_ratio: 3.2 },
@@ -332,9 +428,17 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
     ])
     assert.deepEqual(ctx.appliedPoiGrid, { type: 'shared', year: 2024 })
     assert.equal(ctx.populationOverview.summary.total_population, 10)
+    assert.equal(ctx.populationGrid.scope_id, 'population-scope')
+    assert.equal(ctx.populationGrid.features[0].properties.cell_id, 'p1')
+    assert.equal(ctx.populationGridCount, 1)
+    assert.equal(ctx.populationScopeId, 'population-scope')
     assert.equal(ctx.populationLayer.summary.average_density_per_km2, 8000)
     assert.equal(ctx.populationLayer.cells[0].cell_id, 'p1')
     assert.equal(ctx.nightlightOverview.summary.mean_radiance, 3)
+    assert.equal(ctx.nightlightGrid.scope_id, 'nightlight-scope')
+    assert.equal(ctx.nightlightGrid.features[0].properties.cell_id, 'n1')
+    assert.equal(ctx.nightlightGridCount, 1)
+    assert.equal(ctx.nightlightScopeId, 'nightlight-scope')
     assert.equal(ctx.nightlightLayer.analysis.core_hotspot_count, 2)
     assert.equal(ctx.nightlightLayer.analysis.hotspot_cell_ratio, 0.25)
     assert.equal(ctx.nightlightLayer.analysis.peak_to_edge_ratio, 3.2)
@@ -346,10 +450,14 @@ test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () =
   }
 })
 
-test('history restore ignores old population and nightlight artifacts without layer payload', async () => {
+test('history restore ignores population and nightlight artifacts without full grid features', async () => {
   const ctx = createHistoryRestoreContext({
     historyDetailLoadToken: 1,
+    populationGrid: { features: [{ id: 'existing-population-grid' }] },
+    populationGridCount: 1,
     populationLayer: { cells: [{ cell_id: 'existing-p' }] },
+    nightlightGrid: { features: [{ id: 'existing-nightlight-grid' }] },
+    nightlightGridCount: 1,
     nightlightLayer: { cells: [{ cell_id: 'existing-n' }] },
   })
 
@@ -357,20 +465,24 @@ test('history restore ignores old population and nightlight artifacts without la
     payload: {
       year: '2026',
       overview: { summary: { total_population: 10 } },
-      layer_cells: [{ cell_id: 'legacy-p1' }],
+      layer: { cells: [{ cell_id: 'new-p1' }] },
     },
   }, 1)
   const nightlightRestored = await historyMethods.restoreHistoryNightlightArtifact.call(ctx, {
     payload: {
       year: 2025,
       overview: { summary: { mean_radiance: 3 } },
-      layer_cells: [{ cell_id: 'legacy-n1' }],
+      layer: { cells: [{ cell_id: 'new-n1' }] },
     },
   }, 1)
 
   assert.equal(populationRestored, false)
   assert.equal(nightlightRestored, false)
+  assert.deepEqual(ctx.populationGrid, { features: [{ id: 'existing-population-grid' }] })
+  assert.equal(ctx.populationGridCount, 1)
   assert.deepEqual(ctx.populationLayer, { cells: [{ cell_id: 'existing-p' }] })
+  assert.deepEqual(ctx.nightlightGrid, { features: [{ id: 'existing-nightlight-grid' }] })
+  assert.equal(ctx.nightlightGridCount, 1)
   assert.deepEqual(ctx.nightlightLayer, { cells: [{ cell_id: 'existing-n' }] })
 })
 

@@ -1,17 +1,77 @@
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def _canonical_source_kind(raw_kind: Any = "", source_id: Any = "", fallback: str = "") -> str:
+    allowed = {"system", "document", "image", "web", "database", "package"}
+    text = str(raw_kind or "").strip()
+    source = str(source_id or "").strip()
+    if text in allowed:
+        return text
+    if source.startswith("current:"):
+        return "system"
+    if ":" in source:
+        prefix = source.split(":", 1)[0]
+        return prefix if prefix in allowed else "unknown"
+    fallback_text = str(fallback or "").strip()
+    return fallback_text if fallback_text in allowed else "unknown"
 
 
 class PptSource(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str = Field(..., min_length=1)
-    type: str = "file"
+    type: str = "source"
     title: str
-    status: Literal["ready", "pending", "failed"] = "pending"
+    status: Literal["ready", "pending", "generating", "failed"] = "pending"
     selected: bool = False
+    source_kind: str = ""
+    summary: str = ""
+    evidence_count: int = 0
+    locator_summary: str = ""
+    availability: str = ""
     meta: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_source_fields(cls, value):
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        source_id = str(payload.get("id") or payload.get("source_id") or payload.get("sourceId") or "").strip()
+        source_kind = str(payload.get("source_kind") or payload.get("sourceKind") or meta.get("sourceKind") or "").strip()
+        source_kind = _canonical_source_kind(source_kind, source_id, str(payload.get("type") or "source"))
+        ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
+        ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
+        counts = ai_payload.get("counts") if isinstance(ai_payload.get("counts"), dict) else {}
+        evidence_nodes = (
+            ai_payload.get("evidence_nodes")
+            if isinstance(ai_payload.get("evidence_nodes"), list)
+            else ai_payload.get("evidenceNodes")
+            if isinstance(ai_payload.get("evidenceNodes"), list)
+            else []
+        )
+        transport = meta.get("transport") if isinstance(meta.get("transport"), dict) else {}
+        evidence_count = (
+            payload.get("evidence_count")
+            or payload.get("evidenceCount")
+            or transport.get("evidence_count")
+            or transport.get("evidenceCount")
+            or len(evidence_nodes)
+            or counts.get("evidence")
+            or 0
+        )
+        summary = str(payload.get("summary") or meta.get("label") or "").strip()
+        payload.update({
+            "source_kind": source_kind,
+            "summary": summary,
+            "evidence_count": int(evidence_count or 0),
+            "locator_summary": str(payload.get("locator_summary") or payload.get("locatorSummary") or "").strip(),
+            "availability": str(payload.get("availability") or ("available" if payload.get("status") == "ready" else "")).strip(),
+        })
+        return payload
 
 
 class PptSourceGroup(BaseModel):
@@ -55,10 +115,33 @@ class PptDataSourceSummary(BaseModel):
     id: str
     type: str = "data"
     title: str
-    status: Literal["ready", "pending", "failed"] = "pending"
+    status: Literal["ready", "pending", "generating", "failed"] = "pending"
     summary: str = ""
     count: int = 0
+    source_kind: str = ""
+    evidence_count: int = 0
+    locator_summary: str = ""
+    availability: str = ""
     meta: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_summary_fields(cls, value):
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+        source_id = str(payload.get("id") or payload.get("source_id") or payload.get("sourceId") or "").strip()
+        source_kind = str(payload.get("source_kind") or payload.get("sourceKind") or meta.get("sourceKind") or "").strip()
+        source_kind = _canonical_source_kind(source_kind, source_id, str(payload.get("type") or "data"))
+        evidence_count = payload.get("evidence_count") or payload.get("evidenceCount") or payload.get("count") or 0
+        payload.update({
+            "source_kind": source_kind,
+            "evidence_count": int(evidence_count or 0),
+            "locator_summary": str(payload.get("locator_summary") or payload.get("locatorSummary") or "").strip(),
+            "availability": str(payload.get("availability") or ("available" if payload.get("status") == "ready" else "")).strip(),
+        })
+        return payload
 
 
 class PptPoiQueryRequest(BaseModel):
@@ -188,6 +271,46 @@ class PptDataPackageResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class PptWebSourceLocationDefaultRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    area_id: str = ""
+
+
+class PptWebSourceLocationDefaultResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    area_id: str = ""
+    region_name: str = "当前分析区域"
+    administrative_area: str = ""
+    center: List[float] = Field(default_factory=list)
+    center_coord_type: str = "wgs84"
+    confidence: str = "fallback"
+    warnings: List[str] = Field(default_factory=list)
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PptWebSourceSearchRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    area_id: str = ""
+    region_name: str = ""
+    administrative_area: str = ""
+    topic: str = ""
+    intent: str = ""
+    categories: List[str] = Field(default_factory=list)
+    source_modes: List[str] = Field(default_factory=lambda: ["trusted", "market"])
+    urls: List[str] = Field(default_factory=list)
+    limit: int = Field(8, ge=1, le=20)
+
+
+class PptWebSourceCommitRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    area_id: str = ""
+    preview: Dict[str, Any] = Field(default_factory=dict)
+
+
 class PptSpecRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -197,7 +320,7 @@ class PptSpecRequest(BaseModel):
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"
     page_count: int = Field(15, ge=1, le=80)
-    research_enabled: bool = True
+    web_sources_enabled: bool = True
     sources: List[PptSource] = Field(default_factory=list)
     current: Dict[str, Any] = Field(default_factory=dict)
 
@@ -249,7 +372,7 @@ class PptOutlineSectionRequest(BaseModel):
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"
     page_count: int = Field(15, ge=1, le=80)
-    research_enabled: bool = True
+    web_sources_enabled: bool = True
 
     @field_validator("source_ids", mode="before")
     @classmethod
@@ -290,7 +413,7 @@ class DeckBriefRequest(BaseModel):
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"
     page_count: int = Field(15, ge=1, le=80)
-    research_enabled: bool = True
+    web_sources_enabled: bool = True
 
     @field_validator("source_ids", mode="before")
     @classmethod
@@ -352,7 +475,7 @@ class DeckNarrativePlanRequest(BaseModel):
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"
     page_count: int = Field(15, ge=1, le=80)
-    research_enabled: bool = True
+    web_sources_enabled: bool = True
 
     @field_validator("source_ids", mode="before")
     @classmethod
@@ -427,7 +550,7 @@ class DeckBriefSlideRequest(BaseModel):
     audience: str = "政府评审"
     deck_type: str = "城市更新概念策划"
     page_count: int = Field(15, ge=1, le=80)
-    research_enabled: bool = True
+    web_sources_enabled: bool = True
 
     @field_validator("source_ids", mode="before")
     @classmethod

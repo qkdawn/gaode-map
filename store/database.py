@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _engine_lock = Lock()
 _env_snapshot: tuple[int | None, int | None] | None = None
 _engine_uri = ""
+_session_factory = sessionmaker(autoflush=False, autocommit=False, future=True)
 
 
 def _build_engine(db_uri: str | None = None):
@@ -75,7 +76,7 @@ def _refresh_runtime_config_if_needed() -> None:
         if next_uri != _engine_uri:
             old_engine = engine
             engine = _build_engine(next_uri)
-            SessionLocal.configure(bind=engine)
+            _session_factory.configure(bind=engine)
             old_engine.dispose()
             _engine_uri = next_uri
             logger.info("数据库配置已热更新，连接池已重建")
@@ -83,16 +84,14 @@ def _refresh_runtime_config_if_needed() -> None:
 
 
 engine = _build_engine()
-SessionLocalFactory = sessionmaker(autoflush=False, autocommit=False, future=True)
-SessionLocalFactory.configure(bind=engine)
-SessionLocal = SessionLocalFactory
+_session_factory.configure(bind=engine)
 _engine_uri = settings.sqlalchemy_database_uri
 _env_snapshot = _env_file_snapshot()
 
 
 def SessionLocal():
     _refresh_runtime_config_if_needed()
-    return SessionLocalFactory()
+    return _session_factory()
 
 
 def _ensure_agent_sessions_schema() -> None:
