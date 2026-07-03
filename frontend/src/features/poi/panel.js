@@ -540,6 +540,7 @@
                 }
             },
             shouldShowPoiPanelStatus() {
+                if (this.shouldShowHistoryRestoreProgress && this.shouldShowHistoryRestoreProgress()) return true;
                 const text = String(this.poiStatus || '').trim();
                 if (!text) return false;
                 if (text.indexOf('已加载历史:') === 0) return false;
@@ -606,8 +607,44 @@
                 return '';
             },
             isHistoryPoiRestoring() {
+                const progress = this.historyRestoreProgress && typeof this.historyRestoreProgress === 'object'
+                    ? this.historyRestoreProgress
+                    : null;
+                if (progress) return !!progress.active;
                 const text = String(this.poiStatus || '');
                 return !!this.historyDetailAbortController && text.indexOf('正在加载历史 POI') >= 0;
+            },
+            shouldShowHistoryRestoreProgress() {
+                const progress = this.historyRestoreProgress && typeof this.historyRestoreProgress === 'object'
+                    ? this.historyRestoreProgress
+                    : null;
+                if (!progress) return false;
+                if (progress.active) return true;
+                if (Array.isArray(progress.warnings) && progress.warnings.length) return true;
+                const message = String(progress.message || '').trim();
+                return !!message && message.indexOf('历史恢复') >= 0;
+            },
+            getHistoryRestoreProgressPercent() {
+                const value = Number(this.historyRestoreProgress && this.historyRestoreProgress.percent);
+                return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+            },
+            getHistoryRestoreProgressMessage() {
+                const progress = this.historyRestoreProgress && typeof this.historyRestoreProgress === 'object'
+                    ? this.historyRestoreProgress
+                    : {};
+                return String(progress.message || this.getPoiPanelStatusText() || '').trim();
+            },
+            getHistoryRestoreProgressItems() {
+                const progress = this.historyRestoreProgress && typeof this.historyRestoreProgress === 'object'
+                    ? this.historyRestoreProgress
+                    : {};
+                return Array.isArray(progress.items) ? progress.items : [];
+            },
+            getHistoryRestoreProgressWarnings() {
+                const progress = this.historyRestoreProgress && typeof this.historyRestoreProgress === 'object'
+                    ? this.historyRestoreProgress
+                    : {};
+                return Array.isArray(progress.warnings) ? progress.warnings.slice(0, 3) : [];
             },
             clearPoiKdeOverlay() {
                 if (!this.mapCore || typeof this.mapCore.clearPoiHeatmap !== 'function') return;

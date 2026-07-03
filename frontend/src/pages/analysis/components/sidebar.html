@@ -531,9 +531,33 @@
                                                 <button v-show="poiSubTab === 'category'" id="toggleExpandAll" class="btn-outline btn-compact">全部展开</button>
                                             </div>
                                         </div>
-                                        <div v-if="poiSubTab !== 'grid' && shouldShowPoiPanelStatus()" class="poi-panel-status" :class="{ 'is-loading': isHistoryPoiRestoring() }">
-                                            <span v-if="isHistoryPoiRestoring()" class="poi-panel-status-dot"></span>
-                                            <span>{{ getPoiPanelStatusText() }}</span>
+                                        <div v-if="poiSubTab !== 'grid' && shouldShowPoiPanelStatus()" class="poi-panel-status" :class="{ 'is-loading': isHistoryPoiRestoring(), 'is-history-restore': shouldShowHistoryRestoreProgress() }">
+                                            <template v-if="shouldShowHistoryRestoreProgress()">
+                                                <div class="history-restore-status-head">
+                                                    <span class="poi-panel-status-dot"></span>
+                                                    <span>{{ getHistoryRestoreProgressMessage() }}</span>
+                                                    <strong>{{ getHistoryRestoreProgressPercent() }}%</strong>
+                                                </div>
+                                                <div class="history-restore-progress-track">
+                                                    <div class="history-restore-progress-fill" :style="{ width: `${getHistoryRestoreProgressPercent()}%` }"></div>
+                                                </div>
+                                                <div class="history-restore-steps">
+                                                    <span
+                                                        v-for="item in getHistoryRestoreProgressItems()"
+                                                        :key="`history-restore-step-${item.key}`"
+                                                        class="history-restore-step"
+                                                        :class="`is-${item.status || 'pending'}`">
+                                                        {{ item.label }}
+                                                    </span>
+                                                </div>
+                                                <div v-if="getHistoryRestoreProgressWarnings().length" class="history-restore-warnings">
+                                                    {{ getHistoryRestoreProgressWarnings().join('；') }}
+                                                </div>
+                                            </template>
+                                            <template v-else>
+                                                <span v-if="isHistoryPoiRestoring()" class="poi-panel-status-dot"></span>
+                                                <span>{{ getPoiPanelStatusText() }}</span>
+                                            </template>
                                         </div>
                                     </div>
                                     <div v-show="poiSubTab === 'load'" class="poi-subpanel">

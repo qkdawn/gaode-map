@@ -1,3 +1,8 @@
+import {
+    restoreFeatureCollection,
+    restoreLayer,
+} from './artifacts.js';
+
     function createAnalysisHistoryInitialState() {
         return {
             historyDetailAbortController: null,
@@ -6,11 +11,99 @@
             currentHistoryPolygonWgs84: [],
             currentHistoryAvailablePoiYears: [],
             currentHistorySelectedPoiYear: null,
+            historyRestoreProgress: {
+                active: false,
+                currentStep: '',
+                totalSteps: 8,
+                percent: 0,
+                message: '',
+                warnings: [],
+                items: [
+                    { key: 'base', label: '主结果', status: 'pending' },
+                    { key: 'poi', label: 'POI 明细', status: 'pending' },
+                    { key: 'artifacts', label: '分析产物', status: 'pending' },
+                    { key: 'population', label: '人口', status: 'pending' },
+                    { key: 'nightlight', label: '夜光', status: 'pending' },
+                    { key: 'road', label: '路网', status: 'pending' },
+                    { key: 'grid', label: '网格/H3', status: 'pending' },
+                    { key: 'complete', label: '完成', status: 'pending' },
+                ],
+            },
         };
     }
 
     function createAnalysisHistoryMethods() {
         return {
+            createHistoryRestoreProgressState(active = false) {
+                return {
+                    active: !!active,
+                    currentStep: '',
+                    totalSteps: 8,
+                    percent: 0,
+                    message: '',
+                    warnings: [],
+                    items: [
+                        { key: 'base', label: '主结果', status: 'pending' },
+                        { key: 'poi', label: 'POI 明细', status: 'pending' },
+                        { key: 'artifacts', label: '分析产物', status: 'pending' },
+                        { key: 'population', label: '人口', status: 'pending' },
+                        { key: 'nightlight', label: '夜光', status: 'pending' },
+                        { key: 'road', label: '路网', status: 'pending' },
+                        { key: 'grid', label: '网格/H3', status: 'pending' },
+                        { key: 'complete', label: '完成', status: 'pending' },
+                    ],
+                };
+            },
+            updateHistoryRestoreProgress(patch = {}) {
+                const current = (this.historyRestoreProgress && typeof this.historyRestoreProgress === 'object')
+                    ? this.historyRestoreProgress
+                    : this.createHistoryRestoreProgressState(false);
+                let items = Array.isArray(current.items) ? current.items.map((item) => ({ ...item })) : this.createHistoryRestoreProgressState(false).items;
+                const updates = patch.items && typeof patch.items === 'object' ? patch.items : {};
+                if (Object.keys(updates).length) {
+                    items = items.map((item) => {
+                        const update = updates[item.key];
+                        return update && typeof update === 'object' ? { ...item, ...update } : item;
+                    });
+                }
+                const completed = items.filter((item) => item.status === 'done' || item.status === 'failed' || item.status === 'skipped').length;
+                const total = Number.isFinite(Number(patch.totalSteps)) ? Number(patch.totalSteps) : (Number(current.totalSteps) || items.length || 1);
+                const active = patch.active !== undefined ? !!patch.active : !!current.active;
+                const percent = Number.isFinite(Number(patch.percent))
+                    ? Number(patch.percent)
+                    : Math.round((completed / Math.max(1, total)) * 100);
+                this.historyRestoreProgress = {
+                    ...current,
+                    ...patch,
+                    active,
+                    totalSteps: total,
+                    percent: Math.max(0, Math.min(100, percent)),
+                    warnings: Array.isArray(patch.warnings) ? patch.warnings : (Array.isArray(current.warnings) ? current.warnings : []),
+                    items,
+                };
+            },
+            setHistoryRestoreStep(key, status, message = '') {
+                const nextMessage = String(message || '').trim();
+                this.updateHistoryRestoreProgress({
+                    active: status !== 'done' || key !== 'complete',
+                    currentStep: key,
+                    message: nextMessage || (this.historyRestoreProgress && this.historyRestoreProgress.message) || '',
+                    items: { [key]: { status } },
+                });
+                if (nextMessage) {
+                    this.poiStatus = nextMessage;
+                }
+            },
+            appendHistoryRestoreWarning(message) {
+                const text = String(message || '').trim();
+                if (!text) return;
+                const current = this.historyRestoreProgress && typeof this.historyRestoreProgress === 'object'
+                    ? this.historyRestoreProgress
+                    : this.createHistoryRestoreProgressState(true);
+                const warnings = Array.isArray(current.warnings) ? current.warnings.slice() : [];
+                if (!warnings.includes(text)) warnings.push(text);
+                this.updateHistoryRestoreProgress({ warnings });
+            },
             _resolveHistoryPreferredStep3Panel(data) {
                 const params = (data && data.params && typeof data.params === 'object') ? data.params : {};
                 const h3Result = (params && typeof params.h3_result === 'object') ? params.h3_result : null;
@@ -31,8 +124,8 @@
             async _restoreHistoryH3ResultAsync(h3Result, token) {
                 if (token !== this.historyDetailLoadToken) return false;
                 if (!h3Result || typeof h3Result !== 'object') return false;
-                const grid = (h3Result.grid && typeof h3Result.grid === 'object') ? h3Result.grid : {};
-                const features = Array.isArray(grid.features) ? grid.features : [];
+                const grid = restoreFeatureCollection(h3Result.grid, false);
+                const features = Array.isArray(grid && grid.features) ? grid.features : [];
                 const summary = (h3Result.summary && typeof h3Result.summary === 'object') ? h3Result.summary : null;
                 if (!features.length && !summary) return false;
 
@@ -112,11 +205,11 @@
             async _restoreHistoryRoadResultAsync(roadResult, token) {
                 if (token !== this.historyDetailLoadToken) return false;
                 if (!roadResult || typeof roadResult !== 'object') return false;
-                const roads = (roadResult.roads && typeof roadResult.roads === 'object') ? roadResult.roads : {};
-                const nodes = (roadResult.nodes && typeof roadResult.nodes === 'object') ? roadResult.nodes : {};
+                const roads = restoreFeatureCollection(roadResult.roads, false);
+                const nodes = restoreFeatureCollection(roadResult.nodes, false);
                 const summary = (roadResult.summary && typeof roadResult.summary === 'object') ? roadResult.summary : null;
-                const roadFeatures = Array.isArray(roads.features) ? roads.features : [];
-                const nodeFeatures = Array.isArray(nodes.features) ? nodes.features : [];
+                const roadFeatures = Array.isArray(roads && roads.features) ? roads.features : [];
+                const nodeFeatures = Array.isArray(nodes && nodes.features) ? nodes.features : [];
                 if (!summary && !roadFeatures.length && !nodeFeatures.length) return false;
 
                 const ui = (roadResult.ui && typeof roadResult.ui === 'object') ? roadResult.ui : {};
@@ -140,14 +233,8 @@
                     diagnostics: (roadResult.diagnostics && typeof roadResult.diagnostics === 'object')
                         ? roadResult.diagnostics
                         : {},
-                    roads: {
-                        type: 'FeatureCollection',
-                        features: roadFeatures,
-                    },
-                    nodes: {
-                        type: 'FeatureCollection',
-                        features: nodeFeatures,
-                    },
+                    roads,
+                    nodes,
                     webgl: (roadResult.webgl && typeof roadResult.webgl === 'object') ? roadResult.webgl : null,
                 };
                 const preferredMetricRaw = String(ui.metric || '').trim();
@@ -295,8 +382,8 @@
             async restoreHistoryPoiRasterArtifact(artifact, token, options = {}) {
                 if (token !== this.historyDetailLoadToken || !artifact) return false;
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
-                const grid = payload.grid && typeof payload.grid === 'object' ? payload.grid : payload;
-                const features = Array.isArray(grid.features) ? grid.features : [];
+                const grid = restoreFeatureCollection(payload.grid && typeof payload.grid === 'object' ? payload.grid : payload, false);
+                const features = Array.isArray(grid && grid.features) ? grid.features : [];
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : (artifact.summary || null);
                 const charts = payload.charts && typeof payload.charts === 'object' ? payload.charts : {};
                 if (!features.length && !summary) return false;
@@ -361,8 +448,8 @@
                 if (applyToProjection) {
                     return this._restoreHistoryH3ResultAsync(h3Payload, token);
                 }
-                const grid = h3Payload.grid && typeof h3Payload.grid === 'object' ? h3Payload.grid : {};
-                const features = Array.isArray(grid.features) ? grid.features : [];
+                const grid = restoreFeatureCollection(h3Payload.grid, false);
+                const features = Array.isArray(grid && grid.features) ? grid.features : [];
                 const summary = h3Payload.summary && typeof h3Payload.summary === 'object' ? h3Payload.summary : {};
                 if (!features.length && !Object.keys(summary).length) return false;
                 if (typeof this.commitPoiGridResult === 'function') {
@@ -386,18 +473,11 @@
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
                 const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
-                const grid = payload.grid && typeof payload.grid === 'object' ? payload.grid : {};
-                const layer = payload.layer && typeof payload.layer === 'object' ? payload.layer : {};
-                const features = Array.isArray(grid.features) ? grid.features : [];
-                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !features.length || !Array.isArray(layer.cells)) return false;
+                const grid = restoreFeatureCollection(payload.grid, true);
+                const layer = restoreLayer(payload.layer, true);
+                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !grid || !layer) return false;
                 this.populationOverview = Object.keys(overview).length ? overview : { summary };
-                this.populationGrid = {
-                    type: 'FeatureCollection',
-                    features,
-                    count: Number.isFinite(Number(grid.count)) ? Number(grid.count) : features.length,
-                    cell_count: Number.isFinite(Number(grid.cell_count)) ? Number(grid.cell_count) : features.length,
-                    scope_id: String(grid.scope_id || payload.scope_id || ''),
-                };
+                this.populationGrid = grid;
                 this.populationLayer = layer;
                 this.populationGridCount = this.populationGrid.cell_count;
                 this.populationScopeId = String(grid.scope_id || layer.scope_id || payload.scope_id || '');
@@ -414,18 +494,11 @@
                 const payload = artifact.payload && typeof artifact.payload === 'object' ? artifact.payload : {};
                 const overview = payload.overview && typeof payload.overview === 'object' ? payload.overview : {};
                 const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
-                const grid = payload.grid && typeof payload.grid === 'object' ? payload.grid : {};
-                const layer = payload.layer && typeof payload.layer === 'object' ? payload.layer : {};
-                const features = Array.isArray(grid.features) ? grid.features : [];
-                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !features.length || !Array.isArray(layer.cells)) return false;
+                const grid = restoreFeatureCollection(payload.grid, true);
+                const layer = restoreLayer(payload.layer, true);
+                if ((!Object.keys(overview).length && !Object.keys(summary).length) || !grid || !layer) return false;
                 this.nightlightOverview = Object.keys(overview).length ? overview : { summary };
-                this.nightlightGrid = {
-                    type: 'FeatureCollection',
-                    features,
-                    count: Number.isFinite(Number(grid.count)) ? Number(grid.count) : features.length,
-                    cell_count: Number.isFinite(Number(grid.cell_count)) ? Number(grid.cell_count) : features.length,
-                    scope_id: String(grid.scope_id || payload.scope_id || ''),
-                };
+                this.nightlightGrid = grid;
                 this.nightlightLayer = layer;
                 this.nightlightGridCount = this.nightlightGrid.cell_count;
                 this.nightlightScopeId = String(grid.scope_id || layer.scope_id || payload.scope_id || '');
@@ -440,9 +513,12 @@
                 }
                 let artifacts;
                 try {
+                    this.setHistoryRestoreStep('artifacts', 'running', '正在读取历史分析产物...');
                     artifacts = await this.fetchHistoryArtifacts(historyId, signal);
+                    this.setHistoryRestoreStep('artifacts', 'done', '历史分析产物已读取，正在恢复各类结果...');
                 } catch (e) {
                     if (e && (e.name === 'AbortError' || String(e.message || '').toLowerCase().includes('aborted'))) {
+                        this.setHistoryRestoreStep('artifacts', 'failed', '历史分析产物读取已中断');
                         return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
                     }
                     throw e;
@@ -454,6 +530,7 @@
                 const rasterArtifacts = this.pickLatestHistoryArtifactsByYear(artifacts, 'poi_raster_grid');
                 const preferredRaster = this.pickLatestHistoryArtifact(artifacts, 'poi_raster_grid', { preferredYear });
                 let rasterRestored = false;
+                this.setHistoryRestoreStep('grid', 'running', '正在恢复历史网格和 H3 结果...');
                 for (const artifact of rasterArtifacts) {
                     const restored = await this.restoreHistoryPoiRasterArtifact(artifact, token, {
                         applyToProjection: artifact === preferredRaster,
@@ -469,10 +546,17 @@
                     });
                     h3Restored = h3Restored || restored;
                 }
+                this.setHistoryRestoreStep('grid', (rasterRestored || h3Restored) ? 'done' : 'skipped', (rasterRestored || h3Restored) ? '历史网格和 H3 结果已恢复' : '该历史未找到可恢复的网格/H3 结果');
+                this.setHistoryRestoreStep('population', 'running', '正在恢复历史人口结果...');
                 const populationRestored = await this.restoreHistoryPopulationArtifact(this.pickLatestHistoryArtifact(artifacts, 'population'), token);
+                this.setHistoryRestoreStep('population', populationRestored ? 'done' : 'skipped', populationRestored ? '历史人口结果已恢复' : '该历史未找到可恢复的人口结果');
+                this.setHistoryRestoreStep('nightlight', 'running', '正在恢复历史夜光结果...');
                 const nightlightRestored = await this.restoreHistoryNightlightArtifact(this.pickLatestHistoryArtifact(artifacts, 'nightlight'), token);
+                this.setHistoryRestoreStep('nightlight', nightlightRestored ? 'done' : 'skipped', nightlightRestored ? '历史夜光结果已恢复' : '该历史未找到可恢复的夜光结果');
+                this.setHistoryRestoreStep('road', 'running', '正在恢复历史路网结果...');
                 const roadArtifact = this.pickLatestHistoryArtifact(artifacts, 'road_syntax');
                 const roadRestored = await this._restoreHistoryRoadResultAsync(roadArtifact && roadArtifact.payload, token);
+                this.setHistoryRestoreStep('road', roadRestored ? 'done' : 'skipped', roadRestored ? '历史路网结果已恢复' : '该历史未找到可恢复的路网结果');
                 if (
                     token === this.historyDetailLoadToken
                     && (rasterRestored || h3Restored || populationRestored || nightlightRestored || roadRestored)
@@ -669,7 +753,8 @@
                         this.resetAnalysisDisplayTargetsForPanel('poi', { apply: false });
                     }
                     this.applySimplifyConfig();
-                    this.poiStatus = '正在加载历史记录...';
+                    this.historyRestoreProgress = this.createHistoryRestoreProgressState(true);
+                    this.setHistoryRestoreStep('base', 'running', '正在加载历史主结果...');
                     await this.$nextTick();
 
                     controller = new AbortController();
@@ -696,6 +781,7 @@
                     if (!data || token !== this.historyDetailLoadToken) return;
 
                     this._applyHistoryDetailBaseResult(data);
+                    this.setHistoryRestoreStep('base', 'done', '历史主结果已恢复');
                     this.currentHistoryRecordId = historyId;
                     if (this.lastIsochroneGeoJSON) {
                         this.scopeSource = 'history';
@@ -705,19 +791,6 @@
                     }
                     baseRestored = true;
                     const legacySnapshots = await this._restoreHistoryAnalysisSnapshotsAsync(data, token);
-                    let restoredSnapshots = legacySnapshots;
-                    try {
-                        const artifactSnapshots = await this.restoreHistoryArtifactsAsync(historyId, token, controller.signal);
-                        restoredSnapshots = {
-                            h3Restored: artifactSnapshots.h3Restored || legacySnapshots.h3Restored,
-                            roadRestored: artifactSnapshots.roadRestored || legacySnapshots.roadRestored,
-                            rasterRestored: artifactSnapshots.rasterRestored,
-                            populationRestored: artifactSnapshots.populationRestored,
-                            nightlightRestored: artifactSnapshots.nightlightRestored,
-                        };
-                    } catch (artifactErr) {
-                        console.warn('history artifacts restore failed', artifactErr);
-                    }
                     if (token !== this.historyDetailLoadToken) return;
                     this.currentHistoryRecordId = historyId;
                     if (this.lastIsochroneGeoJSON) {
@@ -727,19 +800,55 @@
                         0,
                         Number((data && data.poi_count) || (((data || {}).poi_summary || {}).total) || 0)
                     );
-                    const restoredTags = [];
-                    if (restoredSnapshots.rasterRestored) restoredTags.push('共享栅格');
-                    if (restoredSnapshots.h3Restored) restoredTags.push('网格');
-                    if (restoredSnapshots.populationRestored) restoredTags.push('人口');
-                    if (restoredSnapshots.nightlightRestored) restoredTags.push('夜光');
-                    if (restoredSnapshots.roadRestored) restoredTags.push('路网');
-                    const restoredText = restoredTags.length ? `（${restoredTags.join(' + ')}已恢复）` : '';
-                    this.poiStatus = poiCountHint > 0
-                        ? `历史主结果${restoredText}，正在加载历史 POI（${poiCountHint} 条）...`
-                        : `历史主结果${restoredText}，正在检查 POI 数据...`;
                     await this.$nextTick();
                     await new Promise((resolve) => window.requestAnimationFrame(resolve));
-                    await this._restoreHistoryPoisAsync(historyId, token, controller.signal, poiCountHint);
+                    this.setHistoryRestoreStep('poi', 'running', poiCountHint > 0
+                        ? `正在加载历史 POI（${poiCountHint} 条）...`
+                        : '正在检查历史 POI 数据...');
+                    const poiPromise = this._restoreHistoryPoisAsync(historyId, token, controller.signal, poiCountHint)
+                        .then(() => {
+                            if (token !== this.historyDetailLoadToken) return false;
+                            const hasPois = Array.isArray(this.allPoisDetails) && this.allPoisDetails.length > 0;
+                            this.setHistoryRestoreStep('poi', hasPois ? 'done' : 'skipped', hasPois ? `历史 POI 已恢复（${this.allPoisDetails.length} 条）` : '该历史无可恢复 POI 明细');
+                            return true;
+                        })
+                        .catch((poiErr) => {
+                            if (poiErr && (poiErr.name === 'AbortError' || String(poiErr.message || '').toLowerCase().includes('aborted'))) throw poiErr;
+                            console.warn('history POI restore failed', poiErr);
+                            const message = poiErr && poiErr.message ? poiErr.message : String(poiErr || '');
+                            this.setHistoryRestoreStep('poi', 'failed', '历史 POI 恢复失败，其他分析结果继续恢复');
+                            this.appendHistoryRestoreWarning(message ? `POI 恢复失败：${message}` : 'POI 恢复失败');
+                            return false;
+                        });
+                    const artifactPromise = this.restoreHistoryArtifactsAsync(historyId, token, controller.signal)
+                        .then((artifactSnapshots) => ({
+                            h3Restored: artifactSnapshots.h3Restored || legacySnapshots.h3Restored,
+                            roadRestored: artifactSnapshots.roadRestored || legacySnapshots.roadRestored,
+                            rasterRestored: artifactSnapshots.rasterRestored,
+                            populationRestored: artifactSnapshots.populationRestored,
+                            nightlightRestored: artifactSnapshots.nightlightRestored,
+                        }))
+                        .catch((artifactErr) => {
+                            if (artifactErr && (artifactErr.name === 'AbortError' || String(artifactErr.message || '').toLowerCase().includes('aborted'))) throw artifactErr;
+                            console.warn('history artifacts restore failed', artifactErr);
+                            const message = artifactErr && artifactErr.message ? artifactErr.message : String(artifactErr || '');
+                            this.setHistoryRestoreStep('artifacts', 'failed', '历史分析产物恢复失败，POI 可继续使用');
+                            this.appendHistoryRestoreWarning(message ? `分析产物恢复失败：${message}` : '分析产物恢复失败');
+                            return {
+                                h3Restored: legacySnapshots.h3Restored,
+                                roadRestored: legacySnapshots.roadRestored,
+                                rasterRestored: false,
+                                populationRestored: false,
+                                nightlightRestored: false,
+                            };
+                        });
+                    await Promise.all([poiPromise, artifactPromise]);
+                    if (token === this.historyDetailLoadToken) {
+                        this.setHistoryRestoreStep('complete', 'done', this.historyRestoreProgress && this.historyRestoreProgress.warnings && this.historyRestoreProgress.warnings.length
+                            ? '历史恢复完成，部分内容有提示'
+                            : '历史恢复完成');
+                        this.updateHistoryRestoreProgress({ active: false, percent: 100 });
+                    }
                     if (token === this.historyDetailLoadToken && typeof this.syncSummaryTaskBoardFromLocalResults === 'function') {
                         this.syncSummaryTaskBoardFromLocalResults({ sync: false });
                     }

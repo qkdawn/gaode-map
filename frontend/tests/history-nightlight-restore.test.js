@@ -12,6 +12,29 @@ const historyMethods = createAnalysisHistoryMethods()
 const historyOrchestratorMethods = createAnalysisHistoryOrchestratorMethods()
 const nightlightMethods = createAnalysisNightlightMethods()
 
+function deferred() {
+  const state = {}
+  state.promise = new Promise((resolve, reject) => {
+    state.resolve = resolve
+    state.reject = reject
+  })
+  return state
+}
+
+async function waitFor(assertion, attempts = 25) {
+  let lastError = null
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      assertion()
+      return
+    } catch (err) {
+      lastError = err
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  }
+  throw lastError
+}
+
 function createHistoryRestoreContext(overrides = {}) {
   const nightlightState = createAnalysisNightlightInitialState()
   const ctx = {
@@ -45,6 +68,7 @@ function createHistoryRestoreContext(overrides = {}) {
     nightlightResetArgs: [],
     applySimplifyConfigCalls: 0,
     resetPanelCalls: [],
+    historyRestoreProgress: historyMethods.createHistoryRestoreProgressState(false),
     step: 1,
     sidebarView: 'start',
     activeStep3Panel: 'nightlight',
@@ -315,6 +339,91 @@ test('loadHistoryDetail keeps restored history id and history scope source', asy
   assert.equal(ctx.restoredPoiHistoryId, '123')
   assert.deepEqual(ctx.allPoisDetails, [{ id: 'history-poi' }])
   assert.deepEqual(ctx.summaryTaskBoardSyncs, [{ sync: false }])
+  assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'complete').status, 'done')
+})
+
+test('loadHistoryDetail restores POI before slow artifacts finish', async () => {
+  const originalFetch = global.fetch
+  const originalWindow = global.window
+  const artifacts = deferred()
+  const ctx = Object.assign(
+    createHistoryRestoreContext(),
+    historyMethods,
+    {
+      historyDetailLoadToken: 0,
+      historyDetailAbortController: null,
+      historyFetchAbortController: null,
+      cancelHistoryLoading() {},
+      cancelHistoryDetailLoading() {
+        this.historyDetailLoadToken += 1
+        this.historyDetailAbortController = null
+      },
+      stopScopeDrawing() {},
+      clearIsochroneDebugState() {},
+      $nextTick() {
+        return Promise.resolve()
+      },
+      async _restoreHistoryPoisAsync(id) {
+        this.restoredPoiHistoryId = id
+        this.allPoisDetails = [{ id: 'history-poi-fast' }]
+      },
+      syncSummaryTaskBoardFromLocalResults(options) {
+        this.summaryTaskBoardSyncs = Array.isArray(this.summaryTaskBoardSyncs) ? this.summaryTaskBoardSyncs.slice() : []
+        this.summaryTaskBoardSyncs.push(options)
+      },
+    },
+  )
+  global.window = {
+    requestAnimationFrame(callback) {
+      callback()
+    },
+  }
+  global.fetch = async (url) => {
+    if (url === '/api/v1/analysis/history/slow-artifacts/artifacts') {
+      return {
+        ok: true,
+        async json() {
+          return artifacts.promise
+        },
+      }
+    }
+    assert.equal(url, '/api/v1/analysis/history/slow-artifacts?include_pois=false')
+    return {
+      ok: true,
+      async json() {
+        return {
+          params: {
+            center: [121.48, 31.23],
+            mode: 'walking',
+            time_min: 15,
+            source: 'local',
+            drawn_polygon: [],
+          },
+          polygon: [[121.47, 31.22], [121.49, 31.22], [121.49, 31.24], [121.47, 31.22]],
+          poi_count: 1,
+        }
+      },
+    }
+  }
+
+  try {
+    const loadPromise = ctx.loadHistoryDetail('slow-artifacts')
+    await waitFor(() => {
+      assert.equal(ctx.restoredPoiHistoryId, 'slow-artifacts')
+      assert.deepEqual(ctx.allPoisDetails, [{ id: 'history-poi-fast' }])
+      assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'poi').status, 'done')
+      assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'artifacts').status, 'running')
+      assert.equal(ctx.historyRestoreProgress.active, true)
+    })
+    artifacts.resolve([])
+    await loadPromise
+  } finally {
+    artifacts.resolve([])
+    global.fetch = originalFetch
+    global.window = originalWindow
+  }
+
+  assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'complete').status, 'done')
 })
 
 test('restoreHistoryArtifactsAsync hydrates reusable base artifacts', async () => {
