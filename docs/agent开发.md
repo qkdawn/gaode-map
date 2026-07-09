@@ -205,15 +205,15 @@ V1 明确不做以下内容：
 
 这三种模式不是模型自己决定，而由 harness runtime 根据工具元数据和上下文状态控制。
 
-### 5.3 回退规则
+### 5.3 收敛规则
 
-仅允许三类回退：
+当前主链路不再维护独立 Planner 回退层。运行时只允许三类明确收敛：
 
-- 执行前发现缺输入，回退到澄清
-- 审计发现证据不足，回退到规划阶段补跑工具
-- 工具失败但存在替代路径，回退到规划阶段切换执行能力链
+- 执行前发现缺输入，直接进入澄清结果
+- 预处理来源直答失败，直接返回失败，不进入完整工具循环
+- ReAct 工具循环失败、风险确认或完成后，分别进入失败、确认或最终综合
 
-不允许无限循环。
+审计阶段只负责标注证据缺口和解释边界；是否补证据应由同一轮 ReAct 工具窗口完成，不恢复旧式 replan 循环。
 
 ---
 
@@ -381,19 +381,21 @@ V1 不引入独立数据库记忆系统，而是实现轻量工作记忆。
 
 新增 `modules/agent`，作为技术执行型分析 Agent 的业务主域。
 
-建议拆分如下：
+当前拆分如下：
 
 - `modules/agent/schemas.py`
 - `modules/agent/runtime.py`
 - `modules/agent/gate.py`
 - `modules/agent/context_builder.py`
-- `modules/agent/plan_steps.py`
+- `modules/agent/direct_context.py`
+- `modules/agent/finalizer_evidence.py`
 - `modules/agent/tools.py`
+- `modules/agent/tool_definitions/`
+- `modules/agent/tool_adapters/`
 - `modules/agent/executor.py`
 - `modules/agent/auditor.py`
 - `modules/agent/synthesizer.py`
 - `modules/agent/providers/llm_provider.py`
-- `modules/agent/knowledge/`
 
 ### 9.2 各模块职责
 
@@ -405,14 +407,18 @@ V1 不引入独立数据库记忆系统，而是实现轻量工作记忆。
   - 判断是否能直接开工
 - `context_builder.py`
   - 从 analysis 快照生成 `facts/analysis/limits/research_notes`
-- `plan_steps.py`
-  - 存放 follow-up 或测试复用的标准计划步骤工厂，不承担主流程规划器职责
+- `direct_context.py`
+  - 处理前端已预处理来源的直接回答路径，跳过 gate 和工具循环
 - `tools.py`
-  - 定义工具注册表，把现有 GIS 能力、业务模块能力、数据处理能力统一包装为工具
+  - 汇总主 Agent 可见工具注册表
+- `tool_definitions/`
+  - 定义对 LLM 和外部 API 暴露的工具元数据
+- `tool_adapters/`
+  - 封装内部分析能力；未注册到 `tools.py` 的适配器只能由服务编排显式调用
 - `executor.py`
   - 串行执行工具和结果标准化
 - `auditor.py`
-  - 检查证据链和解释边界，并决定是否补跑
+  - 检查证据链和解释边界，不承担 replan 职责
 - `synthesizer.py`
   - 负责引用和 synthesis payload 整理，最终卡片由 LLM 主生成
 - `providers/`
