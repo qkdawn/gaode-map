@@ -490,8 +490,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     )
     current_plan_envelope = AgentPlanEnvelope(
         steps=list(loop_result.steps or []),
-        followup_steps=[],
-        followup_applied=False,
         summary=planning_summary,
     )
     await _maybe_emit(emit, "plan", current_plan_envelope.model_dump(mode="json"))

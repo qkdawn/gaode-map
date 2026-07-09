@@ -7,6 +7,7 @@ from modules.agent.schemas import (
     AgentContextAskResponse,
     AgentSessionDetail,
     AgentSessionSnapshotRequest,
+    AgentPlanEnvelope,
     AgentTranslationPack,
     AgentTurnOutput,
     AgentTurnRequest,
@@ -85,6 +86,12 @@ def test_agent_stage_contract_normalizes_legacy_stages():
     assert response.stage == "executing"
     assert snapshot.stage == "gating"
     assert detail.stage == "synthesizing"
+
+
+def test_agent_plan_contract_ignores_legacy_followup_fields():
+    plan = AgentPlanEnvelope(followup_steps=[{"tool_name": "read_current_scope"}], followup_applied=True, summary="已规划")
+
+    assert plan.model_dump(mode="json") == {"steps": [], "summary": "已规划"}
 
 
 def _snapshot_with_scope(**kwargs) -> AnalysisSnapshot:

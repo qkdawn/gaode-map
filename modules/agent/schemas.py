@@ -695,21 +695,7 @@ class AgentPlanEnvelope(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     steps: List[PlanStep] = Field(default_factory=list)
-    followup_steps: List[PlanStep] = Field(default_factory=list)
-    followup_applied: bool = False
     summary: str = ""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_aliases(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        value = dict(value)
-        if "followup_steps" not in value and "followupSteps" in value:
-            value["followup_steps"] = value.get("followupSteps")
-        if "followup_applied" not in value and "followupApplied" in value:
-            value["followup_applied"] = value.get("followupApplied")
-        return value
 
 
 class AgentMessageProcess(BaseModel):
