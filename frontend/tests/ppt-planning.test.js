@@ -19,6 +19,7 @@ import {
 } from '../src/features/ppt-planning/carrier-preview.js'
 import { createAgentPptPlanningTabMethods } from '../src/features/agent/ppt-planning-tabs.js'
 import { createAgentRuntimeMethods } from '../src/features/agent/runtime.js'
+import { buildAnalysisQuickAskTarget } from '../src/features/agent/analysis-quick-request.js'
 import { regenerateDeckBriefSlide } from '../src/features/ppt-planning/api.js'
 import {
   MAP_LAYER_RENDERERS,
@@ -2185,7 +2186,7 @@ test('analysis source target uses only selected ready deliverable sources', () =
     },
   }
 
-  const target = ctx.buildAgentAnalysisSourceTarget()
+  const target = buildAnalysisQuickAskTarget(ctx)
 
   assert.equal(target.type, 'analysis_sources')
   assert.equal(target.source, 'analysis')
