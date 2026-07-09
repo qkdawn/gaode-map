@@ -895,7 +895,7 @@ def _list_image_attachment_ppt_sources(conversation_id: str) -> List[PptDataSour
 
 def _lightweight_source_manifest_item(source: PptDataSourceSummary) -> PptDataSourceSummary:
     meta = _safe_dict(source.meta)
-    source_kind = _clean_text(source.source_kind or meta.get("sourceKind"))
+    source_kind = _clean_text(source.source_kind) or "unknown"
     lightweight_meta: Dict[str, Any] = {
         "label": _clean_text(meta.get("label") or source.summary),
         "sourceKind": source_kind,
@@ -923,7 +923,7 @@ def list_ppt_source_manifest(area_id: str, conversation_id: str = "") -> List[Pp
     return [
         _lightweight_source_manifest_item(source)
         for source in list_ppt_sources(area_id, conversation_id=conversation_id)
-        if _clean_text(source.source_kind or _safe_dict(source.meta).get("sourceKind")) != "system"
+        if _clean_text(source.source_kind) != "system"
     ]
 
 

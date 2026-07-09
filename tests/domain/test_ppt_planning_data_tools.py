@@ -11,12 +11,13 @@ from modules.ppt_planning.data_tools import (
     PptDataSourceNotFound,
     create_ppt_data_package,
     delete_ppt_persisted_source,
+    list_ppt_source_manifest,
     list_ppt_sources,
     query_nearby_poi_points,
     query_poi_points,
 )
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
-from modules.ppt_planning.schemas import PptDataPackageRequest, PptPoiNearbyRequest, PptPoiQueryRequest
+from modules.ppt_planning.schemas import PptDataPackageRequest, PptDataSourceSummary, PptPoiNearbyRequest, PptPoiQueryRequest
 from store.ai_models import AiBase, Document, DocumentIndexNode
 
 
@@ -34,6 +35,41 @@ def _fake_detail():
         "params": {"center": [112.9, 28.2], "time_min": 35},
         "polygon": [[112.9, 28.2], [112.91, 28.2], [112.91, 28.21]],
     }
+
+
+def test_ppt_source_manifest_filters_only_canonical_source_kind(monkeypatch):
+    def fake_sources(_area_id, conversation_id=""):
+        return [
+            PptDataSourceSummary.model_construct(
+                id="external:legacy-package",
+                type="data",
+                title="POI 资料包",
+                status="ready",
+                source_kind="",
+                count=0,
+                summary="",
+                evidence_count=0,
+                locator_summary="",
+                availability="",
+                meta={"label": "POI 资料包", "sourceKind": "system"},
+            ),
+            PptDataSourceSummary(
+                id="current:scope",
+                type="data",
+                title="当前范围",
+                status="ready",
+                source_kind="system",
+                meta={"label": "当前范围", "sourceKind": "package"},
+            ),
+        ]
+
+    monkeypatch.setattr("modules.ppt_planning.data_tools.list_ppt_sources", fake_sources)
+
+    manifest = list_ppt_source_manifest("history-1")
+
+    assert [source.id for source in manifest] == ["external:legacy-package"]
+    assert manifest[0].source_kind == "unknown"
+    assert manifest[0].meta["sourceKind"] == "unknown"
 
 
 def _fake_pois():
