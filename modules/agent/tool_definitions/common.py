@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, List
 
 from ..schemas import ToolResult, ToolSpec
-from ..tool_adapters.scenario_tools import run_placeholder_scene_pack
 
 ToolRunner = Callable[..., Awaitable[ToolResult]]
 
@@ -13,19 +12,6 @@ ToolRunner = Callable[..., Awaitable[ToolResult]]
 class RegisteredTool:
     spec: ToolSpec
     runner: ToolRunner
-
-
-def _named_placeholder(tool_name: str) -> ToolRunner:
-    async def runner(*, arguments, snapshot, artifacts, question):
-        result = await run_placeholder_scene_pack(
-            arguments=arguments,
-            snapshot=snapshot,
-            artifacts=artifacts,
-            question=question,
-        )
-        return result.model_copy(update={"tool_name": tool_name})
-
-    return runner
 
 
 def _register(spec: ToolSpec, runner: ToolRunner) -> RegisteredTool:

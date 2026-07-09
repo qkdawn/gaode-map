@@ -258,19 +258,3 @@ async def run_site_selection_pack(
             "current_site_candidate_scores": scoring,
         },
     )
-
-
-async def run_placeholder_scene_pack(
-    *,
-    arguments: Dict[str, Any],
-    snapshot: AnalysisSnapshot,
-    artifacts: Dict[str, Any],
-    question: str,
-) -> ToolResult:
-    del arguments, snapshot, artifacts, question
-    return ToolResult(
-        tool_name="placeholder_scene_pack",
-        status="failed",
-        warnings=["该场景工具包已预留分类，但当前版本尚未实现。"],
-        error="scene_pack_not_implemented",
-    )
