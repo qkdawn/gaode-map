@@ -587,10 +587,6 @@ export function createAgentThreadUiMethods() {
           title: '\u8ffd\u95ee\u751f\u6210',
           description: '\u6574\u7406\u9700\u8981\u7528\u6237\u8865\u5145\u7684\u5173\u952e\u4fe1\u606f\u3002',
         },
-        context_ready: {
-          title: '\u4e0a\u4e0b\u6587\u6574\u7406',
-          description: '\u6c47\u603b\u5f53\u524d\u8303\u56f4\u3001\u9762\u677f\u72b6\u6001\u548c\u53ef\u590d\u7528\u5206\u6790\u7ed3\u679c\u3002',
-        },
         planning: {
           title: '\u5de5\u5177\u5224\u65ad',
           description: '\u5224\u65ad\u8fd9\u4e00\u8f6e\u6700\u8be5\u5148\u8c03\u4ec0\u4e48\u5de5\u5177\uff0c\u4ee5\u53ca\u8fd8\u9700\u8981\u8865\u54ea\u4e9b\u8bc1\u636e\u3002',
@@ -603,7 +599,7 @@ export function createAgentThreadUiMethods() {
           title: '\u5de5\u5177\u6267\u884c',
           description: '\u6267\u884c\u5206\u6790\u5de5\u5177\u5e76\u6536\u96c6\u8bc1\u636e\u3002\u8fc7\u7a0b\u4fe1\u606f\u4f1a\u663e\u793a\u5728\u4e0b\u65b9\u6b65\u9aa4\u4e2d\u3002',
         },
-        auditing: {
+        assess: {
           title: '\u6821\u9a8c',
           description: '\u6574\u7406\u6267\u884c\u7ed3\u679c\uff0c\u505a\u8d28\u91cf\u548c\u98ce\u9669\u590d\u6838\u3002',
         },
@@ -632,11 +628,10 @@ export function createAgentThreadUiMethods() {
         'connecting',
         'gating',
         'clarifying',
-        'context_ready',
         'planning',
         'tool_confirmation',
         'executing',
-        'auditing',
+        'assess',
         'synthesizing',
         'answering',
         'answered',

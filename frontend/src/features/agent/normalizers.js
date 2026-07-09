@@ -281,11 +281,9 @@ function normalizeAgentStatusThinkingItem(seed = {}) {
   const mapping = {
     gating: ['门卫判断', '正在判断你的问题是否清晰、当前范围是否能直接开始分析。'],
     clarifying: ['生成追问', '还缺少关键信息，正在整理最关键的补充问题。'],
-    context_ready: ['整理上下文', '正在汇总当前分析快照与可复用结果。'],
     planning: ['工具判断', '正在判断这轮最该先调什么工具，以及还缺哪些证据。'],
     executing: ['执行工具', '正在执行工具调用并收集证据。'],
-    auditing: ['证据检查', '正在检查这些证据够不够真正回答你的问题。'],
-    replanning: ['工具判断', '正在根据新证据决定要不要继续调用工具。'],
+    assess: ['证据检查', '正在检查这些证据够不够真正回答你的问题。'],
     synthesizing: ['综合分析', '正在把现有证据整理成自然回答。'],
     answered: ['回答生成完成', '已生成最终回答。'],
     requires_clarification: ['需要补充信息', '还差关键信息，补充后才能继续分析。'],
