@@ -305,3 +305,24 @@ def test_auditor_flags_boundary_risk_for_revenue_inference():
     )
 
     assert any("经营收益" in issue or "消费能力" in issue for issue in result.issues)
+
+
+def test_auditor_next_step_question_uses_available_evidence_not_legacy_options():
+    snapshot = _snapshot_with_scope(poi_summary={"total": 8})
+    memory = WorkingMemory(
+        artifacts={
+            "scope_polygon": snapshot.scope["polygon"],
+            "current_pois": [{"id": "poi-1"}],
+            "current_poi_summary": {"total": 8},
+        }
+    )
+
+    result = audit_execution(
+        question="下一步还能做什么分析",
+        snapshot=snapshot,
+        context=build_context_bundle(snapshot),
+        memory=memory,
+    )
+
+    assert result.passed is True
+    assert "可用于判断下一步的分析证据" not in result.missing_evidence

@@ -91,11 +91,6 @@ def _answer_depth_guidance(question: str) -> Dict[str, Any]:
 
 
 def _evidence_headline(item: AgentEvidenceItem) -> str:
-    if item.metric == "next_analysis_options" and isinstance(item.value, dict):
-        options = [option for option in (item.value.get("options") or []) if isinstance(option, dict)]
-        if options:
-            return f"next_analysis_option={options[0].get('title') or '-'}"
-        return "next_analysis_options_available"
     if item.metric == "business_profile" and isinstance(item.value, dict):
         return f"poi_mix_signal={item.value.get('poi_mix_signal') or item.value.get('business_profile') or '-'}"
     if item.metric == "commercial_hotspots" and isinstance(item.value, dict):
@@ -162,7 +157,7 @@ def _detect_conflicts(metrics: Dict[str, object], audit: AuditResult) -> List[st
 
 def _select_key_evidence(evidence: List[AgentEvidenceItem], *, question: str) -> List[Dict[str, Any]]:
     if any(token in question for token in ("下一步", "继续", "还可以", "做什么分析", "还能分析")):
-        preferred_order = ["next_analysis_options", "poi_count", "h3_density", "population_profile", "nightlight_activity", "road_structure"]
+        preferred_order = ["poi_count", "h3_density", "population_profile", "nightlight_activity", "road_structure"]
     elif mentions_supply(question):
         preferred_order = ["target_supply_gap", "business_site_advice", "commercial_hotspots", "h3_density", "road_structure"]
     elif mentions_nightlight(question):
@@ -516,7 +511,7 @@ def build_citations(snapshot: AnalysisSnapshot, artifacts: Dict[str, object]) ->
         citations.append("analysis_snapshot.nightlight.summary")
     if artifacts.get("current_pois") or snapshot.pois or snapshot.poi_summary:
         citations.append("analysis_snapshot.pois")
-    for key in ("business_site_advice", "current_business_profile", "current_commercial_hotspots", "current_target_supply_gap", "current_next_analysis_options"):
+    for key in ("business_site_advice", "current_business_profile", "current_commercial_hotspots", "current_target_supply_gap"):
         if artifacts.get(key):
             citations.append(key)
     return citations

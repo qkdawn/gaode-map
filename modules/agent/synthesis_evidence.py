@@ -61,21 +61,6 @@ def build_analysis_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, obj
                 limitation="缺口指标不能直接推出开店可行性，仍需验证店面条件、竞品质量、租金与动线。",
             )
         )
-    if metrics["next_analysis_options"]:
-        evidence.append(
-            AgentEvidenceItem(
-                metric="next_analysis_options",
-                value={
-                    "options": metrics["next_analysis_options"],
-                    "ready_dimensions": metrics["next_analysis_ready_dimensions"],
-                    "missing_dimensions": metrics["next_analysis_missing_dimensions"],
-                },
-                interpretation="raw_signal: ready_dimensions, missing_dimensions and option metadata are available.",
-                source="current_next_analysis_options",
-                confidence="moderate",
-                limitation="这是分析路线建议，不是具体选址、招商或经营结论。",
-            )
-        )
     if metrics["business_place_type"]:
         evidence.append(
             AgentEvidenceItem(

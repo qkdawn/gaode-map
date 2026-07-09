@@ -135,7 +135,6 @@ def audit_execution(
     commercial_hotspots = _current_analysis(artifacts, "current_commercial_hotspots")
     target_supply_gap = _current_analysis(artifacts, "current_target_supply_gap")
     business_site_advice = _current_analysis(artifacts, "business_site_advice")
-    next_analysis_options = _current_analysis(artifacts, "current_next_analysis_options")
     issues: List[str] = []
     missing_evidence: List[str] = []
     required_evidence: List[str] = []
@@ -187,9 +186,8 @@ def audit_execution(
         if not _has_target_candidate_evidence(target_supply_gap):
             _append_unique(missing_evidence, "候选格子列表")
     if needs_next_analysis:
-        _append_unique(required_evidence, "下一步分析方向")
-        if not next_analysis_options.get("recommended_options"):
-            _append_unique(missing_evidence, "下一步分析方向")
+        if not any([has_poi_view, has_h3_view, has_population_view, has_nightlight_view, has_road_view]):
+            _append_unique(missing_evidence, "可用于判断下一步的分析证据")
 
     if mentions_population(question) and not has_population_view:
         issues.append("人口相关结论缺少 total_population 证据。")
@@ -204,8 +202,8 @@ def audit_execution(
         issues.append("当前缺少供给或空间密度证据，暂不能形成具体补位/选址判断。")
     if mentions_summary(question) and missing_evidence:
         issues.append(f"区域总结仍有证据缺口：{'、'.join(missing_evidence)}。")
-    if needs_next_analysis and "下一步分析方向" in missing_evidence:
-        issues.append("当前缺少基于证据就绪状态排序的下一步分析方向。")
+    if needs_next_analysis and "可用于判断下一步的分析证据" in missing_evidence:
+        issues.append("当前缺少可用于排序下一步动作的范围分析证据。")
     if any(token in question for token in ("客流", "消费", "收益", "营业额")):
         issues.append("当前 Agent 不应直接从 GIS 指标推断客流、消费能力或经营收益。")
     for limit in context.limits:
