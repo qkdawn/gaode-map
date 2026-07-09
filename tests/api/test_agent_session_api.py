@@ -168,6 +168,23 @@ def test_agent_summary_api_rejects_extra_request_fields(monkeypatch):
         assert generate_resp.status_code == 422
 
 
+def test_agent_site_selection_api_rejects_extra_request_fields(monkeypatch):
+    _install_test_session(monkeypatch)
+    with TestClient(_build_test_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/agent/site-selection",
+            json={
+                "conversation_id": "agent-1",
+                "history_id": "history-1",
+                "analysis_snapshot": {},
+                "place_type": "咖啡店",
+                "debug": True,
+            },
+        )
+
+        assert response.status_code == 422
+
+
 def test_legacy_react_routes_are_removed(monkeypatch):
     _install_test_session(monkeypatch)
     with TestClient(_build_test_app()) as client:
