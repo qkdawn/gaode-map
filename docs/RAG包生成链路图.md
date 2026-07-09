@@ -2,6 +2,8 @@
 
 这张图把经典 RAG 流程和当前 `/analysis` 的真实实现对齐。读图顺序按标准 RAG 阶段走：**Ingest -> Parse/Chunk -> Index -> Retrieve/Recall -> Rerank -> Read/Hydrate -> Context Pack -> LLM**。每一层同时标明当前项目基于什么输入、做什么处理、生成哪个包。
 
+当前口径：PPT 侧生成 `ppt_llm_context_bundle_v1`，包含 `source_manifest`、`metric_context`、`evidence_context` / `evidence_node_context` 和 `omitted_payloads`。主 Agent 深度链路不消费 PPT bundle，而是用自己的 `ContextBundle`、工具注册表、EvidenceNode 读取结果和 finalizer evidence pack。快速问答走独立 `context-ask`，不进入 ReAct 工具循环。
+
 <style scoped>
 .rag-arch{font-family:Inter,"Microsoft YaHei",Arial,sans-serif;background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:16px;color:#0f172a;max-width:1320px}
 .rag-title{font-size:22px;font-weight:800;text-align:center;margin-bottom:4px;color:#0f172a}
@@ -79,7 +81,7 @@
 <div class="rag-layer index">
 <div class="rag-layer-title">4. Index & Source Registry 索引与来源登记</div>
 <div class="rag-grid rag-grid-4">
-<div class="rag-box package"><strong>PptSource</strong><small>基于：标准化来源和节点预览</small><small>生成：id、title、status、source_kind、summary、evidence_count、meta.aiPayload</small></div>
+<div class="rag-box package"><strong>PptSource</strong><small>基于：标准化来源和节点预览</small><small>生成：id、title、status、source_kind、summary、evidence_count、meta.ai_payload / meta.aiPayload</small></div>
 <div class="rag-box package"><strong>source_index_manifest</strong><small>基于：native index 状态</small><small>生成：pageindex / webpage_index / image_visual_index / database_record_index / spatial_package_index</small></div>
 <div class="rag-box package"><strong>selected_sources_context</strong><small>基于：用户本轮已选来源</small><small>生成：Agent 本轮 source guard，只允许检索已选来源</small></div>
 <div class="rag-box package"><strong>native indexes</strong><small>基于：各来源自己的结构</small><small>生成：PageIndex、payload index、scope dataset index、package index</small></div>
@@ -128,7 +130,7 @@
 <div class="rag-box package"><strong>Evidence Pack</strong><small>基于：hydrated EvidenceNode</small><small>生成：evidence_context / selected_source_evidence_nodes / finalizer evidence pack</small></div>
 <div class="rag-box package"><strong>Metric Context</strong><small>基于：ready metrics + metric_gaps</small><small>生成：metric_context，PPT 数字图和 AI 指标解释依据</small></div>
 <div class="rag-box package"><strong>Visual / Data Package</strong><small>基于：visual_assets + ppt_data_package + visual_specs</small><small>生成：visual_artifacts、POI 样例、夜生活包、空间载体包</small></div>
-<div class="rag-box package"><strong>PPT / Agent Bundle</strong><small>基于：前四类包</small><small>生成：PPT Context Bundle 或 Agent Context Bundle</small></div>
+<div class="rag-box package"><strong>PPT Context Bundle</strong><small>基于：前四类包</small><small>生成：ppt_llm_context_bundle_v1，供目录、叙事方案、逐页 brief 和视觉资产链路使用</small></div>
 </div>
 </div>
 <div class="rag-arrow">↓ LLM Consumers：同一批 RAG 包进入不同 AI 链路</div>
@@ -136,7 +138,7 @@
 <div class="rag-layer-title">9. LLM Consumers 大模型消费链路</div>
 <div class="rag-grid rag-grid-2">
 <div class="rag-box warn"><strong>PPT 生成链</strong><small>基于：PPT Context Bundle</small><small>动作：generate_ppt_spec -> generate_narrative_plan -> generate_deck_brief -> regenerate_deck_brief_slide -> visual artifacts</small><small>产物：目录、叙事方案、PPT 指令文件、逐页 brief、页面视觉资产</small></div>
-<div class="rag-box warn"><strong>AI 分析链</strong><small>基于：Agent Context Bundle + 工具注册表</small><small>动作：快速模式 source_qa_loop；深度模式 ReAct 工具循环 + Auditor + Finalizer</small><small>产物：自然语言分析、证据引用、warnings、下一步动作</small></div>
+<div class="rag-box warn"><strong>AI 分析链</strong><small>基于：快速 context-ask 包，或主 Agent ContextBundle + 工具注册表</small><small>动作：快速模式 direct context ask；深度模式 ReAct 工具循环 + Auditor + Finalizer</small><small>产物：自然语言分析、证据引用、warnings、下一步动作</small></div>
 </div>
 </div>
 <div class="rag-note">读图口径：经典 RAG 的 Retrieve/Rerank/Read 阶段在当前系统里既包括 EvidenceIndexService，也包括 selected source tools、scope dataset tools 和 runtime context retrieval。PPT 额外需要 Metric Context 与 Visual/Data Package，这是普通文本 RAG 图里通常没有的展示生成层。</div>
@@ -152,8 +154,8 @@
 | Retrieve / Recall | `EvidenceIndexService.search`、adapter recall、`rank_chunks`、`search_selected_source_evidence`、`query_scope_dataset` | EvidenceIndexRecord、SearchHit、scope records | 已实现轻量召回；向量召回不是主链 |
 | Rerank / Filter / Guard | score sort、top_k、source guard、allowed_source_ids、year warnings、selected-source boundary | 排序后的候选 EvidenceNode / records | 当前是轻量 rerank；hybrid rerank、trust/freshness rerank 待增强 |
 | Read / Hydrate Evidence | `read_selected_source_evidence_node`、`read_analysis_evidence_node`、`read_report_evidence_node`、`read_scope_record`、PageIndex read | hydrated EvidenceNode、locator、citation、metadata | 已实现；不同来源 read 能力深度不同 |
-| Context Pack | `_build_ppt_context_bundle()`、`build_context_bundle()`、finalizer evidence pack | Source Manifest、Evidence Pack、Metric Context、Visual/Data Package、PPT/Agent Bundle | 已实现；PPT 与 Agent 使用不同 bundle |
-| LLM Consumers | PPT 生成链、快速来源问答、深度 ReAct + Auditor + Finalizer | PPT 指令文件、逐页 brief、自然语言分析、引用和 warnings | 已实现主链；最终 PPTX/完整视觉渲染是后续阶段 |
+| Context Pack | `_build_ppt_context_bundle()`、`build_context_bundle()`、finalizer evidence pack | PPT bundle、Agent ContextBundle、Source Manifest、Evidence Pack、Metric Context、Visual/Data Package | 已实现；PPT 与 Agent 使用不同 bundle，不共用一个大包 |
+| LLM Consumers | PPT 生成链、快速 context-ask、深度 ReAct + Auditor + Finalizer | PPT 指令文件、逐页 brief、视觉资产请求/结果、自然语言分析、引用和 warnings | 已实现主链；PPTX 导出和更完整视觉渲染仍可继续增强 |
 
 ## 和标准 RAG 的差异
 
@@ -161,4 +163,4 @@
 - 文档保留 PageIndex，不退化成普通 chunk；空间资料包和当前项目成果包也不强行塞进同一个文本向量表。
 - Rerank 当前偏轻量，主要是关键词/结构召回、score 排序、top_k、来源边界过滤和年份提示；完整 hybrid rerank 后续再增强。
 - PPT 不是普通文本问答消费端，它额外需要 `Metric Context` 和 `Visual/Data Package`，用于指标卡、图表、地图截图、空间载体和逐页视觉指令。
-- AI 分析和 PPT 使用同一套来源与证据，但组合包不同：PPT 使用 `PPT Context Bundle`，主 Agent 使用 `Agent Context Bundle` 和工具调用循环。
+- AI 分析和 PPT 使用同一套来源与证据投影，但组合包不同：PPT 使用 `ppt_llm_context_bundle_v1`；主 Agent 深度链路使用 `ContextBundle`、工具调用循环和 finalizer evidence pack；快速问答使用 `context-ask` 的轻量上下文包。
