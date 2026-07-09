@@ -104,6 +104,11 @@ def test_agent_turn_response_rejects_extra_top_level_fields():
         AgentTurnResponse(status="answered", answer="旧顶层回答")
 
 
+def test_agent_context_ask_response_rejects_extra_fields():
+    with pytest.raises(ValueError):
+        AgentContextAskResponse(status="success", answer="已回答", debug=True)
+
+
 def test_agent_plan_contract_exports_current_fields_only():
     plan = AgentPlanEnvelope(steps=[{"tool_name": "read_current_scope"}], summary="已规划")
 

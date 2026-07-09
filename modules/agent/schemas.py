@@ -205,7 +205,7 @@ class AgentContextAskRequest(BaseModel):
 
 
 class AgentContextAskResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     status: Literal["success", "failed"] = "success"
     answer: str = ""
