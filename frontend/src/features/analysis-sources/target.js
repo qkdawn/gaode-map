@@ -28,26 +28,33 @@ function analysisAiPayloadFromSource(source = {}) {
   const included = cloneArray(payload.included).map((item) => asText(item)).filter(Boolean)
   if (!included.length) return null
   const evidenceNodes = evidenceNodesFromAiPayload(payload).slice(0, 8)
+  const metrics = cloneArray(payload.metrics).slice(0, 12)
+  const metricGaps = cloneArray(payload.metric_gaps).slice(0, 8)
+  const visualSpecs = cloneArray(payload.visual_specs).slice(0, 8)
+  const scope = compactAnalysisSourceValue(payload.scope, 2)
   return {
-    source_id: asText(payload.source_id || payload.sourceId || source.id),
+    source_id: asText(payload.source_id || source.id),
     title: asText(payload.title || source.title),
-    source_kind: asText(payload.source_kind || payload.sourceKind || meta.sourceKind),
+    source_kind: asText(payload.source_kind || meta.sourceKind),
     included,
-    scope: compactAnalysisSourceValue(payload.scope, 2),
-    metrics: compactAnalysisSourceValue(cloneArray(payload.metrics).slice(0, 12), 2),
-    metric_gaps: compactAnalysisSourceValue(cloneArray(payload.metric_gaps || payload.metricGaps).slice(0, 8), 2),
+    scope,
+    metrics: compactAnalysisSourceValue(metrics, 2),
+    metric_gaps: compactAnalysisSourceValue(metricGaps, 2),
     evidence_nodes: compactAnalysisSourceValue(evidenceNodes, 2),
-    visual_specs: compactAnalysisSourceValue(cloneArray(payload.visual_specs || payload.visualSpecs).slice(0, 8), 2),
+    visual_specs: compactAnalysisSourceValue(visualSpecs, 2),
     counts: {
-      ...cloneObject(payload.counts),
+      scope: scope && typeof scope === 'object' && Object.keys(scope).length ? 1 : 0,
+      metrics: metrics.length,
+      metric_gaps: metricGaps.length,
       evidence: evidenceNodes.length,
+      visual_specs: visualSpecs.length,
     },
     policy: asText(payload.policy),
   }
 }
 
 function buildAnalysisSourceEvidence(source = {}, payload = {}) {
-  const evidenceNodes = cloneArray(payload.evidence_nodes || payload.evidenceNodes)
+  const evidenceNodes = cloneArray(payload.evidence_nodes)
     .map((item) => (item && typeof item === 'object' ? cloneObject(item) : null))
     .filter((item) => item && asText(item.title || item.content || item.summary))
   const metricCount = cloneArray(payload.metrics).length || Number((payload.counts || {}).metrics || 0) || 0

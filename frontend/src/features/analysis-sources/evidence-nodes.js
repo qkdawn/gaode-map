@@ -17,17 +17,17 @@ function canonicalAnalysisSourceKind(rawKind = '', sourceId = '', fallback = '')
 
 export function evidenceNodesFromAiPayload(aiPayload = {}) {
   const payload = cloneObject(aiPayload)
-  const sourceId = asText(payload.source_id || payload.sourceId)
-  const sourceKind = canonicalAnalysisSourceKind(payload.source_kind || payload.sourceKind, sourceId, 'unknown')
-  return cloneArray(payload.evidence_nodes || payload.evidenceNodes)
+  const sourceId = asText(payload.source_id)
+  const sourceKind = canonicalAnalysisSourceKind(payload.source_kind, sourceId, 'unknown')
+  return cloneArray(payload.evidence_nodes)
     .map((item, index) => {
       const node = cloneObject(item)
-      const nodeSourceId = asText(node.source_id || node.sourceId || sourceId)
-      const nodeSourceType = canonicalAnalysisSourceKind(node.source_type || node.sourceType || sourceKind, nodeSourceId, sourceKind)
+      const nodeSourceId = asText(node.source_id || sourceId)
+      const nodeSourceType = canonicalAnalysisSourceKind(node.source_type || sourceKind, nodeSourceId, sourceKind)
       const content = asText(node.content || node.text || node.summary)
       const title = asText(node.title) || asText(payload.title) || '证据'
       if (!nodeSourceId || (!content && !title)) return null
-      const nodeId = asText(node.id || node.node_id || node.nodeId) || `${nodeSourceId}:evidence:${index + 1}`
+      const nodeId = asText(node.id || node.node_id) || `${nodeSourceId}:evidence:${index + 1}`
       return {
         id: nodeId,
         source_id: nodeSourceId,
@@ -38,7 +38,7 @@ export function evidenceNodesFromAiPayload(aiPayload = {}) {
         metadata: cloneObject(node.metadata || node.payload),
         locator: asText(node.locator),
         score: Number(node.score || 0) || 0,
-        evidence_level: asText(node.evidence_level || node.evidenceLevel || 'source_evidence'),
+        evidence_level: asText(node.evidence_level || 'source_evidence'),
         warnings: cloneArray(node.warnings).map((warning) => asText(warning)).filter(Boolean),
         citation: asText(node.citation),
       }
@@ -48,15 +48,15 @@ export function evidenceNodesFromAiPayload(aiPayload = {}) {
 
 export function evidenceNodesFromEvidenceItems(aiPayload = {}, items = []) {
   const payload = cloneObject(aiPayload)
-  const sourceId = asText(payload.source_id || payload.sourceId)
-  const sourceKind = canonicalAnalysisSourceKind(payload.source_kind || payload.sourceKind, sourceId, 'unknown')
+  const sourceId = asText(payload.source_id)
+  const sourceKind = canonicalAnalysisSourceKind(payload.source_kind, sourceId, 'unknown')
   return cloneArray(items)
     .map((item, index) => {
       const evidence = item && typeof item === 'object' ? cloneObject(item) : { text: asText(item) }
       const metadata = cloneObject(evidence.payload)
       const nodeId = asText(metadata.evidence_node_id || metadata.node_id || evidence.evidence_node_id)
         || `${sourceId}:evidence:${index + 1}`
-      const nodeSourceId = asText(metadata.source_id || evidence.source_id || evidence.sourceId || sourceId)
+      const nodeSourceId = asText(metadata.source_id || evidence.source_id || sourceId)
       const nodeSourceType = canonicalAnalysisSourceKind(metadata.source_type || evidence.source_type || sourceKind, nodeSourceId, sourceKind)
       const content = asText(evidence.text || evidence.content || evidence.summary)
       const title = asText(evidence.title) || asText(payload.title) || '证据'

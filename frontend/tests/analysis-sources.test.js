@@ -90,3 +90,43 @@ test('analysis source target keeps only selected ready deliverable sources', () 
   assert.equal(Object.prototype.hasOwnProperty.call(target.evidence[0], 'sourceTitle'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target, 'artifactRefs'), false)
 })
+
+test('analysis source target ignores legacy ai payload aliases', () => {
+  const target = buildAnalysisSourceTarget({
+    sources: [{
+      id: 'document:legacy-aliases',
+      type: 'document',
+      title: '旧字段文档',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'document',
+        aiPayload: {
+          source_id: 'document:legacy-aliases',
+          sourceId: 'document:wrong-id',
+          title: '旧字段文档',
+          source_kind: 'document',
+          sourceKind: 'web',
+          included: ['evidence', 'metric_gaps', 'visual_specs'],
+          evidenceNodes: [{
+            id: 'legacy-node',
+            sourceId: 'document:legacy-aliases',
+            sourceType: 'document',
+            title: '旧节点',
+            content: '旧 camel EvidenceNode 不应进入 target。',
+          }],
+          metricGaps: [{ text: '旧指标缺口' }],
+          visualSpecs: [{ visual_id: 'legacy-visual' }],
+          counts: { evidence: 1, metric_gaps: 1, visual_specs: 1 },
+        },
+      },
+    }],
+  })
+
+  assert.deepEqual(target.artifact_refs, ['document:legacy-aliases'])
+  assert.equal(target.payload.sources[0].source_kind, 'document')
+  assert.deepEqual(target.payload.sources[0].evidence_nodes, [])
+  assert.deepEqual(target.payload.sources[0].metric_gaps, [])
+  assert.deepEqual(target.payload.sources[0].visual_specs, [])
+  assert.equal(target.evidence[0].text, '该来源包含可用于 AI 的分析输入块。')
+})
