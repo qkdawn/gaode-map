@@ -112,6 +112,20 @@ def test_context_ask_invalid_target_type_returns_validation_error():
     assert response.status_code == 422
 
 
+def test_context_ask_rejects_extra_request_and_target_fields():
+    payload = _payload()
+    payload["debug"] = True
+    target_payload = _payload()
+    target_payload["target"]["artifactRefs"] = ["legacy-camel-alias"]
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
+        target_response = client.post("/api/v1/analysis/agent/context-ask", json=target_payload)
+
+    assert response.status_code == 422
+    assert target_response.status_code == 422
+
+
 def test_context_ask_ai_provider_exception_falls_back(monkeypatch):
     import modules.agent.context_ask_service as service
 

@@ -181,7 +181,7 @@ class AgentSiteSelectionResponse(BaseModel):
 
 
 class ContextAskTarget(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate", "analysis_sources"] = "report_section"
     id: str = ""
@@ -194,7 +194,7 @@ class ContextAskTarget(BaseModel):
 
 
 class AgentContextAskRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     conversation_id: str = ""
     history_id: str = ""
