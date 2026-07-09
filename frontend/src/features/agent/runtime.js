@@ -2568,7 +2568,7 @@ function createAgentRuntimeMethods() {
         image.src = raw
       })
     },
-    async captureAgentLegacyVisualSnapshots(targets = null) {
+    async captureAgentMainMapVisualSnapshots(targets = null) {
       if (typeof this._captureMapSnapshotBase64 !== 'function') {
         return [{
           snapshot_id: `visual-${Date.now().toString(36)}-missing-capture`,
@@ -2657,7 +2657,7 @@ function createAgentRuntimeMethods() {
           warnings: ['offscreen_snapshot_unavailable_main_map_fallback_disabled'],
         }]
       }
-      const snapshots = await this.captureAgentLegacyVisualSnapshots(targets)
+      const snapshots = await this.captureAgentMainMapVisualSnapshots(targets)
       return cloneArray(snapshots).map((snapshot) => ({
         ...snapshot,
         warnings: [
