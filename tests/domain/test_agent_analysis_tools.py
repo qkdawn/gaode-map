@@ -1,15 +1,17 @@
 import asyncio
 
+from modules.agent.analysis_extractors import (
+    build_h3_structure_analysis,
+    build_nightlight_pattern_analysis,
+    build_poi_structure_analysis,
+    build_population_profile_analysis,
+    build_road_pattern_analysis,
+    detect_commercial_hotspots,
+)
 from modules.agent.schemas import AnalysisSnapshot
 from modules.agent.tool_adapters.analysis_tools import (
     analyze_poi_mix_from_scope,
     analyze_target_supply_gap_from_scope,
-    detect_commercial_hotspots_from_scope,
-    read_h3_structure_analysis,
-    read_nightlight_pattern_analysis,
-    read_poi_structure_analysis,
-    read_population_profile_analysis,
-    read_road_pattern_analysis,
 )
 
 
@@ -92,43 +94,38 @@ def _snapshot() -> AnalysisSnapshot:
 def test_read_tools_extract_structured_analysis_from_snapshot():
     snapshot = _snapshot()
 
-    poi = asyncio.run(read_poi_structure_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
-    h3 = asyncio.run(read_h3_structure_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
-    road = asyncio.run(read_road_pattern_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
-    population = asyncio.run(read_population_profile_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
-    nightlight = asyncio.run(read_nightlight_pattern_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
+    poi = build_poi_structure_analysis(snapshot, {})
+    h3 = build_h3_structure_analysis(snapshot, {})
+    road = build_road_pattern_analysis(snapshot, {})
+    population = build_population_profile_analysis(snapshot, {})
+    nightlight = build_nightlight_pattern_analysis(snapshot, {})
 
-    assert poi.result["dominant_categories"][0] == "餐饮"
-    assert poi.result["evidence_ready"] is True
-    assert h3.result["distribution_pattern"] in {"single_core", "multi_core", "corridor"}
-    assert h3.result["evidence_ready"] is True
-    assert road.result["regression_r2"] == 0.62
-    assert road.result["evidence_ready"] is True
-    assert population.result["top_age_band"] == "25-34岁"
-    assert population.result["top_age_band_population"] == 12000
-    assert population.result["top_age_band_ratio"] == round(12000 / 54326.544, 6)
-    assert len(population.result["age_distribution_ratios"]) == 3
-    assert population.result["age_distribution_ratios"][0]["age_band_label"] == "25-34岁"
-    assert population.result["age_distribution_ratios"][0]["ratio"] == round(12000 / 54326.544, 6)
-    assert any(item["field"] == "population.profile.age_distribution_ratios" for item in population.evidence)
-    assert population.result["evidence_ready"] is True
-    assert nightlight.result["core_hotspot_count"] == 4
-    assert nightlight.result["economic_activity_intensity_level"] == "medium_high"
-    assert "消费能力" not in nightlight.result["summary_text"]
-    assert "客流" not in nightlight.result["summary_text"]
-    assert "白天" not in nightlight.result["summary_text"]
-    assert nightlight.result["evidence_ready"] is True
+    assert poi["dominant_categories"][0] == "餐饮"
+    assert poi["evidence_ready"] is True
+    assert h3["distribution_pattern"] in {"single_core", "multi_core", "corridor"}
+    assert h3["evidence_ready"] is True
+    assert road["regression_r2"] == 0.62
+    assert road["evidence_ready"] is True
+    assert population["top_age_band"] == "25-34岁"
+    assert population["top_age_band_population"] == 12000
+    assert population["top_age_band_ratio"] == round(12000 / 54326.544, 6)
+    assert len(population["age_distribution_ratios"]) == 3
+    assert population["age_distribution_ratios"][0]["age_band_label"] == "25-34岁"
+    assert population["age_distribution_ratios"][0]["ratio"] == round(12000 / 54326.544, 6)
+    assert population["evidence_ready"] is True
+    assert nightlight["core_hotspot_count"] == 4
+    assert nightlight["economic_activity_intensity_level"] == "medium_high"
+    assert "消费能力" not in nightlight["summary_text"]
+    assert "客流" not in nightlight["summary_text"]
+    assert "白天" not in nightlight["summary_text"]
+    assert nightlight["evidence_ready"] is True
 
 
 def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
     snapshot = _snapshot()
     artifacts = {
-        "current_poi_structure_analysis": asyncio.run(
-            read_poi_structure_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结")
-        ).result,
-        "current_h3_structure_analysis": asyncio.run(
-            read_h3_structure_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结")
-        ).result,
+        "current_poi_structure_analysis": build_poi_structure_analysis(snapshot, {}),
+        "current_h3_structure_analysis": build_h3_structure_analysis(snapshot, {}),
         "current_poi_h3_grid": {
             "type": "FeatureCollection",
             "count": 2,
@@ -158,8 +155,11 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
     }
 
     mix = asyncio.run(analyze_poi_mix_from_scope(arguments={}, snapshot=snapshot, artifacts=artifacts, question="总结"))
-    hotspots = asyncio.run(
-        detect_commercial_hotspots_from_scope(arguments={}, snapshot=snapshot, artifacts=artifacts, question="核心在哪")
+    hotspots = detect_commercial_hotspots(
+        snapshot,
+        artifacts,
+        h3_structure=artifacts["current_h3_structure_analysis"],
+        poi_structure=artifacts["current_poi_structure_analysis"],
     )
     gap = asyncio.run(
         analyze_target_supply_gap_from_scope(
@@ -172,7 +172,7 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
 
     assert mix.result["business_profile"] == "poi_mix_raw_signal"
     assert mix.result["functional_mix_score"] is not None
-    assert hotspots.result["core_zone_count"] >= 1
+    assert hotspots["core_zone_count"] >= 1
     assert gap.result["place_type"] == "咖啡厅"
     assert gap.result["supply_gap_level"] in {"medium", "high"}
     assert len(gap.result["candidate_zones"]) >= 1
@@ -182,17 +182,16 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
 def test_read_tools_degrade_gracefully_when_frontend_analysis_missing():
     snapshot = AnalysisSnapshot()
 
-    poi = asyncio.run(read_poi_structure_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
-    h3 = asyncio.run(read_h3_structure_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
-    population = asyncio.run(read_population_profile_analysis(arguments={}, snapshot=snapshot, artifacts={}, question="总结"))
+    poi = build_poi_structure_analysis(snapshot, {})
+    h3 = build_h3_structure_analysis(snapshot, {})
+    population = build_population_profile_analysis(snapshot, {})
 
-    assert poi.status == "success"
-    assert poi.result["summary_text"]
-    assert poi.result["data_status"] == "empty"
-    assert poi.result["evidence_ready"] is False
-    assert h3.result["distribution_pattern"] == "weak_signal"
-    assert h3.result["data_status"] == "empty"
-    assert h3.result["evidence_ready"] is False
-    assert population.result["summary_text"]
-    assert population.result["data_status"] == "empty"
-    assert population.result["evidence_ready"] is False
+    assert poi["summary_text"]
+    assert poi["data_status"] == "empty"
+    assert poi["evidence_ready"] is False
+    assert h3["distribution_pattern"] == "weak_signal"
+    assert h3["data_status"] == "empty"
+    assert h3["evidence_ready"] is False
+    assert population["summary_text"]
+    assert population["data_status"] == "empty"
+    assert population["evidence_ready"] is False
