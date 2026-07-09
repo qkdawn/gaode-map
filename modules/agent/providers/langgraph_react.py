@@ -264,7 +264,7 @@ async def run_langgraph_react_loop(
             await emit(
                 "thinking",
                 {
-                    "phase": "planned",
+                    "phase": "executing",
                     "source": "langgraph_react",
                     "title": "判断下一步",
                     "detail": "我正在根据已有观察和工具目录判断是否继续调用工具，还是已经可以回答问题。",
