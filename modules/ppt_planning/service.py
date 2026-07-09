@@ -726,7 +726,7 @@ def _build_ppt_context_bundle(
         title = (source.title if source else "") or source_id
         meta = _safe_dict(source.meta if source else {})
         ai_payload = _ai_payload_for_source(source)
-        source_kind = _clean_text(meta.get("sourceKind")) or ("document" if source_id.startswith("document:") else "package" if source_id.startswith("package:") else "system")
+        source_kind = _clean_text(source.source_kind if source else "") or ("document" if source_id.startswith("document:") else "package" if source_id.startswith("package:") else "system")
         source_metrics = [metric for metric in all_metrics if source_id in _metric_source_ids(metric) or _clean_text(metric.get("source_id")) == source_id]
         source_evidence_nodes = _evidence_nodes_from_ai_payload(source_id, title, source_kind, ai_payload)
         source_scope = _safe_dict(ai_payload.get("scope"))

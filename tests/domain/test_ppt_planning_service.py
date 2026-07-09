@@ -1916,6 +1916,35 @@ def test_ppt_context_bundle_ignores_legacy_ai_payload_aliases():
     assert manifest["visual_spec_count"] == 0
 
 
+def test_ppt_context_bundle_uses_canonical_source_kind_over_meta_alias():
+    source = {
+        "id": "external:policy-web",
+        "type": "source",
+        "title": "政策网页",
+        "status": "ready",
+        "selected": True,
+        "source_kind": "web",
+        "meta": {
+            "sourceKind": "database",
+            "aiPayload": _ai_payload(
+                "external:policy-web",
+                title="政策网页",
+                source_kind="web",
+                evidence=[{"title": "政策网页", "text": "政策要求完善公共服务设施。"}],
+            ),
+        },
+    }
+
+    bundle = _build_ppt_context_bundle(PptSpecRequest(
+        area_id="history-1",
+        source_ids=["external:policy-web"],
+        sources=[source],
+    ))
+
+    assert bundle["source_manifest"][0]["source_kind"] == "web"
+    assert bundle["evidence_context"]["items"][0]["source_type"] == "web"
+
+
 def test_ppt_metric_context_filters_current_metrics_by_selected_source_ids():
     h3_metric = {
         "metric_id": "analysis:h3:avg_density_poi_per_km2",
