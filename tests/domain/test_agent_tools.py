@@ -2,7 +2,7 @@ import asyncio
 
 import modules.agent.tool_adapters.scope_dataset_tools as scope_dataset_tools
 from modules.agent.context_ask_compaction import compact_evidence_nodes
-from modules.agent.selected_sources import evidence_count_from_item, evidence_nodes_from_item
+from modules.agent.selected_sources import evidence_count_from_item, evidence_nodes_from_item, selected_sources_summary_from_items, source_records_from_items
 from modules.agent.tool_definitions.source_evidence import read_selected_source_evidence_node
 from modules.agent.providers.tool_call_execution import execute_tool_call_step
 from modules.agent.schemas import AnalysisSnapshot, ExecutionTraceItem, PlanStep
@@ -190,6 +190,30 @@ def test_compact_evidence_nodes_uses_current_source_fields_only():
     assert nodes[1]["id"] == "canonical-node"
     assert nodes[1]["source_id"] == "canonical-source"
     assert nodes[1]["source_type"] == "system"
+
+
+def test_selected_source_summary_uses_current_payload_fields_only():
+    source = {
+        "source_id": "current:analysis:road",
+        "title": "路网分析",
+        "source_kind": "system",
+        "locatorSummary": "旧定位摘要",
+        "metricGaps": ["旧指标缺口"],
+        "visualSpecs": [{"visual_id": "legacy-visual"}, {"visual_id": "legacy-visual-2"}],
+        "transportStatus": "legacy_ready",
+        "locator_summary": "当前定位摘要",
+        "metric_gaps": ["当前指标缺口"],
+        "visual_specs": [{"visual_id": "current-visual"}],
+        "transport_status": "ready_to_send",
+    }
+
+    summary = selected_sources_summary_from_items([source])["sources"][0]
+    record = source_records_from_items([source])[0]
+
+    assert summary["metric_gaps"] == ["当前指标缺口"]
+    assert summary["visual_specs_count"] == 1
+    assert summary["transport_status"] == "ready_to_send"
+    assert record.locator_summary == "当前定位摘要"
 
 
 def test_read_selected_source_evidence_node_rejects_unselected_source_id():

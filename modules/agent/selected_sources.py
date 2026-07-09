@@ -126,7 +126,7 @@ def source_records_from_items(items: List[Dict[str, Any]]) -> List[SourceRecord]
                     "status": "ready",
                     "summary": as_text(item.get("summary") or item.get("policy")),
                     "evidence_count": len(evidence_nodes_from_item(item)),
-                    "locator_summary": as_text(item.get("locator_summary") or item.get("locatorSummary")),
+                    "locator_summary": as_text(item.get("locator_summary")),
                     "availability": "selected",
                     "meta": {"aiPayload": dict(item)},
                 }
@@ -154,12 +154,12 @@ def selected_sources_summary_from_items(items: List[Dict[str, Any]], *, limit: i
                 "included": list(item.get("included") or [])[:8],
                 "scope": compact_value(item.get("scope"), depth=2, list_limit=4, string_limit=200),
                 "metrics": compact_value(item.get("metrics"), depth=1, list_limit=4, string_limit=160),
-                "metric_gaps": compact_value(item.get("metric_gaps") or item.get("metricGaps"), depth=1, list_limit=4, string_limit=160),
+                "metric_gaps": compact_value(item.get("metric_gaps"), depth=1, list_limit=4, string_limit=160),
                 "evidence_count": len(evidence_nodes),
                 "evidence_nodes": compact_evidence_nodes(evidence_nodes, limit=3),
-                "visual_specs_count": len(list(item.get("visual_specs") or item.get("visualSpecs") or [])),
+                "visual_specs_count": len(list(item.get("visual_specs") or [])),
                 "policy": as_text(item.get("policy"))[:240],
-                "transport_status": as_text(item.get("transport_status") or item.get("transportStatus")),
+                "transport_status": as_text(item.get("transport_status")),
             }
         )
     return {
