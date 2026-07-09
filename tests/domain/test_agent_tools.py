@@ -1,6 +1,7 @@
 import asyncio
 
 import modules.agent.tool_adapters.scope_dataset_tools as scope_dataset_tools
+from modules.agent.context_ask_compaction import compact_evidence_nodes
 from modules.agent.selected_sources import evidence_count_from_item, evidence_nodes_from_item
 from modules.agent.tool_definitions.source_evidence import read_selected_source_evidence_node
 from modules.agent.providers.tool_call_execution import execute_tool_call_step
@@ -163,6 +164,32 @@ def test_selected_source_evidence_nodes_do_not_fallback_to_summary_evidence():
 
     assert evidence_nodes_from_item(source) == []
     assert evidence_count_from_item(source) == 0
+
+
+def test_compact_evidence_nodes_uses_current_source_fields_only():
+    nodes = compact_evidence_nodes([
+        {
+            "nodeId": "legacy-node",
+            "sourceId": "legacy-source",
+            "sourceType": "legacy-type",
+            "title": "旧字段证据",
+            "content": "旧 camel 字段不应再参与上下文压缩。",
+        },
+        {
+            "id": "canonical-node",
+            "source_id": "canonical-source",
+            "source_type": "system",
+            "title": "当前字段证据",
+            "content": "当前 snake 字段可以进入上下文。",
+        },
+    ])
+
+    assert "id" not in nodes[0]
+    assert "source_id" not in nodes[0]
+    assert "source_type" not in nodes[0]
+    assert nodes[1]["id"] == "canonical-node"
+    assert nodes[1]["source_id"] == "canonical-source"
+    assert nodes[1]["source_type"] == "system"
 
 
 def test_read_selected_source_evidence_node_rejects_unselected_source_id():
