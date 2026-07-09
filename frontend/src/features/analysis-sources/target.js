@@ -30,16 +30,13 @@ function analysisAiPayloadFromSource(source = {}) {
   const evidenceNodes = evidenceNodesFromAiPayload(payload).slice(0, 8)
   return {
     source_id: asText(payload.source_id || payload.sourceId || source.id),
-    sourceId: asText(payload.source_id || payload.sourceId || source.id),
     title: asText(payload.title || source.title),
     source_kind: asText(payload.source_kind || payload.sourceKind || meta.sourceKind),
-    sourceKind: asText(payload.source_kind || payload.sourceKind || meta.sourceKind),
     included,
     scope: compactAnalysisSourceValue(payload.scope, 2),
     metrics: compactAnalysisSourceValue(cloneArray(payload.metrics).slice(0, 12), 2),
     metric_gaps: compactAnalysisSourceValue(cloneArray(payload.metric_gaps || payload.metricGaps).slice(0, 8), 2),
     evidence_nodes: compactAnalysisSourceValue(evidenceNodes, 2),
-    evidenceNodes: compactAnalysisSourceValue(evidenceNodes, 2),
     visual_specs: compactAnalysisSourceValue(cloneArray(payload.visual_specs || payload.visualSpecs).slice(0, 8), 2),
     counts: {
       ...cloneObject(payload.counts),
@@ -63,10 +60,8 @@ function buildAnalysisSourceEvidence(source = {}, payload = {}) {
   if (visualCount) parts.push(`${visualCount} 个图表规格`)
   return {
     source_id: asText(payload.source_id || source.id),
-    sourceId: asText(payload.source_id || source.id),
     title: asText(payload.title || source.title),
     source_title: asText(source.title),
-    sourceTitle: asText(source.title),
     type: asText(source.type),
     text: parts.length ? parts.join('；') : '该来源包含可用于 AI 的分析输入块。',
     payload: {
