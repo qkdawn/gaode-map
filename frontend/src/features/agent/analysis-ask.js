@@ -1,6 +1,6 @@
 import { asText, cloneArray } from './normalizers.js'
 import { ANALYSIS_WORKSPACE_TAB_KIND } from './workspace-kinds.js'
-import { postContextAsk } from './context-ask-request.js'
+import { postContextAsk, serializeContextAskTarget } from './context-ask-request.js'
 import { buildAnalysisSourceTarget } from '../analysis-sources/target.js'
 
 function writeAnalysisAskSessionState(ctx, patch = {}, options = {}) {
@@ -41,10 +41,7 @@ export function createAgentAnalysisAskMethods() {
         history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
         question: asText(question),
         analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
-        target: {
-          ...target,
-          artifact_refs: cloneArray(target.artifactRefs),
-        },
+        target: serializeContextAskTarget(target),
         require_ai: true,
       }
     },

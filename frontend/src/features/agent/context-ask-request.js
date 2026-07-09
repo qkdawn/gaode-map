@@ -1,6 +1,20 @@
-import { asText, cloneArray } from './normalizers.js'
+import { asText, cloneArray, cloneObject } from './normalizers.js'
 
 export const CONTEXT_ASK_URL = '/api/v1/analysis/agent/context-ask'
+
+export function serializeContextAskTarget(target = {}) {
+  const source = target && typeof target === 'object' ? target : {}
+  return {
+    type: asText(source.type) || 'report_section',
+    id: asText(source.id),
+    title: asText(source.title),
+    source: asText(source.source) || 'report',
+    summary: asText(source.summary),
+    evidence: cloneArray(source.evidence),
+    artifact_refs: cloneArray(source.artifact_refs || source.artifactRefs).map((item) => asText(item)).filter(Boolean),
+    payload: cloneObject(source.payload),
+  }
+}
 
 export async function postContextAsk(request = {}, options = {}) {
   const response = await fetch(CONTEXT_ASK_URL, {

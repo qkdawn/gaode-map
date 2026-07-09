@@ -4,7 +4,7 @@ import {
   cloneArray,
   cloneObject,
 } from './normalizers.js'
-import { postContextAsk } from './context-ask-request.js'
+import { postContextAsk, serializeContextAskTarget } from './context-ask-request.js'
 
 export function createAgentContextAskUiMethods() {
   return {
@@ -116,10 +116,7 @@ export function createAgentContextAskUiMethods() {
           history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
           question: text,
           analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
-          target: {
-            ...target,
-            artifact_refs: cloneArray(target.artifactRefs),
-          },
+          target: serializeContextAskTarget(target),
         })
         const assistant = {
           role: 'assistant',
