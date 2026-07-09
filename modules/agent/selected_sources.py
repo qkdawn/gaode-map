@@ -33,6 +33,10 @@ def source_items_from_artifacts(artifacts: Dict[str, Any]) -> List[Dict[str, Any
     return [item for item in list(context.get("sources") or []) if isinstance(item, dict)]
 
 
+def selected_sources_artifact_from_items(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    return {"sources": [dict(item) for item in list(items or []) if isinstance(item, dict)]}
+
+
 def source_id_from_item(item: Dict[str, Any]) -> str:
     return as_text(item.get("source_id") or item.get("sourceId") or item.get("id"))
 
@@ -62,7 +66,7 @@ def artifact_refs_from_item(item: Dict[str, Any]) -> List[str]:
 
 
 def analysis_sources_target_from_items(items: List[Dict[str, Any]]) -> Dict[str, Any]:
-    sources = [dict(item) for item in list(items or []) if isinstance(item, dict)]
+    sources = selected_sources_artifact_from_items(items)["sources"]
     titles = [source_title_from_item(item) for item in sources if source_title_from_item(item)]
     evidence_nodes: List[Any] = []
     artifact_refs: List[str] = []

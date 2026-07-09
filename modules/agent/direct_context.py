@@ -14,7 +14,7 @@ from .schemas import (
     AgentTurnResponse,
     AgentPlanEnvelope,
 )
-from .selected_sources import analysis_sources_target_from_items
+from .selected_sources import analysis_sources_target_from_items, selected_sources_artifact_from_items
 
 StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
@@ -174,7 +174,7 @@ def _preprocessed_sources_response(
             payload.analysis_snapshot,
             {
                 **dict(memory_artifacts or {}),
-                "selected_sources_context": {"sources": sources},
+                "selected_sources_context": selected_sources_artifact_from_items(sources),
             },
         ),
         plan=AgentPlanEnvelope(summary=planning_summary),

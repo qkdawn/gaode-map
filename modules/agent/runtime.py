@@ -31,6 +31,7 @@ from .schemas import (
     AgentTurnStreamEvent,
     AuditResult,
 )
+from .selected_sources import selected_sources_artifact_from_items
 from .synthesizer import (
     build_answer_evidence_payload,
     build_answer_fallback,
@@ -252,7 +253,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         )
     selected_sources = payload.selected_sources_context.source_items()
     if selected_sources:
-        memory.artifacts["selected_sources_context"] = {"sources": selected_sources}
+        memory.artifacts["selected_sources_context"] = selected_sources_artifact_from_items(selected_sources)
         context.available_artifacts.append("selected_sources_context")
         context.context_summary.available_context_sources.append("analysis:selected_sources_context")
         context.limits.append(
