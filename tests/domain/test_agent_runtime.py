@@ -108,6 +108,13 @@ def test_agent_plan_contract_exports_current_fields_only():
     }
 
 
+def test_agent_plan_contract_rejects_removed_followup_fields():
+    with pytest.raises(ValueError):
+        AgentPlanEnvelope(followup_steps=[])
+    with pytest.raises(ValueError):
+        AgentPlanEnvelope(followup_applied=True)
+
+
 def test_agent_turn_output_rejects_removed_structured_answer_fields():
     with pytest.raises(ValueError):
         AgentTurnOutput(answer="已完成", cards=[])

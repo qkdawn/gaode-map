@@ -671,7 +671,7 @@ class AgentSummaryStreamEvent(BaseModel):
 
 
 class AgentPlanEnvelope(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     steps: List[PlanStep] = Field(default_factory=list)
     summary: str = ""
