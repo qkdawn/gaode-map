@@ -32,7 +32,7 @@ def test_upsert_and_get_agent_session_record(monkeypatch):
         snapshot={
             "input": "",
             "messages": [{"role": "user", "content": "总结这个区域"}],
-            "cards": [{"type": "summary", "title": "概览", "content": "已完成分析", "items": []}],
+            "output": {"answer": "已完成分析"},
         },
         title_source="fallback",
     )
