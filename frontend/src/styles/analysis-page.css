@@ -7777,6 +7777,51 @@ body.agent-ppt-source-menu-open {
     color: #475569;
 }
 
+.agent-message-table-wrap {
+    max-width: 100%;
+    margin: 8px 0;
+    overflow-x: auto;
+    border: 1px solid #d9dee7;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.agent-message-table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    table-layout: auto;
+    color: #1f2937;
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.agent-message-table th,
+.agent-message-table td {
+    padding: 8px 10px;
+    border-right: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
+    text-align: left;
+    vertical-align: top;
+    word-break: break-word;
+}
+
+.agent-message-table th:last-child,
+.agent-message-table td:last-child {
+    border-right: 0;
+}
+
+.agent-message-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.agent-message-table th {
+    background: #f3f5f8;
+    color: #111827;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
 .agent-message-bubble strong {
     font-weight: 800;
 }

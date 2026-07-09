@@ -24,6 +24,25 @@ import {
 
 const agentMethods = createAnalysisAgentSessionMethods()
 
+test('agent message renderer formats markdown tables', () => {
+  const html = agentMethods.renderAgentMessageHtml({
+    role: 'assistant',
+    content: [
+      '战略建议',
+      '',
+      '| 维度 | 建议 | 优先级 | 预期效果 |',
+      '|---|---|---|---|',
+      '| **选址** | 优先聚焦28个高密高混合H3格子 | 高 | 精准流量触达 |',
+      '| 业态补缺 | 针对功能混合度低的网格 | 中 | 提升日常回流 |',
+    ].join('\n'),
+  })
+
+  assert.match(html, /<table class="agent-message-table">/)
+  assert.match(html, /<th>维度<\/th>/)
+  assert.match(html, /<strong>选址<\/strong>/)
+  assert.doesNotMatch(html, /<div class="agent-message-paragraph">\| 维度/)
+})
+
 test('agent tabs keep analysis workspace as canonical tab field', () => {
   const state = createAnalysisAgentInitialState()
 

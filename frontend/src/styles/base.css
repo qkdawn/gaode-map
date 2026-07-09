@@ -873,6 +873,50 @@ body,
   font-weight: 700;
 }
 
+.agent-iteration-report-md-table-wrap {
+  max-width: 100%;
+  margin: 8px 0;
+  overflow-x: auto;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.agent-iteration-report-md-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.agent-iteration-report-md-table th,
+.agent-iteration-report-md-table td {
+  padding: 8px 10px;
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.agent-iteration-report-md-table th:last-child,
+.agent-iteration-report-md-table td:last-child {
+  border-right: 0;
+}
+
+.agent-iteration-report-md-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.agent-iteration-report-md-table th {
+  background: #f3f5f8;
+  color: #0f172a;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .agent-iteration-report-gap {
   height: 4px;
 }
