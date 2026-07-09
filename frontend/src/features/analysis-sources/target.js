@@ -92,7 +92,7 @@ export function buildAnalysisSourceTarget(state = {}) {
     source: 'analysis',
     summary: sources.length ? `当前已选择 ${sources.length} 个可用于 AI 的分析来源。` : '',
     evidence,
-    artifactRefs: sources.map((item) => asText(item.source_id)).filter(Boolean),
+    artifact_refs: sources.map((item) => asText(item.source_id)).filter(Boolean),
     payload: {
       sources,
     },
