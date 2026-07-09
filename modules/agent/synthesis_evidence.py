@@ -61,24 +61,6 @@ def build_analysis_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, obj
                 limitation="缺口指标不能直接推出开店可行性，仍需验证店面条件、竞品质量、租金与动线。",
             )
         )
-    if metrics["unified_spatial_cell_count"]:
-        evidence.append(
-            AgentEvidenceItem(
-                metric="unified_spatial_cells",
-                value={
-                    "cell_count": metrics["unified_spatial_cell_count"],
-                    "active_poi_cell_count": metrics["unified_active_poi_cell_count"],
-                    "lit_cell_count": metrics["unified_lit_cell_count"],
-                    "road_covered_cell_count": metrics["unified_road_covered_cell_count"],
-                    "coverage": metrics["unified_spatial_coverage"],
-                    "top_cells": metrics["unified_spatial_top_cells"][:5],
-                },
-                interpretation="raw_signal: POI, population, nightlight and road fields are aligned to shared cells when coverage is available.",
-                source="current_unified_spatial_cells_summary",
-                confidence="strong",
-                limitation="同格对齐只能说明空间关系和 proxy 信号，不能直接证明客流、消费能力、营业额或经营收益。",
-            )
-        )
     if metrics["next_analysis_options"]:
         evidence.append(
             AgentEvidenceItem(

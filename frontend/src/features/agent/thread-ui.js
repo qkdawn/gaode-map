@@ -443,7 +443,6 @@ export function createAgentThreadUiMethods() {
         analysis_preflight: '检查已有分析证据',
         rank_next_analysis_options: '推荐下一步分析方向',
         run_area_character_pack: '生成区域画像',
-        build_unified_spatial_cells: '构建统一空间格网',
         detect_commercial_hotspots: '识别商业热点',
         infer_area_tags: '推断区域标签',
         analyze_spatial_structure: '分析空间结构',

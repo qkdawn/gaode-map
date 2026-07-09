@@ -73,10 +73,6 @@ def _has_road_evidence(summary: Dict[str, Any]) -> bool:
     return bool(summary) and (summary.get("node_count") is not None or summary.get("edge_count") is not None)
 
 
-def _has_unified_spatial_evidence(summary: Dict[str, Any]) -> bool:
-    return bool(summary) and summary.get("cell_count") is not None
-
-
 def _has_population_evidence(summary: Dict[str, Any]) -> bool:
     return bool(summary) and summary.get("total_population") is not None
 
@@ -113,10 +109,6 @@ def _is_hotspot_question(question: str) -> bool:
     return any(token in question for token in ("核心", "热点", "集中", "分布", "偏空", "空白", "多核", "单核"))
 
 
-def _needs_road_spatial_cells(question: str) -> bool:
-    return any(token in question for token in ("空间分布", "低值", "低集成", "低连接", "错位", "网格", "落位", "服务盲区"))
-
-
 def _append_unique(items: List[str], value: str) -> None:
     if value not in items:
         items.append(value)
@@ -144,7 +136,6 @@ def audit_execution(
     target_supply_gap = _current_analysis(artifacts, "current_target_supply_gap")
     business_site_advice = _current_analysis(artifacts, "business_site_advice")
     next_analysis_options = _current_analysis(artifacts, "current_next_analysis_options")
-    unified_spatial_summary = _current_analysis(artifacts, "current_unified_spatial_cells_summary")
     issues: List[str] = []
     missing_evidence: List[str] = []
     required_evidence: List[str] = []
@@ -152,14 +143,12 @@ def audit_execution(
     needs_business_site_advice = mentions_supply(question) and bool(infer_type_info_from_text(question))
     needs_hotspot_analysis = _is_hotspot_question(question) and not mentions_road(question) and not mentions_population(question)
     needs_next_analysis = any(token in question for token in ("下一步", "继续", "还可以", "做什么分析", "还能分析"))
-    needs_road_spatial_cells = mentions_road(question) and _needs_road_spatial_cells(question)
 
     has_h3_view = _has_h3_density(h3_summary) or _has_h3_structure_evidence(h3_structure)
     has_population_view = _has_population_evidence(population_summary) or _has_population_profile_evidence(population_profile)
     has_nightlight_view = _has_nightlight_evidence(nightlight_summary) or _has_nightlight_pattern_evidence(nightlight_pattern)
     has_road_view = _has_road_evidence(road_summary) or _has_road_pattern_evidence(road_pattern)
     has_poi_view = _has_pois(snapshot, artifacts) or _has_poi_structure_evidence(poi_structure)
-    has_unified_spatial_view = _has_unified_spatial_evidence(unified_spatial_summary)
 
     if needs_comprehensive_business_evidence:
         _append_unique(required_evidence, "POI 供给证据")
@@ -173,9 +162,6 @@ def audit_execution(
             _append_unique(required_evidence, "商业画像分析")
             if not is_business_profile_ready(business_profile):
                 _append_unique(missing_evidence, "商业画像分析")
-            _append_unique(required_evidence, "空间同格对齐证据")
-            if not has_unified_spatial_view:
-                _append_unique(missing_evidence, "空间同格对齐证据")
 
     if needs_comprehensive_business_evidence or mentions_population(question):
         _append_unique(required_evidence, "人口概览")
@@ -189,10 +175,6 @@ def audit_execution(
         _append_unique(required_evidence, "路网概览")
     if (needs_comprehensive_business_evidence or mentions_road(question)) and not has_road_view:
         _append_unique(missing_evidence, "路网概览")
-    if needs_road_spatial_cells:
-        _append_unique(required_evidence, "空间同格对齐证据")
-        if not has_unified_spatial_view:
-            _append_unique(missing_evidence, "空间同格对齐证据")
     if needs_hotspot_analysis:
         _append_unique(required_evidence, "空间热点分析")
         if not is_commercial_hotspots_ready(commercial_hotspots):

@@ -26,7 +26,6 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
     commercial_hotspots = artifacts.get("current_commercial_hotspots") if isinstance(artifacts.get("current_commercial_hotspots"), dict) else {}
     target_supply_gap = artifacts.get("current_target_supply_gap") if isinstance(artifacts.get("current_target_supply_gap"), dict) else {}
     next_analysis_options = artifacts.get("current_next_analysis_options") if isinstance(artifacts.get("current_next_analysis_options"), dict) else {}
-    unified_spatial_summary = artifacts.get("current_unified_spatial_cells_summary") if isinstance(artifacts.get("current_unified_spatial_cells_summary"), dict) else {}
     h3_summary = artifacts.get("current_poi_h3_summary") or ((snapshot.h3 or {}).get("summary") if isinstance(snapshot.h3, dict) else {}) or {}
     road_summary = artifacts.get("current_road_summary") or ((snapshot.road or {}).get("summary") if isinstance(snapshot.road, dict) else {}) or {}
     population_summary = artifacts.get("current_population_summary") or ((snapshot.population or {}).get("summary") if isinstance(snapshot.population, dict) else {}) or {}
@@ -99,10 +98,4 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
         "next_analysis_summary": next_analysis_options.get("summary_text"),
         "next_analysis_ready_dimensions": next_analysis_options.get("ready_dimensions") or [],
         "next_analysis_missing_dimensions": next_analysis_options.get("missing_dimensions") or [],
-        "unified_spatial_cell_count": unified_spatial_summary.get("cell_count"),
-        "unified_active_poi_cell_count": unified_spatial_summary.get("active_poi_cell_count"),
-        "unified_lit_cell_count": unified_spatial_summary.get("lit_cell_count"),
-        "unified_road_covered_cell_count": unified_spatial_summary.get("road_covered_cell_count"),
-        "unified_spatial_coverage": unified_spatial_summary.get("coverage") or {},
-        "unified_spatial_top_cells": unified_spatial_summary.get("top_cells") or [],
     }
