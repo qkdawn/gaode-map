@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from modules.evidence_index import EvidenceIndexService, EvidenceSearchQuery
+from modules.evidence_index import EvidenceIndexService, EvidenceSearchQuery, manifest_from_source
 from modules.evidence_index import attach_index_manifest, build_source_index_manifest_payload
 from modules.evidence_retrieval.schemas import SourceRecord
 
@@ -139,6 +139,61 @@ def test_evidence_search_query_ignores_legacy_source_ids_alias():
     query = EvidenceSearchQuery(question="公共服务", sourceIds=["web:legacy"])
 
     assert query.source_ids == []
+
+
+def test_index_manifest_payload_uses_canonical_key_only():
+    payload = attach_index_manifest(
+        {"evidence_nodes": []},
+        build_source_index_manifest_payload(
+            source_id="web:area-1",
+            source_kind="web",
+            native_index_kind="webpage_index",
+            node_count=1,
+        ),
+    )
+
+    assert "index_manifest" in payload
+    assert "indexManifest" not in payload
+
+
+def test_manifest_from_source_ignores_legacy_manifest_fields():
+    legacy_key_source = SourceRecord.model_validate(
+        {
+            "id": "web:area-legacy",
+            "source_kind": "web",
+            "meta": {
+                "aiPayload": {
+                    "indexManifest": build_source_index_manifest_payload(
+                        source_id="web:area-legacy",
+                        source_kind="web",
+                        native_index_kind="webpage_index",
+                        node_count=1,
+                    )
+                }
+            },
+        }
+    )
+    legacy_kind_source = SourceRecord.model_validate(
+        {
+            "id": "external:area-kind",
+            "meta": {
+                "aiPayload": {
+                    "index_manifest": {
+                        "source_id": "external:area-kind",
+                        "sourceKind": "web",
+                        "native_index_kind": "webpage_index",
+                        "node_count": 1,
+                    }
+                }
+            },
+        }
+    )
+
+    legacy_kind_manifest = manifest_from_source(legacy_kind_source)
+
+    assert manifest_from_source(legacy_key_source) is None
+    assert legacy_kind_manifest is not None
+    assert legacy_kind_manifest.source_kind == "unknown"
 
 
 def test_evidence_index_service_uses_declared_source_manifest():

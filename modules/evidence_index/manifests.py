@@ -36,7 +36,6 @@ def build_source_index_manifest_payload(
 def attach_index_manifest(ai_payload: Dict[str, Any], manifest: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(ai_payload or {})
     payload["index_manifest"] = manifest
-    payload["indexManifest"] = manifest
     return payload
 
 
@@ -44,12 +43,12 @@ def manifest_from_source(source: SourceRecord) -> SourceIndexManifest | None:
     meta = source.meta if isinstance(source.meta, dict) else {}
     ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
     ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
-    raw_manifest = ai_payload.get("index_manifest") or ai_payload.get("indexManifest")
+    raw_manifest = ai_payload.get("index_manifest")
     if not isinstance(raw_manifest, dict):
         return None
     payload = {
         **raw_manifest,
         "source_id": str(raw_manifest.get("source_id") or source.source_id).strip(),
-        "source_kind": str(raw_manifest.get("source_kind") or raw_manifest.get("sourceKind") or source.source_kind).strip(),
+        "source_kind": str(raw_manifest.get("source_kind") or source.source_kind).strip(),
     }
     return SourceIndexManifest.model_validate(payload)
