@@ -12,7 +12,6 @@ test('normalizeAgentTurnPayload normalizes structured agent response fields', ()
   const normalized = normalizeAgentTurnPayload({
     status: 'requires_clarification',
     output: {
-      cards: [{ type: 'summary', title: '概览', content: '这里以社区商业为主', items: [] }],
       clarification_question: '你希望这里最终怎么展示？',
       clarification_options: ['问题+建议回答', '只显示真实追问'],
       panel_payloads: { poi_result: { total: 12 } },
