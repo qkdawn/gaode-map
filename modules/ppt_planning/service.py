@@ -318,7 +318,7 @@ def _normalize_source_groups(raw_groups: Any, sources: List[PptSource]) -> List[
         if not isinstance(raw_group, dict):
             continue
         group_source_ids: List[str] = []
-        for raw_source_id in raw_group.get("source_ids") or raw_group.get("sourceIds") or []:
+        for raw_source_id in raw_group.get("source_ids") or []:
             source_id = _clean_text(raw_source_id)
             if source_id and source_id in allowed_ids and source_id not in seen_source_ids:
                 group_source_ids.append(source_id)
@@ -614,8 +614,8 @@ def _compact_source_for_llm(source: PptSource) -> Dict[str, Any]:
 
 
 def _metric_source_ids(metric: Dict[str, Any]) -> List[str]:
-    source_ids = [_clean_text(item) for item in _safe_list(metric.get("source_ids") or metric.get("sourceIds")) if _clean_text(item)]
-    source_id = _clean_text(metric.get("source_id") or metric.get("sourceId"))
+    source_ids = [_clean_text(item) for item in _safe_list(metric.get("source_ids")) if _clean_text(item)]
+    source_id = _clean_text(metric.get("source_id"))
     if source_id and source_id not in source_ids:
         source_ids.append(source_id)
     return source_ids
@@ -670,13 +670,13 @@ def _compact_evidence_node(node: Any) -> Dict[str, Any]:
     metadata = _safe_dict(payload.get("metadata"))
     return {
         "id": _clean_text(payload.get("id")),
-        "source_id": _clean_text(payload.get("source_id") or payload.get("sourceId")),
-        "source_type": _clean_text(payload.get("source_type") or payload.get("sourceType")),
+        "source_id": _clean_text(payload.get("source_id")),
+        "source_type": _clean_text(payload.get("source_type")),
         "title": _truncated_text(payload.get("title"), 120),
         "content": _truncated_text(payload.get("content"), 700),
         "summary": _truncated_text(payload.get("summary"), 260),
         "locator": _truncated_text(payload.get("locator"), 160),
-        "evidence_level": _clean_text(payload.get("evidence_level") or payload.get("evidenceLevel")),
+        "evidence_level": _clean_text(payload.get("evidence_level")),
         "citation": _truncated_text(payload.get("citation"), 160),
         "warnings": _safe_list(payload.get("warnings"))[:4],
         "metadata": {
@@ -696,7 +696,7 @@ def _evidence_nodes_from_ai_payload(source_id: str, title: str, source_kind: str
         "meta": {"aiPayload": ai_payload, "sourceKind": source_kind},
     })
     nodes: List[Dict[str, Any]] = []
-    explicit_nodes = _safe_list(ai_payload.get("evidence_nodes") or ai_payload.get("evidenceNodes"))
+    explicit_nodes = _safe_list(ai_payload.get("evidence_nodes"))
     for index, item in enumerate(explicit_nodes, start=1):
         node = evidence_node_from_node_payload("", source, item, index=index)
         if node is not None:
@@ -744,9 +744,9 @@ def _build_ppt_context_bundle(
             "included": included_types,
             "scope_count": int(counts.get("scope") or (1 if source_scope else 0)),
             "metric_count": len(source_metrics),
-            "metric_gap_count": int(counts.get("metric_gaps") or counts.get("metricGaps") or 0),
+            "metric_gap_count": int(counts.get("metric_gaps") or 0),
             "evidence_count": len(source_evidence_nodes),
-            "visual_spec_count": int(counts.get("visual_specs") or counts.get("visualSpecs") or 0),
+            "visual_spec_count": int(counts.get("visual_specs") or 0),
             "excluded": _safe_list(ai_payload.get("excluded")),
             "policy": _clean_text(ai_payload.get("policy")) or "数字来自 aiPayload.metrics；文本/样本来自 EvidenceNode；完整原始数据不传给 LLM。",
         })
@@ -1141,7 +1141,7 @@ def _filter_page_evidence_context(context_bundle: Dict[str, Any], packet: Dict[s
     selected: List[Dict[str, Any]] = []
     fallback: List[Dict[str, Any]] = []
     for item in _safe_list(_safe_dict(context_bundle.get("evidence_context")).get("items")):
-        source_id = _clean_text(item.get("source_id") or item.get("sourceId"))
+        source_id = _clean_text(item.get("source_id"))
         if selected_sources and source_id in selected_sources:
             fallback.append(item)
         if (selected_sources and source_id in selected_sources) or _text_matches_tokens(item, tokens):
@@ -1161,7 +1161,7 @@ def _filter_page_source_manifest(context_bundle: Dict[str, Any], source_ids: Lis
     manifest = _safe_list(context_bundle.get("source_manifest"))
     if not selected:
         return manifest[:20]
-    result = [item for item in manifest if _clean_text(item.get("source_id") or item.get("sourceId")) in selected]
+    result = [item for item in manifest if _clean_text(item.get("source_id")) in selected]
     return result or manifest[:20]
 
 
@@ -1176,7 +1176,7 @@ def _recommended_source_ids_for_page(request: DeckBriefSlideRequest, role: Dict[
     evidence_context = _safe_dict(context_bundle.get("evidence_context"))
     matched: List[str] = []
     for item in _safe_list(evidence_context.get("items")):
-        source_id = _clean_text(item.get("source_id") or item.get("sourceId"))
+        source_id = _clean_text(item.get("source_id"))
         if source_id in source_ids and _text_matches_tokens(item, tokens):
             matched.append(source_id)
     role_sources = [
@@ -1280,7 +1280,7 @@ def _validate_slide_section(raw: Any, fallback: DeckSlideBrief, metric_context: 
 
 def _raw_slide_validation_summary(raw: Any, fallback: DeckSlideBrief) -> Dict[str, Any]:
     item = _safe_dict(raw.get("slide")) if isinstance(raw, dict) and isinstance(raw.get("slide"), dict) else _safe_dict(raw)
-    visual_specs = item.get("visual_specs") or item.get("visualSpecs") or []
+    visual_specs = item.get("visual_specs") or []
     required_sources = item.get("required_sources") or item.get("requiredSources") or []
     return {
         "raw_keys": list(item.keys())[:16],

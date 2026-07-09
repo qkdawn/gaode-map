@@ -1874,6 +1874,48 @@ def test_ppt_context_bundle_includes_source_manifest_and_excludes_full_current()
     assert "current.datasets.poi.items" in bundle["omitted_payloads"]
 
 
+def test_ppt_context_bundle_ignores_legacy_ai_payload_aliases():
+    source = {
+        "id": "current:analysis:poi_h3",
+        "type": "sheet",
+        "title": "POI / H3 空间结构分析",
+        "status": "ready",
+        "selected": True,
+        "meta": {
+            "sourceKind": "system",
+            "aiPayload": {
+                "version": "ppt_ai_input_block_v1",
+                "source_id": "current:analysis:poi_h3",
+                "source_kind": "system",
+                "included": ["evidence", "metric_gaps", "visual_specs"],
+                "evidenceNodes": [{
+                    "id": "legacy-node",
+                    "sourceId": "current:analysis:poi_h3",
+                    "sourceType": "system",
+                    "title": "旧证据",
+                    "content": "旧 camel evidenceNodes 不应进入 bundle。",
+                }],
+                "counts": {
+                    "metricGaps": 3,
+                    "visualSpecs": 2,
+                    "evidence": 1,
+                },
+            },
+        },
+    }
+
+    bundle = _build_ppt_context_bundle(PptSpecRequest(
+        area_id="history-1",
+        source_ids=["current:analysis:poi_h3"],
+        sources=[source],
+    ))
+
+    manifest = bundle["source_manifest"][0]
+    assert bundle["evidence_context"]["items"] == []
+    assert manifest["metric_gap_count"] == 0
+    assert manifest["visual_spec_count"] == 0
+
+
 def test_ppt_metric_context_filters_current_metrics_by_selected_source_ids():
     h3_metric = {
         "metric_id": "analysis:h3:avg_density_poi_per_km2",
