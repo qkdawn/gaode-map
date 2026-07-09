@@ -142,12 +142,8 @@ function normalizeAgentPlanStep(seed = {}) {
 }
 
 function normalizeAgentPlanEnvelope(seed = {}) {
-  const primarySteps = cloneArray(seed.steps).map((item) => normalizeAgentPlanStep(item)).filter((item) => item.tool_name)
-  const legacyFollowupSteps = cloneArray(seed.followupSteps || seed.followup_steps)
-    .map((item) => normalizeAgentPlanStep(item))
-    .filter((item) => item.tool_name)
   return {
-    steps: [...primarySteps, ...legacyFollowupSteps],
+    steps: cloneArray(seed.steps).map((item) => normalizeAgentPlanStep(item)).filter((item) => item.tool_name),
     summary: asText(seed.summary),
   }
 }

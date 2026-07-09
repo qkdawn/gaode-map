@@ -15,11 +15,8 @@ test('buildAgentPlanChecklist maps execution trace into planner progress and sta
       steps: [
         { tool_name: 'read_current_scope', reason: '读取范围', evidence_goal: '拿到 scope_polygon' },
         { tool_name: 'fetch_pois_in_scope', reason: '抓取 POI', evidence_goal: '确认业态结构' },
-      ],
-      followup_steps: [
         { tool_name: 'compute_h3_metrics_from_scope_and_pois', reason: '补充 H3', evidence_goal: '补强空间证据' },
       ],
-      followup_applied: true,
       summary: '先看范围，再看供给结构',
     },
     [

@@ -88,10 +88,20 @@ def test_agent_stage_contract_rejects_removed_legacy_stages():
         AgentSessionDetail(id="session-1", stage="auditing")
 
 
-def test_agent_plan_contract_ignores_legacy_followup_fields():
-    plan = AgentPlanEnvelope(followup_steps=[{"tool_name": "read_current_scope"}], followup_applied=True, summary="已规划")
+def test_agent_plan_contract_exports_current_fields_only():
+    plan = AgentPlanEnvelope(steps=[{"tool_name": "read_current_scope"}], summary="已规划")
 
-    assert plan.model_dump(mode="json") == {"steps": [], "summary": "已规划"}
+    assert plan.model_dump(mode="json") == {
+        "steps": [{
+            "tool_name": "read_current_scope",
+            "arguments": {},
+            "reason": "",
+            "evidence_goal": "",
+            "expected_artifacts": [],
+            "optional": False,
+        }],
+        "summary": "已规划",
+    }
 
 
 def _snapshot_with_scope(**kwargs) -> AnalysisSnapshot:

@@ -3049,11 +3049,8 @@ test('getAgentPlanChecklist derives grouped checklist states from plan and trace
       steps: [
         { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有证据' },
         { tool_name: 'search_analysis_context', reason: '检索空间结构证据', evidence_goal: '判断集中或分散' },
-      ],
-      followupSteps: [
         { tool_name: 'read_analysis_evidence_node', reason: '读取热点证据节点', evidence_goal: '补空间热点结论', optional: true },
       ],
-      followupApplied: true,
       summary: '先读取已有分析，再补充热点识别。',
     },
     agentExecutionTrace: [
