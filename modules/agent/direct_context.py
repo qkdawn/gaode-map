@@ -14,48 +14,23 @@ from .schemas import (
     AgentTurnResponse,
     AgentPlanEnvelope,
 )
+from .selected_sources import analysis_sources_target_from_items
 
 StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
 PREPROCESSED_SOURCE_TOOL = "context_ask_preprocessed_sources"
 
 
-def _source_title(source: Dict[str, Any]) -> str:
-    return str(source.get("title") or source.get("name") or source.get("source_id") or "").strip()
-
-
 def build_preprocessed_sources_request(payload: AgentTurnRequest, question: str) -> AgentContextAskRequest | None:
     sources = payload.selected_sources_context.source_items()
     if not sources or not str(question or "").strip():
         return None
-    titles = [_source_title(item) for item in sources if _source_title(item)]
-    evidence_nodes: List[Any] = []
-    artifact_refs: List[str] = []
-    summaries: List[str] = []
-    for item in sources:
-        for node in list(item.get("evidence_nodes") or item.get("evidenceNodes") or [])[:4]:
-            evidence_nodes.append(node)
-        for ref in list(item.get("artifact_refs") or item.get("artifactRefs") or []):
-            if ref:
-                artifact_refs.append(ref)
-        summary = str(item.get("summary") or item.get("description") or item.get("policy") or "").strip()
-        if summary:
-            summaries.append(summary)
     return AgentContextAskRequest(
         conversation_id=payload.conversation_id,
         history_id=payload.history_id,
         question=question,
         analysis_snapshot=payload.analysis_snapshot,
-        target={
-            "type": "analysis_sources",
-            "id": "selected-sources",
-            "title": "、".join(titles[:3]) or "已选分析来源",
-            "source": "analysis",
-            "summary": "\n".join(summaries[:6]),
-            "evidence": evidence_nodes[:24],
-            "artifact_refs": artifact_refs[:24],
-            "payload": {"sources": sources},
-        },
+        target=analysis_sources_target_from_items(sources),
         require_ai=True,
     )
 

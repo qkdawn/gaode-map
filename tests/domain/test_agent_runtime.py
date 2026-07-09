@@ -499,7 +499,10 @@ def test_runtime_puts_map_search_context_only_in_working_memory_artifacts(monkey
 def test_runtime_answers_selected_sources_with_preprocessed_context(monkeypatch):
     async def fake_context_ask(payload):
         assert payload.target.type == "analysis_sources"
+        assert payload.target.id == "analysis-selected-sources"
         assert payload.target.payload["sources"][0]["source_id"] == "document:doc-1"
+        assert payload.target.evidence[0]["id"] == "n1"
+        assert payload.target.artifact_refs == ["document:doc-1"]
         return AgentContextAskResponse(
             status="success",
             answer="已基于预处理来源直接回答。",
@@ -529,6 +532,7 @@ def test_runtime_answers_selected_sources_with_preprocessed_context(monkeypatch)
                         "source_kind": "document",
                         "summary": "项目更新目标",
                         "evidence_nodes": [{"id": "n1", "content": "更新目标"}],
+                        "artifact_refs": ["document:doc-1"],
                     }]
                 },
             )

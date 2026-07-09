@@ -48,6 +48,43 @@ def evidence_nodes_from_item(item: Dict[str, Any]) -> List[Any]:
     return []
 
 
+def source_title_from_item(item: Dict[str, Any]) -> str:
+    return as_text(item.get("title") or item.get("name") or source_id_from_item(item))
+
+
+def source_summary_from_item(item: Dict[str, Any]) -> str:
+    return as_text(item.get("summary") or item.get("description") or item.get("policy"))
+
+
+def artifact_refs_from_item(item: Dict[str, Any]) -> List[str]:
+    refs = item.get("artifact_refs") if isinstance(item.get("artifact_refs"), list) else item.get("artifactRefs")
+    return [as_text(ref) for ref in list(refs or []) if as_text(ref)]
+
+
+def analysis_sources_target_from_items(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    sources = [dict(item) for item in list(items or []) if isinstance(item, dict)]
+    titles = [source_title_from_item(item) for item in sources if source_title_from_item(item)]
+    evidence_nodes: List[Any] = []
+    artifact_refs: List[str] = []
+    summaries: List[str] = []
+    for item in sources:
+        evidence_nodes.extend(evidence_nodes_from_item(item)[:4])
+        artifact_refs.extend(artifact_refs_from_item(item))
+        summary = source_summary_from_item(item)
+        if summary:
+            summaries.append(summary)
+    return {
+        "type": ANALYSIS_SOURCES_TARGET_TYPE,
+        "id": "analysis-selected-sources",
+        "title": "、".join(titles[:3]) or "已选分析来源",
+        "source": "analysis",
+        "summary": "\n".join(summaries[:6]),
+        "evidence": evidence_nodes[:24],
+        "artifact_refs": artifact_refs[:24],
+        "payload": {"sources": sources},
+    }
+
+
 def mapped_dataset_source_ids(source_id: str) -> List[str]:
     raw_id = as_text(source_id)
     if not raw_id:
