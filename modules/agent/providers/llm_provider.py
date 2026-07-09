@@ -33,7 +33,6 @@ from .client import (
 from .prompts import (
     gate_system_prompt as _gate_system_prompt_from_module,
     synthesizer_system_prompt as _synthesizer_system_prompt_from_module,
-    translation_system_prompt as _translation_system_prompt_from_module,
 )
 
 LoopEmit = Callable[[str, Dict[str, Any]], Awaitable[None] | None]
@@ -387,32 +386,3 @@ async def generate_answer_output_with_llm(
         reasoning_id="synthesizer-reasoning",
     )
     return AgentTurnOutput(**parsed)
-
-
-async def generate_translation_pack_with_llm(
-    *,
-    messages: List[AgentMessage],
-    snapshot: AnalysisSnapshot,
-    context: ContextBundle,
-    answer_evidence_payload: Dict[str, Any],
-    image_inputs: List[Dict[str, Any]] | None = None,
-    emit: LoopEmit | None = None,
-) -> AgentTranslationPack:
-    payload = await _invoke_json_role(
-        system_prompt=_translation_system_prompt_from_module(),
-        user_payload={
-            "messages": _trim_messages(messages),
-            "analysis_snapshot_digest": snapshot_digest(snapshot),
-            "context_digest": context_digest(context),
-            "answer_evidence_payload": answer_evidence_payload,
-        },
-        image_inputs=image_inputs,
-        emit=emit,
-        phase="synthesizing",
-        title="转译指标为空间体验与策划含义",
-        reasoning_id="translation-reasoning",
-    )
-    pack = AgentTranslationPack(**payload)
-    if not pack.status or pack.status == "skipped":
-        pack.status = "ready" if pack.items else "skipped"
-    return pack

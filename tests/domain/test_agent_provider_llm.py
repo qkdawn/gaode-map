@@ -11,7 +11,6 @@ from modules.agent.providers.chat_parser import extract_json_object
 from modules.agent.providers.llm_provider import (
     _invoke_json_role,
     generate_answer_output_with_llm,
-    generate_translation_pack_with_llm,
     run_gate_with_llm,
 )
 from modules.agent.providers.tool_loop import compact_tool_catalog
@@ -319,63 +318,6 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert user_payload["translation_pack"]["status"] == "ready"
     assert user_payload["translation_pack"]["items"][0]["spatial_phenomenon"] == "服务设施已有基础。"
     assert "synthesis_payload" not in user_payload
-
-
-def test_generate_translation_pack_with_llm_parses_structured_translation(monkeypatch):
-    requests = []
-    snapshot = _snapshot_with_scope()
-    context = build_context_bundle(snapshot)
-    monkeypatch.setattr(settings, "ai_base_url", "https://example.test/v1")
-    monkeypatch.setattr(settings, "ai_api_key", "test-key")
-    monkeypatch.setattr(settings, "ai_model", "test-model")
-    monkeypatch.setattr(settings, "ai_thinking_enabled", False)
-    monkeypatch.setattr(settings, "ai_timeout_s", 5)
-
-    _mock_streams(
-        monkeypatch,
-        requests,
-        [
-            _completion_stream(
-                response_id="resp-translation-1",
-                content=(
-                    '{"status":"ready","summary":"路网证据已转译为空间体验判断。",'
-                    '"items":[{"metric":"road_structure","source":"analysis_snapshot.road.summary",'
-                    '"raw_signal":"节点 8、边段 10","spatial_phenomenon":"内部连接基础偏弱",'
-                    '"human_experience":"步行串联容易中断","planning_implication":"不宜只依赖自然游逛承接商业扩散",'
-                    '"action_hint":"下一步核对入口、过街和慢行连接","confidence":"moderate",'
-                    '"boundary":"不能直接推断客流或消费能力"}],"error":""}'
-                ),
-            )
-        ],
-    )
-
-    pack = asyncio.run(
-        generate_translation_pack_with_llm(
-            messages=[AgentMessage(role="user", content="为什么这里路网差")],
-            snapshot=snapshot,
-            context=context,
-            answer_evidence_payload={
-                "key_evidence": [
-                    {
-                        "metric": "road_structure",
-                        "headline": "路网节点 8、边段 10",
-                        "value": {"node_count": 8, "edge_count": 10},
-                    }
-                ]
-            },
-        )
-    )
-
-    system_prompt = requests[0]["json"]["messages"][0]["content"]
-    user_payload = json.loads(requests[0]["json"]["messages"][1]["content"])
-    assert pack.status == "ready"
-    assert pack.items[0].spatial_phenomenon == "内部连接基础偏弱"
-    assert pack.items[0].human_experience
-    assert pack.items[0].planning_implication
-    assert pack.items[0].action_hint
-    assert "不要写最终自然语言答案" in system_prompt
-    assert "spatial_phenomenon" in system_prompt
-    assert "answer_evidence_payload" in user_payload
 
 
 def test_generate_answer_output_with_llm_accepts_plain_answer_only(monkeypatch):
