@@ -163,17 +163,16 @@ def test_build_answer_evidence_payload_uses_compact_tool_result_digest():
     assert "result" not in tool_digest
     assert "evidence" not in tool_digest
     assert "artifacts" not in tool_digest
+    assert "artifact_shapes" not in tool_digest
     assert "poi-299" not in encoded
     assert "h3-299" not in encoded
     assert "evidence-19" not in encoded
     assert tool_digest["result_summary"] == "poi_count=300"
     assert tool_digest["result_shape"] == {"type": "object", "key_count": 2, "keys": ["poi_count", "raw_points"]}
-    assert len(tool_digest["evidence_sample"]) == 8
+    assert len(tool_digest["evidence_sample"]) == 4
     assert tool_digest["evidence_count"] == 20
-    assert tool_digest["warnings"] == [f"warning-{index}" for index in range(8)]
+    assert tool_digest["warnings"] == [f"warning-{index}" for index in range(4)]
     assert tool_digest["artifact_keys"] == ["current_pois", "current_poi_h3_grid", "current_frontend_analysis"]
-    assert tool_digest["artifact_shapes"]["current_pois"] == {"type": "array", "count": 300}
-    assert tool_digest["artifact_shapes"]["current_poi_h3_grid"]["keys"] == ["features", "summary"]
 
 
 def test_build_answer_evidence_payload_tracks_missing_evidence_and_required_labels():

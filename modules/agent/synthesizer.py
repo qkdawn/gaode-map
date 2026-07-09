@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from .analysis_extractors import is_target_supply_gap_ready
 from .intent_signals import mentions_nightlight, mentions_population, mentions_road, mentions_summary, mentions_supply
-from .llm_digest import tool_results_llm_digest
+from .llm_digest import answer_tool_results_digest
 from .reasoning_rubric import FINAL_SYNTHESIS_REASONING_INSTRUCTIONS, reasoning_rubric_payload
 from .synthesis_evidence import build_analysis_evidence as _build_analysis_evidence_from_module
 from .synthesis_metrics import build_summary_metrics as _build_summary_metrics_from_module
@@ -444,7 +444,7 @@ def build_answer_evidence_payload(
         "metrics": metrics,
         "key_evidence": key_evidence,
         "interpretation_limits": interpretation_limits,
-        "tool_results": tool_results_llm_digest(tool_results),
+        "tool_results": answer_tool_results_digest(tool_results),
         "research_notes": list(research_notes or []),
         "audit_issues": [str(item) for item in audit.issues if str(item).strip()],
         "missing_evidence": list(audit.missing_evidence or []),

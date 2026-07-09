@@ -178,6 +178,28 @@ def tool_results_llm_digest(results: List[ToolResult]) -> List[Dict[str, Any]]:
     return [tool_result_llm_digest(result) for result in results or []]
 
 
+def answer_tool_result_digest(result: ToolResult) -> Dict[str, Any]:
+    artifacts = result.artifacts if isinstance(result.artifacts, dict) else {}
+    return {
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "result_summary": summarize_tool_result(result),
+        "result_shape": shape_summary(result.result),
+        "evidence_sample": [
+            compact_for_llm(item, max_depth=2)
+            for item in list(result.evidence or [])[:4]
+        ],
+        "evidence_count": len(result.evidence or []),
+        "warnings": [str(item) for item in list(result.warnings or [])[:4] if str(item).strip()],
+        "error": result.error,
+        "artifact_keys": list(artifacts.keys())[:12],
+    }
+
+
+def answer_tool_results_digest(results: List[ToolResult]) -> List[Dict[str, Any]]:
+    return [answer_tool_result_digest(result) for result in results or []]
+
+
 def audit_tool_result_digest(result: ToolResult) -> Dict[str, Any]:
     return tool_result_llm_digest(result)
 
