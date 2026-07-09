@@ -1,6 +1,7 @@
 import asyncio
 
 from modules.agent.analysis_extractors import (
+    analyze_poi_mix,
     build_h3_structure_analysis,
     build_nightlight_pattern_analysis,
     build_poi_structure_analysis,
@@ -10,7 +11,6 @@ from modules.agent.analysis_extractors import (
 )
 from modules.agent.schemas import AnalysisSnapshot
 from modules.agent.tool_adapters.analysis_tools import (
-    analyze_poi_mix_from_scope,
     analyze_target_supply_gap_from_scope,
 )
 
@@ -154,7 +154,11 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
         ],
     }
 
-    mix = asyncio.run(analyze_poi_mix_from_scope(arguments={}, snapshot=snapshot, artifacts=artifacts, question="总结"))
+    mix = analyze_poi_mix(
+        snapshot,
+        artifacts,
+        poi_structure=artifacts["current_poi_structure_analysis"],
+    )
     hotspots = detect_commercial_hotspots(
         snapshot,
         artifacts,
@@ -170,8 +174,8 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
         )
     )
 
-    assert mix.result["business_profile"] == "poi_mix_raw_signal"
-    assert mix.result["functional_mix_score"] is not None
+    assert mix["business_profile"] == "poi_mix_raw_signal"
+    assert mix["functional_mix_score"] is not None
     assert hotspots["core_zone_count"] >= 1
     assert gap.result["place_type"] == "咖啡厅"
     assert gap.result["supply_gap_level"] in {"medium", "high"}

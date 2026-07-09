@@ -2819,7 +2819,7 @@ test('getAgentProcessRoleGroups embeds planner checklist and tool calls', () => 
     agentPlan: {
       steps: [
         { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
-        { tool_name: 'analyze_poi_mix_from_scope', reason: '分析业态结构', evidence_goal: '形成商业画像' },
+        { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
       ],
       followupSteps: [],
       followupApplied: false,
@@ -3694,7 +3694,7 @@ test('submitMainAgentTurn shows streamed plan above final response and keeps che
           payload: {
             steps: [
               { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
-              { tool_name: 'analyze_poi_mix_from_scope', reason: '分析业态结构', evidence_goal: '形成商业画像' },
+              { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
             ],
             followup_steps: [],
             followup_applied: false,
@@ -3735,7 +3735,7 @@ test('submitMainAgentTurn shows streamed plan above final response and keeps che
               plan: {
                 steps: [
                   { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
-                  { tool_name: 'analyze_poi_mix_from_scope', reason: '分析业态结构', evidence_goal: '形成商业画像' },
+                  { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
                 ],
                 followup_steps: [],
                 followup_applied: false,
@@ -3773,7 +3773,7 @@ test('submitMainAgentTurn shows streamed plan above final response and keeps che
           plan: {
             steps: [
               { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
-              { tool_name: 'analyze_poi_mix_from_scope', reason: '分析业态结构', evidence_goal: '形成商业画像' },
+              { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
             ],
             followup_steps: [],
             followup_applied: false,
