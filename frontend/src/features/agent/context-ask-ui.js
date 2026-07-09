@@ -18,7 +18,7 @@ export function createAgentContextAskUiMethods() {
       const evidence = cloneArray(source.evidence || source.evidence_refs || source.evidenceRefs)
         .map((item) => (item && typeof item === 'object' ? cloneObject(item) : asText(item)))
         .filter((item) => (typeof item === 'object' ? Object.keys(item).length : !!item))
-      const artifactRefs = cloneArray(source.artifactRefs || source.artifact_refs)
+      const artifactRefs = cloneArray(source.artifact_refs)
         .map((item) => asText(item))
         .filter(Boolean)
       return {
@@ -28,7 +28,7 @@ export function createAgentContextAskUiMethods() {
         source: targetSource,
         summary: clampText(asText(source.summary || source.reasoning || source.content || source.value), 800),
         evidence,
-        artifactRefs,
+        artifact_refs: artifactRefs,
         payload: cloneObject(source.payload),
       }
     },
@@ -88,7 +88,7 @@ export function createAgentContextAskUiMethods() {
       const target = this.normalizeContextAskTarget(targetSeed || this.contextAskTarget)
       const summary = asText(target.summary) || '当前对象没有完整自然语言摘要，需要结合右侧证据和图表继续核对。'
       const evidenceCount = cloneArray(target.evidence).length
-      const refsCount = cloneArray(target.artifactRefs).length
+      const refsCount = cloneArray(target.artifact_refs).length
       const basis = evidenceCount ? `已有 ${evidenceCount} 条证据可参考` : '当前上下文没有传入结构化证据'
       const refs = refsCount ? `，并关联 ${refsCount} 个产物引用` : ''
       return [
@@ -132,7 +132,7 @@ export function createAgentContextAskUiMethods() {
           role: 'assistant',
           content: this.buildContextAskFallbackAnswer(text, target),
           evidence: cloneArray(target.evidence),
-          citations: cloneArray(target.artifactRefs),
+          citations: cloneArray(target.artifact_refs),
           warnings: ['AI 解释接口暂不可用，已返回本地规则解释。'],
         }
         this.contextAskMessages = [...cloneArray(this.contextAskMessages), assistant]
@@ -159,7 +159,7 @@ export function createAgentContextAskUiMethods() {
         source: 'report',
         summary: asText(source.summary || source.reasoning || source.content || source.value || basis.currentConclusion),
         evidence: cloneArray(source.evidence || basis.fields),
-        artifactRefs: cloneArray(source.artifactRefs || source.artifact_refs || basis.evidenceRefs),
+        artifact_refs: cloneArray(source.artifact_refs || basis.evidenceRefs),
         payload: {
           section_key: sectionKey,
           dimensions: cloneArray(source.dimensions),
@@ -181,7 +181,7 @@ export function createAgentContextAskUiMethods() {
         source: 'iteration',
         summary: asText(source.summary || source.value || payload.notice || payload.report_title),
         evidence: cloneArray(source.evidence || source.rows || payload.report_sections || payload.ai_summary),
-        artifactRefs: cloneArray(source.artifactRefs || source.artifact_refs),
+        artifact_refs: cloneArray(source.artifact_refs),
         payload: {
           kind,
           section,
@@ -202,7 +202,7 @@ export function createAgentContextAskUiMethods() {
         source: 'site_selection',
         summary: asText(source.reason) || cloneArray(source.whySuitable).join('；') || cloneArray(source.strengths).join('；'),
         evidence: evidenceChain,
-        artifactRefs: [asText(source.h3Id || source.h3_id)].filter(Boolean),
+        artifact_refs: [asText(source.h3Id || source.h3_id)].filter(Boolean),
         payload: {
           rank: Number(source.rank || 0) || 0,
           h3Id: asText(source.h3Id || source.h3_id),

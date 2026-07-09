@@ -11,7 +11,7 @@ export function serializeContextAskTarget(target = {}) {
     source: asText(source.source) || 'report',
     summary: asText(source.summary),
     evidence: cloneArray(source.evidence),
-    artifact_refs: cloneArray(source.artifact_refs || source.artifactRefs).map((item) => asText(item)).filter(Boolean),
+    artifact_refs: cloneArray(source.artifact_refs).map((item) => asText(item)).filter(Boolean),
     payload: cloneObject(source.payload),
   }
 }

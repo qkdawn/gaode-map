@@ -61,7 +61,7 @@ function createAnalysisAgentInitialState() {
     contextAskError: '',
     contextAskDraft: '',
     contextAskSize: { width: 420, height: 560 },
-    contextAskTarget: { type: '', id: '', title: '', source: '', summary: '', evidence: [], artifactRefs: [], payload: {} },
+    contextAskTarget: { type: '', id: '', title: '', source: '', summary: '', evidence: [], artifact_refs: [], payload: {} },
     contextAskMessages: [],
     agentThinkingTimeline: [],
     agentReasoningBlocks: [],

@@ -373,7 +373,7 @@ test('context ask target normalization keeps a stable schema', () => {
   assert.equal(target.type, 'site_candidate')
   assert.equal(target.source, 'site_selection')
   assert.equal(target.id, 'h3-1')
-  assert.deepEqual(target.artifactRefs, ['artifact-1'])
+  assert.deepEqual(target.artifact_refs, ['artifact-1'])
   assert.equal(target.payload.rank, 1)
 })
 
