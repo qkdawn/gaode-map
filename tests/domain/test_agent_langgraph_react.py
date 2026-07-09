@@ -2,7 +2,7 @@ import json
 
 from modules.agent.context_builder import build_context_bundle
 from modules.agent.providers.langgraph_react import _initial_payload, _react_tool_result_payload
-from modules.agent.providers.prompts import loop_system_prompt
+from modules.agent.providers.prompts import loop_system_prompt, synthesizer_system_prompt
 from modules.agent.schemas import AnalysisSnapshot, ToolResult
 from modules.agent.tools import get_tool_registry
 
@@ -24,15 +24,21 @@ def _snapshot_with_scope() -> AnalysisSnapshot:
     )
 
 
-def test_loop_prompt_changes_with_thinking_mode():
-    quick_prompt = loop_system_prompt(thinking_mode="quick")
-    deep_prompt = loop_system_prompt(thinking_mode="deep")
+def test_loop_prompt_is_main_agent_deep_only():
+    prompt = loop_system_prompt()
 
-    assert "quick 模式" in quick_prompt
-    assert "deep 模式" in deep_prompt
-    assert "固定栏目" in deep_prompt
-    assert "城市空间与文旅商业策划分析顾问" in quick_prompt
-    assert "空间现象、人的体验、策划影响、下一步动作" in quick_prompt
+    assert f"{'qu'}ick 模式" not in prompt
+    assert "Main Agent 深度分析链路" in prompt
+    assert "固定栏目" in prompt
+    assert "城市空间与文旅商业策划分析顾问" in prompt
+    assert "空间现象、人的体验、策划影响、下一步动作" in prompt
+    assert "plan_business_analyst_analysis" in prompt
+    assert "BA 分析骨架" in prompt
+    finalizer_prompt = synthesizer_system_prompt()
+    assert "business_analyst_skeleton" in finalizer_prompt
+    assert "输出模板" in finalizer_prompt
+    assert "只有用户明确要求 BA 报告" in finalizer_prompt
+    assert "必须包含一个 Model Scorecard" not in finalizer_prompt
 
 
 def test_langgraph_initial_payload_uses_digest_instead_of_full_snapshot():
@@ -63,6 +69,40 @@ def test_langgraph_initial_payload_uses_digest_instead_of_full_snapshot():
     assert "shared-199" not in encoded
     assert "cell-119" not in encoded
     assert "frontend_analysis" in encoded
+
+
+def test_langgraph_initial_payload_catalogs_business_analyst_skeleton():
+    registry = get_tool_registry()
+    payload = _initial_payload(
+        question="这里适合开咖啡店吗",
+        snapshot=_snapshot_with_scope(),
+        context=build_context_bundle(_snapshot_with_scope()),
+        registry={"read_current_results": registry["read_current_results"]},
+        artifacts={
+            "business_analyst_skeleton": {
+                "status": "ready",
+                "selected_skill": {
+                    "skill_id": "ba.single_category_site_selection",
+                    "title": "Single category site selection",
+                    "purpose": "Judge site suitability.",
+                    "uses_model_graph": "ba.business_analyst_model_graph.v1",
+                },
+                "model_graph": {"graph_id": "ba.business_analyst_model_graph.v1"},
+                "recommended_path": ["TradeAreaModel", "MarketPotentialModel", "RetailGapModel", "SiteSuitabilityModel"],
+                "path_relations": [{"from": "RetailGapModel", "to": "SiteSuitabilityModel", "relation": "provides_candidate_zones"}],
+                "model_tool_map": {"SiteSuitabilityModel": {"required_tools": ["query_scope_dataset"]}},
+                "skip_conditions": {"HuffGravityModel": ["no candidate site"]},
+                "guardrails": ["recommendation_requires_validation"],
+                "answer_guidance": ["Use this Business Analyst output as an analysis skeleton, not as an answer template."],
+            }
+        },
+    )
+
+    catalog = payload["artifact_catalog"]["business_analyst_skeleton"]
+    assert catalog["selected_skill"]["skill_id"] == "ba.single_category_site_selection"
+    assert catalog["recommended_path"][-1] == "SiteSuitabilityModel"
+    assert catalog["model_tool_map"]["SiteSuitabilityModel"]["required_tools"] == ["query_scope_dataset"]
+    assert catalog["skip_conditions"]["HuffGravityModel"] == ["no candidate site"]
 
 
 def test_langgraph_tool_result_payload_compacts_large_results_and_artifacts():

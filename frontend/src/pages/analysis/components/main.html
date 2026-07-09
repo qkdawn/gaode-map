@@ -294,7 +294,7 @@
                         v-else
                         class="agent-app-center"
                         :class="{
-                            'is-empty': !isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating,
+                            'is-empty': !isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating,
                             'has-thread': agentHasConversationContent() || agentLoading || agentSessionHydrating
                         }">
                         <div
@@ -1967,6 +1967,8 @@
                                 @set-source-group-selected="setAgentPptPlanningSourceGroupSelected"
                                 @move-source-to-group="moveAgentPptPlanningSourceToGroup"
                                 @rename-source="renameAgentPptPlanningSource"
+                                @export-source="exportAgentPptPlanningSource"
+                                @export-all-sources="exportAllAgentPptPlanningSources"
                                 @remove-source="removeAgentPptPlanningSource"
                                 @remove-selected-sources="removeSelectedAgentPptPlanningSources"
                                 @retry-source="retryAgentPptPlanningSource"
@@ -1995,7 +1997,7 @@
                                 @regenerate-revision="regenerateAgentPptPlanningRevision"
                                 @undo-revision="undoAgentPptPlanningRevision">
                                 <template #center>
-                                    <div class="agent-thread-shell agent-ppt-thread-shell" :class="{ 'agent-deep-analysis-thread': isAgentDeepAnalysisTabActive() }">
+                                    <div class="agent-thread-shell agent-ppt-thread-shell">
                                         <div
                                             ref="agentReportThreadBody"
                                             class="agent-report-thread-body agent-report-thread-body-main"
@@ -2022,8 +2024,8 @@
                                                 <div
                                                     v-if="!getAgentThreadMessages().length && !shouldShowAgentThinkingProcessBlock() && !agentClarificationQuestion && !agentRiskPrompt && !agentError && !agentResearchNotes.length && !agentCitations.length"
                                                     class="agent-ppt-center-empty">
-                                                    <strong>继续分析这份 PPT</strong>
-                                                    <span>底部输入框已准备好，可以围绕来源、目录、叙事或指令继续追问。</span>
+                                                    <strong>开始分析</strong>
+                                                    <span>底部输入框已准备好，可以围绕证据、页面支撑、叙事或指令继续追问。</span>
                                                 </div>
 
                                                 <template v-for="(message, index) in getAgentThreadMessages()" :key="`agent-message-ppt-${index}`">
@@ -2093,14 +2095,17 @@
                                                         </div>
                                                     </div>
                                                     <div class="agent-message-row" :class="`is-${message.role}`">
-                                                        <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
+                                                        <div
+                                                            class="agent-message-bubble"
+                                                            :class="[`is-${message.role}`, { 'is-agent-pending': String(message.id || '').startsWith('analysis-quick-ask-pending') }]"
+                                                            v-html="renderAgentMessageHtml(message)"></div>
                                                     </div>
                                                 </template>
 
                                                 <div v-if="shouldShowAgentThinkingProcessBlock()" class="agent-message-row is-assistant">
                                                     <div
                                                         class="agent-message-bubble is-assistant agent-thinking-bubble"
-                                                        :class="{ 'is-debug-open': agentThinkingExpanded, 'is-collapsed': !agentThinkingExpanded && !agentLoading }">
+                                                        :class="{ 'is-debug-open': agentThinkingExpanded, 'is-loading': agentLoading, 'is-collapsed': !agentThinkingExpanded && !agentLoading }">
                                                         __AGENT_THINKING_HEADER__
                                                         __AGENT_REASONING_PANEL__
                                                         <div
@@ -2184,35 +2189,31 @@
                                         </div>
 
                                         <div class="agent-app-composer-wrap agent-ppt-composer-wrap">
-                                            <div class="agent-report-prompts">
-                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '总结这个区域的商业特征' })">总结区域</button>
-                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '哪里适合补充餐饮' })">补充餐饮</button>
-                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '为什么这里路网较差' })">路网原因</button>
-                                                <button type="button" class="agent-shortcut-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '下一步做什么分析' })">下一步建议</button>
+                                            <div class="agent-report-prompts agent-business-prompts">
+                                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请说明已选来源能支撑哪些商业判断，并标出每条判断的证据依据。' })">证据支撑</button>
+                                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请提炼已选来源中最能支撑商业结论的核心论据，并按影响力排序。' })">核心论据</button>
+                                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请识别当前来源对商业判断仍不足的风险缺口，并说明需要补充哪些证据。' })">风险缺口</button>
+                                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="!shouldShowAgentComposer() || agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请把当前分析整理成商业决策口径，突出结论、证据、风险和建议。' })">决策口径</button>
                                             </div>
 
                                             <div class="agent-composer-card">
                                                 <div class="agent-composer-menu-wrap">
-                                                    <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" :disabled="!shouldShowAgentComposer()" @click="toggleAgentComposerMenu" title="更多操作">+</button>
+                                                    <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" :disabled="!shouldShowAgentComposer()" @click="toggleAgentComposerMenu" title="切换回答模式">+</button>
                                                     <div v-if="agentComposerMenuOpen" class="agent-composer-menu">
-                                                        <button type="button" class="agent-composer-menu-item" :disabled="!shouldShowAgentComposer()" @click="startAgentComposerNewReportSession">
-                                                            <span>新报告</span>
-                                                            <small>开启新的追问上下文</small>
-                                                        </button>
                                                         <button type="button" class="agent-composer-menu-item" :disabled="!shouldShowAgentComposer()" @click="selectAgentComposerMode('deep')">
-                                                            <span>深度思考</span>
-                                                            <small>本次发送展示分析过程</small>
+                                                            <span>深度</span>
+                                                            <small>读取已选来源并补充工具证据</small>
                                                         </button>
                                                     </div>
                                                 </div>
                                                 <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
-                                                    深度思考
-                                                    <button type="button" aria-label="取消深度思考" @click="clearAgentComposerMode">×</button>
+                                                    深度
+                                                    <button type="button" aria-label="取消深度" @click="clearAgentComposerMode">×</button>
                                                 </div>
                                                 <textarea
                                                     v-model="agentInput"
                                                     class="agent-composer-input"
-                                                    placeholder="继续追问这份报告..."
+                                                    placeholder="输入问题，快速回答；选择深度后会补充工具证据..."
                                                     :disabled="!shouldShowAgentComposer() || agentSessionHydrating"
                                                     @keydown.enter.exact.prevent="submitAgentComposer()"
                                                 ></textarea>
@@ -2237,12 +2238,12 @@
                             </ppt-planning-workbench>
                         </div>
 
-                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && !isAgentDeepAnalysisTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">
+                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && !agentHasConversationContent() && !agentLoading && !agentSessionHydrating" class="agent-hero">
                             <div class="agent-hero-title">我们先从哪里开始呢？</div>
                             <div class="agent-hero-subtitle">先说问题，Agent 会调用已有工具和分析能力直接处理。</div>
                         </div>
 
-                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell" :class="{ 'agent-deep-analysis-thread': isAgentDeepAnalysisTabActive() }">
+                        <div v-if="!isAgentSummaryTabActive() && !isAgentIterationChangeTabActive() && !isAgentSiteSelectionTabActive() && !isAgentPptPlanningTabActive() && (agentHasConversationContent() || agentLoading || agentSessionHydrating)" class="agent-thread-shell">
                             <div
                                 ref="agentReportThreadBody"
                                 class="agent-report-thread-body agent-report-thread-body-main"
@@ -2333,14 +2334,17 @@
                                         </div>
                                     </div>
                                     <div class="agent-message-row" :class="`is-${message.role}`">
-                                        <div class="agent-message-bubble" :class="`is-${message.role}`" v-html="renderAgentMessageHtml(message)"></div>
+                                        <div
+                                            class="agent-message-bubble"
+                                            :class="[`is-${message.role}`, { 'is-agent-pending': String(message.id || '').startsWith('analysis-quick-ask-pending') }]"
+                                            v-html="renderAgentMessageHtml(message)"></div>
                                     </div>
                                 </template>
 
                                 <div v-if="shouldShowAgentThinkingProcessBlock()" class="agent-message-row is-assistant">
                                     <div
                                         class="agent-message-bubble is-assistant agent-thinking-bubble"
-                                        :class="{ 'is-debug-open': agentThinkingExpanded, 'is-collapsed': !agentThinkingExpanded && !agentLoading }">
+                                        :class="{ 'is-debug-open': agentThinkingExpanded, 'is-loading': agentLoading, 'is-collapsed': !agentThinkingExpanded && !agentLoading }">
                                         __AGENT_THINKING_HEADER__
 
                                         __AGENT_REASONING_PANEL__
@@ -2426,36 +2430,32 @@
                             </div>
                         </div>
 
-                        <div v-if="shouldShowAgentComposer()" class="agent-app-composer-wrap">
-                            <div class="agent-report-prompts">
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '总结这个区域的商业特征' })">总结区域</button>
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '哪里适合补充餐饮' })">补充餐饮</button>
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '为什么这里路网较差' })">路网原因</button>
-                                <button type="button" class="agent-shortcut-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '下一步做什么分析' })">下一步建议</button>
+                        <div v-if="shouldShowAgentGlobalComposer()" class="agent-app-composer-wrap">
+                            <div class="agent-report-prompts agent-business-prompts">
+                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请说明已选来源能支撑哪些商业判断，并标出每条判断的证据依据。' })">证据支撑</button>
+                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请提炼已选来源中最能支撑商业结论的核心论据，并按影响力排序。' })">核心论据</button>
+                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请识别当前来源对商业判断仍不足的风险缺口，并说明需要补充哪些证据。' })">风险缺口</button>
+                                <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请把当前分析整理成商业决策口径，突出结论、证据、风险和建议。' })">决策口径</button>
                             </div>
 
                             <div class="agent-composer-card">
                                 <div class="agent-composer-menu-wrap">
-                                    <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" @click="toggleAgentComposerMenu" title="更多操作">+</button>
+                                    <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" @click="toggleAgentComposerMenu" title="切换回答模式">+</button>
                                     <div v-if="agentComposerMenuOpen" class="agent-composer-menu">
-                                        <button type="button" class="agent-composer-menu-item" @click="startAgentComposerNewReportSession">
-                                            <span>新报告</span>
-                                            <small>开启新的追问上下文</small>
-                                        </button>
                                         <button type="button" class="agent-composer-menu-item" @click="selectAgentComposerMode('deep')">
-                                            <span>深度思考</span>
-                                            <small>本次发送展示分析过程</small>
+                                            <span>深度</span>
+                                            <small>读取已选来源并补充工具证据</small>
                                         </button>
                                     </div>
                                 </div>
                                 <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
-                                    深度思考
-                                    <button type="button" aria-label="取消深度思考" @click="clearAgentComposerMode">×</button>
+                                    深度
+                                    <button type="button" aria-label="取消深度" @click="clearAgentComposerMode">×</button>
                                 </div>
                                 <textarea
                                     v-model="agentInput"
                                     class="agent-composer-input"
-                                    placeholder="继续追问这份报告..."
+                                    placeholder="输入问题，快速回答；选择深度后会补充工具证据..."
                                     :disabled="agentSessionHydrating"
                                     @keydown.enter.exact.prevent="submitAgentComposer()"
                                 ></textarea>
@@ -2519,7 +2519,7 @@
                                         {{ (message.warnings || []).join('；') }}
                                     </div>
                                 </div>
-                                <div v-if="contextAskLoading" class="context-ask-message is-assistant">
+                                <div v-if="contextAskLoading" class="context-ask-message is-assistant is-loading">
                                     <div class="context-ask-bubble">正在解释当前上下文...</div>
                                 </div>
                             </div>

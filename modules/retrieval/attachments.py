@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
-import os
 import re
 import shutil
 from datetime import datetime, timezone
-from functools import partial
 from pathlib import Path
 from typing import Any, BinaryIO, Dict, List
 from uuid import uuid4
 
 from core.config import settings
+from modules.evidence_index import build_source_index_manifest_payload, persist_source_index_manifest_payload
+from modules.evidence_index.schemas import SourceIndexManifest
 
 from .ranker import rank_chunks
 from .schemas import AttachmentChunk, AttachmentRecord, AttachmentSearchHit, KnowledgeChunk
@@ -20,7 +21,9 @@ from .schemas import AttachmentChunk, AttachmentRecord, AttachmentSearchHit, Kno
 
 _METADATA_FILENAME = "metadata.json"
 _CHUNKS_FILENAME = "chunks.json"
+_IMAGE_INDEX_FILENAME = "image_visual_index.json"
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
@@ -46,6 +49,10 @@ def _metadata_path(attachment_dir: Path) -> Path:
 
 def _chunks_path(attachment_dir: Path) -> Path:
     return attachment_dir / _CHUNKS_FILENAME
+
+
+def _image_index_path(attachment_dir: Path) -> Path:
+    return attachment_dir / _IMAGE_INDEX_FILENAME
 
 
 def _record_from_file(path: Path) -> AttachmentRecord | None:
@@ -120,7 +127,7 @@ def save_attachment_upload(
     safe_filename = _safe_segment(Path(filename or "attachment").name, f"attachment{Path(filename or '').suffix}")
     attachment_dir = _conversation_dir(normalized_conversation_id) / attachment_id
     source_dir = attachment_dir / "source"
-    working_dir = attachment_dir / "rag"
+    working_dir = attachment_dir / "image-index"
     output_dir = attachment_dir / "parsed"
     source_dir.mkdir(parents=True, exist_ok=True)
     file_path = source_dir / safe_filename
@@ -191,17 +198,17 @@ async def ingest_attachment(record: AttachmentRecord) -> AttachmentRecord:
     current = record.model_copy(update={"status": "processing", "updated_at": _utc_now(), "error": ""})
     _write_record(current)
     try:
-        chunks = await _process_with_raganything(current)
+        chunks = await _process_attachment_for_index(current)
         if chunks:
             _write_chunks(current, chunks)
         summary = _summarize_chunks(chunks)
         warnings = list(current.warnings or [])
         if not chunks:
-            warnings.append("RAG-Anything 已完成处理，但未返回可检索上下文。")
+            warnings.append("附件索引未返回可检索上下文。")
         current = current.model_copy(
             update={
                 "status": "ready",
-                "summary": summary or "附件已解析，可用于聊天检索。",
+                "summary": summary or "附件已建立索引，可用于聊天检索。",
                 "warnings": warnings,
                 "updated_at": _utc_now(),
             }
@@ -227,131 +234,92 @@ def schedule_attachment_ingest(record: AttachmentRecord) -> None:
         asyncio.run(ingest_attachment(record))
 
 
-async def _process_with_raganything(record: AttachmentRecord) -> List[AttachmentChunk]:
-    try:
-        from raganything import RAGAnything, RAGAnythingConfig
-        from lightrag.llm.openai import openai_complete_if_cache, openai_embed
-        from lightrag.utils import EmbeddingFunc
-    except Exception as exc:
-        raise RuntimeError("raganything_all_dependency_unavailable") from exc
-
-    api_key = str(settings.ai_api_key or "").strip()
-    base_url = str(settings.ai_base_url or "").strip() or None
-    model = str(settings.ai_model or "").strip()
-    embedding_model = str(settings.raganything_embedding_model or "").strip()
-    if not (api_key and model and embedding_model):
-        raise RuntimeError("raganything_provider_not_configured")
-
-    def llm_model_func(prompt, system_prompt=None, history_messages=None, **kwargs):
-        return openai_complete_if_cache(
-            model,
-            prompt,
-            system_prompt=system_prompt,
-            history_messages=history_messages or [],
-            api_key=api_key,
-            base_url=base_url,
-            **kwargs,
-        )
-
-    def vision_model_func(prompt, system_prompt=None, history_messages=None, image_data=None, messages=None, **kwargs):
-        if messages:
-            return openai_complete_if_cache(
-                model,
-                "",
-                system_prompt=None,
-                history_messages=[],
-                messages=messages,
-                api_key=api_key,
-                base_url=base_url,
-                **kwargs,
-            )
-        if image_data:
-            return openai_complete_if_cache(
-                model,
-                "",
-                system_prompt=None,
-                history_messages=[],
-                messages=[
-                    {"role": "system", "content": system_prompt} if system_prompt else None,
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
-                        ],
-                    },
-                ],
-                api_key=api_key,
-                base_url=base_url,
-                **kwargs,
-            )
-        return llm_model_func(prompt, system_prompt, history_messages or [], **kwargs)
-
-    embedding_func = EmbeddingFunc(
-        embedding_dim=int(settings.raganything_embedding_dim or 3072),
-        max_token_size=8192,
-        func=partial(
-            openai_embed.func,
-            model=embedding_model,
-            api_key=api_key,
-            base_url=base_url,
-        ),
-    )
-    config = RAGAnythingConfig(
-        working_dir=record.working_dir,
-        parser_output_dir=record.output_dir,
-        parser=str(settings.raganything_parser or "mineru"),
-        parse_method=str(settings.raganything_parse_method or "auto"),
-        enable_image_processing=True,
-        enable_table_processing=True,
-        enable_equation_processing=True,
-        display_content_stats=False,
-    )
-    rag = RAGAnything(
-        config=config,
-        llm_model_func=llm_model_func,
-        vision_model_func=vision_model_func,
-        embedding_func=embedding_func,
-    )
-    try:
-        await rag.process_document_complete(
-            file_path=record.file_path,
-            output_dir=record.output_dir,
-            parse_method=str(settings.raganything_parse_method or "auto"),
-            doc_id=record.attachment_id,
-            file_name=record.filename,
-        )
-        context = await rag.aquery(
-            "提取这份附件中最重要的文本、图片、表格、公式和页码线索，保留可作为后续问答引用的原文上下文。",
-            mode="hybrid",
-            only_need_context=True,
-            top_k=20,
-        )
-        return _chunks_from_context(record, str(context or ""))
-    finally:
+async def _process_attachment_for_index(record: AttachmentRecord) -> List[AttachmentChunk]:
+    if _is_image_attachment(record):
+        chunks = await _process_image_visual_index(record)
+        _write_image_visual_index(record, chunks)
         try:
-            await rag.finalize_storages()
+            _persist_attachment_image_manifest(record, chunks)
         except Exception:
-            pass
+            logger.exception("Image visual manifest artifact persist failed")
+        return chunks
+    return _process_text_attachment_index(record)
 
 
-def _chunks_from_context(record: AttachmentRecord, context: str) -> List[AttachmentChunk]:
-    text = str(context or "").strip()
-    if not text:
-        return []
-    parts = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
-    if not parts:
-        parts = [text]
+async def _process_image_visual_index(record: AttachmentRecord) -> List[AttachmentChunk]:
+    return _build_image_visual_index(record)
+
+
+def _build_image_visual_index(record: AttachmentRecord) -> List[AttachmentChunk]:
+    metadata = {
+        "conversation_id": record.conversation_id,
+        "history_id": record.history_id,
+        "mime_type": record.mime_type,
+        "image_index_kind": "image_visual_index",
+        "source_path": record.file_path,
+        "open_source_stack": ["PaddleOCR/PP-Structure", "OpenCLIP", "Qdrant"],
+    }
+    dimensions = _read_image_dimensions(record.file_path)
+    if dimensions:
+        metadata["width"] = dimensions["width"]
+        metadata["height"] = dimensions["height"]
+    content = "图片已登记到 ImageVisualIndex。当前索引包含文件定位、格式和尺寸元数据；OCR/layout/caption/vector 节点需由 PaddleOCR/PP-Structure、OpenCLIP 和 Qdrant 处理器补充。"
+    return [
+        AttachmentChunk(
+            chunk_id=f"attachment:{record.attachment_id}:image:metadata",
+            attachment_id=record.attachment_id,
+            filename=record.filename,
+            title=f"{record.filename} 图片索引",
+            content=content,
+            locator="image:full",
+            evidence_level="image_visual_metadata",
+            warnings=["image_visual_index_processor_not_configured"],
+            source_artifacts=[record.filename],
+            metadata=metadata,
+        )
+    ]
+
+
+def _process_text_attachment_index(record: AttachmentRecord) -> List[AttachmentChunk]:
+    path = Path(record.file_path)
+    content = ""
+    if path.suffix.lower() in {".txt", ".md"}:
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+        except UnicodeDecodeError:
+            content = path.read_text(encoding="utf-8", errors="ignore").strip()
+    if not content:
+        return [
+            AttachmentChunk(
+                chunk_id=f"attachment:{record.attachment_id}:file:metadata",
+                attachment_id=record.attachment_id,
+                filename=record.filename,
+                title=f"{record.filename} 附件索引",
+                content="附件已登记到文件索引；当前仅保存文件定位和元数据，文档正文应通过文档库 PageIndex 或专用解析器进入证据层。",
+                locator="file:metadata",
+                evidence_level="attachment_metadata",
+                warnings=["attachment_text_parser_not_configured"],
+                source_artifacts=[record.filename],
+                metadata={
+                    "conversation_id": record.conversation_id,
+                    "history_id": record.history_id,
+                    "mime_type": record.mime_type,
+                    "source_path": record.file_path,
+                },
+            )
+        ]
+    parts = [part.strip() for part in re.split(r"\n{2,}", content) if part.strip()]
     chunks: List[AttachmentChunk] = []
     for index, part in enumerate(parts[:40], start=1):
         chunks.append(
             AttachmentChunk(
-                chunk_id=f"attachment:{record.attachment_id}:chunk:{index}",
+                chunk_id=f"attachment:{record.attachment_id}:text:{index}",
                 attachment_id=record.attachment_id,
                 filename=record.filename,
-                title=f"{record.filename} 片段 {index}",
+                title=f"{record.filename} 文本片段 {index}",
                 content=part[:4000],
-                locator=_extract_locator(part),
+                locator=f"text:{index}",
+                evidence_level="attachment_text",
                 source_artifacts=[record.filename],
                 metadata={
                     "conversation_id": record.conversation_id,
@@ -363,16 +331,69 @@ def _chunks_from_context(record: AttachmentRecord, context: str) -> List[Attachm
     return chunks
 
 
-def _extract_locator(text: str) -> str:
-    match = re.search(r"(?:page|页码|第)\s*[:：]?\s*(\d+)", str(text or ""), re.IGNORECASE)
-    return f"page:{match.group(1)}" if match else ""
-
-
 def _write_chunks(record: AttachmentRecord, chunks: List[AttachmentChunk]) -> None:
     attachment_dir = Path(record.working_dir).parent
     attachment_dir.mkdir(parents=True, exist_ok=True)
     payload = [chunk.model_dump(mode="json") for chunk in chunks]
     _chunks_path(attachment_dir).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _write_image_visual_index(record: AttachmentRecord, chunks: List[AttachmentChunk]) -> None:
+    attachment_dir = Path(record.working_dir).parent
+    attachment_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": "image_visual_index_v1",
+        "attachment_id": record.attachment_id,
+        "filename": record.filename,
+        "mime_type": record.mime_type,
+        "source_path": record.file_path,
+        "nodes": [chunk.model_dump(mode="json") for chunk in chunks],
+        "model_versions": {
+            "ocr_layout": "paddleocr_ppstructure_target",
+            "image_text_embedding": "openclip_target",
+            "vector_store": "qdrant_target",
+        },
+        "diagnostics": [] if chunks else ["image_visual_index_empty"],
+    }
+    _image_index_path(attachment_dir).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _persist_attachment_image_manifest(record: AttachmentRecord, chunks: List[AttachmentChunk]) -> None:
+    history_id = str(record.history_id or "").strip()
+    if not history_id:
+        return
+    source_id = f"image:{record.attachment_id}"
+    manifest_payload = build_source_index_manifest_payload(
+        source_id=source_id,
+        source_kind="image",
+        native_index_kind="image_visual_index",
+        node_count=len(chunks),
+        retrieval_modes=["keyword", "vector"],
+        read_modes=["node_id", "attachment_id", "locator", "bbox"],
+        storage_ref={
+            "attachment_id": record.attachment_id,
+            "working_dir": record.working_dir,
+            "image_visual_index": str(_image_index_path(Path(record.working_dir).parent)),
+        },
+        model_versions={
+            "ocr_layout": "paddleocr_ppstructure_target",
+            "image_text_embedding": "openclip_target",
+            "vector_store": "qdrant_target",
+        },
+        diagnostics=[] if chunks else ["image_visual_index_empty"],
+    )
+    persist_source_index_manifest_payload(
+        history_id,
+        SourceIndexManifest.model_validate(manifest_payload),
+        source_payload={
+            "id": source_id,
+            "title": record.filename,
+            "source_kind": "image",
+            "status": "ready",
+            "evidence_count": len(chunks),
+            "locator_summary": record.filename,
+        },
+    )
 
 
 def _read_chunks(record: AttachmentRecord) -> List[AttachmentChunk]:
@@ -395,6 +416,25 @@ def _summarize_chunks(chunks: List[AttachmentChunk]) -> str:
         return ""
     text = " ".join(chunk.content for chunk in chunks[:3])
     return re.sub(r"\s+", " ", text).strip()[:180]
+
+
+def _is_image_attachment(record: AttachmentRecord) -> bool:
+    mime_type = str(record.mime_type or "").strip().lower()
+    suffix = Path(record.filename or record.file_path or "").suffix.lower()
+    return mime_type.startswith("image/") or suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif"}
+
+
+def _read_image_dimensions(file_path: str) -> Dict[str, int]:
+    try:
+        from PIL import Image
+    except Exception:
+        return {}
+    try:
+        with Image.open(file_path) as image:
+            width, height = image.size
+            return {"width": int(width), "height": int(height)}
+    except Exception:
+        return {}
 
 
 def _search_hit_from_chunk(chunk: AttachmentChunk, *, score: float, snippet: str) -> AttachmentSearchHit:

@@ -340,6 +340,49 @@ def test_ppt_data_sources_api_returns_source_statuses(monkeypatch):
     assert captured == {"area_id": "area-1", "conversation_id": "ppt-tab-1"}
 
 
+def test_ppt_source_manifest_api_returns_lightweight_sources(monkeypatch):
+    captured = {}
+
+    def fake_manifest(area_id, conversation_id=""):
+        captured["area_id"] = area_id
+        captured["conversation_id"] = conversation_id
+        return [
+            PptDataSourceSummary(
+                id="document:doc-1",
+                type="document",
+                title="规划文本",
+                status="ready",
+                summary="PageIndex 12 项",
+                count=12,
+                source_kind="document",
+                evidence_count=12,
+                meta={
+                    "label": "PageIndex 12 项",
+                    "sourceKind": "document",
+                    "document": {"id": "doc-1", "file_name": "plan.pdf"},
+                    "document_index_preview": [{"node_id": "n1", "summary": "heavy"}],
+                    "aiPayload": {"version": "ppt_ai_input_block_v1"},
+                    "ai_payload": {"version": "ppt_ai_input_block_v1"},
+                },
+            )
+        ]
+
+    monkeypatch.setattr(ppt_planning, "list_ppt_source_manifest", fake_manifest)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.get("/api/v1/analysis/ppt/data/source-manifest?area_id=area-1&conversation_id=ppt-tab-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert captured == {"area_id": "area-1", "conversation_id": "ppt-tab-1"}
+    assert payload[0]["id"] == "document:doc-1"
+    assert payload[0]["source_kind"] == "document"
+    assert payload[0]["meta"]["sourceKind"] == "document"
+    assert "document_index_preview" not in payload[0]["meta"]
+    assert "aiPayload" not in payload[0]["meta"]
+    assert "ai_payload" not in payload[0]["meta"]
+
+
 def test_ppt_data_sources_api_maps_database_errors(monkeypatch):
     def fake_list(area_id, conversation_id=""):
         raise SQLAlchemyError("db down")

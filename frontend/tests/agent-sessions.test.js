@@ -13,8 +13,23 @@ import {
   normalizeAgentTurnPayload,
   sortAgentSessions,
 } from '../src/features/agent/sessions.js'
+import {
+  buildAgentAnalysisSnapshot,
+  buildAgentPoiH3Evidence,
+} from '../src/features/agent/analysis-snapshot-evidence.js'
 
 const agentMethods = createAnalysisAgentSessionMethods()
+
+test('agent tabs keep analysis workspace as canonical tab field', () => {
+  const state = createAnalysisAgentInitialState()
+
+  assert.equal(Object.keys(state.agentTabs).includes('analysisWorkspaceTabs'), true)
+  assert.equal(Object.keys(state.agentTabs).includes('pptPlanningTabs'), false)
+
+  state.agentTabs.analysisWorkspaceTabs = [{ id: 'analysis-1' }]
+  assert.equal(state.agentTabs.analysisWorkspaceTabs[0].id, 'analysis-1')
+  assert.equal(JSON.stringify(state.agentTabs).includes('pptPlanningTabs'), false)
+})
 
 function createSseResponse(events = []) {
   const encoder = new TextEncoder()
@@ -356,208 +371,24 @@ test('context ask survives report detail tab switching', () => {
   assert.deepEqual(ctx.contextAskMessages.map((item) => item.content), ['我会围绕“核心判断”解释，不会离开当前区域上下文。', '为什么？'])
 })
 
-test('deep analysis tab persists target across report detail switching', () => {
-  const ctx = createAgentContext()
-  const target = ctx.buildReportSectionContextAskTarget({
-    sectionKey: 'headline',
-    title: '核心判断',
-    summary: '需要继续识别断点',
-  })
-
-  const deepId = ctx.openAgentDeepAnalysisFromTarget(target, { question: '识别断点街区' })
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
-  assert.equal(ctx.getAgentActiveDeepAnalysisTab().target.title, '核心判断')
-  assert.equal(ctx.agentInput, '识别断点街区')
-
-  ctx.openAgentIterationChangeFromReport({ autoload: false })
-  ctx.openAgentSiteSelectionFromReport()
-  ctx.switchAgentTopTab(deepId)
-
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
-  assert.equal(ctx.getAgentActiveDeepAnalysisTab().target.summary, '需要继续识别断点')
-  assert.equal(ctx.agentInput, '识别断点街区')
-})
-
-test('deep analysis submit keeps its tab and sends target context without creating followup', async () => {
+test('analysis composer deep mode uses main agent loop and keeps user message raw', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
-  ctx.openAgentDeepAnalysisFromTarget({
-    type: 'report_section',
-    id: 'headline',
-    title: '核心判断',
-    source: 'report',
-    summary: '路网微循环受阻',
-    evidence: ['road_syntax', 'poi_heatmap'],
-  }, { question: '识别断点街区' })
-
-  let requestBody = null
-  const previousFetch = global.fetch
-  global.fetch = async (url, options = {}) => {
-    if (String(url).includes('/api/v1/analysis/agent/sessions/')) {
-      return {
-        ok: true,
-        async json() {
-          return {
-            id: ctx.activeAgentSessionId,
-            panel_kind: 'deep_analysis',
-            history_id: ctx.getCurrentAgentHistoryId(),
-            status: 'answered',
-            stage: 'answered',
-            messages: ctx.agentMessages,
-            output: {
-              decision: { summary: '断点集中在低连通高活力错配街区。', mode: 'judgment', strength: 'moderate', can_act: true },
-              support: [{ headline: '路网证据', interpretation: '空间句法指标偏弱', source: 'road_syntax', confidence: 'moderate' }],
-              actions: [{ title: '叠加 POI 热力复核', detail: '验证断点周边活力是否被割裂' }],
-              counterpoints: [],
-              boundary: [],
-            },
-            diagnostics: { execution_trace: [{ tool_name: 'compute_road_syntax_from_scope', status: 'success' }], citations: ['road'] },
-            context_summary: {},
-            plan: {},
-            risk_confirmations: [],
-          }
-        },
-      }
-    }
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
-    requestBody = JSON.parse(String(options.body || '{}'))
-    return createSseResponse([
-      {
-        type: 'final',
-        payload: {
-          response: {
-            status: 'answered',
-            stage: 'answered',
-            output: {
-              answer: '应优先识别低连通高活力错配街区。',
-              clarification_question: '',
-              clarification_options: [],
-              risk_prompt: '',
-              panel_payloads: {},
-            },
-            diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
-            context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-            plan: { steps: [], followup_steps: [], followup_applied: false },
-            messages: [
-              { role: 'assistant', content: '应优先识别低连通高活力错配街区。' },
-            ],
-            risk_confirmations: [],
-          },
-        },
-      },
-    ])
-  }
-
-  try {
-    await ctx.submitAgentTurn({ panelKind: 'deep_analysis' })
-  } finally {
-    global.fetch = previousFetch
-  }
-
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
-  assert.equal(ctx.agentTabs.followupTabs.length, 0)
-  assert.match(requestBody.messages[0].content, /继续分析任务/)
-  assert.match(requestBody.messages[0].content, /核心判断/)
-  assert.match(requestBody.messages[0].content, /road_syntax/)
-  assert.equal(requestBody.thinking_mode, 'quick')
-  assert.doesNotMatch(requestBody.messages[0].content, /可写回报告的新模块/)
-  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '应优先识别低连通高活力错配街区。'])
-  assert.equal(ctx.agentMessages[1].role, 'assistant')
-  assert.equal(ctx.findAgentSession(ctx.activeAgentSessionId).panelKind, 'deep_analysis')
-})
-
-test('deep analysis mode is included in prompt and result stays as natural answer', async () => {
-  const ctx = createAgentContext({
-    agentPanelPayloads: {
-      summary_pack: buildSummaryPack('这是一个以日常生活消费为主的社区级商业区'),
-      summary_status: { status: 'ready', generated: true },
-    },
-  })
-  ctx.agentSessionsLoaded = true
-  ctx.openAgentDeepAnalysisFromTarget({
-    type: 'report_section',
-    id: 'headline',
-    title: '核心判断',
-    source: 'report',
-    summary: '需要继续识别断点',
-    evidence: ['road_syntax'],
-  }, { question: '识别断点街区', mode: 'deep' })
-  ctx.setAgentDeepAnalysisMode('deep')
-  ctx.updateAgentSessionSnapshot(ctx.activeAgentSessionId, (session) => ({
-    ...session,
-    persisted: true,
-    panelKind: 'deep_analysis',
-  }))
-
-  let requestBody = null
-  const previousFetch = global.fetch
-  global.fetch = async (url, options = {}) => {
-    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
-    requestBody = JSON.parse(String(options.body || '{}'))
-    return createSseResponse([
-      {
-        type: 'final',
-        payload: {
-          response: {
-            status: 'answered',
-            stage: 'answered',
-            output: {
-              answer: '断点集中在低连通高活力错配街区，建议再叠加 POI 热力复核周边活力是否被割裂。',
-              clarification_question: '',
-              clarification_options: [],
-              risk_prompt: '',
-              panel_payloads: {},
-            },
-            diagnostics: { execution_trace: [{ tool_name: 'compute_road_syntax_from_scope', status: 'success' }], used_tools: ['compute_road_syntax_from_scope'], citations: ['road'], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
-            context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-            plan: { steps: [], followup_steps: [], followup_applied: false },
-            messages: [
-              { role: 'assistant', content: '断点集中在低连通高活力错配街区，建议再叠加 POI 热力复核周边活力是否被割裂。' },
-            ],
-            risk_confirmations: [],
-          },
-        },
-      },
-    ])
-  }
-
-  try {
-    await ctx.submitAgentTurn({ panelKind: 'deep_analysis' })
-  } finally {
-    global.fetch = previousFetch
-  }
-
-  assert.equal(requestBody.thinking_mode, 'deep')
-  assert.match(requestBody.messages[0].content, /深度思考/)
-  assert.match(requestBody.messages[0].content, /深度思考工作方式/)
-  assert.match(requestBody.messages[0].content, /直接回答用户问题/)
-  assert.doesNotMatch(requestBody.messages[0].content, /空间自洽/)
-  assert.doesNotMatch(requestBody.messages[0].content, /可写回报告的新模块/)
-  assert.deepEqual(
-    ctx.agentMessages.map((item) => item.content),
-    ['识别断点街区', '断点集中在低连通高活力错配街区，建议再叠加 POI 热力复核周边活力是否被割裂。'],
-  )
-})
-
-test('composer plus menu selects one-shot deep thinking mode and keeps user message raw', async () => {
-  const ctx = createAgentContext()
-  ctx.agentSessionsLoaded = true
-  ctx.openAgentFollowupFromSummary('', '追问解释')
+  ctx.startNewAgentReportSession()
+  ctx.openAgentPptPlanningFromReport()
   ctx.agentInput = '识别断点街区'
 
   ctx.toggleAgentComposerMenu()
   assert.equal(ctx.agentComposerMenuOpen, true)
   ctx.selectAgentComposerMode('deep')
   assert.equal(ctx.agentComposerMode, 'deep')
-  assert.equal(ctx.agentDeepAnalysisMode, 'deep')
   assert.equal(ctx.agentComposerMenuOpen, false)
 
   let requestBody = null
   const previousFetch = global.fetch
   global.fetch = async (url, options = {}) => {
     if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
       {
@@ -587,19 +418,17 @@ test('composer plus menu selects one-shot deep thinking mode and keeps user mess
   }
 
   try {
-    await ctx.submitAgentTurn({ panelKind: 'deep_analysis' })
+    await ctx.submitAgentComposer()
   } finally {
     global.fetch = previousFetch
   }
 
-  assert.equal(requestBody.thinking_mode, 'deep')
-  assert.match(requestBody.messages[0].content, /深度思考/)
-  assert.match(requestBody.messages[0].content, /深度思考工作方式/)
-  assert.match(requestBody.messages[0].content, /用户问题：识别断点街区/)
+  assert.equal(Object.prototype.hasOwnProperty.call(requestBody, 'thinking_mode'), false)
+  assert.equal(requestBody.messages[0].content, '识别断点街区')
+  assert.doesNotMatch(requestBody.messages[0].content, /深度分析工作方式/)
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['识别断点街区', '断点集中在低连通高活力错配街区。'])
   assert.equal(ctx.agentMessages[1].role, 'assistant')
   assert.equal(ctx.agentComposerMode, '')
-  assert.equal(ctx.agentDeepAnalysisMode, 'deep')
 })
 
 test('composer plus menu preserves new report action and clears deep mode', () => {
@@ -612,32 +441,8 @@ test('composer plus menu preserves new report action and clears deep mode', () =
   ctx.startAgentComposerNewReportSession()
 
   assert.equal(ctx.agentComposerMode, '')
-  assert.equal(ctx.agentDeepAnalysisMode, 'quick')
   assert.equal(ctx.agentWorkspaceView, 'report')
   assert.ok(ctx.activeAgentSessionId)
-})
-
-test('quick deep-analysis prompt does not add deep thinking review workflow', () => {
-  const ctx = createAgentContext()
-  ctx.agentSessionsLoaded = true
-  const target = ctx.buildReportSectionContextAskTarget({
-    sectionKey: 'report_continue',
-    title: '区域报告',
-    summary: '夜光增强但文旅供给不足。',
-  })
-
-  ctx.openAgentDeepAnalysisFromTarget(target, {
-    question: '请形成下一轮策划定位和补证据计划。',
-    mode: 'quick',
-  })
-  ctx.setAgentDeepAnalysisMode('quick')
-  const prompt = ctx.buildAgentDeepAnalysisPrompt('请形成下一轮策划定位和补证据计划。', target)
-
-  assert.match(prompt, /快速继续分析任务/)
-  assert.match(prompt, /直接回答用户问题/)
-  assert.doesNotMatch(prompt, /深度思考工作方式/)
-  assert.doesNotMatch(prompt, /可写回报告的新模块/)
-  assert.match(prompt, /用户问题：请形成下一轮策划定位和补证据计划。/)
 })
 
 test('submitContextAskQuestion appends user and assistant messages', async () => {
@@ -1279,7 +1084,7 @@ test('agent task start reuses current session and submits continuation after cal
     computeCount += 1
     ctx.populationOverview = { summary: { total_population: 100 } }
   }
-  ctx.submitAgentTurn = async ({ prompt }) => {
+  ctx.submitMainAgentTurn = async ({ prompt }) => {
     submittedPrompt = prompt
   }
   ctx.setAgentTaskConfirmation({
@@ -1312,7 +1117,7 @@ test('clarification option click submits immediately without mutating composer i
     agentInput: '底部追问框内容',
   })
   let submittedPrompt = ''
-  ctx.submitAgentTurn = ({ prompt }) => {
+  ctx.submitMainAgentTurn = ({ prompt }) => {
     submittedPrompt = prompt
   }
 
@@ -1329,7 +1134,7 @@ test('clarification draft submit uses inline input and keeps composer untouched'
     agentClarificationDraft: '比较人口和夜间活力哪个更弱',
   })
   let submittedPrompt = ''
-  ctx.submitAgentTurn = ({ prompt }) => {
+  ctx.submitMainAgentTurn = ({ prompt }) => {
     submittedPrompt = prompt
   }
 
@@ -1716,7 +1521,7 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
   assert.equal(ctx.findAgentSession(ctx.activeAgentSessionId).persisted, false)
 
   global.fetch = async (url, options = {}) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       const payload = JSON.parse(String(options.body || '{}'))
       assert.equal(payload.conversation_id, ctx.activeAgentSessionId)
       assert.equal(payload.governance_mode, 'auto')
@@ -1819,7 +1624,7 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
   }
 
   ctx.agentInput = '总结这个区域'
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(ctx.agentThinkingTimeline.length >= 1, true)
   assert.equal(ctx.getAgentHistorySessions().length, 1)
@@ -1841,13 +1646,13 @@ test('cancelAgentTurn aborts in-flight agent request and restores idle state', a
   let capturedSignal = null
   const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     capturedSignal = options.signal
     streamStarted.resolve()
     return createAbortablePendingResponse(options.signal)
   }
 
-  const pending = ctx.submitAgentTurn()
+  const pending = ctx.submitMainAgentTurn()
   await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before cancel test')
 
   assert.equal(ctx.agentLoading, true)
@@ -1867,7 +1672,7 @@ test('cancelAgentTurn aborts in-flight agent request and restores idle state', a
   assert.equal(ctx.agentInput, '总结这个区域')
 })
 
-test('submitAgentTurn does not send standalone attachment ids', async () => {
+test('submitMainAgentTurn does not send standalone attachment ids', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -1876,7 +1681,7 @@ test('submitAgentTurn does not send standalone attachment ids', async () => {
   let requestBody = null
   global.fetch = async (url, options = {}) => {
     if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
       {
@@ -1895,12 +1700,12 @@ test('submitAgentTurn does not send standalone attachment ids', async () => {
     ])
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(Object.prototype.hasOwnProperty.call(requestBody, 'attachment_ids'), false)
 })
 
-test('submitAgentTurn caches automatic visual snapshots after first capture', async () => {
+test('submitMainAgentTurn caches automatic visual snapshots after first capture', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -1924,7 +1729,7 @@ test('submitAgentTurn caches automatic visual snapshots after first capture', as
   const requestBodies = []
   global.fetch = async (url, options = {}) => {
     if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     requestBodies.push(JSON.parse(String(options.body || '{}')))
     return createSseResponse([
       {
@@ -1943,9 +1748,9 @@ test('submitAgentTurn caches automatic visual snapshots after first capture', as
     ])
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
   ctx.agentInput = '继续解释'
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(captureCount, 1)
   assert.equal(requestBodies.length, 2)
@@ -1955,7 +1760,7 @@ test('submitAgentTurn caches automatic visual snapshots after first capture', as
   assert.equal(ctx.agentVisualSnapshotCache.visual_snapshots[0].snapshot_id, 'visual-road')
 })
 
-test('submitAgentTurn drops invalid visual snapshots from cache and request body', async () => {
+test('submitMainAgentTurn drops invalid visual snapshots from cache and request body', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -1980,7 +1785,7 @@ test('submitAgentTurn drops invalid visual snapshots from cache and request body
   let requestBody = null
   global.fetch = async (url, options = {}) => {
     if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
       {
@@ -1999,7 +1804,7 @@ test('submitAgentTurn drops invalid visual snapshots from cache and request body
     ])
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(requestBody.visual_snapshots.length, 1)
   assert.equal(requestBody.visual_snapshots[0].snapshot_id, 'visual-road')
@@ -2030,7 +1835,7 @@ test('getCachedAgentVisualSnapshots self-heals old cache entries without image d
   assert.equal(ctx.agentVisualSnapshotCache.warnings.some((item) => item.includes('当前地图总览 未传入有效图片')), true)
 })
 
-test('submitAgentTurn refreshes visual snapshot cache when fingerprint changes', async () => {
+test('submitMainAgentTurn refreshes visual snapshot cache when fingerprint changes', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -2046,7 +1851,7 @@ test('submitAgentTurn refreshes visual snapshot cache when fingerprint changes',
   const requestBodies = []
   global.fetch = async (url, options = {}) => {
     if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     requestBodies.push(JSON.parse(String(options.body || '{}')))
     return createSseResponse([
       {
@@ -2065,17 +1870,17 @@ test('submitAgentTurn refreshes visual snapshot cache when fingerprint changes',
     ])
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
   ctx.agentInput = '换了结果后再总结'
   ctx.allPoisDetails = [{ id: 'poi-1' }]
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(captureCount, 2)
   assert.equal(requestBodies[0].visual_snapshots[0].snapshot_id, 'visual-1')
   assert.equal(requestBodies[1].visual_snapshots[0].snapshot_id, 'visual-2')
 })
 
-test('submitAgentTurn continues when visual snapshot cache generation fails', async () => {
+test('submitMainAgentTurn continues when visual snapshot cache generation fails', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -2087,7 +1892,7 @@ test('submitAgentTurn continues when visual snapshot cache generation fails', as
   let requestBody = null
   global.fetch = async (url, options = {}) => {
     if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
       {
@@ -2106,7 +1911,7 @@ test('submitAgentTurn continues when visual snapshot cache generation fails', as
     ])
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.deepEqual(requestBody.visual_snapshots, [])
   assert.equal(ctx.agentVisualSnapshotCache.status, 'failed')
@@ -2129,7 +1934,7 @@ test('ensureAgentVisualSnapshotCache does not retry failed cache for same finger
   assert.equal(captureCount, 1)
 })
 
-test('submitAgentTurn sends map search context separately from analysis snapshot', async () => {
+test('submitMainAgentTurn sends map search context separately from analysis snapshot', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -2149,7 +1954,7 @@ test('submitAgentTurn sends map search context separately from analysis snapshot
   let requestBody = null
   global.fetch = async (url, options = {}) => {
     if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     requestBody = JSON.parse(String(options.body || '{}'))
     return createSseResponse([
       {
@@ -2168,7 +1973,7 @@ test('submitAgentTurn sends map search context separately from analysis snapshot
     ])
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(requestBody.analysis_snapshot.context.place_anchors, undefined)
   assert.equal(requestBody.analysis_snapshot.context.spatial_anchors, undefined)
@@ -2468,7 +2273,7 @@ test('agent visual snapshot cache mirror is dev gated', () => {
   }
 })
 
-test('submitAgentTurn ignores duplicate submit while active session is running', async () => {
+test('submitMainAgentTurn ignores duplicate submit while active session is running', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -2477,20 +2282,20 @@ test('submitAgentTurn ignores duplicate submit while active session is running',
   let runRequestCount = 0
   const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     runRequestCount += 1
     streamStarted.resolve()
     return createAbortablePendingResponse(options.signal)
   }
 
-  const pending = ctx.submitAgentTurn()
+  const pending = ctx.submitMainAgentTurn()
   await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before duplicate-submit test')
 
   assert.equal(ctx.agentLoading, true)
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['哪里适合补充餐饮'])
 
   ctx.agentInput = '哪里适合补充餐饮'
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(runRequestCount, 1)
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['哪里适合补充餐饮'])
@@ -2508,7 +2313,7 @@ test('running session survives switching to a new report and can be revisited', 
   const pendingBySessionId = new Map()
   const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     const payload = JSON.parse(String(options.body || '{}'))
     const sessionId = String(payload.conversation_id || '')
     const pending = createAbortablePendingResponse(options.signal)
@@ -2518,7 +2323,7 @@ test('running session survives switching to a new report and can be revisited', 
   }
 
   const sessionAId = ctx.activeAgentSessionId
-  const pendingA = ctx.submitAgentTurn()
+  const pendingA = ctx.submitMainAgentTurn()
   await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before session-switch test')
 
   assert.equal(ctx.isAgentSessionRunning(sessionAId), true)
@@ -2543,7 +2348,7 @@ test('running session survives switching to a new report and can be revisited', 
   assert.equal(ctx.isAgentSessionRunning(sessionAId), false)
 })
 
-test('parallel agent turns can run concurrently and cancel only the active session', async () => {
+test('parallel main agent loop requests can run concurrently and cancel only the active session', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -2555,7 +2360,7 @@ test('parallel agent turns can run concurrently and cancel only the active sessi
   let sessionAId = ''
   let sessionBId = ''
   global.fetch = async (url, options = {}) => {
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     const payload = JSON.parse(String(options.body || '{}'))
     const sessionId = String(payload.conversation_id || '')
     const pending = createAbortablePendingResponse(options.signal)
@@ -2566,13 +2371,13 @@ test('parallel agent turns can run concurrently and cancel only the active sessi
   }
 
   sessionAId = ctx.activeAgentSessionId
-  const pendingA = ctx.submitAgentTurn()
+  const pendingA = ctx.submitMainAgentTurn()
   await waitForDeferred(streamStartedA.promise, 'first agent stream fetch did not start before parallel-turn test')
 
   ctx.startNewAgentReportSession()
   ctx.agentInput = '下一步做什么分析'
   sessionBId = ctx.activeAgentSessionId
-  const pendingB = ctx.submitAgentTurn()
+  const pendingB = ctx.submitMainAgentTurn()
   await waitForDeferred(streamStartedB.promise, 'second agent stream fetch did not start before parallel-turn test')
 
   assert.equal(ctx.getRunningAgentSessionCount(), 2)
@@ -2727,7 +2532,7 @@ test('reasoning deltas are merged in-memory and can be cleared before persistenc
   assert.equal(ctx.agentReasoningBlocks.length, 0)
 })
 
-test('submitAgentTurn shows submit process before first stream event', async () => {
+test('submitMainAgentTurn shows submit process before first stream event', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -2755,7 +2560,7 @@ test('submitAgentTurn shows submit process before first stream event', async () 
     return createAbortablePendingResponse(options.signal)
   }
 
-  const pending = ctx.submitAgentTurn()
+  const pending = ctx.submitMainAgentTurn()
   try {
     await waitForDeferred(streamStarted.promise, 'agent stream fetch did not start before process-steps test')
 
@@ -2780,7 +2585,7 @@ test('submitAgentTurn shows submit process before first stream event', async () 
   }
 })
 
-test('submitAgentTurn collapses process when stream errors before final response', async () => {
+test('submitMainAgentTurn collapses process when stream errors before final response', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
@@ -2803,7 +2608,7 @@ test('submitAgentTurn collapses process when stream errors before final response
     ])
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(ctx.agentStatus, 'failed')
   assert.equal(ctx.agentThinkingExpanded, false)
@@ -2951,6 +2756,27 @@ test('getAgentNaturalProcessItems only renders explicit display text and tool us
   assert.equal(items[2].metaText, '确认当前已有 POI、人口、夜光和路网证据状态。')
 })
 
+test('getAgentNaturalProcessItems renders tool finish result summary without display text', () => {
+  const ctx = createAgentContext()
+
+  ctx.upsertAgentTraceThinkingItem({
+    id: 'tool-call-query-scope-dataset-success',
+    tool_name: 'query_scope_dataset',
+    status: 'success',
+    message: '执行成功',
+    result_summary: '返回 8 条当前范围 POI 记录。',
+    evidence_count: 8,
+    warning_count: 1,
+  })
+
+  const items = ctx.getAgentNaturalProcessItems()
+
+  assert.equal(items.length, 1)
+  assert.equal(items[0].text, '返回 8 条当前范围 POI 记录。')
+  assert.equal(items[0].metaText, '证据：8 条；警告：1 条')
+  assert.equal(items[0].kind, 'result')
+})
+
 test('getAgentProcessRoleGroups groups role steps into first-level panels', () => {
   const ctx = createAgentContext()
 
@@ -3064,7 +2890,7 @@ test('status events create visible process fallback steps', async () => {
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       return createSseResponse([
         {
           type: 'status',
@@ -3135,7 +2961,7 @@ test('status events create visible process fallback steps', async () => {
     }
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.deepEqual(
     ctx.getAgentVisibleProcessSteps().map((item) => item.id),
@@ -3328,14 +3154,14 @@ test('maybePreloadPanelForAgentTool preloads matching panel once without switchi
   assert.deepEqual(ctx.getAgentPanelPreloadNotes().map((item) => item.label), ['已预加载人口面板数据'])
 })
 
-test('submitAgentTurn appends user message immediately and updates thinking timeline from stream', async () => {
+test('submitMainAgentTurn appends user message immediately and updates thinking timeline from stream', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['总结这个区域'])
       return createSseResponse([
         {
@@ -3464,7 +3290,7 @@ test('submitAgentTurn appends user message immediately and updates thinking time
     }
   }
 
-  const pending = ctx.submitAgentTurn()
+  const pending = ctx.submitMainAgentTurn()
   await Promise.resolve()
 
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['总结这个区域'])
@@ -3531,7 +3357,7 @@ test('clarification follow-up continues in the same session instead of opening a
   const originalSessionId = ctx.activeAgentSessionId
   let capturedConversationId = ''
   global.fetch = async (url, options = {}) => {
-    assert.equal(url, '/api/v1/analysis/agent/turn/stream')
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
     const payload = JSON.parse(String(options.body || '{}'))
     capturedConversationId = String(payload.conversation_id || '')
     return createSseResponse([
@@ -3606,7 +3432,7 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
   ctx.agentInput = '第二轮问题'
 
   global.fetch = async (url) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       await Promise.resolve()
       return createSseResponse([
         { type: 'status', payload: { stage: 'gating', label: '门卫判断' } },
@@ -3683,7 +3509,7 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
     }
   }
 
-  const pending = ctx.submitAgentTurn()
+  const pending = ctx.submitMainAgentTurn()
   await Promise.resolve()
 
   assert.deepEqual(
@@ -3725,14 +3551,14 @@ test('getAgentMessagesAfterThinking only returns assistant messages from the cur
   assert.deepEqual(ctx.getAgentMessagesAfterThinking().map((item) => item.content), ['第二轮回答'])
 })
 
-test('submitAgentTurn keeps streamed timeline order when final diagnostics omit intermediate steps', async () => {
+test('submitMainAgentTurn keeps streamed timeline order when final diagnostics omit intermediate steps', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       return createSseResponse([
         {
           type: 'status',
@@ -3840,7 +3666,7 @@ test('submitAgentTurn keeps streamed timeline order when final diagnostics omit 
     }
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   const steps = ctx.getAgentVisibleProcessSteps()
   assert.deepEqual(
@@ -3850,14 +3676,14 @@ test('submitAgentTurn keeps streamed timeline order when final diagnostics omit 
   assert.equal(steps[4].detail, '先读取当前结果。')
 })
 
-test('submitAgentTurn shows streamed plan above final response and keeps checklist expanded by default', async () => {
+test('submitMainAgentTurn shows streamed plan above final response and keeps checklist expanded by default', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       return createSseResponse([
         {
           type: 'plan',
@@ -3955,7 +3781,7 @@ test('submitAgentTurn shows streamed plan above final response and keeps checkli
     }
   }
 
-  const pending = ctx.submitAgentTurn()
+  const pending = ctx.submitMainAgentTurn()
   await pending
 
   assert.equal(ctx.agentPlan.steps.length, 2)
@@ -3967,7 +3793,7 @@ test('submitAgentTurn shows streamed plan above final response and keeps checkli
   assert.equal(ctx.getAgentPlanChecklist().groups[0].items[1].status, 'pending')
 })
 
-test('submitAgentTurn preloads mapped panel after successful trace and records lightweight note', async () => {
+test('submitMainAgentTurn preloads mapped panel after successful trace and records lightweight note', async () => {
   let h3EnsureCount = 0
   let h3ChartsCount = 0
   let decisionCardsCount = 0
@@ -3992,7 +3818,7 @@ test('submitAgentTurn preloads mapped panel after successful trace and records l
   ctx.agentInput = '哪里是商业核心'
 
   global.fetch = async (url) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       return createSseResponse([
         {
           type: 'trace',
@@ -4062,7 +3888,7 @@ test('submitAgentTurn preloads mapped panel after successful trace and records l
     }
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(h3EnsureCount, 1)
   assert.equal(h3ChartsCount, 1)
@@ -4244,7 +4070,7 @@ test('site selection analysis calls direct API instead of agent stream', async (
 
   const siteSelectionCalls = calls.filter((call) => call.url === '/api/v1/analysis/agent/site-selection')
   assert.equal(siteSelectionCalls.length, 1)
-  assert.equal(calls.some((call) => call.url.includes('/agent/turn/stream')), false)
+  assert.equal(calls.some((call) => call.url.includes('/agent/main-loop/stream')), false)
   assert.equal(ctx.agentTabs.activeTabId, tabId)
   assert.equal(ctx.isAgentSiteSelectionTabActive(), true)
   assert.equal(ctx.getAgentSiteSelectionPack().summary_text, '已形成候选格。')
@@ -4447,14 +4273,14 @@ test('site selection tabs persist and restore with panel payloads', () => {
   assert.equal(restored.getAgentSiteSelectionPack().summary_text, '已形成候选格。')
 })
 
-test('submitAgentTurn collapses failed thinking timeline after final response', async () => {
+test('submitMainAgentTurn collapses failed thinking timeline after final response', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
   ctx.agentInput = '总结这个区域'
 
   global.fetch = async (url) => {
-    if (url === '/api/v1/analysis/agent/turn/stream') {
+    if (url === '/api/v1/analysis/agent/main-loop/stream') {
       return createSseResponse([
         {
           type: 'thinking',
@@ -4514,7 +4340,7 @@ test('submitAgentTurn collapses failed thinking timeline after final response', 
     throw new Error(`unexpected fetch ${url}`)
   }
 
-  await ctx.submitAgentTurn()
+  await ctx.submitMainAgentTurn()
 
   assert.equal(ctx.agentStatus, 'failed')
   assert.equal(ctx.agentThinkingExpanded, false)
@@ -4791,13 +4617,14 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.shouldShowAgentComposer(), false)
 
   const pptId = ctx.openAgentPptPlanningFromReport()
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'ppt_planning')
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'analysis')
   assert.equal(ctx.agentTabs.activeTabId, pptId)
   assert.equal(ctx.isAgentPptPlanningTabActive(), true)
   assert.equal(ctx.isAgentReportDetailView(), true)
-  assert.equal(ctx.getAgentWorkspaceNavTitle(), '策划 PPT')
-  assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '先生成 PPT 指令文件，再选择风格 Skill 生成页面')
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '分析')
+  assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '围绕已选来源做快速或深度分析，也可继续生成展示材料')
   assert.equal(ctx.shouldShowAgentComposer(), true)
+  assert.equal(ctx.shouldShowAgentGlobalComposer(), false)
   assert.equal(ctx.openAgentPptPlanningFromReport(), pptId)
 
   ctx.returnToAgentReportHome()
@@ -4815,14 +4642,7 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '追问解释')
   assert.equal(ctx.shouldShowAgentComposer(), false)
 
-  const deepId = ctx.openAgentDeepAnalysisFromTarget(ctx.buildReportSectionContextAskTarget({
-    sectionKey: 'headline',
-    title: '核心判断',
-    summary: '继续研究这个判断',
-  }))
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'deep_analysis')
-  assert.equal(ctx.agentTabs.activeTabId, deepId)
-  assert.equal(ctx.getAgentWorkspaceNavTitle(), '继续分析')
+  assert.equal(ctx.getAgentWorkspaceNavTitle(), '追问解释')
   assert.equal(ctx.shouldShowAgentComposer(), false)
 })
 
@@ -4832,21 +4652,87 @@ test('ppt planning keeps center composer turns in the ppt tab', () => {
   ctx.startNewAgentReportSession()
 
   const pptId = ctx.openAgentPptPlanningFromReport()
-  ctx.agentInput = '继续分析这份 PPT 资料'
+  ctx.agentInput = '继续分析当前资料'
 
   const turnContext = ctx.buildTurnContext()
 
-  assert.equal(turnContext.panelKind, 'ppt_planning')
+  assert.equal(turnContext.panelKind, 'analysis')
   assert.equal(ctx.agentTabs.activeTabId, pptId)
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'ppt_planning')
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'analysis')
   assert.deepEqual(
     ctx.agentTabs.followupTabs.map((item) => item.title),
     [],
   )
   assert.deepEqual(
     turnContext.nextMessages.map((item) => item.content),
-    ['继续分析这份 PPT 资料'],
+    ['继续分析当前资料'],
   )
+})
+
+test('composer outside analysis tab opens analysis quick answer instead of main loop', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  assert.notEqual(ctx.getAgentActiveTopTab().kind, 'analysis')
+  ctx.getAgentPptPlanningStateWithSystemSources = () => ctx.getAgentActivePptPlanningState()
+  ctx.refreshAgentActivePptPlanningSources = () => {}
+  ctx.refreshAgentActivePptPlanningDataSources = () => {}
+  const originalOpenPpt = ctx.openAgentPptPlanningFromReport.bind(ctx)
+  ctx.openAgentPptPlanningFromReport = (options = {}) => {
+    const tabId = originalOpenPpt(options)
+    ctx.updateAgentActivePptPlanningState({
+      ...ctx.getAgentActivePptPlanningState(),
+      sources: [{
+        id: 'current:scope',
+        type: 'data',
+        title: '当前等时圈范围',
+        status: 'ready',
+        selected: true,
+        meta: {
+          sourceKind: 'system',
+          aiPayload: {
+            version: 'ppt_ai_input_block_v1',
+            source_id: 'current:scope',
+            title: '当前等时圈范围',
+            included: ['scope', 'evidence'],
+            scope: { has_polygon: true },
+            evidence: [{ title: '范围', text: '当前区域' }],
+            counts: { scope: 1, evidence: 1 },
+          },
+        },
+      }],
+    })
+    return tabId
+  }
+
+  let submitMainAgentTurnCalled = false
+  ctx.submitMainAgentTurn = async () => {
+    submitMainAgentTurnCalled = true
+  }
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url, body: JSON.parse(options.body || '{}') })
+    return {
+      ok: true,
+      async json() {
+        return { status: 'success', answer: '范围证据可用于 PPT。', evidence: [], citations: [], warnings: [] }
+      },
+    }
+  }
+
+  try {
+    ctx.agentInput = '这些资料能说明什么？'
+    await ctx.submitAgentComposer()
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(submitMainAgentTurnCalled, false)
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'analysis')
+  assert.deepEqual(ctx.agentTabs.followupTabs, [])
+  assert.equal(calls.some((item) => String(item.url).includes('/api/v1/analysis/agent/context-ask')), true)
+  assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['这些资料能说明什么？', '范围证据可用于 PPT。'])
 })
 
 test('ppt planning quick composer uses lightweight ask without agent tool turn', async () => {
@@ -4876,9 +4762,9 @@ test('ppt planning quick composer uses lightweight ask without agent tool turn',
       },
     }],
   })
-  let submitAgentTurnCalled = false
-  ctx.submitAgentTurn = async () => {
-    submitAgentTurnCalled = true
+  let submitMainAgentTurnCalled = false
+  ctx.submitMainAgentTurn = async () => {
+    submitMainAgentTurnCalled = true
   }
   const calls = []
   const originalFetch = globalThis.fetch
@@ -4899,14 +4785,14 @@ test('ppt planning quick composer uses lightweight ask without agent tool turn',
     globalThis.fetch = originalFetch
   }
 
-  assert.equal(submitAgentTurnCalled, false)
+  assert.equal(submitMainAgentTurnCalled, false)
   assert.equal(ctx.agentTabs.activeTabId, pptId)
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'ppt_planning')
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'analysis')
   assert.deepEqual(ctx.agentTabs.followupTabs, [])
   assert.equal(calls[0].url, '/api/v1/analysis/agent/context-ask')
   assert.equal(calls[0].body.require_ai, true)
-  assert.equal(calls[0].body.target.type, 'ppt_sources')
-  assert.equal(calls[0].body.target.source, 'ppt_planning')
+  assert.equal(calls[0].body.target.type, 'analysis_sources')
+  assert.equal(calls[0].body.target.source, 'analysis')
   assert.deepEqual(ctx.agentMessages.map((item) => item.content), ['这些资料能说明什么？', '范围证据可用于 PPT。'])
   assert.equal(ctx.agentMessages.some((item) => item.process), false)
   assert.deepEqual(ctx.agentThinkingTimeline, [])
@@ -4914,13 +4800,13 @@ test('ppt planning quick composer uses lightweight ask without agent tool turn',
   assert.deepEqual(ctx.agentPlan.steps, [])
 })
 
-test('ppt planning deep composer keeps existing agent turn flow', async () => {
+test('analysis deep composer calls main agent loop', async () => {
   const ctx = createAgentContext()
   ctx.agentSessionsLoaded = true
   ctx.startNewAgentReportSession()
   ctx.openAgentPptPlanningFromReport()
   let seenOptions = null
-  ctx.submitAgentTurn = async (options = {}) => {
+  ctx.submitMainAgentTurn = async (options = {}) => {
     seenOptions = options
   }
 
@@ -4928,8 +4814,84 @@ test('ppt planning deep composer keeps existing agent turn flow', async () => {
   ctx.selectAgentComposerMode('deep')
   await ctx.submitAgentComposer()
 
-  assert.equal(seenOptions.panelKind, 'ppt_planning')
+  assert.equal(seenOptions.panelKind, 'analysis')
   assert.equal(seenOptions.mode, 'deep')
+})
+
+test('analysis deep main-loop skips visual snapshot capture', async () => {
+  const ctx = createAgentContext()
+  ctx.agentSessionsLoaded = true
+  ctx.startNewAgentReportSession()
+  ctx.openAgentPptPlanningFromReport()
+  ctx.updateAgentActivePptPlanningState({
+    ...ctx.getAgentActivePptPlanningState(),
+    sources: [{
+      id: 'document:doc-1',
+      type: 'document',
+      title: '项目文档',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'document',
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'document:doc-1',
+          title: '项目文档',
+          source_kind: 'document',
+          included: ['evidence'],
+          evidence_nodes: [{
+            id: 'document:doc-1:evidence:1',
+            source_id: 'document:doc-1',
+            title: '更新目标',
+            content: '围绕城市更新目标组织空间证据。',
+          }],
+          counts: { evidence: 1 },
+        },
+      },
+    }],
+  })
+  ctx.agentInput = '深度检查这些资料'
+  ctx.selectAgentComposerMode('deep')
+  let captureCount = 0
+  ctx.captureAgentVisualSnapshots = async () => {
+    captureCount += 1
+    return [{
+      snapshot_id: 'visual-should-not-send',
+      kind: 'overview_map',
+      data_url: 'data:image/jpeg;base64,abc',
+    }]
+  }
+  let requestBody = null
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    if (getAgentSessionDetailId(url)) return createAgentSessionDetailResponse(ctx, url)
+    assert.equal(url, '/api/v1/analysis/agent/main-loop/stream')
+    requestBody = JSON.parse(String(options.body || '{}'))
+    return createSseResponse([{
+      type: 'final',
+      payload: {
+        response: {
+          status: 'answered',
+          stage: 'answered',
+          output: { answer: '已完成', cards: [], next_suggestions: [], panel_payloads: {} },
+          diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+          context_summary: {},
+          plan: {},
+        },
+      },
+    }])
+  }
+
+  try {
+    await ctx.submitAgentComposer()
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(captureCount, 0)
+  assert.deepEqual(requestBody.visual_snapshots, [])
+  assert.equal(Object.prototype.hasOwnProperty.call(requestBody, 'thinking_mode'), false)
+  assert.equal(requestBody.selected_sources_context.sources.some((item) => item.source_id === 'document:doc-1'), true)
 })
 
 test('ppt planning quick composer blocks when no selected deliverable source exists', async () => {
@@ -6124,7 +6086,7 @@ test('agent iteration poi exposes area heatmap basemap and boundary metadata', (
   assert.equal(ctx.getAgentIterationPoiAreaHeatmapBoundaryPoints(), '')
 })
 
-test('agent iteration poi evidence compacts legacy h3 feature payloads for basis', () => {
+test('agent iteration poi evidence compacts canonical h3 feature payloads for basis', () => {
   const ctx = createAgentContext()
   ctx.commitAgentIterationPoiPayload({
     status: 'ready',
@@ -6139,7 +6101,7 @@ test('agent iteration poi evidence compacts legacy h3 feature payloads for basis
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [[[112.1, 28.1], [112.2, 28.1], [112.1, 28.1]]] },
         properties: {
-          h3_id: 'h3-legacy',
+          h3_id: 'h3-canonical',
           poi_count: 2,
           density_poi_per_km2: 18.2,
           gi_star_z_score: 2.4,
@@ -6147,7 +6109,7 @@ test('agent iteration poi evidence compacts legacy h3 feature payloads for basis
         },
       }],
       derived_stats: {
-        lqSummary: { rows: [{ h3_id: 'h3-legacy', lq_target: 1.2 }] },
+        lq_rows: [{ h3_id: 'h3-1', lq_target: 1.2 }],
       },
     },
     yearly_grid_evidence: {
@@ -6170,7 +6132,7 @@ test('agent iteration poi evidence compacts legacy h3 feature payloads for basis
   const basis = ctx.buildAgentIterationBasisPayload('poi', 'analysis')
   const serialized = JSON.stringify(basis.rawInput)
 
-  assert.equal(preview.h3_evidence.cells[0].h3_id, 'h3-legacy')
+  assert.equal(preview.h3_evidence.cells[0].h3_id, 'h3-canonical')
   assert.equal(preview.h3_evidence.cells[0].geometry, undefined)
   assert.equal(preview.h3_evidence.cells[0].properties, undefined)
   assert.equal(preview.h3_evidence.derived_stats.lq_rows[0].lq_target, 1.2)
@@ -7517,6 +7479,29 @@ test('agent iteration poi space template shows all poi heatmap before subcategor
   assert.match(block, /isAgentIterationPoiSpatialSignalLoading\(\)/)
 })
 
+test('agent process and context loading use frameless scan state classes', async () => {
+  const html = await fs.promises.readFile(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8')
+  const css = await fs.promises.readFile(new URL('../src/styles/analysis-page.css', import.meta.url), 'utf8')
+
+  assert.match(html, /'is-agent-pending': String\(message\.id \|\| ''\)\.startsWith\('analysis-quick-ask-pending'\)/)
+  assert.match(html, /'is-loading': agentLoading/)
+  assert.match(html, /context-ask-message is-assistant is-loading/)
+  assert.match(css, /@keyframes agent-soft-scan/)
+  assert.match(css, /\.agent-thinking-bubble\.is-loading::after/)
+  assert.match(css, /\.agent-process-flow-item\.is-active::after/)
+  assert.match(css, /\.agent-message-bubble\.is-agent-pending::after/)
+  assert.match(css, /\.agent-thinking-bubble\s*\{[^}]*background:\s*transparent/s)
+  assert.match(css, /\.agent-thinking-bubble\s*\{[^}]*border-color:\s*transparent/s)
+  assert.match(css, /\.agent-thinking-bubble\s*\{[^}]*box-shadow:\s*none/s)
+  assert.match(css, /\.agent-process-flow-item\s*\{[^}]*background:\s*transparent/s)
+  assert.doesNotMatch(css, /\.agent-process-flow-item\s*\{[^}]*box-shadow:/s)
+  assert.doesNotMatch(css, /\.agent-process-flow-item\s*\{[^}]*border:/s)
+  assert.doesNotMatch(css, /\.agent-message-bubble\.is-agent-pending\s*\{[^}]*background:\s*transparent/s)
+  assert.match(css, /\.context-ask-message\.is-loading \.context-ask-bubble::after/)
+  assert.match(css, /prefers-reduced-motion: reduce/)
+  assert.doesNotMatch(css, /context-ask-message\.is-assistant:last-child \.context-ask-bubble::after/)
+})
+
 test('iteration change ready payloads are reused unless force refresh is requested', async () => {
   const ctx = createAgentContext({
     currentHistoryRecordId: 'history-1',
@@ -7908,6 +7893,41 @@ test('agent analysis snapshot keeps poi raster out of summary evidence', () => {
   assert.equal(snapshot.param_bundles.poi_fetch.params.year, 2024)
   assert.equal(snapshot.param_bundles.population.task_key, 'population')
   assert.equal(snapshot.h3.grid_params.h3_resolution, 9)
+})
+
+test('analysis snapshot evidence module owns h3 and shared-grid contracts', () => {
+  const ctx = createAgentContext({
+    h3GridResolution: 9,
+    h3NeighborRing: 2,
+    h3GridIncludeMode: 'intersects',
+    h3GridMinOverlapRatio: 0.35,
+    h3AnalysisSummary: {
+      grid_count: 3,
+      poi_count: 11,
+      avg_density_poi_per_km2: 18,
+      avg_local_entropy: 0.45,
+    },
+    h3AnalysisGridFeatures: [
+      { type: 'Feature', properties: { h3_id: 'h3-a', poi_count: 4, density_poi_per_km2: 9, gi_star_z_score: 2.2 } },
+    ],
+    h3DerivedStats: {
+      lqSummary: { rows: [{ h3_id: 'h3-a', lq_target: 1.4 }], total: 1 },
+    },
+    populationLayer: { cells: [{ cell_id: 'r0_c0', value: 100 }] },
+    poiGridFeatures: [{ type: 'Feature', properties: { cell_id: 'r0_c0', poi_count: 7 } }],
+    nightlightLayer: { cells: [{ cell_id: 'r0_c0', value: 12 }] },
+  })
+
+  const h3Evidence = buildAgentPoiH3Evidence(ctx)
+  const snapshot = buildAgentAnalysisSnapshot(ctx)
+
+  assert.equal(h3Evidence.evidence_version, 'poi_h3_evidence_v1')
+  assert.equal(h3Evidence.cells[0].h3_id, 'h3-a')
+  assert.equal(h3Evidence.derived_stats.lq_rows[0].lq_target, 1.4)
+  assert.equal(snapshot.h3.poi_h3_evidence.evidence_version, 'poi_h3_evidence_v1')
+  assert.equal(snapshot.shared_grid.evidence_version, 'shared_grid_evidence_v1')
+  assert.equal(snapshot.shared_grid.top_coupled_cells[0].cell_id, 'r0_c0')
+  assert.equal(snapshot.param_bundles.poi_h3_grid.params.min_overlap_ratio, 0.35)
 })
 
 function ctxSessionBase(id, title) {

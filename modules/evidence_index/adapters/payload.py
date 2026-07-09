@@ -1,0 +1,71 @@
+from __future__ import annotations
+
+from typing import List
+
+from modules.evidence_index.adapters.base import EvidenceSourceAdapter
+from modules.evidence_index.manifests import manifest_from_source
+from modules.evidence_index.schemas import EvidenceIndexRecord, EvidenceSearchQuery, SourceIndexManifest
+from modules.evidence_retrieval.adapters import evidence_nodes_from_source
+from modules.evidence_retrieval.adapters import evidence_node_from_node_payload
+from modules.evidence_retrieval.schemas import SourceRecord
+
+
+class PayloadEvidenceAdapter(EvidenceSourceAdapter):
+    source_kind = "payload"
+
+    def __init__(self, source: SourceRecord):
+        self._source = source
+
+    def manifest(self, source: SourceRecord) -> SourceIndexManifest:
+        declared = manifest_from_source(source)
+        if declared is not None:
+            return declared
+        return SourceIndexManifest(
+            source_id=source.source_id,
+            source_kind=source.source_kind,
+            native_index_kind="payload_index",
+            node_count=int(source.evidence_count or 0),
+            retrieval_modes=["keyword"],
+            read_modes=["node_id"],
+            storage_ref={"source_id": source.source_id},
+            diagnostics=[] if source.evidence_count else ["payload_evidence_empty"],
+        )
+
+    async def recall(self, query: EvidenceSearchQuery, manifest: SourceIndexManifest) -> List[EvidenceIndexRecord]:
+        del manifest
+        records: List[EvidenceIndexRecord] = []
+        for node in evidence_nodes_from_source(query.question, self._source):
+            if node.score <= 0:
+                continue
+            records.append(
+                EvidenceIndexRecord(
+                    record_id=node.id,
+                    source_id=node.source_id,
+                    source_kind=node.source_type,
+                    title=node.title,
+                    summary=node.summary,
+                    content_ref=node.locator or node.id,
+                    metadata=dict(node.metadata or {}),
+                    scores={"keyword": float(node.score or 0.0), "total": float(node.score or 0.0)},
+                    node=node,
+                )
+            )
+        return records
+
+    async def read(self, record_id: str, manifest: SourceIndexManifest):
+        del manifest
+        meta = self._source.meta if isinstance(self._source.meta, dict) else {}
+        ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
+        ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
+        explicit_nodes = (
+            ai_payload.get("evidence_nodes")
+            if isinstance(ai_payload.get("evidence_nodes"), list)
+            else ai_payload.get("evidenceNodes")
+            if isinstance(ai_payload.get("evidenceNodes"), list)
+            else []
+        )
+        for index, item in enumerate(explicit_nodes, start=1):
+            node = evidence_node_from_node_payload("", self._source, item, index=index)
+            if node is not None and node.id == record_id:
+                return node
+        return None

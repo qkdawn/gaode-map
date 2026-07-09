@@ -96,6 +96,7 @@ class PoiResult(Base):
 
     __table_args__ = (
         UniqueConstraint("history_id", "source", "year", name="uq_poi_results_history_source_year"),
+        Index("ix_poi_results_history_created_id", "history_id", "created_at", "id"),
     )
 
 
@@ -127,6 +128,7 @@ class AnalysisArtifact(Base):
             name="uq_analysis_artifact_identity",
         ),
         Index("ix_analysis_artifacts_history_type", "history_id", "artifact_type"),
+        Index("ix_analysis_artifacts_history_updated_id", "history_id", "updated_at", "id"),
     )
 
 

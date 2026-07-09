@@ -235,6 +235,22 @@ test('_applyHistoryDetailBaseResult resets nightlight analysis state while prese
   assert.deepEqual(ctx.resetPanelCalls, [{ panelId: 'poi', options: { apply: false } }])
 })
 
+test('history restore progress advances to the running step position', () => {
+  const ctx = Object.assign(createHistoryRestoreContext(), historyMethods)
+
+  ctx.setHistoryRestoreStep('base', 'running', '正在加载历史主结果...')
+  assert.equal(ctx.historyRestoreProgress.percent, 13)
+
+  ctx.setHistoryRestoreStep('base', 'done', '历史主结果已恢复')
+  assert.equal(ctx.historyRestoreProgress.percent, 13)
+
+  ctx.setHistoryRestoreStep('poi', 'running', '正在加载历史 POI...')
+  assert.equal(ctx.historyRestoreProgress.percent, 25)
+
+  ctx.setHistoryRestoreStep('artifacts', 'running', '正在恢复历史分析快照和分析产物...')
+  assert.equal(ctx.historyRestoreProgress.percent, 38)
+})
+
 test('buildAnalysisArtifactBundle stores full population nightlight and road datasets', () => {
   const ctx = createArtifactBundleContext()
 
@@ -419,6 +435,202 @@ test('loadHistoryDetail restores POI before slow artifacts finish', async () => 
     await loadPromise
   } finally {
     artifacts.resolve([])
+    global.fetch = originalFetch
+    global.window = originalWindow
+  }
+
+  assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'complete').status, 'done')
+})
+
+test('loadHistoryDetail keeps restoring artifacts when POI request is aborted', async () => {
+  const originalFetch = global.fetch
+  const originalWindow = global.window
+  const ctx = Object.assign(
+    createHistoryRestoreContext(),
+    historyMethods,
+    {
+      historyDetailLoadToken: 0,
+      historyDetailAbortController: null,
+      historyFetchAbortController: null,
+      cancelHistoryLoading() {},
+      cancelHistoryDetailLoading() {
+        this.historyDetailLoadToken += 1
+        this.historyDetailAbortController = null
+      },
+      stopScopeDrawing() {},
+      clearIsochroneDebugState() {},
+      $nextTick() {
+        return Promise.resolve()
+      },
+      syncSummaryTaskBoardFromLocalResults(options) {
+        this.summaryTaskBoardSyncs = Array.isArray(this.summaryTaskBoardSyncs) ? this.summaryTaskBoardSyncs.slice() : []
+        this.summaryTaskBoardSyncs.push(options)
+      },
+      restorePoiRasterGridDisplayOnEnter() {
+        this.restoredRasterDisplay = true
+      },
+      commitPoiGridResult(year, type, patch) {
+        this.committedPoiGrid = { year, type, status: patch && patch.status }
+      },
+      commitCurrentPoiGridResult(type, year) {
+        this.appliedPoiGrid = { type, year }
+      },
+    },
+  )
+  global.window = {
+    requestAnimationFrame(callback) {
+      callback()
+    },
+    setTimeout(callback) {
+      callback()
+      return 1
+    },
+    clearTimeout() {},
+  }
+  global.fetch = async (url, options = {}) => {
+    if (url === '/api/v1/analysis/history/poi-timeout/artifacts') {
+      assert.equal(options.signal.aborted, false)
+      return {
+        ok: true,
+        async json() {
+          return [{
+            artifact_type: 'poi_raster_grid',
+            updated_at: '2026-01-01T00:00:00Z',
+            params: { year: 2026 },
+            payload: {
+              grid: {
+                type: 'FeatureCollection',
+                features: [{ type: 'Feature', properties: { cell_id: 'cell-1' } }],
+              },
+              summary: { grid_count: 1 },
+            },
+          }]
+        },
+      }
+    }
+    if (url === '/api/v1/analysis/history/poi-timeout/pois') {
+      const error = new Error('aborted')
+      error.name = 'AbortError'
+      throw error
+    }
+    assert.equal(url, '/api/v1/analysis/history/poi-timeout?include_pois=false')
+    return {
+      ok: true,
+      async json() {
+        return {
+          params: {
+            center: [121.48, 31.23],
+            mode: 'walking',
+            time_min: 15,
+            source: 'local',
+            drawn_polygon: [],
+          },
+          polygon: [[121.47, 31.22], [121.49, 31.22], [121.49, 31.24], [121.47, 31.22]],
+          poi_count: 1,
+        }
+      },
+    }
+  }
+
+  try {
+    await ctx.loadHistoryDetail('poi-timeout')
+  } finally {
+    global.fetch = originalFetch
+    global.window = originalWindow
+  }
+
+  assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'poi').status, 'failed')
+  assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'artifacts').status, 'done')
+  assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'grid').status, 'done')
+  assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'complete').status, 'done')
+  assert.equal(ctx.historyRestoreProgress.active, false)
+  assert.equal(ctx.poiStatus, '历史恢复完成，部分内容有提示')
+  assert.deepEqual(ctx.appliedPoiGrid, { type: 'shared', year: 2026 })
+  assert.equal(ctx.h3GridFeatures.length, 1)
+  assert.deepEqual(ctx.committedPoiGrid, { year: 2026, type: 'shared', status: 'ready' })
+})
+
+test('loadHistoryDetail restores POI before slow legacy snapshots finish', async () => {
+  const originalFetch = global.fetch
+  const originalWindow = global.window
+  const legacySnapshots = deferred()
+  const ctx = Object.assign(
+    createHistoryRestoreContext(),
+    historyMethods,
+    {
+      historyDetailLoadToken: 0,
+      historyDetailAbortController: null,
+      historyFetchAbortController: null,
+      cancelHistoryLoading() {},
+      cancelHistoryDetailLoading() {
+        this.historyDetailLoadToken += 1
+        this.historyDetailAbortController = null
+      },
+      stopScopeDrawing() {},
+      clearIsochroneDebugState() {},
+      $nextTick() {
+        return Promise.resolve()
+      },
+      async _restoreHistoryAnalysisSnapshotsAsync() {
+        return legacySnapshots.promise
+      },
+      async _restoreHistoryPoisAsync(id) {
+        this.restoredPoiHistoryId = id
+        this.allPoisDetails = [{ id: 'history-poi-before-legacy' }]
+      },
+      async restoreHistoryArtifactsAsync() {
+        return {
+          h3Restored: false,
+          roadRestored: false,
+          rasterRestored: false,
+          populationRestored: false,
+          nightlightRestored: false,
+        }
+      },
+      syncSummaryTaskBoardFromLocalResults(options) {
+        this.summaryTaskBoardSyncs = Array.isArray(this.summaryTaskBoardSyncs) ? this.summaryTaskBoardSyncs.slice() : []
+        this.summaryTaskBoardSyncs.push(options)
+      },
+    },
+  )
+  global.window = {
+    requestAnimationFrame(callback) {
+      callback()
+    },
+  }
+  global.fetch = async (url) => {
+    assert.equal(url, '/api/v1/analysis/history/slow-legacy?include_pois=false')
+    return {
+      ok: true,
+      async json() {
+        return {
+          params: {
+            center: [121.48, 31.23],
+            mode: 'walking',
+            time_min: 15,
+            source: 'local',
+            drawn_polygon: [],
+          },
+          polygon: [[121.47, 31.22], [121.49, 31.22], [121.49, 31.24], [121.47, 31.22]],
+          poi_count: 1,
+        }
+      },
+    }
+  }
+
+  try {
+    const loadPromise = ctx.loadHistoryDetail('slow-legacy')
+    await waitFor(() => {
+      assert.equal(ctx.restoredPoiHistoryId, 'slow-legacy')
+      assert.deepEqual(ctx.allPoisDetails, [{ id: 'history-poi-before-legacy' }])
+      assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'poi').status, 'done')
+      assert.equal(ctx.historyRestoreProgress.items.find((item) => item.key === 'artifacts').status, 'running')
+      assert.equal(ctx.historyRestoreProgress.active, true)
+    })
+    legacySnapshots.resolve({ h3Restored: false, roadRestored: false })
+    await loadPromise
+  } finally {
+    legacySnapshots.resolve({ h3Restored: false, roadRestored: false })
     global.fetch = originalFetch
     global.window = originalWindow
   }

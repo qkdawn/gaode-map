@@ -553,6 +553,9 @@ def test_web_source_preview_uses_web_parse_without_persisting(monkeypatch):
     assert result.items[0]["parse_status"] == "parsed"
     assert result.items[0]["web_evidence_nodes"][0]["title"] == "政策"
     assert result.source.meta["aiPayload"]["evidence_nodes"][0]["metadata"]["parse_status"] == "parsed"
+    assert result.source.meta["aiPayload"]["index_manifest"]["source_kind"] == "web"
+    assert result.source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "webpage_index"
+    assert result.source.meta["aiPayload"]["index_manifest"]["model_versions"]["crawler"] == "crawl4ai"
     assert "evidence" not in result.source.meta["aiPayload"]
 
 
@@ -597,6 +600,7 @@ def test_web_source_preview_direct_url_builds_web_source(monkeypatch):
     assert evidence_nodes[0]["source_type"] == "web"
     assert evidence_nodes[0]["metadata"]["url"] == "https://www.gov.cn/demo.html"
     assert evidence_nodes[0]["id"].startswith(result.source.id)
+    assert result.source.meta["aiPayload"]["index_manifest"]["read_modes"] == ["node_id", "url"]
     assert "evidence" not in result.source.meta["aiPayload"]
 
 
@@ -692,14 +696,14 @@ def test_web_source_preview_filters_navigation_noise_from_parsed_fields(monkeypa
 
 
 def test_web_source_commit_persists_preview(monkeypatch):
-    captured = {}
+    upserts = []
     preview = service._build_web_source_response(
         "area-1",
         PptWebSourceSearchRequest(area_id="area-1", region_name="岳麓区", topic="文旅", categories=["区域概况"]),
         [{"title": "网页", "url": "https://gov.cn/demo", "summary": "摘要", "source_name": "政府网站", "source_domain": "gov.cn"}],
         [],
     )
-    monkeypatch.setattr(service.analysis_artifact_repo, "upsert", lambda **kwargs: captured.setdefault("upsert", kwargs))
+    monkeypatch.setattr(service.analysis_artifact_repo, "upsert", lambda **kwargs: upserts.append(kwargs) or {"id": len(upserts), **kwargs})
 
     result = service.commit_ppt_web_source(PptWebSourceCommitRequest(area_id="area-1", preview=preview.model_dump(mode="json")))
 
@@ -712,4 +716,8 @@ def test_web_source_commit_persists_preview(monkeypatch):
     assert evidence_nodes[0]["id"].startswith(result.source.id)
     assert evidence_nodes[0]["source_type"] == "web"
     assert "evidence" not in result.source.meta["aiPayload"]
-    assert captured["upsert"]["artifact_type"] == service.PPT_WEB_SOURCE_ARTIFACT_TYPE
+    assert upserts[0]["artifact_type"] == service.PPT_WEB_SOURCE_ARTIFACT_TYPE
+    manifest_upsert = next(item for item in upserts if item["artifact_type"] == "source_index_manifest")
+    assert manifest_upsert["history_id"] == "area-1"
+    assert manifest_upsert["params"] == {"source_id": result.source.id}
+    assert manifest_upsert["payload"]["manifest"]["native_index_kind"] == "webpage_index"

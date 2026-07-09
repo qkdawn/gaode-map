@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from modules.evidence_retrieval import SourceRecord
+
+from .context_ask_compaction import as_text, compact_value
+
+
+ANALYSIS_SOURCES_TARGET_TYPE = "analysis_sources"
+
+ANALYSIS_TO_DATASET_SOURCES = {
+    "current:analysis:poi_h3": ["current:dataset:h3", "current:dataset:poi"],
+    "current:analysis:population": ["current:dataset:population"],
+    "current:analysis:nightlight": ["current:dataset:nightlight"],
+    "current:analysis:road": ["current:dataset:road"],
+}
+
+
+def is_analysis_sources_type(value: Any) -> bool:
+    return as_text(value) == ANALYSIS_SOURCES_TARGET_TYPE
+
+
+def source_items_from_target(target: Any) -> List[Dict[str, Any]]:
+    payload = getattr(target, "payload", None)
+    if not isinstance(payload, dict):
+        return []
+    return [item for item in list(payload.get("sources") or []) if isinstance(item, dict)]
+
+
+def source_items_from_artifacts(artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
+    context = artifacts.get("selected_sources_context") if isinstance(artifacts.get("selected_sources_context"), dict) else {}
+    return [item for item in list(context.get("sources") or []) if isinstance(item, dict)]
+
+
+def source_id_from_item(item: Dict[str, Any]) -> str:
+    return as_text(item.get("source_id") or item.get("sourceId") or item.get("id"))
+
+
+def source_kind_from_item(item: Dict[str, Any]) -> str:
+    return as_text(item.get("source_kind") or item.get("sourceKind"))
+
+
+def evidence_nodes_from_item(item: Dict[str, Any]) -> List[Any]:
+    nodes = item.get("evidence_nodes") if isinstance(item.get("evidence_nodes"), list) else item.get("evidenceNodes")
+    if isinstance(nodes, list):
+        return nodes
+    return []
+
+
+def mapped_dataset_source_ids(source_id: str) -> List[str]:
+    raw_id = as_text(source_id)
+    if not raw_id:
+        return []
+    mapped = ANALYSIS_TO_DATASET_SOURCES.get(raw_id)
+    if mapped:
+        return list(mapped)
+    return [raw_id] if raw_id.startswith("current:dataset:") else []
+
+
+def selected_dataset_source_ids_from_items(items: List[Dict[str, Any]]) -> List[str]:
+    selected: List[str] = []
+    for item in list(items or []):
+        for source_id in mapped_dataset_source_ids(source_id_from_item(item)):
+            if source_id not in selected:
+                selected.append(source_id)
+    return selected
+
+
+def source_records_from_items(items: List[Dict[str, Any]]) -> List[SourceRecord]:
+    records: List[SourceRecord] = []
+    for item in list(items or []):
+        if not isinstance(item, dict):
+            continue
+        source_id = source_id_from_item(item)
+        if not source_id:
+            continue
+        records.append(
+            SourceRecord.model_validate(
+                {
+                    "source_id": source_id,
+                    "id": source_id,
+                    "title": as_text(item.get("title")) or source_id,
+                    "source_kind": source_kind_from_item(item),
+                    "status": "ready",
+                    "summary": as_text(item.get("summary") or item.get("policy")),
+                    "evidence_count": len(evidence_nodes_from_item(item)),
+                    "locator_summary": as_text(item.get("locator_summary") or item.get("locatorSummary")),
+                    "availability": "selected",
+                    "meta": {"aiPayload": dict(item)},
+                }
+            )
+        )
+    return records
+
+
+def evidence_count_from_item(item: Dict[str, Any]) -> int:
+    return len(evidence_nodes_from_item(item))
+
+
+def source_summary_payloads_from_items(items: List[Dict[str, Any]], *, limit: int = 24) -> List[Dict[str, Any]]:
+    compacted: List[Dict[str, Any]] = []
+    for item in list(items or [])[:limit]:
+        if not isinstance(item, dict):
+            continue
+        compacted.append(
+            {
+                "source_id": source_id_from_item(item),
+                "title": as_text(item.get("title")),
+                "source_kind": source_kind_from_item(item),
+                "included": list(item.get("included") or [])[:8],
+                "metrics": compact_value(item.get("metrics"), depth=2, list_limit=8, string_limit=180),
+                "metric_gaps": compact_value(item.get("metric_gaps") or item.get("metricGaps"), depth=2, list_limit=6, string_limit=160),
+                "evidence_count": evidence_count_from_item(item),
+            }
+        )
+    return compacted
+
+
+def source_record_payload(source: SourceRecord, mapped_dataset_ids: List[str] | None = None) -> Dict[str, Any]:
+    payload = {
+        "source_id": source.source_id,
+        "title": source.title,
+        "source_kind": source.source_kind,
+        "status": source.status,
+        "summary": source.summary,
+        "evidence_count": source.evidence_count,
+        "locator_summary": source.locator_summary,
+        "availability": source.availability,
+    }
+    if mapped_dataset_ids is not None:
+        payload["mapped_dataset_source_ids"] = list(mapped_dataset_ids or [])
+    return payload

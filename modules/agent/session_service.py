@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -368,7 +369,7 @@ def delete_agent_session(session_id: str, repo) -> Dict[str, Any]:
     return {"status": "success", "id": session_id}
 
 
-async def persist_agent_turn(payload: AgentTurnRequest, response: AgentTurnResponse, repo) -> AgentTurnResponse:
+async def persist_main_agent_loop_response(payload: AgentTurnRequest, response: AgentTurnResponse, repo) -> AgentTurnResponse:
     session_id = _normalize_text(payload.conversation_id, max_length=128)
     if not session_id:
         return response
@@ -393,3 +394,27 @@ async def persist_agent_turn(payload: AgentTurnRequest, response: AgentTurnRespo
         if generated_title:
             repo.update_metadata(session_id, title=generated_title, title_source=TITLE_SOURCE_AI)
     return response.model_copy(update={"messages": request.messages})
+
+
+async def persist_streamed_main_agent_loop_response(
+    payload: AgentTurnRequest,
+    response: AgentTurnResponse,
+    repo,
+    *,
+    logger: logging.Logger | None = None,
+) -> AgentTurnResponse:
+    try:
+        return await persist_main_agent_loop_response(payload, response, repo)
+    except Exception as exc:
+        if logger is not None:
+            logger.exception("Failed to persist streamed main agent loop response; returning unpersisted final response")
+        diagnostics = response.diagnostics.model_copy(
+            update={
+                "research_notes": [
+                    *list(response.diagnostics.research_notes or []),
+                    f"Agent 会话保存失败，本次回答未写入历史：{type(exc).__name__}",
+                ],
+                "error": response.diagnostics.error or f"main_agent_loop_persist_failed:{type(exc).__name__}",
+            }
+        )
+        return response.model_copy(update={"diagnostics": diagnostics})

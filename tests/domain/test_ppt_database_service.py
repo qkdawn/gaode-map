@@ -14,8 +14,8 @@ def test_build_database_data_package_creates_database_source(monkeypatch):
 
     monkeypatch.setattr(service.history_repo, "get_detail", lambda area_id, include_pois=False: detail_payload)
     monkeypatch.setattr(service.history_repo, "get_pois", lambda area_id: {"poi_summary": detail_payload["poi_summary"]})
-    captured = {}
-    monkeypatch.setattr(service.analysis_artifact_repo, "upsert", lambda **kwargs: captured.setdefault("artifact", kwargs))
+    upserts = []
+    monkeypatch.setattr(service.analysis_artifact_repo, "upsert", lambda **kwargs: upserts.append(kwargs) or {"id": len(upserts), **kwargs})
 
     response = service.build_database_data_package("history-1", title="数据库资料")
 
@@ -28,11 +28,17 @@ def test_build_database_data_package_creates_database_source(monkeypatch):
     assert response.source.meta["aiPayload"]["sourceKind"] == "database"
     assert response.source.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "database"
     assert response.source.meta["aiPayload"]["evidence_nodes"][0]["id"].startswith("database:history-1:")
+    assert response.source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "database_record_index"
+    assert response.source.meta["aiPayload"]["index_manifest"]["read_modes"] == ["node_id", "record_id", "locator"]
     assert "evidence" not in response.source.meta["aiPayload"]
     assert response.items
     assert response.items[0]["id"].startswith("database:history-1:")
     assert response.items[0]["source_type"] == "database"
-    assert captured["artifact"]["artifact_type"] == "ppt_database_package"
+    assert upserts[0]["artifact_type"] == "ppt_database_package"
+    manifest_upsert = next(item for item in upserts if item["artifact_type"] == "source_index_manifest")
+    assert manifest_upsert["history_id"] == "history-1"
+    assert manifest_upsert["params"] == {"source_id": response.source.id}
+    assert manifest_upsert["payload"]["manifest"]["native_index_kind"] == "database_record_index"
 
 
 def test_list_persisted_database_sources_reads_database_artifacts(monkeypatch):

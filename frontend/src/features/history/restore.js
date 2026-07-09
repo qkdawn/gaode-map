@@ -6,6 +6,8 @@ import {
     function createAnalysisHistoryInitialState() {
         return {
             historyDetailAbortController: null,
+            historyPoiAbortController: null,
+            historyArtifactsAbortController: null,
             historyDetailLoadToken: 0,
             currentHistoryRecordId: '',
             currentHistoryPolygonWgs84: [],
@@ -69,9 +71,14 @@ import {
                 const completed = items.filter((item) => item.status === 'done' || item.status === 'failed' || item.status === 'skipped').length;
                 const total = Number.isFinite(Number(patch.totalSteps)) ? Number(patch.totalSteps) : (Number(current.totalSteps) || items.length || 1);
                 const active = patch.active !== undefined ? !!patch.active : !!current.active;
+                const currentStepKey = String(patch.currentStep || current.currentStep || '');
+                const currentStepIndex = items.findIndex((item) => String(item.key || '') === currentStepKey);
+                const reachedSteps = currentStepIndex >= 0
+                    ? Math.max(completed, currentStepIndex + 1)
+                    : completed;
                 const percent = Number.isFinite(Number(patch.percent))
                     ? Number(patch.percent)
-                    : Math.round((completed / Math.max(1, total)) * 100);
+                    : Math.round((reachedSteps / Math.max(1, total)) * 100);
                 this.historyRestoreProgress = {
                     ...current,
                     ...patch,
@@ -661,7 +668,10 @@ import {
                 this.applySimplifyConfig();
             },
             async _restoreHistoryPoisAsync(id, token, signal, poiCountHint = 0, year = null) {
-                const qs = Number.isFinite(Number(year)) ? `?year=${Number(year)}` : '';
+                const normalizedYear = year === null || year === undefined || year === ''
+                    ? null
+                    : Number(year);
+                const qs = Number.isFinite(normalizedYear) ? `?year=${normalizedYear}` : '';
                 const res = await fetch(`/api/v1/analysis/history/${id}/pois${qs}`, { signal });
                 if (!res.ok) {
                     let detail = '';
@@ -725,7 +735,9 @@ import {
             async loadHistoryDetail(id) {
                 const historyId = String(id || '').trim();
                 if (!historyId) return;
-                let controller = null;
+                let detailController = null;
+                let poiController = null;
+                let artifactsController = null;
                 let baseRestored = false;
                 let historyDetailTimeoutId = null;
                 const previousHistoryId = String(this.currentHistoryRecordId || '').trim();
@@ -757,22 +769,22 @@ import {
                     this.setHistoryRestoreStep('base', 'running', '正在加载历史主结果...');
                     await this.$nextTick();
 
-                    controller = new AbortController();
+                    detailController = new AbortController();
                     const token = this.historyDetailLoadToken + 1;
                     this.historyDetailLoadToken = token;
-                    this.historyDetailAbortController = controller;
+                    this.historyDetailAbortController = detailController;
                     const timerHost = (typeof window !== 'undefined' && typeof window.setTimeout === 'function')
                         ? window
                         : globalThis;
                     historyDetailTimeoutId = timerHost.setTimeout(() => {
-                        if (token === this.historyDetailLoadToken && this.historyDetailAbortController === controller) {
-                            controller.abort();
+                        if (token === this.historyDetailLoadToken && this.historyDetailAbortController === detailController) {
+                            detailController.abort();
                         }
                     }, 30000);
                     historyDetailTimeoutId = { host: timerHost, id: historyDetailTimeoutId };
 
                     const res = await fetch(`/api/v1/analysis/history/${historyId}?include_pois=false`, {
-                        signal: controller.signal
+                        signal: detailController.signal
                     });
                     if (!res.ok) {
                         throw new Error(`历史详情请求失败(${res.status})`);
@@ -790,12 +802,6 @@ import {
                         this.resetAgentIterationChangeForHistorySwitch(historyId, { previousHistoryId });
                     }
                     baseRestored = true;
-                    const legacySnapshots = await this._restoreHistoryAnalysisSnapshotsAsync(data, token);
-                    if (token !== this.historyDetailLoadToken) return;
-                    this.currentHistoryRecordId = historyId;
-                    if (this.lastIsochroneGeoJSON) {
-                        this.scopeSource = 'history';
-                    }
                     const poiCountHint = Math.max(
                         0,
                         Number((data && data.poi_count) || (((data || {}).poi_summary || {}).total) || 0)
@@ -805,7 +811,11 @@ import {
                     this.setHistoryRestoreStep('poi', 'running', poiCountHint > 0
                         ? `正在加载历史 POI（${poiCountHint} 条）...`
                         : '正在检查历史 POI 数据...');
-                    const poiPromise = this._restoreHistoryPoisAsync(historyId, token, controller.signal, poiCountHint)
+                    poiController = new AbortController();
+                    artifactsController = new AbortController();
+                    this.historyPoiAbortController = poiController;
+                    this.historyArtifactsAbortController = artifactsController;
+                    const poiPromise = this._restoreHistoryPoisAsync(historyId, token, poiController.signal, poiCountHint)
                         .then(() => {
                             if (token !== this.historyDetailLoadToken) return false;
                             const hasPois = Array.isArray(this.allPoisDetails) && this.allPoisDetails.length > 0;
@@ -813,21 +823,34 @@ import {
                             return true;
                         })
                         .catch((poiErr) => {
-                            if (poiErr && (poiErr.name === 'AbortError' || String(poiErr.message || '').toLowerCase().includes('aborted'))) throw poiErr;
                             console.warn('history POI restore failed', poiErr);
                             const message = poiErr && poiErr.message ? poiErr.message : String(poiErr || '');
                             this.setHistoryRestoreStep('poi', 'failed', '历史 POI 恢复失败，其他分析结果继续恢复');
                             this.appendHistoryRestoreWarning(message ? `POI 恢复失败：${message}` : 'POI 恢复失败');
                             return false;
                         });
-                    const artifactPromise = this.restoreHistoryArtifactsAsync(historyId, token, controller.signal)
-                        .then((artifactSnapshots) => ({
+                    const artifactPromise = (async () => {
+                        const legacySnapshots = { h3Restored: false, roadRestored: false };
+                        try {
+                            this.setHistoryRestoreStep('artifacts', 'running', '正在恢复历史分析快照和分析产物...');
+                            const restored = await this._restoreHistoryAnalysisSnapshotsAsync(data, token);
+                            legacySnapshots.h3Restored = !!(restored && restored.h3Restored);
+                            legacySnapshots.roadRestored = !!(restored && restored.roadRestored);
+                        } catch (legacyErr) {
+                            console.warn('history legacy snapshots restore failed', legacyErr);
+                            const message = legacyErr && legacyErr.message ? legacyErr.message : String(legacyErr || '');
+                            this.appendHistoryRestoreWarning(message ? `历史快照恢复失败：${message}` : '历史快照恢复失败');
+                        }
+                        if (token !== this.historyDetailLoadToken) return legacySnapshots;
+                        const artifactSnapshots = await this.restoreHistoryArtifactsAsync(historyId, token, artifactsController.signal);
+                        return {
                             h3Restored: artifactSnapshots.h3Restored || legacySnapshots.h3Restored,
                             roadRestored: artifactSnapshots.roadRestored || legacySnapshots.roadRestored,
                             rasterRestored: artifactSnapshots.rasterRestored,
                             populationRestored: artifactSnapshots.populationRestored,
                             nightlightRestored: artifactSnapshots.nightlightRestored,
-                        }))
+                        };
+                    })()
                         .catch((artifactErr) => {
                             if (artifactErr && (artifactErr.name === 'AbortError' || String(artifactErr.message || '').toLowerCase().includes('aborted'))) throw artifactErr;
                             console.warn('history artifacts restore failed', artifactErr);
@@ -835,8 +858,8 @@ import {
                             this.setHistoryRestoreStep('artifacts', 'failed', '历史分析产物恢复失败，POI 可继续使用');
                             this.appendHistoryRestoreWarning(message ? `分析产物恢复失败：${message}` : '分析产物恢复失败');
                             return {
-                                h3Restored: legacySnapshots.h3Restored,
-                                roadRestored: legacySnapshots.roadRestored,
+                                h3Restored: false,
+                                roadRestored: false,
                                 rasterRestored: false,
                                 populationRestored: false,
                                 nightlightRestored: false,
@@ -882,8 +905,14 @@ import {
                             this.scopeSource = 'history';
                         }
                     }
-                    if (controller && this.historyDetailAbortController === controller) {
+                    if (detailController && this.historyDetailAbortController === detailController) {
                         this.historyDetailAbortController = null;
+                    }
+                    if (poiController && this.historyPoiAbortController === poiController) {
+                        this.historyPoiAbortController = null;
+                    }
+                    if (artifactsController && this.historyArtifactsAbortController === artifactsController) {
+                        this.historyArtifactsAbortController = null;
                     }
                 }
             },

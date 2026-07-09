@@ -11,6 +11,44 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 import router.domains.history as history_module
 
 
+def test_history_pois_route_runs_in_threadpool(monkeypatch):
+    captured = {}
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        captured["func"] = func
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return {"status": "threaded"}
+
+    monkeypatch.setattr(history_module, "run_in_threadpool", fake_run_in_threadpool)
+
+    response = asyncio.run(history_module.get_history_pois("history-1", year=2024))
+
+    assert response == {"status": "threaded"}
+    assert captured["func"] is history_module.history_service.get_history_pois_payload
+    assert captured["args"] == ("history-1", history_module.history_repo)
+    assert captured["kwargs"] == {"year": 2024}
+
+
+def test_history_detail_route_runs_in_threadpool(monkeypatch):
+    captured = {}
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        captured["func"] = func
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return {"status": "threaded"}
+
+    monkeypatch.setattr(history_module, "run_in_threadpool", fake_run_in_threadpool)
+
+    response = asyncio.run(history_module.get_history_detail("history-1", include_pois=False, year=2024))
+
+    assert response == {"status": "threaded"}
+    assert captured["func"] is history_module.history_service.get_history_detail_payload_for_year
+    assert captured["args"] == ("history-1", False, 2024, history_module.history_repo)
+    assert captured["kwargs"] == {}
+
+
 def test_get_history_detail_without_pois_returns_lightweight_payload(monkeypatch):
     monkeypatch.setattr(
         history_module.history_repo,

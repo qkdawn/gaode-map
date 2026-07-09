@@ -2478,18 +2478,8 @@ export function createAgentIterationChangeUiMethods() {
         }
       }
       const derived = cloneObject(source.derived_stats)
-      const rowsFrom = (compactKey, legacyKey) => {
-        const compact = cloneArray(derived[compactKey])
-        if (compact.length) return compact.slice(0, rowLimit)
-        return cloneArray(derived[legacyKey] && derived[legacyKey].rows).slice(0, rowLimit)
-      }
-      const summaryFrom = (compactKey, legacyKey) => {
-        const compact = cloneObject(derived[compactKey])
-        if (Object.keys(compact).length) return compact
-        const legacy = cloneObject(derived[legacyKey])
-        delete legacy.rows
-        return legacy
-      }
+      const rowsFrom = (compactKey) => cloneArray(derived[compactKey]).slice(0, rowLimit)
+      const summaryFrom = (compactKey) => cloneObject(derived[compactKey])
       const allCells = cloneArray(source.cells).map(pickCell).filter(Boolean)
       const cells = allCells.slice(0, cellLimit)
       return {
@@ -2507,14 +2497,14 @@ export function createAgentIterationChangeUiMethods() {
         charts: cloneObject(source.charts),
         cells,
         derived_stats: {
-          structure_rows: rowsFrom('structure_rows', 'structureSummary'),
-          typing_rows: rowsFrom('typing_rows', 'typingSummary'),
-          lq_rows: rowsFrom('lq_rows', 'lqSummary'),
-          gap_rows: rowsFrom('gap_rows', 'gapSummary'),
-          structure_summary: summaryFrom('structure_summary', 'structureSummary'),
-          typing_summary: summaryFrom('typing_summary', 'typingSummary'),
-          lq_summary: summaryFrom('lq_summary', 'lqSummary'),
-          gap_summary: summaryFrom('gap_summary', 'gapSummary'),
+          structure_rows: rowsFrom('structure_rows'),
+          typing_rows: rowsFrom('typing_rows'),
+          lq_rows: rowsFrom('lq_rows'),
+          gap_rows: rowsFrom('gap_rows'),
+          structure_summary: summaryFrom('structure_summary'),
+          typing_summary: summaryFrom('typing_summary'),
+          lq_summary: summaryFrom('lq_summary'),
+          gap_summary: summaryFrom('gap_summary'),
         },
         omitted: {
           cells_total: Number((source.omitted && source.omitted.cells_total) || allCells.length || 0) || 0,

@@ -247,7 +247,7 @@ def _build_diagnostics(
     )
 
 
-def _tool_loop_limits(thinking_mode: str) -> tuple[int | None, int | None]:
+def _tool_loop_limits() -> tuple[int | None, int | None]:
     configured_steps = int(settings.ai_max_tool_steps or 0)
     max_steps = max(1, configured_steps) if configured_steps > 0 else None
     max_errors = max(1, int(settings.ai_max_tool_errors or 2))
@@ -274,10 +274,9 @@ def _build_rule_audit_summary(audit: AuditResult) -> str:
     return "当前证据足以支持直接回答，并已保留必要解释边界。"
 
 
-async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None = None) -> AgentTurnResponse:
+async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | None = None) -> AgentTurnResponse:
     snapshot = payload.analysis_snapshot
     question = latest_user_message(payload.messages)
-    thinking_mode = str(payload.thinking_mode or "quick").strip() or "quick"
     state = AgentStateMachine()
     thinking_timeline: List[AgentThinkingItem] = []
 
@@ -306,13 +305,21 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
 
     context = build_context_bundle(snapshot)
     memory = create_working_memory()
-    map_search_context = dict(payload.map_search_context or {}) if isinstance(payload.map_search_context, dict) else {}
+    map_search_context = payload.map_search_context.as_artifact()
     if map_search_context:
         memory.artifacts["frontend_map_search_context"] = map_search_context
         context.available_artifacts.append("frontend_map_search_context")
         context.context_summary.available_context_sources.append("analysis:frontend_map_search_context")
         context.limits.append(
             "frontend_map_search_context 是本轮可检索地图空间对象源；最终回答只能引用 search_analysis_context/read_analysis_evidence_node 已读取到的 EvidenceNode 中的具体地名、格子、线段或 cell。"
+        )
+    selected_sources = payload.selected_sources_context.source_items()
+    if selected_sources:
+        memory.artifacts["selected_sources_context"] = {"sources": selected_sources}
+        context.available_artifacts.append("selected_sources_context")
+        context.context_summary.available_context_sources.append("analysis:selected_sources_context")
+        context.limits.append(
+            "selected_sources_context 是本轮已选分析来源；主 Agent 分析来源时只能通过 list_selected_sources/search_selected_source_evidence/read_selected_source_evidence_node 使用这些来源，不得引用未选来源。"
         )
     visual_image_inputs, visual_snapshot_meta, visual_snapshot_warnings = _visual_snapshot_inputs(payload)
     if visual_snapshot_meta:
@@ -471,7 +478,7 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
         "tool-loop",
     )
     try:
-        max_steps_override, max_errors_override = _tool_loop_limits(thinking_mode)
+        max_steps_override, max_errors_override = _tool_loop_limits()
         loop_result = await run_langgraph_react_loop(
             messages=payload.messages,
             snapshot=snapshot,
@@ -483,7 +490,6 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             include_secondary_tools=True,
             max_steps_override=max_steps_override,
             max_errors_override=max_errors_override,
-            thinking_mode=thinking_mode,
             initial_artifacts=dict(memory.artifacts or {}),
         )
     except Exception as exc:
@@ -609,7 +615,6 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             context=context,
             answer_evidence_payload=answer_evidence_payload,
             image_inputs=visual_image_inputs,
-            thinking_mode=thinking_mode,
             emit=emit_event,
         )
         await emit_thinking(
@@ -724,7 +729,6 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             answer_evidence_payload=answer_evidence_payload,
             translation_pack=translation_pack,
             image_inputs=visual_image_inputs,
-            thinking_mode=thinking_mode,
             emit=emit_event,
         )
     except Exception as exc:
@@ -749,7 +753,6 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
             research_notes=list(memory.research_notes or []),
             audit=latest_rule_audit,
         )
-
     state.move_to("answered")
     await _emit_status(emit, "answered")
     await emit_thinking(
@@ -789,11 +792,11 @@ async def _run_agent_turn(payload: AgentTurnRequest, *, emit: StreamEmit | None 
     )
 
 
-async def process_agent_turn(payload: AgentTurnRequest) -> AgentTurnResponse:
-    return await _run_agent_turn(payload)
+async def process_main_agent_loop(payload: AgentTurnRequest) -> AgentTurnResponse:
+    return await _run_main_agent_loop(payload)
 
 
-async def stream_agent_turn(payload: AgentTurnRequest) -> AsyncIterator[AgentTurnStreamEvent]:
+async def stream_main_agent_loop(payload: AgentTurnRequest) -> AsyncIterator[AgentTurnStreamEvent]:
     queue: asyncio.Queue[AgentTurnStreamEvent | None] = asyncio.Queue()
 
     async def emit(event_type: str, event_payload: dict[str, Any]) -> None:
@@ -801,7 +804,7 @@ async def stream_agent_turn(payload: AgentTurnRequest) -> AsyncIterator[AgentTur
 
     async def runner() -> None:
         try:
-            response = await _run_agent_turn(payload, emit=emit)
+            response = await _run_main_agent_loop(payload, emit=emit)
             if response.status == "failed" and response.diagnostics.error:
                 await emit("error", {"message": response.diagnostics.error})
             await queue.put(

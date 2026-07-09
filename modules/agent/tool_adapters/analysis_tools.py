@@ -89,10 +89,18 @@ async def read_population_profile_analysis(
 ) -> ToolResult:
     del arguments, question
     payload = build_population_profile_analysis(snapshot, artifacts)
-    return _success_result(
+    ready = bool(payload.get("evidence_ready"))
+    return ToolResult(
         tool_name="read_population_profile_analysis",
+        status="success",
         result=payload,
-        evidence={"field": "population.profile.summary_text", "value": payload.get("summary_text")},
+        evidence=[
+            {"field": "population.profile.summary_text", "value": payload.get("summary_text")},
+            {"field": "population.profile.top_age_band", "value": payload.get("top_age_band")},
+            {"field": "population.profile.top_age_band_ratio", "value": payload.get("top_age_band_ratio")},
+            {"field": "population.profile.age_distribution_ratios", "value": payload.get("age_distribution_ratios")},
+        ],
+        warnings=[] if ready else [str(payload.get("summary_text") or "当前缺少可直接利用的结构化分析结果。")],
         artifacts={"current_population_profile_analysis": payload},
     )
 

@@ -1,8 +1,70 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { normalizePptPackageDetail } from './carrier-preview.js'
-import { evidenceNodesFromAiPayload } from './model.js'
-import { getBlockingPptInputSources, getPptPromptActions, getPptSourceHealth } from './ui-state.js'
+import {
+  formatMetricClaimValue,
+  formatVisualOverlayValue,
+  visualColumnKey,
+  visualColumnLabel,
+  visualColumnsPreview,
+  visualComposition,
+  visualData,
+  visualEvidenceSummary,
+  visualExistingAssetMissingText,
+  visualGroupSummary,
+  visualLinkSummary,
+  visualMetricOverlays,
+  visualNodeSummary,
+  visualReasonText,
+  visualRowsPreview,
+  visualTypeLabel,
+} from './visual-view.js'
+import {
+  carrierMetric,
+  carrierPoiLabel,
+  carrierPopulationLabel,
+  carrierTypeLabel,
+  currentGapDescription,
+  currentGapMeta,
+  currentGapTitle,
+  currentMetricSourceIds,
+  formatCurrentMetricValue,
+  formatPackageMetric,
+  packageItemRadiance,
+  packageItemSubtitle,
+  packageItemTitle,
+} from './source-detail-view.js'
+import {
+  buildWebSourceCommitPreview,
+  buildWebSourcePreviewPayload,
+  closeWebSourceDialogForm,
+  createWebSourceDialogState,
+  openWebSourceDialogForm,
+  parseWebSourceUrls,
+  selectedWebSourceItems,
+  toggleWebSourceCategorySelection,
+  toggleWebSourceModeSelection,
+  webSourceItemKey,
+  webSourceItemUrlLabel,
+  webSourceTierLabel,
+} from './web-source-dialog.js'
+import {
+  isCurrentSource,
+  isDeletableSource,
+  isDocumentSource,
+  isGeneratingSource,
+  isPackagePlaceholderSource,
+  isPackageSource,
+  isRetryableSource,
+  removeSourceMessage,
+  sourceHealth,
+  sourceHealthLabel,
+  sourceHealthReason,
+  sourceTransport,
+  sourceTransportExcludedItems,
+  sourceTransportLabel,
+} from './source-view.js'
+import { getBlockingPptInputSources, getPptPromptActions } from './ui-state.js'
 
 const props = defineProps({
   sources: {
@@ -127,6 +189,8 @@ const emit = defineEmits([
   'set-source-group-selected',
   'move-source-to-group',
   'rename-source',
+  'export-source',
+  'export-all-sources',
   'remove-source',
   'remove-selected-sources',
   'retry-source',
@@ -159,25 +223,7 @@ const emit = defineEmits([
 const isSourcesCollapsed = ref(false)
 const sourceMenu = ref({ kind: '', id: '', placement: 'below', x: 0, y: 0 })
 const sourceDialog = ref({ mode: '', id: '', title: '', value: '', message: '' })
-const webSourceDialog = ref({
-  open: false,
-  step: 'form',
-  inputMode: 'search',
-  loadingDefault: false,
-  searching: false,
-  adding: false,
-  regionName: '',
-  administrativeArea: '',
-  topic: '',
-  urlText: '',
-  categories: ['政策背景', '区域概况', '产业商业', '文旅案例', '竞品项目', '周边房租'],
-  sourceModes: ['trusted', 'market'],
-  preview: null,
-  selectedItemKeys: [],
-  activeItemIndex: 0,
-  error: '',
-  warnings: [],
-})
+const webSourceDialog = ref(createWebSourceDialogState())
 const documentSourceInput = ref(null)
 const activeDocumentSourceId = ref('')
 const activePackageSourceId = ref('')
@@ -200,10 +246,6 @@ const sourceCollapseIconPoints = computed(() => (
   isSourcesCollapsed.value ? '14.5,12 12,9.5 12,14.5 14.5,12' : '11.5,12 14,9.5 14,14.5 11.5,12'
 ))
 const centerThreadBodyRef = ref(null)
-
-function asArray(items) {
-  return Array.isArray(items) ? items : []
-}
 
 const sourceById = computed(() => new Map(props.sources.map((source) => [String(source.id || ''), source])))
 const sourceGroupsForTree = computed(() => props.sourceGroups.map((group) => ({
@@ -255,8 +297,7 @@ const webSourcePreviewItemsByCategory = computed(() => {
 })
 const activeWebSourcePreviewItem = computed(() => webSourcePreviewItems.value[Math.max(0, Number(webSourceDialog.value.activeItemIndex || 0))] || null)
 const selectedWebSourcePreviewItems = computed(() => {
-  const selected = new Set(Array.isArray(webSourceDialog.value.selectedItemKeys) ? webSourceDialog.value.selectedItemKeys : [])
-  return webSourcePreviewItems.value.filter((item, index) => selected.has(webSourceItemKey(item, index)))
+  return selectedWebSourceItems(webSourcePreviewItems.value, webSourceDialog.value.selectedItemKeys)
 })
 const canCommitWebSource = computed(() => !!webSourceDialog.value.preview && selectedWebSourcePreviewItems.value.length > 0 && !props.webSourceGenerating && !webSourceDialog.value.adding)
 const bulkDeleteSelectedSources = computed(() => props.sources.filter((source) => source && bulkDeleteSourceIds.value.has(String(source.id || '')) && isDeletableSource(source)))
@@ -895,17 +936,6 @@ function undoActiveFlowRevision() {
   undoRowRevision(activeFlowRow.value)
 }
 
-function formatMetricClaimValue(claim = {}) {
-  const value = claim.value
-  const unit = claim.unit || ''
-  if (value === undefined || value === null || value === '') return claim.text || ''
-  const number = Number(value)
-  const formatted = Number.isFinite(number)
-    ? (Math.abs(number) >= 100 ? number.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : number.toLocaleString('zh-CN', { maximumFractionDigits: 3 }))
-    : String(value)
-  return `${formatted}${unit || ''}`
-}
-
 function visualArtifactFor(row = {}, visual = {}) {
   const visualId = String(visual.visual_id || visual.visualId || '')
   return (row.visualArtifacts || []).find((item) => String(item.visual_id || item.visualId || '') === visualId) || {}
@@ -954,109 +984,6 @@ function openVisualPreview(row = {}, visual = {}) {
 
 function closeVisualPreview() {
   visualPreviewDialog.value = { url: '', title: '' }
-}
-
-function visualData(visual = {}) {
-  const data = visual.data && typeof visual.data === 'object' ? visual.data : {}
-  return data
-}
-
-function visualComposition(visual = {}) {
-  return String(visualData(visual).composition || '')
-}
-
-function visualMetricOverlays(visual = {}) {
-  const overlays = visualData(visual).metric_overlays || visualData(visual).metricOverlays
-  return asArray(overlays).map((item) => (item && typeof item === 'object' ? item : {})).filter((item) => item.label || item.metric_id || item.metricId)
-}
-
-function formatVisualOverlayValue(item = {}) {
-  const value = item.value
-  const unit = item.unit || ''
-  if (value === undefined || value === null || value === '') return '—'
-  const number = Number(value)
-  const formatted = Number.isFinite(number)
-    ? (Math.abs(number) >= 100 ? number.toLocaleString('zh-CN', { maximumFractionDigits: 0 }) : number.toLocaleString('zh-CN', { maximumFractionDigits: 3 }))
-    : String(value)
-  return `${formatted}${unit || ''}`
-}
-
-function visualEvidenceSummary(visual = {}) {
-  const metricIds = asArray(visual.source_metric_ids || visual.sourceMetricIds).filter(Boolean)
-  const sourceIds = asArray(visual.source_ids || visual.sourceIds).filter(Boolean)
-  if (metricIds.length) return `指标：${metricIds.slice(0, 3).join(' / ')}${metricIds.length > 3 ? ` 等 ${metricIds.length} 个` : ''}`
-  if (sourceIds.length) return `来源：${sourceIds.slice(0, 3).join(' / ')}${sourceIds.length > 3 ? ` 等 ${sourceIds.length} 个` : ''}`
-  return ''
-}
-
-function visualReasonText(visual = {}) {
-  const data = visualData(visual)
-  return data.reason || visual.reason || ''
-}
-
-function visualCaptureError(visual = {}) {
-  const data = visualData(visual)
-  const error = data.capture_error || data.captureError
-  return error && typeof error === 'object' ? error : {}
-}
-
-function visualExistingAssetMissingText(visual = {}) {
-  const error = visualCaptureError(visual)
-  if (error.message) {
-    const code = error.code ? `（${error.code}）` : ''
-    const detail = error.detail ? `：${error.detail}` : ''
-    return `上次地图截图失败：${error.message}${code}${detail}`
-  }
-  return '需要复用现有空间图截图，当前未绑定资产。'
-}
-
-function visualRowsPreview(visual = {}) {
-  const data = visualData(visual)
-  return Array.isArray(data.rows) ? data.rows.slice(0, 4) : []
-}
-
-function visualColumnsPreview(visual = {}) {
-  const data = visualData(visual)
-  return Array.isArray(data.columns) ? data.columns.slice(0, 4) : []
-}
-
-function visualColumnKey(column = {}) {
-  if (column && typeof column === 'object') return column.key || column.field || column.label || ''
-  return String(column || '')
-}
-
-function visualColumnLabel(column = {}) {
-  if (column && typeof column === 'object') return column.label || column.key || column.field || ''
-  return String(column || '')
-}
-
-function visualTypeLabel(visual = {}) {
-  const labels = {
-    figure: '数值图表',
-    table: '指标表',
-    metric_card: '指标卡',
-    diagram: '语义图',
-    matrix: '诊断矩阵',
-    existing_asset: '已有空间图',
-  }
-  return labels[String(visual.visual_type || visual.visualType || '')] || '可视化'
-}
-
-function visualNodeSummary(visual = {}) {
-  return asArray(visual.nodes).slice(0, 6).map((node) => node && (node.title || node.label || node.name || node.id)).filter(Boolean)
-}
-
-function visualGroupSummary(visual = {}) {
-  return asArray(visual.groups).slice(0, 4).map((group) => group && (group.title || group.label || group.name || group.id)).filter(Boolean)
-}
-
-function visualLinkSummary(visual = {}) {
-  return asArray(visual.links).slice(0, 6).map((link) => {
-    if (!link || typeof link !== 'object') return ''
-    const source = link.source || link.from || ''
-    const target = link.target || link.to || ''
-    return source || target ? `${source} → ${target}`.trim() : ''
-  }).filter(Boolean)
 }
 
 function openRevisionForRow(row = {}) {
@@ -1169,47 +1096,6 @@ function groupTitle(groupId = '') {
   return (props.sourceGroups.find((group) => String(group.id || '') === String(groupId || '')) || {}).title || '来源'
 }
 
-function isPackageSource(source = {}) {
-  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return meta.sourceKind === 'package' || String(source.id || '').startsWith('package:')
-}
-
-function isPackagePlaceholderSource(source = {}) {
-  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return meta.sourceKind === 'package-placeholder' || String(source.id || '').startsWith('package-placeholder:')
-}
-
-function isDocumentSource(source = {}) {
-  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return meta.sourceKind === 'document' || String(source.id || '').startsWith('document:')
-}
-
-function isImageSource(source = {}) {
-  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return meta.sourceKind === 'image' || String(source.id || '').startsWith('image:')
-}
-
-function isWebSource(source = {}) {
-  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return source.source_kind === 'web'
-    || source.sourceKind === 'web'
-    || meta.sourceKind === 'web'
-}
-
-function isCurrentSource(source = {}) {
-  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return meta.sourceKind === 'system' && String(source.id || '').startsWith('current:')
-}
-
-function isDatabaseSource(source = {}) {
-  const meta = source.meta && typeof source.meta === 'object' ? source.meta : {}
-  return meta.sourceKind === 'database' || String(source.id || '').startsWith('database:')
-}
-
-function isDeletableSource(source = {}) {
-  return isDocumentSource(source) || isImageSource(source) || isPackageSource(source) || isWebSource(source) || isDatabaseSource(source)
-}
-
 function isBulkDeleteSelected(source = {}) {
   return bulkDeleteSourceIds.value.has(String(source.id || ''))
 }
@@ -1234,110 +1120,6 @@ function toggleBulkDeleteSource(source = {}) {
   if (next.has(sourceId)) next.delete(sourceId)
   else next.add(sourceId)
   bulkDeleteSourceIds.value = next
-}
-
-function sourceTransport(source = {}) {
-  const meta = source && source.meta && typeof source.meta === 'object' ? source.meta : {}
-  const aiPayload = meta.aiPayload && typeof meta.aiPayload === 'object'
-    ? meta.aiPayload
-    : meta.ai_payload && typeof meta.ai_payload === 'object'
-      ? meta.ai_payload
-      : null
-  if (aiPayload && aiPayload.version === 'ppt_ai_input_block_v1') {
-    const evidenceNodes = evidenceNodesFromAiPayload(aiPayload)
-    const evidenceCount = Number(aiPayload.evidence_count ?? aiPayload.evidenceCount ?? evidenceNodes.length ?? (aiPayload.counts || {}).evidence ?? 0) || 0
-    return {
-      source_id: aiPayload.source_id || source.id,
-      sourceId: aiPayload.sourceId || source.id,
-      title: aiPayload.title || source.title,
-      source_kind: aiPayload.source_kind || aiPayload.sourceKind || meta.sourceKind,
-      sourceKind: aiPayload.source_kind || aiPayload.sourceKind || meta.sourceKind,
-      transport_status: (Array.isArray(aiPayload.included) && aiPayload.included.length) ? 'ready_to_send' : 'selected_no_payload',
-      transportStatus: (Array.isArray(aiPayload.included) && aiPayload.included.length) ? 'ready_to_send' : 'selected_no_payload',
-      included: Array.isArray(aiPayload.included) ? aiPayload.included : [],
-      metric_count: Number((aiPayload.counts || {}).metrics || 0) || 0,
-      metricCount: Number((aiPayload.counts || {}).metrics || 0) || 0,
-      metric_gap_count: Number((aiPayload.counts || {}).metric_gaps || 0) || 0,
-      metricGapCount: Number((aiPayload.counts || {}).metric_gaps || 0) || 0,
-      evidence_count: evidenceCount,
-      evidenceCount,
-      scope_count: Number((aiPayload.counts || {}).scope || 0) || 0,
-      scopeCount: Number((aiPayload.counts || {}).scope || 0) || 0,
-      visual_spec_count: Number((aiPayload.counts || {}).visual_specs || 0) || 0,
-      visualSpecCount: Number((aiPayload.counts || {}).visual_specs || 0) || 0,
-      excluded: Array.isArray(aiPayload.excluded) ? aiPayload.excluded : [],
-      policy: aiPayload.policy || '',
-      preview: true,
-    }
-  }
-  return meta.transport && typeof meta.transport === 'object' ? meta.transport : null
-}
-
-function sourceTransportLabel(source = {}) {
-  const transport = sourceTransport(source)
-  if (!transport) return ''
-  const metricCount = Number(transport.metric_count ?? transport.metricCount ?? 0) || 0
-  const evidenceCount = Number(transport.evidence_count ?? transport.evidenceCount ?? 0) || 0
-  const scopeCount = Number(transport.scope_count ?? transport.scopeCount ?? 0) || 0
-  const visualSpecCount = Number(transport.visual_spec_count ?? transport.visualSpecCount ?? 0) || 0
-  const included = Array.isArray(transport.included) ? transport.included : []
-  const status = String(transport.transport_status || transport.transportStatus || '')
-  if (status === 'ready_to_send') {
-    const parts = []
-    if (scopeCount || included.includes('scope')) parts.push(`范围 ${scopeCount || 1}`)
-    if (metricCount) parts.push(`metrics ${metricCount}`)
-    if (evidenceCount) parts.push(`evidence ${evidenceCount}`)
-    if (visualSpecCount) parts.push(`visuals ${visualSpecCount}`)
-    return parts.length ? `已构建 ${parts.join(' / ')}` : '已构建可传内容'
-  }
-  if (status === 'included' || metricCount || evidenceCount || scopeCount || included.length) {
-    const parts = []
-    if (scopeCount || included.includes('scope')) parts.push(`范围 ${scopeCount || 1}`)
-    if (metricCount) parts.push(`metrics ${metricCount}`)
-    if (evidenceCount) parts.push(`evidence ${evidenceCount}`)
-    if (visualSpecCount) parts.push(`visuals ${visualSpecCount}`)
-    return parts.length ? `已传 ${parts.join(' / ')}` : '已传可用内容'
-  }
-  return '未传：无可用指标/证据'
-}
-
-function sourceHealth(source = {}) {
-  return getPptSourceHealth(source)
-}
-
-function sourceHealthLabel(source = {}) {
-  return sourceHealth(source).healthLabel || ''
-}
-
-function sourceHealthReason(source = {}) {
-  return sourceHealth(source).healthReason || ''
-}
-
-function isRetryableSource(source = {}) {
-  return !!sourceHealth(source).retryable
-    && (isDocumentSource(source) || isImageSource(source) || isWebSource(source))
-}
-
-function sourceTransportExcludedItems(source = {}) {
-  const transport = sourceTransport(source)
-  return transport && Array.isArray(transport.excluded) ? transport.excluded : []
-}
-
-function removeSourceMessage(source = {}) {
-  if (isDocumentSource(source)) {
-    return '确认彻底删除该文档来源？文档库里的原文件、解析结果和 PageIndex 索引都会删除。'
-  }
-  if (isImageSource(source)) {
-    return '确认彻底删除该图片来源？图片文件、OCR 和视觉理解结果都会删除。'
-  }
-  if (isPackageSource(source)) {
-    return '确认彻底删除该资料包？已持久化的资料包记录会从数据库删除，刷新后不会再出现。'
-  }
-  return '确认从当前 PPT 来源列表删除该来源？刷新来源后可重新加入。'
-}
-
-function isGeneratingSource(source = {}) {
-  return String(source.status || '') === 'generating'
 }
 
 function openPackageDetail(source = {}) {
@@ -1396,82 +1178,6 @@ function handleSourceRowClick(source = {}) {
     return
   }
   if (source.status === 'ready') emit('toggle-source', source.id)
-}
-
-function formatPackageMetric(value) {
-  if (value === undefined || value === null || value === '') return '-'
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/\.?0+$/, '')
-  return String(value)
-}
-
-function formatCurrentMetricValue(metric = {}) {
-  if (metric.value === undefined || metric.value === null || metric.value === '') return '-'
-  return `${formatPackageMetric(metric.value)}${metric.unit || ''}`
-}
-
-function currentMetricSourceIds(metric = {}) {
-  const sourceIds = metric.source_ids || metric.sourceIds
-  return Array.isArray(sourceIds) ? sourceIds.filter(Boolean).join(' / ') : (metric.source_id || metric.sourceId || '')
-}
-
-function currentGapTitle(gap = {}, index = 0) {
-  return gap.label || gap.needed_metric || gap.neededMetric || gap.metric_id || gap.metricId || `缺口指标 ${index + 1}`
-}
-
-function currentGapDescription(gap = {}) {
-  return gap.description || gap.text || gap.reason || '当前没有可用计算结果。'
-}
-
-function currentGapMeta(gap = {}) {
-  return [
-    gap.source_path || gap.sourcePath,
-    gap.source_id || gap.sourceId,
-    gap.metric_id || gap.metricId,
-  ].filter(Boolean).join(' / ')
-}
-
-function packageItemTitle(item = {}, index = 0) {
-  return item.name || item.title || item.label || `点位 ${index + 1}`
-}
-
-function packageItemSubtitle(item = {}) {
-  return [item.category, item.subcategory || item.type].filter(Boolean).join(' / ') || '未分类'
-}
-
-function packageItemRadiance(item = {}) {
-  const nightlightCell = item.nightlight_cell && typeof item.nightlight_cell === 'object' ? item.nightlight_cell : {}
-  return nightlightCell.class_label || nightlightCell.label || formatPackageMetric(nightlightCell.radiance)
-}
-
-function carrierMetric(carrier = {}, group = '', key = '') {
-  const payload = carrier[group] && typeof carrier[group] === 'object' ? carrier[group] : {}
-  return formatPackageMetric(payload[key])
-}
-
-function carrierPoiLabel(carrier = {}) {
-  const metrics = carrier.poi_metrics && typeof carrier.poi_metrics === 'object' ? carrier.poi_metrics : {}
-  const count = metrics.total_related_poi_count ?? 0
-  const categories = Array.isArray(metrics.dominant_categories) ? metrics.dominant_categories.slice(0, 2) : []
-  const label = categories.map((item) => item.category || item.name).filter(Boolean).join(' / ')
-  return label ? `${count} 个 · ${label}` : `${count} 个`
-}
-
-function carrierPopulationLabel(carrier = {}) {
-  const metrics = carrier.population_metrics && typeof carrier.population_metrics === 'object' ? carrier.population_metrics : {}
-  const strength = metrics.demand_strength || '-'
-  if (metrics.total_population !== undefined && metrics.total_population !== null) {
-    return `总人口 ${formatPackageMetric(metrics.total_population)} · ${strength}`
-  }
-  const label = metrics.view_label || '人口图层'
-  const unit = metrics.unit ? ` ${metrics.unit}` : ''
-  return `${label}均值 ${formatPackageMetric(metrics.mean_cell_value)}${unit} · ${strength}`
-}
-
-function carrierTypeLabel(carrier = {}) {
-  const type = String(carrier.carrier_type || carrier.type || '')
-  if (type === 'block_loop') return '街区 / loop'
-  if (type === 'corridor') return '廊道'
-  return '路段'
 }
 
 function selectPackageCarrier(carrierId = '') {
@@ -1587,23 +1293,11 @@ function closeSourceDialog() {
 
 async function openWebSourceDialog(mode = 'search') {
   const inputMode = String(mode || '') === 'url' ? 'url' : 'search'
-  webSourceDialog.value = {
-    ...webSourceDialog.value,
-    open: true,
-    step: 'form',
+  webSourceDialog.value = openWebSourceDialogForm(webSourceDialog.value, {
     inputMode,
     loadingDefault: true,
-    searching: false,
-    adding: false,
     topic: props.spec.topic || '',
-    urlText: '',
-    sourceModes: ['trusted', 'market'],
-    preview: null,
-    selectedItemKeys: [],
-    activeItemIndex: 0,
-    error: '',
-    warnings: [],
-  }
+  })
   try {
     const defaults = await new Promise((resolve) => {
       emit('manage-web-source', {
@@ -1630,22 +1324,7 @@ async function openWebSourceDialog(mode = 'search') {
 }
 
 function closeWebSourceDialog() {
-  webSourceDialog.value = {
-    ...webSourceDialog.value,
-    open: false,
-    step: 'form',
-    inputMode: 'search',
-    loadingDefault: false,
-    searching: false,
-    adding: false,
-    urlText: '',
-    sourceModes: ['trusted', 'market'],
-    preview: null,
-    selectedItemKeys: [],
-    activeItemIndex: 0,
-    error: '',
-    warnings: [],
-  }
+  webSourceDialog.value = closeWebSourceDialogForm(webSourceDialog.value)
 }
 
 function backToWebSourceForm() {
@@ -1654,21 +1333,6 @@ function backToWebSourceForm() {
     step: 'form',
     error: '',
   }
-}
-
-function webSourceItemKey(item = {}, index = 0) {
-  return String(item.url || item.title || `web-source-item-${index}`)
-}
-
-function webSourceItemUrlLabel(item = {}, index = 0) {
-  return String(item.url || item.source_domain || item.source_name || `网页 ${index + 1}`)
-}
-
-function webSourceTierLabel(item = {}) {
-  const tier = String(item.source_tier || item.sourceTier || '').trim()
-  if (tier === 'community') return '低可信线索'
-  if (tier === 'market') return '市场线索'
-  return '可信来源'
 }
 
 function isWebSourceModeSelected(mode = '') {
@@ -1720,27 +1384,16 @@ function clearWebSourcePreviewSelection() {
 }
 
 function toggleWebSourceCategory(category = '') {
-  const normalized = String(category || '').trim()
-  if (!normalized) return
-  const current = Array.isArray(webSourceDialog.value.categories) ? webSourceDialog.value.categories : []
   webSourceDialog.value = {
     ...webSourceDialog.value,
-    categories: current.includes(normalized)
-      ? current.filter((item) => item !== normalized)
-      : [...current, normalized],
+    categories: toggleWebSourceCategorySelection(webSourceDialog.value.categories, category),
   }
 }
 
 function toggleWebSourceMode(mode = '') {
-  const normalized = String(mode || '').trim()
-  if (!normalized) return
-  const current = Array.isArray(webSourceDialog.value.sourceModes) ? webSourceDialog.value.sourceModes : []
-  if (normalized === 'trusted') return
   webSourceDialog.value = {
     ...webSourceDialog.value,
-    sourceModes: current.includes(normalized)
-      ? current.filter((item) => item !== normalized)
-      : [...current, normalized],
+    sourceModes: toggleWebSourceModeSelection(webSourceDialog.value.sourceModes, mode),
   }
 }
 
@@ -1756,22 +1409,9 @@ function setWebSourceInputMode(mode = 'search') {
   }
 }
 
-function webSourceUrlList() {
-  const seen = new Set()
-  return String(webSourceDialog.value.urlText || '')
-    .split(/[\n,，\s]+/)
-    .map((item) => item.trim())
-    .filter((item) => /^https?:\/\/[^/\s]+\S*$/i.test(item))
-    .filter((item) => {
-      if (seen.has(item)) return false
-      seen.add(item)
-      return true
-    })
-}
-
 async function submitWebSourceDialog() {
   if (!canSearchWebSource.value) return
-  const urls = webSourceDialog.value.inputMode === 'url' ? webSourceUrlList() : []
+  const urls = webSourceDialog.value.inputMode === 'url' ? parseWebSourceUrls(webSourceDialog.value.urlText) : []
   if (webSourceDialog.value.inputMode === 'url' && !urls.length) {
     webSourceDialog.value = {
       ...webSourceDialog.value,
@@ -1779,17 +1419,7 @@ async function submitWebSourceDialog() {
     }
     return
   }
-  const payload = {
-    mode: 'preview',
-    region_name: webSourceDialog.value.regionName || '当前分析区域',
-    administrative_area: webSourceDialog.value.administrativeArea || '',
-    topic: webSourceDialog.value.topic || props.spec.topic || '',
-    categories: webSourceDialog.value.categories,
-    source_modes: Array.isArray(webSourceDialog.value.sourceModes) && webSourceDialog.value.sourceModes.length
-      ? webSourceDialog.value.sourceModes
-      : ['trusted', 'market'],
-    urls,
-  }
+  const payload = buildWebSourcePreviewPayload(webSourceDialog.value, props.spec.topic)
   webSourceDialog.value = {
     ...webSourceDialog.value,
     searching: true,
@@ -1826,32 +1456,8 @@ async function commitWebSourceDialog() {
     error: '',
   }
   try {
-    const preview = webSourceDialog.value.preview && typeof webSourceDialog.value.preview === 'object' ? webSourceDialog.value.preview : {}
     const selectedItems = selectedWebSourcePreviewItems.value
-    const selectedUrls = new Set(selectedItems.map((item) => String(item && item.url || '')))
-    const selectedTitles = new Set(selectedItems.map((item) => String(item && item.title || '')))
-    const nextEvidenceRefs = Array.isArray(preview.evidence_refs)
-      ? preview.evidence_refs.filter((url) => selectedUrls.has(String(url || '')))
-      : []
-    const commitPreview = {
-      ...preview,
-      items: selectedItems,
-      evidence_refs: nextEvidenceRefs,
-      summary: `已选择 ${selectedItems.length} 条地区资料。`,
-      warnings: Array.isArray(preview.warnings) ? preview.warnings : [],
-      source: {
-        ...(preview.source || {}),
-        meta: {
-          ...((preview.source && preview.source.meta) || {}),
-          web_source: {
-            ...(((preview.source && preview.source.meta && preview.source.meta.web_source) || {})),
-            selected_item_count: selectedItems.length,
-            selected_urls: Array.from(selectedUrls).filter(Boolean),
-            selected_titles: Array.from(selectedTitles).filter(Boolean),
-          },
-        },
-      },
-    }
+    const commitPreview = buildWebSourceCommitPreview(webSourceDialog.value.preview, selectedItems)
     await new Promise((resolve, reject) => {
       emit('manage-web-source', {
         mode: 'commit',
@@ -1955,18 +1561,36 @@ async function confirmSourceDialog() {
           <button type="button" class="agent-ppt-add-source-btn" @click="openDocumentSourcePicker">+ 添加来源</button>
           <div class="agent-ppt-source-search">
             <div class="agent-ppt-source-search-main">
-              <span>联网来源</span>
+              <span class="agent-ppt-source-search-title">联网来源</span>
               <div class="agent-ppt-source-search-chips">
-                <button type="button" disabled>可信优先</button>
-                <button type="button" disabled>带引用</button>
+                <span>可信优先</span>
+                <span>自动引用</span>
               </div>
             </div>
-            <button type="button" :disabled="webSourceGenerating" @click="openWebSourceDialog('search')">
-              {{ webSourceGenerating ? '搜索中' : '搜索' }}
-            </button>
-            <button type="button" :disabled="webSourceGenerating" @click="openWebSourceDialog('url')">
-              添加 URL
-            </button>
+            <div class="agent-ppt-source-search-actions">
+              <button
+                type="button"
+                class="agent-ppt-source-search-action is-primary"
+                :disabled="webSourceGenerating"
+                @click="openWebSourceDialog('search')">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="11" cy="11" r="6"></circle>
+                  <path d="M16 16l4 4"></path>
+                </svg>
+                <span>{{ webSourceGenerating ? '搜索中' : 'AI 搜索' }}</span>
+              </button>
+              <button
+                type="button"
+                class="agent-ppt-source-search-action"
+                :disabled="webSourceGenerating"
+                @click="openWebSourceDialog('url')">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
+                </svg>
+                <span>添加 URL</span>
+              </button>
+            </div>
           </div>
           <button
             type="button"
@@ -1987,7 +1611,10 @@ async function confirmSourceDialog() {
                 <span aria-hidden="true">✧</span>
               </button>
               <div class="agent-ppt-source-toolbar-copy">
-                <strong>{{ sourceSummary.selected || 0 }}/{{ sourceSummary.total || 0 }}</strong>
+                <strong>
+                  {{ sourceSummary.selected || 0 }}/{{ sourceSummary.total || 0 }}
+                  <span v-if="sourceRefreshing" class="agent-ppt-source-refresh-dot" aria-label="正在同步来源"></span>
+                </strong>
                 <small>{{ deliverableSourceCount }} 个可用于 AI</small>
               </div>
             </div>
@@ -2004,6 +1631,14 @@ async function confirmSourceDialog() {
                 aria-hidden="true">
                 {{ sourceSummary.ready > 0 && sourceSummary.selected === sourceSummary.ready ? '✓' : '' }}
               </span>
+            </button>
+            <button
+              v-if="!bulkDeleteMode"
+              type="button"
+              class="agent-ppt-source-select-row"
+              :disabled="!sources.length"
+              @click="$emit('export-all-sources')">
+              <span>一键导出</span>
             </button>
             <button
               v-if="!bulkDeleteMode"
@@ -2138,6 +1773,7 @@ async function confirmSourceDialog() {
                       @click="openDocumentEvidence(source)">
                       查看结构
                     </button>
+                    <button type="button" @click="$emit('export-source', source.id)">完整导出</button>
                     <div class="agent-ppt-source-move-menu">
                       <button type="button" class="agent-ppt-source-move-trigger" aria-haspopup="true">
                         <span aria-hidden="true"></span>
@@ -2222,6 +1858,7 @@ async function confirmSourceDialog() {
                   @click="openDocumentEvidence(source)">
                   查看结构
                 </button>
+                <button type="button" @click="$emit('export-source', source.id)">完整导出</button>
                 <div class="agent-ppt-source-move-menu">
                   <button type="button" class="agent-ppt-source-move-trigger" aria-haspopup="true">
                     <span aria-hidden="true"></span>

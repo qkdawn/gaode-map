@@ -330,26 +330,6 @@ class Settings(BaseSettings):
         validation_alias="DOCUMENT_MAX_MB",
         description="Maximum uploaded document size in MB",
     )
-    raganything_parser: Literal["mineru", "docling", "paddleocr"] = Field(
-        "mineru",
-        validation_alias="RAGANYTHING_PARSER",
-        description="RAG-Anything parser backend",
-    )
-    raganything_parse_method: Literal["auto", "ocr", "txt"] = Field(
-        "auto",
-        validation_alias="RAGANYTHING_PARSE_METHOD",
-        description="RAG-Anything parse method",
-    )
-    raganything_embedding_model: str = Field(
-        "text-embedding-3-large",
-        validation_alias="RAGANYTHING_EMBEDDING_MODEL",
-        description="OpenAI-compatible embedding model used by RAG-Anything",
-    )
-    raganything_embedding_dim: int = Field(
-        3072,
-        validation_alias="RAGANYTHING_EMBEDDING_DIM",
-        description="Embedding dimension for the RAG-Anything embedding model",
-    )
     evidence_embedding_model: str = Field(
         "BAAI/bge-m3",
         validation_alias="EVIDENCE_EMBEDDING_MODEL",

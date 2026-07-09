@@ -26,6 +26,7 @@ import {
   shouldExpandAgentProcessSection,
 } from './derived.js'
 import { cloneAnalysisTaskConfirmation } from './analysis-task-registry.js'
+import { getAnalysisWorkspaceTabsFromState } from './analysis-workspace-tabs.js'
 
 function createAgentSessionStoreMethods() {
   return {
@@ -66,10 +67,6 @@ function createAgentSessionStoreMethods() {
     isAgentFollowupHistorySession(session = null) {
       if (!session || typeof session !== 'object') return false
       return asText(session.panelKind) === 'followup'
-    },
-    isAgentDeepAnalysisHistorySession(session = null) {
-      if (!session || typeof session !== 'object') return false
-      return asText(session.panelKind) === 'deep_analysis'
     },
     splitAgentHistorySessionsByPanel(sessions = []) {
       const summary = []
@@ -183,12 +180,11 @@ function createAgentSessionStoreMethods() {
         ? this.getAgentActiveTopTab()
         : null
       const isSummaryTab = asText(activeTopTab && activeTopTab.kind) === 'summary'
-      const isDeepAnalysisTab = asText(activeTopTab && activeTopTab.kind) === 'deep_analysis'
       return {
         session,
         activeTabId,
         isSummaryTab,
-        followupThread: isSummaryTab || isDeepAnalysisTab
+        followupThread: isSummaryTab
           ? null
           : cloneObject(this.getAgentActiveFollowupTab && this.getAgentActiveFollowupTab()),
       }
@@ -260,9 +256,6 @@ function createAgentSessionStoreMethods() {
       this.agentRiskConfirmations = cloneArray(session.riskConfirmations)
       this.agentMessages = cloneArray(session.messages)
       this.agentThinkingTimeline = cloneArray(session.thinkingTimeline)
-      if (String(session.panelKind || '') !== 'deep_analysis' && !this.agentLoading) {
-        this.agentDeepAnalysisMode = 'quick'
-      }
       this.agentSummaryLoading = false
       this.agentSummaryGenerating = false
       this.agentSummaryProgressPhase = ''
@@ -285,13 +278,16 @@ function createAgentSessionStoreMethods() {
       if (!options.keepDetailLoadingId) {
         this.agentSessionDetailLoadingId = ''
       }
+      const analysisWorkspaceTabs = typeof this.getAgentAnalysisWorkspaceTabs === 'function'
+        ? this.getAgentAnalysisWorkspaceTabs(this.agentTabs)
+        : getAnalysisWorkspaceTabsFromState(this.agentTabs)
       const hasAgentTopTabs = !!(
         this.agentTabs
         && (
           (Array.isArray(this.agentTabs.summaryTabs) && this.agentTabs.summaryTabs.length)
           || (Array.isArray(this.agentTabs.iterationChangeTabs) && this.agentTabs.iterationChangeTabs.length)
           || (Array.isArray(this.agentTabs.siteSelectionTabs) && this.agentTabs.siteSelectionTabs.length)
-          || (Array.isArray(this.agentTabs.deepAnalysisTabs) && this.agentTabs.deepAnalysisTabs.length)
+          || analysisWorkspaceTabs.length
           || (Array.isArray(this.agentTabs.followupTabs) && this.agentTabs.followupTabs.length)
         )
       )
@@ -361,20 +357,10 @@ function createAgentSessionStoreMethods() {
       if (typeof this.captureAgentActiveFollowupTabState === 'function') {
         this.captureAgentActiveFollowupTabState()
       }
-      if (typeof this.captureAgentActiveDeepAnalysisTabState === 'function') {
-        this.captureAgentActiveDeepAnalysisTabState()
-      }
       const existing = this.readSessionState(activeId)
       let messages = cloneArray((existing && existing.messages) || [])
       if (!messages.length) {
         messages = cloneArray(this.agentMessages)
-      }
-      if (typeof this.getAgentActiveDeepAnalysisTab === 'function') {
-        const activeDeepAnalysisTab = this.getAgentActiveDeepAnalysisTab()
-        const threadMessages = cloneArray(activeDeepAnalysisTab && activeDeepAnalysisTab.thread && activeDeepAnalysisTab.thread.messages)
-        if (threadMessages.length) {
-          messages = threadMessages
-        }
       }
       if (typeof this.getAgentActiveFollowupTab === 'function') {
         const activeFollowupTab = this.getAgentActiveFollowupTab()

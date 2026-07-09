@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PPT AI 当前架构</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --text: #0f172a;
+      --muted: #475569;
+      --line: #cbd5e1;
+      --page: #f8fafc;
+      --panel: #ffffff;
+      --blue-bg: #eff6ff;
+      --blue-line: #93c5fd;
+      --green-bg: #f0fdf4;
+      --green-line: #86efac;
+      --purple-bg: #f5f3ff;
+      --purple-line: #c4b5fd;
+      --amber-bg: #fffbeb;
+      --amber-line: #fbbf24;
+      --cyan-bg: #ecfeff;
+      --cyan-line: #67e8f9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px;
+      font-family: Inter, "Segoe UI", Arial, "Microsoft YaHei", sans-serif;
+      background: #e2e8f0;
+      color: var(--text);
+    }
+    .page {
+      max-width: 1220px;
+      margin: 0 auto;
+      background: var(--page);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
+    }
+    .title { font-size: 24px; font-weight: 850; margin: 0 0 6px; letter-spacing: 0; }
+    .subtitle { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1.35fr 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    .col { display: flex; flex-direction: column; gap: 10px; }
+    .layer {
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      padding: 12px;
+    }
+    .layer.user { border-color: var(--blue-line); background: var(--blue-bg); }
+    .layer.api { border-color: var(--green-line); background: var(--green-bg); }
+    .layer.ai { border-color: var(--purple-line); background: var(--purple-bg); }
+    .layer.data { border-color: var(--amber-line); background: var(--amber-bg); }
+    .layer.agent { border-color: var(--cyan-line); background: var(--cyan-bg); }
+    .layer-title {
+      font-weight: 850;
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: #111827;
+    }
+    .box {
+      border: 1px solid rgba(15, 23, 42, 0.14);
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 8px;
+      padding: 9px;
+      margin-top: 7px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .box strong { display: block; font-size: 12px; margin-bottom: 3px; color: #111827; }
+    .box small { display: block; color: var(--muted); font-size: 11px; line-height: 1.42; }
+    .arrow {
+      text-align: center;
+      color: #64748b;
+      font-weight: 800;
+      font-size: 12px;
+      padding: 4px 0;
+    }
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+    .step {
+      border: 1px solid var(--purple-line);
+      background: rgba(255, 255, 255, 0.86);
+      border-radius: 8px;
+      padding: 9px;
+      font-size: 11px;
+      line-height: 1.38;
+      min-height: 92px;
+    }
+    .step strong {
+      display: block;
+      color: #4c1d95;
+      margin-bottom: 4px;
+      font-size: 11px;
+    }
+    .note {
+      margin-top: 14px;
+      border-left: 4px solid #0ea5e9;
+      background: #f0f9ff;
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #0f172a;
+      border-radius: 0 8px 8px 0;
+    }
+    .explain {
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 10px;
+      background: white;
+      border: 1px solid var(--line);
+    }
+    .explain h2 { font-size: 16px; margin: 0 0 10px; }
+    .explain ul { margin: 0; padding-left: 20px; }
+    .explain li { margin: 7px 0; font-size: 13px; line-height: 1.55; }
+    code {
+      font-family: "Cascadia Code", Consolas, monospace;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-size: 12px;
+    }
+    @media (max-width: 980px) {
+      body { padding: 14px; }
+      .grid { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 620px) {
+      .pipeline { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <h1 class="title">PPT AI 当前架构：来源驱动的分阶段生成</h1>
+    <p class="subtitle">主线不是一次性生成 PPTX，而是先生成可审核的目录、叙事方案和逐页指令，再按页补视觉资产。</p>
+    <section class="grid" aria-label="PPT AI architecture diagram">
+      <div class="col">
+        <div class="layer user">
+          <div class="layer-title">前端工作台</div>
+          <div class="box"><strong>PPT Planning Tab</strong><small>frontend/src/features/agent/ppt-planning-tabs.js</small><small>创建策划 PPT tab、维护来源、触发生成目录/叙事/指令/逐页页面。</small></div>
+          <div class="box"><strong>PptPlanningWorkbench</strong><small>frontend/src/features/ppt-planning/</small><small>来源区 + 指令文件工作区；用户选择来源、编辑生成结果、触发重生成。</small></div>
+          <div class="box"><strong>Context Ask</strong><small>/analysis/agent/context-ask</small><small>用户点 PPT 已选来源追问时进入来源问答链。</small></div>
+        </div>
+        <div class="arrow">请求 payload</div>
+        <div class="layer api">
+          <div class="layer-title">HTTP API 边界</div>
+          <div class="box"><strong>/api/v1/analysis/ppt/*</strong><small>router/domains/ppt_planning.py</small><small>sources、source-manifest、data packages、spec、narrative-plan、deck-brief、slide、visual-artifacts。</small></div>
+          <div class="box"><strong>/api/v1/analysis/agent/context-ask</strong><small>router/domains/agent.py</small><small>PPT 来源追问入口，转到 context_ask_service。</small></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="layer data">
+          <div class="layer-title">来源与证据层</div>
+          <div class="box"><strong>PptSource / Source Manifest</strong><small>modules/ppt_planning/schemas.py + data_tools.py</small><small>统一描述 current analysis、dataset、package、document、image、web、database source。</small></div>
+          <div class="box"><strong>EvidenceNode</strong><small>modules/evidence_index / evidence_retrieval</small><small>文档页、网页段落、图片解析、数据库记录、空间资料包都投影成可检索证据节点。</small></div>
+          <div class="box"><strong>Metric Context</strong><small>modules/ppt_planning/metric_context.py</small><small>把已选来源里的 POI、H3、人口、夜光、路网等 ready metric 压缩给 PPT LLM。</small></div>
+        </div>
+        <div class="arrow">_build_ppt_context_bundle()</div>
+        <div class="layer ai">
+          <div class="layer-title">PPT 生成 AI 主链</div>
+          <div class="pipeline">
+            <div class="step"><strong>1. Source Group</strong>classify_ppt_source_groups：把来源分组，判断材料角色。</div>
+            <div class="step"><strong>2. Outline</strong>generate_ppt_spec：生成目录/章节骨架。</div>
+            <div class="step"><strong>3. Narrative</strong>generate_narrative_plan：生成叙事节奏、证据桶、每页角色。</div>
+            <div class="step"><strong>4. Directive</strong>generate_deck_brief：生成 PPT 指令文件和逐页 brief。</div>
+            <div class="step"><strong>5. Page Assets</strong>regenerate slide / visual artifacts：逐页修补内容、生成地图/图表资产请求。</div>
+          </div>
+          <div class="box"><strong>LLM 输入</strong><small>sources + source_manifest + metric_context + evidence_context + deck_config + outline/narrative_plan</small></div>
+          <div class="box"><strong>LLM 输出</strong><small>PptSpecResponse、DeckNarrativePlanResponse、DeckBriefResponse、DeckSlideBrief、PptVisualArtifactResponse</small></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="layer agent">
+          <div class="layer-title">PPT 来源问答链</div>
+          <div class="box"><strong>context_ask_service</strong><small>modules/agent/context_ask_service.py</small><small>如果 target.type=ppt_sources，优先进入来源问答 mini loop。</small></div>
+          <div class="box"><strong>run_source_qa_loop</strong><small>modules/agent/source_qa_loop.py</small><small>只允许围绕已选 PPT 来源检索；不会访问未选来源。</small></div>
+          <div class="box"><strong>只读工具</strong><small>list_selected_sources、search/read_selected_source_evidence_node、list/query/aggregate/read_scope_dataset</small></div>
+          <div class="box"><strong>回答产物</strong><small>自然回答 + evidence + citations + warnings；不再固定四段模板。</small></div>
+        </div>
+        <div class="arrow">可进入主 Agent</div>
+        <div class="layer agent">
+          <div class="layer-title">主 Agent 关联</div>
+          <div class="box"><strong>selected_sources_context</strong><small>modules/agent/runtime.py</small><small>主 Agent 深度分析时可接收 PPT 已选来源上下文。</small></div>
+          <div class="box"><strong>证据边界</strong><small>只能通过来源工具读取 EvidenceNode；不能引用未选来源或聊天临时附件。</small></div>
+        </div>
+      </div>
+    </section>
+    <div class="note">一句话：PPT AI 的核心数据面是“已选来源 -> EvidenceNode / Metric Context -> Context Bundle”。核心生成面是“目录 -> 叙事方案 -> 指令文件 -> 逐页 brief/视觉资产”。来源问答是旁路 mini loop，服务用户追问，不负责生成整套 PPT。</div>
+    <section class="explain">
+      <h2>流程说明</h2>
+      <ul>
+        <li>前端在 PPT tab 里维护 <code>pptPlanningState</code>，用户选来源、配置页数/类型/主题，然后调用 <code>frontend/src/features/ppt-planning/api.js</code> 里的接口。</li>
+        <li>后端 <code>router/domains/ppt_planning.py</code> 只是 HTTP 边界，真正的编排在 <code>modules/ppt_planning/service.py</code>。</li>
+        <li><code>service.py</code> 每次生成前都会构建 <code>_build_ppt_context_bundle()</code>，把 <code>sources</code>、<code>source_manifest</code>、<code>metric_context</code>、<code>evidence_context</code> 压缩成 LLM 可用上下文。</li>
+        <li>生成不是一步到位：<code>generate_ppt_spec()</code> 先出目录，<code>generate_narrative_plan()</code> 出叙事方案，<code>generate_deck_brief()</code> 出整套 PPT 指令文件，<code>regenerate_deck_brief_slide()</code> 可逐页重生成，<code>generate_visual_artifacts_for_slide()</code> 处理图表、地图快照等视觉资产请求。</li>
+        <li>用户问“这个来源说明什么 / 下一步怎么分析”时，不走 PPT 生成主链，而是 <code>context_ask_service -> run_source_qa_loop</code>，只读已选来源和当前范围数据。</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

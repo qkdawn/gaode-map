@@ -1,4 +1,4 @@
-import { asText, cloneArray, cloneObject } from '../agent/normalizers.js'
+import { asText, cloneArray, cloneObject } from '../shared/normalizers.js'
 
 const ALLOWED_LAYER_TYPES = new Set([
   'scope_boundary',

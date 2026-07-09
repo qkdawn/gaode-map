@@ -47,7 +47,9 @@ export function createAgentSummaryViewMethods() {
       if (payloads.summary_pack && typeof payloads.summary_pack === 'object') {
         return payloads
       }
-      const fallbackPack = cloneObject(((tabs.summaryTab || {}).content) || {})
+      const currentSummaryTab = cloneArray(tabs.summaryTabs).find((item) => asText(item && item.source) === 'current')
+        || cloneArray(tabs.summaryTabs)[0]
+      const fallbackPack = cloneObject((currentSummaryTab && currentSummaryTab.content) || {})
       if (!Object.keys(fallbackPack).length) {
         return payloads
       }
@@ -141,7 +143,7 @@ export function createAgentSummaryViewMethods() {
       }).filter((item) => item && item.reasoning)
       if (mapped.length === sectionOrder.length) return mapped
       return rows.map((item, index) => ({
-        sectionKey: asText(item && (item.section_key || item.sectionKey)) || `legacy-${index}`,
+        sectionKey: asText(item && (item.section_key || item.sectionKey)) || `section-${index}`,
         title: asText(item && item.title) || '-',
         reasoning: asText(item && item.reasoning) || '-',
         dimensions: Array.isArray(item && item.dimensions)

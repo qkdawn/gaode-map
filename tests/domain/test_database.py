@@ -48,6 +48,48 @@ def test_init_db_does_not_create_ai_document_schema(monkeypatch):
     ]
 
 
+def test_poi_results_schema_creates_history_sort_index(monkeypatch):
+    statements = []
+
+    class FakeInspector:
+        def has_table(self, table_name):
+            assert table_name == "poi_results"
+            return True
+
+        def get_columns(self, table_name):
+            assert table_name == "poi_results"
+            return [
+                {"name": "id"},
+                {"name": "history_id"},
+                {"name": "source"},
+                {"name": "year"},
+                {"name": "poi_data"},
+                {"name": "summary"},
+                {"name": "created_at"},
+            ]
+
+    class FakeConnection:
+        def execute(self, statement):
+            statements.append(str(statement))
+
+    class FakeBegin:
+        def __enter__(self):
+            return FakeConnection()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    fake_engine = SimpleNamespace(begin=lambda: FakeBegin())
+
+    monkeypatch.setattr(database, "_refresh_runtime_config_if_needed", lambda: None)
+    monkeypatch.setattr(database, "engine", fake_engine)
+    monkeypatch.setattr(database, "inspect", lambda engine: FakeInspector())
+
+    database._ensure_poi_results_schema()
+
+    assert any("ix_poi_results_history_created_id" in statement for statement in statements)
+
+
 def test_ai_db_initializes_document_pipeline_schema(monkeypatch):
     called = []
 

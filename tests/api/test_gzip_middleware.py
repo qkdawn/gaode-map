@@ -16,14 +16,14 @@ def _build_test_app() -> FastAPI:
     app.add_middleware(
         SelectiveGZipMiddleware,
         minimum_size=100,
-        excluded_paths={"/api/v1/analysis/agent/turn/stream"},
+        excluded_paths={"/api/v1/analysis/agent/main-loop/stream"},
     )
 
     @app.get("/json")
     async def json_route():
         return JSONResponse({"content": "x" * 200})
 
-    @app.get("/api/v1/analysis/agent/turn/stream")
+    @app.get("/api/v1/analysis/agent/main-loop/stream")
     async def excluded_path_route():
         return PlainTextResponse("x" * 200, media_type="text/plain")
 
@@ -55,7 +55,7 @@ def test_regular_json_response_keeps_gzip():
 
 
 def test_excluded_path_bypasses_gzip_even_when_large():
-    response = _request("/api/v1/analysis/agent/turn/stream")
+    response = _request("/api/v1/analysis/agent/main-loop/stream")
     assert response.status_code == 200
     assert response.headers.get("content-encoding") is None
     assert response.text == "x" * 200

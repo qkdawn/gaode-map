@@ -56,12 +56,20 @@ def _tool_argument_hints(name: str) -> Dict[str, Any]:
         return {"query": "用户原问题", "top_k": 8}
     if name in {"read_analysis_evidence_node", "read_report_evidence_node"}:
         return {"node_id": "来自 search 命中的 node_id"}
-    if name == "run_area_character_pack":
-        return {"policy_key": "district_summary", "analysis_mode": "district_summary"}
-    if name == "run_site_selection_pack":
-        return {"place_type": "从用户问题抽取的目标业态", "policy_key": "business_catchment_1km"}
-    if name == "compute_h3_metrics_from_scope_and_pois":
-        return {"resolution": 10, "include_mode": "intersects"}
+    if name == "list_selected_sources":
+        return {}
+    if name == "search_selected_source_evidence":
+        return {"query": "用户原问题", "source_ids": ["来自 list_selected_sources 的 source_id"], "top_k": 8}
+    if name == "read_selected_source_evidence_node":
+        return {"node_id": "来自 search_selected_source_evidence 命中的 node_id"}
+    if name == "list_scope_datasets":
+        return {}
+    if name == "query_scope_dataset":
+        return {"source_id": "current:dataset:poi", "limit": 20, "offset": 0}
+    if name == "aggregate_scope_dataset":
+        return {"source_id": "current:dataset:poi", "group_by": "category", "metrics": [{"op": "count", "field": "*", "as": "count"}]}
+    if name == "read_scope_record":
+        return {"source_id": "current:dataset:poi", "record_id": "来自 query_scope_dataset 的 record_id"}
     return {}
 
 
@@ -165,57 +173,37 @@ def planner_tool_routing_hints() -> Dict[str, Any]:
             "foundation": [
                 "read_current_scope",
                 "read_current_results",
+                "list_selected_sources",
+                "search_selected_source_evidence",
+                "read_selected_source_evidence_node",
                 "search_analysis_context",
                 "read_analysis_evidence_node",
                 "search_report_context",
                 "read_report_evidence_node",
-                "fetch_pois_in_scope",
-                "compute_h3_metrics_from_scope_and_pois",
-                "compute_population_overview_from_scope",
-                "compute_nightlight_overview_from_scope",
-                "compute_road_syntax_from_scope",
+                "list_scope_datasets",
+                "query_scope_dataset",
+                "aggregate_scope_dataset",
+                "read_scope_record",
             ],
-            "capability": [
-                "get_area_data_bundle",
-                "rank_next_analysis_options",
-                "analyze_poi_structure",
-                "analyze_spatial_structure",
-                "build_unified_spatial_cells",
-                "infer_area_labels",
-                "score_site_candidates",
-            ],
-            "scenario": ["run_area_character_pack", "run_site_selection_pack"],
+            "capability": [],
+            "scenario": [],
         },
         "priority_rules": [
-            "先读 scope 和 current_results，再决定是否需要重算基础数据。",
+            "主 Agent 当前只做来源分析和证据读取，不重算基础数据、不运行区域画像或选址 pack。",
+            "已选分析来源问题先 list_selected_sources，再 search_selected_source_evidence / read_selected_source_evidence_node。",
             "涉及已有分析结论或报告追问时，优先 search 对应上下文，再 read 命中的 EvidenceNode。",
+            "涉及当前范围内全量明细、TopN、分页、按类别统计或具体对象时，先 list_scope_datasets，再 query_scope_dataset / aggregate_scope_dataset / read_scope_record。",
             "用户提到文件、图片、报告、图纸、表格时，只使用已进入来源区并可检索的 EvidenceNode。",
             "下一步分析建议类问题只排序分析方向，不直接调用区域画像或选址场景工具。",
-            "区域画像类问题优先使用 run_area_character_pack，并补充 build_unified_spatial_cells 作为空间同格证据。",
-            "选址评估类问题优先使用 run_site_selection_pack。",
-            "如果上游分析产物不完整，先补依赖，再给结论。",
             "frontend_analysis 只能作为参考线索，不能替代正式分析结果。",
             "如果 audit_feedback 指出证据不足，应回退到更保守的工具链路。",
         ],
-        "dependencies": {
-            "run_area_character_pack": ["scope_polygon"],
-            "build_unified_spatial_cells": ["scope_polygon"],
-            "run_site_selection_pack": ["scope_polygon", "place_type"],
-            "infer_area_labels": [
-                "current_poi_structure_analysis",
-                "current_population_profile_analysis",
-                "current_nightlight_pattern_analysis",
-                "current_road_pattern_analysis",
-            ],
-            "score_site_candidates": ["current_target_supply_gap"],
-        },
+        "dependencies": {},
         "question_routes": {
-            "next_analysis": ["read_current_results", "rank_next_analysis_options"],
-            "area_character": ["read_current_results", "run_area_character_pack", "build_unified_spatial_cells"],
-            "site_selection": ["read_current_results", "run_site_selection_pack"],
-            "population": ["read_current_results", "compute_population_overview_from_scope"],
-            "nightlight": ["read_current_results", "compute_nightlight_overview_from_scope"],
-            "road": ["read_current_results", "compute_road_syntax_from_scope", "build_unified_spatial_cells"],
+            "source_analysis": ["list_selected_sources", "search_selected_source_evidence", "read_selected_source_evidence_node"],
+            "current_dataset": ["list_scope_datasets", "aggregate_scope_dataset", "query_scope_dataset", "read_scope_record"],
+            "analysis_evidence": ["search_analysis_context", "read_analysis_evidence_node"],
+            "report_evidence": ["search_report_context", "read_report_evidence_node"],
         },
     }
 

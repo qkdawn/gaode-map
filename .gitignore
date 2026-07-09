@@ -21,6 +21,7 @@ runtime/generated_charts/
 runtime/agent_uploads/
 runtime/documents/
 runtime/searxng/
+runtime/tools/
 /AGENTS.md
 
 # Data

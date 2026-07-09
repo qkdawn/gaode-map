@@ -59,9 +59,24 @@ POI 当前有专门的持久化表：
 | 夜光 | 是 | `analysis_artifacts.payload.grid.features` 保存完整夜光 base grid geometry；`payload.layer.cells` 保存当前视图 cell 指标；`raster` 保存预览信息 | 重新跑分析后的新 artifact 可作为 `current:dataset:nightlight` 查询底座 |
 | 路网 | 是 | `analysis_artifacts.payload.roads.features` 和 `payload.nodes.features` 保存路段与节点 FeatureCollection | 可以作为 `current:dataset:road` 查询底座 |
 
-这意味着重新跑分析后，POI、H3、人口、夜光和路网都具备作为 scoped dataset 查询底座的持久化数据。当前变更只补齐保存底座；`list_scope_datasets`、`query_scope_dataset`、`aggregate_scope_dataset` 和 `read_scope_record` 等 AI 查询工具后续再实现。
+这意味着重新跑分析后，POI、H3、人口、夜光和路网都具备作为 scoped dataset 查询底座的持久化数据。当前代码已提供第一版受控查询层：`modules/scope_datasets/` 负责从 `poi_results` 和规范化 `analysis_artifacts.payload` 读取当前范围数据，Agent 通过 `list_scope_datasets`、`query_scope_dataset`、`aggregate_scope_dataset` 和 `read_scope_record` 使用这些数据。
 
-### 2.4 运行时上下文
+### 2.4 统一 artifact payload 约定
+
+当前范围分析产物统一按“领域字段 + 规范化载体”保存。前端保存和历史恢复都应通过同一套 artifact helper 处理这些公共结构，避免每个分析类型重复手写 `FeatureCollection`、`count`、`scope_id` 和图层字段。
+
+统一约定如下：
+
+| 结构 | 字段 | 用途 |
+| --- | --- | --- |
+| 网格 / 要素集合 | `payload.grid = { type: "FeatureCollection", features, count, cell_count, scope_id, ...extra }` | POI 共享栅格、H3、人口、夜光 |
+| 图层指标 | `payload.layer = { view, year, cells, summary, legend, analysis?, scope_id? }` | 人口、夜光当前视图 cell 指标 |
+| 路网要素 | `payload.roads` / `payload.nodes` 使用同样 FeatureCollection 结构 | 路段和节点明细 |
+| 时间 / 视图 | `params.year/view/metric` 与 `payload.year/view/metric` 同步保留 | 查询、恢复和展示时不用猜测上下文 |
+
+也就是说，`analysis_artifacts` 仍是通用 JSON 容器，但 payload 内部结构要收敛成稳定形状。后续 scoped dataset 工具只需要识别这些规范化字段，不需要理解前端运行时状态变量。
+
+### 2.5 运行时上下文
 
 Agent 执行过程中还会维护运行时 artifacts / snapshot，例如：
 
@@ -139,19 +154,19 @@ Agent 执行过程中还会维护运行时 artifacts / snapshot，例如：
 
 ## 4. 查询设计
 
-AI 不应执行任意 SQL。范围数据查询应通过受控工具完成。
+AI 不应执行任意 SQL。范围数据查询通过 `modules/scope_datasets/` 封装成受控工具完成。工具只接受 `source_id`、白名单过滤字段、排序、分页、聚合和单条读取参数；数据库表、artifact id 和 payload 细节不作为产品结论暴露。
 
 ### 4.1 `list_scope_datasets`
 
-用途：列出当前 `history_id` 下可用的范围数据源。
+用途：列出当前 `history_id` 下可用的范围数据源。Agent turn 中会从 `analysis_snapshot.context.history_id` 自动取得当前历史记录；后台或测试调用也可以显式传入 `history_id`。
 
 输入：
 
 - `history_id`
 
-输出：
+当前输出：
 
-- source 列表
+- source 列表：`current:dataset:poi`、`current:dataset:h3`、`current:dataset:population`、`current:dataset:nightlight`、`current:dataset:road`
 - 数据年份或版本
 - 记录数
 - 可查询字段
@@ -160,7 +175,7 @@ AI 不应执行任意 SQL。范围数据查询应通过受控工具完成。
 
 ### 4.2 `query_scope_dataset`
 
-用途：分页读取当前范围内的明细记录。
+用途：分页读取当前范围内的明细记录，并把当前页记录转换成 `EvidenceNode`。
 
 输入：
 
@@ -169,12 +184,14 @@ AI 不应执行任意 SQL。范围数据查询应通过受控工具完成。
 - `sort`
 - `limit`
 - `offset`
+- `year`
 
 约束：
 
 - 只能使用白名单字段。
 - 默认限制返回条数。
 - 必须返回 `total_count` 或 `has_more`，避免 AI 误以为读完了所有记录。
+- 返回 `records` 用于结构化检查，返回 `evidence_nodes` 用于最终回答引用。
 
 ### 4.3 `aggregate_scope_dataset`
 
@@ -187,6 +204,7 @@ AI 不应执行任意 SQL。范围数据查询应通过受控工具完成。
 - `metrics`
 - `filters`
 - `top_k`
+- `year`
 
 示例能力：
 
@@ -194,6 +212,8 @@ AI 不应执行任意 SQL。范围数据查询应通过受控工具完成。
 - 人口 cell 按密度取 TopN。
 - 夜光 cell 按辐射值取 TopN。
 - 路网 feature 按 `choice`、`integration`、`connectivity` 排序或聚合。
+
+当前第一版支持 `count`、`sum`、`avg`、`min`、`max`，并按 `group_by` 输出分组结果。字段仍受 `list_scope_datasets` 暴露的能力约束。
 
 ### 4.4 `read_scope_record`
 
@@ -203,6 +223,7 @@ AI 不应执行任意 SQL。范围数据查询应通过受控工具完成。
 
 - `source_id`
 - `record_id`
+- `year`
 
 输出：
 
@@ -287,7 +308,7 @@ AI 回答中引用 POI 时，应能说明数据年份和数据源，例如：
 - `aggregate_scope_dataset`
 - `read_scope_record`
 
-这些工具应该只面向当前 `history_id`、当前范围、当前年份或数据版本，不暴露数据库表结构，也不允许 AI 扫描全库。
+这些工具已经作为主 Agent 工具注册。它们只面向当前 `history_id`、当前范围、当前年份或数据版本，不暴露数据库表结构，也不允许 AI 扫描全库。
 
 ## 7. 回答规则
 
@@ -300,9 +321,9 @@ AI 使用当前范围数据源时必须遵守：
 5. 数据库存储位置不能作为用户结论出现。用户应该看到的是来源、年份、指标和引用。
 6. 全量 payload 不进入 prompt；AI 只能通过分页、聚合或单条读取工具获取必要证据。
 
-## 8. 后续实现建议
+## 8. 当前实现与后续增强
 
-后续实现 scoped dataset 查询时，建议新增独立 domain，例如 `modules/scope_datasets/`，由它负责：
+当前已新增独立 domain：`modules/scope_datasets/`，由它负责：
 
 - 从 `poi_results` 和 `analysis_artifacts` 发现当前范围数据源。
 - 归一化不同 payload 的字段。
@@ -311,3 +332,9 @@ AI 使用当前范围数据源时必须遵守：
 - 在返回结果中携带年份、source_id、locator、citation 和 warnings。
 
 这样可以保持路由层、Agent 工具层和存储层职责清楚：存储层只负责保存和读取，scope dataset 层负责把当前范围数据解释成可查询来源，Agent 只消费受控工具和 EvidenceNode。
+
+后续增强集中在三点：
+
+1. 扩展每类 dataset 的字段白名单和中文字段别名。
+2. 给前端来源树展示 scoped dataset 的记录数、年份、可用字段和 warnings。
+3. 将 scoped dataset 查询结果进一步接入统一 `EvidenceRetrievalService` 的跨来源重排和 citation map。

@@ -40,14 +40,7 @@ def test_external_tools_lists_first_batch():
 
     assert response.status_code == 200
     names = {item["name"] for item in response.json()}
-    assert {
-        "read_current_scope",
-        "fetch_pois_in_scope",
-        "build_h3_grid_from_scope",
-        "compute_h3_metrics_from_scope_and_pois",
-        "compute_road_syntax_from_scope",
-        "get_area_data_bundle",
-    } == names
+    assert {"read_current_scope"} == names
     first = response.json()[0]
     assert "input_schema" in first
     assert "output_schema" in first
@@ -55,18 +48,26 @@ def test_external_tools_lists_first_batch():
     assert "produces" in first
 
 
-def test_internal_agent_tools_still_list_full_registry():
+def test_internal_agent_tools_lists_source_analysis_registry():
     with TestClient(_build_test_app()) as client:
         response = client.get("/api/v1/analysis/agent/tools")
 
     assert response.status_code == 200
     payload = response.json()
     names = [item["name"] for item in payload]
-    assert len(names) == 35
-    assert names[:3] == ["read_current_scope", "read_current_results", "fetch_pois_in_scope"]
+    assert names[:6] == [
+        "read_current_scope",
+        "read_current_results",
+        "plan_business_analyst_analysis",
+        "list_selected_sources",
+        "search_selected_source_evidence",
+        "read_selected_source_evidence_node",
+    ]
+    assert {"list_scope_datasets", "query_scope_dataset", "aggregate_scope_dataset", "read_scope_record"}.issubset(names)
     assert "search_database_context" not in names
     assert "read_database_record" not in names
-    assert "run_business_site_advice" in names
+    assert "fetch_pois_in_scope" not in names
+    assert "run_business_site_advice" not in names
 
 
 def test_external_tool_unknown_name_returns_404():
@@ -84,7 +85,7 @@ def test_external_tool_unknown_name_returns_404():
 def test_external_tool_invalid_arguments_returns_failed_tool_result():
     with TestClient(_build_test_app()) as client:
         response = client.post(
-            "/api/v1/tools/fetch_pois_in_scope/run",
+            "/api/v1/tools/read_current_scope/run",
             headers=_auth_headers(),
             json={
                 "arguments": {"unexpected": True},
@@ -117,44 +118,40 @@ def test_external_tool_missing_requirements_returns_tool_result():
             json={"arguments": {"source": "local"}},
         )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "failed"
-    assert payload["error"] == "missing_requirements"
-    assert "scope_polygon" in payload["warnings"][0]
+    assert response.status_code == 404
+    assert response.json()["detail"] == "tool_not_found"
 
 
 def test_external_tool_executes_via_registry_and_injects_snapshot(monkeypatch):
     seen = {}
     original_registry = tool_service.get_tool_registry()
-    registered = original_registry["fetch_pois_in_scope"]
+    registered = original_registry["read_current_scope"]
 
     async def fake_runner(*, arguments, snapshot, artifacts, question):
         seen["arguments"] = arguments
-        seen["scope_polygon"] = artifacts.get("scope_polygon")
+        seen["scope_polygon"] = snapshot.scope.get("polygon")
         seen["question"] = question
         return ToolResult(
-            tool_name="fetch_pois_in_scope",
+            tool_name="read_current_scope",
             status="success",
-            result={"poi_count": 1},
-            evidence=[{"field": "poi.count", "value": 1}],
-            artifacts={"current_pois": [{"name": "A"}]},
+            result={"has_scope": True, "active_panel": ""},
+            artifacts={"scope_polygon": snapshot.scope.get("polygon")},
         )
 
     def fake_registry():
         return {
             **original_registry,
-            "fetch_pois_in_scope": registered.__class__(spec=registered.spec, runner=fake_runner),
+            "read_current_scope": registered.__class__(spec=registered.spec, runner=fake_runner),
         }
 
     monkeypatch.setattr(tool_service, "get_tool_registry", fake_registry)
 
     with TestClient(_build_test_app()) as client:
         response = client.post(
-            "/api/v1/tools/fetch_pois_in_scope/run",
+            "/api/v1/tools/read_current_scope/run",
             headers=_auth_headers(),
             json={
-                "arguments": {"source": "local"},
+                "arguments": {},
                 "question": "分析这个范围",
                 "analysis_snapshot": {
                     "scope": {
@@ -172,7 +169,7 @@ def test_external_tool_executes_via_registry_and_injects_snapshot(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "success"
-    assert response.json()["result"]["poi_count"] == 1
-    assert seen["arguments"] == {"source": "local"}
+    assert response.json()["result"]["has_scope"] is True
+    assert seen["arguments"] == {}
     assert seen["question"] == "分析这个范围"
     assert seen["scope_polygon"][0] == [112.98, 28.19]

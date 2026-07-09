@@ -9,6 +9,7 @@ import {
 import { createAgentSessionStoreMethods } from './session-store.js'
 import { createAgentRuntimeMethods } from './runtime.js'
 import { createAgentUiMethods } from './sessions-ui.js'
+import { withAnalysisWorkspaceTabs } from './analysis-workspace-tabs.js'
 export {
   buildAnalysisTaskParamBundle,
   buildAnalysisTaskParamBundles,
@@ -52,7 +53,6 @@ function createAnalysisAgentInitialState() {
     agentPreloadedPanelKeys: [],
     agentRiskConfirmations: [],
     agentMessages: [],
-    agentDeepAnalysisMode: 'quick',
     agentComposerMenuOpen: false,
     agentComposerMode: '',
     contextAskVisible: false,
@@ -108,24 +108,18 @@ function createAnalysisAgentInitialState() {
     agentPptPlanningPackageErrors: {},
     agentPptPlanningWebSourceGenerating: false,
     agentPptPlanningSourceDeleting: false,
-    agentTabs: {
-      summaryTab: {
-        id: 'summary',
-        frozen: true,
-        createdAt: '',
-        content: {},
-        evidenceRefs: [],
-      },
+    agentAnalysisQuickAskAbortController: null,
+    agentAnalysisQuickAskRequestId: 0,
+    agentAnalysisQuickAskPendingId: '',
+    agentTabs: withAnalysisWorkspaceTabs({
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
       activeTabId: '',
       followupLimit: 6,
       nextFollowupNumber: 1,
-    },
+    }, []),
     agentIterationActiveKind: 'poi',
     agentIterationSecondaryView: {
       poi: 'ai',

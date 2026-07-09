@@ -1,0 +1,425 @@
+from __future__ import annotations
+
+import asyncio
+
+from modules.evidence_index import EvidenceIndexService, EvidenceSearchQuery
+from modules.evidence_index import attach_index_manifest, build_source_index_manifest_payload
+from modules.evidence_retrieval.schemas import SourceRecord
+
+
+def test_evidence_index_service_unifies_payload_and_pageindex_adapters():
+    service = EvidenceIndexService(
+        get_pageindex_document_structure=lambda _document_id: (
+            '[{"title":"公共服务","node_id":"n1","line_num":3,"summary":"补齐公共服务。"}]'
+        ),
+        get_pageindex_page_content=lambda _document_id, _pages: (
+            '[{"page":3,"content":"补齐公共服务设施，改善片区服务短板。"}]'
+        ),
+    )
+    response = asyncio.run(
+        service.search(
+            EvidenceSearchQuery(
+                question="公共服务",
+                top_k=10,
+                source_ids=["document:doc-1", "web:area-1"],
+                sources=[
+                    SourceRecord.model_validate(
+                        {
+                            "id": "web:area-1",
+                            "title": "网页来源",
+                            "status": "ready",
+                            "meta": {
+                                "sourceKind": "web",
+                                "aiPayload": {
+                                    "evidence_nodes": [
+                                        {
+                                            "id": "web:area-1:node:1",
+                                            "source_id": "web:area-1",
+                                            "source_type": "web",
+                                            "title": "政策网页",
+                                            "content": "公共服务和城市更新政策资料。",
+                                        }
+                                    ]
+                                },
+                            },
+                        }
+                    )
+                ],
+            )
+        )
+    )
+
+    node_ids = {node.id for node in response.nodes}
+    assert "document:doc-1:pageindex:n1" in node_ids
+    assert "web:area-1:node:1" in node_ids
+    assert {node.source_type for node in response.nodes} == {"document", "web"}
+
+
+def test_evidence_index_service_reads_payload_and_pageindex_nodes():
+    service = EvidenceIndexService(
+        get_pageindex_document_structure=lambda _document_id: (
+            '[{"title":"公共服务","node_id":"n1","line_num":3,"summary":"补齐公共服务。"}]'
+        ),
+        get_pageindex_page_content=lambda _document_id, _pages: (
+            '[{"page":3,"content":"补齐公共服务设施，改善片区服务短板。"}]'
+        ),
+    )
+    query = EvidenceSearchQuery(
+        question="公共服务",
+        source_ids=["document:doc-1", "web:area-1"],
+        sources=[
+            SourceRecord.model_validate(
+                {
+                    "id": "web:area-1",
+                    "title": "网页来源",
+                    "status": "ready",
+                    "meta": {
+                        "sourceKind": "web",
+                        "aiPayload": {
+                            "evidence_nodes": [
+                                {
+                                    "id": "web:area-1:node:1",
+                                    "source_id": "web:area-1",
+                                    "source_type": "web",
+                                    "title": "政策网页",
+                                    "content": "公共服务和城市更新政策资料。",
+                                }
+                            ]
+                        },
+                    },
+                }
+            )
+        ],
+    )
+
+    page_node = asyncio.run(service.read("document:doc-1:pageindex:n1", query))
+    web_node = asyncio.run(service.read("web:area-1:node:1", query))
+    manifests = service.manifests(query)
+
+    assert page_node is not None
+    assert page_node.evidence_level == "pageindex_node"
+    assert web_node is not None
+    assert web_node.source_type == "web"
+    assert {manifest.native_index_kind for manifest in manifests} == {"pageindex", "payload_index"}
+
+
+def test_evidence_index_service_uses_declared_source_manifest():
+    service = EvidenceIndexService(
+        get_pageindex_document_structure=lambda _document_id: (
+            '[{"title":"公共服务","node_id":"n1","line_num":3,"summary":"补齐公共服务。"}]'
+        ),
+        get_pageindex_page_content=lambda _document_id, _pages: (
+            '[{"page":3,"content":"补齐公共服务设施。"}]'
+        ),
+    )
+    image_payload = attach_index_manifest(
+        {
+            "evidence_nodes": [
+                {
+                    "id": "image:att-1:node:1",
+                    "source_id": "image:att-1",
+                    "source_type": "image",
+                    "title": "图片 OCR",
+                    "content": "公共服务导视牌。",
+                }
+            ]
+        },
+        build_source_index_manifest_payload(
+            source_id="image:att-1",
+            source_kind="image",
+            native_index_kind="image_visual_index",
+            node_count=1,
+            model_versions={"image_text_embedding": "openclip_target"},
+        ),
+    )
+    document_payload = attach_index_manifest(
+        {"evidence_nodes": []},
+        build_source_index_manifest_payload(
+            source_id="document:doc-1",
+            source_kind="document",
+            native_index_kind="pageindex",
+            node_count=1,
+            retrieval_modes=["structure", "keyword"],
+        ),
+    )
+    query = EvidenceSearchQuery(
+        question="公共服务",
+        source_ids=["image:att-1", "document:doc-1"],
+        sources=[
+            SourceRecord.model_validate({"id": "image:att-1", "source_kind": "image", "status": "ready", "meta": {"aiPayload": image_payload}}),
+            SourceRecord.model_validate({"id": "document:doc-1", "source_kind": "document", "status": "ready", "meta": {"aiPayload": document_payload}}),
+        ],
+    )
+
+    manifests = service.manifests(query)
+    native_kinds = [manifest.native_index_kind for manifest in manifests]
+
+    assert native_kinds.count("pageindex") == 1
+    assert "payload_index" not in native_kinds
+    assert "image_visual_index" in native_kinds
+    image_manifest = next(item for item in manifests if item.source_kind == "image")
+    assert image_manifest.model_versions["image_text_embedding"] == "openclip_target"
+
+
+def test_evidence_index_service_routes_image_visual_index_manifest():
+    image_payload = attach_index_manifest(
+        {
+            "evidence_nodes": [
+                {
+                    "id": "image:att-1:node:ocr-1",
+                    "source_id": "image:att-1",
+                    "source_type": "image",
+                    "title": "现场照片 OCR",
+                    "content": "OCR 识别到图中标注：主入口、沿街商业、停车场。",
+                    "metadata": {"attachment_id": "att-1", "filename": "site-photo.png", "bbox_id": "ocr-1"},
+                    "locator": "image:bbox:ocr-1",
+                    "evidence_level": "ocr_text",
+                }
+            ]
+        },
+        build_source_index_manifest_payload(
+            source_id="image:att-1",
+            source_kind="image",
+            native_index_kind="image_visual_index",
+            node_count=1,
+            retrieval_modes=["keyword", "vector"],
+            read_modes=["node_id", "attachment_id", "locator", "bbox"],
+        ),
+    )
+    source = SourceRecord.model_validate({"id": "image:att-1", "source_kind": "image", "status": "ready", "meta": {"aiPayload": image_payload}})
+    service = EvidenceIndexService()
+    query = EvidenceSearchQuery(question="沿街商业", source_ids=["image:att-1"], sources=[source])
+
+    response = asyncio.run(service.search(query))
+    by_bbox = asyncio.run(service.read("ocr-1", query))
+    by_locator = asyncio.run(service.read("image:bbox:ocr-1", query))
+    manifests = service.manifests(query)
+
+    assert response.nodes[0].id == "image:att-1:node:ocr-1"
+    assert by_bbox is not None
+    assert by_bbox.id == "image:att-1:node:ocr-1"
+    assert by_locator is not None
+    assert by_locator.id == "image:att-1:node:ocr-1"
+    assert manifests[0].native_index_kind == "image_visual_index"
+
+
+def test_evidence_index_service_routes_webpage_index_manifest():
+    web_payload = attach_index_manifest(
+        {
+            "evidence_nodes": [
+                {
+                    "id": "web:area-1:web:node-1",
+                    "source_id": "web:area-1",
+                    "source_type": "web",
+                    "title": "政策网页",
+                    "content": "公共服务和城市更新政策资料。",
+                    "metadata": {"url": "https://example.com/policy", "source_domain": "example.com"},
+                    "locator": "https://example.com/policy",
+                }
+            ]
+        },
+        build_source_index_manifest_payload(
+            source_id="web:area-1",
+            source_kind="web",
+            native_index_kind="webpage_index",
+            node_count=1,
+            read_modes=["node_id", "url"],
+            storage_ref={"urls": ["https://example.com/policy"]},
+        ),
+    )
+    source = SourceRecord.model_validate({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
+    service = EvidenceIndexService()
+    query = EvidenceSearchQuery(question="公共服务", source_ids=["web:area-1"], sources=[source])
+
+    response = asyncio.run(service.search(query))
+    by_node_id = asyncio.run(service.read("web:area-1:web:node-1", query))
+    by_url = asyncio.run(service.read("https://example.com/policy", query))
+    manifests = service.manifests(query)
+
+    assert response.nodes[0].id == "web:area-1:web:node-1"
+    assert by_node_id is not None
+    assert by_url is not None
+    assert by_url.id == "web:area-1:web:node-1"
+    assert manifests[0].native_index_kind == "webpage_index"
+
+
+def test_evidence_index_service_routes_database_record_index_manifest():
+    database_payload = attach_index_manifest(
+        {
+            "evidence_nodes": [
+                {
+                    "id": "database:history-1:history:summary",
+                    "source_id": "database:history-1:history",
+                    "source_type": "database",
+                    "title": "当前分析区域详情",
+                    "content": "区域分析包含 POI 总量和公共服务配置。",
+                    "metadata": {"history_id": "history-1", "record_id": "history-1"},
+                    "locator": "analysis_history:history-1",
+                    "evidence_level": "history_summary",
+                }
+            ]
+        },
+        build_source_index_manifest_payload(
+            source_id="database:history-1:package",
+            source_kind="database",
+            native_index_kind="database_record_index",
+            node_count=1,
+            retrieval_modes=["keyword", "structured"],
+            read_modes=["node_id", "record_id", "locator"],
+        ),
+    )
+    source = SourceRecord.model_validate(
+        {
+            "id": "database:history-1:package",
+            "source_kind": "database",
+            "status": "ready",
+            "meta": {"aiPayload": database_payload},
+        }
+    )
+    service = EvidenceIndexService()
+    query = EvidenceSearchQuery(question="公共服务", source_ids=["database:history-1:package"], sources=[source])
+
+    response = asyncio.run(service.search(query))
+    by_record = asyncio.run(service.read("history-1", query))
+    by_locator = asyncio.run(service.read("analysis_history:history-1", query))
+    manifests = service.manifests(query)
+
+    assert response.nodes[0].source_type == "database"
+    assert by_record is not None
+    assert by_record.id == "database:history-1:history:summary"
+    assert by_locator is not None
+    assert by_locator.id == "database:history-1:history:summary"
+    assert manifests[0].native_index_kind == "database_record_index"
+
+
+def test_evidence_index_service_routes_spatial_package_index_manifest():
+    package_payload = attach_index_manifest(
+        {
+            "evidence_nodes": [
+                {
+                    "id": "package:poi-road-carriers:test:package:carrier:corridor_01",
+                    "source_id": "package:poi-road-carriers:test",
+                    "source_type": "package",
+                    "title": "corridor_01",
+                    "content": "廊道串联 POI、人口与夜光热点。",
+                    "metadata": {"carrier_id": "corridor_01", "carrier_type": "corridor"},
+                    "locator": "package:carrier:corridor_01",
+                    "evidence_level": "package_carrier",
+                },
+                {
+                    "id": "package:poi-road-carriers:test:package:item:poi-1",
+                    "source_id": "package:poi-road-carriers:test",
+                    "source_type": "package",
+                    "title": "文化馆",
+                    "content": "公共服务设施样本，位于廊道沿线。",
+                    "metadata": {"id": "poi-1", "category": "科教文化", "carrier_id": "corridor_01"},
+                    "locator": "package:item:poi-1",
+                    "evidence_level": "package_poi_sample",
+                },
+            ]
+        },
+        build_source_index_manifest_payload(
+            source_id="package:poi-road-carriers:test",
+            source_kind="package",
+            native_index_kind="spatial_package_index",
+            node_count=2,
+            retrieval_modes=["keyword", "structured"],
+            read_modes=["node_id", "carrier_id", "item_id", "locator"],
+        ),
+    )
+    source = SourceRecord.model_validate(
+        {
+            "id": "package:poi-road-carriers:test",
+            "source_kind": "package",
+            "status": "ready",
+            "meta": {"aiPayload": package_payload},
+        }
+    )
+    service = EvidenceIndexService()
+    query = EvidenceSearchQuery(question="廊道", source_ids=["package:poi-road-carriers:test"], sources=[source])
+
+    response = asyncio.run(service.search(query))
+    by_carrier = asyncio.run(service.read("corridor_01", query))
+    by_item = asyncio.run(service.read("poi-1", query))
+    by_locator = asyncio.run(service.read("package:item:poi-1", query))
+    manifests = service.manifests(query)
+
+    assert response.nodes[0].source_type == "package"
+    assert by_carrier is not None
+    assert by_carrier.id == "package:poi-road-carriers:test:package:carrier:corridor_01"
+    assert by_item is not None
+    assert by_item.id == "package:poi-road-carriers:test:package:item:poi-1"
+    assert by_locator is not None
+    assert by_locator.id == "package:poi-road-carriers:test:package:item:poi-1"
+    assert manifests[0].native_index_kind == "spatial_package_index"
+
+
+def test_evidence_index_service_uses_manifest_routing_without_explicit_source_ids():
+    web_payload = attach_index_manifest(
+        {
+            "evidence_nodes": [
+                {
+                    "id": "web:area-1:web:node-1",
+                    "source_id": "web:area-1",
+                    "source_type": "web",
+                    "title": "政策网页",
+                    "content": "公共服务和城市更新政策资料。",
+                    "metadata": {"url": "https://example.com/policy"},
+                }
+            ]
+        },
+        build_source_index_manifest_payload(
+            source_id="web:area-1",
+            source_kind="web",
+            native_index_kind="webpage_index",
+            node_count=1,
+            read_modes=["node_id", "url"],
+        ),
+    )
+    source = SourceRecord.model_validate({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
+    service = EvidenceIndexService()
+    query = EvidenceSearchQuery(question="公共服务", sources=[source])
+
+    response = asyncio.run(service.search(query))
+    by_url = asyncio.run(service.read("https://example.com/policy", query))
+    manifests = service.manifests(query)
+
+    assert response.nodes[0].id == "web:area-1:web:node-1"
+    assert by_url is not None
+    assert manifests[0].native_index_kind == "webpage_index"
+
+
+def test_evidence_index_service_indexes_source_and_explains_read_path():
+    web_payload = attach_index_manifest(
+        {
+            "evidence_nodes": [
+                {
+                    "id": "web:area-1:web:node-1",
+                    "source_id": "web:area-1",
+                    "source_type": "web",
+                    "title": "政策网页",
+                    "content": "公共服务和城市更新政策资料。",
+                    "metadata": {"url": "https://example.com/policy"},
+                }
+            ]
+        },
+        build_source_index_manifest_payload(
+            source_id="web:area-1",
+            source_kind="web",
+            native_index_kind="webpage_index",
+            node_count=1,
+            read_modes=["node_id", "url"],
+        ),
+    )
+    source = SourceRecord.model_validate({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
+    service = EvidenceIndexService()
+    query = EvidenceSearchQuery(question="公共服务", source_ids=["web:area-1"], sources=[source])
+
+    manifest = service.index_source(source)
+    trace = asyncio.run(service.explain("https://example.com/policy", query))
+
+    assert manifest.native_index_kind == "webpage_index"
+    assert trace.matched is True
+    assert trace.source_id == "web:area-1"
+    assert trace.native_index_kind == "webpage_index"
+    assert trace.adapter == "WebPageIndexAdapter"

@@ -16,11 +16,6 @@ from .tools import RegisteredTool, get_tool_registry
 
 EXTERNAL_TOOL_NAMES = {
     "read_current_scope",
-    "fetch_pois_in_scope",
-    "build_h3_grid_from_scope",
-    "compute_h3_metrics_from_scope_and_pois",
-    "compute_road_syntax_from_scope",
-    "get_area_data_bundle",
 }
 
 logger = logging.getLogger(__name__)

@@ -26,12 +26,12 @@ async def get_history_list(limit: int = Query(100, ge=0, le=500)):
 
 @router.get("/api/v1/analysis/history/{id}/pois")
 async def get_history_pois(id: str, year: int | None = None):
-    return history_service.get_history_pois_payload(id, history_repo, year=year)
+    return await run_in_threadpool(history_service.get_history_pois_payload, id, history_repo, year=year)
 
 
 @router.get("/api/v1/analysis/history/{id}")
 async def get_history_detail(id: str, include_pois: bool = Query(True), year: int | None = None):
-    return history_service.get_history_detail_payload_for_year(id, include_pois, year, history_repo)
+    return await run_in_threadpool(history_service.get_history_detail_payload_for_year, id, include_pois, year, history_repo)
 
 
 @router.post("/api/v1/analysis/history/{id}/artifacts")

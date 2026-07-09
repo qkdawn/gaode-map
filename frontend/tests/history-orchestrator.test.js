@@ -131,3 +131,78 @@ test('persistAnalysisArtifact posts canonical artifact payload after ensuring hi
     global.fetch = previousFetch
   }
 })
+
+test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
+  const ctx = createContext({
+    resultPoiYear: 2024,
+    poiYearSource: '2024',
+    h3NeighborRing: 2,
+    poiGridFeatures: [{ type: 'Feature', properties: { cell_id: 'r1_c1', poi_count: 5 } }],
+    poiGridSummary: { scope_id: 'shared-scope', grid_count: 1 },
+    h3AnalysisGridFeatures: [{ type: 'Feature', properties: { h3_id: 'h3-1', poi_count: 9 } }],
+    h3GridCount: 1,
+    h3GridResolution: 9,
+    h3GridIncludeMode: 'intersects',
+    h3GridMinOverlapRatio: 0.25,
+    h3AnalysisSummary: { grid_count: 1 },
+    getPopulationSelectedYear() {
+      return '2026'
+    },
+    populationAnalysisView: 'density',
+    populationScopeId: 'population-scope',
+    populationOverview: { summary: { total_population: 100 } },
+    populationGrid: {
+      scope_id: 'population-grid-scope',
+      features: [{ type: 'Feature', properties: { cell_id: 'p1' } }],
+    },
+    populationLayer: { cells: [{ cell_id: 'p1', value: 10 }] },
+    buildAgentPopulationGridEvidence() {
+      return { evidence_level: 'population-test' }
+    },
+    nightlightSelectedYear: 2025,
+    nightlightAnalysisView: 'radiance',
+    nightlightScopeId: 'nightlight-scope',
+    nightlightOverview: { summary: { mean_radiance: 3 } },
+    nightlightGrid: {
+      scope_id: 'nightlight-grid-scope',
+      features: [{ type: 'Feature', properties: { cell_id: 'n1' } }],
+    },
+    nightlightLayer: { cells: [{ cell_id: 'n1', value: 4 }] },
+    nightlightRaster: { image_url: 'data:image/png;base64,test' },
+    roadSyntaxGraphModel: 'segment',
+    roadSyntaxMetric: 'choice',
+    roadSyntaxSummary: { road_count: 1 },
+    roadSyntaxRoadFeatures: [{ type: 'Feature', properties: { road_id: 'road-1' } }],
+    roadSyntaxNodes: [{ type: 'Feature', properties: { node_id: 'node-1' } }],
+  })
+
+  const raster = ctx.buildAnalysisArtifactBundle('poi_raster_grid')
+  const h3 = ctx.buildAnalysisArtifactBundle('poi_h3_grid')
+  const population = ctx.buildAnalysisArtifactBundle('population')
+  const nightlight = ctx.buildAnalysisArtifactBundle('nightlight')
+  const road = ctx.buildAnalysisArtifactBundle('road_syntax')
+
+  assert.equal(raster.payload.grid.type, 'FeatureCollection')
+  assert.equal(raster.payload.grid.scope_id, 'shared-scope')
+  assert.equal(raster.payload.grid.cell_count, 1)
+  assert.equal(raster.payload.year, 2024)
+  assert.equal(h3.payload.grid.type, 'FeatureCollection')
+  assert.equal(h3.payload.grid.count, 1)
+  assert.equal(h3.payload.grid.resolution, 9)
+  assert.equal(h3.payload.year, 2024)
+  assert.equal(population.payload.grid.scope_id, 'population-grid-scope')
+  assert.equal(population.payload.grid.cell_count, 1)
+  assert.equal(population.payload.layer.view, 'density')
+  assert.equal(population.payload.layer.year, '2026')
+  assert.equal(population.payload.year, '2026')
+  assert.equal(nightlight.payload.grid.scope_id, 'nightlight-grid-scope')
+  assert.equal(nightlight.payload.grid.cell_count, 1)
+  assert.equal(nightlight.payload.layer.view, 'radiance')
+  assert.equal(nightlight.payload.layer.year, 2025)
+  assert.equal(nightlight.payload.year, 2025)
+  assert.equal(road.payload.roads.type, 'FeatureCollection')
+  assert.equal(road.payload.roads.count, 1)
+  assert.equal(road.payload.nodes.type, 'FeatureCollection')
+  assert.equal(road.payload.nodes.count, 1)
+  assert.equal(road.payload.metric, 'choice')
+})

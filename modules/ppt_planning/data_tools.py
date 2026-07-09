@@ -19,6 +19,7 @@ from modules.evidence_retrieval import (
     evidence_node_payloads_from_nodes,
     evidence_nodes_from_package,
 )
+from modules.evidence_index import SOURCE_INDEX_MANIFEST_ARTIFACT_TYPE, attach_index_manifest, build_source_index_manifest_payload, persist_source_index_manifest
 from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
 from modules.population.service import get_population_grid
 from modules.ppt_database.service import list_persisted_database_sources
@@ -144,6 +145,7 @@ def _persist_ppt_data_package_response(request: PptDataPackageRequest, response:
                 summary=_ppt_package_artifact_summary(response),
                 data_version="v1",
             )
+            persist_source_index_manifest(area_id, response.source)
         except Exception:
             logger.exception("PPT data package artifact persist failed")
     return response
@@ -571,7 +573,7 @@ def _document_ai_payload(source_id: str, title: str, index_preview: List[Dict[st
         if evidence_node is not None
     ]
     evidence_nodes = evidence_node_payloads_from_nodes(nodes)
-    return {
+    payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
         "sourceId": source_id,
@@ -591,12 +593,25 @@ def _document_ai_payload(source_id: str, title: str, index_preview: List[Dict[st
         "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
         "policy": "文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。",
     }
+    return attach_index_manifest(
+        payload,
+        build_source_index_manifest_payload(
+            source_id=source_id,
+            source_kind="document",
+            native_index_kind="pageindex",
+            node_count=len(evidence_nodes),
+            retrieval_modes=["structure", "keyword"],
+            read_modes=["node_id", "page"],
+            storage_ref={"source_id": source_id, "index_preview_count": len(index_preview), "pageindex_count": int(count or len(index_preview) or 0)},
+            model_versions={"parser": "docling", "indexer": "pageindex"},
+        ),
+    )
 
 
 def _package_ai_payload(source_id: str, title: str, package: Dict[str, Any]) -> Dict[str, Any]:
     nodes = evidence_nodes_from_package(source_id, title, package)
     evidence_nodes = evidence_node_payloads_from_nodes(nodes)
-    return {
+    payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
         "sourceId": source_id,
@@ -619,6 +634,19 @@ def _package_ai_payload(source_id: str, title: str, package: Dict[str, Any]) -> 
         "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
         "policy": "资料包来源只通过 EvidenceNode 派生的摘要、代表样本、载体摘要进入 evidence；不传完整明细。",
     }
+    return attach_index_manifest(
+        payload,
+        build_source_index_manifest_payload(
+            source_id=source_id,
+            source_kind="package",
+            native_index_kind="spatial_package_index",
+            node_count=len(evidence_nodes),
+            retrieval_modes=["keyword", "structured"],
+            read_modes=["node_id", "carrier_id", "item_id", "locator"],
+            storage_ref={"package_id": _clean_text(package.get("id")) or source_id, "package_mode": _clean_text(package.get("package_mode"))},
+            diagnostics=[] if evidence_nodes else ["package_evidence_empty"],
+        ),
+    )
 
 
 def _image_attachment_status(record: AttachmentRecord) -> str:
@@ -653,7 +681,7 @@ def _image_attachment_ai_payload(record: AttachmentRecord, source_id: str, title
     ]
     nodes = [evidence_node_from_attachment_chunk(chunk, source_id=source_id) for chunk in chunks[:40]]
     evidence_nodes = evidence_node_payloads_from_nodes(nodes)
-    return {
+    payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
         "sourceId": source_id,
@@ -673,6 +701,20 @@ def _image_attachment_ai_payload(record: AttachmentRecord, source_id: str, title
         "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
         "policy": "图片来源只通过 OCR、caption、visual_analysis 等 EvidenceNode 进入生成；视觉判断需保留来源和置信度。",
     }
+    return attach_index_manifest(
+        payload,
+        build_source_index_manifest_payload(
+            source_id=source_id,
+            source_kind="image",
+            native_index_kind="image_visual_index",
+            node_count=len(evidence_nodes),
+            retrieval_modes=["keyword", "vector"],
+            read_modes=["node_id", "attachment_id", "locator", "bbox"],
+            storage_ref={"attachment_id": record.attachment_id, "working_dir": record.working_dir},
+            model_versions={"ocr_layout": "paddleocr_ppstructure_target", "image_text_embedding": "openclip_target", "vector_store": "qdrant_target"},
+            diagnostics=[] if evidence_nodes else ["image_evidence_empty"],
+        ),
+    )
 
 
 def _attach_package_ai_payload(source: PptSource) -> PptSource:
@@ -866,6 +908,40 @@ def _list_image_attachment_ppt_sources(conversation_id: str) -> List[PptDataSour
     return sources
 
 
+def _lightweight_source_manifest_item(source: PptDataSourceSummary) -> PptDataSourceSummary:
+    meta = _safe_dict(source.meta)
+    source_kind = _clean_text(source.source_kind or meta.get("sourceKind"))
+    lightweight_meta: Dict[str, Any] = {
+        "label": _clean_text(meta.get("label") or source.summary),
+        "sourceKind": source_kind,
+    }
+    for key in ("areaId", "area_id", "conversationId", "attachmentId", "fileName", "mimeType", "packageVersion"):
+        value = meta.get(key)
+        if value not in (None, ""):
+            lightweight_meta[key] = value
+    return PptDataSourceSummary(
+        id=source.id,
+        type=source.type,
+        title=source.title,
+        status=source.status,
+        summary=source.summary,
+        count=source.count,
+        source_kind=source_kind,
+        evidence_count=source.evidence_count,
+        locator_summary=source.locator_summary,
+        availability=source.availability,
+        meta=lightweight_meta,
+    )
+
+
+def list_ppt_source_manifest(area_id: str, conversation_id: str = "") -> List[PptDataSourceSummary]:
+    return [
+        _lightweight_source_manifest_item(source)
+        for source in list_ppt_sources(area_id, conversation_id=conversation_id)
+        if _clean_text(source.source_kind or _safe_dict(source.meta).get("sourceKind")) != "system"
+    ]
+
+
 def list_ppt_sources(area_id: str, conversation_id: str = "") -> List[PptDataSourceSummary]:
     from modules.ppt_web_source.service import list_persisted_web_sources
 
@@ -923,7 +999,7 @@ def delete_ppt_persisted_source(area_id: str, source_id: str) -> Dict[str, Any]:
     deleted = analysis_artifact_repo.delete_by_source_id(
         normalized_area_id,
         source_id=normalized_source_id,
-        artifact_types=[PPT_DATA_PACKAGE_ARTIFACT_TYPE, PPT_WEB_SOURCE_ARTIFACT_TYPE, PPT_DATABASE_ARTIFACT_TYPE],
+        artifact_types=[PPT_DATA_PACKAGE_ARTIFACT_TYPE, PPT_WEB_SOURCE_ARTIFACT_TYPE, PPT_DATABASE_ARTIFACT_TYPE, SOURCE_INDEX_MANIFEST_ARTIFACT_TYPE],
     )
     if not deleted:
         raise PptDataSourceNotFound("source_not_found")

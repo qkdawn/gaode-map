@@ -34,7 +34,6 @@ ToolSceneType = Literal[
 ]
 ToolLlmExposure = Literal["primary", "secondary", "hidden"]
 GovernanceMode = Literal["auto", "guarded", "readonly"]
-ThinkingMode = Literal["quick", "deep"]
 AgentStatus = Literal["answered", "requires_clarification", "requires_risk_confirmation", "failed"]
 AgentStage = Literal[
     "gating",
@@ -113,6 +112,29 @@ class AgentVisualSnapshot(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class AgentSelectedSourcesContext(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+
+    def source_items(self) -> List[Dict[str, Any]]:
+        return [dict(item) for item in self.sources]
+
+
+class AgentMapSearchContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    evidence_version: str = ""
+    source: str = ""
+    rule: str = ""
+    place_anchors: Dict[str, Any] = Field(default_factory=dict)
+    spatial_anchors: Dict[str, Any] = Field(default_factory=dict)
+
+    def as_artifact(self) -> Dict[str, Any]:
+        payload = self.model_dump(mode="json")
+        return {key: value for key, value in payload.items() if value not in ("", None, {}, [])}
+
+
 class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -122,19 +144,9 @@ class AgentTurnRequest(BaseModel):
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     risk_confirmations: List[str] = Field(default_factory=list)
     governance_mode: GovernanceMode = "auto"
-    thinking_mode: ThinkingMode = "quick"
     visual_snapshots: List[AgentVisualSnapshot] = Field(default_factory=list)
-    map_search_context: Dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_aliases(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        value = dict(value)
-        if "thinking_mode" not in value and "thinkingMode" in value:
-            value["thinking_mode"] = value.get("thinkingMode")
-        return value
+    map_search_context: AgentMapSearchContext = Field(default_factory=AgentMapSearchContext)
+    selected_sources_context: AgentSelectedSourcesContext = Field(default_factory=AgentSelectedSourcesContext)
 
 
 class AgentSummaryRequest(BaseModel):
@@ -173,10 +185,10 @@ class AgentSiteSelectionResponse(BaseModel):
 class ContextAskTarget(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate", "ppt_sources"] = "report_section"
+    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate", "analysis_sources"] = "report_section"
     id: str = ""
     title: str = ""
-    source: Literal["report", "iteration", "site_selection", "ppt_planning"] = "report"
+    source: Literal["report", "iteration", "site_selection", "analysis"] = "report"
     summary: str = ""
     evidence: List[Any] = Field(default_factory=list)
     artifact_refs: List[str] = Field(default_factory=list)

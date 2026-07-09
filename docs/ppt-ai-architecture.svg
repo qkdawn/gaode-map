@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="980" viewBox="0 0 1400 980">
+  <defs>
+    <style>
+      .bg{fill:#f8fafc}
+      .title{font:800 30px "Segoe UI","Microsoft YaHei",Arial,sans-serif;fill:#0f172a}
+      .subtitle{font:15px "Segoe UI","Microsoft YaHei",Arial,sans-serif;fill:#475569}
+      .section-title{font:800 18px "Segoe UI","Microsoft YaHei",Arial,sans-serif;fill:#111827}
+      .box-title{font:800 15px "Segoe UI","Microsoft YaHei",Arial,sans-serif;fill:#111827}
+      .box-text{font:13px "Segoe UI","Microsoft YaHei",Arial,sans-serif;fill:#475569}
+      .small{font:12px Consolas,"Microsoft YaHei",monospace;fill:#64748b}
+      .arrow{font:800 15px "Segoe UI","Microsoft YaHei",Arial,sans-serif;fill:#64748b}
+      .note{font:15px "Segoe UI","Microsoft YaHei",Arial,sans-serif;fill:#0f172a}
+      .panel{stroke:#cbd5e1;stroke-width:1.4;rx:14}
+      .box{fill:rgba(255,255,255,.82);stroke:rgba(15,23,42,.16);stroke-width:1.2;rx:10}
+      .user{fill:#eff6ff;stroke:#93c5fd}
+      .api{fill:#f0fdf4;stroke:#86efac}
+      .data{fill:#fffbeb;stroke:#fbbf24}
+      .ai{fill:#f5f3ff;stroke:#c4b5fd}
+      .agent{fill:#ecfeff;stroke:#67e8f9}
+      .note-box{fill:#f0f9ff;stroke:#0ea5e9;stroke-width:1.4;rx:10}
+    </style>
+  </defs>
+  <rect x="0" y="0" width="1400" height="980" fill="#e2e8f0"/>
+  <rect x="34" y="30" width="1332" height="920" class="bg panel"/>
+  <text x="62" y="78" class="title">PPT AI 当前架构：来源驱动的分阶段生成</text>
+  <text x="62" y="106" class="subtitle">主线不是一次性生成 PPTX，而是先生成可审核的目录、叙事方案和逐页指令，再按页补视觉资产。</text>
+
+  <rect x="62" y="138" width="390" height="260" class="user panel"/>
+  <text x="86" y="174" class="section-title">前端工作台</text>
+  <rect x="86" y="194" width="342" height="56" class="box"/>
+  <text x="104" y="216" class="box-title">PPT Planning Tab</text>
+  <text x="104" y="237" class="small">frontend/src/features/agent/ppt-planning-tabs.js</text>
+  <rect x="86" y="262" width="342" height="64" class="box"/>
+  <text x="104" y="284" class="box-title">PptPlanningWorkbench</text>
+  <text x="104" y="305" class="small">frontend/src/features/ppt-planning/</text>
+  <text x="104" y="321" class="box-text">来源区 + 指令文件工作区</text>
+  <rect x="86" y="338" width="342" height="44" class="box"/>
+  <text x="104" y="363" class="box-title">Context Ask：点来源追问</text>
+
+  <text x="222" y="426" class="arrow">请求 payload ↓</text>
+  <rect x="62" y="450" width="390" height="160" class="api panel"/>
+  <text x="86" y="486" class="section-title">HTTP API 边界</text>
+  <rect x="86" y="506" width="342" height="42" class="box"/>
+  <text x="104" y="532" class="box-title">/api/v1/analysis/ppt/*</text>
+  <rect x="86" y="560" width="342" height="34" class="box"/>
+  <text x="104" y="582" class="box-title">/api/v1/analysis/agent/context-ask</text>
+
+  <rect x="505" y="138" width="390" height="238" class="data panel"/>
+  <text x="529" y="174" class="section-title">来源与证据层</text>
+  <rect x="529" y="194" width="342" height="48" class="box"/>
+  <text x="547" y="216" class="box-title">PptSource / Source Manifest</text>
+  <text x="547" y="235" class="box-text">current analysis、dataset、package、document、image、web、database</text>
+  <rect x="529" y="254" width="342" height="48" class="box"/>
+  <text x="547" y="276" class="box-title">EvidenceNode</text>
+  <text x="547" y="295" class="box-text">文档页、网页段落、图片解析、数据库记录、空间资料包</text>
+  <rect x="529" y="314" width="342" height="46" class="box"/>
+  <text x="547" y="336" class="box-title">Metric Context</text>
+  <text x="547" y="355" class="box-text">POI / H3 / 人口 / 夜光 / 路网 ready metrics</text>
+
+  <text x="612" y="404" class="arrow">_build_ppt_context_bundle() ↓</text>
+  <rect x="505" y="428" width="390" height="300" class="ai panel"/>
+  <text x="529" y="464" class="section-title">PPT 生成 AI 主链</text>
+  <rect x="529" y="484" width="160" height="58" class="box"/>
+  <text x="547" y="506" class="box-title">1. Source Group</text>
+  <text x="547" y="527" class="box-text">来源分组、材料角色</text>
+  <rect x="711" y="484" width="160" height="58" class="box"/>
+  <text x="729" y="506" class="box-title">2. Outline</text>
+  <text x="729" y="527" class="box-text">目录 / 章节骨架</text>
+  <rect x="529" y="554" width="160" height="58" class="box"/>
+  <text x="547" y="576" class="box-title">3. Narrative</text>
+  <text x="547" y="597" class="box-text">叙事节奏、证据桶</text>
+  <rect x="711" y="554" width="160" height="58" class="box"/>
+  <text x="729" y="576" class="box-title">4. Directive</text>
+  <text x="729" y="597" class="box-text">PPT 指令文件</text>
+  <rect x="529" y="624" width="342" height="48" class="box"/>
+  <text x="547" y="646" class="box-title">5. Page Assets</text>
+  <text x="547" y="665" class="box-text">逐页修补内容、生成地图 / 图表资产请求</text>
+  <rect x="529" y="684" width="342" height="28" class="box"/>
+  <text x="547" y="703" class="small">LLM 输入：sources + manifest + metrics + evidence + deck config</text>
+
+  <rect x="948" y="138" width="390" height="300" class="agent panel"/>
+  <text x="972" y="174" class="section-title">PPT 来源问答链</text>
+  <rect x="972" y="194" width="342" height="48" class="box"/>
+  <text x="990" y="216" class="box-title">context_ask_service</text>
+  <text x="990" y="235" class="box-text">target.type=ppt_sources 时优先进入 mini loop</text>
+  <rect x="972" y="254" width="342" height="48" class="box"/>
+  <text x="990" y="276" class="box-title">run_source_qa_loop</text>
+  <text x="990" y="295" class="box-text">只围绕已选 PPT 来源检索，不访问未选来源</text>
+  <rect x="972" y="314" width="342" height="48" class="box"/>
+  <text x="990" y="336" class="box-title">只读工具</text>
+  <text x="990" y="355" class="box-text">list/search/read EvidenceNode + scope dataset tools</text>
+  <rect x="972" y="374" width="342" height="46" class="box"/>
+  <text x="990" y="396" class="box-title">回答产物</text>
+  <text x="990" y="415" class="box-text">自然回答 + evidence + citations + warnings</text>
+
+  <text x="1082" y="466" class="arrow">可进入主 Agent ↓</text>
+  <rect x="948" y="490" width="390" height="142" class="agent panel"/>
+  <text x="972" y="526" class="section-title">主 Agent 关联</text>
+  <rect x="972" y="546" width="342" height="34" class="box"/>
+  <text x="990" y="568" class="box-title">selected_sources_context</text>
+  <rect x="972" y="592" width="342" height="26" class="box"/>
+  <text x="990" y="610" class="box-text">只能通过来源工具读取 EvidenceNode，不能引用未选来源。</text>
+
+  <path d="M452 525 L480 525 L480 257 L505 257" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M895 575 L920 575 L920 287 L948 287" fill="none" stroke="#94a3b8" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arrow)"/>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="none" stroke="#94a3b8" stroke-width="1.5"/>
+    </marker>
+  </defs>
+
+  <rect x="62" y="770" width="1276" height="74" class="note-box"/>
+  <text x="86" y="800" class="note">一句话：PPT AI 的核心数据面是“已选来源 -> EvidenceNode / Metric Context -> Context Bundle”。</text>
+  <text x="86" y="826" class="note">核心生成面是“目录 -> 叙事方案 -> 指令文件 -> 逐页 brief/视觉资产”。来源问答是旁路 mini loop，服务用户追问，不负责生成整套 PPT。</text>
+
+  <text x="62" y="888" class="section-title">关键文件</text>
+  <text x="62" y="916" class="small">frontend/src/features/agent/ppt-planning-tabs.js  ·  router/domains/ppt_planning.py  ·  modules/ppt_planning/service.py  ·  modules/agent/source_qa_loop.py  ·  modules/agent/context_ask_service.py</text>
+</svg>

@@ -425,6 +425,7 @@ export function createAgentThreadUiMethods() {
           title: asText(item && item.title) || '处理中',
           detail: asText(item && item.detail),
           displayText: asText(item && (item.displayText || item.display_text)),
+          resultSummary: asText(item && (item.resultSummary || item.result_summary)),
           items: cloneArray(item && item.items).map((entry) => asText(entry)).filter(Boolean),
           meta: cloneObject(item && item.meta),
           state: asText(item && item.state) || 'pending',
@@ -455,9 +456,14 @@ export function createAgentThreadUiMethods() {
         read_timeseries_analysis: '读取时序变化',
       }
       const forbiddenLabels = new Set(['思考', '行动', '观察', '复盘', '异常'])
+      const genericResultLabels = new Set(['执行成功', '成功', '已完成', '完成', 'ok', 'OK', '无结果'])
       const clean = (value = '') => asText(value)
         .replace(/^(思考|行动|观察|复盘|异常)\s*[·:：-]?\s*/u, '')
         .trim()
+      const cleanResultSummary = (value = '') => {
+        const text = clean(value)
+        return genericResultLabels.has(text) ? '' : text
+      }
       const readItemValue = (items = [], prefix = '') => {
         const matched = cloneArray(items)
           .map((entry) => asText(entry))
@@ -512,7 +518,7 @@ export function createAgentThreadUiMethods() {
           const metaParts = []
           if (evidenceSummary) metaParts.push(`证据：${evidenceSummary}`)
           if (warningSummary) metaParts.push(`警告：${warningSummary}`)
-          const resultText = displayText
+          const resultText = displayText || cleanResultSummary(step.resultSummary)
           if (!resultText) return
           const resultItem = makeTextItem({
             id: `${step.id || index}-tool-result`,
@@ -863,9 +869,8 @@ export function createAgentThreadUiMethods() {
         statusLabel: '\u5df2\u590d\u7528',
         updatedAt: new Date().toISOString(),
       })
-      await this.submitAgentTurn({
+      await this.submitMainAgentTurn({
         prompt: `已复用当前${current.label}结果，请基于最新左侧计算结果继续回答。`,
-        panelKind: asText(this.getAgentActiveTopTab().kind) === 'deep_analysis' ? 'deep_analysis' : undefined,
       })
     },
     async onAgentTaskStartClick(taskConfirmation = null) {
@@ -891,9 +896,8 @@ export function createAgentThreadUiMethods() {
           statusLabel: '已完成',
           updatedAt: new Date().toISOString(),
         })
-        await this.submitAgentTurn({
+        await this.submitMainAgentTurn({
           prompt: `${checked.label}已完成，请基于最新左侧计算结果继续回答。`,
-          panelKind: asText(this.getAgentActiveTopTab().kind) === 'deep_analysis' ? 'deep_analysis' : undefined,
         })
       } catch (err) {
         this.setAgentTaskConfirmation({
@@ -968,13 +972,13 @@ export function createAgentThreadUiMethods() {
       const prompt = asText(option)
       if (!prompt || this.agentLoading || this.agentSessionHydrating || this.agentClarificationSubmitting) return
       this.agentClarificationSubmitting = true
-      this.submitAgentTurn({ prompt })
+      this.submitMainAgentTurn({ prompt })
     },
     onAgentClarificationDraftSubmit() {
       const prompt = String(this.agentClarificationDraft || '').trim()
       if (!prompt || this.agentLoading || this.agentSessionHydrating || this.agentClarificationSubmitting) return
       this.agentClarificationSubmitting = true
-      this.submitAgentTurn({ prompt })
+      this.submitMainAgentTurn({ prompt })
     },
     onAgentActionPromptClick(item = null) {
       const prompt = asText(item && item.prompt)

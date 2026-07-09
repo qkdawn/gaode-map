@@ -30,7 +30,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="area_character",
             toolkit_id="area_character_pack",
             evidence_contract=["current_poi_structure_analysis"],
-            applicable_scenarios=["兼容旧规划链路", "POI 结构复用"],
+            applicable_scenarios=["业态结构复核", "POI 结构复用"],
             produces=["current_poi_structure_analysis"],
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             output_schema={
@@ -61,7 +61,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="area_character",
             toolkit_id="area_character_pack",
             evidence_contract=["current_h3_structure_analysis"],
-            applicable_scenarios=["兼容旧规划链路", "空间结构复用"],
+            applicable_scenarios=["空间网格结构复核", "H3 结构复用"],
             produces=["current_h3_structure_analysis"],
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             output_schema={
@@ -92,7 +92,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="area_character",
             toolkit_id="area_character_pack",
             evidence_contract=["current_road_pattern_analysis"],
-            applicable_scenarios=["兼容旧规划链路", "路网结构复用"],
+            applicable_scenarios=["路网结构复核", "可达性模式复用"],
             produces=["current_road_pattern_analysis"],
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             output_schema={
@@ -114,7 +114,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
     registry["read_population_profile_analysis"] = _register(
         _tool_spec(
             name="read_population_profile_analysis",
-            description="读取当前 snapshot 与 frontend_analysis 中的人口结构画像",
+            description="读取当前 snapshot 与 frontend_analysis 中的人口结构画像，包含每个年龄段占比、主导年龄段、主导年龄段占比和主导年龄格子占比",
             category="information",
             layer="L1",
             ui_tier="capability",
@@ -124,7 +124,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="area_character",
             toolkit_id="area_character_pack",
             evidence_contract=["current_population_profile_analysis"],
-            applicable_scenarios=["兼容旧规划链路", "人口画像复用"],
+            applicable_scenarios=["人口承载复核", "人口画像复用"],
             produces=["current_population_profile_analysis"],
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             output_schema={
@@ -135,6 +135,10 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
                     "view": {"type": "string"},
                     "total_population": {"anyOf": [{"type": "number"}, {"type": "null"}]},
                     "top_age_band": {"type": "string"},
+                    "top_age_band_population": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+                    "top_age_band_ratio": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+                    "age_distribution_ratios": {"type": "array"},
+                    "dominant_cell_ratio": {"anyOf": [{"type": "number"}, {"type": "null"}]},
                     "summary_text": {"type": "string"},
                 },
                 "additionalProperties": True,
@@ -156,7 +160,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="area_character",
             toolkit_id="area_character_pack",
             evidence_contract=["current_nightlight_pattern_analysis"],
-            applicable_scenarios=["兼容旧规划链路", "夜光结构复用"],
+            applicable_scenarios=["夜间活力复核", "夜光结构复用"],
             produces=["current_nightlight_pattern_analysis"],
             input_schema={"type": "object", "properties": {}, "additionalProperties": False},
             output_schema={
@@ -188,7 +192,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="area_character",
             toolkit_id="area_character_pack",
             evidence_contract=["current_business_profile", "current_poi_structure_analysis"],
-            applicable_scenarios=["兼容旧商业画像链路"],
+            applicable_scenarios=["商业画像解释", "功能复合判断"],
             produces=["current_business_profile", "current_poi_structure_analysis"],
             readonly=True,
             cost_level="normal",
@@ -208,7 +212,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="site_selection",
             toolkit_id="site_selection_pack",
             evidence_contract=["current_commercial_hotspots", "current_h3_structure_analysis"],
-            applicable_scenarios=["热点识别", "兼容旧热点链路"],
+            applicable_scenarios=["热点识别", "商业核心区识别"],
             produces=["current_commercial_hotspots", "current_h3_structure_analysis", "current_poi_structure_analysis"],
             input_schema={
                 "type": "object",
@@ -245,7 +249,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             scene_type="site_selection",
             toolkit_id="site_selection_pack",
             evidence_contract=["current_target_supply_gap"],
-            applicable_scenarios=["兼容旧补位分析链路", "目标业态缺口判断"],
+            applicable_scenarios=["目标业态缺口判断", "空间供需错配识别"],
             cautions=["缺少 H3 gap 结果时只能给弱判断"],
             produces=["current_target_supply_gap", "current_h3_structure_analysis"],
             input_schema={
@@ -274,7 +278,7 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
     registry["run_business_site_advice"] = _register(
         _tool_spec(
             name="run_business_site_advice",
-            description="兼容旧版开店/选址建议组合分析，串联 POI/H3/人口/夜光/路网证据",
+            description="生成开店/选址建议组合分析，串联 POI/H3/人口/夜光/路网证据",
             category="action",
             layer="L2",
             ui_tier="capability",
@@ -285,8 +289,8 @@ def register_analysis_business_tools(registry: Dict[str, RegisteredTool]) -> Non
             toolkit_id="site_selection_pack",
             default_policy_key="business_catchment_1km",
             evidence_contract=["business_site_advice", "current_poi_h3_summary", "current_population_summary", "current_nightlight_summary", "current_road_summary"],
-            applicable_scenarios=["兼容旧站点建议链路"],
-            cautions=["建议新流程优先改用 run_site_selection_pack"],
+            applicable_scenarios=["开店选址建议", "多源商业证据串联"],
+            cautions=["优先使用更细粒度证据工具完成可解释诊断；该工具适合需要一次性组合建议时使用"],
             requires=["scope_polygon"],
             produces=[
                 "business_site_advice",

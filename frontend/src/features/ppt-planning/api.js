@@ -210,6 +210,13 @@ export function listPptDataSources(areaId = '', options = {}) {
   })
 }
 
+export function listPptSourceManifest(areaId = '', options = {}) {
+  return getJson('/api/v1/analysis/ppt/data/source-manifest', {
+    area_id: areaId,
+    conversation_id: options.conversationId || options.conversation_id || '',
+  })
+}
+
 export function readPptDataSourceSummary(areaId = '', sourceId = '') {
   return getJson('/api/v1/analysis/ppt/data/source-summary', { area_id: areaId, source_id: sourceId })
 }

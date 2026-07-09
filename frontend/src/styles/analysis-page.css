@@ -2020,67 +2020,27 @@ label {
 .agent-ppt-source-search {
     flex: 0 0 auto;
     margin: 0 18px 12px;
-    min-height: 96px;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
+    border: 1px solid #dbe3ee;
+    border-radius: 12px;
     padding: 12px;
-    background: #f8fafc;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 40px;
-    gap: 10px;
-    align-items: center;
-}
-
-.agent-ppt-source-search-main {
-    min-width: 0;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
     display: grid;
     gap: 12px;
 }
 
-.agent-ppt-source-search span {
-    color: #64748b;
-    font-size: 14px;
-    font-weight: 750;
+.agent-ppt-source-search-main {
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
 }
 
-.agent-ppt-source-search > button {
-    width: 40px;
-    height: 40px;
-    border: 0;
-    border-radius: 50%;
-    color: transparent;
-    background: #e5e7eb;
-    cursor: not-allowed;
-    position: relative;
-}
-
-.agent-ppt-source-search > button:not(:disabled) {
-    background: #f8fafc;
-    cursor: pointer;
-}
-
-.agent-ppt-source-search > button:not(:disabled):hover {
-    background: #eef2f7;
-}
-
-.agent-ppt-source-search > button::before {
-    content: "";
-    position: absolute;
-    inset: 12px;
-    border: 2px solid #64748b;
-    border-radius: 50%;
-}
-
-.agent-ppt-source-search > button::after {
-    content: "";
-    position: absolute;
-    width: 8px;
-    height: 2px;
-    right: 11px;
-    bottom: 12px;
-    background: #64748b;
-    transform: rotate(45deg);
-    border-radius: 999px;
+.agent-ppt-source-search-title {
+    color: #0f172a;
+    font-size: 13px;
+    font-weight: 850;
+    line-height: 1.25;
 }
 
 .agent-ppt-source-search-chips {
@@ -2091,16 +2051,83 @@ label {
     flex-wrap: wrap;
 }
 
-.agent-ppt-source-search-chips button {
-    min-height: 30px;
+.agent-ppt-source-search-chips span {
+    min-height: 24px;
     border: 1px solid #dbe3ee;
     border-radius: 999px;
-    padding: 0 12px;
-    color: #111827;
+    padding: 0 9px;
+    color: #475569;
     background: #ffffff;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
+    line-height: 22px;
+    white-space: nowrap;
+}
+
+.agent-ppt-source-search-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+}
+
+.agent-ppt-source-search-action {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+    padding: 0 10px;
+    color: #334155;
+    background: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 850;
+    cursor: pointer;
+    transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.agent-ppt-source-search-action.is-primary {
+    border-color: #111827;
+    color: #ffffff;
+    background: #111827;
+}
+
+.agent-ppt-source-search-action svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.agent-ppt-source-search-action:hover:not(:disabled) {
+    border-color: #94a3b8;
+    background: #f8fafc;
+    color: #0f172a;
+    transform: translateY(-1px);
+}
+
+.agent-ppt-source-search-action.is-primary:hover:not(:disabled) {
+    border-color: #0f172a;
+    color: #ffffff;
+    background: #1f2937;
+}
+
+.agent-ppt-source-search-action:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.agent-ppt-source-search-action:disabled {
+    color: #94a3b8;
+    background: #f1f5f9;
+    border-color: #e2e8f0;
     cursor: not-allowed;
+    transform: none;
 }
 
 .agent-ppt-data-package-btn {
@@ -2209,6 +2236,9 @@ label {
     line-height: 1.05;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .agent-ppt-source-toolbar-copy small {
@@ -2220,6 +2250,16 @@ label {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.agent-ppt-source-refresh-dot {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    border: 2px solid #bae6fd;
+    border-top-color: #0369a1;
+    border-radius: 999px;
+    animation: agent-ppt-source-spin 0.9s linear infinite;
 }
 
 .agent-ppt-source-tag-btn {
@@ -2730,7 +2770,8 @@ body.agent-ppt-source-menu-open {
 }
 
 .agent-ppt-source-loading.is-generating {
-    border-top-color: #64748b;
+    border-color: #bae6fd;
+    border-top-color: #0369a1;
     background: transparent;
     animation: agent-ppt-source-spin 0.9s linear infinite;
 }
@@ -7669,10 +7710,10 @@ body.agent-ppt-source-menu-open {
 .agent-message-bubble.is-agent-pending {
     position: relative;
     overflow: hidden;
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-    padding: 3px 2px 3px 15px;
+    background: #f7f8fb;
+    border-color: #e5e7eb;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+    padding: 12px 14px 12px 30px;
     color: #475569;
 }
 
@@ -7680,11 +7721,12 @@ body.agent-ppt-source-menu-open {
     content: "";
     position: absolute;
     top: 1.05em;
-    left: 2px;
+    left: 14px;
     width: 5px;
     height: 5px;
     border-radius: 999px;
     background: #94a3b8;
+    z-index: 1;
 }
 
 .agent-message-bubble.is-agent-pending::after {
@@ -7692,10 +7734,10 @@ body.agent-ppt-source-menu-open {
     position: absolute;
     top: 0;
     bottom: 0;
-    left: 12px;
-    width: min(42%, 220px);
+    left: 0;
+    width: min(48%, 260px);
     pointer-events: none;
-    background: linear-gradient(90deg, transparent 0%, rgba(226, 232, 240, 0.62) 48%, transparent 100%);
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.72) 50%, transparent 100%);
     animation: agent-soft-scan 1.7s ease-in-out infinite;
 }
 
@@ -8555,6 +8597,80 @@ body.agent-ppt-source-menu-open {
 .agent-shortcut-chip:hover {
     background: #f9fafb;
     border-color: #cfd6df;
+}
+
+.agent-business-prompts {
+    align-items: center;
+    gap: 0;
+    width: min(100%, 1080px);
+    margin: 0 auto;
+    padding: 0 0 14px;
+    background: transparent;
+}
+
+.agent-business-prompts::before {
+    content: "商业分析";
+    flex: 0 0 auto;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid #d7dde6;
+    border-right: 0;
+    border-radius: 8px 0 0 8px;
+    background: #f7f8fa;
+    color: #6b7280;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 30px;
+    letter-spacing: 0.08em;
+}
+
+.agent-business-chip {
+    position: relative;
+    height: 32px;
+    margin-left: -1px;
+    padding: 0 14px;
+    border-color: #d7dde6;
+    border-radius: 0;
+    background: #ffffff;
+    color: #1f2937;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 30px;
+    letter-spacing: 0;
+    transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.agent-business-chip:last-child {
+    border-radius: 0 8px 8px 0;
+}
+
+.agent-business-chip::before {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: 8px;
+    border-radius: 999px;
+    background: #64748b;
+    vertical-align: 1px;
+}
+
+.agent-business-chip:hover {
+    z-index: 1;
+    background: #f8fafc;
+    border-color: #9aa7b7;
+    color: #0f172a;
+    transform: translateY(-1px);
+}
+
+.agent-business-chip:active {
+    transform: translateY(0);
+}
+
+.agent-business-chip:disabled {
+    cursor: not-allowed;
+    opacity: 0.52;
+    transform: none;
 }
 
 .agent-input-card {
@@ -9550,6 +9666,31 @@ body.agent-ppt-source-menu-open {
     .agent-composer-card {
         gap: 10px;
         border-radius: 22px;
+    }
+
+    .agent-business-prompts {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        padding-bottom: 12px;
+    }
+
+    .agent-business-prompts::before {
+        grid-column: 1 / -1;
+        border-right: 1px solid #d7dde6;
+        border-radius: 8px;
+        text-align: center;
+    }
+
+    .agent-business-chip {
+        width: 100%;
+        margin-left: 0;
+        border-radius: 8px;
+        text-align: center;
+    }
+
+    .agent-business-chip:last-child {
+        border-radius: 8px;
     }
 
     .agent-process-panel-head,

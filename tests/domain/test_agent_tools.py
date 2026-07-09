@@ -1,5 +1,8 @@
 import asyncio
 
+import modules.agent.tool_adapters.scope_dataset_tools as scope_dataset_tools
+from modules.agent.selected_sources import evidence_count_from_item, evidence_nodes_from_item
+from modules.agent.tool_definitions.source_evidence import read_selected_source_evidence_node
 from modules.agent.providers.tool_call_execution import execute_tool_call_step
 from modules.agent.schemas import AnalysisSnapshot, ExecutionTraceItem, PlanStep
 from modules.agent.executor import validate_tool_arguments
@@ -10,64 +13,48 @@ from modules.providers.amap.utils.get_type_info import infer_type_info_from_text
 def test_get_tool_registry_exposes_stage1_tools():
     registry = get_tool_registry()
 
-    assert {
+    assert set(registry.keys()) == {
         "read_current_scope",
         "read_current_results",
-        "fetch_pois_in_scope",
-        "build_h3_grid_from_scope",
-        "compute_h3_metrics_from_scope_and_pois",
-        "compute_population_overview_from_scope",
-        "compute_nightlight_overview_from_scope",
-        "compute_road_syntax_from_scope",
+        "plan_business_analyst_analysis",
+        "list_selected_sources",
+        "search_selected_source_evidence",
+        "read_selected_source_evidence_node",
         "search_analysis_context",
         "read_analysis_evidence_node",
         "search_report_context",
         "read_report_evidence_node",
-        "get_area_data_bundle",
-        "analyze_poi_structure",
-        "rank_next_analysis_options",
-        "analyze_spatial_structure",
-        "build_unified_spatial_cells",
-        "infer_area_labels",
-        "score_site_candidates",
-        "run_area_character_pack",
-        "run_site_selection_pack",
-        "read_poi_structure_analysis",
-        "analyze_target_supply_gap",
-        "run_business_site_advice",
-    }.issubset(set(registry.keys()))
+        "list_scope_datasets",
+        "query_scope_dataset",
+        "aggregate_scope_dataset",
+        "read_scope_record",
+    }
     assert registry["read_current_scope"].spec.readonly is True
     assert registry["read_current_scope"].spec.input_schema["additionalProperties"] is False
     assert registry["read_current_scope"].spec.output_schema["properties"]["has_scope"]["type"] == "boolean"
     assert registry["read_current_scope"].spec.ui_tier == "foundation"
     assert registry["read_current_results"].spec.llm_exposure == "primary"
-    assert registry["analyze_poi_structure"].spec.ui_tier == "capability"
-    assert registry["analyze_poi_structure"].spec.capability_type == "analyze"
-    assert registry["rank_next_analysis_options"].spec.toolkit_id == "next_analysis_pack"
-    assert registry["run_area_character_pack"].spec.ui_tier == "scenario"
-    assert registry["run_area_character_pack"].spec.scene_type == "area_character"
-    assert registry["run_area_character_pack"].spec.llm_exposure == "primary"
-    assert registry["run_site_selection_pack"].spec.scene_type == "site_selection"
-    assert registry["run_site_selection_pack"].spec.default_policy_key == "business_catchment_1km"
-    assert registry["read_poi_structure_analysis"].spec.readonly is True
-    assert registry["analyze_target_supply_gap"].spec.input_schema["required"] == ["place_type"]
-    assert registry["fetch_pois_in_scope"].spec.requires == ["scope_polygon"]
-    assert registry["fetch_pois_in_scope"].spec.input_schema["properties"]["source"]["enum"] == ["local", "gaode"]
-    assert registry["run_business_site_advice"].spec.layer == "L2"
-    assert registry["run_business_site_advice"].spec.cost_level == "expensive"
-    assert registry["run_business_site_advice"].spec.requires == ["scope_polygon"]
-    assert registry["compute_population_overview_from_scope"].spec.requires == ["scope_polygon"]
-    assert registry["compute_nightlight_overview_from_scope"].spec.requires == ["scope_polygon"]
+    assert registry["plan_business_analyst_analysis"].spec.readonly is True
+    assert registry["plan_business_analyst_analysis"].spec.llm_exposure == "primary"
+    assert registry["plan_business_analyst_analysis"].spec.produces == ["business_analyst_skeleton"]
+    assert registry["list_selected_sources"].spec.readonly is True
+    assert registry["search_selected_source_evidence"].spec.input_schema["required"] == ["query"]
+    assert registry["read_selected_source_evidence_node"].spec.input_schema["required"] == ["node_id"]
     assert "search_database_context" not in registry
     assert "read_database_record" not in registry
-    assert registry["compute_h3_metrics_from_scope_and_pois"].spec.produces == [
-        "current_poi_h3",
-        "current_poi_h3_grid",
-        "current_poi_h3_summary",
-        "current_poi_h3_charts",
+    assert "fetch_pois_in_scope" not in registry
+    assert "compute_road_syntax_from_scope" not in registry
+    assert "run_area_character_pack" not in registry
+    assert "run_site_selection_pack" not in registry
+    assert registry["list_scope_datasets"].spec.llm_exposure == "primary"
+    assert registry["query_scope_dataset"].spec.readonly is True
+    assert registry["query_scope_dataset"].spec.input_schema["properties"]["source_id"]["enum"] == [
+        "current:dataset:poi",
+        "current:dataset:h3",
+        "current:dataset:population",
+        "current:dataset:nightlight",
+        "current:dataset:road",
     ]
-    assert registry["compute_road_syntax_from_scope"].spec.cost_level == "expensive"
-    assert registry["compute_road_syntax_from_scope"].spec.risk_level == "safe"
 
 
 def test_get_tool_registry_keeps_expected_tool_order():
@@ -76,47 +63,26 @@ def test_get_tool_registry_keeps_expected_tool_order():
     assert list(registry.keys()) == [
         "read_current_scope",
         "read_current_results",
-        "fetch_pois_in_scope",
-        "build_h3_grid_from_scope",
-        "compute_h3_metrics_from_scope_and_pois",
-        "compute_population_overview_from_scope",
-        "compute_nightlight_overview_from_scope",
-        "compute_road_syntax_from_scope",
+        "plan_business_analyst_analysis",
+        "list_selected_sources",
+        "search_selected_source_evidence",
+        "read_selected_source_evidence_node",
         "search_analysis_context",
         "read_analysis_evidence_node",
         "search_report_context",
         "read_report_evidence_node",
-        "get_area_data_bundle",
-        "analyze_poi_structure",
-        "rank_next_analysis_options",
-        "analyze_spatial_structure",
-        "build_unified_spatial_cells",
-        "infer_area_labels",
-        "score_site_candidates",
-        "run_area_character_pack",
-        "run_site_selection_pack",
-        "run_vitality_assessment_pack",
-        "run_tod_pack",
-        "run_livability_pack",
-        "run_facility_gap_pack",
-        "run_renewal_priority_pack",
-        "read_poi_structure_analysis",
-        "read_h3_structure_analysis",
-        "read_road_pattern_analysis",
-        "read_population_profile_analysis",
-        "read_nightlight_pattern_analysis",
-        "analyze_poi_mix_from_scope",
-        "detect_commercial_hotspots",
-        "analyze_target_supply_gap",
-        "run_business_site_advice",
+        "list_scope_datasets",
+        "query_scope_dataset",
+        "aggregate_scope_dataset",
+        "read_scope_record",
     ]
 
 
 def test_validate_tool_arguments_rejects_unknown_keys():
     registry = get_tool_registry()
     errors = validate_tool_arguments(
-        {"types": "050000", "unexpected": True},
-        registry["fetch_pois_in_scope"].spec.input_schema,
+        {"query": "商业", "unexpected": True},
+        registry["search_selected_source_evidence"].spec.input_schema,
     )
 
     assert "arguments.unexpected 不允许出现" in errors
@@ -128,13 +94,111 @@ def test_execution_trace_item_accepts_blocked_status():
     assert trace.status == "blocked"
 
 
+def test_scope_dataset_tool_reads_history_id_from_snapshot(monkeypatch):
+    seen = {}
+
+    class FakeScopeDatasetService:
+        def list_scope_datasets(self, history_id):
+            seen["history_id"] = history_id
+            return {"datasets": [{"source_id": "current:dataset:poi"}], "warnings": []}
+
+    monkeypatch.setattr(scope_dataset_tools, "ScopeDatasetService", FakeScopeDatasetService)
+    result = asyncio.run(
+        scope_dataset_tools.list_scope_datasets(
+            arguments={},
+            snapshot=AnalysisSnapshot(context={"history_id": "history-1"}),
+            artifacts={},
+            question="当前范围有哪些数据",
+        )
+    )
+
+    assert result.status == "success"
+    assert seen["history_id"] == "history-1"
+    assert result.result["datasets"][0]["source_id"] == "current:dataset:poi"
+
+
+def test_read_selected_source_evidence_node_uses_unified_index_without_cache():
+    artifacts = {
+        "selected_sources_context": {
+            "sources": [
+                {
+                    "source_id": "web:area-1",
+                    "title": "网页来源",
+                    "source_kind": "web",
+                    "evidence_nodes": [
+                        {
+                            "id": "web:area-1:node:1",
+                            "source_id": "web:area-1",
+                            "source_type": "web",
+                            "title": "政策网页",
+                            "content": "公共服务和城市更新政策资料。",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+
+    result = asyncio.run(
+        read_selected_source_evidence_node(
+            arguments={"node_id": "web:area-1:node:1"},
+            snapshot=AnalysisSnapshot(),
+            artifacts=artifacts,
+            question="公共服务",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.result["evidence_node"]["id"] == "web:area-1:node:1"
+    assert result.result["source_type"] == "web"
+
+
+def test_selected_source_evidence_nodes_do_not_fallback_to_summary_evidence():
+    source = {
+        "source_id": "document:doc-1",
+        "title": "文档来源",
+        "evidence": [{"title": "摘要证据", "text": "这是展示用摘要，不是 EvidenceNode。"}],
+    }
+
+    assert evidence_nodes_from_item(source) == []
+    assert evidence_count_from_item(source) == 0
+
+
+def test_read_selected_source_evidence_node_rejects_unselected_source_id():
+    artifacts = {
+        "selected_sources_context": {
+            "sources": [
+                {
+                    "source_id": "web:area-1",
+                    "title": "网页来源",
+                    "source_kind": "web",
+                    "evidence_nodes": [],
+                }
+            ]
+        }
+    }
+
+    result = asyncio.run(
+        read_selected_source_evidence_node(
+            arguments={"node_id": "web:not-selected:node:1", "source_id": "web:not-selected"},
+            snapshot=AnalysisSnapshot(),
+            artifacts=artifacts,
+            question="公共服务",
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.error == "source_id_not_selected"
+    assert "source_id_not_selected:web:not-selected" in result.warnings
+
+
 def test_governance_blocked_tool_call_keeps_result_failed_and_trace_blocked():
     registry = get_tool_registry()
     step = PlanStep(tool_name="compute_road_syntax_from_scope", reason="需要路网句法")
 
     execution = asyncio.run(
         execute_tool_call_step(
-            registered_tool=registry["compute_road_syntax_from_scope"],
+            registered_tool=registry.get("compute_road_syntax_from_scope"),
             step=step,
             snapshot=AnalysisSnapshot(scope={"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}),
             artifacts={},
@@ -144,10 +208,9 @@ def test_governance_blocked_tool_call_keeps_result_failed_and_trace_blocked():
         )
     )
 
-    assert execution.trace.status == "blocked"
+    assert execution.trace.status == "failed"
     assert execution.result.status == "failed"
-    assert execution.result.error == "governance_blocked"
-    assert execution.result.warnings
+    assert execution.result.error == "unknown_tool:compute_road_syntax_from_scope"
 
 
 def test_resolve_type_info_supports_aliases_for_site_advice():

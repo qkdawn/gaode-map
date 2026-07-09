@@ -1,4 +1,4 @@
-import { asText, cloneArray, cloneObject } from '../agent/normalizers.js'
+import { asText, cloneArray, cloneObject } from '../shared/normalizers.js'
 import { buildPptCarrierPreviewModel } from './carrier-preview.js'
 
 const CARRIER_PACKAGE_PREFIX = 'package:poi-road-carriers:'

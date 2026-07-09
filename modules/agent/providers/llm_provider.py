@@ -107,7 +107,7 @@ async def generate_title_with_llm(
     return title[:24]
 
 
-def _with_thinking_mode(request_body: Dict[str, Any]) -> Dict[str, Any]:
+def _with_provider_thinking(request_body: Dict[str, Any]) -> Dict[str, Any]:
     body = dict(request_body or {})
     model = str(body.get("model") or settings.ai_model or "").strip()
     if bool(settings.ai_thinking_enabled) and model != "deepseek-reasoner":
@@ -168,7 +168,7 @@ async def _stream_chat_completion(
     enable_thinking: bool = True,
 ) -> Dict[str, Any]:
     base_body = {**request_body, "stream": True}
-    body = _with_thinking_mode(base_body) if enable_thinking else base_body
+    body = _with_provider_thinking(base_body) if enable_thinking else base_body
     response_id = ""
     finish_reason = ""
     content_parts: List[str] = []
@@ -305,7 +305,7 @@ async def _invoke_json_role(
                 enable_thinking=enable_thinking,
             )
         else:
-            body = _with_thinking_mode(request_body) if enable_thinking else request_body
+            body = _with_provider_thinking(request_body) if enable_thinking else request_body
             response = await client.post(f"{base_url}/chat/completions", headers=headers, json=body)
             if response.status_code >= 400:
                 detail = response.text[:800] if response.text else str(getattr(response, "reason_phrase", "LLM provider error"))
@@ -364,7 +364,6 @@ async def generate_answer_output_with_llm(
     answer_evidence_payload: Dict[str, Any],
     translation_pack: AgentTranslationPack | Dict[str, Any] | None = None,
     image_inputs: List[Dict[str, Any]] | None = None,
-    thinking_mode: str = "quick",
     emit: LoopEmit | None = None,
 ) -> AgentTurnOutput:
     translation_payload = (
@@ -373,10 +372,9 @@ async def generate_answer_output_with_llm(
         else dict(translation_pack or {})
     )
     parsed = await _invoke_json_role(
-        system_prompt=_synthesizer_system_prompt_from_module(thinking_mode=thinking_mode),
+        system_prompt=_synthesizer_system_prompt_from_module(),
         user_payload={
             "messages": _trim_messages(messages),
-            "thinking_mode": str(thinking_mode or "quick"),
             "analysis_snapshot_digest": snapshot_digest(snapshot),
             "context_digest": context_digest(context),
             "answer_evidence_payload": answer_evidence_payload,
@@ -398,14 +396,12 @@ async def generate_translation_pack_with_llm(
     context: ContextBundle,
     answer_evidence_payload: Dict[str, Any],
     image_inputs: List[Dict[str, Any]] | None = None,
-    thinking_mode: str = "quick",
     emit: LoopEmit | None = None,
 ) -> AgentTranslationPack:
     payload = await _invoke_json_role(
-        system_prompt=_translation_system_prompt_from_module(thinking_mode=thinking_mode),
+        system_prompt=_translation_system_prompt_from_module(),
         user_payload={
             "messages": _trim_messages(messages),
-            "thinking_mode": str(thinking_mode or "quick"),
             "analysis_snapshot_digest": snapshot_digest(snapshot),
             "context_digest": context_digest(context),
             "answer_evidence_payload": answer_evidence_payload,

@@ -37,6 +37,7 @@ from modules.ppt_planning.data_tools import (
     PptDataSourceNotFound,
     create_ppt_data_package,
     delete_ppt_persisted_source,
+    list_ppt_source_manifest,
     list_ppt_sources,
     query_nearby_poi_points,
     query_poi_points,
@@ -176,6 +177,35 @@ def _raise_ppt_planning_error(exc: Exception) -> None:
 async def get_ppt_data_sources(area_id: str, conversation_id: str = ""):
     try:
         return list_ppt_sources(area_id, conversation_id=conversation_id)
+    except SQLAlchemyError as exc:
+        _raise_ppt_database_error(exc)
+    except RuntimeError as exc:
+        _raise_ppt_data_error(exc)
+
+
+@router.get("/api/v1/analysis/ppt/data/source-manifest", response_model=list[PptDataSourceSummary])
+async def get_ppt_data_source_manifest(area_id: str, conversation_id: str = ""):
+    try:
+        return [
+            PptDataSourceSummary(
+                id=source.id,
+                type=source.type,
+                title=source.title,
+                status=source.status,
+                summary=source.summary,
+                count=source.count,
+                source_kind=source.source_kind,
+                evidence_count=source.evidence_count,
+                locator_summary=source.locator_summary,
+                availability=source.availability,
+                meta={
+                    key: value
+                    for key, value in (source.meta or {}).items()
+                    if key not in {"aiPayload", "ai_payload", "document_index_preview", "documentIndexPreview", "transport"}
+                },
+            )
+            for source in list_ppt_source_manifest(area_id, conversation_id=conversation_id)
+        ]
     except SQLAlchemyError as exc:
         _raise_ppt_database_error(exc)
     except RuntimeError as exc:

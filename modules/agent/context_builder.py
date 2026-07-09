@@ -38,6 +38,10 @@ def _available_context_sources(snapshot: AnalysisSnapshot, artifacts: Dict[str, 
         sources.append("analysis:site_selection")
     if current.get("frontend_map_search_context"):
         sources.append("analysis:frontend_map_search_context")
+    if current.get("selected_sources_context"):
+        sources.append("analysis:selected_sources_context")
+    if current.get("business_analyst_skeleton"):
+        sources.append("agent:business_analyst_skeleton")
     if current.get("summary_pack") or current.get("current_summary_pack"):
         sources.append("report:summary")
     if current.get("area_character_pack"):

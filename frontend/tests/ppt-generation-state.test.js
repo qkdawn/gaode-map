@@ -128,16 +128,15 @@ function createPptTabUpdateContext(tab = {}) {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
-      pptPlanningTabs: tab.id ? [tab] : [],
+      analysisWorkspaceTabs: tab.id ? [tab] : [],
       activeTabId: tab.id || '',
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return this.agentTabs.pptPlanningTabs.find((item) => item.id === this.agentTabs.activeTabId) || {}
+      return this.agentTabs.analysisWorkspaceTabs.find((item) => item.id === this.agentTabs.activeTabId) || {}
     },
     buildAgentPptPlanningApiContext() {
       return { areaId: 'area-a' }
@@ -156,7 +155,7 @@ test('ppt tab update debug event records successful writes', () => {
   const state = startPptGenerationJob(createPptPlanningState(), { requestId: 'debug-1', type: 'outline', tabId: 'tab-a' })
   const ctx = createPptTabUpdateContext({
     id: 'tab-a',
-    kind: 'ppt_planning',
+    kind: 'analysis',
     source: 'current',
     readonly: false,
     pptPlanningState: state,
@@ -175,7 +174,7 @@ test('ppt runtime patch skips session sync while commit syncs once', () => {
   const state = startPptGenerationJob(createPptPlanningState(), { requestId: 'runtime-1', type: 'outline', tabId: 'tab-a' })
   const ctx = createPptTabUpdateContext({
     id: 'tab-a',
-    kind: 'ppt_planning',
+    kind: 'analysis',
     source: 'current',
     readonly: false,
     pptPlanningState: createPptPlanningState(),
@@ -197,7 +196,7 @@ test('ppt tab update debug event records missing target tab', () => {
   const state = startPptGenerationJob(createPptPlanningState(), { requestId: 'debug-2', type: 'outline', tabId: 'tab-active' })
   const ctx = createPptTabUpdateContext({
     id: 'tab-active',
-    kind: 'ppt_planning',
+    kind: 'analysis',
     source: 'current',
     readonly: false,
     pptPlanningState: state,
@@ -214,7 +213,7 @@ test('ppt tab update debug event records readonly target tab', () => {
   const state = startPptGenerationJob(createPptPlanningState(), { requestId: 'debug-3', type: 'outline', tabId: 'tab-readonly' })
   const ctx = createPptTabUpdateContext({
     id: 'tab-readonly',
-    kind: 'ppt_planning',
+    kind: 'analysis',
     source: 'history',
     readonly: true,
     pptPlanningState: state,

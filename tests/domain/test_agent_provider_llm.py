@@ -6,6 +6,7 @@ import httpx
 from core.config import settings
 from modules.agent.context_builder import build_context_bundle
 from modules.agent.llm_digest import compact_context_summary_dump, context_digest, snapshot_digest, trim_messages
+import modules.agent.providers.langgraph_react as langgraph_react
 from modules.agent.providers.chat_parser import extract_json_object
 from modules.agent.providers.llm_provider import (
     _invoke_json_role,
@@ -14,7 +15,7 @@ from modules.agent.providers.llm_provider import (
     run_gate_with_llm,
 )
 from modules.agent.providers.tool_loop import compact_tool_catalog
-from modules.agent.schemas import AgentMessage, AgentTranslationPack, AnalysisSnapshot, GateDecision
+from modules.agent.schemas import AgentMessage, AgentTranslationPack, AnalysisSnapshot, GateDecision, ToolLoopResult
 from modules.agent.tools import get_tool_registry
 
 
@@ -112,6 +113,126 @@ def _snapshot_with_scope() -> AnalysisSnapshot:
     )
 
 
+def test_langgraph_react_deep_mode_disables_llm_timeout(monkeypatch):
+    captured = {}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured["timeout"] = kwargs.get("timeout")
+
+        def bind_tools(self, tool_schemas):
+            captured["tool_schema_count"] = len(tool_schemas)
+            return self
+
+    class FakeStateGraph:
+        def __init__(self, state_type):
+            del state_type
+
+        def add_node(self, *args, **kwargs):
+            del args, kwargs
+
+        def set_entry_point(self, *args, **kwargs):
+            del args, kwargs
+
+        def add_conditional_edges(self, *args, **kwargs):
+            del args, kwargs
+
+        def add_edge(self, *args, **kwargs):
+            del args, kwargs
+
+        def compile(self):
+            class FakeApp:
+                async def ainvoke(self, state, config):
+                    del config
+                    return {"result": state["result"]}
+
+            return FakeApp()
+
+    monkeypatch.setattr(settings, "ai_timeout_s", 5)
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("langgraph.graph.StateGraph", FakeStateGraph)
+
+    result = asyncio.run(langgraph_react.run_langgraph_react_loop(
+        messages=[AgentMessage(role="user", content="深度分析")],
+        snapshot=_snapshot_with_scope(),
+        context=None,
+        registry={},
+        governance_mode="auto",
+    ))
+
+    assert isinstance(result, ToolLoopResult)
+    assert captured["timeout"] is None
+
+
+def test_langgraph_react_emits_deep_process_milestones(monkeypatch):
+    captured_events = []
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            del kwargs
+
+        def bind_tools(self, tool_schemas):
+            del tool_schemas
+            return self
+
+        async def ainvoke(self, messages):
+            del messages
+            return type("FakeMessage", (), {"content": "已具备回答条件。", "tool_calls": []})()
+
+    class FakeStateGraph:
+        def __init__(self, state_type):
+            del state_type
+            self.nodes = {}
+
+        def add_node(self, name, handler):
+            self.nodes[name] = handler
+
+        def set_entry_point(self, *args, **kwargs):
+            del args, kwargs
+
+        def add_conditional_edges(self, *args, **kwargs):
+            del args, kwargs
+
+        def add_edge(self, *args, **kwargs):
+            del args, kwargs
+
+        def compile(self):
+            nodes = self.nodes
+
+            class FakeApp:
+                async def ainvoke(self, state, config):
+                    del config
+                    await nodes["preflight"](state)
+                    await nodes["think"](state)
+                    state["result"].status = "completed"
+                    await nodes["assess"](state)
+                    await nodes["finalize"](state)
+                    return {"result": state["result"]}
+
+            return FakeApp()
+
+    async def fake_emit(event_type, payload):
+        captured_events.append((event_type, payload))
+
+    monkeypatch.setattr("langchain_openai.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("langgraph.graph.StateGraph", FakeStateGraph)
+
+    asyncio.run(langgraph_react.run_langgraph_react_loop(
+        messages=[AgentMessage(role="user", content="深度分析")],
+        snapshot=_snapshot_with_scope(),
+        context=None,
+        registry={},
+        governance_mode="auto",
+        emit=fake_emit,
+    ))
+
+    thinking_titles = [payload.get("title") for event_type, payload in captured_events if event_type == "thinking"]
+    assert "整理执行边界" in thinking_titles
+    assert "判断下一步" in thinking_titles
+    assert "检查证据是否足够" in thinking_titles
+    assert "进入最终回答" in thinking_titles
+
+
 def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     requests = []
     snapshot = _snapshot_with_scope()
@@ -183,7 +304,7 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     assert "evidence_nodes" in system_prompt
     assert "统一 EvidenceNode" in system_prompt
     assert "不要只改写压缩摘要" in system_prompt
-    assert "至少 5 个展开段" in system_prompt
+    assert "不要固定成总判断/关键证据/边界下一步等模板" in system_prompt
     assert "coverage_domains" in system_prompt
     assert "不能只抓 POI" in system_prompt
     assert "学生高频低客单" in system_prompt
@@ -379,14 +500,14 @@ def test_extract_json_object_accepts_llm_control_characters_in_strings():
 
 def test_compact_tool_catalog_omits_full_schema_and_long_contracts():
     catalog = compact_tool_catalog(get_tool_registry())
-    area_tool = next(item for item in catalog if item["name"] == "run_area_character_pack")
+    source_tool = next(item for item in catalog if item["name"] == "search_selected_source_evidence")
 
-    assert "input_schema" not in area_tool
-    assert "applicable_scenarios" not in area_tool
-    assert "evidence_contract" not in area_tool
-    assert "toolkit_id" not in area_tool
-    assert area_tool["argument_hints"]["policy_key"] == "district_summary"
-    assert len(area_tool["intent"]) <= 96
+    assert "input_schema" not in source_tool
+    assert "applicable_scenarios" not in source_tool
+    assert "evidence_contract" not in source_tool
+    assert "toolkit_id" not in source_tool
+    assert source_tool["argument_hints"]["query"] == "用户原问题"
+    assert len(source_tool["intent"]) <= 96
 
 
 def test_planner_digests_do_not_include_large_frontend_analysis_or_filters():

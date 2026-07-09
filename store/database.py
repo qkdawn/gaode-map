@@ -137,6 +137,12 @@ def _ensure_poi_results_schema() -> None:
     except Exception:
         logger.debug("poi_results multi-year unique index already exists or could not be created", exc_info=True)
 
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE INDEX ix_poi_results_history_created_id ON poi_results (history_id, created_at, id)"))
+    except Exception:
+        logger.debug("poi_results history sort index already exists or could not be created", exc_info=True)
+
 
 def _ensure_analysis_artifacts_schema() -> None:
     _refresh_runtime_config_if_needed()

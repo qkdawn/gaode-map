@@ -383,15 +383,15 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
             "report_title": "业态基础分析总结报告",
             "report_sections": [
                 {
-                    "heading": "一、总体判断：区域业态处于温和扩张阶段",
+                    "heading": "餐饮与咖啡厅增量构成主要变化",
                     "paragraphs": ["从 POI 变化看，区域总量保持增长，餐饮与咖啡厅小类提供主要增量。"],
                 },
                 {
-                    "heading": "二、空间特征：中圈层补点明显",
+                    "heading": "中圈层补点明显",
                     "paragraphs": ["空间信号显示咖啡厅新增偏东北与中圈层，说明增长更偏内部加密。"],
                 },
             ],
-            "report_content": "业态基础分析总结报告\n\n一、总体判断：区域业态处于温和扩张阶段\n\n从 POI 变化看，区域总量保持增长，餐饮与咖啡厅小类提供主要增量。",
+            "report_content": "业态基础分析总结报告\n\n餐饮与咖啡厅增量构成主要变化\n\n从 POI 变化看，区域总量保持增长，餐饮与咖啡厅小类提供主要增量。",
         }
 
     monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
@@ -421,7 +421,7 @@ def test_generate_poi_iteration_analysis_validates_llm_payload(monkeypatch):
     assert result["spatial_factors"]["geometry_mode"] == "point"
     assert result["subcategory_spatial_trend_rows"]
     assert result["report_title"] == "业态基础分析总结报告"
-    assert result["report_sections"][0]["heading"].startswith("一、总体判断")
+    assert result["report_sections"][0]["heading"] == "餐饮与咖啡厅增量构成主要变化"
     assert "区域总量保持增长" in result["report_content"]
     assert "poi_iteration_v1" in result["ai_prompt"]
     assert "growth_area_signal" in result["ai_prompt"]
@@ -443,11 +443,11 @@ def test_generate_poi_iteration_analysis_sends_compact_llm_evidence(monkeypatch)
             "report_title": "业态基础分析总结报告",
             "report_sections": [
                 {
-                    "heading": "一、总体判断：区域业态变化可读",
+                    "heading": "区域业态变化可读",
                     "paragraphs": ["POI 多年证据已被压缩传入，可用于判断总量、结构和空间变化。"],
                 }
             ],
-            "report_content": "业态基础分析总结报告\n\n一、总体判断：区域业态变化可读\n\nPOI 多年证据已被压缩传入，可用于判断总量、结构和空间变化。",
+            "report_content": "业态基础分析总结报告\n\n区域业态变化可读\n\nPOI 多年证据已被压缩传入，可用于判断总量、结构和空间变化。",
         }
 
     monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
@@ -718,15 +718,15 @@ def test_generate_poi_iteration_analysis_accepts_report_payload(monkeypatch):
             "report_title": "业态基础分析总结报告",
             "report_sections": [
                 {
-                    "heading": "一、总体判断：餐饮内部结构增强",
+                    "heading": "餐饮内部结构增强",
                     "paragraphs": ["快餐厅等小类增长说明餐饮内部结构存在便捷消费增强信号。"],
                 },
                 {
-                    "heading": "二、策划启示：关注便捷消费",
+                    "heading": "便捷消费值得继续核对",
                     "paragraphs": ["后续可以围绕快餐、轻餐和社交消费组织业态承接。"],
                 },
             ],
-            "report_content": "业态基础分析总结报告\n\n一、总体判断：餐饮内部结构增强\n\n快餐厅等小类增长说明餐饮内部结构存在便捷消费增强信号。",
+            "report_content": "业态基础分析总结报告\n\n餐饮内部结构增强\n\n快餐厅等小类增长说明餐饮内部结构存在便捷消费增强信号。",
         }
 
     monkeypatch.setattr("modules.agent.iteration_change_service._invoke_json_role", fake_invoke)
@@ -734,7 +734,7 @@ def test_generate_poi_iteration_analysis_accepts_report_payload(monkeypatch):
     result = asyncio.run(generate_poi_iteration_analysis({"years": [2023, 2024, 2025]}))
 
     assert result["status"] == "ready"
-    assert result["report_sections"][0]["heading"] == "一、总体判断：餐饮内部结构增强"
+    assert result["report_sections"][0]["heading"] == "餐饮内部结构增强"
     assert "summary_points" not in result
 
 

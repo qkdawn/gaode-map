@@ -29,7 +29,7 @@ from .schemas import (
     AgentSummaryRequest,
     AgentSummaryStreamEvent,
 )
-from .providers.llm_provider import _invoke_json_role, is_llm_enabled
+from .providers.client import invoke_json_role as _invoke_json_role, is_llm_enabled
 from .prompt_registry import build_prompt_snapshot, get_prompt_config
 from .synthesizer import build_citations, build_summary_panel_payloads
 from .tool_adapters.capability_tools import ensure_area_data_readiness

@@ -800,6 +800,28 @@ def build_road_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dict[str,
     return _with_analysis_status(payload, ready=is_road_pattern_ready(payload))
 
 
+def _age_distribution_ratios(
+    age_distribution: List[Dict[str, Any]],
+    total_population: float | None,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for row in age_distribution:
+        item = _safe_dict(row)
+        total = _to_float(item.get("total"), None)
+        if total is None or total <= 0:
+            continue
+        rows.append(
+            {
+                "age_band": str(item.get("age_band") or "").strip(),
+                "age_band_label": str(item.get("age_band_label") or item.get("age_band") or "").strip(),
+                "total": total,
+                "ratio": round(total / total_population, 6) if total_population and total_population > 0 else None,
+            }
+        )
+    rows.sort(key=lambda item: (-(item.get("total") or 0.0), str(item.get("age_band") or item.get("age_band_label") or "")))
+    return rows
+
+
 def _pick_top_age_band(age_distribution: List[Dict[str, Any]], layer_summary: Dict[str, Any]) -> str:
     label = str(layer_summary.get("top_dominant_age_band_label") or "").strip()
     if label:
@@ -835,8 +857,15 @@ def build_population_profile_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
         _to_float(summary.get("average_density_per_km2"), None),
     )
     dominant_cell_ratio = _to_float(layer_summary.get("dominant_cell_ratio"), None)
-    top_age_band = _pick_top_age_band(age_distribution, layer_summary)
     total_population = _to_float(summary.get("total_population"), None)
+    age_distribution_with_ratios = _age_distribution_ratios(age_distribution, total_population)
+    top_age_row = age_distribution_with_ratios[0] if age_distribution_with_ratios else {}
+    top_age_band = (
+        str(top_age_row.get("age_band_label") or top_age_row.get("age_band") or "").strip()
+        or _pick_top_age_band(age_distribution, layer_summary)
+    )
+    top_age_band_population = _to_float(top_age_row.get("total"), None)
+    top_age_band_ratio = _to_float(top_age_row.get("ratio"), None)
     male_ratio = _to_float(summary.get("male_ratio"), None)
     female_ratio = _to_float(summary.get("female_ratio"), None)
     profile_tags: List[str] = []
@@ -849,17 +878,20 @@ def build_population_profile_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
     density_level = _density_level(average_density)
     if density_level != "unknown":
         profile_tags.append(f"密度水平:{density_level}")
-    summary_text = (
-        f"人口总量约 {total_population:.0f}，年龄主段为 {top_age_band or '未明确'}。"
-        if total_population is not None or top_age_band
-        else "当前缺少可直接利用的人口结构结果。"
-    )
+    if total_population is not None or top_age_band:
+        ratio_text = f"，占比 {top_age_band_ratio * 100:.2f}%" if top_age_band_ratio is not None else ""
+        summary_text = f"人口总量约 {total_population:.0f}，年龄主段为 {top_age_band or '未明确'}{ratio_text}。" if total_population is not None else f"年龄主段为 {top_age_band}{ratio_text}。"
+    else:
+        summary_text = "当前缺少可直接利用的人口结构结果。"
     payload = {
         "view": str(panel.get("analysis_view") or snapshot.current_filters.get("population_view") or "").strip(),
         "total_population": total_population,
         "male_ratio": male_ratio,
         "female_ratio": female_ratio,
         "top_age_band": top_age_band,
+        "top_age_band_population": top_age_band_population,
+        "top_age_band_ratio": top_age_band_ratio,
+        "age_distribution_ratios": age_distribution_with_ratios,
         "dominant_cell_ratio": dominant_cell_ratio,
         "density_level": density_level,
         "profile_tags": profile_tags,

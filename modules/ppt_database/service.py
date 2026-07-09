@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+from modules.evidence_index import attach_index_manifest, build_source_index_manifest_payload, persist_source_index_manifest
 from modules.evidence_retrieval import EvidenceNode, evidence_node_payloads_from_nodes
 from modules.ppt_planning.schemas import PptDataPackageResponse, PptSource, PptDataSourceSummary
 from store.analysis_artifact_repo import analysis_artifact_repo
@@ -151,6 +152,19 @@ def build_database_data_package(area_id: str, *, title: str = "") -> PptDataPack
         "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_node_payloads), "visual_specs": 0},
         "policy": "数据库来源仅通过摘要和证据节点进入 LLM；不传原始记录和大表明细。",
     }
+    ai_payload = attach_index_manifest(
+        ai_payload,
+        build_source_index_manifest_payload(
+            source_id=source_id,
+            source_kind="database",
+            native_index_kind="database_record_index",
+            node_count=len(evidence_node_payloads),
+            retrieval_modes=["keyword", "structured"],
+            read_modes=["node_id", "record_id", "locator"],
+            storage_ref={"area_id": normalized_area_id},
+            diagnostics=[] if evidence_node_payloads else ["database_evidence_empty"],
+        ),
+    )
     source = PptSource(
         id=source_id,
         type="database",
@@ -195,6 +209,7 @@ def build_database_data_package(area_id: str, *, title: str = "") -> PptDataPack
         },
         data_version="v1",
     )
+    persist_source_index_manifest(normalized_area_id, source)
     return response
 
 

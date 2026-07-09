@@ -59,7 +59,53 @@ def test_build_answer_evidence_payload_includes_key_evidence_and_limits():
     assert "不要把行动建议写成工具流程" in payload["spatial_narrative_guidance"]["anti_patterns"]
     assert "place_anchors" not in json.dumps(payload["spatial_narrative_guidance"], ensure_ascii=False)
     assert payload["answer_depth_guidance"]["target_depth"] == "full"
-    assert "至少 5 个展开段" in payload["answer_depth_guidance"]["suggested_shape"]
+    assert "内容驱动" in payload["answer_depth_guidance"]["suggested_shape"]
+    assert "不要求固定标题" in payload["answer_depth_guidance"]["reason"]
+    assert payload["answer_depth_guidance"]["reasoning_skill"] == "evidence_aware_reasoning"
+    assert payload["answer_depth_guidance"]["reasoning_instructions"]
+    rubric_text = json.dumps(payload["reasoning_rubric"], ensure_ascii=False)
+    for token in ["Observation", "Mechanism", "Alternative", "Evidence Quality", "Implication", "证据边界"]:
+        assert token in rubric_text
+
+
+def test_build_answer_evidence_payload_includes_business_analyst_skeleton():
+    payload = build_answer_evidence_payload(
+        question="这里适合开咖啡店吗",
+        snapshot=_snapshot_with_decision_evidence(),
+        artifacts={
+            "business_analyst_skeleton": {
+                "status": "ready",
+                "reason": "ready",
+                "selected_skill": {
+                    "skill_id": "ba.single_category_site_selection",
+                    "title": "Single category site selection",
+                    "purpose": "Judge site suitability.",
+                    "uses_model_graph": "ba.business_analyst_model_graph.v1",
+                    "agent_autonomy": {"may_skip_models": True},
+                },
+                "recommended_path": ["TradeAreaModel", "MarketPotentialModel", "RetailGapModel", "SiteSuitabilityModel"],
+                "path_relations": [{"from": "TradeAreaModel", "to": "MarketPotentialModel", "relation": "defines_scope_for"}],
+                "model_tool_map": {"RetailGapModel": {"required_tools": ["query_scope_dataset"]}},
+                "skip_conditions": {"HuffGravityModel": ["no candidate site"]},
+                "guardrails": ["no_revenue_without_source"],
+                "missing_evidence_defaults": ["rent", "sales or revenue"],
+                "answer_guidance": ["Use this Business Analyst output as an analysis skeleton, not as an answer template."],
+                "model_graph": {"graph_id": "ba.business_analyst_model_graph.v1", "entry_nodes": ["TradeAreaModel"], "target_nodes": ["SiteSuitabilityModel"], "nodes": {}},
+            }
+        },
+        tool_results=[ToolResult(tool_name="read_current_results", status="success")],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    ba_skeleton = payload["business_analyst_skeleton"]
+    assert ba_skeleton["status"] == "ready"
+    assert ba_skeleton["selected_skill"]["skill_id"] == "ba.single_category_site_selection"
+    assert ba_skeleton["recommended_path"][-1] == "SiteSuitabilityModel"
+    assert ba_skeleton["model_tool_map"]["RetailGapModel"]["required_tools"] == ["query_scope_dataset"]
+    assert ba_skeleton["skip_conditions"]["HuffGravityModel"] == ["no candidate site"]
+    assert "no_revenue_without_source" in ba_skeleton["guardrails"]
+    assert "business_analyst_report" not in payload
 
 
 def test_build_answer_evidence_payload_keeps_simple_metric_questions_concise():
@@ -74,6 +120,9 @@ def test_build_answer_evidence_payload_keeps_simple_metric_questions_concise():
 
     assert payload["answer_depth_guidance"]["target_depth"] == "concise"
     assert "不扩展成报告" in payload["answer_depth_guidance"]["reason"]
+    assert payload["answer_depth_guidance"]["reasoning_skill"] == "optional_for_concise"
+    assert payload["answer_depth_guidance"]["reasoning_instructions"] == []
+    assert payload["reasoning_rubric"]["skill"] == "evidence_aware_reasoning"
 
 
 def test_build_answer_evidence_payload_uses_compact_tool_result_digest():

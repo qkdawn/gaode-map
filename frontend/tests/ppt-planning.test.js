@@ -43,7 +43,9 @@ import {
   applyPptOutlineSectionRevision,
   buildDeckBriefPayload,
   buildDeckBriefSlidePayload,
+  buildPptAllSourcesFullExportPayload,
   buildPptVisualArtifactsPayload,
+  buildPptSourceFullExportPayload,
   buildNarrativePlanPayload,
   buildPptOutlineSectionPayload,
   buildPptSpecPayload,
@@ -770,20 +772,19 @@ function createPptPlanningTestContext(overrides = {}) {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -799,9 +800,11 @@ function createPptPlanningTestContext(overrides = {}) {
     },
     captureAgentActiveSummaryTabState() {},
     captureAgentActiveSiteSelectionTabState() {},
-    captureAgentActiveDeepAnalysisTabState() {},
     captureAgentActiveFollowupTabState() {},
     requestAgentPptPlanningDataSources() {
+      return Promise.resolve([])
+    },
+    requestAgentPptPlanningSourceManifest() {
       return Promise.resolve([])
     },
     requestAgentPptPlanningDataPackage() {
@@ -1551,6 +1554,25 @@ test('moving a ppt source out of a group keeps it top-level across refreshes', (
   assert.equal(refreshed.sourceGroups.some((group) => group.sourceIds.includes('current:dataset:poi')), false)
 })
 
+test('ppt state uses canonical ungrouped source ids instead of uncategorized groups', () => {
+  const state = createPptPlanningState({
+    sources: [
+      { id: 'document:doc-1', title: '文档', status: 'ready', selected: true, meta: { sourceKind: 'document' } },
+      { id: 'web:history-1:url', title: '网页', status: 'ready', selected: true, meta: { sourceKind: 'web' } },
+    ],
+    sourceGroups: [
+      { id: 'group:uncategorized', title: '未分类来源', sourceIds: ['document:doc-1'] },
+      { id: 'group:web', title: '联网资料', sourceIds: ['web:history-1:url'] },
+    ],
+    ungroupedSourceIds: ['web:history-1:url'],
+  })
+
+  assert.deepEqual(state.ungroupedSourceIds, ['web:history-1:url'])
+  assert.equal(state.sourceGroups.some((group) => group.id === 'group:uncategorized'), false)
+  assert.equal(state.sourceGroups.some((group) => group.sourceIds.includes('document:doc-1')), true)
+  assert.equal(state.sourceGroups.some((group) => group.sourceIds.includes('web:history-1:url')), false)
+})
+
 test('removing a ppt group keeps its sources as top-level ungrouped items', () => {
   const state = mergePptPlanningSources(createPptPlanningState(), createPptSystemSources({
     scope: { polygon: [[0, 0], [1, 0], [1, 1]] },
@@ -1746,6 +1768,281 @@ test('ppt source model treats evidence nodes as canonical deliverable evidence',
   assert.deepEqual(manifest.deliverableSourceIds, ['web:area:url'])
 })
 
+test('ppt source full export payload includes source transport and grouping context', () => {
+  const state = createPptPlanningState({
+    sourceGroups: [{ id: 'group:packages', title: '资料包', sourceIds: ['package:history-1:abc'], collapsed: false }],
+    sources: [{
+      id: 'package:history-1:abc',
+      type: 'package',
+      title: '城市核心区功能与活力资料包',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'package',
+        package: {
+          source_ids: ['current:dataset:poi'],
+          items: [{ name: 'POI A', category: '餐饮' }],
+          evidence: [{ title: '高频商业节点', text: '餐饮集聚' }],
+        },
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'package:history-1:abc',
+          source_kind: 'package',
+          included: ['metrics', 'evidence'],
+          metrics: [{ metric_id: 'm1', label: 'POI', value: 30 }],
+          evidence_nodes: [{ id: 'e1', title: '节点', content: '证据正文' }],
+        },
+        transport: {
+          transport_status: 'ready_to_send',
+          metric_count: 1,
+          evidence_count: 1,
+        },
+      },
+    }],
+  })
+
+  const payload = buildPptSourceFullExportPayload(state, 'package:history-1:abc', { exportedAt: '2026-07-05T00:00:00.000Z' })
+
+  assert.equal(payload.export_type, 'ppt_source_full_export')
+  assert.equal(payload.exported_at, '2026-07-05T00:00:00.000Z')
+  assert.equal(payload.source.id, 'package:history-1:abc')
+  assert.equal(payload.group.title, '资料包')
+  assert.equal(payload.ai_payload.metrics[0].metric_id, 'm1')
+  assert.equal(payload.transport.transport_status, 'ready_to_send')
+  assert.equal(payload.evidence_nodes[0].content, '证据正文')
+  assert.deepEqual(payload.full_source.meta.package.items, [{ name: 'POI A', category: '餐饮' }])
+})
+
+test('agent ppt source export downloads full source json', () => {
+  const originalBlob = global.Blob
+  const originalURL = global.URL
+  const originalDocument = global.document
+  const clicks = []
+  const appended = []
+  const revoked = []
+  global.Blob = class {
+    constructor(parts, options) {
+      this.parts = parts
+      this.type = options && options.type
+    }
+  }
+  global.URL = {
+    createObjectURL(blob) {
+      clicks.push({ blob })
+      return 'blob:source-export'
+    },
+    revokeObjectURL(url) {
+      revoked.push(url)
+    },
+  }
+  global.document = {
+    body: {
+      appendChild(node) {
+        appended.push(node)
+      },
+      removeChild() {},
+    },
+    createElement(tag) {
+      assert.equal(tag, 'a')
+      return {
+        style: {},
+        click() {
+          clicks.push({ href: this.href, download: this.download })
+        },
+      }
+    },
+  }
+  const exportState = createPptPlanningState({
+    sources: [{
+      id: 'package:history-1:abc',
+      type: 'package',
+      title: '区域综合配套与发展潜力',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'package',
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'package:history-1:abc',
+          included: ['evidence'],
+          evidence_nodes: [{ title: '证据', content: '正文' }],
+        },
+      },
+    }],
+  })
+  const ctx = createPptPlanningTestContext({
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      analysisWorkspaceTabs: [{
+        id: 'ppt-1',
+        kind: 'analysis',
+        source: 'current',
+        pptPlanningState: exportState,
+      }],
+      followupTabs: [],
+    },
+  })
+
+  try {
+    const result = ctx.exportAgentPptPlanningSource('package:history-1:abc')
+
+    assert.equal(result.filename, '区域综合配套与发展潜力_full_export.json')
+    assert.equal(result.payload.full_source.id, 'package:history-1:abc')
+    assert.equal(appended.length, 1)
+    assert.equal(clicks.find((item) => item.download).href, 'blob:source-export')
+    assert.equal(revoked[0], 'blob:source-export')
+    assert.match(clicks[0].blob.parts[0], /ppt_source_full_export/)
+  } finally {
+    global.Blob = originalBlob
+    global.URL = originalURL
+    global.document = originalDocument
+  }
+})
+
+test('ppt all sources full export payload includes every source snapshot', () => {
+  const state = createPptPlanningState({
+    sourceGroups: [
+      { id: 'group:packages', title: '资料包', sourceIds: ['package:history-1:abc'], collapsed: false },
+      { id: 'group:document-evidence', title: '文档库', sourceIds: ['document:doc-1'], collapsed: false },
+    ],
+    sources: [
+      {
+        id: 'package:history-1:abc',
+        type: 'package',
+        title: '资料包 A',
+        status: 'ready',
+        selected: true,
+        meta: {
+          sourceKind: 'package',
+          aiPayload: {
+            version: 'ppt_ai_input_block_v1',
+            source_id: 'package:history-1:abc',
+            included: ['evidence'],
+            evidence_nodes: [{ title: '包证据', content: 'A' }],
+          },
+        },
+      },
+      {
+        id: 'document:doc-1',
+        type: 'document',
+        title: '文档 B',
+        status: 'ready',
+        selected: false,
+        meta: {
+          sourceKind: 'document',
+          aiPayload: {
+            version: 'ppt_ai_input_block_v1',
+            source_id: 'document:doc-1',
+            included: ['evidence'],
+            evidence_nodes: [{ title: '文档证据', content: 'B' }],
+          },
+        },
+      },
+    ],
+  })
+
+  const payload = buildPptAllSourcesFullExportPayload(state, { exportedAt: '2026-07-05T00:00:00.000Z' })
+
+  assert.equal(payload.export_type, 'ppt_all_sources_full_export')
+  assert.equal(payload.exported_at, '2026-07-05T00:00:00.000Z')
+  assert.equal(payload.counts.total, 2)
+  assert.equal(payload.counts.ready, 2)
+  assert.equal(payload.counts.selected, 1)
+  assert.deepEqual(payload.sources.map((item) => item.source.id), ['package:history-1:abc', 'document:doc-1'])
+  assert.equal(payload.sources[0].group.title, '资料包')
+  assert.equal(payload.sources[1].group.title, '文档库')
+})
+
+test('agent ppt all source export downloads combined source json', () => {
+  const originalBlob = global.Blob
+  const originalURL = global.URL
+  const originalDocument = global.document
+  const clicks = []
+  const revoked = []
+  global.Blob = class {
+    constructor(parts, options) {
+      this.parts = parts
+      this.type = options && options.type
+    }
+  }
+  global.URL = {
+    createObjectURL(blob) {
+      clicks.push({ blob })
+      return 'blob:all-sources-export'
+    },
+    revokeObjectURL(url) {
+      revoked.push(url)
+    },
+  }
+  global.document = {
+    body: {
+      appendChild() {},
+      removeChild() {},
+    },
+    createElement(tag) {
+      assert.equal(tag, 'a')
+      return {
+        style: {},
+        click() {
+          clicks.push({ href: this.href, download: this.download })
+        },
+      }
+    },
+  }
+  const exportState = createPptPlanningState({
+    sources: [{
+      id: 'document:doc-1',
+      type: 'document',
+      title: '文档来源',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'document',
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'document:doc-1',
+          included: ['evidence'],
+          evidence_nodes: [{ title: '证据', content: '正文' }],
+        },
+      },
+    }],
+  })
+  const ctx = createPptPlanningTestContext({
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      analysisWorkspaceTabs: [{
+        id: 'ppt-1',
+        kind: 'analysis',
+        source: 'current',
+        pptPlanningState: exportState,
+      }],
+      followupTabs: [],
+    },
+  })
+
+  try {
+    const result = ctx.exportAllAgentPptPlanningSources()
+
+    assert.equal(result.filename, 'ppt_sources_full_export.json')
+    assert.ok(result.payload.sources.length > 1)
+    assert.ok(result.payload.sources.some((item) => item.source.id === 'document:doc-1'))
+    assert.equal(clicks.find((item) => item.download).href, 'blob:all-sources-export')
+    assert.equal(clicks.find((item) => item.download).download, 'ppt_sources_full_export.json')
+    assert.equal(revoked[0], 'blob:all-sources-export')
+    assert.match(clicks[0].blob.parts[0], /ppt_all_sources_full_export/)
+  } finally {
+    global.Blob = originalBlob
+    global.URL = originalURL
+    global.document = originalDocument
+  }
+})
+
 test('ppt image source upsert creates selectable source object', () => {
   const state = upsertPptImageSource(createPptPlanningState(), {
     attachment_id: 'img-1',
@@ -1782,7 +2079,7 @@ test('ppt source merge retains user image source until backend returns it', () =
   assert.ok(refreshed.sources.some((item) => item.id === 'current:scope'))
 })
 
-test('ppt quick ask target uses only selected ready deliverable sources', () => {
+test('analysis source target uses only selected ready deliverable sources', () => {
   const ctx = {
     ...createAgentTabsMethods(),
     ...createAgentRuntimeMethods(),
@@ -1792,9 +2089,9 @@ test('ppt quick ask target uses only selected ready deliverable sources', () => 
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         pptPlanningState: createPptPlanningState({
           sources: [
             {
@@ -1877,7 +2174,6 @@ test('ppt quick ask target uses only selected ready deliverable sources', () => 
           ],
         }),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     agentPanelPayloads: {},
@@ -1889,16 +2185,121 @@ test('ppt quick ask target uses only selected ready deliverable sources', () => 
     },
   }
 
-  const target = ctx.buildAgentPptQuickAskTarget()
+  const target = ctx.buildAgentAnalysisSourceTarget()
 
-  assert.equal(target.type, 'ppt_sources')
-  assert.equal(target.source, 'ppt_planning')
+  assert.equal(target.type, 'analysis_sources')
+  assert.equal(target.source, 'analysis')
   assert.deepEqual(target.payload.sources.map((source) => source.source_id), ['package:scope:test'])
   assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'evidence'), false)
   assert.equal(target.payload.sources[0].evidence_nodes[0].id, 'package:scope:test:package:summary')
   assert.equal(target.payload.sources[0].evidence_nodes[0].source_type, 'package')
   assert.deepEqual(target.evidence.map((item) => item.source_id), ['package:scope:test'])
   assert.equal(target.evidence[0].text.includes('1 条证据'), true)
+})
+
+test('analysis quick ask aborts the previous request when a new question is submitted', async () => {
+  const originalFetch = global.fetch
+  const pending = []
+  const ctx = {
+    ...createAgentTabsMethods(),
+    ...createAgentRuntimeMethods(),
+    ...createAgentPptPlanningTabMethods(),
+    agentInput: '',
+    agentMessages: [],
+    agentLoading: false,
+    agentSessionHydrating: false,
+    activeAgentSessionId: 'ppt-1',
+    agentTabs: {
+      activeTabId: 'ppt-1',
+      summaryTabs: [],
+      iterationChangeTabs: [],
+      siteSelectionTabs: [],
+      analysisWorkspaceTabs: [{
+        id: 'ppt-1',
+        kind: 'analysis',
+        pptPlanningState: createPptPlanningState({
+          sources: [{
+            id: 'package:scope:test',
+            type: 'data',
+            title: '当前等时圈范围',
+            status: 'ready',
+            selected: true,
+            meta: {
+              aiPayload: {
+                version: 'ppt_ai_input_block_v1',
+                source_id: 'package:scope:test',
+                title: '当前等时圈范围',
+                source_kind: 'package',
+                included: ['evidence'],
+                evidence_nodes: [{ id: 'node-1', source_id: 'package:scope:test', source_type: 'package', title: '证据', content: '内容' }],
+              },
+            },
+          }],
+        }),
+      }],
+      followupTabs: [],
+    },
+    agentPanelPayloads: {},
+    getAgentSummaryPack() { return {} },
+    getAgentSummaryStatus() { return {} },
+    hasAgentSummaryPack() { return false },
+    getAgentPptPlanningStateWithSystemSources() {
+      return this.getAgentActivePptPlanningState()
+    },
+    getCurrentAgentHistoryId() {
+      return 'history-1'
+    },
+    buildAgentAnalysisSnapshot() {
+      return {}
+    },
+    updateAgentSessionSnapshot() {},
+  }
+  global.fetch = async (_url, options = {}) => {
+    const item = {}
+    item.promise = new Promise((resolve, reject) => {
+      item.resolve = resolve
+      item.reject = reject
+    })
+    item.signal = options.signal || null
+    if (item.signal) {
+      item.signal.addEventListener('abort', () => {
+        const error = new Error('aborted')
+        error.name = 'AbortError'
+        item.reject(error)
+      }, { once: true })
+    }
+    pending.push(item)
+    await item.promise
+    return item.response || {
+      ok: true,
+      async json() {
+        return { status: 'success', answer: item.answer || '已完成。', evidence: [], citations: [], warnings: [] }
+      },
+    }
+  }
+
+  try {
+    const first = ctx.submitAgentAnalysisQuickAsk({ prompt: '总结区域' })
+    assert.equal(pending.length, 1)
+    assert.equal(ctx.agentMessages.some((message) => message.id === 'analysis-quick-ask-pending-1'), true)
+    const second = ctx.submitAgentAnalysisQuickAsk({ prompt: '下一步建议' })
+    assert.equal(pending.length, 2)
+    assert.equal(pending[0].signal.aborted, true)
+    assert.equal(ctx.agentMessages.some((message) => message.id === 'analysis-quick-ask-pending-1'), false)
+    assert.equal(ctx.agentMessages.some((message) => message.content === '上一条问题已停止，正在处理新的问题。'), true)
+    assert.equal(ctx.agentMessages.some((message) => message.id === 'analysis-quick-ask-pending-2'), true)
+    pending[1].answer = '第二条完成。'
+    pending[1].resolve()
+    const secondResult = await second
+    assert.equal(secondResult.content, '第二条完成。')
+    assert.equal(ctx.agentMessages.some((message) => message.content === 'AI 正在读取已选来源...'), false)
+    assert.equal(ctx.agentMessages.some((message) => message.id === 'analysis-quick-ask-pending-2'), false)
+    const result = await first
+    assert.equal(result, null)
+    assert.equal(ctx.agentAnalysisQuickAskAbortController, null)
+  } finally {
+    global.fetch = originalFetch
+  }
 })
 
 test('ppt state can select all sources and keep an active page brief', () => {
@@ -2039,7 +2440,7 @@ test('agent ppt refresh rebuilds package ai payload from persisted package meta'
   })
 
   await ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const source = state.sources.find((item) => item.id === 'package:poi-road-carriers:restored')
 
   assert.equal(source.selected, true)
@@ -2067,7 +2468,7 @@ test('agent ppt source refresh adds pending package placeholders without selecti
   })
 
   await ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const packageGroup = state.sourceGroups.find((item) => item.id === 'group:packages')
   const poiPlaceholder = state.sources.find((item) => item.id === 'package-placeholder:poi-evidence')
   const payload = buildPptSpecPayload(state)
@@ -2178,9 +2579,9 @@ test('agent ppt auto package marks placeholder generating then replaces it with 
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState({
           sources: [{
@@ -2193,7 +2594,6 @@ test('agent ppt auto package marks placeholder generating then replaces it with 
           }],
         }),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     requestAgentPptPlanningDataPackage(payload) {
@@ -2206,7 +2606,7 @@ test('agent ppt auto package marks placeholder generating then replaces it with 
 
   const generation = ctx.autoCreateAgentPptPlanningPoiEvidencePackage({ areaId: 'history-1' })
   const seenPayload = await requestStarted
-  const generatingState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const generatingState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const generatingPlaceholder = generatingState.sources.find((item) => item.id === 'package-placeholder:poi-evidence')
 
   assert.equal(seenPayload.intent, DEFAULT_PPT_POI_EVIDENCE_INTENT)
@@ -2275,7 +2675,7 @@ test('agent ppt auto package marks placeholder generating then replaces it with 
     },
   })
   await generation
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const packageSource = finalState.sources.find((item) => item.id === 'package:poi:auto')
 
   assert.equal(finalState.sources.some((item) => item.id === 'package-placeholder:poi-evidence'), false)
@@ -2298,9 +2698,9 @@ test('agent ppt auto package payload uses current isochrone center', async () =>
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState({
           sources: [{
@@ -2313,7 +2713,6 @@ test('agent ppt auto package payload uses current isochrone center', async () =>
           }],
         }),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     normalizeAgentSiteSelectionScope() {
@@ -3469,17 +3868,16 @@ test('ppt visual artifact generation captures map requests before writeback', as
     roadSyntaxMainTab: 'params',
     agentTabs: {
       activeTabId: 'ppt-1',
-      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      analysisWorkspaceTabs: [{ id: 'ppt-1', kind: 'analysis', pptPlanningState: state }],
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
-    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState,
     updateAgentPptPlanningTabState: (_tabId, nextState) => {
-      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+      ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = nextState
     },
     buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
     ensurePptMapRequestHistoryData: async () => true,
@@ -3529,7 +3927,7 @@ test('ppt visual artifact generation captures map requests before writeback', as
   assert.equal(calls.length, 2)
   assert.equal(mainMapRenderCalls, 1)
   assert.equal(offscreenRenderCalls, 0)
-  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,main')
+  assert.equal(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,main')
   assert.equal(ctx.activeStep3Panel, 'agent')
   assert.equal(ctx.poiSubTab, 'category')
   assert.equal(ctx.roadSyntaxMainTab, 'params')
@@ -3585,18 +3983,17 @@ test('ppt visual artifact generation captures carrier package snapshot requests 
   Object.assign(ctx, methods, {
     agentTabs: {
       activeTabId: 'ppt-1',
-      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      analysisWorkspaceTabs: [{ id: 'ppt-1', kind: 'analysis', pptPlanningState: state }],
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
-    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
-    getAgentPptPlanningStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState,
+    getAgentPptPlanningStateWithSystemSources: () => ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState,
     updateAgentPptPlanningTabState: (_tabId, nextState) => {
-      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+      ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = nextState
     },
     buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
     requestAgentPptPlanningVisualArtifacts: async (payload) => {
@@ -3635,7 +4032,7 @@ test('ppt visual artifact generation captures carrier package snapshot requests 
 
   await ctx.generateAgentPptPlanningSlideVisuals(1)
   assert.equal(calls.length, 2)
-  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualSpecs[0].status, 'renderable')
+  assert.equal(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState.deckBrief.slides[0].visualSpecs[0].status, 'renderable')
 })
 
 test('ppt visual artifact generation captures maps from main map by default', async () => {
@@ -3655,17 +4052,16 @@ test('ppt visual artifact generation captures maps from main map by default', as
   Object.assign(ctx, methods, {
     agentTabs: {
       activeTabId: 'ppt-1',
-      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      analysisWorkspaceTabs: [{ id: 'ppt-1', kind: 'analysis', pptPlanningState: state }],
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
-    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState,
     updateAgentPptPlanningTabState: (_tabId, nextState) => {
-      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+      ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = nextState
     },
     buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
     ensurePptMapRequestHistoryData: async () => true,
@@ -3710,7 +4106,7 @@ test('ppt visual artifact generation captures maps from main map by default', as
   await ctx.generateAgentPptPlanningSlideVisuals(1)
 
   assert.deepEqual(events, ['render-main'])
-  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,main-map')
+  assert.equal(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,main-map')
 })
 
 test('ppt map request capture can explicitly prefer offscreen renderer', async () => {
@@ -3932,17 +4328,16 @@ test('ppt visual artifact generation hydrates map request data before rendering 
   Object.assign(ctx, methods, {
     agentTabs: {
       activeTabId: 'ppt-1',
-      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      analysisWorkspaceTabs: [{ id: 'ppt-1', kind: 'analysis', pptPlanningState: state }],
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
-    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState,
     updateAgentPptPlanningTabState: (_tabId, nextState) => {
-      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+      ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = nextState
     },
     buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
     ensurePptMapRequestHistoryData: async (mapRequest) => {
@@ -3992,7 +4387,7 @@ test('ppt visual artifact generation hydrates map request data before rendering 
   await ctx.generateAgentPptPlanningSlideVisuals(1)
 
   assert.deepEqual(events, ['request-initial', 'hydrate:population', 'render-main', 'request-writeback'])
-  assert.equal(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,captured')
+  assert.equal(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState.deckBrief.slides[0].visualArtifacts[0].url, 'data:image/png;base64,captured')
 })
 
 test('ppt visual artifact generation isolates failed map captures per visual', async () => {
@@ -4016,17 +4411,16 @@ test('ppt visual artifact generation isolates failed map captures per visual', a
   Object.assign(ctx, methods, runtime, {
     agentTabs: {
       activeTabId: 'ppt-1',
-      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      analysisWorkspaceTabs: [{ id: 'ppt-1', kind: 'analysis', pptPlanningState: state }],
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
-    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState,
     updateAgentPptPlanningTabState: (_tabId, nextState) => {
-      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+      ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = nextState
     },
     buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
     ensurePptMapRequestHistoryData: async () => true,
@@ -4088,7 +4482,7 @@ test('ppt visual artifact generation isolates failed map captures per visual', a
 
   await ctx.generateAgentPptPlanningSlideVisuals(1)
 
-  const slide = ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0]
+  const slide = ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState.deckBrief.slides[0]
   assert.equal(calls.length, 2)
   assert.equal(slide.visualArtifacts[0].url, 'data:image/png;base64,h3')
   assert.equal(slide.visualSpecs[0].data.capture_error.message, '人口图层数据未恢复')
@@ -4113,17 +4507,16 @@ test('ppt visual artifact generation does not create css fallback maps without r
   Object.assign(ctx, methods, runtime, {
     agentTabs: {
       activeTabId: 'ppt-1',
-      pptPlanningTabs: [{ id: 'ppt-1', kind: 'ppt_planning', pptPlanningState: state }],
+      analysisWorkspaceTabs: [{ id: 'ppt-1', kind: 'analysis', pptPlanningState: state }],
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentActivePptPlanningTab: () => ({ id: 'ppt-1' }),
-    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.pptPlanningTabs[0].pptPlanningState,
+    getAgentPptPlanningTabStateWithSystemSources: () => ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState,
     updateAgentPptPlanningTabState: (_tabId, nextState) => {
-      ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = nextState
+      ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = nextState
     },
     buildAgentPptPlanningVisualApiContext: async () => ({ current: {} }),
     renderPptMapRequestMainMapSnapshot: async () => {
@@ -4153,7 +4546,7 @@ test('ppt visual artifact generation does not create css fallback maps without r
 
   await ctx.generateAgentPptPlanningSlideVisuals(1)
   assert.equal(calls.length, 1)
-  const slide = ctx.agentTabs.pptPlanningTabs[0].pptPlanningState.deckBrief.slides[0]
+  const slide = ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState.deckBrief.slides[0]
   assert.equal(slide.visualSpecs[0].status, 'needs_existing_asset')
   assert.equal(slide.visualSpecs[0].data.capture_error.message, '主地图截图方法不可用')
   assert.equal(slide.visualSpecs[0].data.capture_error.code, 'ppt_map_main_capture_unavailable')
@@ -4202,20 +4595,19 @@ test('agent ppt source toggle writes back to the active tab state', () => {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -4230,7 +4622,7 @@ test('agent ppt source toggle writes back to the active tab state', () => {
 
   ctx.toggleAgentPptPlanningSource('current:scope')
 
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const scope = state.sources.find((item) => item.id === 'current:scope')
   assert.equal(scope.status, 'ready')
   assert.equal(scope.selected, false)
@@ -4246,20 +4638,19 @@ test('agent ppt generation actions write outline and directive into the active t
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -4309,12 +4700,12 @@ test('agent ppt generation actions write outline and directive into the active t
   }
 
   await ctx.generateAgentPptPlanningOutline()
-  let state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  let state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(state.currentStep, 'outline_ready')
   assert.ok(state.outline.length > 0)
 
   await ctx.generateAgentPptPlanningDirective()
-  state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(state.currentStep, 'directive_draft')
   assert.equal(state.deckBrief.slides.length, state.outline.length)
   assert.ok(state.generationJob.events.find((event) => event.name === 'directive_response_unwrapped' && event.details.slideCount === 1))
@@ -4332,20 +4723,19 @@ test('agent ppt deck brief job completed writes slides into the active tab', asy
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -4392,11 +4782,11 @@ test('agent ppt deck brief job completed writes slides into the active tab', asy
     storyline: '从问题到证据',
     slide_roles: [{ page_no: 1, role: '开题', job: '建立问题' }],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningDirective()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(finalState.currentStep, 'directive_draft')
   assert.equal(finalState.deckBrief.slides.length, 1)
   assert.equal(finalState.deckBrief.slides[0].title, '项目命题')
@@ -4413,20 +4803,19 @@ test('agent ppt deck brief job failed does not write slides', async () => {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -4471,11 +4860,11 @@ test('agent ppt deck brief job failed does not write slides', async () => {
     storyline: '从问题到证据',
     slide_roles: [{ page_no: 1, role: '开题', job: '建立问题' }],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningDirective()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(finalState.deckBrief.slides.length, 0)
   assert.equal(finalState.currentStep, 'slides_generating')
   assert.match(finalState.generationError, /brief 生成失败/)
@@ -4516,17 +4905,16 @@ test('agent ppt slide generation marks each page active before sending its reque
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     requestAgentPptPlanningDirectiveSlide(payload) {
-      const state = createPptPlanningState(this.agentTabs.pptPlanningTabs[0].pptPlanningState)
+      const state = createPptPlanningState(this.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
       activePageNos.push(state.slideGenerationJob.currentPageNo)
       const pageNo = Number(payload.target && payload.target.index)
       const queueItem = state.slideGenerationQueue.find((item) => Number(item.pageNo || 0) === pageNo)
@@ -4553,11 +4941,11 @@ test('agent ppt slide generation marks each page active before sending its reque
       { page_no: 2, role: '证据页', job: '说明判断' },
     ],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningSlides()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.deepEqual(requestPageNos, [1, 2])
   assert.deepEqual(activePageNos, [1, 2])
   assert.deepEqual(activeStatuses, ['requesting', 'requesting'])
@@ -4602,11 +4990,11 @@ test('agent ppt slide generation syncs only stable slide states', async () => {
       { page_no: 2, role: '证据页', job: '说明判断' },
     ],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningSlides()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(finalState.deckBrief.slides.length, 2)
   assert.equal(syncCount, 2)
 })
@@ -4640,11 +5028,11 @@ test('agent ppt slide generation starts without visual snapshot context', async 
       { page_no: 1, role: '开题', job: '建立问题' },
     ],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningSlides()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(visualContextCalls, 0)
   assert.equal(seenPayloads.length, 1)
   assert.deepEqual((seenPayloads[0].current || {}).visual_snapshots || [], [])
@@ -4675,11 +5063,11 @@ test('agent ppt slide generation rejects mismatched slide response index', async
       { page_no: 2, role: '证据页', job: '说明判断' },
     ],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningSlides()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(finalState.deckBrief.slides.length, 0)
   assert.equal(finalState.slideGenerationQueue[0].status, 'failed')
   assert.match(finalState.generationError, /返回页码异常/)
@@ -4697,10 +5085,10 @@ test('agent ppt slide generation fails when applied slide is lost after sync', a
       })
     },
     syncCurrentAgentSession() {
-      const tab = this.agentTabs.pptPlanningTabs[0]
+      const tab = this.agentTabs.analysisWorkspaceTabs[0]
       const slides = ((tab.pptPlanningState || {}).deckBrief || {}).slides || []
       if (slides.length) {
-        this.agentTabs.pptPlanningTabs[0] = {
+        this.agentTabs.analysisWorkspaceTabs[0] = {
           ...tab,
           pptPlanningState: {
             ...tab.pptPlanningState,
@@ -4726,11 +5114,11 @@ test('agent ppt slide generation fails when applied slide is lost after sync', a
       { page_no: 2, role: '证据页', job: '说明判断' },
     ],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningSlides()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(finalState.deckBrief.slides.length, 0)
   assert.equal(finalState.slideGenerationQueue[0].status, 'failed')
   assert.match(finalState.generationError, /写入后被同步覆盖/)
@@ -4771,11 +5159,11 @@ test('agent ppt slide generation records structured validation failures by page'
       { page_no: 2, role: '证据页', job: '说明判断' },
     ],
   })
-  ctx.agentTabs.pptPlanningTabs[0].pptPlanningState = state
+  ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState = state
 
   await ctx.generateAgentPptPlanningSlides()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(finalState.deckBrief.slides.length, 0)
   assert.equal(finalState.slideGenerationJob.active, false)
   assert.equal(finalState.slideGenerationJob.failedPageNo, 1)
@@ -4828,20 +5216,19 @@ test('agent ppt outline timeout restores materials state with readable error', a
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -4858,7 +5245,7 @@ test('agent ppt outline timeout restores materials state with readable error', a
 
   await ctx.generateAgentPptPlanningOutline()
 
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(state.currentStep, 'materials')
   assert.equal(state.generationErrorSource, 'outline')
   assert.equal(state.generationError, 'ppt_planning_network_error')
@@ -4906,7 +5293,14 @@ test('agent ppt planning api context includes standardized analysis metrics', ()
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:h3:avg_density_poi_per_km2' && item.status === 'ready'))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:population:total_population' && item.status === 'ready'))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:population:population_density' && item.status === 'ready' && item.value === 8000))
-  assert.ok(metrics.find((item) => item.metric_id === 'analysis:population:age_structure' && item.status === 'ready' && item.value === 35))
+  const ageStructure = metrics.find((item) => item.metric_id === 'analysis:population:age_structure')
+  assert.ok(ageStructure && ageStructure.status === 'ready' && ageStructure.value === 35)
+  assert.equal(ageStructure.details.dominant_age_band_label, '30-34岁')
+  assert.equal(ageStructure.details.dominant_age_band_ratio, 0.35)
+  assert.equal(ageStructure.details.age_distribution_ratios.length, 2)
+  assert.equal(ageStructure.evidence_payload.age_distribution_ratios[0].ratio, 0.35)
+  assert.match(ageStructure.calculation_method, /各年龄段占总人口比例/)
+  assert.doesNotMatch(ageStructure.calculation_method, /选取人口数最高的主导年龄段/)
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:nightlight:max_radiance' && item.status === 'ready'))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:road:avg_integration' && item.status === 'ready'))
   assert.ok(metrics.find((item) => item.metric_id === 'analysis:h3:lq' && item.status === 'missing'))
@@ -4934,7 +5328,44 @@ test('agent ppt population age structure reads overview age distribution without
   assert.equal(age.value, 40)
   assert.equal(age.unit, '%')
   assert.match(age.description, /25-29岁/)
+  assert.match(age.description, /已计算各年龄段占比/)
+  assert.doesNotMatch(age.description, /主导年龄段为/)
+  assert.equal(age.details.dominant_age_band, '25')
+  assert.equal(age.details.dominant_age_band_label, '25-29岁')
+  assert.equal(age.details.dominant_age_band_population, 400)
+  assert.equal(age.details.dominant_age_band_ratio, 0.4)
+  assert.deepEqual(age.details.age_distribution_ratios, [
+    { age_band: '25', age_band_label: '25-29岁', total: 400, ratio: 0.4 },
+    { age_band: '10', age_band_label: '10-14岁', total: 250, ratio: 0.25 },
+  ])
+  assert.deepEqual(age.evidence_payload, age.details)
   assert.equal(density.status, 'missing')
+})
+
+test('agent ppt population age structure falls back to population count without total population', () => {
+  const ctx = createPptPlanningTestContext({
+    populationOverview: {
+      summary: {},
+      age_distribution: [
+        { age_band: '10', age_band_label: '10-14岁', total: 250 },
+        { age_band: '25', age_band_label: '25-29岁', total: 400 },
+      ],
+    },
+    populationLayer: null,
+  })
+
+  const metrics = ctx.buildAgentPptPlanningCurrent().metrics.metrics
+  const age = metrics.find((item) => item.metric_id === 'analysis:population:age_structure')
+
+  assert.equal(age.status, 'ready')
+  assert.equal(age.value, 400)
+  assert.equal(age.unit, '人')
+  assert.match(age.description, /缺少总人口，无法计算占比/)
+  assert.equal(age.details.dominant_age_band_ratio, null)
+  assert.deepEqual(age.details.age_distribution_ratios, [
+    { age_band: '25', age_band_label: '25-29岁', total: 400, ratio: null },
+    { age_band: '10', age_band_label: '10-14岁', total: 250, ratio: null },
+  ])
 })
 
 test('agent ppt population age structure remains missing when age distribution is empty', () => {
@@ -5029,13 +5460,12 @@ test('agent ppt directive regeneration cleans previous deck visual artifacts', a
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: initialState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     requestAgentPptPlanningDeckBriefJob() {
@@ -5064,7 +5494,7 @@ test('agent ppt directive regeneration cleans previous deck visual artifacts', a
   })
 
   await ctx.generateAgentPptPlanningDirective()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.deepEqual(cleaned, ['old-deck.svg'])
   assert.equal(state.deckBrief.slides[0].visualArtifacts[0].filename, 'new-deck.svg')
@@ -5094,20 +5524,19 @@ test('agent ppt regenerate outline confirms and clears downstream output', async
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: initialState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -5143,7 +5572,7 @@ test('agent ppt regenerate outline confirms and clears downstream output', async
   }
 
   await ctx.regenerateAgentPptPlanningOutlineWithConfirm()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(outlineCalls, 1)
   assert.equal(directiveCalls, 0)
@@ -5174,20 +5603,19 @@ test('agent ppt regenerate directive confirms and keeps outline', async () => {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: initialState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -5222,7 +5650,7 @@ test('agent ppt regenerate directive confirms and keeps outline', async () => {
   }
 
   await ctx.regenerateAgentPptPlanningDirectiveWithConfirm()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(directiveCalls, 1)
   assert.equal(state.currentStep, 'directive_draft')
@@ -5245,20 +5673,19 @@ test('agent ppt regenerate narrative clears downstream and uses narrative endpoi
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: initialState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return { polygon: [[0, 0], [1, 0], [1, 1]], drawnPolygon: [], isochroneFeature: null }
@@ -5281,7 +5708,7 @@ test('agent ppt regenerate narrative clears downstream and uses narrative endpoi
   }
 
   await ctx.regenerateAgentPptPlanningNarrativePlanWithConfirm()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(narrativeCalls, 1)
   assert.equal(slideCalls, 0)
@@ -5307,20 +5734,19 @@ test('agent ppt regenerate slides keeps outline and narrative while clearing old
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: initialState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return { polygon: [[0, 0], [1, 0], [1, 1]], drawnPolygon: [], isochroneFeature: null }
@@ -5344,7 +5770,7 @@ test('agent ppt regenerate slides keeps outline and narrative while clearing old
   }
 
   await ctx.regenerateAgentPptPlanningSlidesWithConfirm()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(slideCalls, 2)
   assert.deepEqual(cleaned, ['old-brief.svg'])
@@ -5375,20 +5801,19 @@ test('agent ppt regenerate cancellation keeps generated state unchanged', async 
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: initialState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -5408,7 +5833,7 @@ test('agent ppt regenerate cancellation keeps generated state unchanged', async 
   }
 
   await ctx.regenerateAgentPptPlanningOutlineWithConfirm()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(outlineCalls, 0)
   assert.equal(state.currentStep, 'directive_draft')
@@ -5440,20 +5865,19 @@ test('agent ppt revision actions replace only the active section', async () => {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: initialState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return { polygon: [[0, 0], [1, 0], [1, 1]], drawnPolygon: [], isochroneFeature: null }
@@ -5486,7 +5910,7 @@ test('agent ppt revision actions replace only the active section', async () => {
   ctx.openAgentPptPlanningRevisionTarget('outline', { id: 'page-2', pageNo: 2 })
   ctx.updateAgentPptPlanningRevisionDraft('outline', 'revisionNote', '更像问题诊断')
   await ctx.regenerateAgentPptPlanningRevision('outline')
-  let state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  let state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(state.outline[0].theme, '项目命题')
   assert.equal(state.outline[1].theme, '空间问题诊断')
@@ -5495,7 +5919,7 @@ test('agent ppt revision actions replace only the active section', async () => {
   ctx.openAgentPptPlanningRevisionTarget('directive', { index: 2, pageNo: 2 })
   ctx.updateAgentPptPlanningRevisionDraft('directive', 'revisionNote', '重写为诊断页')
   await ctx.regenerateAgentPptPlanningRevision('directive')
-  state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(state.deckBrief.slides[0].title, '项目命题')
   assert.equal(state.deckBrief.slides[1].title, '空间问题诊断')
@@ -5517,20 +5941,19 @@ test('agent ppt data package action writes a visible package source', async () =
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     ensureAgentTabs() {
       return this.agentTabs
     },
     getAgentActiveTopTab() {
-      return { id: this.agentTabs.activeTabId, kind: 'ppt_planning' }
+      return { id: this.agentTabs.activeTabId, kind: 'analysis' }
     },
     normalizeAgentSiteSelectionScope() {
       return {
@@ -5556,7 +5979,7 @@ test('agent ppt data package action writes a visible package source', async () =
   }
 
   await ctx.createAgentPptPlanningDataPackage()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const packageSource = state.sources.find((item) => item.id === 'package:poi:test')
 
   assert.equal(seenPayload.area_id, 'history-1')
@@ -5618,7 +6041,7 @@ test('agent ppt refresh loads backend sources and auto creates poi evidence pack
   })
 
   await ctx.refreshAgentActivePptPlanningDataSources()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const poiSource = state.sources.find((item) => item.id === 'current:dataset:poi')
   const packageSource = state.sources.find((item) => item.id === 'package:poi:auto')
 
@@ -5684,7 +6107,7 @@ test('agent ppt refresh auto creates nightlife poi nightlight package when both 
   })
 
   await ctx.refreshAgentActivePptPlanningDataSources()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const nightlifePayload = packagePayloads.find((payload) => payload.intent === DEFAULT_PPT_NIGHTLIFE_POI_INTENT)
   const nightlifePackage = state.sources.find((item) => item.id === 'package:poi-nightlife:auto')
 
@@ -5771,7 +6194,7 @@ test('agent ppt refresh auto creates road carrier package when four evidence sou
   })
 
   await ctx.refreshAgentActivePptPlanningDataSources()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const carrierPayload = packagePayloads.find((payload) => payload.intent === DEFAULT_PPT_CARRIER_EVIDENCE_INTENT)
   const carrierPackage = state.sources.find((item) => item.id === 'package:poi-road-carriers:auto')
 
@@ -5941,7 +6364,7 @@ test('agent ppt auto package failure is isolated to its placeholder', async () =
   })
 
   await ctx.refreshAgentActivePptPlanningDataSources()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const poiPackage = state.sources.find((item) => item.id === 'package:poi:auto')
   const nightlifePackage = state.sources.find((item) => item.id === 'package:poi-nightlife:auto')
   const carrierPlaceholder = state.sources.find((item) => item.id === 'package-placeholder:road-carrier')
@@ -5954,7 +6377,7 @@ test('agent ppt auto package failure is isolated to its placeholder', async () =
   assert.equal(state.generationError, '')
 })
 
-test('agent top tab switch refreshes backend ppt data sources when activating ppt tab', () => {
+test('agent top tab switch refreshes backend ppt data sources when activating ppt tab', async () => {
   const methods = createAgentTabsMethods()
   let sourceRefreshCalls = 0
   const ctx = {
@@ -5972,14 +6395,13 @@ test('agent top tab switch refreshes backend ppt data sources when activating pp
         source: 'current',
         panelPayloads: {},
       }],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         panelPayloads: {},
         pptPlanningState: createPptPlanningState(),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentSummaryPack() {
@@ -6021,8 +6443,10 @@ test('agent top tab switch refreshes backend ppt data sources when activating pp
   }
 
   ctx.switchAgentTopTab('ppt-1')
+  await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
 
-  assert.equal(ctx.getAgentActiveTopTab().kind, 'ppt_planning')
+  assert.equal(ctx.getAgentActiveTopTab().kind, 'analysis')
   assert.equal(sourceRefreshCalls, 1)
 })
 
@@ -6039,16 +6463,141 @@ test('ppt source refresh immediately marks planning state as blocked', async () 
   })
 
   const refreshPromise = ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
-  const refreshingState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const refreshingState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
 
   assert.equal(refreshingState.sourceRefreshing, true)
   assert.equal(hasPptBlockingInputs(refreshingState), true)
+  assert.ok(refreshingState.sources.some((item) => item.id === 'source-refresh-placeholder:backend-sources'))
+  const refreshPlaceholder = refreshingState.sources.find((item) => item.id === 'source-refresh-placeholder:backend-sources')
+  assert.equal(refreshPlaceholder.status, 'generating')
+  assert.equal(refreshPlaceholder.meta.label, '同步中')
 
   resolveSources([])
   await refreshPromise
 
-  const settledState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const settledState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(settledState.sourceRefreshing, false)
+  assert.equal(settledState.sources.some((item) => String(item.id).startsWith('source-refresh-placeholder:')), false)
+})
+
+test('ppt source refresh uses manifest placeholders before full sources settle', async () => {
+  let resolveSources
+  const sourcePromise = new Promise((resolve) => {
+    resolveSources = resolve
+  })
+  const manifestSources = [
+    { id: 'document:manifest-1', type: 'document', title: '规划文本', status: 'ready', meta: { sourceKind: 'document', label: 'PageIndex 12 项' } },
+    { id: 'web:manifest-1', type: 'web', title: '联网资料', status: 'ready', meta: { sourceKind: 'web', label: '已整理' } },
+    { id: 'database:manifest-1', type: 'database', title: '数据库资料', status: 'ready', meta: { sourceKind: 'database', label: '已整理' } },
+  ]
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningSourceManifest(areaId) {
+      assert.equal(areaId, 'history-1')
+      return Promise.resolve(manifestSources)
+    },
+    requestAgentPptPlanningDataSources(areaId) {
+      assert.equal(areaId, 'history-1')
+      return sourcePromise
+    },
+  })
+
+  const refreshPromise = ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+  await Promise.resolve()
+  const refreshingState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
+
+  assert.equal(refreshingState.sourceRefreshing, true)
+  assert.ok(refreshingState.sources.some((item) => item.id === 'source-refresh-placeholder:document:manifest-1'))
+  assert.ok(refreshingState.sources.some((item) => item.id === 'source-refresh-placeholder:web:manifest-1'))
+  assert.ok(refreshingState.sources.some((item) => item.id === 'source-refresh-placeholder:database:manifest-1'))
+  assert.equal(refreshingState.sources.some((item) => item.id === 'source-refresh-placeholder:backend-sources'), false)
+  assert.equal(getPptSourceSummary(refreshingState).total, 13)
+  assert.equal(getPptSourceSummary(refreshingState).deliverableSourceIds.includes('source-refresh-placeholder:document:manifest-1'), false)
+
+  resolveSources(manifestSources.map((source) => ({
+    ...source,
+    status: 'ready',
+    selected: true,
+    meta: {
+      ...source.meta,
+      aiPayload: {
+        version: 'ppt_ai_input_block_v1',
+        source_id: source.id,
+        included: ['evidence'],
+        evidence_nodes: [{ title: source.title, content: 'ready' }],
+      },
+    },
+  })))
+  await refreshPromise
+
+  const settledState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
+  assert.equal(settledState.sourceRefreshing, false)
+  assert.equal(getPptSourceSummary(settledState).total, 13)
+  assert.equal(settledState.sources.some((item) => String(item.id).startsWith('source-refresh-placeholder:')), false)
+  assert.ok(settledState.sources.some((item) => item.id === 'document:manifest-1' && item.status === 'ready'))
+})
+
+test('ppt source refresh keeps known backend source count stable with placeholders', async () => {
+  let resolveSources
+  const sourcePromise = new Promise((resolve) => {
+    resolveSources = resolve
+  })
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDataSources(areaId) {
+      assert.equal(areaId, 'history-1')
+      return sourcePromise
+    },
+  })
+  const initialState = mergePptPlanningSources(createPptPlanningState(), [
+    ...createPptSystemSources({
+      scope: { polygon: [[0, 0], [1, 0], [1, 1]] },
+      taskResults: { poi_fetch: true },
+    }),
+    {
+      id: 'document:known',
+      type: 'document',
+      title: '既有文档',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'document',
+        label: 'PageIndex 已生成',
+      },
+    },
+  ])
+  ctx.updateAgentActivePptPlanningState(ctx.getAgentPptPlanningStateWithPackagePlaceholders(initialState, 'history-1'))
+  const totalBeforeRefresh = getPptSourceSummary(ctx.getAgentActivePptPlanningState()).total
+
+  const refreshPromise = ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
+  const refreshingState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
+  const placeholder = refreshingState.sources.find((item) => item.id === 'source-refresh-placeholder:document:known')
+
+  assert.equal(getPptSourceSummary(refreshingState).total, totalBeforeRefresh)
+  assert.equal(placeholder.status, 'generating')
+  assert.equal(placeholder.selected, false)
+  assert.equal(placeholder.meta.expectedSourceId, 'document:known')
+  assert.equal(hasPptBlockingInputs(refreshingState), true)
+
+  resolveSources([{
+    id: 'document:known',
+    type: 'document',
+    title: '既有文档',
+    status: 'ready',
+    meta: {
+      sourceKind: 'document',
+      label: 'PageIndex 章节 2 个',
+      document_index_preview: [
+        { node_id: 'n1', title: '章节 1', summary: '内容 1' },
+        { node_id: 'n2', title: '章节 2', summary: '内容 2' },
+      ],
+    },
+  }])
+  await refreshPromise
+
+  const settledState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
+  assert.equal(settledState.sourceRefreshing, false)
+  assert.equal(getPptSourceSummary(settledState).total, totalBeforeRefresh)
+  assert.equal(settledState.sources.some((item) => String(item.id).startsWith('source-refresh-placeholder:')), false)
+  assert.ok(settledState.sources.some((item) => item.id === 'document:known' && item.status === 'ready'))
 })
 
 test('ppt outline generation does not call api while sources are refreshing', async () => {
@@ -6095,17 +6644,16 @@ test('ppt outline generation does not call api without deliverable selected sour
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: staleState,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     getAgentPptPlanningStateWithSystemSources() {
-      return createPptPlanningState(this.agentTabs.pptPlanningTabs[0].pptPlanningState)
+      return createPptPlanningState(this.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
     },
     requestAgentPptPlanningOutlineWithDebug() {
       outlineCalls += 1
@@ -6115,7 +6663,7 @@ test('ppt outline generation does not call api without deliverable selected sour
 
   await ctx.generateAgentPptPlanningOutline()
 
-  const finalState = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const finalState = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.equal(outlineCalls, 0)
   assert.equal(finalState.generationJob.phase, 'failed')
   assert.match(finalState.generationError, /没有可发送给 AI/)
@@ -6157,13 +6705,12 @@ test('agent ppt auto poi evidence package is not created twice for same area', a
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: stateWithPackage,
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     requestAgentPptPlanningDataPackage() {
@@ -6186,9 +6733,9 @@ test('agent ppt auto poi evidence package is not created twice while in flight',
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState({
           sources: [{
@@ -6201,7 +6748,6 @@ test('agent ppt auto poi evidence package is not created twice while in flight',
           }],
         }),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     requestAgentPptPlanningDataPackage() {
@@ -6261,7 +6807,7 @@ test('agent ppt auto package failure keeps ready sources and visible error', asy
   })
 
   await ctx.refreshAgentActivePptPlanningDataSources()
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   const poiSource = state.sources.find((item) => item.id === 'current:dataset:poi')
 
   assert.equal(poiSource.status, 'ready')
@@ -6283,9 +6829,9 @@ test('agent ppt auto carrier package sends package version', async () => {
       summaryTabs: [],
       iterationChangeTabs: [],
       siteSelectionTabs: [],
-      pptPlanningTabs: [{
+      analysisWorkspaceTabs: [{
         id: 'ppt-1',
-        kind: 'ppt_planning',
+        kind: 'analysis',
         source: 'current',
         pptPlanningState: createPptPlanningState({
           sources: [
@@ -6296,7 +6842,6 @@ test('agent ppt auto carrier package sends package version', async () => {
           ],
         }),
       }],
-      deepAnalysisTabs: [],
       followupTabs: [],
     },
     requestAgentPptPlanningDataPackage(nextPayload) {
@@ -6362,7 +6907,7 @@ test('agent ppt restored package source satisfies auto package placeholder', asy
 
   await ctx.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
 
-  const state = createPptPlanningState(ctx.agentTabs.pptPlanningTabs[0].pptPlanningState)
+  const state = createPptPlanningState(ctx.agentTabs.analysisWorkspaceTabs[0].pptPlanningState)
   assert.ok(state.sources.some((item) => item.id === 'package:poi-road-carriers:restored'))
   assert.equal(state.sources.some((item) => item.id === 'package-placeholder:road-carrier'), false)
 })

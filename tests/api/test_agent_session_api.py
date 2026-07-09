@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import importlib.util
@@ -42,6 +43,26 @@ def _install_test_session(monkeypatch):
     testing_session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     Base.metadata.create_all(bind=engine)
     monkeypatch.setattr(agent_session_repo_module, "SessionLocal", testing_session_local)
+
+
+def _final_stream_response(body: str):
+    for chunk in body.split("\n\n"):
+        if not chunk.startswith("event: final"):
+            continue
+        for line in chunk.splitlines():
+            if line.startswith("data: "):
+                return json.loads(line.removeprefix("data: "))["response"]
+    raise AssertionError("stream response did not include final event")
+
+
+def _stream_main_loop_response(response: AgentTurnResponse):
+    async def fake_stream_main_agent_loop(_payload):
+        yield agent_router_module.AgentTurnStreamEvent(
+            type="final",
+            payload={"response": response.model_dump(mode="json")},
+        )
+
+    return fake_stream_main_agent_loop
 
 
 def test_agent_session_crud_api(monkeypatch):
@@ -122,7 +143,7 @@ def test_legacy_react_routes_are_removed(monkeypatch):
         assert cancel_resp.status_code == 404
 
 
-def test_agent_turn_persists_multiple_statuses(monkeypatch):
+def test_agent_main_loop_persists_multiple_statuses(monkeypatch):
     _install_test_session(monkeypatch)
     async def fake_generate_title(*_args, **_kwargs):
         return None
@@ -137,13 +158,14 @@ def test_agent_turn_persists_multiple_statuses(monkeypatch):
         ]
 
         for index, (status, extra) in enumerate(statuses, start=1):
-            async def fake_process_agent_turn(_payload, *, _status=status, _extra=extra):
-                return AgentTurnResponse(status=_status, **_extra)
-
-            monkeypatch.setattr(agent_router_module, "process_agent_turn", fake_process_agent_turn)
+            monkeypatch.setattr(
+                agent_router_module,
+                "stream_main_agent_loop",
+                _stream_main_loop_response(AgentTurnResponse(status=status, **extra)),
+            )
 
             resp = client.post(
-                "/api/v1/analysis/agent/turn",
+                "/api/v1/analysis/agent/main-loop/stream",
                 json={
                     "conversation_id": f"agent-{index}",
                     "history_id": f"history-{index}",
@@ -153,11 +175,12 @@ def test_agent_turn_persists_multiple_statuses(monkeypatch):
             )
 
             assert resp.status_code == 200
-            assert resp.json()["status"] == status
+            final_response = _final_stream_response(resp.text)
+            assert final_response["status"] == status
             if status == "answered":
-                assert resp.json()["messages"][-1]["role"] == "assistant"
-                assert resp.json()["messages"][-1]["content"] == "已完成分析"
-                assert resp.json()["messages"][-1]["process"]["thinking_timeline"][0]["id"] == "thinking-answer"
+                assert final_response["messages"][-1]["role"] == "assistant"
+                assert final_response["messages"][-1]["content"] == "已完成分析"
+                assert final_response["messages"][-1]["process"]["thinking_timeline"][0]["id"] == "thinking-answer"
 
         list_resp = client.get("/api/v1/analysis/agent/sessions")
         assert list_resp.status_code == 200
@@ -188,7 +211,7 @@ def test_agent_turn_persists_multiple_statuses(monkeypatch):
         assert failed_detail.json()["diagnostics"]["thinking_timeline"][0]["id"] == "thinking-failed"
 
 
-def test_agent_turn_generates_title_only_for_first_persist(monkeypatch):
+def test_agent_main_loop_generates_title_only_for_first_persist(monkeypatch):
     _install_test_session(monkeypatch)
     generated_titles = []
 
@@ -199,16 +222,17 @@ def test_agent_turn_generates_title_only_for_first_persist(monkeypatch):
     monkeypatch.setattr(agent_session_service, "generate_agent_session_title", fake_generate_title)
 
     with TestClient(_build_test_app()) as client:
-        async def fake_process_agent_turn(_payload):
-            return AgentTurnResponse(
+        monkeypatch.setattr(
+            agent_router_module,
+            "stream_main_agent_loop",
+            _stream_main_loop_response(AgentTurnResponse(
                 status="answered",
                 output={"answer": "已完成分析"},
-            )
-
-        monkeypatch.setattr(agent_router_module, "process_agent_turn", fake_process_agent_turn)
+            )),
+        )
 
         first = client.post(
-            "/api/v1/analysis/agent/turn",
+            "/api/v1/analysis/agent/main-loop/stream",
             json={
                 "conversation_id": "agent-title",
                 "history_id": "history-1",
@@ -219,7 +243,7 @@ def test_agent_turn_generates_title_only_for_first_persist(monkeypatch):
         assert first.status_code == 200
 
         second = client.post(
-            "/api/v1/analysis/agent/turn",
+            "/api/v1/analysis/agent/main-loop/stream",
             json={
                 "conversation_id": "agent-title",
                 "history_id": "history-2",
@@ -241,7 +265,7 @@ def test_agent_turn_generates_title_only_for_first_persist(monkeypatch):
         assert len(generated_titles) == 1
 
 
-def test_agent_turn_keeps_user_title_without_auto_override(monkeypatch):
+def test_agent_main_loop_keeps_user_title_without_auto_override(monkeypatch):
     _install_test_session(monkeypatch)
     generated_titles = []
 
@@ -276,16 +300,17 @@ def test_agent_turn_keeps_user_title_without_auto_override(monkeypatch):
         assert put_resp.status_code == 200
         assert put_resp.json()["title_source"] == "user"
 
-        async def fake_process_agent_turn(_payload):
-            return AgentTurnResponse(
+        monkeypatch.setattr(
+            agent_router_module,
+            "stream_main_agent_loop",
+            _stream_main_loop_response(AgentTurnResponse(
                 status="answered",
                 output={"answer": "已完成分析"},
-            )
-
-        monkeypatch.setattr(agent_router_module, "process_agent_turn", fake_process_agent_turn)
+            )),
+        )
 
         turn_resp = client.post(
-            "/api/v1/analysis/agent/turn",
+            "/api/v1/analysis/agent/main-loop/stream",
             json={
                 "conversation_id": "agent-user-title",
                 "history_id": "history-1",

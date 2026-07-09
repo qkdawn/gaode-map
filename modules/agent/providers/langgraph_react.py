@@ -15,6 +15,7 @@ from ..schemas import (
     ToolLoopResult,
     ToolResult,
 )
+from ..selected_sources import source_id_from_item, source_items_from_artifacts, source_kind_from_item
 from ..tools import RegisteredTool
 from .prompts import loop_system_prompt
 from .tool_loop import chat_completion_tools
@@ -31,7 +32,6 @@ class LangGraphReactState(TypedDict, total=False):
     question: str
     governance_mode: str
     confirmed_tools: List[str]
-    thinking_mode: str
     max_steps: Optional[int]
     max_errors: int
     step_count: int
@@ -82,6 +82,37 @@ def _artifact_catalog(artifacts: Dict[str, Any]) -> Dict[str, Any]:
                 for key in ("poi", "h3", "road", "population", "nightlight")
                 if key == "poi" or (isinstance(spatial.get(key), dict) and spatial.get(key))
             ],
+        }
+    if artifacts.get("selected_sources_context"):
+        sources = source_items_from_artifacts(artifacts)
+        catalog["selected_sources_context"] = {
+            "purpose": "本轮已选分析来源可检索源；分析来源时先 list_selected_sources，再 search_selected_source_evidence/read_selected_source_evidence_node。",
+            "source_count": len(sources),
+            "source_ids": [source_id_from_item(item) for item in sources[:20] if source_id_from_item(item)],
+            "source_kinds": list(dict.fromkeys([source_kind_from_item(item) for item in sources if source_kind_from_item(item)])),
+        }
+    if artifacts.get("business_analyst_skeleton"):
+        ba_skeleton = artifacts.get("business_analyst_skeleton") if isinstance(artifacts.get("business_analyst_skeleton"), dict) else {}
+        selected_skill = ba_skeleton.get("selected_skill") if isinstance(ba_skeleton.get("selected_skill"), dict) else {}
+        model_graph = ba_skeleton.get("model_graph") if isinstance(ba_skeleton.get("model_graph"), dict) else {}
+        catalog["business_analyst_skeleton"] = {
+            "purpose": "本轮 Business Analyst 分析骨架；用于决定商业分析模型路径、可选分支和对应工具，不是输出模板。",
+            "status": str(ba_skeleton.get("status") or ""),
+            "selected_skill": {
+                "skill_id": str(selected_skill.get("skill_id") or ""),
+                "title": str(selected_skill.get("title") or ""),
+                "purpose": str(selected_skill.get("purpose") or ""),
+            },
+            "graph_id": str(model_graph.get("graph_id") or selected_skill.get("uses_model_graph") or ""),
+            "recommended_path": list(ba_skeleton.get("recommended_path") or [])[:8],
+            "path_relations": list(ba_skeleton.get("path_relations") or [])[:8],
+            "optional_branch_keys": list((ba_skeleton.get("optional_branches") or {}).keys())[:8]
+            if isinstance(ba_skeleton.get("optional_branches"), dict)
+            else [],
+            "model_tool_map": ba_skeleton.get("model_tool_map") if isinstance(ba_skeleton.get("model_tool_map"), dict) else {},
+            "skip_conditions": ba_skeleton.get("skip_conditions") if isinstance(ba_skeleton.get("skip_conditions"), dict) else {},
+            "guardrails": list(ba_skeleton.get("guardrails") or [])[:12],
+            "answer_guidance": list(ba_skeleton.get("answer_guidance") or [])[:8],
         }
     return catalog
 
@@ -189,7 +220,6 @@ async def run_langgraph_react_loop(
     include_secondary_tools: bool = False,
     max_steps_override: Optional[int] = None,
     max_errors_override: Optional[int] = None,
-    thinking_mode: str = "quick",
     initial_artifacts: Optional[Dict[str, Any]] = None,
 ) -> ToolLoopResult:
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -205,7 +235,7 @@ async def run_langgraph_react_loop(
         model=str(settings.ai_model or "").strip(),
         api_key=str(settings.ai_api_key or ""),
         base_url=str(settings.ai_base_url or "").rstrip("/") or None,
-        timeout=float(settings.ai_timeout_s or 60),
+        timeout=None,
     ).bind_tools(tool_schemas)
 
     async def preflight(_state: LangGraphReactState) -> Dict[str, Any]:
@@ -362,7 +392,7 @@ async def run_langgraph_react_loop(
                 {
                     "phase": "assess",
                     "source": "langgraph_react",
-                    "title": "检查是否继续",
+                    "title": "检查证据是否足够",
                     "detail": "正在根据刚拿到的工具结果判断证据是否已够用。",
                     "state": "completed" if result.status == "completed" else "active",
                 },
@@ -371,6 +401,17 @@ async def run_langgraph_react_loop(
 
     async def finalize(state: LangGraphReactState) -> Dict[str, Any]:
         result = state["result"]
+        if emit:
+            await emit(
+                "thinking",
+                {
+                    "phase": "answering",
+                    "source": "langgraph_react",
+                    "title": "进入最终回答",
+                    "detail": "工具循环已收敛，正在把证据整理成最终回答。",
+                    "state": "active" if result.status == "completed" else "completed",
+                },
+            )
         if result.status != "completed" and not result.assistant_summary:
             result.assistant_summary = result.error or result.stop_reason or "工具循环未能稳定完成。"
         return {"result": result, "final_message": result.assistant_summary}
@@ -409,7 +450,7 @@ async def run_langgraph_react_loop(
 
     result = ToolLoopResult(status="completed", artifacts=dict(initial_artifacts or {}))
     initial_messages = [
-        SystemMessage(content=loop_system_prompt(thinking_mode=thinking_mode)),
+        SystemMessage(content=loop_system_prompt()),
         HumanMessage(content=_safe_json(_initial_payload(question=question, snapshot=snapshot, context=context_bundle, registry=registry, artifacts=initial_artifacts))),
     ]
     final_state = await app.ainvoke(
@@ -421,7 +462,6 @@ async def run_langgraph_react_loop(
             "question": question,
             "governance_mode": governance_mode,
             "confirmed_tools": list(confirmed_tools or []),
-            "thinking_mode": str(thinking_mode or "quick"),
             "max_steps": max_steps,
             "max_errors": max_errors,
             "step_count": 0,

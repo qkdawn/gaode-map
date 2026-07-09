@@ -14,10 +14,14 @@ from .adapters import (
     evidence_nodes_from_package,
 )
 from .schemas import EvidenceNode, EvidenceSearchRequest, EvidenceSearchResponse, SourceRecord
-from .service import (
-    EmptySearchQuestion,
-    search_evidence,
-)
+
+
+def __getattr__(name: str):
+    if name in {"EmptySearchQuestion", "search_evidence"}:
+        from .service import EmptySearchQuestion, search_evidence
+
+        return {"EmptySearchQuestion": EmptySearchQuestion, "search_evidence": search_evidence}[name]
+    raise AttributeError(name)
 
 __all__ = [
     "EmptySearchQuestion",

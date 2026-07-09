@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import httpx
 
 from core.config import settings
+from modules.evidence_index import attach_index_manifest, build_source_index_manifest_payload, persist_source_index_manifest
 from modules.evidence_retrieval import EvidenceNode, evidence_node_payloads_from_nodes
 from modules.ppt_planning.schemas import (
     PptDataPackageResponse,
@@ -993,7 +994,7 @@ def _web_source_ai_payload(source_id: str, title: str, items: List[Dict[str, Any
                 )
             )
     evidence_node_payloads = evidence_node_payloads_from_nodes(evidence_nodes)
-    return {
+    payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
         "sourceId": source_id,
@@ -1010,6 +1011,20 @@ def _web_source_ai_payload(source_id: str, title: str, items: List[Dict[str, Any
         "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_node_payloads), "visual_specs": 0},
         "policy": "联网资料仅作为外部背景、政策、案例和竞品支撑；不能覆盖当前地图分析指标或用户选择的项目来源事实。",
     }
+    return attach_index_manifest(
+        payload,
+        build_source_index_manifest_payload(
+            source_id=source_id,
+            source_kind="web",
+            native_index_kind="webpage_index",
+            node_count=len(evidence_node_payloads),
+            retrieval_modes=["keyword"],
+            read_modes=["node_id", "url"],
+            storage_ref={"urls": [_clean_text(item.get("url")) for item in items if _clean_text(item.get("url"))]},
+            model_versions={"crawler": "crawl4ai", "search": "searxng"},
+            diagnostics=[] if evidence_node_payloads else ["web_evidence_empty"],
+        ),
+    )
 
 
 def _web_source_id(area_id: str, request: PptWebSourceSearchRequest, items: List[Dict[str, Any]]) -> str:
@@ -1081,6 +1096,7 @@ def _persist_web_source(area_id: str, response: PptDataPackageResponse) -> None:
         },
         data_version="v1",
     )
+    persist_source_index_manifest(area_id, source)
 
 
 async def _enrich_item_with_web_parse(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -1191,11 +1207,6 @@ def _build_web_source_response(area_id: str, request: PptWebSourceSearchRequest,
     )
 
 
-def _build_web_source_response_with_llamaindex(area_id: str, request: PptWebSourceSearchRequest, items: List[Dict[str, Any]], warnings: List[str]) -> PptDataPackageResponse:
-    # 这里保留一个清晰的编排入口，后续可以把网页/数据库证据统一交给 LlamaIndex 做召回与重排。
-    return _build_web_source_response(area_id, request, items, warnings)
-
-
 async def preview_ppt_web_source(request: PptWebSourceSearchRequest) -> PptDataPackageResponse:
     area_id = _clean_text(request.area_id)
     if not area_id:
@@ -1267,7 +1278,7 @@ async def preview_ppt_web_source(request: PptWebSourceSearchRequest) -> PptDataP
     for item in enriched:
         if _clean_text(item.get("url")) and _clean_text(item.get("parse_status")) != "parsed":
             warnings.append(f"{_clean_text(item.get('title')) or item.get('url')} 网页正文解析失败，已标记为待核验。")
-    response = _build_web_source_response_with_llamaindex(area_id, normalized_request, enriched, warnings)
+    response = _build_web_source_response(area_id, normalized_request, enriched, warnings)
     return response
 
 

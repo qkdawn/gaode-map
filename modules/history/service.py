@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+from time import perf_counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -10,6 +12,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from core.spatial import transform_geojson_coordinates, transform_nested_coords, transform_polygon_payload_coords
 from modules.poi.schemas import HistorySaveRequest
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
+
+logger = logging.getLogger(__name__)
 
 
 def coerce_extracted_json_value(value: Any) -> Any:
@@ -341,16 +345,32 @@ def get_history_detail_payload_for_year(history_id: str, include_pois: bool, yea
 
 
 def get_history_pois_payload(history_id: str, repo, year: Optional[int] = None) -> Dict[str, Any]:
+    started_at = perf_counter()
     try:
+        repo_started_at = perf_counter()
         if year is None:
             res = repo.get_pois(history_id)
         else:
             res = repo.get_pois(history_id, year=year)
+        repo_ms = (perf_counter() - repo_started_at) * 1000
     except SQLAlchemyError as exc:
         raise HTTPException(500, _build_history_database_error_detail(exc)) from exc
     if not res:
         raise HTTPException(404, "Record not found")
-    return convert_history_pois_to_gcj02(res)
+    convert_started_at = perf_counter()
+    payload = convert_history_pois_to_gcj02(res)
+    convert_ms = (perf_counter() - convert_started_at) * 1000
+    total_ms = (perf_counter() - started_at) * 1000
+    logger.info(
+        "history POI payload restored history_id=%s year=%s count=%s repo_ms=%.1f convert_ms=%.1f total_ms=%.1f",
+        history_id,
+        year,
+        len(payload.get("pois") or []),
+        repo_ms,
+        convert_ms,
+        total_ms,
+    )
+    return payload
 
 
 def delete_history_record(history_id: str, repo) -> Dict[str, Any]:

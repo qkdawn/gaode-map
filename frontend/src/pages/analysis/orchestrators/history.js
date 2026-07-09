@@ -1,14 +1,27 @@
+import {
+  buildAnalysisArtifactEnvelope,
+  buildFeatureCollectionArtifact,
+  buildMetricLayerArtifact,
+  cloneArtifactValue,
+} from '../../../features/history/artifacts.js'
+
 function createAnalysisHistoryOrchestratorMethods() {
   return {
     cancelHistoryDetailLoading() {
-      if (this.historyDetailAbortController) {
+      const controllers = [
+        ['historyDetailAbortController', this.historyDetailAbortController],
+        ['historyPoiAbortController', this.historyPoiAbortController],
+        ['historyArtifactsAbortController', this.historyArtifactsAbortController],
+      ]
+      controllers.forEach(([key, controller]) => {
+        if (!controller) return
         try {
-          this.historyDetailAbortController.abort()
+          controller.abort()
         } catch (e) {
-          console.warn('history detail abort failed', e)
+          console.warn('history detail abort failed', key, e)
         }
-        this.historyDetailAbortController = null
-      }
+        this[key] = null
+      })
       this.historyDetailLoadToken += 1
     },
     buildHistoryH3ResultSnapshot() {
@@ -253,12 +266,7 @@ function createAnalysisHistoryOrchestratorMethods() {
       return savePromise
     },
     cloneArtifactValue(value) {
-      if (value === undefined || value === null) return Array.isArray(value) ? [] : {}
-      try {
-        return JSON.parse(JSON.stringify(value))
-      } catch (_) {
-        return Array.isArray(value) ? value.slice() : Object.assign({}, value)
-      }
+      return cloneArtifactValue(value)
     },
     normalizeArtifactParams(params = {}) {
       return this.cloneArtifactValue(params && typeof params === 'object' ? params : {})
@@ -314,24 +322,24 @@ function createAnalysisHistoryOrchestratorMethods() {
           neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
         }
         const features = Array.isArray(this.poiGridFeatures) ? this.poiGridFeatures : []
-        return {
+        return buildAnalysisArtifactEnvelope({
           params,
           payload: {
-            grid: {
-              type: 'FeatureCollection',
-              grid_type: 'shared_raster',
-              cell_id_source: 'population_nightlight_shared_cell_id',
-              scope_id: (this.poiGridSummary && this.poiGridSummary.scope_id) || null,
+            year: params.year,
+            params: this.cloneArtifactValue(params),
+            grid: buildFeatureCollectionArtifact({
               features,
-              count: features.length,
-              cell_count: features.length,
-            },
+              scopeId: (this.poiGridSummary && this.poiGridSummary.scope_id) || '',
+              extra: {
+                grid_type: 'shared_raster',
+                cell_id_source: 'population_nightlight_shared_cell_id',
+              },
+            }),
             summary: this.cloneArtifactValue(this.poiGridSummary || {}),
             charts: this.cloneArtifactValue(this.h3AnalysisCharts || {}),
-            ...params,
           },
           summary: this.cloneArtifactValue(this.poiGridSummary || {}),
-        }
+        })
       }
       if (type === 'poi_h3_grid') {
         const features = Array.isArray(this.h3AnalysisGridFeatures) ? this.h3AnalysisGridFeatures : []
@@ -343,24 +351,26 @@ function createAnalysisHistoryOrchestratorMethods() {
           source: this.normalizePoiSource ? this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local') : String(this.resultDataSource || this.poiDataSource || ''),
           year: Number(this.poiYearSource || this.resultPoiYear || 0) || null,
         }
-        return {
+        return buildAnalysisArtifactEnvelope({
           params,
           payload: {
             year: params.year,
             params: this.cloneArtifactValue(params),
-            grid: {
-              type: 'FeatureCollection',
+            grid: buildFeatureCollectionArtifact({
               features,
-              count: Number(this.h3GridCount || features.length || 0) || 0,
-              resolution: params.resolution,
-              include_mode: params.include_mode,
-              min_overlap_ratio: params.min_overlap_ratio,
-            },
+              extra: {
+                count: Number(this.h3GridCount || features.length || 0) || 0,
+                cell_count: Number(this.h3GridCount || features.length || 0) || 0,
+                resolution: params.resolution,
+                include_mode: params.include_mode,
+                min_overlap_ratio: params.min_overlap_ratio,
+              },
+            }),
             summary: this.cloneArtifactValue(this.h3AnalysisSummary || {}),
             charts: this.cloneArtifactValue(this.h3AnalysisCharts || {}),
           },
           summary: this.cloneArtifactValue(this.h3AnalysisSummary || {}),
-        }
+        })
       }
       if (type === 'population') {
         const params = {
@@ -376,25 +386,23 @@ function createAnalysisHistoryOrchestratorMethods() {
           || this.populationScopeId
           || ''
         )
-        return {
+        const summary = this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {})
+        return buildAnalysisArtifactEnvelope({
           params,
           payload: {
             overview: this.cloneArtifactValue(this.populationOverview || {}),
-            summary: this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {}),
-            grid: {
-              type: 'FeatureCollection',
+            summary,
+            grid: buildFeatureCollectionArtifact({
               features,
-              count: features.length,
-              cell_count: features.length,
-              scope_id: scopeId,
-            },
+              scopeId,
+            }),
             grid_evidence: typeof this.buildAgentPopulationGridEvidence === 'function' ? this.buildAgentPopulationGridEvidence() : {},
-            layer: this.cloneArtifactValue(layer),
+            layer: buildMetricLayerArtifact({ layer, view: params.view, year: params.year }),
             year: params.year,
             view: params.view,
           },
-          summary: this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {}),
-        }
+          summary,
+        })
       }
       if (type === 'nightlight') {
         const params = {
@@ -410,25 +418,23 @@ function createAnalysisHistoryOrchestratorMethods() {
           || this.nightlightScopeId
           || ''
         )
-        return {
+        const summary = this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {})
+        return buildAnalysisArtifactEnvelope({
           params,
           payload: {
             overview: this.cloneArtifactValue(this.nightlightOverview || {}),
-            summary: this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {}),
-            grid: {
-              type: 'FeatureCollection',
+            summary,
+            grid: buildFeatureCollectionArtifact({
               features,
-              count: features.length,
-              cell_count: features.length,
-              scope_id: scopeId,
-            },
-            layer: this.cloneArtifactValue(layer),
+              scopeId,
+            }),
+            layer: buildMetricLayerArtifact({ layer, view: params.view, year: params.year }),
             raster: this.cloneArtifactValue(this.nightlightRaster || {}),
             year: params.year,
             view: params.view,
           },
-          summary: this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {}),
-        }
+          summary,
+        })
       }
       if (type === 'road_syntax') {
         const params = {
@@ -438,20 +444,20 @@ function createAnalysisHistoryOrchestratorMethods() {
         }
         const roadFeatures = Array.isArray(this.roadSyntaxRoadFeatures) ? this.roadSyntaxRoadFeatures : []
         const nodeFeatures = Array.isArray(this.roadSyntaxNodes) ? this.roadSyntaxNodes : []
-        return {
+        return buildAnalysisArtifactEnvelope({
           params,
           payload: {
             summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
             diagnostics: this.cloneArtifactValue(this.roadSyntaxDiagnostics || {}),
-            roads: { type: 'FeatureCollection', features: roadFeatures, count: roadFeatures.length },
-            nodes: { type: 'FeatureCollection', features: nodeFeatures, count: nodeFeatures.length },
+            roads: buildFeatureCollectionArtifact({ features: roadFeatures }),
+            nodes: buildFeatureCollectionArtifact({ features: nodeFeatures }),
             webgl: this.cloneArtifactValue(this.roadSyntaxWebglPayload || {}),
             graph_model: params.graph_model,
             mode: params.mode,
             metric: params.metric,
           },
           summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
-        }
+        })
       }
       return null
     },

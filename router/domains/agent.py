@@ -1,11 +1,12 @@
 import json
+import logging
 from typing import List
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from modules.agent.runtime import process_agent_turn, stream_agent_turn
+from modules.agent.runtime import stream_main_agent_loop
 from modules.agent.schemas import (
     AgentContextAskRequest,
     AgentContextAskResponse,
@@ -29,7 +30,7 @@ from modules.agent.schemas import (
     AgentTurnRequest,
     AgentTurnResponse,
 )
-from modules.agent.context_ask_service import answer_context_ask
+from modules.agent.analysis_quick_answer_service import answer_analysis_quick_question
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload
 from modules.agent.prompt_registry import (
@@ -45,7 +46,7 @@ from modules.agent.session_service import (
     delete_agent_session,
     get_agent_session_detail,
     list_agent_sessions,
-    persist_agent_turn,
+    persist_streamed_main_agent_loop_response,
     update_agent_session_metadata,
     upsert_agent_session,
 )
@@ -54,6 +55,7 @@ from store.agent_session_repo import agent_session_repo
 from store.history_repo import history_repo
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _encode_sse(event: AgentTurnStreamEvent) -> str:
@@ -64,14 +66,8 @@ def _encode_summary_sse(event: AgentSummaryStreamEvent) -> str:
     return f"event: {event.type}\ndata: {json.dumps(event.payload, ensure_ascii=False)}\n\n"
 
 
-@router.post("/api/v1/analysis/agent/turn", response_model=AgentTurnResponse)
-async def run_agent_turn(payload: AgentTurnRequest):
-    response = await process_agent_turn(payload)
-    return await persist_agent_turn(payload, response, agent_session_repo)
-
-
-@router.post("/api/v1/analysis/agent/turn/stream")
-async def run_agent_turn_stream(request: Request, payload: AgentTurnRequest):
+@router.post("/api/v1/analysis/agent/main-loop/stream")
+async def run_agent_main_loop_stream(request: Request, payload: AgentTurnRequest):
     async def event_stream():
         bootstrap_events = [
             AgentTurnStreamEvent(
@@ -93,7 +89,7 @@ async def run_agent_turn_stream(request: Request, payload: AgentTurnRequest):
             if await request.is_disconnected():
                 return
             yield _encode_sse(bootstrap)
-        generator = stream_agent_turn(payload)
+        generator = stream_main_agent_loop(payload)
         try:
             async for event in generator:
                 if await request.is_disconnected():
@@ -101,7 +97,7 @@ async def run_agent_turn_stream(request: Request, payload: AgentTurnRequest):
                 outgoing = event
                 if event.type == "final":
                     response = AgentTurnResponse(**(event.payload or {}).get("response", {}))
-                    persisted = await persist_agent_turn(payload, response, agent_session_repo)
+                    persisted = await persist_streamed_main_agent_loop_response(payload, response, agent_session_repo, logger=logger)
                     outgoing = AgentTurnStreamEvent(
                         type="final",
                         payload={"response": persisted.model_dump(mode="json")},
@@ -134,7 +130,7 @@ async def run_agent_site_selection(payload: AgentSiteSelectionRequest):
 
 @router.post("/api/v1/analysis/agent/context-ask", response_model=AgentContextAskResponse)
 async def run_agent_context_ask(payload: AgentContextAskRequest):
-    return await answer_context_ask(payload)
+    return await answer_analysis_quick_question(payload)
 
 
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])

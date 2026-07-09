@@ -65,6 +65,7 @@ def _snapshot() -> AnalysisSnapshot:
             "population": {
                 "analysis_view": "age",
                 "age_distribution": [
+                    {"age_band": "20", "age_band_label": "20-24岁", "total": 8000},
                     {"age_band_label": "25-34岁", "total": 12000},
                     {"age_band_label": "35-44岁", "total": 9800},
                 ],
@@ -104,6 +105,12 @@ def test_read_tools_extract_structured_analysis_from_snapshot():
     assert road.result["regression_r2"] == 0.62
     assert road.result["evidence_ready"] is True
     assert population.result["top_age_band"] == "25-34岁"
+    assert population.result["top_age_band_population"] == 12000
+    assert population.result["top_age_band_ratio"] == round(12000 / 54326.544, 6)
+    assert len(population.result["age_distribution_ratios"]) == 3
+    assert population.result["age_distribution_ratios"][0]["age_band_label"] == "25-34岁"
+    assert population.result["age_distribution_ratios"][0]["ratio"] == round(12000 / 54326.544, 6)
+    assert any(item["field"] == "population.profile.age_distribution_ratios" for item in population.evidence)
     assert population.result["evidence_ready"] is True
     assert nightlight.result["core_hotspot_count"] == 4
     assert nightlight.result["economic_activity_intensity_level"] == "medium_high"

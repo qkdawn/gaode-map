@@ -2,38 +2,9 @@ import {
   asText,
   clampText,
   cloneArray,
-  cloneAgentSessionRecord,
   cloneObject,
-  consumeSseStream,
-  createAgentSessionRecord,
-  hasAgentMessageProcessContent,
-  normalizeAgentMessageProcess,
-  normalizeAgentPanelPreloadNotes,
-  normalizeAgentToolSummary,
-  sortAgentSessions,
 } from './normalizers.js'
-import {
-  buildAgentPlanChecklist,
-  buildAgentToolCallItems,
-  hasAgentExecutionTraceContent,
-  hasAgentPlanContent,
-  shouldShowAgentProcessLiveStatus,
-  shouldShowAgentProcessToggle,
-} from './derived.js'
-import {
-  buildAnalysisTaskConfirmation,
-  cloneAnalysisTaskConfirmation,
-  focusAnalysisTaskPanel,
-  getAnalysisTaskDefinition,
-  getAnalysisTaskDefinitions,
-  runAnalysisTask,
-} from './analysis-task-registry.js'
-import { buildAnalysisTaskParamBundle } from './analysis-task-params.js'
-import { createAgentPptPlanningTabMethods } from './ppt-planning-tabs.js'
-import {
-  normalizeAgentPptPlanningTab,
-  serializeAgentPptPlanningTab,
-} from './ppt-planning-tabs.js'
+import { postContextAsk } from './context-ask-request.js'
 
 export function createAgentContextAskUiMethods() {
   return {
@@ -140,25 +111,16 @@ export function createAgentContextAskUiMethods() {
       ]
       this.contextAskLoading = true
       try {
-        const response = await fetch('/api/v1/analysis/agent/context-ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            conversation_id: this.getActiveAgentSessionId ? this.getActiveAgentSessionId() : asText(this.activeAgentSessionId),
-            history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
-            question: text,
-            analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
-            target: {
-              ...target,
-              artifact_refs: cloneArray(target.artifactRefs),
-            },
-          }),
+        const data = await postContextAsk({
+          conversation_id: this.getActiveAgentSessionId ? this.getActiveAgentSessionId() : asText(this.activeAgentSessionId),
+          history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
+          question: text,
+          analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
+          target: {
+            ...target,
+            artifact_refs: cloneArray(target.artifactRefs),
+          },
         })
-        let data = {}
-        try { data = await response.json() } catch (_) { data = {} }
-        if (!response.ok || asText(data.status) === 'failed') {
-          throw new Error(asText(data.error || data.detail) || `context_ask_failed_${response.status}`)
-        }
         const assistant = {
           role: 'assistant',
           content: asText(data.answer) || this.buildContextAskFallbackAnswer(text, target),

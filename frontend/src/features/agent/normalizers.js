@@ -1,31 +1,10 @@
-function asText(value, fallback = '') {
-  const text = String(value ?? fallback ?? '').trim()
-  return text
-}
-
-function clampText(value, maxLength, fallback = '') {
-  const text = asText(value, fallback)
-  if (!maxLength || maxLength <= 0) return text
-  return text.slice(0, maxLength)
-}
-
-function cloneArray(items) {
-  return Array.isArray(items) ? items.map((item) => (item && typeof item === 'object' ? { ...item } : item)) : []
-}
-
-function cloneObject(value, fallback = {}) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : { ...fallback }
-}
-
-function cloneRecordMap(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.keys(value).reduce((result, key) => {
-    const nextKey = asText(key)
-    if (!nextKey) return result
-    result[nextKey] = value[key]
-    return result
-  }, {})
-}
+import {
+  asText,
+  clampText,
+  cloneArray,
+  cloneObject,
+  cloneRecordMap,
+} from '../shared/normalizers.js'
 
 function normalizeAgentPanelKind(value) {
   return asText(value).toLowerCase()
@@ -48,6 +27,7 @@ function normalizeAgentThinkingItem(seed = {}) {
     title: asText(seed.title) || '处理中',
     detail: asText(seed.detail),
     displayText: asText(seed.displayText || seed.display_text),
+    resultSummary: asText(seed.resultSummary || seed.result_summary),
     items: cloneArray(seed.items).map((item) => asText(item)).filter(Boolean),
     meta: cloneObject(seed.meta),
     state: asText(seed.state || 'pending') || 'pending',
@@ -103,6 +83,7 @@ function normalizeAgentTraceThinkingItem(seed = {}) {
     title: `${titleStatus} ${toolName}`,
     detail: asText(seed.message || seed.reason),
     displayText: asText(seed.displayText || seed.display_text),
+    resultSummary,
     items,
     meta: {
       toolName,

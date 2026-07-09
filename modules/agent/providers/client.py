@@ -37,6 +37,17 @@ class LLMProviderClient(Protocol):
         temperature: float = 0.2,
     ) -> str: ...
 
+    async def chat_completion(
+        self,
+        *,
+        request_body: Dict[str, Any],
+        emit=None,
+        phase: str = "",
+        title: str = "",
+        reasoning_id: str = "",
+        enable_thinking: bool = True,
+    ) -> Dict[str, Any]: ...
+
     async def health(self) -> bool: ...
 
 
@@ -100,23 +111,47 @@ class OpenAICompatibleProviderClient:
 
     async def chat_text(self, *, messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
         from .chat_parser import extract_chat_completion_text
-        from .llm_provider import _stream_chat_completion
 
-        base_url = str(settings.ai_base_url or "").rstrip("/")
-        api_key = str(settings.ai_api_key or "")
-        model = str(settings.ai_model or "").strip()
-        if not (base_url and api_key and model):
-            raise ValueError("llm_provider_not_configured")
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         body: Dict[str, Any] = {
-            "model": model,
+            "model": str(settings.ai_model or "").strip(),
             "messages": messages,
             "temperature": float(temperature),
             "stream": False,
         }
-        async with httpx.AsyncClient(timeout=float(settings.ai_timeout_s or 60)) as client:
-            payload = await _stream_chat_completion(client=client, base_url=base_url, headers=headers, request_body=body)
+        payload = await self.chat_completion(request_body=body)
         return extract_chat_completion_text(payload)
+
+    async def chat_completion(
+        self,
+        *,
+        request_body: Dict[str, Any],
+        emit=None,
+        phase: str = "",
+        title: str = "",
+        reasoning_id: str = "",
+        enable_thinking: bool = True,
+    ) -> Dict[str, Any]:
+        from .llm_provider import _resolve_httpx_timeout, _stream_chat_completion
+
+        base_url = str(settings.ai_base_url or "").rstrip("/")
+        api_key = str(settings.ai_api_key or "")
+        model = str((request_body or {}).get("model") or settings.ai_model or "").strip()
+        if not (base_url and api_key and model):
+            raise ValueError("llm_provider_not_configured")
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        body = {**dict(request_body or {}), "model": model}
+        async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(None)) as client:
+            return await _stream_chat_completion(
+                client=client,
+                base_url=base_url,
+                headers=headers,
+                request_body=body,
+                emit=emit,
+                phase=phase,
+                title=title,
+                reasoning_id=reasoning_id,
+                enable_thinking=enable_thinking,
+            )
 
     async def health(self) -> bool:
         base_url = str(settings.ai_base_url or "").rstrip("/")
@@ -139,3 +174,25 @@ def get_llm_provider_client(provider: Optional[str] = None) -> Optional[LLMProvi
     if spec.name in {"deepseek", "openai_compatible"}:
         return OpenAICompatibleProviderClient(spec)
     return None
+
+
+async def invoke_json_role(
+    *,
+    system_prompt: str,
+    user_payload: Dict[str, Any],
+    emit=None,
+    phase: str = "",
+    title: str = "",
+    reasoning_id: str = "",
+) -> Dict[str, Any]:
+    client = get_llm_provider_client()
+    if client is None:
+        raise ValueError("llm_provider_not_configured")
+    return await client.chat_json(
+        system_prompt=system_prompt,
+        user_payload=user_payload,
+        emit=emit,
+        phase=phase,
+        title=title,
+        reasoning_id=reasoning_id,
+    )

@@ -10,6 +10,7 @@ from modules.ppt_planning.data_tools import (
     PptDataInvalidIntentPlan,
     PptDataSourceNotFound,
     create_ppt_data_package,
+    delete_ppt_persisted_source,
     list_ppt_sources,
     query_nearby_poi_points,
     query_poi_points,
@@ -740,6 +741,10 @@ def test_create_ppt_carrier_package_detects_block_loop_and_layers(monkeypatch):
     assert upserts[0]["artifact_type"] == "ppt_data_package"
     assert upserts[0]["params"]["package_version"] == "road-carrier-evidence-v2"
     assert upserts[0]["payload"]["source"]["meta"]["package"]["carriers"]
+    manifest_upsert = next(item for item in upserts if item["artifact_type"] == "source_index_manifest")
+    assert manifest_upsert["history_id"] == "history-1"
+    assert manifest_upsert["params"] == {"source_id": response.source.id}
+    assert manifest_upsert["payload"]["manifest"]["native_index_kind"] == "spatial_package_index"
 
 
 def test_create_ppt_carrier_package_limits_representative_pois_per_carrier(monkeypatch):
@@ -762,6 +767,23 @@ def test_create_ppt_carrier_package_limits_representative_pois_per_carrier(monke
     assert len(carrier["representative_pois"]) == 3
     assert len([item for item in package["items"] if item["carrier_id"] == carrier["carrier_id"]]) <= 3
     assert package["carrier_summary"]["carrier_count"] == len(package["carriers"])
+
+
+def test_delete_ppt_persisted_source_deletes_manifest_artifact(monkeypatch):
+    captured = {}
+
+    def fake_delete(area_id, *, source_id, artifact_types=None):
+        captured.update({"area_id": area_id, "source_id": source_id, "artifact_types": artifact_types})
+        return 2
+
+    monkeypatch.setattr("modules.ppt_planning.data_tools.analysis_artifact_repo.delete_by_source_id", fake_delete)
+
+    result = delete_ppt_persisted_source("history-1", "package:poi:test")
+
+    assert result["deleted"] == 2
+    assert captured["area_id"] == "history-1"
+    assert captured["source_id"] == "package:poi:test"
+    assert "source_index_manifest" in captured["artifact_types"]
 
 
 def test_list_ppt_sources_restores_package_artifacts(monkeypatch):
@@ -818,6 +840,8 @@ def test_list_ppt_sources_restores_package_artifacts(monkeypatch):
     assert restored.evidence_count == 2
     assert restored.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "package"
     assert restored.meta["aiPayload"]["evidence_nodes"][0]["id"] == "package:poi-road-carriers:test:package:summary"
+    assert restored.meta["aiPayload"]["index_manifest"]["source_kind"] == "package"
+    assert restored.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "spatial_package_index"
     assert "evidence" not in restored.meta["aiPayload"]
 
 
@@ -1022,4 +1046,6 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
     assert source.meta["aiPayload"]["sourceKind"] == "document"
     assert source.meta["aiPayload"]["evidence_nodes"][0]["id"] == "document:doc-1:pageindex:n1"
     assert source.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "document"
+    assert source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "pageindex"
+    assert source.meta["aiPayload"]["index_manifest"]["retrieval_modes"] == ["structure", "keyword"]
     assert "evidence" not in source.meta["aiPayload"]

@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 from .analysis_extractors import is_target_supply_gap_ready
 from .intent_signals import mentions_nightlight, mentions_population, mentions_road, mentions_summary, mentions_supply
 from .llm_digest import tool_results_llm_digest
+from .reasoning_rubric import FINAL_SYNTHESIS_REASONING_INSTRUCTIONS, reasoning_rubric_payload
 from .synthesis_evidence import build_analysis_evidence as _build_analysis_evidence_from_module
 from .synthesis_metrics import build_summary_metrics as _build_summary_metrics_from_module
 from .schemas import AgentEvidenceItem, AgentTurnOutput, AnalysisSnapshot, AuditResult, ToolResult
@@ -70,18 +71,20 @@ def _answer_depth_guidance(question: str) -> Dict[str, Any]:
     is_full = any(token in text for token in full_tokens)
     target_depth = "concise" if is_concise and not is_full else ("full" if is_full else "balanced")
     if target_depth == "full":
-        guidance = "高价值问题要充分展开：先给总判断，再解释空间矛盾、关键证据、边界和下一步判断标准；商业总结默认覆盖 POI/H3/路网/人口/夜光五类证据。"
-        suggested_shape = "一个总判断 + 至少 5 个展开段 + 一句话结论"
+        guidance = "高价值问题要充分展开：围绕用户问题选择自然结构，说明空间关系、主要矛盾或机会、证据支撑、替代解释、边界和后续验证；商业总结应按证据价值覆盖 POI/H3/路网/人口/夜光，不要求固定标题或固定段数；生成结论前必须按 Evidence-Aware Reasoning 五步法检查 Observation、Mechanism、Alternative、Evidence Quality、Implication。"
+        suggested_shape = "内容驱动的自然段或小标题，覆盖必要证据、判断边界和验证动作"
     elif target_depth == "concise":
-        guidance = "简单问题保持短答：只回答关键结论、必要证据和解释边界，不扩展成报告。"
+        guidance = "简单问题保持短答：只回答关键结论、必要证据和解释边界，不扩展成报告，也不强制展开五步法。"
         suggested_shape = "一个直接结论 + 1 到 2 个必要说明"
     else:
-        guidance = "按证据复杂度自然展开，避免过短的指标转述，也避免无证据长篇。"
-        suggested_shape = "一个总判断 + 若干自然段"
+        guidance = "按证据复杂度自然展开，避免过短的指标转述，也避免无证据长篇；涉及判断时检查替代解释和证据质量。"
+        suggested_shape = "按问题自然组织若干段"
     return {
         "target_depth": target_depth,
         "reason": guidance,
         "suggested_shape": suggested_shape,
+        "reasoning_skill": "evidence_aware_reasoning" if target_depth != "concise" else "optional_for_concise",
+        "reasoning_instructions": FINAL_SYNTHESIS_REASONING_INSTRUCTIONS if target_depth != "concise" else [],
         "full_depth_triggers": ["总结", "商业特征", "下一步", "行动方案", "选址/补位", "空间结构", "规划式分析"],
         "concise_triggers": ["单项指标", "定义", "状态", "数量", "是否完成", "某个数字含义"],
     }
@@ -384,6 +387,39 @@ def _spatial_narrative_guidance() -> Dict[str, Any]:
     }
 
 
+def _business_analyst_skeleton_block(artifacts: Dict[str, object]) -> Dict[str, Any]:
+    context = artifacts.get("business_analyst_skeleton") if isinstance(artifacts, dict) else {}
+    if not isinstance(context, dict) or not context:
+        return {"status": "skipped", "reason": "no_business_analyst_skeleton"}
+    selected_skill = context.get("selected_skill") if isinstance(context.get("selected_skill"), dict) else {}
+    model_graph = context.get("model_graph") if isinstance(context.get("model_graph"), dict) else {}
+    return {
+        "status": str(context.get("status") or "skipped"),
+        "reason": str(context.get("reason") or ""),
+        "selected_skill": {
+            "skill_id": str(selected_skill.get("skill_id") or ""),
+            "title": str(selected_skill.get("title") or ""),
+            "purpose": str(selected_skill.get("purpose") or ""),
+            "uses_model_graph": str(selected_skill.get("uses_model_graph") or ""),
+            "agent_autonomy": selected_skill.get("agent_autonomy") if isinstance(selected_skill.get("agent_autonomy"), dict) else {},
+        },
+        "recommended_path": list(context.get("recommended_path") or [])[:8],
+        "path_relations": list(context.get("path_relations") or [])[:8],
+        "optional_branches": context.get("optional_branches") if isinstance(context.get("optional_branches"), dict) else {},
+        "model_tool_map": context.get("model_tool_map") if isinstance(context.get("model_tool_map"), dict) else {},
+        "skip_conditions": context.get("skip_conditions") if isinstance(context.get("skip_conditions"), dict) else {},
+        "guardrails": list(context.get("guardrails") or [])[:12],
+        "missing_evidence_defaults": list(context.get("missing_evidence_defaults") or [])[:8],
+        "answer_guidance": list(context.get("answer_guidance") or [])[:8],
+        "model_graph": {
+            "graph_id": str(model_graph.get("graph_id") or ""),
+            "entry_nodes": list(model_graph.get("entry_nodes") or []),
+            "target_nodes": list(model_graph.get("target_nodes") or []),
+            "nodes": model_graph.get("nodes") if isinstance(model_graph.get("nodes"), dict) else {},
+        },
+    }
+
+
 def build_answer_evidence_payload(
     *,
     question: str,
@@ -401,6 +437,7 @@ def build_answer_evidence_payload(
     spatial_structure = _spatial_structure_block(metrics)
     target_supply_gap = _target_supply_gap_block(metrics)
     key_evidence = _select_key_evidence(evidence, question=question)
+    business_analyst_skeleton = _business_analyst_skeleton_block(artifacts)
     base_payload = {
         "question": question,
         "tool_chain": [result.tool_name for result in tool_results if result.status == "success"],
@@ -422,8 +459,10 @@ def build_answer_evidence_payload(
             "artifact_key": "frontend_map_search_context" if (artifacts or {}).get("frontend_map_search_context") else "",
             "evidence_rule": "具体地名、H3 格子、路网线段、人口/夜光 cell 只有通过 search_analysis_context 命中并 read_analysis_evidence_node 读取 EvidenceNode 后，才能在最终回答中引用。",
         },
+        "business_analyst_skeleton": business_analyst_skeleton,
         "spatial_narrative_guidance": _spatial_narrative_guidance(),
         "answer_depth_guidance": _answer_depth_guidance(question),
+        "reasoning_rubric": reasoning_rubric_payload(),
     }
     return {
         **base_payload,

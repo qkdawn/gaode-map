@@ -6,11 +6,12 @@ from typing import Any, Dict, List
 
 from modules.spatial_factor_engine import build_subcategory_spatial_trends
 
-from .providers.llm_provider import _invoke_json_role, is_llm_enabled
+from .providers.client import invoke_json_role as _invoke_json_role, is_llm_enabled
 from .prompt_registry import build_prompt_snapshot, get_prompt_config
 
 
 logger = logging.getLogger(__name__)
+
 
 _REQUIRED_FIELDS = ("headline", "trend_summary", "hotspot_migration", "risk_or_opportunity")
 _POI_ITERATION_PROMPT_BUDGET_BYTES = 300_000
