@@ -43,6 +43,8 @@
 
 ## 阶段状态
 
+主 Agent 流式入口是 `/api/v1/analysis/agent/main-loop/stream`。快速上下文问答入口是 `/api/v1/analysis/agent/context-ask`，它不属于主工具循环。
+
 当前主链路实际使用的阶段状态如下：
 
 | 状态 | 含义 |
@@ -60,7 +62,7 @@
 
 - 主 Agent 不再接收 `thinking_mode` 字段；执行深度由主链路内部的工具循环、证据缺口和风险治理共同决定
 - 快速上下文问答是独立的 `context-ask` 链路，只消费预处理好的目标、来源和当前范围摘要，不进入工具循环
-- answered 最终主契约只有自然回答 `answer`
+- answered 最终主契约只有自然回答 `answer`；前端 Markdown renderer 支持标题、列表、引用、行内粗体、行内代码和 GFM 风格表格
 
 ## 来源证据如何进入上下文
 

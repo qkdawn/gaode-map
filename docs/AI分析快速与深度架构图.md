@@ -39,7 +39,7 @@
 </style>
 <div class="ai-arch">
 <div class="ai-title">当前 AI 分析双链路总图</div>
-<div class="ai-subtitle">同一个分析工作台输入，按用户选择和前端状态分流：非深度追问进入快速问答链；深度模式进入主 Agent 流式循环。两条链都可读取当前范围和已选来源，但循环深度、工具权限、证据整理方式不同。</div>
+<div class="ai-subtitle">同一个分析工作台输入，按用户选择分流：快速追问进入 context-ask；深度模式进入主 Agent 流式循环。快速模式直接传递前后端整理好的轻量上下文，不做模型工具循环；深度模式始终开放受控工具循环，已选来源只作为 EvidenceNode 检索源。</div>
 <div class="ai-shared">
 <div class="ai-shared-title">共享输入层：来自 /analysis 工作台</div>
 <div class="ai-grid">
@@ -53,7 +53,7 @@
 <div class="ai-grid-2">
 <div class="ai-col quick">
 <div class="ai-col-title">快速模式 Quick Analysis</div>
-<div class="ai-col-desc">目标是快速回答“这个结果/来源说明什么、当前范围有什么、能否简单比较”。它优先做受限工具小循环；不适合长链路规划和跨来源深挖。</div>
+<div class="ai-col-desc">目标是快速回答“这个结果/来源说明什么、当前范围有什么、能否简单比较”。它只做确定性预处理和一次 LLM JSON 调用；不适合长链路规划和跨来源深挖。</div>
 <div class="ai-stage">
 <div class="ai-stage-title">1 Frontend 分流</div>
 <div class="ai-box highlight"><strong>submitAgentAnalysisQuickAsk</strong><small>frontend/src/features/agent/analysis-ask.js</small><small>当处于 analysis workspace 且不是 deep mode 时触发。</small></div>
@@ -61,31 +61,30 @@
 <div class="ai-flow">↓</div>
 <div class="ai-stage">
 <div class="ai-stage-title">2 API 入口</div>
-<div class="ai-box"><strong>POST /api/v1/analysis/agent/context-ask</strong><small>router/domains/agent.py</small><small>统一进入 `answer_analysis_quick_question(payload)`。</small></div>
+<div class="ai-box"><strong>POST /api/v1/analysis/agent/context-ask</strong><small>router/domains/agent.py</small><small>统一进入 `answer_context_ask(payload)`。</small></div>
 </div>
 <div class="ai-flow">↓</div>
 <div class="ai-stage">
-<div class="ai-stage-title">3 快速问答编排</div>
-<div class="ai-box"><strong>answer_analysis_quick_question</strong><small>modules/agent/analysis_quick_answer_service.py</small><small>先尝试来源工具循环；不适用或失败时回退到紧凑上下文问答。</small></div>
+<div class="ai-stage-title">3 Direct Context Ask</div>
+<div class="ai-box"><strong>answer_context_ask</strong><small>modules/agent/context_ask_service.py</small><small>校验问题、准备 target / snapshot / selected sources 的紧凑上下文。</small></div>
 </div>
 <div class="ai-flow">↓</div>
 <div class="ai-stage">
-<div class="ai-stage-title">4 Source QA Mini Loop</div>
-<div class="ai-box highlight"><strong>run_source_qa_loop</strong><small>modules/agent/source_qa_loop.py</small><small>最多 4 轮、8 次工具调用。只围绕已选来源和当前范围数据补证据。</small></div>
+<div class="ai-stage-title">4 轻量上下文包</div>
+<div class="ai-box highlight"><strong>_build_user_payload</strong><small>modules/agent/context_ask_service.py</small><small>把问题、target、analysis snapshot、selected sources summary 和 scoped dataset context 合成一次性输入包。</small></div>
 <div class="ai-tools">
-<div class="ai-pill">list_selected_sources</div>
-<div class="ai-pill">search_selected_source_evidence</div>
-<div class="ai-pill">read_selected_source_evidence_node</div>
-<div class="ai-pill">list_scope_datasets</div>
-<div class="ai-pill">query_scope_dataset</div>
-<div class="ai-pill">aggregate_scope_dataset</div>
-<div class="ai-pill">read_scope_record</div>
+<div class="ai-pill">_compact_target</div>
+<div class="ai-pill">_compact_snapshot</div>
+<div class="ai-pill">_compact_selected_sources</div>
+<div class="ai-pill">build_scoped_dataset_context</div>
+<div class="ai-pill">compact_value</div>
+<div class="ai-pill">compact_evidence_nodes</div>
 </div>
 </div>
-<div class="ai-flow">↓ 不适用 / 失败时</div>
+<div class="ai-flow">↓</div>
 <div class="ai-stage">
-<div class="ai-stage-title">5 Fallback Compact Ask</div>
-<div class="ai-box warn"><strong>answer_context_ask</strong><small>modules/agent/context_ask_service.py</small><small>把 target、snapshot、selected sources、scoped dataset context 压成紧凑上下文，再调用 LLM JSON 输出。</small></div>
+<div class="ai-stage-title">5 一次 LLM JSON 调用</div>
+<div class="ai-box warn"><strong>client.chat_json</strong><small>phase = context_ask</small><small>模型只看到预处理包和快速模式 prompt，不看到工具 schema，也不会进入 ReAct 循环。</small></div>
 </div>
 <div class="ai-flow">↓</div>
 <div class="ai-stage">
@@ -141,7 +140,7 @@
 <div class="ai-flow">↓</div>
 <div class="ai-stage">
 <div class="ai-stage-title">7 Finalizer LLM</div>
-<div class="ai-box output"><strong>generate_answer_output_with_llm</strong><small>modules/agent/providers/llm_provider.py</small><small>输入 messages、context_digest、answer_evidence_payload、thinking_mode，生成最终自然语言回答。</small></div>
+<div class="ai-box output"><strong>generate_answer_output_with_llm</strong><small>modules/agent/providers/llm_provider.py</small><small>输入 messages、context_digest、answer_evidence_payload 和可选视觉快照，生成最终自然语言回答。</small></div>
 </div>
 <div class="ai-flow">↓</div>
 <div class="ai-stage">
@@ -159,11 +158,11 @@
 | 主要用途 | 快速解释已选来源、当前范围、已有分析结果 | 多轮补证据、规划分析路径、综合判断和生成完整结论 |
 | 前端触发 | analysis workspace 非 deep mode 的 quick ask | composer mode = `deep` |
 | API 入口 | `POST /api/v1/analysis/agent/context-ask` | `POST /api/v1/analysis/agent/main-loop/stream` |
-| 后端入口 | `answer_analysis_quick_question` | `stream_main_agent_loop` / `_run_main_agent_loop` |
-| 上下文形态 | target、snapshot、selected sources、scope datasets 的紧凑上下文 | `build_context_bundle` 形成完整 context/memory，并追加地图检索、已选来源、可视化快照 |
-| 工具循环 | `run_source_qa_loop`，最多 4 轮 / 8 次工具调用 | `run_langgraph_react_loop`，preflight / think / act_tools / assess / finalize |
-| 工具范围 | 已选来源工具 + 当前范围数据工具 | 当前范围、分析结果、ESRI 规划、已选来源、分析上下文、报告上下文、范围数据工具 |
-| 风险控制 | 来源边界、当前范围边界、fallback 到紧凑问答 | gate 澄清/阻断、工具 registry、执行审计、finalizer evidence pack |
+| 后端入口 | `answer_context_ask` | `stream_main_agent_loop` / `_run_main_agent_loop` |
+| 上下文形态 | target、snapshot、selected sources、scope datasets 的一次性预处理包 | `build_context_bundle` 形成完整 context/memory，并追加地图检索、已选来源、可视化快照 |
+| 工具循环 | 无；只做确定性 scoped dataset 预处理 | `run_langgraph_react_loop`，preflight / think / act_tools / assess / finalize |
+| 工具范围 | 不向模型暴露工具 schema；后端可预聚合当前范围数据 | 当前范围、分析结果、ESRI 规划、已选来源、分析上下文、报告上下文、范围数据工具 |
+| 风险控制 | 来源边界、当前范围边界、紧凑上下文和 prompt 约束 | gate 澄清/阻断、工具 registry、执行审计、finalizer evidence pack |
 | 输出形态 | `answer`、`evidence`、`citations`、`warnings` | 流式回答、诊断、工具轨迹、证据包、审计结果、会话沉淀 |
 | 成本和延迟 | 低成本、低延迟，适合随手问 | 成本和延迟更高，适合正式分析和复盘 |
 
@@ -186,9 +185,8 @@
 |---|---|---|
 | 快速前端提交 | `frontend/src/features/agent/analysis-ask.js` | `submitAgentAnalysisQuickAsk` 构造快速问答请求 |
 | 快速 API | `router/domains/agent.py` | `/api/v1/analysis/agent/context-ask` |
-| 快速编排 | `modules/agent/analysis_quick_answer_service.py` | `answer_analysis_quick_question` |
-| 快速来源循环 | `modules/agent/source_qa_loop.py` | `run_source_qa_loop` 和受限工具调用 |
-| 快速 fallback | `modules/agent/context_ask_service.py` | `answer_context_ask` 紧凑上下文问答 |
+| 快速编排 | `modules/agent/context_ask_service.py` | `answer_context_ask` 构造预处理包并一次调用 LLM |
+| 快速范围数据预处理 | `modules/agent/context_ask_datasets.py` | `build_scoped_dataset_context` 读取、聚合和压缩当前范围数据 |
 | 深度前端请求 | `frontend/src/features/agent/main-loop-request.js` | 主 Agent 流式请求地址 |
 | 深度 API | `router/domains/agent.py` | `/api/v1/analysis/agent/main-loop/stream` |
 | 深度编排 | `modules/agent/runtime.py` | context bundle、gate、tool loop、audit、finalizer 总编排 |
@@ -199,7 +197,7 @@
 
 ## 读图口径
 
-- 快速模式是“受限 RAG 问答链”：优先在已选来源和当前范围数据内补证据，失败才回退到紧凑上下文 LLM 回答。
-- 深度模式是“主 Agent 工具循环链”：先组装完整上下文并过 gate，再由模型在受控工具 registry 中选择工具，多轮执行后做审计和最终综合。
-- 两者都不是让模型直接读所有数据；模型看到的是上下文摘要、工具 schema、工具 observation 和最终证据包。
+- 快速模式是“直接上下文问答链”：后端先把已选来源、分析快照和当前范围数据压成预处理包，再一次性传给 LLM。
+- 深度模式是“主 Agent 工具循环链”：先组装完整上下文并过 gate，再由模型在受控工具 registry 中选择工具，多轮执行后做审计和最终综合。带已选来源也不会走快速直答短路。
+- 两者都不是让模型直接读所有数据；快速模式模型只看到预处理包，深度模式模型看到受控工具 schema、工具 observation 和最终证据包。
 - 快速模式强调低延迟和边界清楚；深度模式强调证据完整度、执行轨迹和最终结论质量。

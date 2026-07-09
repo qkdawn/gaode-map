@@ -208,8 +208,8 @@ V1 明确不做以下内容：
 当前主链路不再维护独立 Planner 回退层。运行时只允许三类明确收敛：
 
 - 执行前发现缺输入，直接进入澄清结果
-- 预处理来源直答失败，直接返回失败，不进入完整工具循环
-- ReAct 工具循环失败、风险确认或完成后，分别进入失败、确认或最终综合
+- 快速 `context-ask` 失败，直接返回快速问答失败，不回退到主 Agent 工具循环
+- 主 Agent ReAct 工具循环失败、风险确认或完成后，分别进入失败、确认或最终综合
 
 审计阶段只负责标注证据缺口和解释边界；是否补证据应由同一轮 ReAct 工具窗口完成，不恢复旧式 replan 循环。
 
@@ -406,7 +406,7 @@ V1 不引入独立数据库记忆系统，而是实现轻量工作记忆。
 - `context_builder.py`
   - 从 analysis 快照生成 `facts/analysis/limits/research_notes`
 - `direct_context.py`
-  - 处理前端已预处理来源的直接回答路径，跳过 gate 和工具循环
+  - 保留快速上下文问答相关 helper；主 Agent 深度入口不再调用它做已选来源直答短路
 - `tools.py`
   - 汇总主 Agent 可见工具注册表
 - `tool_definitions/`
@@ -512,7 +512,7 @@ V1 不引入独立数据库记忆系统，而是实现轻量工作记忆。
 
 ### 11.1 新增接口
 
-- `POST /api/v1/analysis/agent/turn`
+- `POST /api/v1/analysis/agent/main-loop/stream`
 
 ### 11.2 请求体
 

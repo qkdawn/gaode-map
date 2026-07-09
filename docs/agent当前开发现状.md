@@ -33,7 +33,7 @@
 当前的核心特征有四点：
 
 1. 主链路只有一条  
-   用户问题统一进入 `turn / turn/stream` 主入口，不再维护独立实验链路。
+   用户问题统一进入 `main-loop/stream` 主入口，不再维护独立实验链路。
 
 2. 中段是受控工具循环  
    系统会先判断问题是否清晰、是否需要澄清，再按需进入工具循环，证据够了就停，不再默认做长链条规划。
@@ -71,10 +71,10 @@
 
 ### 3.1 入口阶段
 
-主 Agent 分析入口有两个：
+Agent 对话相关入口有两个：
 
-- `/api/v1/analysis/agent/turn`
-- `/api/v1/analysis/agent/turn/stream`
+- `/api/v1/analysis/agent/main-loop/stream`
+- `/api/v1/analysis/agent/context-ask`
 
 输入的核心是：
 
@@ -86,7 +86,7 @@
 当前不再通过 `thinking_mode` 字段控制执行深度。前端根据用户入口选择链路：
 
 - 快速上下文问答走 `/api/v1/analysis/agent/context-ask`，只把前端整理好的目标、已选来源、EvidenceNode 和范围摘要传给模型
-- 主 Agent 分析走 `/api/v1/analysis/agent/turn/stream`，始终进入门卫、工具循环、证据检查和最终回答
+- 主 Agent 分析走 `/api/v1/analysis/agent/main-loop/stream`，始终进入门卫、工具循环、证据检查和最终回答
 
 两条链路最终都回到同一个目标：继续回答用户问题。快速链路不进入工具循环；主 Agent 链路即使带了已选来源，也只把来源作为可检索 EvidenceNode，不做预处理直答短路。
 
@@ -146,10 +146,11 @@
 
 当前 Agent 对外主契约非常收束：
 
-- 主请求：`/api/v1/analysis/agent/turn`
-- 流式请求：`/api/v1/analysis/agent/turn/stream`
+- 主流式请求：`/api/v1/analysis/agent/main-loop/stream`
 - answered 主输出：`output.answer`
 - 快速上下文问答：`/api/v1/analysis/agent/context-ask`
+
+`output.answer` 使用 Markdown 风格中文文本。前端当前支持标题、列表、引用、行内粗体、行内代码和 GFM 风格表格；表格会渲染为真实 `<table>`，而不是按普通段落显示管道符。
 
 非 answered 状态只保留两类产品语义：
 
