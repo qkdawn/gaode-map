@@ -7,6 +7,7 @@ from modules.evidence_index.adapters.base import EvidenceSourceAdapter
 from modules.evidence_index.manifests import manifest_from_source
 from modules.evidence_index.schemas import EvidenceIndexRecord, EvidenceSearchQuery, SourceIndexManifest
 from modules.evidence_retrieval.adapters import evidence_node_from_node_payload
+from modules.evidence_retrieval.adapters import evidence_node_payloads_from_source
 from modules.evidence_retrieval.schemas import EvidenceNode, SourceRecord
 
 
@@ -71,19 +72,9 @@ class PackageEvidenceAdapter(EvidenceSourceAdapter):
         return None
 
     def _nodes(self) -> List[EvidenceNode]:
-        meta = self._source.meta if isinstance(self._source.meta, dict) else {}
-        ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
-        ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
-        explicit_nodes = (
-            ai_payload.get("evidence_nodes")
-            if isinstance(ai_payload.get("evidence_nodes"), list)
-            else ai_payload.get("evidenceNodes")
-            if isinstance(ai_payload.get("evidenceNodes"), list)
-            else []
-        )
         return [
             node
-            for index, item in enumerate(explicit_nodes, start=1)
+            for index, item in enumerate(evidence_node_payloads_from_source(self._source), start=1)
             for node in [evidence_node_from_node_payload("", self._source, item, index=index)]
             if node is not None and node.source_type == "package"
         ]

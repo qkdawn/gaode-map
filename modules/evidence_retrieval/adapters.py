@@ -30,23 +30,21 @@ def canonical_source_kind(raw_kind: Any = "", source_id: Any = "") -> SourceKind
 
 
 def evidence_nodes_from_source(question: str, source: SourceRecord) -> List[EvidenceNode]:
-    meta = source.meta if isinstance(source.meta, dict) else {}
-    ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
-    ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
-    explicit_nodes = (
-        ai_payload.get("evidence_nodes")
-        if isinstance(ai_payload.get("evidence_nodes"), list)
-        else ai_payload.get("evidenceNodes")
-        if isinstance(ai_payload.get("evidenceNodes"), list)
-        else []
-    )
     nodes = [
         node
-        for index, item in enumerate(explicit_nodes, start=1)
+        for index, item in enumerate(evidence_node_payloads_from_source(source), start=1)
         for node in [evidence_node_from_node_payload(question, source, item, index=index)]
         if node is not None
     ]
     return nodes
+
+
+def evidence_node_payloads_from_source(source: SourceRecord) -> List[Any]:
+    meta = source.meta if isinstance(source.meta, dict) else {}
+    ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
+    ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
+    nodes = ai_payload.get("evidence_nodes")
+    return list(nodes) if isinstance(nodes, list) else []
 
 
 def evidence_node_from_node_payload(question: str, source: SourceRecord, item: Any, *, index: int = 1) -> EvidenceNode | None:

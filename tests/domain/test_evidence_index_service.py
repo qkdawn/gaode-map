@@ -103,6 +103,38 @@ def test_evidence_index_service_reads_payload_and_pageindex_nodes():
     assert {manifest.native_index_kind for manifest in manifests} == {"pageindex", "payload_index"}
 
 
+def test_evidence_index_service_ignores_legacy_evidence_nodes_alias():
+    source = SourceRecord.model_validate(
+        {
+            "id": "web:area-legacy",
+            "title": "旧网页来源",
+            "source_kind": "web",
+            "status": "ready",
+            "meta": {
+                "aiPayload": {
+                    "evidenceNodes": [
+                        {
+                            "id": "web:area-legacy:node:1",
+                            "sourceId": "web:area-legacy",
+                            "sourceType": "web",
+                            "title": "旧节点",
+                            "content": "旧 camel EvidenceNode 不应再进入索引。",
+                        }
+                    ]
+                }
+            },
+        }
+    )
+    service = EvidenceIndexService()
+    query = EvidenceSearchQuery(question="旧节点", source_ids=["web:area-legacy"], sources=[source])
+
+    response = asyncio.run(service.search(query))
+    node = asyncio.run(service.read("web:area-legacy:node:1", query))
+
+    assert response.nodes == []
+    assert node is None
+
+
 def test_evidence_index_service_uses_declared_source_manifest():
     service = EvidenceIndexService(
         get_pageindex_document_structure=lambda _document_id: (
