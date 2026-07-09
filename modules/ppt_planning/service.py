@@ -295,7 +295,7 @@ def _compact_source_for_grouping(source: PptSource) -> Dict[str, Any]:
         "title": source.title,
         "status": source.status,
         "label": _clean_text(meta.get("label")),
-        "source_kind": _clean_text(meta.get("sourceKind")),
+        "source_kind": _clean_text(source.source_kind),
         "task_key": _clean_text(meta.get("taskKey")),
         "package_summary": _clean_text(package.get("summary"))[:300],
         "package_mode": _clean_text(package.get("package_mode")),

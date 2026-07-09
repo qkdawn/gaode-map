@@ -2049,14 +2049,16 @@ def test_ppt_metric_context_ignores_legacy_visual_and_gap_aliases():
 
 def test_classify_ppt_source_groups_returns_normalized_groups(monkeypatch):
     monkeypatch.setattr("modules.ppt_planning.service.is_llm_enabled", lambda: True)
+    seen_payload = {}
 
     async def fake_invoke(**kwargs):
+        seen_payload.update(kwargs.get("user_payload") or {})
         return {
             "groups": [
                 {
                     "id": "group:vitality",
                     "title": "城市活力证据",
-                    "source_ids": ["current:dataset:poi", "current:unknown", "current:dataset:poi"],
+                    "source_ids": ["package:poi", "current:unknown", "package:poi"],
                     "meta": {"reason": "POI 用于解释活力。"},
                 }
             ]
@@ -2066,13 +2068,14 @@ def test_classify_ppt_source_groups_returns_normalized_groups(monkeypatch):
 
     response = asyncio.run(classify_ppt_source_groups(PptSourceGroupClassifyRequest(
         sources=[
-            {"id": "current:dataset:poi", "type": "data", "title": "POI 基础数据", "status": "ready"},
+            {"id": "package:poi", "type": "data", "title": "POI 基础数据", "status": "ready", "source_kind": "package"},
             {"id": "current:scope", "type": "data", "title": "当前等时圈范围", "status": "ready"},
         ],
     )))
 
+    assert seen_payload["sources"][0]["source_kind"] == "package"
     assert response.groups[0].id == "group:vitality"
-    assert response.groups[0].source_ids == ["current:dataset:poi"]
+    assert response.groups[0].source_ids == ["package:poi"]
     assert response.groups[1].id == "group:uncategorized"
     assert response.groups[1].source_ids == ["current:scope"]
 
