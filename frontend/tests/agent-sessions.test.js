@@ -626,14 +626,14 @@ test('backToAgentReport keeps report state and cached tools', () => {
 
 test('agent tool detail dialog reads current tool without mutating sessions or tools', () => {
   const tool = normalizeAgentToolSummary({
-    name: 'compute_population_overview_from_scope',
-    description: 'Build population overview',
-    ui_tier: 'foundation',
-    data_domain: 'population',
-    capability_type: 'analyze',
+    name: 'query_scope_dataset',
+    description: 'Query scope dataset',
+    ui_tier: 'dataset',
+    data_domain: 'scope',
+    capability_type: 'retrieve',
     risk_level: 'safe',
     readonly: true,
-    produces: ['current_population_summary'],
+    produces: ['scope_dataset_rows'],
   })
   const ctx = createAgentContext({
     agentWorkspaceView: 'tools',
@@ -652,8 +652,8 @@ test('agent tool detail dialog reads current tool without mutating sessions or t
 
   assert.equal(stopEvent.stopped, true)
   assert.equal(ctx.agentToolDetailDialogOpen, true)
-  assert.equal(ctx.agentActiveToolDetailName, 'compute_population_overview_from_scope')
-  assert.equal(ctx.getAgentToolDetail().name, 'compute_population_overview_from_scope')
+  assert.equal(ctx.agentActiveToolDetailName, 'query_scope_dataset')
+  assert.equal(ctx.getAgentToolDetail().name, 'query_scope_dataset')
   assert.equal(ctx.agentTools, originalTools)
   assert.equal(ctx.agentSessions.length, 0)
   assert.equal(ctx.agentWorkspaceView, 'tools')
@@ -1185,28 +1185,28 @@ test('applyAgentSessionSnapshot clears transient clarification draft state', () 
 
 test('normalizeAgentToolSummary keeps new classification fields and grouping works', () => {
   const toolA = normalizeAgentToolSummary({
-    name: 'run_area_character_pack',
-    ui_tier: 'scenario',
-    data_domain: 'general',
-    capability_type: 'decide',
-    scene_type: 'area_character',
-    llm_exposure: 'primary',
-    applicable_scenarios: ['区域总体调性'],
-    cautions: ['不能替代控规'],
-    input_schema: { type: 'object', properties: { policy_key: { type: 'string' } } },
-    output_schema: { type: 'object', properties: { character_tags: { type: 'array' } } },
-    requires: ['scope_polygon'],
-    produces: ['area_character_pack'],
-  })
-  const toolB = normalizeAgentToolSummary({
-    name: 'compute_population_overview_from_scope',
-    ui_tier: 'foundation',
-    data_domain: 'population',
-    capability_type: 'analyze',
+    name: 'search_analysis_context',
+    ui_tier: 'retrieval',
+    data_domain: 'analysis',
+    capability_type: 'retrieve',
     scene_type: 'general',
     llm_exposure: 'primary',
-    requires: ['scope_polygon'],
-    produces: ['current_population_summary'],
+    applicable_scenarios: ['证据检索'],
+    cautions: ['不能替代原始数据'],
+    input_schema: { type: 'object', properties: { query: { type: 'string' } } },
+    output_schema: { type: 'object', properties: { matches: { type: 'array' } } },
+    requires: ['analysis_snapshot'],
+    produces: ['analysis_context_matches'],
+  })
+  const toolB = normalizeAgentToolSummary({
+    name: 'query_scope_dataset',
+    ui_tier: 'dataset',
+    data_domain: 'scope',
+    capability_type: 'retrieve',
+    scene_type: 'general',
+    llm_exposure: 'primary',
+    requires: ['history_id'],
+    produces: ['scope_dataset_rows'],
   })
   const ctx = createAgentContext({
     agentTools: [toolA, toolB],
@@ -1214,13 +1214,13 @@ test('normalizeAgentToolSummary keeps new classification fields and grouping wor
 
   const groups = ctx.getGroupedAgentTools()
 
-  assert.equal(toolA.uiTier, 'scenario')
-  assert.equal(toolA.sceneType, 'area_character')
-  assert.equal(toolA.capabilityType, 'decide')
-  assert.deepEqual(toolA.applicableScenarios, ['区域总体调性'])
-  assert.equal(groups[0].key, 'foundation')
-  assert.equal(groups[1].key, 'scenario')
-  assert.equal(groups[1].subgroups[0].key, 'area_character')
+  assert.equal(toolA.uiTier, 'retrieval')
+  assert.equal(toolA.sceneType, 'general')
+  assert.equal(toolA.capabilityType, 'retrieve')
+  assert.deepEqual(toolA.applicableScenarios, ['证据检索'])
+  assert.equal(groups[0].key, 'retrieval')
+  assert.equal(groups[1].key, 'dataset')
+  assert.equal(groups[0].subgroups[0].key, 'analysis')
 })
 
 test('loadAgentSessionSummaries preserves local draft while adding persisted summaries', async () => {
@@ -2730,7 +2730,7 @@ test('getAgentNaturalProcessItems only renders explicit display text and tool us
   })
   ctx.upsertAgentTraceThinkingItem({
     id: 'tool-call-analysis-preflight-start',
-    tool_name: 'analysis_preflight',
+    tool_name: 'read_current_results',
     status: 'start',
     message: '执行工具',
     display_text: '确认当前已有 POI、人口、夜光和路网证据状态。',
@@ -2738,7 +2738,7 @@ test('getAgentNaturalProcessItems only renders explicit display text and tool us
   })
   ctx.upsertAgentTraceThinkingItem({
     id: 'tool-call-analysis-preflight-success',
-    tool_name: 'analysis_preflight',
+    tool_name: 'read_current_results',
     status: 'success',
     message: '执行成功',
     result_summary: '执行成功',
@@ -2750,7 +2750,7 @@ test('getAgentNaturalProcessItems only renders explicit display text and tool us
   assert.deepEqual(items.map((item) => item.text), [
     '用户要解释路网较差原因，当前范围有效，可以开始分析。',
     '先复用已有路网结果，再补充空间分布证据。',
-    '调用工具：检查已有分析证据',
+    '调用工具：读取已有分析结果',
   ])
   assert.equal(items.some((item) => item.text.includes('问题已经发给 AI')), false)
   assert.equal(items.some((item) => item.text.includes('正在决定这轮')), false)
@@ -3062,17 +3062,17 @@ test('getAgentPlanChecklist derives grouped checklist states from plan and trace
     agentPlan: {
       steps: [
         { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有证据' },
-        { tool_name: 'read_h3_structure_analysis', reason: '读取空间结构', evidence_goal: '判断集中或分散' },
+        { tool_name: 'search_analysis_context', reason: '检索空间结构证据', evidence_goal: '判断集中或分散' },
       ],
       followupSteps: [
-        { tool_name: 'detect_commercial_hotspots', reason: '识别商业热点', evidence_goal: '补空间热点结论', optional: true },
+        { tool_name: 'read_analysis_evidence_node', reason: '读取热点证据节点', evidence_goal: '补空间热点结论', optional: true },
       ],
       followupApplied: true,
       summary: '先读取已有分析，再补充热点识别。',
     },
     agentExecutionTrace: [
       { tool_name: 'read_current_results', status: 'success' },
-      { tool_name: 'read_h3_structure_analysis', status: 'start' },
+      { tool_name: 'search_analysis_context', status: 'start' },
     ],
     agentLoading: true,
     agentStage: 'executing',
@@ -3110,7 +3110,7 @@ test('getAgentToolCallItems normalizes trace cards and supports independent togg
       },
       {
         id: 'trace-2',
-        tool_name: 'run_area_character_pack',
+        tool_name: 'query_scope_dataset',
         status: 'blocked',
         reason: '等待风险确认',
       },
@@ -3141,12 +3141,14 @@ test('maybePreloadPanelForAgentTool preloads matching panel once without switchi
   })
 
   const first = await ctx.maybePreloadPanelForAgentTool({
-    tool_name: 'compute_population_overview_from_scope',
+    tool_name: 'query_scope_dataset',
     status: 'success',
+    produced_artifacts: ['current_population_profile_analysis'],
   })
   const second = await ctx.maybePreloadPanelForAgentTool({
-    tool_name: 'compute_population_overview_from_scope',
+    tool_name: 'query_scope_dataset',
     status: 'success',
+    produced_artifacts: ['current_population_profile_analysis'],
   })
 
   assert.equal(first, true)
@@ -3825,10 +3827,11 @@ test('submitMainAgentTurn preloads mapped panel after successful trace and recor
         {
           type: 'trace',
           payload: {
-            tool_name: 'read_h3_structure_analysis',
+            tool_name: 'query_scope_dataset',
             status: 'success',
             reason: '读取 H3 结构',
             message: '执行成功',
+            produced_artifacts: ['current_h3_structure_analysis'],
           },
         },
         {
@@ -3844,8 +3847,8 @@ test('submitMainAgentTurn preloads mapped panel after successful trace and recor
                 next_suggestions: [],
               },
               diagnostics: {
-                execution_trace: [{ tool_name: 'read_h3_structure_analysis', status: 'success' }],
-                used_tools: ['read_h3_structure_analysis'],
+                execution_trace: [{ tool_name: 'query_scope_dataset', status: 'success', produced_artifacts: ['current_h3_structure_analysis'] }],
+                used_tools: ['query_scope_dataset'],
                 citations: [],
                 research_notes: [],
                 audit_issues: [],
@@ -3881,7 +3884,7 @@ test('submitMainAgentTurn preloads mapped panel after successful trace and recor
             risk_prompt: '',
             next_suggestions: [],
           },
-          diagnostics: { execution_trace: [{ tool_name: 'read_h3_structure_analysis', status: 'success' }], used_tools: ['read_h3_structure_analysis'], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
+          diagnostics: { execution_trace: [{ tool_name: 'query_scope_dataset', status: 'success', produced_artifacts: ['current_h3_structure_analysis'] }], used_tools: ['query_scope_dataset'], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
           plan: { steps: [], followup_steps: [], followup_applied: false, summary: '' },
           risk_confirmations: [],

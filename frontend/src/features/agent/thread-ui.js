@@ -168,7 +168,7 @@ export function createAgentThreadUiMethods() {
         : null
     },
     getGroupedAgentTools() {
-      const tierOrder = ['foundation', 'capability', 'scenario']
+      const tierOrder = ['foundation', 'retrieval', 'source', 'dataset', 'business_analyst', 'capability', 'scenario']
       const groups = []
       tierOrder.forEach((tierKey) => {
         const tools = cloneArray(this.agentTools).filter((item) => asText(item && item.uiTier) === tierKey)
@@ -184,11 +184,7 @@ export function createAgentThreadUiMethods() {
         groups.push({
           key: tierKey,
           label: this.getAgentToolLabel(tierKey),
-          description: tierKey === 'foundation'
-            ? '底层数据与计算能力，主要用于补证和兜底。'
-            : tierKey === 'capability'
-              ? '把获取、分析、解释、决策固化为统一能力接口。'
-              : '面向真实任务场景，默认优先使用场景工具。',
+          description: this.getAgentToolGroupDescription(tierKey),
           subgroups: Array.from(subgroupMap.entries()).map(([subgroupKey, subgroupTools]) => ({
             key: subgroupKey,
             label: this.getAgentToolLabel(subgroupKey),
@@ -197,6 +193,18 @@ export function createAgentThreadUiMethods() {
         })
       })
       return groups
+    },
+    getAgentToolGroupDescription(tierKey = '') {
+      const descriptions = {
+        foundation: '读取当前范围和已有结果，避免在对话中重复计算。',
+        retrieval: '检索分析和报告证据，给回答提供可追溯上下文。',
+        source: '读取用户已选资料，支撑快速问答和 PPT 材料复用。',
+        dataset: '查询与聚合范围数据集，按需返回结构化记录。',
+        business_analyst: '规划外部 Business Analyst 分析，不在对话内直接执行高成本流程。',
+        capability: '保留的能力接口分组。',
+        scenario: '保留的场景接口分组。',
+      }
+      return descriptions[asText(tierKey)] || '当前 Agent 可调用的工具。'
     },
     async loadAgentTools(force = false) {
       if (this.agentToolsLoading) return this.agentTools
@@ -440,19 +448,18 @@ export function createAgentThreadUiMethods() {
       const toolLabels = {
         read_current_scope: '读取当前分析范围',
         read_current_results: '读取已有分析结果',
-        analysis_preflight: '检查已有分析证据',
-        rank_next_analysis_options: '推荐下一步分析方向',
-        run_area_character_pack: '生成区域画像',
-        detect_commercial_hotspots: '识别商业热点',
-        infer_area_tags: '推断区域标签',
-        analyze_spatial_structure: '分析空间结构',
-        compute_road_syntax_from_scope: '计算路网句法指标',
-        read_poi_structure_analysis: '读取 POI 结构分析',
-        read_h3_structure_analysis: '读取 H3 结构分析',
-        read_road_network_analysis: '读取路网分析',
-        read_population_analysis: '读取人口画像',
-        read_nightlight_analysis: '读取夜光活力',
-        read_timeseries_analysis: '读取时序变化',
+        list_selected_sources: '列出已选资料',
+        search_selected_source_evidence: '检索已选资料证据',
+        read_selected_source_evidence_node: '读取资料证据节点',
+        search_analysis_context: '检索分析上下文',
+        read_analysis_evidence_node: '读取分析证据节点',
+        search_report_context: '检索报告上下文',
+        read_report_evidence_node: '读取报告证据节点',
+        list_scope_datasets: '列出范围数据集',
+        query_scope_dataset: '查询范围数据',
+        aggregate_scope_dataset: '聚合范围数据',
+        read_scope_record: '读取范围记录',
+        plan_business_analyst_analysis: '规划 Business Analyst 分析',
       }
       const forbiddenLabels = new Set(['思考', '行动', '观察', '复盘', '异常'])
       const genericResultLabels = new Set(['执行成功', '成功', '已完成', '完成', 'ok', 'OK', '无结果'])

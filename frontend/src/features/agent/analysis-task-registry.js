@@ -86,7 +86,7 @@ const ANALYSIS_TASKS = Object.freeze({
     estimate: '约 1-3 分钟',
     description: '使用当前分析范围和 POI 数据生成 H3 六边形指标，补齐空间结构、热点和缺口证据。',
     resultUsage: '完成后会用于 POI 空间结构、热点、LISA、Gi*、LQ 和缺口分析。',
-    toolNames: ['compute_h3_metrics_from_scope_and_pois', 'build_h3_grid_from_scope', 'read_h3_structure_analysis'],
+    toolNames: ['compute_h3_metrics_from_scope_and_pois', 'build_h3_grid_from_scope'],
     producedArtifacts: ['current_poi_h3', 'current_poi_h3_grid', 'current_poi_h3_summary', 'current_poi_h3_charts'],
     runningFlag: 'isComputingH3Analysis',
     hasResult(ctx) {
@@ -130,7 +130,7 @@ const ANALYSIS_TASKS = Object.freeze({
     estimate: '约 1-3 分钟',
     description: '使用当前分析范围计算人口总量、密度与结构信息。',
     resultUsage: '完成后会作为客群与生活圈判断的底层证据。',
-    toolNames: ['compute_population_overview_from_scope', 'read_population_profile_analysis'],
+    toolNames: ['compute_population_overview_from_scope'],
     producedArtifacts: ['current_population', 'current_population_summary', 'population_overview'],
     runningFlag: 'isComputingPopulation',
     hasResult(ctx) {
@@ -154,7 +154,7 @@ const ANALYSIS_TASKS = Object.freeze({
     estimate: '约 1-3 分钟',
     description: '使用当前分析范围计算夜光强度、热点与经济活动强度 proxy。',
     resultUsage: '完成后会用于补充夜间经济活动强度证据。',
-    toolNames: ['compute_nightlight_overview_from_scope', 'read_nightlight_pattern_analysis'],
+    toolNames: ['compute_nightlight_overview_from_scope'],
     producedArtifacts: ['current_nightlight', 'current_nightlight_summary', 'nightlight_overview'],
     runningFlag: 'isComputingNightlight',
     hasResult(ctx) {
@@ -178,7 +178,7 @@ const ANALYSIS_TASKS = Object.freeze({
     estimate: '约 2-5 分钟',
     description: '使用当前分析范围计算路网句法指标和可达性证据。',
     resultUsage: '完成后会用于解释通达性、街道结构和商业可达性。',
-    toolNames: ['compute_road_syntax_from_scope', 'read_road_network_analysis'],
+    toolNames: ['compute_road_syntax_from_scope'],
     producedArtifacts: ['current_road', 'current_road_summary', 'road_syntax_summary'],
     runningFlag: 'isComputingRoadSyntax',
     hasResult(ctx) {

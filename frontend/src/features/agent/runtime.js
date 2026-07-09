@@ -505,7 +505,6 @@ function createAgentRuntimeMethods() {
       }
       if (
         toolName === 'compute_h3_metrics_from_scope_and_pois'
-        || toolName === 'read_h3_structure_analysis'
         || hasArtifact('current_h3_structure_analysis')
         || hasArtifact('current_poi_h3_summary')
         || hasArtifact('current_poi_h3_grid')
@@ -515,7 +514,6 @@ function createAgentRuntimeMethods() {
       }
       if (
         toolName === 'compute_population_overview_from_scope'
-        || toolName === 'read_population_profile_analysis'
         || hasArtifact('current_population_profile_analysis')
         || hasArtifact('population_overview')
       ) {
@@ -523,7 +521,6 @@ function createAgentRuntimeMethods() {
       }
       if (
         toolName === 'compute_nightlight_overview_from_scope'
-        || toolName === 'read_nightlight_pattern_analysis'
         || hasArtifact('current_nightlight_pattern_analysis')
         || hasArtifact('nightlight_overview')
       ) {
@@ -531,7 +528,6 @@ function createAgentRuntimeMethods() {
       }
       if (
         toolName === 'compute_road_syntax_from_scope'
-        || toolName === 'read_road_pattern_analysis'
         || hasArtifact('current_road_pattern_analysis')
         || hasArtifact('road_syntax_summary')
       ) {
