@@ -1,2 +1,1 @@
-"""Agent package for the stage-1 GIS harness runtime."""
-
+"""Main Agent runtime for analysis workspace conversations."""

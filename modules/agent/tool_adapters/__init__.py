@@ -1,1 +1,1 @@
-"""Tool adapters for stage-1 agent tools."""
+"""Tool adapters for Agent domain capabilities."""
