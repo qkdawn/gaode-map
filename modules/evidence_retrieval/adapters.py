@@ -49,16 +49,16 @@ def evidence_node_payloads_from_source(source: SourceRecord) -> List[Any]:
 
 def evidence_node_from_node_payload(question: str, source: SourceRecord, item: Any, *, index: int = 1) -> EvidenceNode | None:
     payload = item if isinstance(item, dict) else {}
-    source_id = str(payload.get("source_id") or payload.get("sourceId") or source.source_id).strip()
+    source_id = str(payload.get("source_id") or source.source_id).strip()
     if not source_id:
         return None
-    source_kind = canonical_source_kind(payload.get("source_type") or payload.get("sourceType") or source.source_kind, source_id)
+    source_kind = canonical_source_kind(payload.get("source_type") or source.source_kind, source_id)
     title = str(payload.get("title") or source.title or f"证据 {index}").strip()
     content = str(payload.get("content") or payload.get("text") or payload.get("summary") or "").strip()
     if not content:
         return None
     metadata = _safe_dict(payload.get("metadata") or payload.get("payload"))
-    node_id = str(payload.get("id") or payload.get("node_id") or payload.get("nodeId") or f"{source_id}:evidence:{index}").strip()
+    node_id = str(payload.get("id") or payload.get("node_id") or f"{source_id}:evidence:{index}").strip()
     warnings = payload.get("warnings") if isinstance(payload.get("warnings"), list) else []
     return EvidenceNode(
         id=node_id,
@@ -70,7 +70,7 @@ def evidence_node_from_node_payload(question: str, source: SourceRecord, item: A
         metadata=metadata,
         locator=str(payload.get("locator") or metadata.get("locator") or ""),
         score=float(payload.get("score") or _score_text(question, " ".join([title, content])) if question else payload.get("score") or 0.0),
-        evidence_level=str(payload.get("evidence_level") or payload.get("evidenceLevel") or "source_evidence"),
+        evidence_level=str(payload.get("evidence_level") or "source_evidence"),
         warnings=[str(item) for item in warnings],
         citation=str(payload.get("citation") or source.locator_summary or source.title),
     )
@@ -254,9 +254,7 @@ def evidence_node_payload_from_node(node: EvidenceNode) -> dict:
     return {
         "id": node.id,
         "source_id": node.source_id,
-        "sourceId": node.source_id,
         "source_type": node.source_type,
-        "sourceType": node.source_type,
         "title": node.title,
         "content": node.content,
         "summary": node.summary,
@@ -264,7 +262,6 @@ def evidence_node_payload_from_node(node: EvidenceNode) -> dict:
         "locator": node.locator,
         "score": float(node.score or 0.0),
         "evidence_level": node.evidence_level,
-        "evidenceLevel": node.evidence_level,
         "warnings": list(node.warnings or []),
         "citation": node.citation,
     }

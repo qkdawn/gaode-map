@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from modules.evidence_retrieval import (
+    evidence_node_from_node_payload,
     evidence_node_from_attachment_chunk,
     evidence_node_from_document_index_node,
     evidence_node_from_knowledge_chunk,
@@ -249,6 +250,47 @@ def test_evidence_node_payload_preserves_source_identity():
     assert payload["source_id"] == "web:area-1"
     assert payload["source_type"] == "web"
     assert payload["metadata"]["url"] == "https://example.com"
+    assert "sourceId" not in payload
+    assert "sourceType" not in payload
+    assert "evidenceLevel" not in payload
+
+
+def test_evidence_node_payload_parser_uses_current_fields_only():
+    source = SourceRecord.model_validate({"id": "web:canonical", "source_kind": "web", "status": "ready"})
+    legacy_only = evidence_node_from_node_payload(
+        "政策",
+        source,
+        {
+            "nodeId": "legacy-node",
+            "sourceId": "web:legacy",
+            "sourceType": "database",
+            "title": "旧节点",
+            "content": "旧 camel 字段不应覆盖 SourceRecord。",
+            "evidenceLevel": "legacy_level",
+        },
+    )
+    canonical = evidence_node_from_node_payload(
+        "政策",
+        source,
+        {
+            "node_id": "canonical-node",
+            "source_id": "web:canonical-node-source",
+            "source_type": "web",
+            "title": "当前节点",
+            "content": "当前 snake 字段可以进入 EvidenceNode。",
+            "evidence_level": "web_chunk",
+        },
+    )
+
+    assert legacy_only is not None
+    assert legacy_only.id == "web:canonical:evidence:1"
+    assert legacy_only.source_id == "web:canonical"
+    assert legacy_only.source_type == "web"
+    assert legacy_only.evidence_level == "source_evidence"
+    assert canonical is not None
+    assert canonical.id == "canonical-node"
+    assert canonical.source_id == "web:canonical-node-source"
+    assert canonical.evidence_level == "web_chunk"
 
 
 def test_ai_payload_evidence_nodes_round_trip_canonical_node_id():
