@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import httpx
 
-from .context_ask_compaction import as_text, compact_evidence_nodes, compact_items, compact_value, merge_unique
+from .context_ask_compaction import as_text, compact_items, compact_value, merge_unique
 from .context_ask_datasets import build_scoped_dataset_context
 from .context_ask_prompts import CONTEXT_ASK_SYSTEM_PROMPT
 from .providers.client import get_llm_provider_client, is_llm_enabled
 from .schemas import AgentContextAskRequest, AgentContextAskResponse, ContextAskTarget
 from .selected_sources import (
-    evidence_nodes_from_item,
     is_analysis_sources_type,
-    source_id_from_item,
     source_items_from_target,
-    source_kind_from_item,
+    selected_sources_summary_from_items,
 )
 
 
@@ -41,31 +39,6 @@ def _compact_target(target: ContextAskTarget) -> Dict[str, Any]:
     data["evidence"] = compact_items(list(target.evidence or []), limit=6)
     data["payload"] = compact_value(target.payload, depth=3, list_limit=6, string_limit=400)
     return data
-
-
-def _compact_selected_sources(target: ContextAskTarget) -> Dict[str, Any]:
-    sources = source_items_from_target(target)
-    compacted_sources: List[Dict[str, Any]] = []
-    for item in sources[:24]:
-        evidence_nodes = evidence_nodes_from_item(item)
-        compacted_sources.append({
-            "source_id": source_id_from_item(item),
-            "title": as_text(item.get("title")),
-            "source_kind": source_kind_from_item(item),
-            "included": list(item.get("included") or [])[:8],
-            "scope": compact_value(item.get("scope"), depth=2, list_limit=4, string_limit=200),
-            "metrics": compact_value(item.get("metrics"), depth=1, list_limit=4, string_limit=160),
-            "metric_gaps": compact_value(item.get("metric_gaps") or item.get("metricGaps"), depth=1, list_limit=4, string_limit=160),
-            "evidence_count": len(evidence_nodes),
-            "evidence_nodes": compact_evidence_nodes(evidence_nodes, limit=3),
-            "visual_specs_count": len(list(item.get("visual_specs") or item.get("visualSpecs") or [])),
-            "policy": as_text(item.get("policy"))[:240],
-            "transport_status": as_text(item.get("transport_status") or item.get("transportStatus")),
-        })
-    return {
-        "source_count": len(sources),
-        "sources": compacted_sources,
-    }
 
 
 def _json_size(value: Dict[str, Any]) -> int:
@@ -117,7 +90,7 @@ def _build_user_payload(payload: AgentContextAskRequest, scoped_dataset_context:
         "history_id": payload.history_id,
         "target": _compact_target(target),
         "analysis_snapshot_summary": _compact_snapshot(payload),
-        "selected_sources_summary": _compact_selected_sources(target) if is_selected_sources else {},
+        "selected_sources_summary": selected_sources_summary_from_items(source_items_from_target(target)) if is_selected_sources else {},
         "scoped_dataset_context": compact_value(scoped_dataset_context or {}, depth=8, list_limit=12, string_limit=400) if is_selected_sources else {},
         "instructions": [
             "只解释 target，不延伸到无关区域。",

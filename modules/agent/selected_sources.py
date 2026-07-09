@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from modules.evidence_retrieval import SourceRecord
 
-from .context_ask_compaction import as_text, compact_value
+from .context_ask_compaction import as_text, compact_evidence_nodes, compact_value
 
 
 ANALYSIS_SOURCES_TARGET_TYPE = "analysis_sources"
@@ -135,23 +135,33 @@ def evidence_count_from_item(item: Dict[str, Any]) -> int:
     return len(evidence_nodes_from_item(item))
 
 
-def source_summary_payloads_from_items(items: List[Dict[str, Any]], *, limit: int = 24) -> List[Dict[str, Any]]:
-    compacted: List[Dict[str, Any]] = []
+def selected_sources_summary_from_items(items: List[Dict[str, Any]], *, limit: int = 24) -> Dict[str, Any]:
+    sources = [item for item in list(items or []) if isinstance(item, dict)]
+    compacted_sources: List[Dict[str, Any]] = []
     for item in list(items or [])[:limit]:
         if not isinstance(item, dict):
             continue
-        compacted.append(
+        evidence_nodes = evidence_nodes_from_item(item)
+        compacted_sources.append(
             {
                 "source_id": source_id_from_item(item),
                 "title": as_text(item.get("title")),
                 "source_kind": source_kind_from_item(item),
                 "included": list(item.get("included") or [])[:8],
-                "metrics": compact_value(item.get("metrics"), depth=2, list_limit=8, string_limit=180),
-                "metric_gaps": compact_value(item.get("metric_gaps") or item.get("metricGaps"), depth=2, list_limit=6, string_limit=160),
-                "evidence_count": evidence_count_from_item(item),
+                "scope": compact_value(item.get("scope"), depth=2, list_limit=4, string_limit=200),
+                "metrics": compact_value(item.get("metrics"), depth=1, list_limit=4, string_limit=160),
+                "metric_gaps": compact_value(item.get("metric_gaps") or item.get("metricGaps"), depth=1, list_limit=4, string_limit=160),
+                "evidence_count": len(evidence_nodes),
+                "evidence_nodes": compact_evidence_nodes(evidence_nodes, limit=3),
+                "visual_specs_count": len(list(item.get("visual_specs") or item.get("visualSpecs") or [])),
+                "policy": as_text(item.get("policy"))[:240],
+                "transport_status": as_text(item.get("transport_status") or item.get("transportStatus")),
             }
         )
-    return compacted
+    return {
+        "source_count": len(sources),
+        "sources": compacted_sources,
+    }
 
 
 def source_record_payload(source: SourceRecord, mapped_dataset_ids: List[str] | None = None) -> Dict[str, Any]:
