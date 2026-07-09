@@ -44,7 +44,7 @@ class EvidenceSearchQuery(BaseModel):
         if not isinstance(value, dict):
             return value
         payload = dict(value)
-        source_ids = payload.get("source_ids") or payload.get("sourceIds") or []
+        source_ids = payload.get("source_ids") or []
         if isinstance(source_ids, str):
             source_ids = [source_ids] if source_ids.strip() else []
         payload["source_ids"] = source_ids

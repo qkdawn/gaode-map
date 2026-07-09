@@ -135,6 +135,12 @@ def test_evidence_index_service_ignores_legacy_evidence_nodes_alias():
     assert node is None
 
 
+def test_evidence_search_query_ignores_legacy_source_ids_alias():
+    query = EvidenceSearchQuery(question="公共服务", sourceIds=["web:legacy"])
+
+    assert query.source_ids == []
+
+
 def test_evidence_index_service_uses_declared_source_manifest():
     service = EvidenceIndexService(
         get_pageindex_document_structure=lambda _document_id: (

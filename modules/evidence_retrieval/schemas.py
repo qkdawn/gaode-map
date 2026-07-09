@@ -29,8 +29,8 @@ class SourceRecord(BaseModel):
             return value
         payload = dict(value)
         meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-        source_id = str(payload.get("source_id") or payload.get("sourceId") or payload.get("id") or "").strip()
-        source_kind = str(payload.get("source_kind") or payload.get("sourceKind") or meta.get("sourceKind") or "").strip()
+        source_id = str(payload.get("source_id") or payload.get("id") or "").strip()
+        source_kind = str(payload.get("source_kind") or meta.get("sourceKind") or "").strip()
         if not source_kind:
             if source_id.startswith("document:"):
                 source_kind = "document"
@@ -46,22 +46,15 @@ class SourceRecord(BaseModel):
                 source_kind = "system"
             else:
                 source_kind = "unknown"
-        evidence_count = payload.get("evidence_count") or payload.get("evidenceCount")
+        evidence_count = payload.get("evidence_count")
         if evidence_count is None:
             transport = meta.get("transport") if isinstance(meta.get("transport"), dict) else {}
             ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
             ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
             counts = ai_payload.get("counts") if isinstance(ai_payload.get("counts"), dict) else {}
-            evidence_nodes = (
-                ai_payload.get("evidence_nodes")
-                if isinstance(ai_payload.get("evidence_nodes"), list)
-                else ai_payload.get("evidenceNodes")
-                if isinstance(ai_payload.get("evidenceNodes"), list)
-                else []
-            )
+            evidence_nodes = ai_payload.get("evidence_nodes") if isinstance(ai_payload.get("evidence_nodes"), list) else []
             evidence_count = (
                 transport.get("evidence_count")
-                or transport.get("evidenceCount")
                 or len(evidence_nodes)
                 or counts.get("evidence")
                 or payload.get("count")
@@ -75,7 +68,7 @@ class SourceRecord(BaseModel):
                 "source_kind": source_kind,
                 "summary": summary,
                 "evidence_count": int(evidence_count or 0),
-                "locator_summary": str(payload.get("locator_summary") or payload.get("locatorSummary") or "").strip(),
+                "locator_summary": str(payload.get("locator_summary") or "").strip(),
                 "availability": str(payload.get("availability") or ("available" if payload.get("status") == "ready" else "")).strip(),
             }
         )
@@ -111,7 +104,7 @@ class EvidenceSearchRequest(BaseModel):
         if not isinstance(value, dict):
             return value
         payload = dict(value)
-        source_ids = payload.get("source_ids") or payload.get("sourceIds") or []
+        source_ids = payload.get("source_ids") or []
         if isinstance(source_ids, str):
             source_ids = [source_ids] if source_ids.strip() else []
         payload["source_ids"] = source_ids

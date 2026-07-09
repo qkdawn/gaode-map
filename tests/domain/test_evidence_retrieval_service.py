@@ -159,6 +159,43 @@ def test_source_record_counts_canonical_web_source_nodes():
     assert source.evidence_count == 1
 
 
+def test_source_record_ignores_legacy_source_field_aliases():
+    source = SourceRecord.model_validate(
+        {
+            "sourceId": "web:legacy",
+            "sourceKind": "web",
+            "title": "旧来源",
+            "status": "ready",
+            "evidenceCount": 3,
+            "locatorSummary": "旧定位摘要",
+            "meta": {
+                "aiPayload": {
+                    "evidenceNodes": [
+                        {
+                            "id": "web:legacy:node:1",
+                            "sourceId": "web:legacy",
+                            "sourceType": "web",
+                            "content": "旧 camel evidence node 不应计数。",
+                        }
+                    ]
+                },
+                "transport": {"evidenceCount": 2},
+            },
+        }
+    )
+
+    assert source.source_id == ""
+    assert source.source_kind == "unknown"
+    assert source.evidence_count == 0
+    assert source.locator_summary == ""
+
+
+def test_evidence_search_request_ignores_legacy_source_ids_alias():
+    request = EvidenceSearchRequest.model_validate({"question": "公共服务", "sourceIds": ["web:legacy"]})
+
+    assert request.source_ids == []
+
+
 def test_search_evidence_maps_web_source_to_web_nodes():
     response = asyncio.run(
         search_evidence(
