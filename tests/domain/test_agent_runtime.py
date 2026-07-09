@@ -22,15 +22,19 @@ from modules.agent.schemas import (
 )
 
 
-def test_agent_turn_request_ignores_removed_thinking_mode_fields():
-    request = AgentTurnRequest(
-        messages=[AgentMessage(role="user", content="继续分析这个区域")],
-        analysis_snapshot={"scope": {"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}},
-        thinkingMode="deep",
-        thinking_mode="deep",
-    )
-
-    assert not hasattr(request, "thinking_mode")
+def test_agent_turn_request_rejects_removed_thinking_mode_fields():
+    with pytest.raises(ValueError):
+        AgentTurnRequest(
+            messages=[AgentMessage(role="user", content="继续分析这个区域")],
+            analysis_snapshot={"scope": {"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}},
+            thinkingMode="deep",
+        )
+    with pytest.raises(ValueError):
+        AgentTurnRequest(
+            messages=[AgentMessage(role="user", content="继续分析这个区域")],
+            analysis_snapshot={"scope": {"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}},
+            thinking_mode="deep",
+        )
 
 
 def test_agent_turn_request_accepts_visual_snapshots():
