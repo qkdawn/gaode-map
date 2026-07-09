@@ -94,34 +94,52 @@ async def answer_preprocessed_sources(
         with latency.track("preprocessed_context_ask"):
             context_answer = await answer_context_ask(request)
     except Exception as exc:
-        research_notes.append(f"预处理来源直答失败，已回退完整工具循环：{exc}")
+        error = f"预处理来源直答失败：{exc}"
+        research_notes.append(error)
         await emit_thinking(
             {
                 "phase": "preflight",
                 "title": "预处理来源直答未完成",
-                "detail": "已回退完整工具循环。",
-                "display_text": "已回退完整工具循环。",
+                "detail": error,
+                "display_text": "预处理来源直答失败。",
                 "state": "failed",
             },
             "preprocessed-sources",
         )
-        return None
+        return _failed_preprocessed_sources_response(
+            payload=payload,
+            sources=sources,
+            error=error,
+            research_notes=research_notes,
+            thinking_timeline=thinking_timeline,
+            latency=latency,
+            memory_artifacts=memory_artifacts,
+        )
 
     if context_answer.status != "success" or not str(context_answer.answer or "").strip():
         research_notes.extend([str(item) for item in list(context_answer.warnings or []) if str(item).strip()])
+        error = context_answer.error or "预处理来源直答未返回有效回答。"
         if context_answer.error:
-            research_notes.append(f"预处理来源直答失败，已回退完整工具循环：{context_answer.error}")
+            research_notes.append(f"预处理来源直答失败：{context_answer.error}")
         await emit_thinking(
             {
                 "phase": "preflight",
                 "title": "预处理来源直答未完成",
-                "detail": context_answer.error or "已回退完整工具循环。",
-                "display_text": "已回退完整工具循环。",
+                "detail": error,
+                "display_text": "预处理来源直答失败。",
                 "state": "failed",
             },
             "preprocessed-sources",
         )
-        return None
+        return _failed_preprocessed_sources_response(
+            payload=payload,
+            sources=sources,
+            error=error,
+            research_notes=research_notes,
+            thinking_timeline=thinking_timeline,
+            latency=latency,
+            memory_artifacts=memory_artifacts,
+        )
 
     await emit_thinking(
         {
@@ -154,4 +172,37 @@ async def answer_preprocessed_sources(
             },
         ),
         plan=AgentPlanEnvelope(summary="已使用预处理分析来源直接回答。"),
+    )
+
+
+def _failed_preprocessed_sources_response(
+    *,
+    payload: AgentTurnRequest,
+    sources: List[Dict[str, Any]],
+    error: str,
+    research_notes: List[str],
+    thinking_timeline: List[AgentThinkingItem],
+    latency: LatencyRecorder,
+    memory_artifacts: Dict[str, Any],
+) -> AgentTurnResponse:
+    return AgentTurnResponse(
+        status="failed",
+        stage="failed",
+        output=AgentTurnOutput(),
+        diagnostics=AgentTurnDiagnostics(
+            used_tools=[PREPROCESSED_SOURCE_TOOL],
+            research_notes=list(research_notes or []),
+            thinking_timeline=list(thinking_timeline or []),
+            planning_summary="预处理分析来源直答失败，未进入完整工具循环。",
+            latency_ms=latency.finish(),
+            error=error,
+        ),
+        context_summary=build_context_summary(
+            payload.analysis_snapshot,
+            {
+                **dict(memory_artifacts or {}),
+                "selected_sources_context": {"sources": sources},
+            },
+        ),
+        plan=AgentPlanEnvelope(summary="预处理分析来源直答失败。"),
     )

@@ -483,19 +483,21 @@ def test_runtime_answers_selected_sources_with_preprocessed_context(monkeypatch)
     assert "analysis:selected_sources_context" in response.context_summary.available_context_sources
 
 
-def test_runtime_falls_back_to_tool_loop_when_preprocessed_sources_fail(monkeypatch):
-    captured = {}
-    _install_runtime_stubs(
-        monkeypatch,
-        loop_result=ToolLoopResult(status="completed"),
-        captured=captured,
-    )
-
+def test_runtime_fails_preprocessed_sources_without_tool_loop_fallback(monkeypatch):
     async def fake_context_ask(payload):
         del payload
         return AgentContextAskResponse(status="failed", error="ai_call_failed")
 
+    async def fail_gate(**kwargs):
+        raise AssertionError("selected sources should skip gate even when direct answer fails")
+
+    async def fail_loop(**kwargs):
+        raise AssertionError("selected sources should not fall back to tool loop")
+
+    monkeypatch.setattr(agent_runtime, "is_llm_enabled", lambda: True)
     monkeypatch.setattr(direct_context, "answer_context_ask", fake_context_ask)
+    monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fail_gate)
+    monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fail_loop)
 
     response = asyncio.run(
         process_main_agent_loop(
@@ -514,8 +516,10 @@ def test_runtime_falls_back_to_tool_loop_when_preprocessed_sources_fail(monkeypa
         )
     )
 
-    assert response.status == "answered"
-    assert captured["initial_artifacts"]["selected_sources_context"]["sources"][0]["source_id"] == "document:doc-1"
+    assert response.status == "failed"
+    assert response.diagnostics.error == "ai_call_failed"
+    assert response.used_tools == ["context_ask_preprocessed_sources"]
+    assert "未进入完整工具循环" in response.diagnostics.planning_summary
     assert "analysis:selected_sources_context" in response.context_summary.available_context_sources
 
 
