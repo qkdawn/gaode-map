@@ -138,8 +138,6 @@ function createAgentSessionDetailResponse(ctx, url = '') {
         context_summary: session.contextSummary || ctx.agentContextSummary || {},
         plan: {
           steps: plan.steps || [],
-          followup_steps: plan.followupSteps || plan.followup_steps || [],
-          followup_applied: !!(plan.followupApplied || plan.followup_applied),
           summary: plan.summary || '',
         },
         risk_confirmations: session.riskConfirmations || [],
@@ -303,8 +301,6 @@ test('normalizeAgentTurnPayload reads staged backend response shape', () => {
     },
     plan: {
       steps: [{ tool_name: 'read_current_scope', reason: '读取范围' }],
-      followup_steps: [],
-      followup_applied: false,
       summary: '先读取范围，再分析业态结构',
     },
   })
@@ -408,7 +404,7 @@ test('analysis composer deep mode uses main agent loop and keeps user message ra
             },
             diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
             context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-            plan: { steps: [], followup_steps: [], followup_applied: false },
+            plan: { steps: [] },
             messages: [
               { role: 'assistant', content: '断点集中在低连通高活力错配街区。' },
             ],
@@ -1384,7 +1380,7 @@ test('activateAgentSession switches immediately and hydrates persisted summary l
       error: '',
     },
     context_summary: {},
-    plan: { steps: [], followup_steps: [], followup_applied: false },
+    plan: { steps: [] },
     risk_confirmations: [],
   })
 
@@ -1564,8 +1560,6 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
               },
               plan: {
                 steps: [],
-                followup_steps: [],
-                followup_applied: false,
               },
             },
           },
@@ -1618,7 +1612,7 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
           },
           diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [{ id: 'thinking-1', phase: 'planned', title: '规划工具调用', detail: '正在决定下一步工具。', state: 'completed' }], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-          plan: { steps: [], followup_steps: [], followup_applied: false },
+          plan: { steps: [] },
           risk_confirmations: [],
         }
       },
@@ -2821,8 +2815,6 @@ test('getAgentProcessRoleGroups embeds planner checklist and tool calls', () => 
         { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
         { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
       ],
-      followupSteps: [],
-      followupApplied: false,
       summary: '先读取已有分析，再生成商业画像。',
     },
     agentExecutionTrace: [
@@ -2867,8 +2859,6 @@ test('getAgentProcessRoleGroups creates planner and tool panels without timeline
   const ctx = createAgentContext({
     agentPlan: {
       steps: [{ tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' }],
-      followupSteps: [],
-      followupApplied: false,
       summary: '先读取已有分析。',
     },
     agentExecutionTrace: [{ tool_name: 'read_current_results', status: 'success' }],
@@ -2924,7 +2914,7 @@ test('status events create visible process fallback steps', async () => {
                 error: '',
               },
               context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-              plan: { steps: [], followup_steps: [], followup_applied: false },
+              plan: { steps: [] },
             },
           },
         },
@@ -2956,7 +2946,7 @@ test('status events create visible process fallback steps', async () => {
           },
           diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-          plan: { steps: [], followup_steps: [], followup_applied: false },
+          plan: { steps: [] },
           risk_confirmations: [],
         }
       },
@@ -2990,7 +2980,7 @@ test('applyAgentSessionSnapshot collapses failed timeline but expands risk confi
     auditIssues: [],
     nextSuggestions: [],
     contextSummary: {},
-    plan: { steps: [], followupSteps: [], followupApplied: false },
+    plan: { steps: [] },
     riskConfirmations: [],
     messages: [],
     thinkingTimeline: [
@@ -3042,8 +3032,6 @@ test('applyAgentSessionSnapshot keeps planner and tool calls collapsed for answe
     contextSummary: {},
     plan: {
       steps: [{ tool_name: 'read_current_results', reason: '读取当前结果' }],
-      followupSteps: [],
-      followupApplied: false,
       summary: '先读取结果。',
     },
     riskConfirmations: [],
@@ -3234,8 +3222,6 @@ test('submitMainAgentTurn appends user message immediately and updates thinking 
               },
               plan: {
                 steps: [{ tool_name: 'read_current_scope', reason: '读取范围' }],
-                followup_steps: [],
-                followup_applied: false,
               },
             },
           },
@@ -3287,7 +3273,7 @@ test('submitMainAgentTurn appends user message immediately and updates thinking 
             error: '',
           },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-          plan: { steps: [], followup_steps: [], followup_applied: false },
+          plan: { steps: [] },
           risk_confirmations: [],
         }
       },
@@ -3387,7 +3373,7 @@ test('clarification follow-up continues in the same session instead of opening a
               error: '',
             },
             context_summary: {},
-            plan: { steps: [], followup_steps: [], followup_applied: false, summary: '' },
+            plan: { steps: [], summary: '' },
           },
         },
       },
@@ -3463,7 +3449,7 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
                 error: '',
               },
               context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-              plan: { steps: [], followup_steps: [], followup_applied: false },
+              plan: { steps: [] },
             },
           },
         },
@@ -3506,7 +3492,7 @@ test('multi-turn thinking keeps previous assistant above the new user turn', asy
           },
           diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [{ id: 'thinking-gating', phase: 'gating', title: '门卫判断', detail: '已完成。', state: 'completed' }], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-          plan: { steps: [], followup_steps: [], followup_applied: false },
+          plan: { steps: [] },
           risk_confirmations: [],
         }
       },
@@ -3576,8 +3562,6 @@ test('submitMainAgentTurn keeps streamed timeline order when final diagnostics o
           type: 'plan',
           payload: {
             steps: [{ tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有证据' }],
-            followup_steps: [],
-            followup_applied: false,
             summary: '先读取当前结果。',
           },
         },
@@ -3617,8 +3601,6 @@ test('submitMainAgentTurn keeps streamed timeline order when final diagnostics o
               context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
               plan: {
                 steps: [{ tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有证据' }],
-                followup_steps: [],
-                followup_applied: false,
                 summary: '先读取当前结果。',
               },
             },
@@ -3663,7 +3645,7 @@ test('submitMainAgentTurn keeps streamed timeline order when final diagnostics o
             error: '',
           },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-          plan: { steps: [], followup_steps: [], followup_applied: false },
+          plan: { steps: [] },
           risk_confirmations: [],
         }
       },
@@ -3696,8 +3678,6 @@ test('submitMainAgentTurn shows streamed plan above final response and keeps che
               { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
               { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
             ],
-            followup_steps: [],
-            followup_applied: false,
             summary: '先读取已有分析，再生成商业画像。',
           },
         },
@@ -3737,8 +3717,6 @@ test('submitMainAgentTurn shows streamed plan above final response and keeps che
                   { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
                   { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
                 ],
-                followup_steps: [],
-                followup_applied: false,
                 summary: '先读取已有分析，再生成商业画像。',
               },
             },
@@ -3775,8 +3753,6 @@ test('submitMainAgentTurn shows streamed plan above final response and keeps che
               { tool_name: 'read_current_results', reason: '读取当前结果', evidence_goal: '确认已有摘要' },
               { tool_name: 'search_analysis_context', reason: '检索业态结构证据', evidence_goal: '形成商业画像' },
             ],
-            followup_steps: [],
-            followup_applied: false,
             summary: '先读取已有分析，再生成商业画像。',
           },
           risk_confirmations: [],
@@ -3856,7 +3832,7 @@ test('submitMainAgentTurn preloads mapped panel after successful trace and recor
                 error: '',
               },
               context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-              plan: { steps: [], followup_steps: [], followup_applied: false, summary: '' },
+              plan: { steps: [], summary: '' },
             },
           },
         },
@@ -3886,7 +3862,7 @@ test('submitMainAgentTurn preloads mapped panel after successful trace and recor
           },
           diagnostics: { execution_trace: [{ tool_name: 'query_scope_dataset', status: 'success', produced_artifacts: ['current_h3_structure_analysis'] }], used_tools: ['query_scope_dataset'], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
-          plan: { steps: [], followup_steps: [], followup_applied: false, summary: '' },
+          plan: { steps: [], summary: '' },
           risk_confirmations: [],
         }
       },
@@ -4334,8 +4310,6 @@ test('submitMainAgentTurn collapses failed thinking timeline after final respons
               },
               plan: {
                 steps: [],
-                followup_steps: [],
-                followup_applied: false,
               },
             },
           },
