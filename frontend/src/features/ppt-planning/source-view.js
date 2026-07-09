@@ -5,41 +5,45 @@ function sourceMeta(source = {}) {
   return source.meta && typeof source.meta === 'object' ? source.meta : {}
 }
 
+function sourceKind(source = {}) {
+  const kind = String((source && source.source_kind) || '').trim()
+  if (kind) return kind
+  const sourceId = String((source && source.id) || '')
+  if (sourceId.startsWith('package-placeholder:')) return 'package-placeholder'
+  if (sourceId.startsWith('package:')) return 'package'
+  if (sourceId.startsWith('document:')) return 'document'
+  if (sourceId.startsWith('image:')) return 'image'
+  if (sourceId.startsWith('web:')) return 'web'
+  if (sourceId.startsWith('database:')) return 'database'
+  if (sourceId.startsWith('current:')) return 'system'
+  return 'unknown'
+}
 export function isPackageSource(source = {}) {
-  const meta = sourceMeta(source)
-  return meta.sourceKind === 'package' || String(source.id || '').startsWith('package:')
+  return sourceKind(source) === 'package'
 }
 
 export function isPackagePlaceholderSource(source = {}) {
-  const meta = sourceMeta(source)
-  return meta.sourceKind === 'package-placeholder' || String(source.id || '').startsWith('package-placeholder:')
+  return sourceKind(source) === 'package-placeholder'
 }
 
 export function isDocumentSource(source = {}) {
-  const meta = sourceMeta(source)
-  return meta.sourceKind === 'document' || String(source.id || '').startsWith('document:')
+  return sourceKind(source) === 'document'
 }
 
 export function isImageSource(source = {}) {
-  const meta = sourceMeta(source)
-  return meta.sourceKind === 'image' || String(source.id || '').startsWith('image:')
+  return sourceKind(source) === 'image'
 }
 
 export function isWebSource(source = {}) {
-  const meta = sourceMeta(source)
-  return source.source_kind === 'web'
-    || source.sourceKind === 'web'
-    || meta.sourceKind === 'web'
+  return sourceKind(source) === 'web'
 }
 
 export function isCurrentSource(source = {}) {
-  const meta = sourceMeta(source)
-  return meta.sourceKind === 'system' && String(source.id || '').startsWith('current:')
+  return sourceKind(source) === 'system' && String(source.id || '').startsWith('current:')
 }
 
 export function isDatabaseSource(source = {}) {
-  const meta = sourceMeta(source)
-  return meta.sourceKind === 'database' || String(source.id || '').startsWith('database:')
+  return sourceKind(source) === 'database'
 }
 
 export function isDeletableSource(source = {}) {
@@ -60,8 +64,8 @@ export function sourceTransport(source = {}) {
       source_id: aiPayload.source_id || source.id,
       sourceId: aiPayload.sourceId || source.id,
       title: aiPayload.title || source.title,
-      source_kind: aiPayload.source_kind || aiPayload.sourceKind || meta.sourceKind,
-      sourceKind: aiPayload.source_kind || aiPayload.sourceKind || meta.sourceKind,
+      source_kind: aiPayload.source_kind || sourceKind(source),
+      sourceKind: aiPayload.source_kind || sourceKind(source),
       transport_status: (Array.isArray(aiPayload.included) && aiPayload.included.length) ? 'ready_to_send' : 'selected_no_payload',
       transportStatus: (Array.isArray(aiPayload.included) && aiPayload.included.length) ? 'ready_to_send' : 'selected_no_payload',
       included: Array.isArray(aiPayload.included) ? aiPayload.included : [],

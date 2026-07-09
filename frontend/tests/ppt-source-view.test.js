@@ -23,6 +23,13 @@ test('ppt source view helpers classify source ownership and actions', () => {
   assert.match(removeSourceMessage({ id: 'document:doc-1', meta: { sourceKind: 'document' } }), /文档库/)
 })
 
+
+test('ppt source view helpers prefer canonical source_kind over meta alias', () => {
+  assert.equal(isPackageSource({ id: 'external:package-1', source_kind: 'package', meta: { sourceKind: 'system' } }), true)
+  assert.equal(isDocumentSource({ id: 'external:doc-1', source_kind: 'document', meta: { sourceKind: 'system' } }), true)
+  assert.equal(isCurrentSource({ id: 'current:scope', source_kind: 'system', meta: { sourceKind: 'package' } }), true)
+  assert.equal(isDeletableSource({ id: 'external:package-1', source_kind: 'package', meta: { sourceKind: 'system' } }), true)
+})
 test('ppt source view helpers derive transport from ai payload', () => {
   const source = {
     id: 'current:analysis',
@@ -53,4 +60,25 @@ test('ppt source view helpers derive transport from ai payload', () => {
   assert.equal(transport.evidence_count, 1)
   assert.equal(sourceTransportLabel(source), '已构建 范围 1 / metrics 2 / evidence 1 / visuals 1')
   assert.deepEqual(sourceTransportExcludedItems(source), ['raw_rows'])
+})
+
+test('ppt source transport fallback uses canonical source kind', () => {
+  const transport = sourceTransport({
+    id: 'external:web-source',
+    title: '联网资料',
+    source_kind: 'web',
+    meta: {
+      sourceKind: 'database',
+      aiPayload: {
+        version: 'ppt_ai_input_block_v1',
+        source_id: 'external:web-source',
+        title: '联网资料',
+        included: ['evidence'],
+        counts: { evidence: 0 },
+      },
+    },
+  })
+
+  assert.equal(transport.source_kind, 'web')
+  assert.equal(transport.sourceKind, 'web')
 })
