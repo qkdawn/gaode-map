@@ -866,7 +866,6 @@ function createAgentRuntimeMethods() {
           audit_issues: cloneArray(merged.auditIssues),
           planning_summary: String((merged.diagnostics && merged.diagnostics.planningSummary) || (merged.plan && merged.plan.summary) || ''),
           audit_summary: String((merged.diagnostics && merged.diagnostics.auditSummary) || ''),
-          replan_count: Number((merged.diagnostics && merged.diagnostics.replanCount) || 0) || 0,
           latency_ms: cloneObject(merged.diagnostics && merged.diagnostics.latencyMs),
           thinking_timeline: cloneArray(merged.thinkingTimeline),
           error: String(merged.error || ''),

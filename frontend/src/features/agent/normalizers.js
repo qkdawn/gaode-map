@@ -496,11 +496,6 @@ function normalizeAgentTurnPayload(seed = {}) {
         ? seed.auditSummary
         : (rawDiagnostics.audit_summary || rawDiagnostics.auditSummary),
     ),
-    replanCount: Number(
-      Object.prototype.hasOwnProperty.call(seed, 'replanCount')
-        ? seed.replanCount
-        : (rawDiagnostics.replan_count ?? rawDiagnostics.replanCount ?? 0),
-    ) || 0,
     latencyMs: cloneObject(
       Object.prototype.hasOwnProperty.call(seed, 'latencyMs')
         ? seed.latencyMs
@@ -661,7 +656,7 @@ function createAgentSessionPlaceholderRecord(session = null) {
       riskPrompt: '',
       panelPayloads: {},
     },
-    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], replanCount: 0, latencyMs: {}, error: '' },
+    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], latencyMs: {}, error: '' },
     contextSummary: {},
     plan: { steps: [], summary: '' },
     snapshotLoaded: false,

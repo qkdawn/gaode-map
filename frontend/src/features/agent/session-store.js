@@ -422,7 +422,6 @@ function createAgentSessionStoreMethods() {
             || (this.agentPlan && this.agentPlan.summary),
           ),
           auditSummary: asText(existing && existing.diagnostics && (existing.diagnostics.auditSummary || existing.diagnostics.audit_summary)),
-          replanCount: Number(existing && existing.diagnostics && (existing.diagnostics.replanCount ?? existing.diagnostics.replan_count ?? 0)) || 0,
           latencyMs: cloneObject(existing && existing.diagnostics && (existing.diagnostics.latencyMs || existing.diagnostics.latency_ms)),
           thinkingTimeline: this.agentThinkingTimeline,
           error: this.agentError,
