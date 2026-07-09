@@ -92,6 +92,11 @@ def test_agent_stage_contract_rejects_removed_legacy_stages():
         AgentSessionDetail(id="session-1", stage="auditing")
 
 
+def test_agent_turn_response_rejects_extra_top_level_fields():
+    with pytest.raises(ValueError):
+        AgentTurnResponse(status="answered", answer="旧顶层回答")
+
+
 def test_agent_plan_contract_exports_current_fields_only():
     plan = AgentPlanEnvelope(steps=[{"tool_name": "read_current_scope"}], summary="已规划")
 

@@ -716,7 +716,7 @@ AgentMessage.model_rebuild()
 
 
 class AgentTurnResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     status: AgentStatus
     stage: AgentStage = "answered"
