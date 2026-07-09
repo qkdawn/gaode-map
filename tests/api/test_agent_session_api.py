@@ -185,6 +185,27 @@ def test_agent_site_selection_api_rejects_extra_request_fields(monkeypatch):
         assert response.status_code == 422
 
 
+def test_agent_iteration_api_rejects_extra_request_fields(monkeypatch):
+    _install_test_session(monkeypatch)
+    with TestClient(_build_test_app()) as client:
+        nightlight_resp = client.post(
+            "/api/v1/analysis/agent/iteration/nightlight/interpret",
+            json={"evidence": {}, "debug": True},
+        )
+        poi_interpret_resp = client.post(
+            "/api/v1/analysis/agent/iteration/poi/interpret",
+            json={"evidence": {}, "debug": True},
+        )
+        poi_build_resp = client.post(
+            "/api/v1/analysis/agent/iteration/poi/build",
+            json={"history_id": "history-1", "years": [2024], "center": [113.3, 23.1], "debug": True},
+        )
+
+        assert nightlight_resp.status_code == 422
+        assert poi_interpret_resp.status_code == 422
+        assert poi_build_resp.status_code == 422
+
+
 def test_legacy_react_routes_are_removed(monkeypatch):
     _install_test_session(monkeypatch)
     with TestClient(_build_test_app()) as client:

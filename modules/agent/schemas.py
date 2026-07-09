@@ -256,7 +256,7 @@ class AgentSummaryGenerateResponse(BaseModel):
 
 
 class AgentIterationNightlightRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     evidence: Dict[str, Any] = Field(default_factory=dict)
 
@@ -274,7 +274,7 @@ class AgentIterationNightlightResponse(BaseModel):
 
 
 class AgentIterationPoiRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     evidence: Dict[str, Any] = Field(default_factory=dict)
 
@@ -301,7 +301,7 @@ class AgentIterationPoiResponse(BaseModel):
 
 
 class AgentIterationPoiBuildRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     history_id: str = ""
     years: List[int] = Field(default_factory=list)
