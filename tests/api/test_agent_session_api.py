@@ -206,6 +206,31 @@ def test_agent_iteration_api_rejects_extra_request_fields(monkeypatch):
         assert poi_build_resp.status_code == 422
 
 
+def test_agent_main_loop_rejects_extra_context_envelope_fields(monkeypatch):
+    _install_test_session(monkeypatch)
+    base_payload = {
+        "conversation_id": "agent-extra-context",
+        "history_id": "history-1",
+        "messages": [{"role": "user", "content": "总结这个区域"}],
+        "analysis_snapshot": {"scope": {"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}},
+    }
+    cases = [
+        {"messages": [{"role": "user", "content": "总结这个区域", "debug": True}]},
+        {"analysis_snapshot": {"scope": {}, "debug": True}},
+        {"visual_snapshots": [{"snapshot_id": "visual-1", "kind": "overview_map", "data_url": "data:image/png;base64,abc", "debug": True}]},
+        {"selected_sources_context": {"sources": [], "debug": True}},
+    ]
+
+    with TestClient(_build_test_app()) as client:
+        for patch in cases:
+            response = client.post(
+                "/api/v1/analysis/agent/main-loop/stream",
+                json={**base_payload, **patch},
+            )
+
+            assert response.status_code == 422
+
+
 def test_legacy_react_routes_are_removed(monkeypatch):
     _install_test_session(monkeypatch)
     with TestClient(_build_test_app()) as client:

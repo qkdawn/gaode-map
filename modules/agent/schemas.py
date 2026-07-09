@@ -72,7 +72,7 @@ EvidenceConfidence = Literal["strong", "moderate", "weak"]
 
 
 class AgentMessage(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     role: Literal["system", "user", "assistant"] = "user"
     content: str = ""
@@ -80,7 +80,7 @@ class AgentMessage(BaseModel):
 
 
 class AnalysisSnapshot(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     context: Dict[str, Any] = Field(default_factory=dict)
     scope: Dict[str, Any] = Field(default_factory=dict)
@@ -98,7 +98,7 @@ class AnalysisSnapshot(BaseModel):
 
 
 class AgentVisualSnapshot(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     snapshot_id: str = ""
     kind: str = ""
@@ -111,7 +111,7 @@ class AgentVisualSnapshot(BaseModel):
 
 
 class AgentSelectedSourcesContext(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     sources: List[Dict[str, Any]] = Field(default_factory=list)
 
