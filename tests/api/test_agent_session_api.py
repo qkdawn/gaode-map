@@ -153,7 +153,7 @@ def test_agent_main_loop_persists_multiple_statuses(monkeypatch):
         statuses = [
             ("answered", {"output": {"answer": "已完成分析"}, "diagnostics": {"thinking_timeline": [{"id": "thinking-answer", "phase": "answering", "title": "回答生成完成", "state": "completed"}]}}),
             ("requires_clarification", {"output": {"clarification_question": "请补充范围"}, "diagnostics": {"thinking_timeline": [{"id": "thinking-clarify", "phase": "gating", "title": "需要补充信息", "state": "failed"}]}}),
-            ("requires_risk_confirmation", {"output": {"risk_prompt": "工具 `compute_road_syntax_from_scope` 属于高成本执行，请确认后重试。"}, "diagnostics": {"thinking_timeline": [{"id": "thinking-risk", "phase": "planned", "title": "等待风险确认", "state": "failed"}]}}),
+            ("requires_risk_confirmation", {"output": {"risk_prompt": "工具 `compute_road_syntax_from_scope` 属于高成本执行，请确认后重试。"}, "diagnostics": {"thinking_timeline": [{"id": "thinking-risk", "phase": "executing", "title": "等待风险确认", "state": "failed"}]}}),
             ("failed", {"diagnostics": {"thinking_timeline": [{"id": "thinking-failed", "phase": "answering", "title": "回答生成失败", "state": "failed"}]}}),
         ]
 

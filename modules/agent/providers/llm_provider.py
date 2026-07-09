@@ -162,7 +162,7 @@ async def _stream_chat_completion(
     request_body: Dict[str, Any],
     emit: LoopEmit | None = None,
     reasoning_id: str = "llm-reasoning",
-    phase: str = "planned",
+    phase: str = "executing",
     title: str = "模型思考",
     enable_thinking: bool = True,
 ) -> Dict[str, Any]:

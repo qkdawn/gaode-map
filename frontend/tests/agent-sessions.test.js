@@ -1524,11 +1524,11 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
       return createSseResponse([
         {
           type: 'status',
-          payload: { stage: 'planned', label: '制定工具计划' },
+          payload: { stage: 'executing', label: '执行工具循环' },
         },
         {
           type: 'thinking',
-          payload: { id: 'thinking-1', phase: 'planned', title: '规划工具调用', detail: '正在决定下一步工具。', state: 'active' },
+          payload: { id: 'thinking-1', phase: 'executing', title: '执行工具循环', detail: '正在按需调用工具补证据。', state: 'active' },
         },
         {
           type: 'final',
@@ -1547,7 +1547,7 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
                 citations: [],
                 research_notes: [],
                 audit_issues: [],
-                thinking_timeline: [{ id: 'thinking-1', phase: 'planned', title: '规划工具调用', detail: '正在决定下一步工具。', state: 'completed' }],
+                thinking_timeline: [{ id: 'thinking-1', phase: 'executing', title: '执行工具循环', detail: '正在按需调用工具补证据。', state: 'completed' }],
                 error: '',
               },
               context_summary: {
@@ -1608,7 +1608,7 @@ test('startNewAgentReportSession keeps new draft out of visible history until fi
             risk_prompt: '',
             next_suggestions: [],
           },
-          diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [{ id: 'thinking-1', phase: 'planned', title: '规划工具调用', detail: '正在决定下一步工具。', state: 'completed' }], error: '' },
+          diagnostics: { execution_trace: [], used_tools: [], citations: [], research_notes: [], audit_issues: [], thinking_timeline: [{ id: 'thinking-1', phase: 'executing', title: '执行工具循环', detail: '正在按需调用工具补证据。', state: 'completed' }], error: '' },
           context_summary: { has_scope: true, available_results: [], active_panel: 'agent', filters_digest: {} },
           plan: { steps: [] },
           risk_confirmations: [],
@@ -2513,8 +2513,8 @@ test('waiting process fallback advances while first backend event is delayed', (
 test('reasoning deltas are merged in-memory and can be cleared before persistence', () => {
   const ctx = createAgentContext()
 
-  ctx.upsertAgentReasoningDelta({ id: 'reasoning-1', phase: 'planned', title: '模型思考', delta: '先检查', state: 'active' })
-  ctx.upsertAgentReasoningDelta({ id: 'reasoning-1', phase: 'planned', title: '模型思考', delta: '范围。', state: 'completed' })
+  ctx.upsertAgentReasoningDelta({ id: 'reasoning-1', phase: 'executing', title: '模型思考', delta: '先检查', state: 'active' })
+  ctx.upsertAgentReasoningDelta({ id: 'reasoning-1', phase: 'executing', title: '模型思考', delta: '范围。', state: 'completed' })
 
   assert.equal(ctx.agentReasoningBlocks.length, 1)
   assert.equal(ctx.agentReasoningBlocks[0].content, '先检查范围。')
@@ -3164,7 +3164,7 @@ test('submitMainAgentTurn appends user message immediately and updates thinking 
         },
         {
           type: 'reasoning_delta',
-          payload: { id: 'reasoning-1', phase: 'planned', title: '模型思考', delta: '先读取当前范围。', state: 'active' },
+          payload: { id: 'reasoning-1', phase: 'executing', title: '模型思考', delta: '先读取当前范围。', state: 'active' },
         },
         {
           type: 'trace',
