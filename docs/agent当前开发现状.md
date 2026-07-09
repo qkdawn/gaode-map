@@ -71,7 +71,7 @@
 
 ### 3.1 入口阶段
 
-主入口只有两个：
+主 Agent 分析入口有两个：
 
 - `/api/v1/analysis/agent/turn`
 - `/api/v1/analysis/agent/turn/stream`
@@ -85,7 +85,7 @@
 
 当前不再通过 `thinking_mode` 字段控制执行深度。前端根据用户入口选择链路：
 
-- 快速上下文问答走 `/api/v1/analysis/agent/context-ask`，只把后端预处理好的目标、来源和范围摘要传给模型
+- 快速上下文问答走 `/api/v1/analysis/agent/context-ask`，只把前端整理好的目标、已选来源、EvidenceNode 和范围摘要传给模型
 - 主 Agent 分析走 `/api/v1/analysis/agent/turn/stream`，进入门卫、工具循环、证据检查和最终回答
 
 两条链路最终都回到同一个目标：继续回答用户问题，但快速链路不进入工具循环。
@@ -188,6 +188,34 @@
 - 决定工具治理规则
 
 这让前后端职责分界比早期版本更清楚。
+
+### 4.4 Source / EvidenceNode 契约
+
+当前 Agent 不再把文档、图片、网页、数据库和资料包当成五套输入。后端先把它们变成 Source，再把 Source 背后的可回答内容聚合成 EvidenceNode。Agent 工具和回答生成只需要理解 Source 与 EvidenceNode。
+
+Source 的类型以顶层 `source_kind` 为准。`meta.sourceKind` 仍可能出现在前端展示状态、下载文件或旧 UI payload 里，但它不再作为后端输入判断依据。这个收敛已经落到主要链路：已选来源、证据检索、PPT source manifest、PPT context bundle 和 source-view 都优先使用 canonical `source_kind`。
+
+EvidenceNode 使用 snake_case 字段：`source_id`、`source_type`、`evidence_level`、`metadata`、`locator` 等。前端少数本地状态还会保留 `sourceId`、`sourceKind`、`evidenceNodes` 这样的 camelCase 字段，主要为了组件状态、导出和历史 UI 兼容。系统边界是：camelCase 可以是展示层影子字段，但不能重新变成 Agent 输入契约。
+
+这层设计解决了三个问题。
+
+第一，模型不需要理解每种材料的原始结构。文档有 PageIndex，图片有 OCR 和视觉理解，网页有 URL 和正文分块，数据库有 record_id，资料包有代表样本和空间载体。EvidenceNode 把这些差异压进 `metadata` 和 `locator`，对上层只暴露统一证据。
+
+第二，工具治理更简单。搜索工具先返回命中的 EvidenceNode 摘要，读取工具再按 `node_id` 拿完整节点。Finalizer 只能引用已经读取过的节点，避免模型凭快照或摘要猜具体地名、cell、路段或记录。
+
+第三，上下文体积可控。系统不会把文档全文、POI 全量明细、H3 features、路网 geometry 或资料包完整 items 直接塞给模型。领域模块保留原始数据；Agent 只拿轻量证据、指标和必要定位。
+
+### 4.5 PPT planning 的上下文包
+
+PPT planning 不是主 Agent turn，但它复用了同一套来源证据思想。生成目录、叙事计划和页面指令时，后端构造一个轻量 context bundle：
+
+- `scope_brief`：当前范围摘要。
+- `source_manifest`：每个来源实际传入了什么、传了多少证据、哪些原始数据被省略。
+- `metric_context`：唯一可用于精确数字判断的 ready 指标集合。
+- `evidence_context` / `evidence_node_context`：文档、资料包、网页、数据库和 current 分析派生出的轻量 EvidenceNode。
+- `omitted_payloads`：明确说明没有传给模型的重数据。
+
+这套 bundle 的目标不是让 PPT 生成器拿到全部数据，而是让它知道“能引用什么、不能引用什么”。PPT 可以基于 `metric_context` 写精确数字，可以基于 EvidenceNode 写样本、文本依据和空间载体，但不能凭完整 POI 明细或 geometry 做模型内推断。
 
 ## 5. 从旧链路收敛到当前单一路径
 
@@ -339,6 +367,9 @@
 
 第四，继续明确主链路与旁支能力的分层。  
 主对话链路、专题服务、总结能力和报告类能力，后续可以在文档和产品呈现上继续拉开层次，减少误解。
+
+第五，继续清理前端本地旧字段。
+后端输入契约已经收敛到 snake_case，但前端 PPT 状态里还保留部分 `sourceKind`、`sourceId`、`evidenceNodes`、`visualSpecs` 影子字段。后续清理应按组件边界推进：先保证 canonical 字段驱动行为，再把只用于展示或导出的旧字段收窄到局部 helper。
 
 ## 9. 简短结论
 

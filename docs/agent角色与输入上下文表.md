@@ -71,13 +71,50 @@
 ```text
 来源区上传文档 / 图片，或添加网页 / 数据库 / 资料包
 -> 后端解析、清洗、索引或构建
--> 形成 Source 条目
--> Source 背后挂 EvidenceNode
+-> 形成 Source 条目，类型以顶层 source_kind 为准
+-> Source 背后挂统一 EvidenceNode
 -> Tool Loop / Finalizer 按已选 source_ids 召回证据
 -> 命中节点后作为带来源证据进入回答
 ```
 
 这意味着文档、图片、网页、数据库记录和资料包都是同一种来源语义。附件解析能力可以作为文档 / 图片来源构建的内部管线存在，但不再是用户可见或 Agent 工具可调用的独立产品入口。
+
+### EvidenceNode 聚合规则
+
+`EvidenceNode` 是来源进入 Agent 的统一证据层。它把不同材料的内部格式收敛成同一组字段：`id`、`source_id`、`source_type`、`title`、`content`、`summary`、`metadata`、`locator`、`evidence_level`、`citation` 和 `warnings`。
+
+不同来源的聚合方式不同，但最终都落到这层：
+
+| 来源 | 聚合入口 | EvidenceNode 内容 |
+| --- | --- | --- |
+| 文档 | PageIndex 章节节点、页码、章节摘要 | 章节标题、页码范围、章节摘要、文档定位信息 |
+| 图片 | OCR、caption、视觉理解结果 | 图片说明、识别文本、视觉判断、置信度和错误信息 |
+| 网页 | 抓取正文、页面分块、URL 元数据 | 网页标题、URL、段落摘要、引用链接 |
+| 数据库 | 记录行、字段摘要、业务主键 | 记录标题、关键字段、record_id、表/数据集定位 |
+| 资料包 | 包摘要、代表样本、空间载体、派生指标 | 资料包结论、样本或载体摘要、指标来源和省略说明 |
+| 当前分析 | POI、H3、路网、人口、夜光等结构化结果 | 指标解释、空间对象、cell / feature / record 定位 |
+
+聚合时系统不把完整原始 payload 直接塞进模型。文档全文、POI 明细、H3 features、路网 geometry、资料包完整 items 等重数据只留在领域模块或导出能力里。Agent 只拿轻量 EvidenceNode 和必要的 `metadata`。这样做有三个原因：
+
+- 控制上下文体积。模型只看能支撑回答的证据片段，不吃整份原始数据。
+- 保留来源边界。每个节点都带 `source_id`、`locator` 和 `evidence_level`，回答能追溯到文档章节、网页 URL、数据库记录或地图对象。
+- 统一工具治理。检索工具只需要搜索和读取 EvidenceNode，不需要为文档、图片、网页、数据库和资料包各维护一套回答路径。
+
+### 字段契约
+
+当前后端输入契约以 snake_case 为准。来源类型读顶层 `source_kind`，证据节点读 `evidence_nodes`，来源 id 读 `source_id` / `source_ids`。`meta.sourceKind`、`sourceKind`、`sourceId`、`evidenceNodes` 这类 camelCase 字段只在部分前端展示状态、下载 payload 或旧 UI 状态中保留，不再作为 Agent 输入判断依据。
+
+这条规则减少了调用方需要记住的兼容分支：后端、工具循环和 Finalizer 只理解一套 canonical 形状；前端如果需要展示旧字段，应该在 UI 层转换，而不是把旧字段继续传回后端当作契约。
+
+### 快速上下文问答
+
+快速上下文问答走独立的 `context-ask` 链路。它不进入 Tool Loop，也不做多轮工具补证据。前端先把当前问题、范围摘要、已选来源和可用 EvidenceNode 整理成目标 payload，再交给后端直接生成回答。
+
+这个设计把“轻量追问”和“主 Agent 分析”分开：
+
+- 轻量追问使用已经预处理好的证据，响应更短。
+- 主 Agent 遇到证据缺口时，可以进入工具循环补读 EvidenceNode。
+- 两条链路都共享 Source / EvidenceNode 语义，避免快速模式变成另一套附件或临时字段协议。
 
 ## 为什么不再拆成更多角色
 
