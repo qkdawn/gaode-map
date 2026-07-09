@@ -1548,7 +1548,6 @@ export function createAgentSummaryViewMethods() {
           citations: this.agentCitations,
           researchNotes: this.agentResearchNotes,
           auditIssues: this.agentAuditIssues,
-          nextSuggestions: [],
           clarificationQuestion: '',
           clarificationOptions: [],
           riskPrompt: '',

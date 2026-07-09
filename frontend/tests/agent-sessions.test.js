@@ -469,7 +469,7 @@ test('submitContextAskQuestion appends user and assistant messages', async () =>
   assert.deepEqual(ctx.contextAskMessages.slice(-2).map((item) => item.content), ['为什么？', '依据 POI 和人口证据判断。'])
 })
 
-test('normalizeAgentTurnPayload keeps backward compatibility when structured output is absent', () => {
+test('normalizeAgentTurnPayload accepts minimal structured output', () => {
   const normalized = normalizeAgentTurnPayload({
     status: 'answered',
     output: {
@@ -3016,7 +3016,6 @@ test('applyAgentSessionSnapshot keeps planner and tool calls collapsed for answe
     citations: [],
     researchNotes: [],
     auditIssues: [],
-    nextSuggestions: [],
     contextSummary: {},
     plan: {
       steps: [{ tool_name: 'read_current_results', reason: '读取当前结果' }],
@@ -7896,12 +7895,10 @@ function ctxSessionBase(id, title) {
     preview: '开始一份新的区域分析',
     status: 'idle',
     input: '',
-    cards: [],
     executionTrace: [],
     usedTools: [],
     citations: [],
     researchNotes: [],
-    nextSuggestions: [],
     clarificationQuestion: '',
     riskPrompt: '',
     error: '',
