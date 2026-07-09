@@ -787,7 +787,7 @@ class AgentSessionSummary(BaseModel):
 
 
 class AgentSessionSnapshotRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     title: str = ""
     preview: str = ""
@@ -806,7 +806,7 @@ class AgentSessionSnapshotRequest(BaseModel):
 
 
 class AgentSessionMetadataPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     title: Optional[str] = None
     is_pinned: Optional[bool] = None

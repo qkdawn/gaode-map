@@ -128,6 +128,30 @@ def test_agent_session_crud_api(monkeypatch):
         assert missing_resp.status_code == 404
 
 
+def test_agent_session_api_rejects_extra_snapshot_fields(monkeypatch):
+    _install_test_session(monkeypatch)
+    with TestClient(_build_test_app()) as client:
+        put_resp = client.put(
+            "/api/v1/analysis/agent/sessions/agent-extra",
+            json={
+                "title": "商业分析",
+                "preview": "开始一份新的区域分析",
+                "status": "idle",
+                "history_id": "history-current",
+                "panel_kind": "followup",
+                "messages": [],
+                "panelPreloadNotes": [],
+            },
+        )
+        patch_resp = client.patch(
+            "/api/v1/analysis/agent/sessions/agent-extra",
+            json={"title": "重命名", "unknown_field": True},
+        )
+
+        assert put_resp.status_code == 422
+        assert patch_resp.status_code == 422
+
+
 def test_legacy_react_routes_are_removed(monkeypatch):
     _install_test_session(monkeypatch)
     with TestClient(_build_test_app()) as client:
