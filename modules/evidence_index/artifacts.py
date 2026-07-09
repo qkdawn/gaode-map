@@ -105,12 +105,12 @@ def _source_payload(source: Any) -> Dict[str, Any]:
 
 
 def _compact_source_payload(source: Dict[str, Any]) -> Dict[str, Any]:
-    meta = source.get("meta") if isinstance(source.get("meta"), dict) else {}
+    record = SourceRecord.model_validate(source)
     return {
-        "id": str(source.get("id") or source.get("source_id") or "").strip(),
-        "title": str(source.get("title") or "").strip(),
-        "source_kind": str(source.get("source_kind") or source.get("sourceKind") or meta.get("sourceKind") or "").strip(),
-        "status": str(source.get("status") or "").strip(),
-        "evidence_count": int(source.get("evidence_count") or source.get("evidenceCount") or 0),
-        "locator_summary": str(source.get("locator_summary") or source.get("locatorSummary") or "").strip(),
+        "id": record.source_id,
+        "title": record.title,
+        "source_kind": record.source_kind,
+        "status": record.status,
+        "evidence_count": record.evidence_count,
+        "locator_summary": record.locator_summary,
     }

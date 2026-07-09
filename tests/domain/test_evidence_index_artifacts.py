@@ -1,4 +1,6 @@
 from modules.evidence_index import SOURCE_INDEX_MANIFEST_ARTIFACT_TYPE, attach_index_manifest, build_source_index_manifest_payload, list_source_index_manifests, persist_source_index_manifest
+from modules.evidence_index.artifacts import persist_source_index_manifest_payload
+from modules.evidence_index.schemas import SourceIndexManifest
 from modules.evidence_retrieval.schemas import SourceRecord
 
 
@@ -42,6 +44,39 @@ def test_persist_source_index_manifest_writes_history_scoped_artifact():
     assert repo.upserts[0]["payload"]["manifest"]["native_index_kind"] == "webpage_index"
     assert repo.upserts[0]["payload"]["source"]["id"] == "web:area-1"
     assert repo.upserts[0]["summary"]["node_count"] == 2
+
+
+def test_persist_source_index_manifest_compacts_source_with_canonical_record():
+    manifest = SourceIndexManifest.model_validate(
+        build_source_index_manifest_payload(
+            source_id="web:area-1",
+            source_kind="web",
+            native_index_kind="webpage_index",
+            node_count=1,
+        )
+    )
+    repo = FakeManifestRepo()
+
+    artifact = persist_source_index_manifest_payload(
+        "history-1",
+        manifest,
+        source_payload={
+            "sourceId": "web:legacy",
+            "sourceKind": "web",
+            "title": "旧来源",
+            "status": "ready",
+            "evidenceCount": 3,
+            "locatorSummary": "旧定位摘要",
+        },
+        repo=repo,
+    )
+
+    assert artifact is not None
+    compact = repo.upserts[0]["payload"]["source"]
+    assert compact["id"] == ""
+    assert compact["source_kind"] == "unknown"
+    assert compact["evidence_count"] == 0
+    assert compact["locator_summary"] == ""
 
 
 def test_persist_source_index_manifest_ignores_sources_without_manifest():
