@@ -31,9 +31,7 @@ export function evidenceNodesFromAiPayload(aiPayload = {}) {
       return {
         id: nodeId,
         source_id: nodeSourceId,
-        sourceId: nodeSourceId,
         source_type: nodeSourceType,
-        sourceType: nodeSourceType,
         title,
         content,
         summary: asText(node.summary || content).slice(0, 260),
@@ -41,7 +39,6 @@ export function evidenceNodesFromAiPayload(aiPayload = {}) {
         locator: asText(node.locator),
         score: Number(node.score || 0) || 0,
         evidence_level: asText(node.evidence_level || node.evidenceLevel || 'source_evidence'),
-        evidenceLevel: asText(node.evidence_level || node.evidenceLevel || 'source_evidence'),
         warnings: cloneArray(node.warnings).map((warning) => asText(warning)).filter(Boolean),
         citation: asText(node.citation),
       }
@@ -67,9 +64,7 @@ export function evidenceNodesFromEvidenceItems(aiPayload = {}, items = []) {
       return {
         id: nodeId,
         source_id: nodeSourceId,
-        sourceId: nodeSourceId,
         source_type: nodeSourceType,
-        sourceType: nodeSourceType,
         title,
         content,
         summary: asText(evidence.summary || content).slice(0, 260),
@@ -77,7 +72,6 @@ export function evidenceNodesFromEvidenceItems(aiPayload = {}, items = []) {
         locator: asText(metadata.locator || evidence.locator),
         score: Number(evidence.score || 0) || 0,
         evidence_level: asText(metadata.evidence_level || evidence.type || evidence.evidence_level || 'source_evidence'),
-        evidenceLevel: asText(metadata.evidence_level || evidence.type || evidence.evidence_level || 'source_evidence'),
         warnings: cloneArray(metadata.warnings || evidence.warnings).map((warning) => asText(warning)).filter(Boolean),
         citation: asText(evidence.citation),
       }
