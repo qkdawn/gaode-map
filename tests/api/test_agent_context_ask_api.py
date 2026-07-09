@@ -10,8 +10,6 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT_DIR))
 os.environ.setdefault("AMAP_JS_API_KEY", "test-key")
 
-import modules.agent.analysis_quick_answer_service as quick_service
-
 _AGENT_ROUTE_PATH = ROOT_DIR / "router" / "domains" / "agent.py"
 _AGENT_ROUTE_SPEC = importlib.util.spec_from_file_location("test_agent_context_ask_route_module", _AGENT_ROUTE_PATH)
 agent_router_module = importlib.util.module_from_spec(_AGENT_ROUTE_SPEC)
@@ -212,21 +210,8 @@ def test_context_ask_accepts_analysis_sources_and_sends_target_payload(monkeypat
             }],
         },
     }
-    class SkippedSourceQa:
-        status = "skipped"
-        answer = ""
-        evidence = []
-        citations = []
-        warnings = []
-        used_tools = []
-        error = "test_force_context_fallback"
-
-    async def fake_source_qa_loop(_payload):
-        return SkippedSourceQa()
-
     monkeypatch.setattr(service, "is_llm_enabled", lambda: True)
     monkeypatch.setattr(service, "get_llm_provider_client", lambda: FakeClient())
-    monkeypatch.setattr(quick_service, "run_source_qa_loop", fake_source_qa_loop)
 
     with TestClient(_build_test_app()) as client:
         response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
@@ -247,21 +232,20 @@ def test_context_ask_accepts_analysis_sources_and_sends_target_payload(monkeypat
     assert captured["user_payload"]["scoped_dataset_context"]["datasets"] == {}
 
 
-def test_context_ask_uses_source_qa_loop_for_analysis_sources(monkeypatch):
+def test_context_ask_analysis_sources_uses_direct_preprocessed_payload(monkeypatch):
     import modules.agent.context_ask_service as service
 
-    class SourceQa:
-        status = "success"
-        answer = "已通过来源工具回答。"
-        evidence = [{"source_id": "current:dataset:road", "citation": "当前范围路网，2024 年"}]
-        citations = ["当前范围路网，2024 年"]
-        warnings = []
-        used_tools = ["list_scope_datasets", "query_scope_dataset"]
-        error = ""
+    captured = {}
 
     class FakeClient:
         async def chat_json(self, **kwargs):
-            raise AssertionError("ppt source QA should not fall back to chat_json")
+            captured.update(kwargs)
+            return {
+                "answer": "已通过直接上下文包回答。",
+                "evidence": [{"source_id": "current:analysis:road"}],
+                "citations": ["current:analysis:road"],
+                "warnings": [],
+            }
 
     payload = _payload(question="为什么这里路网较差")
     payload["require_ai"] = True
@@ -273,12 +257,8 @@ def test_context_ask_uses_source_qa_loop_for_analysis_sources(monkeypatch):
         "payload": {"sources": [{"source_id": "current:analysis:road"}]},
     }
 
-    async def fake_source_qa_loop(_payload):
-        return SourceQa()
-
     monkeypatch.setattr(service, "is_llm_enabled", lambda: True)
     monkeypatch.setattr(service, "get_llm_provider_client", lambda: FakeClient())
-    monkeypatch.setattr(quick_service, "run_source_qa_loop", fake_source_qa_loop)
 
     with TestClient(_build_test_app()) as client:
         response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
@@ -286,38 +266,38 @@ def test_context_ask_uses_source_qa_loop_for_analysis_sources(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "success"
-    assert data["answer"] == "已通过来源工具回答。"
-    assert data["evidence"][0]["source_id"] == "current:dataset:road"
-    assert data["citations"] == ["当前范围路网，2024 年"]
-    assert any("query_scope_dataset" in item for item in data["warnings"])
+    assert data["answer"] == "已通过直接上下文包回答。"
+    assert captured["phase"] == "context_ask"
+    assert captured["reasoning_id"] == "context-ask"
+    user_payload = captured["user_payload"]
+    assert user_payload["question"] == "为什么这里路网较差"
+    assert user_payload["target"]["type"] == "analysis_sources"
+    assert user_payload["selected_sources_summary"]["sources"][0]["source_id"] == "current:analysis:road"
+    assert "tools" not in captured
 
 
-def test_context_ask_keeps_long_markdown_source_qa_answer(monkeypatch):
+def test_context_ask_keeps_long_markdown_direct_answer(monkeypatch):
     import modules.agent.context_ask_service as service
 
     long_answer = (
         "## 路网组织判断\n"
         "当前范围内部显示，路网问题不是单一指标偏低，而是局部连接、整合与可读性共同造成的空间组织压力。\n\n"
         "## 低连接样本证据\n"
-        "来源问答工具读取了当前范围路网明细，并将低连接度、低整合度和高深度样本作为判断依据。\n\n"
+        "后端预处理包提供了当前范围路网明细，并将低连接度、低整合度和高深度样本作为判断依据。\n\n"
         "## 对游逛转化的影响\n"
         "这意味着部分路段可能难以承担连续游逛和商业界面串联，热区之间的转化效率需要进一步核验。\n\n"
         "## 证据边界和下一步\n"
         "没有外部基准时，只能说当前范围内部排序提示局部短板；下一步应叠加 POI 与人流场景验证。"
     )
 
-    class SourceQa:
-        status = "success"
-        answer = long_answer
-        evidence = []
-        citations = []
-        warnings = []
-        used_tools = ["list_scope_datasets", "query_scope_dataset"]
-        error = ""
-
     class FakeClient:
         async def chat_json(self, **kwargs):
-            raise AssertionError("ppt source QA should not fall back to chat_json")
+            return {
+                "answer": long_answer,
+                "evidence": [],
+                "citations": [],
+                "warnings": [],
+            }
 
     payload = _payload(question="为什么这里路网较差")
     payload["require_ai"] = True
@@ -329,12 +309,8 @@ def test_context_ask_keeps_long_markdown_source_qa_answer(monkeypatch):
         "payload": {"sources": [{"source_id": "current:analysis:road"}]},
     }
 
-    async def fake_source_qa_loop(_payload):
-        return SourceQa()
-
     monkeypatch.setattr(service, "is_llm_enabled", lambda: True)
     monkeypatch.setattr(service, "get_llm_provider_client", lambda: FakeClient())
-    monkeypatch.setattr(quick_service, "run_source_qa_loop", fake_source_qa_loop)
 
     with TestClient(_build_test_app()) as client:
         response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
@@ -447,20 +423,6 @@ def test_context_ask_enriches_analysis_road_sources_with_scoped_dataset(monkeypa
     monkeypatch.setattr(service, "is_llm_enabled", lambda: True)
     monkeypatch.setattr(service, "get_llm_provider_client", lambda: FakeClient())
 
-    class SkippedSourceQa:
-        status = "skipped"
-        answer = ""
-        evidence = []
-        citations = []
-        warnings = []
-        used_tools = []
-        error = "test_fallback"
-
-    async def fake_source_qa_loop(_payload):
-        return SkippedSourceQa()
-
-    monkeypatch.setattr(quick_service, "run_source_qa_loop", fake_source_qa_loop)
-
     with TestClient(_build_test_app()) as client:
         response = client.post("/api/v1/analysis/agent/context-ask", json=payload)
 
@@ -505,20 +467,6 @@ def test_context_ask_warns_when_analysis_dataset_source_has_no_history_id(monkey
 
     monkeypatch.setattr(service, "is_llm_enabled", lambda: True)
     monkeypatch.setattr(service, "get_llm_provider_client", lambda: FakeClient())
-
-    class FailedSourceQa:
-        status = "failed"
-        answer = ""
-        evidence = []
-        citations = []
-        warnings = ["已选来源包含当前范围数据源，但缺少 history_id，无法执行来源工具检索。"]
-        used_tools = []
-        error = "history_id_required"
-
-    async def fake_source_qa_loop(_payload):
-        return FailedSourceQa()
-
-    monkeypatch.setattr(quick_service, "run_source_qa_loop", fake_source_qa_loop)
 
     with TestClient(_build_test_app()) as client:
         response = client.post("/api/v1/analysis/agent/context-ask", json=payload)

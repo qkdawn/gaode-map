@@ -30,7 +30,7 @@ from modules.agent.schemas import (
     AgentTurnRequest,
     AgentTurnResponse,
 )
-from modules.agent.analysis_quick_answer_service import answer_analysis_quick_question
+from modules.agent.context_ask_service import answer_context_ask
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload
 from modules.agent.prompt_registry import (
@@ -130,7 +130,7 @@ async def run_agent_site_selection(payload: AgentSiteSelectionRequest):
 
 @router.post("/api/v1/analysis/agent/context-ask", response_model=AgentContextAskResponse)
 async def run_agent_context_ask(payload: AgentContextAskRequest):
-    return await answer_analysis_quick_question(payload)
+    return await answer_context_ask(payload)
 
 
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])

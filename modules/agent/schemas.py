@@ -633,6 +633,7 @@ class AgentTurnDiagnostics(BaseModel):
     planning_summary: str = ""
     audit_summary: str = ""
     translation_pack: AgentTranslationPack = Field(default_factory=AgentTranslationPack)
+    latency_ms: Dict[str, int] = Field(default_factory=dict)
     error: str = ""
 
 

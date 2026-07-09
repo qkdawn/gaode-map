@@ -91,7 +91,7 @@ def _fallback_answer(question: str, target: ContextAskTarget, reason: str = "") 
             f"围绕“{target.title or '已选分析来源'}”，当前只能基于已传入的来源摘要和证据节点做解释；{summary}\n\n"
             f"证据边界：当前上下文包含{evidence_text}{citation_text}。本次没有重新运行来源工具，也没有补充外部基准，因此不能把摘要中的指标直接扩展成新的空间结论。\n\n"
             f"继续核对时，建议把“{as_text(question) or '当前问题'}”拆成可验证的分析任务：先确认已选来源覆盖哪些 current:dataset，再分别做 POI 业态结构、H3 热点分布、人口承载、夜光活力和路网可达性的交叉验证；每一步都应输出可引用的 EvidenceNode、年份、source_id 和空间定位。\n\n"
-            "如果需要具体判断优劣、短板或策略优先级，应重新启用 AI 来源问答工具链或打开证据抽屉核对原始明细；当前降级回答只适合作为解释框架，不应作为最终分析结论。"
+            "如果需要具体判断优劣、短板或策略优先级，应切换深度模式补充证据，或打开证据抽屉核对原始明细；当前降级回答只适合作为解释框架，不应作为最终分析结论。"
         )
     else:
         answer = (
@@ -122,7 +122,7 @@ def _build_user_payload(payload: AgentContextAskRequest, scoped_dataset_context:
         "instructions": [
             "只解释 target，不延伸到无关区域。",
             "不能说使用了没有出现在 evidence/artifact_refs/payload/snapshot_summary/scoped_dataset_context 中的数据。",
-            "如果 scoped_dataset_context.datasets 非空，优先用当前范围数据检索结果回答具体对象、局部差异、TopN 和原因类问题。",
+            "如果 scoped_dataset_context.datasets 非空，优先用后端预处理好的当前范围数据回答具体对象、局部差异、TopN 和原因类问题。",
             "没有外部基准或规划阈值时，不得把当前范围内部排序直接说成整体优劣结论。",
             "证据不足时必须说明不确定性。",
             "已选分析来源回答可以使用 Markdown 小标题；复杂问题按需要说明判断、支撑证据、空间或商业含义、证据边界和下一步验证动作，但不要套用固定栏目。",

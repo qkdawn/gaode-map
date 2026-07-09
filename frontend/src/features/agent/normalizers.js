@@ -502,6 +502,11 @@ function normalizeAgentTurnPayload(seed = {}) {
         ? seed.replanCount
         : (rawDiagnostics.replan_count ?? rawDiagnostics.replanCount ?? 0),
     ) || 0,
+    latencyMs: cloneObject(
+      Object.prototype.hasOwnProperty.call(seed, 'latencyMs')
+        ? seed.latencyMs
+        : (rawDiagnostics.latency_ms || rawDiagnostics.latencyMs),
+    ),
     thinkingTimeline: cloneArray(
       Object.prototype.hasOwnProperty.call(seed, 'thinkingTimeline')
         ? seed.thinkingTimeline
@@ -657,7 +662,7 @@ function createAgentSessionPlaceholderRecord(session = null) {
       riskPrompt: '',
       panelPayloads: {},
     },
-    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], replanCount: 0, error: '' },
+    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], replanCount: 0, latencyMs: {}, error: '' },
     contextSummary: {},
     plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
     snapshotLoaded: false,

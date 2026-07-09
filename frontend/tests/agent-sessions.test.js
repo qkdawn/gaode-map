@@ -291,6 +291,7 @@ test('normalizeAgentTurnPayload reads staged backend response shape', () => {
       planning_summary: '先读取范围，再分析业态结构',
       audit_summary: '证据完整，可直接回答',
       replan_count: 1,
+      latency_ms: { gate: 120, tool_loop: 340, total: 980 },
       thinking_timeline: [{ id: 'thinking-1', phase: 'gating', title: '输入检查完成', detail: '已确认范围。', state: 'completed' }],
       error: '',
     },
@@ -315,6 +316,7 @@ test('normalizeAgentTurnPayload reads staged backend response shape', () => {
   assert.equal(normalized.diagnostics.planningSummary, '先读取范围，再分析业态结构')
   assert.equal(normalized.diagnostics.auditSummary, '证据完整，可直接回答')
   assert.equal(normalized.diagnostics.replanCount, 1)
+  assert.deepEqual(normalized.diagnostics.latencyMs, { gate: 120, tool_loop: 340, total: 980 })
   assert.equal(normalized.diagnostics.thinkingTimeline[0].id, 'thinking-1')
   assert.equal(normalized.contextSummary.active_panel, 'agent')
   assert.equal(normalized.plan.summary, '先读取范围，再分析业态结构')

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from contextlib import suppress
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List
 
@@ -9,19 +10,20 @@ from core.config import settings
 
 from .auditor import audit_execution
 from .context_builder import build_context_bundle, build_context_summary
-from .gate import latest_user_message
+from .context_ask_service import answer_context_ask
+from .gate import latest_user_message, run_gate
 from .finalizer_evidence import build_finalizer_evidence_pack
 from .memory import create_working_memory
 from .llm_digest import summarize_tool_result
 from .providers.langgraph_react import run_langgraph_react_loop
 from .providers.llm_provider import (
     generate_answer_output_with_llm,
-    generate_translation_pack_with_llm,
     is_llm_enabled,
     run_gate_with_llm,
 )
 from .schemas import (
     AgentPlanEnvelope,
+    AgentContextAskRequest,
     AgentTranslationPack,
     AgentThinkingItem,
     AgentTurnDiagnostics,
@@ -44,6 +46,11 @@ StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
 _VISUAL_SNAPSHOT_LIMIT = 12
 _VISUAL_SNAPSHOT_MAX_DATA_URL_CHARS = 2_500_000
+_PREPROCESSED_SOURCE_TOOL = "context_ask_preprocessed_sources"
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int(round((time.perf_counter() - started_at) * 1000.0)))
 
 
 def _visual_snapshot_inputs(payload: AgentTurnRequest) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
@@ -78,6 +85,46 @@ def _visual_snapshot_inputs(payload: AgentTurnRequest) -> tuple[List[Dict[str, A
     if len(payload.visual_snapshots or []) > _VISUAL_SNAPSHOT_LIMIT:
         warnings.append(f"地图视觉快照超过 {_VISUAL_SNAPSHOT_LIMIT} 张，已只使用前 {_VISUAL_SNAPSHOT_LIMIT} 张。")
     return images, metadata, warnings
+
+
+def _source_title(source: Dict[str, Any]) -> str:
+    return str(source.get("title") or source.get("name") or source.get("source_id") or "").strip()
+
+
+def _build_preprocessed_sources_request(payload: AgentTurnRequest, question: str) -> AgentContextAskRequest | None:
+    sources = payload.selected_sources_context.source_items()
+    if not sources or not str(question or "").strip():
+        return None
+    titles = [_source_title(item) for item in sources if _source_title(item)]
+    evidence_nodes: List[Any] = []
+    artifact_refs: List[str] = []
+    summaries: List[str] = []
+    for item in sources:
+        for node in list(item.get("evidence_nodes") or item.get("evidenceNodes") or [])[:4]:
+            evidence_nodes.append(node)
+        for ref in list(item.get("artifact_refs") or item.get("artifactRefs") or []):
+            if ref:
+                artifact_refs.append(ref)
+        summary = str(item.get("summary") or item.get("description") or item.get("policy") or "").strip()
+        if summary:
+            summaries.append(summary)
+    return AgentContextAskRequest(
+        conversation_id=payload.conversation_id,
+        history_id=payload.history_id,
+        question=question,
+        analysis_snapshot=payload.analysis_snapshot,
+        target={
+            "type": "analysis_sources",
+            "id": "selected-sources",
+            "title": "、".join(titles[:3]) or "已选分析来源",
+            "source": "analysis",
+            "summary": "\n".join(summaries[:6]),
+            "evidence": evidence_nodes[:24],
+            "artifact_refs": artifact_refs[:24],
+            "payload": {"sources": sources},
+        },
+        require_ai=True,
+    )
 
 _STAGE_LABELS = {
     "gating": "门卫判断",
@@ -232,6 +279,7 @@ def _build_diagnostics(
     planning_summary: str = "",
     audit_summary: str = "",
     translation_pack: AgentTranslationPack | None = None,
+    latency_ms: Dict[str, int] | None = None,
 ) -> AgentTurnDiagnostics:
     return AgentTurnDiagnostics(
         execution_trace=list(memory.execution_trace or []),
@@ -243,6 +291,7 @@ def _build_diagnostics(
         planning_summary=str(planning_summary or ""),
         audit_summary=str(audit_summary or ""),
         translation_pack=translation_pack or AgentTranslationPack(),
+        latency_ms=dict(latency_ms or {}),
         error=str(error or ""),
     )
 
@@ -275,6 +324,8 @@ def _build_rule_audit_summary(audit: AuditResult) -> str:
 
 
 async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | None = None) -> AgentTurnResponse:
+    total_started_at = time.perf_counter()
+    latency_ms: Dict[str, int] = {}
     snapshot = payload.analysis_snapshot
     question = latest_user_message(payload.messages)
     state = AgentStateMachine()
@@ -367,6 +418,80 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             },
             "visual-snapshots",
         )
+    direct_context_request = _build_preprocessed_sources_request(payload, question)
+    if direct_context_request is not None:
+        await emit_thinking(
+            {
+                "phase": "preflight",
+                "title": "使用已预处理来源",
+                "detail": "本轮已携带前端整理好的分析来源和 EvidenceNode，直接进入上下文回答，跳过完整工具循环。",
+                "display_text": "已使用预处理来源直接回答。",
+                "items": [
+                    str(item.get("title") or item.get("source_id") or "").strip()
+                    for item in payload.selected_sources_context.source_items()[:4]
+                    if str(item.get("title") or item.get("source_id") or "").strip()
+                ],
+                "state": "active",
+            },
+            "preprocessed-sources",
+        )
+        direct_started_at = time.perf_counter()
+        try:
+            context_answer = await answer_context_ask(direct_context_request)
+        except Exception as exc:
+            context_answer = None
+            memory.research_notes.append(f"预处理来源直答失败，已回退完整工具循环：{exc}")
+        latency_ms["preprocessed_context_ask"] = _elapsed_ms(direct_started_at)
+        if context_answer is not None and context_answer.status == "success" and str(context_answer.answer or "").strip():
+            state.move_to("answered")
+            await _emit_status(emit, "answered")
+            await emit_thinking(
+                {
+                    "phase": "preflight",
+                    "title": "预处理来源回答完成",
+                    "detail": "已基于已选来源包生成回答，未重新运行 Agent 工具循环。",
+                    "display_text": "已基于已选来源包生成回答。",
+                    "state": "completed",
+                },
+                "preprocessed-sources",
+            )
+            note = "本轮使用 selected_sources_context 预处理来源直接回答，跳过 gate、ReAct 工具循环和最终综合 LLM。"
+            latency_ms["total"] = _elapsed_ms(total_started_at)
+            return AgentTurnResponse(
+                status="answered",
+                stage="answered",
+                output=AgentTurnOutput(answer=context_answer.answer),
+                diagnostics=AgentTurnDiagnostics(
+                    used_tools=[_PREPROCESSED_SOURCE_TOOL],
+                    citations=[str(item) for item in list(context_answer.citations or []) if str(item).strip()],
+                    research_notes=[note, *[str(item) for item in list(context_answer.warnings or []) if str(item).strip()]],
+                    thinking_timeline=list(thinking_timeline or []),
+                    planning_summary="已使用预处理分析来源直接回答。",
+                    latency_ms=latency_ms,
+                ),
+                context_summary=build_context_summary(
+                    snapshot,
+                    {
+                        **dict(memory.artifacts or {}),
+                        "selected_sources_context": {"sources": payload.selected_sources_context.source_items()},
+                    },
+                ),
+                plan=AgentPlanEnvelope(summary="已使用预处理分析来源直接回答。"),
+            )
+        await emit_thinking(
+            {
+                "phase": "preflight",
+                "title": "预处理来源直答未完成",
+                "detail": (context_answer.error if context_answer else "") or "已回退完整工具循环。",
+                "display_text": "已回退完整工具循环。",
+                "state": "failed",
+            },
+            "preprocessed-sources",
+        )
+        if context_answer is not None:
+            memory.research_notes.extend([str(item) for item in list(context_answer.warnings or []) if str(item).strip()])
+            if context_answer.error:
+                memory.research_notes.append(f"预处理来源直答失败，已回退完整工具循环：{context_answer.error}")
     await emit_thinking(
         {
             "phase": "gating",
@@ -378,6 +503,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     )
 
     if not is_llm_enabled():
+        latency_ms["total"] = _elapsed_ms(total_started_at)
         await _emit_status(emit, "failed")
         return AgentTurnResponse(
             status="failed",
@@ -386,33 +512,57 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             diagnostics=AgentTurnDiagnostics(
                 error="LLM provider 未启用或配置不完整，当前版本要求统一主链路工具循环与自然回答。",
                 thinking_timeline=list(thinking_timeline or []),
+                latency_ms=latency_ms,
             ),
             context_summary=context.context_summary,
             plan=AgentPlanEnvelope(),
         )
 
-    try:
-        gate = await run_gate_with_llm(
-            messages=payload.messages,
-            snapshot=snapshot,
-            context=context,
-            emit=emit_event,
+    rule_gate_started_at = time.perf_counter()
+    gate = run_gate(payload.messages, snapshot)
+    latency_ms["rule_gate"] = _elapsed_ms(rule_gate_started_at)
+    gate_fast_passed = gate.status == "pass"
+    if gate_fast_passed:
+        latency_ms["gate"] = 0
+        await emit_thinking(
+            {
+                "phase": "gating",
+                "title": "门卫快速通过",
+                "detail": gate.summary or "问题和范围已满足执行条件，已跳过 LLM 门卫。",
+                "display_text": gate.summary or "已跳过 LLM 门卫。",
+                "state": "completed",
+            },
+            "gating-check",
         )
-    except Exception as exc:
-        await _emit_status(emit, "failed")
-        return AgentTurnResponse(
-            status="failed",
-            stage="failed",
-            output=AgentTurnOutput(),
-            diagnostics=AgentTurnDiagnostics(
-                error=f"Gatekeeper 调用失败：{exc}",
-                thinking_timeline=list(thinking_timeline or []),
-            ),
-            context_summary=context.context_summary,
-            plan=AgentPlanEnvelope(),
-        )
+    else:
+        gate_started_at = time.perf_counter()
+        try:
+            gate = await run_gate_with_llm(
+                messages=payload.messages,
+                snapshot=snapshot,
+                context=context,
+                emit=emit_event,
+            )
+            latency_ms["gate"] = _elapsed_ms(gate_started_at)
+        except Exception as exc:
+            latency_ms["gate"] = _elapsed_ms(gate_started_at)
+            latency_ms["total"] = _elapsed_ms(total_started_at)
+            await _emit_status(emit, "failed")
+            return AgentTurnResponse(
+                status="failed",
+                stage="failed",
+                output=AgentTurnOutput(),
+                diagnostics=AgentTurnDiagnostics(
+                    error=f"Gatekeeper 调用失败：{exc}",
+                    thinking_timeline=list(thinking_timeline or []),
+                    latency_ms=latency_ms,
+                ),
+                context_summary=context.context_summary,
+                plan=AgentPlanEnvelope(),
+            )
 
     if gate.status == "clarify":
+        latency_ms["total"] = _elapsed_ms(total_started_at)
         state.move_to("clarifying")
         await _emit_status(emit, "clarifying")
         await emit_thinking(
@@ -437,11 +587,13 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             diagnostics=AgentTurnDiagnostics(
                 research_notes=list(gate.research_notes or []) + list(gate.missing_information or []),
                 thinking_timeline=list(thinking_timeline or []),
+                latency_ms=latency_ms,
             ),
             context_summary=context.context_summary,
             plan=AgentPlanEnvelope(summary=gate.summary or ""),
         )
     if gate.status == "block":
+        latency_ms["total"] = _elapsed_ms(total_started_at)
         await _emit_status(emit, "failed")
         return AgentTurnResponse(
             status="failed",
@@ -450,21 +602,23 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             diagnostics=AgentTurnDiagnostics(
                 error=gate.blocked_reason or gate.summary or "当前请求被门卫节点阻断",
                 thinking_timeline=list(thinking_timeline or []),
+                latency_ms=latency_ms,
             ),
             context_summary=context.context_summary,
             plan=AgentPlanEnvelope(summary=gate.summary or ""),
         )
 
-    await emit_thinking(
-        {
-            "phase": "gating",
-            "title": "门卫通过",
-            "detail": gate.summary or "问题已明确，可以继续收集证据并回答。",
-            "display_text": gate.summary or "",
-            "state": "completed",
-        },
-        "gating-check",
-    )
+    if not gate_fast_passed:
+        await emit_thinking(
+            {
+                "phase": "gating",
+                "title": "门卫通过",
+                "detail": gate.summary or "问题已明确，可以继续收集证据并回答。",
+                "display_text": gate.summary or "",
+                "state": "completed",
+            },
+            "gating-check",
+        )
 
     state.move_to("executing")
     await _emit_status(emit, "executing")
@@ -479,6 +633,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     )
     try:
         max_steps_override, max_errors_override = _tool_loop_limits()
+        tool_loop_started_at = time.perf_counter()
         loop_result = await run_langgraph_react_loop(
             messages=payload.messages,
             snapshot=snapshot,
@@ -492,7 +647,10 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             max_errors_override=max_errors_override,
             initial_artifacts=dict(memory.artifacts or {}),
         )
+        latency_ms["tool_loop"] = _elapsed_ms(tool_loop_started_at)
     except Exception as exc:
+        latency_ms["tool_loop"] = _elapsed_ms(tool_loop_started_at) if "tool_loop_started_at" in locals() else 0
+        latency_ms["total"] = _elapsed_ms(total_started_at)
         await _emit_status(emit, "failed")
         return AgentTurnResponse(
             status="failed",
@@ -503,6 +661,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
                 used_tools=used_tools,
                 error=f"工具循环调用失败：{exc}",
                 thinking_timeline=thinking_timeline,
+                latency_ms=latency_ms,
             ),
             context_summary=build_context_summary(snapshot, memory.artifacts),
             plan=AgentPlanEnvelope(),
@@ -526,6 +685,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     await _maybe_emit(emit, "plan", current_plan_envelope.model_dump(mode="json"))
 
     if loop_result.status == "requires_risk_confirmation":
+        latency_ms["total"] = _elapsed_ms(total_started_at)
         await emit_thinking(
             {
                 "phase": "executing",
@@ -545,12 +705,14 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
                 used_tools=used_tools,
                 thinking_timeline=thinking_timeline,
                 planning_summary=planning_summary,
+                latency_ms=latency_ms,
             ),
             context_summary=build_context_summary(snapshot, memory.artifacts),
             plan=current_plan_envelope,
         )
 
     if loop_result.status == "failed":
+        latency_ms["total"] = _elapsed_ms(total_started_at)
         await emit_thinking(
             {
                 "phase": "executing",
@@ -571,6 +733,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
                 error=loop_result.error or loop_result.stop_reason or "tool_loop_failed",
                 thinking_timeline=thinking_timeline,
                 planning_summary=planning_summary,
+                latency_ms=latency_ms,
             ),
             context_summary=build_context_summary(snapshot, memory.artifacts),
             plan=current_plan_envelope,
@@ -599,52 +762,22 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         research_notes=list(memory.research_notes or []),
         audit=latest_rule_audit,
     )
+    translation_pack = AgentTranslationPack(
+        status="skipped",
+        summary="指标转译已合并到最终回答阶段，减少一次独立 LLM 往返。",
+    )
+    latency_ms["translation"] = 0
+    memory.research_notes.append("指标转译已合并到最终回答阶段，减少一次独立 LLM 往返。")
     await emit_thinking(
         {
             "phase": "synthesizing",
-            "title": "转译指标含义",
-            "detail": "正在把关键指标转成空间现象、人的体验和策划含义。",
-            "state": "active",
+            "title": "指标转译合并",
+            "detail": translation_pack.summary,
+            "display_text": translation_pack.summary,
+            "state": "completed",
         },
         "translation-layer",
     )
-    try:
-        translation_pack = await generate_translation_pack_with_llm(
-            messages=payload.messages,
-            snapshot=snapshot,
-            context=context,
-            answer_evidence_payload=answer_evidence_payload,
-            image_inputs=visual_image_inputs,
-            emit=emit_event,
-        )
-        await emit_thinking(
-            {
-                "phase": "synthesizing",
-                "title": "指标转译完成",
-                "detail": translation_pack.summary or "已完成关键指标的空间体验与策划含义转译。",
-                "display_text": translation_pack.summary or "",
-                "items": [
-                    str(item.planning_implication or item.spatial_phenomenon or item.metric)
-                    for item in list(translation_pack.items or [])[:3]
-                    if str(item.planning_implication or item.spatial_phenomenon or item.metric).strip()
-                ],
-                "state": "completed",
-            },
-            "translation-layer",
-        )
-    except Exception as exc:
-        translation_pack = AgentTranslationPack(status="failed", error=str(exc))
-        note = f"指标转译层调用失败，已继续使用原始证据回答：{exc}"
-        memory.research_notes.append(note)
-        await emit_thinking(
-            {
-                "phase": "synthesizing",
-                "title": "指标转译失败",
-                "detail": note,
-                "state": "failed",
-            },
-            "translation-layer",
-        )
     await emit_thinking(
         {
             "phase": "synthesizing",
@@ -654,6 +787,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         },
         "finalizer-evidence",
     )
+    finalizer_started_at = time.perf_counter()
     try:
         finalizer_evidence_pack = build_finalizer_evidence_pack(
             question=question,
@@ -708,6 +842,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             },
             "finalizer-evidence",
         )
+    latency_ms["finalizer_evidence"] = _elapsed_ms(finalizer_started_at)
     citations = build_citations(snapshot, memory.artifacts)
     state.move_to("synthesizing")
     await _emit_status(emit, "synthesizing")
@@ -721,6 +856,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         "synthesizing-final",
     )
     synthesis_error = ""
+    answer_started_at = time.perf_counter()
     try:
         answer_output = await generate_answer_output_with_llm(
             messages=payload.messages,
@@ -744,6 +880,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
                 audit=latest_rule_audit,
             )
         )
+    latency_ms["answer"] = _elapsed_ms(answer_started_at)
     if not str(answer_output.answer or "").strip():
         answer_output.answer = build_answer_fallback(
             question=question,
@@ -773,6 +910,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         research_notes=list(memory.research_notes or []),
         audit=latest_rule_audit,
     )
+    latency_ms["total"] = _elapsed_ms(total_started_at)
     return AgentTurnResponse(
         status="answered",
         stage="answered",
@@ -785,6 +923,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             planning_summary=planning_summary,
             audit_summary=audit_summary,
             translation_pack=translation_pack,
+            latency_ms=latency_ms,
             error=synthesis_error,
         ),
         context_summary=build_context_summary(snapshot, memory.artifacts),

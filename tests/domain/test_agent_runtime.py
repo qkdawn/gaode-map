@@ -3,6 +3,7 @@ import modules.agent.runtime as agent_runtime
 from modules.agent.runtime import process_main_agent_loop, stream_main_agent_loop
 from modules.agent.schemas import (
     AgentMessage,
+    AgentContextAskResponse,
     AgentTranslationPack,
     AgentTurnOutput,
     AgentTurnRequest,
@@ -88,7 +89,7 @@ def _snapshot_with_scope(**kwargs) -> AnalysisSnapshot:
     return AnalysisSnapshot(**payload)
 
 
-def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, translation_pack=None, answer_output=None, captured=None):
+def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, answer_output=None, captured=None):
     monkeypatch.setattr(agent_runtime, "is_llm_enabled", lambda: True)
 
     async def fake_gate(*, messages, snapshot, context, emit=None):
@@ -117,27 +118,6 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, translat
             captured["initial_artifacts"] = dict(initial_artifacts or {})
         return loop_result or ToolLoopResult(status="completed")
 
-    async def fake_translation(*, messages, snapshot, context, answer_evidence_payload, image_inputs=None, emit=None):
-        del messages, snapshot, context, emit
-        if captured is not None:
-            captured["translation_image_inputs"] = image_inputs or []
-            captured["translation_evidence_payload"] = answer_evidence_payload
-        return translation_pack or AgentTranslationPack(
-            status="ready",
-            summary="已将关键指标转译为空间体验与策划含义。",
-            items=[
-                {
-                    "metric": "poi_count",
-                    "raw_signal": "POI 样本量 12",
-                    "spatial_phenomenon": "服务供给已有基础。",
-                    "human_experience": "可支撑基础到访。",
-                    "planning_implication": "AI 生成的策划含义。",
-                    "action_hint": "继续核对业态结构。",
-                    "confidence": "moderate",
-                }
-            ],
-        )
-
     async def fake_answer(*, messages, snapshot, context, answer_evidence_payload, translation_pack=None, image_inputs=None, emit=None):
         del messages, snapshot, context, emit
         if captured is not None:
@@ -148,7 +128,6 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, translat
 
     monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fake_gate)
     monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fake_loop)
-    monkeypatch.setattr(agent_runtime, "generate_translation_pack_with_llm", fake_translation)
     monkeypatch.setattr(agent_runtime, "generate_answer_output_with_llm", fake_answer)
 
 
@@ -200,6 +179,11 @@ def test_runtime_uses_tool_loop_then_answers(monkeypatch):
         ),
         answer_output=AgentTurnOutput(answer="这里更接近生活服务导向的社区商业片区。"),
     )
+    async def fail_llm_gate(**kwargs):
+        del kwargs
+        raise AssertionError("clear questions should use rule gate fast-pass")
+
+    monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fail_llm_gate)
 
     response = asyncio.run(
         process_main_agent_loop(
@@ -217,8 +201,10 @@ def test_runtime_uses_tool_loop_then_answers(monkeypatch):
     assert "read_analysis_evidence_node" in response.used_tools
     assert response.plan.steps[0].tool_name == "read_current_scope"
     assert "本轮按需调用工具补证据" in response.diagnostics.planning_summary
-    assert response.diagnostics.translation_pack.status == "ready"
-    assert response.diagnostics.translation_pack.items[0].planning_implication
+    assert response.diagnostics.translation_pack.status == "skipped"
+    assert "合并到最终回答" in response.diagnostics.translation_pack.summary
+    assert response.diagnostics.latency_ms["gate"] == 0
+    assert response.diagnostics.latency_ms["rule_gate"] >= 0
 
 
 def test_runtime_returns_risk_confirmation_from_tool_loop(monkeypatch):
@@ -297,7 +283,7 @@ def test_runtime_runs_main_agent_loop_with_secondary_tools(monkeypatch):
     )
 
     assert response.status == "answered"
-    assert captured["answer_translation_pack"].status == "ready"
+    assert captured["answer_translation_pack"].status == "skipped"
     assert captured["include_secondary_tools"] is True
 
 
@@ -389,7 +375,7 @@ def test_runtime_does_not_cap_main_agent_tool_loop_when_step_limit_unset(monkeyp
     assert captured["max_steps_override"] is None
 
 
-def test_runtime_passes_visual_snapshots_only_to_translation_and_answer(monkeypatch):
+def test_runtime_passes_visual_snapshots_to_final_answer(monkeypatch):
     captured = {}
     _install_runtime_stubs(
         monkeypatch,
@@ -415,11 +401,10 @@ def test_runtime_passes_visual_snapshots_only_to_translation_and_answer(monkeypa
     )
 
     assert response.status == "answered"
-    assert captured["translation_image_inputs"][0]["kind"] == "road_map"
     assert captured["answer_image_inputs"][0]["kind"] == "road_map"
     assert captured["answer_evidence_payload"]["frontend_visual_snapshots"]["available"][0]["kind"] == "road_map"
     assert "data_url" not in captured["answer_evidence_payload"]["frontend_visual_snapshots"]["available"][0]
-    assert response.diagnostics.translation_pack.status == "ready"
+    assert response.diagnostics.translation_pack.status == "skipped"
 
 
 def test_runtime_puts_map_search_context_only_in_working_memory_artifacts(monkeypatch):
@@ -450,13 +435,66 @@ def test_runtime_puts_map_search_context_only_in_working_memory_artifacts(monkey
     assert "analysis:frontend_map_search_context" in response.context_summary.available_context_sources
 
 
-def test_runtime_puts_selected_sources_context_in_working_memory_artifacts(monkeypatch):
+def test_runtime_answers_selected_sources_with_preprocessed_context(monkeypatch):
+    async def fake_context_ask(payload):
+        assert payload.target.type == "analysis_sources"
+        assert payload.target.payload["sources"][0]["source_id"] == "document:doc-1"
+        return AgentContextAskResponse(
+            status="success",
+            answer="已基于预处理来源直接回答。",
+            warnings=["没有重新运行工具循环。"],
+        )
+
+    async def fail_gate(**kwargs):
+        raise AssertionError("selected sources should skip gate")
+
+    async def fail_loop(**kwargs):
+        raise AssertionError("selected sources should skip tool loop")
+
+    monkeypatch.setattr(agent_runtime, "is_llm_enabled", lambda: True)
+    monkeypatch.setattr(agent_runtime, "answer_context_ask", fake_context_ask)
+    monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fail_gate)
+    monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fail_loop)
+
+    response = asyncio.run(
+        process_main_agent_loop(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="分析已选来源")],
+                analysis_snapshot=_snapshot_with_scope(),
+                selected_sources_context={
+                    "sources": [{
+                        "source_id": "document:doc-1",
+                        "title": "项目文档",
+                        "source_kind": "document",
+                        "summary": "项目更新目标",
+                        "evidence_nodes": [{"id": "n1", "content": "更新目标"}],
+                    }]
+                },
+            )
+        )
+    )
+
+    assert response.status == "answered"
+    assert response.output.answer == "已基于预处理来源直接回答。"
+    assert response.used_tools == ["context_ask_preprocessed_sources"]
+    assert response.diagnostics.latency_ms["preprocessed_context_ask"] >= 0
+    assert response.diagnostics.latency_ms["total"] >= response.diagnostics.latency_ms["preprocessed_context_ask"]
+    assert "analysis:selected_sources_context" in response.context_summary.available_context_sources
+
+
+def test_runtime_falls_back_to_tool_loop_when_preprocessed_sources_fail(monkeypatch):
     captured = {}
     _install_runtime_stubs(
         monkeypatch,
         loop_result=ToolLoopResult(status="completed"),
         captured=captured,
     )
+
+    async def fake_context_ask(payload):
+        del payload
+        return AgentContextAskResponse(status="failed", error="ai_call_failed")
+
+    monkeypatch.setattr(agent_runtime, "answer_context_ask", fake_context_ask)
 
     response = asyncio.run(
         process_main_agent_loop(
@@ -613,7 +651,8 @@ def test_runtime_falls_back_to_server_side_answer_when_finalizer_fails(monkeypat
     assert "服务端兜底" in response.diagnostics.error
 
 
-def test_runtime_keeps_answering_when_translation_layer_fails(monkeypatch):
+def test_runtime_skips_translation_layer_and_answer_receives_skipped_pack(monkeypatch):
+    captured = {}
     _install_runtime_stubs(
         monkeypatch,
         loop_result=ToolLoopResult(
@@ -623,13 +662,8 @@ def test_runtime_keeps_answering_when_translation_layer_fails(monkeypatch):
             artifacts={"current_poi_summary": {"total": 12}},
         ),
         answer_output=AgentTurnOutput(answer="这里仍可基于原始证据形成方向性判断。"),
+        captured=captured,
     )
-
-    async def failing_translation(*, messages, snapshot, context, answer_evidence_payload, image_inputs=None, emit=None):
-        del messages, snapshot, context, answer_evidence_payload, image_inputs, emit
-        raise RuntimeError("translation failed")
-
-    monkeypatch.setattr(agent_runtime, "generate_translation_pack_with_llm", failing_translation)
 
     response = asyncio.run(
         process_main_agent_loop(
@@ -642,8 +676,9 @@ def test_runtime_keeps_answering_when_translation_layer_fails(monkeypatch):
 
     assert response.status == "answered"
     assert response.output.answer == "这里仍可基于原始证据形成方向性判断。"
-    assert response.diagnostics.translation_pack.status == "failed"
-    assert "translation failed" in response.diagnostics.translation_pack.error
+    assert response.diagnostics.translation_pack.status == "skipped"
+    assert captured["answer_translation_pack"].status == "skipped"
+    assert response.diagnostics.latency_ms["translation"] == 0
 
 
 def test_stream_main_agent_loop_emits_gating_executing_and_final(monkeypatch):
@@ -674,3 +709,9 @@ def test_stream_main_agent_loop_emits_gating_executing_and_final(monkeypatch):
     assert "gating" in stages
     assert "executing" in stages
     assert stages[-1] == "answered"
+    final_response = next(event.payload["response"] for event in events if event.type == "final")
+    latency = final_response["diagnostics"]["latency_ms"]
+    for key in ("rule_gate", "gate", "tool_loop", "translation", "finalizer_evidence", "answer", "total"):
+        assert latency[key] >= 0
+    assert latency["gate"] == 0
+    assert latency["translation"] == 0
