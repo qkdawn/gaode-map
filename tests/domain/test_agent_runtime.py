@@ -83,6 +83,15 @@ def test_agent_turn_request_accepts_selected_sources_context():
     assert request.selected_sources_context.sources[0]["source_id"] == "document:doc-1"
 
 
+def test_agent_turn_request_accepts_execution_mode():
+    request = AgentTurnRequest(
+        execution_mode="deep",
+        messages=[AgentMessage(role="user", content="深度分析已选来源")],
+    )
+
+    assert request.execution_mode == "deep"
+
+
 def test_agent_stage_contract_rejects_removed_legacy_stages():
     with pytest.raises(ValueError):
         AgentTurnResponse(status="answered", stage="replanning")
@@ -501,29 +510,19 @@ def test_runtime_puts_map_search_context_only_in_working_memory_artifacts(monkey
     assert "analysis:frontend_map_search_context" in response.context_summary.available_context_sources
 
 
-def test_runtime_answers_selected_sources_with_preprocessed_context(monkeypatch):
-    async def fake_context_ask(payload):
-        assert payload.target.type == "analysis_sources"
-        assert payload.target.id == "analysis-selected-sources"
-        assert payload.target.payload["sources"][0]["source_id"] == "document:doc-1"
-        assert payload.target.evidence[0]["id"] == "n1"
-        assert payload.target.artifact_refs == ["document:doc-1"]
-        return AgentContextAskResponse(
-            status="success",
-            answer="已基于预处理来源直接回答。",
-            warnings=["没有重新运行工具循环。"],
-        )
+def test_runtime_uses_tool_loop_for_selected_sources_by_default(monkeypatch):
+    captured = {}
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed", used_tools=["list_selected_sources"]),
+        answer_output=AgentTurnOutput(answer="已进入主工具循环分析已选来源。"),
+        captured=captured,
+    )
 
-    async def fail_gate(**kwargs):
-        raise AssertionError("selected sources should skip gate")
+    async def fail_context_ask(_payload):
+        raise AssertionError("main agent loop must not use preprocessed direct answer")
 
-    async def fail_loop(**kwargs):
-        raise AssertionError("selected sources should skip tool loop")
-
-    monkeypatch.setattr(agent_runtime, "is_llm_enabled", lambda: True)
-    monkeypatch.setattr(direct_context, "answer_context_ask", fake_context_ask)
-    monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fail_gate)
-    monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fail_loop)
+    monkeypatch.setattr(direct_context, "answer_context_ask", fail_context_ask)
 
     response = asyncio.run(
         process_main_agent_loop(
@@ -545,33 +544,32 @@ def test_runtime_answers_selected_sources_with_preprocessed_context(monkeypatch)
     )
 
     assert response.status == "answered"
-    assert response.output.answer == "已基于预处理来源直接回答。"
-    assert response.used_tools == ["context_ask_preprocessed_sources"]
-    assert response.diagnostics.latency_ms["preprocessed_context_ask"] >= 0
-    assert response.diagnostics.latency_ms["total"] >= response.diagnostics.latency_ms["preprocessed_context_ask"]
+    assert response.output.answer == "已进入主工具循环分析已选来源。"
+    assert response.used_tools == ["list_selected_sources"]
+    assert "selected_sources_context" in captured["initial_artifacts"]
+    assert captured["initial_artifacts"]["selected_sources_context"]["sources"][0]["source_id"] == "document:doc-1"
     assert "analysis:selected_sources_context" in response.context_summary.available_context_sources
 
 
-def test_runtime_fails_preprocessed_sources_without_tool_loop_fallback(monkeypatch):
-    async def fake_context_ask(payload):
-        del payload
-        return AgentContextAskResponse(status="failed", error="ai_call_failed")
+def test_runtime_deep_mode_uses_selected_sources_in_tool_loop(monkeypatch):
+    captured = {}
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(status="completed", used_tools=["list_selected_sources"]),
+        answer_output=AgentTurnOutput(answer="已进入深度工具循环并使用已选来源。"),
+        captured=captured,
+    )
 
-    async def fail_gate(**kwargs):
-        raise AssertionError("selected sources should skip gate even when direct answer fails")
+    async def fail_context_ask(_payload):
+        raise AssertionError("deep mode should not use preprocessed direct answer")
 
-    async def fail_loop(**kwargs):
-        raise AssertionError("selected sources should not fall back to tool loop")
-
-    monkeypatch.setattr(agent_runtime, "is_llm_enabled", lambda: True)
-    monkeypatch.setattr(direct_context, "answer_context_ask", fake_context_ask)
-    monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fail_gate)
-    monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fail_loop)
+    monkeypatch.setattr(direct_context, "answer_context_ask", fail_context_ask)
 
     response = asyncio.run(
         process_main_agent_loop(
             AgentTurnRequest(
-                messages=[AgentMessage(role="user", content="分析已选来源")],
+                execution_mode="deep",
+                messages=[AgentMessage(role="user", content="深度分析已选来源")],
                 analysis_snapshot=_snapshot_with_scope(),
                 selected_sources_context={
                     "sources": [{
@@ -585,11 +583,11 @@ def test_runtime_fails_preprocessed_sources_without_tool_loop_fallback(monkeypat
         )
     )
 
-    assert response.status == "failed"
-    assert response.diagnostics.error == "ai_call_failed"
-    assert response.used_tools == ["context_ask_preprocessed_sources"]
-    assert "未进入完整工具循环" in response.diagnostics.planning_summary
-    assert "analysis:selected_sources_context" in response.context_summary.available_context_sources
+    assert response.status == "answered"
+    assert response.output.answer == "已进入深度工具循环并使用已选来源。"
+    assert response.used_tools == ["list_selected_sources"]
+    assert "selected_sources_context" in captured["initial_artifacts"]
+    assert captured["initial_artifacts"]["selected_sources_context"]["sources"][0]["source_id"] == "document:doc-1"
 
 
 def test_runtime_reads_finalizer_evidence_for_high_value_map_questions(monkeypatch):

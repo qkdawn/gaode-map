@@ -9,7 +9,6 @@ from core.config import settings
 
 from .auditor import audit_execution
 from .context_builder import build_context_bundle, build_context_summary
-from .direct_context import answer_preprocessed_sources
 from .gate import latest_user_message, run_gate
 from .finalizer_evidence import build_finalizer_evidence_pack
 from .latency import LatencyRecorder
@@ -305,18 +304,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             },
             "visual-snapshots",
         )
-    direct_response = await answer_preprocessed_sources(
-        payload=payload,
-        question=question,
-        memory_artifacts=memory.artifacts,
-        research_notes=memory.research_notes,
-        thinking_timeline=thinking_timeline,
-        latency=latency,
-        emit_thinking=emit_thinking,
-    )
-    if direct_response is not None:
-        await _emit_status(emit, "answered")
-        return direct_response
     await emit_thinking(
         {
             "phase": "gating",

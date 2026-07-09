@@ -86,9 +86,9 @@
 当前不再通过 `thinking_mode` 字段控制执行深度。前端根据用户入口选择链路：
 
 - 快速上下文问答走 `/api/v1/analysis/agent/context-ask`，只把前端整理好的目标、已选来源、EvidenceNode 和范围摘要传给模型
-- 主 Agent 分析走 `/api/v1/analysis/agent/turn/stream`，进入门卫、工具循环、证据检查和最终回答
+- 主 Agent 分析走 `/api/v1/analysis/agent/turn/stream`，始终进入门卫、工具循环、证据检查和最终回答
 
-两条链路最终都回到同一个目标：继续回答用户问题，但快速链路不进入工具循环。
+两条链路最终都回到同一个目标：继续回答用户问题。快速链路不进入工具循环；主 Agent 链路即使带了已选来源，也只把来源作为可检索 EvidenceNode，不做预处理直答短路。
 
 ### 3.2 门卫判断
 
