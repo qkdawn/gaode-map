@@ -1,5 +1,5 @@
-import { cloneArray } from './normalizers.js'
 import { ANALYSIS_WORKSPACE_TAB_KIND } from './workspace-kinds.js'
+import { buildAnalysisQuickAskSelectedSourcesContext } from './analysis-quick-request.js'
 
 export const MAIN_AGENT_LOOP_STREAM_URL = '/api/v1/analysis/agent/main-loop/stream'
 
@@ -12,11 +12,10 @@ export function shouldCaptureMainLoopVisualSnapshots(panelKind = '', options = {
 }
 
 export function buildMainLoopSelectedSourcesContext(ctx = {}, panelKind = '') {
-  if (panelKind !== ANALYSIS_WORKSPACE_TAB_KIND || typeof ctx.buildAgentAnalysisSourceTarget !== 'function') {
+  if (panelKind !== ANALYSIS_WORKSPACE_TAB_KIND) {
     return {}
   }
-  const target = ctx.buildAgentAnalysisSourceTarget()
-  return { sources: cloneArray((target.payload || {}).sources) }
+  return buildAnalysisQuickAskSelectedSourcesContext(ctx)
 }
 
 export async function buildMainLoopRequestBody(ctx = {}, turnContext = {}, options = {}) {

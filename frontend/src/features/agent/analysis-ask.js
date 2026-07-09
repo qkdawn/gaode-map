@@ -1,7 +1,7 @@
 import { asText, cloneArray } from './normalizers.js'
 import { ANALYSIS_WORKSPACE_TAB_KIND } from './workspace-kinds.js'
-import { postContextAsk, serializeContextAskTarget } from './context-ask-request.js'
-import { buildAnalysisSourceTarget } from '../analysis-sources/target.js'
+import { postContextAsk } from './context-ask-request.js'
+import { buildAnalysisQuickAskRequest, buildAnalysisQuickAskTarget } from './analysis-quick-request.js'
 
 function writeAnalysisAskSessionState(ctx, patch = {}, options = {}) {
   if (!ctx.activeAgentSessionId || typeof ctx.updateAgentSessionSnapshot !== 'function') return
@@ -28,22 +28,10 @@ function writeAnalysisAskSessionState(ctx, patch = {}, options = {}) {
 export function createAgentAnalysisAskMethods() {
   return {
     buildAgentAnalysisSourceTarget() {
-      const state = typeof this.getAgentAnalysisSourceState === 'function'
-        ? this.getAgentAnalysisSourceState()
-        : {}
-      return buildAnalysisSourceTarget(state)
+      return buildAnalysisQuickAskTarget(this)
     },
     buildAgentAnalysisQuickAskRequest(question = '') {
-      const target = this.buildAgentAnalysisSourceTarget()
-      if (!cloneArray(target.payload && target.payload.sources).length) return null
-      return {
-        conversation_id: this.getActiveAgentSessionId ? this.getActiveAgentSessionId() : asText(this.activeAgentSessionId),
-        history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
-        question: asText(question),
-        analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
-        target: serializeContextAskTarget(target),
-        require_ai: true,
-      }
+      return buildAnalysisQuickAskRequest(this, question)
     },
     appendAgentAnalysisQuickAskMessage(message = {}) {
       this.agentMessages = [...cloneArray(this.agentMessages), {

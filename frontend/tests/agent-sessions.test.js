@@ -17,6 +17,10 @@ import {
   buildAgentAnalysisSnapshot,
   buildAgentPoiH3Evidence,
 } from '../src/features/agent/analysis-snapshot-evidence.js'
+import {
+  buildAnalysisQuickAskRequest,
+  buildAnalysisQuickAskSelectedSourcesContext,
+} from '../src/features/agent/analysis-quick-request.js'
 
 const agentMethods = createAnalysisAgentSessionMethods()
 
@@ -29,6 +33,43 @@ test('agent tabs keep analysis workspace as canonical tab field', () => {
   state.agentTabs.analysisWorkspaceTabs = [{ id: 'analysis-1' }]
   assert.equal(state.agentTabs.analysisWorkspaceTabs[0].id, 'analysis-1')
   assert.equal(JSON.stringify(state.agentTabs).includes('pptPlanningTabs'), false)
+})
+
+test('analysis quick ask request uses selected source context directly', () => {
+  const ctx = {
+    activeAgentSessionId: 'agent-1',
+    getCurrentAgentHistoryId: () => 'history-1',
+    buildAgentAnalysisSnapshot: () => ({ context: { history_id: 'history-1' } }),
+    getAgentAnalysisSourceState: () => ({
+      sources: [{
+        id: 'document:doc-1',
+        title: '片区报告',
+        type: 'document',
+        selected: true,
+        status: 'ready',
+        meta: {
+          aiPayload: {
+            source_id: 'document:doc-1',
+            title: '片区报告',
+            source_kind: 'report',
+            included: ['scope', 'metrics'],
+            metrics: [{ key: 'poi_total', value: 12 }],
+          },
+        },
+      }],
+    }),
+  }
+
+  const request = buildAnalysisQuickAskRequest(ctx, '为什么？')
+  const selectedSources = buildAnalysisQuickAskSelectedSourcesContext(ctx)
+
+  assert.equal(request.conversation_id, 'agent-1')
+  assert.equal(request.history_id, 'history-1')
+  assert.equal(request.require_ai, true)
+  assert.equal(request.target.type, 'analysis_sources')
+  assert.deepEqual(request.target.artifact_refs, ['document:doc-1'])
+  assert.equal(selectedSources.sources[0].source_id, 'document:doc-1')
+  assert.equal(buildAnalysisQuickAskRequest({ getAgentAnalysisSourceState: () => ({ sources: [] }) }, '为什么？'), null)
 })
 
 function createSseResponse(events = []) {
