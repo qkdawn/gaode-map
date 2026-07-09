@@ -152,6 +152,22 @@ def test_agent_session_api_rejects_extra_snapshot_fields(monkeypatch):
         assert patch_resp.status_code == 422
 
 
+def test_agent_summary_api_rejects_extra_request_fields(monkeypatch):
+    _install_test_session(monkeypatch)
+    payload = {
+        "conversation_id": "summary-1",
+        "history_id": "history-1",
+        "analysis_snapshot": {},
+        "debug": True,
+    }
+    with TestClient(_build_test_app()) as client:
+        readiness_resp = client.post("/api/v1/analysis/agent/summary/readiness", json=payload)
+        generate_resp = client.post("/api/v1/analysis/agent/summary/generate", json=payload)
+
+        assert readiness_resp.status_code == 422
+        assert generate_resp.status_code == 422
+
+
 def test_legacy_react_routes_are_removed(monkeypatch):
     _install_test_session(monkeypatch)
     with TestClient(_build_test_app()) as client:

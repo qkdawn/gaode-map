@@ -148,7 +148,7 @@ class AgentTurnRequest(BaseModel):
 
 
 class AgentSummaryRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     conversation_id: str = ""
     history_id: str = ""
