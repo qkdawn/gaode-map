@@ -1,4 +1,5 @@
 import asyncio
+import modules.agent.direct_context as direct_context
 import modules.agent.runtime as agent_runtime
 from modules.agent.runtime import process_main_agent_loop, stream_main_agent_loop
 from modules.agent.schemas import (
@@ -452,7 +453,7 @@ def test_runtime_answers_selected_sources_with_preprocessed_context(monkeypatch)
         raise AssertionError("selected sources should skip tool loop")
 
     monkeypatch.setattr(agent_runtime, "is_llm_enabled", lambda: True)
-    monkeypatch.setattr(agent_runtime, "answer_context_ask", fake_context_ask)
+    monkeypatch.setattr(direct_context, "answer_context_ask", fake_context_ask)
     monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fail_gate)
     monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fail_loop)
 
@@ -494,7 +495,7 @@ def test_runtime_falls_back_to_tool_loop_when_preprocessed_sources_fail(monkeypa
         del payload
         return AgentContextAskResponse(status="failed", error="ai_call_failed")
 
-    monkeypatch.setattr(agent_runtime, "answer_context_ask", fake_context_ask)
+    monkeypatch.setattr(direct_context, "answer_context_ask", fake_context_ask)
 
     response = asyncio.run(
         process_main_agent_loop(
