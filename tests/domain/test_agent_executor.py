@@ -1,6 +1,5 @@
 import asyncio
 
-import modules.agent.executor as executor_module
 from modules.agent.executor import execute_plan_step
 from modules.agent.schemas import AnalysisSnapshot, PlanStep, ToolResult, ToolSpec
 from modules.agent.tools import RegisteredTool
@@ -113,71 +112,3 @@ def test_executor_injects_current_pois_from_snapshot_before_running_tool():
     assert seen["current_poi_summary"] == snapshot.poi_summary
     assert artifacts["current_pois"] == snapshot.pois
 
-
-def test_executor_runs_analysis_preflight_and_injects_data_readiness(monkeypatch):
-    snapshot = _snapshot_with_scope()
-    artifacts = {}
-    called = {"count": 0}
-
-    async def fake_preflight(*, tool_name, snapshot, artifacts, question):
-        del tool_name, snapshot, question
-        called["count"] += 1
-        artifacts["current_data_readiness"] = {"checked": True, "reused": ["poi"], "fetched": ["h3"], "ready": True}
-        return {"applied": True, "ready": True, "data_readiness": dict(artifacts["current_data_readiness"])}
-
-    async def runner(*, arguments, snapshot, artifacts, question):
-        del arguments, snapshot, question
-        return ToolResult(tool_name="analyze_poi_structure", status="success", result={"ok": True}, artifacts=dict(artifacts))
-
-    monkeypatch.setattr(executor_module, "ensure_preflight_for_analysis_tool", fake_preflight)
-
-    result, trace = asyncio.run(
-        execute_plan_step(
-            registered_tool=_registered_tool("analyze_poi_structure", [], runner),
-            step=PlanStep(tool_name="analyze_poi_structure"),
-            snapshot=snapshot,
-            artifacts=artifacts,
-            question="总结这个区域",
-        )
-    )
-
-    assert called["count"] == 1
-    assert trace.status == "success"
-    assert result.result["data_readiness"]["checked"] is True
-    assert result.result["data_readiness"]["fetched"] == ["h3"]
-    assert result.artifacts["current_data_readiness"]["ready"] is True
-
-
-def test_executor_blocks_analysis_when_preflight_not_ready(monkeypatch):
-    snapshot = _snapshot_with_scope()
-
-    async def fake_preflight(*, tool_name, snapshot, artifacts, question):
-        del tool_name, snapshot, artifacts, question
-        return {
-            "applied": True,
-            "ready": False,
-            "error": "missing_required_dimensions",
-            "warnings": ["population missing"],
-            "data_readiness": {"checked": True, "reused": ["poi"], "fetched": [], "ready": False},
-        }
-
-    async def runner(*, arguments, snapshot, artifacts, question):
-        del arguments, snapshot, artifacts, question
-        raise AssertionError("runner should not execute when preflight fails")
-
-    monkeypatch.setattr(executor_module, "ensure_preflight_for_analysis_tool", fake_preflight)
-
-    result, trace = asyncio.run(
-        execute_plan_step(
-            registered_tool=_registered_tool("read_population_profile_analysis", [], runner),
-            step=PlanStep(tool_name="read_population_profile_analysis"),
-            snapshot=snapshot,
-            artifacts={},
-            question="总结这个区域",
-        )
-    )
-
-    assert result.status == "failed"
-    assert result.error == "missing_required_dimensions"
-    assert result.artifacts["current_data_readiness"]["ready"] is False
-    assert trace.status == "failed"

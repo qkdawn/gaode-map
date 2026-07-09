@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-from .preflight import ensure_preflight_for_analysis_tool
 from .schemas import AnalysisSnapshot, ExecutionTraceItem, PlanStep, ToolResult
 from .tool_adapters.scope_tools import extract_scope_polygon
 from .tools import RegisteredTool
@@ -158,7 +157,6 @@ async def execute_plan_step(
     snapshot: AnalysisSnapshot,
     artifacts: Dict[str, object],
     question: str,
-    run_preflight: bool = True,
 ) -> Tuple[ToolResult, ExecutionTraceItem]:
     validation_errors = validate_tool_arguments(step.arguments, registered_tool.spec.input_schema)
     if validation_errors:
@@ -183,51 +181,12 @@ async def execute_plan_step(
                 error="missing_requirements",
             )
         else:
-            preflight_state: Dict[str, Any] = {"applied": False}
-            if run_preflight:
-                preflight_state = await ensure_preflight_for_analysis_tool(
-                    tool_name=registered_tool.spec.name,
-                    snapshot=snapshot,
-                    artifacts=artifacts,
-                    question=question,
-                )
-                if preflight_state.get("applied") and not preflight_state.get("ready", False):
-                    result = ToolResult(
-                        tool_name=registered_tool.spec.name,
-                        status="failed",
-                        warnings=[str(item) for item in (preflight_state.get("warnings") or []) if str(item).strip()],
-                        error=str(preflight_state.get("error") or "analysis_preflight_failed"),
-                        artifacts={"current_data_readiness": dict(preflight_state.get("data_readiness") or {})},
-                    )
-                    trace = ExecutionTraceItem(
-                        tool_name=registered_tool.spec.name,
-                        status=result.status,
-                        reason=step.reason,
-                        message=result.error or "analysis_preflight_failed",
-                        cost_level=registered_tool.spec.cost_level,
-                        risk_level=registered_tool.spec.risk_level,
-                        evidence_count=0,
-                        warning_count=len(result.warnings or []),
-                    )
-                    return result, trace
-
             result = await registered_tool.runner(
                 arguments=step.arguments,
                 snapshot=snapshot,
                 artifacts=artifacts,
                 question=question,
             )
-            if preflight_state.get("data_readiness"):
-                if isinstance(result.result, dict):
-                    result.result = {
-                        **dict(result.result or {}),
-                        "data_readiness": dict(preflight_state.get("data_readiness") or {}),
-                    }
-                if isinstance(result.artifacts, dict):
-                    result.artifacts = {
-                        **dict(result.artifacts or {}),
-                        "current_data_readiness": dict(preflight_state.get("data_readiness") or {}),
-                    }
             result.result = json_safe(result.result)
             result.evidence = json_safe(result.evidence)
             result.warnings = [str(item) for item in (result.warnings or [])]

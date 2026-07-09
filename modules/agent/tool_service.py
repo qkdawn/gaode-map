@@ -140,7 +140,6 @@ async def run_registered_tool(
     artifacts: Dict[str, object],
     question: str,
     registry: Optional[Dict[str, RegisteredTool]] = None,
-    run_preflight: bool = True,
     caller: str = "internal",
 ) -> ToolExecution:
     started_at = time.perf_counter()
@@ -163,7 +162,6 @@ async def run_registered_tool(
             snapshot=snapshot,
             artifacts=artifacts,
             question=question,
-            run_preflight=run_preflight,
         )
         elapsed_ms = round((time.perf_counter() - started_at) * 1000.0, 2)
         logger.info(
@@ -216,7 +214,6 @@ async def run_external_tool(
         artifacts={},
         question=str(request.question or ""),
         registry=registry,
-        run_preflight=False,
         caller="external",
     )
     return execution.result

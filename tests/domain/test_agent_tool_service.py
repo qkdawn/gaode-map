@@ -54,7 +54,6 @@ def test_run_registered_tool_executes_via_executor_and_returns_trace():
             artifacts={},
             question="run shared tool",
             registry={"shared_tool": registered},
-            run_preflight=False,
         )
     )
 
@@ -96,7 +95,6 @@ def test_run_registered_tool_logs_audit_record(caplog):
                 question="",
                 registry={"logged_tool": registered},
                 caller="internal",
-                run_preflight=False,
             )
         )
 

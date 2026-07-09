@@ -14,7 +14,6 @@ from .gate import latest_user_message, run_gate
 from .finalizer_evidence import build_finalizer_evidence_pack
 from .latency import LatencyRecorder
 from .memory import create_working_memory
-from .llm_digest import summarize_tool_result
 from .providers.langgraph_react import run_langgraph_react_loop
 from .providers.llm_provider import (
     generate_answer_output_with_llm,
@@ -92,16 +91,6 @@ _STAGE_LABELS = {
     "requires_risk_confirmation": "等待风险确认",
 }
 
-_GENERIC_TOOL_RESULT_TEXT = {"", "执行成功", "成功", "已完成", "完成", "ok", "OK", "无结果"}
-
-
-def _tool_result_display_text(result) -> str:
-    if result.status == "failed":
-        return str(result.error or "执行失败")
-    summary = summarize_tool_result(result)
-    return "" if str(summary or "").strip() in _GENERIC_TOOL_RESULT_TEXT else str(summary or "").strip()
-
-
 async def _maybe_emit(emit: StreamEmit | None, event_type: str, payload: dict[str, Any]) -> None:
     if emit is None:
         return
@@ -166,61 +155,6 @@ def _trace_to_thinking_payload(seed: dict[str, Any], fallback_id: str) -> dict[s
         },
         "state": state,
     }
-
-
-async def _emit_preflight_trace(
-    *,
-    emit: StreamEmit | None,
-    step_tool_name: str,
-    step_index: int,
-    data_readiness: Dict[str, Any],
-) -> None:
-    if not emit or not isinstance(data_readiness, dict):
-        return
-    reused = [str(item) for item in (data_readiness.get("reused") or []) if str(item).strip()]
-    fetched = [str(item) for item in (data_readiness.get("fetched") or []) if str(item).strip()]
-    ready = bool(data_readiness.get("ready"))
-    await _maybe_emit(
-        emit,
-        "trace",
-        {
-            "id": f"precheck:{step_tool_name}:{step_index}",
-            "tool_name": "analysis_preflight",
-            "phase": "precheck",
-            "status": "success" if data_readiness.get("checked") else "failed",
-            "reason": "checked",
-            "message": "已完成现有数据检查",
-            "result_summary": f"复用: {', '.join(reused) if reused else '无'}",
-            "produced_artifacts": ["current_data_readiness"],
-        },
-    )
-    await _maybe_emit(
-        emit,
-        "trace",
-        {
-            "id": f"fetch-missing:{step_tool_name}:{step_index}",
-            "tool_name": "analysis_preflight",
-            "phase": "fetch_missing",
-            "status": "success" if ready else "failed",
-            "reason": "fetched_missing",
-            "message": "已按缺失维度补齐数据" if ready else "缺失维度补齐失败",
-            "result_summary": f"补齐: {', '.join(fetched) if fetched else '无'}",
-            "produced_artifacts": ["current_area_data_bundle", "current_data_readiness"],
-        },
-    )
-    await _maybe_emit(
-        emit,
-        "trace",
-        {
-            "id": f"analysis-start:{step_tool_name}:{step_index}",
-            "tool_name": "analysis_preflight",
-            "phase": "analysis",
-            "status": "start" if ready else "failed",
-            "reason": "analysis_started",
-            "message": "数据就绪，开始分析" if ready else "数据未就绪，阻止进入分析",
-            "produced_artifacts": ["current_data_readiness"],
-        },
-    )
 
 
 def _build_diagnostics(
