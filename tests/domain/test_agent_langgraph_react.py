@@ -3,6 +3,7 @@ import json
 from modules.agent.context_builder import build_context_bundle
 from modules.agent.providers.langgraph_react import _initial_payload, _react_tool_result_payload
 from modules.agent.providers.prompts import loop_system_prompt, synthesizer_system_prompt
+from modules.agent.providers.tool_loop import select_react_tool_registry
 from modules.agent.schemas import AnalysisSnapshot, ToolResult
 from modules.agent.tools import get_tool_registry
 
@@ -103,6 +104,58 @@ def test_langgraph_initial_payload_catalogs_business_analyst_skeleton():
     assert catalog["recommended_path"][-1] == "SiteSuitabilityModel"
     assert catalog["model_tool_map"]["SiteSuitabilityModel"]["required_tools"] == ["query_scope_dataset"]
     assert catalog["skip_conditions"]["HuffGravityModel"] == ["no candidate site"]
+
+
+def test_react_tool_registry_defaults_to_core_analysis_tools():
+    selected = select_react_tool_registry(
+        get_tool_registry(),
+        question="总结这个区域的空间结构",
+        artifacts={},
+        include_secondary=True,
+    )
+
+    assert list(selected) == [
+        "read_current_scope",
+        "read_current_results",
+        "search_analysis_context",
+        "read_analysis_evidence_node",
+    ]
+
+
+def test_react_tool_registry_opens_contextual_tool_windows():
+    registry = get_tool_registry()
+
+    source_selected = select_react_tool_registry(
+        registry,
+        question="分析已选资料里的政策依据",
+        artifacts={"selected_sources_context": {"sources": [{"source_id": "document:1"}]}},
+        include_secondary=True,
+    )
+    assert {"list_selected_sources", "search_selected_source_evidence", "read_selected_source_evidence_node"}.issubset(source_selected)
+
+    report_selected = select_react_tool_registry(
+        registry,
+        question="报告里这个结论的依据是什么",
+        artifacts={},
+        include_secondary=True,
+    )
+    assert {"search_report_context", "read_report_evidence_node"}.issubset(report_selected)
+
+    dataset_selected = select_react_tool_registry(
+        registry,
+        question="当前范围 POI 类别分别有多少",
+        artifacts={},
+        include_secondary=True,
+    )
+    assert {"list_scope_datasets", "aggregate_scope_dataset", "query_scope_dataset", "read_scope_record"}.issubset(dataset_selected)
+
+    ba_selected = select_react_tool_registry(
+        registry,
+        question="这里适合开咖啡店吗",
+        artifacts={},
+        include_secondary=True,
+    )
+    assert "plan_business_analyst_analysis" in ba_selected
 
 
 def test_langgraph_tool_result_payload_compacts_large_results_and_artifacts():

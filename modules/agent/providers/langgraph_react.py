@@ -18,7 +18,7 @@ from ..schemas import (
 from ..selected_sources import source_id_from_item, source_items_from_artifacts, source_kind_from_item
 from ..tools import RegisteredTool
 from .prompts import loop_system_prompt
-from .tool_loop import chat_completion_tools
+from .tool_loop import chat_completion_tools, select_react_tool_registry
 from .tool_call_execution import execute_tool_call_step, tool_finish_trace_payload, tool_start_trace_payload
 
 GraphEmit = Callable[[str, Dict[str, Any]], Awaitable[None]]
@@ -230,7 +230,13 @@ async def run_langgraph_react_loop(
     context_bundle = context or build_context_bundle(snapshot)
     max_steps = _optional_positive_limit(max_steps_override if max_steps_override is not None else settings.ai_max_tool_steps)
     max_errors = max(1, int(max_errors_override or settings.ai_max_tool_errors or 2))
-    tool_schemas = chat_completion_tools(registry, include_secondary=include_secondary_tools)
+    visible_registry = select_react_tool_registry(
+        registry,
+        question=question,
+        artifacts=dict(initial_artifacts or {}),
+        include_secondary=include_secondary_tools,
+    )
+    tool_schemas = chat_completion_tools(visible_registry)
     model = ChatOpenAI(
         model=str(settings.ai_model or "").strip(),
         api_key=str(settings.ai_api_key or ""),
@@ -294,7 +300,7 @@ async def run_langgraph_react_loop(
 
             tool_name = str(call.get("name") or "").strip()
             arguments = call.get("args") if isinstance(call.get("args"), dict) else {}
-            registered = state["registry"].get(tool_name)
+            registered = visible_registry.get(tool_name)
             step = PlanStep(
                 tool_name=tool_name,
                 arguments=arguments,
@@ -451,14 +457,14 @@ async def run_langgraph_react_loop(
     result = ToolLoopResult(status="completed", artifacts=dict(initial_artifacts or {}))
     initial_messages = [
         SystemMessage(content=loop_system_prompt()),
-        HumanMessage(content=_safe_json(_initial_payload(question=question, snapshot=snapshot, context=context_bundle, registry=registry, artifacts=initial_artifacts))),
+        HumanMessage(content=_safe_json(_initial_payload(question=question, snapshot=snapshot, context=context_bundle, registry=visible_registry, artifacts=initial_artifacts))),
     ]
     final_state = await app.ainvoke(
         {
             "messages": initial_messages,
             "snapshot": snapshot,
             "context": context_bundle,
-            "registry": registry,
+            "registry": visible_registry,
             "question": question,
             "governance_mode": governance_mode,
             "confirmed_tools": list(confirmed_tools or []),
