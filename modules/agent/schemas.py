@@ -577,7 +577,6 @@ class AuditResult(BaseModel):
 
     passed: bool = True
     issues: List[str] = Field(default_factory=list)
-    followup_plan: List[PlanStep] = Field(default_factory=list)
     missing_evidence: List[str] = Field(default_factory=list)
     required_evidence: List[str] = Field(default_factory=list)
 
@@ -590,7 +589,6 @@ class WorkingMemory(BaseModel):
     execution_trace: List[ExecutionTraceItem] = Field(default_factory=list)
     research_notes: List[str] = Field(default_factory=list)
     audit_issues: List[str] = Field(default_factory=list)
-    followup_plan: List[PlanStep] = Field(default_factory=list)
 
 
 class ToolLoopResult(BaseModel):

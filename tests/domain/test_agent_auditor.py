@@ -49,7 +49,6 @@ def test_auditor_requires_business_profile_for_commercial_summary():
     assert result.passed is False
     assert "商业画像分析" in result.required_evidence
     assert "商业画像分析" in result.missing_evidence
-    assert result.followup_plan == []
 
 
 def test_auditor_accepts_analysis_artifacts_for_commercial_summary():
@@ -305,5 +304,4 @@ def test_auditor_flags_boundary_risk_for_revenue_inference():
         memory=memory,
     )
 
-    assert result.followup_plan == []
     assert any("经营收益" in issue or "消费能力" in issue for issue in result.issues)

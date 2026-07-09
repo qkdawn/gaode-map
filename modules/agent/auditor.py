@@ -216,7 +216,6 @@ def audit_execution(
     return AuditResult(
         passed=not missing_evidence,
         issues=issues,
-        followup_plan=[],
         missing_evidence=missing_evidence,
         required_evidence=required_evidence,
     )
