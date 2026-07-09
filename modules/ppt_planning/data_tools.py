@@ -289,7 +289,7 @@ def _safe_list(value: Any) -> List[Any]:
 
 def _ai_payload_evidence_count(ai_payload: Dict[str, Any]) -> int:
     payload = _safe_dict(ai_payload)
-    evidence_nodes = _safe_list(payload.get("evidence_nodes") or payload.get("evidenceNodes"))
+    evidence_nodes = _safe_list(payload.get("evidence_nodes"))
     return len(evidence_nodes)
 
 
@@ -576,19 +576,14 @@ def _document_ai_payload(source_id: str, title: str, index_preview: List[Dict[st
     payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
-        "sourceId": source_id,
         "title": title,
         "source_kind": "document",
-        "sourceKind": "document",
         "included": ["evidence"] if evidence_nodes else [],
         "scope": None,
         "metrics": [],
         "metric_gaps": [],
-        "metricGaps": [],
         "evidence_nodes": evidence_nodes,
-        "evidenceNodes": evidence_nodes,
         "visual_specs": [],
-        "visualSpecs": [],
         "excluded": [{"type": "document_full_text", "reason": "不传文档全文，只传 PageIndex 节点/章节摘要。", "count": int(count or len(index_preview) or 0)}],
         "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
         "policy": "文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。",
@@ -614,19 +609,14 @@ def _package_ai_payload(source_id: str, title: str, package: Dict[str, Any]) -> 
     payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
-        "sourceId": source_id,
         "title": title,
         "source_kind": "package",
-        "sourceKind": "package",
         "included": ["evidence"] if evidence_nodes else [],
         "scope": None,
         "metrics": [],
         "metric_gaps": [],
-        "metricGaps": [],
         "evidence_nodes": evidence_nodes,
-        "evidenceNodes": evidence_nodes,
         "visual_specs": [],
-        "visualSpecs": [],
         "excluded": [
             {"type": "package_full_items", "reason": "不传资料包完整 POI 明细，只传摘要和代表样本。", "count": len(_safe_list(package.get("items")))},
             {"type": "package_carrier_geometries", "reason": "不传载体完整 geometry，只传载体摘要和指标摘要。", "count": len(_safe_list(package.get("carriers")))},
@@ -684,19 +674,14 @@ def _image_attachment_ai_payload(record: AttachmentRecord, source_id: str, title
     payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
-        "sourceId": source_id,
         "title": title,
         "source_kind": "image",
-        "sourceKind": "image",
         "included": ["evidence"] if evidence_nodes else [],
         "scope": None,
         "metrics": [],
         "metric_gaps": [],
-        "metricGaps": [],
         "evidence_nodes": evidence_nodes,
-        "evidenceNodes": evidence_nodes,
         "visual_specs": [],
-        "visualSpecs": [],
         "excluded": [{"type": "image_binary", "reason": "不直接传图片二进制，只传 OCR、图像描述和视觉理解生成的证据节点。"}],
         "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
         "policy": "图片来源只通过 OCR、caption、visual_analysis 等 EvidenceNode 进入生成；视觉判断需保留来源和置信度。",

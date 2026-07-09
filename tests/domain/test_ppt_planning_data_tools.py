@@ -388,6 +388,11 @@ def test_create_ppt_data_package_returns_ready_source(monkeypatch):
     assert response.source.meta["package"]["package_mode"] == "query"
     ai_payload = response.source.meta["aiPayload"]
     assert ai_payload["source_kind"] == "package"
+    assert "sourceId" not in ai_payload
+    assert "sourceKind" not in ai_payload
+    assert "metricGaps" not in ai_payload
+    assert "evidenceNodes" not in ai_payload
+    assert "visualSpecs" not in ai_payload
     assert ai_payload["counts"]["evidence"] >= 2
     assert ai_payload["evidence_nodes"][0]["source_type"] == "package"
     assert ai_payload["evidence_nodes"][0]["source_id"] == response.source.id
@@ -1043,7 +1048,11 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
     assert source.meta["document"]["document_role"] == "policy_document"
     assert source.meta["document"]["index_count"] == 1
     assert source.meta["document_index_preview"][0]["title"] == "政策要求"
-    assert source.meta["aiPayload"]["sourceKind"] == "document"
+    assert "sourceId" not in source.meta["aiPayload"]
+    assert "sourceKind" not in source.meta["aiPayload"]
+    assert "metricGaps" not in source.meta["aiPayload"]
+    assert "evidenceNodes" not in source.meta["aiPayload"]
+    assert "visualSpecs" not in source.meta["aiPayload"]
     assert source.meta["aiPayload"]["evidence_nodes"][0]["id"] == "document:doc-1:pageindex:n1"
     assert source.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "document"
     assert source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "pageindex"
