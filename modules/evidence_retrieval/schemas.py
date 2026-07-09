@@ -30,7 +30,7 @@ class SourceRecord(BaseModel):
         payload = dict(value)
         meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
         source_id = str(payload.get("source_id") or payload.get("id") or "").strip()
-        source_kind = str(payload.get("source_kind") or meta.get("sourceKind") or "").strip()
+        source_kind = str(payload.get("source_kind") or "").strip()
         if not source_kind:
             if source_id.startswith("document:"):
                 source_kind = "document"

@@ -159,6 +159,19 @@ def test_source_record_counts_canonical_web_source_nodes():
     assert source.evidence_count == 1
 
 
+def test_source_record_does_not_read_legacy_meta_source_kind():
+    source = SourceRecord.model_validate(
+        {
+            "id": "external:legacy-kind",
+            "title": "旧 meta 类型",
+            "status": "ready",
+            "meta": {"sourceKind": "web"},
+        }
+    )
+
+    assert source.source_kind == "unknown"
+
+
 def test_source_record_ignores_legacy_source_field_aliases():
     source = SourceRecord.model_validate(
         {
