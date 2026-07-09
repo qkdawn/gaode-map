@@ -56,6 +56,7 @@ def test_list_persisted_database_sources_reads_database_artifacts(monkeypatch):
                         "id": "database:history-1:abc",
                         "type": "database",
                         "title": "数据库资料",
+                        "locatorSummary": "旧定位摘要",
                         "meta": {
                             "sourceKind": "database",
                             "database": {"source_count": 2},

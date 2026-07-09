@@ -232,7 +232,7 @@ def list_persisted_database_sources(area_id: str) -> List[PptDataSourceSummary]:
                 count=evidence_count,
                 source_kind="database",
                 evidence_count=evidence_count,
-                locator_summary=_clean_text(source.get("locator_summary") or source.get("locatorSummary"))
+                locator_summary=_clean_text(source.get("locator_summary"))
                 or _database_locator_summary(normalized_area_id, evidence_count),
                 availability=_clean_text(source.get("availability")) or _database_availability(evidence_count),
                 meta={
