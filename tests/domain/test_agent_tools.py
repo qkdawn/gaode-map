@@ -158,6 +158,7 @@ def test_selected_source_evidence_nodes_do_not_fallback_to_summary_evidence():
         "source_id": "document:doc-1",
         "title": "文档来源",
         "evidence": [{"title": "摘要证据", "text": "这是展示用摘要，不是 EvidenceNode。"}],
+        "evidenceNodes": [{"id": "legacy-camel", "content": "旧 camel 字段不应再被读取。"}],
     }
 
     assert evidence_nodes_from_item(source) == []

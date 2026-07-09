@@ -38,15 +38,15 @@ def selected_sources_artifact_from_items(items: List[Dict[str, Any]]) -> Dict[st
 
 
 def source_id_from_item(item: Dict[str, Any]) -> str:
-    return as_text(item.get("source_id") or item.get("sourceId") or item.get("id"))
+    return as_text(item.get("source_id") or item.get("id"))
 
 
 def source_kind_from_item(item: Dict[str, Any]) -> str:
-    return as_text(item.get("source_kind") or item.get("sourceKind"))
+    return as_text(item.get("source_kind"))
 
 
 def evidence_nodes_from_item(item: Dict[str, Any]) -> List[Any]:
-    nodes = item.get("evidence_nodes") if isinstance(item.get("evidence_nodes"), list) else item.get("evidenceNodes")
+    nodes = item.get("evidence_nodes")
     if isinstance(nodes, list):
         return nodes
     return []
@@ -61,7 +61,7 @@ def source_summary_from_item(item: Dict[str, Any]) -> str:
 
 
 def artifact_refs_from_item(item: Dict[str, Any]) -> List[str]:
-    refs = item.get("artifact_refs") if isinstance(item.get("artifact_refs"), list) else item.get("artifactRefs")
+    refs = item.get("artifact_refs")
     return [as_text(ref) for ref in list(refs or []) if as_text(ref)]
 
 
