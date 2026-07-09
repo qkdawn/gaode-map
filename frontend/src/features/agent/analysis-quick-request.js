@@ -1,5 +1,4 @@
 import { asText, cloneArray } from './normalizers.js'
-import { serializeContextAskTarget } from './context-ask-request.js'
 import { buildAnalysisSourceTarget } from '../analysis-sources/target.js'
 
 export function buildAnalysisQuickAskTarget(ctx = {}) {
@@ -17,7 +16,7 @@ export function buildAnalysisQuickAskRequest(ctx = {}, question = '') {
     history_id: asText(ctx.getCurrentAgentHistoryId && ctx.getCurrentAgentHistoryId()),
     question: asText(question),
     analysis_snapshot: ctx.buildAgentAnalysisSnapshot ? ctx.buildAgentAnalysisSnapshot() : {},
-    target: serializeContextAskTarget(target),
+    target,
     require_ai: true,
   }
 }
