@@ -80,16 +80,15 @@
 
 - 用户消息
 - 当前 `analysis_snapshot`
-- `thinking_mode: quick | deep`
 - 风险确认状态
 - 上传附件引用
 
-这里的 `thinking_mode` 只决定内部执行深度，不决定回答模板。
+当前不再通过 `thinking_mode` 字段控制执行深度。前端根据用户入口选择链路：
 
-- `quick` 更偏复用已有证据、少量补工具
-- `deep` 更偏多做一轮校验、把边界说得更稳
+- 快速上下文问答走 `/api/v1/analysis/agent/context-ask`，只把后端预处理好的目标、来源和范围摘要传给模型
+- 主 Agent 分析走 `/api/v1/analysis/agent/turn/stream`，进入门卫、工具循环、证据检查和最终回答
 
-两者最终都回到同一个目标：继续回答用户问题。
+两条链路最终都回到同一个目标：继续回答用户问题，但快速链路不进入工具循环。
 
 ### 3.2 门卫判断
 
@@ -150,7 +149,7 @@
 - 主请求：`/api/v1/analysis/agent/turn`
 - 流式请求：`/api/v1/analysis/agent/turn/stream`
 - answered 主输出：`output.answer`
-- 执行深度开关：`thinking_mode: quick | deep`
+- 快速上下文问答：`/api/v1/analysis/agent/context-ask`
 
 非 answered 状态只保留两类产品语义：
 

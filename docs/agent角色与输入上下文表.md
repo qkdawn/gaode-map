@@ -15,9 +15,9 @@
 | 节点 / 职责角色 | 当前实现锚点 | 主要输入上下文 | 主要输出 | 当前边界 / 不做什么 |
 | --- | --- | --- | --- | --- |
 | `Gatekeeper` | `runtime.py`、`llm_provider.py` 中的 `run_gate_with_llm(...)` | `messages`、`latest_user_message`、`analysis_snapshot_digest`、`context_summary`、`available_artifacts` | `pass / clarify / block`、`summary`、`clarification_question`、`clarification_options` | 只判断问题是否清晰、当前上下文是否足够进入后续分析；不负责规划完整步骤，也不直接产出最终结论。 |
-| `Tool Loop` | `langgraph_react.py` 中的 `run_langgraph_react_loop(...)` | `question`、`analysis_snapshot_digest`、`context_digest`、`tool_catalog`、工具历史观察、`thinking_mode`、当前治理状态 | 是否继续调用工具、工具调用轨迹、工具结果、停止原因、风险确认请求 | 它是当前主链路内部的 ReAct 风格工具循环，不是独立产品入口；目标是按需补证据，不是无限扩展分析链。 |
+| `Tool Loop` | `langgraph_react.py` 中的 `run_langgraph_react_loop(...)` | `question`、`analysis_snapshot_digest`、`context_digest`、`tool_catalog`、工具历史观察、当前治理状态 | 是否继续调用工具、工具调用轨迹、工具结果、停止原因、风险确认请求 | 它是当前主链路内部的 ReAct 风格工具循环，不是独立产品入口；目标是按需补证据，不是无限扩展分析链。 |
 | `Rule Audit` | `runtime.py` 中的规则审查逻辑与 `audit_execution(...)` | 用户问题、`snapshot`、`context`、`memory.artifacts`、工具结果摘要、缺失证据、问题边界 | `issues`、`missing_evidence`、`required_evidence`、能否支持更稳妥的回答表达 | 它是规则层证据检查，不是旧式 LLM 审计员；不再承担 replan 主导角色，也不向用户输出独立审查栏目。 |
-| `Finalizer` | `llm_provider.py` 中的 `generate_answer_output_with_llm(...)`，以及 `synthesizer.py` 的证据整理逻辑 | `messages`、`analysis_snapshot_digest`、`context_digest`、`answer_evidence_payload`、`thinking_mode` | 自然语言主回答 `answer`，以及必要的引用、研究笔记、面板增强信息 | 最终只负责自然回答，不再产出结构化 answered 契约，也不再按固定四段或固定栏目交卷。 |
+| `Finalizer` | `llm_provider.py` 中的 `generate_answer_output_with_llm(...)`，以及 `synthesizer.py` 的证据整理逻辑 | `messages`、`analysis_snapshot_digest`、`context_digest`、`answer_evidence_payload` | 自然语言主回答 `answer`，以及必要的引用、研究笔记、面板增强信息 | 最终只负责自然回答，不再产出结构化 answered 契约，也不再按固定四段或固定栏目交卷。 |
 | `Session / Evidence Source Context` | `session_service.py`、`modules/evidence_retrieval/`、来源区选择状态 | 会话消息、assistant canonical message、已选 `source_ids`、统一证据节点、当前 `conversation_id` | 会话持久化、assistant 消息恢复、来源选择恢复、可被 Tool Loop / Finalizer 使用的证据包 | 它是上下文输入层，不是主决策节点；外部材料必须先成为来源，再由统一证据层召回，不能通过独立附件工具进入工具循环。 |
 
 ## 各节点当前怎么衔接
@@ -58,8 +58,8 @@
 
 其中：
 
-- `thinking_mode` 只影响执行深度和工具轮次，不决定节点模板
-- `deep` 不是报告模式，只是允许多做一轮证据检查和边界校验
+- 主 Agent 不再接收 `thinking_mode` 字段；执行深度由主链路内部的工具循环、证据缺口和风险治理共同决定
+- 快速上下文问答是独立的 `context-ask` 链路，只消费预处理好的目标、来源和当前范围摘要，不进入工具循环
 - answered 最终主契约只有自然回答 `answer`
 
 ## 来源证据如何进入上下文
