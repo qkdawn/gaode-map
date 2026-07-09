@@ -10,11 +10,9 @@ from ..analysis_extractors import (
     build_population_profile_analysis,
     build_road_pattern_analysis,
     infer_area_character_labels,
-    score_site_candidates,
 )
 from ..policy_table import resolve_policy
 from ..schemas import AnalysisSnapshot, ToolResult
-from .analysis_tools import analyze_target_supply_gap_from_scope
 from .h3_tools import compute_h3_metrics_from_scope_and_pois
 from .nightlight_tools import compute_nightlight_overview_from_scope
 from .poi_tools import fetch_pois_in_scope
@@ -106,107 +104,6 @@ def _has_frontend_panel(snapshot: AnalysisSnapshot, key: str) -> bool:
     frontend_analysis = snapshot.frontend_analysis if isinstance(snapshot.frontend_analysis, dict) else {}
     panel = frontend_analysis.get(key)
     return isinstance(panel, dict) and bool(panel)
-
-
-def _next_option(rank: int, title: str, why: str, prompt: str, *, application: str, evidence: List[str]) -> Dict[str, Any]:
-    return {
-        "rank": rank,
-        "title": title,
-        "application": application,
-        "why": why,
-        "prompt": prompt,
-        "evidence_basis": evidence,
-    }
-
-
-def build_next_analysis_options(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
-    local_artifacts = dict(artifacts or {})
-    readiness = {
-        "poi": bool(local_artifacts.get("current_pois") or snapshot.pois or (snapshot.poi_summary or {}).get("total")),
-        "h3": bool(_current_poi_h3_summary(snapshot, local_artifacts)) or _has_frontend_panel(snapshot, "h3"),
-        "population": bool(_current_summary(snapshot, local_artifacts, "population")) or _has_frontend_panel(snapshot, "population"),
-        "nightlight": bool(_current_summary(snapshot, local_artifacts, "nightlight")) or _has_frontend_panel(snapshot, "nightlight"),
-        "road": bool(_current_summary(snapshot, local_artifacts, "road")) or _has_frontend_panel(snapshot, "road"),
-        "frontend_analysis": bool(snapshot.frontend_analysis),
-    }
-    ready_dimensions = [key for key, ready in readiness.items() if ready and key != "frontend_analysis"]
-    missing_dimensions = [key for key, ready in readiness.items() if not ready and key != "frontend_analysis"]
-    options: List[Dict[str, Any]] = []
-    has_business_chain = all(readiness.get(key) for key in ("poi", "h3", "population", "nightlight", "road"))
-    has_market_chain = readiness["poi"] and readiness["h3"]
-    if has_business_chain:
-        options.append(
-            _next_option(
-                len(options) + 1,
-                "业态缺口与选址预筛",
-                "商业链路证据已齐，下一步应从成熟热区里筛出高需求、低同质、好到达的补位缝隙，而不是继续证明哪里最热。",
-                "选择一个目标业态，识别供给缺口、机会格和候选点位，并剔除只在热力图上好看的伪机会。",
-                application="商业选址 / 招商补位",
-                evidence=["poi", "h3", "population", "nightlight", "road"],
-            )
-        )
-    if has_market_chain:
-        options.append(
-            _next_option(
-                len(options) + 1,
-                "细分业态与竞品结构",
-                "POI 与 H3 已能支撑微商圈拆分，下一步应区分学生高频、社区刚需、文创停留和夜间社交等不同消费场景。",
-                "选择目标业态，生成细分 POI、H3 密度和空间缺口，并判断竞品饱和度与消费场景是否匹配。",
-                application="竞品调查 / 业态定位",
-                evidence=["poi", "h3"],
-            )
-        )
-    if readiness["road"] and (readiness["h3"] or readiness["poi"]):
-        options.append(
-            _next_option(
-                len(options) + 1,
-                "可达性真实性校验",
-                "热点和道路证据已能对照，下一步要识别人很多、店很多但不好到达、难识别、难转化的位置风险。",
-                "叠加热点、候选格、路网集成度/选择度与主路支路关系，剔除实际导流能力弱的位置。",
-                application="交通可达 / 点位风险",
-                evidence=["road", "h3" if readiness["h3"] else "poi"],
-            )
-        )
-    if readiness["nightlight"] and readiness["poi"]:
-        options.append(
-            _next_option(
-                len(options) + 1,
-                "夜间活力与业态匹配",
-                "夜光与 POI 已能对照，但夜光强不等于消费强，下一步要判断亮度来源和业态承接是否重叠。",
-                "对比夜光热点与 POI 分布，区分餐饮、社区照明、道路照明、校园活动和文化休闲带动。",
-                application="夜经济 / 运营时段",
-                evidence=["nightlight", "poi"],
-            )
-        )
-    if readiness["population"] and readiness["poi"]:
-        options.append(
-            _next_option(
-                len(options) + 1,
-                "客群与服务供给匹配",
-                "人口与 POI 已能对照，下一步要判断供给是否服务真实日常人群，而不是只服务地图上的热度。",
-                "对照人口结构、居住基底和 POI 供给，拆分社区复购、学生高频和外来到访需求。",
-                application="客群画像 / 社区服务",
-                evidence=["population", "poi"],
-            )
-        )
-    if not options:
-        options.append(
-            _next_option(
-                1,
-                "先补齐基础证据链",
-                f"missing_dimensions={','.join(missing_dimensions) or '-'}",
-                "补齐缺失的基础结果后再生成下一步分析 raw metrics",
-                application="数据就绪 / 分析准备",
-                evidence=ready_dimensions,
-            )
-        )
-    return {
-        "readiness": readiness,
-        "ready_dimensions": ready_dimensions,
-        "missing_dimensions": missing_dimensions,
-        "recommended_options": options[:5],
-        "summary_text": f"已基于当前证据就绪状态生成 {min(len(options), 5)} 个下一步分析方向。",
-    }
 
 
 async def ensure_area_data_readiness(
@@ -452,27 +349,6 @@ async def get_area_data_bundle(
     )
 
 
-async def rank_next_analysis_options(
-    *,
-    arguments: Dict[str, Any],
-    snapshot: AnalysisSnapshot,
-    artifacts: Dict[str, Any],
-    question: str,
-) -> ToolResult:
-    del arguments, question
-    payload = build_next_analysis_options(snapshot, artifacts)
-    return ToolResult(
-        tool_name="rank_next_analysis_options",
-        status="success",
-        result=payload,
-        evidence=[
-            {"field": "next_analysis.ready_dimensions", "value": payload.get("ready_dimensions")},
-            {"field": "next_analysis.recommended_options", "value": payload.get("recommended_options")},
-        ],
-        artifacts={"current_next_analysis_options": payload},
-    )
-
-
 async def analyze_poi_structure(
     *,
     arguments: Dict[str, Any],
@@ -582,45 +458,5 @@ async def infer_area_labels(
             "current_nightlight_pattern_analysis": nightlight_pattern,
             "current_road_pattern_analysis": road_pattern,
             "current_area_character_labels": payload,
-        },
-    )
-
-
-async def score_site_candidates_tool(
-    *,
-    arguments: Dict[str, Any],
-    snapshot: AnalysisSnapshot,
-    artifacts: Dict[str, Any],
-    question: str,
-) -> ToolResult:
-    target_supply_gap = await analyze_target_supply_gap_from_scope(
-        arguments={"place_type": str(arguments.get("place_type") or "")},
-        snapshot=snapshot,
-        artifacts=artifacts,
-        question=question,
-    )
-    population_profile = build_population_profile_analysis(snapshot, artifacts)
-    nightlight_pattern = build_nightlight_pattern_analysis(snapshot, artifacts)
-    road_pattern = build_road_pattern_analysis(snapshot, artifacts)
-    payload = score_site_candidates(
-        snapshot,
-        artifacts,
-        target_supply_gap=target_supply_gap.result,
-        population_profile=population_profile,
-        nightlight_pattern=nightlight_pattern,
-        road_pattern=road_pattern,
-    )
-    return ToolResult(
-        tool_name="score_site_candidates",
-        status="success",
-        result=payload,
-        evidence=[
-            {"field": "site.ranking", "value": payload.get("ranking")},
-            {"field": "site.confidence", "value": payload.get("confidence")},
-        ],
-        warnings=list(target_supply_gap.warnings or []),
-        artifacts={
-            "current_target_supply_gap": target_supply_gap.result,
-            "current_site_candidate_scores": payload,
         },
     )
