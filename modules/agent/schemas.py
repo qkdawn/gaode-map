@@ -38,11 +38,7 @@ AgentStatus = Literal["answered", "requires_clarification", "requires_risk_confi
 AgentStage = Literal[
     "gating",
     "clarifying",
-    "context_ready",
-    "planning",
     "executing",
-    "auditing",
-    "replanning",
     "synthesizing",
     "answered",
     "requires_clarification",
@@ -73,6 +69,29 @@ AgentSummaryStreamEventType = Literal[
 ]
 ThinkingState = Literal["pending", "active", "completed", "failed"]
 EvidenceConfidence = Literal["strong", "moderate", "weak"]
+
+
+_LEGACY_STAGE_MAP = {
+    "context_ready": "gating",
+    "planning": "executing",
+    "planned": "executing",
+    "auditing": "synthesizing",
+    "replanning": "executing",
+    "waiting_clarification": "requires_clarification",
+    "waiting_risk_confirmation": "requires_risk_confirmation",
+}
+
+
+def _normalize_agent_stage_value(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return value
+    normalized = dict(value)
+    stage = str(normalized.get("stage") or "").strip()
+    if stage in _LEGACY_STAGE_MAP:
+        normalized["stage"] = _LEGACY_STAGE_MAP[stage]
+    return normalized
+
+
 class AgentMessage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -747,7 +766,7 @@ class AgentTurnResponse(BaseModel):
     def _populate_stage(cls, value: Any) -> Any:
         if not isinstance(value, dict):
             return value
-        value = dict(value)
+        value = _normalize_agent_stage_value(value)
         if value.get("stage"):
             return value
         status = str(value.get("status") or "").strip()
@@ -820,6 +839,11 @@ class AgentSessionSnapshotRequest(BaseModel):
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_stage(cls, value: Any) -> Any:
+        return _normalize_agent_stage_value(value)
+
 
 class AgentSessionMetadataPatchRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -837,3 +861,8 @@ class AgentSessionDetail(AgentSessionSummary):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_stage(cls, value: Any) -> Any:
+        return _normalize_agent_stage_value(value)

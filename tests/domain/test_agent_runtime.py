@@ -5,9 +5,12 @@ from modules.agent.runtime import process_main_agent_loop, stream_main_agent_loo
 from modules.agent.schemas import (
     AgentMessage,
     AgentContextAskResponse,
+    AgentSessionDetail,
+    AgentSessionSnapshotRequest,
     AgentTranslationPack,
     AgentTurnOutput,
     AgentTurnRequest,
+    AgentTurnResponse,
     AnalysisSnapshot,
     ExecutionTraceItem,
     GateDecision,
@@ -72,6 +75,16 @@ def test_agent_turn_request_accepts_selected_sources_context():
     )
 
     assert request.selected_sources_context.sources[0]["source_id"] == "document:doc-1"
+
+
+def test_agent_stage_contract_normalizes_legacy_stages():
+    response = AgentTurnResponse(status="answered", stage="replanning")
+    snapshot = AgentSessionSnapshotRequest(stage="context_ready")
+    detail = AgentSessionDetail(id="session-1", stage="auditing")
+
+    assert response.stage == "executing"
+    assert snapshot.stage == "gating"
+    assert detail.stage == "synthesizing"
 
 
 def _snapshot_with_scope(**kwargs) -> AnalysisSnapshot:

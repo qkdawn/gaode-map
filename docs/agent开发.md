@@ -157,26 +157,24 @@ V1 明确不做以下内容：
 
 ---
 
-## 5. 状态机设计
+## 5. 阶段设计
 
-控制平面采用有限状态机控制整个 Agent 流程。
+控制平面使用一组收敛阶段描述本轮 Agent 进展；阶段只表达用户可感知的运行位置，不再保留独立 Planner / Auditor / Replanner 状态机。
 
 ### 5.1 状态定义
 
 - `gating`
   - 问题明确性判断
-- `context_ready`
-  - 上下文已完成装配
-- `planned`
-  - 已生成执行能力链
+- `clarifying`
+  - 正在组织澄清问题
 - `executing`
-  - 正在调用工具
-- `auditing`
-  - 正在审计结果质量
-- `waiting_clarification`
+  - 正在按上下文窗口调用工具或读取证据
+- `synthesizing`
+  - 正在执行最终证据检索和自然回答生成
+- `requires_clarification`
   - 缺关键输入，等待用户补充
-- `waiting_risk_confirmation`
-  - 高成本或多分支场景，等待用户选择
+- `requires_risk_confirmation`
+  - 高成本工具需要用户确认
 - `answered`
   - 已输出最终回答
 - `failed`
