@@ -176,8 +176,8 @@ def _metric_tokens(metric: Dict[str, Any]) -> List[str]:
 def _visual_search_tokens(item: Dict[str, Any], data: Dict[str, Any]) -> List[str]:
     tokens = [
         _clean_text(item.get("title")),
-        _clean_text(item.get("intent") or item.get("render_intent") or item.get("renderIntent")),
-        _clean_text(item.get("visual_type") or item.get("visualType")),
+        _clean_text(item.get("intent") or item.get("render_intent")),
+        _clean_text(item.get("visual_type")),
         _clean_text(data.get("title")),
         _clean_text(data.get("intent")),
     ]
@@ -233,12 +233,12 @@ def _infer_visual_metric_ids(item: Dict[str, Any], data: Dict[str, Any], metric_
         return []
     source_ids = {
         _clean_text(source_id)
-        for source_id in _safe_list(item.get("source_ids") or item.get("sourceIds"))
+        for source_id in _safe_list(item.get("source_ids"))
         if _clean_text(source_id)
     }
     source_ids.update({
         _clean_text(source_id)
-        for source_id in _safe_list(data.get("source_ids") or data.get("sourceIds"))
+        for source_id in _safe_list(data.get("source_ids"))
         if _clean_text(source_id)
     })
     if not source_ids:
@@ -259,7 +259,7 @@ def _infer_visual_metric_ids(item: Dict[str, Any], data: Dict[str, Any], metric_
     if not candidates:
         return []
     candidates.sort(key=lambda item: (-item[0], _clean_text(item[2].get("label")), _clean_text(item[1])))
-    limit = _choose_metric_count(_clean_text(item.get("visual_type") or item.get("visualType")), _clean_text(item.get("title")), _clean_text(item.get("intent") or item.get("render_intent") or item.get("renderIntent")))
+    limit = _choose_metric_count(_clean_text(item.get("visual_type")), _clean_text(item.get("title")), _clean_text(item.get("intent") or item.get("render_intent")))
     return [metric_id for _, metric_id, _ in candidates[:limit] if metric_id]
 
 
@@ -267,8 +267,8 @@ def _visual_source_ids(item: Dict[str, Any], data: Dict[str, Any]) -> List[str]:
     return list(dict.fromkeys(
         _clean_text(source_id)
         for source_id in [
-            *_safe_list(item.get("source_ids") or item.get("sourceIds")),
-            *_safe_list(data.get("source_ids") or data.get("sourceIds")),
+            *_safe_list(item.get("source_ids")),
+            *_safe_list(data.get("source_ids")),
         ]
         if _clean_text(source_id)
     ))
@@ -426,8 +426,8 @@ def _normalize_analysis_metric(raw: Any) -> Optional[Dict[str, Any]]:
     method = _clean_text(item.get("calculation_method") or item.get("calculationMethod") or item.get("method"))
     scope = _clean_text(item.get("scope") or item.get("spatial_scope") or item.get("spatialScope"))
     display = f"{label} {_display_number(value)}{unit}" if status == "ready" and value is not None else label
-    source_ids = [_clean_text(item) for item in _safe_list(item.get("source_ids") or item.get("sourceIds")) if _clean_text(item)]
-    source_id = _clean_text(item.get("source_id") or item.get("sourceId")) or (source_ids[0] if source_ids else f"current:analysis:{domain}")
+    source_ids = [_clean_text(item) for item in _safe_list(item.get("source_ids")) if _clean_text(item)]
+    source_id = _clean_text(item.get("source_id")) or (source_ids[0] if source_ids else f"current:analysis:{domain}")
     if not source_ids:
         source_ids = [source_id]
     return {
@@ -563,7 +563,7 @@ def build_metric_context(*, sources: List[PptSource], source_ids: List[str], cur
                 continue
             if _clean_text(metric.get("status")) == "ready" and _safe_float(metric.get("value")) is not None:
                 metrics.append(metric)
-        for raw_gap in _safe_list(ai_payload.get("metric_gaps") or ai_payload.get("metricGaps")):
+        for raw_gap in _safe_list(ai_payload.get("metric_gaps")):
             gap_metric = _normalize_analysis_metric(raw_gap)
             if gap_metric:
                 missing_metrics.append(gap_metric)
@@ -631,7 +631,7 @@ def _normalize_claim(raw: Any, metric_by_id: Dict[str, Dict[str, Any]], index: i
         "text": _clean_text(item.get("text")) or _clean_text(metric.get("display_text")),
         "value": value,
         "unit": _clean_text(item.get("unit")) or _clean_text(metric.get("unit")),
-        "source_id": _clean_text(item.get("source_id") or item.get("sourceId")) or _clean_text(metric.get("source_id")),
+        "source_id": _clean_text(item.get("source_id")) or _clean_text(metric.get("source_id")),
         "method": _clean_text(metric.get("calculation_method") or metric.get("method")),
         "calculation_method": _clean_text(metric.get("calculation_method") or metric.get("method")),
         "spatial_scope": _clean_text(item.get("spatial_scope") or item.get("spatialScope")) or _clean_text(metric.get("spatial_scope")),
@@ -657,7 +657,7 @@ def _normalize_gaps(raw_gaps: Any) -> List[Dict[str, Any]]:
                 "gap_id": _clean_text(item.get("gap_id") or item.get("gapId")) or f"gap-{index}",
                 "text": text,
                 "needed_metric": _clean_text(item.get("needed_metric") or item.get("neededMetric")),
-                "source_id": _clean_text(item.get("source_id") or item.get("sourceId")),
+                "source_id": _clean_text(item.get("source_id")),
             })
     return gaps
 
@@ -665,7 +665,6 @@ def _normalize_gaps(raw_gaps: Any) -> List[Dict[str, Any]]:
 def _visual_id(item: Dict[str, Any], index: int) -> str:
     return _clean_text(
         item.get("visual_id")
-        or item.get("visualId")
         or item.get("chart_id")
         or item.get("chartId")
         or item.get("asset_id")
@@ -687,7 +686,7 @@ def _visual_missing(base: Dict[str, Any], reason: str, **extra: Any) -> Dict[str
 
 
 def _normalize_source_metric_ids(item: Dict[str, Any], data: Dict[str, Any], metric_by_id: Dict[str, Dict[str, Any]]) -> List[str]:
-    requested = _safe_list(item.get("source_metric_ids") or item.get("sourceMetricIds") or data.get("source_metric_ids") or data.get("sourceMetricIds"))
+    requested = _safe_list(item.get("source_metric_ids") or data.get("source_metric_ids"))
     ids = [
         _clean_text(metric_id)
         for metric_id in requested
@@ -726,16 +725,16 @@ def _normalize_matrix_cells(data: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _normalize_visual(raw: Any, metric_by_id: Dict[str, Dict[str, Any]], asset_by_id: Dict[str, Dict[str, Any]], index: int) -> Optional[Dict[str, Any]]:
     item = _safe_dict(raw)
-    visual_type = _clean_text(item.get("visual_type") or item.get("visualType"))
+    visual_type = _clean_text(item.get("visual_type"))
     if visual_type not in VISUAL_TYPES:
         visual_id = _visual_id(item, index)
         return {
             "visual_id": visual_id,
             "visual_type": "metric_card",
             "title": _clean_text(item.get("title")) or f"可视化 {index}",
-            "intent": _clean_text(item.get("intent") or item.get("render_intent") or item.get("renderIntent")),
+            "intent": _clean_text(item.get("intent") or item.get("render_intent")),
             "status": "missing_data",
-            "source_ids": [_clean_text(source_id) for source_id in _safe_list(item.get("source_ids") or item.get("sourceIds")) if _clean_text(source_id)],
+            "source_ids": [_clean_text(source_id) for source_id in _safe_list(item.get("source_ids")) if _clean_text(source_id)],
             "data": {
                 **_safe_dict(item.get("data")),
                 "reason": f"{visual_type or 'unknown'} 不是支持的 visual_type，未生成数值图 fallback。",
@@ -743,12 +742,12 @@ def _normalize_visual(raw: Any, metric_by_id: Dict[str, Dict[str, Any]], asset_b
         }
     visual_id = _visual_id(item, index)
     title = _clean_text(item.get("title")) or f"可视化 {index}"
-    source_ids = [_clean_text(source_id) for source_id in _safe_list(item.get("source_ids") or item.get("sourceIds")) if _clean_text(source_id)]
+    source_ids = [_clean_text(source_id) for source_id in _safe_list(item.get("source_ids")) if _clean_text(source_id)]
     base = {
         "visual_id": visual_id,
         "visual_type": visual_type,
         "title": title,
-        "intent": _clean_text(item.get("intent") or item.get("render_intent") or item.get("renderIntent")),
+        "intent": _clean_text(item.get("intent") or item.get("render_intent")),
         "status": _clean_text(item.get("status")) if _clean_text(item.get("status")) in VISUAL_STATUSES else "",
         "source_ids": source_ids,
         "data": _safe_dict(item.get("data")),
@@ -1011,17 +1010,17 @@ def _find_ready_asset_for_source(source_id: str, asset_by_id: Dict[str, Dict[str
 def _spatial_source_for_visual(visual: Dict[str, Any], metric_by_id: Dict[str, Dict[str, Any]]) -> str:
     candidates = [
         _clean_text(source_id)
-        for source_id in _safe_list(visual.get("source_ids") or visual.get("sourceIds"))
+        for source_id in _safe_list(visual.get("source_ids"))
         if _clean_text(source_id)
     ]
-    for metric_id in _safe_list(visual.get("source_metric_ids") or visual.get("sourceMetricIds")):
+    for metric_id in _safe_list(visual.get("source_metric_ids")):
         metric = metric_by_id.get(_clean_text(metric_id), {})
-        source_id = _clean_text(metric.get("source_id") or metric.get("sourceId"))
+        source_id = _clean_text(metric.get("source_id"))
         if source_id:
             candidates.append(source_id)
         candidates.extend([
             _clean_text(item)
-            for item in _safe_list(metric.get("source_ids") or metric.get("sourceIds"))
+            for item in _safe_list(metric.get("source_ids"))
             if _clean_text(item)
         ])
     unique_candidates = list(dict.fromkeys(candidates))
@@ -1044,7 +1043,7 @@ def _collect_visual_overlays(visuals: List[Dict[str, Any]], metric_by_id: Dict[s
     overlays: List[Dict[str, Any]] = []
     seen = set()
     for visual in visuals:
-        for metric_id in _safe_list(visual.get("source_metric_ids") or visual.get("sourceMetricIds")):
+        for metric_id in _safe_list(visual.get("source_metric_ids")):
             metric_id = _clean_text(metric_id)
             metric = metric_by_id.get(metric_id)
             if not metric or metric_id in seen:
@@ -1064,13 +1063,13 @@ def _metric_dashboard_from_group(source_id: str, group: List[Dict[str, Any]], ov
     first = group[0]
     metric_ids = [overlay["metric_id"] for overlay in overlays if _clean_text(overlay.get("metric_id"))]
     source_ids = list(dict.fromkeys(
-        source for visual in group for source in _safe_list(visual.get("source_ids") or visual.get("sourceIds")) if _clean_text(source)
+        source for visual in group for source in _safe_list(visual.get("source_ids")) if _clean_text(source)
     ))
     if source_id and source_id not in source_ids:
         source_ids.append(source_id)
     return {
         **first,
-        "visual_id": _clean_text(first.get("visual_id") or first.get("visualId")) or f"visual-spatial-dashboard-{_stable_id([source_id, *metric_ids])}",
+        "visual_id": _clean_text(first.get("visual_id")) or f"visual-spatial-dashboard-{_stable_id([source_id, *metric_ids])}",
         "visual_type": "metric_card",
         "title": SPATIAL_COMPOSITION_TITLES.get(source_id) or first.get("title") or "空间指标诊断",
         "intent": "用同源空间指标形成紧凑诊断，不拆成多张表格。",
@@ -1186,7 +1185,7 @@ def _existing_asset_composition_from_group(
     first = group[0]
     metric_ids = [overlay["metric_id"] for overlay in overlays if _clean_text(overlay.get("metric_id"))]
     source_ids = list(dict.fromkeys(
-        source for visual in group for source in _safe_list(visual.get("source_ids") or visual.get("sourceIds")) if _clean_text(source)
+        source for visual in group for source in _safe_list(visual.get("source_ids")) if _clean_text(source)
     ))
     if source_id and source_id not in source_ids:
         source_ids.append(source_id)
@@ -1207,7 +1206,7 @@ def _existing_asset_composition_from_group(
         return _metric_dashboard_from_group(source_id, group, overlays)
     return {
         **first,
-        "visual_id": _clean_text(first.get("visual_id") or first.get("visualId")) or f"visual-spatial-map-{_stable_id([source_id, asset_id, composition, *metric_ids])}",
+        "visual_id": _clean_text(first.get("visual_id")) or f"visual-spatial-map-{_stable_id([source_id, asset_id, composition, *metric_ids])}",
         "visual_type": "existing_asset",
         "title": SPATIAL_COMPOSITION_TITLES.get(source_id) or first.get("title") or "空间指标诊断",
         "intent": "用地图位置关系解释同源指标诊断。",
@@ -1238,7 +1237,7 @@ def _consolidate_spatial_visuals(
     ordered_sources: List[str] = []
     passthrough: List[Dict[str, Any]] = []
     for visual in visuals:
-        visual_type = _clean_text(visual.get("visual_type") or visual.get("visualType"))
+        visual_type = _clean_text(visual.get("visual_type"))
         if visual_type not in {"figure", "table", "metric_card"} or _clean_text(visual.get("status")) != "renderable":
             passthrough.append(visual)
             continue
@@ -1281,18 +1280,18 @@ def validate_visual_assets(slide_payload: Dict[str, Any], metric_context: Dict[s
     }
     claims = [
         claim
-        for index, raw in enumerate(_safe_list(slide_payload.get("metric_claims") or slide_payload.get("metricClaims")), start=1)
+        for index, raw in enumerate(_safe_list(slide_payload.get("metric_claims")), start=1)
         if (claim := _normalize_claim(raw, metric_by_id, index))
     ]
     visuals = [
         visual
-        for index, raw in enumerate(_safe_list(slide_payload.get("visual_specs") or slide_payload.get("visualSpecs")), start=1)
+        for index, raw in enumerate(_safe_list(slide_payload.get("visual_specs")), start=1)
         if (visual := _normalize_visual(raw, metric_by_id, asset_by_id, index))
     ]
     visuals = _consolidate_spatial_visuals(visuals, metric_by_id, asset_by_id)
-    gaps = _normalize_gaps(slide_payload.get("metric_gaps") or slide_payload.get("metricGaps"))
-    requested_claims = bool(_safe_list(slide_payload.get("metric_claims") or slide_payload.get("metricClaims")))
-    requested_visuals = bool(_safe_list(slide_payload.get("visual_specs") or slide_payload.get("visualSpecs")))
+    gaps = _normalize_gaps(slide_payload.get("metric_gaps"))
+    requested_claims = bool(_safe_list(slide_payload.get("metric_claims")))
+    requested_visuals = bool(_safe_list(slide_payload.get("visual_specs")))
     if (requested_claims and not claims) or (requested_visuals and not visuals):
         known_gap_ids = {_clean_text(gap.get("metric_id")) for gap in gaps}
         for gap in _safe_list(metric_context.get("metric_gaps"))[:6]:

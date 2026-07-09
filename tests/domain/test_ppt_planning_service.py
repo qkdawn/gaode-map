@@ -1947,6 +1947,64 @@ def test_ppt_metric_context_filters_current_metrics_by_selected_source_ids():
     assert gap_ids == ["analysis:h3:lq"]
 
 
+def test_ppt_metric_context_ignores_legacy_visual_and_gap_aliases():
+    ready_metric = {
+        "metric_id": "analysis:h3:avg_density_poi_per_km2",
+        "domain": "h3",
+        "label": "平均 POI 密度",
+        "value": 18.2,
+        "unit": "个/km²",
+        "scope": "当前分析范围",
+        "sourceId": "current:legacy",
+        "sourceIds": ["current:legacy"],
+        "source_path": "h3AnalysisSummary.avg_density_poi_per_km2",
+        "status": "ready",
+    }
+    gap_metric = {
+        "metric_id": "analysis:h3:lq",
+        "domain": "h3",
+        "label": "区位商 LQ",
+        "sourceId": "current:legacy",
+        "sourceIds": ["current:legacy"],
+        "status": "missing",
+        "description": "旧 camel 缺口不应进入上下文。",
+    }
+    metric_context = build_metric_context(
+        sources=[{
+            "id": "current:analysis:poi_h3",
+            "type": "sheet",
+            "title": "POI / H3 空间结构分析",
+            "status": "ready",
+            "selected": True,
+            "meta": {
+                "sourceKind": "system",
+                "aiPayload": {
+                    "source_id": "current:analysis:poi_h3",
+                    "source_kind": "system",
+                    "included": ["metrics", "metric_gaps"],
+                    "metrics": [ready_metric],
+                    "metricGaps": [gap_metric],
+                },
+            },
+        }],
+        source_ids=["current:analysis:poi_h3"],
+        current={},
+    )
+
+    assets = validate_visual_assets({
+        "visualSpecs": [{
+            "title": "旧图表",
+            "visualType": "figure",
+            "sourceIds": ["current:legacy"],
+            "sourceMetricIds": ["analysis:h3:avg_density_poi_per_km2"],
+        }],
+    }, metric_context)
+
+    assert metric_context["metrics"] == []
+    assert metric_context["missing_metrics"] == []
+    assert assets["visual_specs"] == []
+
+
 def test_classify_ppt_source_groups_returns_normalized_groups(monkeypatch):
     monkeypatch.setattr("modules.ppt_planning.service.is_llm_enabled", lambda: True)
 
