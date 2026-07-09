@@ -46,7 +46,7 @@ function createAnalysisAgentInitialState() {
     agentPendingTaskConfirmation: null,
     agentError: '',
     agentContextSummary: {},
-    agentPlan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
+    agentPlan: { steps: [], summary: '' },
     agentPlanExpanded: false,
     agentTraceExpanded: false,
     agentPanelPreloadNotes: [],

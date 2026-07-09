@@ -3081,13 +3081,13 @@ test('getAgentPlanChecklist derives grouped checklist states from plan and trace
   const checklist = ctx.getAgentPlanChecklist()
 
   assert.equal(checklist.visible, true)
-  assert.equal(checklist.summary.includes('已根据审计补充步骤'), true)
+  assert.equal(checklist.summary, '先读取已有分析，再补充热点识别。')
   assert.equal(checklist.progressLabel, '1/3 已完成')
-  assert.equal(checklist.groups.length, 2)
+  assert.equal(checklist.groups.length, 1)
   assert.equal(checklist.groups[0].items[0].status, 'completed')
   assert.equal(checklist.groups[0].items[1].status, 'active')
-  assert.equal(checklist.groups[1].items[0].status, 'pending')
-  assert.equal(checklist.groups[1].items[0].optional, true)
+  assert.equal(checklist.groups[0].items[2].status, 'pending')
+  assert.equal(checklist.groups[0].items[2].optional, true)
 
   ctx.agentPlanExpanded = true
   ctx.toggleAgentPlanExpanded()

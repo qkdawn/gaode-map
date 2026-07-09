@@ -128,7 +128,7 @@ export function createAgentTabsMethods() {
         riskPrompt: String(normalized.riskPrompt || ''),
         error: String(normalized.error || ''),
         contextSummary: cloneObject(normalized.contextSummary),
-        plan: cloneObject(normalized.plan || { steps: [], followupSteps: [], followupApplied: false, summary: '' }),
+        plan: cloneObject(normalized.plan || { steps: [], summary: '' }),
         panelPayloads: cloneObject(normalized.panelPayloads),
         panelPreloadNotes: cloneArray(normalized.panelPreloadNotes),
         preloadedPanelKeys: cloneArray(normalized.preloadedPanelKeys),

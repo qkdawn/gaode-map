@@ -17,19 +17,14 @@ function getAgentPlanTraceStatus(seed = {}) {
 }
 
 function summarizeAgentPlan(plan = {}, diagnostics = {}) {
-  const baseSummary = asText(plan.summary || diagnostics.planningSummary || diagnostics.planning_summary)
-  if (plan.followupApplied && cloneArray(plan.followupSteps).length) {
-    return baseSummary ? `${baseSummary} 已根据审计补充步骤。` : '已根据审计补充步骤。'
-  }
-  return baseSummary
+  return asText(plan.summary || diagnostics.planningSummary || diagnostics.planning_summary)
 }
 
 function buildAgentPlanChecklist(plan = {}, executionTrace = [], options = {}) {
   const normalizedPlan = normalizeAgentPlanEnvelope(plan)
   const traces = cloneArray(executionTrace)
   const groups = [
-    { key: 'initial', title: '初始计划', description: 'AI 生成的首轮分析步骤', items: normalizedPlan.steps },
-    { key: 'followup', title: '补充计划', description: '审计后补充的步骤', items: normalizedPlan.followupSteps },
+    { key: 'tools', title: '工具步骤', description: 'AI 为本轮回答选择的分析工具', items: normalizedPlan.steps },
   ].filter((group) => group.items.length)
   const allSteps = groups.flatMap((group) => group.items)
   const totalCount = allSteps.length
@@ -40,14 +35,13 @@ function buildAgentPlanChecklist(plan = {}, executionTrace = [], options = {}) {
       progressLabel: '',
       completedCount: 0,
       totalCount: 0,
-      followupApplied: normalizedPlan.followupApplied,
       groups: [],
     }
   }
 
   let traceCursor = 0
   let firstPendingAssigned = false
-  const isExecuting = !!options.isLoading && ['planning', 'executing', 'auditing', 'replanning', 'synthesizing'].includes(asText(options.stage))
+  const isExecuting = !!options.isLoading && ['planning', 'executing', 'synthesizing'].includes(asText(options.stage))
   const normalizedGroups = groups.map((group) => ({
     ...group,
     items: group.items.map((step) => {
@@ -97,14 +91,13 @@ function buildAgentPlanChecklist(plan = {}, executionTrace = [], options = {}) {
     progressLabel: `${completedCount}/${totalCount} 已完成`,
     completedCount,
     totalCount,
-    followupApplied: normalizedPlan.followupApplied,
     groups: normalizedGroups,
   }
 }
 
 function hasAgentPlanContent(plan = {}) {
   const normalizedPlan = normalizeAgentPlanEnvelope(plan || {})
-  return !!(normalizedPlan.steps.length || normalizedPlan.followupSteps.length)
+  return !!normalizedPlan.steps.length
 }
 
 function hasAgentExecutionTraceContent(executionTrace = []) {

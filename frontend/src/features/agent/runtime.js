@@ -874,8 +874,6 @@ function createAgentRuntimeMethods() {
         context_summary: cloneObject(merged.contextSummary),
         plan: {
           steps: cloneArray(merged.plan && merged.plan.steps),
-          followup_steps: cloneArray(merged.plan && merged.plan.followupSteps),
-          followup_applied: !!(merged.plan && merged.plan.followupApplied),
           summary: String((merged.plan && merged.plan.summary) || ''),
         },
         risk_confirmations: cloneArray(merged.riskConfirmations),
@@ -2970,7 +2968,7 @@ function createAgentRuntimeMethods() {
             const hadPlan = !!(
               currentSessionSnapshot
               && currentSessionSnapshot.plan
-              && (cloneArray(currentSessionSnapshot.plan.steps).length || cloneArray(currentSessionSnapshot.plan.followupSteps).length)
+              && cloneArray(currentSessionSnapshot.plan.steps).length
             )
             this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
               ...session,
@@ -2981,7 +2979,7 @@ function createAgentRuntimeMethods() {
                 planItem,
               ),
             }))
-            if (!hadPlan && (nextPlan.steps.length || nextPlan.followupSteps.length) && targetSessionId === asText(this.activeAgentSessionId)) {
+            if (!hadPlan && nextPlan.steps.length && targetSessionId === asText(this.activeAgentSessionId)) {
               this.agentPlanExpanded = true
             }
             markStreamActive()

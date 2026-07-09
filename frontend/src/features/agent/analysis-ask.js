@@ -19,7 +19,7 @@ function writeAnalysisAskSessionState(ctx, patch = {}, options = {}) {
     researchNotes: [],
     auditIssues: [],
     thinkingTimeline: [],
-    plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
+    plan: { steps: [], summary: '' },
     pendingTaskConfirmation: null,
     error: asText(patch.error || ''),
   }), options)

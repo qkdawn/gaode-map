@@ -595,10 +595,6 @@ export function createAgentThreadUiMethods() {
           title: '\u5de5\u5177\u5224\u65ad',
           description: '\u5224\u65ad\u8fd9\u4e00\u8f6e\u6700\u8be5\u5148\u8c03\u4ec0\u4e48\u5de5\u5177\uff0c\u4ee5\u53ca\u8fd8\u9700\u8981\u8865\u54ea\u4e9b\u8bc1\u636e\u3002',
         },
-        replanning: {
-          title: '\u7ee7\u7eed\u5224\u65ad',
-          description: '\u6839\u636e\u65b0\u8bc1\u636e\u8c03\u6574\u4e0b\u4e00\u6b65\u8981\u4e0d\u8981\u7ee7\u7eed\u8c03\u5de5\u5177\u3002',
-        },
         tool_confirmation: {
           title: '\u5de5\u5177\u786e\u8ba4',
           description: '\u7b49\u5f85\u9700\u8981\u7528\u6237\u786e\u8ba4\u7684 Agent \u8c03\u7528\u3002\u786e\u8ba4\u540e\u53ef\u7ee7\u7eed\u6267\u884c\u3002',
@@ -638,7 +634,6 @@ export function createAgentThreadUiMethods() {
         'clarifying',
         'context_ready',
         'planning',
-        'replanning',
         'tool_confirmation',
         'executing',
         'auditing',
@@ -677,8 +672,7 @@ export function createAgentThreadUiMethods() {
       })
       const planChecklist = this.getAgentPlanChecklist()
       if (planChecklist.visible) {
-        const planGroupKey = planChecklist.followupApplied ? 'replanning' : 'planning'
-        const planGroup = ensureGroup(planGroupKey)
+        const planGroup = ensureGroup('planning')
         planGroup.planChecklist = planChecklist
         planGroup.progressLabel = planChecklist.progressLabel
       }

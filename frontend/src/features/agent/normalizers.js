@@ -142,17 +142,19 @@ function normalizeAgentPlanStep(seed = {}) {
 }
 
 function normalizeAgentPlanEnvelope(seed = {}) {
+  const primarySteps = cloneArray(seed.steps).map((item) => normalizeAgentPlanStep(item)).filter((item) => item.tool_name)
+  const legacyFollowupSteps = cloneArray(seed.followupSteps || seed.followup_steps)
+    .map((item) => normalizeAgentPlanStep(item))
+    .filter((item) => item.tool_name)
   return {
-    steps: cloneArray(seed.steps).map((item) => normalizeAgentPlanStep(item)).filter((item) => item.tool_name),
-    followupSteps: cloneArray(seed.followupSteps || seed.followup_steps).map((item) => normalizeAgentPlanStep(item)).filter((item) => item.tool_name),
-    followupApplied: !!(seed.followupApplied || seed.followup_applied),
+    steps: [...primarySteps, ...legacyFollowupSteps],
     summary: asText(seed.summary),
   }
 }
 
 function hasAgentPlanEnvelopeContent(plan = {}) {
   const normalized = normalizeAgentPlanEnvelope(plan)
-  return !!(normalized.steps.length || normalized.followupSteps.length || normalized.summary)
+  return !!(normalized.steps.length || normalized.summary)
 }
 
 function normalizeAgentMessageProcess(seed = {}) {
@@ -283,7 +285,7 @@ function normalizeAgentStatusThinkingItem(seed = {}) {
     planning: ['工具判断', '正在判断这轮最该先调什么工具，以及还缺哪些证据。'],
     executing: ['执行工具', '正在执行工具调用并收集证据。'],
     auditing: ['证据检查', '正在检查这些证据够不够真正回答你的问题。'],
-    replanning: ['继续判断', '正在根据新证据决定要不要继续调用工具。'],
+    replanning: ['工具判断', '正在根据新证据决定要不要继续调用工具。'],
     synthesizing: ['综合分析', '正在把现有证据整理成自然回答。'],
     answered: ['回答生成完成', '已生成最终回答。'],
     requires_clarification: ['需要补充信息', '还差关键信息，补充后才能继续分析。'],
@@ -350,11 +352,10 @@ function normalizeAgentPlanThinkingItem(seed = {}) {
   return normalizeAgentThinkingItem({
     id: `plan-envelope-${stableAgentHash({
       steps: normalizedPlan.steps.map((step) => step.tool_name),
-      followup: normalizedPlan.followupSteps.map((step) => step.tool_name),
       summary: normalizedPlan.summary,
     })}`,
-    phase: normalizedPlan.followupApplied ? 'replanning' : 'planning',
-    title: normalizedPlan.followupApplied ? '已补充后续步骤' : '已列出本轮步骤',
+    phase: 'planning',
+    title: '已列出本轮步骤',
     detail: normalizedPlan.summary || '已生成待执行的分析步骤。',
     items: previewItems,
     state: 'completed',
@@ -664,7 +665,7 @@ function createAgentSessionPlaceholderRecord(session = null) {
     },
     diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], replanCount: 0, latencyMs: {}, error: '' },
     contextSummary: {},
-    plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
+    plan: { steps: [], summary: '' },
     snapshotLoaded: false,
   })
 }

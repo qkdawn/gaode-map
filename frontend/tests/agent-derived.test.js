@@ -36,8 +36,9 @@ test('buildAgentPlanChecklist maps execution trace into planner progress and sta
   assert.equal(checklist.progressLabel, '1/3 已完成')
   assert.equal(checklist.groups[0].items[0].status, 'completed')
   assert.equal(checklist.groups[0].items[1].status, 'blocked')
-  assert.equal(checklist.groups[1].items[0].status, 'pending')
-  assert.match(checklist.summary, /已根据审计补充步骤/)
+  assert.equal(checklist.groups[0].items[2].status, 'pending')
+  assert.equal(checklist.groups[0].title, '工具步骤')
+  assert.equal(checklist.summary, '先看范围，再看供给结构')
 })
 
 test('buildAgentToolCallItems normalizes trace metadata and artifact labels', () => {

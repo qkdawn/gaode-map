@@ -1079,7 +1079,7 @@ export function createAgentSummaryViewMethods() {
         },
         diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], error: '' },
         contextSummary: {},
-        plan: { steps: [], followupSteps: [], followupApplied: false, summary: '' },
+        plan: { steps: [], summary: '' },
         persisted: false,
         snapshotLoaded: true,
         titleSource: 'fallback',
