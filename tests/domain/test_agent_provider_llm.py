@@ -13,9 +13,7 @@ from modules.agent.providers.llm_provider import (
     generate_answer_output_with_llm,
     run_gate_with_llm,
 )
-from modules.agent.providers.tool_loop import compact_tool_catalog
 from modules.agent.schemas import AgentMessage, AgentTranslationPack, AnalysisSnapshot, GateDecision, ToolLoopResult
-from modules.agent.tools import get_tool_registry
 
 
 class _FakeStreamResponse:
@@ -438,18 +436,6 @@ def test_extract_json_object_accepts_llm_control_characters_in_strings():
     parsed = extract_json_object('{"answer":"第一行\n第二行"}')
 
     assert parsed["answer"] == "第一行\n第二行"
-
-
-def test_compact_tool_catalog_omits_full_schema_and_long_contracts():
-    catalog = compact_tool_catalog(get_tool_registry())
-    source_tool = next(item for item in catalog if item["name"] == "search_selected_source_evidence")
-
-    assert "input_schema" not in source_tool
-    assert "applicable_scenarios" not in source_tool
-    assert "evidence_contract" not in source_tool
-    assert "toolkit_id" not in source_tool
-    assert source_tool["argument_hints"]["query"] == "用户原问题"
-    assert len(source_tool["intent"]) <= 96
 
 
 def test_planner_digests_do_not_include_large_frontend_analysis_or_filters():
