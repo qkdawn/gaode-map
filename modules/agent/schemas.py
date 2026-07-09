@@ -608,7 +608,7 @@ class ToolLoopResult(BaseModel):
 
 
 class AgentTurnOutput(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     answer: str = ""
     clarification_question: str = ""

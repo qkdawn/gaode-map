@@ -108,6 +108,13 @@ def test_agent_plan_contract_exports_current_fields_only():
     }
 
 
+def test_agent_turn_output_rejects_removed_structured_answer_fields():
+    with pytest.raises(ValueError):
+        AgentTurnOutput(answer="已完成", cards=[])
+    with pytest.raises(ValueError):
+        AgentTurnOutput(answer="已完成", next_suggestions=[])
+
+
 def _snapshot_with_scope(**kwargs) -> AnalysisSnapshot:
     payload = {
         "scope": {
