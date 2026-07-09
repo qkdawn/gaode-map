@@ -40,25 +40,17 @@ class PptSource(BaseModel):
             return value
         payload = dict(value)
         meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-        source_id = str(payload.get("id") or payload.get("source_id") or payload.get("sourceId") or "").strip()
-        source_kind = str(payload.get("source_kind") or payload.get("sourceKind") or meta.get("sourceKind") or "").strip()
+        source_id = str(payload.get("id") or payload.get("source_id") or "").strip()
+        source_kind = str(payload.get("source_kind") or "").strip()
         source_kind = _canonical_source_kind(source_kind, source_id, str(payload.get("type") or "source"))
         ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
         ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
         counts = ai_payload.get("counts") if isinstance(ai_payload.get("counts"), dict) else {}
-        evidence_nodes = (
-            ai_payload.get("evidence_nodes")
-            if isinstance(ai_payload.get("evidence_nodes"), list)
-            else ai_payload.get("evidenceNodes")
-            if isinstance(ai_payload.get("evidenceNodes"), list)
-            else []
-        )
+        evidence_nodes = ai_payload.get("evidence_nodes") if isinstance(ai_payload.get("evidence_nodes"), list) else []
         transport = meta.get("transport") if isinstance(meta.get("transport"), dict) else {}
         evidence_count = (
             payload.get("evidence_count")
-            or payload.get("evidenceCount")
             or transport.get("evidence_count")
-            or transport.get("evidenceCount")
             or len(evidence_nodes)
             or counts.get("evidence")
             or 0
@@ -68,7 +60,7 @@ class PptSource(BaseModel):
             "source_kind": source_kind,
             "summary": summary,
             "evidence_count": int(evidence_count or 0),
-            "locator_summary": str(payload.get("locator_summary") or payload.get("locatorSummary") or "").strip(),
+            "locator_summary": str(payload.get("locator_summary") or "").strip(),
             "availability": str(payload.get("availability") or ("available" if payload.get("status") == "ready" else "")).strip(),
         })
         return payload
@@ -131,14 +123,14 @@ class PptDataSourceSummary(BaseModel):
             return value
         payload = dict(value)
         meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-        source_id = str(payload.get("id") or payload.get("source_id") or payload.get("sourceId") or "").strip()
-        source_kind = str(payload.get("source_kind") or payload.get("sourceKind") or meta.get("sourceKind") or "").strip()
+        source_id = str(payload.get("id") or payload.get("source_id") or "").strip()
+        source_kind = str(payload.get("source_kind") or "").strip()
         source_kind = _canonical_source_kind(source_kind, source_id, str(payload.get("type") or "data"))
-        evidence_count = payload.get("evidence_count") or payload.get("evidenceCount") or payload.get("count") or 0
+        evidence_count = payload.get("evidence_count") or payload.get("count") or 0
         payload.update({
             "source_kind": source_kind,
             "evidence_count": int(evidence_count or 0),
-            "locator_summary": str(payload.get("locator_summary") or payload.get("locatorSummary") or "").strip(),
+            "locator_summary": str(payload.get("locator_summary") or "").strip(),
             "availability": str(payload.get("availability") or ("available" if payload.get("status") == "ready" else "")).strip(),
         })
         return payload
