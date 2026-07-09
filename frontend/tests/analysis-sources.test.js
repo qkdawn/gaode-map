@@ -130,3 +130,30 @@ test('analysis source target ignores legacy ai payload aliases', () => {
   assert.deepEqual(target.payload.sources[0].visual_specs, [])
   assert.equal(target.evidence[0].text, '该来源包含可用于 AI 的分析输入块。')
 })
+
+test('analysis source target does not infer source kind from meta alias', () => {
+  const target = buildAnalysisSourceTarget({
+    sources: [{
+      id: 'document:meta-kind',
+      title: '旧 meta 类型',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'document',
+        aiPayload: {
+          source_id: 'document:meta-kind',
+          included: ['evidence'],
+          evidence_nodes: [{
+            id: 'document:meta-kind:node:1',
+            source_id: 'document:meta-kind',
+            source_type: 'document',
+            title: '证据',
+            content: '当前 payload 没有声明 source_kind。',
+          }],
+        },
+      },
+    }],
+  })
+
+  assert.equal(target.payload.sources[0].source_kind, '')
+})

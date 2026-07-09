@@ -35,7 +35,7 @@ function analysisAiPayloadFromSource(source = {}) {
   return {
     source_id: asText(payload.source_id || source.id),
     title: asText(payload.title || source.title),
-    source_kind: asText(payload.source_kind || meta.sourceKind),
+    source_kind: asText(payload.source_kind),
     included,
     scope,
     metrics: compactAnalysisSourceValue(metrics, 2),
