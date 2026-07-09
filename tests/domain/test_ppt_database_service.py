@@ -25,7 +25,11 @@ def test_build_database_data_package_creates_database_source(monkeypatch):
     assert response.source.evidence_count == 3
     assert response.source.availability == "available"
     assert response.source.locator_summary == "analysis_history:history-1 / database evidence 3"
-    assert response.source.meta["aiPayload"]["sourceKind"] == "database"
+    assert "sourceId" not in response.source.meta["aiPayload"]
+    assert "sourceKind" not in response.source.meta["aiPayload"]
+    assert "metricGaps" not in response.source.meta["aiPayload"]
+    assert "evidenceNodes" not in response.source.meta["aiPayload"]
+    assert "visualSpecs" not in response.source.meta["aiPayload"]
     assert response.source.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "database"
     assert response.source.meta["aiPayload"]["evidence_nodes"][0]["id"].startswith("database:history-1:")
     assert response.source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "database_record_index"

@@ -132,7 +132,7 @@ def _safe_list(value: Any) -> List[Any]:
 
 def _ai_payload_evidence_count(ai_payload: Dict[str, Any]) -> int:
     payload = _safe_dict(ai_payload)
-    evidence_nodes = _safe_list(payload.get("evidence_nodes") or payload.get("evidenceNodes"))
+    evidence_nodes = _safe_list(payload.get("evidence_nodes"))
     return len(evidence_nodes)
 
 
@@ -997,13 +997,10 @@ def _web_source_ai_payload(source_id: str, title: str, items: List[Dict[str, Any
     payload = {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
-        "sourceId": source_id,
         "title": title,
         "source_kind": "web",
-        "sourceKind": "web",
         "included": ["evidence"] if evidence_node_payloads else [],
         "evidence_nodes": evidence_node_payloads,
-        "evidenceNodes": evidence_node_payloads,
         "metrics": [],
         "metric_gaps": [],
         "visual_specs": [],
@@ -1349,7 +1346,7 @@ def list_persisted_web_sources(area_id: str) -> List[Any]:
         meta = _safe_dict(source.get("meta"))
         items = _safe_list(payload.get("items"))
         ai_payload = _safe_dict(meta.get("aiPayload") or meta.get("ai_payload"))
-        evidence_count = _ai_payload_evidence_count(ai_payload) or int(source.get("evidence_count") or source.get("evidenceCount") or 0)
+        evidence_count = _ai_payload_evidence_count(ai_payload) or int(source.get("evidence_count") or 0)
         sources.append(
             {
                 "id": source_id,
@@ -1360,7 +1357,7 @@ def list_persisted_web_sources(area_id: str) -> List[Any]:
                 "summary": _clean_text(payload.get("summary")) or _clean_text(meta.get("label")),
                 "count": len(items),
                 "evidence_count": evidence_count,
-                "locator_summary": _clean_text(source.get("locator_summary") or source.get("locatorSummary")) or _web_locator_summary(items),
+                "locator_summary": _clean_text(source.get("locator_summary")) or _web_locator_summary(items),
                 "availability": _clean_text(source.get("availability")) or _web_availability(evidence_count, items),
                 "meta": {
                     **meta,

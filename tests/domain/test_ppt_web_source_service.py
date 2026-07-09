@@ -100,6 +100,9 @@ def test_web_source_preview_sanitizes_coordinate_region_without_persisting(monke
     assert all("112.9,28.2" not in term for term in captured["terms"])
     assert "upsert" not in captured
     assert result.source.meta["aiPayload"]["included"] == ["evidence"]
+    assert "sourceId" not in result.source.meta["aiPayload"]
+    assert "sourceKind" not in result.source.meta["aiPayload"]
+    assert "evidenceNodes" not in result.source.meta["aiPayload"]
 
 
 def test_web_source_fetches_and_ranks_searxng_candidates(monkeypatch):
