@@ -106,9 +106,10 @@ async def answer_preprocessed_sources(
             },
             "preprocessed-sources",
         )
-        return _failed_preprocessed_sources_response(
+        return _preprocessed_sources_response(
             payload=payload,
             sources=sources,
+            status="failed",
             error=error,
             research_notes=research_notes,
             thinking_timeline=thinking_timeline,
@@ -131,9 +132,10 @@ async def answer_preprocessed_sources(
             },
             "preprocessed-sources",
         )
-        return _failed_preprocessed_sources_response(
+        return _preprocessed_sources_response(
             payload=payload,
             sources=sources,
+            status="failed",
             error=error,
             research_notes=research_notes,
             thinking_timeline=thinking_timeline,
@@ -152,50 +154,46 @@ async def answer_preprocessed_sources(
         "preprocessed-sources",
     )
     note = "本轮使用 selected_sources_context 预处理来源直接回答，跳过 gate、ReAct 工具循环和最终综合 LLM。"
-    return AgentTurnResponse(
+    return _preprocessed_sources_response(
+        payload=payload,
+        sources=sources,
         status="answered",
-        stage="answered",
-        output=AgentTurnOutput(answer=context_answer.answer),
-        diagnostics=AgentTurnDiagnostics(
-            used_tools=[PREPROCESSED_SOURCE_TOOL],
-            citations=[str(item) for item in list(context_answer.citations or []) if str(item).strip()],
-            research_notes=[note, *[str(item) for item in list(context_answer.warnings or []) if str(item).strip()]],
-            thinking_timeline=list(thinking_timeline or []),
-            planning_summary="已使用预处理分析来源直接回答。",
-            latency_ms=latency.finish(),
-        ),
-        context_summary=build_context_summary(
-            payload.analysis_snapshot,
-            {
-                **dict(memory_artifacts or {}),
-                "selected_sources_context": {"sources": sources},
-            },
-        ),
-        plan=AgentPlanEnvelope(summary="已使用预处理分析来源直接回答。"),
+        answer=context_answer.answer,
+        citations=[str(item) for item in list(context_answer.citations or []) if str(item).strip()],
+        research_notes=[note, *[str(item) for item in list(context_answer.warnings or []) if str(item).strip()]],
+        thinking_timeline=thinking_timeline,
+        latency=latency,
+        memory_artifacts=memory_artifacts,
     )
 
 
-def _failed_preprocessed_sources_response(
+def _preprocessed_sources_response(
     *,
     payload: AgentTurnRequest,
     sources: List[Dict[str, Any]],
-    error: str,
+    status: str,
+    answer: str = "",
+    citations: List[str] | None = None,
+    error: str = "",
     research_notes: List[str],
     thinking_timeline: List[AgentThinkingItem],
     latency: LatencyRecorder,
     memory_artifacts: Dict[str, Any],
 ) -> AgentTurnResponse:
+    is_answered = status == "answered"
+    planning_summary = "已使用预处理分析来源直接回答。" if is_answered else "预处理分析来源直答失败，未进入完整工具循环。"
     return AgentTurnResponse(
-        status="failed",
-        stage="failed",
-        output=AgentTurnOutput(),
+        status="answered" if is_answered else "failed",
+        stage="answered" if is_answered else "failed",
+        output=AgentTurnOutput(answer=str(answer or "")),
         diagnostics=AgentTurnDiagnostics(
             used_tools=[PREPROCESSED_SOURCE_TOOL],
+            citations=list(citations or []),
             research_notes=list(research_notes or []),
             thinking_timeline=list(thinking_timeline or []),
-            planning_summary="预处理分析来源直答失败，未进入完整工具循环。",
+            planning_summary=planning_summary,
             latency_ms=latency.finish(),
-            error=error,
+            error=str(error or ""),
         ),
         context_summary=build_context_summary(
             payload.analysis_snapshot,
@@ -204,5 +202,5 @@ def _failed_preprocessed_sources_response(
                 "selected_sources_context": {"sources": sources},
             },
         ),
-        plan=AgentPlanEnvelope(summary="预处理分析来源直答失败。"),
+        plan=AgentPlanEnvelope(summary=planning_summary),
     )
