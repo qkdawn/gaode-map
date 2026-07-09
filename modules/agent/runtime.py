@@ -31,7 +31,6 @@ from .schemas import (
     AgentTurnStreamEvent,
     AuditResult,
 )
-from .state_machine import AgentStateMachine
 from .synthesizer import (
     build_answer_evidence_payload,
     build_answer_fallback,
@@ -216,7 +215,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     latency = LatencyRecorder()
     snapshot = payload.analysis_snapshot
     question = latest_user_message(payload.messages)
-    state = AgentStateMachine()
     thinking_timeline: List[AgentThinkingItem] = []
 
     async def emit_event(event_type: str, event_payload: dict[str, Any]) -> None:
@@ -276,7 +274,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     translation_pack = AgentTranslationPack(status="skipped")
 
     await _maybe_emit(emit, "meta", {"conversation_id": str(payload.conversation_id or "")})
-    await _emit_status(emit, state.stage)
+    await _emit_status(emit, "gating")
     if visual_snapshot_meta:
         snapshot_titles = [
             str(item.get("title") or item.get("kind") or "").strip()
@@ -316,7 +314,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         emit_thinking=emit_thinking,
     )
     if direct_response is not None:
-        state.move_to("answered")
         await _emit_status(emit, "answered")
         return direct_response
     await emit_thinking(
@@ -384,7 +381,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             )
 
     if gate.status == "clarify":
-        state.move_to("clarifying")
         await _emit_status(emit, "clarifying")
         await emit_thinking(
             {
@@ -440,7 +436,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             "gating-check",
         )
 
-    state.move_to("executing")
     await _emit_status(emit, "executing")
     await emit_thinking(
         {
@@ -658,7 +653,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             "finalizer-evidence",
         )
     citations = build_citations(snapshot, memory.artifacts)
-    state.move_to("synthesizing")
     await _emit_status(emit, "synthesizing")
     await emit_thinking(
         {
@@ -703,7 +697,6 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             research_notes=list(memory.research_notes or []),
             audit=latest_rule_audit,
         )
-    state.move_to("answered")
     await _emit_status(emit, "answered")
     await emit_thinking(
         {
