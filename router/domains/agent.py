@@ -6,6 +6,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from modules.agent.capability_catalog import (
+    AnalysisCapability,
+    CapabilityReadiness,
+    evaluate_capability_readiness,
+    list_analysis_capabilities,
+)
 from modules.agent.runtime import stream_main_agent_loop
 from modules.agent.execution_service import agent_capabilities, prepare_agent_turn
 from modules.agent.model_profiles import (
@@ -80,6 +86,22 @@ def _encode_context_ask_sse(event_type: str, payload: dict) -> str:
 @router.get("/api/v1/analysis/agent/capabilities")
 async def get_agent_capabilities():
     return await run_in_threadpool(agent_capabilities)
+
+
+@router.get("/api/v1/analysis/agent/analysis-capabilities", response_model=List[AnalysisCapability])
+async def get_analysis_capabilities():
+    return await run_in_threadpool(list_analysis_capabilities)
+
+
+@router.post(
+    "/api/v1/analysis/agent/analysis-capabilities/{capability_id}/readiness",
+    response_model=CapabilityReadiness,
+)
+async def post_analysis_capability_readiness(capability_id: str, payload: AgentTurnRequest):
+    try:
+        return await run_in_threadpool(evaluate_capability_readiness, capability_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="analysis_capability_not_found") from exc
 
 
 @router.post("/api/v1/analysis/agent/model-profiles", response_model=AgentModelProfileView)
