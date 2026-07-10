@@ -116,31 +116,46 @@ def build_finalizer_evidence_pack(
 ) -> Dict[str, Any]:
     service = RetrievalService(snapshot=snapshot, artifacts=artifacts or {})
     available_domains = _available_domains(service)
+    dossier = answer_evidence_payload.get("project_evidence_dossier")
+    dossier = dossier if isinstance(dossier, dict) else {}
+    document_evidence_nodes = [item for item in list(dossier.get("evidence") or []) if isinstance(item, dict)]
+    dossier_warnings = [str(item).strip() for item in list(dossier.get("warnings") or []) if str(item).strip()]
     pack: Dict[str, Any] = {
-        "status": "skipped",
-        "reason": "not_required",
+        "status": "ready" if document_evidence_nodes else "skipped",
+        "reason": "project_document_evidence" if document_evidence_nodes else "not_required",
         "available_domains": available_domains,
         "search_queries": [],
+        "document_evidence_nodes": document_evidence_nodes,
+        "document_conflicts": [item for item in list(dossier.get("conflicts") or []) if isinstance(item, dict)],
+        "document_status": str(dossier.get("status") or "empty"),
         "evidence_nodes": [],
         "coverage_domains": [],
         "missing_coverage_domains": [],
-        "warnings": [],
+        "warnings": dossier_warnings[:8],
         "evidence_limits": [
+            "项目事实先使用 document_evidence_nodes，并遵守 project_brief > design_vision > reference_document 的证据顺序。",
+            "design_vision 只能表述为设计意图；pending_verification/conflicting 不得改写成确认事实。",
             "最终回答只能引用 evidence_nodes 中实际读取到的具体地名、H3 格子、路网线段、人口/夜光 cell。",
             "地图快照可支持视觉观察，但不能替代结构化 EvidenceNode。",
         ],
     }
+    if dossier.get("has_project_anchor") and not dossier.get("has_readable_project_anchor"):
+        pack["status"] = "failed"
+        pack["reason"] = "core_project_document_unreadable"
+        return pack
     if not available_domains:
-        pack["reason"] = "no_analysis_context_sources"
+        pack["reason"] = "project_document_only" if document_evidence_nodes else "no_analysis_context_sources"
+        if dossier.get("status") == "partial" and dossier.get("has_project_anchor"):
+            pack["status"] = "partial" if document_evidence_nodes else "failed"
         return pack
     if not _needs_finalizer_retrieval(question, answer_evidence_payload):
         return pack
 
     pack["status"] = "ready"
-    pack["reason"] = "high_value_spatial_question"
+    pack["reason"] = "project_and_spatial_evidence" if document_evidence_nodes else "high_value_spatial_question"
     read_ids: set[str] = set()
     evidence_nodes: List[Dict[str, Any]] = []
-    warnings: List[str] = []
+    warnings: List[str] = list(dossier_warnings)
     coverage_domains: List[str] = []
     for planned in _coverage_plan(available_domains) + _query_plan(question, answer_evidence_payload, available_domains):
         hits = service.search_analysis_context(

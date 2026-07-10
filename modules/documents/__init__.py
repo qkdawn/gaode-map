@@ -1,3 +1,11 @@
+from .project_evidence import (
+    EvidenceConflict,
+    EvidenceItem,
+    EvidenceStatus,
+    ProjectEvidenceDossier,
+    build_project_evidence_dossier,
+    dossier_evidence_payloads,
+)
 from .pageindex import (
     get_pageindex_document,
     get_pageindex_document_structure,
@@ -11,6 +19,7 @@ from .schemas import (
     DocumentIndexNodeRecord,
     DocumentIndexResponse,
     DocumentRecord,
+    DocumentRole,
     DocumentUploadResponse,
     PageIndexContentResponse,
 )
@@ -29,11 +38,18 @@ from .service import (
 
 __all__ = [
     "DocumentBlockResponse",
+    "EvidenceConflict",
+    "EvidenceItem",
+    "EvidenceStatus",
+    "ProjectEvidenceDossier",
+    "build_project_evidence_dossier",
+    "dossier_evidence_payloads",
     "DocumentBlocksResponse",
     "DocumentIndexNodeRecord",
     "DocumentIndexResponse",
     "DocumentNotFound",
     "DocumentRecord",
+    "DocumentRole",
     "DocumentTooLarge",
     "DocumentUploadResponse",
     "PageIndexContentResponse",

@@ -362,3 +362,123 @@ def test_build_answer_evidence_payload_ignores_empty_analysis_placeholders_and_f
 
     assert payload["metrics"]["h3_structure_summary"] is None
     assert any(item["metric"] == "h3_density" for item in payload["key_evidence"])
+
+
+def test_build_answer_evidence_payload_preserves_project_dossier_status_and_conflicts():
+    artifacts = {
+        "project_evidence_dossier": {
+            "status": "partial",
+            "question": "这个项目适合做什么",
+            "document_ids": ["brief", "reference"],
+            "document_roles": {"brief": "project_brief", "reference": "reference_document"},
+            "precedence": ["project_brief anchors project facts and constraints"],
+            "evidence": [
+                {
+                    "id": "document:brief:project-evidence:area",
+                    "source_id": "document:brief",
+                    "document_id": "brief",
+                    "document_title": "项目基本情况",
+                    "document_role": "project_brief",
+                    "status": "pending_verification",
+                    "category": "building_scale",
+                    "title": "建筑规模",
+                    "content": "总建筑面积约20000㎡，具体数据待确认。",
+                    "node_id": "area",
+                    "page_start": 2,
+                    "page_end": 2,
+                    "locator": "pageindex:area:p.2",
+                    "citation": "项目基本情况 p.2 / 建筑规模",
+                }
+            ],
+            "conflicts": [
+                {
+                    "metric_key": "households",
+                    "label": "居民户数",
+                    "values": ["约102户", "120户"],
+                    "evidence_ids": ["brief-households", "reference-households"],
+                    "preferred_value": "约102户",
+                    "preferred_evidence_id": "brief-households",
+                    "unresolved": False,
+                    "explanation": "采用项目摘要口径，同时保留冲突。",
+                }
+            ],
+            "warnings": ["参考资料与项目摘要的居民户数不一致。"],
+        }
+    }
+
+    payload = build_answer_evidence_payload(
+        question="这个项目适合做什么",
+        snapshot=AnalysisSnapshot(),
+        artifacts=artifacts,
+        tool_results=[],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    dossier = payload["project_evidence_dossier"]
+    assert dossier["has_project_anchor"] is True
+    assert dossier["evidence"][0]["status"] == "pending_verification"
+    assert dossier["conflicts"][0]["preferred_value"] == "约102户"
+    assert "GIS/城市数据" in dossier["answer_order"][1]
+
+
+def test_analysis_expression_brief_separates_facts_intent_inference_and_actions():
+    payload = build_answer_evidence_payload(
+        question="根据项目文档和周边数据，给出项目更新定位与下一步建议",
+        snapshot=AnalysisSnapshot(),
+        artifacts={
+            "project_evidence_dossier": {
+                "status": "partial",
+                "document_ids": ["brief", "vision"],
+                "document_roles": {"brief": "project_brief", "vision": "design_vision"},
+                "readable_document_ids": ["brief", "vision"],
+                "evidence": [
+                    {"id": "fact", "status": "pending_verification", "content": "约102户居民。"},
+                    {"id": "intent", "status": "design_intent", "content": "形成开放共享空间。"},
+                ],
+                "conflicts": [{"metric_key": "households", "values": ["约102户", "120户"]}],
+                "warnings": [],
+            }
+        },
+        tool_results=[],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    brief = payload["analysis_expression_brief"]
+    assert brief["question_intent"] == "decision_and_action"
+    assert brief["claim_order"][0] == "direct_conclusion"
+    assert "project_document_facts_and_constraints" in brief["claim_order"]
+    assert any("设计愿景" in item for item in brief["required_distinctions"])
+    assert any("待核实" in item for item in brief["required_distinctions"])
+    assert any("冲突口径" in item for item in brief["required_distinctions"])
+    assert brief["recommendation_contract"]["required_fields"] == [
+        "priority", "action", "evidence_basis", "trigger_or_precondition", "verification_method"
+    ]
+    assert "潜力巨大" in brief["language_rules"]["avoid_terms_without_definition"]
+
+
+def test_analysis_expression_brief_blocks_confident_answer_when_core_document_is_unreadable():
+    payload = build_answer_evidence_payload(
+        question="分析这个项目适合做什么",
+        snapshot=AnalysisSnapshot(),
+        artifacts={
+            "project_evidence_dossier": {
+                "status": "failed",
+                "document_ids": ["brief"],
+                "document_roles": {"brief": "project_brief"},
+                "readable_document_ids": [],
+                "evidence": [],
+                "conflicts": [],
+                "warnings": ["项目摘要解析失败。"],
+            }
+        },
+        tool_results=[],
+        research_notes=[],
+        audit=AuditResult(),
+    )
+
+    brief = payload["analysis_expression_brief"]
+    assert brief["blocking_conditions"]
+    assert "GIS-only" in brief["blocking_conditions"][0]
+    assert "project_document_facts_and_constraints" not in brief["claim_order"]

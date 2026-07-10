@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
-from modules.documents.schemas import DocumentBlocksResponse, DocumentRecord
+from modules.documents.schemas import DocumentBlocksResponse, DocumentRecord, DocumentRole
 from modules.documents.service import DocumentTooLarge, EmptyDocument, UnsupportedDocumentType
 from modules.jobs import JobCreateResponse
 from router.domains import documents
@@ -28,6 +28,7 @@ def _record(document_id="doc-1", *, title="报告", file_name="report.pdf", file
         file_path=f"/tmp/{file_name}",
         upload_time=datetime(2026, 6, 11, 12, 0, 0),
         status="uploaded",
+        document_role=DocumentRole.PROJECT_BRIEF,
     )
 
 
@@ -35,6 +36,7 @@ def test_document_upload_api_returns_metadata(monkeypatch):
     def fake_upload(**kwargs):
         assert kwargs["filename"] == "report.pdf"
         assert kwargs["title"] == "项目报告"
+        assert kwargs["document_role"] == DocumentRole.PROJECT_BRIEF
         return _record(title=kwargs["title"])
 
     monkeypatch.setattr(documents, "create_document_upload", fake_upload)
@@ -42,7 +44,7 @@ def test_document_upload_api_returns_metadata(monkeypatch):
     with TestClient(_build_test_app()) as client:
         response = client.post(
             "/documents/upload",
-            data={"title": "项目报告"},
+            data={"title": "项目报告", "document_role": "project_brief"},
             files={"file": ("report.pdf", b"%PDF", "application/pdf")},
         )
 
@@ -51,6 +53,23 @@ def test_document_upload_api_returns_metadata(monkeypatch):
     assert payload["id"] == "doc-1"
     assert payload["title"] == "项目报告"
     assert payload["file_type"] == "pdf"
+    assert payload["document_role"] == "project_brief"
+
+
+def test_document_upload_api_requires_valid_document_role(monkeypatch):
+    monkeypatch.setattr(documents, "create_document_upload", lambda **kwargs: _record())
+    with TestClient(_build_test_app()) as client:
+        missing = client.post(
+            "/documents/upload",
+            files={"file": ("report.pdf", b"%PDF", "application/pdf")},
+        )
+        invalid = client.post(
+            "/documents/upload",
+            data={"document_role": "evidence_document"},
+            files={"file": ("report.pdf", b"%PDF", "application/pdf")},
+        )
+    assert missing.status_code == 422
+    assert invalid.status_code == 422
 
 
 def test_document_upload_api_maps_validation_errors(monkeypatch):
@@ -68,6 +87,7 @@ def test_document_upload_api_maps_validation_errors(monkeypatch):
         with TestClient(_build_test_app()) as client:
             response = client.post(
                 "/documents/upload",
+                data={"document_role": "reference_document"},
                 files={"file": ("report.pdf", b"%PDF", "application/pdf")},
             )
 

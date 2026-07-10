@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 DocumentStatus = Literal["uploaded", "parsing", "parsed", "failed"]
+
+
+class DocumentRole(str, Enum):
+    PROJECT_BRIEF = "project_brief"
+    DESIGN_VISION = "design_vision"
+    REFERENCE_DOCUMENT = "reference_document"
 
 
 class DocumentRecord(BaseModel):
@@ -17,7 +24,7 @@ class DocumentRecord(BaseModel):
     file_name: str
     file_type: Literal["pdf", "docx"]
     file_path: str
-    document_role: str = "evidence_document"
+    document_role: DocumentRole
     upload_time: datetime
     status: DocumentStatus
 

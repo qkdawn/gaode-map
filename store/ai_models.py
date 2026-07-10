@@ -22,7 +22,7 @@ class Document(AiBase):
     file_name = Column(String(255), nullable=False)
     file_type = Column(String(32), nullable=False, index=True)
     file_path = Column(Text, nullable=False)
-    document_role = Column(String(64), nullable=False, default="evidence_document", index=True)
+    document_role = Column(String(64), nullable=False, default="reference_document", index=True)
     upload_time = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
     status = Column(String(32), nullable=False, default="uploaded", index=True)
 

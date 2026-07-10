@@ -159,10 +159,22 @@ def _pageindex_score(question: str, node: dict) -> float:
 
 
 def _pageindex_query_tokens(question: str) -> List[str]:
-    tokens = [part.strip() for part in re.split(r"[\s,，。；;：:\-_/|()（）]+", question) if part.strip()]
-    if len(question) >= 4:
-        tokens.append(question[:4])
-    return list(dict.fromkeys(tokens))
+    normalized = _normalize_text(question)
+    tokens = [part.strip() for part in re.split(r"[\s,，。；;：:\-_/|()（）]+", normalized) if len(part.strip()) >= 2]
+    chinese_runs = re.findall(r"[\u4e00-\u9fff]+", normalized)
+    for run in chinese_runs:
+        for size in (2, 3, 4):
+            tokens.extend(run[index:index + size] for index in range(max(0, len(run) - size + 1)))
+    concept_groups = {
+        "居民": ("居民", "住户", "住宅", "产权", "安置", "共建", "共管"),
+        "保护": ("保护", "历史建筑", "文物", "古建筑", "修缮", "活化"),
+        "空间": ("空间", "一路", "一院", "一园", "院落", "动线", "礼堂"),
+        "改造": ("改造", "更新", "愿景", "定位", "业态", "运营"),
+    }
+    for concepts in concept_groups.values():
+        if any(concept in normalized for concept in concepts):
+            tokens.extend(concepts)
+    return list(dict.fromkeys(token for token in tokens if token))[:100]
 
 
 def _normalize_text(value: object) -> str:

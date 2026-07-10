@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from modules.documents import dossier_evidence_payloads
 from modules.evidence_retrieval import EvidenceSearchRequest, SourceRecord, evidence_node_payload_from_node, search_evidence
 from modules.evidence_index import EvidenceIndexService, EvidenceSearchQuery
 
@@ -108,7 +109,23 @@ async def search_selected_source_evidence(*, arguments, snapshot, artifacts, que
             top_k=int(arguments.get("top_k") or 8),
         )
     )
-    nodes = [evidence_node_payload_from_node(node) for node in response.nodes]
+    query = _as_text(arguments.get("query")) or _as_text(question)
+    dossier_nodes = dossier_evidence_payloads(
+        artifacts.get("project_evidence_dossier"),
+        source_ids=allowed,
+        question=query,
+        limit=max(8, int(arguments.get("top_k") or 8)),
+    )
+    retrieved_nodes = [evidence_node_payload_from_node(node) for node in response.nodes]
+    nodes = []
+    seen_node_ids = set()
+    for node in dossier_nodes + retrieved_nodes:
+        node_id = _as_text(node.get("id"))
+        if not node_id or node_id in seen_node_ids:
+            continue
+        seen_node_ids.add(node_id)
+        nodes.append(node)
+    nodes = nodes[: max(8, int(arguments.get("top_k") or 8))]
     cache = artifacts.setdefault(_cache_key(artifacts), {})
     if isinstance(cache, dict):
         for node in nodes:
@@ -126,7 +143,10 @@ async def search_selected_source_evidence(*, arguments, snapshot, artifacts, que
         }
         for node in nodes
     ]
-    warnings = [] if hits else ["已选来源中未检索到匹配 EvidenceNode。"]
+    dossier = artifacts.get("project_evidence_dossier") if isinstance(artifacts.get("project_evidence_dossier"), dict) else {}
+    warnings = [str(item).strip() for item in list(dossier.get("warnings") or []) if str(item).strip()]
+    if not hits:
+        warnings.append(f"已选来源 EvidenceNode 未命中：{query or '空查询'}。该提示只针对本轮手动选择的资料来源，不代表当前地图分析上下文没有证据。")
     return ToolResult(
         tool_name="search_selected_source_evidence",
         result={"hits": hits, "evidence_nodes": nodes, "warnings": warnings},

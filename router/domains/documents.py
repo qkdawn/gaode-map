@@ -12,6 +12,7 @@ from modules.documents import (
     DocumentIndexResponse,
     DocumentNotFound,
     DocumentRecord,
+    DocumentRole,
     DocumentTooLarge,
     DocumentUploadResponse,
     PageIndexContentResponse,
@@ -43,6 +44,7 @@ def _raise_database_error(exc: SQLAlchemyError) -> None:
 @router.post("/documents/upload", response_model=DocumentUploadResponse)
 async def post_document_upload(
     file: UploadFile = File(...),
+    document_role: DocumentRole = Form(...),
     title: str = Form(""),
 ) -> DocumentUploadResponse:
     try:
@@ -50,6 +52,7 @@ async def post_document_upload(
             filename=file.filename or "document",
             content_type=file.content_type or "",
             fileobj=file.file,
+            document_role=document_role,
             title=title,
         )
     except UnsupportedDocumentType as exc:

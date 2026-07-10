@@ -34,6 +34,7 @@ ToolSceneType = Literal[
 ]
 ToolLlmExposure = Literal["primary", "secondary", "hidden"]
 GovernanceMode = Literal["auto", "guarded", "readonly"]
+AgentExecutionMode = Literal["auto", "deep"]
 AgentStatus = Literal["answered", "requires_clarification", "requires_risk_confirmation", "failed"]
 AgentStage = Literal[
     "gating",
@@ -142,6 +143,7 @@ class AgentTurnRequest(BaseModel):
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     risk_confirmations: List[str] = Field(default_factory=list)
     governance_mode: GovernanceMode = "auto"
+    execution_mode: AgentExecutionMode = "auto"
     visual_snapshots: List[AgentVisualSnapshot] = Field(default_factory=list)
     map_search_context: AgentMapSearchContext = Field(default_factory=AgentMapSearchContext)
     selected_sources_context: AgentSelectedSourcesContext = Field(default_factory=AgentSelectedSourcesContext)

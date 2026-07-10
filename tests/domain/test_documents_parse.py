@@ -90,6 +90,7 @@ def _document(status="uploaded"):
         file_name="report.pdf",
         file_type="pdf",
         file_path="/tmp/report.pdf",
+        document_role="reference_document",
         upload_time=datetime(2026, 6, 11, 12, 0, 0),
         status=status,
     )
@@ -145,6 +146,7 @@ def test_parse_document_replaces_blocks_and_marks_parsed(monkeypatch):
             {"label": "text", "text": "新正文"},
         ]),
     )
+    monkeypatch.setattr("modules.documents.pageindex.rebuild_document_index", lambda _document_id: None)
 
     record = asyncio.run(parse_document("doc-1"))
 

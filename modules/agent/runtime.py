@@ -6,6 +6,7 @@ from contextlib import suppress
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List
 
 from core.config import settings
+from modules.documents import build_project_evidence_dossier
 
 from .auditor import audit_execution
 from .context_builder import build_context_bundle, build_context_summary
@@ -211,6 +212,18 @@ def _build_rule_audit_summary(audit: AuditResult) -> str:
     return "当前证据足以支持直接回答，并已保留必要解释边界。"
 
 
+def _merge_notes(existing: List[str], incoming: List[Any]) -> List[str]:
+    seen = {str(item).strip() for item in existing if str(item).strip()}
+    merged = list(existing or [])
+    for item in incoming or []:
+        text = str(item).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        merged.append(text)
+    return merged
+
+
 async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | None = None) -> AgentTurnResponse:
     latency = LatencyRecorder()
     snapshot = payload.analysis_snapshot
@@ -258,14 +271,27 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         context.limits.append(
             "selected_sources_context 是本轮已选分析来源；主 Agent 分析来源时只能通过 list_selected_sources/search_selected_source_evidence/read_selected_source_evidence_node 使用这些来源，不得引用未选来源。"
         )
+        project_dossier = build_project_evidence_dossier(selected_sources, question=question)
+        if project_dossier.document_ids:
+            memory.artifacts["project_evidence_dossier"] = project_dossier.model_dump(mode="json")
+            context.available_artifacts.append("project_evidence_dossier")
+            context.context_summary.available_context_sources.append("document:project_evidence_dossier")
+            context.limits.append(
+                "项目摘要 project_brief 是项目事实与约束锚点；design_vision 是设计意图；reference_document 只能补充。GIS 只能解释周边与验证机会，不能覆盖项目文档事实。"
+            )
+            memory.research_notes = _merge_notes(memory.research_notes, project_dossier.warnings)
+            if project_dossier.status == "failed" and project_dossier.has_project_anchor:
+                memory.research_notes = _merge_notes(
+                    memory.research_notes,
+                    ["核心项目文档未成功读取；最终回答必须明确失败，不能退化为自信的 GIS-only 项目结论。"],
+                )
     visual_image_inputs, visual_snapshot_meta, visual_snapshot_warnings = _visual_snapshot_inputs(payload)
     if visual_snapshot_meta:
         memory.artifacts["visual_snapshots"] = visual_snapshot_meta
         context.available_artifacts.append("frontend_visual_snapshots")
         context.context_summary.available_context_sources.append("visual:frontend_map_snapshots")
         context.limits.append("地图视觉快照只能作为可见图层证据，不能伪装成后端指标计算结果。")
-    for warning in visual_snapshot_warnings:
-        memory.research_notes.append(warning)
+    memory.research_notes = _merge_notes(memory.research_notes, visual_snapshot_warnings)
     used_tools: List[str] = []
     planning_summary = ""
     audit_summary = ""
@@ -471,7 +497,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     memory.execution_trace = list(loop_result.execution_trace or [])
     memory.tool_results = list(loop_result.tool_results or [])
     memory.artifacts.update(dict(loop_result.artifacts or {}))
-    memory.research_notes.extend([str(item) for item in list(loop_result.research_notes or []) if str(item).strip()])
+    memory.research_notes = _merge_notes(memory.research_notes, list(loop_result.research_notes or []))
     planning_summary = _build_loop_plan_summary(
         used_tools=used_tools,
         assistant_summary=str(loop_result.assistant_summary or ""),
@@ -593,6 +619,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             )
             answer_evidence_payload["finalizer_evidence_pack"] = finalizer_evidence_pack
             finalizer_nodes = list(finalizer_evidence_pack.get("evidence_nodes") or [])
+            finalizer_document_nodes = list(finalizer_evidence_pack.get("document_evidence_nodes") or [])
             finalizer_read_count = len(finalizer_nodes)
             finalizer_search_count = len(finalizer_evidence_pack.get("search_queries") or [])
         if finalizer_read_count:
@@ -603,17 +630,18 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
             {
                 "phase": "synthesizing",
                 "title": "最终证据检索完成",
-                "detail": f"已执行 {finalizer_search_count} 次检索，读取 {finalizer_read_count} 个 EvidenceNode。",
-                "display_text": f"已读取 {finalizer_read_count} 个最终回答证据节点。",
+                "detail": f"已整理 {len(finalizer_document_nodes)} 个项目文档证据，并执行 {finalizer_search_count} 次 GIS 检索、读取 {finalizer_read_count} 个空间 EvidenceNode。",
+                "display_text": f"已读取 {len(finalizer_document_nodes)} 个文档证据和 {finalizer_read_count} 个地图证据节点。",
                 "items": [
                     str(item.get("title") or item.get("id") or "").strip()
-                    for item in finalizer_nodes[:4]
+                    for item in (finalizer_document_nodes + finalizer_nodes)[:4]
                     if str(item.get("title") or item.get("id") or "").strip()
                 ],
                 "meta": {
                     "status": finalizer_evidence_pack.get("status"),
                     "search_count": finalizer_search_count,
                     "read_count": finalizer_read_count,
+                    "document_read_count": len(finalizer_document_nodes),
                     "warnings": list(finalizer_evidence_pack.get("warnings") or [])[:4],
                 },
                 "state": "completed",
@@ -623,9 +651,14 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     except Exception as exc:
         note = f"最终证据检索失败，已继续使用现有证据回答：{exc}"
         memory.research_notes.append(note)
+        dossier = answer_evidence_payload.get("project_evidence_dossier")
+        dossier = dossier if isinstance(dossier, dict) else {}
         answer_evidence_payload["finalizer_evidence_pack"] = {
             "status": "failed",
-            "warnings": [note],
+            "warnings": [note, *list(dossier.get("warnings") or [])][:8],
+            "document_evidence_nodes": list(dossier.get("evidence") or []),
+            "document_conflicts": list(dossier.get("conflicts") or []),
+            "document_status": dossier.get("status") or "empty",
             "evidence_nodes": [],
             "search_queries": [],
         }

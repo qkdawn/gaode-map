@@ -91,6 +91,18 @@ def _artifact_catalog(artifacts: Dict[str, Any]) -> Dict[str, Any]:
             "source_ids": [source_id_from_item(item) for item in sources[:20] if source_id_from_item(item)],
             "source_kinds": list(dict.fromkeys([source_kind_from_item(item) for item in sources if source_kind_from_item(item)])),
         }
+    if artifacts.get("project_evidence_dossier"):
+        dossier = artifacts.get("project_evidence_dossier") if isinstance(artifacts.get("project_evidence_dossier"), dict) else {}
+        evidence = dossier.get("evidence") if isinstance(dossier.get("evidence"), list) else []
+        conflicts = dossier.get("conflicts") if isinstance(dossier.get("conflicts"), list) else []
+        catalog["project_evidence_dossier"] = {
+            "purpose": "项目文档优先证据档案。项目分析必须先读取项目摘要/设计愿景，再用 GIS 补充周边与验证，不得让 GIS 覆盖项目事实。",
+            "status": str(dossier.get("status") or ""),
+            "document_roles": dict(dossier.get("document_roles") or {}),
+            "evidence_count": len(evidence),
+            "conflict_count": len(conflicts),
+            "warnings": list(dossier.get("warnings") or [])[:6],
+        }
     if artifacts.get("business_analyst_skeleton"):
         ba_skeleton = artifacts.get("business_analyst_skeleton") if isinstance(artifacts.get("business_analyst_skeleton"), dict) else {}
         selected_skill = ba_skeleton.get("selected_skill") if isinstance(ba_skeleton.get("selected_skill"), dict) else {}
@@ -357,7 +369,13 @@ async def run_langgraph_react_loop(
                 artifacts.update(tool_result.artifacts)
                 result.artifacts = artifacts
             if tool_result.warnings:
-                result.research_notes.extend([str(item) for item in tool_result.warnings if str(item).strip()])
+                seen_notes = {str(item).strip() for item in result.research_notes if str(item).strip()}
+                for warning in tool_result.warnings:
+                    text = str(warning).strip()
+                    if not text or text in seen_notes:
+                        continue
+                    seen_notes.add(text)
+                    result.research_notes.append(text)
             if emit:
                 await emit(
                     "trace",

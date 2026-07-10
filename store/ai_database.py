@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import sessionmaker
 
@@ -60,4 +60,11 @@ def SessionLocal():
 def init_ai_db() -> None:
     engine = get_ai_engine()
     AiBase.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE documents SET document_role = 'reference_document' "
+                "WHERE document_role = 'evidence_document' OR document_role IS NULL OR document_role = ''"
+            )
+        )
     logger.info("AI 文档数据库初始化完成")

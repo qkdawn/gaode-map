@@ -14,7 +14,7 @@ from store.ai_database import SessionLocal
 from store.ai_models import Document, DocumentBlock, DocumentIndexNode
 
 from .docling_parser import ParsedDocumentBlock, parse_document_with_docling
-from .schemas import DocumentBlockResponse, DocumentBlocksResponse, DocumentRecord
+from .schemas import DocumentBlockResponse, DocumentBlocksResponse, DocumentRecord, DocumentRole
 
 
 _SAFE_NAME_RE = re.compile(r"[^\w._-]+", re.UNICODE)
@@ -106,6 +106,7 @@ def create_document_upload(
     filename: str,
     content_type: str,
     fileobj: BinaryIO,
+    document_role: DocumentRole,
     title: str | None = None,
 ) -> DocumentRecord:
     safe_name = _safe_file_name(filename)
@@ -127,7 +128,7 @@ def create_document_upload(
             file_name=safe_name,
             file_type=file_type,
             file_path=str(file_path),
-            document_role="evidence_document",
+            document_role=document_role.value,
             upload_time=now,
             status="uploaded",
         )

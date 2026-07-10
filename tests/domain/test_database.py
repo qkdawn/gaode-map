@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+from sqlalchemy import inspect, text
+
 from core.config import DEFAULT_DOCUMENT_UPLOAD_DIR, Settings
 import store.ai_database as ai_database
 from store.ai_models import AiBase
@@ -90,21 +92,35 @@ def test_poi_results_schema_creates_history_sort_index(monkeypatch):
     assert any("ix_poi_results_history_created_id" in statement for statement in statements)
 
 
-def test_ai_db_initializes_document_pipeline_schema(monkeypatch):
-    called = []
+def test_ai_db_initializes_document_pipeline_schema_and_migrates_legacy_role(monkeypatch):
+    engine = ai_database._build_ai_engine("sqlite:///:memory:")
+    AiBase.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO documents "
+                "(id, title, file_name, file_type, file_path, document_role, upload_time, status) "
+                "VALUES "
+                "('legacy-doc', 'Legacy', 'legacy.docx', 'docx', '/tmp/legacy.docx', "
+                "'evidence_document', CURRENT_TIMESTAMP, 'ready')"
+            )
+        )
 
-    monkeypatch.setattr(ai_database, "_engine", None)
-    monkeypatch.setattr(ai_database.settings, "postgres_database_url", "sqlite:///:memory:")
-    monkeypatch.setattr(AiBase.metadata, "create_all", lambda bind: called.append(sorted(AiBase.metadata.tables)))
+    monkeypatch.setattr(ai_database, "_engine", engine)
 
     ai_database.init_ai_db()
 
-    assert called == [[
+    assert sorted(inspect(engine).get_table_names()) == [
         "document_blocks",
         "document_index_nodes",
         "documents",
         "jobs",
-    ]]
+    ]
+    with engine.connect() as connection:
+        role = connection.execute(
+            text("SELECT document_role FROM documents WHERE id = 'legacy-doc'")
+        ).scalar_one()
+    assert role == "reference_document"
 
 
 def test_ai_engine_accepts_sqlite_for_tests(monkeypatch):

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from modules.documents.schemas import DocumentRole
 from modules.documents.service import (
     DocumentNotFound,
     DocumentTooLarge,
@@ -71,12 +72,14 @@ def test_document_upload_saves_safe_file_and_metadata(monkeypatch, tmp_path):
         content_type="application/pdf",
         fileobj=BytesIO(b"%PDF-1.4 fake"),
         title="长沙城市更新报告",
+        document_role=DocumentRole.PROJECT_BRIEF,
     )
 
     assert record.title == "长沙城市更新报告"
     assert record.file_name == "城市更新-报告.pdf"
     assert record.file_type == "pdf"
     assert record.status == "uploaded"
+    assert record.document_role == DocumentRole.PROJECT_BRIEF
     assert record.file_path.startswith(str(tmp_path))
     assert (tmp_path / record.id / "source" / record.file_name).read_bytes() == b"%PDF-1.4 fake"
     assert fake_session.committed is True
@@ -91,6 +94,7 @@ def test_document_upload_defaults_title_to_file_stem(monkeypatch, tmp_path):
         filename="strategy.docx",
         content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         fileobj=BytesIO(b"docx bytes"),
+        document_role=DocumentRole.DESIGN_VISION,
     )
 
     assert record.title == "strategy"
@@ -108,6 +112,7 @@ def test_document_upload_rejects_unsupported_empty_and_large(monkeypatch, tmp_pa
             filename="script.exe",
             content_type="application/octet-stream",
             fileobj=BytesIO(b"nope"),
+            document_role=DocumentRole.REFERENCE_DOCUMENT,
         )
 
     with pytest.raises(EmptyDocument):
@@ -115,6 +120,7 @@ def test_document_upload_rejects_unsupported_empty_and_large(monkeypatch, tmp_pa
             filename="empty.pdf",
             content_type="application/pdf",
             fileobj=BytesIO(b""),
+            document_role=DocumentRole.REFERENCE_DOCUMENT,
         )
 
     with pytest.raises(DocumentTooLarge):
@@ -122,6 +128,7 @@ def test_document_upload_rejects_unsupported_empty_and_large(monkeypatch, tmp_pa
             filename="large.pdf",
             content_type="application/pdf",
             fileobj=BytesIO(b"x" * (1024 * 1024 + 1)),
+            document_role=DocumentRole.REFERENCE_DOCUMENT,
         )
 
 
@@ -135,6 +142,7 @@ def test_document_list_and_get_use_metadata_order(monkeypatch):
         file_path="/tmp/older.pdf",
         upload_time=datetime.utcnow() - timedelta(days=1),
         status="uploaded",
+        document_role="project_brief",
     )
     newer = SimpleNamespace(
         id="doc-2",
@@ -144,6 +152,7 @@ def test_document_list_and_get_use_metadata_order(monkeypatch):
         file_path="/tmp/newer.docx",
         upload_time=datetime.utcnow(),
         status="uploaded",
+        document_role="design_vision",
     )
     fake_session.rows.extend([older, newer])
     monkeypatch.setattr("modules.documents.service.SessionLocal", lambda: fake_session)

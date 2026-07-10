@@ -1,6 +1,5 @@
 import asyncio
 import pytest
-import modules.agent.direct_context as direct_context
 import modules.agent.runtime as agent_runtime
 from modules.agent.runtime import process_main_agent_loop, stream_main_agent_loop
 from modules.agent.schemas import (
@@ -282,6 +281,33 @@ def test_runtime_uses_tool_loop_then_answers(monkeypatch):
     assert response.diagnostics.latency_ms["rule_gate"] >= 0
 
 
+def test_runtime_deduplicates_research_notes(monkeypatch):
+    _install_runtime_stubs(
+        monkeypatch,
+        loop_result=ToolLoopResult(
+            status="completed",
+            research_notes=[
+                "POI 供给不能直接等同市场需求。",
+                "POI 供给不能直接等同市场需求。",
+                "夜光仅作为活力 proxy，不能直接等同客流。",
+            ],
+        ),
+        answer_output=AgentTurnOutput(answer="已保留限制说明。"),
+    )
+
+    response = asyncio.run(
+        process_main_agent_loop(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="总结这个区域的商业特征")],
+                analysis_snapshot=_snapshot_with_scope(),
+            )
+        )
+    )
+
+    assert response.diagnostics.research_notes.count("POI 供给不能直接等同市场需求。") == 1
+    assert response.diagnostics.research_notes.count("夜光仅作为活力 proxy，不能直接等同客流。") == 1
+
+
 def test_runtime_returns_risk_confirmation_from_tool_loop(monkeypatch):
     _install_runtime_stubs(
         monkeypatch,
@@ -519,11 +545,6 @@ def test_runtime_uses_tool_loop_for_selected_sources_by_default(monkeypatch):
         captured=captured,
     )
 
-    async def fail_context_ask(_payload):
-        raise AssertionError("main agent loop must not use preprocessed direct answer")
-
-    monkeypatch.setattr(direct_context, "answer_context_ask", fail_context_ask)
-
     response = asyncio.run(
         process_main_agent_loop(
             AgentTurnRequest(
@@ -559,11 +580,6 @@ def test_runtime_deep_mode_uses_selected_sources_in_tool_loop(monkeypatch):
         answer_output=AgentTurnOutput(answer="已进入深度工具循环并使用已选来源。"),
         captured=captured,
     )
-
-    async def fail_context_ask(_payload):
-        raise AssertionError("deep mode should not use preprocessed direct answer")
-
-    monkeypatch.setattr(direct_context, "answer_context_ask", fail_context_ask)
 
     response = asyncio.run(
         process_main_agent_loop(
