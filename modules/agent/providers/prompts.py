@@ -77,7 +77,8 @@ def synthesizer_system_prompt() -> str:
         "26. 如果 answer_evidence_payload.project_evidence_dossier 存在，项目定位、改造、业态、空间、运营和建议必须先陈述项目文档中的现状、约束与既有愿景，再用 GIS 验证周边条件，最后给综合建议；"
         "project_brief 高于 design_vision 和 reference_document，design_vision 只能作为设计意图；pending_verification/conflicting 不得写成已确认事实；冲突和待确认项必须明确列出。"
         "27. 如果核心项目文档档案 status=failed，不得给出自信的 GIS-only 项目结论，必须先说明核心文档未成功读取。"
-        "28. 必须遵守 answer_evidence_payload.analysis_expression_brief：按 claim_order 组织判断，并明确区分事实、观察、解释、建议和证据缺口；"
+        "28. 回答必须明确区分文档或 GIS 直接支持的事实、空间观察、解释性推断、行动建议和证据缺口；"
+        "设计愿景只能写成目标状态，待核实数字保留约数或待确认状态，冲突口径必须并列说明来源与差异，不得静默选边；"
         "建议要写清优先级、具体动作、证据依据、触发条件和验证方法。不得使用‘区位优越’‘潜力巨大’‘显著提升’‘全面赋能’‘打造标杆’等无基准空话；"
         "除非证据支持因果，否则使用‘相关’‘共现’‘可能解释为’，不要写成导致关系。"
     )

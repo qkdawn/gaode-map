@@ -469,71 +469,6 @@ def _project_evidence_dossier_block(artifacts: Dict[str, object]) -> Dict[str, A
     }
 
 
-def _analysis_expression_brief(
-    *,
-    question: str,
-    dossier: Dict[str, Any],
-    conflicts: List[str],
-    interpretation_limits: List[str],
-) -> Dict[str, Any]:
-    """Build a compact answer contract that separates evidence from interpretation."""
-    text = _as_text(question)
-    if any(token in text for token in ("建议", "方案", "下一步", "怎么做", "适合做什么", "定位", "更新", "改造")):
-        intent = "decision_and_action"
-    elif any(token in text for token in ("为什么", "原因", "如何理解", "意味着")):
-        intent = "explanation"
-    elif any(token in text for token in ("总结", "特征", "分析", "研判", "空间结构")):
-        intent = "diagnosis"
-    else:
-        intent = "direct_answer"
-
-    evidence = [item for item in list(dossier.get("evidence") or []) if isinstance(item, dict)]
-    statuses = {_as_text(item.get("status")) for item in evidence}
-    has_document_conflicts = bool(dossier.get("conflicts")) or "conflicting" in statuses
-    has_design_intent = "design_intent" in statuses
-    has_pending = "pending_verification" in statuses
-    core_document_failed = bool(dossier.get("has_project_anchor")) and not bool(dossier.get("has_readable_project_anchor"))
-
-    required_distinctions = [
-        "将文档/GIS直接支持的事实，与解释性推断、行动建议分开表达",
-        "将当前分析范围内的相对排序，与城市级或外部基准比较分开表达",
-        "将空间相关性或共现，与因果关系分开表达",
-    ]
-    if has_design_intent:
-        required_distinctions.append("将设计愿景标为目标状态，不得写成已经建成或已经实现的现状")
-    if has_pending:
-        required_distinctions.append("待核实数字必须保留约数或待确认状态，不得改写成精确事实")
-    if has_document_conflicts:
-        required_distinctions.append("冲突口径必须并列说明来源、差异和采用规则，不得静默选边")
-
-    claim_order = ["direct_conclusion"]
-    if evidence:
-        claim_order.append("project_document_facts_and_constraints")
-    claim_order.extend(["gis_observations", "interpretation", "prioritized_actions", "limitations_and_verification"])
-
-    return {
-        "question_intent": intent,
-        "claim_order": claim_order,
-        "required_distinctions": required_distinctions,
-        "sentence_pattern": "结论；依据是什么；这意味着什么；下一步做什么或如何验证。",
-        "language_rules": {
-            "lead_with_conclusion": True,
-            "explain_metric_on_first_use": True,
-            "quantify_only_when_supported": True,
-            "prefer_concrete_subjects_and_actions": True,
-            "avoid_unsupported_superlatives": True,
-            "avoid_causal_language_without_causal_evidence": True,
-            "avoid_terms_without_definition": ["区位优越", "潜力巨大", "显著提升", "全面赋能", "打造标杆", "高质量发展"],
-        },
-        "recommendation_contract": {
-            "required_fields": ["priority", "action", "evidence_basis", "trigger_or_precondition", "verification_method"],
-            "rule": "建议必须能执行和验证；证据不足时写成待验证方向，而不是确定性结论。",
-        },
-        "blocking_conditions": (["核心项目文档不可读，先披露该缺口，不得输出自信的 GIS-only 项目结论"] if core_document_failed else []),
-        "known_limits": [*conflicts, *interpretation_limits][:12],
-    }
-
-
 def build_answer_evidence_payload(
     *,
     question: str,
@@ -570,12 +505,6 @@ def build_answer_evidence_payload(
         "target_supply_gap": target_supply_gap,
         "frontend_visual_snapshots": _frontend_visual_snapshot_block(artifacts, research_notes),
         "project_evidence_dossier": project_evidence_dossier,
-        "analysis_expression_brief": _analysis_expression_brief(
-            question=question,
-            dossier=project_evidence_dossier,
-            conflicts=conflicts,
-            interpretation_limits=interpretation_limits,
-        ),
         "map_search_context": {
             "available": bool((artifacts or {}).get("frontend_map_search_context")),
             "artifact_key": "frontend_map_search_context" if (artifacts or {}).get("frontend_map_search_context") else "",

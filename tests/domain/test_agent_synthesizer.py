@@ -1,5 +1,6 @@
 import json
 
+from modules.agent.providers.prompts import synthesizer_system_prompt
 from modules.agent.schemas import AgentTurnOutput, AnalysisSnapshot, AuditResult, ToolResult
 from modules.agent.synthesizer import (
     build_analysis_evidence,
@@ -422,7 +423,8 @@ def test_build_answer_evidence_payload_preserves_project_dossier_status_and_conf
     assert "GIS/城市数据" in dossier["answer_order"][1]
 
 
-def test_analysis_expression_brief_separates_facts_intent_inference_and_actions():
+
+def test_answer_payload_does_not_add_analysis_expression_brief():
     payload = build_answer_evidence_payload(
         question="根据项目文档和周边数据，给出项目更新定位与下一步建议",
         snapshot=AnalysisSnapshot(),
@@ -445,40 +447,15 @@ def test_analysis_expression_brief_separates_facts_intent_inference_and_actions(
         audit=AuditResult(),
     )
 
-    brief = payload["analysis_expression_brief"]
-    assert brief["question_intent"] == "decision_and_action"
-    assert brief["claim_order"][0] == "direct_conclusion"
-    assert "project_document_facts_and_constraints" in brief["claim_order"]
-    assert any("设计愿景" in item for item in brief["required_distinctions"])
-    assert any("待核实" in item for item in brief["required_distinctions"])
-    assert any("冲突口径" in item for item in brief["required_distinctions"])
-    assert brief["recommendation_contract"]["required_fields"] == [
-        "priority", "action", "evidence_basis", "trigger_or_precondition", "verification_method"
-    ]
-    assert "潜力巨大" in brief["language_rules"]["avoid_terms_without_definition"]
+    assert "analysis_expression_brief" not in payload
+    assert payload["project_evidence_dossier"]["evidence"]
 
 
-def test_analysis_expression_brief_blocks_confident_answer_when_core_document_is_unreadable():
-    payload = build_answer_evidence_payload(
-        question="分析这个项目适合做什么",
-        snapshot=AnalysisSnapshot(),
-        artifacts={
-            "project_evidence_dossier": {
-                "status": "failed",
-                "document_ids": ["brief"],
-                "document_roles": {"brief": "project_brief"},
-                "readable_document_ids": [],
-                "evidence": [],
-                "conflicts": [],
-                "warnings": ["项目摘要解析失败。"],
-            }
-        },
-        tool_results=[],
-        research_notes=[],
-        audit=AuditResult(),
-    )
+def test_synthesizer_prompt_keeps_expression_rules_without_brief_contract():
+    prompt = synthesizer_system_prompt()
 
-    brief = payload["analysis_expression_brief"]
-    assert brief["blocking_conditions"]
-    assert "GIS-only" in brief["blocking_conditions"][0]
-    assert "project_document_facts_and_constraints" not in brief["claim_order"]
+    assert "analysis_expression_brief" not in prompt
+    assert "事实、空间观察、解释性推断、行动建议和证据缺口" in prompt
+    assert "设计愿景只能写成目标状态" in prompt
+    assert "冲突口径必须并列说明" in prompt
+    assert "潜力巨大" in prompt
