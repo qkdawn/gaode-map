@@ -10,6 +10,30 @@ from core.config import settings
 
 
 @dataclass(frozen=True)
+class LLMRuntimeConfig:
+    provider: str
+    base_url: str
+    api_key: str
+    model: str
+    thinking_enabled: bool = True
+    timeout_s: int = 60
+
+    @classmethod
+    def from_settings(cls) -> "LLMRuntimeConfig":
+        return cls(
+            provider=str(settings.ai_provider or "").strip(),
+            base_url=str(settings.ai_base_url or "").strip().rstrip("/"),
+            api_key=str(settings.ai_api_key or ""),
+            model=str(settings.ai_model or "").strip(),
+            thinking_enabled=bool(settings.ai_thinking_enabled),
+            timeout_s=int(settings.ai_timeout_s or 60),
+        )
+
+    def configured(self) -> bool:
+        return bool(self.provider and self.base_url and self.api_key and self.model)
+
+
+@dataclass(frozen=True)
 class LLMProviderSpec:
     name: str
     supports_json_mode: bool = True
@@ -91,8 +115,9 @@ def is_llm_enabled() -> bool:
 
 
 class OpenAICompatibleProviderClient:
-    def __init__(self, spec: LLMProviderSpec):
+    def __init__(self, spec: LLMProviderSpec, runtime: Optional[LLMRuntimeConfig] = None):
         self.spec = spec
+        self.runtime = runtime or LLMRuntimeConfig.from_settings()
 
     @property
     def supports_json_mode(self) -> bool:
@@ -117,13 +142,14 @@ class OpenAICompatibleProviderClient:
             phase=phase,
             title=title,
             reasoning_id=reasoning_id,
+            runtime=self.runtime,
         )
 
     async def chat_text(self, *, messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
         from .chat_parser import extract_chat_completion_text
 
         body: Dict[str, Any] = {
-            "model": str(settings.ai_model or "").strip(),
+            "model": self.runtime.model,
             "messages": messages,
             "temperature": float(temperature),
             "stream": False,
@@ -144,14 +170,14 @@ class OpenAICompatibleProviderClient:
     ) -> Dict[str, Any]:
         from .llm_provider import _resolve_httpx_timeout, _stream_chat_completion
 
-        base_url = str(settings.ai_base_url or "").rstrip("/")
-        api_key = str(settings.ai_api_key or "")
-        model = str((request_body or {}).get("model") or settings.ai_model or "").strip()
+        base_url = self.runtime.base_url
+        api_key = self.runtime.api_key
+        model = str((request_body or {}).get("model") or self.runtime.model or "").strip()
         if not (base_url and api_key and model):
             raise ValueError("llm_provider_not_configured")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         body = {**dict(request_body or {}), "model": model}
-        async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(None)) as client:
+        async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(self.runtime.timeout_s)) as client:
             return await _stream_chat_completion(
                 client=client,
                 base_url=base_url,
@@ -162,7 +188,7 @@ class OpenAICompatibleProviderClient:
                 phase=phase,
                 title=title,
                 reasoning_id=reasoning_id,
-                enable_thinking=enable_thinking,
+                enable_thinking=bool(enable_thinking and self.runtime.thinking_enabled),
             )
 
     async def chat_completion(
@@ -204,7 +230,7 @@ class OpenAICompatibleProviderClient:
 
         payload = await self._chat_completion(
             request_body={
-                "model": str(settings.ai_model or "").strip(),
+                "model": self.runtime.model,
                 "messages": messages,
                 "temperature": float(temperature),
                 "max_tokens": max(128, int(max_tokens)),
@@ -215,25 +241,29 @@ class OpenAICompatibleProviderClient:
         return extract_chat_completion_text(payload)
 
     async def health(self) -> bool:
-        base_url = str(settings.ai_base_url or "").rstrip("/")
-        api_key = str(settings.ai_api_key or "")
+        base_url = self.runtime.base_url
+        api_key = self.runtime.api_key
         if not (base_url and api_key):
             return False
         headers = {"Authorization": f"Bearer {api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=float(settings.ai_timeout_s or 15)) as client:
+            async with httpx.AsyncClient(timeout=float(self.runtime.timeout_s or 15)) as client:
                 response = await client.get(f"{base_url}/models", headers=headers)
             return 200 <= response.status_code < 300
         except Exception:
             return False
 
 
-def get_llm_provider_client(provider: Optional[str] = None) -> Optional[LLMProviderClient]:
-    spec = get_llm_provider_spec(provider)
+def get_llm_provider_client(
+    provider: Optional[str] = None,
+    *,
+    runtime: Optional[LLMRuntimeConfig] = None,
+) -> Optional[LLMProviderClient]:
+    spec = get_llm_provider_spec(provider if provider is not None else (runtime.provider if runtime else None))
     if not spec:
         return None
     if spec.name in {"deepseek", "openai_compatible"}:
-        return OpenAICompatibleProviderClient(spec)
+        return OpenAICompatibleProviderClient(spec, runtime=runtime)
     return None
 
 
@@ -245,8 +275,9 @@ async def invoke_json_role(
     phase: str = "",
     title: str = "",
     reasoning_id: str = "",
+    runtime: Optional[LLMRuntimeConfig] = None,
 ) -> Dict[str, Any]:
-    client = get_llm_provider_client()
+    client = get_llm_provider_client(runtime=runtime)
     if client is None:
         raise ValueError("llm_provider_not_configured")
     return await client.chat_json(

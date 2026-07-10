@@ -9,6 +9,7 @@ import {
 import { createAgentSessionStoreMethods } from './session-store.js'
 import { createAgentRuntimeMethods } from './runtime.js'
 import { createAgentUiMethods } from './sessions-ui.js'
+import { createAgentExecutionProfileMethods } from './execution-profile.js'
 import { withAnalysisWorkspaceTabs } from './analysis-workspace-tabs.js'
 export {
   buildAnalysisTaskParamBundle,
@@ -48,6 +49,7 @@ function createAnalysisAgentInitialState() {
     agentContextSummary: {},
     agentPlan: { steps: [], summary: '' },
     agentPlanExpanded: false,
+    agentActiveExecutionProfile: {},
     agentTraceExpanded: false,
     agentPanelPreloadNotes: [],
     agentPreloadedPanelKeys: [],
@@ -55,6 +57,11 @@ function createAnalysisAgentInitialState() {
     agentMessages: [],
     agentComposerMenuOpen: false,
     agentComposerMode: '',
+    agentCapabilitiesLoaded: false, agentCapabilitiesLoading: false, agentCapabilitiesError: '',
+    agentModels: [], agentSkills: [], agentSelectedModelProfileId: '',
+    agentSelectedSkillId: '', agentPinnedSkillId: '', agentSkillScope: 'turn',
+    agentModelMenuOpen: false, agentModelConfigOpen: false, agentModelConfigMessage: '',
+    agentModelForm: {},
     contextAskVisible: false,
     contextAskMinimized: false,
     contextAskLoading: false,
@@ -177,6 +184,7 @@ function createAnalysisAgentSessionMethods() {
     ...createAgentSessionStoreMethods(),
     ...createAgentRuntimeMethods(),
     ...createAgentUiMethods(),
+    ...createAgentExecutionProfileMethods(),
   }
 }
 

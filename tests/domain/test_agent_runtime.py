@@ -2,6 +2,7 @@ import asyncio
 import pytest
 import modules.agent.runtime as agent_runtime
 from modules.agent.runtime import process_main_agent_loop, stream_main_agent_loop
+from modules.agent.providers.client import LLMRuntimeConfig
 from modules.agent.schemas import (
     AgentMessage,
     AgentContextAskResponse,
@@ -803,3 +804,45 @@ def test_stream_main_agent_loop_emits_gating_executing_and_final(monkeypatch):
         assert latency[key] >= 0
     assert latency["gate"] == 0
     assert latency["translation"] == 0
+
+
+def test_concurrent_streams_keep_model_runtime_isolated(monkeypatch):
+    seen = []
+
+    async def fake_run(payload, *, emit=None, llm_runtime=None, effective_profile=None):
+        await asyncio.sleep(0.01 if llm_runtime.model == "model-a" else 0)
+        seen.append((payload.conversation_id, llm_runtime.model, llm_runtime.api_key))
+        return AgentTurnResponse(
+            status="answered", stage="answered",
+            output=AgentTurnOutput(answer=llm_runtime.model),
+        )
+
+    monkeypatch.setattr(agent_runtime, "_run_main_agent_loop", fake_run)
+    runtime_a = LLMRuntimeConfig(
+        provider="openai_compatible", base_url="https://a.test", api_key="key-a", model="model-a",
+    )
+    runtime_b = LLMRuntimeConfig(
+        provider="openai_compatible", base_url="https://b.test", api_key="key-b", model="model-b",
+    )
+
+    async def collect(conversation_id, runtime):
+        events = []
+        payload = AgentTurnRequest(
+            conversation_id=conversation_id, messages=[AgentMessage(role="user", content="分析")],
+        )
+        async for event in stream_main_agent_loop(payload, llm_runtime=runtime):
+            events.append(event)
+        return events[-1].payload["response"]["output"]["answer"]
+
+    async def run_both():
+        return await asyncio.gather(
+            collect("conversation-a", runtime_a),
+            collect("conversation-b", runtime_b),
+        )
+
+    answers = asyncio.run(run_both())
+    assert answers == ["model-a", "model-b"]
+    assert sorted(seen) == [
+        ("conversation-a", "model-a", "key-a"),
+        ("conversation-b", "model-b", "key-b"),
+    ]

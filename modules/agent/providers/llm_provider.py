@@ -25,6 +25,7 @@ from .chat_parser import (
 )
 from .client import (
     LLMProviderClient,
+    LLMRuntimeConfig,
     LLMProviderSpec,
     get_llm_provider_client as _get_llm_provider_client_from_module,
     get_llm_provider_spec as _get_llm_provider_spec_from_module,
@@ -46,8 +47,10 @@ def is_llm_enabled() -> bool:
     return _is_llm_enabled_from_module()
 
 
-def get_llm_provider_client(provider: Optional[str] = None) -> Optional[LLMProviderClient]:
-    return _get_llm_provider_client_from_module(provider)
+def get_llm_provider_client(
+    provider: Optional[str] = None, *, runtime: LLMRuntimeConfig | None = None
+) -> Optional[LLMProviderClient]:
+    return _get_llm_provider_client_from_module(provider, runtime=runtime)
 
 
 def _trim_messages(messages: List[AgentMessage]) -> List[Dict[str, str]]:
@@ -266,10 +269,12 @@ async def _invoke_json_role(
     enable_thinking: bool = True,
     stream: bool = True,
     timeout_s: float | None = None,
+    runtime: LLMRuntimeConfig | None = None,
 ) -> Dict[str, Any]:
-    base_url = str(settings.ai_base_url or "").rstrip("/")
+    effective = runtime or LLMRuntimeConfig.from_settings()
+    base_url = effective.base_url.rstrip("/")
     headers = {
-        "Authorization": f"Bearer {settings.ai_api_key}",
+        "Authorization": f"Bearer {effective.api_key}",
         "Content-Type": "application/json",
     }
     user_content: Any = json.dumps(user_payload, ensure_ascii=False)
@@ -289,14 +294,16 @@ async def _invoke_json_role(
             )
 
     request_body = {
-        "model": settings.ai_model,
+        "model": effective.model,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
     }
-    async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(timeout_s)) as client:
+    effective_timeout = timeout_s if timeout_s is not None else effective.timeout_s
+    enable_thinking = bool(enable_thinking and effective.thinking_enabled)
+    async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(effective_timeout)) as client:
         if stream:
             payload = await _stream_chat_completion(
                 client=client,
@@ -333,6 +340,7 @@ async def run_gate_with_llm(
     snapshot: AnalysisSnapshot,
     context: ContextBundle,
     emit: LoopEmit | None = None,
+    runtime: LLMRuntimeConfig | None = None,
 ) -> GateDecision:
     rule_decision = run_gate(messages, snapshot)
     if rule_decision.status in {"clarify", "block"}:
@@ -350,6 +358,7 @@ async def run_gate_with_llm(
         phase="gating",
         title="门卫判断问题是否清晰",
         reasoning_id="gatekeeper-reasoning",
+        runtime=runtime,
     )
     decision = GateDecision(**payload)
     if decision.status == "clarify":
@@ -370,6 +379,7 @@ async def generate_answer_output_with_llm(
     translation_pack: AgentTranslationPack | Dict[str, Any] | None = None,
     image_inputs: List[Dict[str, Any]] | None = None,
     emit: LoopEmit | None = None,
+    runtime: LLMRuntimeConfig | None = None,
 ) -> AgentTurnOutput:
     translation_payload = (
         translation_pack.model_dump(mode="json")
@@ -390,5 +400,6 @@ async def generate_answer_output_with_llm(
         phase="synthesizing",
         title="综合分析并生成最终结论",
         reasoning_id="synthesizer-reasoning",
+        runtime=runtime,
     )
     return AgentTurnOutput(**parsed)

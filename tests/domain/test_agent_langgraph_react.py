@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from modules.agent.context_builder import build_context_bundle
@@ -5,6 +6,7 @@ from modules.agent.providers.langgraph_react import _initial_payload, _react_too
 from modules.agent.providers.prompts import loop_system_prompt, synthesizer_system_prompt
 from modules.agent.providers.tool_loop import select_react_tool_registry
 from modules.agent.schemas import AnalysisSnapshot, ToolResult
+from modules.agent.tool_definitions.source_evidence import search_selected_source_evidence
 from modules.agent.tools import get_tool_registry
 
 
@@ -148,6 +150,15 @@ def test_react_tool_registry_opens_contextual_tool_windows():
         include_secondary=True,
     )
     assert {"list_scope_datasets", "aggregate_scope_dataset", "query_scope_dataset", "read_scope_record"}.issubset(dataset_selected)
+    assert "query_current_pois" in dataset_selected
+
+    poi_list_selected = select_react_tool_registry(
+        registry,
+        question="范围内所有学校有哪些",
+        artifacts={},
+        include_secondary=True,
+    )
+    assert "query_current_pois" in poi_list_selected
 
     ba_selected = select_react_tool_registry(
         registry,
@@ -156,6 +167,30 @@ def test_react_tool_registry_opens_contextual_tool_windows():
         include_secondary=True,
     )
     assert "plan_business_analyst_analysis" in ba_selected
+
+
+def test_selected_source_search_miss_warning_is_scoped_to_selected_sources():
+    result = asyncio.run(
+        search_selected_source_evidence(
+            arguments={"query": "商业决策路径", "top_k": 3},
+            snapshot=_snapshot_with_scope(),
+            artifacts={
+                "selected_sources_context": {
+                    "sources": [{
+                        "source_id": "document:1",
+                        "title": "项目文档",
+                        "source_kind": "document",
+                        "evidence_nodes": [{"id": "node-1", "title": "更新目标", "content": "城市更新。"}],
+                    }]
+                }
+            },
+            question="请整理商业决策路径",
+        )
+    )
+
+    assert result.warnings
+    assert "已选来源 EvidenceNode 未命中" in result.warnings[0]
+    assert "不代表当前地图分析上下文没有证据" in result.warnings[0]
 
 
 def test_langgraph_tool_result_payload_compacts_large_results_and_artifacts():

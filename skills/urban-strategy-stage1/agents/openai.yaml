@@ -1,0 +1,7 @@
+interface:
+  display_name: "城市区域策划第一阶段"
+  short_description: "基于多源证据生成区域定位、功能策略与设计前置任务书"
+  brand_color: "#276B5D"
+  default_prompt: "Use $urban-strategy-stage1 to analyze this project package and produce an evidence-grounded Stage 1 urban strategy report and design handoff."
+policy:
+  allow_implicit_invocation: true

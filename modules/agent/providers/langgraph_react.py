@@ -17,6 +17,7 @@ from ..schemas import (
 )
 from ..selected_sources import source_id_from_item, source_items_from_artifacts, source_kind_from_item
 from ..tools import RegisteredTool
+from .client import LLMRuntimeConfig
 from .prompts import loop_system_prompt
 from .tool_loop import chat_completion_tools, select_react_tool_registry
 from .tool_call_execution import execute_tool_call_step, tool_finish_trace_payload, tool_start_trace_payload
@@ -233,6 +234,7 @@ async def run_langgraph_react_loop(
     max_steps_override: Optional[int] = None,
     max_errors_override: Optional[int] = None,
     initial_artifacts: Optional[Dict[str, Any]] = None,
+    llm_runtime: LLMRuntimeConfig | None = None,
 ) -> ToolLoopResult:
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
     from langchain_openai import ChatOpenAI
@@ -249,11 +251,12 @@ async def run_langgraph_react_loop(
         include_secondary=include_secondary_tools,
     )
     tool_schemas = chat_completion_tools(visible_registry)
+    effective = llm_runtime or LLMRuntimeConfig.from_settings()
     model = ChatOpenAI(
-        model=str(settings.ai_model or "").strip(),
-        api_key=str(settings.ai_api_key or ""),
-        base_url=str(settings.ai_base_url or "").rstrip("/") or None,
-        timeout=None,
+        model=effective.model,
+        api_key=effective.api_key,
+        base_url=effective.base_url or None,
+        timeout=None if effective.timeout_s <= 0 else effective.timeout_s,
     ).bind_tools(tool_schemas)
 
     async def preflight(_state: LangGraphReactState) -> Dict[str, Any]:

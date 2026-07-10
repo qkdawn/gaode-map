@@ -876,6 +876,10 @@ function createAgentRuntimeMethods() {
           summary: String((merged.plan && merged.plan.summary) || ''),
         },
         risk_confirmations: cloneArray(merged.riskConfirmations),
+        conversation_execution_profile: cloneObject(merged.conversationExecutionProfile || {
+          model_profile_id: asText(this.agentSelectedModelProfileId),
+          pinned_skill_id: this.agentSkillScope === 'conversation' ? asText(this.agentPinnedSkillId || this.agentSelectedSkillId) : '',
+        }),
       }
     },
     async putAgentSession(sessionId = '', overrides = {}) {
@@ -931,6 +935,7 @@ function createAgentRuntimeMethods() {
         executionTrace: cloneArray(seed.executionTrace),
         plan: normalizeAgentPlanEnvelope(seed.plan),
         pendingTaskConfirmation: cloneObject(seed.pendingTaskConfirmation),
+        executionProfile: cloneObject(seed.executionProfile),
       })
     },
     getCanonicalAssistantMessage(messages = []) {
@@ -1031,6 +1036,11 @@ function createAgentRuntimeMethods() {
         historyId,
         requestAbortController,
         requestRiskConfirmations,
+        executionProfile: {
+          model_profile_id: asText(this.agentSelectedModelProfileId),
+          skill_id: asText(this.agentSelectedSkillId || this.agentPinnedSkillId),
+          skill_scope: this.agentSkillScope === 'conversation' ? 'conversation' : 'turn',
+        },
         nextMessages,
       }
     },
@@ -1051,7 +1061,7 @@ function createAgentRuntimeMethods() {
         }
       }
       const isDeepAnalysisRequested = asText((options && options.mode) || this.agentComposerMode) === 'deep'
-      if (activeKind === ANALYSIS_WORKSPACE_TAB_KIND && !isDeepAnalysisRequested && typeof this.submitAgentAnalysisQuickAsk === 'function') {
+      if (activeKind === ANALYSIS_WORKSPACE_TAB_KIND && !isDeepAnalysisRequested && !this.agentSelectedSkillId && !this.agentPinnedSkillId && typeof this.submitAgentAnalysisQuickAsk === 'function') {
         return this.submitAgentAnalysisQuickAsk(options)
       }
       const panelKind = ANALYSIS_WORKSPACE_TAB_KIND
@@ -2919,6 +2929,8 @@ function createAgentRuntimeMethods() {
             }
           }
           if (type === 'meta') {
+            const effective = payload && payload.effective_execution_profile
+            if (effective) this.agentActiveExecutionProfile = { ...effective }
             return
           }
           if (type === 'status') {
@@ -3083,6 +3095,7 @@ function createAgentRuntimeMethods() {
               thinkingTimeline: nextThinkingTimeline,
               executionTrace: turn.diagnostics.executionTrace,
               plan: turn.plan,
+              executionProfile: responsePayload.effective_execution_profile || this.agentActiveExecutionProfile,
               pendingTaskConfirmation,
             })
             : null
@@ -3215,6 +3228,10 @@ function createAgentRuntimeMethods() {
           this.agentTraceExpanded = false
         }
       } finally {
+        if (turnContext.executionProfile && turnContext.executionProfile.skill_scope === 'turn') {
+          this.agentSelectedSkillId = this.agentPinnedSkillId || ''
+          this.agentSkillScope = this.agentPinnedSkillId ? 'conversation' : 'turn'
+        }
         this.syncUiAfterTurn(turnContext)
       }
     },

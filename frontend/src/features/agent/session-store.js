@@ -227,6 +227,13 @@ function createAgentSessionStoreMethods() {
       this.agentStage = String(session.stage || 'gating')
       this.agentAnswer = String(session.answer || (session.output && session.output.answer) || '')
       this.agentExecutionTrace = cloneArray(session.executionTrace)
+      const conversationProfile = cloneObject(session.conversationExecutionProfile)
+      if (asText(conversationProfile.model_profile_id)) {
+        this.agentSelectedModelProfileId = asText(conversationProfile.model_profile_id)
+      }
+      this.agentPinnedSkillId = asText(conversationProfile.pinned_skill_id)
+      this.agentSelectedSkillId = this.agentPinnedSkillId
+      this.agentSkillScope = this.agentPinnedSkillId ? 'conversation' : 'turn'
       this.agentUsedTools = cloneArray(session.usedTools)
       this.agentCitations = cloneArray(session.citations)
       this.agentResearchNotes = cloneArray(session.researchNotes)
@@ -337,6 +344,7 @@ function createAgentSessionStoreMethods() {
         contextSummary: detail && detail.context_summary,
         plan: detail && detail.plan,
         riskConfirmations: detail && detail.risk_confirmations,
+        conversationExecutionProfile: detail && detail.conversation_execution_profile,
         messages: detail && detail.messages,
         isPinned: !!(detail && detail.is_pinned),
         persisted: true,
@@ -425,6 +433,10 @@ function createAgentSessionStoreMethods() {
           latencyMs: cloneObject(existing && existing.diagnostics && (existing.diagnostics.latencyMs || existing.diagnostics.latency_ms)),
           thinkingTimeline: this.agentThinkingTimeline,
           error: this.agentError,
+        },
+        conversationExecutionProfile: {
+          model_profile_id: asText(this.agentSelectedModelProfileId),
+          pinned_skill_id: this.agentSkillScope === 'conversation' ? asText(this.agentPinnedSkillId || this.agentSelectedSkillId) : '',
         },
         contextSummary: this.agentContextSummary,
         plan: this.agentPlan,
@@ -516,6 +528,11 @@ function createAgentSessionStoreMethods() {
       return this.mergeAgentSessionDetail(detail)
     },
     ensureAgentPanelReady() {
+      if (!this.agentCapabilitiesLoaded && !this.agentCapabilitiesLoading && typeof this.loadAgentCapabilities === 'function') {
+        this.loadAgentCapabilities().catch((err) => {
+          console.warn('Agent capabilities load failed', err)
+        })
+      }
       const activeId = this.getActiveAgentSessionId()
       if (activeId) {
         const existing = this.findAgentSession(activeId)

@@ -20,6 +20,7 @@ export function buildMainLoopSelectedSourcesContext(ctx = {}, panelKind = '') {
 
 export async function buildMainLoopRequestBody(ctx = {}, turnContext = {}, options = {}) {
   const panelKind = turnContext.panelKind
+  const executionMode = turnContext.mode === 'deep' || options.mode === 'deep' ? 'deep' : 'auto'
   const visualSnapshots = shouldCaptureMainLoopVisualSnapshots(panelKind, options)
     ? await ctx.ensureAgentVisualSnapshotCache()
     : []
@@ -27,12 +28,14 @@ export async function buildMainLoopRequestBody(ctx = {}, turnContext = {}, optio
     conversation_id: turnContext.targetSessionId,
     history_id: turnContext.historyId,
     governance_mode: 'auto',
+    execution_mode: executionMode,
     messages: turnContext.requestMessages,
     analysis_snapshot: ctx.buildAgentAnalysisSnapshot(),
     map_search_context: typeof ctx.buildAgentMapSearchContext === 'function' ? ctx.buildAgentMapSearchContext() : {},
     selected_sources_context: buildMainLoopSelectedSourcesContext(ctx, panelKind),
     risk_confirmations: turnContext.requestRiskConfirmations,
     visual_snapshots: visualSnapshots,
+    execution_profile: turnContext.executionProfile || { model_profile_id: '', skill_id: '', skill_scope: 'turn' },
   }
 }
 
@@ -45,7 +48,9 @@ export async function postMainLoopStream(ctx = {}, turnContext = {}, options = {
     body: JSON.stringify(requestBody),
   })
   if (!res.ok) {
-    throw new Error(`${MAIN_AGENT_LOOP_STREAM_URL} 请求失败(${res.status})`)
+    const error = await res.json().catch(() => ({}))
+    const detail = typeof error.detail === 'string' ? error.detail : ''
+    throw new Error(detail || `${MAIN_AGENT_LOOP_STREAM_URL} 请求失败(${res.status})`)
   }
   return res
 }

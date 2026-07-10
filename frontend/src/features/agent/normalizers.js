@@ -157,6 +157,7 @@ function normalizeAgentMessageProcess(seed = {}) {
   const raw = seed && typeof seed === 'object' ? seed : {}
   const plan = normalizeAgentPlanEnvelope(raw.plan)
   const pendingTaskConfirmation = cloneObject(raw.pendingTaskConfirmation || raw.pending_task_confirmation)
+  const executionProfile = cloneObject(raw.executionProfile || raw.execution_profile)
   return {
     turnId: asText(raw.turnId || raw.turn_id),
     status: asText(raw.status),
@@ -169,6 +170,7 @@ function normalizeAgentMessageProcess(seed = {}) {
     executionTrace: cloneArray(raw.executionTrace || raw.execution_trace),
     plan,
     pendingTaskConfirmation,
+    executionProfile,
   }
 }
 
@@ -179,6 +181,7 @@ function hasAgentMessageProcessContent(process = {}) {
     || normalized.executionTrace.length
     || hasAgentPlanEnvelopeContent(normalized.plan)
     || Object.keys(normalized.pendingTaskConfirmation || {}).length
+    || Object.keys(normalized.executionProfile || {}).length
   )
 }
 
@@ -609,6 +612,7 @@ function createAgentSessionRecord(seed = {}) {
     error: String(turn.diagnostics.error || ''),
     riskConfirmations: cloneArray(seed.riskConfirmations || seed.risk_confirmations),
     panelPreloadNotes: normalizeAgentPanelPreloadNotes(seed.panelPreloadNotes),
+    conversationExecutionProfile: cloneObject(seed.conversationExecutionProfile || seed.conversation_execution_profile),
     preloadedPanelKeys: cloneArray(seed.preloadedPanelKeys).map((item) => asText(item)).filter(Boolean),
     pendingTaskConfirmation: cloneObject(seed.pendingTaskConfirmation || seed.pending_task_confirmation),
     messages,

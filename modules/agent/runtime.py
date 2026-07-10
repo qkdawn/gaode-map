@@ -14,6 +14,7 @@ from .gate import latest_user_message, run_gate
 from .finalizer_evidence import build_finalizer_evidence_pack
 from .latency import LatencyRecorder
 from .memory import create_working_memory
+from .providers.client import LLMRuntimeConfig
 from .providers.langgraph_react import run_langgraph_react_loop
 from .providers.llm_provider import (
     generate_answer_output_with_llm,
@@ -30,6 +31,7 @@ from .schemas import (
     AgentTurnResponse,
     AgentTurnStreamEvent,
     AuditResult,
+    EffectiveExecutionProfile,
 )
 from .selected_sources import selected_sources_artifact_from_items
 from .synthesizer import (
@@ -224,7 +226,11 @@ def _merge_notes(existing: List[str], incoming: List[Any]) -> List[str]:
     return merged
 
 
-async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | None = None) -> AgentTurnResponse:
+async def _run_main_agent_loop(
+    payload: AgentTurnRequest, *, emit: StreamEmit | None = None,
+    llm_runtime: LLMRuntimeConfig | None = None,
+    effective_profile: EffectiveExecutionProfile | None = None,
+) -> AgentTurnResponse:
     latency = LatencyRecorder()
     snapshot = payload.analysis_snapshot
     question = latest_user_message(payload.messages)
@@ -340,7 +346,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
         "gating-check",
     )
 
-    if not is_llm_enabled():
+    if not (llm_runtime.configured() if llm_runtime else is_llm_enabled()):
         await _emit_status(emit, "failed")
         return AgentTurnResponse(
             status="failed",
@@ -373,12 +379,15 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     else:
         try:
             with latency.track("gate"):
-                gate = await run_gate_with_llm(
+                gate_kwargs = dict(
                     messages=payload.messages,
                     snapshot=snapshot,
                     context=context,
                     emit=emit_event,
                 )
+                if llm_runtime is not None:
+                    gate_kwargs["runtime"] = llm_runtime
+                gate = await run_gate_with_llm(**gate_kwargs)
         except Exception as exc:
             await _emit_status(emit, "failed")
             return AgentTurnResponse(
@@ -463,7 +472,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     try:
         max_steps_override, max_errors_override = _tool_loop_limits()
         with latency.track("tool_loop"):
-            loop_result = await run_langgraph_react_loop(
+            loop_kwargs = dict(
                 messages=payload.messages,
                 snapshot=snapshot,
                 context=context,
@@ -476,6 +485,9 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
                 max_errors_override=max_errors_override,
                 initial_artifacts=dict(memory.artifacts or {}),
             )
+            if llm_runtime is not None:
+                loop_kwargs["llm_runtime"] = llm_runtime
+            loop_result = await run_langgraph_react_loop(**loop_kwargs)
     except Exception as exc:
         await _emit_status(emit, "failed")
         return AgentTurnResponse(
@@ -685,7 +697,7 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
     synthesis_error = ""
     try:
         with latency.track("answer"):
-            answer_output = await generate_answer_output_with_llm(
+            synthesizer_kwargs = dict(
                 messages=payload.messages,
                 snapshot=snapshot,
                 context=context,
@@ -694,6 +706,9 @@ async def _run_main_agent_loop(payload: AgentTurnRequest, *, emit: StreamEmit | 
                 image_inputs=visual_image_inputs,
                 emit=emit_event,
             )
+            if llm_runtime is not None:
+                synthesizer_kwargs["runtime"] = llm_runtime
+            answer_output = await generate_answer_output_with_llm(**synthesizer_kwargs)
     except Exception as exc:
         synthesis_error = f"综合回答 LLM 调用失败，已切换到服务端兜底：{exc}"
         memory.research_notes.append(synthesis_error)
@@ -759,7 +774,10 @@ async def process_main_agent_loop(payload: AgentTurnRequest) -> AgentTurnRespons
     return await _run_main_agent_loop(payload)
 
 
-async def stream_main_agent_loop(payload: AgentTurnRequest) -> AsyncIterator[AgentTurnStreamEvent]:
+async def stream_main_agent_loop(
+    payload: AgentTurnRequest, *, llm_runtime: LLMRuntimeConfig | None = None,
+    effective_profile: EffectiveExecutionProfile | None = None, skill_id: str = "",
+) -> AsyncIterator[AgentTurnStreamEvent]:
     queue: asyncio.Queue[AgentTurnStreamEvent | None] = asyncio.Queue()
 
     async def emit(event_type: str, event_payload: dict[str, Any]) -> None:
@@ -767,7 +785,15 @@ async def stream_main_agent_loop(payload: AgentTurnRequest) -> AsyncIterator[Age
 
     async def runner() -> None:
         try:
-            response = await _run_main_agent_loop(payload, emit=emit)
+            if effective_profile is not None:
+                await emit("meta", {"effective_execution_profile": effective_profile.model_dump(mode="json")})
+            if skill_id == "urban-strategy-stage1":
+                from .skills.urban_strategy_stage1 import execute as execute_stage1
+                response = await execute_stage1(payload, runtime=llm_runtime or LLMRuntimeConfig.from_settings(), profile=effective_profile or EffectiveExecutionProfile(), emit=emit)
+            else:
+                response = await _run_main_agent_loop(payload, emit=emit, llm_runtime=llm_runtime, effective_profile=effective_profile)
+            if effective_profile is not None:
+                response = response.model_copy(update={"effective_execution_profile": effective_profile})
             if response.status == "failed" and response.diagnostics.error:
                 await emit("error", {"message": response.diagnostics.error})
             await queue.put(

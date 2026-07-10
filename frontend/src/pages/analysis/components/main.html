@@ -2040,6 +2040,7 @@
                                                                     @click="toggleAgentMessageProcessExpanded(message, index)">
                                                                     <span class="agent-thinking-dot"></span>
                                                                     <span class="agent-thinking-toggle-label">{{ getAgentMessageProcessStatusLabel(message) }}</span>
+                                                                    <span v-if="getAgentMessageExecutionProfileLabel(message)" class="agent-execution-profile-label">{{ getAgentMessageExecutionProfileLabel(message) }}</span>
                                                                     <span class="agent-thinking-toggle-icon">
                                                                         <span class="agent-thinking-chevron" :class="{ 'is-open': isAgentMessageProcessExpanded(message, index) }">⌄</span>
                                                                     </span>
@@ -2279,6 +2280,7 @@
                                                     @click="toggleAgentMessageProcessExpanded(message, index)">
                                                     <span class="agent-thinking-dot"></span>
                                                     <span class="agent-thinking-toggle-label">{{ getAgentMessageProcessStatusLabel(message) }}</span>
+                                                    <span v-if="getAgentMessageExecutionProfileLabel(message)" class="agent-execution-profile-label">{{ getAgentMessageExecutionProfileLabel(message) }}</span>
                                                     <span class="agent-thinking-toggle-icon">
                                                         <span class="agent-thinking-chevron" :class="{ 'is-open': isAgentMessageProcessExpanded(message, index) }">⌄</span>
                                                     </span>
@@ -2452,14 +2454,41 @@
                                     深度
                                     <button type="button" aria-label="取消深度" @click="clearAgentComposerMode">×</button>
                                 </div>
+                                <div v-if="getAgentSelectedSkill()" class="agent-skill-chip" :style="{ '--skill-color': getAgentSelectedSkill().color || '#276b5d' }">
+                                    <span>{{ getAgentSelectedSkill().display_name }}</span>
+                                    <button type="button" class="agent-skill-scope" @click="toggleAgentSkillScope" :title="agentSkillScope === 'conversation' ? '改为仅本轮' : '固定到当前对话'">{{ agentSkillScope === 'conversation' ? '本对话' : '仅本轮' }}</button>
+                                    <button type="button" class="agent-skill-remove" aria-label="取消 Skill" @click="clearAgentSkill">×</button>
+                                </div>
                                 <textarea
                                     v-model="agentInput"
                                     class="agent-composer-input"
-                                    placeholder="输入问题，快速回答；选择深度后会补充工具证据..."
+                                    placeholder="输入问题，或输入 / 选择 Skill..."
                                     :disabled="agentSessionHydrating"
+                                    @focus="loadAgentCapabilities()"
                                     @keydown.enter.exact.prevent="submitAgentComposer()"
                                 ></textarea>
+                                <div v-if="getAgentSkillMatches().length" class="agent-skill-menu">
+                                    <button v-for="skill in getAgentSkillMatches()" :key="skill.id" type="button" class="agent-skill-option" @click="chooseAgentSkill(skill)">
+                                        <span class="agent-skill-swatch" :style="{ background: skill.color || '#276b5d' }"></span>
+                                        <span><strong>{{ skill.display_name }}</strong><small>/{{ skill.id }} · {{ skill.description }}</small></span>
+                                    </button>
+                                </div>
                             <div class="agent-composer-actions">
+                                <div class="agent-model-picker">
+                                    <button type="button" class="agent-model-button" :disabled="agentLoading" :title="getAgentSelectedModelName()" @click="toggleAgentModelMenu">
+                                        <span>{{ getAgentSelectedModelName() }}</span><span aria-hidden="true">⌄</span>
+                                    </button>
+                                    <div v-if="agentModelMenuOpen" class="agent-model-menu">
+                                        <div v-if="agentCapabilitiesError" class="agent-model-diagnostic">{{ agentCapabilitiesError }}</div>
+                                        <div class="agent-model-group" v-for="source in ['system', 'personal']" :key="source">
+                                            <div class="agent-model-group-label">{{ source === 'system' ? '系统模型' : '个人模型' }}</div>
+                                            <button v-for="model in agentModels.filter(item => item.source === source)" :key="model.id" type="button" class="agent-model-option" :class="{ active: model.id === agentSelectedModelProfileId, disabled: !model.enabled }" :disabled="!model.enabled" @click="selectAgentModel(model.id)">
+                                                <span>{{ model.display_name }}</span><small>{{ model.model }}</small>
+                                            </button>
+                                        </div>
+                                        <button type="button" class="agent-model-config-entry" @click="openAgentModelConfig()">配置模型</button>
+                                    </div>
+                                </div>
                                 <button
                                     type="button"
                                         class="agent-composer-send"
@@ -2474,6 +2503,36 @@
                                 </button>
                             </div>
                         </div>
+                    </div>
+                    <div v-if="agentModelConfigOpen" class="agent-model-dialog-backdrop" @click.self="closeAgentModelConfig">
+                        <section class="agent-model-dialog" role="dialog" aria-modal="true" aria-label="配置模型">
+                            <header><div><strong>配置模型</strong><small>密钥只在后端加密保存</small></div><button type="button" aria-label="关闭" @click="closeAgentModelConfig">×</button></header>
+                            <div class="agent-model-dialog-body">
+                                <nav class="agent-model-list">
+                                    <button type="button" @click="openAgentModelConfig()">+ 新增个人模型</button>
+                                    <button v-for="model in agentModels" :key="model.id" type="button" :class="{ active: agentModelForm.id === model.id }" @click="openAgentModelConfig(model)">
+                                        <span>{{ model.display_name }}</span><small>{{ model.source === 'system' ? '系统只读' : (model.enabled ? '已启用' : '已禁用') }}</small>
+                                    </button>
+                                </nav>
+                                <form class="agent-model-form" @submit.prevent="saveAgentModelProfile">
+                                    <template v-if="agentModelForm.id && agentModelForm.id === 'system-default'">
+                                        <label>显示名称<input :value="agentModelForm.display_name" disabled></label>
+                                        <label>模型 ID<input :value="agentModelForm.model" disabled></label>
+                                        <p>系统模型由部署环境提供，不能在这里修改或删除。</p>
+                                    </template>
+                                    <template v-else>
+                                        <label>显示名称<input v-model.trim="agentModelForm.display_name" required maxlength="120"></label>
+                                        <label>Provider<select v-model="agentModelForm.provider"><option value="deepseek">DeepSeek</option><option value="openai_compatible">OpenAI-compatible</option></select></label>
+                                        <label>Base URL<input v-model.trim="agentModelForm.base_url" required placeholder="https://api.example.com/v1"></label>
+                                        <label>模型 ID<input v-model.trim="agentModelForm.model" required></label>
+                                        <label>API Key<input v-model="agentModelForm.api_key" type="password" :required="!agentModelForm.id" :placeholder="agentModelForm.has_api_key ? '已配置，留空则保留' : '请输入 API Key'"></label>
+                                        <div class="agent-model-form-flags"><label><input v-model="agentModelForm.enabled" type="checkbox"> 启用</label><label><input v-model="agentModelForm.is_default" type="checkbox"> 设为个人默认</label></div>
+                                        <div class="agent-model-form-actions"><button type="button" @click="testAgentModelProfile">测试连接</button><button v-if="agentModelForm.id" type="button" class="danger" @click="deleteAgentModelProfile(agentModelForm)">删除</button><button type="submit" class="primary">保存</button></div>
+                                    </template>
+                                    <p v-if="agentModelConfigMessage" class="agent-model-config-message">{{ agentModelConfigMessage }}</p>
+                                </form>
+                            </div>
+                        </section>
                     </div>
                     <aside
                         v-if="contextAskVisible"

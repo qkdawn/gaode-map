@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "design-handoff.schema.json",
+  "title": "DesignHandoffContract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "project_identity",
+    "preferred_positioning",
+    "program",
+    "spatial_strategy",
+    "renewal_principles",
+    "operational_requirements",
+    "hard_constraints",
+    "open_design_questions",
+    "evidence_refs",
+    "items_requiring_survey_or_approval"
+  ],
+  "properties": {
+    "version": {"const": "v1"},
+    "project_identity": {"type": "object", "required": ["project_id", "name"]},
+    "preferred_positioning": {
+      "type": "object",
+      "required": ["statement", "target_users", "problems_to_solve", "success_conditions", "prerequisites", "fallback_option"],
+      "properties": {
+        "statement": {"type": "string", "minLength": 1},
+        "target_users": {"type": "array", "minItems": 1},
+        "problems_to_solve": {"type": "array", "minItems": 1},
+        "success_conditions": {"type": "array", "minItems": 1},
+        "prerequisites": {"type": "array"},
+        "fallback_option": {"type": "string"}
+      }
+    },
+    "program": {
+      "type": "object",
+      "required": ["must_have", "should_have", "optional", "excluded", "area_ranges", "shared_space_rules"],
+      "properties": {
+        "must_have": {"type": "array", "minItems": 1},
+        "should_have": {"type": "array"},
+        "optional": {"type": "array"},
+        "excluded": {"type": "array"},
+        "area_ranges": {"type": "array"},
+        "shared_space_rules": {"type": "array"}
+      }
+    },
+    "spatial_strategy": {
+      "type": "object",
+      "required": ["zones", "anchors", "connections", "public_interfaces", "day_night_requirements"],
+      "properties": {
+        "zones": {"type": "array", "minItems": 1},
+        "anchors": {"type": "array"},
+        "connections": {"type": "array"},
+        "public_interfaces": {"type": "array"},
+        "day_night_requirements": {"type": "array"}
+      }
+    },
+    "renewal_principles": {
+      "type": "object",
+      "required": ["retain", "adapt", "replace", "temporary_use"],
+      "properties": {
+        "retain": {"type": "array"},
+        "adapt": {"type": "array"},
+        "replace": {"type": "array"},
+        "temporary_use": {"type": "array"}
+      }
+    },
+    "operational_requirements": {
+      "type": "object",
+      "required": ["hours", "service_flows", "back_of_house", "event_modes", "operator_assumptions"],
+      "properties": {
+        "hours": {"type": "array"},
+        "service_flows": {"type": "array"},
+        "back_of_house": {"type": "array"},
+        "event_modes": {"type": "array"},
+        "operator_assumptions": {"type": "array"}
+      }
+    },
+    "hard_constraints": {"type": "array"},
+    "open_design_questions": {"type": "array", "minItems": 1},
+    "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "items_requiring_survey_or_approval": {"type": "array"}
+  }
+}

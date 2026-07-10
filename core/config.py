@@ -222,6 +222,11 @@ class Settings(BaseSettings):
         validation_alias="AI_MODEL",
         description="Agent 使用的模型名，例如 deepseek-v4-flash",
     )
+    ai_model_config_secret: str = Field(
+        "",
+        validation_alias="AI_MODEL_CONFIG_SECRET",
+        description="用于加密个人模型 API Key 的 Fernet 密钥",
+    )
     ai_thinking_enabled: bool = Field(
         True,
         validation_alias="AI_THINKING_ENABLED",

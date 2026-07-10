@@ -3319,6 +3319,70 @@ body.agent-ppt-source-menu-open {
     gap: 10px;
 }
 
+.agent-ppt-current-detail-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+.agent-ppt-current-detail-tabs button {
+    min-width: 0;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 7px 8px;
+    background: transparent;
+    color: #475569;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+    align-items: center;
+    cursor: pointer;
+}
+
+.agent-ppt-current-detail-tabs button:disabled {
+    color: #94a3b8;
+    cursor: not-allowed;
+    opacity: 0.68;
+}
+
+.agent-ppt-current-detail-tabs button.is-active {
+    border-color: #99f6e4;
+    background: #ffffff;
+    color: #0f766e;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.agent-ppt-current-detail-tabs span {
+    min-width: 0;
+    font-size: 12px;
+    line-height: 1.2;
+    font-weight: 780;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agent-ppt-current-detail-tabs strong {
+    min-width: 18px;
+    padding: 2px 5px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 11px;
+    line-height: 1.1;
+    font-weight: 820;
+    text-align: center;
+}
+
+.agent-ppt-current-detail-tabs button.is-active strong {
+    background: #ccfbf1;
+    color: #0f766e;
+}
+
 .agent-ppt-current-transport {
     display: grid;
     gap: 10px;
@@ -3994,6 +4058,10 @@ body.agent-ppt-source-menu-open {
 
     .agent-ppt-package-stats > div:nth-child(2n) {
         border-right: 0;
+    }
+
+    .agent-ppt-current-detail-tabs {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .agent-ppt-package-meta > div {
@@ -13442,4 +13510,118 @@ body.agent-ppt-source-menu-open {
     flex-direction: column;
     gap: 10px;
     flex-shrink: 0;
+}
+
+.agent-ppt-document-role-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  padding: 2px 7px;
+  border: 1px solid rgba(65, 105, 225, 0.28);
+  border-radius: 999px;
+  color: #3154a5;
+  background: rgba(65, 105, 225, 0.08);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.agent-ppt-document-role-options {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 4px;
+  padding: 0;
+  border: 0;
+}
+
+.agent-ppt-document-role-options legend {
+  margin-bottom: 6px;
+  color: #525d70;
+  font-size: 12px;
+}
+
+.agent-ppt-document-role-options label {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.agent-ppt-document-role-options input {
+  width: auto;
+  margin: 3px 0 0;
+}
+
+.agent-ppt-document-role-options span {
+  display: grid;
+  gap: 3px;
+}
+
+.agent-ppt-document-role-options small {
+  color: #727d8f;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+
+/* Agent execution profile controls */
+.agent-composer-actions { gap: 8px; }
+.agent-model-picker { position: relative; flex: 0 1 auto; min-width: 0; }
+.agent-model-button { max-width: 180px; height: 36px; display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; color: #52525b; cursor: pointer; padding: 0 7px; font-size: 12px; }
+.agent-model-button span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-model-menu { position: absolute; right: 0; bottom: calc(100% + 10px); width: 280px; max-height: 360px; overflow: auto; z-index: 80; padding: 8px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; box-shadow: 0 14px 36px rgba(24,24,27,.16); }
+.agent-model-group-label { padding: 7px 8px 4px; color: #71717a; font-size: 11px; }
+.agent-model-option, .agent-model-config-entry { width: 100%; border: 0; background: transparent; padding: 8px; display: flex; justify-content: space-between; gap: 12px; text-align: left; cursor: pointer; color: #18181b; }
+.agent-model-option small { color: #71717a; overflow: hidden; text-overflow: ellipsis; }
+.agent-model-option:hover, .agent-model-option.active, .agent-model-config-entry:hover { background: #f4f4f5; }
+.agent-model-option.disabled { opacity: .45; cursor: not-allowed; }
+.agent-model-config-entry { margin-top: 6px; border-top: 1px solid #e4e4e7; color: #0f766e; font-weight: 600; }
+.agent-model-diagnostic { margin: 4px; padding: 8px; background: #fff7ed; color: #9a3412; font-size: 12px; }
+.agent-skill-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px 4px 9px; border-left: 3px solid var(--skill-color); background: #f4f4f5; color: #27272a; font-size: 12px; }
+.agent-skill-scope, .agent-skill-remove { border: 0; background: transparent; cursor: pointer; color: #52525b; padding: 2px 4px; }
+.agent-skill-scope { border-left: 1px solid #d4d4d8; }
+.agent-skill-menu { position: absolute; left: 52px; bottom: calc(100% + 8px); z-index: 75; width: min(480px, calc(100% - 80px)); max-height: 260px; overflow: auto; padding: 6px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; box-shadow: 0 14px 36px rgba(24,24,27,.14); }
+.agent-skill-option { width: 100%; display: flex; align-items: flex-start; gap: 9px; border: 0; background: transparent; padding: 9px; text-align: left; cursor: pointer; }
+.agent-skill-option:hover { background: #f4f4f5; }
+.agent-skill-option span:last-child { min-width: 0; display: grid; gap: 3px; }
+.agent-skill-option small { color: #71717a; white-space: normal; }
+.agent-skill-swatch { flex: 0 0 9px; width: 9px; height: 9px; margin-top: 4px; }
+.agent-model-dialog-backdrop { position: fixed; inset: 0; z-index: 180; display: grid; place-items: center; padding: 20px; background: rgba(24,24,27,.34); }
+.agent-model-dialog { width: min(760px, 100%); max-height: min(680px, calc(100vh - 40px)); overflow: hidden; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; box-shadow: 0 24px 70px rgba(0,0,0,.2); }
+.agent-model-dialog > header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e4e4e7; }
+.agent-model-dialog > header div { display: grid; gap: 2px; }
+.agent-model-dialog > header small { color: #71717a; }
+.agent-model-dialog > header button { border: 0; background: transparent; font-size: 20px; cursor: pointer; }
+.agent-model-dialog-body { display: grid; grid-template-columns: 210px minmax(0,1fr); min-height: 420px; }
+.agent-model-list { padding: 10px; border-right: 1px solid #e4e4e7; overflow: auto; }
+.agent-model-list button { width: 100%; display: grid; gap: 2px; border: 0; background: transparent; padding: 9px; text-align: left; cursor: pointer; }
+.agent-model-list button:hover, .agent-model-list button.active { background: #f4f4f5; }
+.agent-model-list small { color: #71717a; }
+.agent-model-form { display: grid; align-content: start; gap: 12px; padding: 18px; overflow: auto; }
+.agent-model-form > label { display: grid; gap: 5px; color: #3f3f46; font-size: 12px; }
+.agent-model-form input, .agent-model-form select { width: 100%; height: 36px; border: 1px solid #d4d4d8; border-radius: 4px; padding: 0 9px; background: #fff; color: #18181b; }
+.agent-model-form-flags, .agent-model-form-actions { display: flex; align-items: center; gap: 12px; }
+.agent-model-form-flags input { width: auto; height: auto; }
+.agent-model-form-actions { justify-content: flex-end; margin-top: 5px; }
+.agent-model-form-actions button { min-height: 34px; border: 1px solid #d4d4d8; border-radius: 4px; background: #fff; padding: 0 12px; cursor: pointer; }
+.agent-model-form-actions .primary { border-color: #18181b; background: #18181b; color: #fff; }
+.agent-model-form-actions .danger { margin-right: auto; color: #b91c1c; }
+.agent-model-config-message { color: #0f766e; font-size: 12px; }
+@media (max-width: 720px) {
+  .agent-model-button { max-width: 92px; }
+  .agent-model-dialog-body { grid-template-columns: 1fr; }
+  .agent-model-list { max-height: 130px; border-right: 0; border-bottom: 1px solid #e4e4e7; }
+  .agent-skill-chip span:first-child { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+.agent-execution-profile-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted, #667085);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

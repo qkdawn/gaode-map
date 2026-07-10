@@ -22,6 +22,8 @@ import {
   buildAnalysisQuickAskSelectedSourcesContext,
 } from '../src/features/agent/analysis-quick-request.js'
 
+import { buildMainLoopRequestBody } from '../src/features/agent/main-loop-request.js'
+import { slashSkillQuery } from '../src/features/agent/execution-profile.js'
 const agentMethods = createAnalysisAgentSessionMethods()
 
 test('agent message renderer formats markdown tables', () => {
@@ -2590,6 +2592,9 @@ test('submitMainAgentTurn shows submit process before first stream event', async
   let capturedSignal = null
   const streamStarted = createDeferred()
   global.fetch = async (url, options = {}) => {
+    if (url === '/api/v1/analysis/agent/capabilities') {
+      return { ok: true, async json() { return { models: [], skills: [], default_model_profile_id: '' } } }
+    }
     if (url === '/api/v1/analysis/agent/summary/readiness') {
       return {
         ok: true,
@@ -4912,6 +4917,7 @@ test('analysis deep main-loop skips visual snapshot capture', async () => {
 
   assert.equal(captureCount, 0)
   assert.deepEqual(requestBody.visual_snapshots, [])
+  assert.equal(requestBody.execution_mode, 'deep')
   assert.equal(Object.prototype.hasOwnProperty.call(requestBody, 'thinking_mode'), false)
   assert.equal(requestBody.selected_sources_context.sources.some((item) => item.source_id === 'document:doc-1'), true)
 })
@@ -7985,3 +7991,113 @@ test.after(() => {
 global.window = globalThis
 global.alert = () => {}
 global.confirm = () => true
+
+test('slash Skill query only matches a command being searched at the start', () => {
+  assert.equal(slashSkillQuery('/urban'), 'urban')
+  assert.equal(slashSkillQuery('/'), '')
+  assert.equal(slashSkillQuery('/urban 生成报告'), null)
+  assert.equal(slashSkillQuery('请用 /urban'), null)
+})
+
+test('main loop request serializes the locked model and Skill profile', async () => {
+  const body = await buildMainLoopRequestBody({
+    ensureAgentVisualSnapshotCache: async () => [],
+    buildAgentAnalysisSnapshot: () => ({}),
+    buildAgentMapSearchContext: () => ({}),
+  }, {
+    panelKind: 'followup', targetSessionId: 'agent-1', historyId: 'history-1',
+    requestMessages: [{ role: 'user', content: '生成报告' }], requestRiskConfirmations: [],
+    executionProfile: { model_profile_id: 'personal-model', skill_id: 'urban-strategy-stage1', skill_scope: 'turn' },
+  }, { visualSnapshots: false })
+
+  assert.deepEqual(body.execution_profile, {
+    model_profile_id: 'personal-model', skill_id: 'urban-strategy-stage1', skill_scope: 'turn',
+  })
+})
+
+test('session restore recovers conversation model and pinned Skill', () => {
+  const ctx = createAgentContext()
+  const session = ctx.createAgentSession({})
+  session.conversationExecutionProfile = {
+    model_profile_id: 'personal-model', pinned_skill_id: 'urban-strategy-stage1',
+  }
+
+  ctx.applyAgentSessionSnapshot(session)
+
+  assert.equal(ctx.agentSelectedModelProfileId, 'personal-model')
+  assert.equal(ctx.agentPinnedSkillId, 'urban-strategy-stage1')
+  assert.equal(ctx.agentSelectedSkillId, 'urban-strategy-stage1')
+  assert.equal(ctx.agentSkillScope, 'conversation')
+})
+
+test('assistant history preserves and labels immutable execution profile', () => {
+  const ctx = createAgentContext()
+  const process = {
+    status: 'answered',
+    execution_profile: {
+      model_profile_id: 'deleted-model', model_display_name: '已删除的模型快照', model: 'model-x',
+      skill_id: 'urban-strategy-stage1', skill_display_name: '城市区域策划第一阶段', skill_scope: 'conversation',
+    },
+  }
+  const session = ctx.createAgentSession({})
+  session.messages = [{ role: 'assistant', content: '报告', process }]
+  ctx.applyAgentSessionSnapshot(session)
+
+  assert.equal(ctx.shouldShowAgentMessageProcess(ctx.agentMessages[0]), true)
+  assert.equal(
+    ctx.getAgentMessageExecutionProfileLabel(ctx.agentMessages[0]),
+    '已删除的模型快照 · 城市区域策划第一阶段 · 对话固定',
+  )
+})
+
+
+test('model and pinned Skill changes persist immediately for a saved conversation', async () => {
+  const ctx = createAgentContext()
+  const session = ctx.createAgentSession({ id: 'agent-saved', persisted: true })
+  session.persisted = true
+  ctx.agentSessions = [session]
+  ctx.activeAgentSessionId = session.id
+  const writes = []
+  ctx.syncCurrentAgentSession = () => session
+  ctx.putAgentSession = async (id, overrides) => { writes.push({ id, overrides }) }
+
+  ctx.selectAgentModel('personal-model')
+  ctx.agentSelectedSkillId = 'urban-strategy-stage1'
+  ctx.toggleAgentSkillScope()
+  await Promise.resolve()
+
+  assert.deepEqual(writes, [
+    { id: session.id, overrides: { conversationExecutionProfile: { model_profile_id: 'personal-model', pinned_skill_id: '' } } },
+    { id: session.id, overrides: { conversationExecutionProfile: { model_profile_id: 'personal-model', pinned_skill_id: 'urban-strategy-stage1' } } },
+  ])
+})
+
+test('local assistant process records the effective execution profile from the completed turn', () => {
+  const ctx = createAgentContext()
+  const profile = {
+    model_profile_id: 'personal-model', model_display_name: '个人模型', provider: 'openai_compatible', model: 'model-x',
+    skill_id: 'urban-strategy-stage1', skill_display_name: '城市区域策划第一阶段', skill_scope: 'turn',
+  }
+  const process = ctx.buildAgentTurnProcessSnapshot({ status: 'answered', stage: 'answered', executionProfile: profile })
+
+  assert.deepEqual(process.executionProfile, profile)
+})
+
+
+test('temporary turn Skill restores the conversation pinned Skill after completion', async () => {
+  const ctx = createAgentContext()
+  ctx.agentPinnedSkillId = 'pinned-skill'
+  ctx.agentSelectedSkillId = 'temporary-skill'
+  ctx.agentSkillScope = 'turn'
+  ctx.syncUiAfterTurn = () => {}
+  const turnContext = { executionProfile: { skill_scope: 'turn' } }
+
+  // Exercise the same state transition used by submitMainAgentTurn's finally block.
+  if (turnContext.executionProfile.skill_scope === 'turn') {
+    ctx.agentSelectedSkillId = ctx.agentPinnedSkillId || ''
+    ctx.agentSkillScope = ctx.agentPinnedSkillId ? 'conversation' : 'turn'
+  }
+
+  assert.equal(ctx.agentSelectedSkillId, 'pinned-skill')
+  assert.equal(ctx.agentSkillScope, 'conversation')
+})

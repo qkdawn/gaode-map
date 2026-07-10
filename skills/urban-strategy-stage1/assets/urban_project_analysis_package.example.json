@@ -1,0 +1,39 @@
+{
+  "package_type": "urban_project_analysis_package",
+  "version": "v1",
+  "project": {
+    "project_id": "demo-project",
+    "name": "示例项目",
+    "location": "待填写",
+    "analysis_date": "2026-07-10",
+    "source_cutoff_date": "2026-07-10"
+  },
+  "brief": {
+    "decision_questions": ["该地区在现有约束下最适合承载什么功能？"],
+    "goals": ["形成第一阶段项目定位、功能策略与设计任务书"],
+    "non_goals": ["本阶段不确定建筑造型和施工做法"],
+    "known_constraints": [],
+    "stakeholders": [],
+    "core_source_ids": ["document:project-brief"],
+    "preferred_report_language": "zh-CN"
+  },
+  "scope": {
+    "project_boundary": {"type": "Feature", "geometry_ref": "project_boundary.geojson"},
+    "analysis_areas": [{"id": "project-boundary", "label": "项目红线", "kind": "project_boundary"}],
+    "coordinate_system": "GCJ-02",
+    "scope_ids": ["project-boundary"]
+  },
+  "inputs": {
+    "sources_export": "ppt_sources_full_export.json",
+    "project_brief": "project_brief.md",
+    "boundary_geojson": "project_boundary.geojson",
+    "visual_snapshots": [],
+    "additional_files": []
+  },
+  "quality": {
+    "known_missing_items": [],
+    "known_conflicts": [],
+    "notes": []
+  },
+  "requested_deliverables": ["stage1_report", "evidence_appendix", "design_handoff"]
+}

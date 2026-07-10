@@ -25,7 +25,7 @@ def _build_test_app():
 
 
 def test_stream_main_loop_serializes_persisted_final_response(monkeypatch):
-    async def fake_stream_main_loop(_payload):
+    async def fake_stream_main_loop(_payload, **_execution):
         yield agent_router_module.AgentTurnStreamEvent(
             type="final",
             payload={
@@ -48,7 +48,7 @@ def test_stream_main_loop_serializes_persisted_final_response(monkeypatch):
             },
         )
 
-    async def fake_persist_streamed_main_agent_loop_response(_payload, response, _repo, *, logger=None):
+    async def fake_persist_streamed_main_agent_loop_response(_payload, response, _repo, *, logger=None, conversation_profile=None):
         diagnostics = response.diagnostics.model_copy(
             update={
                 "research_notes": ["persisted via helper"],

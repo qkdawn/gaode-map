@@ -56,7 +56,7 @@ def _final_stream_response(body: str):
 
 
 def _stream_main_loop_response(response: AgentTurnResponse):
-    async def fake_stream_main_agent_loop(_payload):
+    async def fake_stream_main_agent_loop(_payload, **_execution):
         yield agent_router_module.AgentTurnStreamEvent(
             type="final",
             payload={"response": response.model_dump(mode="json")},

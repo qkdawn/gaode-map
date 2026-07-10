@@ -344,6 +344,14 @@ export function createAgentThreadUiMethods() {
       }
       return mapping[asText(process.status)] || '已思考'
     },
+    getAgentMessageExecutionProfileLabel(message = {}) {
+      const profile = cloneObject(this.getAgentMessageProcess(message).executionProfile)
+      const parts = [asText(profile.model_display_name || profile.model)]
+      const skill = asText(profile.skill_display_name || profile.skill_id)
+      if (skill) parts.push(skill)
+      if (skill && profile.skill_scope === 'conversation') parts.push('对话固定')
+      return parts.filter(Boolean).join(' · ')
+    },
     getAgentMessageNaturalProcessItems(message = {}) {
       return this.getAgentNaturalProcessItems(this.getAgentMessageProcess(message))
     },

@@ -48,29 +48,30 @@ class MapPolygonLink(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     map_id = Column(Integer, ForeignKey("map_data.id"), nullable=False, index=True)
-    polygon_id = Column(Integer, ForeignKey("polygon_data.id"), nullable=False, index=True)
+    polygon_id = Column(
+        Integer, ForeignKey("polygon_data.id"), nullable=False, index=True
+    )
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
-    __table_args__ = (
-        UniqueConstraint("map_id", "polygon_id", name="uq_map_polygon"),
-    )
+    __table_args__ = (UniqueConstraint("map_id", "polygon_id", name="uq_map_polygon"),)
 
 
 class AnalysisHistory(Base):
     """
     空间分析历史记录
     """
+
     __tablename__ = "analysis_history"
 
     id = Column(String(64), primary_key=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    
+
     # 存储分析参数 (中心点, 时长, 出行方式)
     params = Column(JSON, nullable=False)
-    
+
     # 存储生成的等时圈多边形 (GeoJSON/Coordinates)
     result_polygon = Column(JSON, nullable=True)
-    
+
     # 简短描述 (e.g. "人民广场 - 15分钟步行")
     description = Column(String(255), nullable=True)
 
@@ -79,23 +80,31 @@ class PoiResult(Base):
     """
     POI 抓取结果
     """
+
     __tablename__ = "poi_results"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    history_id = Column(String(64), ForeignKey("analysis_history.id", ondelete="CASCADE"), nullable=False, index=True)
+    history_id = Column(
+        String(64),
+        ForeignKey("analysis_history.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     source = Column(String(32), nullable=True, index=True)
     year = Column(Integer, nullable=True, index=True)
-    
+
     # 完整的 POI 数据列表
     poi_data = Column(JSON, nullable=False)
-    
+
     # 统计摘要 (e.g. {"咖啡": 50, "便利店": 30})
     summary = Column(JSON, nullable=True)
-    
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint("history_id", "source", "year", name="uq_poi_results_history_source_year"),
+        UniqueConstraint(
+            "history_id", "source", "year", name="uq_poi_results_history_source_year"
+        ),
         Index("ix_poi_results_history_created_id", "history_id", "created_at", "id"),
     )
 
@@ -104,10 +113,16 @@ class AnalysisArtifact(Base):
     """
     可复用分析证据单元。
     """
+
     __tablename__ = "analysis_artifacts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    history_id = Column(String(64), ForeignKey("analysis_history.id", ondelete="CASCADE"), nullable=False, index=True)
+    history_id = Column(
+        String(64),
+        ForeignKey("analysis_history.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     artifact_type = Column(String(64), nullable=False, index=True)
     params_hash = Column(String(64), nullable=False, index=True)
     params = Column(JSON, nullable=False, default=dict)
@@ -128,14 +143,32 @@ class AnalysisArtifact(Base):
             name="uq_analysis_artifact_identity",
         ),
         Index("ix_analysis_artifacts_history_type", "history_id", "artifact_type"),
-        Index("ix_analysis_artifacts_history_updated_id", "history_id", "updated_at", "id"),
+        Index(
+            "ix_analysis_artifacts_history_updated_id", "history_id", "updated_at", "id"
+        ),
     )
+
+
+class AgentModelProfile(Base):
+    __tablename__ = "agent_model_profiles"
+
+    id = Column(String(64), primary_key=True)
+    display_name = Column(String(120), nullable=False)
+    provider = Column(String(32), nullable=False)
+    base_url = Column(String(512), nullable=False)
+    model_name = Column(String(160), nullable=False)
+    api_key_ciphertext = Column(Text, nullable=False, default="")
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    is_default = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
 
 class AgentSession(Base):
     """
     AI 面板历史记录
     """
+
     __tablename__ = "agent_sessions"
 
     id = Column(String(128), primary_key=True)

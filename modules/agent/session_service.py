@@ -12,6 +12,7 @@ from .providers.llm_provider import (
 )
 from .schemas import (
     AgentContextSummary,
+    ConversationExecutionProfile,
     AgentMessage,
     AgentMessageProcess,
     AgentPlanEnvelope,
@@ -188,6 +189,7 @@ def _build_turn_process_payload(response: AgentTurnResponse) -> AgentMessageProc
         thinking_timeline=list(response.diagnostics.thinking_timeline or []),
         execution_trace=list(response.diagnostics.execution_trace or []),
         plan=response.plan,
+        execution_profile=response.effective_execution_profile,
     )
 
 
@@ -227,6 +229,7 @@ def build_snapshot_payload(request: AgentSessionSnapshotRequest) -> Dict[str, An
         "context_summary": request.context_summary.model_dump(),
         "plan": request.plan.model_dump(),
         "risk_confirmations": [str(item) for item in request.risk_confirmations],
+        "conversation_execution_profile": request.conversation_execution_profile.model_dump(mode="json"),
     }
     history_id = _normalize_text(request.history_id, max_length=128)
     panel_kind = normalize_agent_panel_kind(request.panel_kind)
@@ -237,7 +240,10 @@ def build_snapshot_payload(request: AgentSessionSnapshotRequest) -> Dict[str, An
     return payload
 
 
-def build_turn_persist_payload(payload: AgentTurnRequest, response: AgentTurnResponse) -> AgentSessionSnapshotRequest:
+def build_turn_persist_payload(
+    payload: AgentTurnRequest, response: AgentTurnResponse,
+    conversation_profile: ConversationExecutionProfile | None = None,
+) -> AgentSessionSnapshotRequest:
     messages = [AgentMessage(**item.model_dump(mode="json")) for item in payload.messages]
     if response.status == "answered":
         messages.append(_build_assistant_message(response))
@@ -255,6 +261,7 @@ def build_turn_persist_payload(payload: AgentTurnRequest, response: AgentTurnRes
         context_summary=response.context_summary,
         plan=response.plan,
         risk_confirmations=[str(item) for item in payload.risk_confirmations],
+        conversation_execution_profile=conversation_profile or ConversationExecutionProfile(),
     )
     request.preview = derive_agent_session_preview(build_snapshot_payload(request))
     return request
@@ -311,6 +318,7 @@ def _build_detail_model(record: Dict[str, Any]) -> AgentSessionDetail:
         context_summary=_normalize_context_summary(snapshot),
         plan=_normalize_plan(snapshot),
         risk_confirmations=[str(item) for item in (snapshot.get("risk_confirmations") or [])],
+        conversation_execution_profile=ConversationExecutionProfile(**(snapshot.get("conversation_execution_profile") or {})),
     )
 
 
@@ -369,12 +377,15 @@ def delete_agent_session(session_id: str, repo) -> Dict[str, Any]:
     return {"status": "success", "id": session_id}
 
 
-async def persist_main_agent_loop_response(payload: AgentTurnRequest, response: AgentTurnResponse, repo) -> AgentTurnResponse:
+async def persist_main_agent_loop_response(
+    payload: AgentTurnRequest, response: AgentTurnResponse, repo, *,
+    conversation_profile: ConversationExecutionProfile | None = None,
+) -> AgentTurnResponse:
     session_id = _normalize_text(payload.conversation_id, max_length=128)
     if not session_id:
         return response
     existing_record = repo.get_record(session_id)
-    request = build_turn_persist_payload(payload, response)
+    request = build_turn_persist_payload(payload, response, conversation_profile)
     title, title_source = _resolve_upsert_title(request, existing_record)
     request.title = title
     history_id, panel_kind = _require_agent_panel_identity(request.history_id, request.panel_kind)
@@ -402,9 +413,10 @@ async def persist_streamed_main_agent_loop_response(
     repo,
     *,
     logger: logging.Logger | None = None,
+    conversation_profile: ConversationExecutionProfile | None = None,
 ) -> AgentTurnResponse:
     try:
-        return await persist_main_agent_loop_response(payload, response, repo)
+        return await persist_main_agent_loop_response(payload, response, repo, conversation_profile=conversation_profile)
     except Exception as exc:
         if logger is not None:
             logger.exception("Failed to persist streamed main agent loop response; returning unpersisted final response")

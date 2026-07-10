@@ -7,6 +7,12 @@ from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from modules.agent.runtime import stream_main_agent_loop
+from modules.agent.execution_service import agent_capabilities, prepare_agent_turn
+from modules.agent.model_profiles import (
+    AgentModelProfileCreate, AgentModelProfilePatch, AgentModelProfileTestRequest,
+    AgentModelProfileTestResponse, AgentModelProfileView, create_model_profile,
+    delete_model_profile, test_model_profile, update_model_profile,
+)
 from modules.agent.schemas import (
     AgentContextAskRequest,
     AgentContextAskResponse,
@@ -70,8 +76,40 @@ def _encode_context_ask_sse(event_type: str, payload: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+
+@router.get("/api/v1/analysis/agent/capabilities")
+async def get_agent_capabilities():
+    return await run_in_threadpool(agent_capabilities)
+
+
+@router.post("/api/v1/analysis/agent/model-profiles", response_model=AgentModelProfileView)
+async def post_agent_model_profile(payload: AgentModelProfileCreate):
+    return await run_in_threadpool(create_model_profile, payload)
+
+
+@router.patch("/api/v1/analysis/agent/model-profiles/{profile_id}", response_model=AgentModelProfileView)
+async def patch_agent_model_profile(profile_id: str, payload: AgentModelProfilePatch):
+    return await run_in_threadpool(update_model_profile, profile_id, payload)
+
+
+@router.delete("/api/v1/analysis/agent/model-profiles/{profile_id}", status_code=204)
+async def remove_agent_model_profile(profile_id: str):
+    await run_in_threadpool(delete_model_profile, profile_id)
+
+
+@router.post("/api/v1/analysis/agent/model-profiles/test", response_model=AgentModelProfileTestResponse)
+async def test_agent_model_profile(payload: AgentModelProfileTestRequest):
+    return await test_model_profile(payload)
+
+
 @router.post("/api/v1/analysis/agent/main-loop/stream")
 async def run_agent_main_loop_stream(request: Request, payload: AgentTurnRequest):
+    try:
+        prepared = await run_in_threadpool(prepare_agent_turn, payload, agent_session_repo)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    payload = prepared.payload
+
     async def event_stream():
         bootstrap_events = [
             AgentTurnStreamEvent(
@@ -93,7 +131,10 @@ async def run_agent_main_loop_stream(request: Request, payload: AgentTurnRequest
             if await request.is_disconnected():
                 return
             yield _encode_sse(bootstrap)
-        generator = stream_main_agent_loop(payload)
+        generator = stream_main_agent_loop(
+            payload, llm_runtime=prepared.runtime, effective_profile=prepared.effective_profile,
+            skill_id=prepared.effective_profile.skill_id,
+        )
         try:
             async for event in generator:
                 if await request.is_disconnected():
@@ -101,7 +142,7 @@ async def run_agent_main_loop_stream(request: Request, payload: AgentTurnRequest
                 outgoing = event
                 if event.type == "final":
                     response = AgentTurnResponse(**(event.payload or {}).get("response", {}))
-                    persisted = await persist_streamed_main_agent_loop_response(payload, response, agent_session_repo, logger=logger)
+                    persisted = await persist_streamed_main_agent_loop_response(payload, response, agent_session_repo, logger=logger, conversation_profile=prepared.conversation_profile)
                     outgoing = AgentTurnStreamEvent(
                         type="final",
                         payload={"response": persisted.model_dump(mode="json")},

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urban-project-analysis-package.schema.json",
+  "title": "UrbanProjectAnalysisPackage",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["package_type", "version", "project", "brief", "scope", "inputs", "requested_deliverables"],
+  "properties": {
+    "package_type": {"const": "urban_project_analysis_package"},
+    "version": {"const": "v1"},
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id", "name", "location", "analysis_date", "source_cutoff_date"],
+      "properties": {
+        "project_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "location": {"type": "string"},
+        "analysis_date": {"type": "string", "format": "date"},
+        "source_cutoff_date": {"type": "string", "format": "date"}
+      }
+    },
+    "brief": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_questions", "goals", "non_goals", "known_constraints", "stakeholders", "core_source_ids"],
+      "properties": {
+        "decision_questions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "goals": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "non_goals": {"type": "array", "items": {"type": "string"}},
+        "known_constraints": {"type": "array", "items": {"type": "string"}},
+        "stakeholders": {"type": "array", "items": {"type": "string"}},
+        "core_source_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "preferred_report_language": {"type": "string", "default": "zh-CN"}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_boundary", "analysis_areas", "coordinate_system", "scope_ids"],
+      "properties": {
+        "project_boundary": {"type": "object"},
+        "analysis_areas": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+        "coordinate_system": {"type": "string", "minLength": 1},
+        "scope_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources_export", "project_brief"],
+      "properties": {
+        "sources_export": {"type": "string", "minLength": 1},
+        "project_brief": {"type": "string", "minLength": 1},
+        "boundary_geojson": {"type": "string"},
+        "visual_snapshots": {"type": "array", "items": {"type": "string"}},
+        "additional_files": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "known_missing_items": {"type": "array", "items": {"type": "string"}},
+        "known_conflicts": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "requested_deliverables": {
+      "type": "array",
+      "minItems": 2,
+      "contains": {"const": "stage1_report"},
+      "items": {"enum": ["stage1_report", "evidence_appendix", "design_handoff"]}
+    }
+  }
+}

@@ -134,6 +134,33 @@ class AgentMapSearchContext(BaseModel):
         return {key: value for key, value in payload.items() if value not in ("", None, {}, [])}
 
 
+class AgentExecutionProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_profile_id: str = ""
+    skill_id: str = ""
+    skill_scope: Literal["turn", "conversation"] = "turn"
+
+
+class EffectiveExecutionProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_profile_id: str = ""
+    model_display_name: str = ""
+    provider: str = ""
+    model: str = ""
+    skill_id: str = ""
+    skill_display_name: str = ""
+    skill_scope: Literal["turn", "conversation"] = "turn"
+
+
+class ConversationExecutionProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model_profile_id: str = ""
+    pinned_skill_id: str = ""
+
+
 class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -147,6 +174,7 @@ class AgentTurnRequest(BaseModel):
     visual_snapshots: List[AgentVisualSnapshot] = Field(default_factory=list)
     map_search_context: AgentMapSearchContext = Field(default_factory=AgentMapSearchContext)
     selected_sources_context: AgentSelectedSourcesContext = Field(default_factory=AgentSelectedSourcesContext)
+    execution_profile: AgentExecutionProfileRequest = Field(default_factory=AgentExecutionProfileRequest)
 
 
 class AgentSummaryRequest(BaseModel):
@@ -692,6 +720,7 @@ class AgentMessageProcess(BaseModel):
     execution_trace: List[ExecutionTraceItem] = Field(default_factory=list)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     pending_task_confirmation: Dict[str, Any] = Field(default_factory=dict)
+    execution_profile: EffectiveExecutionProfile = Field(default_factory=EffectiveExecutionProfile)
 
     @model_validator(mode="before")
     @classmethod
@@ -727,6 +756,7 @@ class AgentTurnResponse(BaseModel):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     messages: List[AgentMessage] = Field(default_factory=list)
+    effective_execution_profile: EffectiveExecutionProfile = Field(default_factory=EffectiveExecutionProfile)
 
     @model_validator(mode="before")
     @classmethod
@@ -805,6 +835,7 @@ class AgentSessionSnapshotRequest(BaseModel):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
+    conversation_execution_profile: ConversationExecutionProfile = Field(default_factory=ConversationExecutionProfile)
 
 
 class AgentSessionMetadataPatchRequest(BaseModel):
@@ -823,3 +854,4 @@ class AgentSessionDetail(AgentSessionSummary):
     context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
     plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
     risk_confirmations: List[str] = Field(default_factory=list)
+    conversation_execution_profile: ConversationExecutionProfile = Field(default_factory=ConversationExecutionProfile)
