@@ -4,6 +4,7 @@ from typing import Any, Awaitable, Callable
 
 from ..llm_digest import snapshot_digest
 from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
+from ..quality_audit import QualityAuditResult, audit_stage1_package
 from ..schemas import (
     AgentContextSummary,
     AgentPlanEnvelope,
@@ -25,8 +26,6 @@ def evaluate_readiness(payload: AgentTurnRequest) -> dict[str, Any]:
     project_text = " ".join(
         str(value) for value in context.values() if isinstance(value, (str, int, float))
     )
-    has_scope = bool(scope)
-    has_brief = len(project_text.strip()) >= 20
     has_evidence = bool(sources) or any(
         (
             snapshot.frontend_analysis,
@@ -39,7 +38,7 @@ def evaluate_readiness(payload: AgentTurnRequest) -> dict[str, Any]:
     )
     checks = (
         (
-            has_scope,
+            bool(scope),
             "项目空间范围",
             "可识别的项目空间范围",
             "select-scope",
@@ -47,7 +46,7 @@ def evaluate_readiness(payload: AgentTurnRequest) -> dict[str, Any]:
             "scope-selection",
         ),
         (
-            has_brief,
+            len(project_text.strip()) >= 20,
             "项目摘要与决策问题",
             "项目摘要与核心决策问题",
             "edit-project-brief",
@@ -69,9 +68,9 @@ def evaluate_readiness(payload: AgentTurnRequest) -> dict[str, Any]:
     for passed, label, missing_label, action_id, action_label, target in checks:
         if passed:
             satisfied.append(label)
-            continue
-        missing.append(missing_label)
-        actions.append({"id": action_id, "label": action_label, "target": target})
+        else:
+            missing.append(missing_label)
+            actions.append({"id": action_id, "label": action_label, "target": target})
 
     missing_optional: list[str] = []
     if not sources:
@@ -80,7 +79,6 @@ def evaluate_readiness(payload: AgentTurnRequest) -> dict[str, Any]:
         missing_optional.append("产权、居民与运营边界核验")
     if not context.get("building_condition_summary"):
         missing_optional.append("逐栋结构、消防与机电条件核验")
-
     conflicts = context.get("evidence_conflicts")
     return {
         "ready": not missing,
@@ -93,6 +91,57 @@ def evaluate_readiness(payload: AgentTurnRequest) -> dict[str, Any]:
     }
 
 
+async def _emit_phase(
+    emit: Emit | None,
+    *,
+    phase_id: str,
+    title: str,
+    detail: str,
+    state: str = "active",
+) -> None:
+    if emit:
+        await emit(
+            "thinking",
+            {
+                "id": phase_id,
+                "phase": "executing",
+                "title": title,
+                "detail": detail,
+                "state": state,
+            },
+        )
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _list_from(value: Any, key: str) -> list[dict[str, Any]]:
+    items = _mapping(value).get(key)
+    return (
+        [dict(item) for item in items if isinstance(item, dict)]
+        if isinstance(items, list)
+        else []
+    )
+
+
+def _audit_payload(audit: QualityAuditResult) -> dict[str, Any]:
+    return audit.model_dump(mode="json")
+
+
+def _base_panels(
+    readiness: dict[str, Any], package: dict[str, Any], audit: QualityAuditResult
+) -> dict[str, Any]:
+    return {
+        "stage1_readiness": readiness,
+        "stage1_evidence_ledger": package["evidence_ledger"],
+        "stage1_workpacks": package["workpacks"],
+        "stage1_strategy": package["strategy"],
+        "stage1_spatial_matrix": package["spatial_matrix"],
+        "stage1_quality_audit": _audit_payload(audit),
+    }
+
+
 async def execute(
     payload: AgentTurnRequest,
     *,
@@ -101,114 +150,212 @@ async def execute(
     emit: Emit | None = None,
 ) -> AgentTurnResponse:
     readiness = evaluate_readiness(payload)
-    if emit:
-        await emit(
-            "thinking",
-            {
-                "id": "stage1-readiness",
-                "phase": "gating",
-                "title": "检查 Stage 1 资料完整性",
-                "detail": "核对项目范围、摘要、核心文档和分析证据。",
-                "state": "completed",
-            },
-        )
+    await _emit_phase(
+        emit,
+        phase_id="stage1-readiness",
+        title="检查 Stage 1 资料完整性",
+        detail="核对项目范围、摘要、核心文档和分析证据。",
+        state="completed",
+    )
     if not readiness["ready"]:
         missing = "、".join(readiness["missing"])
         return AgentTurnResponse(
             status="requires_clarification",
             stage="requires_clarification",
             output=AgentTurnOutput(
-                clarification_question=f"执行城市区域策划第一阶段前，还需要补充：{missing}。请补齐后再生成完整报告。",
+                clarification_question=f"执行城市区域策划第一阶段前，还需要补充：{missing}。",
                 clarification_options=[
-                    "补充项目范围",
-                    "补充项目摘要与目标",
-                    "选择核心文档或分析结果",
+                    action["label"] for action in readiness["actions"]
                 ],
                 panel_payloads={"stage1_readiness": readiness},
             ),
             diagnostics=AgentTurnDiagnostics(
-                research_notes=["Stage 1 readiness 未通过，已停止完整报告生成。"]
+                research_notes=["Stage 1 readiness 未通过，未调用模型生成报告。"]
             ),
             context_summary=AgentContextSummary(),
             plan=AgentPlanEnvelope(),
             effective_execution_profile=profile,
         )
+
     client = get_llm_provider_client(runtime=runtime)
     if client is None:
         raise ValueError("所选模型 Provider 不可用")
     question = str(payload.messages[-1].content if payload.messages else "").strip()
-    evidence = {
+    evidence_input = {
         "question": question,
+        "project_context": payload.analysis_snapshot.context,
         "snapshot": snapshot_digest(payload.analysis_snapshot),
         "selected_sources": payload.selected_sources_context.source_items(),
-        "rules": [
-            "区分事实、推断和假设",
-            "保留冲突，不伪造精确指标",
-            "所有结论给出证据来源或缺口",
-        ],
+        "known_conflicts": readiness["conflicts"],
+        "optional_gaps": readiness["missing_optional"],
     }
-    if emit:
-        await emit(
-            "thinking",
-            {
-                "id": "stage1-workpacks",
-                "phase": "executing",
-                "title": "形成四类专家工作包",
-                "detail": "区域结构、人群需求、文化文旅、存量更新与商业运营共享同一证据底座。",
-                "state": "active",
-            },
-        )
-    workpacks = await client.chat_json(
-        system_prompt="你是城市策划证据分析负责人。输出 JSON：workpacks 数组，必须覆盖 spatial、culture_tourism、renewal、commercial_operations；每项包含 findings、evidence_refs、uncertainties。不得补造数据。",
-        user_payload=evidence,
+
+    await _emit_phase(
+        emit,
+        phase_id="stage1-evidence",
+        title="建立证据台账",
+        detail="逐条标注来源、适用范围、验证状态和限制。",
+    )
+    evidence_result = await client.chat_json(
+        system_prompt=(
+            "你是城市更新项目的证据审计负责人。只输出 JSON：evidence_ledger 数组。"
+            "每项必须含 id、claim、evidence_type(F/G/P/H/V)、status(verified/cross_checked/"
+            "inferred/hypothesis/blocked/fieldwork_required)、source_ref、scope、comparison_baseline、"
+            "confidence(high/medium/low)、limitation、next_action、executor(agent/fieldwork)。"
+            "没有页码时明确写来源路径或数据集；不得把夜光、POI、gap_score、周边人口解释为客流、消费或经营成功。"
+        ),
+        user_payload=evidence_input,
+        emit=emit,
+        phase="executing",
+        title="构建 Claim-Evidence 台账",
+        reasoning_id="stage1-evidence-model",
+    )
+    evidence_ledger = _list_from(evidence_result, "evidence_ledger")
+
+    await _emit_phase(
+        emit,
+        phase_id="stage1-workpacks",
+        title="形成四类专业工作包",
+        detail="区域结构、人群需求、文化文旅、存量更新与运营共享同一证据底座。",
+    )
+    workpack_result = await client.chat_json(
+        system_prompt=(
+            "你是城市策划证据分析负责人。只输出 JSON：workpacks 数组，必须且仅覆盖 spatial、audience、"
+            "culture_tourism、renewal_operations。每项包含 type、findings、evidence_refs、counter_evidence、"
+            "uncertainties、validation_actions。引用证据 ID，不得引入台账之外的事实。"
+        ),
+        user_payload={"question": question, "evidence_ledger": evidence_ledger},
         emit=emit,
         phase="executing",
         title="生成四类专家工作包",
         reasoning_id="stage1-workpacks-model",
     )
-    if emit:
-        await emit(
-            "thinking",
-            {
-                "id": "stage1-options",
-                "phase": "executing",
-                "title": "生成定位选项与决策矩阵",
-                "detail": "比较定位适配度、差异化、实施难度、运营可持续性和风险。",
-                "state": "active",
-            },
-        )
-    options = await client.chat_json(
-        system_prompt="你是城市更新决策顾问。基于共享工作包输出 JSON：options（至少3个定位）、decision_matrix、recommended_option、rejection_reasons、invalidation_conditions。禁止引入输入之外的事实。",
-        user_payload={"question": question, "workpacks": workpacks},
+    workpacks = _list_from(workpack_result, "workpacks")
+
+    await _emit_phase(
+        emit,
+        phase_id="stage1-options",
+        title="比较定位方案",
+        detail="形成至少三个实质不同且可证伪的定位选项。",
+    )
+    strategy_result = await client.chat_json(
+        system_prompt=(
+            "你是城市更新决策顾问。只输出 JSON，含 options(至少3个)、recommended_option_id、decision_matrix、"
+            "rejection_reasons。每个 option 必须含稳定 id、name、proposition、differentiation、feasibility、"
+            "operating_sustainability、evidence_refs、counter_evidence、invalidation_conditions、risks。"
+            "不得用文案包装替代方案竞争。"
+        ),
+        user_payload={
+            "question": question,
+            "evidence_ledger": evidence_ledger,
+            "workpacks": workpacks,
+        },
         emit=emit,
         phase="executing",
-        title="比较定位方案",
+        title="生成定位竞争与决策矩阵",
         reasoning_id="stage1-options-model",
     )
+    strategy = _mapping(strategy_result)
+
+    await _emit_phase(
+        emit,
+        phase_id="stage1-spatial-matrix",
+        title="形成空间功能决策矩阵",
+        detail="逐空间比较候选功能、排除项、成立条件和组合平衡。",
+    )
+    matrix_result = await client.chat_json(
+        system_prompt=(
+            "你是存量空间功能策划负责人。只输出 JSON：matrix_version、positioning_option_id、"
+            "spatial_hierarchy、space_decisions、portfolio_checks。spatial_hierarchy 必须含 system/cluster/unit。"
+            "每个 space_decision 必须含 space_id、current_state、change_logic、candidate_functions(至少2项)、"
+            "preferred_function、excluded_functions、audience_scenarios、access_and_movement、operation_strategy、"
+            "renovation_and_delivery、preconditions、evidence_refs、assumptions、validation_actions、"
+            "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)。"
+            "空间建议必须说明前置条件，不得虚构产权、结构或消防结论。"
+        ),
+        user_payload={
+            "question": question,
+            "evidence_ledger": evidence_ledger,
+            "workpacks": workpacks,
+            "strategy": strategy,
+        },
+        emit=emit,
+        phase="executing",
+        title="生成空间功能策划矩阵",
+        reasoning_id="stage1-spatial-matrix-model",
+    )
+    spatial_matrix = _mapping(matrix_result)
+    package = {
+        "evidence_ledger": evidence_ledger,
+        "workpacks": workpacks,
+        "strategy": strategy,
+        "spatial_matrix": spatial_matrix,
+    }
+
+    audit = audit_stage1_package(package)
+    await _emit_phase(
+        emit,
+        phase_id="stage1-quality-audit",
+        title="执行交付前质量审计",
+        detail=f"通过 {audit.checks_passed}/{audit.checks_total} 项，质量分 {audit.score}。",
+        state="completed" if audit.status == "passed" else "failed",
+    )
+    panels = _base_panels(readiness, package, audit)
+    if audit.status != "passed":
+        repair_tasks = [
+            {
+                "code": issue.code,
+                "message": issue.message,
+                "repair_hint": issue.repair_hint,
+            }
+            for issue in audit.blocking_issues
+        ]
+        panels["stage1_repair_tasks"] = repair_tasks
+        return AgentTurnResponse(
+            status="requires_clarification",
+            stage="requires_clarification",
+            output=AgentTurnOutput(
+                clarification_question="中间分析未通过交付质量审计，已停止生成完整报告。请按修复任务补证或重新运行。",
+                clarification_options=[
+                    item["repair_hint"] or item["message"] for item in repair_tasks[:4]
+                ],
+                panel_payloads=panels,
+            ),
+            diagnostics=AgentTurnDiagnostics(
+                audit_issues=[item["message"] for item in repair_tasks],
+                research_notes=["质量审计未通过，最终报告模型未被调用。"],
+            ),
+            context_summary=AgentContextSummary(),
+            plan=AgentPlanEnvelope(),
+            effective_execution_profile=profile,
+        )
+
     report = await client.chat_json(
-        system_prompt="你是城市区域策划总顾问。输出 JSON，字段 answer（专业中文 Markdown 报告）、claims（claim/evidence/status）、sources。报告必须含总判断、证据边界、推荐定位、客群、功能组合、空间策略、运营治理、分期、风险、设计任务书。明确事实/推断/待验证，不写建筑形态设计。",
-        user_payload={"evidence": evidence, "workpacks": workpacks, "options": options},
+        system_prompt=(
+            "你是城市区域策划总顾问。只输出 JSON：answer(专业中文 Markdown 报告)、sources。"
+            "报告必须含总判断、证据边界、定位方案比较、推荐定位、客群场景、功能组合、空间策略、"
+            "运营治理、分期、风险、验证计划和设计任务书。仅使用已审计包；inferred/hypothesis 不得写成事实。"
+        ),
+        user_payload={
+            "question": question,
+            "stage1_package": package,
+            "quality_audit": _audit_payload(audit),
+        },
         emit=emit,
         phase="synthesizing",
-        title="形成 Stage 1 决策报告",
+        title="编译 Stage 1 决策报告",
         reasoning_id="stage1-report-model",
     )
     answer = str(report.get("answer") or "").strip()
+    panels["claim_evidence"] = evidence_ledger
+    panels["sources_used"] = report.get("sources") or []
     return AgentTurnResponse(
         status="answered",
         stage="answered",
-        output=AgentTurnOutput(
-            answer=answer,
-            panel_payloads={
-                "stage1_readiness": readiness,
-                "stage1_workpacks": workpacks,
-                "stage1_options": options,
-                "claim_evidence": report.get("claims") or [],
-                "sources_used": report.get("sources") or [],
-            },
-        ),
+        output=AgentTurnOutput(answer=answer, panel_payloads=panels),
         diagnostics=AgentTurnDiagnostics(
-            research_notes=["全部 Stage 1 阶段使用同一模型配置。"]
+            research_notes=["全部 Stage 1 阶段使用同一轮锁定的模型配置。"],
+            audit_summary=f"质量审计通过：{audit.score} 分。",
         ),
         context_summary=AgentContextSummary(),
         plan=AgentPlanEnvelope(),
