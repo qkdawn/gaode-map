@@ -69,6 +69,12 @@ const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 P
 const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
 const PPT_NIGHTLIFE_PACKAGE_VERSION = 'nightlife-evidence-v2'
 const PPT_CARRIER_PACKAGE_VERSION = 'road-carrier-evidence-v2'
+let pptUploadSequence = 0
+
+function createPptUploadSourceId(sourceKind = 'source') {
+  pptUploadSequence += 1
+  return `${asText(sourceKind) || 'source'}-upload:${Date.now()}:${pptUploadSequence}`
+}
 const PPT_AUTO_PACKAGE_DEFINITIONS = Object.freeze([
   {
     key: 'poi-evidence',
@@ -268,7 +274,7 @@ export function createAgentPptPlanningTabMethods() {
       const tab = getAnalysisWorkspaceTabsFromState(tabs).find((item) => asText(item && item.id) === targetId) || null
       return createPptPlanningState(tab && tab.pptPlanningState)
     },
-    buildAgentPptPlanningCurrent() {
+    buildAgentPptPlanningCurrent({ includeRawData = true } = {}) {
       const siteSelectionScope = typeof this.normalizeAgentSiteSelectionScope === 'function'
         ? this.normalizeAgentSiteSelectionScope()
         : {}
@@ -322,8 +328,8 @@ export function createAgentPptPlanningTabMethods() {
       return {
         scope,
         datasets: {
-          poi: { items: cloneArray(this.allPoisDetails), count: poiTotal },
-          h3: { features: cloneArray(this.h3AnalysisGridFeatures), count: h3Count },
+          poi: { items: includeRawData ? cloneArray(this.allPoisDetails) : [], count: poiTotal },
+          h3: { features: includeRawData ? cloneArray(this.h3AnalysisGridFeatures) : [], count: h3Count },
           population: cloneObject(this.populationOverview || {}),
           nightlight: nightlightAnalysis,
           road: cloneObject(this.roadSyntaxSummary || {}),
@@ -331,7 +337,7 @@ export function createAgentPptPlanningTabMethods() {
         analysis: {
           poi_h3: {
             summary: cloneObject(this.h3AnalysisSummary || {}),
-            features: cloneArray(this.h3AnalysisGridFeatures),
+            features: includeRawData ? cloneArray(this.h3AnalysisGridFeatures) : [],
           },
           population: cloneObject(this.populationOverview || {}),
           nightlight: nightlightAnalysis,
@@ -357,15 +363,15 @@ export function createAgentPptPlanningTabMethods() {
         },
       }
     },
-    buildAgentPptPlanningSystemSourceContext() {
-      return this.buildAgentPptPlanningCurrent()
+    buildAgentPptPlanningSystemSourceContext(options = {}) {
+      return this.buildAgentPptPlanningCurrent(options)
     },
-    mergeAgentPptPlanningSystemSources(state = {}) {
+    mergeAgentPptPlanningSystemSources(state = {}, { preservePreviousPayload = true, includeRawData = true } = {}) {
       const normalizedState = createPptPlanningState(state)
       const context = this.buildAgentPptPlanningApiContext()
       const areaId = asText(context.areaId || context.area_id)
       const previousById = new Map(cloneArray(normalizedState.sources).map((item) => [asText(item.id), item]))
-      const systemSources = createPptSystemSources(this.buildAgentPptPlanningSystemSourceContext()).map((source) => {
+      const systemSources = createPptSystemSources(this.buildAgentPptPlanningSystemSourceContext({ includeRawData })).map((source) => {
         const previous = previousById.get(asText(source.id))
         if (
           previous
@@ -376,18 +382,19 @@ export function createAgentPptPlanningTabMethods() {
         ) {
           const previousMeta = cloneObject(previous.meta)
           const sourceMeta = cloneObject(source.meta)
-          const preservePreviousPayload = asText(source.status) !== 'ready'
+          const keepPreviousPayload = preservePreviousPayload && asText(source.status) !== 'ready'
+          if (!preservePreviousPayload && asText(source.status) !== 'ready') return source
           return {
             ...source,
             title: asText(previous.title) || source.title,
             status: asText(source.status) === 'ready' ? source.status : previous.status,
             selected: !!previous.selected,
             meta: {
-              ...(preservePreviousPayload ? sourceMeta : previousMeta),
-              ...(preservePreviousPayload ? previousMeta : sourceMeta),
-              aiPayload: preservePreviousPayload ? previousMeta.aiPayload : sourceMeta.aiPayload,
-              ai_payload: preservePreviousPayload ? previousMeta.ai_payload : sourceMeta.ai_payload,
-              transport: preservePreviousPayload ? previousMeta.transport : sourceMeta.transport,
+              ...(keepPreviousPayload ? sourceMeta : previousMeta),
+              ...(keepPreviousPayload ? previousMeta : sourceMeta),
+              aiPayload: keepPreviousPayload ? previousMeta.aiPayload : sourceMeta.aiPayload,
+              ai_payload: keepPreviousPayload ? previousMeta.ai_payload : sourceMeta.ai_payload,
+              transport: keepPreviousPayload ? previousMeta.transport : sourceMeta.transport,
               areaId,
             },
           }
@@ -396,11 +403,14 @@ export function createAgentPptPlanningTabMethods() {
       })
       return this.getAgentPptPlanningStateWithPackagePlaceholders(mergePptPlanningSources(normalizedState, systemSources), areaId)
     },
-    getAgentPptPlanningStateWithSystemSources() {
-      return this.mergeAgentPptPlanningSystemSources(this.getAgentActivePptPlanningState())
+    getAgentPptPlanningStateWithSystemSources(options = {}) {
+      return this.mergeAgentPptPlanningSystemSources(this.getAgentActivePptPlanningState(), options)
     },
     getAgentAnalysisSourceState() {
-      return this.getAgentPptPlanningStateWithSystemSources()
+      return this.getAgentPptPlanningStateWithSystemSources({
+        preservePreviousPayload: false,
+        includeRawData: false,
+      })
     },
     getAgentPptPlanningTabStateWithSystemSources(tabId = '') {
       return this.mergeAgentPptPlanningSystemSources(this.getAgentPptPlanningTabState(tabId))
@@ -765,20 +775,36 @@ export function createAgentPptPlanningTabMethods() {
         },
       }
     },
-    async uploadAgentPptPlanningDocumentSource(file) {
+    async uploadAgentPptPlanningDocumentSource(file, documentRole) {
       if (!file) return
+      const placeholderSourceId = createPptUploadSourceId('document')
+      const uploadDocument = { file_name: asText(file.name) || '文档资料', document_role: documentRole }
+      this.updateAgentActivePptPlanningState(upsertPptDocumentSource(
+        this.getAgentPptPlanningStateWithSystemSources(),
+        uploadDocument,
+        {
+          sourceId: placeholderSourceId,
+          status: 'generating',
+          label: '上传中',
+          documentRole,
+          uploadPlaceholder: true,
+        },
+      ))
       let document = null
       try {
-        document = await uploadDocumentSource(file, file.name || '')
+        document = await uploadDocumentSource(file, file.name || '', documentRole)
         const documentId = asText(document && document.id)
         if (documentId) {
           this.updateAgentActivePptPlanningState(upsertPptDocumentSource(
             this.getAgentPptPlanningStateWithSystemSources(),
             document,
-            { status: 'generating', label: '整理中' },
+            {
+              previousSourceId: placeholderSourceId,
+              status: 'generating',
+              label: '整理中',
+              documentRole,
+            },
           ))
-        }
-        if (documentId) {
           const parseJob = await this.requestAgentPptPlanningDocumentParse(documentId)
           await waitForPptPlanningJob(parseJob && parseJob.job_id)
           this.updateAgentActivePptPlanningState(upsertPptDocumentSource(
@@ -787,19 +813,26 @@ export function createAgentPptPlanningTabMethods() {
             {
               status: 'ready',
               label: 'PageIndex 已生成',
+              documentRole,
             },
           ))
         }
         await this.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
       } catch (error) {
         const documentId = asText(document && document.id)
-        if (documentId) {
-          this.updateAgentActivePptPlanningState(upsertPptDocumentSource(
-            this.getAgentPptPlanningStateWithSystemSources(),
-            document,
-            { status: 'failed', label: '整理失败' },
-          ))
-        }
+        const failedDocument = documentId ? document : uploadDocument
+        this.updateAgentActivePptPlanningState(upsertPptDocumentSource(
+          this.getAgentPptPlanningStateWithSystemSources(),
+          failedDocument,
+          {
+            sourceId: documentId ? '' : placeholderSourceId,
+            previousSourceId: documentId ? placeholderSourceId : '',
+            status: 'failed',
+            label: documentId ? '整理失败' : '上传失败',
+            documentRole,
+            uploadPlaceholder: !documentId,
+          },
+        ))
         this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'))
       }
     },
@@ -809,6 +842,19 @@ export function createAgentPptPlanningTabMethods() {
       const areaId = asText(context.areaId || context.area_id)
       const activeTab = this.getAgentActiveTopTab()
       const conversationId = asText(activeTab && activeTab.id)
+      const placeholderSourceId = createPptUploadSourceId('image')
+      const uploadAttachment = { filename: asText(file.name) || '图片来源', mime_type: asText(file.type) }
+      this.updateAgentActivePptPlanningState(upsertPptImageSource(
+        this.getAgentPptPlanningStateWithSystemSources(),
+        uploadAttachment,
+        {
+          sourceId: placeholderSourceId,
+          status: 'generating',
+          label: '上传中',
+          conversationId,
+          uploadPlaceholder: true,
+        },
+      ))
       let attachment = null
       try {
         attachment = await uploadImageSource(file, conversationId, areaId)
@@ -816,18 +862,23 @@ export function createAgentPptPlanningTabMethods() {
           this.updateAgentActivePptPlanningState(upsertPptImageSource(
             this.getAgentPptPlanningStateWithSystemSources(),
             attachment,
-            { status: 'generating', label: '图片解析中', conversationId },
+            { previousSourceId: placeholderSourceId, status: 'generating', label: '图片解析中', conversationId },
           ))
         }
         await this.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
       } catch (error) {
-        if (attachment) {
-          this.updateAgentActivePptPlanningState(upsertPptImageSource(
-            this.getAgentPptPlanningStateWithSystemSources(),
-            attachment,
-            { status: 'failed', label: '图片解析失败', conversationId },
-          ))
-        }
+        this.updateAgentActivePptPlanningState(upsertPptImageSource(
+          this.getAgentPptPlanningStateWithSystemSources(),
+          attachment || uploadAttachment,
+          {
+            sourceId: attachment ? '' : placeholderSourceId,
+            previousSourceId: attachment ? placeholderSourceId : '',
+            status: 'failed',
+            label: attachment ? '图片解析失败' : '上传失败',
+            conversationId,
+            uploadPlaceholder: !attachment,
+          },
+        ))
         this.updateAgentActivePptPlanningState(setPptGenerationError(this.getAgentPptPlanningStateWithSystemSources(), error && error.message, 'source_refresh'))
       }
     },

@@ -161,6 +161,7 @@ async def _stream_chat_completion(
     headers: Dict[str, str],
     request_body: Dict[str, Any],
     emit: LoopEmit | None = None,
+    content_emit: LoopEmit | None = None,
     reasoning_id: str = "llm-reasoning",
     phase: str = "executing",
     title: str = "模型思考",
@@ -217,6 +218,11 @@ async def _stream_chat_completion(
             content_delta = delta.get("content")
             if isinstance(content_delta, str) and content_delta:
                 content_parts.append(content_delta)
+                await _maybe_emit(
+                    content_emit,
+                    "content_delta",
+                    {"delta": content_delta},
+                )
             for raw_call in delta.get("tool_calls") or []:
                 _merge_tool_call_delta(tool_call_accumulator, raw_call)
 

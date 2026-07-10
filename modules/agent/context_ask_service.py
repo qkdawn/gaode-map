@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import Any, Dict
+from typing import Any, AsyncIterator, Dict, Tuple
 
 import httpx
 
 from .context_ask_compaction import as_text, compact_items, compact_value, merge_unique
 from .context_ask_datasets import build_scoped_dataset_context
-from .context_ask_prompts import CONTEXT_ASK_SYSTEM_PROMPT
+from .context_ask_prompts import CONTEXT_ASK_FAST_SYSTEM_PROMPT, CONTEXT_ASK_SYSTEM_PROMPT
 from .providers.client import get_llm_provider_client, is_llm_enabled
 from .schemas import AgentContextAskRequest, AgentContextAskResponse, ContextAskTarget
 from .selected_sources import (
@@ -37,7 +38,7 @@ def _compact_target(target: ContextAskTarget) -> Dict[str, Any]:
     data = target.model_dump(mode="json")
     data["summary"] = as_text(data.get("summary"))[:1200]
     data["evidence"] = compact_items(list(target.evidence or []), limit=6)
-    data["payload"] = compact_value(target.payload, depth=3, list_limit=6, string_limit=400)
+    data["payload"] = compact_value(target.payload, depth=5, list_limit=6, string_limit=400)
     return data
 
 
@@ -141,6 +142,90 @@ def _ai_failure_or_fallback(
     return _fallback_answer(question, target, warning)
 
 
+def _response_support(target: ContextAskTarget, scoped_dataset_context: Dict[str, Any]) -> Tuple[list[Any], list[Any], list[str]]:
+    scoped_evidence = list(scoped_dataset_context.get("evidence_nodes") or [])
+    scoped_citations = list(scoped_dataset_context.get("citations") or [])
+    scoped_warnings = [as_text(item) for item in list(scoped_dataset_context.get("warnings") or []) if as_text(item)]
+    evidence = compact_items(merge_unique(list(target.evidence or []) + scoped_evidence))
+    citations = merge_unique(list(target.artifact_refs or []) + scoped_citations)
+    return evidence, citations, merge_unique(scoped_warnings)
+
+
+def _fast_messages(payload: AgentContextAskRequest, scoped_dataset_context: Dict[str, Any]) -> list[Dict[str, str]]:
+    return [
+        {"role": "system", "content": CONTEXT_ASK_FAST_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps(
+                _build_user_payload(payload, scoped_dataset_context),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        },
+    ]
+
+
+async def stream_context_ask(payload: AgentContextAskRequest, *, tool_warning: str = "") -> AsyncIterator[tuple[str, Dict[str, Any]]]:
+    question = as_text(payload.question)
+    if not question:
+        yield "error", {"error": "invalid_question", "message": "question 不能为空"}
+        return
+
+    target = payload.target
+    if not as_text(target.title):
+        target.title = "当前上下文"
+    if not is_llm_enabled():
+        yield "error", {"error": "ai_unavailable", "message": "AI 未启用，无法回答。"}
+        return
+    client = get_llm_provider_client()
+    if not client:
+        yield "error", {"error": "ai_unavailable", "message": "AI provider 未配置，无法回答。"}
+        return
+
+    scoped_dataset_context = build_scoped_dataset_context(payload)
+    if tool_warning:
+        scoped_dataset_context["warnings"] = merge_unique(list(scoped_dataset_context.get("warnings") or []) + [tool_warning])
+    evidence, citations, warnings = _response_support(target, scoped_dataset_context)
+    queue: asyncio.Queue[tuple[str, Dict[str, Any]] | None] = asyncio.Queue()
+
+    async def emit_delta(delta: str) -> None:
+        if delta:
+            await queue.put(("answer_delta", {"delta": delta}))
+
+    async def produce() -> None:
+        try:
+            answer = as_text(await client.stream_text(messages=_fast_messages(payload, scoped_dataset_context), emit_delta=emit_delta))
+            if not answer:
+                raise ValueError("ai_invalid_response")
+            await queue.put((
+                "complete",
+                {
+                    "answer": answer,
+                    "evidence": evidence,
+                    "citations": citations,
+                    "warnings": warnings,
+                },
+            ))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await queue.put(("error", {"error": "ai_call_failed", "message": _format_ai_error(exc)}))
+        finally:
+            await queue.put(None)
+
+    producer = asyncio.create_task(produce())
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+    finally:
+        if not producer.done():
+            producer.cancel()
+        await asyncio.gather(producer, return_exceptions=True)
+
+
 async def answer_context_ask(payload: AgentContextAskRequest, *, tool_warning: str = "") -> AgentContextAskResponse:
     question = as_text(payload.question)
     if not question:
@@ -212,18 +297,15 @@ async def answer_context_ask(payload: AgentContextAskRequest, *, tool_warning: s
             target=target,
         )
 
-    scoped_evidence = list(scoped_dataset_context.get("evidence_nodes") or [])
-    scoped_citations = list(scoped_dataset_context.get("citations") or [])
-    scoped_warnings = [as_text(item) for item in list(scoped_dataset_context.get("warnings") or []) if as_text(item)]
-
-    response_evidence = list(data.get("evidence") or target.evidence or []) + scoped_evidence
-    response_citations = list(data.get("citations") or target.artifact_refs or []) + scoped_citations
-    response_warnings = [as_text(item) for item in list(data.get("warnings") or []) if as_text(item)] + scoped_warnings
+    response_evidence, response_citations, scoped_warnings = _response_support(target, scoped_dataset_context)
+    response_evidence = compact_items(merge_unique(list(data.get("evidence") or []) + response_evidence))
+    response_citations = merge_unique(list(data.get("citations") or []) + response_citations)
+    response_warnings = merge_unique([as_text(item) for item in list(data.get("warnings") or []) if as_text(item)] + scoped_warnings)
 
     return AgentContextAskResponse(
         status="success",
         answer=answer,
-        evidence=compact_items(merge_unique(response_evidence)),
-        citations=merge_unique(response_citations),
-        warnings=merge_unique(response_warnings),
+        evidence=response_evidence,
+        citations=response_citations,
+        warnings=response_warnings,
     )

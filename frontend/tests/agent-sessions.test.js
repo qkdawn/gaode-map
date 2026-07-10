@@ -58,7 +58,7 @@ test('analysis quick ask request uses selected source context directly', () => {
   const ctx = {
     activeAgentSessionId: 'agent-1',
     getCurrentAgentHistoryId: () => 'history-1',
-    buildAgentAnalysisSnapshot: () => ({ context: { history_id: 'history-1' } }),
+    buildAgentAnalysisSnapshot: () => ({ context: { history_id: 'history-1' }, frontend_analysis: { huge: ['raw'] }, h3: { summary: { grid_count: 8 }, charts: { raw: true } } }),
     getAgentAnalysisSourceState: () => ({
       sources: [{
         id: 'document:doc-1',
@@ -85,6 +85,8 @@ test('analysis quick ask request uses selected source context directly', () => {
   assert.equal(request.conversation_id, 'agent-1')
   assert.equal(request.history_id, 'history-1')
   assert.equal(request.require_ai, true)
+  assert.deepEqual(request.analysis_snapshot.h3, { summary: { grid_count: 8 } })
+  assert.equal(Object.prototype.hasOwnProperty.call(request.analysis_snapshot, 'frontend_analysis'), false)
   assert.equal(request.target.type, 'analysis_sources')
   assert.deepEqual(request.target.artifact_refs, ['document:doc-1'])
   assert.equal(selectedSources.sources[0].source_id, 'document:doc-1')
@@ -4731,12 +4733,13 @@ test('composer outside analysis tab opens analysis quick answer instead of main 
   const calls = []
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, body: JSON.parse(options.body || '{}') })
-    return {
-      ok: true,
-      async json() {
-        return { status: 'success', answer: '范围证据可用于 PPT。', evidence: [], citations: [], warnings: [] }
+    return createSseResponse([
+      { type: 'answer_delta', payload: { delta: '范围证据可用于 PPT。' } },
+      {
+        type: 'complete',
+        payload: { answer: '范围证据可用于 PPT。', evidence: [], citations: [], warnings: [] },
       },
-    }
+    ])
   }
 
   try {
@@ -4788,12 +4791,13 @@ test('ppt planning quick composer uses lightweight ask without agent tool turn',
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, body: JSON.parse(options.body || '{}') })
-    return {
-      ok: true,
-      async json() {
-        return { status: 'success', answer: '范围证据可用于 PPT。', evidence: [], citations: [], warnings: [] }
+    return createSseResponse([
+      { type: 'answer_delta', payload: { delta: '范围证据可用于 PPT。' } },
+      {
+        type: 'complete',
+        payload: { answer: '范围证据可用于 PPT。', evidence: [], citations: [], warnings: [] },
       },
-    }
+    ])
   }
 
   try {
@@ -4807,7 +4811,7 @@ test('ppt planning quick composer uses lightweight ask without agent tool turn',
   assert.equal(ctx.agentTabs.activeTabId, pptId)
   assert.equal(ctx.getAgentActiveTopTab().kind, 'analysis')
   assert.deepEqual(ctx.agentTabs.followupTabs, [])
-  assert.equal(calls[0].url, '/api/v1/analysis/agent/context-ask')
+  assert.equal(calls[0].url, '/api/v1/analysis/agent/context-ask/stream')
   assert.equal(calls[0].body.require_ai, true)
   assert.equal(calls[0].body.target.type, 'analysis_sources')
   assert.equal(calls[0].body.target.source, 'analysis')

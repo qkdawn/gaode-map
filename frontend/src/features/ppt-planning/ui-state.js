@@ -2402,7 +2402,17 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
       ? asText(options.count) ? `PageIndex 章节 ${Number(options.count) || 0} 个` : 'PageIndex 已生成'
       : status === 'generating' ? '整理中' : '待生成')
   const previousById = new Map(normalized.sources.map((item) => [asText(item.id), item]))
-  const previous = previousById.get(sourceId)
+  const previousSourceId = asText(options.previousSourceId || options.previous_source_id)
+  const previous = previousById.get(sourceId) || (previousSourceId ? previousById.get(previousSourceId) : null)
+  const documentRole = asText(
+    options.documentRole
+      || options.document_role
+      || document.document_role
+      || document.documentRole
+      || (document.meta && document.meta.document && document.meta.document.document_role)
+      || (previous && previous.meta && previous.meta.document && previous.meta.document.document_role)
+      || (previous && previous.meta && (previous.meta.aiPayload || previous.meta.ai_payload) && (previous.meta.aiPayload || previous.meta.ai_payload).document_role),
+  )
   const indexPreview = cloneArray(options.documentIndexPreview || options.document_index_preview || (previous && previous.meta && previous.meta.document_index_preview))
   const evidence = ready ? indexPreview.slice(0, 40).map((node, index) => {
     const item = cloneObject(node)
@@ -2431,7 +2441,9 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
     title,
     source_kind: 'document',
     sourceKind: 'document',
-    included: evidence.length ? ['evidence'] : [],
+    document_role: documentRole,
+    documentRole,
+    included: ['document_identity'],
     scope: null,
     metrics: [],
     metric_gaps: [],
@@ -2460,7 +2472,14 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
       ...cloneObject(previous && previous.meta),
       label,
       sourceKind: 'document',
+      uploadPlaceholder: !!options.uploadPlaceholder,
       documentId,
+      document_role: documentRole,
+      document: {
+        ...cloneObject(previous && previous.meta && previous.meta.document),
+        id: documentId,
+        document_role: documentRole,
+      },
       fileName: asText(document.file_name || document.fileName),
       count: Number(options.count ?? (previous && previous.meta && previous.meta.count) ?? 0) || 0,
       document_index_preview: indexPreview,
@@ -2469,13 +2488,20 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
       transport,
     },
   })
-  const sources = normalized.sources.some((source) => asText(source.id) === sourceId)
-    ? normalized.sources.map((source) => (asText(source.id) === sourceId ? nextSource : source))
-    : [...normalized.sources, nextSource]
+  const replacementIds = new Set([sourceId, previousSourceId].filter(Boolean))
+  const replacementIndex = normalized.sources.findIndex((source) => replacementIds.has(asText(source.id)))
+  const sources = normalized.sources.filter((source) => !replacementIds.has(asText(source.id)))
+  sources.splice(replacementIndex >= 0 ? replacementIndex : sources.length, 0, nextSource)
+  const sourceGroups = normalized.sourceGroups.map((group) => ({
+    ...group,
+    sourceIds: uniqueText(cloneArray(group.sourceIds).map((id) => (asText(id) === previousSourceId ? sourceId : id))),
+  }))
+  const ungroupedSourceIds = uniqueText(normalized.ungroupedSourceIds.map((id) => (asText(id) === previousSourceId ? sourceId : id)))
   return createPptPlanningState({
     ...normalized,
     sources,
-    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources, normalized.ungroupedSourceIds),
+    sourceGroups: reconcilePptSourceGroups(sourceGroups, sources, ungroupedSourceIds),
+    ungroupedSourceIds,
     spec: syncSpecSourceIds(normalized, sources),
     generationError: '',
     generationErrorSource: '',
@@ -2491,8 +2517,9 @@ export function upsertPptImageSource(state = {}, attachment = {}, options = {}) 
   const ready = status === 'ready'
   const title = asText(attachment.filename || attachment.fileName || options.title) || '图片来源'
   const mimeType = asText(attachment.mime_type || attachment.mimeType)
+  const previousSourceId = asText(options.previousSourceId || options.previous_source_id)
   const previousById = new Map(normalized.sources.map((item) => [asText(item.id), item]))
-  const previous = previousById.get(sourceId)
+  const previous = previousById.get(sourceId) || previousById.get(previousSourceId)
   const previousPayload = cloneObject(previous && previous.meta && (previous.meta.aiPayload || previous.meta.ai_payload))
   const aiPayload = previousPayload.version === 'ppt_ai_input_block_v1'
     ? previousPayload
@@ -2534,6 +2561,7 @@ export function upsertPptImageSource(state = {}, attachment = {}, options = {}) 
       ...cloneObject(previous && previous.meta),
       label: asText(attachment.summary || options.label) || (ready ? '图片解析完成' : '图片解析中'),
       sourceKind: 'image',
+      uploadPlaceholder: !!options.uploadPlaceholder,
       attachmentId,
       conversationId: asText(attachment.conversation_id || attachment.conversationId || options.conversationId),
       fileName: title,
@@ -2551,13 +2579,20 @@ export function upsertPptImageSource(state = {}, attachment = {}, options = {}) 
       transport: evidenceCount > 0 ? createPptTransportFromAiPayload(aiPayload) : cloneObject(previous && previous.meta && previous.meta.transport),
     },
   })
-  const sources = normalized.sources.some((source) => asText(source.id) === sourceId)
-    ? normalized.sources.map((source) => (asText(source.id) === sourceId ? nextSource : source))
-    : [...normalized.sources, nextSource]
+  const replacementIds = new Set([sourceId, previousSourceId].filter(Boolean))
+  const replacementIndex = normalized.sources.findIndex((source) => replacementIds.has(asText(source.id)))
+  const sources = normalized.sources.filter((source) => !replacementIds.has(asText(source.id)))
+  sources.splice(replacementIndex >= 0 ? replacementIndex : sources.length, 0, nextSource)
+  const sourceGroups = normalized.sourceGroups.map((group) => ({
+    ...group,
+    sourceIds: uniqueText(cloneArray(group.sourceIds).map((id) => (asText(id) === previousSourceId ? sourceId : id))),
+  }))
+  const ungroupedSourceIds = uniqueText(normalized.ungroupedSourceIds.map((id) => (asText(id) === previousSourceId ? sourceId : id)))
   return createPptPlanningState({
     ...normalized,
     sources,
-    sourceGroups: reconcilePptSourceGroups(normalized.sourceGroups, sources, normalized.ungroupedSourceIds),
+    sourceGroups: reconcilePptSourceGroups(sourceGroups, sources, ungroupedSourceIds),
+    ungroupedSourceIds,
     spec: syncSpecSourceIds(normalized, sources),
     generationError: '',
     generationErrorSource: '',

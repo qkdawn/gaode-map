@@ -43,6 +43,30 @@ def _payload(question="为什么这么判断？"):
     }
 
 
+
+def test_context_ask_stream_returns_incremental_answer_and_complete_event(monkeypatch):
+    async def fake_stream_context_ask(_payload):
+        yield "answer_delta", {"delta": "第一段"}
+        yield "answer_delta", {"delta": "第二段"}
+        yield "complete", {
+            "answer": "第一段第二段",
+            "evidence": [{"id": "node-1"}],
+            "citations": ["current:scope"],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(agent_router_module, "stream_context_ask", fake_stream_context_ask)
+
+    with TestClient(_build_test_app()) as client:
+        response = client.post("/api/v1/analysis/agent/context-ask/stream", json=_payload())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.text.count("event: answer_delta") == 2
+    assert "event: complete" in response.text
+    assert "第一段第二段" in response.text
+
+
 def test_context_ask_returns_fallback_when_ai_disabled(monkeypatch):
     import modules.agent.context_ask_service as service
 
@@ -447,7 +471,8 @@ def test_context_ask_enriches_analysis_road_sources_with_scoped_dataset(monkeypa
     assert "current:dataset:road" in scoped["datasets"]
     road_context = scoped["datasets"]["current:dataset:road"]
     assert road_context["aggregate"]["rows"][0]["avg_connectivity"] == 2
-    assert len(road_context["examples"]) == 4
+    assert len(road_context["examples"]) == 1
+    assert scoped["query_count"] == 2
     assert road_context["examples"][0]["evidence_nodes"][0]["citation"] == "当前范围路网，2024 年"
     assert data["evidence"][0]["source_id"] == "current:dataset:road"
     assert data["citations"] == ["当前范围路网，2024 年"]
@@ -468,7 +493,7 @@ def test_context_ask_warns_when_analysis_dataset_source_has_no_history_id(monkey
                 "warnings": [],
             }
 
-    payload = _payload()
+    payload = _payload(question="人口情况如何？")
     payload["history_id"] = ""
     payload["require_ai"] = True
     payload["target"] = {
@@ -476,7 +501,7 @@ def test_context_ask_warns_when_analysis_dataset_source_has_no_history_id(monkey
         "id": "analysis-selected-sources",
         "title": "已选分析来源",
         "source": "analysis",
-        "payload": {"sources": [{"source_id": "current:dataset:population"}]},
+        "payload": {"sources": [{"source_id": "current:dataset:population", "selected": True}]},
     }
 
     monkeypatch.setattr(service, "is_llm_enabled", lambda: True)

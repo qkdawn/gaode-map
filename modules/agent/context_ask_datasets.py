@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 from modules.scope_datasets import ScopeDatasetService
 
@@ -13,79 +13,124 @@ from .selected_sources import (
 )
 
 
-DATASET_FIELDS = {
-    "current:dataset:poi": ["category", "type", "source", "year"],
-    "current:dataset:h3": ["poi_count", "density", "lq"],
-    "current:dataset:population": ["value", "population", "density"],
-    "current:dataset:nightlight": ["value", "radiance"],
-    "current:dataset:road": ["choice", "integration", "connectivity", "depth"],
-}
+_DATASET_KEYWORDS: Sequence[tuple[str, Sequence[str]]] = (
+    ("current:dataset:poi", ("poi", "业态", "商业", "餐饮", "设施", "配套", "供需", "店铺", "门店")),
+    ("current:dataset:h3", ("h3", "网格", "热点", "集聚", "热区", "冷区")),
+    ("current:dataset:population", ("人口", "客群", "年龄", "常住", "承载", "人口密度")),
+    ("current:dataset:nightlight", ("夜光", "夜间", "夜生活", "夜经济", "夜间活力")),
+    ("current:dataset:road", ("路网", "交通", "可达", "连通", "整合度", "选择度", "道路", "街巷", "通行")),
+)
+_NEGATIVE_TERMS = ("差", "低", "弱", "不足", "短板", "问题", "缺口", "不便", "不佳")
 
 
-def _metric_specs(fields: List[str]) -> List[Dict[str, str]]:
-    specs: List[Dict[str, str]] = [{"op": "count", "field": "*", "as": "count"}]
-    for field in fields:
-        specs.extend([
-            {"op": "min", "field": field, "as": f"min_{field}"},
-            {"op": "avg", "field": field, "as": f"avg_{field}"},
-            {"op": "max", "field": field, "as": f"max_{field}"},
-        ])
-    return specs
+def _empty_context(*, planned_source_ids: List[str] | None = None, warnings: List[str] | None = None) -> Dict[str, Any]:
+    return {
+        "datasets": {},
+        "warnings": list(warnings or []),
+        "evidence_nodes": [],
+        "citations": [],
+        "planned_source_ids": list(planned_source_ids or []),
+        "query_count": 0,
+    }
 
 
-def _query_examples(service: ScopeDatasetService, *, history_id: str, source_id: str, field: str, direction: str, filters: Dict[str, Any] | None = None) -> Dict[str, Any]:
-    return service.query_scope_dataset(
-        history_id=history_id,
-        source_id=source_id,
-        filters=filters or {},
-        sort={"field": field, "direction": direction},
-        limit=5,
-    )
+def _plan_dataset_sources(question: str, selected_source_ids: List[str], *, limit: int = 2) -> List[str]:
+    """Select only datasets explicitly needed by the question.
+
+    Generic project positioning/update questions intentionally return no detailed dataset
+    plan: their fast-path evidence should come from the project dossier and the compact
+    source metrics already sent by the frontend.
+    """
+    text = as_text(question).lower()
+    if not text:
+        return []
+    selected = set(selected_source_ids)
+    ranked: List[tuple[int, int, str]] = []
+    for source_id, keywords in _DATASET_KEYWORDS:
+        if source_id not in selected:
+            continue
+        positions = [text.find(keyword.lower()) for keyword in keywords if keyword.lower() in text]
+        if not positions:
+            continue
+        ranked.append((min(positions), -len(positions), source_id))
+    ranked.sort()
+    return [source_id for _, _, source_id in ranked[: max(0, int(limit))]]
 
 
-def _dataset_examples(service: ScopeDatasetService, *, history_id: str, source_id: str) -> List[Dict[str, Any]]:
-    if source_id == "current:dataset:poi":
-        return [
-            service.query_scope_dataset(history_id=history_id, source_id=source_id, limit=8),
-        ]
+def _target_field(source_id: str, question: str) -> str:
+    text = as_text(question).lower()
+    if source_id == "current:dataset:h3":
+        return "poi_count" if "poi" in text or "数量" in text else "density"
+    if source_id == "current:dataset:population":
+        return "density" if "密度" in text else "population"
+    if source_id == "current:dataset:nightlight":
+        return "radiance"
     if source_id == "current:dataset:road":
-        examples = []
-        for field, direction in [("connectivity", "asc"), ("integration", "asc"), ("depth", "desc"), ("choice", "asc")]:
-            examples.append(
-                _query_examples(
-                    service,
-                    history_id=history_id,
-                    source_id=source_id,
-                    field=field,
-                    direction=direction,
-                    filters={"feature_kind": "road"},
-                )
-            )
-        return examples
-
-    fields = DATASET_FIELDS.get(source_id, [])
-    examples = []
-    for field in fields[:2]:
-        examples.append(_query_examples(service, history_id=history_id, source_id=source_id, field=field, direction="desc"))
-        examples.append(_query_examples(service, history_id=history_id, source_id=source_id, field=field, direction="asc"))
-    if not examples:
-        examples.append(service.query_scope_dataset(history_id=history_id, source_id=source_id, limit=8))
-    return examples
+        if "选择" in text:
+            return "choice"
+        if "连通" in text:
+            return "connectivity"
+        if "深度" in text:
+            return "depth"
+        return "integration"
+    return ""
 
 
-def _dataset_aggregate(service: ScopeDatasetService, *, history_id: str, source_id: str) -> Dict[str, Any]:
+def _query_direction(source_id: str, field: str, question: str) -> str:
+    text = as_text(question).lower()
+    negative = any(term in text for term in _NEGATIVE_TERMS)
+    if field == "depth":
+        return "desc" if negative else "asc"
+    return "asc" if negative else "desc"
+
+
+def _dataset_example(
+    service: ScopeDatasetService,
+    *,
+    history_id: str,
+    source_id: str,
+    question: str,
+) -> Dict[str, Any]:
+    if source_id == "current:dataset:poi":
+        return service.query_scope_dataset(history_id=history_id, source_id=source_id, limit=5)
+    field = _target_field(source_id, question)
+    kwargs: Dict[str, Any] = {
+        "history_id": history_id,
+        "source_id": source_id,
+        "sort": {"field": field, "direction": _query_direction(source_id, field, question)},
+        "limit": 5,
+    }
+    if source_id == "current:dataset:road":
+        kwargs["filters"] = {"feature_kind": "road"}
+    return service.query_scope_dataset(**kwargs)
+
+
+def _dataset_aggregate(
+    service: ScopeDatasetService,
+    *,
+    history_id: str,
+    source_id: str,
+    question: str,
+) -> Dict[str, Any]:
     if source_id == "current:dataset:poi":
         return service.aggregate_scope_dataset(
             history_id=history_id,
             source_id=source_id,
             group_by="category",
             metrics=[{"op": "count", "field": "*", "as": "count"}],
-            top_k=12,
+            top_k=8,
+        )
+    field = _target_field(source_id, question)
+    metrics: List[Dict[str, str]] = [{"op": "count", "field": "*", "as": "count"}]
+    if field:
+        metrics.extend(
+            {"op": op, "field": field, "as": f"{op}_{field}"}
+            for op in ("min", "avg", "max")
         )
     return service.aggregate_scope_dataset(
         history_id=history_id,
         source_id=source_id,
-        metrics=_metric_specs(DATASET_FIELDS.get(source_id, [])),
+        metrics=metrics,
         top_k=1,
     )
 
@@ -106,36 +151,34 @@ def _compact_dataset_query_result(result: Dict[str, Any]) -> Dict[str, Any]:
 def build_scoped_dataset_context(payload: AgentContextAskRequest) -> Dict[str, Any]:
     target = payload.target
     if not is_analysis_sources_type(target.type):
-        return {"datasets": {}, "warnings": [], "evidence_nodes": [], "citations": []}
+        return _empty_context()
 
     selected_source_ids = selected_dataset_source_ids_from_items(source_items_from_target(target))
-    if not selected_source_ids:
-        return {"datasets": {}, "warnings": [], "evidence_nodes": [], "citations": []}
+    planned_source_ids = _plan_dataset_sources(payload.question, selected_source_ids)
+    if not planned_source_ids:
+        return _empty_context()
 
     history_id = as_text(payload.history_id)
     if not history_id:
-        return {
-            "datasets": {},
-            "warnings": ["已选来源包含当前范围数据源，但缺少 history_id，无法执行 scoped dataset 检索。"],
-            "evidence_nodes": [],
-            "citations": [],
-        }
+        return _empty_context(
+            planned_source_ids=planned_source_ids,
+            warnings=["问题需要当前范围明细数据，但缺少 history_id，无法执行 scoped dataset 检索。"],
+        )
 
     service = ScopeDatasetService()
     warnings: List[str] = []
     evidence_nodes: List[Dict[str, Any]] = []
     citations: List[Any] = []
     datasets: Dict[str, Any] = {}
+    query_count = 0
 
     try:
         listed = service.list_scope_datasets(history_id)
     except Exception as exc:
-        return {
-            "datasets": {},
-            "warnings": [f"scoped dataset 列表读取失败：{type(exc).__name__}"],
-            "evidence_nodes": [],
-            "citations": [],
-        }
+        return _empty_context(
+            planned_source_ids=planned_source_ids,
+            warnings=[f"scoped dataset 列表读取失败：{type(exc).__name__}"],
+        )
 
     available = {
         as_text(item.get("source_id")): item
@@ -144,37 +187,50 @@ def build_scoped_dataset_context(payload: AgentContextAskRequest) -> Dict[str, A
     }
     warnings.extend([as_text(item) for item in list(listed.get("warnings") or []) if as_text(item)])
 
-    for source_id in selected_source_ids:
+    for source_id in planned_source_ids:
         manifest = available.get(source_id)
         if not manifest or not int(manifest.get("record_count") or 0):
             warnings.append(f"{source_id} 当前没有可检索的范围明细数据。")
             continue
         try:
-            aggregate = _dataset_aggregate(service, history_id=history_id, source_id=source_id)
-            raw_examples = _dataset_examples(service, history_id=history_id, source_id=source_id)
-            examples = [_compact_dataset_query_result(item) for item in raw_examples]
+            aggregate = _dataset_aggregate(
+                service,
+                history_id=history_id,
+                source_id=source_id,
+                question=payload.question,
+            )
+            query_count += 1
+            raw_example = _dataset_example(
+                service,
+                history_id=history_id,
+                source_id=source_id,
+                question=payload.question,
+            )
+            query_count += 1
         except Exception as exc:
             warnings.append(f"{source_id} scoped dataset 检索失败：{type(exc).__name__}")
             continue
 
-        for result in raw_examples:
-            warnings.extend([as_text(item) for item in list(result.get("warnings") or []) if as_text(item)])
-            for node in list(result.get("evidence_nodes") or []):
-                if isinstance(node, dict):
-                    evidence_nodes.append(node)
-                    citation = node.get("citation")
-                    if citation not in (None, "", [], {}) and citation not in citations:
-                        citations.append(citation)
+        warnings.extend([as_text(item) for item in list(raw_example.get("warnings") or []) if as_text(item)])
+        for node in list(raw_example.get("evidence_nodes") or []):
+            if not isinstance(node, dict):
+                continue
+            evidence_nodes.append(node)
+            citation = node.get("citation")
+            if citation not in (None, "", [], {}) and citation not in citations:
+                citations.append(citation)
 
         datasets[source_id] = {
             "manifest": compact_value(manifest, depth=3, list_limit=8, string_limit=240),
-            "aggregate": compact_value(aggregate, depth=3, list_limit=12, string_limit=240),
-            "examples": examples,
+            "aggregate": compact_value(aggregate, depth=3, list_limit=8, string_limit=240),
+            "examples": [_compact_dataset_query_result(raw_example)],
         }
 
     return {
         "datasets": datasets,
         "warnings": sorted(set(warnings)),
-        "evidence_nodes": evidence_nodes[:20],
-        "citations": citations[:20],
+        "evidence_nodes": evidence_nodes[:10],
+        "citations": citations[:10],
+        "planned_source_ids": planned_source_ids,
+        "query_count": query_count,
     }

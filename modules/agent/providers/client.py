@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol
+import inspect
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
 import httpx
 
@@ -35,6 +36,15 @@ class LLMProviderClient(Protocol):
         *,
         messages: List[Dict[str, str]],
         temperature: float = 0.2,
+    ) -> str: ...
+
+    async def stream_text(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        emit_delta: Callable[[str], Any],
+        temperature: float = 0.1,
+        max_tokens: int = 900,
     ) -> str: ...
 
     async def chat_completion(
@@ -121,11 +131,12 @@ class OpenAICompatibleProviderClient:
         payload = await self.chat_completion(request_body=body)
         return extract_chat_completion_text(payload)
 
-    async def chat_completion(
+    async def _chat_completion(
         self,
         *,
         request_body: Dict[str, Any],
         emit=None,
+        content_emit=None,
         phase: str = "",
         title: str = "",
         reasoning_id: str = "",
@@ -147,11 +158,61 @@ class OpenAICompatibleProviderClient:
                 headers=headers,
                 request_body=body,
                 emit=emit,
+                content_emit=content_emit,
                 phase=phase,
                 title=title,
                 reasoning_id=reasoning_id,
                 enable_thinking=enable_thinking,
             )
+
+    async def chat_completion(
+        self,
+        *,
+        request_body: Dict[str, Any],
+        emit=None,
+        phase: str = "",
+        title: str = "",
+        reasoning_id: str = "",
+        enable_thinking: bool = True,
+    ) -> Dict[str, Any]:
+        return await self._chat_completion(
+            request_body=request_body,
+            emit=emit,
+            phase=phase,
+            title=title,
+            reasoning_id=reasoning_id,
+            enable_thinking=enable_thinking,
+        )
+
+    async def stream_text(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        emit_delta: Callable[[str], Any],
+        temperature: float = 0.1,
+        max_tokens: int = 900,
+    ) -> str:
+        from .chat_parser import extract_chat_completion_text
+
+        async def forward_delta(_event_type: str, payload: Dict[str, Any]) -> None:
+            delta = str(payload.get("delta") or "")
+            if not delta:
+                return
+            outcome = emit_delta(delta)
+            if inspect.isawaitable(outcome):
+                await outcome
+
+        payload = await self._chat_completion(
+            request_body={
+                "model": str(settings.ai_model or "").strip(),
+                "messages": messages,
+                "temperature": float(temperature),
+                "max_tokens": max(128, int(max_tokens)),
+            },
+            content_emit=forward_delta,
+            enable_thinking=False,
+        )
+        return extract_chat_completion_text(payload)
 
     async def health(self) -> bool:
         base_url = str(settings.ai_base_url or "").rstrip("/")

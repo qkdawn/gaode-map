@@ -1,6 +1,6 @@
 import { asText, cloneArray } from './normalizers.js'
 import { ANALYSIS_WORKSPACE_TAB_KIND } from './workspace-kinds.js'
-import { postContextAsk } from './context-ask-request.js'
+import { postContextAskStream } from './context-ask-request.js'
 import { buildAnalysisQuickAskRequest } from './analysis-quick-request.js'
 
 function writeAnalysisAskSessionState(ctx, patch = {}, options = {}) {
@@ -40,6 +40,25 @@ export function createAgentAnalysisAskMethods() {
         stage: asText(message.stage || 'answered'),
         messages: this.agentMessages,
         error: asText(message.error || ''),
+      }, { syncActive: true })
+    },
+    updateAgentAnalysisQuickAskPendingMessage(content = '', pendingId = '') {
+      const id = asText(pendingId)
+      if (!id) return
+      const messages = cloneArray(this.agentMessages)
+      const pendingIndex = messages.findIndex((item) => asText(item && item.id) === id)
+      if (pendingIndex < 0) return
+      messages.splice(pendingIndex, 1, {
+        id,
+        role: 'assistant',
+        content: String(content || ''),
+      })
+      this.agentMessages = messages
+      writeAnalysisAskSessionState(this, {
+        status: 'running',
+        stage: 'answered',
+        messages,
+        error: '',
       }, { syncActive: true })
     },
     replaceAgentAnalysisQuickAskPendingMessage(content = '', options = {}) {
@@ -118,9 +137,17 @@ export function createAgentAnalysisAskMethods() {
         error: '',
       }, { syncActive: true })
       try {
-        const data = await postContextAsk(request, { signal: controller ? controller.signal : undefined })
+        let streamedAnswer = ''
+        const data = await postContextAskStream(request, {
+          signal: controller ? controller.signal : undefined,
+          onDelta: (delta) => {
+            if (requestId !== Number(this.agentAnalysisQuickAskRequestId || 0)) return
+            streamedAnswer += String(delta || '')
+            this.updateAgentAnalysisQuickAskPendingMessage(streamedAnswer, pendingId)
+          },
+        })
         if (requestId !== Number(this.agentAnalysisQuickAskRequestId || 0)) return null
-        const answer = asText(data.answer)
+        const answer = asText(data.answer || streamedAnswer)
         if (!answer) throw new Error('ai_invalid_response')
         this.replaceAgentAnalysisQuickAskPendingMessage(answer, { pendingId })
         return { role: 'assistant', content: answer, evidence: cloneArray(data.evidence), citations: cloneArray(data.citations), warnings: cloneArray(data.warnings) }

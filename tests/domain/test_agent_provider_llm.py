@@ -10,6 +10,7 @@ import modules.agent.providers.langgraph_react as langgraph_react
 from modules.agent.providers.chat_parser import extract_json_object
 from modules.agent.providers.llm_provider import (
     _invoke_json_role,
+    _stream_chat_completion,
     generate_answer_output_with_llm,
     run_gate_with_llm,
 )
@@ -108,6 +109,41 @@ def _snapshot_with_scope() -> AnalysisSnapshot:
             ]
         }
     )
+
+
+
+def test_stream_chat_completion_forwards_content_deltas(monkeypatch):
+    requests = []
+    emitted = []
+    _mock_streams(
+        monkeypatch,
+        requests,
+        [
+            _completion_stream(
+                response_id="resp-fast-1",
+                content="快速答案",
+            )
+        ],
+    )
+
+    async def emit(event_type, payload):
+        emitted.append((event_type, payload))
+
+    async def run():
+        async with httpx.AsyncClient() as client:
+            return await _stream_chat_completion(
+                client=client,
+                base_url="https://example.test/v1",
+                headers={"Authorization": "Bearer test"},
+                request_body={"model": "test-model", "messages": []},
+                content_emit=emit,
+                enable_thinking=False,
+            )
+
+    payload = asyncio.run(run())
+
+    assert payload["choices"][0]["message"]["content"] == "快速答案"
+    assert emitted == [("content_delta", {"delta": "快速答案"})]
 
 
 def test_langgraph_react_deep_mode_disables_llm_timeout(monkeypatch):

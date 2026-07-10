@@ -45,6 +45,15 @@ def source_kind_from_item(item: Dict[str, Any]) -> str:
     return as_text(item.get("source_kind"))
 
 
+def document_role_from_item(item: Dict[str, Any]) -> str:
+    direct = as_text(item.get("document_role"))
+    if direct:
+        return direct
+    meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+    document = meta.get("document") if isinstance(meta.get("document"), dict) else {}
+    return as_text(document.get("document_role") or meta.get("document_role"))
+
+
 def evidence_nodes_from_item(item: Dict[str, Any]) -> List[Any]:
     nodes = item.get("evidence_nodes")
     if isinstance(nodes, list):
@@ -128,7 +137,10 @@ def source_records_from_items(items: List[Dict[str, Any]]) -> List[SourceRecord]
                     "evidence_count": len(evidence_nodes_from_item(item)),
                     "locator_summary": as_text(item.get("locator_summary")),
                     "availability": "selected",
-                    "meta": {"aiPayload": dict(item)},
+                    "meta": {
+                        "aiPayload": dict(item),
+                        "document_role": document_role_from_item(item),
+                    },
                 }
             )
         )
@@ -151,6 +163,7 @@ def selected_sources_summary_from_items(items: List[Dict[str, Any]], *, limit: i
                 "source_id": source_id_from_item(item),
                 "title": as_text(item.get("title")),
                 "source_kind": source_kind_from_item(item),
+                "document_role": document_role_from_item(item),
                 "included": list(item.get("included") or [])[:8],
                 "scope": compact_value(item.get("scope"), depth=2, list_limit=4, string_limit=200),
                 "metrics": compact_value(item.get("metrics"), depth=1, list_limit=4, string_limit=160),
@@ -178,6 +191,7 @@ def source_record_payload(source: SourceRecord, mapped_dataset_ids: List[str] | 
         "evidence_count": source.evidence_count,
         "locator_summary": source.locator_summary,
         "availability": source.availability,
+        "document_role": as_text((source.meta or {}).get("document_role")),
     }
     if mapped_dataset_ids is not None:
         payload["mapped_dataset_source_ids"] = list(mapped_dataset_ids or [])

@@ -30,7 +30,7 @@ from modules.agent.schemas import (
     AgentTurnRequest,
     AgentTurnResponse,
 )
-from modules.agent.context_ask_service import answer_context_ask
+from modules.agent.context_ask_service import answer_context_ask, stream_context_ask
 from modules.agent.iteration_change_service import generate_nightlight_iteration_analysis, generate_poi_iteration_analysis
 from modules.agent.poi_iteration_build_service import build_agent_poi_iteration_payload
 from modules.agent.prompt_registry import (
@@ -64,6 +64,10 @@ def _encode_sse(event: AgentTurnStreamEvent) -> str:
 
 def _encode_summary_sse(event: AgentSummaryStreamEvent) -> str:
     return f"event: {event.type}\ndata: {json.dumps(event.payload, ensure_ascii=False)}\n\n"
+
+
+def _encode_context_ask_sse(event_type: str, payload: dict) -> str:
+    return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.post("/api/v1/analysis/agent/main-loop/stream")
@@ -131,6 +135,28 @@ async def run_agent_site_selection(payload: AgentSiteSelectionRequest):
 @router.post("/api/v1/analysis/agent/context-ask", response_model=AgentContextAskResponse)
 async def run_agent_context_ask(payload: AgentContextAskRequest):
     return await answer_context_ask(payload)
+
+
+@router.post("/api/v1/analysis/agent/context-ask/stream")
+async def run_agent_context_ask_stream(request: Request, payload: AgentContextAskRequest):
+    async def event_stream():
+        generator = stream_context_ask(payload)
+        try:
+            async for event_type, event_payload in generator:
+                if await request.is_disconnected():
+                    break
+                yield _encode_context_ask_sse(event_type, event_payload)
+        finally:
+            await generator.aclose()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])

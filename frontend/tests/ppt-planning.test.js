@@ -20,7 +20,7 @@ import {
 import { createAgentPptPlanningTabMethods } from '../src/features/agent/ppt-planning-tabs.js'
 import { createAgentRuntimeMethods } from '../src/features/agent/runtime.js'
 import { buildAnalysisQuickAskTarget } from '../src/features/agent/analysis-quick-request.js'
-import { regenerateDeckBriefSlide } from '../src/features/ppt-planning/api.js'
+import { regenerateDeckBriefSlide, uploadDocumentSource } from '../src/features/ppt-planning/api.js'
 import {
   MAP_LAYER_RENDERERS,
   capturePptMapRequestAsset,
@@ -30,6 +30,7 @@ import {
   capturePptCarrierSnapshotAsset,
   isPptCarrierSnapshotRequest,
 } from '../src/features/ppt-planning/carrier-snapshot.js'
+import { isRetryableSource } from '../src/features/ppt-planning/source-view.js'
 
 import {
   applyDeckBriefResponse,
@@ -93,6 +94,23 @@ import {
 const DEFAULT_PPT_POI_EVIDENCE_INTENT = '为 PPT 指令生成整理当前区域代表性 POI 资料'
 const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 POI，并与夜光格子对应'
 const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
+
+function createContextAskStreamResponse(answer = '已完成。') {
+  const encoder = new TextEncoder()
+  const events = [
+    `event: answer_delta\ndata: ${JSON.stringify({ delta: answer })}\n\n`,
+    `event: complete\ndata: ${JSON.stringify({ answer, evidence: [], citations: [], warnings: [] })}\n\n`,
+  ]
+  return {
+    ok: true,
+    body: new ReadableStream({
+      start(controller) {
+        events.forEach((event) => controller.enqueue(encoder.encode(event)))
+        controller.close()
+      },
+    }),
+  }
+}
 
 test('ppt normalizeDeckBrief keeps empty responses empty', () => {
   const brief = normalizeDeckBrief({})
@@ -912,6 +930,42 @@ test('agent ppt system source refresh replaces stale empty transport preview', (
   assert.equal(source.meta.transport.transportStatus, 'ready_to_send')
   assert.ok(source.meta.transport.metricCount > 0)
   assert.ok(source.meta.transport.evidenceCount >= 1)
+})
+
+test('analysis quick ask rebuilds selected system source payload from current state without raw grids', () => {
+  const ctx = createPptPlanningTestContext({
+    h3AnalysisSummary: { avg_density_poi_per_km2: 27, grid_count: 1 },
+    h3AnalysisGridFeatures: [{ id: 'latest-grid', properties: { density: 27, huge: 'raw-grid-value' } }],
+  })
+  ctx.updateAgentActivePptPlanningState(createPptPlanningState({
+    sources: [{
+      id: 'current:analysis:poi_h3',
+      type: 'sheet',
+      title: 'POI / H3 空间结构分析',
+      status: 'ready',
+      selected: true,
+      meta: {
+        sourceKind: 'system',
+        areaId: 'history-1',
+        aiPayload: {
+          version: 'ppt_ai_input_block_v1',
+          source_id: 'current:analysis:poi_h3',
+          included: ['metrics'],
+          metrics: [{ metric_id: 'analysis:h3:avg_density', value: 3 }],
+        },
+      },
+    }],
+  }))
+
+  const target = buildAnalysisQuickAskTarget(ctx)
+  const source = target.payload.sources.find((item) => item.source_id === 'current:analysis:poi_h3')
+  const serialized = JSON.stringify(source)
+
+  assert.ok(source)
+  assert.equal(serialized.includes('raw-grid-value'), false)
+  assert.equal(serialized.includes('latest-grid'), false)
+  assert.equal(serialized.includes('27'), true)
+  assert.equal(serialized.includes('"value":3'), false)
 })
 
 test('ppt source group response keeps missing sources as top-level ungrouped items', () => {
@@ -2271,12 +2325,7 @@ test('analysis quick ask aborts the previous request when a new question is subm
     }
     pending.push(item)
     await item.promise
-    return item.response || {
-      ok: true,
-      async json() {
-        return { status: 'success', answer: item.answer || '已完成。', evidence: [], citations: [], warnings: [] }
-      },
-    }
+    return item.response || createContextAskStreamResponse(item.answer || '已完成。')
   }
 
   try {
@@ -2538,6 +2587,150 @@ test('ppt outline waits for package placeholders only when their inputs are read
     getPendingPptPackageSources(readyInputState).map((item) => item.id),
     ['package-placeholder:poi-evidence', 'package-placeholder:nightlife-poi'],
   )
+})
+
+test('document upload appears immediately and replaces its placeholder in place', async () => {
+  const originalFetch = globalThis.fetch
+  let resolveUpload
+  globalThis.fetch = () => new Promise((resolve) => { resolveUpload = resolve })
+  const ctx = createPptPlanningTestContext({
+    requestAgentPptPlanningDocumentParse(documentId) {
+      assert.equal(documentId, 'doc-uploaded')
+      return Promise.resolve({})
+    },
+    refreshAgentActivePptPlanningDataSources() {
+      return Promise.resolve()
+    },
+  })
+  const file = new Blob(['docx'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+  Object.defineProperty(file, 'name', { value: '长沙县政府原址项目摘要.docx' })
+
+  try {
+    const uploadPromise = ctx.uploadAgentPptPlanningDocumentSource(file, 'project_brief')
+    const uploadingSources = ctx.getAgentActivePptPlanningState().sources.filter((source) => source.meta && source.meta.uploadPlaceholder)
+    assert.equal(uploadingSources.length, 1)
+    assert.match(uploadingSources[0].id, /^document-upload:/)
+    assert.equal(uploadingSources[0].title, '长沙县政府原址项目摘要.docx')
+    assert.equal(uploadingSources[0].status, 'generating')
+    assert.equal(uploadingSources[0].meta.label, '上传中')
+    assert.equal(uploadingSources[0].meta.document_role, 'project_brief')
+
+    resolveUpload({
+      ok: true,
+      json: async () => ({ id: 'doc-uploaded', file_name: file.name, document_role: 'project_brief' }),
+    })
+    await uploadPromise
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  const sources = ctx.getAgentActivePptPlanningState().sources
+  assert.equal(sources.some((source) => String(source.id).startsWith('document-upload:')), false)
+  const source = sources.find((item) => item.id === 'document:doc-uploaded')
+  assert.ok(source)
+  assert.equal(source.status, 'ready')
+  assert.equal(source.meta.label, 'PageIndex 已生成')
+  assert.equal(source.meta.uploadPlaceholder, false)
+})
+
+test('document upload failure keeps a removable non-retryable failed placeholder', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('network_down') }
+  const ctx = createPptPlanningTestContext()
+  const file = new Blob(['docx'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+  Object.defineProperty(file, 'name', { value: '上传失败文档.docx' })
+
+  try {
+    await ctx.uploadAgentPptPlanningDocumentSource(file, 'reference_document')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  const source = ctx.getAgentActivePptPlanningState().sources.find((item) => item.meta && item.meta.uploadPlaceholder)
+  assert.ok(source)
+  assert.equal(source.status, 'failed')
+  assert.equal(source.meta.label, '上传失败')
+  assert.equal(source.meta.documentId, '')
+  assert.equal(isRetryableSource(source), false)
+  assert.match(ctx.getAgentActivePptPlanningState().generationError, /network_down/)
+})
+
+test('image upload appears immediately and replaces its placeholder in place', async () => {
+  const originalFetch = globalThis.fetch
+  let resolveUpload
+  globalThis.fetch = () => new Promise((resolve) => { resolveUpload = resolve })
+  const ctx = createPptPlanningTestContext({
+    refreshAgentActivePptPlanningDataSources() { return Promise.resolve() },
+  })
+  const file = new Blob(['png'], { type: 'image/png' })
+  Object.defineProperty(file, 'name', { value: '现场照片.png' })
+
+  try {
+    const uploadPromise = ctx.uploadAgentPptPlanningImageSource(file)
+    const uploading = ctx.getAgentActivePptPlanningState().sources.find((source) => source.meta && source.meta.uploadPlaceholder)
+    assert.ok(uploading)
+    assert.match(uploading.id, /^image-upload:/)
+    assert.equal(uploading.title, '现场照片.png')
+    assert.equal(uploading.status, 'generating')
+    assert.equal(uploading.meta.label, '上传中')
+
+    resolveUpload({
+      ok: true,
+      json: async () => ({ attachment_id: 'img-uploaded', filename: file.name, mime_type: file.type }),
+    })
+    await uploadPromise
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  const sources = ctx.getAgentActivePptPlanningState().sources
+  assert.equal(sources.some((source) => String(source.id).startsWith('image-upload:')), false)
+  const source = sources.find((item) => item.id === 'image:img-uploaded')
+  assert.ok(source)
+  assert.equal(source.status, 'generating')
+  assert.equal(source.meta.label, '图片解析中')
+  assert.equal(source.meta.uploadPlaceholder, false)
+})
+
+test('image upload failure keeps a visible removable placeholder', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new Error('image_network_down') }
+  const ctx = createPptPlanningTestContext()
+  const file = new Blob(['png'], { type: 'image/png' })
+  Object.defineProperty(file, 'name', { value: '失败照片.png' })
+
+  try {
+    await ctx.uploadAgentPptPlanningImageSource(file)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  const source = ctx.getAgentActivePptPlanningState().sources.find((item) => item.meta && item.meta.uploadPlaceholder)
+  assert.ok(source)
+  assert.match(source.id, /^image-upload:/)
+  assert.equal(source.status, 'failed')
+  assert.equal(source.meta.label, '上传失败')
+  assert.equal(isRetryableSource(source), false)
+  assert.match(ctx.getAgentActivePptPlanningState().generationError, /image_network_down/)
+})
+
+test('document upload request always includes explicit document role', async () => {
+  const originalFetch = globalThis.fetch
+  let captured = null
+  globalThis.fetch = async (url, options = {}) => {
+    captured = { url, options }
+    return { ok: true, json: async () => ({ id: 'doc-1', document_role: 'project_brief' }) }
+  }
+  try {
+    const file = new Blob(['docx'], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+    await uploadDocumentSource(file, '项目基本情况.docx', 'project_brief')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(captured.url, '/documents/upload')
+  assert.equal(captured.options.method, 'POST')
+  assert.equal(captured.options.body.get('document_role'), 'project_brief')
+  assert.equal(captured.options.body.get('title'), '项目基本情况.docx')
 })
 
 test('ppt outline blocks when any selected source is not ready', () => {
@@ -5383,8 +5576,7 @@ test('agent ppt population age structure remains missing when age distribution i
   const age = metrics.find((item) => item.metric_id === 'analysis:population:age_structure')
 
   assert.equal(age.status, 'missing')
-  assert.equal(age.source_path, 'populationOverview.age_distribution')
-})
+  assert.equal(age.source_path, 'populationOverview.age_distribution')})
 
 test('agent ppt h3 metrics use derived typing lq and neighbor results', () => {
   const ctx = createPptPlanningTestContext({

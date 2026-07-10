@@ -104,7 +104,10 @@ def create_app() -> FastAPI:
     app.add_middleware(
         SelectiveGZipMiddleware,
         minimum_size=500,
-        excluded_paths={"/api/v1/analysis/agent/turn/stream"},
+        excluded_paths={
+            "/api/v1/analysis/agent/main-loop/stream",
+            "/api/v1/analysis/agent/context-ask/stream",
+        },
     )
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(BizError, biz_exception_handler)

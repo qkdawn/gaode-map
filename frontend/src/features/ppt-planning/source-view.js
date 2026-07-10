@@ -2,7 +2,18 @@ import { evidenceNodesFromAiPayload } from '../analysis-sources/evidence-nodes.j
 import { getPptSourceHealth } from './source-health.js'
 
 function sourceMeta(source = {}) {
+  if (!source || typeof source !== 'object') return {}
   return source.meta && typeof source.meta === 'object' ? source.meta : {}
+}
+
+function sourceAiPayload(source = {}) {
+  const meta = sourceMeta(source)
+  const payload = meta.aiPayload && typeof meta.aiPayload === 'object'
+    ? meta.aiPayload
+    : meta.ai_payload && typeof meta.ai_payload === 'object'
+      ? meta.ai_payload
+      : null
+  return payload && typeof payload === 'object' ? payload : {}
 }
 
 function sourceKind(source = {}) {
@@ -18,6 +29,28 @@ function sourceKind(source = {}) {
   if (sourceId.startsWith('current:')) return 'system'
   return 'unknown'
 }
+
+
+export function documentRole(source = {}) {
+  const meta = sourceMeta(source)
+  const payload = sourceAiPayload(source)
+  return String(
+    payload.document_role
+      || payload.documentRole
+      || (meta.document && meta.document.document_role)
+      || meta.document_role
+      || '',
+  ).trim()
+}
+
+export function documentRoleLabel(source = {}) {
+  return {
+    project_brief: '项目摘要',
+    design_vision: '设计愿景',
+    reference_document: '参考资料',
+  }[documentRole(source)] || ''
+}
+
 export function isPackageSource(source = {}) {
   return sourceKind(source) === 'package'
 }
@@ -52,11 +85,7 @@ export function isDeletableSource(source = {}) {
 
 export function sourceTransport(source = {}) {
   const meta = sourceMeta(source)
-  const aiPayload = meta.aiPayload && typeof meta.aiPayload === 'object'
-    ? meta.aiPayload
-    : meta.ai_payload && typeof meta.ai_payload === 'object'
-      ? meta.ai_payload
-      : null
+  const aiPayload = sourceAiPayload(source)
   if (aiPayload && aiPayload.version === 'ppt_ai_input_block_v1') {
     const evidenceNodes = evidenceNodesFromAiPayload(aiPayload)
     const evidenceCount = Number(aiPayload.evidence_count ?? aiPayload.evidenceCount ?? evidenceNodes.length ?? (aiPayload.counts || {}).evidence ?? 0) || 0
@@ -85,6 +114,26 @@ export function sourceTransport(source = {}) {
     }
   }
   return meta.transport && typeof meta.transport === 'object' ? meta.transport : null
+}
+
+export function currentSourceEvidenceNodes(source = {}) {
+  return evidenceNodesFromAiPayload(sourceAiPayload(source)).slice(0, 80)
+}
+
+export function currentSourceDetailTabs({
+  readyMetrics = [],
+  evidenceNodes = [],
+  scopePayload = null,
+  visualSpecs = [],
+  gapMetrics = [],
+} = {}) {
+  return [
+    { key: 'metrics', label: 'Metrics', count: Array.isArray(readyMetrics) ? readyMetrics.length : 0 },
+    { key: 'evidence', label: 'EvidenceNode', count: Array.isArray(evidenceNodes) ? evidenceNodes.length : 0 },
+    { key: 'scope', label: 'Scope', count: scopePayload && typeof scopePayload === 'object' ? 1 : 0 },
+    { key: 'visuals', label: 'Visuals', count: Array.isArray(visualSpecs) ? visualSpecs.length : 0 },
+    { key: 'gaps', label: 'Gaps', count: Array.isArray(gapMetrics) ? gapMetrics.length : 0 },
+  ].map((item) => ({ ...item, available: item.count > 0 }))
 }
 
 export function sourceTransportLabel(source = {}) {
@@ -128,6 +177,7 @@ export function sourceHealthReason(source = {}) {
 }
 
 export function isRetryableSource(source = {}) {
+  if (sourceMeta(source).uploadPlaceholder) return false
   return !!sourceHealth(source).retryable
     && (isDocumentSource(source) || isImageSource(source) || isWebSource(source))
 }

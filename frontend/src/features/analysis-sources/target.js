@@ -27,6 +27,26 @@ function analysisAiPayloadFromSource(source = {}) {
   const payload = cloneObject(meta.aiPayload || meta.ai_payload)
   const included = cloneArray(payload.included).map((item) => asText(item)).filter(Boolean)
   if (!included.length) return null
+  const sourceKind = asText(payload.source_kind || payload.sourceKind)
+  const documentRole = asText(
+    payload.document_role
+      || payload.documentRole
+      || (meta.document && meta.document.document_role)
+      || meta.document_role,
+  )
+  if (sourceKind === 'document' || asText(source.id).startsWith('document:')) {
+    return {
+      source_id: asText(payload.source_id || source.id),
+      title: asText(payload.title || source.title),
+      source_kind: 'document',
+      document_role: documentRole,
+      included: ['document_identity'],
+      counts: {
+        evidence: Number((payload.counts || {}).evidence || meta.count || 0) || 0,
+      },
+      policy: '前端只传文档身份与角色；后端按角色读取完整 PageIndex 并构建项目证据档案。',
+    }
+  }
   const evidenceNodes = evidenceNodesFromAiPayload(payload).slice(0, 8)
   const metrics = cloneArray(payload.metrics).slice(0, 12)
   const metricGaps = cloneArray(payload.metric_gaps).slice(0, 8)
@@ -35,7 +55,7 @@ function analysisAiPayloadFromSource(source = {}) {
   return {
     source_id: asText(payload.source_id || source.id),
     title: asText(payload.title || source.title),
-    source_kind: asText(payload.source_kind),
+    source_kind: sourceKind,
     included,
     scope,
     metrics: compactAnalysisSourceValue(metrics, 2),
@@ -70,7 +90,10 @@ function buildAnalysisSourceEvidence(source = {}, payload = {}) {
     title: asText(payload.title || source.title),
     source_title: asText(source.title),
     type: asText(source.type),
-    text: parts.length ? parts.join('；') : '该来源包含可用于 AI 的分析输入块。',
+    document_role: asText(payload.document_role),
+    text: asText(payload.source_kind) === 'document'
+      ? `项目文档身份已传递（角色：${asText(payload.document_role) || '未标注'}），核心证据由后端档案模块读取。`
+      : (parts.length ? parts.join('；') : '该来源包含可用于 AI 的分析输入块。'),
     payload: {
       included: cloneArray(payload.included),
       counts: cloneObject(payload.counts),
