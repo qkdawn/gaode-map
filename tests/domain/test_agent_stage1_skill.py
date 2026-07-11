@@ -161,6 +161,11 @@ def valid_matrix():
         "space_decisions": [
             {
                 "space_id": "unit-1",
+                "space_name": "原县政府礼堂",
+                "future_role": "社区文化锚点",
+                "core_audiences": ["社区家庭", "青年社群"],
+                "movement_role": "主游线目的地",
+                "value_role": "公共服务与活动引流",
                 "current_state": {"use": "闲置礼堂"},
                 "change_logic": {"reason": "补足社区文化活动空间"},
                 "candidate_functions": [{"id": "culture"}, {"id": "retail"}],

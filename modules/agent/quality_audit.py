@@ -600,6 +600,11 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         audience = _list(decision.get("audience_scenarios"))
         if (
             not _text(decision.get("space_id"))
+            or not _text(decision.get("space_name"))
+            or not _text(decision.get("future_role"))
+            or not _list(decision.get("core_audiences"))
+            or not _text(decision.get("movement_role"))
+            or not _text(decision.get("value_role"))
             or len(candidates) < 2
             or not isinstance(decision.get("preferred_function"), dict)
             or not _list(decision.get("excluded_functions"))
@@ -616,9 +621,9 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         issues.append(
             _issue(
                 "space_decisions_incomplete",
-                "关键空间缺少候选比较、排除理由、客群场景、前置条件、证据或推荐强度。",
+                "关键空间缺少名称、未来角色、核心客群、动线/价值角色、候选比较、前置条件、证据或推荐强度。",
                 path="spatial_matrix.space_decisions",
-                repair_hint="每个空间至少比较两个候选，并给出首选、排除项、场景化客群和成立条件。",
+                repair_hint="每个空间补齐管理层摘要字段，至少比较两个候选，并给出首选、排除项、场景化客群和成立条件。",
             )
         )
 

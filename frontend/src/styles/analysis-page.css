@@ -13901,6 +13901,44 @@ body.agent-ppt-source-menu-open {
 .agent-space-decision-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; padding: 0 10px 10px; border-top: 1px solid #e2e8f0; }
 .agent-space-decision-body p { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 8px 0 0; color: #475569; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .agent-space-decision-body p > span { color: #94a3b8; font-size: 9px; font-weight: 700; }
+.agent-spatial-management-table { max-width: 100%; overflow: auto; border: 1px solid #dbe3ec; border-radius: 7px; background: #fff; }
+.agent-spatial-management-table table { width: 100%; min-width: 980px; border-collapse: collapse; table-layout: fixed; }
+.agent-spatial-management-table th, .agent-spatial-management-table td { padding: 8px 9px; border-right: 1px solid #edf1f5; border-bottom: 1px solid #edf1f5; color: #475569; font-size: 9px; line-height: 1.45; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.agent-spatial-management-table thead th { position: sticky; top: 0; z-index: 1; background: #f1f5f9; color: #64748b; font-weight: 700; white-space: nowrap; }
+.agent-spatial-management-table tbody th { color: #334155; font-size: 10px; }
+.agent-spatial-management-table tbody th small { display: block; margin-top: 2px; color: #94a3b8; font-size: 8px; font-weight: 400; }
+.agent-spatial-management-table tr:last-child th, .agent-spatial-management-table tr:last-child td { border-bottom: 0; }
+.agent-spatial-management-table th:last-child, .agent-spatial-management-table td:last-child { border-right: 0; }
+.agent-spatial-management-table button, .agent-space-evidence-action button { padding: 3px 6px; border: 1px solid #bfdbfe; border-radius: 4px; background: #eff6ff; color: #1d4ed8; cursor: pointer; font-size: 9px; font-weight: 700; }
+.agent-space-status { display: inline-flex; padding: 2px 5px; border-radius: 3px; background: #eef2f7; color: #475569; white-space: nowrap; }
+.agent-space-status.strong { background: #ecfdf3; color: #087443; }
+.agent-space-status.conditional { background: #fff7ed; color: #9a3412; }
+.agent-space-status.excluded { background: #fff1f2; color: #9f1239; }
+.agent-space-evidence-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin-top: 8px; padding: 8px 0 0; border-top: 1px dashed #cbd5e1; color: #94a3b8; font-size: 9px; font-weight: 700; }
+.agent-evidence-drawer-backdrop { position: fixed; inset: 0; z-index: 1500; display: flex; justify-content: flex-end; background: rgba(15, 23, 42, .28); }
+.agent-evidence-drawer { display: flex; flex-direction: column; width: min(520px, 92vw); height: 100%; background: #f8fafc; box-shadow: -14px 0 36px rgba(15, 23, 42, .2); }
+.agent-evidence-drawer > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 18px 14px; border-bottom: 1px solid #dbe3ec; background: #fff; }
+.agent-evidence-drawer > header > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.agent-evidence-drawer > header small { color: #2563eb; font-size: 9px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
+.agent-evidence-drawer > header strong { color: #1e293b; font-size: 15px; overflow-wrap: anywhere; }
+.agent-evidence-drawer > header span { color: #64748b; font-size: 10px; line-height: 1.45; }
+.agent-evidence-drawer > header button { flex: 0 0 auto; width: 28px; height: 28px; border: 1px solid #dbe3ec; border-radius: 6px; background: #fff; color: #64748b; cursor: pointer; font-size: 20px; line-height: 1; }
+.agent-evidence-drawer-list { display: flex; flex: 1; flex-direction: column; gap: 10px; min-height: 0; padding: 14px; overflow: auto; }
+.agent-evidence-drawer-list article { padding: 12px; border: 1px solid #dbe3ec; border-radius: 8px; background: #fff; }
+.agent-evidence-drawer-list article.gap { border-color: #fde68a; }
+.agent-evidence-drawer-list article.missing { border-color: #fecaca; background: #fff8f8; }
+.agent-evidence-drawer-title { display: flex; align-items: center; gap: 7px; color: #334155; }
+.agent-evidence-drawer-title span, .agent-evidence-drawer-title em { flex: 0 0 auto; padding: 2px 5px; border-radius: 3px; background: #dbeafe; color: #1d4ed8; font-size: 9px; font-style: normal; font-weight: 700; }
+.agent-evidence-drawer-title strong { min-width: 0; flex: 1; font-size: 11px; overflow-wrap: anywhere; }
+.agent-evidence-drawer-title em { background: #f1f5f9; color: #475569; }
+.agent-evidence-drawer-list .claim { margin: 8px 0 0; color: #334155; font-size: 11px; line-height: 1.55; }
+.agent-evidence-drawer-list dl { display: flex; flex-direction: column; gap: 0; margin: 10px 0 0; border-top: 1px solid #edf1f5; }
+.agent-evidence-drawer-list dl > div { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid #edf1f5; }
+.agent-evidence-drawer-list dt { color: #94a3b8; font-size: 9px; font-weight: 700; }
+.agent-evidence-drawer-list dd { margin: 0; color: #475569; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.agent-evidence-drawer-list dl > div.gap dd { color: #92400e; }
+.agent-evidence-drawer-list dl > div.action dd { color: #1d4ed8; font-weight: 600; }
+.agent-evidence-drawer-empty { padding: 18px; border: 1px dashed #f59e0b; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 11px; line-height: 1.55; }
 .agent-conflict-register { display: flex; flex-direction: column; gap: 8px; padding: 13px 16px; border-top: 1px solid #fde68a; background: #fffdf7; }
 .agent-conflict-register > strong { color: #334155; font-size: 11px; }
 .agent-conflict-register article { padding: 9px 10px; border: 1px solid #dbe3ec; border-radius: 6px; background: #fff; }

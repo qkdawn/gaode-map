@@ -625,8 +625,9 @@ async def execute(
         system_prompt=(
             "你是存量空间功能策划负责人。只输出 JSON：matrix_version、positioning_option_id、"
             "spatial_hierarchy、space_decisions、portfolio_checks。spatial_hierarchy 必须含 system/cluster/unit。"
-            "每个 space_decision 必须含 space_id、current_state、change_logic、candidate_functions(至少2项)、"
-            "preferred_function、excluded_functions、audience_scenarios、access_and_movement、operation_strategy、"
+            "每个 space_decision 必须含 space_id、space_name、future_role、core_audiences、movement_role、value_role、"
+            "current_state、change_logic、candidate_functions(至少2项)、preferred_function、excluded_functions、"
+            "audience_scenarios、access_and_movement、operation_strategy、"
             "renovation_and_delivery、preconditions、evidence_refs、hard_constraint_refs、assumptions、validation_actions、"
             "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)。"
             "每个空间决策必须引用全部适用的 hard_constraint_refs，并根据硬约束写入前置条件、排除项和验证动作。"

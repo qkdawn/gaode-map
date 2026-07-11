@@ -128,6 +128,8 @@ function createAnalysisAgentInitialState() {
     selectedAnalysisCapabilityRunLoading: false,
     selectedAnalysisCapabilityRunError: '',
     selectedAnalysisCapabilityRunRequestToken: 0,
+    stage1EvidenceDrawerSpaceId: '',
+    stage1EvidenceDrawerRunId: '',
     agentToolsViewMode: 'tools',
     agentToolDetailDialogOpen: false,
     agentActiveToolDetailName: '',

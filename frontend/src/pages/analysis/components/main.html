@@ -342,16 +342,39 @@
                             </div>
                             <div v-if="getStage1SpaceDecisions().length" class="agent-spatial-matrix">
                                 <div class="agent-spatial-matrix-head">
-                                    <div><strong>空间功能策划决策矩阵</strong><span>从项目定位下钻到空间单元、成立条件与证据</span></div>
+                                    <div><strong>空间功能策划决策矩阵</strong><span>管理层总览用于比较；展开单元后核对完整决策和原始证据</span></div>
                                     <small>{{ getStage1SpatialMatrix().matrix_version || '未标版本' }} · {{ getStage1SpaceDecisionCount() }} 个空间</small>
+                                </div>
+                                <div class="agent-spatial-management-table" role="region" aria-label="空间功能策划管理层总表" tabindex="0">
+                                    <table>
+                                        <thead><tr><th>空间单元</th><th>未来角色</th><th>首选功能</th><th>核心客群</th><th>动线角色</th><th>价值角色</th><th>推荐强度</th><th>关键前提</th><th>证据</th></tr></thead>
+                                        <tbody>
+                                            <tr v-for="row in getStage1SpaceManagementRows()" :key="`management-${row.space_id}`">
+                                                <th scope="row">{{ row.space_name }}<small>{{ row.space_id }}</small></th>
+                                                <td>{{ row.future_role }}</td>
+                                                <td>{{ row.preferred_function }}</td>
+                                                <td>{{ row.core_audiences || '未说明' }}</td>
+                                                <td>{{ row.movement_role }}</td>
+                                                <td>{{ row.value_role }}</td>
+                                                <td><span class="agent-space-status" :class="row.recommendation_status">{{ row.recommendation_label }}</span></td>
+                                                <td>{{ row.preconditions || '未说明' }}</td>
+                                                <td><button type="button" @click="openStage1EvidenceDrawer(getStage1SpaceDecisionById(row.space_id))">{{ row.evidence_count }} 条</button></td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
                                 </div>
                                 <details v-for="decision in getStage1SpaceDecisions()" :key="decision.space_id" class="agent-space-decision">
                                     <summary>
-                                        <span>{{ decision.space_id }}</span>
+                                        <span>{{ decision.space_name || decision.space_id }}</span>
                                         <strong>{{ getStage1FunctionLabel(decision.preferred_function) }}</strong>
                                         <em :class="decision.recommendation_status">{{ getStage1DecisionStatusLabel(decision) }} · {{ getStage1DecisionConfidenceLabel(decision) }}</em>
                                     </summary>
                                     <div class="agent-space-decision-body">
+                                        <p><span>未来空间角色</span>{{ decision.future_role || '未说明' }}</p>
+                                        <p><span>核心客群</span>{{ getStage1DecisionDetailText(decision.core_audiences) || '未说明' }}</p>
+                                        <p><span>动线角色</span>{{ decision.movement_role || '未说明' }}</p>
+                                        <p><span>价值角色</span>{{ decision.value_role || '未说明' }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.current_state)"><span>现状诊断</span>{{ getStage1DecisionDetailText(decision.current_state) }}</p>
                                         <p v-if="getStage1FunctionListText(decision.candidate_functions)"><span>候选功能</span>{{ getStage1FunctionListText(decision.candidate_functions) }}</p>
                                         <p v-if="getStage1FunctionListText(decision.excluded_functions)"><span>排除功能</span>{{ getStage1FunctionListText(decision.excluded_functions) }}</p>
                                         <p v-if="getStage1DecisionDetailText(decision.change_logic)"><span>改变逻辑</span>{{ getStage1DecisionDetailText(decision.change_logic) }}</p>
@@ -360,10 +383,40 @@
                                         <p v-if="getStage1DecisionDetailText(decision.operation_strategy)"><span>运营要求</span>{{ getStage1DecisionDetailText(decision.operation_strategy) }}</p>
                                         <p v-if="getStage1DecisionDetailText(decision.renovation_and_delivery)"><span>改造交付</span>{{ getStage1DecisionDetailText(decision.renovation_and_delivery) }}</p>
                                         <p v-if="getStage1DecisionDetailText(decision.preconditions)"><span>成立条件</span>{{ getStage1DecisionDetailText(decision.preconditions) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.assumptions)"><span>策划假设</span>{{ getStage1DecisionDetailText(decision.assumptions) }}</p>
                                         <p v-if="getStage1DecisionDetailText(decision.validation_actions)"><span>验证动作</span>{{ getStage1DecisionDetailText(decision.validation_actions) }}</p>
-                                        <p v-if="getStage1DecisionDetailText(decision.evidence_refs)"><span>证据引用</span>{{ getStage1DecisionDetailText(decision.evidence_refs) }}</p>
+                                        <div class="agent-space-evidence-action">
+                                            <span>证据链</span>
+                                            <button type="button" @click="openStage1EvidenceDrawer(decision)">查看 {{ Array.isArray(decision.evidence_refs) ? decision.evidence_refs.length : 0 }} 条原始证据</button>
+                                        </div>
                                     </div>
                                 </details>
+                                <div v-if="getStage1EvidenceDrawerDecision()" class="agent-evidence-drawer-backdrop" @click.self="closeStage1EvidenceDrawer">
+                                    <aside class="agent-evidence-drawer" role="dialog" aria-modal="true" aria-labelledby="stage1-evidence-drawer-title">
+                                        <header>
+                                            <div><small>Decision Evidence</small><strong id="stage1-evidence-drawer-title">{{ getStage1EvidenceDrawerDecision().space_name || getStage1EvidenceDrawerDecision().space_id }}</strong><span>{{ getStage1FunctionLabel(getStage1EvidenceDrawerDecision().preferred_function) }} · 证据用于何处、质量边界与下一步核验</span></div>
+                                            <button type="button" aria-label="关闭证据抽屉" @click="closeStage1EvidenceDrawer">×</button>
+                                        </header>
+                                        <div class="agent-evidence-drawer-list">
+                                            <article v-for="entry in getStage1DecisionEvidenceEntries(getStage1EvidenceDrawerDecision())" :key="entry.id" :class="{ missing: entry.missing, gap: getStage1EvidenceGapText(entry) }">
+                                                <div class="agent-evidence-drawer-title"><span>{{ getStage1EvidenceTypeLabel(entry) }}</span><strong>{{ entry.id }}</strong><em>{{ getStage1EvidenceStatusLabel(entry) }}</em></div>
+                                                <p class="claim">{{ entry.claim || '该引用没有登记可展示的主张。' }}</p>
+                                                <dl>
+                                                    <div v-if="getStage1EvidenceSourceText(entry)"><dt>来源与定位</dt><dd>{{ getStage1EvidenceSourceText(entry) }}</dd></div>
+                                                    <div v-if="getStage1EvidenceDateText(entry)"><dt>时间口径</dt><dd>{{ getStage1EvidenceDateText(entry) }}</dd></div>
+                                                    <div v-if="entry.scope"><dt>空间范围</dt><dd>{{ entry.scope }}</dd></div>
+                                                    <div v-if="entry.method"><dt>读取/计算方法</dt><dd>{{ entry.method }}</dd></div>
+                                                    <div v-if="getStage1EvidenceMetricText(entry)"><dt>指标与结果</dt><dd>{{ getStage1EvidenceMetricText(entry) }}</dd></div>
+                                                    <div v-if="getStage1EvidenceQualityText(entry)"><dt>质量与置信</dt><dd>{{ getStage1EvidenceQualityText(entry) }}</dd></div>
+                                                    <div><dt>结论用途</dt><dd>支撑空间 {{ entry.used_by_space_id }} 的功能推荐、条件或排除判断</dd></div>
+                                                    <div v-if="getStage1EvidenceGapText(entry)" class="gap"><dt>局限/冲突</dt><dd>{{ getStage1EvidenceGapText(entry) }}</dd></div>
+                                                    <div v-if="getStage1EvidenceNextActionText(entry)" class="action"><dt>待验证动作</dt><dd>{{ getStage1EvidenceNextActionText(entry) }}</dd></div>
+                                                </dl>
+                                            </article>
+                                            <div v-if="!getStage1DecisionEvidenceEntries(getStage1EvidenceDrawerDecision()).length" class="agent-evidence-drawer-empty">当前空间决策没有登记证据引用，不能作为已证实结论使用。</div>
+                                        </div>
+                                    </aside>
+                                </div>
                             </div>
                             <div v-if="getStage1ConflictRegister().length" class="agent-conflict-register">
                                 <strong>来源冲突与裁决状态</strong>

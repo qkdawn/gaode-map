@@ -38,6 +38,8 @@ function createContext(overrides = {}) {
     selectedAnalysisCapabilityRunLoading: false,
     selectedAnalysisCapabilityRunError: '',
     selectedAnalysisCapabilityRunRequestToken: 0,
+    stage1EvidenceDrawerSpaceId: '',
+    stage1EvidenceDrawerRunId: '',
     activeAgentSessionId: 'conversation-1',
     agentSkills: [],
     agentPanelPayloads: {},
@@ -387,7 +389,10 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         ],
         tasks: [task],
       },
-      stage1_evidence_ledger: [{ id: 'e1' }, { id: 'e2' }],
+      stage1_evidence_ledger: [
+        { id: 'e1', evidence_type: 'F', status: 'verified', claim: '礼堂具备社区公共记忆价值', source_ref: '项目基础资料', source_artifact_id: 'document:brief:node-1', source_locator: 'p.12', source_date: '2025', scope: '原县政府礼堂', method: '读取项目资料', metric: '历史价值', value: '社区公共记忆节点', confidence: 'high', limitation: '当前使用状态需现场复核', next_action: '核对现状使用记录' },
+        { id: 'e2', evidence_type: 'V', status: 'fieldwork_required', claim: '消防条件决定空间开放强度', source_ref: '消防专项资料', source_artifact_id: 'manual:fire-review', source_locator: '待补充', source_date: 'unknown', scope: '原县政府礼堂', method: '现场踏勘与专项检测', confidence: 'low', limitation: '尚未完成现场核验', next_action: '完成消防专项检测' },
+      ],
       stage1_provenance_binding: {
         status: 'passed_with_gaps', assessed_count: 2, critical_evidence_ids: ['e1'],
         status_counts: { verified: 1, corrected: 1 },
@@ -415,7 +420,7 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         pending_actions: [{ constraint_id: 'fire_safety', label: '消防与疏散', action: '完成消防专项检测', executor: 'manual_authority' }],
       },
       stage1_conflict_register: [
-        { metric_key: 'households', label: '居民户数', values: ['102户', '120户'], evidence_ids: ['node-1', 'node-2'], unresolved: true, explanation: '同级项目摘要口径冲突' },
+        { metric_key: 'households', label: '居民户数', values: ['102户', '120户'], evidence_ids: ['e2', 'node-2'], unresolved: true, explanation: '同级项目摘要口径冲突' },
         { metric_key: 'area', label: '项目面积', values: ['2.4公顷', '2.5公顷'], evidence_ids: ['node-3'], unresolved: false, explanation: '采用项目摘要口径' },
       ],
       stage1_spatial_matrix: {
@@ -423,6 +428,11 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         positioning_option_id: 'option-a',
         space_decisions: [{
           space_id: 'unit-1',
+          space_name: '原县政府礼堂',
+          future_role: '社区文化锚点',
+          core_audiences: ['社区家庭', '青年社群'],
+          movement_role: '主游线目的地',
+          value_role: '公共服务与活动引流',
           current_state: { use: '闲置礼堂' },
           change_logic: { reason: '补足社区文化活动空间' },
           candidate_functions: [{ id: 'culture', name: '文化活动' }, { id: 'retail', name: '社区零售' }],
@@ -434,7 +444,7 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
           renovation_and_delivery: { phase: '一期轻量改造' },
           preconditions: ['完成消防评估'],
           validation_actions: ['开展消防与结构核验'],
-          evidence_refs: ['e1'],
+          evidence_refs: ['e1', 'e2', 'missing-evidence'],
           recommendation_status: 'conditional',
           confidence: 'medium',
         }],
@@ -544,6 +554,35 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1HardConstraintPendingActions()[0].executor, 'manual_authority')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
+  assert.deepEqual(ctx.getStage1SpaceManagementRows(), [{
+    space_id: 'unit-1', space_name: '原县政府礼堂', future_role: '社区文化锚点', preferred_function: '文化活动',
+    core_audiences: '社区家庭；青年社群', movement_role: '主游线目的地', value_role: '公共服务与活动引流',
+    recommendation_status: 'conditional', recommendation_label: '条件推荐', preconditions: '完成消防评估', evidence_count: 3,
+  }])
+  ctx.openStage1EvidenceDrawer(ctx.getStage1SpaceDecisions()[0])
+  assert.equal(ctx.getStage1EvidenceDrawerDecision().space_id, 'unit-1')
+  const evidenceEntries = ctx.getStage1DecisionEvidenceEntries(ctx.getStage1EvidenceDrawerDecision())
+  assert.equal(evidenceEntries.length, 3)
+  assert.equal(evidenceEntries[0].claim, '礼堂具备社区公共记忆价值')
+  assert.equal(evidenceEntries[1].verification_task.next_action, '现场踏勘')
+  assert.equal(evidenceEntries[1].quality_issues[0].message, '缺少样本诊断')
+  assert.equal(evidenceEntries[1].conflicts[0].label, '居民户数')
+  assert.equal(evidenceEntries[2].missing, true)
+  evidenceEntries[0].claim = 'changed'
+  assert.equal(ctx.getStage1DecisionEvidenceEntries(ctx.getStage1EvidenceDrawerDecision())[0].claim, '礼堂具备社区公共记忆价值')
+  assert.equal(ctx.getStage1EvidenceTypeLabel(evidenceEntries[0]), '项目事实')
+  assert.equal(ctx.getStage1EvidenceStatusLabel(evidenceEntries[1]), '需现场核验')
+  assert.equal(ctx.getStage1EvidenceSourceText(evidenceEntries[0]), '项目基础资料 · document:brief:node-1 · p.12')
+  assert.equal(ctx.getStage1EvidenceDateText(evidenceEntries[0]), '来源 2025')
+  assert.equal(ctx.getStage1EvidenceMetricText(evidenceEntries[0]), '历史价值：社区公共记忆节点')
+  assert.match(ctx.getStage1EvidenceQualityText(evidenceEntries[0]), /高置信证据/)
+  assert.match(ctx.getStage1EvidenceGapText(evidenceEntries[1]), /尚未完成现场核验/)
+  assert.equal(ctx.getStage1EvidenceNextActionText(evidenceEntries[1]), '现场踏勘')
+  ctx.agentPanelPayloads.capability_run.run_id = 'caprun-2'
+  assert.equal(ctx.getStage1EvidenceDrawerDecision(), null)
+  ctx.agentPanelPayloads.capability_run.run_id = 'caprun-1'
+  ctx.closeStage1EvidenceDrawer()
+  assert.equal(ctx.getStage1EvidenceDrawerDecision(), null)
   const matrix = ctx.getStage1SpatialMatrix()
   matrix.space_decisions[0].preferred_function.name = 'changed'
   assert.equal(ctx.getStage1SpaceDecisions()[0].preferred_function.name, '文化活动')
@@ -659,7 +698,10 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /空间功能策划决策矩阵/)
   assert.match(main, /getStage1SpaceDecisions\(\)/)
   assert.match(main, /getStage1DecisionStatusLabel\(decision\)/)
-  assert.match(main, /证据引用/)
+  assert.match(main, /管理层总览用于比较/)
+  assert.match(main, /getStage1SpaceManagementRows\(\)/)
+  assert.match(main, /getStage1DecisionEvidenceEntries/)
+  assert.match(main, /Decision Evidence/)
   assert.match(main, /来源冲突与裁决状态/)
   assert.match(main, /getStage1ConflictRegister\(\)/)
   assert.match(main, /正式交付物/)

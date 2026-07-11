@@ -1019,9 +1019,12 @@ export function createAgentCapabilityWorkbenchMethods() {
     hasStage1Outcome() {
       return !!(this.getCapabilityRun() || this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1HardConstraintScreening() || this.getStage1Deliverables())
     },
-    getStage1EvidenceCount() {
+    getStage1EvidenceLedger() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger
-      return Array.isArray(ledger) ? ledger.length : 0
+      return Array.isArray(ledger) ? clonePayloadValue(ledger) : []
+    },
+    getStage1EvidenceCount() {
+      return this.getStage1EvidenceLedger().length
     },
     getStage1SpatialMatrix() {
       const matrix = (this.agentPanelPayloads || {}).stage1_spatial_matrix
@@ -1033,6 +1036,109 @@ export function createAgentCapabilityWorkbenchMethods() {
     },
     getStage1SpaceDecisionCount() {
       return this.getStage1SpaceDecisions().length
+    },
+    getStage1SpaceManagementRows() {
+      return this.getStage1SpaceDecisions().map(decision => ({
+        space_id: text(decision?.space_id),
+        space_name: text(decision?.space_name) || text(decision?.space_id) || '未命名空间',
+        future_role: text(decision?.future_role) || '未说明',
+        preferred_function: this.getStage1FunctionLabel(decision?.preferred_function),
+        core_audiences: this.getStage1DecisionDetailText(decision?.core_audiences),
+        movement_role: text(decision?.movement_role) || '未说明',
+        value_role: text(decision?.value_role) || '未说明',
+        recommendation_status: text(decision?.recommendation_status),
+        recommendation_label: this.getStage1DecisionStatusLabel(decision),
+        preconditions: this.getStage1DecisionDetailText(decision?.preconditions),
+        evidence_count: Array.isArray(decision?.evidence_refs) ? decision.evidence_refs.length : 0,
+      }))
+    },
+    getStage1SpaceDecisionById(spaceId) {
+      const target = text(spaceId)
+      return this.getStage1SpaceDecisions().find(item => text(item?.space_id) === target) || null
+    },
+    openStage1EvidenceDrawer(decision) {
+      const spaceId = text(decision?.space_id)
+      if (!spaceId) return
+      this.stage1EvidenceDrawerSpaceId = spaceId
+      this.stage1EvidenceDrawerRunId = text(this.getCapabilityRun()?.run_id)
+    },
+    closeStage1EvidenceDrawer() {
+      this.stage1EvidenceDrawerSpaceId = ''
+      this.stage1EvidenceDrawerRunId = ''
+    },
+    getStage1EvidenceDrawerDecision() {
+      if (text(this.stage1EvidenceDrawerRunId) !== text(this.getCapabilityRun()?.run_id)) return null
+      return this.getStage1SpaceDecisionById(this.stage1EvidenceDrawerSpaceId)
+    },
+    getStage1DecisionEvidenceEntries(decision) {
+      const refs = uniqueTextItems(decision?.evidence_refs, 64)
+      if (!refs.length) return []
+      const ledger = new Map(this.getStage1EvidenceLedger().map(item => [text(item?.id), item]))
+      const verification = this.getStage1EvidenceVerification() || {}
+      const tasks = Array.isArray(verification.tasks) ? verification.tasks : []
+      const automatedChecks = Array.isArray(verification.automated_checks) ? verification.automated_checks : []
+      const provenance = new Map(this.getStage1ProvenanceBindings().map(item => [text(item?.evidence_id), item]))
+      const qualityIssues = this.getStage1DataQualityIssues()
+      const conflicts = this.getStage1ConflictRegister()
+      return refs.map((evidenceId) => {
+        const node = ledger.get(evidenceId) || { id: evidenceId }
+        return {
+          ...clonePayloadValue(node),
+          id: evidenceId,
+          missing: !ledger.has(evidenceId),
+          used_by_space_id: text(decision?.space_id),
+          verification_task: clonePayloadValue(tasks.find(item => text(item?.evidence_id) === evidenceId) || null),
+          automated_check: clonePayloadValue(automatedChecks.find(item => text(item?.evidence_id) === evidenceId) || null),
+          provenance: clonePayloadValue(provenance.get(evidenceId) || null),
+          quality_issues: clonePayloadValue(qualityIssues.filter(item => text(item?.evidence_id) === evidenceId)),
+          conflicts: clonePayloadValue(conflicts.filter(item => item?.unresolved === true && (Array.isArray(item?.evidence_ids) ? item.evidence_ids : []).map(text).includes(evidenceId))),
+        }
+      })
+    },
+    getStage1EvidenceTypeLabel(entry) {
+      const labels = { F: '项目事实', G: 'GIS 分析', P: '代理指标', H: '策划假设', V: '待验证事项' }
+      return labels[entry?.evidence_type] || text(entry?.evidence_type) || '未标证据类型'
+    },
+    getStage1EvidenceStatusLabel(entry) {
+      const labels = {
+        verified: '已验证', cross_checked: '已交叉核对', inferred: '推断', hypothesis: '假设',
+        blocked: '阻断', fieldwork_required: '需现场核验',
+      }
+      return labels[entry?.status] || text(entry?.status) || (entry?.missing ? '引用失效' : '未标验证状态')
+    },
+    getStage1EvidenceSourceText(entry) {
+      return [entry?.source_ref, entry?.source_artifact_id, entry?.source_locator]
+        .map(text).filter(Boolean).filter((item, index, values) => values.indexOf(item) === index).join(' · ')
+    },
+    getStage1EvidenceDateText(entry) {
+      const parts = []
+      if (text(entry?.source_date)) parts.push(`来源 ${text(entry.source_date)}`)
+      if (text(entry?.analysis_date)) parts.push(`分析 ${text(entry.analysis_date)}`)
+      return parts.join(' · ')
+    },
+    getStage1EvidenceMetricText(entry) {
+      const metric = text(entry?.metric)
+      const value = text(entry?.value)
+      return [metric, value].filter(Boolean).join('：')
+    },
+    getStage1EvidenceQualityText(entry) {
+      const parts = []
+      if (text(entry?.confidence)) parts.push(`${this.getStage1DecisionConfidenceLabel(entry)}证据`)
+      if (entry?.provenance?.status) parts.push(`来源${entry.provenance.status === 'verified' ? '已绑定' : entry.provenance.status === 'corrected' ? '已修正' : '存在缺口'}`)
+      if (entry?.automated_check?.outcome) parts.push(`自动核验 ${text(entry.automated_check.outcome)}`)
+      return parts.join(' · ')
+    },
+    getStage1EvidenceGapText(entry) {
+      const parts = []
+      if (entry?.missing) parts.push('该引用未在本轮证据台账中找到')
+      if (text(entry?.limitation)) parts.push(text(entry.limitation))
+      if (entry?.verification_task?.blocking_reason) parts.push(text(entry.verification_task.blocking_reason))
+      if (Array.isArray(entry?.quality_issues)) parts.push(...entry.quality_issues.map(item => text(item?.message)))
+      if (Array.isArray(entry?.conflicts)) parts.push(...entry.conflicts.map(item => `${text(item?.label || item?.metric_key) || '证据'}存在未裁决口径`))
+      return uniqueTextItems(parts, 8).join('；')
+    },
+    getStage1EvidenceNextActionText(entry) {
+      return text(entry?.verification_task?.next_action || entry?.next_action || entry?.verification_task?.verification_method)
     },
     getStage1FunctionLabel(value) {
       if (value && typeof value === 'object') return text(value.name || value.title || value.label || value.id) || '未命名功能'
