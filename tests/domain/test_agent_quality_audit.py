@@ -21,10 +21,10 @@ def complete_package():
             }
         ],
         "workpacks": [
-            {"type": "spatial"},
-            {"type": "audience"},
-            {"type": "culture_tourism"},
-            {"type": "renewal_operations"},
+            {"type": "spatial", "evidence_refs": ["evidence-1"]},
+            {"type": "audience", "evidence_refs": ["evidence-1"]},
+            {"type": "culture_tourism", "evidence_refs": ["evidence-1"]},
+            {"type": "renewal_operations", "evidence_refs": ["evidence-1"]},
         ],
         "strategy": {
             "recommended_option_id": "option-a",
@@ -111,3 +111,14 @@ def test_evidence_requires_scope_limitation_and_validation_status():
 
     assert result.status == "failed"
     assert result.blocking_issues[0].code == "evidence_contract_invalid"
+
+
+def test_unknown_evidence_reference_blocks_delivery():
+    package = complete_package()
+    package["strategy"]["options"][0]["evidence_refs"] = ["missing-evidence"]
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    issue = next(item for item in result.blocking_issues if item.code == "evidence_reference_invalid")
+    assert "missing-evidence" in issue.message

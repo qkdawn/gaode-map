@@ -38,6 +38,9 @@ def ready_payload():
             },
             "frontend_analysis": {"poi_total": 2635},
         },
+        selected_sources_context={
+            "sources": [{"source_id": "project-doc", "title": "项目资料"}]
+        },
     )
 
 
@@ -64,10 +67,10 @@ def valid_evidence():
 def valid_workpacks():
     return {
         "workpacks": [
-            {"type": "spatial"},
-            {"type": "audience"},
-            {"type": "culture_tourism"},
-            {"type": "renewal_operations"},
+            {"type": "spatial", "evidence_refs": ["evidence-1"]},
+            {"type": "audience", "evidence_refs": ["evidence-1"]},
+            {"type": "culture_tourism", "evidence_refs": ["evidence-1"]},
+            {"type": "renewal_operations", "evidence_refs": ["evidence-1"]},
         ]
     }
 
@@ -130,6 +133,26 @@ def test_stage1_reports_structured_readiness_gaps_without_calling_model():
     assert response.status == "requires_clarification"
     assert response.output.panel_payloads["stage1_readiness"]["ready"] is False
     assert response.effective_execution_profile.model_profile_id == "personal-test"
+
+
+def test_stage1_evidence_gate_stops_before_professional_models(monkeypatch):
+    runtime, profile = runtime_and_profile()
+    calls = []
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs["reasoning_id"])
+            return {"evidence_ledger": []}
+
+    monkeypatch.setattr(stage1, "get_llm_provider_client", lambda *, runtime: FakeClient())
+    response = asyncio.run(execute(ready_payload(), runtime=runtime, profile=profile))
+
+    assert response.status == "requires_clarification"
+    assert calls == ["stage1-evidence-model"]
+    verification = response.output.panel_payloads["stage1_evidence_verification"]
+    assert verification["status"] == "failed"
+    assert verification["report_allowed"] is False
+    assert "后续专业模型未被调用" in response.diagnostics.research_notes[0]
 
 
 def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
@@ -201,6 +224,7 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
     ]
     assert response.status == "answered"
     assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "passed"
+    assert response.output.panel_payloads["stage1_evidence_verification"]["status"] == "passed"
     assert response.output.panel_payloads["claim_evidence"][0]["status"] == "verified"
     assert response.output.panel_payloads["sources_used"] == ["项目资料 p.12"]
     assert response.effective_execution_profile == profile

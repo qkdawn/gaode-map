@@ -85,7 +85,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 8
+    checks_total = 9
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -131,6 +131,37 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         issues.append(
             _issue(
                 "evidence_ledger_missing", "未生成证据台账。", path="evidence_ledger"
+            )
+        )
+
+    evidence_ids = {
+        _text(node.get("id")) for node in ledger if isinstance(node, dict) and _text(node.get("id"))
+    }
+    referenced_ids: set[str] = set()
+    for workpack in workpacks:
+        if isinstance(workpack, dict):
+            referenced_ids.update(_text(item) for item in _list(workpack.get("evidence_refs")) if _text(item))
+    for option in _list(strategy.get("options")):
+        if isinstance(option, dict):
+            referenced_ids.update(_text(item) for item in _list(option.get("evidence_refs")) if _text(item))
+    for decision in _list(matrix.get("space_decisions")):
+        if isinstance(decision, dict):
+            referenced_ids.update(_text(item) for item in _list(decision.get("evidence_refs")) if _text(item))
+    unknown_refs = sorted(referenced_ids - evidence_ids)
+    if referenced_ids and not unknown_refs:
+        checks_passed += 1
+    else:
+        message = (
+            f"专业结论引用了证据台账中不存在的 ID：{'、'.join(unknown_refs)}。"
+            if unknown_refs
+            else "专业工作包、定位方案和空间决策没有形成可追溯的证据引用。"
+        )
+        issues.append(
+            _issue(
+                "evidence_reference_invalid",
+                message,
+                path="workpacks/strategy/spatial_matrix",
+                repair_hint="只引用本轮证据台账中的稳定 evidence id，并为专业结论补齐引用。",
             )
         )
 

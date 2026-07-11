@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
+from ..evidence_verification import verify_evidence_ledger
 from ..llm_digest import snapshot_digest
 from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
 from ..quality_audit import QualityAuditResult, audit_stage1_package
+from ..stage1_contracts import VerificationSummary
 from ..schemas import (
     AgentContextSummary,
     AgentPlanEnvelope,
@@ -130,11 +132,15 @@ def _audit_payload(audit: QualityAuditResult) -> dict[str, Any]:
 
 
 def _base_panels(
-    readiness: dict[str, Any], package: dict[str, Any], audit: QualityAuditResult
+    readiness: dict[str, Any],
+    package: dict[str, Any],
+    audit: QualityAuditResult,
+    verification: VerificationSummary,
 ) -> dict[str, Any]:
     return {
         "stage1_readiness": readiness,
         "stage1_evidence_ledger": package["evidence_ledger"],
+        "stage1_evidence_verification": verification.model_dump(mode="json"),
         "stage1_workpacks": package["workpacks"],
         "stage1_strategy": package["strategy"],
         "stage1_spatial_matrix": package["spatial_matrix"],
@@ -210,7 +216,42 @@ async def execute(
         title="构建 Claim-Evidence 台账",
         reasoning_id="stage1-evidence-model",
     )
-    evidence_ledger = _list_from(evidence_result, "evidence_ledger")
+    evidence_ledger, verification = verify_evidence_ledger(
+        _list_from(evidence_result, "evidence_ledger"),
+        selected_sources=payload.selected_sources_context.source_items(),
+        snapshot=payload.analysis_snapshot,
+    )
+    await _emit_phase(
+        emit,
+        phase_id="stage1-evidence-verification",
+        title="验证证据状态与时效",
+        detail=(
+            f"证据门控{verification.status}；形成 {len(verification.tasks)} 项明确核验任务。"
+        ),
+        state="completed" if verification.report_allowed else "failed",
+    )
+    if not verification.report_allowed:
+        verification_payload = verification.model_dump(mode="json")
+        return AgentTurnResponse(
+            status="requires_clarification",
+            stage="requires_clarification",
+            output=AgentTurnOutput(
+                clarification_question="证据台账未通过验证门控，已停止专业推演。请补充可定位证据后重新运行。",
+                clarification_options=verification.blocking_reasons[:4],
+                panel_payloads={
+                    "stage1_readiness": readiness,
+                    "stage1_evidence_ledger": evidence_ledger,
+                    "stage1_evidence_verification": verification_payload,
+                },
+            ),
+            diagnostics=AgentTurnDiagnostics(
+                audit_issues=verification.blocking_reasons,
+                research_notes=["证据门控未通过，后续专业模型未被调用。"],
+            ),
+            context_summary=AgentContextSummary(),
+            plan=AgentPlanEnvelope(),
+            effective_execution_profile=profile,
+        )
 
     await _emit_phase(
         emit,
@@ -300,7 +341,7 @@ async def execute(
         detail=f"通过 {audit.checks_passed}/{audit.checks_total} 项，质量分 {audit.score}。",
         state="completed" if audit.status == "passed" else "failed",
     )
-    panels = _base_panels(readiness, package, audit)
+    panels = _base_panels(readiness, package, audit, verification)
     if audit.status != "passed":
         repair_tasks = [
             {
@@ -334,11 +375,13 @@ async def execute(
         system_prompt=(
             "你是城市区域策划总顾问。只输出 JSON：answer(专业中文 Markdown 报告)、sources。"
             "报告必须含总判断、证据边界、定位方案比较、推荐定位、客群场景、功能组合、空间策略、"
-            "运营治理、分期、风险、验证计划和设计任务书。仅使用已审计包；inferred/hypothesis 不得写成事实。"
+            "运营治理、分期、风险、验证计划和设计任务书。仅使用已审计包；必须分列已验证、推断、假设、"
+            "阻塞与现场核验事项；inferred/hypothesis 不得写成事实，blocked/fieldwork_required 不得写成既定条件。"
         ),
         user_payload={
             "question": question,
             "stage1_package": package,
+            "evidence_verification": verification.model_dump(mode="json"),
             "quality_audit": _audit_payload(audit),
         },
         emit=emit,
