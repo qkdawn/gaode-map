@@ -61,6 +61,8 @@ def package():
             "space_decisions": [
                 {
                     "space_id": "unit-1",
+                    "current_state": {"use": "闲置礼堂"},
+                    "change_logic": {"reason": "补足社区文化活动空间"},
                     "preferred_function": {"id": "culture"},
                     "candidate_functions": [{"id": "culture"}, {"id": "retail"}],
                     "excluded_functions": [{"id": "heavy-food"}],

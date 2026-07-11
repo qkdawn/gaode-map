@@ -115,6 +115,31 @@
                                     </article>
                                 </div>
                             </div>
+                            <div v-if="getStage1SpaceDecisions().length" class="agent-spatial-matrix">
+                                <div class="agent-spatial-matrix-head">
+                                    <div><strong>空间功能策划决策矩阵</strong><span>从项目定位下钻到空间单元、成立条件与证据</span></div>
+                                    <small>{{ getStage1SpatialMatrix().matrix_version || '未标版本' }} · {{ getStage1SpaceDecisionCount() }} 个空间</small>
+                                </div>
+                                <details v-for="decision in getStage1SpaceDecisions()" :key="decision.space_id" class="agent-space-decision">
+                                    <summary>
+                                        <span>{{ decision.space_id }}</span>
+                                        <strong>{{ getStage1FunctionLabel(decision.preferred_function) }}</strong>
+                                        <em :class="decision.recommendation_status">{{ getStage1DecisionStatusLabel(decision) }} · {{ getStage1DecisionConfidenceLabel(decision) }}</em>
+                                    </summary>
+                                    <div class="agent-space-decision-body">
+                                        <p v-if="getStage1FunctionListText(decision.candidate_functions)"><span>候选功能</span>{{ getStage1FunctionListText(decision.candidate_functions) }}</p>
+                                        <p v-if="getStage1FunctionListText(decision.excluded_functions)"><span>排除功能</span>{{ getStage1FunctionListText(decision.excluded_functions) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.change_logic)"><span>改变逻辑</span>{{ getStage1DecisionDetailText(decision.change_logic) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.audience_scenarios)"><span>客群场景</span>{{ getStage1DecisionDetailText(decision.audience_scenarios) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.access_and_movement)"><span>到达动线</span>{{ getStage1DecisionDetailText(decision.access_and_movement) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.operation_strategy)"><span>运营要求</span>{{ getStage1DecisionDetailText(decision.operation_strategy) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.renovation_and_delivery)"><span>改造交付</span>{{ getStage1DecisionDetailText(decision.renovation_and_delivery) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.preconditions)"><span>成立条件</span>{{ getStage1DecisionDetailText(decision.preconditions) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.validation_actions)"><span>验证动作</span>{{ getStage1DecisionDetailText(decision.validation_actions) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.evidence_refs)"><span>证据引用</span>{{ getStage1DecisionDetailText(decision.evidence_refs) }}</p>
+                                    </div>
+                                </details>
+                            </div>
                             <div v-if="getStage1ConflictRegister().length" class="agent-conflict-register">
                                 <strong>来源冲突与裁决状态</strong>
                                 <article v-for="conflict in getStage1ConflictRegister()" :key="`${conflict.metric_key}-${conflict.label}`" :class="{ unresolved: conflict.unresolved }">

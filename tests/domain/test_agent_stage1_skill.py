@@ -113,11 +113,17 @@ def valid_matrix():
         "space_decisions": [
             {
                 "space_id": "unit-1",
+                "current_state": {"use": "闲置礼堂"},
+                "change_logic": {"reason": "补足社区文化活动空间"},
                 "candidate_functions": [{"id": "culture"}, {"id": "retail"}],
                 "preferred_function": {"id": "culture"},
                 "excluded_functions": [{"id": "heavy-food"}],
                 "audience_scenarios": ["社区周末活动"],
+                "access_and_movement": {"visitor_entry": "南侧主入口"},
+                "operation_strategy": {"operator": "社区文化运营主体"},
+                "renovation_and_delivery": {"phase": "一期轻量改造"},
                 "preconditions": ["完成消防评估"],
+                "validation_actions": ["开展消防与结构核验"],
                 "evidence_refs": ["evidence-1"],
                 "recommendation_status": "conditional",
                 "confidence": "medium",

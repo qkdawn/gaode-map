@@ -59,6 +59,8 @@ def complete_package():
             "space_decisions": [
                 {
                     "space_id": "unit-1",
+                    "current_state": {"use": "闲置礼堂"},
+                    "change_logic": {"reason": "补足社区文化活动空间"},
                     "candidate_functions": [
                         {"id": "culture"},
                         {"id": "retail"},
@@ -68,7 +70,11 @@ def complete_package():
                         {"id": "heavy-food", "reason": "消防与排烟受限"}
                     ],
                     "audience_scenarios": ["社区周末文化活动"],
+                    "access_and_movement": {"visitor_entry": "南侧主入口"},
+                    "operation_strategy": {"operator": "社区文化运营主体"},
+                    "renovation_and_delivery": {"phase": "一期轻量改造"},
                     "preconditions": ["完成消防评估"],
+                    "validation_actions": ["开展消防与结构核验"],
                     "evidence_refs": ["evidence-1"],
                     "recommendation_status": "conditional",
                     "confidence": "medium",
@@ -114,6 +120,19 @@ def test_matrix_must_bind_to_the_recommended_strategy_option():
 
     assert result.status == "failed"
     assert "matrix_positioning_mismatch" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_space_decision_must_be_ready_for_design_handoff():
+    package = complete_package()
+    package["spatial_matrix"]["space_decisions"][0]["operation_strategy"] = {}
+    package["spatial_matrix"]["space_decisions"][0]["validation_actions"] = []
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "space_design_handoff_incomplete" in {
         issue.code for issue in result.blocking_issues
     }
 

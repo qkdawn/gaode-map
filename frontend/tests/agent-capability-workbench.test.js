@@ -160,7 +160,27 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         { metric_key: 'households', label: '居民户数', values: ['102户', '120户'], evidence_ids: ['node-1', 'node-2'], unresolved: true, explanation: '同级项目摘要口径冲突' },
         { metric_key: 'area', label: '项目面积', values: ['2.4公顷', '2.5公顷'], evidence_ids: ['node-3'], unresolved: false, explanation: '采用项目摘要口径' },
       ],
-      stage1_spatial_matrix: { space_decisions: [{ id: 's1' }] },
+      stage1_spatial_matrix: {
+        matrix_version: '1.0',
+        positioning_option_id: 'option-a',
+        space_decisions: [{
+          space_id: 'unit-1',
+          current_state: { use: '闲置礼堂' },
+          change_logic: { reason: '补足社区文化活动空间' },
+          candidate_functions: [{ id: 'culture', name: '文化活动' }, { id: 'retail', name: '社区零售' }],
+          preferred_function: { id: 'culture', name: '文化活动' },
+          excluded_functions: [{ id: 'heavy-food', name: '重餐饮', reason: '排烟受限' }],
+          audience_scenarios: ['社区周末活动'],
+          access_and_movement: { visitor_entry: '南侧主入口' },
+          operation_strategy: { operator: '社区文化运营主体' },
+          renovation_and_delivery: { phase: '一期轻量改造' },
+          preconditions: ['完成消防评估'],
+          validation_actions: ['开展消防与结构核验'],
+          evidence_refs: ['e1'],
+          recommendation_status: 'conditional',
+          confidence: 'medium',
+        }],
+      },
       stage1_deliverables: {
         status: 'ready',
         source_contract: 'audited_stage1_package',
@@ -233,6 +253,14 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1DataQualityCoordinateText(), 'EPSG:4490')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
+  const matrix = ctx.getStage1SpatialMatrix()
+  matrix.space_decisions[0].preferred_function.name = 'changed'
+  assert.equal(ctx.getStage1SpaceDecisions()[0].preferred_function.name, '文化活动')
+  assert.equal(ctx.getStage1FunctionLabel(ctx.getStage1SpaceDecisions()[0].preferred_function), '文化活动')
+  assert.equal(ctx.getStage1FunctionListText(ctx.getStage1SpaceDecisions()[0].candidate_functions), '文化活动、社区零售')
+  assert.equal(ctx.getStage1DecisionDetailText(ctx.getStage1SpaceDecisions()[0].change_logic), '补足社区文化活动空间')
+  assert.equal(ctx.getStage1DecisionStatusLabel(ctx.getStage1SpaceDecisions()[0]), '条件推荐')
+  assert.equal(ctx.getStage1DecisionConfidenceLabel(ctx.getStage1SpaceDecisions()[0]), '中置信')
   const deliverables = ctx.getStage1Deliverables()
   deliverables.artifacts[0].filename = 'changed.md'
   deliverables.design_handoff.space_requirements[0].space_id = 'changed'
@@ -261,6 +289,10 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getStage1ProvenanceDiscrepancyText\(binding\)/)
   assert.match(main, /数据质量与时空口径/)
   assert.match(main, /getStage1DataQualityCoverageItems\(\)/)
+  assert.match(main, /空间功能策划决策矩阵/)
+  assert.match(main, /getStage1SpaceDecisions\(\)/)
+  assert.match(main, /getStage1DecisionStatusLabel\(decision\)/)
+  assert.match(main, /证据引用/)
   assert.match(main, /来源冲突与裁决状态/)
   assert.match(main, /getStage1ConflictRegister\(\)/)
   assert.match(main, /正式交付物/)

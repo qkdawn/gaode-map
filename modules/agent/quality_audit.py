@@ -88,7 +88,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 15
+    checks_total = 16
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -495,6 +495,33 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 "关键空间缺少候选比较、排除理由、客群场景、前置条件、证据或推荐强度。",
                 path="spatial_matrix.space_decisions",
                 repair_hint="每个空间至少比较两个候选，并给出首选、排除项、场景化客群和成立条件。",
+            )
+        )
+
+    incomplete_handoffs = []
+    required_handoff_sections = (
+        "current_state",
+        "change_logic",
+        "access_and_movement",
+        "operation_strategy",
+        "renovation_and_delivery",
+    )
+    for index, decision in enumerate(decisions):
+        node = decision if isinstance(decision, dict) else {}
+        if any(
+            not isinstance(node.get(field), dict) or not node.get(field)
+            for field in required_handoff_sections
+        ) or not _list(node.get("validation_actions")):
+            incomplete_handoffs.append(index)
+    if decisions and not incomplete_handoffs:
+        checks_passed += 1
+    else:
+        issues.append(
+            _issue(
+                "space_design_handoff_incomplete",
+                "空间决策尚未形成可直接交给设计端的现状、改变逻辑、动线、运营、改造交付和验证动作。",
+                path="spatial_matrix.space_decisions",
+                repair_hint="逐空间补齐 current_state、change_logic、access_and_movement、operation_strategy、renovation_and_delivery 和 validation_actions。",
             )
         )
 

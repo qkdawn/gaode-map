@@ -10,6 +10,13 @@ const clonePayloadValue = value => {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clonePayloadValue(item)]))
 }
 
+const collectPayloadText = (value) => {
+  if (Array.isArray(value)) return value.flatMap(collectPayloadText)
+  if (value && typeof value === 'object') return Object.values(value).flatMap(collectPayloadText)
+  const item = text(value)
+  return item ? [item] : []
+}
+
 const CAPABILITY_PROMPTS = Object.freeze({
   'urban-strategy-stage1': '基于当前项目范围、资料和分析结果，执行城市更新第一阶段策划并生成可审计报告。',
   'spatial-programming-matrix': '基于当前项目证据，重点生成空间功能策划决策矩阵，并说明候选功能、排除理由和前置条件。',
@@ -244,9 +251,34 @@ export function createAgentCapabilityWorkbenchMethods() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger
       return Array.isArray(ledger) ? ledger.length : 0
     },
+    getStage1SpatialMatrix() {
+      const matrix = (this.agentPanelPayloads || {}).stage1_spatial_matrix
+      return matrix && typeof matrix === 'object' ? clonePayloadValue(matrix) : null
+    },
+    getStage1SpaceDecisions() {
+      const decisions = this.getStage1SpatialMatrix()?.space_decisions
+      return Array.isArray(decisions) ? clonePayloadValue(decisions) : []
+    },
     getStage1SpaceDecisionCount() {
-      const matrix = (this.agentPanelPayloads || {}).stage1_spatial_matrix || {}
-      return Array.isArray(matrix.space_decisions) ? matrix.space_decisions.length : 0
+      return this.getStage1SpaceDecisions().length
+    },
+    getStage1FunctionLabel(value) {
+      if (value && typeof value === 'object') return text(value.name || value.title || value.label || value.id) || '未命名功能'
+      return text(value) || '未命名功能'
+    },
+    getStage1FunctionListText(values) {
+      return Array.isArray(values) ? values.map(item => this.getStage1FunctionLabel(item)).filter(Boolean).join('、') : ''
+    },
+    getStage1DecisionDetailText(value) {
+      return [...new Set(collectPayloadText(value))].join('；')
+    },
+    getStage1DecisionStatusLabel(decision) {
+      const labels = { strong: '强推荐', conditional: '条件推荐', alternative: '备选', excluded: '排除' }
+      return labels[decision?.recommendation_status] || text(decision?.recommendation_status) || '未标记'
+    },
+    getStage1DecisionConfidenceLabel(decision) {
+      const labels = { high: '高置信', medium: '中置信', low: '低置信' }
+      return labels[decision?.confidence] || text(decision?.confidence) || '未标记'
     },
     getStage1VerificationStatusLabel() {
       const verification = this.getStage1EvidenceVerification() || {}
