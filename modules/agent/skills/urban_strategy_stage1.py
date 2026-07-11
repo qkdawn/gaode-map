@@ -23,6 +23,11 @@ from ..stage1_provenance import (
     project_evidence_payload,
     provenance_registry_payload,
 )
+from ..stage1_runs import (
+    bind_stage1_input_artifacts,
+    build_stage1_output_artifacts,
+    start_stage1_run,
+)
 from ..schemas import (
     AgentContextSummary,
     AgentPlanEnvelope,
@@ -266,6 +271,14 @@ async def execute(
     profile: EffectiveExecutionProfile,
     emit: Emit | None = None,
 ) -> AgentTurnResponse:
+    question = str(payload.messages[-1].content if payload.messages else "").strip()
+    selected_sources = payload.selected_sources_context.source_items()
+    run = start_stage1_run(
+        payload,
+        profile=profile,
+        question=question,
+        selected_sources=selected_sources,
+    )
     readiness = evaluate_readiness(payload)
     await _emit_phase(
         emit,
@@ -276,6 +289,18 @@ async def execute(
     )
     if not readiness["ready"]:
         missing = "、".join(readiness["missing"])
+        run.record_stage(
+            "readiness",
+            "资料完整性检查",
+            status="waiting_for_user",
+            summary=f"缺少：{missing}",
+            diagnostics=list(readiness["missing"]),
+        )
+        run_manifest = run.finish(
+            "waiting_for_user",
+            current_stage="readiness",
+            diagnostics=list(readiness["missing"]),
+        )
         return AgentTurnResponse(
             status="requires_clarification",
             stage="requires_clarification",
@@ -284,7 +309,10 @@ async def execute(
                 clarification_options=[
                     action["label"] for action in readiness["actions"]
                 ],
-                panel_payloads={"stage1_readiness": readiness},
+                panel_payloads={
+                    "stage1_readiness": readiness,
+                    "capability_run": run_manifest.model_dump(mode="json"),
+                },
             ),
             diagnostics=AgentTurnDiagnostics(
                 research_notes=["Stage 1 readiness 未通过，未调用模型生成报告。"]
@@ -294,11 +322,14 @@ async def execute(
             effective_execution_profile=profile,
         )
 
+    run.record_stage(
+        "readiness",
+        "资料完整性检查",
+        summary=f"满足 {len(readiness['satisfied'])} 项必需输入。",
+    )
     client = get_llm_provider_client(runtime=runtime)
     if client is None:
         raise ValueError("所选模型 Provider 不可用")
-    question = str(payload.messages[-1].content if payload.messages else "").strip()
-    selected_sources = payload.selected_sources_context.source_items()
     dossier = build_project_evidence_dossier(selected_sources, question=question)
     conflict_register = _conflict_register(
         selected_sources,
@@ -311,6 +342,14 @@ async def execute(
         snapshot=payload.analysis_snapshot,
         dossier=dossier,
     )
+    input_artifacts = bind_stage1_input_artifacts(provenance_registry)
+    run.set_input_artifacts(input_artifacts)
+    input_artifact_ids = [item.artifact_id for item in input_artifacts]
+    project_brief = {
+        "question": question,
+        "project_context": payload.analysis_snapshot.context,
+        "scope": payload.analysis_snapshot.scope,
+    }
     evidence_input = {
         "question": question,
         "project_context": payload.analysis_snapshot.context,
@@ -368,8 +407,37 @@ async def execute(
         ),
         state="completed" if verification.report_allowed else "failed",
     )
+    run.record_stage(
+        "evidence-ledger",
+        "建立证据台账",
+        summary=f"登记并绑定 {len(evidence_ledger)} 条证据。",
+    )
+    run.record_stage(
+        "evidence-verification",
+        "验证证据状态与时效",
+        status="completed" if verification.report_allowed else "waiting_for_user",
+        summary=f"门控状态：{verification.status}。",
+        diagnostics=list(verification.blocking_reasons),
+    )
     if not verification.report_allowed:
         verification_payload = verification.model_dump(mode="json")
+        partial_package = {
+            "project_brief": project_brief,
+            "source_readiness": readiness,
+            "evidence_ledger": evidence_ledger,
+            "conflict_register": conflict_register,
+        }
+        output_artifacts = build_stage1_output_artifacts(
+            run_id=run.run_id,
+            package=partial_package,
+            input_artifact_ids=input_artifact_ids,
+        )
+        run_manifest = run.finish(
+            "waiting_for_user",
+            current_stage="evidence-verification",
+            diagnostics=list(verification.blocking_reasons),
+            output_artifacts=output_artifacts,
+        )
         return AgentTurnResponse(
             status="requires_clarification",
             stage="requires_clarification",
@@ -382,6 +450,7 @@ async def execute(
                     "stage1_conflict_register": conflict_register,
                     "stage1_provenance_binding": provenance.model_dump(mode="json"),
                     "stage1_evidence_verification": verification_payload,
+                    "capability_run": run_manifest.model_dump(mode="json"),
                 },
             ),
             diagnostics=AgentTurnDiagnostics(
@@ -412,6 +481,11 @@ async def execute(
         reasoning_id="stage1-workpacks-model",
     )
     workpacks = _list_from(workpack_result, "workpacks")
+    run.record_stage(
+        "expert-workpacks",
+        "形成专业工作包",
+        summary=f"生成 {len(workpacks)} 个共享证据底座的专业工作包。",
+    )
 
     await _emit_phase(
         emit,
@@ -439,6 +513,14 @@ async def execute(
         reasoning_id="stage1-options-model",
     )
     strategy = _mapping(strategy_result)
+    run.record_stage(
+        "strategy-options",
+        "比较定位方案",
+        summary=(
+            f"比较 {len(strategy.get('options') or [])} 个定位方案，"
+            f"推荐 {strategy.get('recommended_option_id') or '未确定'}。"
+        ),
+    )
 
     await _emit_phase(
         emit,
@@ -470,6 +552,13 @@ async def execute(
         reasoning_id="stage1-spatial-matrix-model",
     )
     spatial_matrix = _mapping(matrix_result)
+    run.record_stage(
+        "spatial-decision-matrix",
+        "形成空间功能决策矩阵",
+        summary=(
+            f"形成 {len(spatial_matrix.get('space_decisions') or [])} 个空间决策。"
+        ),
+    )
     critical_evidence_ids = _critical_evidence_ids(strategy, spatial_matrix)
     provenance = assess_provenance_bindings(
         provenance_bindings,
@@ -502,7 +591,16 @@ async def execute(
         ),
         state="completed" if data_quality.status != "failed" else "failed",
     )
+    run.record_stage(
+        "quality-and-provenance",
+        "检查数据质量与产物来源",
+        status="completed" if data_quality.status != "failed" else "failed",
+        summary=(f"数据质量 {data_quality.status}；真实资产绑定 {provenance.status}。"),
+        diagnostics=[item.message for item in data_quality.issues],
+    )
     package = {
+        "project_brief": project_brief,
+        "source_readiness": readiness,
         "evidence_ledger": evidence_ledger,
         "conflict_register": conflict_register,
         "data_quality": data_quality.model_dump(mode="json"),
@@ -520,6 +618,13 @@ async def execute(
         detail=f"通过 {audit.checks_passed}/{audit.checks_total} 项，质量分 {audit.score}。",
         state="completed" if audit.status == "passed" else "failed",
     )
+    run.record_stage(
+        "quality-audit",
+        "执行交付前质量审计",
+        status="completed" if audit.status == "passed" else "waiting_for_user",
+        summary=f"通过 {audit.checks_passed}/{audit.checks_total} 项，质量分 {audit.score}。",
+        diagnostics=[item.message for item in audit.blocking_issues],
+    )
     panels = _base_panels(readiness, package, audit, verification, provenance)
     if audit.status != "passed":
         repair_tasks = [
@@ -531,6 +636,18 @@ async def execute(
             for issue in audit.blocking_issues
         ]
         panels["stage1_repair_tasks"] = repair_tasks
+        output_artifacts = build_stage1_output_artifacts(
+            run_id=run.run_id,
+            package=package,
+            input_artifact_ids=input_artifact_ids,
+        )
+        run_manifest = run.finish(
+            "waiting_for_user",
+            current_stage="quality-audit",
+            diagnostics=[item["message"] for item in repair_tasks],
+            output_artifacts=output_artifacts,
+        )
+        panels["capability_run"] = run_manifest.model_dump(mode="json")
         return AgentTurnResponse(
             status="requires_clarification",
             stage="requires_clarification",
@@ -574,16 +691,52 @@ async def execute(
         reasoning_id="stage1-report-model",
     )
     answer = str(report.get("answer") or "").strip()
-    deliverables = compile_stage1_deliverables(package, report_markdown=answer)
+    run.record_stage(
+        "stage1-report",
+        "编译 Stage 1 决策报告",
+        summary="最终报告只读取通过审计的 Stage 1 包。",
+    )
+    run.record_stage(
+        "formal-deliverables",
+        "编译正式交付物",
+        summary="报告、证据附录、设计任务书与运行清单共享同一运行版本。",
+    )
+    handoff_payload = design_handoff.model_dump(mode="json")
+    output_artifacts = build_stage1_output_artifacts(
+        run_id=run.run_id,
+        package=package,
+        input_artifact_ids=input_artifact_ids,
+        report_markdown=answer,
+        evidence_appendix=evidence_appendix,
+        design_handoff=handoff_payload,
+        include_manifest=True,
+    )
+    warning_messages = [
+        *list(readiness["missing_optional"]),
+        *list(verification.notes),
+        *[item.message for item in data_quality.issues],
+    ]
+    run_manifest = run.finish(
+        "completed_with_warnings" if warning_messages else "completed",
+        current_stage="formal-deliverables",
+        diagnostics=warning_messages,
+        output_artifacts=output_artifacts,
+    )
+    deliverables = compile_stage1_deliverables(
+        package,
+        report_markdown=answer,
+        run_manifest=run_manifest,
+    )
     await _emit_phase(
         emit,
         phase_id="stage1-deliverables",
         title="编译正式交付物",
-        detail="主报告、证据附录与设计任务书已从同一审计包生成。",
+        detail="主报告、证据附录、设计任务书与运行清单已从同一审计包生成。",
         state="completed",
     )
     panels["claim_evidence"] = evidence_ledger
     panels["sources_used"] = report.get("sources") or []
+    panels["capability_run"] = run_manifest.model_dump(mode="json")
     panels["stage1_deliverables"] = deliverables.model_dump(mode="json")
     return AgentTurnResponse(
         status="answered",

@@ -149,6 +149,10 @@ def test_stage1_reports_structured_readiness_gaps_without_calling_model():
     }
     assert response.status == "requires_clarification"
     assert response.output.panel_payloads["stage1_readiness"]["ready"] is False
+    run = response.output.panel_payloads["capability_run"]
+    assert run["status"] == "waiting_for_user"
+    assert run["current_stage"] == "readiness"
+    assert run["configuration_snapshot"]["question"] == "生成报告"
     assert response.effective_execution_profile.model_profile_id == "personal-test"
 
 
@@ -171,6 +175,15 @@ def test_stage1_evidence_gate_stops_before_professional_models(monkeypatch):
     verification = response.output.panel_payloads["stage1_evidence_verification"]
     assert verification["status"] == "failed"
     assert verification["report_allowed"] is False
+    run = response.output.panel_payloads["capability_run"]
+    assert run["status"] == "waiting_for_user"
+    assert run["current_stage"] == "evidence-verification"
+    assert [item["artifact_id"] for item in run["output_artifact_refs"]] == [
+        "stage1-project-brief",
+        "stage1-source-readiness",
+        "stage1-evidence-ledger",
+        "stage1-conflict-register",
+    ]
     assert "后续专业模型未被调用" in response.diagnostics.research_notes[0]
 
 
@@ -203,6 +216,12 @@ def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
     ]
     assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "failed"
     assert response.output.panel_payloads["stage1_repair_tasks"]
+    run = response.output.panel_payloads["capability_run"]
+    assert run["status"] == "waiting_for_user"
+    assert run["current_stage"] == "quality-audit"
+    assert "stage1-decision-matrix" in {
+        item["artifact_id"] for item in run["output_artifact_refs"]
+    }
     assert "最终报告模型未被调用" in response.diagnostics.research_notes[0]
 
 
@@ -254,7 +273,32 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
         "stage1_report.md",
         "evidence_appendix.md",
         "design_handoff.json",
+        "run_manifest.json",
     ]
+    run = response.output.panel_payloads["capability_run"]
+    assert run["run_id"] == deliverables["run_manifest"]["run_id"]
+    assert run["capability_id"] == "urban-strategy-stage1"
+    assert run["status"] == "completed_with_warnings"
+    assert run["execution_profile"]["model_profile_id"] == "personal-test"
+    assert run["execution_profile"]["skill_id"] == "urban-strategy-stage1"
+    assert run["input_artifact_refs"]
+    assert [item["stage_id"] for item in run["stage_records"]][-2:] == [
+        "stage1-report",
+        "formal-deliverables",
+    ]
+    output_filenames = {item["filename"] for item in run["output_artifact_refs"]}
+    assert {
+        "project_brief.json",
+        "source_readiness.json",
+        "evidence_ledger.jsonl",
+        "conflict_register.json",
+        "strategy_options.json",
+        "decision_matrix.json",
+        "stage1_report.md",
+        "evidence_appendix.md",
+        "design_handoff.json",
+        "run_manifest.json",
+    } <= output_filenames
     assert deliverables["design_handoff"]["positioning_option_id"] == "option-a"
     assert (
         deliverables["design_handoff"]["space_requirements"][0]["space_id"] == "unit-1"

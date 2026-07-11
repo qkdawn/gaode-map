@@ -119,6 +119,74 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.agentWorkspaceView = 'report'
       await this.submitAgentComposer({ prompt: CAPABILITY_PROMPTS[capability.id] || capability.description })
     },
+    getCapabilityRun() {
+      const run = (this.agentPanelPayloads || {}).capability_run
+      return run && typeof run === 'object' ? clonePayloadValue(run) : null
+    },
+    getCapabilityRunStatusLabel() {
+      const labels = {
+        draft: '草稿',
+        checking_inputs: '检查输入',
+        ready: '已就绪',
+        queued: '排队中',
+        running: '运行中',
+        waiting_for_user: '等待补充',
+        completed: '已完成',
+        completed_with_warnings: '完成但有提示',
+        failed: '运行失败',
+        cancelled: '已取消',
+        stale: '可能过期',
+      }
+      const status = this.getCapabilityRun()?.status
+      return labels[status] || text(status) || '未记录'
+    },
+    getCapabilityRunStages() {
+      const records = this.getCapabilityRun()?.stage_records
+      return Array.isArray(records) ? clonePayloadValue(records) : []
+    },
+    getCapabilityRunOutputArtifacts() {
+      const artifacts = this.getCapabilityRun()?.output_artifact_refs
+      return Array.isArray(artifacts) ? clonePayloadValue(artifacts) : []
+    },
+    getCapabilityRunArtifactTypeLabel(artifact) {
+      const labels = {
+        structured_data: '结构化数据',
+        map_layer: '地图图层',
+        table: '表格',
+        chart: '图表',
+        report: '报告',
+        presentation: '演示文稿',
+        evidence_ledger: '证据台账',
+        design_handoff: '设计移交',
+        export_file: '导出文件',
+        diagnostic_report: '诊断记录',
+      }
+      return labels[artifact?.artifact_type] || text(artifact?.artifact_type) || '产物'
+    },
+    getCapabilityRunArtifactLineageText(artifact) {
+      const upstream = Array.isArray(artifact?.source_artifact_refs) ? artifact.source_artifact_refs.length : 0
+      const evidence = Array.isArray(artifact?.evidence_refs) ? artifact.evidence_refs.length : 0
+      const parts = [`${upstream} 个上游`]
+      if (evidence) parts.push(`${evidence} 条证据`)
+      if (text(artifact?.content_digest)) parts.push(text(artifact.content_digest).slice(0, 18))
+      return parts.join(' · ')
+    },
+    getCapabilityRunCurrentStageLabel() {
+      const run = this.getCapabilityRun()
+      const stage = this.getCapabilityRunStages().find(item => item.stage_id === run?.current_stage)
+      return text(stage?.title || run?.current_stage) || '尚未开始'
+    },
+    getCapabilityRunModelLabel() {
+      const profile = this.getCapabilityRun()?.execution_profile || {}
+      return text(profile.model_display_name || profile.model || profile.model_profile_id) || '未锁定模型'
+    },
+    getCapabilityRunSkillLabel() {
+      const profile = this.getCapabilityRun()?.execution_profile || {}
+      return text(profile.skill_display_name || profile.skill_id) || '未锁定 Skill'
+    },
+    getCapabilityRunSourceCount() {
+      return this.getCapabilityRun()?.input_artifact_refs?.length || 0
+    },
     getStage1QualityAudit() {
       return (this.agentPanelPayloads || {}).stage1_quality_audit || null
     },
@@ -245,7 +313,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       return Array.isArray(constraints) ? constraints.length : 0
     },
     hasStage1Outcome() {
-      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1Deliverables())
+      return !!(this.getCapabilityRun() || this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1Deliverables())
     },
     getStage1EvidenceCount() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger

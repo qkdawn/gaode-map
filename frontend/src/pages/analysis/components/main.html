@@ -49,6 +49,37 @@
                                     <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
                                 </div>
                             </header>
+                            <div v-if="getCapabilityRun()" class="agent-capability-run-manifest" :class="getCapabilityRun().status">
+                                <div class="agent-capability-run-manifest-head">
+                                    <div><span>Capability Run</span><strong>{{ getCapabilityRunStatusLabel() }}</strong></div>
+                                    <code>{{ getCapabilityRun().run_id }}</code>
+                                </div>
+                                <div class="agent-capability-run-manifest-meta">
+                                    <span>当前阶段 <strong>{{ getCapabilityRunCurrentStageLabel() }}</strong></span>
+                                    <span>模型 <strong>{{ getCapabilityRunModelLabel() }}</strong></span>
+                                    <span>Skill <strong>{{ getCapabilityRunSkillLabel() }}</strong></span>
+                                    <span>输入产物 <strong>{{ getCapabilityRunSourceCount() }}</strong></span>
+                                    <span>输出产物 <strong>{{ getCapabilityRunOutputArtifacts().length }}</strong></span>
+                                </div>
+                                <details v-if="getCapabilityRunStages().length" class="agent-capability-run-trace">
+                                    <summary>查看不可变运行快照与阶段记录</summary>
+                                    <div class="agent-capability-run-stage-grid">
+                                        <article v-for="stage in getCapabilityRunStages()" :key="stage.stage_id" :class="stage.status">
+                                            <span>{{ stage.status === 'completed' ? '完成' : stage.status === 'waiting_for_user' ? '待补充' : stage.status }}</span>
+                                            <strong>{{ stage.title }}</strong>
+                                            <small v-if="stage.summary">{{ stage.summary }}</small>
+                                        </article>
+                                    </div>
+                                    <div v-if="getCapabilityRunOutputArtifacts().length" class="agent-capability-run-artifacts">
+                                        <strong>产物索引与血缘</strong>
+                                        <article v-for="artifact in getCapabilityRunOutputArtifacts()" :key="artifact.artifact_id">
+                                            <span>{{ getCapabilityRunArtifactTypeLabel(artifact) }}</span>
+                                            <div><strong>{{ artifact.title }}</strong><code>{{ artifact.filename || artifact.artifact_id }}</code></div>
+                                            <small>{{ getCapabilityRunArtifactLineageText(artifact) }}</small>
+                                        </article>
+                                    </div>
+                                </details>
+                            </div>
                             <div v-if="getStage1EvidenceVerification()" class="agent-verification-summary" :class="getStage1EvidenceVerification().status">
                                 <div class="agent-verification-title">
                                     <strong>{{ getStage1VerificationStatusLabel() }}</strong>

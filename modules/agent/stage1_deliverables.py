@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .capability_runs import CapabilityRun
+
 
 class Stage1DeliverableArtifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -58,6 +60,7 @@ class Stage1Deliverables(BaseModel):
     report_markdown: str
     evidence_appendix_markdown: str
     design_handoff: DesignHandoffContract
+    run_manifest: CapabilityRun
     artifacts: list[Stage1DeliverableArtifact] = Field(default_factory=list)
 
 
@@ -239,7 +242,10 @@ def build_evidence_appendix(package: dict[str, Any]) -> str:
 
 
 def compile_stage1_deliverables(
-    package: dict[str, Any], *, report_markdown: str
+    package: dict[str, Any],
+    *,
+    report_markdown: str,
+    run_manifest: CapabilityRun,
 ) -> Stage1Deliverables:
     """Compile all Stage 1 deliverables from one audited source contract."""
 
@@ -254,6 +260,7 @@ def compile_stage1_deliverables(
         report_markdown=report,
         evidence_appendix_markdown=appendix,
         design_handoff=handoff,
+        run_manifest=run_manifest.model_copy(deep=True),
         artifacts=[
             Stage1DeliverableArtifact(
                 artifact_id="stage1-report",
@@ -275,6 +282,15 @@ def compile_stage1_deliverables(
                 title="设计任务书",
                 format="json",
                 summary=f"向下一阶段传递 {space_count} 个空间单元要求。",
+            ),
+            Stage1DeliverableArtifact(
+                artifact_id="stage1-run-manifest",
+                filename="run_manifest.json",
+                title="运行清单",
+                format="json",
+                summary=(
+                    f"锁定运行 {run_manifest.run_id} 的配置、阶段记录与产物血缘。"
+                ),
             ),
         ],
     )

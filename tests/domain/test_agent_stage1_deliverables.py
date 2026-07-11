@@ -1,3 +1,4 @@
+from modules.agent.capability_runs import CapabilityRunRecorder
 from modules.agent.stage1_deliverables import (
     build_design_handoff,
     build_evidence_appendix,
@@ -83,6 +84,22 @@ def package():
     }
 
 
+def run_manifest():
+    recorder = CapabilityRunRecorder(
+        capability_id="urban-strategy-stage1",
+        project_context={"scope": {"scope_id": "scope-1"}},
+        configuration_snapshot={"question": "形成 Stage 1 策划"},
+        execution_profile={
+            "model_profile_id": "model-1",
+            "skill_id": "urban-strategy-stage1",
+        },
+        run_id="caprun-test",
+        created_at="2026-07-12T00:00:00Z",
+    )
+    recorder.record_stage("formal-deliverables", "编译正式交付物")
+    return recorder.finish("completed", current_stage="formal-deliverables")
+
+
 def test_design_handoff_reuses_strategy_matrix_and_evidence_ids():
     handoff = build_design_handoff(package())
 
@@ -108,7 +125,9 @@ def test_evidence_appendix_preserves_locator_conflict_and_quality_status():
 
 def test_compiler_exposes_three_named_artifacts_from_one_source_contract():
     deliverables = compile_stage1_deliverables(
-        package(), report_markdown="# Stage 1 主报告"
+        package(),
+        report_markdown="# Stage 1 主报告",
+        run_manifest=run_manifest(),
     )
 
     assert deliverables.source_contract == "audited_stage1_package"
@@ -116,5 +135,7 @@ def test_compiler_exposes_three_named_artifacts_from_one_source_contract():
         "stage1_report.md",
         "evidence_appendix.md",
         "design_handoff.json",
+        "run_manifest.json",
     ]
     assert deliverables.design_handoff.space_requirements[0].space_id == "unit-1"
+    assert deliverables.run_manifest.run_id == "caprun-test"

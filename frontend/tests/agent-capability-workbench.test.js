@@ -129,6 +129,19 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   const task = { evidence_id: 'e2', executor: 'fieldwork', missing_input: '消防核验', blocking_reason: '缺少现场资料', next_action: '现场踏勘' }
   const ctx = createContext({
     agentPanelPayloads: {
+      capability_run: {
+        run_id: 'caprun-1', capability_id: 'urban-strategy-stage1', status: 'completed_with_warnings', current_stage: 'formal-deliverables',
+        execution_profile: { model_profile_id: 'model-1', model_display_name: '规划模型', skill_id: 'urban-strategy-stage1', skill_display_name: '城市区域策划第一阶段' },
+        input_artifact_refs: [{ artifact_id: 'document:brief' }, { artifact_id: 'analysis:road' }],
+        output_artifact_refs: [
+          { artifact_id: 'stage1-report', artifact_type: 'report', title: 'Stage 1 report', filename: 'stage1_report.md', source_artifact_refs: ['stage1-evidence-ledger'], evidence_refs: ['e1', 'e2'], content_digest: 'sha256:1234567890abcdef1234' },
+          { artifact_id: 'stage1-run-manifest', artifact_type: 'structured_data', title: 'Run manifest', filename: 'run_manifest.json', source_artifact_refs: [], evidence_refs: [], content_digest: '' },
+        ],
+        stage_records: [
+          { stage_id: 'readiness', title: '资料完整性检查', status: 'completed', summary: '输入满足' },
+          { stage_id: 'formal-deliverables', title: '编译正式交付物', status: 'completed', summary: '共享同一运行版本' },
+        ],
+      },
       stage1_quality_audit: { status: 'failed', score: 63, issues: [{ code: 'broken-ref', severity: 'error', message: '证据引用失效' }] },
       stage1_evidence_verification: {
         status: 'passed_with_gaps', as_of_date: '2026-07-12',
@@ -188,6 +201,7 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
           { artifact_id: 'stage1-report', filename: 'stage1_report.md', title: 'Stage 1 主报告', format: 'markdown', status: 'ready', summary: '引用同一审计包中的 2 条证据。' },
           { artifact_id: 'stage1-evidence-appendix', filename: 'evidence_appendix.md', title: '证据附录', format: 'markdown', status: 'ready', summary: '保留证据定位与冲突。' },
           { artifact_id: 'stage1-design-handoff', filename: 'design_handoff.json', title: '设计任务书', format: 'json', status: 'ready', summary: '传递空间单元要求。' },
+          { artifact_id: 'stage1-run-manifest', filename: 'run_manifest.json', title: '运行清单', format: 'json', status: 'ready', summary: '锁定运行快照。' },
         ],
         design_handoff: {
           positioning_option_id: 'option-a',
@@ -198,6 +212,21 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
     },
   })
   assert.equal(ctx.hasStage1Outcome(), true)
+  const run = ctx.getCapabilityRun()
+  run.stage_records[0].title = 'changed'
+  assert.equal(ctx.getCapabilityRun().stage_records[0].title, '资料完整性检查')
+  assert.equal(ctx.getCapabilityRunStatusLabel(), '完成但有提示')
+  assert.equal(ctx.getCapabilityRunCurrentStageLabel(), '编译正式交付物')
+  assert.equal(ctx.getCapabilityRunModelLabel(), '规划模型')
+  assert.equal(ctx.getCapabilityRunSkillLabel(), '城市区域策划第一阶段')
+  assert.equal(ctx.getCapabilityRunSourceCount(), 2)
+  const outputArtifacts = ctx.getCapabilityRunOutputArtifacts()
+  assert.equal(outputArtifacts.length, 2)
+  assert.equal(ctx.getCapabilityRunArtifactTypeLabel(outputArtifacts[0]), '报告')
+  assert.equal(ctx.getCapabilityRunArtifactTypeLabel(outputArtifacts[1]), '结构化数据')
+  assert.equal(ctx.getCapabilityRunArtifactLineageText(outputArtifacts[0]), '1 个上游 · 2 条证据 · sha256:1234567890a')
+  outputArtifacts[0].source_artifact_refs.push('changed')
+  assert.equal(ctx.getCapabilityRunOutputArtifacts()[0].source_artifact_refs.length, 1)
   assert.equal(ctx.getStage1VerificationStatusLabel(), '证据门控通过，仍有缺口')
   assert.deepEqual(ctx.getStage1VerificationStatusItems(), [
     { key: 'verified', label: '已验证', count: 2 },
@@ -280,6 +309,14 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getAnalysisCapabilityGroups\(\)/)
   assert.match(main, /inspectAnalysisCapability\(capability\)/)
   assert.match(main, /runAnalysisCapability\(getActiveAnalysisCapability\(\)\)/)
+  assert.match(main, /getCapabilityRun\(\)/)
+  assert.match(main, /Capability Run/)
+  assert.match(main, /查看不可变运行快照与阶段记录/)
+  assert.match(main, /getCapabilityRunStages\(\)/)
+  assert.match(main, /产物索引与血缘/)
+  assert.match(main, /getCapabilityRunOutputArtifacts\(\)/)
+  assert.match(main, /getCapabilityRunArtifactTypeLabel\(artifact\)/)
+  assert.match(main, /getCapabilityRunArtifactLineageText\(artifact\)/)
   assert.match(main, /getStage1EvidenceVerification\(\)/)
   assert.match(main, /Agent 自动核验记录/)
   assert.match(main, /getStage1AutomatedVerificationChecks\(\)/)
