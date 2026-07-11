@@ -11,6 +11,10 @@ from modules.agent.capability_run_service import (
     list_capability_runs,
 )
 from modules.agent.capability_runs import CapabilityRun, CapabilityRunDetail
+from modules.agent.capability_guidance import (
+    CapabilityWorkbenchOverview,
+    build_capability_workbench_overview,
+)
 from modules.agent.capability_catalog import (
     AnalysisCapability,
     CapabilityReadiness,
@@ -110,6 +114,14 @@ async def get_agent_capabilities():
 )
 async def get_analysis_capabilities():
     return await run_in_threadpool(list_analysis_capabilities)
+
+
+@router.post(
+    "/api/v1/analysis/agent/analysis-capabilities/workbench",
+    response_model=CapabilityWorkbenchOverview,
+)
+async def post_analysis_capability_workbench(payload: AgentTurnRequest):
+    return await run_in_threadpool(build_capability_workbench_overview, payload)
 
 
 @router.get(

@@ -2,6 +2,7 @@ import { buildAnalysisQuickAskSelectedSourcesContext } from './analysis-quick-re
 
 const CATALOG_URL = '/api/v1/analysis/agent/analysis-capabilities'
 const RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
+const WORKBENCH_URL = '/api/v1/analysis/agent/analysis-capabilities/workbench'
 const REQUIRED_STAGE1_ARTIFACT_IDS = Object.freeze([
   'stage1-report',
   'stage1-evidence-appendix',
@@ -112,7 +113,140 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.closeAgentSessionMenu()
       this.loadAgentCapabilities()
       this.loadAnalysisCapabilities().catch(() => {})
+      this.loadAnalysisCapabilityOverview(true).catch(() => {})
       this.loadAnalysisCapabilityRuns().catch(() => {})
+    },
+    buildAnalysisCapabilityWorkbenchPayload() {
+      return {
+        conversation_id: text(this.activeAgentSessionId),
+        history_id: typeof this.getCurrentAgentHistoryId === 'function' ? text(this.getCurrentAgentHistoryId()) : '',
+        messages: [{ role: 'user', content: '检查当前项目的分析能力就绪度并推荐下一步。' }],
+        analysis_snapshot: typeof this.buildAgentAnalysisSnapshot === 'function' ? this.buildAgentAnalysisSnapshot() : {},
+        selected_sources_context: buildAnalysisQuickAskSelectedSourcesContext(this),
+      }
+    },
+    async loadAnalysisCapabilityOverview(force = false) {
+      const requestPayload = this.buildAnalysisCapabilityWorkbenchPayload()
+      const historyId = text(requestPayload.history_id)
+      const sameContext = text(this.analysisCapabilityOverviewHistoryId) === historyId
+      if (this.analysisCapabilityOverviewLoaded && sameContext && !force) return this.getAnalysisCapabilityOverview()
+      const requestToken = Number(this.analysisCapabilityOverviewRequestToken || 0) + 1
+      this.analysisCapabilityOverviewRequestToken = requestToken
+      this.analysisCapabilityOverviewHistoryId = historyId
+      this.analysisCapabilityOverviewLoading = true
+      this.analysisCapabilityOverviewLoaded = false
+      this.analysisCapabilityOverviewError = ''
+      this.analysisCapabilityOverview = null
+      try {
+        const response = await fetch(WORKBENCH_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestPayload),
+        })
+        if (!response.ok) throw new Error(`能力工作台状态请求失败(${response.status})`)
+        const payload = await response.json()
+        if (this.analysisCapabilityOverviewRequestToken !== requestToken) return null
+        this.analysisCapabilityOverview = payload && typeof payload === 'object' ? clonePayloadValue(payload) : null
+        this.analysisCapabilityOverviewLoaded = true
+        const readiness = { ...(this.analysisCapabilityReadiness || {}) }
+        for (const card of this.analysisCapabilityOverview?.cards || []) {
+          if (text(card?.capability_id) && card?.readiness) readiness[text(card.capability_id)] = clonePayloadValue(card.readiness)
+        }
+        this.analysisCapabilityReadiness = readiness
+        return this.getAnalysisCapabilityOverview()
+      } catch (error) {
+        if (this.analysisCapabilityOverviewRequestToken !== requestToken) return null
+        this.analysisCapabilityOverviewError = error instanceof Error ? error.message : String(error)
+        throw error
+      } finally {
+        if (this.analysisCapabilityOverviewRequestToken === requestToken) this.analysisCapabilityOverviewLoading = false
+      }
+    },
+    getAnalysisCapabilityOverview() {
+      return this.analysisCapabilityOverview && typeof this.analysisCapabilityOverview === 'object'
+        ? clonePayloadValue(this.analysisCapabilityOverview)
+        : null
+    },
+    getAnalysisCapabilityOverviewCard(capabilityId = '') {
+      const card = (this.analysisCapabilityOverview?.cards || []).find(item => text(item?.capability_id) === text(capabilityId))
+      return card ? clonePayloadValue(card) : null
+    },
+    getAnalysisCapabilityRecommendation() {
+      const recommendation = this.analysisCapabilityOverview?.recommendation
+      return recommendation && typeof recommendation === 'object' ? clonePayloadValue(recommendation) : null
+    },
+    getAnalysisCapabilityRecommendationLabel(recommendation = null) {
+      return {
+        inspect_run: '查看当前任务',
+        resolve_inputs: '检查输入缺口',
+        run: '配置并运行',
+        rerun: '检查并重跑',
+        review_result: '复核最新成果',
+      }[text(recommendation?.action)] || '查看能力'
+    },
+    getAnalysisCapabilityRecentRuns() {
+      const runs = this.analysisCapabilityOverview?.recent_runs
+      return Array.isArray(runs) ? clonePayloadValue(runs) : []
+    },
+    getAnalysisCapabilityCardState(capability = null) {
+      return text(this.getAnalysisCapabilityOverviewCard(capability?.id)?.state) || (capability?.status === 'available' ? 'checking' : 'unavailable')
+    },
+    getAnalysisCapabilityCardStateLabel(capability = null) {
+      return {
+        ready: '可运行',
+        limited: '有条件可运行',
+        blocked: '缺少输入',
+        running: '正在运行',
+        completed: '已有结果',
+        stale: '结果已过期',
+        failed: '运行失败',
+        unavailable: '不可执行',
+        checking: '检查中',
+      }[this.getAnalysisCapabilityCardState(capability)] || '待检查'
+    },
+    getAnalysisCapabilityCardMeta(capability = null) {
+      const card = this.getAnalysisCapabilityOverviewCard(capability?.id)
+      if (!card) return `${Number(capability?.estimated_stages || 0)} 个阶段 · ${capability?.output_contract?.length || 0} 类成果`
+      const missing = Array.isArray(card.readiness?.missing_required) ? card.readiness.missing_required.length : 0
+      if (missing) return `缺少 ${missing} 项必需输入 · ${card.run_count || 0} 个版本`
+      if (card.latest_run) return `最近运行 ${this.getAnalysisCapabilityRunTimeLabel(card.latest_run)} · ${card.run_count || 0} 个版本`
+      return `${Number(capability?.estimated_stages || 0)} 个阶段 · 尚无运行`
+    },
+    getFilteredAnalysisCapabilities() {
+      const query = text(this.analysisCapabilitySearchQuery).toLowerCase()
+      const status = text(this.analysisCapabilityStatusFilter) || 'all'
+      return (this.analysisCapabilities || []).filter((capability) => {
+        const state = this.getAnalysisCapabilityCardState(capability)
+        if (status !== 'all' && state !== status) return false
+        if (!query) return true
+        const haystack = [
+          capability.id,
+          capability.display_name,
+          capability.description,
+          capability.category,
+          ...(capability.output_contract || []),
+          ...(capability.input_requirements || []).map(item => item?.label),
+        ].map(text).join(' ').toLowerCase()
+        return haystack.includes(query)
+      })
+    },
+    async openAnalysisCapabilityOverviewTarget(capabilityId = '', runId = '') {
+      const capability = (this.analysisCapabilities || []).find(item => text(item?.id) === text(capabilityId))
+      if (!capability) return null
+      await this.inspectAnalysisCapability(capability)
+      if (runId) {
+        const run = this.getAnalysisCapabilityRuns().find(item => text(item?.run_id) === text(runId))
+        if (run) await this.selectAnalysisCapabilityRun(run)
+      }
+      return capability
+    },
+    openAnalysisCapabilityRecommendation() {
+      const recommendation = this.getAnalysisCapabilityRecommendation()
+      if (!recommendation) return Promise.resolve(null)
+      return this.openAnalysisCapabilityOverviewTarget(recommendation.capability_id, recommendation.run_id)
+    },
+    openAnalysisCapabilityRecentRun(run = null) {
+      return this.openAnalysisCapabilityOverviewTarget(run?.capability_id, run?.run_id)
     },
     async loadAnalysisCapabilityRuns({ force = false, capabilityId = '' } = {}) {
       const historyId = typeof this.getCurrentAgentHistoryId === 'function' ? text(this.getCurrentAgentHistoryId()) : ''
@@ -342,7 +476,7 @@ export function createAgentCapabilityWorkbenchMethods() {
     getAnalysisCapabilityGroups() {
       const labels = { planning: '策划决策', analysis: '空间分析', governance: '证据治理', delivery: '成果交付' }
       const groups = []
-      for (const capability of this.analysisCapabilities || []) {
+      for (const capability of this.getFilteredAnalysisCapabilities()) {
         const key = text(capability.category) || 'analysis'
         let group = groups.find(item => item.key === key)
         if (!group) {
@@ -353,8 +487,11 @@ export function createAgentCapabilityWorkbenchMethods() {
       }
       return groups
     },
+    getAnalysisCapabilityById(capabilityId = '') {
+      return (this.analysisCapabilities || []).find(item => text(item?.id) === text(capabilityId)) || null
+    },
     getActiveAnalysisCapability() {
-      return (this.analysisCapabilities || []).find(item => item.id === this.activeAnalysisCapabilityId) || null
+      return this.getAnalysisCapabilityById(this.activeAnalysisCapabilityId)
     },
     getAnalysisCapabilityReadiness(capabilityId = '') {
       return (this.analysisCapabilityReadiness || {})[text(capabilityId)] || null
@@ -672,6 +809,7 @@ export function createAgentCapabilityWorkbenchMethods() {
         capabilityInputSelections,
       })
       await this.loadAnalysisCapabilityRuns({ force: true, capabilityId: capability.id }).catch(() => {})
+      await this.loadAnalysisCapabilityOverview(true).catch(() => {})
     },
     getCapabilityRun() {
       const run = (this.agentPanelPayloads || {}).capability_run

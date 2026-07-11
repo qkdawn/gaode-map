@@ -13,6 +13,14 @@ function createContext(overrides = {}) {
     analysisCapabilitiesLoaded: false,
     analysisCapabilitiesLoading: false,
     analysisCapabilitiesError: '',
+    analysisCapabilityOverview: null,
+    analysisCapabilityOverviewLoaded: false,
+    analysisCapabilityOverviewLoading: false,
+    analysisCapabilityOverviewError: '',
+    analysisCapabilityOverviewHistoryId: '',
+    analysisCapabilityOverviewRequestToken: 0,
+    analysisCapabilitySearchQuery: '',
+    analysisCapabilityStatusFilter: 'all',
     analysisCapabilityReadiness: {},
     analysisCapabilityReadinessErrors: {},
     analysisCapabilityReadinessLoading: false,
@@ -903,4 +911,126 @@ test('PPT execution receives the readiness-locked Stage 1 run', async () => {
     mode: 'specific_run',
     run_id: 'run-locked',
   }])
+})
+
+
+test('workbench overview centralizes card readiness, recent runs and recommendation', async () => {
+  const originalFetch = global.fetch
+  let requestBody = null
+  global.fetch = async (url, options) => {
+    assert.match(String(url), /analysis-capabilities\/workbench$/)
+    requestBody = JSON.parse(options.body)
+    return {
+      ok: true,
+      json: async () => ({
+        cards: [
+          {
+            capability_id: 'urban-strategy-stage1',
+            state: 'ready',
+            run_count: 0,
+            latest_run: null,
+            readiness: { capability_id: 'urban-strategy-stage1', status: 'ready', missing_required: [] },
+          },
+        ],
+        recent_runs: [{ run_id: 'run-1', capability_id: 'urban-strategy-stage1', status: 'completed' }],
+        recommendation: { capability_id: 'urban-strategy-stage1', action: 'run', reason: '输入已就绪' },
+      }),
+    }
+  }
+  try {
+    const ctx = createContext()
+    const overview = await ctx.loadAnalysisCapabilityOverview()
+    assert.equal(requestBody.history_id, 'history-1')
+    assert.equal(requestBody.conversation_id, 'conversation-1')
+    assert.equal(overview.recommendation.action, 'run')
+    assert.equal(ctx.getAnalysisCapabilityReadiness('urban-strategy-stage1').status, 'ready')
+    overview.cards[0].state = 'changed'
+    assert.equal(ctx.getAnalysisCapabilityOverviewCard('urban-strategy-stage1').state, 'ready')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('capability discovery filters by status and searchable contract text', () => {
+  const ctx = createContext({
+    analysisCapabilities: [
+      { id: 'urban-strategy-stage1', category: 'planning', display_name: '城市更新 Stage 1', description: '形成策划报告', output_contract: ['设计任务书'], input_requirements: [] },
+      { id: 'ppt-planning', category: 'delivery', display_name: '成果 PPT', description: '演示文稿', output_contract: ['可编辑 PPT'], input_requirements: [] },
+    ],
+    analysisCapabilityOverview: {
+      cards: [
+        { capability_id: 'urban-strategy-stage1', state: 'completed', readiness: { status: 'ready' }, run_count: 2 },
+        { capability_id: 'ppt-planning', state: 'blocked', readiness: { status: 'blocked', missing_required: ['已审定报告'] }, run_count: 0 },
+      ],
+      recent_runs: [],
+      recommendation: null,
+    },
+  })
+
+  ctx.analysisCapabilityStatusFilter = 'blocked'
+  assert.deepEqual(ctx.getFilteredAnalysisCapabilities().map(item => item.id), ['ppt-planning'])
+  ctx.analysisCapabilityStatusFilter = 'all'
+  ctx.analysisCapabilitySearchQuery = '设计任务书'
+  assert.deepEqual(ctx.getFilteredAnalysisCapabilities().map(item => item.id), ['urban-strategy-stage1'])
+  ctx.analysisCapabilitySearchQuery = '不存在'
+  assert.deepEqual(ctx.getAnalysisCapabilityGroups(), [])
+})
+
+test('recommended and recent capability actions open the exact capability run', async () => {
+  const selected = []
+  const ctx = createContext({
+    analysisCapabilities: [{ id: 'urban-strategy-stage1', display_name: '城市更新 Stage 1' }],
+    analysisCapabilityOverview: {
+      cards: [],
+      recent_runs: [],
+      recommendation: { capability_id: 'urban-strategy-stage1', action: 'inspect_run', run_id: 'run-7', reason: '任务进行中' },
+    },
+    inspectAnalysisCapability: async capability => {
+      ctx.activeAnalysisCapabilityId = capability.id
+      ctx.analysisCapabilityRuns = [{ run_id: 'run-7', capability_id: capability.id, status: 'running' }]
+    },
+    selectAnalysisCapabilityRun: async run => { selected.push(run.run_id) },
+  })
+
+  await ctx.openAnalysisCapabilityRecommendation()
+  assert.equal(ctx.activeAnalysisCapabilityId, 'urban-strategy-stage1')
+  assert.deepEqual(selected, ['run-7'])
+  assert.equal(ctx.getAnalysisCapabilityRecommendationLabel(ctx.getAnalysisCapabilityRecommendation()), '查看当前任务')
+})
+
+
+test('analysis workspace template exposes recommendation, recent runs and discovery controls', () => {
+  const template = fs.readFileSync(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8')
+  assert.match(template, /getAnalysisCapabilityRecommendation\(\)/)
+  assert.match(template, /getAnalysisCapabilityRecentRuns\(\)/)
+  assert.match(template, /analysisCapabilitySearchQuery/)
+  assert.match(template, /analysisCapabilityStatusFilter/)
+  assert.match(template, /getAnalysisCapabilityCardStateLabel/)
+})
+
+
+test('late workbench overview cannot leak recommendations across histories', async () => {
+  const originalFetch = global.fetch
+  const pending = []
+  global.fetch = async () => ({
+    ok: true,
+    json: () => new Promise(resolve => pending.push(resolve)),
+  })
+  try {
+    let historyId = 'history-a'
+    const ctx = createContext({ getCurrentAgentHistoryId: () => historyId })
+    const first = ctx.loadAnalysisCapabilityOverview(true)
+    await Promise.resolve()
+    historyId = 'history-b'
+    const second = ctx.loadAnalysisCapabilityOverview(true)
+    await Promise.resolve()
+    pending[1]({ cards: [], recent_runs: [], recommendation: { capability_id: 'new', action: 'run', reason: 'new' } })
+    await second
+    pending[0]({ cards: [], recent_runs: [], recommendation: { capability_id: 'old', action: 'run', reason: 'old' } })
+    await first
+    assert.equal(ctx.getAnalysisCapabilityRecommendation().capability_id, 'new')
+    assert.equal(ctx.analysisCapabilityOverviewHistoryId, 'history-b')
+  } finally {
+    global.fetch = originalFetch
+  }
 })

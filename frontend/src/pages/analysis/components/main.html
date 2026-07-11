@@ -9,6 +9,33 @@
                             <button type="button" class="agent-tools-back-btn" @click="backToAgentReport">返回报告</button>
                         </header>
                         <div class="agent-capability-model">本轮模型 <strong>{{ getAgentSelectedModelName() }}</strong></div>
+                        <section v-if="getAnalysisCapabilityRecommendation()" class="agent-capability-recommendation">
+                            <div>
+                                <span class="agent-tools-eyebrow">Recommended Next Step</span>
+                                <strong>{{ getAnalysisCapabilityById(getAnalysisCapabilityRecommendation().capability_id)?.display_name || getAnalysisCapabilityRecommendation().capability_id }}</strong>
+                                <p>{{ getAnalysisCapabilityRecommendation().reason }}</p>
+                            </div>
+                            <button type="button" @click="openAnalysisCapabilityRecommendation().catch(() => {})">{{ getAnalysisCapabilityRecommendationLabel(getAnalysisCapabilityRecommendation()) }}</button>
+                        </section>
+                        <div v-else-if="analysisCapabilityOverviewLoading" class="agent-capability-overview-state">正在判断当前项目的推荐下一步...</div>
+                        <div v-else-if="analysisCapabilityOverviewError" class="agent-capability-overview-state is-error">
+                            <span>{{ analysisCapabilityOverviewError }}</span>
+                            <button type="button" @click="loadAnalysisCapabilityOverview(true).catch(() => {})">重试</button>
+                        </div>
+                        <section v-if="getAnalysisCapabilityRecentRuns().length" class="agent-capability-recents" aria-label="最近使用">
+                            <header><strong>最近使用</strong><span>当前项目的不可变运行版本</span></header>
+                            <div>
+                                <button v-for="run in getAnalysisCapabilityRecentRuns()" :key="`recent-${run.run_id}`" type="button" :class="run.status" @click="openAnalysisCapabilityRecentRun(run).catch(() => {})">
+                                    <span>{{ getAnalysisCapabilityById(run.capability_id)?.display_name || run.capability_id }}</span>
+                                    <strong>{{ getAnalysisCapabilityRunStatusLabel(run) }}</strong>
+                                    <small>{{ getAnalysisCapabilityRunTimeLabel(run) }}</small>
+                                </button>
+                            </div>
+                        </section>
+                        <div class="agent-capability-discovery">
+                            <label><span>搜索能力</span><input v-model.trim="analysisCapabilitySearchQuery" type="search" placeholder="名称、用途、输入或产物"></label>
+                            <label><span>状态</span><select v-model="analysisCapabilityStatusFilter"><option value="all">全部状态</option><option value="ready">可运行</option><option value="limited">有条件可运行</option><option value="blocked">缺少输入</option><option value="running">正在运行</option><option value="completed">已有结果</option><option value="stale">结果已过期</option><option value="failed">运行失败</option><option value="unavailable">不可执行</option></select></label>
+                        </div>
                         <div v-if="analysisCapabilitiesLoading" class="agent-tools-state">正在加载能力目录...</div>
                         <div v-else-if="analysisCapabilitiesError" class="agent-tools-state is-error"><span>{{ analysisCapabilitiesError }}</span><button class="agent-tools-retry-btn" @click="loadAnalysisCapabilities(true)">重试</button></div>
                         <div v-else class="agent-capability-body">
@@ -16,13 +43,14 @@
                                 <section v-for="group in getAnalysisCapabilityGroups()" :key="group.key">
                                     <h3>{{ group.label }}</h3>
                                     <div class="agent-capability-grid">
-                                        <button v-for="capability in group.items" :key="capability.id" type="button" class="agent-capability-card" :class="{ active: activeAnalysisCapabilityId === capability.id }" @click="inspectAnalysisCapability(capability)">
-                                            <span class="agent-capability-status" :class="capability.status">{{ capability.status === 'available' ? '可执行' : '规划中' }}</span>
+                                        <button v-for="capability in group.items" :key="capability.id" type="button" class="agent-capability-card" :class="[{ active: activeAnalysisCapabilityId === capability.id }, getAnalysisCapabilityCardState(capability)]" @click="inspectAnalysisCapability(capability)">
+                                            <span class="agent-capability-status" :class="getAnalysisCapabilityCardState(capability)">{{ getAnalysisCapabilityCardStateLabel(capability) }}</span>
                                             <strong>{{ capability.display_name }}</strong><span>{{ capability.description }}</span>
-                                            <small>{{ capability.estimated_stages }} 个阶段 · {{ capability.output_contract.length }} 类成果</small>
+                                            <small>{{ getAnalysisCapabilityCardMeta(capability) }}</small>
                                         </button>
                                     </div>
                                 </section>
+                                <div v-if="!getFilteredAnalysisCapabilities().length" class="agent-capability-empty">没有符合当前搜索和状态筛选的能力。</div>
                             </div>
                             <aside v-if="getActiveAnalysisCapability()" class="agent-capability-detail">
                                 <div><span class="agent-tools-eyebrow">Capability</span><h3>{{ getActiveAnalysisCapability().display_name }}</h3><p>{{ getActiveAnalysisCapability().description }}</p></div>
