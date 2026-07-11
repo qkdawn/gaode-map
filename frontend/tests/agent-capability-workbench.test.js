@@ -16,6 +16,18 @@ function createContext(overrides = {}) {
     analysisCapabilityReadiness: {},
     analysisCapabilityReadinessLoading: false,
     activeAnalysisCapabilityId: '',
+    analysisCapabilityRuns: [],
+    analysisCapabilityRunsLoaded: false,
+    analysisCapabilityRunsLoading: false,
+    analysisCapabilityRunsError: '',
+    analysisCapabilityRunsHistoryId: '',
+    analysisCapabilityRunsCapabilityId: '',
+    analysisCapabilityRunsRequestToken: 0,
+    selectedAnalysisCapabilityRunId: '',
+    selectedAnalysisCapabilityRunDetail: null,
+    selectedAnalysisCapabilityRunLoading: false,
+    selectedAnalysisCapabilityRunError: '',
+    selectedAnalysisCapabilityRunRequestToken: 0,
     activeAgentSessionId: 'conversation-1',
     agentSkills: [],
     agentPanelPayloads: {},
@@ -48,6 +60,137 @@ test('capability catalog is loaded once and grouped by category', async () => {
   } finally {
     global.fetch = originalFetch
   }
+})
+
+test('run history request is scoped to current history and selected capability', async () => {
+  const originalFetch = global.fetch
+  const urls = []
+  global.fetch = async url => {
+    urls.push(String(url))
+    return { ok: true, json: async () => [{ run_id: 'run-1', status: 'completed' }] }
+  }
+  try {
+    const ctx = createContext()
+    const first = await ctx.loadAnalysisCapabilityRuns({ capabilityId: 'urban-strategy-stage1' })
+    const cached = await ctx.loadAnalysisCapabilityRuns({ capabilityId: 'urban-strategy-stage1' })
+    assert.equal(urls.length, 1)
+    assert.match(urls[0], /history_id=history-1/)
+    assert.match(urls[0], /capability_id=urban-strategy-stage1/)
+    assert.equal(first[0].run_id, 'run-1')
+    cached[0].run_id = 'changed'
+    assert.equal(ctx.getAnalysisCapabilityRuns()[0].run_id, 'run-1')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('run history clears without a history and never leaks across histories', async () => {
+  const originalFetch = global.fetch
+  const urls = []
+  global.fetch = async url => {
+    urls.push(String(url))
+    return { ok: true, json: async () => [{ run_id: `run-${urls.length}`, status: 'completed' }] }
+  }
+  try {
+    let historyId = 'history-1'
+    const ctx = createContext({ getCurrentAgentHistoryId: () => historyId })
+    await ctx.loadAnalysisCapabilityRuns({ capabilityId: 'evidence-audit' })
+    historyId = 'history-2'
+    await ctx.loadAnalysisCapabilityRuns({ capabilityId: 'evidence-audit' })
+    assert.equal(urls.length, 2)
+    assert.match(urls[1], /history_id=history-2/)
+    assert.equal(ctx.getAnalysisCapabilityRuns()[0].run_id, 'run-2')
+    historyId = ''
+    await ctx.loadAnalysisCapabilityRuns({ capabilityId: 'evidence-audit' })
+    assert.deepEqual(ctx.getAnalysisCapabilityRuns(), [])
+    assert.equal(urls.length, 2)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('late run history responses cannot repopulate a cleared history', async () => {
+  const originalFetch = global.fetch
+  let resolvePayload
+  global.fetch = async () => ({
+    ok: true,
+    json: () => new Promise(resolve => { resolvePayload = resolve }),
+  })
+  try {
+    let historyId = 'history-1'
+    const ctx = createContext({ getCurrentAgentHistoryId: () => historyId })
+    const pending = ctx.loadAnalysisCapabilityRuns({ capabilityId: 'urban-strategy-stage1' })
+    await Promise.resolve()
+    historyId = ''
+    await ctx.loadAnalysisCapabilityRuns({ capabilityId: 'urban-strategy-stage1' })
+    resolvePayload([{ run_id: 'late-run', status: 'completed' }])
+    await pending
+    assert.deepEqual(ctx.getAnalysisCapabilityRuns(), [])
+    assert.equal(ctx.analysisCapabilityRunsHistoryId, '')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('selecting a run loads an immutable detail without replacing current panel payloads', async () => {
+  const originalFetch = global.fetch
+  global.fetch = async url => {
+    assert.match(String(url), /analysis-capability-runs\/run-1$/)
+    return {
+      ok: true,
+      json: async () => ({
+        history_id: 'history-1',
+        run: { run_id: 'run-1', status: 'stale', stale_input_artifact_ids: ['poi-result'], diagnostics: ['上游输入已更新'] },
+        artifacts: [{ direction: 'output', artifact: { artifact_id: 'report-1', title: '阶段报告', version: 'run-1' }, payload: { markdown: 'historical' } }],
+      }),
+    }
+  }
+  try {
+    const currentPanels = { stage1_deliverables: { report_markdown: 'current' } }
+    const ctx = createContext({
+      analysisCapabilityRuns: [{ run_id: 'run-1', status: 'stale' }],
+      agentPanelPayloads: currentPanels,
+    })
+    const detail = await ctx.selectAnalysisCapabilityRun(ctx.analysisCapabilityRuns[0])
+    detail.artifacts[0].payload.markdown = 'changed'
+    assert.equal(ctx.getSelectedAnalysisCapabilityRunDetail().artifacts[0].payload.markdown, 'historical')
+    assert.deepEqual(ctx.agentPanelPayloads, currentPanels)
+    assert.equal(ctx.getSelectedAnalysisCapabilityRunArtifacts()[0].artifact.artifact_id, 'report-1')
+    assert.equal(ctx.isAnalysisCapabilityRunSelected(ctx.analysisCapabilityRuns[0]), true)
+    ctx.clearSelectedAnalysisCapabilityRun()
+    assert.equal(ctx.getSelectedAnalysisCapabilityRunDetail(), null)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('run detail failure exposes an explicit error and keeps current results intact', async () => {
+  const originalFetch = global.fetch
+  global.fetch = async () => ({ ok: false, status: 404 })
+  try {
+    const ctx = createContext({ agentPanelPayloads: { capability_run: { run_id: 'current-run' } } })
+    await assert.rejects(ctx.selectAnalysisCapabilityRun({ run_id: 'missing-run' }), /404/)
+    assert.match(ctx.selectedAnalysisCapabilityRunError, /404/)
+    assert.equal(ctx.getCapabilityRun().run_id, 'current-run')
+    assert.equal(ctx.selectedAnalysisCapabilityRunLoading, false)
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('run history labels stale inputs, stages, versions and timestamps', () => {
+  const run = {
+    run_id: 'run-1', status: 'stale', current_stage: 'delivery', created_at: '2026-07-12T08:30:00Z',
+    stale_input_artifact_ids: ['poi-result', 'population-grid'],
+    stage_records: [{ stage_id: 'delivery', title: '交付编译' }],
+  }
+  const ctx = createContext({ analysisCapabilityRuns: [run, { run_id: 'run-0', status: 'completed' }] })
+  assert.equal(ctx.getAnalysisCapabilityRunStatusLabel(run), '上游已更新')
+  assert.equal(ctx.getAnalysisCapabilityRunVersionLabel(run, 0), '最新 v2')
+  assert.equal(ctx.getAnalysisCapabilityRunVersionLabel(ctx.analysisCapabilityRuns[1], 1), '历史 v1')
+  assert.equal(ctx.getAnalysisCapabilityRunCurrentStageLabel(run), '交付编译')
+  assert.deepEqual(ctx.getAnalysisCapabilityRunChangedInputIds(run), ['poi-result', 'population-grid'])
+  assert.match(ctx.getAnalysisCapabilityRunTimeLabel(run), /2026/)
 })
 
 test('readiness request carries analysis snapshot and selected source identities', async () => {
@@ -317,6 +460,15 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getCapabilityRunOutputArtifacts\(\)/)
   assert.match(main, /getCapabilityRunArtifactTypeLabel\(artifact\)/)
   assert.match(main, /getCapabilityRunArtifactLineageText\(artifact\)/)
+  assert.match(main, /运行版本/)
+  assert.match(main, /getAnalysisCapabilityRuns\(\)/)
+  assert.match(main, /selectAnalysisCapabilityRun\(run\)/)
+  assert.match(main, /不可变历史快照/)
+  assert.match(main, /上游输入已更新/)
+  assert.match(main, /getAnalysisCapabilityRunChangedInputIds\(run\)/)
+  assert.match(main, /返回当前结果/)
+  assert.match(main, /getSelectedAnalysisCapabilityRunArtifacts\(\)/)
+  assert.match(main, /仅保存元数据/)
   assert.match(main, /getStage1EvidenceVerification\(\)/)
   assert.match(main, /Agent 自动核验记录/)
   assert.match(main, /getStage1AutomatedVerificationChecks\(\)/)

@@ -35,6 +35,50 @@
                                     <span v-for="item in getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).missing_required" :key="item">缺少：{{ item }}</span>
                                     <span v-for="item in getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).missing_optional" :key="item">建议补充：{{ item }}</span>
                                 </div>
+                                <section class="agent-capability-run-history" aria-label="运行版本">
+                                    <div class="agent-capability-run-history-head">
+                                        <div><strong>运行版本</strong><span>按当前分析历史保存</span></div>
+                                        <button v-if="selectedAnalysisCapabilityRunId" type="button" @click="clearSelectedAnalysisCapabilityRun">返回当前结果</button>
+                                    </div>
+                                    <div v-if="analysisCapabilityRunsLoading" class="agent-capability-run-history-state">正在读取运行版本...</div>
+                                    <div v-else-if="analysisCapabilityRunsError" class="agent-capability-run-history-state failed">
+                                        <span>{{ analysisCapabilityRunsError }}</span>
+                                        <button type="button" @click="loadAnalysisCapabilityRuns({ force: true, capabilityId: getActiveAnalysisCapability().id }).catch(() => {})">重试</button>
+                                    </div>
+                                    <div v-else-if="!getAnalysisCapabilityRuns().length" class="agent-capability-run-history-state">当前分析历史尚无该能力的持久化运行。</div>
+                                    <div v-else class="agent-capability-run-list">
+                                        <button v-for="(run, index) in getAnalysisCapabilityRuns()" :key="run.run_id" type="button" class="agent-capability-run-version" :class="[run.status, { active: isAnalysisCapabilityRunSelected(run) }]" @click="selectAnalysisCapabilityRun(run).catch(() => {})">
+                                            <span>{{ getAnalysisCapabilityRunVersionLabel(run, index) }}</span>
+                                            <strong>{{ getAnalysisCapabilityRunStatusLabel(run) }}</strong>
+                                            <small>{{ getAnalysisCapabilityRunTimeLabel(run) }}</small>
+                                            <small>{{ getAnalysisCapabilityRunCurrentStageLabel(run) }}</small>
+                                            <em v-if="run.status === 'stale'">上游输入已更新</em>
+                                            <small v-if="getAnalysisCapabilityRunChangedInputIds(run).length" class="agent-capability-run-version-inputs">{{ getAnalysisCapabilityRunChangedInputIds(run).join('、') }}</small>
+                                            <code>{{ run.run_id }}</code>
+                                        </button>
+                                    </div>
+                                    <div v-if="selectedAnalysisCapabilityRunLoading" class="agent-capability-run-history-state">正在读取不可变快照...</div>
+                                    <div v-else-if="selectedAnalysisCapabilityRunError" class="agent-capability-run-history-state failed">{{ selectedAnalysisCapabilityRunError }}</div>
+                                    <article v-else-if="getSelectedAnalysisCapabilityRunDetail()" class="agent-capability-run-snapshot" :class="getSelectedAnalysisCapabilityRunDetail().run.status">
+                                        <header>
+                                            <div><span>不可变历史快照</span><strong>{{ getAnalysisCapabilityRunStatusLabel(getSelectedAnalysisCapabilityRunDetail().run) }}</strong></div>
+                                            <code>{{ getSelectedAnalysisCapabilityRunDetail().run.run_id }}</code>
+                                        </header>
+                                        <p v-if="getAnalysisCapabilityRunChangedInputIds(getSelectedAnalysisCapabilityRunDetail().run).length" class="agent-capability-run-stale-note">上游输入已更新：{{ getAnalysisCapabilityRunChangedInputIds(getSelectedAnalysisCapabilityRunDetail().run).join('、') }}。该结果保留用于审计，不代表当前最新结论。</p>
+                                        <div v-if="getSelectedAnalysisCapabilityRunDetail().run.diagnostics.length" class="agent-capability-run-snapshot-diagnostics">
+                                            <span v-for="diagnostic in getSelectedAnalysisCapabilityRunDetail().run.diagnostics" :key="diagnostic">{{ diagnostic }}</span>
+                                        </div>
+                                        <div class="agent-capability-run-snapshot-artifacts">
+                                            <strong>产物快照</strong>
+                                            <span v-if="!getSelectedAnalysisCapabilityRunArtifacts().length">未保存产物快照。</span>
+                                            <article v-for="snapshot in getSelectedAnalysisCapabilityRunArtifacts()" :key="`${snapshot.direction}-${snapshot.artifact.artifact_id}`">
+                                                <span>{{ snapshot.direction === 'output' ? '输出' : '输入' }}</span>
+                                                <div><strong>{{ snapshot.artifact.title }}</strong><code>{{ snapshot.artifact.artifact_id }} · {{ snapshot.artifact.version }}</code></div>
+                                                <small>{{ snapshot.payload === null ? '仅保存元数据' : '已保存不可变内容' }}</small>
+                                            </article>
+                                        </div>
+                                    </article>
+                                </section>
                                 <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading" @click="runAnalysisCapability(getActiveAnalysisCapability())">运行能力</button>
                             </aside>
                         </div>

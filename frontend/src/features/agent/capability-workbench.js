@@ -1,6 +1,7 @@
 import { buildAnalysisQuickAskSelectedSourcesContext } from './analysis-quick-request.js'
 
 const CATALOG_URL = '/api/v1/analysis/agent/analysis-capabilities'
+const RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
 
 const text = value => String(value || '').trim()
 
@@ -49,6 +50,140 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.closeAgentSessionMenu()
       this.loadAgentCapabilities()
       this.loadAnalysisCapabilities().catch(() => {})
+      this.loadAnalysisCapabilityRuns().catch(() => {})
+    },
+    async loadAnalysisCapabilityRuns({ force = false, capabilityId = '' } = {}) {
+      const historyId = typeof this.getCurrentAgentHistoryId === 'function' ? text(this.getCurrentAgentHistoryId()) : ''
+      const normalizedCapabilityId = text(capabilityId)
+      if (!historyId) {
+        this.analysisCapabilityRunsRequestToken = Number(this.analysisCapabilityRunsRequestToken || 0) + 1
+        this.analysisCapabilityRuns = []
+        this.analysisCapabilityRunsLoaded = false
+        this.analysisCapabilityRunsHistoryId = ''
+        this.analysisCapabilityRunsCapabilityId = normalizedCapabilityId
+        this.analysisCapabilityRunsError = ''
+        this.analysisCapabilityRunsLoading = false
+        this.clearSelectedAnalysisCapabilityRun()
+        return []
+      }
+      const sameQuery = this.analysisCapabilityRunsHistoryId === historyId
+        && this.analysisCapabilityRunsCapabilityId === normalizedCapabilityId
+      if (!force && sameQuery && this.analysisCapabilityRunsLoaded) return this.getAnalysisCapabilityRuns()
+      if (!force && sameQuery && this.analysisCapabilityRunsLoading) return []
+
+      const requestToken = Number(this.analysisCapabilityRunsRequestToken || 0) + 1
+      this.analysisCapabilityRunsRequestToken = requestToken
+      this.analysisCapabilityRunsLoading = true
+      this.analysisCapabilityRunsLoaded = false
+      this.analysisCapabilityRunsError = ''
+      this.analysisCapabilityRuns = []
+      this.analysisCapabilityRunsHistoryId = historyId
+      this.analysisCapabilityRunsCapabilityId = normalizedCapabilityId
+      this.clearSelectedAnalysisCapabilityRun()
+      const query = new URLSearchParams({ history_id: historyId })
+      if (normalizedCapabilityId) query.set('capability_id', normalizedCapabilityId)
+      try {
+        const response = await fetch(`${RUNS_URL}?${query.toString()}`)
+        if (!response.ok) throw new Error(`运行版本请求失败(${response.status})`)
+        const payload = await response.json()
+        if (this.analysisCapabilityRunsRequestToken !== requestToken) return []
+        this.analysisCapabilityRuns = Array.isArray(payload) ? clonePayloadValue(payload) : []
+        this.analysisCapabilityRunsLoaded = true
+        return this.getAnalysisCapabilityRuns()
+      } catch (error) {
+        if (this.analysisCapabilityRunsRequestToken !== requestToken) return []
+        this.analysisCapabilityRunsError = error instanceof Error ? error.message : String(error)
+        throw error
+      } finally {
+        if (this.analysisCapabilityRunsRequestToken === requestToken) this.analysisCapabilityRunsLoading = false
+      }
+    },
+    getAnalysisCapabilityRuns() {
+      return Array.isArray(this.analysisCapabilityRuns) ? clonePayloadValue(this.analysisCapabilityRuns) : []
+    },
+    async loadAnalysisCapabilityRunDetail(runId = '') {
+      const normalizedRunId = text(runId)
+      if (!normalizedRunId) return null
+      const requestToken = Number(this.selectedAnalysisCapabilityRunRequestToken || 0) + 1
+      this.selectedAnalysisCapabilityRunRequestToken = requestToken
+      this.selectedAnalysisCapabilityRunId = normalizedRunId
+      this.selectedAnalysisCapabilityRunDetail = null
+      this.selectedAnalysisCapabilityRunLoading = true
+      this.selectedAnalysisCapabilityRunError = ''
+      try {
+        const response = await fetch(`${RUNS_URL}/${encodeURIComponent(normalizedRunId)}`)
+        if (!response.ok) throw new Error(`运行快照请求失败(${response.status})`)
+        const detail = await response.json()
+        if (this.selectedAnalysisCapabilityRunRequestToken !== requestToken) return null
+        this.selectedAnalysisCapabilityRunDetail = detail && typeof detail === 'object' ? clonePayloadValue(detail) : null
+        return this.getSelectedAnalysisCapabilityRunDetail()
+      } catch (error) {
+        if (this.selectedAnalysisCapabilityRunRequestToken !== requestToken) return null
+        this.selectedAnalysisCapabilityRunError = error instanceof Error ? error.message : String(error)
+        throw error
+      } finally {
+        if (this.selectedAnalysisCapabilityRunRequestToken === requestToken) this.selectedAnalysisCapabilityRunLoading = false
+      }
+    },
+    selectAnalysisCapabilityRun(run = null) {
+      const runId = text(run?.run_id)
+      if (!runId) return Promise.resolve(null)
+      if (runId === this.selectedAnalysisCapabilityRunId && this.selectedAnalysisCapabilityRunDetail) {
+        return Promise.resolve(this.getSelectedAnalysisCapabilityRunDetail())
+      }
+      return this.loadAnalysisCapabilityRunDetail(runId)
+    },
+    clearSelectedAnalysisCapabilityRun() {
+      this.selectedAnalysisCapabilityRunRequestToken = Number(this.selectedAnalysisCapabilityRunRequestToken || 0) + 1
+      this.selectedAnalysisCapabilityRunId = ''
+      this.selectedAnalysisCapabilityRunDetail = null
+      this.selectedAnalysisCapabilityRunLoading = false
+      this.selectedAnalysisCapabilityRunError = ''
+    },
+    getSelectedAnalysisCapabilityRun() {
+      const runId = text(this.selectedAnalysisCapabilityRunId)
+      return this.getAnalysisCapabilityRuns().find(run => text(run?.run_id) === runId) || null
+    },
+    getSelectedAnalysisCapabilityRunDetail() {
+      const detail = this.selectedAnalysisCapabilityRunDetail
+      return detail && typeof detail === 'object' ? clonePayloadValue(detail) : null
+    },
+    getSelectedAnalysisCapabilityRunArtifacts() {
+      const artifacts = this.getSelectedAnalysisCapabilityRunDetail()?.artifacts
+      return Array.isArray(artifacts) ? clonePayloadValue(artifacts) : []
+    },
+    getAnalysisCapabilityRunStatusLabel(run = null) {
+      const labels = {
+        draft: '草稿', checking_inputs: '检查输入', ready: '已就绪', queued: '排队中', running: '运行中',
+        waiting_for_user: '等待补充', completed: '已完成', completed_with_warnings: '完成但有提示', failed: '运行失败',
+        cancelled: '已取消', stale: '上游已更新',
+      }
+      return labels[run?.status] || text(run?.status) || '未记录'
+    },
+    getAnalysisCapabilityRunVersionLabel(run = null, index = 0) {
+      const total = this.getAnalysisCapabilityRuns().length
+      const ordinal = Math.max(total - Number(index || 0), 1)
+      return `${index === 0 ? '最新' : '历史'} v${ordinal}`
+    },
+    getAnalysisCapabilityRunTimeLabel(run = null) {
+      const value = text(run?.completed_at || run?.created_at)
+      if (!value) return '未记录时间'
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return value
+      return new Intl.DateTimeFormat('zh-CN', {
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(date)
+    },
+    getAnalysisCapabilityRunCurrentStageLabel(run = null) {
+      const records = Array.isArray(run?.stage_records) ? run.stage_records : []
+      const stage = records.find(item => item?.stage_id === run?.current_stage)
+      return text(stage?.title || run?.current_stage) || '尚未开始'
+    },
+    getAnalysisCapabilityRunChangedInputIds(run = null) {
+      return Array.isArray(run?.stale_input_artifact_ids) ? run.stale_input_artifact_ids.map(text).filter(Boolean) : []
+    },
+    isAnalysisCapabilityRunSelected(run = null) {
+      return !!text(run?.run_id) && text(run.run_id) === text(this.selectedAnalysisCapabilityRunId)
     },
     getAnalysisCapabilityGroups() {
       const labels = { planning: '策划决策', analysis: '空间分析', governance: '证据治理', delivery: '成果交付' }
@@ -77,6 +212,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       const id = text(capability && capability.id)
       if (!id) return
       this.activeAnalysisCapabilityId = id
+      const runsPromise = this.loadAnalysisCapabilityRuns({ capabilityId: id }).catch(() => [])
       this.analysisCapabilityReadinessLoading = true
       this.analysisCapabilityReadinessErrors = { ...this.analysisCapabilityReadinessErrors, [id]: '' }
       try {
@@ -102,6 +238,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       } finally {
         this.analysisCapabilityReadinessLoading = false
       }
+      await runsPromise
     },
     async runAnalysisCapability(capability = null) {
       if (!capability || capability.status !== 'available') return
@@ -118,27 +255,14 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.chooseAgentSkill(skill)
       this.agentWorkspaceView = 'report'
       await this.submitAgentComposer({ prompt: CAPABILITY_PROMPTS[capability.id] || capability.description })
+      await this.loadAnalysisCapabilityRuns({ force: true, capabilityId: capability.id }).catch(() => {})
     },
     getCapabilityRun() {
       const run = (this.agentPanelPayloads || {}).capability_run
       return run && typeof run === 'object' ? clonePayloadValue(run) : null
     },
     getCapabilityRunStatusLabel() {
-      const labels = {
-        draft: '草稿',
-        checking_inputs: '检查输入',
-        ready: '已就绪',
-        queued: '排队中',
-        running: '运行中',
-        waiting_for_user: '等待补充',
-        completed: '已完成',
-        completed_with_warnings: '完成但有提示',
-        failed: '运行失败',
-        cancelled: '已取消',
-        stale: '可能过期',
-      }
-      const status = this.getCapabilityRun()?.status
-      return labels[status] || text(status) || '未记录'
+      return this.getAnalysisCapabilityRunStatusLabel(this.getCapabilityRun())
     },
     getCapabilityRunStages() {
       const records = this.getCapabilityRun()?.stage_records
@@ -172,9 +296,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       return parts.join(' · ')
     },
     getCapabilityRunCurrentStageLabel() {
-      const run = this.getCapabilityRun()
-      const stage = this.getCapabilityRunStages().find(item => item.stage_id === run?.current_stage)
-      return text(stage?.title || run?.current_stage) || '尚未开始'
+      return this.getAnalysisCapabilityRunCurrentStageLabel(this.getCapabilityRun())
     },
     getCapabilityRunModelLabel() {
       const profile = this.getCapabilityRun()?.execution_profile || {}
