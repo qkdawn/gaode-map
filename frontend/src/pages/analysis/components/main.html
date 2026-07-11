@@ -73,6 +73,32 @@
                                     </article>
                                 </div>
                             </div>
+                            <div v-if="getStage1ProvenanceBinding()" class="agent-provenance-binding" :class="getStage1ProvenanceBinding().status">
+                                <div class="agent-provenance-head">
+                                    <div><strong>证据与真实数据资产</strong><span>{{ getStage1ProvenanceStatusLabel() }}</span></div>
+                                    <small>核对 {{ getStage1ProvenanceBinding().assessed_count }} 条证据，{{ getStage1ProvenanceBinding().critical_evidence_ids.length }} 条进入关键决策链</small>
+                                </div>
+                                <div class="agent-provenance-counts">
+                                    <span v-for="item in getStage1ProvenanceStatusItems()" :key="item.key" :class="item.key">{{ item.label }} {{ item.count }}</span>
+                                </div>
+                                <details v-if="getStage1ProvenanceBindings().length" class="agent-provenance-details">
+                                    <summary>查看逐条来源绑定与自动修正</summary>
+                                    <article v-for="binding in getStage1ProvenanceBindings()" :key="binding.evidence_id" :class="binding.status">
+                                        <div><span>{{ binding.status === 'verified' ? '已验证' : binding.status === 'corrected' ? '已修正' : binding.status === 'conflicting' ? '冲突' : '无法定位' }}</span><strong>{{ binding.evidence_id }}</strong></div>
+                                        <p>{{ binding.message }}</p>
+                                        <small v-if="binding.locator">定位：{{ binding.locator }}</small>
+                                        <small v-if="getStage1ProvenanceCorrectionText(binding)">{{ getStage1ProvenanceCorrectionText(binding) }}</small>
+                                        <small v-if="getStage1ProvenanceUnverifiedText(binding)">{{ getStage1ProvenanceUnverifiedText(binding) }}</small>
+                                        <small v-if="getStage1ProvenanceDiscrepancyText(binding)">{{ getStage1ProvenanceDiscrepancyText(binding) }}</small>
+                                    </article>
+                                </details>
+                                <div v-if="getStage1ProvenanceIssues().length" class="agent-provenance-issues">
+                                    <article v-for="issue in getStage1ProvenanceIssues()" :key="`${issue.code}-${issue.evidence_id}`" :class="issue.severity">
+                                        <div><span>{{ issue.severity === 'error' ? '阻断' : '提示' }}</span><strong>{{ issue.message }}</strong></div>
+                                        <small v-if="issue.repair_hint">{{ issue.repair_hint }}</small>
+                                    </article>
+                                </div>
+                            </div>
                             <div v-if="getStage1DataQuality()" class="agent-data-quality" :class="getStage1DataQuality().status">
                                 <div class="agent-data-quality-head">
                                     <div><strong>数据质量与时空口径</strong><span>{{ getStage1DataQualityStatusLabel() }}</span></div>

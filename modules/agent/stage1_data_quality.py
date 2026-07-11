@@ -55,6 +55,15 @@ def _applicable(value: Any) -> bool:
     return _text(value).lower() not in _NOT_APPLICABLE_VALUES
 
 
+def _field_verified(node: dict[str, Any], field: str) -> bool:
+    unverified = node.get("provenance_unverified_fields")
+    return not isinstance(unverified, list) or field not in unverified
+
+
+def _known_field(node: dict[str, Any], field: str) -> bool:
+    return _field_verified(node, field) and _known(node.get(field))
+
+
 def _year(value: Any) -> int | None:
     text = _text(value)
     if not text or text.lower() in _UNKNOWN_VALUES:
@@ -134,7 +143,7 @@ def assess_stage1_data_quality(
             analytic_nodes.append(node)
 
         source_date = node.get("source_date")
-        if _known(source_date):
+        if _known_field(node, "source_date"):
             coverage["source_date"] += 1
         else:
             issues.append(
@@ -148,8 +157,7 @@ def assess_stage1_data_quality(
                 )
             )
 
-        source_locator = node.get("source_locator")
-        if _known(source_locator):
+        if _known_field(node, "source_locator"):
             coverage["source_locator"] += 1
         else:
             issues.append(
@@ -166,8 +174,7 @@ def assess_stage1_data_quality(
         if not analytic:
             continue
 
-        analysis_date = node.get("analysis_date")
-        if _known(analysis_date):
+        if _known_field(node, "analysis_date"):
             coverage["analysis_date"] += 1
         else:
             issues.append(
@@ -199,7 +206,7 @@ def assess_stage1_data_quality(
             )
 
         coordinate_system = _text(node.get("coordinate_system"))
-        if _known(coordinate_system) and _applicable(coordinate_system):
+        if _known_field(node, "coordinate_system") and _applicable(coordinate_system):
             coverage["coordinate_system"] += 1
             coordinate_systems.add(coordinate_system)
         else:
@@ -215,7 +222,7 @@ def assess_stage1_data_quality(
             )
 
         quality_counts = {
-            key: _count(node.get(key))
+            key: _count(node.get(key)) if _field_verified(node, key) else None
             for key in (
                 "sample_size",
                 "missing_count",
@@ -286,7 +293,7 @@ def assess_stage1_data_quality(
             _text(node.get("id"))
             for node in analytic_nodes
             if _text(node.get("coordinate_system")) in coordinate_systems
-            and not _known(node.get("coordinate_transform"))
+            and not _known_field(node, "coordinate_transform")
         ]
         if missing_transform_ids:
             issues.append(

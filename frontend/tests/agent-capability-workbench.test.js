@@ -140,6 +140,15 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         tasks: [task],
       },
       stage1_evidence_ledger: [{ id: 'e1' }, { id: 'e2' }],
+      stage1_provenance_binding: {
+        status: 'passed_with_gaps', assessed_count: 2, critical_evidence_ids: ['e1'],
+        status_counts: { verified: 1, corrected: 1 },
+        bindings: [
+          { evidence_id: 'e1', status: 'verified', artifact_id: 'document:brief:node-1', locator: 'pageindex:node-1:p.12', corrected_fields: [], unverified_fields: [], discrepancies: [], message: '来源声明已绑定到真实数据资产。' },
+          { evidence_id: 'e2', status: 'corrected', artifact_id: 'analysis_snapshot.road', locator: 'analysis_snapshot.road', corrected_fields: ['sample_size'], unverified_fields: ['coordinate_transform'], discrepancies: [{ field: 'sample_size', declared: 99, authoritative: 48, resolution: 'corrected' }], message: '已按真实数据资产修正来源声明。' },
+        ],
+        issues: [{ code: 'artifact_declaration_corrected', severity: 'warning', evidence_id: 'e2', message: '来源声明已修正', repair_hint: '检查提示词' }],
+      },
       stage1_data_quality: {
         status: 'passed_with_gaps', assessed_count: 2, analytic_count: 1,
         critical_evidence_ids: ['e1'],
@@ -182,6 +191,20 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1ConflictStatusLabel(conflicts[0]), '待裁决')
   assert.equal(ctx.getStage1ConflictStatusLabel(conflicts[1]), '已确定口径')
   assert.equal(ctx.getStage1ConflictValuesText(ctx.getStage1ConflictRegister()[0]), '102户 / 120户')
+  assert.equal(ctx.getStage1ProvenanceStatusLabel(), '真实资产绑定存在缺口')
+  assert.deepEqual(ctx.getStage1ProvenanceStatusItems(), [
+    { key: 'verified', label: '已验证', count: 1 },
+    { key: 'corrected', label: '已修正', count: 1 },
+  ])
+  const provenanceBindings = ctx.getStage1ProvenanceBindings()
+  provenanceBindings[1].discrepancies[0].authoritative = 100
+  provenanceBindings[1].corrected_fields[0] = 'changed'
+  assert.equal(ctx.getStage1ProvenanceBindings()[1].discrepancies[0].authoritative, 48)
+  assert.deepEqual(ctx.getStage1ProvenanceBindings()[1].corrected_fields, ['sample_size'])
+  assert.equal(ctx.getStage1ProvenanceCorrectionText(ctx.getStage1ProvenanceBindings()[1]), '修正字段：sample_size')
+  assert.equal(ctx.getStage1ProvenanceUnverifiedText(ctx.getStage1ProvenanceBindings()[1]), '资产未登记：coordinate_transform')
+  assert.equal(ctx.getStage1ProvenanceDiscrepancyText(ctx.getStage1ProvenanceBindings()[1]), 'sample_size：99 → 48')
+  assert.equal(ctx.getStage1ProvenanceIssues()[0].message, '来源声明已修正')
   assert.equal(ctx.getStage1DataQualityStatusLabel(), '数据质量存在缺口')
   assert.deepEqual(ctx.getStage1DataQualityCoverageItems(), [
     { key: 'source_date', label: '来源日期', count: 2, total: 2, display: '2/2', gap: false },
@@ -211,6 +234,9 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /Agent 自动核验记录/)
   assert.match(main, /getStage1AutomatedVerificationChecks\(\)/)
   assert.match(main, /尚待完成的核验任务/)
+  assert.match(main, /证据与真实数据资产/)
+  assert.match(main, /getStage1ProvenanceBindings\(\)/)
+  assert.match(main, /getStage1ProvenanceDiscrepancyText\(binding\)/)
   assert.match(main, /数据质量与时空口径/)
   assert.match(main, /getStage1DataQualityCoverageItems\(\)/)
   assert.match(main, /来源冲突与裁决状态/)

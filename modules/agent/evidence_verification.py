@@ -178,10 +178,33 @@ def verify_evidence_ledger(
         if status not in _ALLOWED_STATUSES:
             status = "hypothesis"
 
-        source_known = _known_source_ref(node["source_ref"], selected_sources)
+        binding_status = _text(node.get("provenance_binding_status"))
+        has_binding_result = binding_status in {
+            "verified",
+            "corrected",
+            "unverifiable",
+            "conflicting",
+        }
+        source_known = binding_status in {"verified", "corrected"} or (
+            not has_binding_result
+            and _known_source_ref(node["source_ref"], selected_sources)
+        )
         snapshot_known = _references_snapshot(node["source_ref"], snapshot_refs)
         evidence_type = _text(node.get("evidence_type"))
-        if status in {"verified", "cross_checked"} and not (
+        if binding_status == "conflicting":
+            status = "blocked"
+            node["blocking_reason"] = "真实数据资产之间存在未解决的来源元数据冲突"
+            node["missing_input"] = "唯一可定位的权威 artifact 及统一后的元数据"
+            node["executor"] = "manual_authority"
+            node["next_action"] = "裁决冲突来源后重新执行证据绑定"
+            notes.append(f"{node['id']} 因真实数据资产元数据冲突而阻塞。")
+        elif binding_status == "unverifiable" and status in {
+            "verified",
+            "cross_checked",
+        }:
+            status = "inferred" if node["claim"] else "blocked"
+            notes.append(f"{node['id']} 的来源无法绑定到真实数据资产，验证状态已降级。")
+        elif status in {"verified", "cross_checked"} and not (
             source_known or snapshot_known
         ):
             status = "inferred" if node["claim"] else "blocked"

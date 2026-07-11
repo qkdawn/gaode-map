@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .stage1_data_quality import Stage1DataQualitySummary
+from .stage1_provenance import Stage1ProvenanceSummary
 
 
 class AuditIssue(BaseModel):
@@ -87,7 +88,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 13
+    checks_total = 14
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -101,6 +102,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     )
     conflict_register = _list(package.get("conflict_register"))
     data_quality_payload = package.get("data_quality")
+    provenance_payload = package.get("provenance_binding")
 
     if ledger:
         invalid_nodes = []
@@ -203,6 +205,50 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 )
             )
         if not data_quality.blocking_issues:
+            checks_passed += 1
+
+    try:
+        provenance = Stage1ProvenanceSummary.model_validate(provenance_payload)
+    except ValidationError:
+        provenance = None
+    if provenance is None:
+        issues.append(
+            _issue(
+                "provenance_binding_missing",
+                "缺少证据与真实文档节点或分析产物的绑定结果。",
+                path="provenance_binding",
+                repair_hint="用后端权威 artifact 注册表重新绑定证据，禁止只信任模型声明。",
+            )
+        )
+    else:
+        for item in provenance.issues:
+            issues.append(
+                _issue(
+                    item.code,
+                    item.message,
+                    path=f"evidence_ledger.{item.evidence_id}",
+                    repair_hint=item.repair_hint,
+                    warning=item.severity == "warning",
+                )
+            )
+        bound_ids = {item.evidence_id for item in provenance.bindings}
+        if bound_ids != evidence_ids:
+            missing_ids = sorted(evidence_ids - bound_ids)
+            extra_ids = sorted(bound_ids - evidence_ids)
+            details = []
+            if missing_ids:
+                details.append(f"未绑定：{'、'.join(missing_ids)}")
+            if extra_ids:
+                details.append(f"无对应证据：{'、'.join(extra_ids)}")
+            issues.append(
+                _issue(
+                    "provenance_binding_coverage_invalid",
+                    "证据溯源绑定未完整覆盖当前台账；" + "；".join(details) + "。",
+                    path="provenance_binding.bindings",
+                    repair_hint="对最终证据台账逐条重新执行 artifact 绑定。",
+                )
+            )
+        elif not provenance.blocking_issues:
             checks_passed += 1
 
     referenced_ids: set[str] = set()

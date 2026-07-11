@@ -3,6 +3,10 @@ from datetime import date
 
 from modules.agent.quality_audit import audit_stage1_package
 from modules.agent.stage1_data_quality import assess_stage1_data_quality
+from modules.agent.stage1_provenance import (
+    EvidenceProvenanceBinding,
+    assess_provenance_bindings,
+)
 
 
 def complete_package():
@@ -73,6 +77,21 @@ def complete_package():
     }
     package["data_quality"] = assess_stage1_data_quality(
         package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
+    ).model_dump(mode="json")
+    package["provenance_binding"] = assess_provenance_bindings(
+        [
+            EvidenceProvenanceBinding(
+                evidence_id="evidence-1",
+                status="verified",
+                artifact_id="document-node-12",
+                source_id="document:project-doc",
+                source_kind="document",
+                locator="document:project-doc#page=12&node=document-node-12",
+                metadata_origin="project_evidence_dossier",
+                matched_by="source_artifact_id",
+            )
+        ],
+        critical_evidence_ids={"evidence-1"},
     ).model_dump(mode="json")
     return package
 
@@ -268,6 +287,13 @@ def test_unreferenced_data_quality_gap_is_warning_not_delivery_blocker():
     package["data_quality"] = assess_stage1_data_quality(
         package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
     ).model_dump(mode="json")
+    package["provenance_binding"]["bindings"].append(
+        {
+            "evidence_id": "background-1",
+            "status": "unverifiable",
+            "message": "背景证据未绑定",
+        }
+    )
 
     result = audit_stage1_package(package)
 

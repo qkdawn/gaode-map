@@ -39,7 +39,14 @@ def ready_payload():
             "frontend_analysis": {"poi_total": 2635},
         },
         selected_sources_context={
-            "sources": [{"source_id": "project-doc", "title": "项目资料"}]
+            "sources": [
+                {
+                    "source_id": "project-doc",
+                    "title": "项目资料",
+                    "source_kind": "analysis_source",
+                    "source_date": "2026-07-01",
+                }
+            ]
         },
     )
 

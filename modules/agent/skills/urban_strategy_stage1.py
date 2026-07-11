@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
-from modules.documents import build_project_evidence_dossier
+from modules.documents import ProjectEvidenceDossier, build_project_evidence_dossier
 
 from ..evidence_verification import verify_evidence_ledger
 from ..llm_digest import snapshot_digest
@@ -10,6 +10,14 @@ from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
 from ..quality_audit import QualityAuditResult, audit_stage1_package
 from ..stage1_contracts import VerificationSummary
 from ..stage1_data_quality import assess_stage1_data_quality
+from ..stage1_provenance import (
+    Stage1ProvenanceSummary,
+    assess_provenance_bindings,
+    bind_evidence_to_artifacts,
+    build_provenance_registry,
+    project_evidence_payload,
+    provenance_registry_payload,
+)
 from ..schemas import (
     AgentContextSummary,
     AgentPlanEnvelope,
@@ -135,6 +143,7 @@ def _conflict_register(
     *,
     question: str,
     context_conflicts: list[Any],
+    dossier: ProjectEvidenceDossier | None = None,
 ) -> list[dict[str, Any]]:
     conflicts: list[dict[str, Any]] = []
     document_sources = [
@@ -143,8 +152,12 @@ def _conflict_register(
         if str(source.get("source_id") or "").startswith("document:")
     ]
     if document_sources:
-        dossier = build_project_evidence_dossier(document_sources, question=question)
-        conflicts.extend(item.model_dump(mode="json") for item in dossier.conflicts)
+        resolved_dossier = dossier or build_project_evidence_dossier(
+            document_sources, question=question
+        )
+        conflicts.extend(
+            item.model_dump(mode="json") for item in resolved_dossier.conflicts
+        )
 
     for index, item in enumerate(context_conflicts):
         if isinstance(item, dict):
@@ -225,12 +238,14 @@ def _base_panels(
     package: dict[str, Any],
     audit: QualityAuditResult,
     verification: VerificationSummary,
+    provenance: Stage1ProvenanceSummary,
 ) -> dict[str, Any]:
     return {
         "stage1_readiness": readiness,
         "stage1_evidence_ledger": package["evidence_ledger"],
         "stage1_conflict_register": package["conflict_register"],
         "stage1_data_quality": package["data_quality"],
+        "stage1_provenance_binding": provenance.model_dump(mode="json"),
         "stage1_evidence_verification": verification.model_dump(mode="json"),
         "stage1_workpacks": package["workpacks"],
         "stage1_strategy": package["strategy"],
@@ -279,16 +294,25 @@ async def execute(
         raise ValueError("所选模型 Provider 不可用")
     question = str(payload.messages[-1].content if payload.messages else "").strip()
     selected_sources = payload.selected_sources_context.source_items()
+    dossier = build_project_evidence_dossier(selected_sources, question=question)
     conflict_register = _conflict_register(
         selected_sources,
         question=question,
         context_conflicts=readiness["conflicts"],
+        dossier=dossier,
+    )
+    provenance_registry = build_provenance_registry(
+        selected_sources=selected_sources,
+        snapshot=payload.analysis_snapshot,
+        dossier=dossier,
     )
     evidence_input = {
         "question": question,
         "project_context": payload.analysis_snapshot.context,
         "snapshot": snapshot_digest(payload.analysis_snapshot),
         "selected_sources": selected_sources,
+        "project_evidence": project_evidence_payload(dossier),
+        "authoritative_artifacts": provenance_registry_payload(provenance_registry),
         "known_conflicts": conflict_register,
         "optional_gaps": readiness["missing_optional"],
     }
@@ -319,8 +343,13 @@ async def execute(
         title="构建 Claim-Evidence 台账",
         reasoning_id="stage1-evidence-model",
     )
-    evidence_ledger, verification = verify_evidence_ledger(
+    evidence_ledger, provenance_bindings = bind_evidence_to_artifacts(
         _list_from(evidence_result, "evidence_ledger"),
+        registry=provenance_registry,
+    )
+    provenance = assess_provenance_bindings(provenance_bindings)
+    evidence_ledger, verification = verify_evidence_ledger(
+        evidence_ledger,
         selected_sources=selected_sources,
         snapshot=payload.analysis_snapshot,
     )
@@ -346,6 +375,7 @@ async def execute(
                     "stage1_readiness": readiness,
                     "stage1_evidence_ledger": evidence_ledger,
                     "stage1_conflict_register": conflict_register,
+                    "stage1_provenance_binding": provenance.model_dump(mode="json"),
                     "stage1_evidence_verification": verification_payload,
                 },
             ),
@@ -435,9 +465,26 @@ async def execute(
         reasoning_id="stage1-spatial-matrix-model",
     )
     spatial_matrix = _mapping(matrix_result)
+    critical_evidence_ids = _critical_evidence_ids(strategy, spatial_matrix)
+    provenance = assess_provenance_bindings(
+        provenance_bindings,
+        critical_evidence_ids=critical_evidence_ids,
+    )
+    await _emit_phase(
+        emit,
+        phase_id="stage1-provenance-binding",
+        title="绑定证据与真实数据资产",
+        detail=(
+            f"核对 {provenance.assessed_count} 条证据；"
+            f"已验证 {provenance.status_counts.get('verified', 0)} 条、"
+            f"修正 {provenance.status_counts.get('corrected', 0)} 条、"
+            f"无法定位 {provenance.status_counts.get('unverifiable', 0)} 条。"
+        ),
+        state="completed" if provenance.status != "failed" else "failed",
+    )
     data_quality = assess_stage1_data_quality(
         evidence_ledger,
-        critical_evidence_ids=_critical_evidence_ids(strategy, spatial_matrix),
+        critical_evidence_ids=critical_evidence_ids,
     )
     await _emit_phase(
         emit,
@@ -454,6 +501,7 @@ async def execute(
         "evidence_ledger": evidence_ledger,
         "conflict_register": conflict_register,
         "data_quality": data_quality.model_dump(mode="json"),
+        "provenance_binding": provenance.model_dump(mode="json"),
         "workpacks": workpacks,
         "strategy": strategy,
         "spatial_matrix": spatial_matrix,
@@ -467,7 +515,7 @@ async def execute(
         detail=f"通过 {audit.checks_passed}/{audit.checks_total} 项，质量分 {audit.score}。",
         state="completed" if audit.status == "passed" else "failed",
     )
-    panels = _base_panels(readiness, package, audit, verification)
+    panels = _base_panels(readiness, package, audit, verification, provenance)
     if audit.status != "passed":
         repair_tasks = [
             {

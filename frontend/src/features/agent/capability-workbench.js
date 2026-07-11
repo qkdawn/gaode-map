@@ -131,6 +131,54 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1ConflictValuesText(conflict) {
       return Array.isArray(conflict?.values) ? conflict.values.map(text).filter(Boolean).join(' / ') : ''
     },
+    getStage1ProvenanceBinding() {
+      const provenance = (this.agentPanelPayloads || {}).stage1_provenance_binding
+      return provenance && typeof provenance === 'object' ? clonePayloadValue(provenance) : null
+    },
+    getStage1ProvenanceStatusLabel() {
+      const labels = {
+        passed: '真实资产绑定通过',
+        passed_with_gaps: '真实资产绑定存在缺口',
+        failed: '真实资产绑定阻断交付',
+      }
+      return labels[this.getStage1ProvenanceBinding()?.status] || '尚未执行真实资产绑定'
+    },
+    getStage1ProvenanceStatusItems() {
+      const counts = this.getStage1ProvenanceBinding()?.status_counts || {}
+      const labels = {
+        verified: '已验证',
+        corrected: '已修正',
+        unverifiable: '无法定位',
+        conflicting: '来源冲突',
+      }
+      return Object.entries(labels)
+        .map(([key, label]) => ({ key, label, count: Number(counts[key] || 0) }))
+        .filter(item => item.count > 0)
+    },
+    getStage1ProvenanceBindings() {
+      const bindings = this.getStage1ProvenanceBinding()?.bindings
+      return Array.isArray(bindings) ? clonePayloadValue(bindings) : []
+    },
+    getStage1ProvenanceIssues() {
+      const issues = this.getStage1ProvenanceBinding()?.issues
+      return Array.isArray(issues) ? clonePayloadValue(issues) : []
+    },
+    getStage1ProvenanceCorrectionText(binding) {
+      const fields = Array.isArray(binding?.corrected_fields) ? binding.corrected_fields.map(text).filter(Boolean) : []
+      return fields.length ? `修正字段：${fields.join('、')}` : ''
+    },
+    getStage1ProvenanceUnverifiedText(binding) {
+      const fields = Array.isArray(binding?.unverified_fields) ? binding.unverified_fields.map(text).filter(Boolean) : []
+      return fields.length ? `资产未登记：${fields.join('、')}` : ''
+    },
+    getStage1ProvenanceDiscrepancyText(binding) {
+      const discrepancies = Array.isArray(binding?.discrepancies) ? binding.discrepancies : []
+      return discrepancies.map((item) => {
+        const declared = item?.declared && typeof item.declared === 'object' ? JSON.stringify(item.declared) : text(item?.declared) || '未声明'
+        const authoritative = item?.authoritative && typeof item.authoritative === 'object' ? JSON.stringify(item.authoritative) : text(item?.authoritative) || '未登记'
+        return `${text(item?.field) || '字段'}：${declared} → ${authoritative}`
+      }).join('；')
+    },
     getStage1DataQuality() {
       const quality = (this.agentPanelPayloads || {}).stage1_data_quality
       return quality && typeof quality === 'object' ? clonePayloadValue(quality) : null
@@ -170,7 +218,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       return Array.isArray(systems) ? systems.map(text).filter(Boolean).join(' / ') : ''
     },
     hasStage1Outcome() {
-      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1DataQuality())
+      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality())
     },
     getStage1EvidenceCount() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger
