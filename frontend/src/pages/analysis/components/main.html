@@ -59,6 +59,45 @@
                                     <span v-for="item in getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).missing_required" :key="item">缺少：{{ item }}</span>
                                     <span v-for="item in getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).missing_optional" :key="item">建议补充：{{ item }}</span>
                                 </div>
+                                <section v-for="preview in [getAnalysisCapabilityRunPreview(getActiveAnalysisCapability())]" :key="`run-preview-${preview.capability_id}`" class="agent-capability-run-preview" :class="preview.status" aria-label="运行前摘要">
+                                    <header class="agent-capability-run-preview-head">
+                                        <div><span>Run Preview</span><strong>运行前摘要</strong></div>
+                                        <em>{{ preview.status === 'ready' ? '可确认运行' : preview.status === 'review' ? '需确认风险' : preview.status === 'blocked' ? '暂不可运行' : '正在检查' }}</em>
+                                    </header>
+                                    <p class="agent-capability-run-preview-lock">点击“确认并运行”后锁定以下输入、来源和上游版本；运行中的任务不受后续配置修改影响。</p>
+                                    <div class="agent-capability-run-preview-grid">
+                                        <span>能力<strong>{{ preview.capability }}</strong></span>
+                                        <span>范围<strong>{{ preview.scope }}</strong></span>
+                                        <span>模型<strong>{{ preview.model }}</strong></span>
+                                        <span>执行器<strong>{{ preview.executor }}</strong></span>
+                                        <span>预计阶段<strong>{{ preview.estimated_stages }} 个</strong></span>
+                                    </div>
+                                    <div class="agent-capability-run-preview-block">
+                                        <strong>选定来源</strong>
+                                        <div v-if="preview.sources.length" class="agent-capability-run-preview-tags"><span v-for="source in preview.sources" :key="source.id">{{ source.title }}</span></div>
+                                        <small v-else>未选择额外项目资料；仅使用当前分析上下文和已锁定上游产物。</small>
+                                    </div>
+                                    <div v-if="preview.selected_inputs.length" class="agent-capability-run-preview-block">
+                                        <strong>锁定的上游输入</strong>
+                                        <article v-for="input in preview.selected_inputs" :key="input.requirement_id" class="agent-capability-run-preview-input" :class="input.state">
+                                            <div><span>{{ input.label }}</span><code v-if="input.run_id">{{ input.run_id }}</code></div>
+                                            <small>{{ input.mode === 'ignore_optional' ? '忽略可选输入' : input.run_id ? `${input.artifact_count} 个不可变产物` : '尚未锁定运行版本' }}</small>
+                                        </article>
+                                    </div>
+                                    <div class="agent-capability-run-preview-block">
+                                        <strong>参数</strong>
+                                        <div class="agent-capability-run-preview-tags"><span v-for="parameter in preview.parameters" :key="`${parameter.label}-${parameter.value}`">{{ parameter.label }}：{{ parameter.value }}</span></div>
+                                    </div>
+                                    <div v-if="preview.risks.length" class="agent-capability-run-preview-risks">
+                                        <strong>缺口与风险</strong>
+                                        <span v-for="(risk, index) in preview.risks" :key="`${risk.level}-${index}`" :class="risk.level">{{ risk.label }}</span>
+                                    </div>
+                                    <div v-else class="agent-capability-run-preview-clear">输入检查已通过，未发现执行阻断。</div>
+                                    <div class="agent-capability-run-preview-block">
+                                        <strong>将生成的产物</strong>
+                                        <div class="agent-capability-run-preview-tags"><span v-for="output in preview.outputs" :key="output">{{ output }}</span></div>
+                                    </div>
+                                </section>
                                 <section class="agent-capability-run-history" aria-label="运行版本">
                                     <div class="agent-capability-run-history-head">
                                         <div><strong>运行版本</strong><span>按当前分析历史保存</span></div>
@@ -106,7 +145,7 @@
                                         </div>
                                     </article>
                                 </section>
-                                <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading || !isAnalysisCapabilityReady(getActiveAnalysisCapability().id)" @click="runAnalysisCapability(getActiveAnalysisCapability())">运行能力</button>
+                                <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading || !isAnalysisCapabilityReady(getActiveAnalysisCapability().id)" @click="runAnalysisCapability(getActiveAnalysisCapability())">确认并运行</button>
                             </aside>
                         </div>
                         <section v-if="hasStage1Outcome()" class="agent-stage1-outcome">

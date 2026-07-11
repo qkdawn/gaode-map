@@ -36,6 +36,7 @@ function createContext(overrides = {}) {
     getCurrentAgentHistoryId: () => 'history-1',
     buildAgentAnalysisSnapshot: () => ({ scope: { scope_id: 'scope-1' } }),
     getAgentAnalysisSourceState: () => ({ sources: [] }),
+    getAgentSelectedModelName: () => 'DeepSeek Chat',
     ...overrides,
   }
 }
@@ -579,6 +580,12 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getAnalysisCapabilityGroups\(\)/)
   assert.match(main, /上游版本选择/)
   assert.match(main, /不静默读取运行时文件/)
+  assert.match(main, /运行前摘要/)
+  assert.match(main, /运行中的任务不受后续配置修改影响/)
+  assert.match(main, /getAnalysisCapabilityRunPreview/)
+  assert.match(main, /锁定的上游输入/)
+  assert.match(main, /将生成的产物/)
+  assert.match(main, /确认并运行/)
   assert.match(main, /setAnalysisCapabilityInputMode/)
   assert.match(main, /setAnalysisCapabilityInputRun/)
   assert.match(main, /inspectAnalysisCapability\(capability\)/)
@@ -718,6 +725,107 @@ test('running a ready capability forwards target id and explicit upstream policy
     mode: 'specific_run',
     run_id: 'run-1',
   }])
+})
+
+test('run preview presents the exact readiness-locked execution contract', () => {
+  const capability = {
+    id: 'spatial-programming-matrix',
+    display_name: '空间功能策划矩阵',
+    executor_type: 'skill',
+    executor_id: 'urban-strategy-stage1',
+    estimated_stages: 4,
+    output_contract: ['空间功能决策矩阵', '设计约束'],
+  }
+  const readiness = {
+    status: 'ready',
+    missing_required: [],
+    missing_optional: [],
+    conflicts: [],
+    actions: [],
+    input_resolutions: [{
+      requirement_id: 'stage1_basis',
+      label: 'Stage 1 结构化成果',
+      selection_mode: 'latest_successful',
+      selected_run_id: 'run-stage1-7',
+      state: 'resolved',
+      artifact_refs: [{ artifact_id: 'stage1-report' }, { artifact_id: 'stage1-design-handoff' }],
+    }],
+  }
+  const originalReadiness = structuredClone(readiness)
+  const ctx = createContext({
+    analysisCapabilities: [capability],
+    activeAnalysisCapabilityId: capability.id,
+    analysisCapabilityReadiness: { [capability.id]: readiness },
+    buildAgentAnalysisSnapshot: () => ({
+      context: { mode: 'walking', time_min: 15, source: 'gaode', history_id: 'history-1' },
+      scope: { drawn_polygon: [[116.1, 39.9], [116.2, 39.9], [116.2, 40], [116.1, 39.9]] },
+      current_filters: { h3_resolution: 9, road_metric: 'integration' },
+    }),
+    getAgentAnalysisSourceState: () => ({
+      sources: [{
+        id: 'document:brief',
+        title: '项目任务书',
+        type: 'document',
+        selected: true,
+        status: 'ready',
+        meta: { aiPayload: { source_id: 'document:brief', title: '项目任务书', source_kind: 'document', document_role: 'project_brief', included: ['document_identity'] } },
+      }],
+    }),
+  })
+
+  const preview = ctx.getAnalysisCapabilityRunPreview(capability)
+
+  assert.equal(preview.status, 'ready')
+  assert.equal(preview.scope, '当前地图多边形 · 4 个顶点')
+  assert.equal(preview.model, 'DeepSeek Chat')
+  assert.equal(preview.executor, 'Skill · urban-strategy-stage1')
+  assert.equal(preview.estimated_stages, 4)
+  assert.deepEqual(preview.sources.map(item => item.title), ['项目任务书'])
+  assert.deepEqual(preview.selected_inputs[0], {
+    requirement_id: 'stage1_basis',
+    label: 'Stage 1 结构化成果',
+    state: 'resolved',
+    mode: 'specific_run',
+    run_id: 'run-stage1-7',
+    artifact_count: 2,
+  })
+  assert.deepEqual(preview.outputs, ['空间功能决策矩阵', '设计约束'])
+  assert.ok(preview.parameters.some(item => item.label === '时间阈值' && item.value === '15 分钟'))
+  assert.deepEqual(readiness, originalReadiness)
+})
+
+test('run preview makes blockers and optional gaps explicit before execution', () => {
+  const capability = {
+    id: 'evidence-audit',
+    display_name: '证据与结论审计',
+    executor_type: 'skill',
+    executor_id: 'urban-strategy-stage1',
+    output_contract: ['Claim-Evidence 台账'],
+  }
+  const ctx = createContext({
+    analysisCapabilities: [capability],
+    activeAnalysisCapabilityId: capability.id,
+    analysisCapabilityReadiness: {
+      [capability.id]: {
+        status: 'blocked',
+        missing_required: ['项目证据'],
+        missing_optional: ['历史成果'],
+        conflicts: ['来源时间口径不一致'],
+        actions: [{ id: 'upload', label: '上传项目任务书', target: 'sources' }],
+        input_resolutions: [],
+      },
+    },
+  })
+
+  const preview = ctx.getAnalysisCapabilityRunPreview(capability)
+
+  assert.equal(preview.status, 'blocked')
+  assert.deepEqual(preview.risks, [
+    { level: 'blocked', label: '缺少必需输入：项目证据' },
+    { level: 'blocked', label: '输入冲突：来源时间口径不一致' },
+    { level: 'warning', label: '可选缺口：历史成果' },
+    { level: 'warning', label: '建议处理：上传项目任务书' },
+  ])
 })
 
 test('execution freezes readiness-resolved latest input to its immutable run', () => {

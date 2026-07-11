@@ -406,6 +406,104 @@ export function createAgentCapabilityWorkbenchMethods() {
         return item
       })
     },
+    getAnalysisCapabilityRunPreview(capability = null) {
+      const activeCapability = capability || this.getActiveAnalysisCapability()
+      if (!activeCapability) return null
+      const capabilityId = text(activeCapability.id)
+      const readiness = this.getAnalysisCapabilityReadiness(capabilityId)
+      const readinessError = this.getAnalysisCapabilityReadinessError(capabilityId)
+      const snapshot = typeof this.buildAgentAnalysisSnapshot === 'function'
+        ? clonePayloadValue(this.buildAgentAnalysisSnapshot() || {})
+        : {}
+      const selectedSourcesContext = buildAnalysisQuickAskSelectedSourcesContext(this)
+      const selectedSources = (selectedSourcesContext.sources || []).map(source => ({
+        id: text(source?.source_id),
+        title: text(source?.title) || text(source?.source_id) || '未命名来源',
+        kind: text(source?.source_kind) || 'analysis',
+      }))
+      const scope = snapshot.scope || {}
+      const scopePolygon = Array.isArray(scope.drawn_polygon) && scope.drawn_polygon.length
+        ? scope.drawn_polygon
+        : (Array.isArray(scope.polygon) ? scope.polygon : [])
+      let scopeLabel = '未检测到地图空间范围'
+      if (scope.isochrone_feature) scopeLabel = '当前等时圈分析范围'
+      else if (scopePolygon.length) scopeLabel = `当前地图多边形 · ${scopePolygon.length} 个顶点`
+      else if (text(snapshot.context?.history_id)) scopeLabel = `当前历史任务 · ${text(snapshot.context.history_id)}`
+
+      const parameters = []
+      const addParameter = (label, value) => {
+        const normalized = text(value)
+        if (normalized && !parameters.some(item => item.label === label && item.value === normalized)) {
+          parameters.push({ label, value: normalized })
+        }
+      }
+      const modeLabels = { walking: '步行', driving: '驾车', bicycling: '骑行', transit: '公共交通' }
+      const context = snapshot.context || {}
+      const filters = snapshot.current_filters || {}
+      if (text(context.mode)) addParameter('交通方式', modeLabels[text(context.mode)] || context.mode)
+      if (Number(context.time_min) > 0) addParameter('时间阈值', `${Number(context.time_min)} 分钟`)
+      addParameter('数据来源', context.source || filters.poi_source)
+      if (Number(filters.h3_resolution) > 0) addParameter('H3 分辨率', filters.h3_resolution)
+      if (Number(filters.h3_neighbor_ring) > 0) addParameter('邻域圈层', filters.h3_neighbor_ring)
+      addParameter('路网指标', filters.road_metric)
+      addParameter('人口视图', filters.population_view)
+      addParameter('夜光视图', filters.nightlight_view)
+      if (!parameters.length) addParameter('参数策略', '沿用当前分析上下文默认参数')
+
+      const lockedSelections = new Map(
+        this.buildLockedAnalysisCapabilityInputSelections(capabilityId)
+          .map(item => [text(item.requirement_id), item]),
+      )
+      const selectedInputs = this.getAnalysisCapabilityInputResolutions(capabilityId).map((resolution) => {
+        const locked = lockedSelections.get(text(resolution.requirement_id)) || {}
+        return {
+          requirement_id: text(resolution.requirement_id),
+          label: text(resolution.label) || text(resolution.requirement_id),
+          state: text(resolution.state),
+          mode: text(locked.mode),
+          run_id: text(locked.run_id),
+          artifact_count: Array.isArray(resolution.artifact_refs) ? resolution.artifact_refs.length : 0,
+        }
+      })
+
+      const risks = []
+      const addRisks = (items, level, prefix = '') => {
+        for (const item of items || []) {
+          const label = text(item?.label || item)
+          if (label) risks.push({ level, label: prefix ? `${prefix}${label}` : label })
+        }
+      }
+      if (readinessError) addRisks([readinessError], 'blocked')
+      addRisks(readiness?.missing_required, 'blocked', '缺少必需输入：')
+      addRisks(readiness?.conflicts, 'blocked', '输入冲突：')
+      addRisks(readiness?.missing_optional, 'warning', '可选缺口：')
+      addRisks(readiness?.actions, 'warning', '建议处理：')
+
+      let status = 'checking'
+      if (this.analysisCapabilityReadinessLoading) status = 'checking'
+      else if (readinessError || ['blocked', 'unavailable'].includes(text(readiness?.status))) status = 'blocked'
+      else if (text(readiness?.status) === 'ready') status = 'ready'
+      else if (text(readiness?.status) === 'limited') status = 'review'
+
+      return {
+        capability_id: capabilityId,
+        status,
+        capability: text(activeCapability.display_name) || capabilityId,
+        scope: scopeLabel,
+        sources: selectedSources,
+        parameters: parameters.slice(0, 6),
+        model: typeof this.getAgentSelectedModelName === 'function'
+          ? text(this.getAgentSelectedModelName()) || '未选择模型'
+          : '未选择模型',
+        executor: `${activeCapability.executor_type === 'service' ? '服务' : 'Skill'} · ${text(activeCapability.executor_id) || '未配置'}`,
+        estimated_stages: Number(activeCapability.estimated_stages || 0) || 1,
+        selected_inputs: selectedInputs,
+        risks,
+        outputs: Array.isArray(activeCapability.output_contract)
+          ? activeCapability.output_contract.map(text).filter(Boolean)
+          : [],
+      }
+    },
     syncAnalysisCapabilityInputSelections(capabilityId = '', readiness = null) {
       const id = text(capabilityId)
       const previous = (this.analysisCapabilityInputSelections || {})[id] || {}

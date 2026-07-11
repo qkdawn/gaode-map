@@ -13654,6 +13654,37 @@ body.agent-ppt-source-menu-open {
 .agent-capability-readiness { padding: 12px; border-radius: 6px; background: #f8fafc; color: #475569; }
 .agent-capability-readiness.ready { background: #ecfdf3; color: #087443; }
 .agent-capability-readiness.blocked { background: #fff7ed; color: #9a3412; }
+.agent-capability-run-preview { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid #dbe3ec; border-left: 3px solid #64748b; border-radius: 7px; background: #fff; }
+.agent-capability-run-preview.ready { border-left-color: #16a34a; background: #fbfffc; }
+.agent-capability-run-preview.review { border-left-color: #d97706; background: #fffdf7; }
+.agent-capability-run-preview.blocked { border-left-color: #dc2626; background: #fffafa; }
+.agent-capability-run-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.agent-capability-run-preview-head > div { display: flex; flex-direction: column; gap: 1px; }
+.agent-capability-run-preview-head span { color: #64748b; font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.agent-capability-run-preview-head strong { color: #1e293b; font-size: 12px; }
+.agent-capability-run-preview-head em { padding: 3px 6px; border-radius: 999px; background: #eef2f7; color: #475569; font-size: 8px; font-style: normal; font-weight: 700; white-space: nowrap; }
+.agent-capability-run-preview.ready .agent-capability-run-preview-head em { background: #dcfce7; color: #166534; }
+.agent-capability-run-preview.blocked .agent-capability-run-preview-head em { background: #fee2e2; color: #991b1b; }
+.agent-capability-run-preview-lock { padding: 7px 8px; border-radius: 5px; background: #eff6ff; color: #1e40af !important; font-size: 9px !important; line-height: 1.5 !important; }
+.agent-capability-run-preview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.agent-capability-run-preview-grid span { display: flex; min-width: 0; flex-direction: column; gap: 2px; padding: 7px; border-radius: 5px; background: #f8fafc; color: #64748b; font-size: 8px; }
+.agent-capability-run-preview-grid span:nth-child(2) { grid-column: 1 / -1; }
+.agent-capability-run-preview-grid strong { color: #334155; font-size: 9px; overflow-wrap: anywhere; }
+.agent-capability-run-preview-block, .agent-capability-run-preview-risks { display: flex; flex-direction: column; gap: 6px; }
+.agent-capability-run-preview-block > strong, .agent-capability-run-preview-risks > strong { color: #475569; font-size: 9px; }
+.agent-capability-run-preview-block > small { color: #64748b; font-size: 8px; line-height: 1.5; }
+.agent-capability-run-preview-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.agent-capability-run-preview-tags span { max-width: 100%; padding: 3px 6px; border: 1px solid #dbe3ec; border-radius: 4px; background: #f8fafc; color: #475569; font-size: 8px; overflow-wrap: anywhere; }
+.agent-capability-run-preview-input { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 6px 7px; border-left: 2px solid #94a3b8; background: #f8fafc; }
+.agent-capability-run-preview-input.resolved, .agent-capability-run-preview-input.ignored { border-left-color: #16a34a; }
+.agent-capability-run-preview-input.missing, .agent-capability-run-preview-input.recalculate_required { border-left-color: #d97706; }
+.agent-capability-run-preview-input > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.agent-capability-run-preview-input span { color: #334155; font-size: 8px; font-weight: 700; }
+.agent-capability-run-preview-input code { color: #64748b; font-size: 7px; overflow-wrap: anywhere; }
+.agent-capability-run-preview-input small { color: #64748b; font-size: 8px; text-align: right; }
+.agent-capability-run-preview-risks span { padding: 5px 7px; border-radius: 4px; background: #fff7ed; color: #9a3412; font-size: 8px; line-height: 1.45; }
+.agent-capability-run-preview-risks span.blocked { background: #fef2f2; color: #b91c1c; }
+.agent-capability-run-preview-clear { padding: 6px 7px; border-radius: 4px; background: #ecfdf3; color: #087443; font-size: 8px; }
 .agent-capability-run-history { display: flex; flex-direction: column; gap: 9px; padding-top: 14px; border-top: 1px solid #e2e8f0; }
 .agent-capability-run-history-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .agent-capability-run-history-head > div { display: flex; flex-direction: column; gap: 2px; }
