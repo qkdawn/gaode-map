@@ -44,6 +44,7 @@
                                 <div class="agent-stage1-outcome-stats">
                                     <span v-if="getStage1QualityAudit()" :class="getStage1QualityAudit().status">质量 {{ getStage1QualityAudit().score }} 分</span>
                                     <span>{{ getStage1EvidenceCount() }} 条证据</span>
+                                    <span v-if="getStage1DataQuality()" :class="getStage1DataQuality().status">{{ getStage1DataQualityStatusLabel() }}</span>
                                     <span v-if="getStage1ConflictRegister().length" :class="{ failed: getStage1UnresolvedConflictCount() > 0 }">{{ getStage1UnresolvedConflictCount() }} 项待裁决冲突</span>
                                     <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
                                 </div>
@@ -69,6 +70,22 @@
                                     <article v-for="task in getStage1VerificationTasks()" :key="`${task.evidence_id}-${task.executor}`">
                                         <div><span>{{ task.executor === 'fieldwork' ? '现场' : task.executor === 'agent' ? 'Agent' : '权威资料' }}</span><strong>{{ task.missing_input }}</strong></div>
                                         <p>{{ task.blocking_reason }}</p><small>下一步：{{ task.next_action }}</small>
+                                    </article>
+                                </div>
+                            </div>
+                            <div v-if="getStage1DataQuality()" class="agent-data-quality" :class="getStage1DataQuality().status">
+                                <div class="agent-data-quality-head">
+                                    <div><strong>数据质量与时空口径</strong><span>{{ getStage1DataQualityStatusLabel() }}</span></div>
+                                    <small>审计 {{ getStage1DataQuality().assessed_count }} 条证据，{{ getStage1DataQuality().critical_evidence_ids.length }} 条进入关键决策链</small>
+                                </div>
+                                <div class="agent-data-quality-coverage">
+                                    <span v-for="item in getStage1DataQualityCoverageItems()" :key="item.key" :class="{ gap: item.gap }">{{ item.label }} {{ item.display }}</span>
+                                </div>
+                                <p v-if="getStage1DataQualityCoordinateText()">坐标口径：{{ getStage1DataQualityCoordinateText() }}</p>
+                                <div v-if="getStage1DataQualityIssues().length" class="agent-data-quality-issues">
+                                    <article v-for="issue in getStage1DataQualityIssues()" :key="`${issue.code}-${issue.evidence_id}`" :class="issue.severity">
+                                        <div><span>{{ issue.severity === 'error' ? '阻断' : '提示' }}</span><strong>{{ issue.message }}</strong></div>
+                                        <small v-if="issue.repair_hint">{{ issue.repair_hint }}</small>
                                     </article>
                                 </div>
                             </div>

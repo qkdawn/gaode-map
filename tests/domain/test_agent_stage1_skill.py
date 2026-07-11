@@ -54,6 +54,8 @@ def valid_evidence():
                 "status": "verified",
                 "source_ref": "项目资料 p.12",
                 "source_artifact_id": "document-node-12",
+                "source_date": "2026-07-01",
+                "source_locator": "document:project-doc#page=12&node=document-node-12",
                 "method": "document_read",
                 "scope": "项目红线",
                 "comparison_baseline": "",
@@ -342,10 +344,16 @@ def test_stage1_exposes_context_conflicts_in_quality_panel(monkeypatch):
     assert "居民户数不一致" in conflict["label"]
     audit = response.output.panel_payloads["stage1_quality_audit"]
     assert audit["status"] == "passed"
+    data_quality = response.output.panel_payloads["stage1_data_quality"]
+    assert data_quality["status"] == "passed"
+    assert data_quality["coverage"]["source_locator"] == 1
     assert any(
         item["code"] == "unresolved_evidence_conflict" for item in audit["issues"]
     )
     assert calls[0]["user_payload"]["known_conflicts"][0]["unresolved"] is True
+    assert "source_date" in calls[0]["system_prompt"]
+    assert "sample_size" in calls[0]["system_prompt"]
+    assert "data_quality" in calls[-1]["system_prompt"]
     assert (
         calls[2]["user_payload"]["conflict_register"][0]["label"] == conflict["label"]
     )

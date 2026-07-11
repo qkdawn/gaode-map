@@ -1,10 +1,12 @@
 from copy import deepcopy
+from datetime import date
 
 from modules.agent.quality_audit import audit_stage1_package
+from modules.agent.stage1_data_quality import assess_stage1_data_quality
 
 
 def complete_package():
-    return {
+    package = {
         "evidence_ledger": [
             {
                 "id": "evidence-1",
@@ -13,6 +15,8 @@ def complete_package():
                 "status": "verified",
                 "source_ref": "项目基础资料 p.12",
                 "source_artifact_id": "document-node-12",
+                "source_date": "2026-07-01",
+                "source_locator": "document:project-doc#page=12&node=document-node-12",
                 "method": "document_read",
                 "scope": "项目红线",
                 "comparison_baseline": "",
@@ -67,6 +71,10 @@ def complete_package():
             "portfolio_checks": ["公共服务与经营功能保持平衡"],
         },
     }
+    package["data_quality"] = assess_stage1_data_quality(
+        package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
+    ).model_dump(mode="json")
+    return package
 
 
 def test_complete_stage1_package_passes_quality_gate():
@@ -206,3 +214,116 @@ def test_unlinked_conflict_is_exposed_without_blocking_unrelated_decision():
     assert result.status == "passed"
     assert result.score == 100
     assert [item.code for item in result.issues] == ["unresolved_evidence_conflict"]
+
+
+def test_critical_analytic_evidence_requires_fresh_sample_and_spatial_metadata():
+    package = complete_package()
+    evidence = package["evidence_ledger"][0]
+    evidence.update(
+        {
+            "evidence_type": "G",
+            "source_date": "2020",
+            "analysis_date": "",
+            "sample_size": None,
+            "missing_count": None,
+            "duplicate_count": None,
+            "anomaly_count": None,
+            "coordinate_system": "",
+        }
+    )
+    package["data_quality"] = assess_stage1_data_quality(
+        package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
+    ).model_dump(mode="json")
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert {item.code for item in result.blocking_issues} >= {
+        "analytic_source_stale",
+        "analysis_date_missing",
+        "sample_diagnostics_missing",
+        "coordinate_system_missing",
+    }
+
+
+def test_unreferenced_data_quality_gap_is_warning_not_delivery_blocker():
+    package = complete_package()
+    package["evidence_ledger"].append(
+        {
+            "id": "background-1",
+            "claim": "旧版背景数据仅用于历史参照",
+            "evidence_type": "G",
+            "status": "inferred",
+            "source_ref": "旧版统计表",
+            "source_artifact_id": "old-table",
+            "source_date": "unknown",
+            "source_locator": "",
+            "method": "table_read",
+            "scope": "行政区",
+            "comparison_baseline": "",
+            "confidence": "low",
+            "limitation": "不支撑推荐方案",
+        }
+    )
+    package["data_quality"] = assess_stage1_data_quality(
+        package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
+    ).model_dump(mode="json")
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "passed"
+    assert any(item.code == "source_date_missing" for item in result.issues)
+    assert all(item.severity == "warning" for item in result.issues)
+
+
+def test_data_quality_blocks_unrecorded_coordinate_conversion_on_critical_evidence():
+    ledger = []
+    for evidence_id, coordinate_system in (("geo-1", "EPSG:4490"), ("geo-2", "GCJ-02")):
+        ledger.append(
+            {
+                "id": evidence_id,
+                "evidence_type": "G",
+                "source_date": "2026-01-01",
+                "source_locator": f"artifact:{evidence_id}#result",
+                "analysis_date": "2026-07-01",
+                "sample_size": 100,
+                "missing_count": 0,
+                "duplicate_count": 0,
+                "anomaly_count": 0,
+                "coordinate_system": coordinate_system,
+                "coordinate_transform": "",
+            }
+        )
+
+    summary = assess_stage1_data_quality(
+        ledger, critical_evidence_ids={"geo-1"}, as_of=date(2026, 7, 12)
+    )
+
+    assert summary.status == "failed"
+    mismatch = next(
+        item
+        for item in summary.blocking_issues
+        if item.code == "coordinate_system_mismatch"
+    )
+    assert "EPSG:4490" in mismatch.message
+    assert "GCJ-02" in mismatch.message
+
+
+def test_data_quality_treats_unknown_critical_source_locator_as_blocking():
+    summary = assess_stage1_data_quality(
+        [
+            {
+                "id": "fact-1",
+                "evidence_type": "F",
+                "source_date": "unknown",
+                "source_locator": "not_applicable",
+            }
+        ],
+        critical_evidence_ids={"fact-1"},
+    )
+
+    assert summary.status == "failed"
+    assert {item.code for item in summary.blocking_issues} == {
+        "source_date_missing",
+        "source_locator_missing",
+    }

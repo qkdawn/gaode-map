@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from .stage1_data_quality import Stage1DataQualitySummary
 
 
 class AuditIssue(BaseModel):
@@ -85,7 +87,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 12
+    checks_total = 13
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -98,6 +100,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         else {}
     )
     conflict_register = _list(package.get("conflict_register"))
+    data_quality_payload = package.get("data_quality")
 
     if ledger:
         invalid_nodes = []
@@ -171,6 +174,37 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 repair_hint="逐条补齐 source_artifact_id 和 method；文档证据保留节点 ID，计算证据写明算法。",
             )
         )
+    try:
+        data_quality = Stage1DataQualitySummary.model_validate(data_quality_payload)
+    except ValidationError:
+        data_quality = None
+    if data_quality is None:
+        issues.append(
+            _issue(
+                "data_quality_missing",
+                "缺少稳定的数据质量诊断结果。",
+                path="data_quality",
+                repair_hint="对证据台账执行来源日期、定位、样本和空间口径审计后再进入交付。",
+            )
+        )
+    else:
+        for item in data_quality.issues:
+            issues.append(
+                _issue(
+                    item.code,
+                    item.message,
+                    path=(
+                        f"evidence_ledger.{item.evidence_id}"
+                        if item.evidence_id
+                        else "data_quality"
+                    ),
+                    repair_hint=item.repair_hint,
+                    warning=item.severity == "warning",
+                )
+            )
+        if not data_quality.blocking_issues:
+            checks_passed += 1
+
     referenced_ids: set[str] = set()
     for workpack in workpacks:
         if isinstance(workpack, dict):

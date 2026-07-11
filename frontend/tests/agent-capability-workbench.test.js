@@ -140,6 +140,13 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         tasks: [task],
       },
       stage1_evidence_ledger: [{ id: 'e1' }, { id: 'e2' }],
+      stage1_data_quality: {
+        status: 'passed_with_gaps', assessed_count: 2, analytic_count: 1,
+        critical_evidence_ids: ['e1'],
+        coverage: { source_date: 2, source_locator: 1, analysis_date: 1, sample_diagnostics: 0, coordinate_system: 1 },
+        coordinate_systems: ['EPSG:4490'], stale_evidence_ids: [],
+        issues: [{ code: 'sample_diagnostics_missing', dimension: 'sample', severity: 'warning', evidence_id: 'e2', message: '缺少样本诊断', repair_hint: '补充分析产物元数据' }],
+      },
       stage1_conflict_register: [
         { metric_key: 'households', label: '居民户数', values: ['102户', '120户'], evidence_ids: ['node-1', 'node-2'], unresolved: true, explanation: '同级项目摘要口径冲突' },
         { metric_key: 'area', label: '项目面积', values: ['2.4公顷', '2.5公顷'], evidence_ids: ['node-3'], unresolved: false, explanation: '采用项目摘要口径' },
@@ -175,6 +182,18 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1ConflictStatusLabel(conflicts[0]), '待裁决')
   assert.equal(ctx.getStage1ConflictStatusLabel(conflicts[1]), '已确定口径')
   assert.equal(ctx.getStage1ConflictValuesText(ctx.getStage1ConflictRegister()[0]), '102户 / 120户')
+  assert.equal(ctx.getStage1DataQualityStatusLabel(), '数据质量存在缺口')
+  assert.deepEqual(ctx.getStage1DataQualityCoverageItems(), [
+    { key: 'source_date', label: '来源日期', count: 2, total: 2, display: '2/2', gap: false },
+    { key: 'source_locator', label: '精确定位', count: 1, total: 2, display: '1/2', gap: true },
+    { key: 'analysis_date', label: '计算日期', count: 1, total: 1, display: '1/1', gap: false },
+    { key: 'sample_diagnostics', label: '样本诊断', count: 0, total: 1, display: '0/1', gap: true },
+    { key: 'coordinate_system', label: '坐标口径', count: 1, total: 1, display: '1/1', gap: false },
+  ])
+  const qualityIssues = ctx.getStage1DataQualityIssues()
+  qualityIssues[0].message = 'changed'
+  assert.equal(ctx.getStage1DataQualityIssues()[0].message, '缺少样本诊断')
+  assert.equal(ctx.getStage1DataQualityCoordinateText(), 'EPSG:4490')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
 })
@@ -192,6 +211,8 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /Agent 自动核验记录/)
   assert.match(main, /getStage1AutomatedVerificationChecks\(\)/)
   assert.match(main, /尚待完成的核验任务/)
+  assert.match(main, /数据质量与时空口径/)
+  assert.match(main, /getStage1DataQualityCoverageItems\(\)/)
   assert.match(main, /来源冲突与裁决状态/)
   assert.match(main, /getStage1ConflictRegister\(\)/)
   assert.match(main, /交付前必须修复/)

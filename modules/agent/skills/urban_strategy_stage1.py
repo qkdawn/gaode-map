@@ -9,6 +9,7 @@ from ..llm_digest import snapshot_digest
 from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
 from ..quality_audit import QualityAuditResult, audit_stage1_package
 from ..stage1_contracts import VerificationSummary
+from ..stage1_data_quality import assess_stage1_data_quality
 from ..schemas import (
     AgentContextSummary,
     AgentPlanEnvelope,
@@ -190,6 +191,35 @@ def _audit_payload(audit: QualityAuditResult) -> dict[str, Any]:
     return audit.model_dump(mode="json")
 
 
+def _critical_evidence_ids(
+    strategy: dict[str, Any], spatial_matrix: dict[str, Any]
+) -> set[str]:
+    recommended_id = str(strategy.get("recommended_option_id") or "").strip()
+    critical: set[str] = set()
+    for option in strategy.get("options") or []:
+        if (
+            not isinstance(option, dict)
+            or str(option.get("id") or "").strip() != recommended_id
+        ):
+            continue
+        critical.update(
+            str(item).strip()
+            for item in option.get("evidence_refs") or []
+            if str(item).strip()
+        )
+    for decision in spatial_matrix.get("space_decisions") or []:
+        if not isinstance(decision, dict):
+            continue
+        if decision.get("recommendation_status") not in {"strong", "conditional"}:
+            continue
+        critical.update(
+            str(item).strip()
+            for item in decision.get("evidence_refs") or []
+            if str(item).strip()
+        )
+    return critical
+
+
 def _base_panels(
     readiness: dict[str, Any],
     package: dict[str, Any],
@@ -200,6 +230,7 @@ def _base_panels(
         "stage1_readiness": readiness,
         "stage1_evidence_ledger": package["evidence_ledger"],
         "stage1_conflict_register": package["conflict_register"],
+        "stage1_data_quality": package["data_quality"],
         "stage1_evidence_verification": verification.model_dump(mode="json"),
         "stage1_workpacks": package["workpacks"],
         "stage1_strategy": package["strategy"],
@@ -273,8 +304,12 @@ async def execute(
             "你是城市更新项目的证据审计负责人。只输出 JSON：evidence_ledger 数组。"
             "每项必须含 id、claim、evidence_type(F/G/P/H/V)、status(verified/cross_checked/"
             "inferred/hypothesis/blocked/fieldwork_required)、source_ref、source_artifact_id、scope、method、metric、value、"
-            "comparison_baseline、confidence(high/medium/low)、limitation、next_action、executor(agent/fieldwork)。"
+            "comparison_baseline、confidence(high/medium/low)、limitation、next_action、executor(agent/fieldwork)，"
+            "以及 source_date、source_locator。G/P/V 分析证据还必须含 analysis_date、sample_size、missing_count、"
+            "duplicate_count、anomaly_count、coordinate_system、coordinate_transform。"
             "source_artifact_id 必须保留文档节点或分析产物 ID，method 必须说明读取或计算方法。"
+            "source_date/analysis_date 使用 ISO 日期或年份，无法确认时写 unknown，不得用当前日期猜测；"
+            "source_locator 必须能下钻到页码、章节、节点或分析 artifact 结果键。"
             "没有页码时明确写来源路径或数据集；不得把夜光、POI、gap_score、周边人口解释为客流、消费或经营成功。"
             "已知冲突不得静默选边；若引用冲突证据，必须降级结论并保留冲突说明。"
         ),
@@ -400,9 +435,25 @@ async def execute(
         reasoning_id="stage1-spatial-matrix-model",
     )
     spatial_matrix = _mapping(matrix_result)
+    data_quality = assess_stage1_data_quality(
+        evidence_ledger,
+        critical_evidence_ids=_critical_evidence_ids(strategy, spatial_matrix),
+    )
+    await _emit_phase(
+        emit,
+        phase_id="stage1-data-quality",
+        title="检查数据质量与时空口径",
+        detail=(
+            f"审计 {data_quality.assessed_count} 条证据；"
+            f"发现 {len(data_quality.blocking_issues)} 项阻断和 "
+            f"{len(data_quality.issues) - len(data_quality.blocking_issues)} 项提示。"
+        ),
+        state="completed" if data_quality.status != "failed" else "failed",
+    )
     package = {
         "evidence_ledger": evidence_ledger,
         "conflict_register": conflict_register,
+        "data_quality": data_quality.model_dump(mode="json"),
         "workpacks": workpacks,
         "strategy": strategy,
         "spatial_matrix": spatial_matrix,
@@ -451,7 +502,8 @@ async def execute(
             "你是城市区域策划总顾问。只输出 JSON：answer(专业中文 Markdown 报告)、sources。"
             "报告必须含总判断、证据边界、定位方案比较、推荐定位、客群场景、功能组合、空间策略、"
             "运营治理、分期、风险、验证计划和设计任务书。仅使用已审计包；必须分列已验证、推断、假设、"
-            "阻塞与现场核验事项；inferred/hypothesis 不得写成事实，blocked/fieldwork_required 不得写成既定条件。"
+            "阻塞与现场核验事项；必须披露 data_quality 中的时效、样本、坐标与来源定位缺口；"
+            "inferred/hypothesis 不得写成事实，blocked/fieldwork_required 不得写成既定条件。"
         ),
         user_payload={
             "question": question,

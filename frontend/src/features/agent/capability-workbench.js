@@ -131,8 +131,46 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1ConflictValuesText(conflict) {
       return Array.isArray(conflict?.values) ? conflict.values.map(text).filter(Boolean).join(' / ') : ''
     },
+    getStage1DataQuality() {
+      const quality = (this.agentPanelPayloads || {}).stage1_data_quality
+      return quality && typeof quality === 'object' ? clonePayloadValue(quality) : null
+    },
+    getStage1DataQualityStatusLabel() {
+      const labels = {
+        passed: '数据质量通过',
+        passed_with_gaps: '数据质量存在缺口',
+        failed: '数据质量阻断交付',
+      }
+      return labels[this.getStage1DataQuality()?.status] || '尚未执行数据质量审计'
+    },
+    getStage1DataQualityCoverageItems() {
+      const quality = this.getStage1DataQuality() || {}
+      const total = Number(quality.assessed_count || 0)
+      const analyticTotal = Number(quality.analytic_count || 0)
+      const coverage = quality.coverage || {}
+      const labels = {
+        source_date: '来源日期',
+        source_locator: '精确定位',
+        analysis_date: '计算日期',
+        sample_diagnostics: '样本诊断',
+        coordinate_system: '坐标口径',
+      }
+      return Object.entries(labels).map(([key, label]) => {
+        const itemTotal = ['analysis_date', 'sample_diagnostics', 'coordinate_system'].includes(key) ? analyticTotal : total
+        const count = Number(coverage[key] || 0)
+        return { key, label, count, total: itemTotal, display: itemTotal > 0 ? `${count}/${itemTotal}` : '不适用', gap: itemTotal > 0 && count < itemTotal }
+      })
+    },
+    getStage1DataQualityIssues() {
+      const issues = this.getStage1DataQuality()?.issues
+      return Array.isArray(issues) ? clonePayloadValue(issues) : []
+    },
+    getStage1DataQualityCoordinateText() {
+      const systems = this.getStage1DataQuality()?.coordinate_systems
+      return Array.isArray(systems) ? systems.map(text).filter(Boolean).join(' / ') : ''
+    },
     hasStage1Outcome() {
-      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification())
+      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1DataQuality())
     },
     getStage1EvidenceCount() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger
