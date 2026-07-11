@@ -69,7 +69,7 @@ class CapabilityArtifactRef(BaseModel):
     artifact_id: str
     artifact_type: CapabilityArtifactType
     title: str
-    version: str = "1"
+    version: str = "unversioned"
     filename: str = ""
     source_run_id: str = ""
     source_artifact_refs: list[str] = Field(default_factory=list)
@@ -104,9 +104,28 @@ class CapabilityRun(BaseModel):
     current_stage: str = ""
     stage_records: list[CapabilityStageRecord] = Field(default_factory=list)
     diagnostics: list[str] = Field(default_factory=list)
+    stale_input_artifact_ids: list[str] = Field(default_factory=list)
     output_artifact_refs: list[CapabilityArtifactRef] = Field(default_factory=list)
     created_at: str
     completed_at: str = ""
+
+
+class CapabilityArtifactSnapshot(BaseModel):
+    """Persisted artifact version with its immutable payload when available."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["input", "output"]
+    artifact: CapabilityArtifactRef
+    payload: Any = None
+
+
+class CapabilityRunDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    history_id: str
+    run: CapabilityRun
+    artifacts: list[CapabilityArtifactSnapshot] = Field(default_factory=list)
 
 
 class CapabilityRunRecorder:
@@ -203,22 +222,28 @@ def artifact_ref(
     artifact_id: str,
     artifact_type: CapabilityArtifactType,
     title: str,
-    source_run_id: str,
+    source_run_id: str = "",
     payload: Any = None,
     filename: str = "",
     source_artifact_refs: list[str] | None = None,
     evidence_refs: list[str] | None = None,
+    version: str = "",
 ) -> CapabilityArtifactRef:
     """Create a lineage-safe artifact index entry from a domain payload."""
 
+    digest = content_digest(payload) if payload is not None else ""
+    resolved_version = str(
+        version or source_run_id or digest[:24] or "unversioned"
+    ).strip()
     return CapabilityArtifactRef(
         artifact_id=artifact_id,
         artifact_type=artifact_type,
         title=title,
+        version=resolved_version,
         filename=filename,
         source_run_id=source_run_id,
         source_artifact_refs=list(source_artifact_refs or []),
         evidence_refs=list(evidence_refs or []),
-        content_digest=content_digest(payload) if payload is not None else "",
+        content_digest=digest,
         created_at=_utc_now(),
     )

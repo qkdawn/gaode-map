@@ -149,6 +149,73 @@ class AnalysisArtifact(Base):
     )
 
 
+class CapabilityRunRecord(Base):
+    """Immutable capability execution manifest bound to one analysis history."""
+
+    __tablename__ = "capability_runs"
+
+    run_id = Column(String(96), primary_key=True)
+    history_id = Column(String(64), nullable=False, index=True)
+    capability_id = Column(String(96), nullable=False, index=True)
+    status = Column(String(32), nullable=False, index=True)
+    current_stage = Column(String(96), nullable=False, default="")
+    manifest = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    persisted_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index(
+            "ix_capability_runs_history_capability_persisted",
+            "history_id",
+            "capability_id",
+            "persisted_at",
+        ),
+    )
+
+
+class CapabilityArtifactVersion(Base):
+    """Run-scoped immutable artifact payload and lineage snapshot."""
+
+    __tablename__ = "capability_artifact_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(
+        String(96),
+        ForeignKey("capability_runs.run_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    history_id = Column(String(64), nullable=False, index=True)
+    artifact_id = Column(String(160), nullable=False, index=True)
+    direction = Column(String(16), nullable=False, index=True)
+    artifact_type = Column(String(32), nullable=False, index=True)
+    version = Column(String(128), nullable=False)
+    title = Column(String(255), nullable=False, default="")
+    filename = Column(String(512), nullable=False, default="")
+    source_run_id = Column(String(96), nullable=False, default="", index=True)
+    source_artifact_refs = Column(JSON, nullable=False, default=list)
+    evidence_refs = Column(JSON, nullable=False, default=list)
+    content_digest = Column(String(80), nullable=False, default="", index=True)
+    payload = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "direction",
+            "artifact_id",
+            name="uq_capability_artifact_run_direction_id",
+        ),
+        Index(
+            "ix_capability_artifacts_history_artifact_created",
+            "history_id",
+            "artifact_id",
+            "created_at",
+        ),
+    )
+
+
 class AgentModelProfile(Base):
     __tablename__ = "agent_model_profiles"
 

@@ -251,6 +251,7 @@ def _base_panels(
     provenance: Stage1ProvenanceSummary,
 ) -> dict[str, Any]:
     return {
+        "stage1_project_brief": package["project_brief"],
         "stage1_readiness": readiness,
         "stage1_evidence_ledger": package["evidence_ledger"],
         "stage1_conflict_register": package["conflict_register"],
@@ -445,6 +446,7 @@ async def execute(
                 clarification_question="证据台账未通过验证门控，已停止专业推演。请补充可定位证据后重新运行。",
                 clarification_options=verification.blocking_reasons[:4],
                 panel_payloads={
+                    "stage1_project_brief": project_brief,
                     "stage1_readiness": readiness,
                     "stage1_evidence_ledger": evidence_ledger,
                     "stage1_conflict_register": conflict_register,

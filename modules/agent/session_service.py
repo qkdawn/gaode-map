@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
+from .capability_run_service import persist_capability_run_response
 from .providers.llm_provider import (
     generate_title_with_llm,
     is_llm_enabled,
@@ -74,12 +75,20 @@ def _require_agent_panel_identity(history_id: str, panel_kind: str) -> tuple[str
     return normalized_history_id, normalized_panel_kind
 
 
-def derive_agent_session_title(messages: List[Dict[str, Any]] | List[AgentMessage] | None) -> str:
+def derive_agent_session_title(
+    messages: List[Dict[str, Any]] | List[AgentMessage] | None,
+) -> str:
     rows = messages or []
     for item in rows:
-        role = str(getattr(item, "role", "") if not isinstance(item, dict) else item.get("role", "")).strip()
+        role = str(
+            getattr(item, "role", "")
+            if not isinstance(item, dict)
+            else item.get("role", "")
+        ).strip()
         content = _normalize_text(
-            getattr(item, "content", "") if not isinstance(item, dict) else item.get("content", ""),
+            getattr(item, "content", "")
+            if not isinstance(item, dict)
+            else item.get("content", ""),
             max_length=24,
         )
         if role == "user" and content:
@@ -92,7 +101,11 @@ def _summary_card_content_from_output(output: Dict[str, Any]) -> str:
 
 
 def derive_agent_session_preview(payload: Dict[str, Any]) -> str:
-    diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+    diagnostics = (
+        payload.get("diagnostics")
+        if isinstance(payload.get("diagnostics"), dict)
+        else {}
+    )
     output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
     for key in ("error",):
         text = _normalize_text(diagnostics.get(key), max_length=120)
@@ -122,7 +135,9 @@ def _get_record_title_source(record: Optional[Dict[str, Any]]) -> str:
     direct = normalize_agent_session_title_source(record.get("title_source"))
     if direct != TITLE_SOURCE_FALLBACK or record.get("title_source"):
         return direct
-    snapshot = record.get("snapshot") if isinstance(record.get("snapshot"), dict) else {}
+    snapshot = (
+        record.get("snapshot") if isinstance(record.get("snapshot"), dict) else {}
+    )
     meta = snapshot.get("_meta") if isinstance(snapshot, dict) else {}
     if isinstance(meta, dict):
         return normalize_agent_session_title_source(meta.get("title_source"))
@@ -147,7 +162,11 @@ def _resolve_upsert_title(
 ) -> tuple[str, str]:
     fallback_title = derive_agent_session_title(request.messages)
     requested_title = _normalize_text(request.title, max_length=60)
-    existing_title = _normalize_text(existing_record.get("title"), max_length=60) if existing_record else ""
+    existing_title = (
+        _normalize_text(existing_record.get("title"), max_length=60)
+        if existing_record
+        else ""
+    )
     existing_source = _get_record_title_source(existing_record)
     if requested_title and requested_title != fallback_title:
         return requested_title, TITLE_SOURCE_USER
@@ -156,7 +175,9 @@ def _resolve_upsert_title(
     return requested_title or fallback_title, TITLE_SOURCE_FALLBACK
 
 
-def _build_turn_title_seed(payload: AgentTurnRequest, response: AgentTurnResponse) -> tuple[str, str]:
+def _build_turn_title_seed(
+    payload: AgentTurnRequest, response: AgentTurnResponse
+) -> tuple[str, str]:
     first_user_message = ""
     for item in payload.messages:
         if str(item.role or "").strip() == "user" and _normalize_text(item.content):
@@ -164,7 +185,10 @@ def _build_turn_title_seed(payload: AgentTurnRequest, response: AgentTurnRespons
             break
     assistant_summary = _normalize_text(response.output.answer, max_length=240)
     if not assistant_summary:
-        assistant_summary = _normalize_text(response.output.clarification_question or response.output.risk_prompt, max_length=240)
+        assistant_summary = _normalize_text(
+            response.output.clarification_question or response.output.risk_prompt,
+            max_length=240,
+        )
     if not assistant_summary and response.diagnostics.error:
         assistant_summary = _normalize_text(response.diagnostics.error, max_length=240)
     return first_user_message, assistant_summary
@@ -201,7 +225,9 @@ def _build_assistant_message(response: AgentTurnResponse) -> AgentMessage:
     )
 
 
-async def generate_agent_session_title(payload: AgentTurnRequest, response: AgentTurnResponse) -> Optional[str]:
+async def generate_agent_session_title(
+    payload: AgentTurnRequest, response: AgentTurnResponse
+) -> Optional[str]:
     if not is_llm_enabled():
         return None
     first_user_message, assistant_summary = _build_turn_title_seed(payload, response)
@@ -229,7 +255,9 @@ def build_snapshot_payload(request: AgentSessionSnapshotRequest) -> Dict[str, An
         "context_summary": request.context_summary.model_dump(),
         "plan": request.plan.model_dump(),
         "risk_confirmations": [str(item) for item in request.risk_confirmations],
-        "conversation_execution_profile": request.conversation_execution_profile.model_dump(mode="json"),
+        "conversation_execution_profile": request.conversation_execution_profile.model_dump(
+            mode="json"
+        ),
     }
     history_id = _normalize_text(request.history_id, max_length=128)
     panel_kind = normalize_agent_panel_kind(request.panel_kind)
@@ -241,10 +269,13 @@ def build_snapshot_payload(request: AgentSessionSnapshotRequest) -> Dict[str, An
 
 
 def build_turn_persist_payload(
-    payload: AgentTurnRequest, response: AgentTurnResponse,
+    payload: AgentTurnRequest,
+    response: AgentTurnResponse,
     conversation_profile: ConversationExecutionProfile | None = None,
 ) -> AgentSessionSnapshotRequest:
-    messages = [AgentMessage(**item.model_dump(mode="json")) for item in payload.messages]
+    messages = [
+        AgentMessage(**item.model_dump(mode="json")) for item in payload.messages
+    ]
     if response.status == "answered":
         messages.append(_build_assistant_message(response))
     request = AgentSessionSnapshotRequest(
@@ -254,14 +285,17 @@ def build_turn_persist_payload(
         stage=response.stage,
         history_id=_normalize_text(payload.history_id, max_length=128),
         panel_kind=PANEL_KIND_FOLLOWUP,
-        input="" if response.status == "answered" else str(payload.messages[-1].content if payload.messages else ""),
+        input=""
+        if response.status == "answered"
+        else str(payload.messages[-1].content if payload.messages else ""),
         messages=messages,
         output=response.output,
         diagnostics=response.diagnostics,
         context_summary=response.context_summary,
         plan=response.plan,
         risk_confirmations=[str(item) for item in payload.risk_confirmations],
-        conversation_execution_profile=conversation_profile or ConversationExecutionProfile(),
+        conversation_execution_profile=conversation_profile
+        or ConversationExecutionProfile(),
     )
     request.preview = derive_agent_session_preview(build_snapshot_payload(request))
     return request
@@ -274,12 +308,20 @@ def _normalize_output(snapshot: Dict[str, Any]) -> AgentTurnOutput:
 
 def _normalize_diagnostics(snapshot: Dict[str, Any]) -> AgentTurnDiagnostics:
     diagnostics = snapshot.get("diagnostics")
-    return AgentTurnDiagnostics(**diagnostics) if isinstance(diagnostics, dict) else AgentTurnDiagnostics()
+    return (
+        AgentTurnDiagnostics(**diagnostics)
+        if isinstance(diagnostics, dict)
+        else AgentTurnDiagnostics()
+    )
 
 
 def _normalize_context_summary(snapshot: Dict[str, Any]) -> AgentContextSummary:
     context_summary = snapshot.get("context_summary")
-    return AgentContextSummary(**context_summary) if isinstance(context_summary, dict) else AgentContextSummary()
+    return (
+        AgentContextSummary(**context_summary)
+        if isinstance(context_summary, dict)
+        else AgentContextSummary()
+    )
 
 
 def _normalize_plan(snapshot: Dict[str, Any]) -> AgentPlanEnvelope:
@@ -299,26 +341,38 @@ def _build_summary_model(record: Dict[str, Any]) -> AgentSessionSummary:
         panel_kind=_get_record_panel_kind(record),
         created_at=serialize_datetime(record.get("created_at")),
         updated_at=serialize_datetime(record.get("updated_at")),
-        pinned_at=serialize_datetime(record.get("pinned_at")) if record.get("pinned_at") else None,
+        pinned_at=serialize_datetime(record.get("pinned_at"))
+        if record.get("pinned_at")
+        else None,
     )
 
 
 def _build_detail_model(record: Dict[str, Any]) -> AgentSessionDetail:
     summary = _build_summary_model(record)
-    snapshot = record.get("snapshot") if isinstance(record.get("snapshot"), dict) else {}
+    snapshot = (
+        record.get("snapshot") if isinstance(record.get("snapshot"), dict) else {}
+    )
     output = _normalize_output(snapshot)
     diagnostics = _normalize_diagnostics(snapshot)
     return AgentSessionDetail(
         **summary.model_dump(),
         stage=str(snapshot.get("stage") or "gating"),
         input=str(snapshot.get("input") or ""),
-        messages=[AgentMessage(**item) for item in (snapshot.get("messages") or []) if isinstance(item, dict)],
+        messages=[
+            AgentMessage(**item)
+            for item in (snapshot.get("messages") or [])
+            if isinstance(item, dict)
+        ],
         output=output,
         diagnostics=diagnostics,
         context_summary=_normalize_context_summary(snapshot),
         plan=_normalize_plan(snapshot),
-        risk_confirmations=[str(item) for item in (snapshot.get("risk_confirmations") or [])],
-        conversation_execution_profile=ConversationExecutionProfile(**(snapshot.get("conversation_execution_profile") or {})),
+        risk_confirmations=[
+            str(item) for item in (snapshot.get("risk_confirmations") or [])
+        ],
+        conversation_execution_profile=ConversationExecutionProfile(
+            **(snapshot.get("conversation_execution_profile") or {})
+        ),
     )
 
 
@@ -333,15 +387,21 @@ def get_agent_session_detail(session_id: str, repo) -> AgentSessionDetail:
     return _build_detail_model(record)
 
 
-def upsert_agent_session(session_id: str, request: AgentSessionSnapshotRequest, repo) -> AgentSessionDetail:
+def upsert_agent_session(
+    session_id: str, request: AgentSessionSnapshotRequest, repo
+) -> AgentSessionDetail:
     existing_record = repo.get_record(session_id)
     if not _normalize_text(request.history_id):
         request.history_id = _get_record_history_id(existing_record)
     if not normalize_agent_panel_kind(request.panel_kind):
         request.panel_kind = _get_record_panel_kind(existing_record)
-    history_id, panel_kind = _require_agent_panel_identity(request.history_id, request.panel_kind)
+    history_id, panel_kind = _require_agent_panel_identity(
+        request.history_id, request.panel_kind
+    )
     title, title_source = _resolve_upsert_title(request, existing_record)
-    preview = _normalize_text(request.preview, max_length=120) or derive_agent_session_preview(build_snapshot_payload(request))
+    preview = _normalize_text(
+        request.preview, max_length=120
+    ) or derive_agent_session_preview(build_snapshot_payload(request))
     record = repo.upsert_record(
         session_id,
         title=title,
@@ -356,10 +416,16 @@ def upsert_agent_session(session_id: str, request: AgentSessionSnapshotRequest, 
     return _build_detail_model(record)
 
 
-def update_agent_session_metadata(session_id: str, request: AgentSessionMetadataPatchRequest, repo) -> AgentSessionDetail:
+def update_agent_session_metadata(
+    session_id: str, request: AgentSessionMetadataPatchRequest, repo
+) -> AgentSessionDetail:
     if request.title is None and request.is_pinned is None:
         raise HTTPException(status_code=422, detail="至少提供一个可更新字段")
-    title = normalize_agent_session_title(request.title) if request.title is not None else None
+    title = (
+        normalize_agent_session_title(request.title)
+        if request.title is not None
+        else None
+    )
     record = repo.update_metadata(
         session_id,
         title=title,
@@ -378,9 +444,13 @@ def delete_agent_session(session_id: str, repo) -> Dict[str, Any]:
 
 
 async def persist_main_agent_loop_response(
-    payload: AgentTurnRequest, response: AgentTurnResponse, repo, *,
+    payload: AgentTurnRequest,
+    response: AgentTurnResponse,
+    repo,
+    *,
     conversation_profile: ConversationExecutionProfile | None = None,
 ) -> AgentTurnResponse:
+    persist_capability_run_response(payload, response)
     session_id = _normalize_text(payload.conversation_id, max_length=128)
     if not session_id:
         return response
@@ -388,8 +458,12 @@ async def persist_main_agent_loop_response(
     request = build_turn_persist_payload(payload, response, conversation_profile)
     title, title_source = _resolve_upsert_title(request, existing_record)
     request.title = title
-    history_id, panel_kind = _require_agent_panel_identity(request.history_id, request.panel_kind)
-    preview = _normalize_text(request.preview, max_length=120) or derive_agent_session_preview(build_snapshot_payload(request))
+    history_id, panel_kind = _require_agent_panel_identity(
+        request.history_id, request.panel_kind
+    )
+    preview = _normalize_text(
+        request.preview, max_length=120
+    ) or derive_agent_session_preview(build_snapshot_payload(request))
     repo.upsert_record(
         session_id,
         title=title,
@@ -403,7 +477,9 @@ async def persist_main_agent_loop_response(
     if existing_record is None and title_source == TITLE_SOURCE_FALLBACK:
         generated_title = await generate_agent_session_title(payload, response)
         if generated_title:
-            repo.update_metadata(session_id, title=generated_title, title_source=TITLE_SOURCE_AI)
+            repo.update_metadata(
+                session_id, title=generated_title, title_source=TITLE_SOURCE_AI
+            )
     return response.model_copy(update={"messages": request.messages})
 
 
@@ -416,17 +492,20 @@ async def persist_streamed_main_agent_loop_response(
     conversation_profile: ConversationExecutionProfile | None = None,
 ) -> AgentTurnResponse:
     try:
-        return await persist_main_agent_loop_response(payload, response, repo, conversation_profile=conversation_profile)
+        return await persist_main_agent_loop_response(
+            payload, response, repo, conversation_profile=conversation_profile
+        )
     except Exception as exc:
         if logger is not None:
-            logger.exception("Failed to persist streamed main agent loop response; returning unpersisted final response")
+            logger.exception("Failed to persist streamed main agent loop response")
         diagnostics = response.diagnostics.model_copy(
             update={
                 "research_notes": [
                     *list(response.diagnostics.research_notes or []),
-                    f"Agent 会话保存失败，本次回答未写入历史：{type(exc).__name__}",
+                    f"Agent 会话保存失败，本次回答未写入会话历史：{type(exc).__name__}",
                 ],
-                "error": response.diagnostics.error or f"main_agent_loop_persist_failed:{type(exc).__name__}",
+                "error": response.diagnostics.error
+                or f"main_agent_loop_persist_failed:{type(exc).__name__}",
             }
         )
         return response.model_copy(update={"diagnostics": diagnostics})
