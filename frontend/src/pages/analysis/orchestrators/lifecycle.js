@@ -77,6 +77,12 @@ function createAnalysisLifecycleHooks(options = {}) {
       }
     },
     watch: {
+      'agentPanelPayloads.capability_run.run_id'(newRunId, oldRunId) {
+        if (String(newRunId || '') === String(oldRunId || '')) return
+        if (typeof this.resetStage1SpatialInteraction === 'function') {
+          this.resetStage1SpatialInteraction()
+        }
+      },
       step(newStep, oldStep) {
         if (oldStep === 1 && newStep !== 1) {
           this.destroyPlaceSearch()

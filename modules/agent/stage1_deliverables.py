@@ -23,6 +23,7 @@ class DesignSpaceRequirement(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     space_id: str
+    map_binding: dict[str, Any] = Field(default_factory=dict)
     preferred_function: dict[str, Any] = Field(default_factory=dict)
     candidate_functions: list[Any] = Field(default_factory=list)
     excluded_functions: list[Any] = Field(default_factory=list)
@@ -169,6 +170,7 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
         requirements.append(
             DesignSpaceRequirement(
                 space_id=_text(node.get("space_id")),
+                map_binding=_mapping(node.get("map_binding")),
                 preferred_function=_mapping(node.get("preferred_function")),
                 candidate_functions=_list(node.get("candidate_functions")),
                 excluded_functions=_list(node.get("excluded_functions")),

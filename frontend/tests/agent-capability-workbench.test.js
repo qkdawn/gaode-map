@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 import { createAgentCapabilityWorkbenchMethods } from '../src/features/agent/capability-workbench.js'
+import { createAnalysisLifecycleHooks } from '../src/pages/analysis/orchestrators/lifecycle.js'
 
 const methods = createAgentCapabilityWorkbenchMethods()
 
@@ -40,6 +41,11 @@ function createContext(overrides = {}) {
     selectedAnalysisCapabilityRunRequestToken: 0,
     stage1EvidenceDrawerSpaceId: '',
     stage1EvidenceDrawerRunId: '',
+    stage1ExpandedSpaceId: '',
+    stage1ExpandedRunId: '',
+    stage1MapFocusedSpaceId: '',
+    stage1MapFocusedRunId: '',
+    stage1MapFocusMessage: '',
     activeAgentSessionId: 'conversation-1',
     agentSkills: [],
     agentPanelPayloads: {},
@@ -447,6 +453,19 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
           evidence_refs: ['e1', 'e2', 'missing-evidence'],
           recommendation_status: 'conditional',
           confidence: 'medium',
+          map_binding: {
+            status: 'bound',
+            spatial_object_id: 'building:auditorium',
+            object_type: 'building',
+            title: '礼堂建筑轮廓',
+            source_ref: 'project_gis.buildings',
+            source_locator: 'project_gis.buildings/auditorium',
+            feature: {
+              type: 'Feature',
+              properties: { building_id: 'auditorium' },
+              geometry: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112.01, 28.01], [112, 28]]] },
+            },
+          },
         }],
       },
       stage1_deliverables: {
@@ -554,10 +573,15 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1HardConstraintPendingActions()[0].executor, 'manual_authority')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
+  const decision = ctx.getStage1SpaceDecisions()[0]
+  const mapBinding = ctx.getStage1MapBinding(decision)
+  mapBinding.feature.geometry.coordinates[0][0][0] = 0
+  assert.equal(ctx.getStage1MapBinding(ctx.getStage1SpaceDecisions()[0]).feature.geometry.coordinates[0][0][0], 112)
   assert.deepEqual(ctx.getStage1SpaceManagementRows(), [{
     space_id: 'unit-1', space_name: '原县政府礼堂', future_role: '社区文化锚点', preferred_function: '文化活动',
     core_audiences: '社区家庭；青年社群', movement_role: '主游线目的地', value_role: '公共服务与活动引流',
     recommendation_status: 'conditional', recommendation_label: '条件推荐', preconditions: '完成消防评估', evidence_count: 3,
+    map_bound: true, map_label: '礼堂建筑轮廓',
   }])
   ctx.openStage1EvidenceDrawer(ctx.getStage1SpaceDecisions()[0])
   assert.equal(ctx.getStage1EvidenceDrawerDecision().space_id, 'unit-1')
@@ -599,6 +623,100 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1DesignHandoff().positioning_option_id, 'option-a')
   assert.equal(ctx.getStage1DesignHandoffSpaceCount(), 1)
   assert.equal(ctx.getStage1DesignHandoffConstraintCount(), 1)
+})
+
+test('Stage 1 map focus is bound to the immutable capability Run', () => {
+  let clickHandler = null
+  const focusCalls = []
+  const ctx = createContext({
+    mapCore: {
+      focusSpatialFeature(feature, options) {
+        focusCalls.push({ feature, options })
+        clickHandler = options.onClick
+        return true
+      },
+    },
+    agentPanelPayloads: {
+      capability_run: { run_id: 'run-map-1' },
+      stage1_spatial_matrix: {
+        space_decisions: [{
+          space_id: 'road-space',
+          space_name: '南侧入口',
+          map_binding: {
+            status: 'bound',
+            spatial_object_id: 'road:south-entry',
+            object_type: 'road_segment',
+            title: '南侧入口道路',
+            source_ref: 'analysis_snapshot.road.features',
+            source_locator: 'analysis_snapshot.road.features/south-entry',
+            feature: {
+              type: 'Feature',
+              properties: { road_id: 'south-entry' },
+              geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] },
+            },
+          },
+        }],
+      },
+    },
+  })
+  const decision = ctx.getStage1SpaceDecisions()[0]
+
+  assert.equal(ctx.focusStage1SpaceOnMap(decision), true)
+  assert.equal(focusCalls.length, 1)
+  assert.equal(focusCalls[0].options.fitView, true)
+  assert.equal(ctx.isStage1SpaceMapFocused(decision), true)
+  assert.equal(ctx.isStage1SpaceDecisionExpanded(decision), true)
+  assert.match(ctx.stage1MapFocusMessage, /南侧入口道路/)
+
+  ctx.stage1ExpandedSpaceId = ''
+  ctx.stage1ExpandedRunId = ''
+  clickHandler()
+  assert.equal(ctx.isStage1SpaceDecisionExpanded(decision), true)
+
+  ctx.agentPanelPayloads.capability_run.run_id = 'run-map-2'
+  assert.equal(ctx.isStage1SpaceMapFocused(decision), false)
+  assert.equal(ctx.isStage1SpaceDecisionExpanded(decision), false)
+})
+
+test('Stage 1 map focus is cleared when the active capability Run changes', () => {
+  let clears = 0
+  const ctx = createContext({
+    mapCore: { clearSpatialFeatureFocus: () => { clears += 1 } },
+    stage1ExpandedSpaceId: 'space-1',
+    stage1ExpandedRunId: 'run-1',
+    stage1MapFocusedSpaceId: 'space-1',
+    stage1MapFocusedRunId: 'run-1',
+    stage1MapFocusMessage: '已定位',
+  })
+  const watcher = createAnalysisLifecycleHooks().watch['agentPanelPayloads.capability_run.run_id']
+
+  watcher.call(ctx, 'run-2', 'run-1')
+
+  assert.equal(clears, 1)
+  assert.equal(ctx.stage1ExpandedSpaceId, '')
+  assert.equal(ctx.stage1MapFocusedRunId, '')
+  assert.equal(ctx.stage1MapFocusMessage, '')
+})
+
+test('Stage 1 map focus reports unavailable bindings without touching the map', () => {
+  let focusCalls = 0
+  const ctx = createContext({
+    mapCore: { focusSpatialFeature: () => { focusCalls += 1; return true } },
+    agentPanelPayloads: {
+      capability_run: { run_id: 'run-map-1' },
+      stage1_spatial_matrix: {
+        space_decisions: [{
+          space_id: 'courtyard-1',
+          map_binding: { status: 'unavailable', reason: '尚未提供庭院权威轮廓。' },
+        }],
+      },
+    },
+  })
+  const decision = ctx.getStage1SpaceDecisions()[0]
+
+  assert.equal(ctx.focusStage1SpaceOnMap(decision), false)
+  assert.equal(focusCalls, 0)
+  assert.equal(ctx.stage1MapFocusMessage, '尚未提供庭院权威轮廓。')
 })
 
 test('Stage 1 quality gate distinguishes ready and conditional delivery', () => {
@@ -700,6 +818,8 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getStage1DecisionStatusLabel\(decision\)/)
   assert.match(main, /管理层总览用于比较/)
   assert.match(main, /getStage1SpaceManagementRows\(\)/)
+  assert.match(main, /focusStage1SpaceOnMap/)
+  assert.match(main, /getStage1MapBindingLabel/)
   assert.match(main, /getStage1DecisionEvidenceEntries/)
   assert.match(main, /Decision Evidence/)
   assert.match(main, /来源冲突与裁决状态/)

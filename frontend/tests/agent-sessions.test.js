@@ -16,6 +16,7 @@ import {
 import {
   buildAgentAnalysisSnapshot,
   buildAgentPoiH3Evidence,
+  buildAgentSpatialObjects,
 } from '../src/features/agent/analysis-snapshot-evidence.js'
 import {
   buildAnalysisQuickAskRequest,
@@ -7934,6 +7935,43 @@ test('agent analysis snapshot keeps poi raster out of summary evidence', () => {
   assert.equal(snapshot.param_bundles.poi_fetch.params.year, 2024)
   assert.equal(snapshot.param_bundles.population.task_key, 'population')
   assert.equal(snapshot.h3.grid_params.h3_resolution, 9)
+})
+
+test('analysis snapshot exposes stable authoritative road and H3 map objects', () => {
+  const roadFeature = {
+    type: 'Feature',
+    properties: { road_id: 'south-entry', name: '南侧入口道路', nested: { lane_count: 2 } },
+    geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] },
+  }
+  const h3Feature = {
+    type: 'Feature',
+    properties: { h3_id: 'h3-a' },
+    geometry: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112.01, 28.01], [112, 28]]] },
+  }
+  const ctx = {
+    roadSyntaxRoadFeatures: [
+      { type: 'Feature', properties: { name: '没有稳定 ID' }, geometry: { type: 'LineString', coordinates: [[0, 0], [1, 1]] } },
+      { type: 'Feature', properties: { road_id: 'invalid' }, geometry: { type: 'LineString', coordinates: [] } },
+      roadFeature,
+      { type: 'Feature', properties: { road_id: 'second' }, geometry: { type: 'LineString', coordinates: [[112.02, 28], [112.03, 28.01]] } },
+      { type: 'Feature', properties: { road_id: 'beyond-limit' }, geometry: { type: 'LineString', coordinates: [[112.04, 28], [112.05, 28.01]] } },
+    ],
+    h3GridFeatures: [h3Feature],
+  }
+
+  const objects = buildAgentSpatialObjects(ctx, 2)
+  const snapshot = buildAgentAnalysisSnapshot(ctx)
+
+  assert.deepEqual(objects.map(item => item.spatial_object_id), ['road:south-entry', 'road:second', 'h3:h3-a'])
+  assert.equal(objects[0].source_locator, 'analysis_snapshot.road.features/south-entry')
+  assert.equal(objects[0].title, '南侧入口道路')
+  assert.equal(snapshot.spatial_objects[0].spatial_object_id, 'road:south-entry')
+  assert.equal(snapshot.spatial_objects.at(-1).spatial_object_id, 'h3:h3-a')
+
+  objects[0].feature.geometry.coordinates[0][0] = 0
+  objects[0].feature.properties.nested.lane_count = 9
+  assert.equal(roadFeature.geometry.coordinates[0][0], 112)
+  assert.equal(roadFeature.properties.nested.lane_count, 2)
 })
 
 test('analysis snapshot evidence module owns h3 and shared-grid contracts', () => {

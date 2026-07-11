@@ -347,7 +347,7 @@
                                 </div>
                                 <div class="agent-spatial-management-table" role="region" aria-label="空间功能策划管理层总表" tabindex="0">
                                     <table>
-                                        <thead><tr><th>空间单元</th><th>未来角色</th><th>首选功能</th><th>核心客群</th><th>动线角色</th><th>价值角色</th><th>推荐强度</th><th>关键前提</th><th>证据</th></tr></thead>
+                                        <thead><tr><th>空间单元</th><th>未来角色</th><th>首选功能</th><th>核心客群</th><th>动线角色</th><th>价值角色</th><th>推荐强度</th><th>关键前提</th><th>地图</th><th>证据</th></tr></thead>
                                         <tbody>
                                             <tr v-for="row in getStage1SpaceManagementRows()" :key="`management-${row.space_id}`">
                                                 <th scope="row">{{ row.space_name }}<small>{{ row.space_id }}</small></th>
@@ -358,12 +358,13 @@
                                                 <td>{{ row.value_role }}</td>
                                                 <td><span class="agent-space-status" :class="row.recommendation_status">{{ row.recommendation_label }}</span></td>
                                                 <td>{{ row.preconditions || '未说明' }}</td>
+                                                <td><button type="button" :disabled="!row.map_bound" :title="row.map_label" @click="focusStage1SpaceOnMap(getStage1SpaceDecisionById(row.space_id))">{{ row.map_bound ? '定位' : '未绑定' }}</button></td>
                                                 <td><button type="button" @click="openStage1EvidenceDrawer(getStage1SpaceDecisionById(row.space_id))">{{ row.evidence_count }} 条</button></td>
                                             </tr>
                                         </tbody>
                                     </table>
                                 </div>
-                                <details v-for="decision in getStage1SpaceDecisions()" :key="decision.space_id" class="agent-space-decision">
+                                <details v-for="decision in getStage1SpaceDecisions()" :key="decision.space_id" class="agent-space-decision" :open="isStage1SpaceDecisionExpanded(decision)" @toggle="toggleStage1SpaceDecision(decision, $event)">
                                     <summary>
                                         <span>{{ decision.space_name || decision.space_id }}</span>
                                         <strong>{{ getStage1FunctionLabel(decision.preferred_function) }}</strong>
@@ -385,6 +386,11 @@
                                         <p v-if="getStage1DecisionDetailText(decision.preconditions)"><span>成立条件</span>{{ getStage1DecisionDetailText(decision.preconditions) }}</p>
                                         <p v-if="getStage1DecisionDetailText(decision.assumptions)"><span>策划假设</span>{{ getStage1DecisionDetailText(decision.assumptions) }}</p>
                                         <p v-if="getStage1DecisionDetailText(decision.validation_actions)"><span>验证动作</span>{{ getStage1DecisionDetailText(decision.validation_actions) }}</p>
+                                        <div class="agent-space-map-action" :class="{ unavailable: !isStage1MapBindingAvailable(decision), focused: isStage1SpaceMapFocused(decision) }">
+                                            <span>地图对象</span>
+                                            <button v-if="isStage1MapBindingAvailable(decision)" type="button" @click="focusStage1SpaceOnMap(decision)">{{ isStage1SpaceMapFocused(decision) ? '已定位，点击重新聚焦' : `定位 ${getStage1MapBindingLabel(decision)}` }}</button>
+                                            <em v-else>{{ getStage1MapBindingLabel(decision) }}</em>
+                                        </div>
                                         <div class="agent-space-evidence-action">
                                             <span>证据链</span>
                                             <button type="button" @click="openStage1EvidenceDrawer(decision)">查看 {{ Array.isArray(decision.evidence_refs) ? decision.evidence_refs.length : 0 }} 条原始证据</button>

@@ -1050,11 +1050,85 @@ export function createAgentCapabilityWorkbenchMethods() {
         recommendation_label: this.getStage1DecisionStatusLabel(decision),
         preconditions: this.getStage1DecisionDetailText(decision?.preconditions),
         evidence_count: Array.isArray(decision?.evidence_refs) ? decision.evidence_refs.length : 0,
+        map_bound: this.isStage1MapBindingAvailable(decision),
+        map_label: this.getStage1MapBindingLabel(decision),
       }))
     },
     getStage1SpaceDecisionById(spaceId) {
       const target = text(spaceId)
       return this.getStage1SpaceDecisions().find(item => text(item?.space_id) === target) || null
+    },
+    getStage1MapBinding(decision) {
+      const binding = decision?.map_binding
+      return binding && typeof binding === 'object' ? clonePayloadValue(binding) : null
+    },
+    isStage1MapBindingAvailable(decision) {
+      const binding = this.getStage1MapBinding(decision)
+      return binding?.status === 'bound' && !!text(binding?.spatial_object_id) && !!binding?.feature?.geometry
+    },
+    getStage1MapBindingLabel(decision) {
+      const binding = this.getStage1MapBinding(decision)
+      if (this.isStage1MapBindingAvailable(decision)) {
+        return text(binding?.title) || text(binding?.spatial_object_id) || '已绑定地图对象'
+      }
+      return text(binding?.reason) || '没有权威地图对象绑定'
+    },
+    selectStage1SpaceDecision(decision) {
+      const spaceId = text(decision?.space_id)
+      if (!spaceId) return
+      this.stage1ExpandedSpaceId = spaceId
+      this.stage1ExpandedRunId = text(this.getCapabilityRun()?.run_id)
+    },
+    isStage1SpaceDecisionExpanded(decision) {
+      return text(this.stage1ExpandedRunId) === text(this.getCapabilityRun()?.run_id)
+        && text(this.stage1ExpandedSpaceId) === text(decision?.space_id)
+    },
+    toggleStage1SpaceDecision(decision, event = null) {
+      const open = !!event?.target?.open
+      if (open) this.selectStage1SpaceDecision(decision)
+      else if (this.isStage1SpaceDecisionExpanded(decision)) {
+        this.stage1ExpandedSpaceId = ''
+        this.stage1ExpandedRunId = ''
+      }
+    },
+    focusStage1SpaceOnMap(decision) {
+      const binding = this.getStage1MapBinding(decision)
+      if (!this.isStage1MapBindingAvailable(decision)) {
+        this.stage1MapFocusMessage = this.getStage1MapBindingLabel(decision)
+        return false
+      }
+      const mapCore = this.mapCore
+      if (!mapCore || typeof mapCore.focusSpatialFeature !== 'function') {
+        this.stage1MapFocusMessage = '地图尚未就绪，无法定位该空间对象。'
+        return false
+      }
+      const focused = mapCore.focusSpatialFeature(binding.feature, {
+        fitView: true,
+        onClick: () => this.selectStage1SpaceDecision(decision),
+      })
+      if (!focused) {
+        this.stage1MapFocusMessage = '权威对象几何无法在当前地图中显示。'
+        return false
+      }
+      this.selectStage1SpaceDecision(decision)
+      this.stage1MapFocusedSpaceId = text(decision?.space_id)
+      this.stage1MapFocusedRunId = text(this.getCapabilityRun()?.run_id)
+      this.stage1MapFocusMessage = `已定位：${text(binding?.title) || text(decision?.space_name) || text(decision?.space_id)}`
+      return true
+    },
+    isStage1SpaceMapFocused(decision) {
+      return text(this.stage1MapFocusedRunId) === text(this.getCapabilityRun()?.run_id)
+        && text(this.stage1MapFocusedSpaceId) === text(decision?.space_id)
+    },
+    resetStage1SpatialInteraction() {
+      if (this.mapCore && typeof this.mapCore.clearSpatialFeatureFocus === 'function') {
+        this.mapCore.clearSpatialFeatureFocus()
+      }
+      this.stage1ExpandedSpaceId = ''
+      this.stage1ExpandedRunId = ''
+      this.stage1MapFocusedSpaceId = ''
+      this.stage1MapFocusedRunId = ''
+      this.stage1MapFocusMessage = ''
     },
     openStage1EvidenceDrawer(decision) {
       const spaceId = text(decision?.space_id)

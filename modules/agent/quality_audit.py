@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .stage1_data_quality import Stage1DataQualitySummary
 from .stage1_hard_constraints import HARD_CONSTRAINT_DEFINITIONS
 from .stage1_provenance import Stage1ProvenanceSummary
+from .stage1_spatial_objects import is_valid_spatial_feature
 
 
 class AuditIssue(BaseModel):
@@ -89,7 +90,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 18
+    checks_total = 19
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -624,6 +625,53 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 "关键空间缺少名称、未来角色、核心客群、动线/价值角色、候选比较、前置条件、证据或推荐强度。",
                 path="spatial_matrix.space_decisions",
                 repair_hint="每个空间补齐管理层摘要字段，至少比较两个候选，并给出首选、排除项、场景化客群和成立条件。",
+            )
+        )
+
+    invalid_map_bindings = []
+    unavailable_map_bindings = []
+    bound_map_bindings = []
+    for index, decision in enumerate(decisions):
+        node = decision if isinstance(decision, dict) else {}
+        binding = node.get("map_binding") if isinstance(node.get("map_binding"), dict) else {}
+        status = _text(binding.get("status"))
+        if status == "bound":
+            if (
+                not _text(binding.get("spatial_object_id"))
+                or not _text(binding.get("object_type"))
+                or not _text(binding.get("source_ref"))
+                or not _text(binding.get("source_locator"))
+                or not is_valid_spatial_feature(binding.get("feature"))
+            ):
+                invalid_map_bindings.append(index)
+            else:
+                bound_map_bindings.append(index)
+        elif status == "unavailable" and _text(binding.get("reason")):
+            unavailable_map_bindings.append(index)
+        else:
+            invalid_map_bindings.append(index)
+    if invalid_map_bindings:
+        issues.append(
+            _issue(
+                "spatial_map_binding_invalid",
+                "空间决策缺少可审计的地图绑定状态，或绑定未携带稳定 ID、来源定位和有效几何。",
+                path="spatial_matrix.space_decisions.map_binding",
+                repair_hint="仅从本轮权威空间对象清单选择稳定 ID；不能精确对应时明确标记 unavailable 并说明原因。",
+            )
+        )
+    elif decisions and not unavailable_map_bindings:
+        checks_passed += 1
+    else:
+        issues.append(
+            _issue(
+                "spatial_map_binding_incomplete",
+                (
+                    f"{len(unavailable_map_bindings)} 个空间决策尚无权威地图对象绑定；"
+                    f"当前已绑定 {len(bound_map_bindings)} 个。"
+                ),
+                path="spatial_matrix.space_decisions.map_binding",
+                repair_hint="补充带稳定对象 ID、来源定位和 GeoJSON 几何的建筑、庭院、入口或路径数据后重新运行。",
+                warning=True,
             )
         )
 

@@ -68,6 +68,23 @@ def complete_package():
             "space_decisions": [
                 {
                     "space_id": "unit-1",
+                    "map_binding": {
+                        "status": "bound",
+                        "spatial_object_id": "building:auditorium",
+                        "object_type": "building",
+                        "title": "原县政府礼堂",
+                        "source_ref": "project_gis.buildings",
+                        "source_locator": "project_gis.buildings/auditorium",
+                        "feature": {
+                            "type": "Feature",
+                            "properties": {"id": "auditorium"},
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[112.0, 28.0], [112.01, 28.0], [112.01, 28.01], [112.0, 28.0]]],
+                            },
+                        },
+                        "reason": "",
+                    },
                     "space_name": "原县政府礼堂",
                     "future_role": "社区文化锚点",
                     "core_audiences": ["社区家庭", "青年社群"],
@@ -469,3 +486,37 @@ def test_excluded_hard_constraint_blocks_delivery():
 
     issue = next(item for item in result.blocking_issues if item.code == "hard_constraint_application_invalid")
     assert "不可交付" in issue.message
+
+
+def test_stage1_quality_gate_reports_truthful_unavailable_map_binding_as_warning():
+    package = complete_package()
+    package["spatial_matrix"]["space_decisions"][0]["map_binding"] = {
+        "status": "unavailable",
+        "reason": "尚未提供礼堂建筑轮廓",
+    }
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "passed"
+    issue = next(item for item in result.issues if item.code == "spatial_map_binding_incomplete")
+    assert issue.severity == "warning"
+    assert "1 个空间决策" in issue.message
+
+
+def test_stage1_quality_gate_rejects_unverifiable_bound_map_object():
+    package = complete_package()
+    package["spatial_matrix"]["space_decisions"][0]["map_binding"] = {
+        "status": "bound",
+        "spatial_object_id": "invented-building",
+        "object_type": "building",
+        "source_ref": "",
+        "source_locator": "",
+        "feature": None,
+    }
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "spatial_map_binding_invalid" in {
+        issue.code for issue in result.blocking_issues
+    }

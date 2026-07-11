@@ -30,6 +30,11 @@ from ..stage1_runs import (
     build_stage1_output_artifacts,
     start_stage1_run,
 )
+from ..stage1_spatial_objects import (
+    bind_spatial_matrix_to_objects,
+    build_spatial_object_registry,
+    spatial_object_catalog,
+)
 from ..schemas import (
     AgentContextSummary,
     AgentPlanEnvelope,
@@ -303,6 +308,7 @@ async def execute(
         resolved_inputs=resolved_inputs,
     )
     readiness = evaluate_readiness(payload)
+    spatial_object_registry = build_spatial_object_registry(payload.analysis_snapshot)
     if capability_id == "spatial-programming-matrix" and any(
         item.state == "resolved" for item in resolved_inputs.resolutions
     ):
@@ -629,7 +635,11 @@ async def execute(
             "current_state、change_logic、candidate_functions(至少2项)、preferred_function、excluded_functions、"
             "audience_scenarios、access_and_movement、operation_strategy、"
             "renovation_and_delivery、preconditions、evidence_refs、hard_constraint_refs、assumptions、validation_actions、"
-            "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)。"
+            "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)、"
+            "map_binding。map_binding 只能是 {status:'bound', spatial_object_id:'清单中的稳定ID'} 或"
+            "{status:'unavailable', spatial_object_id:'', reason:'无法精确绑定的原因'}。"
+            "只有决策空间与清单对象精确相同时才能 bound；不得把建筑、院落或入口随意绑定到 H3 网格或路段，"
+            "不得生成坐标、几何或清单外 ID。"
             "每个空间决策必须引用全部适用的 hard_constraint_refs，并根据硬约束写入前置条件、排除项和验证动作。"
             "空间建议必须说明前置条件，不得虚构产权、结构或消防结论。"
             "strong 建议不得依赖未解决冲突证据；存在冲突时应降级为 conditional 并写明前置条件。"
@@ -641,13 +651,18 @@ async def execute(
             "workpacks": workpacks,
             "strategy": strategy,
             "hard_constraint_screening": hard_constraint_screening,
+            "authoritative_spatial_objects": spatial_object_catalog(
+                spatial_object_registry
+            ),
         },
         emit=emit,
         phase="executing",
         title="生成空间功能策划矩阵",
         reasoning_id="stage1-spatial-matrix-model",
     )
-    spatial_matrix = _mapping(matrix_result)
+    spatial_matrix = bind_spatial_matrix_to_objects(
+        _mapping(matrix_result), spatial_object_registry
+    )
     run.record_stage(
         "spatial-decision-matrix",
         "形成空间功能决策矩阵",

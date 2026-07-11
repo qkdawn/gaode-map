@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 
 import modules.agent.skills.urban_strategy_stage1 as stage1
 from modules.agent.providers.client import LLMRuntimeConfig
@@ -540,3 +541,68 @@ def test_hard_constraint_evidence_enters_the_critical_quality_chain():
     )
 
     assert critical == {"evidence-1", "fire-report"}
+
+
+def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeypatch):
+    runtime, profile = runtime_and_profile()
+    payload = ready_payload()
+    payload.analysis_snapshot.spatial_objects = [
+        {
+            "spatial_object_id": "road:south-entry",
+            "object_type": "road_segment",
+            "title": "南侧入口道路",
+            "source_ref": "analysis_snapshot.road.features",
+            "source_locator": "analysis_snapshot.road.features/south-entry",
+            "feature": {
+                "type": "Feature",
+                "properties": {"road_id": "south-entry"},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[112.0, 28.0], [112.01, 28.01]],
+                },
+            },
+        }
+    ]
+    matrix = deepcopy(valid_matrix())
+    matrix["space_decisions"][0]["map_binding"] = {
+        "status": "bound",
+        "spatial_object_id": "road:south-entry",
+        "feature": {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [0, 0]},
+        },
+    }
+    responses = [
+        valid_evidence(),
+        valid_workpacks(),
+        valid_strategy(),
+        matrix,
+        {"answer": "# 条件式建议", "sources": ["项目资料 p.12"]},
+    ]
+    calls = []
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs)
+            return responses[len(calls) - 1]
+
+    monkeypatch.setattr(stage1, "get_llm_provider_client", lambda *, runtime: FakeClient())
+
+    response = asyncio.run(execute(payload, runtime=runtime, profile=profile))
+
+    matrix_call = next(item for item in calls if item["reasoning_id"] == "stage1-spatial-matrix-model")
+    catalog = matrix_call["user_payload"]["authoritative_spatial_objects"]
+    assert catalog == [
+        {
+            "spatial_object_id": "road:south-entry",
+            "object_type": "road_segment",
+            "title": "南侧入口道路",
+            "source_ref": "analysis_snapshot.road.features",
+            "source_locator": "analysis_snapshot.road.features/south-entry",
+        }
+    ]
+    binding = response.output.panel_payloads["stage1_spatial_matrix"]["space_decisions"][0]["map_binding"]
+    assert binding["status"] == "bound"
+    assert binding["feature"]["geometry"]["type"] == "LineString"
+    handoff_binding = response.output.panel_payloads["stage1_deliverables"]["design_handoff"]["space_requirements"][0]["map_binding"]
+    assert handoff_binding == binding

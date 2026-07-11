@@ -92,6 +92,7 @@ class AnalysisSnapshot(BaseModel):
     population: Dict[str, Any] = Field(default_factory=dict)
     nightlight: Dict[str, Any] = Field(default_factory=dict)
     shared_grid: Dict[str, Any] = Field(default_factory=dict)
+    spatial_objects: List[Dict[str, Any]] = Field(default_factory=list)
     param_bundles: Dict[str, Any] = Field(default_factory=dict)
     frontend_analysis: Dict[str, Any] = Field(default_factory=dict)
     active_panel: str = ""

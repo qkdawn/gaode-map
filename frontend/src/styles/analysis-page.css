@@ -13910,10 +13910,16 @@ body.agent-ppt-source-menu-open {
 .agent-spatial-management-table tr:last-child th, .agent-spatial-management-table tr:last-child td { border-bottom: 0; }
 .agent-spatial-management-table th:last-child, .agent-spatial-management-table td:last-child { border-right: 0; }
 .agent-spatial-management-table button, .agent-space-evidence-action button { padding: 3px 6px; border: 1px solid #bfdbfe; border-radius: 4px; background: #eff6ff; color: #1d4ed8; cursor: pointer; font-size: 9px; font-weight: 700; }
+.agent-spatial-management-table button:disabled { border-color: #e2e8f0; background: #f8fafc; color: #94a3b8; cursor: not-allowed; }
 .agent-space-status { display: inline-flex; padding: 2px 5px; border-radius: 3px; background: #eef2f7; color: #475569; white-space: nowrap; }
 .agent-space-status.strong { background: #ecfdf3; color: #087443; }
 .agent-space-status.conditional { background: #fff7ed; color: #9a3412; }
 .agent-space-status.excluded { background: #fff1f2; color: #9f1239; }
+.agent-space-map-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin-top: 8px; padding: 8px; border: 1px solid #99f6e4; border-radius: 5px; background: #f0fdfa; color: #0f766e; font-size: 9px; font-weight: 700; }
+.agent-space-map-action button { padding: 3px 7px; border: 1px solid #5eead4; border-radius: 4px; background: #fff; color: #0f766e; cursor: pointer; font-size: 9px; font-weight: 700; }
+.agent-space-map-action.focused { border-color: #14b8a6; box-shadow: inset 3px 0 #14b8a6; }
+.agent-space-map-action.unavailable { border-color: #e2e8f0; background: #f8fafc; color: #64748b; }
+.agent-space-map-action em { max-width: 75%; color: #64748b; font-style: normal; font-weight: 400; line-height: 1.4; text-align: right; overflow-wrap: anywhere; }
 .agent-space-evidence-action { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin-top: 8px; padding: 8px 0 0; border-top: 1px dashed #cbd5e1; color: #94a3b8; font-size: 9px; font-weight: 700; }
 .agent-evidence-drawer-backdrop { position: fixed; inset: 0; z-index: 1500; display: flex; justify-content: flex-end; background: rgba(15, 23, 42, .28); }
 .agent-evidence-drawer { display: flex; flex-direction: column; width: min(520px, 92vw); height: 100%; background: #f8fafc; box-shadow: -14px 0 36px rgba(15, 23, 42, .2); }

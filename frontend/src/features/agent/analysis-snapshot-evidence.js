@@ -340,6 +340,72 @@ function buildAgentSharedGridEvidence(ctx = {}) {
   }
 }
 
+function cloneSpatialValue(value) {
+  if (Array.isArray(value)) return value.map(cloneSpatialValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneSpatialValue(item)]))
+}
+
+function spatialFeatureId(feature = {}, keys = []) {
+  const properties = cloneObject(feature.properties)
+  const candidates = [feature.id, ...keys.map(key => properties[key])]
+  return candidates.map(value => asText(value)).find(Boolean) || ''
+}
+
+function hasSpatialGeometry(feature = {}) {
+  const geometry = feature && feature.type === 'Feature' ? feature.geometry : feature
+  return !!(
+    geometry
+    && typeof geometry === 'object'
+    && ['Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'].includes(asText(geometry.type))
+    && Array.isArray(geometry.coordinates)
+    && geometry.coordinates.length
+  )
+}
+
+function buildAgentSpatialObjects(ctx = {}, limitPerSource = 200) {
+  const objects = []
+  const seen = new Set()
+  const append = (features, config) => {
+    let accepted = 0
+    for (const feature of cloneArray(features)) {
+      if (accepted >= limitPerSource) break
+      if (!feature || typeof feature !== 'object' || !hasSpatialGeometry(feature)) continue
+      const rawId = spatialFeatureId(feature, config.idKeys)
+      if (!rawId) continue
+      const spatialObjectId = `${config.prefix}:${rawId}`
+      if (seen.has(spatialObjectId)) continue
+      seen.add(spatialObjectId)
+      accepted += 1
+      const properties = cloneObject(feature.properties)
+      const title = config.titleKeys.map(key => asText(properties[key])).find(Boolean) || spatialObjectId
+      objects.push({
+        spatial_object_id: spatialObjectId,
+        object_type: config.objectType,
+        title,
+        source_ref: config.sourceRef,
+        source_locator: `${config.sourceRef}/${rawId}`,
+        feature: cloneSpatialValue(feature),
+      })
+    }
+  }
+  append(ctx.roadSyntaxRoadFeatures, {
+    prefix: 'road',
+    objectType: 'road_segment',
+    sourceRef: 'analysis_snapshot.road.features',
+    idKeys: ['road_id', 'osm_id', 'edge_id', 'id'],
+    titleKeys: ['name', 'road_name', 'street_name'],
+  })
+  append(ctx.h3GridFeatures, {
+    prefix: 'h3',
+    objectType: 'analysis_grid_cell',
+    sourceRef: 'analysis_snapshot.h3.grid',
+    idKeys: ['h3_id', 'cell_id'],
+    titleKeys: ['name', 'h3_id', 'cell_id'],
+  })
+  return objects
+}
+
 function buildAgentAnalysisSnapshot(ctx = {}) {
   const poiTotal = Array.isArray(ctx.allPoisDetails) ? ctx.allPoisDetails.length : 0
   const populationSummary = (ctx.populationOverview && ctx.populationOverview.summary) || {}
@@ -392,6 +458,7 @@ function buildAgentAnalysisSnapshot(ctx = {}) {
     },
     param_bundles: paramBundles,
     shared_grid: buildAgentSharedGridEvidence(ctx),
+    spatial_objects: buildAgentSpatialObjects(ctx),
     frontend_analysis: frontendAnalysis,
     active_panel: String(ctx.activeStep3Panel || ''),
     current_filters: {
@@ -411,4 +478,5 @@ export {
   buildAgentPoiH3Evidence,
   buildAgentPopulationGridEvidence,
   buildAgentSharedGridEvidence,
+  buildAgentSpatialObjects,
 }
