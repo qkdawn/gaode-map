@@ -133,7 +133,10 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
       stage1_evidence_verification: {
         status: 'passed_with_gaps', as_of_date: '2026-07-12',
         status_counts: { verified: 2, inferred: 1, fieldwork_required: 1 },
-        automated_checks: [{ evidence_id: 'e2', tool_id: 'verify_road_analysis_claim', outcome: 'passed', claim_types: ['network_intelligibility'], diagnostics: ['r²一致'], derived_values: { r2: 0.05 }, summary: '已自动复算' }],
+        automated_checks: [
+          { evidence_id: 'e2', tool_id: 'verify_road_analysis_claim', outcome: 'passed', claim_types: ['network_intelligibility'], diagnostics: ['r²一致'], derived_values: { r2: 0.05 }, summary: '已自动复算' },
+          { evidence_id: 'e3', tool_id: 'verify_proxy_indicator_claim', outcome: 'passed_with_gaps', claim_types: ['poi_proxy'], diagnostics: ['POI不能等同真实需求'], derived_values: { poi: { record_count: 18 } }, summary: '代理边界已检查' },
+        ],
         tasks: [task],
       },
       stage1_evidence_ledger: [{ id: 'e1' }, { id: 'e2' }],
@@ -150,9 +153,12 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   const checks = ctx.getStage1AutomatedVerificationChecks()
   checks[0].diagnostics[0] = 'changed'
   checks[0].derived_values.r2 = 1
+  checks[1].derived_values.poi.record_count = 99
   assert.deepEqual(ctx.getStage1AutomatedVerificationChecks()[0].diagnostics, ['r²一致'])
   assert.equal(ctx.getStage1AutomatedVerificationChecks()[0].derived_values.r2, 0.05)
+  assert.equal(ctx.getStage1AutomatedVerificationChecks()[1].derived_values.poi.record_count, 18)
   assert.equal(ctx.getStage1VerificationToolLabel(checks[0]), '路网指标一致性核验')
+  assert.equal(ctx.getStage1VerificationToolLabel(checks[1]), '代理指标边界核验')
   assert.equal(ctx.getStage1VerificationDerivedText(checks[0]), 'r2=1')
   const tasks = ctx.getStage1VerificationTasks()
   tasks[0].missing_input = 'changed'

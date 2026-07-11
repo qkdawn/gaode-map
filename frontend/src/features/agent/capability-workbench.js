@@ -4,6 +4,12 @@ const CATALOG_URL = '/api/v1/analysis/agent/analysis-capabilities'
 
 const text = value => String(value || '').trim()
 
+const clonePayloadValue = value => {
+  if (Array.isArray(value)) return value.map(clonePayloadValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clonePayloadValue(item)]))
+}
+
 const CAPABILITY_PROMPTS = Object.freeze({
   'urban-strategy-stage1': '基于当前项目范围、资料和分析结果，执行城市更新第一阶段策划并生成可审计报告。',
   'spatial-programming-matrix': '基于当前项目证据，重点生成空间功能策划决策矩阵，并说明候选功能、排除理由和前置条件。',
@@ -150,15 +156,18 @@ export function createAgentCapabilityWorkbenchMethods() {
       const checks = (this.getStage1EvidenceVerification() || {}).automated_checks
       return Array.isArray(checks)
         ? checks.map(item => ({
-            ...item,
-            claim_types: Array.isArray(item.claim_types) ? [...item.claim_types] : [],
-            diagnostics: Array.isArray(item.diagnostics) ? [...item.diagnostics] : [],
-            derived_values: { ...(item.derived_values || {}) },
+            ...clonePayloadValue(item),
+            claim_types: Array.isArray(item.claim_types) ? clonePayloadValue(item.claim_types) : [],
+            diagnostics: Array.isArray(item.diagnostics) ? clonePayloadValue(item.diagnostics) : [],
+            derived_values: clonePayloadValue(item.derived_values || {}),
           }))
         : []
     },
     getStage1VerificationToolLabel(check) {
-      const labels = { verify_road_analysis_claim: '路网指标一致性核验' }
+      const labels = {
+        verify_road_analysis_claim: '路网指标一致性核验',
+        verify_proxy_indicator_claim: '代理指标边界核验',
+      }
       return labels[check?.tool_id] || check?.tool_id || '自动核验'
     },
     getStage1VerificationDerivedText(check) {

@@ -53,6 +53,8 @@ _RELATIVE_TERMS = (
     "极低",
     "优势",
     "短板",
+    "活跃",
+    "稀疏",
 )
 _TRAFFIC_OVERREACH_TERMS = (
     "外部可达",
@@ -64,6 +66,48 @@ _TRAFFIC_OVERREACH_TERMS = (
 )
 _FRONTAGE_TERMS = ("商业界面", "沿街界面", "店铺连续", "商业连续")
 _BEFORE_AFTER_TERMS = ("改造前后", "改善", "提升", "回应短板", "一路")
+_POI_TERMS = ("poi", "兴趣点", "业态数量", "设施数量", "店铺数量", "poi密度")
+_POPULATION_TERMS = ("人口", "年龄结构", "常住人口", "居住人口", "人口密度")
+_NIGHTLIGHT_TERMS = ("夜光", "灯光", "nightlight", "viirs")
+_H3_TERMS = ("h3", "gap_score", "缺口分", "网格缺口", "供需缺口")
+_POI_OVERREACH_TERMS = (
+    "真实需求",
+    "消费需求",
+    "实际客流",
+    "支付能力",
+    "支付意愿",
+    "营业额",
+    "坪效",
+    "收入",
+    "购买力",
+    "开店成功",
+)
+_POPULATION_OVERREACH_TERMS = (
+    "项目客流",
+    "实际客流",
+    "消费偏好",
+    "支付意愿",
+    "支付能力",
+    "购买力",
+)
+_NIGHTLIGHT_OVERREACH_TERMS = (
+    "客流",
+    "消费",
+    "支付",
+    "营业额",
+    "收入",
+    "购买力",
+    "消费力",
+)
+_H3_OVERREACH_TERMS = (
+    "开店成功",
+    "成功概率",
+    "必然成功",
+    "营业额",
+    "收益",
+    "最佳业态",
+    "最适合开",
+)
 
 
 def _text(value: Any) -> str:
@@ -111,6 +155,23 @@ def _claim_types(node: dict[str, Any]) -> set[str]:
             types.add("network_connectivity")
         if any(term in claim for term in _BEFORE_AFTER_TERMS):
             types.add("before_after_network_change")
+    if any(term in text for term in _POI_TERMS):
+        types.add("poi_proxy")
+    if any(term in text for term in _POPULATION_TERMS):
+        types.add("population_proxy")
+    if any(term in text for term in _NIGHTLIGHT_TERMS):
+        types.add("nightlight_proxy")
+    if any(term in text for term in _H3_TERMS):
+        types.add("h3_gap_proxy")
+    if (
+        len(
+            types.intersection(
+                {"poi_proxy", "population_proxy", "nightlight_proxy", "h3_gap_proxy"}
+            )
+        )
+        >= 2
+    ):
+        types.add("multi_proxy_conclusion")
     return types
 
 
@@ -351,6 +412,198 @@ def _verify_road_claim(
     )
 
 
+def _nested_number(value: Any, keys: tuple[str, ...], depth: int = 0) -> float | None:
+    if depth > 3:
+        return None
+    if isinstance(value, dict):
+        for key in keys:
+            number = _number(value.get(key))
+            if number is not None:
+                return number
+        for child in value.values():
+            number = _nested_number(child, keys, depth + 1)
+            if number is not None:
+                return number
+    return None
+
+
+def _proxy_source(snapshot: Any, claim_type: str) -> tuple[bool, dict[str, Any]]:
+    if claim_type == "poi_proxy":
+        pois = list(getattr(snapshot, "pois", None) or [])
+        summary = _mapping(getattr(snapshot, "poi_summary", None))
+        count = _nested_number(summary, ("total_count", "poi_count", "count", "total"))
+        if count is None and pois:
+            count = float(len(pois))
+        derived = {"poi_record_count": int(count)} if count is not None else {}
+        return bool(pois or summary), derived
+    if claim_type == "population_proxy":
+        population = _mapping(getattr(snapshot, "population", None))
+        total = _nested_number(
+            population, ("total_population", "population_total", "total", "population")
+        )
+        return bool(population), {
+            "population_total": total
+        } if total is not None else {}
+    if claim_type == "nightlight_proxy":
+        nightlight = _mapping(getattr(snapshot, "nightlight", None))
+        average = _nested_number(
+            nightlight,
+            ("mean_radiance", "avg_light", "mean_light", "avg_dn", "mean", "average"),
+        )
+        count = _nested_number(
+            nightlight, ("sample_count", "cell_count", "grid_count", "count")
+        )
+        derived: dict[str, Any] = {}
+        if average is not None:
+            derived["nightlight_average"] = round(average, 8)
+        if count is not None:
+            derived["nightlight_sample_count"] = int(count)
+        return bool(nightlight), derived
+    h3 = _mapping(getattr(snapshot, "h3", None))
+    score = _nested_number(h3, ("average_gap_score", "mean_gap_score", "gap_score"))
+    count = _nested_number(h3, ("cell_count", "grid_count", "count"))
+    derived = {}
+    if score is not None:
+        derived["h3_gap_score"] = round(score, 8)
+    if count is not None:
+        derived["h3_cell_count"] = int(count)
+    return bool(h3), derived
+
+
+def _verify_proxy_claim(
+    raw: dict[str, Any], snapshot: Any, claim_types: set[str]
+) -> tuple[dict[str, Any], AutomatedVerificationCheck, VerificationTask | None]:
+    node = deepcopy(raw)
+    evidence_id = _text(node.get("id")) or "unknown-evidence"
+    claim = _text(node.get("claim"))
+    proposed_status = _text(node.get("status")) or "inferred"
+    diagnostics: list[str] = []
+    derived: dict[str, Any] = {}
+    task: VerificationTask | None = None
+    source_types = sorted(
+        claim_types.intersection(
+            {"poi_proxy", "population_proxy", "nightlight_proxy", "h3_gap_proxy"}
+        )
+    )
+    missing_sources: list[str] = []
+    source_labels = {
+        "poi_proxy": "POI",
+        "population_proxy": "人口",
+        "nightlight_proxy": "夜光",
+        "h3_gap_proxy": "H3 网格",
+    }
+    for claim_type in source_types:
+        available, values = _proxy_source(snapshot, claim_type)
+        if not available:
+            missing_sources.append(source_labels[claim_type])
+        derived.update(values)
+
+    if missing_sources:
+        proposed_status = _check_status(proposed_status, "blocked")
+        reason = f"当前 Stage 1 输入缺少可复核的{'、'.join(missing_sources)}分析产物"
+        diagnostics.append(reason)
+        task = VerificationTask(
+            evidence_id=evidence_id,
+            status="blocked",
+            missing_input=f"{'、'.join(missing_sources)}分析快照及其口径、范围和年份",
+            blocking_reason=reason,
+            executor="agent",
+            next_action=f"先运行{'、'.join(missing_sources)}分析，再自动复核该主张",
+        )
+
+    if "poi_proxy" in source_types and any(
+        term in claim for term in _POI_OVERREACH_TERMS
+    ):
+        proposed_status = _check_status(proposed_status, "hypothesis")
+        diagnostics.append(
+            "POI 数量或密度反映设施供给代理，不能直接证明真实需求、客流、支付或经营绩效。"
+        )
+    if "population_proxy" in source_types and any(
+        term in claim for term in _POPULATION_OVERREACH_TERMS
+    ):
+        proposed_status = _check_status(proposed_status, "hypothesis")
+        diagnostics.append(
+            "人口规模或年龄结构不能直接证明项目客流、消费偏好或支付意愿。"
+        )
+    if "nightlight_proxy" in source_types:
+        if _text(node.get("evidence_type")) != "P":
+            node["evidence_type"] = "P"
+            diagnostics.append("夜光属于代理指标，证据类型已归一化为 P。")
+        if any(term in claim for term in _NIGHTLIGHT_OVERREACH_TERMS):
+            proposed_status = _check_status(proposed_status, "hypothesis")
+            diagnostics.append(
+                "夜光强度只能辅助描述活动或建成环境信号，不能等同于客流、消费金额或支付能力。"
+            )
+    if "h3_gap_proxy" in source_types:
+        if _text(node.get("evidence_type")) != "P":
+            node["evidence_type"] = "P"
+            diagnostics.append("H3 gap_score 属于模型代理指标，证据类型已归一化为 P。")
+        if any(term in claim for term in _H3_OVERREACH_TERMS):
+            proposed_status = _check_status(proposed_status, "hypothesis")
+            diagnostics.append(
+                "H3 gap_score 只能表达当前模型口径下的空间缺口，不能解释为开店成功概率、收益或确定业态。"
+            )
+
+    if any(term in claim for term in _RELATIVE_TERMS) and not _text(
+        node.get("comparison_baseline")
+    ):
+        proposed_status = _check_status(proposed_status, "inferred")
+        diagnostics.append(
+            "相对判断缺少同年份、同范围、同口径比较基准，只能陈述当前数值或分布。"
+        )
+    if "multi_proxy_conclusion" in claim_types:
+        proposed_status = _check_status(proposed_status, "inferred")
+        diagnostics.append(
+            "多个代理指标相互印证只能提高线索一致性，不能自动升级为高置信度事实或因果结论。"
+        )
+
+    if task is not None:
+        node.update(
+            missing_input=task.missing_input,
+            blocking_reason=task.blocking_reason,
+            executor=task.executor,
+            next_action=task.next_action,
+        )
+    if proposed_status in {"blocked", "hypothesis"}:
+        node["confidence"] = "low"
+    elif proposed_status == "inferred" and _text(node.get("confidence")) == "high":
+        node["confidence"] = "medium"
+    node["status"] = proposed_status
+    if derived:
+        node["derived_values"] = {**_mapping(node.get("derived_values")), **derived}
+    for message in diagnostics:
+        _append_limitation(node, message)
+    tool_ids = [
+        str(item) for item in list(node.get("verification_tool_ids") or []) if str(item)
+    ]
+    if "verify_proxy_indicator_claim" not in tool_ids:
+        tool_ids.append("verify_proxy_indicator_claim")
+    node["verification_tool_ids"] = tool_ids
+
+    outcome = "passed"
+    if proposed_status == "blocked":
+        outcome = "blocked"
+    elif proposed_status in {"inferred", "hypothesis"} or diagnostics:
+        outcome = "passed_with_gaps"
+    summary = (
+        diagnostics[0] if diagnostics else "代理指标的来源与推论边界自动核验完成。"
+    )
+    return (
+        node,
+        AutomatedVerificationCheck(
+            evidence_id=evidence_id,
+            claim_types=sorted(claim_types),
+            tool_id="verify_proxy_indicator_claim",
+            outcome=outcome,
+            status=proposed_status,
+            summary=summary,
+            diagnostics=diagnostics,
+            derived_values=derived,
+        ),
+        task,
+    )
+
+
 _VERIFICATION_TOOLS: tuple[tuple[VerificationToolSpec, Verifier], ...] = (
     (
         VerificationToolSpec(
@@ -365,6 +618,21 @@ _VERIFICATION_TOOLS: tuple[tuple[VerificationToolSpec, Verifier], ...] = (
             produces=("derived_metrics", "semantic_diagnostics", "verification_status"),
         ),
         _verify_road_claim,
+    ),
+    (
+        VerificationToolSpec(
+            tool_id="verify_proxy_indicator_claim",
+            verifies=(
+                "poi_proxy",
+                "population_proxy",
+                "nightlight_proxy",
+                "h3_gap_proxy",
+                "multi_proxy_conclusion",
+            ),
+            required_inputs=("matching_analysis_snapshot",),
+            produces=("proxy_boundaries", "derived_metrics", "verification_status"),
+        ),
+        _verify_proxy_claim,
     ),
 )
 
