@@ -123,6 +123,24 @@
                                     <small v-if="conflict.explanation">{{ conflict.explanation }}</small>
                                 </article>
                             </div>
+                            <div v-if="getStage1Deliverables()" class="agent-stage1-deliverables">
+                                <div class="agent-stage1-deliverables-head">
+                                    <div><strong>正式交付物</strong><span>主报告、证据附录与设计任务书来自同一审计包</span></div>
+                                    <small>{{ getStage1Deliverables().status === 'ready' ? '已编译' : getStage1Deliverables().status }}</small>
+                                </div>
+                                <div class="agent-stage1-artifact-grid">
+                                    <article v-for="artifact in getStage1DeliverableArtifacts()" :key="artifact.artifact_id || artifact.filename" class="agent-stage1-artifact">
+                                        <div><span>{{ artifact.status === 'ready' ? '已编译' : artifact.status }}</span><strong>{{ artifact.title }}</strong></div>
+                                        <code>{{ artifact.filename }}</code>
+                                        <p v-if="artifact.summary">{{ artifact.summary }}</p>
+                                    </article>
+                                </div>
+                                <div v-if="getStage1DesignHandoff()" class="agent-stage1-handoff-summary">
+                                    <span>定位方案 <strong>{{ getStage1DesignHandoff().positioning_option_id || '未绑定' }}</strong></span>
+                                    <span>空间要求 <strong>{{ getStage1DesignHandoffSpaceCount() }}</strong></span>
+                                    <span :class="{ gap: getStage1DesignHandoffConstraintCount() > 0 }">未解决约束 <strong>{{ getStage1DesignHandoffConstraintCount() }}</strong></span>
+                                </div>
+                            </div>
                             <div v-if="getStage1QualityBlockingIssues().length" class="agent-quality-issues">
                                 <strong>交付前必须修复</strong>
                                 <div v-for="issue in getStage1QualityBlockingIssues()" :key="issue.code"><span>{{ issue.message }}</span><small v-if="issue.repair_hint">{{ issue.repair_hint }}</small></div>

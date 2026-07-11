@@ -243,6 +243,17 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
     )
     assert response.output.panel_payloads["claim_evidence"][0]["status"] == "verified"
     assert response.output.panel_payloads["sources_used"] == ["项目资料 p.12"]
+    deliverables = response.output.panel_payloads["stage1_deliverables"]
+    assert [item["filename"] for item in deliverables["artifacts"]] == [
+        "stage1_report.md",
+        "evidence_appendix.md",
+        "design_handoff.json",
+    ]
+    assert deliverables["design_handoff"]["positioning_option_id"] == "option-a"
+    assert (
+        deliverables["design_handoff"]["space_requirements"][0]["space_id"] == "unit-1"
+    )
+    assert "项目资料 p.12" in deliverables["evidence_appendix_markdown"]
     assert response.effective_execution_profile == profile
 
 
@@ -361,6 +372,11 @@ def test_stage1_exposes_context_conflicts_in_quality_panel(monkeypatch):
     assert "source_date" in calls[0]["system_prompt"]
     assert "sample_size" in calls[0]["system_prompt"]
     assert "data_quality" in calls[-1]["system_prompt"]
+    assert (
+        calls[-1]["user_payload"]["design_handoff"]["positioning_option_id"]
+        == "option-a"
+    )
+    assert "Claim—Evidence Ledger" in calls[-1]["user_payload"]["evidence_appendix"]
     assert (
         calls[2]["user_payload"]["conflict_register"][0]["label"] == conflict["label"]
     )

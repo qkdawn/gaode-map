@@ -161,6 +161,20 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         { metric_key: 'area', label: '项目面积', values: ['2.4公顷', '2.5公顷'], evidence_ids: ['node-3'], unresolved: false, explanation: '采用项目摘要口径' },
       ],
       stage1_spatial_matrix: { space_decisions: [{ id: 's1' }] },
+      stage1_deliverables: {
+        status: 'ready',
+        source_contract: 'audited_stage1_package',
+        artifacts: [
+          { artifact_id: 'stage1-report', filename: 'stage1_report.md', title: 'Stage 1 主报告', format: 'markdown', status: 'ready', summary: '引用同一审计包中的 2 条证据。' },
+          { artifact_id: 'stage1-evidence-appendix', filename: 'evidence_appendix.md', title: '证据附录', format: 'markdown', status: 'ready', summary: '保留证据定位与冲突。' },
+          { artifact_id: 'stage1-design-handoff', filename: 'design_handoff.json', title: '设计任务书', format: 'json', status: 'ready', summary: '传递空间单元要求。' },
+        ],
+        design_handoff: {
+          positioning_option_id: 'option-a',
+          space_requirements: [{ space_id: 'unit-1' }],
+          unresolved_constraints: [{ type: 'fieldwork_required', id: 'e2' }],
+        },
+      },
     },
   })
   assert.equal(ctx.hasStage1Outcome(), true)
@@ -219,6 +233,14 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1DataQualityCoordinateText(), 'EPSG:4490')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
+  const deliverables = ctx.getStage1Deliverables()
+  deliverables.artifacts[0].filename = 'changed.md'
+  deliverables.design_handoff.space_requirements[0].space_id = 'changed'
+  assert.equal(ctx.getStage1DeliverableArtifacts()[0].filename, 'stage1_report.md')
+  assert.equal(ctx.getStage1DesignHandoff().space_requirements[0].space_id, 'unit-1')
+  assert.equal(ctx.getStage1DesignHandoff().positioning_option_id, 'option-a')
+  assert.equal(ctx.getStage1DesignHandoffSpaceCount(), 1)
+  assert.equal(ctx.getStage1DesignHandoffConstraintCount(), 1)
 })
 
 test('analysis workspace templates expose capability navigation and detail view', async () => {
@@ -241,6 +263,9 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getStage1DataQualityCoverageItems\(\)/)
   assert.match(main, /来源冲突与裁决状态/)
   assert.match(main, /getStage1ConflictRegister\(\)/)
+  assert.match(main, /正式交付物/)
+  assert.match(main, /getStage1DeliverableArtifacts\(\)/)
+  assert.match(main, /getStage1DesignHandoffConstraintCount\(\)/)
   assert.match(main, /交付前必须修复/)
   assert.match(sidebar, /openAnalysisCapabilitiesPanel/)
   assert.match(sidebar, />分析能力</)

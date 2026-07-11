@@ -88,7 +88,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 14
+    checks_total = 15
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -325,6 +325,19 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 "定位方案不足三个，或首选方案未通过稳定 ID 指向候选集合。",
                 path="strategy",
                 repair_hint="提供至少三个实质不同的定位，包含证据、反证、淘汰理由和失效条件。",
+            )
+        )
+
+    matrix_positioning_id = _text(matrix.get("positioning_option_id"))
+    if matrix_positioning_id and matrix_positioning_id == recommended_id:
+        checks_passed += 1
+    else:
+        issues.append(
+            _issue(
+                "matrix_positioning_mismatch",
+                "空间功能矩阵未明确绑定到首选定位方案。",
+                path="spatial_matrix.positioning_option_id",
+                repair_hint="使用 strategy.recommended_option_id 作为矩阵唯一 positioning_option_id 后重新生成。",
             )
         )
 

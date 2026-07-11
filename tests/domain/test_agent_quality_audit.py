@@ -49,6 +49,8 @@ def complete_package():
             ],
         },
         "spatial_matrix": {
+            "matrix_version": "1.0",
+            "positioning_option_id": "option-a",
             "spatial_hierarchy": [
                 {"id": "system-1", "level": "system"},
                 {"id": "cluster-1", "level": "cluster"},
@@ -102,6 +104,18 @@ def test_complete_stage1_package_passes_quality_gate():
     assert result.status == "passed"
     assert result.score == 100
     assert result.blocking_issues == []
+
+
+def test_matrix_must_bind_to_the_recommended_strategy_option():
+    package = complete_package()
+    package["spatial_matrix"]["positioning_option_id"] = "option-b"
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "matrix_positioning_mismatch" in {
+        issue.code for issue in result.blocking_issues
+    }
 
 
 def test_missing_falsification_and_space_alternatives_block_delivery():

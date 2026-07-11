@@ -217,8 +217,28 @@ export function createAgentCapabilityWorkbenchMethods() {
       const systems = this.getStage1DataQuality()?.coordinate_systems
       return Array.isArray(systems) ? systems.map(text).filter(Boolean).join(' / ') : ''
     },
+    getStage1Deliverables() {
+      const deliverables = (this.agentPanelPayloads || {}).stage1_deliverables
+      return deliverables && typeof deliverables === 'object' ? clonePayloadValue(deliverables) : null
+    },
+    getStage1DeliverableArtifacts() {
+      const artifacts = this.getStage1Deliverables()?.artifacts
+      return Array.isArray(artifacts) ? clonePayloadValue(artifacts) : []
+    },
+    getStage1DesignHandoff() {
+      const handoff = this.getStage1Deliverables()?.design_handoff
+      return handoff && typeof handoff === 'object' ? clonePayloadValue(handoff) : null
+    },
+    getStage1DesignHandoffSpaceCount() {
+      const requirements = this.getStage1DesignHandoff()?.space_requirements
+      return Array.isArray(requirements) ? requirements.length : 0
+    },
+    getStage1DesignHandoffConstraintCount() {
+      const constraints = this.getStage1DesignHandoff()?.unresolved_constraints
+      return Array.isArray(constraints) ? constraints.length : 0
+    },
     hasStage1Outcome() {
-      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality())
+      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1Deliverables())
     },
     getStage1EvidenceCount() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger

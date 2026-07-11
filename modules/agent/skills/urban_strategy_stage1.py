@@ -5,6 +5,11 @@ from typing import Any, Awaitable, Callable
 from modules.documents import ProjectEvidenceDossier, build_project_evidence_dossier
 
 from ..evidence_verification import verify_evidence_ledger
+from ..stage1_deliverables import (
+    build_design_handoff,
+    build_evidence_appendix,
+    compile_stage1_deliverables,
+)
 from ..llm_digest import snapshot_digest
 from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
 from ..quality_audit import QualityAuditResult, audit_stage1_package
@@ -545,6 +550,8 @@ async def execute(
             effective_execution_profile=profile,
         )
 
+    design_handoff = build_design_handoff(package)
+    evidence_appendix = build_evidence_appendix(package)
     report = await client.chat_json(
         system_prompt=(
             "你是城市区域策划总顾问。只输出 JSON：answer(专业中文 Markdown 报告)、sources。"
@@ -558,6 +565,8 @@ async def execute(
             "stage1_package": package,
             "evidence_verification": verification.model_dump(mode="json"),
             "quality_audit": _audit_payload(audit),
+            "evidence_appendix": evidence_appendix,
+            "design_handoff": design_handoff.model_dump(mode="json"),
         },
         emit=emit,
         phase="synthesizing",
@@ -565,8 +574,17 @@ async def execute(
         reasoning_id="stage1-report-model",
     )
     answer = str(report.get("answer") or "").strip()
+    deliverables = compile_stage1_deliverables(package, report_markdown=answer)
+    await _emit_phase(
+        emit,
+        phase_id="stage1-deliverables",
+        title="编译正式交付物",
+        detail="主报告、证据附录与设计任务书已从同一审计包生成。",
+        state="completed",
+    )
     panels["claim_evidence"] = evidence_ledger
     panels["sources_used"] = report.get("sources") or []
+    panels["stage1_deliverables"] = deliverables.model_dump(mode="json")
     return AgentTurnResponse(
         status="answered",
         stage="answered",
