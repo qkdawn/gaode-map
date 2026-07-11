@@ -60,7 +60,25 @@ def _fallback_answer(question: str, target: ContextAskTarget, reason: str = "") 
     ]
     if reason:
         warnings.append(reason)
-    if is_analysis_sources_type(target.type):
+    if target.type == "capability_run":
+        run_payload = target.payload if isinstance(target.payload, dict) else {}
+        run_id = as_text(run_payload.get("run_id") or target.id) or "未标识运行"
+        version_kind = as_text(run_payload.get("version_kind"))
+        version_text = "不可变历史版本" if version_kind == "immutable_history" else "当前运行结果"
+        status = as_text(run_payload.get("status")) or "未记录"
+        stale_inputs = [as_text(item) for item in list(run_payload.get("stale_input_artifact_ids") or []) if as_text(item)]
+        stale_text = (
+            f"该版本的上游产物已更新（{'、'.join(stale_inputs)}），只能用于解释和审计，不能表述为当前最新结论。"
+            if stale_inputs
+            else "当前上下文没有记录上游失效项，但这不等于已重新核验底层数据。"
+        )
+        answer = (
+            f"围绕运行版本 `{run_id}`，本次解释锁定的是{version_text}，记录状态为 `{status}`。{summary}\n\n"
+            f"版本边界：{stale_text}\n\n"
+            f"证据边界：{evidence_text}{citation_text}。运行诊断、阶段状态和产物元数据只能说明该次执行过程，不能替代产物中的正式证据。\n\n"
+            f"针对“{as_text(question) or '当前问题'}”，应优先核对该 Run 关联的输出产物、evidence_refs 和诊断；如果需要得到当前结论，应回到能力工作台重算或明确选择最新成功版本。本次没有重新运行工具，也没有把其他版本结果混入回答。"
+        )
+    elif is_analysis_sources_type(target.type):
         answer = (
             f"围绕“{target.title or '已选分析来源'}”，当前只能基于已传入的来源摘要和证据节点做解释；{summary}\n\n"
             f"证据边界：当前上下文包含{evidence_text}{citation_text}。本次没有重新运行来源工具，也没有补充外部基准，因此不能把摘要中的指标直接扩展成新的空间结论。\n\n"
@@ -104,6 +122,13 @@ def _build_user_payload(payload: AgentContextAskRequest, scoped_dataset_context:
             "下一步分析类问题必须给出分析目的、使用来源、方法动作、预期产出和优先级。",
         ],
     }
+    if target.type == "capability_run":
+        user_payload["instructions"].extend([
+            "回答必须明确标识 target.payload.run_id，并锁定该运行版本，不得把其他版本或当前页面结果混入。",
+            "version_kind=immutable_history 时，只解释保存的不可变快照；若 stale_input_artifact_ids 非空，必须明确该结果不是当前最新结论。",
+            "diagnostics 和 stage 状态是执行审计信息，不得冒充结论证据；判断只能引用 evidence、artifact_refs 或 artifacts.evidence_refs。",
+            "用户要求当前结论或重算时，应建议返回能力工作台选择最新成功版本或重新执行，而不是自行改写历史结果。",
+        ])
     if _json_size(user_payload) > 60000:
         user_payload["analysis_snapshot_summary"] = {
             "context": compact_value(payload.analysis_snapshot.context, depth=1, list_limit=4, string_limit=200),

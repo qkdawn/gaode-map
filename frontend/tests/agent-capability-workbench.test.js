@@ -178,6 +178,67 @@ test('run detail failure exposes an explicit error and keeps current results int
   }
 })
 
+test('capability run context ask locks the selected immutable version and compacts artifacts', () => {
+  let opened = null
+  const detail = {
+    history_id: 'history-1',
+    run: {
+      run_id: 'run-history-1',
+      capability_id: 'urban-strategy-stage1',
+      status: 'stale',
+      current_stage: 'delivery',
+      stale_input_artifact_ids: ['poi-grid-v2'],
+      diagnostics: ['存在一项待复核代理指标'],
+      stage_records: [{ stage_id: 'delivery', title: '交付编译', status: 'completed', summary: '生成第一阶段报告' }],
+      input_artifact_refs: [{ artifact_id: 'poi-grid-v1', artifact_type: 'structured_data', title: 'POI 网格', version: 'v1' }],
+      output_artifact_refs: [{
+        artifact_id: 'stage1-report', artifact_type: 'report', title: '第一阶段报告', version: 'run-history-1',
+        evidence_refs: ['evidence-poi-1'], source_artifact_refs: ['poi-grid-v1'], content_digest: 'digest-123',
+      }],
+    },
+    artifacts: [{
+      direction: 'output',
+      artifact: {
+        artifact_id: 'stage1-report', artifact_type: 'report', title: '第一阶段报告', version: 'run-history-1',
+        evidence_refs: ['evidence-poi-1'], source_artifact_refs: ['poi-grid-v1'], content_digest: 'digest-123',
+      },
+      payload: { executive_summary: '这是历史版本的核心结论。'.repeat(40), decision: '优先补齐公共服务短板' },
+    }],
+  }
+  const ctx = createContext({
+    analysisCapabilities: [{ id: 'urban-strategy-stage1', display_name: '城市区域策划第一阶段' }],
+    selectedAnalysisCapabilityRunId: 'run-history-1',
+    selectedAnalysisCapabilityRunDetail: detail,
+    normalizeContextAskTarget: target => target,
+    openContextAsk: (target, options) => { opened = { target, options }; return target },
+  })
+
+  const target = ctx.buildCapabilityRunContextAskTarget(detail)
+  assert.equal(target.type, 'capability_run')
+  assert.equal(target.source, 'capability_run')
+  assert.equal(target.payload.run_id, 'run-history-1')
+  assert.equal(target.payload.version_kind, 'immutable_history')
+  assert.deepEqual(target.payload.stale_input_artifact_ids, ['poi-grid-v2'])
+  assert.equal(target.payload.artifacts[1].snapshot_state, 'immutable_payload')
+  assert.ok(target.payload.artifacts[1].payload_highlights.every(item => item.length < 220))
+  assert.equal(target.evidence[0].evidence_ref, 'evidence-poi-1')
+  assert.match(target.summary, /不得将该版本表述为当前最新结论/)
+
+  ctx.openCapabilityRunContextAsk(detail)
+  assert.equal(opened.target.payload.run_id, 'run-history-1')
+  assert.deepEqual(opened.options, { resetMessages: true })
+
+  ctx.agentPanelPayloads = {
+    capability_run: {
+      run_id: 'run-current', capability_id: 'urban-strategy-stage1', status: 'completed', current_stage: 'delivery',
+      input_artifact_refs: [], output_artifact_refs: [], stage_records: [], diagnostics: [],
+    },
+  }
+  const currentTarget = ctx.buildCapabilityRunContextAskTarget()
+  assert.equal(currentTarget.payload.run_id, 'run-current')
+  assert.equal(currentTarget.payload.version_kind, 'current_result')
+})
+
 test('run history labels stale inputs, stages, versions and timestamps', () => {
   const run = {
     run_id: 'run-1', status: 'stale', current_stage: 'delivery', created_at: '2026-07-12T08:30:00Z',
@@ -467,6 +528,10 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /上游输入已更新/)
   assert.match(main, /getAnalysisCapabilityRunChangedInputIds\(run\)/)
   assert.match(main, /返回当前结果/)
+  assert.match(main, /继续追问此版本/)
+  assert.match(main, /openCapabilityRunContextAsk\(getSelectedAnalysisCapabilityRunDetail\(\)\)/)
+  assert.match(main, /继续追问当前版本/)
+  assert.match(main, /openCapabilityRunContextAsk\(\)/)
   assert.match(main, /getSelectedAnalysisCapabilityRunArtifacts\(\)/)
   assert.match(main, /仅保存元数据/)
   assert.match(main, /getStage1EvidenceVerification\(\)/)

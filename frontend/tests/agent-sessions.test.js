@@ -398,6 +398,19 @@ test('context ask target normalization keeps a stable schema', () => {
   assert.equal(target.id, 'h3-1')
   assert.deepEqual(target.artifact_refs, ['artifact-1'])
   assert.equal(target.payload.rank, 1)
+
+  const runTarget = ctx.normalizeContextAskTarget({
+    type: 'capability_run',
+    id: 'run-1',
+    title: '第一阶段运行版本',
+    source: 'capability_run',
+    summary: '锁定不可变历史版本。',
+    artifact_refs: ['stage1-report'],
+    payload: { run_id: 'run-1', version_kind: 'immutable_history' },
+  })
+  assert.equal(runTarget.type, 'capability_run')
+  assert.equal(runTarget.source, 'capability_run')
+  assert.equal(ctx.getContextAskSourceLabel(runTarget.source), '能力运行版本')
 })
 
 test('openContextAsk does not mutate legacy chat state', () => {

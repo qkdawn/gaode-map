@@ -62,7 +62,10 @@
                                     <article v-else-if="getSelectedAnalysisCapabilityRunDetail()" class="agent-capability-run-snapshot" :class="getSelectedAnalysisCapabilityRunDetail().run.status">
                                         <header>
                                             <div><span>不可变历史快照</span><strong>{{ getAnalysisCapabilityRunStatusLabel(getSelectedAnalysisCapabilityRunDetail().run) }}</strong></div>
-                                            <code>{{ getSelectedAnalysisCapabilityRunDetail().run.run_id }}</code>
+                                            <div class="agent-capability-run-snapshot-actions">
+                                                <code>{{ getSelectedAnalysisCapabilityRunDetail().run.run_id }}</code>
+                                                <button type="button" @click="openCapabilityRunContextAsk(getSelectedAnalysisCapabilityRunDetail())">继续追问此版本</button>
+                                            </div>
                                         </header>
                                         <p v-if="getAnalysisCapabilityRunChangedInputIds(getSelectedAnalysisCapabilityRunDetail().run).length" class="agent-capability-run-stale-note">上游输入已更新：{{ getAnalysisCapabilityRunChangedInputIds(getSelectedAnalysisCapabilityRunDetail().run).join('、') }}。该结果保留用于审计，不代表当前最新结论。</p>
                                         <div v-if="getSelectedAnalysisCapabilityRunDetail().run.diagnostics.length" class="agent-capability-run-snapshot-diagnostics">
@@ -96,7 +99,10 @@
                             <div v-if="getCapabilityRun()" class="agent-capability-run-manifest" :class="getCapabilityRun().status">
                                 <div class="agent-capability-run-manifest-head">
                                     <div><span>Capability Run</span><strong>{{ getCapabilityRunStatusLabel() }}</strong></div>
-                                    <code>{{ getCapabilityRun().run_id }}</code>
+                                    <div class="agent-capability-run-manifest-actions">
+                                        <code>{{ getCapabilityRun().run_id }}</code>
+                                        <button type="button" @click="openCapabilityRunContextAsk()">继续追问当前版本</button>
+                                    </div>
                                 </div>
                                 <div class="agent-capability-run-manifest-meta">
                                     <span>当前阶段 <strong>{{ getCapabilityRunCurrentStageLabel() }}</strong></span>

@@ -18,6 +18,63 @@ const collectPayloadText = (value) => {
   return item ? [item] : []
 }
 
+const uniqueTextItems = (values, limit = 16) => {
+  const seen = new Set()
+  const items = []
+  for (const value of values || []) {
+    const item = text(value)
+    if (!item || seen.has(item)) continue
+    seen.add(item)
+    items.push(item)
+    if (items.length >= limit) break
+  }
+  return items
+}
+
+const collectPayloadHighlights = (value, limit = 5) => {
+  const highlights = []
+  const seen = new Set()
+  let visited = 0
+  const visit = (item, depth = 0, path = '') => {
+    if (highlights.length >= limit || visited >= 80 || depth > 4 || item == null) return
+    visited += 1
+    if (Array.isArray(item)) {
+      for (const child of item.slice(0, 8)) visit(child, depth + 1, path)
+      return
+    }
+    if (typeof item === 'object') {
+      for (const [key, child] of Object.entries(item).slice(0, 12)) {
+        visit(child, depth + 1, path ? `${path}.${key}` : key)
+        if (highlights.length >= limit) break
+      }
+      return
+    }
+    const scalar = text(item)
+    if (!scalar || scalar.length < 2) return
+    const normalized = scalar.length > 180 ? `${scalar.slice(0, 177)}...` : scalar
+    const label = path ? `${path}: ${normalized}` : normalized
+    if (seen.has(label)) return
+    seen.add(label)
+    highlights.push(label)
+  }
+  visit(value)
+  return highlights
+}
+
+const compactRunArtifact = (artifact, direction = '', snapshot = null) => ({
+  direction: text(direction || snapshot?.direction),
+  artifact_id: text(artifact?.artifact_id),
+  artifact_type: text(artifact?.artifact_type),
+  title: text(artifact?.title),
+  version: text(artifact?.version),
+  source_run_id: text(artifact?.source_run_id),
+  source_artifact_refs: uniqueTextItems(artifact?.source_artifact_refs, 8),
+  evidence_refs: uniqueTextItems(artifact?.evidence_refs, 8),
+  content_digest: text(artifact?.content_digest),
+  snapshot_state: snapshot ? (snapshot.payload === null ? 'metadata_only' : 'immutable_payload') : 'run_manifest',
+  payload_highlights: snapshot?.payload === null ? [] : collectPayloadHighlights(snapshot?.payload),
+})
+
 const CAPABILITY_PROMPTS = Object.freeze({
   'urban-strategy-stage1': '基于当前项目范围、资料和分析结果，执行城市更新第一阶段策划并生成可审计报告。',
   'spatial-programming-matrix': '基于当前项目证据，重点生成空间功能策划决策矩阵，并说明候选功能、排除理由和前置条件。',
@@ -181,6 +238,98 @@ export function createAgentCapabilityWorkbenchMethods() {
     },
     getAnalysisCapabilityRunChangedInputIds(run = null) {
       return Array.isArray(run?.stale_input_artifact_ids) ? run.stale_input_artifact_ids.map(text).filter(Boolean) : []
+    },
+    buildCapabilityRunContextAskTarget(detailSeed = null) {
+      const selectedDetail = detailSeed && typeof detailSeed === 'object' && detailSeed.run
+        ? clonePayloadValue(detailSeed)
+        : null
+      const run = selectedDetail?.run || this.getCapabilityRun()
+      if (!run || !text(run.run_id)) return null
+
+      const snapshots = Array.isArray(selectedDetail?.artifacts) ? selectedDetail.artifacts : []
+      const snapshotByArtifact = new Map()
+      for (const snapshot of snapshots) {
+        const artifactId = text(snapshot?.artifact?.artifact_id)
+        if (artifactId) snapshotByArtifact.set(`${text(snapshot?.direction)}:${artifactId}`, snapshot)
+      }
+      const artifactContexts = []
+      const seenArtifacts = new Set()
+      const appendArtifact = (artifact, direction, snapshot = null) => {
+        const artifactId = text(artifact?.artifact_id)
+        const key = `${direction}:${artifactId}`
+        if (!artifactId || seenArtifacts.has(key) || artifactContexts.length >= 16) return
+        seenArtifacts.add(key)
+        artifactContexts.push(compactRunArtifact(artifact, direction, snapshot))
+      }
+      for (const [direction, refs] of [
+        ['input', run.input_artifact_refs],
+        ['output', run.output_artifact_refs],
+      ]) {
+        for (const artifact of Array.isArray(refs) ? refs : []) {
+          appendArtifact(artifact, direction, snapshotByArtifact.get(`${direction}:${text(artifact?.artifact_id)}`) || null)
+        }
+      }
+      for (const snapshot of snapshots) appendArtifact(snapshot?.artifact, text(snapshot?.direction), snapshot)
+
+      const capability = (this.analysisCapabilities || []).find(item => text(item?.id) === text(run.capability_id))
+      const capabilityLabel = text(capability?.display_name || run.capability_id) || '分析能力'
+      const staleInputs = this.getAnalysisCapabilityRunChangedInputIds(run)
+      const diagnostics = uniqueTextItems(run.diagnostics, 6)
+      const outputTitles = artifactContexts.filter(item => item.direction === 'output').map(item => item.title || item.artifact_id)
+      const stages = (Array.isArray(run.stage_records) ? run.stage_records : []).slice(0, 10).map(stage => ({
+        stage_id: text(stage?.stage_id),
+        title: text(stage?.title),
+        status: text(stage?.status),
+        summary: text(stage?.summary).slice(0, 240),
+        diagnostics: uniqueTextItems(stage?.diagnostics, 4),
+      }))
+      const evidence = []
+      for (const artifact of artifactContexts) {
+        for (const evidenceRef of artifact.evidence_refs) {
+          evidence.push({ evidence_ref: evidenceRef, artifact_id: artifact.artifact_id })
+          if (evidence.length >= 12) break
+        }
+        if (evidence.length >= 12) break
+      }
+      const artifactRefs = uniqueTextItems(artifactContexts.map(item => item.artifact_id), 16)
+      const versionKind = selectedDetail ? 'immutable_history' : 'current_result'
+      const summaryParts = [
+        `${capabilityLabel} 运行 ${run.run_id} 的${selectedDetail ? '不可变历史快照' : '当前结果'}，状态为${this.getAnalysisCapabilityRunStatusLabel(run)}，当前阶段为${this.getAnalysisCapabilityRunCurrentStageLabel(run)}。`,
+      ]
+      if (outputTitles.length) summaryParts.push(`输出产物：${outputTitles.slice(0, 6).join('、')}。`)
+      if (staleInputs.length) summaryParts.push(`上游已更新：${staleInputs.join('、')}；回答时不得将该版本表述为当前最新结论。`)
+      if (diagnostics.length) summaryParts.push(`运行诊断：${diagnostics.slice(0, 3).join('；')}。`)
+
+      const target = {
+        type: 'capability_run',
+        id: text(run.run_id),
+        title: `${capabilityLabel} · ${run.run_id}`,
+        source: 'capability_run',
+        summary: summaryParts.join(' '),
+        evidence,
+        artifact_refs: artifactRefs,
+        payload: {
+          run_id: text(run.run_id),
+          capability_id: text(run.capability_id),
+          version_kind: versionKind,
+          status: text(run.status),
+          current_stage: text(run.current_stage),
+          created_at: text(run.created_at),
+          completed_at: text(run.completed_at),
+          stale_input_artifact_ids: staleInputs,
+          diagnostics,
+          stages,
+          artifacts: artifactContexts,
+        },
+      }
+      return typeof this.normalizeContextAskTarget === 'function'
+        ? this.normalizeContextAskTarget(target)
+        : target
+    },
+    openCapabilityRunContextAsk(detailSeed = null) {
+      const target = this.buildCapabilityRunContextAskTarget(detailSeed)
+      if (!target || typeof this.openContextAsk !== 'function') return null
+      return this.openContextAsk(target, { resetMessages: true })
     },
     isAnalysisCapabilityRunSelected(run = null) {
       return !!text(run?.run_id) && text(run.run_id) === text(this.selectedAnalysisCapabilityRunId)

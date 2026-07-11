@@ -10,8 +10,8 @@ export function createAgentContextAskUiMethods() {
   return {
     normalizeContextAskTarget(target = null) {
       const source = target && typeof target === 'object' ? target : {}
-      const allowedTypes = new Set(['report_section', 'trend_chart', 'trend_metric', 'site_candidate'])
-      const allowedSources = new Set(['report', 'iteration', 'site_selection'])
+      const allowedTypes = new Set(['report_section', 'trend_chart', 'trend_metric', 'site_candidate', 'capability_run'])
+      const allowedSources = new Set(['report', 'iteration', 'site_selection', 'capability_run'])
       const type = allowedTypes.has(asText(source.type)) ? asText(source.type) : 'report_section'
       const targetSource = allowedSources.has(asText(source.source)) ? asText(source.source) : 'report'
       const title = clampText(asText(source.title), 80) || '当前上下文'
@@ -37,6 +37,7 @@ export function createAgentContextAskUiMethods() {
         report: '区域报告',
         iteration: '多年变化',
         site_selection: '区域内选址',
+        capability_run: '能力运行版本',
       }
       return labels[asText(source)] || '当前分析'
     },

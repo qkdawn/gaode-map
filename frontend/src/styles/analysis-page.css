@@ -13680,7 +13680,11 @@ body.agent-ppt-source-menu-open {
 .agent-capability-run-snapshot > header > div { display: flex; flex-direction: column; gap: 2px; }
 .agent-capability-run-snapshot > header span { color: #64748b; font-size: 9px; }
 .agent-capability-run-snapshot > header strong { color: #334155; font-size: 11px; }
-.agent-capability-run-snapshot > header code { max-width: 54%; color: #64748b; font-size: 8px; text-align: right; overflow-wrap: anywhere; }
+.agent-capability-run-snapshot > header code { color: #64748b; font-size: 8px; text-align: right; overflow-wrap: anywhere; }
+.agent-capability-run-snapshot-actions, .agent-capability-run-manifest-actions { display: flex; min-width: 0; flex-direction: column; align-items: flex-end; gap: 5px; }
+.agent-capability-run-snapshot-actions { max-width: 58%; }
+.agent-capability-run-snapshot-actions button, .agent-capability-run-manifest-actions button { border: 1px solid #bfdbfe; border-radius: 4px; background: #eff6ff; color: #1d4ed8; padding: 4px 7px; font-size: 9px; font-weight: 700; cursor: pointer; }
+.agent-capability-run-snapshot-actions button:hover, .agent-capability-run-manifest-actions button:hover { border-color: #60a5fa; background: #dbeafe; }
 .agent-capability-run-stale-note { padding: 7px 8px; border-left: 2px solid #dc2626; background: #fff; color: #991b1b !important; font-size: 9px !important; line-height: 1.5 !important; }
 .agent-capability-run-snapshot-diagnostics { display: flex; flex-direction: column; gap: 4px; }
 .agent-capability-run-snapshot-diagnostics span { color: #64748b; font-size: 9px; line-height: 1.45; }
@@ -13711,6 +13715,7 @@ body.agent-ppt-source-menu-open {
 .agent-capability-run-manifest-head span { padding: 2px 5px; border-radius: 3px; background: #dbeafe; color: #1d4ed8; font-size: 9px; font-weight: 700; text-transform: uppercase; }
 .agent-capability-run-manifest-head strong { color: #334155; font-size: 11px; }
 .agent-capability-run-manifest-head code { color: #64748b; font-size: 9px; overflow-wrap: anywhere; }
+.agent-capability-run-manifest-actions code { max-width: 260px; text-align: right; }
 .agent-capability-run-manifest-meta { display: flex; flex-wrap: wrap; gap: 6px; }
 .agent-capability-run-manifest-meta span { padding: 3px 6px; border-radius: 4px; background: #fff; color: #64748b; font-size: 9px; }
 .agent-capability-run-manifest-meta strong { color: #334155; }
