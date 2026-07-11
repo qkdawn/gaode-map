@@ -38,10 +38,36 @@
                                 <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading" @click="runAnalysisCapability(getActiveAnalysisCapability())">运行能力</button>
                             </aside>
                         </div>
-                        <div v-if="getStage1QualityAudit()" class="agent-quality-strip" :class="getStage1QualityAudit().status">
-                            <strong>最近一次 Stage 1：{{ getStage1QualityAudit().status === 'passed' ? '质量审计通过' : '质量审计未通过' }}</strong>
-                            <span>{{ getStage1QualityAudit().score }} 分</span><span>{{ getStage1EvidenceCount() }} 条证据</span><span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
-                        </div>
+                        <section v-if="hasStage1Outcome()" class="agent-stage1-outcome">
+                            <header class="agent-stage1-outcome-head">
+                                <div><span class="agent-tools-eyebrow">Latest Stage 1</span><strong>最近一次策划质量诊断</strong></div>
+                                <div class="agent-stage1-outcome-stats">
+                                    <span v-if="getStage1QualityAudit()" :class="getStage1QualityAudit().status">质量 {{ getStage1QualityAudit().score }} 分</span>
+                                    <span>{{ getStage1EvidenceCount() }} 条证据</span>
+                                    <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
+                                </div>
+                            </header>
+                            <div v-if="getStage1EvidenceVerification()" class="agent-verification-summary" :class="getStage1EvidenceVerification().status">
+                                <div class="agent-verification-title">
+                                    <strong>{{ getStage1VerificationStatusLabel() }}</strong>
+                                    <span>截至 {{ getStage1EvidenceVerification().as_of_date }}</span>
+                                </div>
+                                <div class="agent-verification-counts">
+                                    <span v-for="item in getStage1VerificationStatusItems()" :key="item.key" :class="item.key">{{ item.label }} {{ item.count }}</span>
+                                </div>
+                                <div v-if="getStage1VerificationTasks().length" class="agent-verification-tasks">
+                                    <strong>尚待完成的核验任务</strong>
+                                    <article v-for="task in getStage1VerificationTasks()" :key="`${task.evidence_id}-${task.executor}`">
+                                        <div><span>{{ task.executor === 'fieldwork' ? '现场' : task.executor === 'agent' ? 'Agent' : '权威资料' }}</span><strong>{{ task.missing_input }}</strong></div>
+                                        <p>{{ task.blocking_reason }}</p><small>下一步：{{ task.next_action }}</small>
+                                    </article>
+                                </div>
+                            </div>
+                            <div v-if="getStage1QualityBlockingIssues().length" class="agent-quality-issues">
+                                <strong>交付前必须修复</strong>
+                                <div v-for="issue in getStage1QualityBlockingIssues()" :key="issue.code"><span>{{ issue.message }}</span><small v-if="issue.repair_hint">{{ issue.repair_hint }}</small></div>
+                            </div>
+                        </section>
                     </div>
                     <div v-else-if="agentWorkspaceView === 'tools'" class="agent-tools-workspace">
                         <div class="agent-tools-header">

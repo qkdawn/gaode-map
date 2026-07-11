@@ -109,6 +109,12 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1QualityAudit() {
       return (this.agentPanelPayloads || {}).stage1_quality_audit || null
     },
+    getStage1EvidenceVerification() {
+      return (this.agentPanelPayloads || {}).stage1_evidence_verification || null
+    },
+    hasStage1Outcome() {
+      return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification())
+    },
     getStage1EvidenceCount() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger
       return Array.isArray(ledger) ? ledger.length : 0
@@ -116,6 +122,39 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1SpaceDecisionCount() {
       const matrix = (this.agentPanelPayloads || {}).stage1_spatial_matrix || {}
       return Array.isArray(matrix.space_decisions) ? matrix.space_decisions.length : 0
+    },
+    getStage1VerificationStatusLabel() {
+      const verification = this.getStage1EvidenceVerification() || {}
+      const labels = {
+        passed: '证据门控通过',
+        passed_with_gaps: '证据门控通过，仍有缺口',
+        failed: '证据门控未通过',
+      }
+      return labels[verification.status] || '尚未执行证据门控'
+    },
+    getStage1VerificationStatusItems() {
+      const counts = (this.getStage1EvidenceVerification() || {}).status_counts || {}
+      const labels = {
+        verified: '已验证',
+        cross_checked: '已交叉核对',
+        inferred: '推断',
+        hypothesis: '假设',
+        blocked: '阻塞',
+        fieldwork_required: '需现场核验',
+      }
+      return Object.keys(labels)
+        .filter(key => Number(counts[key] || 0) > 0)
+        .map(key => ({ key, label: labels[key], count: Number(counts[key]) }))
+    },
+    getStage1VerificationTasks() {
+      const tasks = (this.getStage1EvidenceVerification() || {}).tasks
+      return Array.isArray(tasks) ? tasks.map(item => ({ ...item })) : []
+    },
+    getStage1QualityBlockingIssues() {
+      const issues = (this.getStage1QualityAudit() || {}).issues
+      return Array.isArray(issues)
+        ? issues.filter(item => item && item.severity === 'error').map(item => ({ ...item }))
+        : []
     },
   }
 }

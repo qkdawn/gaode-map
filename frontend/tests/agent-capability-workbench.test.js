@@ -125,15 +125,30 @@ test('PPT capability reuses the existing planning workbench', async () => {
   assert.equal(opened, 1)
 })
 
-test('Stage 1 quality accessors summarize immutable panel payloads', () => {
+test('Stage 1 quality accessors expose verification gaps without mutating payloads', () => {
+  const task = { evidence_id: 'e2', executor: 'fieldwork', missing_input: '消防核验', blocking_reason: '缺少现场资料', next_action: '现场踏勘' }
   const ctx = createContext({
     agentPanelPayloads: {
-      stage1_quality_audit: { passed: false, score: 63 },
+      stage1_quality_audit: { status: 'failed', score: 63, issues: [{ code: 'broken-ref', severity: 'error', message: '证据引用失效' }] },
+      stage1_evidence_verification: {
+        status: 'passed_with_gaps', as_of_date: '2026-07-12',
+        status_counts: { verified: 2, inferred: 1, fieldwork_required: 1 }, tasks: [task],
+      },
       stage1_evidence_ledger: [{ id: 'e1' }, { id: 'e2' }],
       stage1_spatial_matrix: { space_decisions: [{ id: 's1' }] },
     },
   })
-  assert.deepEqual(ctx.getStage1QualityAudit(), { passed: false, score: 63 })
+  assert.equal(ctx.hasStage1Outcome(), true)
+  assert.equal(ctx.getStage1VerificationStatusLabel(), '证据门控通过，仍有缺口')
+  assert.deepEqual(ctx.getStage1VerificationStatusItems(), [
+    { key: 'verified', label: '已验证', count: 2 },
+    { key: 'inferred', label: '推断', count: 1 },
+    { key: 'fieldwork_required', label: '需现场核验', count: 1 },
+  ])
+  const tasks = ctx.getStage1VerificationTasks()
+  tasks[0].missing_input = 'changed'
+  assert.equal(task.missing_input, '消防核验')
+  assert.equal(ctx.getStage1QualityBlockingIssues()[0].code, 'broken-ref')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
 })
@@ -147,6 +162,9 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getAnalysisCapabilityGroups\(\)/)
   assert.match(main, /inspectAnalysisCapability\(capability\)/)
   assert.match(main, /runAnalysisCapability\(getActiveAnalysisCapability\(\)\)/)
+  assert.match(main, /getStage1EvidenceVerification\(\)/)
+  assert.match(main, /尚待完成的核验任务/)
+  assert.match(main, /交付前必须修复/)
   assert.match(sidebar, /openAnalysisCapabilitiesPanel/)
   assert.match(sidebar, />分析能力</)
 })
