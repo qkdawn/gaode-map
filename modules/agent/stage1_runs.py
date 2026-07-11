@@ -149,6 +149,16 @@ def build_stage1_output_artifacts(
             ["stage1-evidence-ledger"],
             evidence_refs=evidence_ids,
         )
+    if "hard_constraint_screening" in package:
+        add(
+            "stage1-hard-constraint-screening",
+            "diagnostic_report",
+            "硬约束筛选",
+            "hard_constraint_screening.json",
+            package["hard_constraint_screening"],
+            ["stage1-evidence-ledger", "stage1-conflict-register"],
+            evidence_refs=evidence_ids,
+        )
     workpack_ids: list[str] = []
     for index, workpack in enumerate(package.get("workpacks") or []):
         if not isinstance(workpack, dict):
@@ -176,7 +186,12 @@ def build_stage1_output_artifacts(
             "定位方案与比较矩阵",
             "strategy_options.json",
             package["strategy"],
-            ["stage1-evidence-ledger", "stage1-conflict-register", *workpack_ids],
+            [
+                "stage1-evidence-ledger",
+                "stage1-conflict-register",
+                "stage1-hard-constraint-screening",
+                *workpack_ids,
+            ],
             evidence_refs=evidence_ids,
         )
     if "spatial_matrix" in package:

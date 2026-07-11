@@ -156,6 +156,7 @@
                                     <span>{{ getStage1EvidenceCount() }} 条证据</span>
                                     <span v-if="getStage1DataQuality()" :class="getStage1DataQuality().status">{{ getStage1DataQualityStatusLabel() }}</span>
                                     <span v-if="getStage1ConflictRegister().length" :class="{ failed: getStage1UnresolvedConflictCount() > 0 }">{{ getStage1UnresolvedConflictCount() }} 项待裁决冲突</span>
+                                    <span v-if="getStage1HardConstraintScreening()" :class="getStage1HardConstraintScreening().status">{{ getStage1HardConstraintStatusLabel() }}</span>
                                     <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
                                 </div>
                             </header>
@@ -186,6 +187,23 @@
                                     <article v-for="(item, index) in getStage1QualityGate().blocking_items" :key="`${item.source}-${index}`">
                                         <span>{{ item.source }}</span>
                                         <div><strong>{{ item.message }}</strong><small v-if="item.repair_hint">修复：{{ item.repair_hint }}</small></div>
+                                    </article>
+                                </div>
+                            </div>
+                            <div v-if="getStage1HardConstraintScreening()" class="agent-hard-constraint-screening" :class="getStage1HardConstraintScreening().status">
+                                <div class="agent-hard-constraint-head">
+                                    <div><strong>硬约束筛选</strong><span>{{ getStage1HardConstraintStatusLabel() }}</span></div>
+                                    <small>产权、消防、结构、排污、停车装卸、无障碍与居民噪声必须先于方案锁定</small>
+                                </div>
+                                <div class="agent-hard-constraint-grid">
+                                    <article v-for="assessment in getStage1HardConstraintAssessments()" :key="assessment.constraint_id" :class="[assessment.state, assessment.decision_effect]">
+                                        <div>
+                                            <strong>{{ assessment.label }}</strong>
+                                            <span>{{ getStage1HardConstraintStateLabel(assessment) }}</span>
+                                        </div>
+                                        <p>{{ assessment.finding }}</p>
+                                        <small>{{ getStage1HardConstraintEffectLabel(assessment) }}<template v-if="assessment.scope"> · {{ assessment.scope }}</template></small>
+                                        <small v-if="assessment.verification_action">核验：{{ assessment.verification_action }}</small>
                                     </article>
                                 </div>
                             </div>

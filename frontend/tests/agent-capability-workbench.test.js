@@ -396,6 +396,16 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         coordinate_systems: ['EPSG:4490'], stale_evidence_ids: [],
         issues: [{ code: 'sample_diagnostics_missing', dimension: 'sample', severity: 'warning', evidence_id: 'e2', message: '缺少样本诊断', repair_hint: '补充分析产物元数据' }],
       },
+      stage1_hard_constraint_screening: {
+        status: 'conditional',
+        status_counts: { verified: 1, unknown: 1 },
+        required_constraint_ids: ['ownership', 'fire_safety'],
+        assessments: [
+          { constraint_id: 'ownership', label: '产权与使用权', state: 'verified', decision_effect: 'allow', scope: '项目范围', finding: '统一运营授权已核验', evidence_refs: ['e1'], verification_action: '' },
+          { constraint_id: 'fire_safety', label: '消防与疏散', state: 'unknown', decision_effect: 'condition', scope: '礼堂', finding: '尚缺消防检测', evidence_refs: [], verification_action: '完成消防专项检测', executor: 'manual_authority' },
+        ],
+        pending_actions: [{ constraint_id: 'fire_safety', label: '消防与疏散', action: '完成消防专项检测', executor: 'manual_authority' }],
+      },
       stage1_conflict_register: [
         { metric_key: 'households', label: '居民户数', values: ['102户', '120户'], evidence_ids: ['node-1', 'node-2'], unresolved: true, explanation: '同级项目摘要口径冲突' },
         { metric_key: 'area', label: '项目面积', values: ['2.4公顷', '2.5公顷'], evidence_ids: ['node-3'], unresolved: false, explanation: '采用项目摘要口径' },
@@ -477,10 +487,10 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   const qualityGate = ctx.getStage1QualityGate()
   assert.equal(qualityGate.status, 'blocked')
   assert.equal(qualityGate.label, '质量门已阻断')
-  assert.equal(qualityGate.checks.length, 6)
+  assert.equal(qualityGate.checks.length, 7)
   assert.equal(qualityGate.blocking_items.length, 2)
-  assert.deepEqual(qualityGate.task_counts, { agent: 0, manual_authority: 0, fieldwork: 1 })
-  assert.equal(qualityGate.task_total, 1)
+  assert.deepEqual(qualityGate.task_counts, { agent: 0, manual_authority: 1, fieldwork: 1 })
+  assert.equal(qualityGate.task_total, 2)
   qualityGate.blocking_items[0].message = 'changed'
   assert.equal(ctx.getStage1QualityGate().blocking_items[0].message, '证据引用失效')
   assert.equal(ctx.getStage1QualityBlockingIssues()[0].code, 'broken-ref')
@@ -517,6 +527,13 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   qualityIssues[0].message = 'changed'
   assert.equal(ctx.getStage1DataQualityIssues()[0].message, '缺少样本诊断')
   assert.equal(ctx.getStage1DataQualityCoordinateText(), 'EPSG:4490')
+  assert.equal(ctx.getStage1HardConstraintStatusLabel(), '硬约束待核验')
+  const hardConstraints = ctx.getStage1HardConstraintAssessments()
+  hardConstraints[0].finding = 'changed'
+  assert.equal(ctx.getStage1HardConstraintAssessments()[0].finding, '统一运营授权已核验')
+  assert.equal(ctx.getStage1HardConstraintStateLabel(hardConstraints[1]), '待核验')
+  assert.equal(ctx.getStage1HardConstraintEffectLabel(hardConstraints[1]), '作为前置条件')
+  assert.equal(ctx.getStage1HardConstraintPendingActions()[0].executor, 'manual_authority')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
   const matrix = ctx.getStage1SpatialMatrix()
@@ -549,6 +566,7 @@ test('Stage 1 quality gate distinguishes ready and conditional delivery', () => 
       stage1_evidence_verification: { status: 'passed', report_allowed: true, status_counts: { verified: 3 }, blocking_reasons: [], tasks: [] },
       stage1_provenance_binding: { status: 'passed', assessed_count: 3, status_counts: { verified: 3 }, issues: [] },
       stage1_data_quality: { status: 'passed', assessed_count: 3, issues: [] },
+      stage1_hard_constraint_screening: { status: 'clear', assessments: [{ constraint_id: 'ownership', state: 'verified' }], pending_actions: [] },
       stage1_deliverables: { status: 'ready', artifacts },
     },
   })
@@ -613,6 +631,9 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /仅保存元数据/)
   assert.match(main, /getStage1QualityGate\(\)/)
   assert.match(main, /Stage 1 Quality Gate/)
+  assert.match(main, /硬约束筛选/)
+  assert.match(main, /getStage1HardConstraintAssessments\(\)/)
+  assert.match(main, /getStage1HardConstraintEffectLabel\(assessment\)/)
   assert.match(main, /交付前必须修复/)
   assert.match(main, /待核验责任/)
   assert.match(main, /getStage1EvidenceVerification\(\)/)

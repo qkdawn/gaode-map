@@ -3,6 +3,7 @@ from datetime import date
 
 from modules.agent.quality_audit import audit_stage1_package
 from modules.agent.stage1_data_quality import assess_stage1_data_quality
+from modules.agent.stage1_hard_constraints import build_hard_constraint_screening
 from modules.agent.stage1_provenance import (
     EvidenceProvenanceBinding,
     assess_provenance_bindings,
@@ -44,6 +45,14 @@ def complete_package():
                     "evidence_refs": ["evidence-1"],
                     "counter_evidence": ["夜间开放边界待核实"],
                     "invalidation_conditions": ["居民协商无法达成"],
+                    "recommendation_status": "conditional",
+                    "hard_constraint_refs": [
+                        "ownership", "fire_safety", "structural_condition",
+                        "drainage_sewage", "parking_loading", "accessibility",
+                        "resident_noise",
+                    ],
+                    "preconditions": ["完成硬约束核验"],
+                    "validation_actions": ["执行硬约束筛选中的待办任务"],
                 }
                 for option_id in ("option-a", "option-b", "option-c")
             ],
@@ -76,6 +85,11 @@ def complete_package():
                     "preconditions": ["完成消防评估"],
                     "validation_actions": ["开展消防与结构核验"],
                     "evidence_refs": ["evidence-1"],
+                    "hard_constraint_refs": [
+                        "ownership", "fire_safety", "structural_condition",
+                        "drainage_sewage", "parking_loading", "accessibility",
+                        "resident_noise",
+                    ],
                     "recommendation_status": "conditional",
                     "confidence": "medium",
                 }
@@ -83,6 +97,9 @@ def complete_package():
             "portfolio_checks": ["公共服务与经营功能保持平衡"],
         },
     }
+    package["hard_constraint_screening"] = build_hard_constraint_screening(
+        {}, evidence_ids={"evidence-1"}
+    ).model_dump(mode="json")
     package["data_quality"] = assess_stage1_data_quality(
         package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
     ).model_dump(mode="json")
@@ -386,3 +403,49 @@ def test_data_quality_treats_unknown_critical_source_locator_as_blocking():
         "source_date_missing",
         "source_locator_missing",
     }
+
+
+def test_hard_constraint_screening_must_cover_all_required_categories():
+    package = complete_package()
+    package["hard_constraint_screening"]["assessments"] = package["hard_constraint_screening"]["assessments"][:-1]
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "hard_constraint_screening_invalid" in {item.code for item in result.blocking_issues}
+
+
+def test_unknown_constraints_require_conditional_recommendations_and_refs():
+    package = complete_package()
+    package["strategy"]["options"][0]["recommendation_status"] = "strong"
+    package["spatial_matrix"]["space_decisions"][0]["hard_constraint_refs"] = ["fire_safety"]
+
+    result = audit_stage1_package(package)
+
+    issue = next(item for item in result.blocking_issues if item.code == "hard_constraint_application_invalid")
+    assert "未逐项响应硬约束" in issue.message
+    assert "未降级" in issue.message
+
+
+def test_excluded_hard_constraint_blocks_delivery():
+    package = complete_package()
+    package["hard_constraint_screening"] = build_hard_constraint_screening(
+        {
+            "assessments": [
+                {
+                    "constraint_id": "fire_safety",
+                    "state": "constrained",
+                    "decision_effect": "exclude",
+                    "finding": "现状疏散能力不允许当前活动容量。",
+                    "evidence_refs": ["evidence-1"],
+                    "verification_action": "调整容量并重新开展消防论证。",
+                }
+            ]
+        },
+        evidence_ids={"evidence-1"},
+    ).model_dump(mode="json")
+
+    result = audit_stage1_package(package)
+
+    issue = next(item for item in result.blocking_issues if item.code == "hard_constraint_application_invalid")
+    assert "不可交付" in issue.message

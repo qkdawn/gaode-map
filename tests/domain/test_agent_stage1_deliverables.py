@@ -4,10 +4,11 @@ from modules.agent.stage1_deliverables import (
     build_evidence_appendix,
     compile_stage1_deliverables,
 )
+from modules.agent.stage1_hard_constraints import build_hard_constraint_screening
 
 
 def package():
-    return {
+    payload = {
         "evidence_ledger": [
             {
                 "id": "evidence-1",
@@ -75,6 +76,11 @@ def package():
                     "assumptions": ["社区组织愿意参与"],
                     "validation_actions": ["访谈社区组织"],
                     "evidence_refs": ["evidence-1"],
+                    "hard_constraint_refs": [
+                        "ownership", "fire_safety", "structural_condition",
+                        "drainage_sewage", "parking_loading", "accessibility",
+                        "resident_noise",
+                    ],
                     "recommendation_status": "conditional",
                     "confidence": "medium",
                 }
@@ -82,6 +88,10 @@ def package():
             "portfolio_checks": ["公共服务与经营功能平衡"],
         },
     }
+    payload["hard_constraint_screening"] = build_hard_constraint_screening(
+        {}, evidence_ids={"evidence-1", "fieldwork-1"}
+    ).model_dump(mode="json")
+    return payload
 
 
 def run_manifest():
@@ -107,9 +117,12 @@ def test_design_handoff_reuses_strategy_matrix_and_evidence_ids():
     assert handoff.positioning_option["name"] == "社区文化客厅"
     assert handoff.space_requirements[0].evidence_refs == ["evidence-1"]
     assert handoff.evidence_ledger_ids == ["evidence-1", "fieldwork-1"]
+    assert handoff.hard_constraint_screening["status"] == "conditional"
+    assert handoff.space_requirements[0].hard_constraint_refs[0] == "ownership"
     assert {item["type"] for item in handoff.unresolved_constraints} == {
         "evidence_conflict",
         "fieldwork_required",
+        "hard_constraint",
     }
 
 
@@ -119,6 +132,8 @@ def test_evidence_appendix_preserves_locator_conflict_and_quality_status():
     assert "项目摘要 p.12" in appendix
     assert "pageindex:node-12:p.12" in appendix
     assert "居民户数" in appendix
+    assert "硬约束筛选" in appendix
+    assert "产权与使用权" in appendix
     assert "passed_with_gaps" in appendix
     assert "真实资产绑定状态：passed" in appendix
 

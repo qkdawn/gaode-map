@@ -16,6 +16,7 @@ from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
 from ..quality_audit import QualityAuditResult, audit_stage1_package
 from ..stage1_contracts import VerificationSummary
 from ..stage1_data_quality import assess_stage1_data_quality
+from ..stage1_hard_constraints import build_hard_constraint_screening
 from ..stage1_provenance import (
     Stage1ProvenanceSummary,
     assess_provenance_bindings,
@@ -216,7 +217,9 @@ def _audit_payload(audit: QualityAuditResult) -> dict[str, Any]:
 
 
 def _critical_evidence_ids(
-    strategy: dict[str, Any], spatial_matrix: dict[str, Any]
+    strategy: dict[str, Any],
+    spatial_matrix: dict[str, Any],
+    hard_constraint_screening: dict[str, Any],
 ) -> set[str]:
     recommended_id = str(strategy.get("recommended_option_id") or "").strip()
     critical: set[str] = set()
@@ -241,6 +244,14 @@ def _critical_evidence_ids(
             for item in decision.get("evidence_refs") or []
             if str(item).strip()
         )
+    for assessment in hard_constraint_screening.get("assessments") or []:
+        if not isinstance(assessment, dict):
+            continue
+        critical.update(
+            str(item).strip()
+            for item in assessment.get("evidence_refs") or []
+            if str(item).strip()
+        )
     return critical
 
 
@@ -260,6 +271,7 @@ def _base_panels(
         "stage1_provenance_binding": provenance.model_dump(mode="json"),
         "stage1_evidence_verification": verification.model_dump(mode="json"),
         "stage1_workpacks": package["workpacks"],
+        "stage1_hard_constraint_screening": package["hard_constraint_screening"],
         "stage1_strategy": package["strategy"],
         "stage1_spatial_matrix": package["spatial_matrix"],
         "stage1_quality_audit": _audit_payload(audit),
@@ -525,14 +537,20 @@ async def execute(
     await _emit_phase(
         emit,
         phase_id="stage1-workpacks",
-        title="形成四类专业工作包",
-        detail="区域结构、人群需求、文化文旅、存量更新与运营共享同一证据底座。",
+        title="形成专业工作包与硬约束筛选",
+        detail="四类专业研判与产权、消防、结构、排污等硬约束共享同一证据底座。",
     )
     workpack_result = await client.chat_json(
         system_prompt=(
-            "你是城市策划证据分析负责人。只输出 JSON：workpacks 数组，必须且仅覆盖 spatial、audience、"
-            "culture_tourism、renewal_operations。每项包含 type、findings、evidence_refs、counter_evidence、"
-            "uncertainties、validation_actions。引用证据 ID，不得引入台账之外的事实。"
+            "你是城市策划证据分析负责人。只输出 JSON：workpacks、hard_constraint_screening。"
+            "workpacks 必须且仅覆盖 spatial、audience、culture_tourism、renewal_operations；每项包含 "
+            "type、findings、evidence_refs、counter_evidence、uncertainties、validation_actions。"
+            "hard_constraint_screening.assessments 必须逐项覆盖 ownership、fire_safety、structural_condition、"
+            "drainage_sewage、parking_loading、accessibility、resident_noise；每项包含 constraint_id、state"
+            "(verified/constrained/unknown/not_applicable)、decision_effect(allow/condition/exclude)、scope、finding、"
+            "evidence_refs、affected_space_ids、verification_action、executor(agent/manual_authority/fieldwork)。"
+            "没有证据时必须标记 unknown 并给出核验动作；不得推测产权、消防、结构或工程条件。"
+            "所有引用只能使用证据台账 ID，不得引入台账之外的事实。"
         ),
         user_payload={"question": question, "evidence_ledger": evidence_ledger},
         emit=emit,
@@ -541,10 +559,22 @@ async def execute(
         reasoning_id="stage1-workpacks-model",
     )
     workpacks = _list_from(workpack_result, "workpacks")
+    evidence_ids = {
+        str(item.get("id") or "").strip()
+        for item in evidence_ledger
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    hard_constraint_screening = build_hard_constraint_screening(
+        _mapping(workpack_result).get("hard_constraint_screening"),
+        evidence_ids=evidence_ids,
+    ).model_dump(mode="json")
     run.record_stage(
         "expert-workpacks",
-        "形成专业工作包",
-        summary=f"生成 {len(workpacks)} 个共享证据底座的专业工作包。",
+        "形成专业工作包与硬约束筛选",
+        summary=(
+            f"生成 {len(workpacks)} 个专业工作包；"
+            f"硬约束状态为 {hard_constraint_screening['status']}。"
+        ),
     )
 
     await _emit_phase(
@@ -558,14 +588,17 @@ async def execute(
             "你是城市更新决策顾问。只输出 JSON，含 options(至少3个)、recommended_option_id、decision_matrix、"
             "rejection_reasons。每个 option 必须含稳定 id、name、proposition、differentiation、feasibility、"
             "operating_sustainability、evidence_refs、counter_evidence、invalidation_conditions、risks。"
-            "不得用文案包装替代方案竞争。首选方案必须至少引用一条 verified 或 cross_checked 证据，"
-            "不得把未解决冲突作为唯一支撑。"
+            "不得用文案包装替代方案竞争。每个 option 还必须含 recommendation_status、hard_constraint_refs、"
+            "preconditions、validation_actions，并逐项响应硬约束筛选。首选方案必须至少引用一条 verified 或 "
+            "cross_checked 证据，不得把未解决冲突作为唯一支撑。硬约束状态为 conditional 时首选不得标记 strong；"
+            "decision_effect=exclude 的约束未解决前不得推荐受影响方案。"
         ),
         user_payload={
             "question": question,
             "evidence_ledger": evidence_ledger,
             "conflict_register": conflict_register,
             "workpacks": workpacks,
+            "hard_constraint_screening": hard_constraint_screening,
         },
         emit=emit,
         phase="executing",
@@ -594,8 +627,9 @@ async def execute(
             "spatial_hierarchy、space_decisions、portfolio_checks。spatial_hierarchy 必须含 system/cluster/unit。"
             "每个 space_decision 必须含 space_id、current_state、change_logic、candidate_functions(至少2项)、"
             "preferred_function、excluded_functions、audience_scenarios、access_and_movement、operation_strategy、"
-            "renovation_and_delivery、preconditions、evidence_refs、assumptions、validation_actions、"
+            "renovation_and_delivery、preconditions、evidence_refs、hard_constraint_refs、assumptions、validation_actions、"
             "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)。"
+            "每个空间决策必须引用全部适用的 hard_constraint_refs，并根据硬约束写入前置条件、排除项和验证动作。"
             "空间建议必须说明前置条件，不得虚构产权、结构或消防结论。"
             "strong 建议不得依赖未解决冲突证据；存在冲突时应降级为 conditional 并写明前置条件。"
         ),
@@ -605,6 +639,7 @@ async def execute(
             "conflict_register": conflict_register,
             "workpacks": workpacks,
             "strategy": strategy,
+            "hard_constraint_screening": hard_constraint_screening,
         },
         emit=emit,
         phase="executing",
@@ -619,7 +654,9 @@ async def execute(
             f"形成 {len(spatial_matrix.get('space_decisions') or [])} 个空间决策。"
         ),
     )
-    critical_evidence_ids = _critical_evidence_ids(strategy, spatial_matrix)
+    critical_evidence_ids = _critical_evidence_ids(
+        strategy, spatial_matrix, hard_constraint_screening
+    )
     provenance = assess_provenance_bindings(
         provenance_bindings,
         critical_evidence_ids=critical_evidence_ids,
@@ -666,6 +703,7 @@ async def execute(
         "data_quality": data_quality.model_dump(mode="json"),
         "provenance_binding": provenance.model_dump(mode="json"),
         "workpacks": workpacks,
+        "hard_constraint_screening": hard_constraint_screening,
         "strategy": strategy,
         "spatial_matrix": spatial_matrix,
     }
@@ -735,7 +773,8 @@ async def execute(
             "报告必须含总判断、证据边界、定位方案比较、推荐定位、客群场景、功能组合、空间策略、"
             "运营治理、分期、风险、验证计划和设计任务书。仅使用已审计包；必须分列已验证、推断、假设、"
             "阻塞与现场核验事项；必须披露 data_quality 中的时效、样本、坐标与来源定位缺口；"
-            "inferred/hypothesis 不得写成事实，blocked/fieldwork_required 不得写成既定条件。"
+            "inferred/hypothesis 不得写成事实，blocked/fieldwork_required 不得写成既定条件；必须单列硬约束筛选，"
+            "不得把 unknown 或 constrained 写成已经满足。"
         ),
         user_payload={
             "question": question,

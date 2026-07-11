@@ -13796,6 +13796,24 @@ body.agent-ppt-source-menu-open {
 .agent-stage1-quality-blockers article > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .agent-stage1-quality-blockers article strong { color: #7f1d1d; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .agent-stage1-quality-blockers article small { color: #64748b; font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
+.agent-hard-constraint-screening { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-left: 3px solid #16a34a; background: #f8fcf9; }
+.agent-hard-constraint-screening.conditional { border-left-color: #d97706; background: #fffdf7; }
+.agent-hard-constraint-screening.blocked { border-left-color: #dc2626; background: #fff8f8; }
+.agent-hard-constraint-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.agent-hard-constraint-head > div { display: flex; flex-direction: column; gap: 2px; }
+.agent-hard-constraint-head strong { color: #334155; font-size: 12px; }
+.agent-hard-constraint-head span, .agent-hard-constraint-head small { color: #64748b; font-size: 9px; line-height: 1.4; }
+.agent-hard-constraint-screening.conditional .agent-hard-constraint-head span { color: #92400e; }
+.agent-hard-constraint-screening.blocked .agent-hard-constraint-head span { color: #991b1b; }
+.agent-hard-constraint-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.agent-hard-constraint-grid article { display: flex; min-width: 0; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid #dbe3ec; border-radius: 5px; background: #fff; }
+.agent-hard-constraint-grid article > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.agent-hard-constraint-grid article strong { color: #334155; font-size: 10px; }
+.agent-hard-constraint-grid article span { flex: 0 0 auto; padding: 1px 4px; border-radius: 3px; background: #ecfdf3; color: #087443; font-size: 8px; font-weight: 700; }
+.agent-hard-constraint-grid article.unknown span, .agent-hard-constraint-grid article.constrained span { background: #fef3c7; color: #92400e; }
+.agent-hard-constraint-grid article.exclude span { background: #fee2e2; color: #991b1b; }
+.agent-hard-constraint-grid article p { margin: 0; color: #475569; font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; }
+.agent-hard-constraint-grid article small { color: #64748b; font-size: 8px; line-height: 1.4; overflow-wrap: anywhere; }
 .agent-verification-summary { padding: 14px 16px; border-left: 3px solid #16a34a; }
 .agent-verification-summary.passed_with_gaps { border-left-color: #d97706; background: #fffdf7; }
 .agent-verification-summary.failed { border-left-color: #dc2626; background: #fff8f8; }
@@ -13887,7 +13905,7 @@ body.agent-ppt-source-menu-open {
     .agent-capability-groups { overflow: visible; }
     .agent-capability-detail { border-left: 0; border-top: 1px solid #e2e8f0; }
 }
-@media (max-width: 600px) { .agent-capability-grid, .agent-stage1-artifact-grid, .agent-space-decision-body, .agent-capability-run-stage-grid, .agent-stage1-quality-checks { grid-template-columns: 1fr; } .agent-space-decision summary, .agent-capability-run-artifacts article { grid-template-columns: auto minmax(0, 1fr); } .agent-space-decision summary > span, .agent-capability-run-artifacts article > small { grid-column: 1 / -1; } }
+@media (max-width: 600px) { .agent-capability-grid, .agent-stage1-artifact-grid, .agent-space-decision-body, .agent-capability-run-stage-grid, .agent-stage1-quality-checks, .agent-hard-constraint-grid { grid-template-columns: 1fr; } .agent-space-decision summary, .agent-capability-run-artifacts article { grid-template-columns: auto minmax(0, 1fr); } .agent-space-decision summary > span, .agent-capability-run-artifacts article > small { grid-column: 1 / -1; } }
 .agent-provenance-binding { display: flex; flex-direction: column; gap: 9px; padding: 13px 16px; border-top: 1px solid #dbe3ec; background: #f8fafc; }
 .agent-provenance-binding.failed { border-top-color: #fecaca; background: #fff8f8; }
 .agent-provenance-binding.passed_with_gaps { border-top-color: #fde68a; background: #fffdf7; }

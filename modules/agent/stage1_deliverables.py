@@ -34,6 +34,7 @@ class DesignSpaceRequirement(BaseModel):
     assumptions: list[Any] = Field(default_factory=list)
     validation_actions: list[Any] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
+    hard_constraint_refs: list[str] = Field(default_factory=list)
     recommendation_status: str = ""
     confidence: str = ""
 
@@ -48,6 +49,7 @@ class DesignHandoffContract(BaseModel):
     spatial_hierarchy: list[dict[str, Any]] = Field(default_factory=list)
     space_requirements: list[DesignSpaceRequirement] = Field(default_factory=list)
     portfolio_requirements: list[Any] = Field(default_factory=list)
+    hard_constraint_screening: dict[str, Any] = Field(default_factory=dict)
     unresolved_constraints: list[dict[str, Any]] = Field(default_factory=list)
     evidence_ledger_ids: list[str] = Field(default_factory=list)
 
@@ -98,6 +100,29 @@ def _selected_option(strategy: dict[str, Any]) -> dict[str, Any]:
 
 def _unresolved_constraints(package: dict[str, Any]) -> list[dict[str, Any]]:
     constraints: list[dict[str, Any]] = []
+    screening = _mapping(package.get("hard_constraint_screening"))
+    for assessment in _list(screening.get("assessments")):
+        node = _mapping(assessment)
+        if node.get("state") not in {"unknown", "constrained"} and node.get("decision_effect") != "exclude":
+            continue
+        constraints.append(
+            {
+                "type": "hard_constraint",
+                "id": _text(node.get("constraint_id")),
+                "label": _text(node.get("label")),
+                "state": _text(node.get("state")),
+                "decision_effect": _text(node.get("decision_effect")),
+                "description": _text(node.get("finding")),
+                "evidence_refs": [
+                    _text(item) for item in _list(node.get("evidence_refs")) if _text(item)
+                ],
+                "affected_space_ids": [
+                    _text(item) for item in _list(node.get("affected_space_ids")) if _text(item)
+                ],
+                "next_action": _text(node.get("verification_action")),
+                "executor": _text(node.get("executor")),
+            }
+        )
     for conflict in _list(package.get("conflict_register")):
         node = _mapping(conflict)
         if node.get("unresolved") is False:
@@ -159,6 +184,11 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
                     for item in _list(node.get("evidence_refs"))
                     if _text(item)
                 ],
+                hard_constraint_refs=[
+                    _text(item)
+                    for item in _list(node.get("hard_constraint_refs"))
+                    if _text(item)
+                ],
                 recommendation_status=_text(node.get("recommendation_status")),
                 confidence=_text(node.get("confidence")),
             )
@@ -177,6 +207,7 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
         ],
         space_requirements=requirements,
         portfolio_requirements=_list(matrix.get("portfolio_checks")),
+        hard_constraint_screening=_mapping(package.get("hard_constraint_screening")),
         unresolved_constraints=_unresolved_constraints(package),
         evidence_ledger_ids=evidence_ids,
     )
@@ -227,6 +258,17 @@ def build_evidence_appendix(package: dict[str, Any]) -> str:
             )
     else:
         lines.append("- 本轮未登记来源冲突。")
+    lines.extend(["", "## 硬约束筛选", ""])
+    screening = _mapping(package.get("hard_constraint_screening"))
+    lines.append(f"- 筛选状态：{_text(screening.get('status')) or 'unknown'}。")
+    for assessment in _list(screening.get("assessments")):
+        node = _mapping(assessment)
+        lines.append(
+            f"- **{_text(node.get('label')) or _text(node.get('constraint_id'))}**："
+            f"{_text(node.get('state'))}/{_text(node.get('decision_effect'))}；"
+            f"{_text(node.get('finding')) or '未提供判断'}"
+            + (f"；下一步：{_text(node.get('verification_action'))}" if _text(node.get('verification_action')) else "")
+        )
     lines.extend(["", "## 数据质量与真实资产绑定", ""])
     data_quality = _mapping(package.get("data_quality"))
     provenance = _mapping(package.get("provenance_binding"))

@@ -87,6 +87,37 @@ def valid_evidence():
     }
 
 
+def hard_constraint_ids():
+    return [
+        "ownership",
+        "fire_safety",
+        "structural_condition",
+        "drainage_sewage",
+        "parking_loading",
+        "accessibility",
+        "resident_noise",
+    ]
+
+
+def valid_hard_constraint_screening():
+    return {
+        "assessments": [
+            {
+                "constraint_id": constraint_id,
+                "state": "unknown",
+                "decision_effect": "condition",
+                "scope": "项目范围",
+                "finding": f"{constraint_id} 尚待专项核验",
+                "evidence_refs": [],
+                "affected_space_ids": ["unit-1"],
+                "verification_action": f"完成 {constraint_id} 专项核验",
+                "executor": "fieldwork",
+            }
+            for constraint_id in hard_constraint_ids()
+        ]
+    }
+
+
 def valid_workpacks():
     return {
         "workpacks": [
@@ -94,7 +125,8 @@ def valid_workpacks():
             {"type": "audience", "evidence_refs": ["evidence-1"]},
             {"type": "culture_tourism", "evidence_refs": ["evidence-1"]},
             {"type": "renewal_operations", "evidence_refs": ["evidence-1"]},
-        ]
+        ],
+        "hard_constraint_screening": valid_hard_constraint_screening(),
     }
 
 
@@ -107,6 +139,10 @@ def valid_strategy():
                 "evidence_refs": ["evidence-1"],
                 "counter_evidence": ["夜间开放边界待核实"],
                 "invalidation_conditions": ["居民协商无法达成"],
+                "recommendation_status": "conditional",
+                "hard_constraint_refs": hard_constraint_ids(),
+                "preconditions": ["完成硬约束核验"],
+                "validation_actions": ["执行硬约束筛选任务"],
             }
             for option_id in ("option-a", "option-b", "option-c")
         ],
@@ -137,6 +173,7 @@ def valid_matrix():
                 "preconditions": ["完成消防评估"],
                 "validation_actions": ["开展消防与结构核验"],
                 "evidence_refs": ["evidence-1"],
+                "hard_constraint_refs": hard_constraint_ids(),
                 "recommendation_status": "conditional",
                 "confidence": "medium",
             }
@@ -274,6 +311,7 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
     ]
     assert response.status == "answered"
     assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "passed"
+    assert response.output.panel_payloads["stage1_hard_constraint_screening"]["status"] == "conditional"
     assert (
         response.output.panel_payloads["stage1_evidence_verification"]["status"]
         == "passed"
@@ -304,6 +342,7 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
         "source_readiness.json",
         "evidence_ledger.jsonl",
         "conflict_register.json",
+        "hard_constraint_screening.json",
         "strategy_options.json",
         "decision_matrix.json",
         "stage1_report.md",
@@ -479,3 +518,20 @@ def test_stage1_conflict_register_reads_selected_project_documents(monkeypatch):
     assert captured[0][1] == "居民如何安置"
     assert register[0]["metric_key"] == "households"
     assert register[0]["evidence_ids"] == ["node-a", "node-b"]
+
+
+def test_hard_constraint_evidence_enters_the_critical_quality_chain():
+    critical = stage1._critical_evidence_ids(
+        valid_strategy(),
+        valid_matrix(),
+        {
+            "assessments": [
+                {
+                    "constraint_id": "fire_safety",
+                    "evidence_refs": ["fire-report"],
+                }
+            ]
+        },
+    )
+
+    assert critical == {"evidence-1", "fire-report"}

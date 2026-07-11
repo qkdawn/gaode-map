@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .stage1_data_quality import Stage1DataQualitySummary
+from .stage1_hard_constraints import HARD_CONSTRAINT_DEFINITIONS
 from .stage1_provenance import Stage1ProvenanceSummary
 
 
@@ -88,7 +89,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 16
+    checks_total = 18
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -103,6 +104,11 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     conflict_register = _list(package.get("conflict_register"))
     data_quality_payload = package.get("data_quality")
     provenance_payload = package.get("provenance_binding")
+    hard_constraint_screening = (
+        package.get("hard_constraint_screening")
+        if isinstance(package.get("hard_constraint_screening"), dict)
+        else {}
+    )
 
     if ledger:
         invalid_nodes = []
@@ -291,6 +297,67 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
             )
         )
 
+    required_constraint_ids = {
+        item.constraint_id for item in HARD_CONSTRAINT_DEFINITIONS
+    }
+    constraint_assessments = _list(hard_constraint_screening.get("assessments"))
+    constraint_by_id = {
+        _text(item.get("constraint_id")): item
+        for item in constraint_assessments
+        if isinstance(item, dict) and _text(item.get("constraint_id"))
+    }
+    valid_constraint_states = {"verified", "constrained", "unknown", "not_applicable"}
+    valid_constraint_effects = {"allow", "condition", "exclude"}
+    invalid_constraints = []
+    for constraint_id in sorted(required_constraint_ids):
+        item = constraint_by_id.get(constraint_id, {})
+        state = item.get("state")
+        effect = item.get("decision_effect")
+        refs = {_text(ref) for ref in _list(item.get("evidence_refs")) if _text(ref)}
+        requires_action = state in {"unknown", "constrained"} or effect in {"condition", "exclude"}
+        if (
+            state not in valid_constraint_states
+            or effect not in valid_constraint_effects
+            or not _text(item.get("finding"))
+            or bool(refs - evidence_ids)
+            or (state in {"verified", "not_applicable"} and not refs)
+            or (requires_action and not _text(item.get("verification_action")))
+        ):
+            invalid_constraints.append(constraint_id)
+    declared_required_ids = {
+        _text(item)
+        for item in _list(hard_constraint_screening.get("required_constraint_ids"))
+        if _text(item)
+    }
+    expected_screening_status = (
+        "blocked"
+        if any(item.get("decision_effect") == "exclude" for item in constraint_by_id.values())
+        else "conditional"
+        if any(
+            item.get("state") in {"unknown", "constrained"}
+            or item.get("decision_effect") == "condition"
+            for item in constraint_by_id.values()
+        )
+        else "clear"
+    )
+    if (
+        set(constraint_by_id) == required_constraint_ids
+        and len(constraint_assessments) == len(required_constraint_ids)
+        and declared_required_ids == required_constraint_ids
+        and not invalid_constraints
+        and hard_constraint_screening.get("status") == expected_screening_status
+    ):
+        checks_passed += 1
+    else:
+        issues.append(
+            _issue(
+                "hard_constraint_screening_invalid",
+                "产权、消防、结构、排污、停车装卸、无障碍或居民噪声约束未形成完整可核验筛选。",
+                path="hard_constraint_screening",
+                repair_hint="逐项登记状态、决策影响、证据和核验动作；没有证据时保留 unknown，不得猜测为已满足。",
+            )
+        )
+
     required_workpacks = {
         "spatial",
         "audience",
@@ -438,6 +505,63 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 repair_hint="补充直接证据、解决来源冲突，或将建议降级为条件式推荐并明确失效条件。",
             )
         )
+    option_constraint_gaps = []
+    for index, option in enumerate(options):
+        node = option if isinstance(option, dict) else {}
+        refs = {_text(item) for item in _list(node.get("hard_constraint_refs")) if _text(item)}
+        if refs != required_constraint_ids or node.get("recommendation_status") not in _RECOMMENDATION_STATUSES:
+            option_constraint_gaps.append(_text(node.get("id")) or str(index))
+    decision_constraint_gaps = []
+    for index, decision in enumerate(_list(matrix.get("space_decisions"))):
+        node = decision if isinstance(decision, dict) else {}
+        refs = {_text(item) for item in _list(node.get("hard_constraint_refs")) if _text(item)}
+        if refs != required_constraint_ids:
+            decision_constraint_gaps.append(_text(node.get("space_id")) or str(index))
+    conditional_screening = hard_constraint_screening.get("status") == "conditional"
+    recommended_status = recommended_option.get("recommendation_status")
+    recommendation_conditions_missing = conditional_screening and (
+        recommended_status != "conditional"
+        or not _list(recommended_option.get("preconditions"))
+        or not _list(recommended_option.get("validation_actions"))
+    )
+    strong_conditional_spaces = [
+        _text(item.get("space_id")) or str(index)
+        for index, item in enumerate(_list(matrix.get("space_decisions")))
+        if isinstance(item, dict)
+        and conditional_screening
+        and item.get("recommendation_status") == "strong"
+    ]
+    screening_blocked = hard_constraint_screening.get("status") == "blocked"
+    if (
+        options
+        and not option_constraint_gaps
+        and not decision_constraint_gaps
+        and not recommendation_conditions_missing
+        and not strong_conditional_spaces
+        and not screening_blocked
+    ):
+        checks_passed += 1
+    else:
+        details = []
+        if option_constraint_gaps:
+            details.append(f"方案未逐项响应硬约束：{'、'.join(option_constraint_gaps)}")
+        if decision_constraint_gaps:
+            details.append(f"空间决策未逐项响应硬约束：{'、'.join(decision_constraint_gaps)}")
+        if recommendation_conditions_missing:
+            details.append("硬约束尚未全部确认，但首选方案未降级并登记前置条件与验证动作")
+        if strong_conditional_spaces:
+            details.append(f"硬约束未确认时仍标记强推荐：{'、'.join(strong_conditional_spaces)}")
+        if screening_blocked:
+            details.append("存在 decision_effect=exclude 的硬约束，当前首选方案不可交付")
+        issues.append(
+            _issue(
+                "hard_constraint_application_invalid",
+                "；".join(details) or "硬约束未进入定位和空间方案筛选。",
+                path="strategy/spatial_matrix",
+                repair_hint="让每个定位方案和空间决策引用完整硬约束；未知项降级为条件推荐，排除项解决前不得交付。",
+            )
+        )
+
     for conflict in unresolved_conflicts:
         label = (
             _text(conflict.get("label"))

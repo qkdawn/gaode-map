@@ -830,6 +830,34 @@ export function createAgentCapabilityWorkbenchMethods() {
       const systems = this.getStage1DataQuality()?.coordinate_systems
       return Array.isArray(systems) ? systems.map(text).filter(Boolean).join(' / ') : ''
     },
+    getStage1HardConstraintScreening() {
+      const screening = (this.agentPanelPayloads || {}).stage1_hard_constraint_screening
+      return screening && typeof screening === 'object' ? clonePayloadValue(screening) : null
+    },
+    getStage1HardConstraintStatusLabel() {
+      const labels = {
+        clear: '硬约束已确认',
+        conditional: '硬约束待核验',
+        blocked: '硬约束阻断方案',
+      }
+      return labels[this.getStage1HardConstraintScreening()?.status] || '尚未执行硬约束筛选'
+    },
+    getStage1HardConstraintAssessments() {
+      const assessments = this.getStage1HardConstraintScreening()?.assessments
+      return Array.isArray(assessments) ? clonePayloadValue(assessments) : []
+    },
+    getStage1HardConstraintStateLabel(assessment) {
+      const labels = { verified: '已核验', constrained: '存在限制', unknown: '待核验', not_applicable: '不适用' }
+      return labels[assessment?.state] || text(assessment?.state) || '未标记'
+    },
+    getStage1HardConstraintEffectLabel(assessment) {
+      const labels = { allow: '允许进入方案', condition: '作为前置条件', exclude: '排除当前方案' }
+      return labels[assessment?.decision_effect] || text(assessment?.decision_effect) || '未标记'
+    },
+    getStage1HardConstraintPendingActions() {
+      const actions = this.getStage1HardConstraintScreening()?.pending_actions
+      return Array.isArray(actions) ? clonePayloadValue(actions) : []
+    },
     getStage1Deliverables() {
       const deliverables = (this.agentPanelPayloads || {}).stage1_deliverables
       return deliverables && typeof deliverables === 'object' ? clonePayloadValue(deliverables) : null
@@ -851,7 +879,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       return Array.isArray(constraints) ? constraints.length : 0
     },
     hasStage1Outcome() {
-      return !!(this.getCapabilityRun() || this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1Deliverables())
+      return !!(this.getCapabilityRun() || this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1HardConstraintScreening() || this.getStage1Deliverables())
     },
     getStage1EvidenceCount() {
       const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger
@@ -938,8 +966,9 @@ export function createAgentCapabilityWorkbenchMethods() {
       const provenance = this.getStage1ProvenanceBinding()
       const dataQuality = this.getStage1DataQuality()
       const deliverables = this.getStage1Deliverables()
+      const hardConstraints = this.getStage1HardConstraintScreening()
       const conflicts = this.getStage1ConflictRegister()
-      if (!verification && !quality && !provenance && !dataQuality && !deliverables && !conflicts.length) return null
+      if (!verification && !quality && !provenance && !dataQuality && !hardConstraints && !deliverables && !conflicts.length) return null
 
       const checks = []
       const blockingItems = []
@@ -987,6 +1016,18 @@ export function createAgentCapabilityWorkbenchMethods() {
         if (dataQuality.status === 'failed' && !dataQualityIssues.some(item => item?.severity === 'error')) addBlockingItem('数据质量', '数据质量审计未通过。')
       }
 
+      if (hardConstraints) {
+        const assessments = this.getStage1HardConstraintAssessments()
+        const verified = assessments.filter(item => ['verified', 'not_applicable'].includes(item?.state)).length
+        const status = hardConstraints.status === 'blocked' ? 'failed' : hardConstraints.status === 'conditional' ? 'warning' : hardConstraints.status === 'clear' ? 'passed' : 'pending'
+        checks.push({ key: 'hard-constraints', label: '硬约束筛选', status, detail: `${verified}/${assessments.length} 项已确认或不适用` })
+        if (hardConstraints.status === 'blocked') {
+          assessments
+            .filter(item => item?.decision_effect === 'exclude')
+            .forEach(item => addBlockingItem('硬约束', `${text(item.label || item.constraint_id)}排除当前方案。`, item.verification_action || item.finding))
+        }
+      }
+
       const unresolvedConflicts = conflicts.filter(item => item?.unresolved === true)
       if (conflicts.length) {
         checks.push({ key: 'conflicts', label: '来源冲突', status: unresolvedConflicts.length ? 'failed' : 'passed', detail: unresolvedConflicts.length ? `${unresolvedConflicts.length} 项待裁决` : `${conflicts.length} 项已确定口径` })
@@ -1000,7 +1041,9 @@ export function createAgentCapabilityWorkbenchMethods() {
         if (missingArtifactIds.length) addBlockingItem('正式交付物', `缺少核心成果：${missingArtifactIds.join('、')}。`)
       }
 
-      const tasks = this.getStage1VerificationTasks()
+      const evidenceTasks = this.getStage1VerificationTasks()
+      const hardConstraintTasks = this.getStage1HardConstraintPendingActions()
+      const tasks = [...evidenceTasks, ...hardConstraintTasks]
       const taskCounts = { agent: 0, manual_authority: 0, fieldwork: 0 }
       tasks.forEach((task) => {
         const executor = text(task?.executor)
@@ -1011,7 +1054,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       const labels = { blocked: '质量门已阻断', review: '有条件通过', ready: '质量门通过' }
       const summaries = {
         blocked: `${blockingItems.length} 项问题必须修复后才能作为正式交付依据。`,
-        review: `核心质量检查已通过，仍有 ${tasks.length} 项核验任务需要纳入后续决策。`,
+        review: `核心质量检查已通过，仍有 ${tasks.length} 项证据或硬约束核验任务需要纳入后续决策。`,
         ready: '证据、数据、来源与正式交付物满足当前 Stage 1 质量门。',
       }
       return { status, label: labels[status], summary: summaries[status], checks, blocking_items: blockingItems, task_counts: taskCounts, task_total: tasks.length }
