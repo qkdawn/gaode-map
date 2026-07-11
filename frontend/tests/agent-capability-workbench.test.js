@@ -352,7 +352,7 @@ test('PPT capability reuses the existing planning workbench', async () => {
 })
 
 test('Stage 1 quality accessors expose verification gaps without mutating payloads', () => {
-  const task = { evidence_id: 'e2', executor: 'fieldwork', missing_input: '消防核验', blocking_reason: '缺少现场资料', next_action: '现场踏勘' }
+  const task = { evidence_id: 'e2', status: 'fieldwork_required', executor: 'fieldwork', missing_input: '消防核验', blocking_reason: '缺少现场资料', next_action: '现场踏勘', responsible_party: '消防顾问', verification_method: '完成消防疏散踏勘并签字', decision_impact: '完成前不得锁定礼堂使用强度' }
   const ctx = createContext({
     agentPanelPayloads: {
       capability_run: {
@@ -472,6 +472,16 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   const tasks = ctx.getStage1VerificationTasks()
   tasks[0].missing_input = 'changed'
   assert.equal(task.missing_input, '消防核验')
+  assert.equal(ctx.getStage1VerificationTaskExecutorLabel(ctx.getStage1VerificationTasks()[0]), '消防顾问')
+  const qualityGate = ctx.getStage1QualityGate()
+  assert.equal(qualityGate.status, 'blocked')
+  assert.equal(qualityGate.label, '质量门已阻断')
+  assert.equal(qualityGate.checks.length, 6)
+  assert.equal(qualityGate.blocking_items.length, 2)
+  assert.deepEqual(qualityGate.task_counts, { agent: 0, manual_authority: 0, fieldwork: 1 })
+  assert.equal(qualityGate.task_total, 1)
+  qualityGate.blocking_items[0].message = 'changed'
+  assert.equal(ctx.getStage1QualityGate().blocking_items[0].message, '证据引用失效')
   assert.equal(ctx.getStage1QualityBlockingIssues()[0].code, 'broken-ref')
   const conflicts = ctx.getStage1ConflictRegister()
   conflicts[0].values[0] = 'changed'
@@ -526,6 +536,40 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1DesignHandoffConstraintCount(), 1)
 })
 
+test('Stage 1 quality gate distinguishes ready and conditional delivery', () => {
+  const artifacts = [
+    { artifact_id: 'stage1-report', status: 'ready' },
+    { artifact_id: 'stage1-evidence-appendix', status: 'ready' },
+    { artifact_id: 'stage1-design-handoff', status: 'ready' },
+  ]
+  const ready = createContext({
+    agentPanelPayloads: {
+      stage1_quality_audit: { status: 'passed', score: 100, checks_passed: 16, checks_total: 16, issues: [] },
+      stage1_evidence_verification: { status: 'passed', report_allowed: true, status_counts: { verified: 3 }, blocking_reasons: [], tasks: [] },
+      stage1_provenance_binding: { status: 'passed', assessed_count: 3, status_counts: { verified: 3 }, issues: [] },
+      stage1_data_quality: { status: 'passed', assessed_count: 3, issues: [] },
+      stage1_deliverables: { status: 'ready', artifacts },
+    },
+  })
+  assert.equal(ready.getStage1QualityGate().status, 'ready')
+  assert.equal(ready.getStage1QualityGate().blocking_items.length, 0)
+
+  const review = createContext({
+    agentPanelPayloads: {
+      ...ready.agentPanelPayloads,
+      stage1_evidence_verification: {
+        status: 'passed_with_gaps',
+        report_allowed: true,
+        status_counts: { verified: 2, fieldwork_required: 1 },
+        blocking_reasons: [],
+        tasks: [{ evidence_id: 'e3', status: 'fieldwork_required', executor: 'fieldwork' }],
+      },
+    },
+  })
+  assert.equal(review.getStage1QualityGate().status, 'review')
+  assert.equal(review.getStage1QualityGate().task_total, 1)
+})
+
 test('analysis workspace templates expose capability navigation and detail view', async () => {
   const [main, sidebar] = await Promise.all([
     fs.promises.readFile(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8'),
@@ -560,10 +604,17 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /openCapabilityRunContextAsk\(\)/)
   assert.match(main, /getSelectedAnalysisCapabilityRunArtifacts\(\)/)
   assert.match(main, /仅保存元数据/)
+  assert.match(main, /getStage1QualityGate\(\)/)
+  assert.match(main, /Stage 1 Quality Gate/)
+  assert.match(main, /交付前必须修复/)
+  assert.match(main, /待核验责任/)
   assert.match(main, /getStage1EvidenceVerification\(\)/)
   assert.match(main, /Agent 自动核验记录/)
   assert.match(main, /getStage1AutomatedVerificationChecks\(\)/)
   assert.match(main, /尚待完成的核验任务/)
+  assert.match(main, /getStage1VerificationTaskExecutorLabel\(task\)/)
+  assert.match(main, /task\.verification_method/)
+  assert.match(main, /task\.decision_impact/)
   assert.match(main, /证据与真实数据资产/)
   assert.match(main, /getStage1ProvenanceBindings\(\)/)
   assert.match(main, /getStage1ProvenanceDiscrepancyText\(binding\)/)

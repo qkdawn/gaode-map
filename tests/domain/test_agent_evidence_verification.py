@@ -78,8 +78,34 @@ def test_past_future_plan_becomes_structured_authority_task():
     assert ledger[0]["temporal_status"] == "current_status_unknown"
     assert ledger[0]["confidence"] == "low"
     assert summary.status == "passed_with_gaps"
-    assert summary.tasks[0].executor == "manual_authority"
-    assert "2026-07-12" in summary.tasks[0].missing_input
+    task = summary.tasks[0]
+    assert task.executor == "manual_authority"
+    assert task.responsible_party == "项目方或主管部门"
+    assert task.verification_method == task.next_action
+    assert "不得进入已验证结论" in task.decision_impact
+    assert "2026-07-12" in task.missing_input
+
+
+def test_fieldwork_task_exposes_responsibility_method_and_decision_impact():
+    _, summary = verify_evidence_ledger(
+        [
+            evidence(
+                status="fieldwork_required",
+                missing_input="礼堂消防疏散实测记录",
+                blocking_reason="数字资料不能替代现场核验",
+                next_action="由消防顾问完成现场踏勘并签字",
+            )
+        ],
+        selected_sources=[{"source_id": "project-doc", "title": "项目资料"}],
+        snapshot=snapshot(),
+        as_of=date(2026, 7, 12),
+    )
+
+    task = summary.tasks[0]
+    assert task.executor == "fieldwork"
+    assert task.responsible_party == "现场调研负责人"
+    assert task.verification_method == "由消防顾问完成现场踏勘并签字"
+    assert "不能作为确定性设计条件" in task.decision_impact
 
 
 def test_empty_ledger_fails_gate_and_stops_report():

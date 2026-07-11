@@ -2,6 +2,11 @@ import { buildAnalysisQuickAskSelectedSourcesContext } from './analysis-quick-re
 
 const CATALOG_URL = '/api/v1/analysis/agent/analysis-capabilities'
 const RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
+const REQUIRED_STAGE1_ARTIFACT_IDS = Object.freeze([
+  'stage1-report',
+  'stage1-evidence-appendix',
+  'stage1-design-handoff',
+])
 
 const text = value => String(value || '').trim()
 
@@ -829,9 +834,97 @@ export function createAgentCapabilityWorkbenchMethods() {
         .map(([key, value]) => `${key}=${value ?? '-'}`)
         .join('；')
     },
+    getStage1QualityGate() {
+      const verification = this.getStage1EvidenceVerification()
+      const quality = this.getStage1QualityAudit()
+      const provenance = this.getStage1ProvenanceBinding()
+      const dataQuality = this.getStage1DataQuality()
+      const deliverables = this.getStage1Deliverables()
+      const conflicts = this.getStage1ConflictRegister()
+      if (!verification && !quality && !provenance && !dataQuality && !deliverables && !conflicts.length) return null
+
+      const checks = []
+      const blockingItems = []
+      const seenBlockingItems = new Set()
+      const addBlockingItem = (source, message, repairHint = '') => {
+        const normalizedMessage = text(message)
+        if (!normalizedMessage || seenBlockingItems.has(normalizedMessage)) return
+        seenBlockingItems.add(normalizedMessage)
+        blockingItems.push({ source, message: normalizedMessage, repair_hint: text(repairHint) })
+      }
+      const statusFor = status => status === 'failed' ? 'failed' : status === 'passed_with_gaps' ? 'warning' : status === 'passed' ? 'passed' : 'pending'
+
+      if (quality) {
+        const auditIssues = Array.isArray(quality.issues) ? quality.issues : []
+        checks.push({
+          key: 'quality',
+          label: '报告质量审计',
+          status: quality.status === 'passed' && auditIssues.some(item => item?.severity === 'warning') ? 'warning' : statusFor(quality.status),
+          detail: `${Number(quality.score || 0)} 分 · ${Number(quality.checks_passed || 0)}/${Number(quality.checks_total || 0)} 项通过`,
+        })
+        auditIssues.filter(item => item?.severity === 'error').forEach(item => addBlockingItem('报告质量', item.message, item.repair_hint))
+        if (quality.status === 'failed' && !auditIssues.some(item => item?.severity === 'error')) addBlockingItem('报告质量', '报告质量审计未通过。')
+      }
+      if (verification) {
+        const counts = verification.status_counts || {}
+        const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0)
+        const verified = Number(counts.verified || 0) + Number(counts.cross_checked || 0)
+        checks.push({ key: 'evidence', label: '证据门控', status: statusFor(verification.status), detail: `${verified}/${total} 条已验证或交叉核对` })
+        const verificationBlockingReasons = Array.isArray(verification.blocking_reasons) ? verification.blocking_reasons : []
+        verificationBlockingReasons.forEach(message => addBlockingItem('证据门控', message))
+        if (verification.report_allowed === false && !verificationBlockingReasons.length) addBlockingItem('证据门控', '证据门控禁止生成正式报告。')
+      }
+      if (provenance) {
+        const assessed = Number(provenance.assessed_count || 0)
+        const bound = Number(provenance.status_counts?.verified || 0) + Number(provenance.status_counts?.corrected || 0)
+        checks.push({ key: 'provenance', label: '真实来源绑定', status: statusFor(provenance.status), detail: `${bound}/${assessed} 条已定位或修正` })
+        const provenanceIssues = Array.isArray(provenance.issues) ? provenance.issues : []
+        provenanceIssues.filter(item => item?.severity === 'error').forEach(item => addBlockingItem('来源绑定', item.message, item.repair_hint))
+        if (provenance.status === 'failed' && !provenanceIssues.some(item => item?.severity === 'error')) addBlockingItem('来源绑定', '关键证据未能绑定到真实数据资产。')
+      }
+      if (dataQuality) {
+        checks.push({ key: 'data', label: '数据质量', status: statusFor(dataQuality.status), detail: `${Number(dataQuality.assessed_count || 0)} 条证据已审计` })
+        const dataQualityIssues = Array.isArray(dataQuality.issues) ? dataQuality.issues : []
+        dataQualityIssues.filter(item => item?.severity === 'error').forEach(item => addBlockingItem('数据质量', item.message, item.repair_hint))
+        if (dataQuality.status === 'failed' && !dataQualityIssues.some(item => item?.severity === 'error')) addBlockingItem('数据质量', '数据质量审计未通过。')
+      }
+
+      const unresolvedConflicts = conflicts.filter(item => item?.unresolved === true)
+      if (conflicts.length) {
+        checks.push({ key: 'conflicts', label: '来源冲突', status: unresolvedConflicts.length ? 'failed' : 'passed', detail: unresolvedConflicts.length ? `${unresolvedConflicts.length} 项待裁决` : `${conflicts.length} 项已确定口径` })
+        unresolvedConflicts.forEach(item => addBlockingItem('来源冲突', `${text(item.label || item.metric_key) || '关键指标'}仍存在未裁决口径冲突。`, item.explanation))
+      }
+      if (deliverables) {
+        const artifactIds = new Set((Array.isArray(deliverables.artifacts) ? deliverables.artifacts : []).filter(item => item?.status === 'ready').map(item => text(item?.artifact_id)))
+        const missingArtifactIds = REQUIRED_STAGE1_ARTIFACT_IDS.filter(id => !artifactIds.has(id))
+        checks.push({ key: 'deliverables', label: '正式交付物', status: deliverables.status === 'ready' && !missingArtifactIds.length ? 'passed' : 'failed', detail: `${REQUIRED_STAGE1_ARTIFACT_IDS.length - missingArtifactIds.length}/${REQUIRED_STAGE1_ARTIFACT_IDS.length} 项核心成果就绪` })
+        if (deliverables.status !== 'ready') addBlockingItem('正式交付物', '第一阶段正式交付物尚未完成编译。')
+        if (missingArtifactIds.length) addBlockingItem('正式交付物', `缺少核心成果：${missingArtifactIds.join('、')}。`)
+      }
+
+      const tasks = this.getStage1VerificationTasks()
+      const taskCounts = { agent: 0, manual_authority: 0, fieldwork: 0 }
+      tasks.forEach((task) => {
+        const executor = text(task?.executor)
+        if (Object.hasOwn(taskCounts, executor)) taskCounts[executor] += 1
+      })
+      const hasReviewItems = checks.some(item => item.status !== 'passed') || tasks.length > 0
+      const status = blockingItems.length ? 'blocked' : hasReviewItems ? 'review' : 'ready'
+      const labels = { blocked: '质量门已阻断', review: '有条件通过', ready: '质量门通过' }
+      const summaries = {
+        blocked: `${blockingItems.length} 项问题必须修复后才能作为正式交付依据。`,
+        review: `核心质量检查已通过，仍有 ${tasks.length} 项核验任务需要纳入后续决策。`,
+        ready: '证据、数据、来源与正式交付物满足当前 Stage 1 质量门。',
+      }
+      return { status, label: labels[status], summary: summaries[status], checks, blocking_items: blockingItems, task_counts: taskCounts, task_total: tasks.length }
+    },
     getStage1VerificationTasks() {
       const tasks = (this.getStage1EvidenceVerification() || {}).tasks
-      return Array.isArray(tasks) ? tasks.map(item => ({ ...item })) : []
+      return Array.isArray(tasks) ? clonePayloadValue(tasks) : []
+    },
+    getStage1VerificationTaskExecutorLabel(task) {
+      const labels = { agent: 'Agent 验证编排器', manual_authority: '项目方或主管部门', fieldwork: '现场调研负责人' }
+      return text(task?.responsible_party) || labels[task?.executor] || '项目负责人'
     },
     getStage1QualityBlockingIssues() {
       const issues = (this.getStage1QualityAudit() || {}).issues

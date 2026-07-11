@@ -120,6 +120,36 @@
                                     <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
                                 </div>
                             </header>
+                            <div v-if="getStage1QualityGate()" class="agent-stage1-quality-gate" :class="getStage1QualityGate().status">
+                                <div class="agent-stage1-quality-gate-head">
+                                    <div>
+                                        <span>Stage 1 Quality Gate</span>
+                                        <strong>{{ getStage1QualityGate().label }}</strong>
+                                        <p>{{ getStage1QualityGate().summary }}</p>
+                                    </div>
+                                    <em>{{ getStage1QualityGate().status === 'ready' ? '可交付' : getStage1QualityGate().status === 'review' ? '带条件交付' : '禁止交付' }}</em>
+                                </div>
+                                <div class="agent-stage1-quality-checks">
+                                    <article v-for="check in getStage1QualityGate().checks" :key="check.key" :class="check.status">
+                                        <span>{{ check.status === 'passed' ? '通过' : check.status === 'warning' ? '缺口' : check.status === 'failed' ? '阻断' : '待执行' }}</span>
+                                        <strong>{{ check.label }}</strong>
+                                        <small>{{ check.detail }}</small>
+                                    </article>
+                                </div>
+                                <div v-if="getStage1QualityGate().task_total" class="agent-stage1-quality-task-summary">
+                                    <strong>待核验责任</strong>
+                                    <span v-if="getStage1QualityGate().task_counts.agent">Agent {{ getStage1QualityGate().task_counts.agent }}</span>
+                                    <span v-if="getStage1QualityGate().task_counts.manual_authority">项目方/主管部门 {{ getStage1QualityGate().task_counts.manual_authority }}</span>
+                                    <span v-if="getStage1QualityGate().task_counts.fieldwork">现场调研 {{ getStage1QualityGate().task_counts.fieldwork }}</span>
+                                </div>
+                                <div v-if="getStage1QualityGate().blocking_items.length" class="agent-stage1-quality-blockers">
+                                    <strong>交付前必须修复</strong>
+                                    <article v-for="(item, index) in getStage1QualityGate().blocking_items" :key="`${item.source}-${index}`">
+                                        <span>{{ item.source }}</span>
+                                        <div><strong>{{ item.message }}</strong><small v-if="item.repair_hint">修复：{{ item.repair_hint }}</small></div>
+                                    </article>
+                                </div>
+                            </div>
                             <div v-if="getCapabilityRun()" class="agent-capability-run-manifest" :class="getCapabilityRun().status">
                                 <div class="agent-capability-run-manifest-head">
                                     <div><span>Capability Run</span><strong>{{ getCapabilityRunStatusLabel() }}</strong></div>
@@ -173,8 +203,13 @@
                                 <div v-if="getStage1VerificationTasks().length" class="agent-verification-tasks">
                                     <strong>尚待完成的核验任务</strong>
                                     <article v-for="task in getStage1VerificationTasks()" :key="`${task.evidence_id}-${task.executor}`">
-                                        <div><span>{{ task.executor === 'fieldwork' ? '现场' : task.executor === 'agent' ? 'Agent' : '权威资料' }}</span><strong>{{ task.missing_input }}</strong></div>
-                                        <p>{{ task.blocking_reason }}</p><small>下一步：{{ task.next_action }}</small>
+                                        <div><span>{{ task.status === 'fieldwork_required' ? '现场核验' : '资料核验' }}</span><strong>{{ task.missing_input }}</strong></div>
+                                        <p>{{ task.blocking_reason }}</p>
+                                        <dl>
+                                            <div><dt>责任</dt><dd>{{ getStage1VerificationTaskExecutorLabel(task) }}</dd></div>
+                                            <div><dt>方法</dt><dd>{{ task.verification_method }}</dd></div>
+                                            <div><dt>影响</dt><dd>{{ task.decision_impact }}</dd></div>
+                                        </dl>
                                     </article>
                                 </div>
                             </div>
@@ -270,10 +305,6 @@
                                     <span>空间要求 <strong>{{ getStage1DesignHandoffSpaceCount() }}</strong></span>
                                     <span :class="{ gap: getStage1DesignHandoffConstraintCount() > 0 }">未解决约束 <strong>{{ getStage1DesignHandoffConstraintCount() }}</strong></span>
                                 </div>
-                            </div>
-                            <div v-if="getStage1QualityBlockingIssues().length" class="agent-quality-issues">
-                                <strong>交付前必须修复</strong>
-                                <div v-for="issue in getStage1QualityBlockingIssues()" :key="issue.code"><span>{{ issue.message }}</span><small v-if="issue.repair_hint">{{ issue.repair_hint }}</small></div>
                             </div>
                         </section>
                     </div>

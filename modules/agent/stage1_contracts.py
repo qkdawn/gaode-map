@@ -38,6 +38,40 @@ class VerificationTask(BaseModel):
     blocking_reason: str
     executor: VerificationExecutor
     next_action: str
+    responsible_party: str
+    verification_method: str
+    decision_impact: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def describe_execution_contract(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        executor = str(payload.get("executor") or "").strip()
+        status = str(payload.get("status") or "").strip()
+        missing_input = str(payload.get("missing_input") or "待核验输入").strip()
+        next_action = str(payload.get("next_action") or "").strip()
+        responsibility = {
+            "agent": "Agent 验证编排器",
+            "manual_authority": "项目方或主管部门",
+            "fieldwork": "现场调研负责人",
+        }
+        payload["responsible_party"] = str(
+            payload.get("responsible_party") or responsibility.get(executor) or "项目负责人"
+        ).strip()
+        payload["verification_method"] = str(
+            payload.get("verification_method") or next_action or "补齐依据后重新执行证据核验"
+        ).strip()
+        default_impact = (
+            f"完成前，{missing_input}相关判断只能保留为待现场核验事项，不能作为确定性设计条件。"
+            if status == "fieldwork_required"
+            else f"完成前，{missing_input}相关判断不得进入已验证结论或正式决策依据。"
+        )
+        payload["decision_impact"] = str(
+            payload.get("decision_impact") or default_impact
+        ).strip()
+        return payload
 
 
 class AutomatedVerificationCheck(BaseModel):
