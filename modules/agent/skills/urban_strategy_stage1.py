@@ -206,8 +206,8 @@ async def execute(
         system_prompt=(
             "你是城市更新项目的证据审计负责人。只输出 JSON：evidence_ledger 数组。"
             "每项必须含 id、claim、evidence_type(F/G/P/H/V)、status(verified/cross_checked/"
-            "inferred/hypothesis/blocked/fieldwork_required)、source_ref、scope、comparison_baseline、"
-            "confidence(high/medium/low)、limitation、next_action、executor(agent/fieldwork)。"
+            "inferred/hypothesis/blocked/fieldwork_required)、source_ref、source_artifact_id、scope、method、metric、value、"
+            "comparison_baseline、confidence(high/medium/low)、limitation、next_action、executor(agent/fieldwork)。"
             "没有页码时明确写来源路径或数据集；不得把夜光、POI、gap_score、周边人口解释为客流、消费或经营成功。"
         ),
         user_payload=evidence_input,
@@ -226,7 +226,8 @@ async def execute(
         phase_id="stage1-evidence-verification",
         title="验证证据状态与时效",
         detail=(
-            f"证据门控{verification.status}；形成 {len(verification.tasks)} 项明确核验任务。"
+            f"证据门控{verification.status}；自动执行 {len(verification.automated_checks)} 项确定性核验，"
+            f"仍有 {len(verification.tasks)} 项明确核验任务。"
         ),
         state="completed" if verification.report_allowed else "failed",
     )

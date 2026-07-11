@@ -144,7 +144,9 @@ def test_stage1_evidence_gate_stops_before_professional_models(monkeypatch):
             calls.append(kwargs["reasoning_id"])
             return {"evidence_ledger": []}
 
-    monkeypatch.setattr(stage1, "get_llm_provider_client", lambda *, runtime: FakeClient())
+    monkeypatch.setattr(
+        stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
+    )
     response = asyncio.run(execute(ready_payload(), runtime=runtime, profile=profile))
 
     assert response.status == "requires_clarification"
@@ -224,7 +226,83 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
     ]
     assert response.status == "answered"
     assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "passed"
-    assert response.output.panel_payloads["stage1_evidence_verification"]["status"] == "passed"
+    assert (
+        response.output.panel_payloads["stage1_evidence_verification"]["status"]
+        == "passed"
+    )
     assert response.output.panel_payloads["claim_evidence"][0]["status"] == "verified"
     assert response.output.panel_payloads["sources_used"] == ["项目资料 p.12"]
     assert response.effective_execution_profile == profile
+
+
+def test_stage1_stream_exposes_automatic_road_verification(monkeypatch):
+    runtime, profile = runtime_and_profile()
+    payload = ready_payload()
+    payload.analysis_snapshot.road = {
+        "summary": {
+            "avg_intelligibility": 0.22,
+            "avg_intelligibility_r2": 0.05,
+            "node_count": 120,
+        },
+        "diagnostics": {"regression": {"r": 0.22, "r2": 0.05, "n": 120}},
+    }
+    responses = [
+        {
+            "evidence_ledger": [
+                {
+                    "id": "road-1",
+                    "claim": "可理解度0.22（R²=0.05）属于极低水平",
+                    "evidence_type": "G",
+                    "status": "verified",
+                    "source_ref": "analysis_snapshot.road",
+                    "source_artifact_id": "road-analysis-1",
+                    "scope": "项目周边路网",
+                    "method": "space_syntax",
+                    "metric": "network_intelligibility",
+                    "value": 0.22,
+                    "comparison_baseline": "",
+                    "confidence": "high",
+                    "limitation": "",
+                    "next_action": "",
+                    "executor": "agent",
+                }
+            ]
+        },
+        {"workpacks": []},
+        {"options": [], "recommended_option_id": ""},
+        {},
+    ]
+    calls = []
+    events = []
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs["reasoning_id"])
+            return responses[len(calls) - 1]
+
+    async def emit(event, data):
+        events.append((event, data))
+
+    monkeypatch.setattr(
+        stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
+    )
+    response = asyncio.run(
+        execute(payload, runtime=runtime, profile=profile, emit=emit)
+    )
+
+    verification = response.output.panel_payloads["stage1_evidence_verification"]
+    assert (
+        verification["automated_checks"][0]["tool_id"] == "verify_road_analysis_claim"
+    )
+    phase = next(
+        data
+        for event, data in events
+        if event == "thinking" and data["id"] == "stage1-evidence-verification"
+    )
+    assert "自动执行 1 项确定性核验" in phase["detail"]
+    assert calls == [
+        "stage1-evidence-model",
+        "stage1-workpacks-model",
+        "stage1-options-model",
+        "stage1-spatial-matrix-model",
+    ]

@@ -146,6 +146,26 @@ export function createAgentCapabilityWorkbenchMethods() {
         .filter(key => Number(counts[key] || 0) > 0)
         .map(key => ({ key, label: labels[key], count: Number(counts[key]) }))
     },
+    getStage1AutomatedVerificationChecks() {
+      const checks = (this.getStage1EvidenceVerification() || {}).automated_checks
+      return Array.isArray(checks)
+        ? checks.map(item => ({
+            ...item,
+            claim_types: Array.isArray(item.claim_types) ? [...item.claim_types] : [],
+            diagnostics: Array.isArray(item.diagnostics) ? [...item.diagnostics] : [],
+            derived_values: { ...(item.derived_values || {}) },
+          }))
+        : []
+    },
+    getStage1VerificationToolLabel(check) {
+      const labels = { verify_road_analysis_claim: '路网指标一致性核验' }
+      return labels[check?.tool_id] || check?.tool_id || '自动核验'
+    },
+    getStage1VerificationDerivedText(check) {
+      return Object.entries(check?.derived_values || {})
+        .map(([key, value]) => `${key}=${value ?? '-'}`)
+        .join('；')
+    },
     getStage1VerificationTasks() {
       const tasks = (this.getStage1EvidenceVerification() || {}).tasks
       return Array.isArray(tasks) ? tasks.map(item => ({ ...item })) : []

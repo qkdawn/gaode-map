@@ -132,7 +132,9 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
       stage1_quality_audit: { status: 'failed', score: 63, issues: [{ code: 'broken-ref', severity: 'error', message: '证据引用失效' }] },
       stage1_evidence_verification: {
         status: 'passed_with_gaps', as_of_date: '2026-07-12',
-        status_counts: { verified: 2, inferred: 1, fieldwork_required: 1 }, tasks: [task],
+        status_counts: { verified: 2, inferred: 1, fieldwork_required: 1 },
+        automated_checks: [{ evidence_id: 'e2', tool_id: 'verify_road_analysis_claim', outcome: 'passed', claim_types: ['network_intelligibility'], diagnostics: ['r²一致'], derived_values: { r2: 0.05 }, summary: '已自动复算' }],
+        tasks: [task],
       },
       stage1_evidence_ledger: [{ id: 'e1' }, { id: 'e2' }],
       stage1_spatial_matrix: { space_decisions: [{ id: 's1' }] },
@@ -145,6 +147,13 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
     { key: 'inferred', label: '推断', count: 1 },
     { key: 'fieldwork_required', label: '需现场核验', count: 1 },
   ])
+  const checks = ctx.getStage1AutomatedVerificationChecks()
+  checks[0].diagnostics[0] = 'changed'
+  checks[0].derived_values.r2 = 1
+  assert.deepEqual(ctx.getStage1AutomatedVerificationChecks()[0].diagnostics, ['r²一致'])
+  assert.equal(ctx.getStage1AutomatedVerificationChecks()[0].derived_values.r2, 0.05)
+  assert.equal(ctx.getStage1VerificationToolLabel(checks[0]), '路网指标一致性核验')
+  assert.equal(ctx.getStage1VerificationDerivedText(checks[0]), 'r2=1')
   const tasks = ctx.getStage1VerificationTasks()
   tasks[0].missing_input = 'changed'
   assert.equal(task.missing_input, '消防核验')
@@ -163,6 +172,8 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /inspectAnalysisCapability\(capability\)/)
   assert.match(main, /runAnalysisCapability\(getActiveAnalysisCapability\(\)\)/)
   assert.match(main, /getStage1EvidenceVerification\(\)/)
+  assert.match(main, /Agent 自动核验记录/)
+  assert.match(main, /getStage1AutomatedVerificationChecks\(\)/)
   assert.match(main, /尚待完成的核验任务/)
   assert.match(main, /交付前必须修复/)
   assert.match(sidebar, /openAnalysisCapabilitiesPanel/)

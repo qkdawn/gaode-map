@@ -10,6 +10,7 @@ from .stage1_contracts import (
     historical_plan_date,
     verification_status_counts,
 )
+from .verification_tools import run_automated_verification
 
 _ALLOWED_STATUSES = {
     "verified",
@@ -19,8 +20,29 @@ _ALLOWED_STATUSES = {
     "blocked",
     "fieldwork_required",
 }
-_FIELDWORK_TERMS = ("现场", "入户", "访谈", "测绘", "结构", "消防", "产权", "审批", "鉴定")
-_RELATIVE_TERMS = ("较高", "较低", "偏高", "偏低", "高于", "低于", "优势", "短板", "领先", "落后")
+_FIELDWORK_TERMS = (
+    "现场",
+    "入户",
+    "访谈",
+    "测绘",
+    "结构",
+    "消防",
+    "产权",
+    "审批",
+    "鉴定",
+)
+_RELATIVE_TERMS = (
+    "较高",
+    "较低",
+    "偏高",
+    "偏低",
+    "高于",
+    "低于",
+    "优势",
+    "短板",
+    "领先",
+    "落后",
+)
 
 
 def _text(value: Any) -> str:
@@ -38,7 +60,9 @@ def _source_search_text(source: dict[str, Any]) -> str:
         "source_type",
         "provider",
     )
-    return " ".join(_text(source.get(field)).lower() for field in fields if source.get(field))
+    return " ".join(
+        _text(source.get(field)).lower() for field in fields if source.get(field)
+    )
 
 
 def _known_source_ref(source_ref: str, sources: list[dict[str, Any]]) -> bool:
@@ -82,7 +106,8 @@ def _references_snapshot(source_ref: str, refs: set[str]) -> bool:
         "前端分析": "frontend_analysis",
     }
     return any(ref in normalized for ref in refs) or any(
-        token in normalized and canonical in refs for token, canonical in aliases.items()
+        token in normalized and canonical in refs
+        for token, canonical in aliases.items()
     )
 
 
@@ -98,13 +123,18 @@ def _task_for(node: dict[str, Any], *, as_of: date) -> VerificationTask | None:
     executor = _text(node.get("executor"))
     if status == "fieldwork_required":
         executor = "fieldwork"
-        missing_input = missing_input or f"{claim}对应的现场观察、测绘、访谈或权属核验记录"
+        missing_input = (
+            missing_input or f"{claim}对应的现场观察、测绘、访谈或权属核验记录"
+        )
         blocking_reason = blocking_reason or "现有数字资料不能替代现场或法定核验"
         next_action = next_action or "形成带日期、对象和记录人的现场核验表"
     else:
         if executor not in {"agent", "manual_authority"}:
             executor = "manual_authority"
-        missing_input = missing_input or f"截至 {as_of.isoformat()} 可确认{claim}的原始文件或主管部门记录"
+        missing_input = (
+            missing_input
+            or f"截至 {as_of.isoformat()} 可确认{claim}的原始文件或主管部门记录"
+        )
         blocking_reason = blocking_reason or "当前输入中没有足以完成复核的原始依据"
         next_action = next_action or "补充原始文件后由 Agent 重新交叉核对"
     return VerificationTask(
@@ -151,12 +181,16 @@ def verify_evidence_ledger(
         source_known = _known_source_ref(node["source_ref"], selected_sources)
         snapshot_known = _references_snapshot(node["source_ref"], snapshot_refs)
         evidence_type = _text(node.get("evidence_type"))
-        if status in {"verified", "cross_checked"} and not (source_known or snapshot_known):
+        if status in {"verified", "cross_checked"} and not (
+            source_known or snapshot_known
+        ):
             status = "inferred" if node["claim"] else "blocked"
             notes.append(f"{node['id']} 的验证状态因来源无法在本轮输入中定位而降级。")
         elif status == "verified" and evidence_type == "G" and snapshot_known:
             status = "cross_checked"
-            notes.append(f"{node['id']} 为计算/代理证据，未取得原始计算链，因此降级为交叉核对。")
+            notes.append(
+                f"{node['id']} 为计算/代理证据，未取得原始计算链，因此降级为交叉核对。"
+            )
 
         temporal_status = _text(node.get("temporal_status")) or "not_applicable"
         if historical_plan_date(node["claim"], as_of=current_date):
@@ -193,17 +227,32 @@ def verify_evidence_ledger(
         node["confidence"] = confidence
         node["temporal_status"] = temporal_status
 
-        if status == "fieldwork_required" and not any(term in node["claim"] for term in _FIELDWORK_TERMS):
+        if status == "fieldwork_required" and not any(
+            term in node["claim"] for term in _FIELDWORK_TERMS
+        ):
             notes.append(f"{node['id']} 被标记为现场核验，需在任务中说明具体现场对象。")
         normalized.append(node)
 
-    tasks = [task for node in normalized if (task := _task_for(node, as_of=current_date))]
+    automated = run_automated_verification(normalized, snapshot=snapshot)
+    normalized = automated.ledger
+    notes.extend(automated.notes)
+    tasks = list(automated.tasks)
+    for node in normalized:
+        task = _task_for(node, as_of=current_date)
+        if task is not None and not any(
+            existing.evidence_id == task.evidence_id
+            and existing.missing_input == task.missing_input
+            for existing in tasks
+        ):
+            tasks.append(task)
     blocking_reasons: list[str] = []
     if not normalized:
         blocking_reasons.append("模型未生成可审计的证据节点。")
     invalid_claim_ids = [node["id"] for node in normalized if not node["claim"]]
     if invalid_claim_ids:
-        blocking_reasons.append(f"证据节点缺少明确主张：{'、'.join(invalid_claim_ids)}。")
+        blocking_reasons.append(
+            f"证据节点缺少明确主张：{'、'.join(invalid_claim_ids)}。"
+        )
 
     counts = verification_status_counts(normalized)
     if blocking_reasons:
@@ -217,6 +266,7 @@ def verify_evidence_ledger(
         report_allowed=not blocking_reasons,
         as_of_date=current_date.isoformat(),
         status_counts=counts,
+        automated_checks=automated.checks,
         tasks=tasks,
         notes=notes,
         blocking_reasons=blocking_reasons,

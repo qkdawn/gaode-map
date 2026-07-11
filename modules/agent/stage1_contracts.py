@@ -40,6 +40,21 @@ class VerificationTask(BaseModel):
     next_action: str
 
 
+class AutomatedVerificationCheck(BaseModel):
+    """One deterministic tool-backed check applied to an evidence claim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_id: str
+    claim_types: list[str] = Field(default_factory=list)
+    tool_id: str
+    outcome: Literal["passed", "passed_with_gaps", "blocked", "failed"]
+    status: VerificationStatus
+    summary: str
+    diagnostics: list[str] = Field(default_factory=list)
+    derived_values: dict[str, Any] = Field(default_factory=dict)
+
+
 class VerificationSummary(BaseModel):
     """Evidence gate result consumed by Stage 1 orchestration and the UI."""
 
@@ -49,6 +64,7 @@ class VerificationSummary(BaseModel):
     report_allowed: bool
     as_of_date: str
     status_counts: dict[str, int] = Field(default_factory=dict)
+    automated_checks: list[AutomatedVerificationCheck] = Field(default_factory=list)
     tasks: list[VerificationTask] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
     blocking_reasons: list[str] = Field(default_factory=list)
@@ -127,7 +143,9 @@ class DesignHandoffContract(BaseModel):
 
     @model_validator(mode="after")
     def unique_evidence_refs(self) -> "DesignHandoffContract":
-        normalized = [str(item).strip() for item in self.evidence_refs if str(item).strip()]
+        normalized = [
+            str(item).strip() for item in self.evidence_refs if str(item).strip()
+        ]
         if len(normalized) != len(set(normalized)):
             raise ValueError("evidence_refs must be unique")
         self.evidence_refs = normalized
@@ -135,7 +153,9 @@ class DesignHandoffContract(BaseModel):
 
 
 _DATE_PATTERN = re.compile(r"(?P<year>20\d{2})\s*年(?:\s*(?P<month>\d{1,2})\s*月)?")
-_FUTURE_PLAN_PATTERN = re.compile(r"(计划|拟于|预计|将于|力争|月底前|年底前).{0,28}(完成|启动|开展|实现|建成|交付)")
+_FUTURE_PLAN_PATTERN = re.compile(
+    r"(计划|拟于|预计|将于|力争|月底前|年底前).{0,28}(完成|启动|开展|实现|建成|交付)"
+)
 
 
 def historical_plan_date(text: str, *, as_of: date) -> bool:

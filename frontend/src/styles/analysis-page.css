@@ -13673,8 +13673,13 @@ body.agent-ppt-source-menu-open {
 .agent-verification-counts .verified, .agent-verification-counts .cross_checked { background: #ecfdf3; color: #087443; }
 .agent-verification-counts .inferred, .agent-verification-counts .hypothesis { background: #eff6ff; color: #1d4ed8; }
 .agent-verification-counts .blocked, .agent-verification-counts .fieldwork_required { background: #fff7ed; color: #9a3412; }
-.agent-verification-tasks { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
-.agent-verification-tasks > strong, .agent-quality-issues > strong { font-size: 11px; color: #334155; }
+.agent-automated-checks, .agent-verification-tasks { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.agent-automated-checks > strong, .agent-verification-tasks > strong, .agent-quality-issues > strong { font-size: 11px; color: #334155; }
+.agent-automated-checks article { padding: 9px 10px; border: 1px solid #bae6fd; border-radius: 6px; background: #f8fcff; }
+.agent-automated-checks article.blocked, .agent-automated-checks article.failed { border-color: #fecaca; background: #fff8f8; }
+.agent-automated-checks article > div { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; }
+.agent-automated-checks article > div span { flex: 0 0 auto; padding: 2px 5px; border-radius: 3px; background: #e0f2fe; color: #0369a1; font-size: 9px; font-weight: 700; }
+.agent-automated-checks p, .agent-automated-checks small { display: block; margin: 5px 0 0; color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .agent-verification-tasks article { padding: 9px 10px; border: 1px solid #fed7aa; border-radius: 6px; background: #fff; }
 .agent-verification-tasks article > div { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; }
 .agent-verification-tasks article > div span { flex: 0 0 auto; padding: 2px 5px; border-radius: 3px; background: #ffedd5; color: #9a3412; font-size: 9px; font-weight: 700; }

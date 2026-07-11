@@ -55,6 +55,14 @@
                                 <div class="agent-verification-counts">
                                     <span v-for="item in getStage1VerificationStatusItems()" :key="item.key" :class="item.key">{{ item.label }} {{ item.count }}</span>
                                 </div>
+                                <div v-if="getStage1AutomatedVerificationChecks().length" class="agent-automated-checks">
+                                    <strong>Agent 自动核验记录</strong>
+                                    <article v-for="check in getStage1AutomatedVerificationChecks()" :key="`${check.evidence_id}-${check.tool_id}`" :class="check.outcome">
+                                        <div><span>{{ getStage1VerificationToolLabel(check) }}</span><strong>{{ check.summary }}</strong></div>
+                                        <p v-if="check.diagnostics.length">{{ check.diagnostics.join('；') }}</p>
+                                        <small v-if="getStage1VerificationDerivedText(check)">复算值：{{ getStage1VerificationDerivedText(check) }}</small>
+                                    </article>
+                                </div>
                                 <div v-if="getStage1VerificationTasks().length" class="agent-verification-tasks">
                                     <strong>尚待完成的核验任务</strong>
                                     <article v-for="task in getStage1VerificationTasks()" :key="`${task.evidence_id}-${task.executor}`">
