@@ -118,6 +118,19 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1EvidenceVerification() {
       return (this.agentPanelPayloads || {}).stage1_evidence_verification || null
     },
+    getStage1ConflictRegister() {
+      const conflicts = (this.agentPanelPayloads || {}).stage1_conflict_register
+      return Array.isArray(conflicts) ? clonePayloadValue(conflicts) : []
+    },
+    getStage1UnresolvedConflictCount() {
+      return this.getStage1ConflictRegister().filter(item => item?.unresolved === true).length
+    },
+    getStage1ConflictStatusLabel(conflict) {
+      return conflict?.unresolved === true ? '待裁决' : '已确定口径'
+    },
+    getStage1ConflictValuesText(conflict) {
+      return Array.isArray(conflict?.values) ? conflict.values.map(text).filter(Boolean).join(' / ') : ''
+    },
     hasStage1Outcome() {
       return !!(this.getStage1QualityAudit() || this.getStage1EvidenceVerification())
     },

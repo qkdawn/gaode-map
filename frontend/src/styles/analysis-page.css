@@ -13684,6 +13684,14 @@ body.agent-ppt-source-menu-open {
 .agent-verification-tasks article > div { display: flex; align-items: flex-start; gap: 8px; font-size: 11px; }
 .agent-verification-tasks article > div span { flex: 0 0 auto; padding: 2px 5px; border-radius: 3px; background: #ffedd5; color: #9a3412; font-size: 9px; font-weight: 700; }
 .agent-verification-tasks p, .agent-verification-tasks small { display: block; margin: 5px 0 0; color: #64748b; font-size: 10px; line-height: 1.5; }
+.agent-conflict-register { display: flex; flex-direction: column; gap: 8px; padding: 13px 16px; border-top: 1px solid #fde68a; background: #fffdf7; }
+.agent-conflict-register > strong { color: #334155; font-size: 11px; }
+.agent-conflict-register article { padding: 9px 10px; border: 1px solid #dbe3ec; border-radius: 6px; background: #fff; }
+.agent-conflict-register article.unresolved { border-color: #fcd34d; }
+.agent-conflict-register article > div { display: flex; align-items: flex-start; gap: 8px; color: #334155; font-size: 11px; }
+.agent-conflict-register article > div span { flex: 0 0 auto; padding: 2px 5px; border-radius: 3px; background: #ecfdf3; color: #087443; font-size: 9px; font-weight: 700; }
+.agent-conflict-register article.unresolved > div span { background: #fef3c7; color: #92400e; }
+.agent-conflict-register p, .agent-conflict-register small { display: block; margin: 5px 0 0; color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .agent-quality-issues { display: flex; flex-direction: column; gap: 7px; padding: 13px 16px; border-top: 1px solid #fee2e2; background: #fff8f8; }
 .agent-quality-issues > div { display: flex; flex-direction: column; gap: 3px; color: #991b1b; font-size: 11px; }
 .agent-quality-issues small { color: #64748b; line-height: 1.45; }

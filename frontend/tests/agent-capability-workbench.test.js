@@ -140,6 +140,10 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         tasks: [task],
       },
       stage1_evidence_ledger: [{ id: 'e1' }, { id: 'e2' }],
+      stage1_conflict_register: [
+        { metric_key: 'households', label: '居民户数', values: ['102户', '120户'], evidence_ids: ['node-1', 'node-2'], unresolved: true, explanation: '同级项目摘要口径冲突' },
+        { metric_key: 'area', label: '项目面积', values: ['2.4公顷', '2.5公顷'], evidence_ids: ['node-3'], unresolved: false, explanation: '采用项目摘要口径' },
+      ],
       stage1_spatial_matrix: { space_decisions: [{ id: 's1' }] },
     },
   })
@@ -164,6 +168,13 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   tasks[0].missing_input = 'changed'
   assert.equal(task.missing_input, '消防核验')
   assert.equal(ctx.getStage1QualityBlockingIssues()[0].code, 'broken-ref')
+  const conflicts = ctx.getStage1ConflictRegister()
+  conflicts[0].values[0] = 'changed'
+  assert.equal(ctx.getStage1ConflictRegister()[0].values[0], '102户')
+  assert.equal(ctx.getStage1UnresolvedConflictCount(), 1)
+  assert.equal(ctx.getStage1ConflictStatusLabel(conflicts[0]), '待裁决')
+  assert.equal(ctx.getStage1ConflictStatusLabel(conflicts[1]), '已确定口径')
+  assert.equal(ctx.getStage1ConflictValuesText(ctx.getStage1ConflictRegister()[0]), '102户 / 120户')
   assert.equal(ctx.getStage1EvidenceCount(), 2)
   assert.equal(ctx.getStage1SpaceDecisionCount(), 1)
 })
@@ -181,6 +192,8 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /Agent 自动核验记录/)
   assert.match(main, /getStage1AutomatedVerificationChecks\(\)/)
   assert.match(main, /尚待完成的核验任务/)
+  assert.match(main, /来源冲突与裁决状态/)
+  assert.match(main, /getStage1ConflictRegister\(\)/)
   assert.match(main, /交付前必须修复/)
   assert.match(sidebar, /openAnalysisCapabilitiesPanel/)
   assert.match(sidebar, />分析能力</)

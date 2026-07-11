@@ -85,7 +85,7 @@ def _issue(
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 9
+    checks_total = 12
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -97,6 +97,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         if isinstance(package.get("spatial_matrix"), dict)
         else {}
     )
+    conflict_register = _list(package.get("conflict_register"))
 
     if ledger:
         invalid_nodes = []
@@ -134,19 +135,64 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
             )
         )
 
-    evidence_ids = {
-        _text(node.get("id")) for node in ledger if isinstance(node, dict) and _text(node.get("id"))
-    }
+    ledger_nodes = [node for node in ledger if isinstance(node, dict)]
+    evidence_id_list = [
+        _text(node.get("id")) for node in ledger_nodes if _text(node.get("id"))
+    ]
+    evidence_ids = set(evidence_id_list)
+    duplicate_ids = sorted(
+        {item for item in evidence_id_list if evidence_id_list.count(item) > 1}
+    )
+    if not duplicate_ids:
+        checks_passed += 1
+    else:
+        issues.append(
+            _issue(
+                "evidence_id_duplicate",
+                f"证据台账存在重复 ID：{'、'.join(duplicate_ids)}。",
+                path="evidence_ledger",
+                repair_hint="为每条证据生成唯一稳定 ID，禁止后写节点覆盖前一条证据。",
+            )
+        )
+
+    incomplete_provenance = [
+        _text(node.get("id")) or str(index)
+        for index, node in enumerate(ledger_nodes)
+        if not _text(node.get("source_artifact_id")) or not _text(node.get("method"))
+    ]
+    if ledger_nodes and not incomplete_provenance:
+        checks_passed += 1
+    else:
+        issues.append(
+            _issue(
+                "evidence_provenance_incomplete",
+                "证据节点缺少可追溯的来源 artifact 或取得/计算方法。",
+                path="evidence_ledger",
+                repair_hint="逐条补齐 source_artifact_id 和 method；文档证据保留节点 ID，计算证据写明算法。",
+            )
+        )
     referenced_ids: set[str] = set()
     for workpack in workpacks:
         if isinstance(workpack, dict):
-            referenced_ids.update(_text(item) for item in _list(workpack.get("evidence_refs")) if _text(item))
+            referenced_ids.update(
+                _text(item)
+                for item in _list(workpack.get("evidence_refs"))
+                if _text(item)
+            )
     for option in _list(strategy.get("options")):
         if isinstance(option, dict):
-            referenced_ids.update(_text(item) for item in _list(option.get("evidence_refs")) if _text(item))
+            referenced_ids.update(
+                _text(item)
+                for item in _list(option.get("evidence_refs"))
+                if _text(item)
+            )
     for decision in _list(matrix.get("space_decisions")):
         if isinstance(decision, dict):
-            referenced_ids.update(_text(item) for item in _list(decision.get("evidence_refs")) if _text(item))
+            referenced_ids.update(
+                _text(item)
+                for item in _list(decision.get("evidence_refs"))
+                if _text(item)
+            )
     unknown_refs = sorted(referenced_ids - evidence_ids)
     if referenced_ids and not unknown_refs:
         checks_passed += 1
@@ -219,6 +265,100 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 "定位方案缺少证据、反证或失效条件。",
                 path="strategy.options",
                 repair_hint="每个方案必须说明支持证据、反对证据和何时应放弃。",
+            )
+        )
+
+    evidence_by_id = {_text(node.get("id")): node for node in ledger_nodes}
+    recommended_option = next(
+        (
+            item
+            for item in options
+            if isinstance(item, dict) and _text(item.get("id")) == recommended_id
+        ),
+        {},
+    )
+    recommended_refs = {
+        _text(item)
+        for item in _list(recommended_option.get("evidence_refs"))
+        if _text(item)
+    }
+    direct_statuses = {"verified", "cross_checked"}
+    has_direct_recommendation_evidence = any(
+        evidence_by_id.get(evidence_id, {}).get("status") in direct_statuses
+        for evidence_id in recommended_refs
+    )
+
+    unresolved_conflicts = [
+        item
+        for item in conflict_register
+        if isinstance(item, dict) and item.get("unresolved") is True
+    ]
+    conflicted_artifact_ids = {
+        _text(evidence_id)
+        for conflict in unresolved_conflicts
+        for evidence_id in _list(conflict.get("evidence_ids"))
+        if _text(evidence_id)
+    }
+    conflicted_ledger_ids = {
+        _text(node.get("id"))
+        for node in ledger_nodes
+        if _text(node.get("source_artifact_id")) in conflicted_artifact_ids
+        or _text(node.get("id")) in conflicted_artifact_ids
+    }
+    strong_conflicted_spaces = [
+        _text(decision.get("space_id")) or str(index)
+        for index, decision in enumerate(_list(matrix.get("space_decisions")))
+        if isinstance(decision, dict)
+        and decision.get("recommendation_status") == "strong"
+        and conflicted_ledger_ids.intersection(
+            {
+                _text(item)
+                for item in _list(decision.get("evidence_refs"))
+                if _text(item)
+            }
+        )
+    ]
+    recommendation_uses_conflict = bool(
+        recommended_refs.intersection(conflicted_ledger_ids)
+    )
+    if (
+        has_direct_recommendation_evidence
+        and not recommendation_uses_conflict
+        and not strong_conflicted_spaces
+    ):
+        checks_passed += 1
+    else:
+        details = []
+        if recommended_refs and not has_direct_recommendation_evidence:
+            details.append("首选定位缺少 verified/cross_checked 直接证据")
+        if recommendation_uses_conflict:
+            details.append("首选定位引用了未解决冲突证据")
+        if strong_conflicted_spaces:
+            details.append(
+                f"强推荐空间依赖冲突证据：{'、'.join(strong_conflicted_spaces)}"
+            )
+        issues.append(
+            _issue(
+                "decision_evidence_strength_invalid",
+                "；".join(details) or "首选定位没有形成可验证的直接证据支撑。",
+                path="strategy/spatial_matrix",
+                repair_hint="补充直接证据、解决来源冲突，或将建议降级为条件式推荐并明确失效条件。",
+            )
+        )
+    for conflict in unresolved_conflicts:
+        label = (
+            _text(conflict.get("label"))
+            or _text(conflict.get("metric_key"))
+            or "未命名事项"
+        )
+        issues.append(
+            _issue(
+                "unresolved_evidence_conflict",
+                f"存在尚未解决的来源冲突：{label}。",
+                path="conflict_register",
+                repair_hint=_text(conflict.get("explanation"))
+                or "保留不同来源口径，指定权威来源或登记人工核实任务。",
+                warning=True,
             )
         )
 

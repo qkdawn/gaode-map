@@ -53,6 +53,8 @@ def valid_evidence():
                 "evidence_type": "F",
                 "status": "verified",
                 "source_ref": "项目资料 p.12",
+                "source_artifact_id": "document-node-12",
+                "method": "document_read",
                 "scope": "项目红线",
                 "comparison_baseline": "",
                 "confidence": "high",
@@ -306,3 +308,81 @@ def test_stage1_stream_exposes_automatic_road_verification(monkeypatch):
         "stage1-options-model",
         "stage1-spatial-matrix-model",
     ]
+
+
+def test_stage1_exposes_context_conflicts_in_quality_panel(monkeypatch):
+    runtime, profile = runtime_and_profile()
+    payload = ready_payload()
+    payload.analysis_snapshot.context["evidence_conflicts"] = [
+        "项目摘要与旧版资料的居民户数不一致"
+    ]
+    responses = [
+        valid_evidence(),
+        valid_workpacks(),
+        valid_strategy(),
+        valid_matrix(),
+        {"answer": "# 条件式建议", "sources": ["项目资料 p.12"]},
+    ]
+    calls = []
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs)
+            return responses[len(calls) - 1]
+
+    monkeypatch.setattr(
+        stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
+    )
+
+    response = asyncio.run(execute(payload, runtime=runtime, profile=profile))
+
+    assert response.status == "answered"
+    conflict = response.output.panel_payloads["stage1_conflict_register"][0]
+    assert conflict["unresolved"] is True
+    assert "居民户数不一致" in conflict["label"]
+    audit = response.output.panel_payloads["stage1_quality_audit"]
+    assert audit["status"] == "passed"
+    assert any(
+        item["code"] == "unresolved_evidence_conflict" for item in audit["issues"]
+    )
+    assert calls[0]["user_payload"]["known_conflicts"][0]["unresolved"] is True
+    assert (
+        calls[2]["user_payload"]["conflict_register"][0]["label"] == conflict["label"]
+    )
+
+
+def test_stage1_conflict_register_reads_selected_project_documents(monkeypatch):
+    captured = []
+
+    class Conflict:
+        def model_dump(self, *, mode):
+            assert mode == "json"
+            return {
+                "metric_key": "households",
+                "label": "居民户数",
+                "values": ["102户", "120户"],
+                "evidence_ids": ["node-a", "node-b"],
+                "preferred_value": "",
+                "preferred_evidence_id": "",
+                "unresolved": True,
+                "explanation": "同级项目摘要冲突。",
+            }
+
+    class Dossier:
+        conflicts = [Conflict()]
+
+    monkeypatch.setattr(
+        stage1,
+        "build_project_evidence_dossier",
+        lambda sources, *, question: captured.append((sources, question)) or Dossier(),
+    )
+
+    register = stage1._conflict_register(
+        [{"source_id": "document:brief", "title": "项目摘要"}],
+        question="居民如何安置",
+        context_conflicts=[],
+    )
+
+    assert captured[0][1] == "居民如何安置"
+    assert register[0]["metric_key"] == "households"
+    assert register[0]["evidence_ids"] == ["node-a", "node-b"]

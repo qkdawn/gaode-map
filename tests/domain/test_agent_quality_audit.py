@@ -12,6 +12,8 @@ def complete_package():
                 "evidence_type": "F",
                 "status": "verified",
                 "source_ref": "项目基础资料 p.12",
+                "source_artifact_id": "document-node-12",
+                "method": "document_read",
                 "scope": "项目红线",
                 "comparison_baseline": "",
                 "confidence": "high",
@@ -120,5 +122,87 @@ def test_unknown_evidence_reference_blocks_delivery():
     result = audit_stage1_package(package)
 
     assert result.status == "failed"
-    issue = next(item for item in result.blocking_issues if item.code == "evidence_reference_invalid")
+    issue = next(
+        item
+        for item in result.blocking_issues
+        if item.code == "evidence_reference_invalid"
+    )
     assert "missing-evidence" in issue.message
+
+
+def test_duplicate_evidence_ids_and_missing_provenance_block_delivery():
+    package = complete_package()
+    duplicate = deepcopy(package["evidence_ledger"][0])
+    duplicate["source_artifact_id"] = ""
+    package["evidence_ledger"].append(duplicate)
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert {issue.code for issue in result.blocking_issues} >= {
+        "evidence_id_duplicate",
+        "evidence_provenance_incomplete",
+    }
+
+
+def test_recommended_option_requires_direct_verified_evidence():
+    package = complete_package()
+    package["evidence_ledger"][0]["status"] = "inferred"
+    package["evidence_ledger"][0]["confidence"] = "medium"
+
+    result = audit_stage1_package(package)
+
+    issue = next(
+        item
+        for item in result.blocking_issues
+        if item.code == "decision_evidence_strength_invalid"
+    )
+    assert "缺少 verified/cross_checked" in issue.message
+
+
+def test_unresolved_conflict_cannot_support_recommended_option():
+    package = complete_package()
+    package["conflict_register"] = [
+        {
+            "metric_key": "households",
+            "label": "居民户数",
+            "values": ["102户", "120户"],
+            "evidence_ids": ["document-node-12", "document-node-18"],
+            "unresolved": True,
+            "explanation": "同级项目摘要口径冲突，需人工核实。",
+        }
+    ]
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "引用了未解决冲突证据" in next(
+        item.message
+        for item in result.blocking_issues
+        if item.code == "decision_evidence_strength_invalid"
+    )
+    conflict_issue = next(
+        item for item in result.issues if item.code == "unresolved_evidence_conflict"
+    )
+    assert conflict_issue.severity == "warning"
+    assert "居民户数" in conflict_issue.message
+
+
+def test_unlinked_conflict_is_exposed_without_blocking_unrelated_decision():
+    package = complete_package()
+    package["conflict_register"] = [
+        {
+            "metric_key": "households",
+            "label": "居民户数",
+            "values": ["102户", "120户"],
+            "evidence_ids": ["other-document-node"],
+            "unresolved": True,
+            "explanation": "保留冲突。",
+        }
+    ]
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "passed"
+    assert result.score == 100
+    assert [item.code for item in result.issues] == ["unresolved_evidence_conflict"]

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable
 
+from modules.documents import build_project_evidence_dossier
+
 from ..evidence_verification import verify_evidence_ledger
 from ..llm_digest import snapshot_digest
 from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
@@ -127,6 +129,63 @@ def _list_from(value: Any, key: str) -> list[dict[str, Any]]:
     )
 
 
+def _conflict_register(
+    selected_sources: list[dict[str, Any]],
+    *,
+    question: str,
+    context_conflicts: list[Any],
+) -> list[dict[str, Any]]:
+    conflicts: list[dict[str, Any]] = []
+    document_sources = [
+        source
+        for source in selected_sources
+        if str(source.get("source_id") or "").startswith("document:")
+    ]
+    if document_sources:
+        dossier = build_project_evidence_dossier(document_sources, question=question)
+        conflicts.extend(item.model_dump(mode="json") for item in dossier.conflicts)
+
+    for index, item in enumerate(context_conflicts):
+        if isinstance(item, dict):
+            conflict = dict(item)
+            conflict.setdefault("metric_key", f"context_conflict_{index + 1}")
+            conflict.setdefault(
+                "label",
+                str(item.get("explanation") or item.get("metric_key") or "上下文冲突"),
+            )
+            conflict.setdefault("values", [])
+            conflict.setdefault("evidence_ids", [])
+            conflict.setdefault("unresolved", True)
+            conflict.setdefault(
+                "explanation",
+                "当前分析上下文已标记该冲突，需保留不同口径并明确裁决依据。",
+            )
+        else:
+            label = str(item or "").strip()
+            if not label:
+                continue
+            conflict = {
+                "metric_key": f"context_conflict_{index + 1}",
+                "label": label,
+                "values": [],
+                "evidence_ids": [],
+                "preferred_value": "",
+                "preferred_evidence_id": "",
+                "unresolved": True,
+                "explanation": "当前分析上下文已标记该冲突，需保留不同口径并明确裁决依据。",
+            }
+        conflicts.append(conflict)
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for conflict in conflicts:
+        key = (str(conflict.get("metric_key") or ""), str(conflict.get("label") or ""))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(conflict)
+    return deduped
+
+
 def _audit_payload(audit: QualityAuditResult) -> dict[str, Any]:
     return audit.model_dump(mode="json")
 
@@ -140,6 +199,7 @@ def _base_panels(
     return {
         "stage1_readiness": readiness,
         "stage1_evidence_ledger": package["evidence_ledger"],
+        "stage1_conflict_register": package["conflict_register"],
         "stage1_evidence_verification": verification.model_dump(mode="json"),
         "stage1_workpacks": package["workpacks"],
         "stage1_strategy": package["strategy"],
@@ -187,12 +247,18 @@ async def execute(
     if client is None:
         raise ValueError("所选模型 Provider 不可用")
     question = str(payload.messages[-1].content if payload.messages else "").strip()
+    selected_sources = payload.selected_sources_context.source_items()
+    conflict_register = _conflict_register(
+        selected_sources,
+        question=question,
+        context_conflicts=readiness["conflicts"],
+    )
     evidence_input = {
         "question": question,
         "project_context": payload.analysis_snapshot.context,
         "snapshot": snapshot_digest(payload.analysis_snapshot),
-        "selected_sources": payload.selected_sources_context.source_items(),
-        "known_conflicts": readiness["conflicts"],
+        "selected_sources": selected_sources,
+        "known_conflicts": conflict_register,
         "optional_gaps": readiness["missing_optional"],
     }
 
@@ -208,7 +274,9 @@ async def execute(
             "每项必须含 id、claim、evidence_type(F/G/P/H/V)、status(verified/cross_checked/"
             "inferred/hypothesis/blocked/fieldwork_required)、source_ref、source_artifact_id、scope、method、metric、value、"
             "comparison_baseline、confidence(high/medium/low)、limitation、next_action、executor(agent/fieldwork)。"
+            "source_artifact_id 必须保留文档节点或分析产物 ID，method 必须说明读取或计算方法。"
             "没有页码时明确写来源路径或数据集；不得把夜光、POI、gap_score、周边人口解释为客流、消费或经营成功。"
+            "已知冲突不得静默选边；若引用冲突证据，必须降级结论并保留冲突说明。"
         ),
         user_payload=evidence_input,
         emit=emit,
@@ -218,7 +286,7 @@ async def execute(
     )
     evidence_ledger, verification = verify_evidence_ledger(
         _list_from(evidence_result, "evidence_ledger"),
-        selected_sources=payload.selected_sources_context.source_items(),
+        selected_sources=selected_sources,
         snapshot=payload.analysis_snapshot,
     )
     await _emit_phase(
@@ -242,6 +310,7 @@ async def execute(
                 panel_payloads={
                     "stage1_readiness": readiness,
                     "stage1_evidence_ledger": evidence_ledger,
+                    "stage1_conflict_register": conflict_register,
                     "stage1_evidence_verification": verification_payload,
                 },
             ),
@@ -285,11 +354,13 @@ async def execute(
             "你是城市更新决策顾问。只输出 JSON，含 options(至少3个)、recommended_option_id、decision_matrix、"
             "rejection_reasons。每个 option 必须含稳定 id、name、proposition、differentiation、feasibility、"
             "operating_sustainability、evidence_refs、counter_evidence、invalidation_conditions、risks。"
-            "不得用文案包装替代方案竞争。"
+            "不得用文案包装替代方案竞争。首选方案必须至少引用一条 verified 或 cross_checked 证据，"
+            "不得把未解决冲突作为唯一支撑。"
         ),
         user_payload={
             "question": question,
             "evidence_ledger": evidence_ledger,
+            "conflict_register": conflict_register,
             "workpacks": workpacks,
         },
         emit=emit,
@@ -314,10 +385,12 @@ async def execute(
             "renovation_and_delivery、preconditions、evidence_refs、assumptions、validation_actions、"
             "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)。"
             "空间建议必须说明前置条件，不得虚构产权、结构或消防结论。"
+            "strong 建议不得依赖未解决冲突证据；存在冲突时应降级为 conditional 并写明前置条件。"
         ),
         user_payload={
             "question": question,
             "evidence_ledger": evidence_ledger,
+            "conflict_register": conflict_register,
             "workpacks": workpacks,
             "strategy": strategy,
         },
@@ -329,6 +402,7 @@ async def execute(
     spatial_matrix = _mapping(matrix_result)
     package = {
         "evidence_ledger": evidence_ledger,
+        "conflict_register": conflict_register,
         "workpacks": workpacks,
         "strategy": strategy,
         "spatial_matrix": spatial_matrix,

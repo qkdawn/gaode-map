@@ -44,6 +44,7 @@
                                 <div class="agent-stage1-outcome-stats">
                                     <span v-if="getStage1QualityAudit()" :class="getStage1QualityAudit().status">质量 {{ getStage1QualityAudit().score }} 分</span>
                                     <span>{{ getStage1EvidenceCount() }} 条证据</span>
+                                    <span v-if="getStage1ConflictRegister().length" :class="{ failed: getStage1UnresolvedConflictCount() > 0 }">{{ getStage1UnresolvedConflictCount() }} 项待裁决冲突</span>
                                     <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
                                 </div>
                             </header>
@@ -70,6 +71,14 @@
                                         <p>{{ task.blocking_reason }}</p><small>下一步：{{ task.next_action }}</small>
                                     </article>
                                 </div>
+                            </div>
+                            <div v-if="getStage1ConflictRegister().length" class="agent-conflict-register">
+                                <strong>来源冲突与裁决状态</strong>
+                                <article v-for="conflict in getStage1ConflictRegister()" :key="`${conflict.metric_key}-${conflict.label}`" :class="{ unresolved: conflict.unresolved }">
+                                    <div><span>{{ getStage1ConflictStatusLabel(conflict) }}</span><strong>{{ conflict.label || conflict.metric_key }}</strong></div>
+                                    <p v-if="getStage1ConflictValuesText(conflict)">不同口径：{{ getStage1ConflictValuesText(conflict) }}</p>
+                                    <small v-if="conflict.explanation">{{ conflict.explanation }}</small>
+                                </article>
                             </div>
                             <div v-if="getStage1QualityBlockingIssues().length" class="agent-quality-issues">
                                 <strong>交付前必须修复</strong>
