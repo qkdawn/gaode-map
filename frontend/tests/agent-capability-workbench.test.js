@@ -668,3 +668,59 @@ test('running a ready capability forwards target id and explicit upstream policy
     run_id: 'run-1',
   }])
 })
+
+test('execution freezes readiness-resolved latest input to its immutable run', () => {
+  const ctx = createContext({
+    analysisCapabilityReadiness: {
+      'ppt-planning': {
+        status: 'ready',
+        input_resolutions: [{
+          requirement_id: 'approved_report',
+          selection_mode: 'latest_successful',
+          selected_run_id: 'run-selected-during-readiness',
+          state: 'resolved',
+        }],
+      },
+    },
+    analysisCapabilityInputSelections: {
+      'ppt-planning': { approved_report: { mode: 'latest_successful', run_id: 'run-selected-during-readiness' } },
+    },
+  })
+
+  assert.deepEqual(ctx.buildAnalysisCapabilityInputSelections('ppt-planning'), [{
+    requirement_id: 'approved_report',
+    mode: 'latest_successful',
+  }])
+  assert.deepEqual(ctx.buildLockedAnalysisCapabilityInputSelections('ppt-planning'), [{
+    requirement_id: 'approved_report',
+    mode: 'specific_run',
+    run_id: 'run-selected-during-readiness',
+  }])
+})
+
+test('PPT execution receives the readiness-locked Stage 1 run', async () => {
+  let openedWith = null
+  const capability = { id: 'ppt-planning', status: 'available', executor_type: 'service', executor_id: 'ppt-planning' }
+  const ctx = createContext({
+    analysisCapabilityReadiness: {
+      [capability.id]: {
+        status: 'ready',
+        input_resolutions: [{
+          requirement_id: 'approved_report',
+          selection_mode: 'latest_successful',
+          selected_run_id: 'run-locked',
+          state: 'resolved',
+        }],
+      },
+    },
+    openAgentPptPlanningFromReport: options => { openedWith = options },
+  })
+
+  await ctx.runAnalysisCapability(capability)
+
+  assert.deepEqual(openedWith.capabilityInputSelections, [{
+    requirement_id: 'approved_report',
+    mode: 'specific_run',
+    run_id: 'run-locked',
+  }])
+})

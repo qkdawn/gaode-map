@@ -17,6 +17,16 @@ import {
 } from './analysis-workspace-tabs.js'
 import { createPptSystemSources, createPptTransportFromAiPayload } from '../ppt-planning/model.js'
 import {
+  applyCapabilitySourceSelectionPolicy,
+  capabilityInputSelectionFingerprint,
+  capabilityRunSourceId,
+  capabilitySourceRunId,
+  createStage1CapabilityFailedSource,
+  createStage1CapabilityPlaceholderSource,
+  createStage1CapabilityPptSource,
+  normalizeCapabilityInputSelections,
+} from '../ppt-planning/capability-source.js'
+import {
   cleanupPptVisualArtifacts,
   getJobStatus,
   uploadDocumentSource,
@@ -64,6 +74,7 @@ import {
   webSourceRetryPayloadFromPptSource,
 } from '../ppt-planning/source-payloads.js'
 
+const CAPABILITY_RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
 const DEFAULT_PPT_POI_EVIDENCE_INTENT = '为 PPT 指令生成整理当前区域代表性 POI 资料'
 const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 POI，并与夜光格子对应'
 const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
@@ -207,6 +218,9 @@ export function normalizeAgentPptPlanningTab(item = {}, options = {}) {
     readonly: options.restore ? !!(item && item.readonly && source !== 'history') : !!(item && item.readonly),
     createdAt: asText(item && (item.created_at || item.createdAt)) || new Date().toISOString(),
     panelPayloads: cloneObject(item && (item.panel_payloads || item.panelPayloads)),
+    capabilityInputSelections: normalizeCapabilityInputSelections(
+      item && (item.capability_input_selections || item.capabilityInputSelections),
+    ),
     pptPlanningState,
   }
 }
@@ -221,6 +235,7 @@ export function serializeAgentPptPlanningTab(item = {}, fallbackPanelPayloads = 
     readonly: !!item.readonly,
     created_at: item.createdAt,
     panel_payloads: cloneObject(item.panelPayloads || fallbackPanelPayloads),
+    capability_input_selections: normalizeCapabilityInputSelections(item.capabilityInputSelections),
     ppt_planning_state: createPptPlanningState(item.pptPlanningState),
   }
 }
@@ -243,17 +258,67 @@ export function createAgentPptPlanningTabMethods() {
     openAgentPptPlanningFromReport(options = {}) {
       this.agentWorkspaceView = 'report'
       const tabs = this.ensureAgentTabs(true)
-      const existing = getAnalysisWorkspaceTabsFromState(tabs).find((item) => asText(item && item.source) === 'current' || asText(item && item.source) === 'draft')
+      const capabilityInputSelections = normalizeCapabilityInputSelections(options.capabilityInputSelections)
+      const selectionFingerprint = capabilityInputSelectionFingerprint(capabilityInputSelections)
+      const runId = capabilitySourceRunId(capabilityInputSelections)
+      const existing = getAnalysisWorkspaceTabsFromState(tabs).find((item) => {
+        if (!['current', 'draft'].includes(asText(item && item.source))) return false
+        const itemFingerprint = capabilityInputSelectionFingerprint(item && item.capabilityInputSelections)
+        return selectionFingerprint ? itemFingerprint === selectionFingerprint : !itemFingerprint
+      })
       if (existing && !options.forceNew) {
         const alreadyActive = asText(tabs.activeTabId) === asText(existing.id)
+        const existingState = createPptPlanningState(existing.pptPlanningState)
+        const existingSource = existingState.sources.find(item => asText(item?.id) === capabilityRunSourceId(runId))
+        const needsHydration = !!runId && asText(existingSource?.status) !== 'ready'
         this.switchAgentTopTab(existing.id)
         if (alreadyActive) {
           this.refreshAgentActivePptPlanningSources()
           this.refreshAgentActivePptPlanningDataSources()
         }
+        if (needsHydration) void this.hydrateAgentPptPlanningCapabilitySource(existing.id, runId)
         return existing.id
       }
-      return this.createAgentPptPlanningTab({ title: '分析', source: 'current' })
+      const pptPlanningState = runId
+        ? mergePptPlanningSources(createPptPlanningState(), [createStage1CapabilityPlaceholderSource(runId)])
+        : createPptPlanningState()
+      const tabId = this.createAgentPptPlanningTab({
+        title: runId ? `分析 · ${runId}` : '分析',
+        source: 'current',
+        capabilityInputSelections,
+        pptPlanningState,
+      })
+      if (runId) void this.hydrateAgentPptPlanningCapabilitySource(tabId, runId)
+      return tabId
+    },
+    async hydrateAgentPptPlanningCapabilitySource(tabId = '', runId = '') {
+      const targetTabId = asText(tabId)
+      const targetRunId = asText(runId)
+      if (!targetTabId || !targetRunId) return false
+      try {
+        const response = await fetch(`${CAPABILITY_RUNS_URL}/${encodeURIComponent(targetRunId)}`)
+        if (!response.ok) throw new Error(`Capability Run 读取失败(${response.status})`)
+        const source = createStage1CapabilityPptSource(await response.json(), targetRunId)
+        const currentState = this.getAgentPptPlanningTabState(targetTabId)
+        const additionalSelectedSourceIds = currentState.sources
+          .filter(item => item?.selected && asText(item?.id) !== capabilityRunSourceId(targetRunId))
+          .map(item => asText(item.id))
+          .filter(Boolean)
+        const nextState = applyCapabilitySourceSelectionPolicy(
+          mergePptPlanningSources(currentState, [source]),
+          targetRunId,
+          { additionalSelectedSourceIds },
+        )
+        return this.updateAgentPptPlanningTabState(targetTabId, nextState)
+      } catch (error) {
+        const failedSource = createStage1CapabilityFailedSource(targetRunId, error)
+        const nextState = applyCapabilitySourceSelectionPolicy(
+          mergePptPlanningSources(this.getAgentPptPlanningTabState(targetTabId), [failedSource]),
+          targetRunId,
+        )
+        this.updateAgentPptPlanningTabState(targetTabId, nextState)
+        return false
+      }
     },
     isAgentPptPlanningTabActive() {
       return asText(this.getAgentActiveTopTab().kind) === ANALYSIS_WORKSPACE_TAB_KIND
@@ -404,7 +469,17 @@ export function createAgentPptPlanningTabMethods() {
       return this.getAgentPptPlanningStateWithPackagePlaceholders(mergePptPlanningSources(normalizedState, systemSources), areaId)
     },
     getAgentPptPlanningStateWithSystemSources(options = {}) {
-      return this.mergeAgentPptPlanningSystemSources(this.getAgentActivePptPlanningState(), options)
+      const activeTab = this.getAgentActivePptPlanningTab()
+      const state = this.mergeAgentPptPlanningSystemSources(this.getAgentActivePptPlanningState(), options)
+      const runId = capabilitySourceRunId(activeTab && activeTab.capabilityInputSelections)
+      if (!runId) return state
+      const explicitAdditionalSourceIds = this.getAgentActivePptPlanningState().sources
+        .filter(item => item?.selected && asText(item?.id) !== capabilityRunSourceId(runId))
+        .map(item => asText(item.id))
+        .filter(Boolean)
+      return applyCapabilitySourceSelectionPolicy(state, runId, {
+        additionalSelectedSourceIds: explicitAdditionalSourceIds,
+      })
     },
     getAgentAnalysisSourceState() {
       return this.getAgentPptPlanningStateWithSystemSources({
@@ -413,7 +488,18 @@ export function createAgentPptPlanningTabMethods() {
       })
     },
     getAgentPptPlanningTabStateWithSystemSources(tabId = '') {
-      return this.mergeAgentPptPlanningSystemSources(this.getAgentPptPlanningTabState(tabId))
+      const state = this.mergeAgentPptPlanningSystemSources(this.getAgentPptPlanningTabState(tabId))
+      const tabs = this.ensureAgentTabs(false)
+      const tab = getAnalysisWorkspaceTabsFromState(tabs).find(item => asText(item?.id) === asText(tabId))
+      const runId = capabilitySourceRunId(tab && tab.capabilityInputSelections)
+      if (!runId) return state
+      const explicitAdditionalSourceIds = this.getAgentPptPlanningTabState(tabId).sources
+        .filter(item => item?.selected && asText(item?.id) !== capabilityRunSourceId(runId))
+        .map(item => asText(item.id))
+        .filter(Boolean)
+      return applyCapabilitySourceSelectionPolicy(state, runId, {
+        additionalSelectedSourceIds: explicitAdditionalSourceIds,
+      })
     },
     getAgentPptPlanningStateWithPackagePlaceholders(state = {}, areaId = '') {
       const normalized = createPptPlanningState(state)
@@ -475,13 +561,14 @@ export function createAgentPptPlanningTabMethods() {
       const areaId = asText(context.areaId || context.area_id)
       const activeTab = this.getAgentActiveTopTab()
       const activeTabId = asText(activeTab && activeTab.id)
+      const capabilityRunId = capabilitySourceRunId(activeTab && activeTab.capabilityInputSelections)
       if (!areaId || asText(activeTab && activeTab.kind) !== ANALYSIS_WORKSPACE_TAB_KIND) return
       const initialState = this.getAgentPptPlanningStateWithPackagePlaceholders(
         this.getAgentPptPlanningStateWithSystemSources(),
         areaId,
       )
       this.updateAgentPptPlanningTabRuntimeState(activeTabId, setPptSourceRefreshing(
-        syncPptSourceRefreshPlaceholderSources(initialState),
+        capabilityRunId ? initialState : syncPptSourceRefreshPlaceholderSources(initialState),
         true,
       ))
       try {
@@ -495,7 +582,7 @@ export function createAgentPptPlanningTabMethods() {
             areaId,
           )
           this.updateAgentPptPlanningTabRuntimeState(activeTabId, setPptSourceRefreshing(
-            syncPptSourceRefreshPlaceholderSources(manifestState, manifestSources),
+            capabilityRunId ? manifestState : syncPptSourceRefreshPlaceholderSources(manifestState, manifestSources),
             true,
           ))
         } catch (_) {
@@ -506,7 +593,14 @@ export function createAgentPptPlanningTabMethods() {
         if (asText(tabs.activeTabId) !== activeTabId) return
         const nextSources = cloneArray(backendSources).map((source) => normalizeBackendPptDataSource(source, areaId))
         const nextSourceIds = new Set(nextSources.map((source) => asText(source && source.id)).filter(Boolean))
-        const activeStateWithoutRefreshPlaceholders = clearPptSourceRefreshPlaceholderSources(this.getAgentActivePptPlanningState())
+        const activeStateBeforeRefresh = clearPptSourceRefreshPlaceholderSources(this.getAgentActivePptPlanningState())
+        const explicitCapabilityAdditionalSourceIds = capabilityRunId
+          ? new Set(activeStateBeforeRefresh.sources
+            .filter(source => source && source.selected && asText(source.id) !== capabilityRunSourceId(capabilityRunId))
+            .map(source => asText(source.id))
+            .filter(Boolean))
+          : null
+        const activeStateWithoutRefreshPlaceholders = activeStateBeforeRefresh
         const currentState = createPptPlanningState({
           ...activeStateWithoutRefreshPlaceholders,
           sources: cloneArray(activeStateWithoutRefreshPlaceholders.sources)
@@ -518,7 +612,7 @@ export function createAgentPptPlanningTabMethods() {
           .filter(Boolean))
         const mergedBackendState = mergePptPlanningSources(currentState, nextSources)
         const mergedSystemState = this.mergeAgentPptPlanningSystemSources(mergedBackendState)
-        const refreshedState = this.getAgentPptPlanningStateWithPackagePlaceholders(
+        const unfilteredRefreshedState = this.getAgentPptPlanningStateWithPackagePlaceholders(
           createPptPlanningState({
             ...mergedSystemState,
             sources: cloneArray(mergedSystemState.sources).map((source) => ({
@@ -530,8 +624,13 @@ export function createAgentPptPlanningTabMethods() {
           }),
           areaId,
         )
+        const refreshedState = capabilityRunId
+          ? applyCapabilitySourceSelectionPolicy(unfilteredRefreshedState, capabilityRunId, {
+            additionalSelectedSourceIds: [...explicitCapabilityAdditionalSourceIds],
+          })
+          : unfilteredRefreshedState
         this.updateAgentActivePptPlanningStateWithSourceStale(setPptSourceRefreshing(refreshedState, false), currentState)
-        if (options.autoPackage !== false) {
+        if (!capabilityRunId && options.autoPackage !== false) {
           await Promise.allSettled([
             this.autoCreateAgentPptPlanningPoiEvidencePackage({ areaId }),
             this.autoCreateAgentPptPlanningNightlifePoiPackage({ areaId }),
@@ -1186,8 +1285,16 @@ export function createAgentPptPlanningTabMethods() {
         readonly: !!options.readonly,
         createdAt: new Date().toISOString(),
         panelPayloads: cloneObject(this.agentPanelPayloads),
-        pptPlanningState: mergePptPlanningSources(createPptPlanningState(options.pptPlanningState), createPptSystemSources(this.buildAgentPptPlanningSystemSourceContext())),
+        capabilityInputSelections: normalizeCapabilityInputSelections(options.capabilityInputSelections),
+        pptPlanningState: createPptPlanningState(options.pptPlanningState),
       }
+      const capabilityRunId = capabilitySourceRunId(tab.capabilityInputSelections)
+      tab.pptPlanningState = capabilityRunId
+        ? applyCapabilitySourceSelectionPolicy(
+          mergePptPlanningSources(tab.pptPlanningState, createPptSystemSources(this.buildAgentPptPlanningSystemSourceContext())),
+          capabilityRunId,
+        )
+        : mergePptPlanningSources(tab.pptPlanningState, createPptSystemSources(this.buildAgentPptPlanningSystemSourceContext()))
       const nextAnalysisWorkspaceTabs = [...getAnalysisWorkspaceTabsFromState(tabs), tab]
       tabs.activeTabId = tabId
       this.agentTabs = cloneAgentTabsState(withAnalysisWorkspaceTabs(tabs, nextAnalysisWorkspaceTabs))

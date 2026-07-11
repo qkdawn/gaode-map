@@ -386,6 +386,21 @@ export function createAgentCapabilityWorkbenchMethods() {
         return item
       })
     },
+    buildLockedAnalysisCapabilityInputSelections(capabilityId = '') {
+      return this.getAnalysisCapabilityInputResolutions(capabilityId).map((resolution) => {
+        const requirementId = text(resolution.requirement_id)
+        const state = text(resolution.state)
+        const runId = text(resolution.selected_run_id)
+        if (state === 'ignored') return { requirement_id: requirementId, mode: 'ignore_optional' }
+        if (state === 'resolved' && runId) {
+          return { requirement_id: requirementId, mode: 'specific_run', run_id: runId }
+        }
+        const selected = this.getAnalysisCapabilityInputSelection(capabilityId, requirementId)
+        const item = { requirement_id: requirementId, mode: text(selected.mode) || 'latest_successful' }
+        if (item.mode === 'specific_run') item.run_id = text(selected.run_id)
+        return item
+      })
+    },
     syncAnalysisCapabilityInputSelections(capabilityId = '', readiness = null) {
       const id = text(capabilityId)
       const previous = (this.analysisCapabilityInputSelections || {})[id] || {}
@@ -535,7 +550,7 @@ export function createAgentCapabilityWorkbenchMethods() {
         }
         return
       }
-      const capabilityInputSelections = this.buildAnalysisCapabilityInputSelections(capability.id)
+      const capabilityInputSelections = this.buildLockedAnalysisCapabilityInputSelections(capability.id)
       if (capability.executor_type === 'service' && capability.executor_id === 'ppt-planning') {
         this.openAgentPptPlanningFromReport({ capabilityInputSelections })
         return

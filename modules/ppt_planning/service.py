@@ -682,7 +682,23 @@ def _compact_evidence_node(node: Any) -> Dict[str, Any]:
         "metadata": {
             key: value
             for key, value in metadata.items()
-            if key in {"domain", "page", "page_no", "url", "record_id", "record_type", "confidence", "locator", "node_id", "carrier_id"}
+            if key in {
+                "domain",
+                "page",
+                "page_no",
+                "url",
+                "record_id",
+                "record_type",
+                "confidence",
+                "locator",
+                "node_id",
+                "carrier_id",
+                "run_id",
+                "source_run_id",
+                "artifact_id",
+                "content_digest",
+                "artifact_version",
+            }
         },
     }
 
