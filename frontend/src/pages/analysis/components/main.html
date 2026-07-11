@@ -3,7 +3,47 @@
         <main class="main-content" :class="{ 'main-content-agent-mode': isAgentWorkspaceActive() }">
             <div v-show="isAgentWorkspaceActive()" class="agent-main-stage">
                 <div class="agent-app-main">
-                    <div v-if="agentWorkspaceView === 'tools'" class="agent-tools-workspace">
+                    <div v-if="agentWorkspaceView === 'capabilities'" class="agent-capability-workspace">
+                        <header class="agent-capability-header">
+                            <div><div class="agent-tools-eyebrow">Analysis Workbench</div><h2>分析能力</h2><p>选择可执行能力，检查当前输入，再以本对话选定的模型运行。</p></div>
+                            <button type="button" class="agent-tools-back-btn" @click="backToAgentReport">返回报告</button>
+                        </header>
+                        <div class="agent-capability-model">本轮模型 <strong>{{ getAgentSelectedModelName() }}</strong></div>
+                        <div v-if="analysisCapabilitiesLoading" class="agent-tools-state">正在加载能力目录...</div>
+                        <div v-else-if="analysisCapabilitiesError" class="agent-tools-state is-error"><span>{{ analysisCapabilitiesError }}</span><button class="agent-tools-retry-btn" @click="loadAnalysisCapabilities(true)">重试</button></div>
+                        <div v-else class="agent-capability-body">
+                            <div class="agent-capability-groups">
+                                <section v-for="group in getAnalysisCapabilityGroups()" :key="group.key">
+                                    <h3>{{ group.label }}</h3>
+                                    <div class="agent-capability-grid">
+                                        <button v-for="capability in group.items" :key="capability.id" type="button" class="agent-capability-card" :class="{ active: activeAnalysisCapabilityId === capability.id }" @click="inspectAnalysisCapability(capability)">
+                                            <span class="agent-capability-status" :class="capability.status">{{ capability.status === 'available' ? '可执行' : '规划中' }}</span>
+                                            <strong>{{ capability.display_name }}</strong><span>{{ capability.description }}</span>
+                                            <small>{{ capability.estimated_stages }} 个阶段 · {{ capability.output_contract.length }} 类成果</small>
+                                        </button>
+                                    </div>
+                                </section>
+                            </div>
+                            <aside v-if="getActiveAnalysisCapability()" class="agent-capability-detail">
+                                <div><span class="agent-tools-eyebrow">Capability</span><h3>{{ getActiveAnalysisCapability().display_name }}</h3><p>{{ getActiveAnalysisCapability().description }}</p></div>
+                                <div class="agent-capability-detail-section"><strong>输入要求</strong><span v-for="item in getActiveAnalysisCapability().input_requirements" :key="item.id">{{ item.label }}</span></div>
+                                <div class="agent-capability-detail-section"><strong>预期成果</strong><span v-for="item in getActiveAnalysisCapability().output_contract" :key="item">{{ item }}</span></div>
+                                <div v-if="analysisCapabilityReadinessLoading" class="agent-capability-readiness">正在检查输入...</div>
+                                <div v-else-if="getAnalysisCapabilityReadinessError(getActiveAnalysisCapability().id)" class="agent-capability-readiness blocked">{{ getAnalysisCapabilityReadinessError(getActiveAnalysisCapability().id) }}</div>
+                                <div v-else-if="getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id)" class="agent-capability-readiness" :class="getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).status">
+                                    <strong>{{ getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).status === 'ready' ? '输入已就绪' : '输入尚未就绪' }}</strong>
+                                    <span v-for="item in getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).missing_required" :key="item">缺少：{{ item }}</span>
+                                    <span v-for="item in getAnalysisCapabilityReadiness(getActiveAnalysisCapability().id).missing_optional" :key="item">建议补充：{{ item }}</span>
+                                </div>
+                                <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading" @click="runAnalysisCapability(getActiveAnalysisCapability())">运行能力</button>
+                            </aside>
+                        </div>
+                        <div v-if="getStage1QualityAudit()" class="agent-quality-strip" :class="getStage1QualityAudit().status">
+                            <strong>最近一次 Stage 1：{{ getStage1QualityAudit().status === 'passed' ? '质量审计通过' : '质量审计未通过' }}</strong>
+                            <span>{{ getStage1QualityAudit().score }} 分</span><span>{{ getStage1EvidenceCount() }} 条证据</span><span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
+                        </div>
+                    </div>
+                    <div v-else-if="agentWorkspaceView === 'tools'" class="agent-tools-workspace">
                         <div class="agent-tools-header">
                             <div>
                                 <div class="agent-tools-eyebrow">{{ agentToolsViewMode === 'input_packages' ? 'Agent Input Packages' : 'Agent Tool Registry' }}</div>

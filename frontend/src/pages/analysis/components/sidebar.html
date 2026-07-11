@@ -1,4 +1,4 @@
-﻿
+
 
         <!-- Left Sidebar: Wizard Dashboard -->
         <aside class="sidebar"
@@ -323,6 +323,11 @@
                                                 <path d="M15 5l3 3"/>
                                             </svg>
                                             <span class="agent-sidebar-new-title">新报告</span>
+                                        </button>
+                                        <button type="button" class="agent-sidebar-new-btn agent-sidebar-tool-btn" :class="{ active: agentWorkspaceView === 'capabilities' }" @click="openAnalysisCapabilitiesPanel">
+                                            <svg class="agent-sidebar-new-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></svg>
+                                            <span class="agent-sidebar-new-title">分析能力</span>
+                                            <span v-if="analysisCapabilitiesLoading" class="agent-sidebar-tool-loading">加载中</span>
                                         </button>
                                         <button
                                             type="button"

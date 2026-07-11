@@ -36,6 +36,7 @@ import { createAgentContextAskUiMethods } from './context-ask-ui.js'
 import { createAgentSiteSelectionTabMethods } from './site-selection-tabs.js'
 import { createAgentIterationChangeUiMethods } from './iteration-change-ui.js'
 import { createAgentThreadUiMethods } from './thread-ui.js'
+import { createAgentCapabilityWorkbenchMethods } from './capability-workbench.js'
 
 function createAgentUiMethods() {
   return {
@@ -200,6 +201,7 @@ function createAgentUiMethods() {
     ...createAgentContextAskUiMethods(),
     ...createAgentSiteSelectionTabMethods(),
     ...createAgentIterationChangeUiMethods(),
+    ...createAgentCapabilityWorkbenchMethods(),
     ...createAgentThreadUiMethods(),
   }
 }
