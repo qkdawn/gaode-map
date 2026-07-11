@@ -13849,3 +13849,21 @@ body.agent-ppt-source-menu-open {
 .agent-provenance-details small, .agent-provenance-issues small { display: block; margin-top: 4px; color: #64748b; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .agent-provenance-issues { display: flex; flex-direction: column; gap: 6px; }
 .agent-provenance-issues article { margin: 0; }
+.agent-capability-inputs { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #dbe3ec; border-radius: 7px; background: #f8fafc; }
+.agent-capability-inputs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.agent-capability-inputs-head strong { color: #334155; font-size: 11px; }
+.agent-capability-inputs-head span { color: #64748b; font-size: 9px; text-align: right; }
+.agent-capability-input { display: flex; flex-direction: column; gap: 7px; padding: 9px; border: 1px solid #dbe3ec; border-left: 3px solid #94a3b8; border-radius: 6px; background: #fff; }
+.agent-capability-input.resolved, .agent-capability-input.ignored { border-left-color: #16a34a; }
+.agent-capability-input.missing, .agent-capability-input.recalculate_required { border-left-color: #d97706; background: #fffdf7; }
+.agent-capability-input.invalid { border-left-color: #dc2626; background: #fff8f8; }
+.agent-capability-input-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.agent-capability-input-title > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.agent-capability-input-title strong { color: #334155; font-size: 10px; }
+.agent-capability-input-title small { color: #64748b; font-size: 8px; overflow-wrap: anywhere; }
+.agent-capability-input-title > span { padding: 2px 5px; border-radius: 999px; background: #eef2f7; color: #475569; font-size: 8px; white-space: nowrap; }
+.agent-capability-input label { display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 7px; color: #64748b; font-size: 9px; }
+.agent-capability-input select { min-width: 0; height: 28px; padding: 0 7px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #334155; font-size: 9px; }
+.agent-capability-input-lock { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: #64748b; font-size: 8px; }
+.agent-capability-input-lock code { color: #4338ca; overflow-wrap: anywhere; }
+.agent-capability-input p { margin: 0; color: #b45309; font-size: 8px; line-height: 1.45; }

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .capability_inputs import CapabilityInputResolution, resolve_capability_inputs
 from .schemas import AgentTurnRequest
 from .skills.urban_strategy_stage1 import evaluate_readiness
 
@@ -22,6 +23,29 @@ class CapabilityRequirement(BaseModel):
     id: str
     label: str
     required: bool = True
+    input_kind: Literal["current_context", "upstream_artifact"] = "current_context"
+    upstream_capability_id: str = ""
+    required_artifact_ids: list[str] = Field(default_factory=list)
+    selection_modes: list[
+        Literal["latest_successful", "specific_run", "recalculate", "ignore_optional"]
+    ] = Field(default_factory=list)
+    default_selection_mode: Literal[
+        "latest_successful", "specific_run", "recalculate", "ignore_optional"
+    ] = "latest_successful"
+
+    @model_validator(mode="after")
+    def validate_upstream_contract(self):
+        if self.input_kind == "current_context":
+            if self.upstream_capability_id or self.required_artifact_ids or self.selection_modes:
+                raise ValueError("current_context_requirement_has_upstream_configuration")
+            return self
+        if not self.upstream_capability_id or not self.required_artifact_ids:
+            raise ValueError("upstream_requirement_source_contract_required")
+        if not self.selection_modes or self.default_selection_mode not in self.selection_modes:
+            raise ValueError("upstream_requirement_selection_contract_invalid")
+        if self.required and "ignore_optional" in self.selection_modes:
+            raise ValueError("required_upstream_requirement_cannot_be_ignored")
+        return self
 
 
 class AnalysisCapability(BaseModel):
@@ -54,6 +78,7 @@ class CapabilityReadiness(BaseModel):
     missing_optional: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
     actions: list[CapabilityAction] = Field(default_factory=list)
+    input_resolutions: list[CapabilityInputResolution] = Field(default_factory=list)
     limited_mode_allowed: bool = False
 
 
@@ -94,7 +119,20 @@ _CAPABILITIES = (
         executor_type="skill",
         executor_id="urban-strategy-stage1",
         input_requirements=[
-            CapabilityRequirement(id="evidence", label="项目资料或分析证据")
+            CapabilityRequirement(id="project_scope", label="项目空间范围"),
+            CapabilityRequirement(id="project_brief", label="项目摘要与决策问题"),
+            CapabilityRequirement(
+                id="stage1_basis",
+                label="Stage 1 分析依据",
+                input_kind="upstream_artifact",
+                upstream_capability_id="urban-strategy-stage1",
+                required_artifact_ids=[
+                    "stage1-evidence-ledger",
+                    "stage1-strategy-options",
+                    "stage1-decision-matrix",
+                ],
+                selection_modes=["latest_successful", "specific_run", "recalculate"],
+            ),
         ],
         output_contract=["空间诊断", "候选功能比较", "组合与时序检查"],
         supports_map=True,
@@ -112,7 +150,26 @@ _CAPABILITIES = (
         executor_type="skill",
         executor_id="urban-strategy-stage1",
         input_requirements=[
-            CapabilityRequirement(id="evidence", label="待审计证据或分析结果")
+            CapabilityRequirement(id="evidence", label="当前项目证据或分析结果"),
+            CapabilityRequirement(
+                id="stage1_audit_target",
+                label="Stage 1 历史成果",
+                required=False,
+                input_kind="upstream_artifact",
+                upstream_capability_id="urban-strategy-stage1",
+                required_artifact_ids=[
+                    "stage1-evidence-ledger",
+                    "stage1-report",
+                    "stage1-run-manifest",
+                ],
+                selection_modes=[
+                    "latest_successful",
+                    "specific_run",
+                    "recalculate",
+                    "ignore_optional",
+                ],
+                default_selection_mode="ignore_optional",
+            ),
         ],
         output_contract=["Claim-Evidence 台账", "质量问题", "验证任务"],
         supports_resume=True,
@@ -128,7 +185,18 @@ _CAPABILITIES = (
         executor_type="service",
         executor_id="ppt-planning",
         input_requirements=[
-            CapabilityRequirement(id="approved_report", label="已审定报告或分析成果")
+            CapabilityRequirement(
+                id="approved_report",
+                label="已审定报告或分析成果",
+                input_kind="upstream_artifact",
+                upstream_capability_id="urban-strategy-stage1",
+                required_artifact_ids=[
+                    "stage1-report",
+                    "stage1-evidence-appendix",
+                    "stage1-design-handoff",
+                ],
+                selection_modes=["latest_successful", "specific_run", "recalculate"],
+            )
         ],
         output_contract=["叙事结构", "页面规格", "可编辑 PPT"],
         supports_resume=True,
@@ -157,15 +225,75 @@ def evaluate_capability_readiness(
     capability = get_analysis_capability(capability_id)
     if capability.status != "available":
         return CapabilityReadiness(capability_id=capability.id, status="unavailable")
+    resolved_inputs = resolve_capability_inputs(capability.id, payload)
     if capability.executor_id == "urban-strategy-stage1":
         result: dict[str, Any] = evaluate_readiness(payload)
+        if capability.id == "spatial-programming-matrix" and any(
+            item.state == "resolved" for item in resolved_inputs.resolutions
+        ):
+            result["missing"] = [
+                item
+                for item in result.get("missing", [])
+                if item != "核心项目文档或已选分析证据"
+            ]
+            result["actions"] = [
+                item
+                for item in result.get("actions", [])
+                if item.get("target") != "analysis-sources"
+            ]
+            if "Stage 1 分析依据" not in result["satisfied"]:
+                result["satisfied"].append("Stage 1 分析依据")
+            result["ready"] = not result["missing"]
+        missing_required = list(result.get("missing") or [])
+        missing_optional = list(result.get("missing_optional") or [])
+        for item in resolved_inputs.resolutions:
+            if item.state in {"resolved", "ignored"}:
+                continue
+            target = missing_required if item.required else missing_optional
+            if item.label not in target:
+                target.append(item.label)
+        actions = [CapabilityAction(**item) for item in result.get("actions") or []]
+        actions.extend(
+            CapabilityAction(
+                id=f"resolve-{item.requirement_id}",
+                label=(
+                    f"重新运行{item.label}"
+                    if item.selection_mode == "recalculate"
+                    else f"选择{item.label}版本"
+                ),
+                target=f"capability-input:{item.requirement_id}",
+            )
+            for item in resolved_inputs.resolutions
+            if item.state not in {"resolved", "ignored"}
+        )
+        ready = bool(result["ready"]) and not resolved_inputs.blocking_diagnostics
         return CapabilityReadiness(
             capability_id=capability.id,
-            status="ready" if result["ready"] else "blocked",
+            status="ready" if ready else "blocked",
             satisfied=list(result.get("satisfied") or []),
-            missing_required=list(result.get("missing") or []),
-            missing_optional=list(result.get("missing_optional") or []),
-            conflicts=list(result.get("conflicts") or []),
-            actions=[CapabilityAction(**item) for item in result.get("actions") or []],
+            missing_required=missing_required,
+            missing_optional=missing_optional,
+            conflicts=[
+                *list(result.get("conflicts") or []),
+                *resolved_inputs.blocking_diagnostics,
+            ],
+            actions=actions,
+            input_resolutions=resolved_inputs.public_resolutions(),
             limited_mode_allowed=False,
         )
+    return CapabilityReadiness(
+        capability_id=capability.id,
+        status="ready" if not resolved_inputs.blocking_diagnostics else "blocked",
+        missing_required=[
+            item.label
+            for item in resolved_inputs.resolutions
+            if item.required and item.state not in {"resolved", "ignored"}
+        ],
+        missing_optional=[
+            item.label
+            for item in resolved_inputs.resolutions
+            if not item.required and item.state not in {"resolved", "ignored"}
+        ],
+        conflicts=resolved_inputs.blocking_diagnostics,
+        input_resolutions=resolved_inputs.public_resolutions(),
+    )

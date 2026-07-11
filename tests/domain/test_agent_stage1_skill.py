@@ -51,6 +51,18 @@ def ready_payload():
     )
 
 
+def test_stage1_executor_rejects_service_capability_target():
+    runtime, profile = runtime_and_profile()
+    payload = ready_payload().model_copy(update={"target_capability_id": "ppt-planning"})
+
+    try:
+        asyncio.run(execute(payload, runtime=runtime, profile=profile))
+    except ValueError as exc:
+        assert str(exc) == "capability_executor_mismatch"
+    else:
+        raise AssertionError("service capability must not execute through the Stage 1 skill")
+
+
 def valid_evidence():
     return {
         "evidence_ledger": [

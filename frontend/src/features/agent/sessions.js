@@ -106,6 +106,7 @@ function createAnalysisAgentInitialState() {
     analysisCapabilityReadiness: {},
     analysisCapabilityReadinessErrors: {},
     analysisCapabilityReadinessLoading: false,
+    analysisCapabilityInputSelections: {},
     activeAnalysisCapabilityId: '',
     analysisCapabilityRuns: [],
     analysisCapabilityRunsLoaded: false,

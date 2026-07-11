@@ -4,6 +4,7 @@ from typing import Any, Awaitable, Callable
 
 from modules.documents import ProjectEvidenceDossier, build_project_evidence_dossier
 
+from ..capability_inputs import resolve_capability_inputs
 from ..evidence_verification import verify_evidence_ledger
 from ..stage1_deliverables import (
     build_design_handoff,
@@ -274,13 +275,52 @@ async def execute(
 ) -> AgentTurnResponse:
     question = str(payload.messages[-1].content if payload.messages else "").strip()
     selected_sources = payload.selected_sources_context.source_items()
+    capability_id = str(payload.target_capability_id or "urban-strategy-stage1").strip()
+    from ..capability_catalog import get_analysis_capability
+
+    capability = get_analysis_capability(capability_id)
+    if capability.executor_type != "skill" or capability.executor_id != "urban-strategy-stage1":
+        raise ValueError("capability_executor_mismatch")
+    resolved_inputs = resolve_capability_inputs(capability_id, payload)
     run = start_stage1_run(
         payload,
         profile=profile,
         question=question,
         selected_sources=selected_sources,
+        capability_id=capability_id,
+        resolved_inputs=resolved_inputs,
     )
     readiness = evaluate_readiness(payload)
+    if capability_id == "spatial-programming-matrix" and any(
+        item.state == "resolved" for item in resolved_inputs.resolutions
+    ):
+        readiness["missing"] = [
+            item
+            for item in readiness.get("missing", [])
+            if item != "核心项目文档或已选分析证据"
+        ]
+        readiness["actions"] = [
+            item
+            for item in readiness.get("actions", [])
+            if item.get("target") != "analysis-sources"
+        ]
+        if "Stage 1 分析依据" not in readiness["satisfied"]:
+            readiness["satisfied"].append("Stage 1 分析依据")
+        readiness["ready"] = not readiness["missing"]
+    if resolved_inputs.blocking_diagnostics:
+        readiness["ready"] = False
+        readiness["missing"] = [
+            *readiness.get("missing", []),
+            *[
+                item.label
+                for item in resolved_inputs.resolutions
+                if item.required and item.state not in {"resolved", "ignored"}
+            ],
+        ]
+        readiness["conflicts"] = [
+            *readiness.get("conflicts", []),
+            *resolved_inputs.blocking_diagnostics,
+        ]
     await _emit_phase(
         emit,
         phase_id="stage1-readiness",
@@ -343,7 +383,10 @@ async def execute(
         snapshot=payload.analysis_snapshot,
         dossier=dossier,
     )
-    input_artifacts = bind_stage1_input_artifacts(provenance_registry)
+    input_artifacts = [
+        *bind_stage1_input_artifacts(provenance_registry),
+        *resolved_inputs.input_artifact_refs,
+    ]
     run.set_input_artifacts(input_artifacts)
     input_artifact_ids = [item.artifact_id for item in input_artifacts]
     project_brief = {
@@ -360,6 +403,21 @@ async def execute(
         "authoritative_artifacts": provenance_registry_payload(provenance_registry),
         "known_conflicts": conflict_register,
         "optional_gaps": readiness["missing_optional"],
+        "upstream_artifacts": [
+            {
+                "requirement_id": item.requirement_id,
+                "source_run_id": item.selected_run_id,
+                "artifact_refs": [ref.model_dump(mode="json") for ref in item.artifact_refs],
+                "artifact_payloads": {
+                    key: value
+                    for key, value in resolved_inputs.artifact_payloads.items()
+                    if key.startswith(f"{item.selected_run_id}:")
+                },
+                "diagnostics": item.diagnostics,
+            }
+            for item in resolved_inputs.resolutions
+            if item.state == "resolved"
+        ],
     }
 
     await _emit_phase(

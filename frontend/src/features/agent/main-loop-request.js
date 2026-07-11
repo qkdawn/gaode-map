@@ -27,6 +27,10 @@ export async function buildMainLoopRequestBody(ctx = {}, turnContext = {}, optio
   return {
     conversation_id: turnContext.targetSessionId,
     history_id: turnContext.historyId,
+    target_capability_id: String(options.targetCapabilityId || '').trim(),
+    capability_input_selections: Array.isArray(options.capabilityInputSelections)
+      ? options.capabilityInputSelections.map(item => ({ ...item }))
+      : [],
     governance_mode: 'auto',
     execution_mode: executionMode,
     messages: turnContext.requestMessages,

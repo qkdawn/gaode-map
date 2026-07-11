@@ -48,3 +48,46 @@ def test_unknown_analysis_capability_returns_404():
 
     assert response.status_code == 404
     assert response.json()["detail"] == "analysis_capability_not_found"
+
+
+def test_downstream_readiness_exposes_explicit_upstream_version_choices(monkeypatch):
+    from modules.agent.capability_inputs import (
+        CapabilityInputResolution,
+        ResolvedCapabilityInputs,
+    )
+
+    monkeypatch.setattr(
+        "modules.agent.capability_catalog.resolve_capability_inputs",
+        lambda capability_id, payload: ResolvedCapabilityInputs(
+            resolutions=[
+                CapabilityInputResolution(
+                    requirement_id="approved_report",
+                    label="已审定报告或分析成果",
+                    required=True,
+                    upstream_capability_id="urban-strategy-stage1",
+                    selection_mode="latest_successful",
+                    state="missing",
+                    diagnostics=["没有可用版本"],
+                )
+            ],
+            blocking_diagnostics=["没有可用版本"],
+        ),
+    )
+    with TestClient(build_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/agent/analysis-capabilities/ppt-planning/readiness",
+            json={
+                "history_id": "history-without-stage1-runs",
+                "target_capability_id": "ppt-planning",
+                "messages": [{"role": "user", "content": "生成 PPT"}],
+            },
+        )
+
+    assert response.status_code == 200
+    readiness = response.json()
+    assert readiness["status"] == "blocked"
+    resolution = readiness["input_resolutions"][0]
+    assert resolution["requirement_id"] == "approved_report"
+    assert resolution["selection_mode"] == "latest_successful"
+    assert resolution["state"] == "missing"
+    assert resolution["available_versions"] == []

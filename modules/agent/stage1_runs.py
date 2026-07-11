@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .capability_inputs import ResolvedCapabilityInputs
 from .capability_runs import (
     CapabilityArtifactRef,
     CapabilityArtifactType,
@@ -19,11 +20,13 @@ def start_stage1_run(
     profile: EffectiveExecutionProfile,
     question: str,
     selected_sources: list[dict[str, Any]],
+    capability_id: str = "urban-strategy-stage1",
+    resolved_inputs: ResolvedCapabilityInputs | None = None,
 ) -> CapabilityRunRecorder:
     """Lock one Stage 1 configuration before readiness or model execution begins."""
 
     return CapabilityRunRecorder(
-        capability_id="urban-strategy-stage1",
+        capability_id=capability_id,
         project_context={
             "scope": payload.analysis_snapshot.scope,
             "context": payload.analysis_snapshot.context,
@@ -40,6 +43,9 @@ def start_stage1_run(
                 if str(item.get("source_id") or "").strip()
             ],
             "analysis_snapshot_digest": snapshot_digest(payload.analysis_snapshot),
+            "capability_input_selections": (
+                resolved_inputs.configuration_snapshot() if resolved_inputs else []
+            ),
         },
         execution_profile=profile.model_dump(mode="json"),
     )

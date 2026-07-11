@@ -27,6 +27,30 @@
                             <aside v-if="getActiveAnalysisCapability()" class="agent-capability-detail">
                                 <div><span class="agent-tools-eyebrow">Capability</span><h3>{{ getActiveAnalysisCapability().display_name }}</h3><p>{{ getActiveAnalysisCapability().description }}</p></div>
                                 <div class="agent-capability-detail-section"><strong>输入要求</strong><span v-for="item in getActiveAnalysisCapability().input_requirements" :key="item.id">{{ item.label }}</span></div>
+                                <section v-if="getAnalysisCapabilityInputResolutions(getActiveAnalysisCapability().id).length" class="agent-capability-inputs">
+                                    <div class="agent-capability-inputs-head"><strong>上游版本选择</strong><span>执行前锁定，不静默读取运行时文件</span></div>
+                                    <article v-for="resolution in getAnalysisCapabilityInputResolutions(getActiveAnalysisCapability().id)" :key="resolution.requirement_id" class="agent-capability-input" :class="resolution.state">
+                                        <div class="agent-capability-input-title">
+                                            <div><strong>{{ resolution.label }}</strong><small>{{ resolution.required ? '必需输入' : '可选输入' }} · {{ resolution.upstream_capability_id }}</small></div>
+                                            <span>{{ getAnalysisCapabilityInputStateLabel(resolution) }}</span>
+                                        </div>
+                                        <label>
+                                            <span>处理方式</span>
+                                            <select :value="getAnalysisCapabilityInputSelection(getActiveAnalysisCapability().id, resolution.requirement_id).mode" @change="setAnalysisCapabilityInputMode(getActiveAnalysisCapability().id, resolution.requirement_id, $event)">
+                                                <option v-for="mode in getAnalysisCapabilityInputModes(resolution)" :key="mode.value" :value="mode.value">{{ mode.label }}</option>
+                                            </select>
+                                        </label>
+                                        <label v-if="getAnalysisCapabilityInputSelection(getActiveAnalysisCapability().id, resolution.requirement_id).mode === 'specific_run'">
+                                            <span>历史版本</span>
+                                            <select :value="getAnalysisCapabilityInputSelection(getActiveAnalysisCapability().id, resolution.requirement_id).run_id" @change="setAnalysisCapabilityInputRun(getActiveAnalysisCapability().id, resolution.requirement_id, $event)">
+                                                <option value="">请选择不可变运行版本</option>
+                                                <option v-for="version in resolution.available_versions" :key="version.run_id" :value="version.run_id">{{ getAnalysisCapabilityVersionLabel(version) }}</option>
+                                            </select>
+                                        </label>
+                                        <div v-if="resolution.selected_run_id" class="agent-capability-input-lock">已锁定 <code>{{ resolution.selected_run_id }}</code><span>{{ resolution.artifact_refs.length }} 个产物</span></div>
+                                        <p v-for="diagnostic in resolution.diagnostics" :key="diagnostic">{{ diagnostic }}</p>
+                                    </article>
+                                </section>
                                 <div class="agent-capability-detail-section"><strong>预期成果</strong><span v-for="item in getActiveAnalysisCapability().output_contract" :key="item">{{ item }}</span></div>
                                 <div v-if="analysisCapabilityReadinessLoading" class="agent-capability-readiness">正在检查输入...</div>
                                 <div v-else-if="getAnalysisCapabilityReadinessError(getActiveAnalysisCapability().id)" class="agent-capability-readiness blocked">{{ getAnalysisCapabilityReadinessError(getActiveAnalysisCapability().id) }}</div>
@@ -82,7 +106,7 @@
                                         </div>
                                     </article>
                                 </section>
-                                <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading" @click="runAnalysisCapability(getActiveAnalysisCapability())">运行能力</button>
+                                <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading || !isAnalysisCapabilityReady(getActiveAnalysisCapability().id)" @click="runAnalysisCapability(getActiveAnalysisCapability())">运行能力</button>
                             </aside>
                         </div>
                         <section v-if="hasStage1Outcome()" class="agent-stage1-outcome">

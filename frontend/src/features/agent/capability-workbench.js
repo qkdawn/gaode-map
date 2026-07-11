@@ -357,11 +357,133 @@ export function createAgentCapabilityWorkbenchMethods() {
     getAnalysisCapabilityReadinessError(capabilityId = '') {
       return (this.analysisCapabilityReadinessErrors || {})[text(capabilityId)] || ''
     },
-    async inspectAnalysisCapability(capability = null) {
-      const id = text(capability && capability.id)
-      if (!id) return
-      this.activeAnalysisCapabilityId = id
-      const runsPromise = this.loadAnalysisCapabilityRuns({ capabilityId: id }).catch(() => [])
+    isAnalysisCapabilityReady(capabilityId = '') {
+      return this.getAnalysisCapabilityReadiness(capabilityId)?.status === 'ready'
+    },
+    getAnalysisCapabilityInputResolutions(capabilityId = '') {
+      const resolutions = this.getAnalysisCapabilityReadiness(capabilityId)?.input_resolutions
+      return Array.isArray(resolutions) ? clonePayloadValue(resolutions) : []
+    },
+    getAnalysisCapabilityInputSelection(capabilityId = '', requirementId = '') {
+      const capabilitySelections = (this.analysisCapabilityInputSelections || {})[text(capabilityId)] || {}
+      const selected = capabilitySelections[text(requirementId)]
+      if (selected && typeof selected === 'object') return { ...selected }
+      const resolution = this.getAnalysisCapabilityInputResolutions(capabilityId)
+        .find(item => text(item.requirement_id) === text(requirementId))
+      return {
+        mode: text(resolution?.selection_mode) || 'latest_successful',
+        run_id: text(resolution?.selected_run_id),
+      }
+    },
+    buildAnalysisCapabilityInputSelections(capabilityId = '') {
+      return this.getAnalysisCapabilityInputResolutions(capabilityId).map((resolution) => {
+        const selected = this.getAnalysisCapabilityInputSelection(capabilityId, resolution.requirement_id)
+        const item = {
+          requirement_id: text(resolution.requirement_id),
+          mode: text(selected.mode) || 'latest_successful',
+        }
+        if (item.mode === 'specific_run') item.run_id = text(selected.run_id)
+        return item
+      })
+    },
+    syncAnalysisCapabilityInputSelections(capabilityId = '', readiness = null) {
+      const id = text(capabilityId)
+      const previous = (this.analysisCapabilityInputSelections || {})[id] || {}
+      const next = { ...previous }
+      for (const resolution of readiness?.input_resolutions || []) {
+        const requirementId = text(resolution?.requirement_id)
+        if (!requirementId || next[requirementId]) continue
+        next[requirementId] = {
+          mode: text(resolution.selection_mode) || 'latest_successful',
+          run_id: text(resolution.selected_run_id),
+        }
+      }
+      this.analysisCapabilityInputSelections = {
+        ...(this.analysisCapabilityInputSelections || {}),
+        [id]: next,
+      }
+    },
+    getAnalysisCapabilityInputRequirement(requirementId = '') {
+      const requirements = this.getActiveAnalysisCapability()?.input_requirements
+      return (Array.isArray(requirements) ? requirements : [])
+        .find(item => text(item.id) === text(requirementId)) || null
+    },
+    getAnalysisCapabilityInputModes(resolution = null) {
+      const requirement = this.getAnalysisCapabilityInputRequirement(resolution?.requirement_id)
+      const modes = Array.isArray(requirement?.selection_modes) ? requirement.selection_modes : []
+      return modes.map(mode => ({
+        value: mode,
+        label: {
+          latest_successful: '使用最新成功版本',
+          specific_run: '选择历史版本',
+          recalculate: '先重新计算上游',
+          ignore_optional: '明确忽略此可选输入',
+        }[mode] || mode,
+      }))
+    },
+    getAnalysisCapabilityInputStateLabel(resolution = null) {
+      return {
+        resolved: '已锁定',
+        missing: '缺少版本',
+        invalid: '选择无效',
+        recalculate_required: '等待重算',
+        ignored: '已明确忽略',
+      }[text(resolution?.state)] || '待检查'
+    },
+    getAnalysisCapabilityVersionLabel(version = null) {
+      const timestamp = text(version?.completed_at || version?.created_at)
+      const suffix = version?.stale ? ' · 已过期' : ''
+      return `${text(version?.run_id) || '未知版本'}${timestamp ? ` · ${timestamp}` : ''}${suffix}`
+    },
+    async setAnalysisCapabilityInputMode(capabilityId = '', requirementId = '', event = null) {
+      const id = text(capabilityId)
+      const requirement = text(requirementId)
+      const mode = text(event?.target?.value || event) || 'latest_successful'
+      const current = (this.analysisCapabilityInputSelections || {})[id] || {}
+      this.analysisCapabilityInputSelections = {
+        ...(this.analysisCapabilityInputSelections || {}),
+        [id]: {
+          ...current,
+          [requirement]: { mode, run_id: '' },
+        },
+      }
+      if (mode === 'specific_run') {
+        const readiness = this.getAnalysisCapabilityReadiness(id)
+        if (readiness) {
+          this.analysisCapabilityReadiness = {
+            ...this.analysisCapabilityReadiness,
+            [id]: {
+              ...clonePayloadValue(readiness),
+              input_resolutions: this.getAnalysisCapabilityInputResolutions(id).map(item => (
+                text(item.requirement_id) === requirement
+                  ? { ...item, selection_mode: mode, state: 'missing', selected_run_id: '', artifact_refs: [], diagnostics: ['请选择一个不可变历史版本。'] }
+                  : item
+              )),
+            },
+          }
+        }
+      }
+      if (mode !== 'specific_run') {
+        await this.refreshAnalysisCapabilityReadiness(this.getActiveAnalysisCapability())
+      }
+    },
+    async setAnalysisCapabilityInputRun(capabilityId = '', requirementId = '', event = null) {
+      const id = text(capabilityId)
+      const requirement = text(requirementId)
+      const runId = text(event?.target?.value || event)
+      const current = (this.analysisCapabilityInputSelections || {})[id] || {}
+      this.analysisCapabilityInputSelections = {
+        ...(this.analysisCapabilityInputSelections || {}),
+        [id]: {
+          ...current,
+          [requirement]: { mode: 'specific_run', run_id: runId },
+        },
+      }
+      if (runId) await this.refreshAnalysisCapabilityReadiness(this.getActiveAnalysisCapability())
+    },
+    async refreshAnalysisCapabilityReadiness(capability = null) {
+      const id = text(capability?.id)
+      if (!id) return null
       this.analysisCapabilityReadinessLoading = true
       this.analysisCapabilityReadinessErrors = { ...this.analysisCapabilityReadinessErrors, [id]: '' }
       try {
@@ -371,6 +493,8 @@ export function createAgentCapabilityWorkbenchMethods() {
           body: JSON.stringify({
             conversation_id: text(this.activeAgentSessionId),
             history_id: typeof this.getCurrentAgentHistoryId === 'function' ? text(this.getCurrentAgentHistoryId()) : '',
+            target_capability_id: id,
+            capability_input_selections: this.buildAnalysisCapabilityInputSelections(id),
             messages: [{ role: 'user', content: CAPABILITY_PROMPTS[id] || capability.description || capability.display_name }],
             analysis_snapshot: typeof this.buildAgentAnalysisSnapshot === 'function' ? this.buildAgentAnalysisSnapshot() : {},
             selected_sources_context: buildAnalysisQuickAskSelectedSourcesContext(this),
@@ -379,20 +503,41 @@ export function createAgentCapabilityWorkbenchMethods() {
         if (!response.ok) throw new Error(`输入检查失败(${response.status})`)
         const readiness = await response.json()
         this.analysisCapabilityReadiness = { ...this.analysisCapabilityReadiness, [id]: readiness }
+        this.syncAnalysisCapabilityInputSelections(id, readiness)
+        return readiness
       } catch (error) {
         this.analysisCapabilityReadinessErrors = {
           ...this.analysisCapabilityReadinessErrors,
           [id]: error instanceof Error ? error.message : String(error),
         }
+        return null
       } finally {
         this.analysisCapabilityReadinessLoading = false
       }
+    },
+    async inspectAnalysisCapability(capability = null) {
+      const id = text(capability && capability.id)
+      if (!id) return
+      this.activeAnalysisCapabilityId = id
+      const runsPromise = this.loadAnalysisCapabilityRuns({ capabilityId: id }).catch(() => [])
+      await this.refreshAnalysisCapabilityReadiness(capability)
       await runsPromise
     },
     async runAnalysisCapability(capability = null) {
       if (!capability || capability.status !== 'available') return
+      const readiness = this.getAnalysisCapabilityReadiness(capability.id)
+      if (!readiness || readiness.status !== 'ready') {
+        this.analysisCapabilityReadinessErrors = {
+          ...this.analysisCapabilityReadinessErrors,
+          [capability.id]: readiness
+            ? '请先完成并确认所有必需输入。'
+            : '请先检查并锁定能力输入。',
+        }
+        return
+      }
+      const capabilityInputSelections = this.buildAnalysisCapabilityInputSelections(capability.id)
       if (capability.executor_type === 'service' && capability.executor_id === 'ppt-planning') {
-        this.openAgentPptPlanningFromReport()
+        this.openAgentPptPlanningFromReport({ capabilityInputSelections })
         return
       }
       await this.loadAgentCapabilities()
@@ -403,7 +548,11 @@ export function createAgentCapabilityWorkbenchMethods() {
       }
       this.chooseAgentSkill(skill)
       this.agentWorkspaceView = 'report'
-      await this.submitAgentComposer({ prompt: CAPABILITY_PROMPTS[capability.id] || capability.description })
+      await this.submitAgentComposer({
+        prompt: CAPABILITY_PROMPTS[capability.id] || capability.description,
+        targetCapabilityId: capability.id,
+        capabilityInputSelections,
+      })
       await this.loadAnalysisCapabilityRuns({ force: true, capabilityId: capability.id }).catch(() => {})
     },
     getCapabilityRun() {

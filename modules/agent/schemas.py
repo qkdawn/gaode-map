@@ -161,11 +161,35 @@ class ConversationExecutionProfile(BaseModel):
     pinned_skill_id: str = ""
 
 
+class CapabilityInputSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    requirement_id: str
+    mode: Literal[
+        "latest_successful", "specific_run", "recalculate", "ignore_optional"
+    ] = "latest_successful"
+    run_id: str = ""
+
+    @model_validator(mode="after")
+    def validate_run_selection(self):
+        self.requirement_id = str(self.requirement_id or "").strip()
+        self.run_id = str(self.run_id or "").strip()
+        if not self.requirement_id:
+            raise ValueError("capability_input_requirement_id_required")
+        if self.mode == "specific_run" and not self.run_id:
+            raise ValueError("capability_input_run_id_required")
+        if self.mode != "specific_run" and self.run_id:
+            raise ValueError("capability_input_run_id_not_allowed")
+        return self
+
+
 class AgentTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     conversation_id: str = ""
     history_id: str = ""
+    target_capability_id: str = ""
+    capability_input_selections: List[CapabilityInputSelection] = Field(default_factory=list)
     messages: List[AgentMessage] = Field(default_factory=list)
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     risk_confirmations: List[str] = Field(default_factory=list)

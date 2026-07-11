@@ -14,7 +14,9 @@ function createContext(overrides = {}) {
     analysisCapabilitiesLoading: false,
     analysisCapabilitiesError: '',
     analysisCapabilityReadiness: {},
+    analysisCapabilityReadinessErrors: {},
     analysisCapabilityReadinessLoading: false,
+    analysisCapabilityInputSelections: {},
     activeAnalysisCapabilityId: '',
     analysisCapabilityRuns: [],
     analysisCapabilityRunsLoaded: false,
@@ -295,12 +297,28 @@ test('readiness failure is exposed without discarding the active capability', as
   }
 })
 
+test('capability execution is blocked until readiness locks its inputs', async () => {
+  let submitted = false
+  const ctx = createContext({ submitAgentComposer: async () => { submitted = true } })
+
+  await ctx.runAnalysisCapability({
+    id: 'urban-strategy-stage1',
+    status: 'available',
+    executor_type: 'skill',
+    executor_id: 'urban-strategy-stage1',
+  })
+
+  assert.equal(submitted, false)
+  assert.match(ctx.getAnalysisCapabilityReadinessError('urban-strategy-stage1'), /锁定能力输入/)
+})
+
 test('running a Skill capability selects its executor for the current turn', async () => {
   const selected = []
   const submitted = []
   const skill = { id: 'urban-strategy-stage1', display_name: '城市区域策划第一阶段' }
   const ctx = createContext({
     agentSkills: [skill],
+    analysisCapabilityReadiness: { 'urban-strategy-stage1': { status: 'ready', input_resolutions: [] } },
     loadAgentCapabilities: async () => {},
     chooseAgentSkill: value => selected.push(value),
     submitAgentComposer: async value => submitted.push(value),
@@ -314,6 +332,7 @@ test('running a Skill capability selects its executor for the current turn', asy
 test('running a capability never falls back to plain Agent when its Skill is missing', async () => {
   let submitted = false
   const ctx = createContext({
+    analysisCapabilityReadiness: { 'urban-strategy-stage1': { status: 'ready', input_resolutions: [] } },
     loadAgentCapabilities: async () => {},
     submitAgentComposer: async () => { submitted = true },
   })
@@ -324,7 +343,10 @@ test('running a capability never falls back to plain Agent when its Skill is mis
 
 test('PPT capability reuses the existing planning workbench', async () => {
   let opened = 0
-  const ctx = createContext({ openAgentPptPlanningFromReport: () => { opened += 1 } })
+  const ctx = createContext({
+    analysisCapabilityReadiness: { 'ppt-planning': { status: 'ready', input_resolutions: [] } },
+    openAgentPptPlanningFromReport: () => { opened += 1 },
+  })
   await ctx.runAnalysisCapability({ id: 'ppt-planning', status: 'available', executor_type: 'service', executor_id: 'ppt-planning' })
   assert.equal(opened, 1)
 })
@@ -511,6 +533,10 @@ test('analysis workspace templates expose capability navigation and detail view'
   ])
   assert.match(main, /agentWorkspaceView === 'capabilities'/)
   assert.match(main, /getAnalysisCapabilityGroups\(\)/)
+  assert.match(main, /上游版本选择/)
+  assert.match(main, /不静默读取运行时文件/)
+  assert.match(main, /setAnalysisCapabilityInputMode/)
+  assert.match(main, /setAnalysisCapabilityInputRun/)
   assert.match(main, /inspectAnalysisCapability\(capability\)/)
   assert.match(main, /runAnalysisCapability\(getActiveAnalysisCapability\(\)\)/)
   assert.match(main, /getCapabilityRun\(\)/)
@@ -555,4 +581,90 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /交付前必须修复/)
   assert.match(sidebar, /openAnalysisCapabilitiesPanel/)
   assert.match(sidebar, />分析能力</)
+})
+
+
+test('upstream input selection serializes a locked historical run', async () => {
+  let refreshed = 0
+  const capability = {
+    id: 'spatial-programming-matrix',
+    status: 'available',
+    input_requirements: [{
+      id: 'stage1_basis',
+      selection_modes: ['latest_successful', 'specific_run', 'recalculate'],
+    }],
+  }
+  const ctx = createContext({
+    analysisCapabilities: [capability],
+    activeAnalysisCapabilityId: capability.id,
+    analysisCapabilityReadiness: {
+      [capability.id]: {
+        status: 'ready',
+        input_resolutions: [{
+          requirement_id: 'stage1_basis',
+          selection_mode: 'latest_successful',
+          state: 'resolved',
+          selected_run_id: 'run-current',
+          available_versions: [{ run_id: 'run-history', stale: true }],
+        }],
+      },
+    },
+    refreshAnalysisCapabilityReadiness: async () => { refreshed += 1 },
+  })
+
+  await ctx.setAnalysisCapabilityInputMode(capability.id, 'stage1_basis', 'specific_run')
+  assert.equal(refreshed, 0)
+  await ctx.setAnalysisCapabilityInputRun(capability.id, 'stage1_basis', 'run-history')
+
+  assert.equal(refreshed, 1)
+  assert.deepEqual(ctx.buildAnalysisCapabilityInputSelections(capability.id), [{
+    requirement_id: 'stage1_basis',
+    mode: 'specific_run',
+    run_id: 'run-history',
+  }])
+  assert.match(ctx.getAnalysisCapabilityVersionLabel({ run_id: 'run-history', stale: true }), /已过期/)
+})
+
+test('running a ready capability forwards target id and explicit upstream policy', async () => {
+  let submitted = null
+  const capability = {
+    id: 'spatial-programming-matrix',
+    status: 'available',
+    executor_type: 'skill',
+    executor_id: 'urban-strategy-stage1',
+    description: '生成空间矩阵',
+  }
+  const skill = { id: 'urban-strategy-stage1' }
+  const ctx = createContext({
+    analysisCapabilities: [capability],
+    activeAnalysisCapabilityId: capability.id,
+    analysisCapabilityReadiness: {
+      [capability.id]: {
+        status: 'ready',
+        input_resolutions: [{
+          requirement_id: 'stage1_basis',
+          selection_mode: 'specific_run',
+          selected_run_id: 'run-1',
+          state: 'resolved',
+        }],
+      },
+    },
+    analysisCapabilityInputSelections: {
+      [capability.id]: { stage1_basis: { mode: 'specific_run', run_id: 'run-1' } },
+    },
+    agentSkills: [skill],
+    loadAgentCapabilities: async () => {},
+    chooseAgentSkill: () => {},
+    submitAgentComposer: async options => { submitted = options },
+    loadAnalysisCapabilityRuns: async () => [],
+  })
+
+  await ctx.runAnalysisCapability(capability)
+
+  assert.equal(submitted.targetCapabilityId, capability.id)
+  assert.deepEqual(submitted.capabilityInputSelections, [{
+    requirement_id: 'stage1_basis',
+    mode: 'specific_run',
+    run_id: 'run-1',
+  }])
 })
