@@ -24,7 +24,7 @@ import {
 } from '../src/features/agent/analysis-quick-request.js'
 
 import { buildMainLoopRequestBody } from '../src/features/agent/main-loop-request.js'
-import { slashSkillQuery } from '../src/features/agent/execution-profile.js'
+import { createAgentExecutionProfileMethods, slashSkillQuery } from '../src/features/agent/execution-profile.js'
 const agentMethods = createAnalysisAgentSessionMethods()
 
 test('agent message renderer formats markdown tables', () => {
@@ -44,6 +44,16 @@ test('agent message renderer formats markdown tables', () => {
   assert.match(html, /<th>维度<\/th>/)
   assert.match(html, /<strong>选址<\/strong>/)
   assert.doesNotMatch(html, /<div class="agent-message-paragraph">\| 维度/)
+})
+
+test('agent composer grows to content height and scrolls only after its limit', () => {
+  const resizeAgentComposerInput = createAgentExecutionProfileMethods().resizeAgentComposerInput
+  const input = { scrollHeight: 312, style: {} }
+
+  resizeAgentComposerInput({ target: input })
+
+  assert.equal(input.style.height, '240px')
+  assert.equal(input.style.overflowY, 'auto')
 })
 
 test('agent tabs keep analysis workspace as canonical tab field', () => {

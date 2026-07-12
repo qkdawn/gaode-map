@@ -3059,43 +3059,49 @@
                                 <button type="button" class="agent-shortcut-chip agent-business-chip" :disabled="agentLoading || agentSessionHydrating" @click="submitAgentComposer({ prompt: '请把当前分析整理成商业决策口径，突出结论、证据、风险和建议。' })">决策口径</button>
                             </div>
 
-                            <div class="agent-composer-card">
-                                <div class="agent-composer-menu-wrap">
-                                    <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" @click="toggleAgentComposerMenu" title="切换回答模式">+</button>
-                                    <div v-if="agentComposerMenuOpen" class="agent-composer-menu">
-                                        <button type="button" class="agent-composer-menu-item" @click="selectAgentComposerMode('deep')">
-                                            <span>深度</span>
-                                            <small>读取已选来源并补充工具证据</small>
-                                        </button>
+                            <div class="agent-composer-card agent-global-composer-card">
+                                <div class="agent-composer-editor">
+                                    <div class="agent-composer-menu-wrap">
+                                        <button type="button" class="agent-composer-plus" :class="{ active: agentComposerMenuOpen }" @click="toggleAgentComposerMenu" title="切换回答模式">+</button>
+                                        <div v-if="agentComposerMenuOpen" class="agent-composer-menu">
+                                            <button type="button" class="agent-composer-menu-item" @click="selectAgentComposerMode('deep')">
+                                                <span>深度</span>
+                                                <small>读取已选来源并补充工具证据</small>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="agent-composer-editor-body">
+                                        <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
+                                            深度
+                                            <button type="button" aria-label="取消深度" @click="clearAgentComposerMode">×</button>
+                                        </div>
+                                        <div v-if="getAgentSelectedSkill()" class="agent-skill-chip" :style="{ '--skill-color': getAgentSelectedSkill().color || '#276b5d' }">
+                                            <span>{{ getAgentSelectedSkill().display_name }}</span>
+                                            <button type="button" class="agent-skill-scope" @click="toggleAgentSkillScope" :title="agentSkillScope === 'conversation' ? '改为仅本轮' : '固定到当前对话'">{{ agentSkillScope === 'conversation' ? '本对话' : '仅本轮' }}</button>
+                                            <button type="button" class="agent-skill-remove" aria-label="取消 Skill" @click="clearAgentSkill">×</button>
+                                        </div>
+                                        <textarea
+                                            v-model="agentInput"
+                                            class="agent-composer-input"
+                                            placeholder="输入问题，或输入 / 选择 Skill..."
+                                            :disabled="agentSessionHydrating"
+                                            @focus="loadAgentCapabilities(); resizeAgentComposerInput($event)"
+                                            @input="resizeAgentComposerInput($event)"
+                                            @keydown.enter.exact.prevent="submitAgentComposer()"
+                                        ></textarea>
                                     </div>
                                 </div>
-                                <div v-if="agentComposerMode === 'deep'" class="agent-composer-mode-chip">
-                                    深度
-                                    <button type="button" aria-label="取消深度" @click="clearAgentComposerMode">×</button>
-                                </div>
-                                <div v-if="getAgentSelectedSkill()" class="agent-skill-chip" :style="{ '--skill-color': getAgentSelectedSkill().color || '#276b5d' }">
-                                    <span>{{ getAgentSelectedSkill().display_name }}</span>
-                                    <button type="button" class="agent-skill-scope" @click="toggleAgentSkillScope" :title="agentSkillScope === 'conversation' ? '改为仅本轮' : '固定到当前对话'">{{ agentSkillScope === 'conversation' ? '本对话' : '仅本轮' }}</button>
-                                    <button type="button" class="agent-skill-remove" aria-label="取消 Skill" @click="clearAgentSkill">×</button>
-                                </div>
-                                <textarea
-                                    v-model="agentInput"
-                                    class="agent-composer-input"
-                                    placeholder="输入问题，或输入 / 选择 Skill..."
-                                    :disabled="agentSessionHydrating"
-                                    @focus="loadAgentCapabilities()"
-                                    @keydown.enter.exact.prevent="submitAgentComposer()"
-                                ></textarea>
                                 <div v-if="getAgentSkillMatches().length" class="agent-skill-menu">
                                     <button v-for="skill in getAgentSkillMatches()" :key="skill.id" type="button" class="agent-skill-option" @click="chooseAgentSkill(skill)">
                                         <span class="agent-skill-swatch" :style="{ background: skill.color || '#276b5d' }"></span>
                                         <span><strong>{{ skill.display_name }}</strong><small>/{{ skill.id }} · {{ skill.description }}</small></span>
                                     </button>
                                 </div>
-                            <div class="agent-composer-actions">
-                                <div class="agent-model-picker">
-                                    <button type="button" class="agent-model-button" :disabled="agentLoading" :title="getAgentSelectedModelName()" @click="toggleAgentModelMenu">
-                                        <span>{{ getAgentSelectedModelName() }}</span><span aria-hidden="true">⌄</span>
+                                <div class="agent-composer-footer">
+                                    <div class="agent-composer-actions">
+                                        <div class="agent-model-picker">
+                                            <button type="button" class="agent-model-button" :disabled="agentLoading" :title="`选择模型：${getAgentSelectedModelName()}`" @click="toggleAgentModelMenu">
+                                                <span class="agent-model-button-label">模型</span><span class="agent-model-button-value">{{ getAgentSelectedModelName() }}</span><span aria-hidden="true">⌄</span>
                                     </button>
                                     <div v-if="agentModelMenuOpen" class="agent-model-menu">
                                         <div v-if="agentCapabilitiesError" class="agent-model-diagnostic">{{ agentCapabilitiesError }}</div>
@@ -3108,8 +3114,8 @@
                                         <button type="button" class="agent-model-config-entry" @click="openAgentModelConfig()">配置模型</button>
                                     </div>
                                 </div>
-                                <button
-                                    type="button"
+                                        <button
+                                            type="button"
                                         class="agent-composer-send"
                                         :class="{ 'is-loading': agentLoading }"
                                         :disabled="agentSessionHydrating || (!agentLoading && !agentCanSubmit())"
@@ -3119,7 +3125,9 @@
                                         <span v-else class="agent-composer-send-loading" aria-hidden="true">
                                             <span class="agent-composer-send-stop"></span>
                                         </span>
-                                </button>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

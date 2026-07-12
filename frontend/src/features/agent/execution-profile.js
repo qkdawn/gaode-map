@@ -40,7 +40,15 @@ export function createAgentExecutionProfileMethods() {
     },
     toggleAgentModelMenu() {
       this.agentModelMenuOpen = !this.agentModelMenuOpen
-      if (this.agentModelMenuOpen) this.loadAgentCapabilities()
+      if (this.agentModelMenuOpen) this.loadAgentCapabilities(true)
+    },
+    resizeAgentComposerInput(event) {
+      const input = event && event.target
+      if (!input || !input.style || typeof input.scrollHeight !== 'number') return
+      const maxHeight = 240
+      input.style.height = 'auto'
+      input.style.height = `${Math.min(Math.max(input.scrollHeight, 48), maxHeight)}px`
+      input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden'
     },
     selectAgentModel(profileId) {
       this.agentSelectedModelProfileId = text(profileId)
