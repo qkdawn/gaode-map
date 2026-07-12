@@ -435,6 +435,36 @@
                                     </div>
                                     <p v-if="stage1SpatialPresentationMessage" class="agent-spatial-map-message">{{ stage1SpatialPresentationMessage }}</p>
                                 </div>
+                                <section v-if="getStage1MovementPresentation()" class="agent-movement-workbench" aria-label="游客居民后勤消防流线工作台">
+                                    <div class="agent-movement-head">
+                                        <div><strong>四类流线与冲突核验</strong><span>游客、居民、后勤和消防流线只显示服务端绑定的权威路径；无路径时保留缺口，不补画坐标</span></div>
+                                        <small>{{ getStage1MovementRouteCount() }} 条流线 · {{ getStage1MovementPresentation().bound_item_count || 0 }} 条已绑定</small>
+                                    </div>
+                                    <div class="agent-movement-toolbar">
+                                        <div class="agent-movement-type-buttons" role="group" aria-label="流线类型筛选">
+                                            <button v-for="item in getStage1MovementTypes()" :key="item.id" type="button" :class="{ active: stage1MovementType === item.id }" @click="setStage1MovementType(item.id)"><i v-if="item.color" :style="{ backgroundColor: item.color }"></i>{{ item.label }} <small>{{ item.route_count }}</small></button>
+                                        </div>
+                                        <button type="button" :disabled="getStage1MovementBoundCount() === 0" @click="renderStage1MovementPresentation()">显示流线</button>
+                                    </div>
+                                    <p v-if="stage1MovementPresentationMessage" class="agent-spatial-map-message">{{ stage1MovementPresentationMessage }}</p>
+                                    <div class="agent-movement-cards">
+                                        <article v-for="route in getStage1MovementItems()" :key="route.route_id" :class="{ selected: isStage1MovementSelected(route), unavailable: route.map_binding?.status !== 'bound' }" @click="selectStage1MovementRoute(route)">
+                                            <header><span><i :style="{ backgroundColor: route.color }"></i>{{ route.movement_label }}</span><strong>{{ route.title }}</strong><em>{{ route.status_label }}</em></header>
+                                            <p>{{ route.role }}</p>
+                                            <dl>
+                                                <div><dt>起点</dt><dd>{{ route.entry_or_origin }}</dd></div>
+                                                <div><dt>目的地</dt><dd>{{ getStage1DecisionDetailText(route.destinations) || '未说明' }}</dd></div>
+                                                <div><dt>关联空间</dt><dd>{{ getStage1MovementAffectedSpaceNames(route) }}</dd></div>
+                                                <div><dt>运营时段</dt><dd>{{ getStage1DecisionDetailText(route.operating_windows) || '未说明' }}</dd></div>
+                                                <div v-if="getStage1DecisionDetailText(route.constraints)"><dt>约束</dt><dd>{{ getStage1DecisionDetailText(route.constraints) }}</dd></div>
+                                                <div v-if="getStage1DecisionDetailText(route.conflicts)" class="conflict"><dt>冲突</dt><dd>{{ getStage1DecisionDetailText(route.conflicts) }}</dd></div>
+                                                <div><dt>验证动作</dt><dd>{{ getStage1DecisionDetailText(route.validation_actions) || '未登记' }}</dd></div>
+                                                <div><dt>地图状态</dt><dd>{{ route.map_binding?.status === 'bound' ? (route.map_binding.title || route.map_binding.spatial_object_id) : (route.map_binding?.reason || '未绑定权威路径') }}</dd></div>
+                                            </dl>
+                                            <footer><span>证据 {{ Array.isArray(route.evidence_refs) ? route.evidence_refs.length : 0 }} 条</span><button type="button" @click.stop="selectStage1MovementRoute(route)">{{ isStage1MovementSelected(route) ? '已选中' : '查看关联空间' }}</button></footer>
+                                        </article>
+                                    </div>
+                                </section>
                                 <div class="agent-spatial-management-table" role="region" aria-label="空间功能策划管理层总表" tabindex="0">
                                     <table>
                                         <thead><tr><th>层级 / 空间</th><th>未来角色</th><th>首选功能</th><th>核心客群</th><th>动线角色</th><th>价值角色</th><th>推荐强度</th><th>关键前提</th><th>地图</th><th>证据</th></tr></thead>

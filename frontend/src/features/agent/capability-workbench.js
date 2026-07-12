@@ -1246,6 +1246,84 @@ export function createAgentCapabilityWorkbenchMethods() {
         : '当前筛选下没有已绑定权威几何的空间决策。'
       return count
     },
+    getStage1MovementPresentation() {
+      const presentation = this.getStage1SpatialMatrix()?.movement_presentation
+      return presentation && typeof presentation === 'object' ? clonePayloadValue(presentation) : null
+    },
+    getStage1MovementTypes() {
+      const types = this.getStage1MovementPresentation()?.types
+      const items = Array.isArray(types) ? clonePayloadValue(types) : []
+      return [
+        { id: 'all', label: '全部流线', color: '', route_count: this.getStage1MovementRouteCount() },
+        ...items,
+      ]
+    },
+    getStage1MovementItems() {
+      const items = this.getStage1MovementPresentation()?.items
+      const movementType = text(this.stage1MovementType) || 'all'
+      return (Array.isArray(items) ? clonePayloadValue(items) : [])
+        .filter(item => movementType === 'all' || text(item?.movement_type) === movementType)
+    },
+    getStage1MovementRouteCount() {
+      const items = this.getStage1MovementPresentation()?.items
+      return Array.isArray(items) ? items.length : 0
+    },
+    getStage1MovementBoundCount() {
+      return this.getStage1MovementItems()
+        .filter(item => item?.map_binding?.status === 'bound' && item?.map_binding?.feature?.geometry).length
+    },
+    getStage1MovementAffectedSpaceNames(route) {
+      const names = (Array.isArray(route?.affected_space_ids) ? route.affected_space_ids : [])
+        .map(spaceId => this.getStage1SpaceDecisionById(spaceId)?.space_name || text(spaceId))
+        .filter(Boolean)
+      return names.join('、') || '未关联空间'
+    },
+    isStage1MovementSelected(route) {
+      return !!text(route?.route_id) && text(route?.route_id) === text(this.stage1SelectedMovementRouteId)
+    },
+    selectStage1MovementRoute(route) {
+      const routeId = text(route?.route_id)
+      if (!routeId) return null
+      this.stage1SelectedMovementRouteId = routeId
+      const firstSpaceId = Array.isArray(route?.affected_space_ids) ? text(route.affected_space_ids[0]) : ''
+      const decision = firstSpaceId ? this.getStage1SpaceDecisionById(firstSpaceId) : null
+      if (decision) this.selectStage1SpaceDecision(decision)
+      return route
+    },
+    setStage1MovementType(movementType) {
+      this.stage1MovementType = text(movementType?.target?.value || movementType) || 'all'
+      return this.renderStage1MovementPresentation()
+    },
+    renderStage1MovementPresentation({ fitView = true } = {}) {
+      const mapCore = this.mapCore
+      if (!mapCore || typeof mapCore.showSpatialPresentation !== 'function') {
+        this.stage1MovementPresentationMessage = '地图尚未就绪，无法显示策划流线。'
+        return 0
+      }
+      const items = this.getStage1MovementItems()
+        .filter(item => item?.map_binding?.status === 'bound' && item?.map_binding?.feature?.geometry)
+        .map(item => ({
+          route_id: text(item?.route_id),
+          feature: clonePayloadValue(item.map_binding.feature),
+          color: text(item?.color),
+          label: text(item?.movement_label),
+          strokeWeight: 6,
+        }))
+      const count = mapCore.showSpatialPresentation(items, {
+        fitView,
+        onClick: item => {
+          const route = this.getStage1MovementItems().find(candidate => text(candidate?.route_id) === text(item?.route_id))
+          if (route) this.selectStage1MovementRoute(route)
+        },
+      })
+      const selectedType = this.getStage1MovementTypes()
+        .find(item => text(item?.id) === text(this.stage1MovementType))
+      this.stage1MovementPresentationMessage = count
+        ? `已显示“${text(selectedType?.label) || '全部流线'}”，共 ${count} 个权威路径覆盖物。点击地图路径可定位流线及关联空间。`
+        : '当前筛选下没有已绑定权威路径的流线；请查看卡片中的缺口和核验动作。'
+      return count
+    },
+
     getStage1SpaceDecisions() {
       const decisions = this.getStage1SpatialMatrix()?.space_decisions
       return Array.isArray(decisions) ? clonePayloadValue(decisions) : []
@@ -1352,6 +1430,8 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.stage1MapFocusedRunId = ''
       this.stage1MapFocusMessage = ''
       this.stage1SpatialPresentationMessage = ''
+      this.stage1SelectedMovementRouteId = ''
+      this.stage1MovementPresentationMessage = ''
     },
     openStage1EvidenceDrawer(decision) {
       const spaceId = text(decision?.space_id)

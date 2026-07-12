@@ -55,6 +55,9 @@ function createContext(overrides = {}) {
     stage1SpatialMapMode: 'suggested_function',
     stage1SpatialHierarchyLevel: 'all',
     stage1SpatialPresentationMessage: '',
+    stage1MovementType: 'all',
+    stage1SelectedMovementRouteId: '',
+    stage1MovementPresentationMessage: '',
     activeAgentSessionId: 'conversation-1',
     agentSkills: [],
     agentPanelPayloads: {},
@@ -568,6 +571,24 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
           }],
           bound_item_count: 1,
         },
+        movement_presentation: {
+          types: [
+            { id: 'visitor', label: '游客', color: '#2563eb', route_count: 1 },
+            { id: 'resident', label: '居民', color: '#16a34a', route_count: 1 },
+            { id: 'service', label: '后勤', color: '#d97706', route_count: 1 },
+            { id: 'fire', label: '消防应急', color: '#dc2626', route_count: 1 },
+          ],
+          items: [
+            {
+              route_id: 'route-visitor', movement_type: 'visitor', movement_label: '游客', color: '#2563eb', title: '游客主游线', role: '连接入口与礼堂', status: 'proposed', status_label: '策划建议', entry_or_origin: '南侧入口', destinations: ['礼堂'], affected_space_ids: ['unit-1'], operating_windows: ['日间'], constraints: ['无障碍待核'], conflicts: [], evidence_refs: ['e1'], assumptions: [], validation_actions: ['现场踏勘'],
+              map_binding: { status: 'bound', title: '入口路径', feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] } } },
+            },
+            ...['resident', 'service', 'fire'].map((movementType, index) => ({
+              route_id: `route-${movementType}`, movement_type: movementType, movement_label: ['居民', '后勤', '消防应急'][index], color: ['#16a34a', '#d97706', '#dc2626'][index], title: `${['居民', '后勤', '消防应急'][index]}流线`, role: '待核验流线', status: 'unavailable', status_label: '路径待补', entry_or_origin: '待核入口', destinations: ['礼堂'], affected_space_ids: ['unit-1'], operating_windows: ['待核'], constraints: [], conflicts: movementType === 'service' ? ['与游客流线交叉'] : [], evidence_refs: ['e1'], assumptions: [], validation_actions: ['补充路径测绘'], map_binding: { status: 'unavailable', reason: '尚无权威路径几何' },
+            })),
+          ],
+          bound_item_count: 1,
+        },
       },
       stage1_deliverables: {
         status: 'ready',
@@ -733,6 +754,9 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1SpatialPresentationLegend()[0].label, '文化活动')
   assert.deepEqual(ctx.getStage1SpatialHierarchyLevels().map(item => item.id), ['all', 'system', 'cluster', 'unit'])
   assert.equal(ctx.getStage1SpaceManagementRows()[0].hierarchy_label, '单元层')
+  assert.deepEqual(ctx.getStage1MovementTypes().map(item => item.label), ['全部流线', '游客', '居民', '后勤', '消防应急'])
+  assert.equal(ctx.getStage1MovementRouteCount(), 4)
+  assert.equal(ctx.getStage1MovementBoundCount(), 1)
 })
 
 test('Stage 1 spatial presentation renders authoritative geometry with server colors', () => {
@@ -790,6 +814,63 @@ test('Stage 1 spatial presentation filters hierarchy and reports missing geometr
   assert.equal(ctx.stage1SpatialPresentationMessage, '当前筛选下没有已绑定权威几何的空间决策。')
 })
 
+test('Stage 1 movement presentation uses server labels colors and authoritative paths', () => {
+  let rendered = null
+  let clickHandler = null
+  const matrix = {
+    space_decisions: [{ space_id: 'space-1', space_name: '礼堂' }],
+    movement_presentation: {
+      types: [
+        { id: 'visitor', label: '游客', color: '#2563eb', route_count: 1 },
+        { id: 'resident', label: '居民', color: '#16a34a', route_count: 0 },
+        { id: 'service', label: '后勤', color: '#d97706', route_count: 0 },
+        { id: 'fire', label: '消防应急', color: '#dc2626', route_count: 0 },
+      ],
+      items: [{
+        route_id: 'route-visitor', movement_type: 'visitor', movement_label: '游客', color: '#2563eb', title: '游客主游线', affected_space_ids: ['space-1'],
+        map_binding: { status: 'bound', feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] } } },
+      }],
+      bound_item_count: 1,
+    },
+  }
+  const ctx = createContext({
+    agentPanelPayloads: { capability_run: { run_id: 'run-1' }, stage1_spatial_matrix: matrix },
+    mapCore: {
+      showSpatialPresentation(items, options) { rendered = items; clickHandler = options.onClick; return items.length },
+    },
+  })
+
+  assert.equal(ctx.renderStage1MovementPresentation(), 1)
+  assert.equal(rendered[0].color, '#2563eb')
+  assert.equal(rendered[0].feature.geometry.type, 'LineString')
+  clickHandler(rendered[0])
+  assert.equal(ctx.stage1SelectedMovementRouteId, 'route-visitor')
+  assert.equal(ctx.stage1ExpandedSpaceId, 'space-1')
+  assert.match(ctx.stage1MovementPresentationMessage, /权威路径覆盖物/)
+})
+
+test('Stage 1 movement presentation filters types and exposes unavailable paths', () => {
+  let rendered = null
+  const ctx = createContext({
+    stage1MovementType: 'service',
+    agentPanelPayloads: {
+      stage1_spatial_matrix: {
+        movement_presentation: {
+          types: [{ id: 'service', label: '后勤', color: '#d97706', route_count: 1 }],
+          items: [{ route_id: 'route-service', movement_type: 'service', movement_label: '后勤', color: '#d97706', map_binding: { status: 'unavailable', reason: '待测绘' } }],
+          bound_item_count: 0,
+        },
+      },
+    },
+    mapCore: { showSpatialPresentation(items) { rendered = items; return 0 } },
+  })
+
+  assert.equal(ctx.renderStage1MovementPresentation(), 0)
+  assert.deepEqual(rendered, [])
+  assert.equal(ctx.getStage1MovementItems()[0].map_binding.reason, '待测绘')
+  assert.match(ctx.stage1MovementPresentationMessage, /缺口和核验动作/)
+})
+
 test('Stage 1 spatial reset clears focus and presentation overlays', () => {
   let focusClears = 0
   let presentationClears = 0
@@ -799,6 +880,8 @@ test('Stage 1 spatial reset clears focus and presentation overlays', () => {
       clearSpatialPresentation: () => { presentationClears += 1 },
     },
     stage1SpatialPresentationMessage: '已显示',
+    stage1SelectedMovementRouteId: 'route-visitor',
+    stage1MovementPresentationMessage: '已显示流线',
   })
 
   ctx.resetStage1SpatialInteraction()
@@ -806,6 +889,8 @@ test('Stage 1 spatial reset clears focus and presentation overlays', () => {
   assert.equal(focusClears, 1)
   assert.equal(presentationClears, 1)
   assert.equal(ctx.stage1SpatialPresentationMessage, '')
+  assert.equal(ctx.stage1SelectedMovementRouteId, '')
+  assert.equal(ctx.stage1MovementPresentationMessage, '')
 })
 
 test('Stage 1 map focus is bound to the immutable capability Run', () => {

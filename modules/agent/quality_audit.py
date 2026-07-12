@@ -50,6 +50,14 @@ _SPATIAL_LEVELS = {"system", "cluster", "unit"}
 _CURRENT_STATE_CATEGORIES = {"active", "underused", "vacant", "constrained", "unknown"}
 _RISK_LEVELS = {"low", "medium", "high", "critical"}
 _IMPLEMENTATION_PHASES = {"phase_1", "phase_2", "phase_3", "long_term"}
+_MOVEMENT_TYPES = {"visitor", "resident", "service", "fire"}
+_MOVEMENT_STATUSES = {"verified", "proposed", "blocked", "unavailable"}
+_MOVEMENT_COLORS = {
+    "visitor": "#2563eb",
+    "resident": "#16a34a",
+    "service": "#d97706",
+    "fire": "#dc2626",
+}
 _SPATIAL_MAP_MODES = {
     "current_state",
     "suggested_function",
@@ -280,12 +288,150 @@ def _audit_spatial_matrix_semantics(
     else:
         passed += 1
 
+    movement_routes = _list(matrix.get("movement_routes"))
+    routes = [item for item in movement_routes if isinstance(item, dict)]
+    route_ids = [_text(item.get("route_id")) for item in routes]
+    movement_types = {_text(item.get("movement_type")) for item in routes}
+    movement_systems_invalid = (
+        len(routes) != len(movement_routes)
+        or movement_types != _MOVEMENT_TYPES
+        or any(not route_id for route_id in route_ids)
+        or len(set(route_ids)) != len(route_ids)
+        or any(
+            not _text(route.get("title"))
+            or not _text(route.get("role"))
+            or not _text(route.get("entry_or_origin"))
+            or not _list(route.get("destinations"))
+            or not _list(route.get("operating_windows"))
+            or not isinstance(route.get("constraints"), list)
+            or not isinstance(route.get("conflicts"), list)
+            or not isinstance(route.get("assumptions"), list)
+            or route.get("status") not in _MOVEMENT_STATUSES
+            for route in routes
+        )
+    )
+    if movement_systems_invalid:
+        issues.append(
+            _issue(
+                "spatial_movement_systems_incomplete",
+                "空间矩阵未完整登记游客、居民、后勤和消防四类流线，或流线缺少稳定 ID、角色、时段、约束与冲突。",
+                path="spatial_matrix.movement_routes",
+                repair_hint="按 visitor、resident、service、fire 完整登记流线，并显式返回 constraints、conflicts、assumptions 和状态。",
+            )
+        )
+    else:
+        passed += 1
+
+    decision_id_set = set(decision_ids)
+    movement_references_invalid = any(
+        not _list(route.get("affected_space_ids"))
+        or not set(_text(item) for item in _list(route.get("affected_space_ids"))).issubset(
+            decision_id_set
+        )
+        or not _list(route.get("evidence_refs"))
+        or not _list(route.get("validation_actions"))
+        for route in routes
+    )
+    if movement_references_invalid or not routes:
+        issues.append(
+            _issue(
+                "spatial_movement_references_invalid",
+                "流线未引用有效空间决策、证据或验证动作，无法进入可审计的设计交接。",
+                path="spatial_matrix.movement_routes",
+                repair_hint="让 affected_space_ids 只引用本矩阵空间，并为每条流线补齐 evidence_refs 与 validation_actions。",
+            )
+        )
+    else:
+        passed += 1
+
+    movement_presentation = (
+        matrix.get("movement_presentation")
+        if isinstance(matrix.get("movement_presentation"), dict)
+        else {}
+    )
+    movement_type_items = _list(movement_presentation.get("types"))
+    movement_items = _list(movement_presentation.get("items"))
+    movement_items_by_id = {
+        _text(item.get("route_id")): item
+        for item in movement_items
+        if isinstance(item, dict) and _text(item.get("route_id"))
+    }
+    presentation_types = {
+        _text(item.get("id")): item
+        for item in movement_type_items
+        if isinstance(item, dict) and _text(item.get("id"))
+    }
+    movement_presentation_invalid = (
+        set(presentation_types) != _MOVEMENT_TYPES
+        or len(movement_type_items) != len(_MOVEMENT_TYPES)
+        or set(movement_items_by_id) != set(route_ids)
+        or len(movement_items_by_id) != len(movement_items)
+        or any(
+            not _text(item.get("label"))
+            or _text(item.get("color")).lower() != _MOVEMENT_COLORS[movement_type]
+            or item.get("route_count")
+            != sum(
+                1 for route in routes if route.get("movement_type") == movement_type
+            )
+            for movement_type, item in presentation_types.items()
+        )
+        or movement_presentation.get("bound_item_count")
+        != sum(
+            1
+            for route in routes
+            if isinstance(route.get("map_binding"), dict)
+            and route["map_binding"].get("status") == "bound"
+        )
+    )
+    if not movement_presentation_invalid:
+        for route in routes:
+            item = movement_items_by_id.get(_text(route.get("route_id")), {})
+            binding = route.get("map_binding") if isinstance(route.get("map_binding"), dict) else {}
+            status = _text(binding.get("status"))
+            if status == "bound":
+                geometry_type = _text(
+                    ((binding.get("feature") or {}).get("geometry") or {}).get("type")
+                )
+                binding_invalid = (
+                    geometry_type not in {"LineString", "MultiLineString"}
+                    or not _text(binding.get("spatial_object_id"))
+                    or not _text(binding.get("source_ref"))
+                    or not _text(binding.get("source_locator"))
+                    or not is_valid_spatial_feature(binding.get("feature"))
+                )
+            else:
+                binding_invalid = status != "unavailable" or not _text(
+                    binding.get("reason")
+                )
+            if (
+                binding_invalid
+                or item.get("movement_type") != route.get("movement_type")
+                or _text(item.get("color")).lower()
+                != _MOVEMENT_COLORS[_text(route.get("movement_type"))]
+                or item.get("conflicts") != route.get("conflicts")
+                or item.get("validation_actions") != route.get("validation_actions")
+                or item.get("map_binding") != binding
+            ):
+                movement_presentation_invalid = True
+                break
+    if movement_presentation_invalid or not routes:
+        issues.append(
+            _issue(
+                "spatial_movement_presentation_incomplete",
+                "四类流线没有形成服务端定义的图例、冲突/核验摘要和可审计路径绑定。",
+                path="spatial_matrix.movement_presentation",
+                repair_hint="通过空间矩阵编译器生成流线表达；bound 仅允许权威 LineString/MultiLineString，无法绑定时明确 unavailable。",
+            )
+        )
+    else:
+        passed += 1
+
     return passed, issues
 
 
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 21
+    checks_total = 24
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))

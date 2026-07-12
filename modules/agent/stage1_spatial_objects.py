@@ -147,6 +147,62 @@ def spatial_object_catalog(
     ]
 
 
+def _unavailable_binding(reason: str) -> dict[str, Any]:
+    return {
+        "status": "unavailable",
+        "spatial_object_id": "",
+        "object_type": "",
+        "title": "",
+        "source_ref": "",
+        "source_locator": "",
+        "feature": None,
+        "reason": reason,
+    }
+
+
+def _resolve_authoritative_binding(
+    requested: Any,
+    registry: dict[str, dict[str, Any]],
+    *,
+    required_geometry_types: set[str] | None = None,
+    object_label: str = "空间对象",
+) -> dict[str, Any]:
+    """Resolve one model-selected ID without exposing geometry choices to the model."""
+
+    selection = requested if isinstance(requested, dict) else {}
+    requested_status = _text(selection.get("status"))
+    requested_id = _text(selection.get("spatial_object_id"))
+    authoritative = registry.get(requested_id)
+    if requested_status == "bound" and authoritative is not None:
+        geometry_type = _text(
+            ((authoritative.get("feature") or {}).get("geometry") or {}).get("type")
+        )
+        if required_geometry_types and geometry_type not in required_geometry_types:
+            expected = "、".join(sorted(required_geometry_types))
+            return _unavailable_binding(
+                f"模型引用的权威对象不是可用的{object_label}，其几何类型为 {geometry_type or '未知'}；"
+                f"要求 {expected}。"
+            )
+        return {
+            "status": "bound",
+            **deepcopy(authoritative),
+            "reason": "",
+        }
+
+    reason = _text(selection.get("reason"))
+    if requested_status == "bound" and requested_id:
+        reason = f"模型引用的{object_label}不在本轮权威对象清单中，已拒绝地图绑定。"
+    elif requested_status == "bound":
+        reason = f"模型声明地图绑定但未选择权威{object_label} ID，已拒绝地图绑定。"
+    elif requested_status not in {"unavailable", "bound"}:
+        reason = "模型未返回有效地图绑定状态，已按未绑定处理。"
+    elif not reason and not registry:
+        reason = "本轮输入未提供带稳定 ID 和几何的权威空间对象。"
+    elif not reason:
+        reason = f"没有能够精确对应的权威{object_label}。"
+    return _unavailable_binding(reason)
+
+
 def bind_spatial_matrix_to_objects(
     matrix: dict[str, Any],
     registry: dict[str, dict[str, Any]],
@@ -164,45 +220,33 @@ def bind_spatial_matrix_to_objects(
     for decision in decisions:
         if not isinstance(decision, dict):
             continue
-        requested = (
-            decision.get("map_binding")
-            if isinstance(decision.get("map_binding"), dict)
-            else {}
+        decision["map_binding"] = _resolve_authoritative_binding(
+            decision.get("map_binding"), registry
         )
-        requested_status = _text(requested.get("status"))
-        requested_id = _text(requested.get("spatial_object_id"))
-        authoritative = registry.get(requested_id)
-        if requested_status == "bound" and authoritative is not None:
-            decision["map_binding"] = {
-                "status": "bound",
-                **deepcopy(authoritative),
-                "reason": "",
-            }
+        if decision["map_binding"]["status"] == "bound":
             bound_count += 1
-            continue
+        else:
+            unavailable_count += 1
 
-        reason = _text(requested.get("reason"))
-        if requested_status == "bound" and requested_id:
-            reason = "模型引用的空间对象不在本轮权威对象清单中，已拒绝地图绑定。"
-        elif requested_status == "bound":
-            reason = "模型声明地图绑定但未选择权威空间对象 ID，已拒绝地图绑定。"
-        elif requested_status not in {"unavailable", "bound"}:
-            reason = "模型未返回有效地图绑定状态，已按未绑定处理。"
-        elif not reason and not registry:
-            reason = "本轮输入未提供带稳定 ID 和几何的权威空间对象。"
-        elif not reason:
-            reason = "没有能够与该决策精确对应的权威地图对象。"
-        decision["map_binding"] = {
-            "status": "unavailable",
-            "spatial_object_id": "",
-            "object_type": "",
-            "title": "",
-            "source_ref": "",
-            "source_locator": "",
-            "feature": None,
-            "reason": reason,
-        }
-        unavailable_count += 1
+    movement_routes = result.get("movement_routes")
+    if not isinstance(movement_routes, list):
+        movement_routes = []
+        result["movement_routes"] = movement_routes
+    movement_bound_count = 0
+    movement_unavailable_count = 0
+    for route in movement_routes:
+        if not isinstance(route, dict):
+            continue
+        route["map_binding"] = _resolve_authoritative_binding(
+            route.get("map_binding"),
+            registry,
+            required_geometry_types={"LineString", "MultiLineString"},
+            object_label="路径对象",
+        )
+        if route["map_binding"]["status"] == "bound":
+            movement_bound_count += 1
+        else:
+            movement_unavailable_count += 1
 
     result["map_binding_summary"] = {
         "registry_count": len(registry),
@@ -214,6 +258,21 @@ def bind_spatial_matrix_to_objects(
             if decisions and unavailable_count == 0
             else "partial"
             if bound_count
+            else "unavailable"
+        ),
+    }
+    result["movement_binding_summary"] = {
+        "registry_count": len(registry),
+        "route_count": len(
+            [item for item in movement_routes if isinstance(item, dict)]
+        ),
+        "bound_count": movement_bound_count,
+        "unavailable_count": movement_unavailable_count,
+        "status": (
+            "complete"
+            if movement_routes and movement_unavailable_count == 0
+            else "partial"
+            if movement_bound_count
             else "unavailable"
         ),
     }

@@ -11,6 +11,34 @@ from modules.agent.stage1_provenance import (
 )
 
 
+def movement_routes():
+    labels = {"visitor": "游客主游线", "resident": "居民日常流线", "service": "后勤流线", "fire": "消防应急流线"}
+    return [
+        {
+            "route_id": f"route-{movement_type}",
+            "movement_type": movement_type,
+            "title": labels[movement_type],
+            "role": "连接项目入口与礼堂",
+            "entry_or_origin": "南侧入口",
+            "destinations": ["原县政府礼堂"],
+            "affected_space_ids": ["space-auditorium"],
+            "operating_windows": ["日常开放时段"],
+            "constraints": ["无障碍与道路阻隔待核验"],
+            "conflicts": [] if movement_type != "service" else ["后勤与游客流线可能交叉"],
+            "evidence_refs": ["evidence-1"],
+            "assumptions": [],
+            "validation_actions": ["现场踏勘并复核路径宽度"],
+            "status": "proposed",
+            "map_binding": {
+                "status": "unavailable",
+                "spatial_object_id": "",
+                "reason": f"{labels[movement_type]}尚无权威路径几何",
+            },
+        }
+        for movement_type in ("visitor", "resident", "service", "fire")
+    ]
+
+
 def complete_package():
     package = {
         "evidence_ledger": [
@@ -140,6 +168,7 @@ def complete_package():
                     "confidence": "medium",
                 }
             ],
+            "movement_routes": movement_routes(),
             "portfolio_checks": ["公共服务与经营功能保持平衡"],
         },
     }
@@ -626,5 +655,43 @@ def test_stage1_quality_gate_rejects_unverifiable_bound_map_object():
 
     assert result.status == "failed"
     assert "spatial_map_binding_invalid" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_stage1_quality_gate_requires_all_movement_systems():
+    package = complete_package()
+    package["spatial_matrix"]["movement_routes"].pop()
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "spatial_movement_systems_incomplete" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_stage1_quality_gate_rejects_invalid_movement_references():
+    package = complete_package()
+    package["spatial_matrix"]["movement_routes"][0]["affected_space_ids"] = [
+        "space-invented"
+    ]
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "spatial_movement_references_invalid" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_stage1_quality_gate_requires_server_derived_movement_presentation():
+    package = complete_package()
+    package["spatial_matrix"]["movement_presentation"]["types"][2]["color"] = "#000000"
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "spatial_movement_presentation_incomplete" in {
         issue.code for issue in result.blocking_issues
     }

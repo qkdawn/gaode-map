@@ -154,6 +154,35 @@ def valid_strategy():
     }
 
 
+def valid_movement_routes(space_id="unit-1"):
+    labels = {"visitor": "游客主游线", "resident": "居民日常流线", "service": "后勤流线", "fire": "消防应急流线"}
+    reasons = {"visitor": "游客路径待测绘", "resident": "居民路径待访谈", "service": "后勤路径待运营核验", "fire": "消防路径待专项核验"}
+    return [
+        {
+            "route_id": f"route-{movement_type}",
+            "movement_type": movement_type,
+            "title": labels[movement_type],
+            "role": "连接入口与礼堂",
+            "entry_or_origin": "南侧入口",
+            "destinations": ["原县政府礼堂"],
+            "affected_space_ids": [space_id],
+            "operating_windows": ["日常开放时段"],
+            "constraints": ["路径宽度与无障碍条件待核验"],
+            "conflicts": [] if movement_type != "service" else ["后勤与游客到达可能交叉"],
+            "evidence_refs": ["evidence-1"],
+            "assumptions": [],
+            "validation_actions": ["现场踏勘并复核流线"],
+            "status": "proposed",
+            "map_binding": {
+                "status": "unavailable",
+                "spatial_object_id": "",
+                "reason": reasons[movement_type],
+            },
+        }
+        for movement_type in ("visitor", "resident", "service", "fire")
+    ]
+
+
 def valid_matrix():
     return {
         "matrix_version": "2.0",
@@ -224,6 +253,7 @@ def valid_matrix():
                 },
             }
         ],
+        "movement_routes": valid_movement_routes(),
         "portfolio_checks": ["公共服务与经营功能平衡"],
     }
 
@@ -640,6 +670,10 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
         }
     ]
     matrix = deepcopy(valid_matrix())
+    matrix["movement_routes"][0]["map_binding"] = {
+        "status": "bound",
+        "spatial_object_id": "road:south-entry",
+    }
     matrix["space_decisions"][0]["map_binding"] = {
         "status": "bound",
         "spatial_object_id": "road:south-entry",
@@ -686,6 +720,11 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
     ][0]["map_binding"]
     assert binding["status"] == "bound"
     assert binding["feature"]["geometry"]["type"] == "LineString"
+    movement_binding = response.output.panel_payloads["stage1_spatial_matrix"][
+        "movement_routes"
+    ][0]["map_binding"]
+    assert movement_binding["status"] == "bound"
+    assert movement_binding["feature"]["geometry"]["type"] == "LineString"
     handoff_binding = response.output.panel_payloads["stage1_deliverables"][
         "design_handoff"
     ]["space_requirements"][0]["map_binding"]

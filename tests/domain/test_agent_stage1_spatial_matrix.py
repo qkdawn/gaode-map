@@ -5,6 +5,37 @@ from modules.agent.stage1_spatial_matrix import (
 )
 
 
+def _movement_routes(visitor_binding=None):
+    bindings = {
+        "visitor": visitor_binding
+        or {"status": "unavailable", "spatial_object_id": "", "reason": "游客路径待测绘"},
+        "resident": {"status": "unavailable", "spatial_object_id": "", "reason": "居民路径待访谈"},
+        "service": {"status": "unavailable", "spatial_object_id": "", "reason": "后勤路径待运营核验"},
+        "fire": {"status": "unavailable", "spatial_object_id": "", "reason": "消防路径待专项核验"},
+    }
+    labels = {"visitor": "游客主游线", "resident": "居民日常流线", "service": "后勤流线", "fire": "消防应急流线"}
+    return [
+        {
+            "route_id": f"route-{movement_type}",
+            "movement_type": movement_type,
+            "title": labels[movement_type],
+            "role": "连接南侧入口与礼堂",
+            "entry_or_origin": "南侧入口",
+            "destinations": ["原县政府礼堂"],
+            "affected_space_ids": ["space-auditorium"],
+            "operating_windows": ["日常开放时段"],
+            "constraints": ["无障碍连续性待核验"],
+            "conflicts": [] if movement_type != "service" else ["与游客到达存在交叉"],
+            "evidence_refs": ["evidence-1"],
+            "assumptions": [],
+            "validation_actions": ["现场踏勘并复核路径宽度"],
+            "status": "proposed",
+            "map_binding": bindings[movement_type],
+        }
+        for movement_type in ("visitor", "resident", "service", "fire")
+    ]
+
+
 def _matrix():
     return {
         "matrix_version": "2.0",
@@ -74,12 +105,31 @@ def _matrix():
                 },
             }
         ],
+        "movement_routes": _movement_routes(
+            {"status": "bound", "spatial_object_id": "path:main"}
+        ),
         "portfolio_checks": ["公共服务与经营功能平衡"],
     }
 
 
 def _registry():
     return {
+        "path:main": {
+            "spatial_object_id": "path:main",
+            "object_type": "internal_path",
+            "title": "南侧入口至礼堂路径",
+            "source_ref": "project_gis.paths",
+            "source_locator": "project_gis.paths/main",
+            "feature": {
+                "type": "Feature",
+                "id": "path:main",
+                "properties": {},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[112.0, 28.0], [112.1, 28.1]],
+                },
+            },
+        },
         "building:auditorium": {
             "spatial_object_id": "building:auditorium",
             "object_type": "building",
@@ -120,6 +170,16 @@ def test_compile_spatial_matrix_derives_hierarchy_and_map_modes():
     assert item["values"]["risk"]["label"] == "高风险"
     assert item["values"]["implementation_phase"]["label"] == "一期"
     assert result["map_presentation"]["bound_item_count"] == 1
+    assert result["movement_presentation"]["bound_item_count"] == 1
+    assert [item["label"] for item in result["movement_presentation"]["types"]] == [
+        "游客",
+        "居民",
+        "后勤",
+        "消防应急",
+    ]
+    route = result["movement_presentation"]["items"][0]
+    assert route["color"] == "#2563eb"
+    assert route["map_binding"]["feature"]["geometry"]["type"] == "LineString"
 
 
 def test_compile_spatial_matrix_rejects_flat_or_cross_level_hierarchy():
@@ -152,3 +212,33 @@ def test_compile_spatial_matrix_rejects_uncontrolled_risk_or_phase_values():
 
     with pytest.raises(SpatialMatrixContractError):
         compile_spatial_programming_matrix(matrix, _registry())
+
+
+def test_compile_spatial_matrix_requires_all_four_movement_systems():
+    matrix = _matrix()
+    matrix["movement_routes"].pop()
+
+    with pytest.raises(SpatialMatrixContractError, match="movement_routes"):
+        compile_spatial_programming_matrix(matrix, _registry())
+
+
+def test_compile_spatial_matrix_rejects_unknown_movement_space_reference():
+    matrix = _matrix()
+    matrix["movement_routes"][0]["affected_space_ids"] = ["space-invented"]
+
+    with pytest.raises(SpatialMatrixContractError, match="不存在的 affected_space_ids"):
+        compile_spatial_programming_matrix(matrix, _registry())
+
+
+def test_compile_spatial_matrix_rejects_non_line_route_binding():
+    matrix = _matrix()
+    matrix["movement_routes"][0]["map_binding"] = {
+        "status": "bound",
+        "spatial_object_id": "building:auditorium",
+    }
+
+    result = compile_spatial_programming_matrix(matrix, _registry())
+
+    binding = result["movement_routes"][0]["map_binding"]
+    assert binding["status"] == "unavailable"
+    assert "LineString" in binding["reason"]

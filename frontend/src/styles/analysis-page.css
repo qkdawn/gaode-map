@@ -13960,6 +13960,39 @@ body.agent-ppt-source-menu-open {
 .agent-space-decision-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; padding: 0 10px 10px; border-top: 1px solid #e2e8f0; }
 .agent-space-decision-body p { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 8px 0 0; color: #475569; font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .agent-space-decision-body p > span { color: #94a3b8; font-size: 9px; font-weight: 700; }
+.agent-movement-workbench { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #dbe3ec; border-radius: 7px; background: #f8fafc; }
+.agent-movement-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.agent-movement-head > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.agent-movement-head strong { color: #334155; font-size: 10px; }
+.agent-movement-head span, .agent-movement-head small { color: #64748b; font-size: 9px; line-height: 1.45; }
+.agent-movement-head small { flex: none; }
+.agent-movement-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-movement-type-buttons { display: flex; min-width: 0; flex-wrap: wrap; gap: 5px; }
+.agent-movement-type-buttons button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #475569; cursor: pointer; font-size: 9px; }
+.agent-movement-type-buttons button i { width: 7px; height: 7px; border-radius: 999px; }
+.agent-movement-type-buttons button small { color: inherit; font-size: 8px; }
+.agent-movement-type-buttons button.active { border-color: #0f766e; background: #ecfdf5; color: #0f766e; font-weight: 700; }
+.agent-movement-toolbar > button { flex: none; padding: 5px 8px; border: 1px solid #0f766e; border-radius: 4px; background: #0f766e; color: #fff; cursor: pointer; font-size: 9px; font-weight: 700; }
+.agent-movement-toolbar > button:disabled { border-color: #cbd5e1; background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+.agent-movement-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.agent-movement-cards article { display: flex; min-width: 0; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid #dbe3ec; border-left: 3px solid #94a3b8; border-radius: 6px; background: #fff; cursor: pointer; }
+.agent-movement-cards article.selected { border-color: #0f766e; border-left-color: #0f766e; box-shadow: 0 0 0 1px rgba(15, 118, 110, .08); }
+.agent-movement-cards article.unavailable { background: #f8fafc; }
+.agent-movement-cards header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.agent-movement-cards header span { display: inline-flex; align-items: center; gap: 4px; color: #475569; font-size: 8px; font-weight: 700; }
+.agent-movement-cards header span i { width: 8px; height: 8px; border-radius: 999px; }
+.agent-movement-cards header strong { min-width: 0; color: #1e293b; font-size: 10px; overflow-wrap: anywhere; }
+.agent-movement-cards header em { padding: 2px 4px; border-radius: 3px; background: #e2e8f0; color: #475569; font-size: 8px; font-style: normal; white-space: nowrap; }
+.agent-movement-cards > article > p { margin: 0; color: #64748b; font-size: 9px; line-height: 1.45; }
+.agent-movement-cards dl { display: flex; margin: 0; flex-direction: column; gap: 3px; }
+.agent-movement-cards dl div { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 5px; font-size: 8px; line-height: 1.4; }
+.agent-movement-cards dt { color: #94a3b8; }
+.agent-movement-cards dd { min-width: 0; margin: 0; color: #475569; overflow-wrap: anywhere; }
+.agent-movement-cards dl .conflict dd { color: #b45309; font-weight: 600; }
+.agent-movement-cards footer { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding-top: 5px; border-top: 1px solid #edf1f5; }
+.agent-movement-cards footer span { color: #94a3b8; font-size: 8px; }
+.agent-movement-cards footer button { padding: 3px 5px; border: 1px solid #cbd5e1; border-radius: 3px; background: #fff; color: #475569; cursor: pointer; font-size: 8px; }
+@media (max-width: 900px) { .agent-movement-cards { grid-template-columns: minmax(0, 1fr); } .agent-movement-head, .agent-movement-toolbar { align-items: stretch; flex-direction: column; } .agent-movement-toolbar > button { align-self: flex-start; } }
 .agent-spatial-management-table { max-width: 100%; overflow: auto; border: 1px solid #dbe3ec; border-radius: 7px; background: #fff; }
 .agent-spatial-management-table table { width: 100%; min-width: 980px; border-collapse: collapse; table-layout: fixed; }
 .agent-spatial-management-table th, .agent-spatial-management-table td { padding: 8px 9px; border-right: 1px solid #edf1f5; border-bottom: 1px solid #edf1f5; color: #475569; font-size: 9px; line-height: 1.45; text-align: left; vertical-align: top; overflow-wrap: anywhere; }

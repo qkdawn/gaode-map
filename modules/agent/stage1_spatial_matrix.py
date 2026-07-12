@@ -16,6 +16,8 @@ RecommendationStatus = Literal["strong", "conditional", "alternative", "excluded
 RiskLevel = Literal["low", "medium", "high", "critical"]
 ImplementationPhase = Literal["phase_1", "phase_2", "phase_3", "long_term"]
 ConfidenceLevel = Literal["high", "medium", "low"]
+MovementType = Literal["visitor", "resident", "service", "fire"]
+MovementStatus = Literal["verified", "proposed", "blocked", "unavailable"]
 
 
 class SpatialMatrixContractError(ValueError):
@@ -80,6 +82,42 @@ class SpatialDecision(BaseModel):
     map_binding: dict[str, Any]
 
 
+class MovementMapBindingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["bound", "unavailable"]
+    spatial_object_id: str = ""
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "MovementMapBindingRequest":
+        if self.status == "bound" and not self.spatial_object_id:
+            raise ValueError("bound 流线必须选择权威路径对象 ID")
+        if self.status == "unavailable" and not self.reason:
+            raise ValueError("unavailable 流线必须说明无法绑定权威路径的原因")
+        return self
+
+
+class MovementRoute(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route_id: str = Field(min_length=1)
+    movement_type: MovementType
+    title: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    entry_or_origin: str = Field(min_length=1)
+    destinations: list[str] = Field(min_length=1)
+    affected_space_ids: list[str] = Field(min_length=1)
+    operating_windows: list[str] = Field(min_length=1)
+    constraints: list[Any]
+    conflicts: list[Any]
+    evidence_refs: list[str] = Field(min_length=1)
+    assumptions: list[Any]
+    validation_actions: list[Any] = Field(min_length=1)
+    status: MovementStatus
+    map_binding: MovementMapBindingRequest
+
+
 class SpatialProgrammingMatrix(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -87,6 +125,7 @@ class SpatialProgrammingMatrix(BaseModel):
     positioning_option_id: str = Field(min_length=1)
     spatial_hierarchy: list[SpatialHierarchyNode] = Field(min_length=3)
     space_decisions: list[SpatialDecision] = Field(min_length=1)
+    movement_routes: list[MovementRoute] = Field(min_length=4)
     portfolio_checks: list[Any] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -120,6 +159,20 @@ class SpatialProgrammingMatrix(BaseModel):
             if decision.space_id not in hierarchy.member_space_ids:
                 raise ValueError(
                     f"空间决策 {decision.space_id} 未登记在层级节点 {hierarchy.id} 的 member_space_ids"
+                )
+        route_ids = [route.route_id for route in self.movement_routes]
+        if len(set(route_ids)) != len(route_ids):
+            raise ValueError("movement_routes 中存在重复稳定 route_id")
+        movement_types = {route.movement_type for route in self.movement_routes}
+        if movement_types != {"visitor", "resident", "service", "fire"}:
+            raise ValueError("movement_routes 必须同时覆盖 visitor、resident、service、fire")
+        decision_id_set = set(decision_ids)
+        for route in self.movement_routes:
+            unknown_space_ids = set(route.affected_space_ids) - decision_id_set
+            if unknown_space_ids:
+                raise ValueError(
+                    f"流线 {route.route_id} 引用了不存在的 affected_space_ids："
+                    f"{', '.join(sorted(unknown_space_ids))}"
                 )
         return self
 
@@ -156,6 +209,18 @@ _PHASE_STYLES = {
     "phase_2": ("二期", "#2563eb"),
     "phase_3": ("三期", "#7c3aed"),
     "long_term": ("远期", "#64748b"),
+}
+_MOVEMENT_STYLES = {
+    "visitor": ("游客", "#2563eb"),
+    "resident": ("居民", "#16a34a"),
+    "service": ("后勤", "#d97706"),
+    "fire": ("消防应急", "#dc2626"),
+}
+_MOVEMENT_STATUS_LABELS = {
+    "verified": "已核验",
+    "proposed": "策划建议",
+    "blocked": "存在阻断",
+    "unavailable": "路径待补",
 }
 _FUNCTION_COLORS = (
     "#0f766e",
@@ -303,6 +368,57 @@ def _build_map_presentation(matrix: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _build_movement_presentation(matrix: dict[str, Any]) -> dict[str, Any]:
+    routes = [
+        item for item in matrix.get("movement_routes", []) if isinstance(item, dict)
+    ]
+    items = []
+    for route in routes:
+        movement_type = _text(route.get("movement_type"))
+        label, color = _MOVEMENT_STYLES[movement_type]
+        items.append(
+            {
+                "route_id": _text(route.get("route_id")),
+                "movement_type": movement_type,
+                "movement_label": label,
+                "color": color,
+                "title": _text(route.get("title")),
+                "role": _text(route.get("role")),
+                "status": _text(route.get("status")),
+                "status_label": _MOVEMENT_STATUS_LABELS[_text(route.get("status"))],
+                "entry_or_origin": _text(route.get("entry_or_origin")),
+                "destinations": deepcopy(route.get("destinations") or []),
+                "affected_space_ids": deepcopy(route.get("affected_space_ids") or []),
+                "operating_windows": deepcopy(route.get("operating_windows") or []),
+                "constraints": deepcopy(route.get("constraints") or []),
+                "conflicts": deepcopy(route.get("conflicts") or []),
+                "evidence_refs": deepcopy(route.get("evidence_refs") or []),
+                "assumptions": deepcopy(route.get("assumptions") or []),
+                "validation_actions": deepcopy(route.get("validation_actions") or []),
+                "map_binding": deepcopy(route.get("map_binding") or {}),
+            }
+        )
+    return {
+        "types": [
+            {
+                "id": movement_type,
+                "label": label,
+                "color": color,
+                "route_count": sum(
+                    1 for item in items if item["movement_type"] == movement_type
+                ),
+            }
+            for movement_type, (label, color) in _MOVEMENT_STYLES.items()
+        ],
+        "items": items,
+        "bound_item_count": sum(
+            1
+            for item in items
+            if (item.get("map_binding") or {}).get("status") == "bound"
+        ),
+    }
+
+
 def compile_spatial_programming_matrix(
     raw_matrix: dict[str, Any],
     spatial_object_registry: dict[str, dict[str, Any]],
@@ -316,4 +432,5 @@ def compile_spatial_programming_matrix(
     matrix = validated.model_dump(mode="json")
     bound = bind_spatial_matrix_to_objects(matrix, spatial_object_registry)
     bound["map_presentation"] = _build_map_presentation(bound)
+    bound["movement_presentation"] = _build_movement_presentation(bound)
     return bound

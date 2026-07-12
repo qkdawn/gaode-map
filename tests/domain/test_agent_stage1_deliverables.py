@@ -7,6 +7,34 @@ from modules.agent.stage1_deliverables import (
 from modules.agent.stage1_hard_constraints import build_hard_constraint_screening
 
 
+def movement_routes():
+    labels = {"visitor": "游客主游线", "resident": "居民日常流线", "service": "后勤流线", "fire": "消防应急流线"}
+    return [
+        {
+            "route_id": f"route-{movement_type}",
+            "movement_type": movement_type,
+            "title": labels[movement_type],
+            "role": "连接入口与礼堂",
+            "entry_or_origin": "南侧入口",
+            "destinations": ["原县政府礼堂"],
+            "affected_space_ids": ["space-auditorium"],
+            "operating_windows": ["日常开放时段"],
+            "constraints": ["道路阻隔与无障碍待核验"],
+            "conflicts": [] if movement_type != "service" else ["后勤与游客流线可能交叉"],
+            "evidence_refs": ["evidence-1"],
+            "assumptions": [],
+            "validation_actions": ["现场踏勘并复核路径"],
+            "status": "proposed",
+            "map_binding": {
+                "status": "unavailable",
+                "spatial_object_id": "",
+                "reason": f"{labels[movement_type]}尚无权威路径几何",
+            },
+        }
+        for movement_type in ("visitor", "resident", "service", "fire")
+    ]
+
+
 def package():
     payload = {
         "evidence_ledger": [
@@ -126,6 +154,7 @@ def package():
                     },
                 }
             ],
+            "movement_routes": movement_routes(),
             "portfolio_checks": ["公共服务与经营功能平衡"],
         },
     }
@@ -154,6 +183,7 @@ def run_manifest():
 def test_design_handoff_reuses_strategy_matrix_and_evidence_ids():
     handoff = build_design_handoff(package())
 
+    assert handoff.contract_version == "2.0"
     assert handoff.positioning_option_id == "option-a"
     assert handoff.positioning_option["name"] == "社区文化客厅"
     assert handoff.space_requirements[0].evidence_refs == ["evidence-1"]
@@ -165,6 +195,17 @@ def test_design_handoff_reuses_strategy_matrix_and_evidence_ids():
     assert requirement.risk_level == "high"
     assert requirement.risk_summary == "消防条件尚待专项核验"
     assert handoff.evidence_ledger_ids == ["evidence-1", "fieldwork-1"]
+    assert {item.movement_type for item in handoff.movement_requirements} == {
+        "visitor",
+        "resident",
+        "service",
+        "fire",
+    }
+    service = next(
+        item for item in handoff.movement_requirements if item.movement_type == "service"
+    )
+    assert service.conflicts == ["后勤与游客流线可能交叉"]
+    assert service.affected_space_ids == ["space-auditorium"]
     assert handoff.hard_constraint_screening["status"] == "conditional"
     assert handoff.space_requirements[0].hard_constraint_refs[0] == "ownership"
     assert {item["type"] for item in handoff.unresolved_constraints} == {

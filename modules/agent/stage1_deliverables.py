@@ -52,15 +52,36 @@ class DesignSpaceRequirement(BaseModel):
     confidence: str = ""
 
 
+class DesignMovementRequirement(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    route_id: str
+    movement_type: Literal["visitor", "resident", "service", "fire"]
+    title: str
+    role: str
+    entry_or_origin: str
+    destinations: list[str] = Field(default_factory=list)
+    affected_space_ids: list[str] = Field(default_factory=list)
+    operating_windows: list[str] = Field(default_factory=list)
+    constraints: list[Any] = Field(default_factory=list)
+    conflicts: list[Any] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    assumptions: list[Any] = Field(default_factory=list)
+    validation_actions: list[Any] = Field(default_factory=list)
+    status: Literal["verified", "proposed", "blocked", "unavailable"]
+    map_binding: dict[str, Any] = Field(default_factory=dict)
+
+
 class DesignHandoffContract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contract_version: str = "1.0"
+    contract_version: str = "2.0"
     positioning_option_id: str
     positioning_option: dict[str, Any] = Field(default_factory=dict)
     matrix_version: str = ""
     spatial_hierarchy: list[dict[str, Any]] = Field(default_factory=list)
     space_requirements: list[DesignSpaceRequirement] = Field(default_factory=list)
+    movement_requirements: list[DesignMovementRequirement] = Field(default_factory=list)
     portfolio_requirements: list[Any] = Field(default_factory=list)
     hard_constraint_screening: dict[str, Any] = Field(default_factory=dict)
     unresolved_constraints: list[dict[str, Any]] = Field(default_factory=list)
@@ -229,6 +250,42 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
                 confidence=_text(node.get("confidence")),
             )
         )
+    movement_requirements = []
+    for route in _list(matrix.get("movement_routes")):
+        node = _mapping(route)
+        movement_requirements.append(
+            DesignMovementRequirement(
+                route_id=_text(node.get("route_id")),
+                movement_type=_text(node.get("movement_type")),
+                title=_text(node.get("title")),
+                role=_text(node.get("role")),
+                entry_or_origin=_text(node.get("entry_or_origin")),
+                destinations=[
+                    _text(item) for item in _list(node.get("destinations")) if _text(item)
+                ],
+                affected_space_ids=[
+                    _text(item)
+                    for item in _list(node.get("affected_space_ids"))
+                    if _text(item)
+                ],
+                operating_windows=[
+                    _text(item)
+                    for item in _list(node.get("operating_windows"))
+                    if _text(item)
+                ],
+                constraints=_list(node.get("constraints")),
+                conflicts=_list(node.get("conflicts")),
+                evidence_refs=[
+                    _text(item)
+                    for item in _list(node.get("evidence_refs"))
+                    if _text(item)
+                ],
+                assumptions=_list(node.get("assumptions")),
+                validation_actions=_list(node.get("validation_actions")),
+                status=_text(node.get("status")),
+                map_binding=_mapping(node.get("map_binding")),
+            )
+        )
     evidence_ids = [
         _text(_mapping(item).get("id"))
         for item in _list(package.get("evidence_ledger"))
@@ -242,6 +299,7 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
             _mapping(item) for item in _list(matrix.get("spatial_hierarchy"))
         ],
         space_requirements=requirements,
+        movement_requirements=movement_requirements,
         portfolio_requirements=_list(matrix.get("portfolio_checks")),
         hard_constraint_screening=_mapping(package.get("hard_constraint_screening")),
         unresolved_constraints=_unresolved_constraints(package),

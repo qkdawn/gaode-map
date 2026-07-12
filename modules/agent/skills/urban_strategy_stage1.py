@@ -252,6 +252,14 @@ def _critical_evidence_ids(
             for item in decision.get("evidence_refs") or []
             if str(item).strip()
         )
+    for route in spatial_matrix.get("movement_routes") or []:
+        if not isinstance(route, dict):
+            continue
+        critical.update(
+            str(item).strip()
+            for item in route.get("evidence_refs") or []
+            if str(item).strip()
+        )
     for assessment in hard_constraint_screening.get("assessments") or []:
         if not isinstance(assessment, dict):
             continue
@@ -638,7 +646,7 @@ async def execute(
     matrix_result = await client.chat_json(
         system_prompt=(
             "你是存量空间功能策划负责人。只输出 JSON：matrix_version、positioning_option_id、"
-            "spatial_hierarchy、space_decisions、portfolio_checks。spatial_hierarchy 必须含 system/cluster/unit；"
+            "spatial_hierarchy、space_decisions、movement_routes、portfolio_checks。spatial_hierarchy 必须含 system/cluster/unit；"
             "每个节点必须含稳定 id、title、level、parent_id、role、member_space_ids，cluster 的 parent_id 指向 system，"
             "unit 的 parent_id 指向 cluster，system 的 parent_id 为空。"
             "每个 space_decision 必须含 space_id、hierarchy_id、space_name、future_role、core_audiences、movement_role、value_role、"
@@ -653,6 +661,13 @@ async def execute(
             "{status:'unavailable', spatial_object_id:'', reason:'无法精确绑定的原因'}。"
             "只有决策空间与清单对象精确相同时才能 bound；不得把建筑、院落或入口随意绑定到 H3 网格或路段，"
             "不得生成坐标、几何或清单外 ID。"
+            "movement_routes 必须完整覆盖 visitor、resident、service、fire 四类流线；service 的用户展示语义是后勤。"
+            "每条流线必须含 route_id、movement_type、title、role、entry_or_origin、destinations、affected_space_ids、"
+            "operating_windows、constraints、conflicts、evidence_refs、assumptions、validation_actions、"
+            "status(verified/proposed/blocked/unavailable)、map_binding。route_id 必须唯一，affected_space_ids 只能引用本矩阵空间。"
+            "流线 map_binding 同样只能选择清单中的稳定 ID 或明确 unavailable；只有 LineString/MultiLineString 权威路径对象可绑定，"
+            "不得生成、补点或改写路径坐标。道路阻隔、绕行、无障碍、居民干扰、后勤交叉和消防冲突必须进入 constraints/conflicts；"
+            "证据不足时保留假设和 validation_actions，不得把宏观路网指标写成真实内部路径结论。"
             "每个空间决策必须引用全部适用的 hard_constraint_refs，并根据硬约束写入前置条件、排除项和验证动作。"
             "空间建议必须说明前置条件，不得虚构产权、结构或消防结论。"
             "strong 建议不得依赖未解决冲突证据；存在冲突时应降级为 conditional 并写明前置条件。"
@@ -729,7 +744,8 @@ async def execute(
         "spatial-decision-matrix",
         "形成空间功能决策矩阵",
         summary=(
-            f"形成 {len(spatial_matrix.get('space_decisions') or [])} 个空间决策。"
+            f"形成 {len(spatial_matrix.get('space_decisions') or [])} 个空间决策，"
+            f"登记 {len(spatial_matrix.get('movement_routes') or [])} 条游客、居民、后勤和消防流线。"
         ),
     )
     critical_evidence_ids = _critical_evidence_ids(
