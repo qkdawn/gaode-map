@@ -65,6 +65,7 @@ import {
   sourceTransportLabel,
 } from './source-view.js'
 import { getBlockingPptInputSources, getPptPromptActions } from './ui-state.js'
+import { buildPptCapabilityLauncherCards } from './capability-launcher.js'
 
 const props = defineProps({
   sources: {
@@ -179,6 +180,22 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  capabilities: {
+    type: Array,
+    default: () => [],
+  },
+  capabilityOverview: {
+    type: Object,
+    default: () => ({}),
+  },
+  capabilitiesLoading: {
+    type: Boolean,
+    default: false,
+  },
+  capabilitiesError: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits([
@@ -218,6 +235,8 @@ const emit = defineEmits([
   'save-revision',
   'regenerate-revision',
   'undo-revision',
+  'load-capabilities',
+  'open-capability',
 ])
 
 const isSourcesCollapsed = ref(false)
@@ -239,6 +258,7 @@ const failedVisualPreviewUrls = ref(new Set())
 const visualPreviewDialog = ref({ url: '', title: '' })
 const sourceMenuLockClass = 'agent-ppt-source-menu-open'
 const nowTick = ref(Date.now())
+const rightWorkspaceView = ref('catalog')
 let nowTickTimer = null
 
 const sourcePanelLabel = computed(() => (isSourcesCollapsed.value ? '展开来源' : '折叠来源'))
@@ -246,6 +266,8 @@ const sourceCollapseIconPoints = computed(() => (
   isSourcesCollapsed.value ? '14.5,12 12,9.5 12,14.5 14.5,12' : '11.5,12 14,9.5 14,14.5 11.5,12'
 ))
 const centerThreadBodyRef = ref(null)
+const launcherCards = computed(() => buildPptCapabilityLauncherCards(props.capabilities, props.capabilityOverview))
+const isCapabilityCatalogVisible = computed(() => rightWorkspaceView.value === 'catalog')
 
 const sourceById = computed(() => new Map(props.sources.map((source) => [String(source.id || ''), source])))
 const sourceGroupsForTree = computed(() => props.sourceGroups.map((group) => ({
@@ -854,6 +876,20 @@ function showFlowView(mode = '') {
   if (mode === 'outline' && hasOutline.value) flowViewMode.value = 'outline'
   if (mode === 'directive' && canViewDirectiveStep.value) flowViewMode.value = 'directive'
 }
+
+function openLauncherCard(card = {}) {
+  const capabilityId = String(card.id || '')
+  if (!capabilityId) return
+  if (capabilityId === 'ppt-planning') {
+    rightWorkspaceView.value = 'ppt'
+    return
+  }
+  emit('open-capability', capabilityId)
+}
+
+function showCapabilityCatalog() {
+  rightWorkspaceView.value = 'catalog'
+}
 const activeRevisionTarget = computed(() => props.activeRevisionTarget && typeof props.activeRevisionTarget === 'object' ? props.activeRevisionTarget : {})
 const activeRevisionType = computed(() => String(activeRevisionTarget.value.type || ''))
 const revisionDrawerOpen = computed(() => activeRevisionType.value === 'outline' || activeRevisionType.value === 'directive')
@@ -1078,6 +1114,7 @@ watch(
 
 onMounted(() => {
   window.addEventListener('keydown', handleSourceMenuKeydown)
+  emit('load-capabilities')
   nowTickTimer = window.setInterval(() => {
     nowTick.value = Date.now()
   }, 1000)
@@ -1902,11 +1939,53 @@ async function confirmSourceDialog() {
         </slot>
       </section>
 
-      <section class="agent-ppt-notebook-panel agent-ppt-document-panel" aria-label="指令文件">
-        <div class="agent-ppt-notebook-head">
-          <h3>指令文件</h3>
-          <span>{{ spec.pageCount || 15 }} 页（可配置） · {{ spec.audience || '政府评审' }}</span>
+      <section class="agent-ppt-notebook-panel agent-ppt-document-panel" aria-label="分析能力">
+        <div class="agent-ppt-notebook-head agent-ppt-capability-head">
+          <button
+            v-if="!isCapabilityCatalogVisible"
+            type="button"
+            class="agent-ppt-capability-back"
+            aria-label="返回分析能力"
+            title="返回分析能力"
+            @click="showCapabilityCatalog">
+            ‹
+          </button>
+          <div>
+            <h3>{{ isCapabilityCatalogVisible ? '分析能力' : '成果 PPT' }}</h3>
+            <small>{{ isCapabilityCatalogVisible ? '选择要生成的成果' : '指令文件与页面生成' }}</small>
+          </div>
+          <span v-if="isCapabilityCatalogVisible">{{ launcherCards.length }} 项</span>
+          <span v-else>{{ spec.pageCount || 15 }} 页 · {{ spec.audience || '政府评审' }}</span>
         </div>
+        <div v-if="isCapabilityCatalogVisible" class="agent-ppt-capability-catalog">
+          <div class="agent-ppt-capability-intro">
+            <strong>选择成果类型</strong>
+            <span>每张卡片对应一套独立的配置、运行和交付流程。</span>
+          </div>
+          <div v-if="capabilitiesLoading" class="agent-ppt-capability-catalog-state">正在读取能力目录...</div>
+          <div v-else-if="capabilitiesError" class="agent-ppt-capability-catalog-state is-error">
+            <span>{{ capabilitiesError }}</span>
+            <button type="button" @click="$emit('load-capabilities')">重试</button>
+          </div>
+          <div v-else-if="launcherCards.length" class="agent-ppt-capability-grid">
+            <button
+              v-for="card in launcherCards"
+              :key="card.id"
+              type="button"
+              class="agent-ppt-capability-card"
+              :class="[`is-${card.accent}`, `is-${card.state}`]"
+              @click="openLauncherCard(card)">
+              <span class="agent-ppt-capability-card-mark">{{ card.shortLabel }}</span>
+              <span class="agent-ppt-capability-card-status">{{ card.statusLabel }}</span>
+              <strong>{{ card.title }}</strong>
+              <small>{{ card.description }}</small>
+              <span v-if="card.outputs.length" class="agent-ppt-capability-card-output">{{ card.outputs.join(' / ') }}</span>
+              <span class="agent-ppt-capability-card-action">{{ card.actionLabel }} <b aria-hidden="true">›</b></span>
+            </button>
+          </div>
+          <div v-else class="agent-ppt-capability-catalog-state">当前没有可展示的能力。</div>
+        </div>
+        <template v-else>
         <div class="agent-ppt-flow-strip" aria-label="PPT 生成流程">
           <button
             type="button"
@@ -2350,6 +2429,7 @@ async function confirmSourceDialog() {
             </div>
           </div>
         </div>
+        </template>
       </section>
     </div>
 

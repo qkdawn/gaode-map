@@ -13,21 +13,21 @@ def test_catalog_only_exposes_real_registered_executors_as_available():
         "spatial-programming-matrix",
         "evidence-audit",
         "ppt-planning",
-        "rsir-business-analysis",
+        "esri-business-analyst-report",
     }
     available = [item for item in capabilities if item.status == "available"]
     assert {(item.executor_type, item.executor_id) for item in available} <= {
         ("skill", "urban-strategy-stage1"),
         ("service", "ppt-planning"),
+        ("service", "business-analyst-agent"),
     }
     assert all(item.intent_phrases for item in capabilities)
 
-    rsir = next(item for item in capabilities if item.id == "rsir-business-analysis")
-    assert rsir.status == "unavailable"
-    assert rsir.executor_type == "none"
-    assert rsir.executor_id == ""
-    assert rsir.availability_note
-    assert "注册可测试的领域执行器" in rsir.activation_requirements
+    business_report = next(item for item in capabilities if item.id == "esri-business-analyst-report")
+    assert business_report.status == "available"
+    assert business_report.executor_type == "service"
+    assert business_report.executor_id == "business-analyst-agent"
+    assert "BA Model Scorecard" in business_report.output_contract
 
 
 def test_stage1_readiness_exposes_actions_for_missing_inputs():
@@ -71,20 +71,32 @@ def test_stage1_readiness_accepts_scope_brief_and_analysis_evidence():
     assert len(readiness.satisfied) == 3
 
 
-def test_unavailable_capability_explains_why_and_what_must_be_done():
+def test_business_analyst_report_readiness_requires_scope_and_evidence():
     payload = AgentTurnRequest(
-        messages=[AgentMessage(role="user", content="生成 RSIR 商业分析")]
+        messages=[AgentMessage(role="user", content="生成 ESRI Business Analyst 报告")]
     )
 
-    readiness = evaluate_capability_readiness("rsir-business-analysis", payload)
+    readiness = evaluate_capability_readiness("esri-business-analyst-report", payload)
 
-    assert readiness.status == "unavailable"
-    assert readiness.conflicts == [
-        "RSIR 的方法定义、计算口径和输出契约尚未确认，当前不能用普通 Agent 代替执行。"
-    ]
+    assert readiness.status == "blocked"
     assert readiness.missing_required == [
-        "确认 RSIR 的完整名称与方法边界",
-        "定义输入数据、核心计算和证据要求",
-        "定义结构化输出与质量验收契约",
-        "注册可测试的领域执行器",
+        "分析范围或商圈边界",
+        "POI、人口、夜光、路网或项目资料证据",
     ]
+
+
+def test_business_analyst_report_readiness_accepts_current_scope_evidence():
+    payload = AgentTurnRequest(
+        messages=[AgentMessage(role="user", content="生成 ESRI Business Analyst 报告")],
+        analysis_snapshot={
+            "scope": {"polygon": [[112.0, 28.0], [112.1, 28.0], [112.0, 28.1]]},
+            "population": {"summary": {"total": 12000}},
+            "poi_summary": {"total": 240},
+        },
+    )
+
+    readiness = evaluate_capability_readiness("esri-business-analyst-report", payload)
+
+    assert readiness.status == "ready"
+    assert readiness.missing_required == []
+    assert readiness.missing_optional

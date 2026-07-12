@@ -60,11 +60,9 @@ def test_workbench_overview_explains_missing_inputs_instead_of_fabricating_readi
     assert overview.recommendation.capability_id == "urban-strategy-stage1"
     assert overview.recommendation.missing_required
     states = {item.capability_id: item.state for item in overview.cards}
-    assert states["rsir-business-analysis"] == "unavailable"
     assert all(
         state == "blocked"
-        for capability_id, state in states.items()
-        if capability_id != "rsir-business-analysis"
+        for state in states.values()
     )
 
 

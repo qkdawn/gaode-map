@@ -10,13 +10,12 @@ def test_explicit_capability_request_opens_configuration_without_guessing_execut
     assert resolution.matched_phrase == "生成空间功能策划决策矩阵"
 
 
-def test_unavailable_capability_intent_returns_authoritative_explanation():
-    resolution = resolve_capability_intent("现在生成 RSIR 商业分析")
+def test_esri_business_analyst_intent_opens_report_configuration():
+    resolution = resolve_capability_intent("现在生成 ESRI Business Analyst 报告")
 
     assert resolution.matched is True
-    assert resolution.capability_id == "rsir-business-analysis"
-    assert resolution.action == "explain_unavailable"
-    assert "不能用普通 Agent 代替执行" in resolution.reason
+    assert resolution.capability_id == "esri-business-analyst-report"
+    assert resolution.action == "open_configuration"
 
 
 def test_ordinary_questions_stay_in_conversation():

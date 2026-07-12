@@ -4,6 +4,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from modules.business_analyst import (
+    business_analyst_input_from_snapshot,
+    evaluate_business_analyst_report_readiness,
+)
+
 from .capability_inputs import CapabilityInputResolution, resolve_capability_inputs
 from .schemas import AgentTurnRequest
 from .skills.urban_strategy_stage1 import evaluate_readiness
@@ -241,27 +246,26 @@ _CAPABILITIES = (
         workspace_kind="full",
     ),
     AnalysisCapability(
-        id="rsir-business-analysis",
-        display_name="RSIR 商业分析",
-        description="围绕商圈、客群、供需、交通和风险形成结构化商业判断。",
+        id="esri-business-analyst-report",
+        display_name="ESRI Business Analyst 报告",
+        description="以商圈、市场潜力、供需缺口、机会业态和选址适配模型生成区域商业分析报告。",
         category="analysis",
-        status="unavailable",
-        executor_type="none",
+        status="available",
+        executor_type="service",
+        executor_id="business-analyst-agent",
         intent_phrases=[
-            "生成RSIR商业分析",
-            "运行RSIR商业分析",
-            "打开RSIR商业分析",
+            "生成ESRI Business Analyst报告",
+            "生成ESRI商业分析报告",
+            "打开ESRI商业分析",
         ],
-        availability_note="RSIR 的方法定义、计算口径和输出契约尚未确认，当前不能用普通 Agent 代替执行。",
-        activation_requirements=[
-            "确认 RSIR 的完整名称与方法边界",
-            "定义输入数据、核心计算和证据要求",
-            "定义结构化输出与质量验收契约",
-            "注册可测试的领域执行器",
+        input_requirements=[
+            CapabilityRequirement(id="trade_area", label="分析范围或商圈边界"),
+            CapabilityRequirement(id="commercial_evidence", label="当前范围分析证据"),
         ],
-        output_contract=["商业判断", "供需机会", "风险与证据缺口"],
+        output_contract=["BA Model Scorecard", "区域商业画像报告", "机会业态与验证计划"],
         supports_map=True,
-        estimated_stages=4,
+        supports_resume=True,
+        estimated_stages=5,
         icon="chart-no-axes-combined",
         workspace_kind="full",
     ),
@@ -345,6 +349,20 @@ def evaluate_capability_readiness(
             actions=actions,
             input_resolutions=resolved_inputs.public_resolutions(),
             limited_mode_allowed=False,
+        )
+    if capability.executor_id == "business-analyst-agent":
+        business_input = business_analyst_input_from_snapshot(
+            payload.analysis_snapshot,
+            has_selected_sources=bool(payload.selected_sources_context.source_items()),
+        )
+        result = evaluate_business_analyst_report_readiness(business_input)
+        return CapabilityReadiness(
+            capability_id=capability.id,
+            status="ready" if result["ready"] else "blocked",
+            satisfied=list(result["satisfied"]),
+            missing_required=list(result["missing_required"]),
+            missing_optional=list(result["missing_optional"]),
+            actions=[CapabilityAction(**item) for item in result["actions"]],
         )
     return CapabilityReadiness(
         capability_id=capability.id,

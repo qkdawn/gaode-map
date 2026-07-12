@@ -1038,7 +1038,9 @@ function createAgentRuntimeMethods() {
         requestRiskConfirmations,
         executionProfile: {
           model_profile_id: asText(this.agentSelectedModelProfileId),
-          skill_id: asText(this.agentSelectedSkillId || this.agentPinnedSkillId),
+          skill_id: Object.hasOwn(options || {}, 'executionSkillId')
+            ? asText(options.executionSkillId)
+            : asText(this.agentSelectedSkillId || this.agentPinnedSkillId),
           skill_scope: this.agentSkillScope === 'conversation' ? 'conversation' : 'turn',
         },
         nextMessages,

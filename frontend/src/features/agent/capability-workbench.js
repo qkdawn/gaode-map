@@ -87,6 +87,7 @@ const CAPABILITY_PROMPTS = Object.freeze({
   'urban-strategy-stage1': '基于当前项目范围、资料和分析结果，执行城市更新第一阶段策划并生成可审计报告。',
   'spatial-programming-matrix': '基于当前项目证据，重点生成空间功能策划决策矩阵，并说明候选功能、排除理由和前置条件。',
   'evidence-audit': '审计当前项目分析的 Claim-Evidence 关系、代理指标边界、冲突与待验证事项。',
+  'esri-business-analyst-report': '生成当前范围的 ESRI Business Analyst / MAPC 区域商业深度画像报告。必须先调用 plan_business_analyst_analysis 选择模型路径，再按 Trade Area、Model Scorecard、Market Potential、Retail Gap、Opportunity Screening、Competition / Huff、Customer Fit、Site Suitability 和验证计划组织报告；缺失模型标为 partial 或 skipped，不得虚构客流、租金、销售、市场份额或客户来源。',
 })
 
 export function createAgentCapabilityWorkbenchMethods() {
@@ -154,6 +155,20 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.loadAnalysisCapabilities().catch(() => {})
       this.loadAnalysisCapabilityOverview(true).catch(() => {})
       this.loadAnalysisCapabilityRuns().catch(() => {})
+    },
+    async loadPptCapabilityLauncher() {
+      await this.loadAnalysisCapabilities()
+      await this.loadAnalysisCapabilityOverview().catch(() => null)
+      return this.analysisCapabilities
+    },
+    async openAnalysisCapabilityFromLauncher(capabilityId = '') {
+      const id = text(capabilityId)
+      if (!id || id === 'ppt-planning') return null
+      await this.loadPptCapabilityLauncher()
+      if (typeof this.selectStep3Panel === 'function') this.selectStep3Panel('agent')
+      this.agentWorkspaceView = 'capabilities'
+      this.closeAgentSessionMenu()
+      return this.openAnalysisCapabilityOverviewTarget(id)
     },
     buildAnalysisCapabilityWorkbenchPayload() {
       return {
@@ -920,6 +935,18 @@ export function createAgentCapabilityWorkbenchMethods() {
       const capabilityInputSelections = this.buildLockedAnalysisCapabilityInputSelections(capability.id)
       if (capability.executor_type === 'service' && capability.executor_id === 'ppt-planning') {
         this.openAgentPptPlanningFromReport({ capabilityInputSelections })
+        return
+      }
+      if (capability.executor_type === 'service' && capability.executor_id === 'business-analyst-agent') {
+        this.agentWorkspaceView = 'report'
+        await this.submitAgentComposer({
+          prompt: CAPABILITY_PROMPTS[capability.id],
+          targetCapabilityId: capability.id,
+          capabilityInputSelections,
+          executionSkillId: '',
+          mode: 'deep',
+        })
+        await this.loadAnalysisCapabilityOverview(true).catch(() => {})
         return
       }
       await this.loadAgentCapabilities()

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 import { createAgentCapabilityWorkbenchMethods } from '../src/features/agent/capability-workbench.js'
+import { buildPptCapabilityLauncherCards } from '../src/features/ppt-planning/capability-launcher.js'
 import { createAnalysisLifecycleHooks } from '../src/pages/analysis/orchestrators/lifecycle.js'
 
 const methods = createAgentCapabilityWorkbenchMethods()
@@ -452,6 +453,54 @@ test('PPT capability reuses the existing planning workbench', async () => {
   })
   await ctx.runAnalysisCapability({ id: 'ppt-planning', status: 'available', executor_type: 'service', executor_id: 'ppt-planning' })
   assert.equal(opened, 1)
+})
+
+test('ESRI Business Analyst capability runs through the deep Agent tool loop', async () => {
+  const submitted = []
+  const capability = {
+    id: 'esri-business-analyst-report',
+    status: 'available',
+    executor_type: 'service',
+    executor_id: 'business-analyst-agent',
+  }
+  const ctx = createContext({
+    analysisCapabilityReadiness: { [capability.id]: { status: 'ready', input_resolutions: [] } },
+    submitAgentComposer: async options => submitted.push(options),
+    loadAnalysisCapabilityOverview: async () => null,
+  })
+
+  await ctx.runAnalysisCapability(capability)
+
+  assert.equal(submitted.length, 1)
+  assert.equal(submitted[0].targetCapabilityId, capability.id)
+  assert.equal(submitted[0].mode, 'deep')
+  assert.equal(submitted[0].executionSkillId, '')
+  assert.match(submitted[0].prompt, /plan_business_analyst_analysis/)
+  assert.match(submitted[0].prompt, /Model Scorecard/)
+})
+
+test('PPT right-side launcher keeps the three requested capabilities in product order', () => {
+  const capabilities = [
+    { id: 'spatial-programming-matrix', status: 'available', display_name: '空间功能策划矩阵', output_contract: ['决策矩阵'] },
+    { id: 'ppt-planning', status: 'available', display_name: '成果 PPT', output_contract: ['可编辑 PPT'] },
+    { id: 'esri-business-analyst-report', status: 'available', display_name: 'ESRI Business Analyst 报告', output_contract: ['区域商业画像报告'] },
+    { id: 'evidence-audit', status: 'available', display_name: '证据审计' },
+  ]
+  const cards = buildPptCapabilityLauncherCards(capabilities, {
+    cards: [
+      { capability_id: 'ppt-planning', state: 'blocked' },
+      { capability_id: 'esri-business-analyst-report', state: 'ready' },
+      { capability_id: 'spatial-programming-matrix', state: 'completed' },
+    ],
+  })
+
+  assert.deepEqual(cards.map(card => card.id), [
+    'ppt-planning',
+    'esri-business-analyst-report',
+    'spatial-programming-matrix',
+  ])
+  assert.deepEqual(cards.map(card => card.statusLabel), ['缺少输入', '可运行', '已有结果'])
+  assert.deepEqual(cards.map(card => card.shortLabel), ['PPT', 'BA', '矩阵'])
 })
 
 test('Stage 1 quality accessors expose verification gaps without mutating payloads', () => {
@@ -1106,9 +1155,10 @@ test('Stage 1 matrix contract repair exposes the single autonomous attempt', () 
 })
 
 test('analysis workspace templates expose capability navigation and detail view', async () => {
-  const [main, sidebar] = await Promise.all([
+  const [main, sidebar, pptWorkbench] = await Promise.all([
     fs.promises.readFile(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8'),
     fs.promises.readFile(new URL('../src/pages/analysis/components/sidebar.html', import.meta.url), 'utf8'),
+    fs.promises.readFile(new URL('../src/features/ppt-planning/PptPlanningWorkbench.vue', import.meta.url), 'utf8'),
   ])
   assert.match(main, /agentWorkspaceView === 'capabilities'/)
   assert.match(main, /getAnalysisCapabilityGroups\(\)/)
@@ -1193,6 +1243,10 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /交付前必须修复/)
   assert.match(sidebar, /openAnalysisCapabilitiesPanel/)
   assert.match(sidebar, />分析能力</)
+  assert.match(pptWorkbench, /选择成果类型/)
+  assert.match(pptWorkbench, /agent-ppt-capability-grid/)
+  assert.match(pptWorkbench, /openLauncherCard\(card\)/)
+  assert.match(pptWorkbench, /showCapabilityCatalog/)
 })
 
 
@@ -1626,16 +1680,16 @@ test('unmatched or failed intent resolution leaves ordinary conversation untouch
   }
 })
 
-test('unavailable capability contract is searchable and explains activation prerequisites', () => {
+test('unavailable future capability contract is searchable and explains activation prerequisites', () => {
   const capability = {
-    id: 'rsir-business-analysis',
+    id: 'future-market-model',
     category: 'analysis',
     status: 'unavailable',
-    display_name: 'RSIR 商业分析',
+    display_name: '未来市场模型',
     description: '商业判断',
     availability_note: '方法契约尚未确认',
     activation_requirements: ['注册可测试的领域执行器'],
-    intent_phrases: ['生成 RSIR 商业分析'],
+    intent_phrases: ['生成未来市场模型'],
     output_contract: [],
     input_requirements: [],
   }
@@ -1644,7 +1698,7 @@ test('unavailable capability contract is searchable and explains activation prer
   assert.equal(ctx.getAnalysisCapabilityCardState(capability), 'unavailable')
   assert.equal(ctx.getAnalysisCapabilityCardMeta(capability), '需完成 1 项启用条件')
   ctx.analysisCapabilitySearchQuery = '领域执行器'
-  assert.deepEqual(ctx.getFilteredAnalysisCapabilities().map(item => item.id), ['rsir-business-analysis'])
+  assert.deepEqual(ctx.getFilteredAnalysisCapabilities().map(item => item.id), ['future-market-model'])
 })
 
 test('composer checks explicit capability intent before falling back to chat execution', () => {

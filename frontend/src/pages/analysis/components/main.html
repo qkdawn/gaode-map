@@ -2579,6 +2579,10 @@
                                 :revision-snapshots="getAgentPptPlanningRevisionSnapshots()"
                                 :stale-directive-page-ids="getAgentPptPlanningStaleDirectivePageIds()"
                                 :revision-generating-target="getAgentPptPlanningRevisionGeneratingTarget()"
+                                :capabilities="analysisCapabilities"
+                                :capability-overview="getAnalysisCapabilityOverview()"
+                                :capabilities-loading="analysisCapabilitiesLoading || analysisCapabilityOverviewLoading"
+                                :capabilities-error="analysisCapabilitiesError || analysisCapabilityOverviewError"
                                 @classify-source-groups="classifyAgentPptPlanningSourceGroups"
                                 @toggle-source="toggleAgentPptPlanningSource"
                                 @toggle-all-sources="toggleAllAgentPptPlanningSources"
@@ -2614,7 +2618,9 @@
                                 @update-revision-draft="updateAgentPptPlanningRevisionDraft"
                                 @save-revision="saveAgentPptPlanningRevision"
                                 @regenerate-revision="regenerateAgentPptPlanningRevision"
-                                @undo-revision="undoAgentPptPlanningRevision">
+                                @undo-revision="undoAgentPptPlanningRevision"
+                                @load-capabilities="loadPptCapabilityLauncher().catch(() => {})"
+                                @open-capability="openAnalysisCapabilityFromLauncher">
                                 <template #center>
                                     <div class="agent-thread-shell agent-ppt-thread-shell">
                                         <div

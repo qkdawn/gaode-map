@@ -20,11 +20,11 @@ def test_analysis_capability_workbench_exposes_recommendation_and_readiness_card
         "spatial-programming-matrix",
         "evidence-audit",
         "ppt-planning",
-        "rsir-business-analysis",
+        "esri-business-analyst-report",
     }
     assert payload["recommendation"]["capability_id"] == "urban-strategy-stage1"
     assert payload["recommendation"]["action"] == "resolve_inputs"
-    rsir = next(item for item in payload["cards"] if item["capability_id"] == "rsir-business-analysis")
-    assert rsir["state"] == "unavailable"
-    assert rsir["readiness"]["conflicts"]
+    business_report = next(item for item in payload["cards"] if item["capability_id"] == "esri-business-analyst-report")
+    assert business_report["state"] == "blocked"
+    assert business_report["readiness"]["missing_required"]
     assert payload["recommendation"]["missing_required"]

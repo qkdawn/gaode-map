@@ -28,6 +28,68 @@ def _input_has_scope(analysis_input: BusinessAnalystInput) -> bool:
     return bool(scope.get("polygon") or scope.get("center") or scope.get("bounds"))
 
 
+def business_analyst_input_from_snapshot(
+    snapshot: Any,
+    *,
+    question_type: str = "",
+    has_selected_sources: bool = False,
+) -> BusinessAnalystInput:
+    def field(name: str) -> Any:
+        if isinstance(snapshot, dict):
+            return snapshot.get(name)
+        return getattr(snapshot, name, None)
+
+    evidence_layers: list[str] = []
+    if field("pois") or field("poi_summary"):
+        evidence_layers.append("poi")
+    if (field("h3") or {}).get("summary"):
+        evidence_layers.append("h3")
+    if (field("population") or {}).get("summary"):
+        evidence_layers.append("population")
+    if (field("nightlight") or {}).get("summary"):
+        evidence_layers.append("nightlight")
+    if (field("road") or {}).get("summary"):
+        evidence_layers.append("road")
+    if field("frontend_analysis"):
+        evidence_layers.append("frontend_analysis")
+    if has_selected_sources:
+        evidence_layers.append("selected_sources")
+    return BusinessAnalystInput(
+        scope=dict(field("scope") or {}),
+        evidence_layers=list(dict.fromkeys(evidence_layers)),
+        question_type=question_type,
+    )
+
+
+def evaluate_business_analyst_report_readiness(
+    analysis_input: BusinessAnalystInput,
+) -> Dict[str, Any]:
+    has_scope = _input_has_scope(analysis_input)
+    has_evidence = bool(analysis_input.evidence_layers)
+    missing_required = []
+    actions = []
+    if not has_scope:
+        missing_required.append("分析范围或商圈边界")
+        actions.append({"id": "select-scope", "label": "选择分析范围", "target": "scope-selection"})
+    if not has_evidence:
+        missing_required.append("POI、人口、夜光、路网或项目资料证据")
+        actions.append({"id": "add-evidence", "label": "准备分析证据", "target": "analysis-sources"})
+    return {
+        "ready": not missing_required,
+        "satisfied": [
+            label
+            for present, label in (
+                (has_scope, "分析范围或商圈边界"),
+                (has_evidence, "当前范围分析证据"),
+            )
+            if present
+        ],
+        "missing_required": missing_required,
+        "missing_optional": ["消费、客流、租金、销售与客户来源等运营校准数据"],
+        "actions": actions,
+    }
+
+
 def _answer_guidance(skill: SkillSpec) -> list[str]:
     return [
         "Use this Business Analyst output as an analysis skeleton, not as an answer template.",

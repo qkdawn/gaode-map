@@ -93,18 +93,17 @@ def test_downstream_readiness_exposes_explicit_upstream_version_choices(monkeypa
     assert resolution["available_versions"] == []
 
 
-def test_analysis_capability_catalog_exposes_unavailable_reason_and_prerequisites():
+def test_analysis_capability_catalog_exposes_esri_business_analyst_report():
     with TestClient(build_app()) as client:
         response = client.get("/api/v1/analysis/agent/analysis-capabilities")
 
     assert response.status_code == 200
     capabilities = {item["id"]: item for item in response.json()}
-    rsir = capabilities["rsir-business-analysis"]
-    assert rsir["status"] == "unavailable"
-    assert rsir["executor_type"] == "none"
-    assert rsir["executor_id"] == ""
-    assert rsir["availability_note"]
-    assert rsir["activation_requirements"][-1] == "注册可测试的领域执行器"
+    business_report = capabilities["esri-business-analyst-report"]
+    assert business_report["status"] == "available"
+    assert business_report["executor_type"] == "service"
+    assert business_report["executor_id"] == "business-analyst-agent"
+    assert "区域商业画像报告" in business_report["output_contract"]
 
 
 def test_analysis_capability_intent_resolves_explicit_workbench_navigation():
