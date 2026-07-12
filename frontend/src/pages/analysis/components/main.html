@@ -292,6 +292,25 @@
                                     </article>
                                 </div>
                             </div>
+                            <div v-if="getStage1RepairPlan() && (getStage1RepairPlan().status !== 'not_needed' || getStage1RepairAttempts().length)" class="agent-stage1-repair-loop" :class="getStage1RepairAttempts().at(-1)?.status || getStage1RepairPlan().status">
+                                <div class="agent-stage1-repair-head">
+                                    <div><span>Autonomous Quality Repair</span><strong>{{ getStage1RepairStatusLabel() }}</strong></div>
+                                    <em>最多 1 次</em>
+                                </div>
+                                <article v-for="attempt in getStage1RepairAttempts()" :key="attempt.attempt" class="agent-stage1-repair-attempt" :class="attempt.status">
+                                    <div><span>第 {{ attempt.attempt }} 次</span><strong>{{ attempt.status === 'passed' ? '修复成功' : attempt.status === 'incomplete' ? '仍未通过' : '契约失败' }}</strong><em>{{ getStage1RepairScoreText(attempt) }}</em></div>
+                                    <small>修复范围：{{ (attempt.task_codes || []).join('、') }}</small>
+                                    <p v-if="attempt.diagnostics?.length">{{ attempt.diagnostics.join('；') }}</p>
+                                </article>
+                                <div v-if="!getStage1RepairAttempts().length && getStage1RepairPlan().automatic_tasks?.length" class="agent-stage1-repair-tasks">
+                                    <strong>Agent 可处理</strong>
+                                    <span v-for="task in getStage1RepairPlan().automatic_tasks" :key="`${task.scope}-${task.code}`">{{ task.repair_instruction }}</span>
+                                </div>
+                                <div v-if="getStage1RepairPlan().external_issues?.length" class="agent-stage1-repair-external">
+                                    <strong>不能由模型绕过</strong>
+                                    <span v-for="issue in getStage1RepairPlan().external_issues" :key="issue.code">{{ issue.message }}</span>
+                                </div>
+                            </div>
                             <div v-if="getStage1HardConstraintScreening()" class="agent-hard-constraint-screening" :class="getStage1HardConstraintScreening().status">
                                 <div class="agent-hard-constraint-head">
                                     <div><strong>硬约束筛选</strong><span>{{ getStage1HardConstraintStatusLabel() }}</span></div>

@@ -159,16 +159,6 @@ def build_stage1_output_artifacts(
             ["stage1-evidence-ledger", "stage1-conflict-register"],
             evidence_refs=evidence_ids,
         )
-    if "quality_audit" in package:
-        add(
-            "stage1-quality-audit",
-            "diagnostic_report",
-            "交付质量审计",
-            "quality_audit.json",
-            package["quality_audit"],
-            ["stage1-evidence-ledger", "stage1-hard-constraint-screening"],
-            evidence_refs=evidence_ids,
-        )
     workpack_ids: list[str] = []
     for index, workpack in enumerate(package.get("workpacks") or []):
         if not isinstance(workpack, dict):
@@ -212,6 +202,47 @@ def build_stage1_output_artifacts(
             "decision_matrix.json",
             package["spatial_matrix"],
             ["stage1-strategy-options", *workpack_ids],
+            evidence_refs=evidence_ids,
+        )
+    auditable_ids = {
+        "stage1-evidence-ledger",
+        "stage1-conflict-register",
+        "stage1-hard-constraint-screening",
+        "stage1-strategy-options",
+        "stage1-decision-matrix",
+        *workpack_ids,
+    }
+    audited_artifact_ids = [
+        item.artifact_id for item in artifacts if item.artifact_id in auditable_ids
+    ]
+    repair_plan = package.get("repair_plan")
+    repair_recorded = (
+        isinstance(repair_plan, dict) and repair_plan.get("status") != "not_needed"
+    )
+    if repair_recorded:
+        add(
+            "stage1-quality-repair",
+            "diagnostic_report",
+            "自主质量修复计划与记录",
+            "quality_repair.json",
+            {
+                "plan": repair_plan,
+                "attempts": package.get("repair_attempts") or [],
+            },
+            audited_artifact_ids,
+            evidence_refs=evidence_ids,
+        )
+    if "quality_audit" in package:
+        add(
+            "stage1-quality-audit",
+            "diagnostic_report",
+            "交付质量审计",
+            "quality_audit.json",
+            package["quality_audit"],
+            [
+                *audited_artifact_ids,
+                *(["stage1-quality-repair"] if repair_recorded else []),
+            ],
             evidence_refs=evidence_ids,
         )
     if report_markdown:

@@ -14118,3 +14118,20 @@ body.agent-ppt-source-menu-open {
 .agent-capability-input p { margin: 0; color: #b45309; font-size: 8px; line-height: 1.45; }
 
 @media (max-width: 600px) { .agent-spatial-map-controls { grid-template-columns: 1fr; } .agent-spatial-map-legend > button { margin-left: 0; } }
+.agent-stage1-repair-loop { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 7px; background: #f8fafc; }
+.agent-stage1-repair-loop.passed { border-color: #86efac; background: #f0fdf4; }
+.agent-stage1-repair-loop.incomplete, .agent-stage1-repair-loop.failed, .agent-stage1-repair-loop.external_input_required { border-color: #fdba74; background: #fff7ed; }
+.agent-stage1-repair-head, .agent-stage1-repair-attempt > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.agent-stage1-repair-head > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.agent-stage1-repair-head span { color: #64748b; font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.agent-stage1-repair-head strong { color: #1e293b; font-size: 10px; }
+.agent-stage1-repair-head em, .agent-stage1-repair-attempt em { color: #64748b; font-size: 8px; font-style: normal; white-space: nowrap; }
+.agent-stage1-repair-attempt { display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; border: 1px solid #dbe3ec; border-radius: 5px; background: #fff; }
+.agent-stage1-repair-attempt span { color: #64748b; font-size: 8px; }
+.agent-stage1-repair-attempt strong { margin-right: auto; color: #334155; font-size: 9px; }
+.agent-stage1-repair-attempt small, .agent-stage1-repair-attempt p { margin: 0; color: #64748b; font-size: 8px; line-height: 1.45; overflow-wrap: anywhere; }
+.agent-stage1-repair-attempt p { color: #b45309; }
+.agent-stage1-repair-tasks, .agent-stage1-repair-external { display: flex; flex-direction: column; gap: 3px; padding-top: 6px; border-top: 1px solid rgba(148, 163, 184, .25); }
+.agent-stage1-repair-tasks strong, .agent-stage1-repair-external strong { color: #475569; font-size: 9px; }
+.agent-stage1-repair-tasks span, .agent-stage1-repair-external span { color: #64748b; font-size: 8px; line-height: 1.45; }
+.agent-stage1-repair-external span { color: #9a3412; }

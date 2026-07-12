@@ -14,6 +14,11 @@ from ..stage1_deliverables import (
 from ..llm_digest import snapshot_digest
 from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
 from ..quality_audit import QualityAuditResult, audit_stage1_package
+from ..stage1_repair import (
+    Stage1RepairContractError,
+    build_stage1_repair_plan,
+    compile_stage1_repair_candidate,
+)
 from ..stage1_contracts import VerificationSummary
 from ..stage1_data_quality import assess_stage1_data_quality
 from ..stage1_hard_constraints import build_hard_constraint_screening
@@ -803,12 +808,140 @@ async def execute(
     }
 
     audit = audit_stage1_package(package)
+    repair_plan = build_stage1_repair_plan(audit)
+    package["repair_plan"] = repair_plan.model_dump(mode="json")
+    repair_attempts: list[dict[str, Any]] = []
+    if repair_plan.can_run_automatically:
+        before_audit = _audit_payload(audit)
+        await _emit_phase(
+            emit,
+            phase_id="stage1-quality-repair",
+            title="自主修复可纠正的质量问题",
+            detail=(
+                f"发现 {len(repair_plan.automatic_tasks)} 项模型产物问题；"
+                "在不新增证据或几何的前提下执行一次受约束修复。"
+            ),
+        )
+        try:
+            repaired_result = await client.chat_json(
+                system_prompt=(
+                    "你是 Stage 1 质量修复器。只输出 JSON，且必须完整包含 workpacks、"
+                    "hard_constraint_screening、strategy、spatial_matrix 四个字段。"
+                    "只纠正 repair_tasks 指定的模型产物问题，不得新增证据 ID、来源、事实、数值、"
+                    "坐标、几何或权威空间对象 ID；不得删除真实冲突、限制、硬约束或现场核验任务。"
+                    "workpacks 必须覆盖 spatial、audience、culture_tourism、renewal_operations。"
+                    "strategy 必须保留至少三个实质不同方案、反证、淘汰理由、推荐强度、硬约束引用和验证动作。"
+                    "spatial_matrix 必须满足现行单一契约，完整返回三级空间层级、空间决策、"
+                    "visitor/resident/service/fire 四类流线和组合校验；所有 evidence_refs 只能来自 allowed_evidence_ids，"
+                    "所有 map_binding 只能选择 authoritative_spatial_objects 中的稳定 ID，无法精确对应时必须 unavailable。"
+                    "不得通过弱化审计标准、伪造证据或把未知项改写为已验证来通过质量门。"
+                ),
+                user_payload={
+                    "repair_tasks": [
+                        item.model_dump(mode="json")
+                        for item in repair_plan.automatic_tasks
+                    ],
+                    "stage1_package": package,
+                    "allowed_evidence_ids": sorted(evidence_ids),
+                    "authoritative_spatial_objects": spatial_object_catalog(
+                        spatial_object_registry
+                    ),
+                },
+                emit=emit,
+                phase="executing",
+                title="修复 Stage 1 中间产物",
+                reasoning_id="stage1-quality-repair-model",
+            )
+            candidate = compile_stage1_repair_candidate(
+                repaired_result,
+                evidence_ids=evidence_ids,
+                spatial_object_registry=spatial_object_registry,
+            )
+        except Stage1RepairContractError as error:
+            repair_attempts.append(
+                {
+                    "attempt": 1,
+                    "status": "failed",
+                    "task_codes": [
+                        item.code for item in repair_plan.automatic_tasks
+                    ],
+                    "diagnostics": error.diagnostics,
+                    "before_audit": before_audit,
+                    "after_audit": before_audit,
+                }
+            )
+            run.record_stage(
+                "quality-repair",
+                "自主修复可纠正的质量问题",
+                status="failed",
+                summary="修复结果未通过单一输出契约，保留原始审计结果。",
+                diagnostics=error.diagnostics,
+            )
+        else:
+            workpacks = candidate.workpacks
+            hard_constraint_screening = candidate.hard_constraint_screening
+            strategy = candidate.strategy
+            spatial_matrix = candidate.spatial_matrix
+            critical_evidence_ids = _critical_evidence_ids(
+                strategy, spatial_matrix, hard_constraint_screening
+            )
+            provenance = assess_provenance_bindings(
+                provenance_bindings,
+                critical_evidence_ids=critical_evidence_ids,
+            )
+            data_quality = assess_stage1_data_quality(
+                evidence_ledger,
+                critical_evidence_ids=critical_evidence_ids,
+            )
+            package.update(
+                {
+                    "workpacks": workpacks,
+                    "hard_constraint_screening": hard_constraint_screening,
+                    "strategy": strategy,
+                    "spatial_matrix": spatial_matrix,
+                    "data_quality": data_quality.model_dump(mode="json"),
+                    "provenance_binding": provenance.model_dump(mode="json"),
+                }
+            )
+            repaired_audit = audit_stage1_package(package)
+            repair_attempts.append(
+                {
+                    "attempt": 1,
+                    "status": (
+                        "passed" if repaired_audit.status == "passed" else "incomplete"
+                    ),
+                    "task_codes": [
+                        item.code for item in repair_plan.automatic_tasks
+                    ],
+                    "diagnostics": [
+                        item.message for item in repaired_audit.blocking_issues
+                    ],
+                    "before_audit": before_audit,
+                    "after_audit": _audit_payload(repaired_audit),
+                }
+            )
+            audit = repaired_audit
+            run.record_stage(
+                "quality-repair",
+                "自主修复可纠正的质量问题",
+                status="completed" if audit.status == "passed" else "failed",
+                summary=(
+                    f"质量分由 {before_audit['score']} 提升至 {audit.score}；"
+                    f"修复后通过 {audit.checks_passed}/{audit.checks_total} 项。"
+                ),
+                diagnostics=[item.message for item in audit.blocking_issues],
+            )
+
     package["quality_audit"] = _audit_payload(audit)
+    package["repair_attempts"] = repair_attempts
     await _emit_phase(
         emit,
         phase_id="stage1-quality-audit",
         title="执行交付前质量审计",
-        detail=f"通过 {audit.checks_passed}/{audit.checks_total} 项，质量分 {audit.score}。",
+        detail=(
+            f"通过 {audit.checks_passed}/{audit.checks_total} 项，质量分 {audit.score}。"
+            + (" 已完成一次自主修复。" if repair_attempts else "")
+        ),
         state="completed" if audit.status == "passed" else "failed",
     )
     run.record_stage(
@@ -819,6 +952,8 @@ async def execute(
         diagnostics=[item.message for item in audit.blocking_issues],
     )
     panels = _base_panels(readiness, package, audit, verification, provenance)
+    panels["stage1_repair_plan"] = repair_plan.model_dump(mode="json")
+    panels["stage1_repair_attempts"] = repair_attempts
     if audit.status != "passed":
         repair_tasks = [
             {

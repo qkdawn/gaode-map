@@ -993,6 +993,31 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1QualityAudit() {
       return (this.agentPanelPayloads || {}).stage1_quality_audit || null
     },
+    getStage1RepairPlan() {
+      const plan = (this.agentPanelPayloads || {}).stage1_repair_plan
+      return plan && typeof plan === 'object' ? clonePayloadValue(plan) : null
+    },
+    getStage1RepairAttempts() {
+      const attempts = (this.agentPanelPayloads || {}).stage1_repair_attempts
+      return Array.isArray(attempts) ? clonePayloadValue(attempts) : []
+    },
+    getStage1RepairStatusLabel() {
+      const plan = this.getStage1RepairPlan()
+      const attempts = this.getStage1RepairAttempts()
+      const latest = attempts.at(-1)
+      if (latest?.status === 'passed') return 'Agent 已自主修复并重新通过审计'
+      if (latest?.status === 'incomplete') return 'Agent 已修复一次，仍有阻断项'
+      if (latest?.status === 'failed') return '自主修复结果未通过契约'
+      if (plan?.status === 'automatic') return '已识别可由 Agent 自主修复的问题'
+      if (plan?.status === 'external_input_required') return '需要补充外部证据或现场核验'
+      return '无需自主修复'
+    },
+    getStage1RepairScoreText(attempt) {
+      const before = Number(attempt?.before_audit?.score)
+      const after = Number(attempt?.after_audit?.score)
+      if (!Number.isFinite(before) || !Number.isFinite(after)) return ''
+      return before === after ? `${before} 分` : `${before} → ${after} 分`
+    },
     getStage1EvidenceVerification() {
       return (this.agentPanelPayloads || {}).stage1_evidence_verification || null
     },

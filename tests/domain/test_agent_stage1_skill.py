@@ -351,6 +351,7 @@ def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
         valid_workpacks(),
         {"options": [{"id": "only-one"}], "recommended_option_id": "only-one"},
         valid_matrix(),
+        {},
     ]
     calls = []
 
@@ -370,9 +371,14 @@ def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
         "stage1-workpacks-model",
         "stage1-options-model",
         "stage1-spatial-matrix-model",
+        "stage1-quality-repair-model",
     ]
     assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "failed"
     assert response.output.panel_payloads["stage1_repair_tasks"]
+    assert response.output.panel_payloads["stage1_repair_plan"]["status"] == "automatic"
+    attempts = response.output.panel_payloads["stage1_repair_attempts"]
+    assert attempts[0]["status"] == "failed"
+    assert any("workpacks" in item for item in attempts[0]["diagnostics"])
     run = response.output.panel_payloads["capability_run"]
     assert run["status"] == "waiting_for_user"
     assert run["current_stage"] == "quality-audit"
@@ -380,6 +386,61 @@ def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
         item["artifact_id"] for item in run["output_artifact_refs"]
     }
     assert "最终报告模型未被调用" in response.diagnostics.research_notes[0]
+
+
+def test_stage1_automatically_repairs_model_output_before_report(monkeypatch):
+    runtime, profile = runtime_and_profile()
+    repaired_workpacks = valid_workpacks()
+    responses = [
+        valid_evidence(),
+        repaired_workpacks,
+        {"options": [{"id": "only-one"}], "recommended_option_id": "only-one"},
+        valid_matrix(),
+        {
+            "workpacks": repaired_workpacks["workpacks"],
+            "hard_constraint_screening": repaired_workpacks["hard_constraint_screening"],
+            "strategy": valid_strategy(),
+            "spatial_matrix": valid_matrix(),
+        },
+        {"answer": "# 修复后报告", "sources": ["项目资料 p.12"]},
+    ]
+    calls = []
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs)
+            return responses[len(calls) - 1]
+
+    monkeypatch.setattr(
+        stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
+    )
+
+    response = asyncio.run(execute(ready_payload(), runtime=runtime, profile=profile))
+
+    assert response.status == "answered"
+    assert [item["reasoning_id"] for item in calls][-2:] == [
+        "stage1-quality-repair-model",
+        "stage1-report-model",
+    ]
+    repair_call = calls[-2]
+    assert repair_call["user_payload"]["repair_tasks"]
+    assert "evidence-1" in repair_call["user_payload"]["allowed_evidence_ids"]
+    attempts = response.output.panel_payloads["stage1_repair_attempts"]
+    assert attempts[0]["status"] == "passed"
+    assert attempts[0]["after_audit"]["score"] > attempts[0]["before_audit"]["score"]
+    assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "passed"
+    run = response.output.panel_payloads["capability_run"]
+    assert any(item["stage_id"] == "quality-repair" for item in run["stage_records"])
+    artifacts = {
+        item["artifact_id"]: item for item in run["output_artifact_refs"]
+    }
+    assert artifacts["stage1-quality-repair"]["filename"] == "quality_repair.json"
+    assert "stage1-decision-matrix" in artifacts["stage1-quality-repair"][
+        "source_artifact_refs"
+    ]
+    assert "stage1-quality-repair" in artifacts["stage1-quality-audit"][
+        "source_artifact_refs"
+    ]
 
 
 def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
@@ -506,6 +567,7 @@ def test_stage1_stream_exposes_automatic_road_verification(monkeypatch):
         {"workpacks": []},
         {"options": [], "recommended_option_id": ""},
         valid_matrix(),
+        {},
     ]
     calls = []
     events = []
@@ -540,6 +602,7 @@ def test_stage1_stream_exposes_automatic_road_verification(monkeypatch):
         "stage1-workpacks-model",
         "stage1-options-model",
         "stage1-spatial-matrix-model",
+        "stage1-quality-repair-model",
     ]
 
 

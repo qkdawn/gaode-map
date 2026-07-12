@@ -1022,6 +1022,37 @@ test('Stage 1 quality gate distinguishes ready and conditional delivery', () => 
   assert.equal(review.getStage1QualityGate().task_total, 1)
 })
 
+
+test('Stage 1 repair loop exposes autonomous attempts without hiding external gaps', () => {
+  const ctx = createContext({
+    agentPanelPayloads: {
+      stage1_repair_plan: {
+        status: 'automatic',
+        attempt_limit: 1,
+        automatic_tasks: [{ code: 'strategy_competition_missing', scope: 'strategy', message: '缺少方案竞争', repair_instruction: '补齐三个方案' }],
+        external_issues: [],
+      },
+      stage1_repair_attempts: [{
+        attempt: 1,
+        status: 'passed',
+        task_codes: ['strategy_competition_missing'],
+        diagnostics: [],
+        before_audit: { score: 71 },
+        after_audit: { score: 100 },
+      }],
+    },
+  })
+
+  assert.equal(ctx.getStage1RepairPlan().attempt_limit, 1)
+  assert.equal(ctx.getStage1RepairAttempts()[0].status, 'passed')
+  assert.equal(ctx.getStage1RepairStatusLabel(), 'Agent 已自主修复并重新通过审计')
+  assert.equal(ctx.getStage1RepairScoreText(ctx.getStage1RepairAttempts()[0]), '71 → 100 分')
+
+  const attempts = ctx.getStage1RepairAttempts()
+  attempts[0].status = 'failed'
+  assert.equal(ctx.getStage1RepairAttempts()[0].status, 'passed')
+})
+
 test('analysis workspace templates expose capability navigation and detail view', async () => {
   const [main, sidebar] = await Promise.all([
     fs.promises.readFile(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8'),
@@ -1067,6 +1098,9 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /仅保存元数据/)
   assert.match(main, /getStage1QualityGate\(\)/)
   assert.match(main, /Stage 1 Quality Gate/)
+  assert.match(main, /Autonomous Quality Repair/)
+  assert.match(main, /getStage1RepairAttempts\(\)/)
+  assert.match(main, /不能由模型绕过/)
   assert.match(main, /硬约束筛选/)
   assert.match(main, /getStage1HardConstraintAssessments\(\)/)
   assert.match(main, /getStage1HardConstraintEffectLabel\(assessment\)/)
