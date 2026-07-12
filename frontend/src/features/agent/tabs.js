@@ -834,9 +834,6 @@ export function createAgentTabsMethods() {
       const activeTab = this.getAgentActiveTopTab()
       return asText(activeTab.kind) === ANALYSIS_WORKSPACE_TAB_KIND
     },
-    shouldShowAgentGlobalComposer() {
-      return this.shouldShowAgentComposer() && !this.isAgentPptPlanningTabActive()
-    },
     buildAgentTabsUiState() {
       this.captureAgentActiveSummaryTabState()
       this.captureAgentActiveSiteSelectionTabState()

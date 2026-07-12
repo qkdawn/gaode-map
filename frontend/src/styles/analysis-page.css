@@ -9102,7 +9102,7 @@ body.agent-ppt-source-menu-open {
     width: min(100%, 920px);
 }
 
-.agent-global-composer-card {
+.agent-primary-composer-card {
     --agent-composer-font: "Microsoft YaHei UI", "PingFang SC", "Segoe UI", sans-serif;
     display: grid;
     gap: 8px;
@@ -9111,18 +9111,18 @@ body.agent-ppt-source-menu-open {
     font-family: var(--agent-composer-font);
 }
 
-.agent-global-composer-card button {
+.agent-primary-composer-card button {
     font-family: inherit;
 }
 
-.agent-global-composer-card .agent-composer-editor {
+.agent-primary-composer-card .agent-composer-editor {
     display: flex;
     align-items: flex-start;
     gap: 10px;
     min-width: 0;
 }
 
-.agent-global-composer-card .agent-composer-editor-body {
+.agent-primary-composer-card .agent-composer-editor-body {
     display: flex;
     flex: 1 1 auto;
     flex-wrap: wrap;
@@ -9131,7 +9131,7 @@ body.agent-ppt-source-menu-open {
     min-width: 0;
 }
 
-.agent-global-composer-card .agent-composer-input {
+.agent-primary-composer-card .agent-composer-input {
     flex: 1 0 100%;
     width: 100%;
     height: 48px;
@@ -9143,28 +9143,28 @@ body.agent-ppt-source-menu-open {
     field-sizing: content;
 }
 
-.agent-global-composer-card .agent-composer-input::placeholder {
+.agent-primary-composer-card .agent-composer-input::placeholder {
     font: inherit;
     color: #94a3b8;
 }
 
-.agent-global-composer-card .agent-composer-footer {
+.agent-primary-composer-card .agent-composer-footer {
     display: flex;
     justify-content: flex-end;
     min-width: 0;
 }
 
-.agent-global-composer-card .agent-composer-actions {
+.agent-primary-composer-card .agent-composer-actions {
     gap: 8px;
     margin-left: auto;
 }
 
-.agent-global-composer-card .agent-model-picker {
+.agent-primary-composer-card .agent-model-picker {
     flex: 0 0 auto;
     min-width: 164px;
 }
 
-.agent-global-composer-card .agent-model-button {
+.agent-primary-composer-card .agent-model-button {
     width: 100%;
     max-width: none;
     height: 36px;
@@ -9178,20 +9178,20 @@ body.agent-ppt-source-menu-open {
     font: 600 12px/1 var(--agent-composer-font);
 }
 
-.agent-global-composer-card .agent-model-button:hover:not(:disabled),
-.agent-global-composer-card .agent-model-button:focus-visible {
+.agent-primary-composer-card .agent-model-button:hover:not(:disabled),
+.agent-primary-composer-card .agent-model-button:focus-visible {
     outline: none;
     border-color: #94a3b8;
     background: #ffffff;
 }
 
-.agent-global-composer-card .agent-model-button-label {
+.agent-primary-composer-card .agent-model-button-label {
     flex: 0 0 auto;
     color: #64748b;
     font-weight: 500;
 }
 
-.agent-global-composer-card .agent-model-button-value {
+.agent-primary-composer-card .agent-model-button-value {
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
@@ -9200,7 +9200,7 @@ body.agent-ppt-source-menu-open {
     white-space: nowrap;
 }
 
-.agent-global-composer-card .agent-composer-send {
+.agent-primary-composer-card .agent-composer-send {
     height: 36px;
     min-width: 68px;
     padding: 0 16px;
@@ -9208,7 +9208,7 @@ body.agent-ppt-source-menu-open {
     font: 700 12px/1 var(--agent-composer-font);
 }
 
-.agent-global-composer-card .agent-composer-send.is-loading {
+.agent-primary-composer-card .agent-composer-send.is-loading {
     width: 36px;
     min-width: 36px;
 }
@@ -9808,7 +9808,7 @@ body.agent-ppt-source-menu-open {
         gap: 8px;
     }
 
-    .agent-global-composer-card .agent-composer-actions {
+    .agent-primary-composer-card .agent-composer-actions {
         flex-direction: row;
         align-items: center;
     }
@@ -9940,16 +9940,16 @@ body.agent-ppt-source-menu-open {
         font-size: 15px;
     }
 
-    .agent-global-composer-card {
+    .agent-primary-composer-card {
         padding: 10px 12px;
     }
 
-    .agent-global-composer-card .agent-model-picker {
+    .agent-primary-composer-card .agent-model-picker {
         min-width: 0;
         max-width: min(52vw, 180px);
     }
 
-    .agent-global-composer-card .agent-model-button-label {
+    .agent-primary-composer-card .agent-model-button-label {
         display: none;
     }
 }

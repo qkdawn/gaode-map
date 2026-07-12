@@ -4673,7 +4673,6 @@ test('agent report navigation opens drill-down views and returns to report home'
   assert.equal(ctx.getAgentWorkspaceNavTitle(), '分析')
   assert.equal(ctx.getAgentWorkspaceNavSubtitle(), '围绕已选来源做快速或深度分析，也可继续生成展示材料')
   assert.equal(ctx.shouldShowAgentComposer(), true)
-  assert.equal(ctx.shouldShowAgentGlobalComposer(), false)
   assert.equal(ctx.openAgentPptPlanningFromReport(), pptId)
 
   ctx.returnToAgentReportHome()
