@@ -13930,6 +13930,25 @@ body.agent-ppt-source-menu-open {
 .agent-spatial-matrix-head > div { display: flex; flex-direction: column; gap: 2px; }
 .agent-spatial-matrix-head strong { color: #334155; font-size: 11px; }
 .agent-spatial-matrix-head span, .agent-spatial-matrix-head small { color: #64748b; font-size: 10px; line-height: 1.45; }
+.agent-spatial-map-workbench { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #dbe3ec; border-radius: 7px; background: #f8fafc; }
+.agent-spatial-map-controls { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 10px; }
+.agent-spatial-map-controls > div { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.agent-spatial-map-controls strong { color: #475569; font-size: 9px; }
+.agent-spatial-map-mode-buttons, .agent-spatial-map-level-buttons { display: flex; flex-wrap: wrap; gap: 5px; }
+.agent-spatial-map-mode-buttons button, .agent-spatial-map-level-buttons button { min-width: 0; padding: 4px 7px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; color: #475569; cursor: pointer; font-size: 9px; line-height: 1.25; }
+.agent-spatial-map-mode-buttons button:hover, .agent-spatial-map-level-buttons button:hover { border-color: #94a3b8; }
+.agent-spatial-map-mode-buttons button.active, .agent-spatial-map-level-buttons button.active { border-color: #0f766e; background: #ecfdf5; color: #0f766e; font-weight: 700; }
+.agent-spatial-map-level-buttons small { margin-left: 3px; color: inherit; font-size: 8px; }
+.agent-spatial-map-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 9px; padding-top: 7px; border-top: 1px solid #e2e8f0; }
+.agent-spatial-map-legend > span { display: inline-flex; align-items: center; gap: 4px; color: #64748b; font-size: 9px; }
+.agent-spatial-map-legend > span i { width: 9px; height: 9px; border: 1px solid rgba(15, 23, 42, .12); border-radius: 2px; }
+.agent-spatial-map-legend > button { margin-left: auto; padding: 5px 8px; border: 1px solid #0f766e; border-radius: 4px; background: #0f766e; color: #fff; cursor: pointer; font-size: 9px; font-weight: 700; }
+.agent-spatial-map-legend > button:disabled { border-color: #cbd5e1; background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+.agent-spatial-map-message { margin: 0; color: #475569; font-size: 9px; line-height: 1.45; overflow-wrap: anywhere; }
+.agent-space-level { display: inline-flex; margin: 0 5px 3px 0; padding: 1px 4px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f8fafc; color: #475569; font-size: 8px; font-weight: 700; white-space: nowrap; }
+.agent-space-level.system { border-color: #a5b4fc; background: #eef2ff; color: #4338ca; }
+.agent-space-level.cluster { border-color: #99f6e4; background: #f0fdfa; color: #0f766e; }
+.agent-space-level.unit { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
 .agent-space-decision { border: 1px solid #dbe3ec; border-radius: 6px; background: #f8fafc; }
 .agent-space-decision summary { display: grid; grid-template-columns: minmax(70px, .65fr) minmax(100px, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; cursor: pointer; color: #334155; font-size: 10px; }
 .agent-space-decision summary > span { overflow-wrap: anywhere; color: #64748b; }
@@ -14064,3 +14083,5 @@ body.agent-ppt-source-menu-open {
 .agent-capability-input-lock { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: #64748b; font-size: 8px; }
 .agent-capability-input-lock code { color: #4338ca; overflow-wrap: anywhere; }
 .agent-capability-input p { margin: 0; color: #b45309; font-size: 8px; line-height: 1.45; }
+
+@media (max-width: 600px) { .agent-spatial-map-controls { grid-template-columns: 1fr; } .agent-spatial-map-legend > button { margin-left: 0; } }

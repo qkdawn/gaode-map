@@ -93,3 +93,46 @@ test('MapCore preserves polygon rings and rejects unsupported geometry', () => {
   assert.equal(core.focusSpatialFeature({ type: 'Feature', geometry: { type: 'GeometryCollection', geometries: [] } }), false)
   assert.equal(core.focusedSpatialOverlays.length, 1)
 })
+
+
+test('MapCore renders and clears independent spatial presentation overlays', () => {
+  const created = []
+  const AMap = {
+    Marker: createOverlayClass('marker', created),
+    Polyline: createOverlayClass('polyline', created),
+    Polygon: createOverlayClass('polygon', created),
+  }
+  const MapCore = loadMapCore(AMap)
+  const fitCalls = []
+  const map = { setFitView: (...args) => fitCalls.push(args) }
+  const focusOverlay = { mapCalls: [], setMap(value) { this.mapCalls.push(value) } }
+  const stalePresentation = { mapCalls: [], setMap(value) { this.mapCalls.push(value) } }
+  const core = Object.create(MapCore.prototype)
+  core.map = map
+  core.focusedSpatialOverlays = [focusOverlay]
+  core.spatialPresentationOverlays = [stalePresentation]
+  let clicked = null
+  const items = [
+    { space_id: 'point-1', color: '#dc2626', feature: { type: 'Feature', geometry: { type: 'Point', coordinates: [112, 28] } } },
+    { space_id: 'line-1', color: '#2563eb', feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] } } },
+    { space_id: 'invalid', color: '#000', feature: { type: 'Feature', geometry: { type: 'GeometryCollection', geometries: [] } } },
+  ]
+
+  const count = core.showSpatialPresentation(items, { onClick: item => { clicked = item.space_id } })
+
+  assert.equal(count, 2)
+  assert.deepEqual(stalePresentation.mapCalls, [null])
+  assert.deepEqual(focusOverlay.mapCalls, [])
+  assert.match(created[0].options.content, /#dc2626/)
+  assert.equal(created[1].options.strokeColor, '#2563eb')
+  created[1].handlers.click()
+  assert.equal(clicked, 'line-1')
+  assert.equal(fitCalls.length, 1)
+  assert.equal(fitCalls[0][0].length, 2)
+
+  core.clearSpatialPresentation()
+  assert.deepEqual(created[0].mapCalls, [map, null])
+  assert.deepEqual(created[1].mapCalls, [map, null])
+  assert.equal(core.spatialPresentationOverlays.length, 0)
+  assert.equal(core.focusedSpatialOverlays[0], focusOverlay)
+})

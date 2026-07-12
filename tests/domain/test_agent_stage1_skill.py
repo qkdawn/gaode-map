@@ -54,14 +54,18 @@ def ready_payload():
 
 def test_stage1_executor_rejects_service_capability_target():
     runtime, profile = runtime_and_profile()
-    payload = ready_payload().model_copy(update={"target_capability_id": "ppt-planning"})
+    payload = ready_payload().model_copy(
+        update={"target_capability_id": "ppt-planning"}
+    )
 
     try:
         asyncio.run(execute(payload, runtime=runtime, profile=profile))
     except ValueError as exc:
         assert str(exc) == "capability_executor_mismatch"
     else:
-        raise AssertionError("service capability must not execute through the Stage 1 skill")
+        raise AssertionError(
+            "service capability must not execute through the Stage 1 skill"
+        )
 
 
 def valid_evidence():
@@ -152,36 +156,72 @@ def valid_strategy():
 
 def valid_matrix():
     return {
-        "matrix_version": "1.0",
+        "matrix_version": "2.0",
         "positioning_option_id": "option-a",
         "spatial_hierarchy": [
-            {"id": "system-1", "level": "system"},
-            {"id": "cluster-1", "level": "cluster"},
-            {"id": "unit-1", "level": "unit"},
+            {
+                "id": "system-1",
+                "title": "一院",
+                "level": "system",
+                "parent_id": "",
+                "role": "公共文化与核心体验系统",
+                "member_space_ids": [],
+            },
+            {
+                "id": "cluster-1",
+                "title": "公共文化组团",
+                "level": "cluster",
+                "parent_id": "system-1",
+                "role": "形成可独立运营的公共文化体验",
+                "member_space_ids": [],
+            },
+            {
+                "id": "unit-1",
+                "title": "礼堂单元",
+                "level": "unit",
+                "parent_id": "cluster-1",
+                "role": "承载社区文化活动",
+                "member_space_ids": ["unit-1"],
+            },
         ],
         "space_decisions": [
             {
                 "space_id": "unit-1",
+                "hierarchy_id": "unit-1",
                 "space_name": "原县政府礼堂",
                 "future_role": "社区文化锚点",
                 "core_audiences": ["社区家庭", "青年社群"],
                 "movement_role": "主游线目的地",
                 "value_role": "公共服务与活动引流",
-                "current_state": {"use": "闲置礼堂"},
+                "current_state_category": "vacant",
+                "current_state": {"summary": "闲置礼堂"},
                 "change_logic": {"reason": "补足社区文化活动空间"},
-                "candidate_functions": [{"id": "culture"}, {"id": "retail"}],
-                "preferred_function": {"id": "culture"},
-                "excluded_functions": [{"id": "heavy-food"}],
+                "candidate_functions": [
+                    {"id": "culture", "name": "文化活动"},
+                    {"id": "retail", "name": "社区零售"},
+                ],
+                "preferred_function": {"id": "culture", "name": "文化活动"},
+                "compatible_functions": [{"id": "exhibition", "name": "社区展览"}],
+                "excluded_functions": [{"id": "heavy-food", "name": "重餐饮"}],
                 "audience_scenarios": ["社区周末活动"],
                 "access_and_movement": {"visitor_entry": "南侧主入口"},
                 "operation_strategy": {"operator": "社区文化运营主体"},
-                "renovation_and_delivery": {"phase": "一期轻量改造"},
+                "renovation_and_delivery": {"scope": "轻量改造"},
+                "implementation_phase": "phase_1",
+                "risk_level": "high",
+                "risk_summary": "消防和结构条件尚待核验",
                 "preconditions": ["完成消防评估"],
                 "validation_actions": ["开展消防与结构核验"],
                 "evidence_refs": ["evidence-1"],
                 "hard_constraint_refs": hard_constraint_ids(),
+                "assumptions": [],
                 "recommendation_status": "conditional",
                 "confidence": "medium",
+                "map_binding": {
+                    "status": "unavailable",
+                    "spatial_object_id": "",
+                    "reason": "样例未提供权威建筑几何",
+                },
             }
         ],
         "portfolio_checks": ["公共服务与经营功能平衡"],
@@ -240,6 +280,38 @@ def test_stage1_evidence_gate_stops_before_professional_models(monkeypatch):
         "stage1-conflict-register",
     ]
     assert "后续专业模型未被调用" in response.diagnostics.research_notes[0]
+
+
+def test_stage1_invalid_spatial_matrix_fails_with_contract_diagnostics(monkeypatch):
+    runtime, profile = runtime_and_profile()
+    responses = [
+        valid_evidence(),
+        valid_workpacks(),
+        valid_strategy(),
+        {"matrix_version": "2.0"},
+    ]
+    calls = []
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs["reasoning_id"])
+            return responses[len(calls) - 1]
+
+    monkeypatch.setattr(
+        stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
+    )
+
+    response = asyncio.run(execute(ready_payload(), runtime=runtime, profile=profile))
+
+    assert response.status == "failed"
+    assert calls[-1] == "stage1-spatial-matrix-model"
+    diagnostic = response.output.panel_payloads["stage1_spatial_matrix_diagnostic"]
+    assert diagnostic["status"] == "failed"
+    assert any("spatial_hierarchy" in item for item in diagnostic["diagnostics"])
+    run = response.output.panel_payloads["capability_run"]
+    assert run["status"] == "failed"
+    assert run["current_stage"] == "spatial-decision-matrix"
+    assert run["stage_records"][-1]["status"] == "failed"
 
 
 def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
@@ -317,7 +389,10 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
     ]
     assert response.status == "answered"
     assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "passed"
-    assert response.output.panel_payloads["stage1_hard_constraint_screening"]["status"] == "conditional"
+    assert (
+        response.output.panel_payloads["stage1_hard_constraint_screening"]["status"]
+        == "conditional"
+    )
     assert (
         response.output.panel_payloads["stage1_evidence_verification"]["status"]
         == "passed"
@@ -400,7 +475,7 @@ def test_stage1_stream_exposes_automatic_road_verification(monkeypatch):
         },
         {"workpacks": []},
         {"options": [], "recommended_option_id": ""},
-        {},
+        valid_matrix(),
     ]
     calls = []
     events = []
@@ -587,11 +662,15 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
             calls.append(kwargs)
             return responses[len(calls) - 1]
 
-    monkeypatch.setattr(stage1, "get_llm_provider_client", lambda *, runtime: FakeClient())
+    monkeypatch.setattr(
+        stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
+    )
 
     response = asyncio.run(execute(payload, runtime=runtime, profile=profile))
 
-    matrix_call = next(item for item in calls if item["reasoning_id"] == "stage1-spatial-matrix-model")
+    matrix_call = next(
+        item for item in calls if item["reasoning_id"] == "stage1-spatial-matrix-model"
+    )
     catalog = matrix_call["user_payload"]["authoritative_spatial_objects"]
     assert catalog == [
         {
@@ -602,8 +681,12 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
             "source_locator": "analysis_snapshot.road.features/south-entry",
         }
     ]
-    binding = response.output.panel_payloads["stage1_spatial_matrix"]["space_decisions"][0]["map_binding"]
+    binding = response.output.panel_payloads["stage1_spatial_matrix"][
+        "space_decisions"
+    ][0]["map_binding"]
     assert binding["status"] == "bound"
     assert binding["feature"]["geometry"]["type"] == "LineString"
-    handoff_binding = response.output.panel_payloads["stage1_deliverables"]["design_handoff"]["space_requirements"][0]["map_binding"]
+    handoff_binding = response.output.panel_payloads["stage1_deliverables"][
+        "design_handoff"
+    ]["space_requirements"][0]["map_binding"]
     assert handoff_binding == binding

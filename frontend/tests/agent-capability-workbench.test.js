@@ -52,6 +52,9 @@ function createContext(overrides = {}) {
     stage1MapFocusedSpaceId: '',
     stage1MapFocusedRunId: '',
     stage1MapFocusMessage: '',
+    stage1SpatialMapMode: 'suggested_function',
+    stage1SpatialHierarchyLevel: 'all',
+    stage1SpatialPresentationMessage: '',
     activeAgentSessionId: 'conversation-1',
     agentSkills: [],
     agentPanelPayloads: {},
@@ -510,43 +513,61 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         { metric_key: 'area', label: '项目面积', values: ['2.4公顷', '2.5公顷'], evidence_ids: ['node-3'], unresolved: false, explanation: '采用项目摘要口径' },
       ],
       stage1_spatial_matrix: {
-        matrix_version: '1.0',
+        matrix_version: '2.0',
         positioning_option_id: 'option-a',
+        spatial_hierarchy: [
+          { id: 'system-1', title: '一院', level: 'system', parent_id: '', role: '公共文化系统', member_space_ids: [] },
+          { id: 'cluster-1', title: '公共文化组团', level: 'cluster', parent_id: 'system-1', role: '公共文化体验组团', member_space_ids: [] },
+          { id: 'unit-1', title: '礼堂单元', level: 'unit', parent_id: 'cluster-1', role: '社区文化单元', member_space_ids: ['unit-1'] },
+        ],
         space_decisions: [{
-          space_id: 'unit-1',
-          space_name: '原县政府礼堂',
-          future_role: '社区文化锚点',
-          core_audiences: ['社区家庭', '青年社群'],
-          movement_role: '主游线目的地',
-          value_role: '公共服务与活动引流',
-          current_state: { use: '闲置礼堂' },
+          space_id: 'unit-1', hierarchy_id: 'unit-1', space_name: '原县政府礼堂',
+          future_role: '社区文化锚点', core_audiences: ['社区家庭', '青年社群'],
+          movement_role: '主游线目的地', value_role: '公共服务与活动引流',
+          current_state_category: 'vacant', current_state: { summary: '闲置礼堂' },
           change_logic: { reason: '补足社区文化活动空间' },
           candidate_functions: [{ id: 'culture', name: '文化活动' }, { id: 'retail', name: '社区零售' }],
           preferred_function: { id: 'culture', name: '文化活动' },
+          compatible_functions: [{ id: 'exhibition', name: '社区展览' }],
           excluded_functions: [{ id: 'heavy-food', name: '重餐饮', reason: '排烟受限' }],
-          audience_scenarios: ['社区周末活动'],
-          access_and_movement: { visitor_entry: '南侧主入口' },
-          operation_strategy: { operator: '社区文化运营主体' },
-          renovation_and_delivery: { phase: '一期轻量改造' },
-          preconditions: ['完成消防评估'],
-          validation_actions: ['开展消防与结构核验'],
-          evidence_refs: ['e1', 'e2', 'missing-evidence'],
-          recommendation_status: 'conditional',
-          confidence: 'medium',
+          audience_scenarios: ['社区周末活动'], access_and_movement: { visitor_entry: '南侧主入口' },
+          operation_strategy: { operator: '社区文化运营主体' }, renovation_and_delivery: { scope: '一期轻量改造' },
+          implementation_phase: 'phase_1', risk_level: 'high', risk_summary: '消防与结构条件尚待核验',
+          preconditions: ['完成消防评估'], assumptions: [], validation_actions: ['开展消防与结构核验'],
+          evidence_refs: ['e1', 'e2', 'missing-evidence'], hard_constraint_refs: ['fire_safety'],
+          recommendation_status: 'conditional', confidence: 'medium',
           map_binding: {
-            status: 'bound',
-            spatial_object_id: 'building:auditorium',
-            object_type: 'building',
-            title: '礼堂建筑轮廓',
-            source_ref: 'project_gis.buildings',
-            source_locator: 'project_gis.buildings/auditorium',
-            feature: {
-              type: 'Feature',
-              properties: { building_id: 'auditorium' },
-              geometry: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112.01, 28.01], [112, 28]]] },
-            },
+            status: 'bound', spatial_object_id: 'building:auditorium', object_type: 'building', title: '礼堂建筑轮廓',
+            source_ref: 'project_gis.buildings', source_locator: 'project_gis.buildings/auditorium',
+            feature: { type: 'Feature', properties: { building_id: 'auditorium' }, geometry: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112.01, 28.01], [112, 28]]] } },
           },
         }],
+        map_presentation: {
+          modes: [
+            { id: 'current_state', label: '现状', legend: [{ key: 'vacant', label: '闲置', color: '#dc2626' }] },
+            { id: 'suggested_function', label: '建议功能', legend: [{ key: 'culture', label: '文化活动', color: '#2563eb' }] },
+            { id: 'recommendation_strength', label: '推荐强度', legend: [{ key: 'conditional', label: '有条件推荐', color: '#d97706' }] },
+            { id: 'risk', label: '风险', legend: [{ key: 'high', label: '高风险', color: '#ea580c' }] },
+            { id: 'implementation_phase', label: '实施阶段', legend: [{ key: 'phase_1', label: '一期', color: '#0f766e' }] },
+          ],
+          hierarchy_levels: [
+            { id: 'system', label: '系统层', decision_count: 0 },
+            { id: 'cluster', label: '组团层', decision_count: 0 },
+            { id: 'unit', label: '单元层', decision_count: 1 },
+          ],
+          items: [{
+            space_id: 'unit-1', space_name: '原县政府礼堂', hierarchy_id: 'unit-1', hierarchy_level: 'unit', hierarchy_title: '礼堂单元',
+            map_binding: { status: 'bound', feature: { type: 'Feature', geometry: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112.01, 28.01], [112, 28]]] } } },
+            values: {
+              current_state: { key: 'vacant', label: '闲置', color: '#dc2626' },
+              suggested_function: { key: 'culture', label: '文化活动', color: '#2563eb' },
+              recommendation_strength: { key: 'conditional', label: '有条件推荐', color: '#d97706' },
+              risk: { key: 'high', label: '高风险', color: '#ea580c', detail: '消防与结构条件尚待核验' },
+              implementation_phase: { key: 'phase_1', label: '一期', color: '#0f766e' },
+            },
+          }],
+          bound_item_count: 1,
+        },
       },
       stage1_deliverables: {
         status: 'ready',
@@ -658,7 +679,8 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   mapBinding.feature.geometry.coordinates[0][0][0] = 0
   assert.equal(ctx.getStage1MapBinding(ctx.getStage1SpaceDecisions()[0]).feature.geometry.coordinates[0][0][0], 112)
   assert.deepEqual(ctx.getStage1SpaceManagementRows(), [{
-    space_id: 'unit-1', space_name: '原县政府礼堂', future_role: '社区文化锚点', preferred_function: '文化活动',
+    space_id: 'unit-1', space_name: '原县政府礼堂', hierarchy_id: 'unit-1', hierarchy_level: 'unit', hierarchy_label: '单元层',
+    future_role: '社区文化锚点', preferred_function: '文化活动',
     core_audiences: '社区家庭；青年社群', movement_role: '主游线目的地', value_role: '公共服务与活动引流',
     recommendation_status: 'conditional', recommendation_label: '条件推荐', preconditions: '完成消防评估', evidence_count: 3,
     map_bound: true, map_label: '礼堂建筑轮廓',
@@ -703,6 +725,87 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
   assert.equal(ctx.getStage1DesignHandoff().positioning_option_id, 'option-a')
   assert.equal(ctx.getStage1DesignHandoffSpaceCount(), 1)
   assert.equal(ctx.getStage1DesignHandoffConstraintCount(), 1)
+  assert.deepEqual(ctx.getStage1SpatialMapModes().map(item => item.id), [
+    'current_state', 'suggested_function', 'recommendation_strength', 'risk', 'implementation_phase',
+  ])
+  const legend = ctx.getStage1SpatialPresentationLegend()
+  legend[0].label = 'changed'
+  assert.equal(ctx.getStage1SpatialPresentationLegend()[0].label, '文化活动')
+  assert.deepEqual(ctx.getStage1SpatialHierarchyLevels().map(item => item.id), ['all', 'system', 'cluster', 'unit'])
+  assert.equal(ctx.getStage1SpaceManagementRows()[0].hierarchy_label, '单元层')
+})
+
+test('Stage 1 spatial presentation renders authoritative geometry with server colors', () => {
+  const calls = []
+  let clickHandler = null
+  const matrix = {
+    space_decisions: [{ space_id: 'space-1', space_name: '礼堂' }],
+    map_presentation: {
+      modes: [{ id: 'risk', label: '风险', legend: [{ key: 'high', label: '高风险', color: '#ea580c' }] }],
+      hierarchy_levels: [{ id: 'unit', label: '单元层', decision_count: 1 }],
+      items: [{
+        space_id: 'space-1', hierarchy_level: 'unit',
+        map_binding: { status: 'bound', feature: { type: 'Feature', geometry: { type: 'Point', coordinates: [112, 28] } } },
+        values: { risk: { key: 'high', label: '高风险', color: '#ea580c' } },
+      }],
+    },
+  }
+  const ctx = createContext({
+    stage1SpatialMapMode: 'risk',
+    agentPanelPayloads: { capability_run: { run_id: 'run-1' }, stage1_spatial_matrix: matrix },
+    mapCore: {
+      showSpatialPresentation(items, options) { calls.push({ items, options }); clickHandler = options.onClick; return items.length },
+      clearSpatialPresentation() {},
+    },
+  })
+
+  assert.equal(ctx.renderStage1SpatialPresentation(), 1)
+  assert.equal(calls[0].items[0].color, '#ea580c')
+  assert.deepEqual(calls[0].items[0].feature.geometry.coordinates, [112, 28])
+  clickHandler(calls[0].items[0])
+  assert.equal(ctx.stage1ExpandedSpaceId, 'space-1')
+  assert.match(ctx.stage1SpatialPresentationMessage, /高风险|风险/)
+})
+
+test('Stage 1 spatial presentation filters hierarchy and reports missing geometry', () => {
+  let rendered = null
+  const ctx = createContext({
+    stage1SpatialMapMode: 'current_state',
+    stage1SpatialHierarchyLevel: 'cluster',
+    agentPanelPayloads: {
+      stage1_spatial_matrix: {
+        space_decisions: [],
+        map_presentation: {
+          modes: [{ id: 'current_state', label: '现状', legend: [] }],
+          hierarchy_levels: [{ id: 'unit', label: '单元层', decision_count: 1 }],
+          items: [{ space_id: 'space-1', hierarchy_level: 'unit', map_binding: { status: 'unavailable' }, values: {} }],
+        },
+      },
+    },
+    mapCore: { showSpatialPresentation(items) { rendered = items; return 0 }, clearSpatialPresentation() {} },
+  })
+
+  assert.equal(ctx.renderStage1SpatialPresentation(), 0)
+  assert.deepEqual(rendered, [])
+  assert.equal(ctx.stage1SpatialPresentationMessage, '当前筛选下没有已绑定权威几何的空间决策。')
+})
+
+test('Stage 1 spatial reset clears focus and presentation overlays', () => {
+  let focusClears = 0
+  let presentationClears = 0
+  const ctx = createContext({
+    mapCore: {
+      clearSpatialFeatureFocus: () => { focusClears += 1 },
+      clearSpatialPresentation: () => { presentationClears += 1 },
+    },
+    stage1SpatialPresentationMessage: '已显示',
+  })
+
+  ctx.resetStage1SpatialInteraction()
+
+  assert.equal(focusClears, 1)
+  assert.equal(presentationClears, 1)
+  assert.equal(ctx.stage1SpatialPresentationMessage, '')
 })
 
 test('Stage 1 map focus is bound to the immutable capability Run', () => {

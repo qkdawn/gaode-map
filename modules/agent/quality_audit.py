@@ -46,6 +46,17 @@ _CLAIM_STATUSES = {
 }
 _RECOMMENDATION_STATUSES = {"strong", "conditional", "alternative", "excluded"}
 _CONFIDENCE_LEVELS = {"high", "medium", "low"}
+_SPATIAL_LEVELS = {"system", "cluster", "unit"}
+_CURRENT_STATE_CATEGORIES = {"active", "underused", "vacant", "constrained", "unknown"}
+_RISK_LEVELS = {"low", "medium", "high", "critical"}
+_IMPLEMENTATION_PHASES = {"phase_1", "phase_2", "phase_3", "long_term"}
+_SPATIAL_MAP_MODES = {
+    "current_state",
+    "suggested_function",
+    "recommendation_strength",
+    "risk",
+    "implementation_phase",
+}
 _PROXY_OVERREACH = (
     (
         re.compile(r"夜光.{0,8}(消费金额|支付能力|客流)"),
@@ -88,9 +99,193 @@ def _issue(
     )
 
 
+def _audit_spatial_matrix_semantics(
+    matrix: dict[str, Any],
+) -> tuple[int, list[AuditIssue]]:
+    """Audit the persisted matrix contract without reconstructing model validation."""
+
+    passed = 0
+    issues: list[AuditIssue] = []
+    hierarchy = _list(matrix.get("spatial_hierarchy"))
+    decisions = _list(matrix.get("space_decisions"))
+    hierarchy_nodes = [item for item in hierarchy if isinstance(item, dict)]
+    nodes_by_id = {
+        _text(item.get("id")): item for item in hierarchy_nodes if _text(item.get("id"))
+    }
+    hierarchy_invalid = (
+        len(hierarchy_nodes) != len(hierarchy)
+        or len(nodes_by_id) != len(hierarchy_nodes)
+        or {item.get("level") for item in hierarchy_nodes} != _SPATIAL_LEVELS
+    )
+    if not hierarchy_invalid:
+        for node in hierarchy_nodes:
+            level = node.get("level")
+            parent_id = _text(node.get("parent_id"))
+            if not _text(node.get("title")) or not _text(node.get("role")):
+                hierarchy_invalid = True
+                break
+            if level == "system":
+                if parent_id:
+                    hierarchy_invalid = True
+                    break
+                continue
+            expected_parent_level = "system" if level == "cluster" else "cluster"
+            parent = nodes_by_id.get(parent_id)
+            if not parent or parent.get("level") != expected_parent_level:
+                hierarchy_invalid = True
+                break
+    decision_ids: list[str] = []
+    if not hierarchy_invalid:
+        for decision in decisions:
+            if not isinstance(decision, dict):
+                hierarchy_invalid = True
+                break
+            space_id = _text(decision.get("space_id"))
+            hierarchy_id = _text(decision.get("hierarchy_id"))
+            node = nodes_by_id.get(hierarchy_id)
+            decision_ids.append(space_id)
+            if (
+                not space_id
+                or node is None
+                or space_id
+                not in {_text(item) for item in _list(node.get("member_space_ids"))}
+            ):
+                hierarchy_invalid = True
+                break
+        if len(set(decision_ids)) != len(decision_ids):
+            hierarchy_invalid = True
+    if hierarchy_invalid or not decisions:
+        issues.append(
+            _issue(
+                "spatial_hierarchy_invalid",
+                "空间层级缺少稳定且唯一的系统/组团/单元关系，或空间决策未登记到所属层级。",
+                path="spatial_matrix.spatial_hierarchy",
+                repair_hint="为系统、组团和单元设置唯一 ID、正确 parent_id，并将每个 space_id 登记到所属节点的 member_space_ids。",
+            )
+        )
+    else:
+        passed += 1
+
+    invalid_dimensions = []
+    for index, decision in enumerate(decisions):
+        node = decision if isinstance(decision, dict) else {}
+        if (
+            node.get("current_state_category") not in _CURRENT_STATE_CATEGORIES
+            or node.get("implementation_phase") not in _IMPLEMENTATION_PHASES
+            or node.get("risk_level") not in _RISK_LEVELS
+            or not _text(node.get("risk_summary"))
+            or not isinstance(node.get("compatible_functions"), list)
+        ):
+            invalid_dimensions.append(_text(node.get("space_id")) or str(index))
+    if decisions and not invalid_dimensions:
+        passed += 1
+    else:
+        issues.append(
+            _issue(
+                "spatial_decision_map_dimensions_missing",
+                "空间决策缺少受控的现状类别、实施阶段、风险等级、风险说明或兼容功能集合。",
+                path="spatial_matrix.space_decisions",
+                repair_hint="逐空间补齐 current_state_category、implementation_phase、risk_level、risk_summary 和 compatible_functions。",
+            )
+        )
+
+    presentation = (
+        matrix.get("map_presentation")
+        if isinstance(matrix.get("map_presentation"), dict)
+        else {}
+    )
+    modes = _list(presentation.get("modes"))
+    hierarchy_levels = _list(presentation.get("hierarchy_levels"))
+    presentation_items = _list(presentation.get("items"))
+    mode_ids = [_text(item.get("id")) for item in modes if isinstance(item, dict)]
+    items_by_id = {
+        _text(item.get("space_id")): item
+        for item in presentation_items
+        if isinstance(item, dict) and _text(item.get("space_id"))
+    }
+    level_ids = {
+        _text(item.get("id"))
+        for item in hierarchy_levels
+        if isinstance(item, dict) and _text(item.get("id"))
+    }
+    presentation_invalid = (
+        len(mode_ids) != len(_SPATIAL_MAP_MODES)
+        or set(mode_ids) != _SPATIAL_MAP_MODES
+        or any(
+            not isinstance(mode, dict)
+            or not _text(mode.get("label"))
+            or not _text(mode.get("description"))
+            or not _list(mode.get("legend"))
+            or any(
+                not isinstance(entry, dict)
+                or not _text(entry.get("key"))
+                or not _text(entry.get("label"))
+                or not re.fullmatch(r"#[0-9a-fA-F]{6}", _text(entry.get("color")))
+                for entry in _list(mode.get("legend"))
+            )
+            for mode in modes
+        )
+        or level_ids != _SPATIAL_LEVELS
+        or len(hierarchy_levels) != len(_SPATIAL_LEVELS)
+        or set(items_by_id) != set(decision_ids)
+        or len(items_by_id) != len(presentation_items)
+        or presentation.get("bound_item_count")
+        != sum(
+            1
+            for item in presentation_items
+            if isinstance(item, dict)
+            and isinstance(item.get("map_binding"), dict)
+            and item["map_binding"].get("status") == "bound"
+        )
+    )
+    if not presentation_invalid:
+        for space_id, item in items_by_id.items():
+            decision = next(
+                (
+                    candidate
+                    for candidate in decisions
+                    if isinstance(candidate, dict)
+                    and _text(candidate.get("space_id")) == space_id
+                ),
+                {},
+            )
+            hierarchy_node = nodes_by_id.get(_text(decision.get("hierarchy_id")), {})
+            values = item.get("values") if isinstance(item.get("values"), dict) else {}
+            if (
+                set(values) != _SPATIAL_MAP_MODES
+                or item.get("hierarchy_id") != decision.get("hierarchy_id")
+                or item.get("hierarchy_level") != hierarchy_node.get("level")
+                or item.get("map_binding") != decision.get("map_binding")
+                or any(
+                    not isinstance(values.get(mode), dict)
+                    or not _text(values[mode].get("key"))
+                    or not _text(values[mode].get("label"))
+                    or not re.fullmatch(
+                        r"#[0-9a-fA-F]{6}", _text(values[mode].get("color"))
+                    )
+                    for mode in _SPATIAL_MAP_MODES
+                )
+            ):
+                presentation_invalid = True
+                break
+    if presentation_invalid or not decisions:
+        issues.append(
+            _issue(
+                "spatial_map_presentation_incomplete",
+                "空间矩阵没有为每个决策生成完整的现状、建议功能、推荐强度、风险和实施阶段地图表达。",
+                path="spatial_matrix.map_presentation",
+                repair_hint="通过空间矩阵编译器重新生成五种地图模式、层级信息、图例与服务端颜色。",
+            )
+        )
+    else:
+        passed += 1
+
+    return passed, issues
+
+
 def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
-    checks_total = 19
+    checks_total = 21
     checks_passed = 0
     ledger = _list(package.get("evidence_ledger"))
     workpacks = _list(package.get("workpacks"))
@@ -315,7 +510,10 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         state = item.get("state")
         effect = item.get("decision_effect")
         refs = {_text(ref) for ref in _list(item.get("evidence_refs")) if _text(ref)}
-        requires_action = state in {"unknown", "constrained"} or effect in {"condition", "exclude"}
+        requires_action = state in {"unknown", "constrained"} or effect in {
+            "condition",
+            "exclude",
+        }
         if (
             state not in valid_constraint_states
             or effect not in valid_constraint_effects
@@ -332,7 +530,10 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     }
     expected_screening_status = (
         "blocked"
-        if any(item.get("decision_effect") == "exclude" for item in constraint_by_id.values())
+        if any(
+            item.get("decision_effect") == "exclude"
+            for item in constraint_by_id.values()
+        )
         else "conditional"
         if any(
             item.get("state") in {"unknown", "constrained"}
@@ -509,13 +710,24 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     option_constraint_gaps = []
     for index, option in enumerate(options):
         node = option if isinstance(option, dict) else {}
-        refs = {_text(item) for item in _list(node.get("hard_constraint_refs")) if _text(item)}
-        if refs != required_constraint_ids or node.get("recommendation_status") not in _RECOMMENDATION_STATUSES:
+        refs = {
+            _text(item)
+            for item in _list(node.get("hard_constraint_refs"))
+            if _text(item)
+        }
+        if (
+            refs != required_constraint_ids
+            or node.get("recommendation_status") not in _RECOMMENDATION_STATUSES
+        ):
             option_constraint_gaps.append(_text(node.get("id")) or str(index))
     decision_constraint_gaps = []
     for index, decision in enumerate(_list(matrix.get("space_decisions"))):
         node = decision if isinstance(decision, dict) else {}
-        refs = {_text(item) for item in _list(node.get("hard_constraint_refs")) if _text(item)}
+        refs = {
+            _text(item)
+            for item in _list(node.get("hard_constraint_refs"))
+            if _text(item)
+        }
         if refs != required_constraint_ids:
             decision_constraint_gaps.append(_text(node.get("space_id")) or str(index))
     conditional_screening = hard_constraint_screening.get("status") == "conditional"
@@ -547,13 +759,21 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         if option_constraint_gaps:
             details.append(f"方案未逐项响应硬约束：{'、'.join(option_constraint_gaps)}")
         if decision_constraint_gaps:
-            details.append(f"空间决策未逐项响应硬约束：{'、'.join(decision_constraint_gaps)}")
+            details.append(
+                f"空间决策未逐项响应硬约束：{'、'.join(decision_constraint_gaps)}"
+            )
         if recommendation_conditions_missing:
-            details.append("硬约束尚未全部确认，但首选方案未降级并登记前置条件与验证动作")
+            details.append(
+                "硬约束尚未全部确认，但首选方案未降级并登记前置条件与验证动作"
+            )
         if strong_conditional_spaces:
-            details.append(f"硬约束未确认时仍标记强推荐：{'、'.join(strong_conditional_spaces)}")
+            details.append(
+                f"硬约束未确认时仍标记强推荐：{'、'.join(strong_conditional_spaces)}"
+            )
         if screening_blocked:
-            details.append("存在 decision_effect=exclude 的硬约束，当前首选方案不可交付")
+            details.append(
+                "存在 decision_effect=exclude 的硬约束，当前首选方案不可交付"
+            )
         issues.append(
             _issue(
                 "hard_constraint_application_invalid",
@@ -580,18 +800,9 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
             )
         )
 
-    hierarchy = _list(matrix.get("spatial_hierarchy"))
-    levels = {_text(item.get("level")) for item in hierarchy if isinstance(item, dict)}
-    if {"system", "cluster", "unit"}.issubset(levels):
-        checks_passed += 1
-    else:
-        issues.append(
-            _issue(
-                "spatial_hierarchy_incomplete",
-                "空间层级未同时覆盖系统、组团和单元。",
-                path="spatial_matrix.spatial_hierarchy",
-            )
-        )
+    spatial_checks_passed, spatial_issues = _audit_spatial_matrix_semantics(matrix)
+    checks_passed += spatial_checks_passed
+    issues.extend(spatial_issues)
 
     decisions = _list(matrix.get("space_decisions"))
     invalid_decisions = []
@@ -633,7 +844,9 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     bound_map_bindings = []
     for index, decision in enumerate(decisions):
         node = decision if isinstance(decision, dict) else {}
-        binding = node.get("map_binding") if isinstance(node.get("map_binding"), dict) else {}
+        binding = (
+            node.get("map_binding") if isinstance(node.get("map_binding"), dict) else {}
+        )
         status = _text(binding.get("status"))
         if status == "bound":
             if (

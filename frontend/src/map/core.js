@@ -40,6 +40,7 @@ import { MapUtils } from './utils'
         this.gridFeatureMap = {};
         this.gridFeatureList = [];
         this.focusedSpatialOverlays = [];
+        this.spatialPresentationOverlays = [];
         this.gridStructureBoundaryOverlays = [];
         this.gridStructureSymbolOverlays = [];
         this.focusedGridPolygon = null;
@@ -1340,25 +1341,20 @@ import { MapUtils } from './utils'
         this._gridFocusViewBeforeLock = null;
     };
 
-    MapCore.prototype.clearSpatialFeatureFocus = function () {
-        (this.focusedSpatialOverlays || []).forEach(function (overlay) {
-            if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null);
-        });
-        this.focusedSpatialOverlays = [];
-    };
-
-    MapCore.prototype.focusSpatialFeature = function (feature, opts) {
+    MapCore.prototype._createSpatialFeatureOverlays = function (feature, opts) {
         var cfg = opts || {};
         var target = feature && feature.type === 'Feature' ? feature : null;
         var geometry = target && target.geometry;
-        if (!this.map || !target || !geometry || !window.AMap) return false;
+        if (!this.map || !target || !geometry || !window.AMap) return [];
         var coordinates = geometry.coordinates;
         var overlays = [];
         var self = this;
         var strokeColor = cfg.strokeColor || '#0f766e';
-        var fillColor = cfg.fillColor || '#14b8a6';
+        var fillColor = cfg.fillColor || strokeColor || '#14b8a6';
         var fillOpacity = typeof cfg.fillOpacity === 'number' ? cfg.fillOpacity : 0.18;
-        var addClick = function (overlay) {
+        var markerColor = /^#[0-9a-f]{6}$/i.test(fillColor) ? fillColor : '#0f766e';
+        var markerContent = '<span aria-hidden="true" style="display:block;width:14px;height:14px;border:2px solid #fff;border-radius:50%;background:' + markerColor + ';box-shadow:0 1px 4px rgba(15,23,42,.35)"></span>';
+        var addOverlay = function (overlay) {
             if (overlay && typeof overlay.on === 'function' && typeof cfg.onClick === 'function') {
                 overlay.on('click', cfg.onClick);
             }
@@ -1367,7 +1363,7 @@ import { MapUtils } from './utils'
         };
         var polygon = function (rings) {
             if (!Array.isArray(rings) || !rings.length) return;
-            addClick(new AMap.Polygon({
+            addOverlay(new AMap.Polygon({
                 path: rings,
                 strokeColor: strokeColor,
                 strokeWeight: cfg.strokeWeight || 4,
@@ -1379,7 +1375,7 @@ import { MapUtils } from './utils'
         };
         var line = function (path) {
             if (!Array.isArray(path) || !path.length) return;
-            addClick(new AMap.Polyline({
+            addOverlay(new AMap.Polyline({
                 path: path,
                 strokeColor: strokeColor,
                 strokeWeight: cfg.strokeWeight || 6,
@@ -1390,9 +1386,9 @@ import { MapUtils } from './utils'
             }));
         };
         if (geometry.type === 'Point') {
-            addClick(new AMap.Marker({ position: coordinates, zIndex: cfg.zIndex || 140 }));
+            addOverlay(new AMap.Marker({ position: coordinates, content: markerContent, zIndex: cfg.zIndex || 140 }));
         } else if (geometry.type === 'MultiPoint') {
-            (coordinates || []).forEach(function (point) { addClick(new AMap.Marker({ position: point, zIndex: cfg.zIndex || 140 })); });
+            (coordinates || []).forEach(function (point) { addOverlay(new AMap.Marker({ position: point, content: markerContent, zIndex: cfg.zIndex || 140 })); });
         } else if (geometry.type === 'LineString') {
             line(coordinates);
         } else if (geometry.type === 'MultiLineString') {
@@ -1402,6 +1398,50 @@ import { MapUtils } from './utils'
         } else if (geometry.type === 'MultiPolygon') {
             (coordinates || []).forEach(polygon);
         }
+        return overlays;
+    };
+
+    MapCore.prototype.clearSpatialFeatureFocus = function () {
+        (this.focusedSpatialOverlays || []).forEach(function (overlay) {
+            if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null);
+        });
+        this.focusedSpatialOverlays = [];
+    };
+
+    MapCore.prototype.clearSpatialPresentation = function () {
+        (this.spatialPresentationOverlays || []).forEach(function (overlay) {
+            if (overlay && typeof overlay.setMap === 'function') overlay.setMap(null);
+        });
+        this.spatialPresentationOverlays = [];
+    };
+
+    MapCore.prototype.showSpatialPresentation = function (items, opts) {
+        var cfg = opts || {};
+        var overlays = [];
+        var self = this;
+        this.clearSpatialPresentation();
+        (Array.isArray(items) ? items : []).forEach(function (item) {
+            if (!item || !item.feature) return;
+            var itemOverlays = self._createSpatialFeatureOverlays(item.feature, {
+                strokeColor: item.color || cfg.strokeColor,
+                fillColor: item.color || cfg.fillColor,
+                fillOpacity: typeof item.fillOpacity === 'number' ? item.fillOpacity : 0.24,
+                strokeWeight: item.strokeWeight || 4,
+                zIndex: item.zIndex || 132,
+                onClick: typeof cfg.onClick === 'function' ? function () { cfg.onClick(item); } : null,
+            });
+            overlays = overlays.concat(itemOverlays);
+        });
+        this.spatialPresentationOverlays = overlays;
+        if (overlays.length && cfg.fitView !== false && typeof this.map.setFitView === 'function') {
+            this.map.setFitView(overlays, false, [48, 48, 48, 48]);
+        }
+        return overlays.length;
+    };
+
+    MapCore.prototype.focusSpatialFeature = function (feature, opts) {
+        var cfg = opts || {};
+        var overlays = this._createSpatialFeatureOverlays(feature, cfg);
         if (!overlays.length) return false;
         this.clearSpatialFeatureFocus();
         this.focusedSpatialOverlays = overlays;

@@ -1157,6 +1157,95 @@ export function createAgentCapabilityWorkbenchMethods() {
       const matrix = (this.agentPanelPayloads || {}).stage1_spatial_matrix
       return matrix && typeof matrix === 'object' ? clonePayloadValue(matrix) : null
     },
+    getStage1SpatialMapPresentation() {
+      const presentation = this.getStage1SpatialMatrix()?.map_presentation
+      return presentation && typeof presentation === 'object' ? clonePayloadValue(presentation) : null
+    },
+    getStage1SpatialMapModes() {
+      const modes = this.getStage1SpatialMapPresentation()?.modes
+      return Array.isArray(modes) ? clonePayloadValue(modes) : []
+    },
+    getStage1SpatialMapMode() {
+      const modes = this.getStage1SpatialMapModes()
+      const selected = text(this.stage1SpatialMapMode)
+      return modes.find(item => text(item?.id) === selected) || modes[0] || null
+    },
+    getStage1SpatialHierarchyLevels() {
+      const levels = this.getStage1SpatialMapPresentation()?.hierarchy_levels
+      return [
+        { id: 'all', label: '全部层级', decision_count: this.getStage1SpaceDecisionCount() },
+        ...(Array.isArray(levels) ? clonePayloadValue(levels) : []),
+      ]
+    },
+    getStage1SpatialHierarchyLabel(level) {
+      return { system: '系统层', cluster: '组团层', unit: '单元层' }[text(level)] || text(level) || '未分层'
+    },
+    getStage1SpatialPresentationItems() {
+      const items = this.getStage1SpatialMapPresentation()?.items
+      const level = text(this.stage1SpatialHierarchyLevel) || 'all'
+      return (Array.isArray(items) ? clonePayloadValue(items) : [])
+        .filter(item => level === 'all' || text(item?.hierarchy_level) === level)
+    },
+    getStage1SpatialPresentationItem(spaceId) {
+      const items = this.getStage1SpatialMapPresentation()?.items
+      return (Array.isArray(items) ? items : [])
+        .find(item => text(item?.space_id) === text(spaceId)) || null
+    },
+    getStage1DecisionMapValue(decision, modeId) {
+      const value = this.getStage1SpatialPresentationItem(decision?.space_id)?.values?.[text(modeId)]
+      return value && typeof value === 'object' ? clonePayloadValue(value) : null
+    },
+    getStage1SpatialPresentationLegend() {
+      const mode = this.getStage1SpatialMapMode()
+      return Array.isArray(mode?.legend) ? clonePayloadValue(mode.legend) : []
+    },
+    getStage1SpatialPresentationBoundCount() {
+      return this.getStage1SpatialPresentationItems()
+        .filter(item => item?.map_binding?.status === 'bound' && item?.map_binding?.feature?.geometry).length
+    },
+    setStage1SpatialMapMode(mode) {
+      this.stage1SpatialMapMode = text(mode?.target?.value || mode) || 'suggested_function'
+      return this.renderStage1SpatialPresentation()
+    },
+    setStage1SpatialHierarchyLevel(level) {
+      this.stage1SpatialHierarchyLevel = text(level?.target?.value || level) || 'all'
+      return this.renderStage1SpatialPresentation()
+    },
+    renderStage1SpatialPresentation({ fitView = true } = {}) {
+      const mapCore = this.mapCore
+      if (!mapCore || typeof mapCore.showSpatialPresentation !== 'function') {
+        this.stage1SpatialPresentationMessage = '地图尚未就绪，无法显示空间策划图层。'
+        return 0
+      }
+      const mode = this.getStage1SpatialMapMode()
+      if (!mode) {
+        if (typeof mapCore.clearSpatialPresentation === 'function') mapCore.clearSpatialPresentation()
+        this.stage1SpatialPresentationMessage = '当前矩阵没有可用的地图表达模式。'
+        return 0
+      }
+      const items = this.getStage1SpatialPresentationItems()
+        .filter(item => item?.map_binding?.status === 'bound' && item?.map_binding?.feature?.geometry)
+        .map(item => ({
+          space_id: text(item?.space_id),
+          feature: clonePayloadValue(item.map_binding.feature),
+          color: text(item?.values?.[mode.id]?.color) || '#0f766e',
+          label: text(item?.values?.[mode.id]?.label),
+        }))
+      const count = mapCore.showSpatialPresentation(items, {
+        fitView,
+        onClick: item => {
+          const decision = this.getStage1SpaceDecisionById(item?.space_id)
+          if (decision) this.selectStage1SpaceDecision(decision)
+        },
+      })
+      const levelLabel = this.stage1SpatialHierarchyLevel === 'all'
+        ? '全部层级'
+        : this.getStage1SpatialHierarchyLabel(this.stage1SpatialHierarchyLevel)
+      this.stage1SpatialPresentationMessage = count
+        ? `已显示${levelLabel}的“${text(mode.label)}”图层，共 ${count} 个地图覆盖物。`
+        : '当前筛选下没有已绑定权威几何的空间决策。'
+      return count
+    },
     getStage1SpaceDecisions() {
       const decisions = this.getStage1SpatialMatrix()?.space_decisions
       return Array.isArray(decisions) ? clonePayloadValue(decisions) : []
@@ -1168,6 +1257,9 @@ export function createAgentCapabilityWorkbenchMethods() {
       return this.getStage1SpaceDecisions().map(decision => ({
         space_id: text(decision?.space_id),
         space_name: text(decision?.space_name) || text(decision?.space_id) || '未命名空间',
+        hierarchy_id: text(decision?.hierarchy_id),
+        hierarchy_level: text(this.getStage1SpatialPresentationItem(decision?.space_id)?.hierarchy_level),
+        hierarchy_label: this.getStage1SpatialHierarchyLabel(this.getStage1SpatialPresentationItem(decision?.space_id)?.hierarchy_level),
         future_role: text(decision?.future_role) || '未说明',
         preferred_function: this.getStage1FunctionLabel(decision?.preferred_function),
         core_audiences: this.getStage1DecisionDetailText(decision?.core_audiences),
@@ -1251,11 +1343,15 @@ export function createAgentCapabilityWorkbenchMethods() {
       if (this.mapCore && typeof this.mapCore.clearSpatialFeatureFocus === 'function') {
         this.mapCore.clearSpatialFeatureFocus()
       }
+      if (this.mapCore && typeof this.mapCore.clearSpatialPresentation === 'function') {
+        this.mapCore.clearSpatialPresentation()
+      }
       this.stage1ExpandedSpaceId = ''
       this.stage1ExpandedRunId = ''
       this.stage1MapFocusedSpaceId = ''
       this.stage1MapFocusedRunId = ''
       this.stage1MapFocusMessage = ''
+      this.stage1SpatialPresentationMessage = ''
     },
     openStage1EvidenceDrawer(decision) {
       const spaceId = text(decision?.space_id)

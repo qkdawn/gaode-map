@@ -57,32 +57,73 @@ def package():
             ],
         },
         "spatial_matrix": {
-            "matrix_version": "1.0",
+            "matrix_version": "2.0",
             "positioning_option_id": "option-a",
-            "spatial_hierarchy": [{"id": "unit-1", "level": "unit"}],
+            "spatial_hierarchy": [
+                {
+                    "id": "system-1",
+                    "title": "一院",
+                    "level": "system",
+                    "parent_id": "",
+                    "role": "公共文化系统",
+                    "member_space_ids": [],
+                },
+                {
+                    "id": "cluster-1",
+                    "title": "公共文化组团",
+                    "level": "cluster",
+                    "parent_id": "system-1",
+                    "role": "公共文化体验组团",
+                    "member_space_ids": [],
+                },
+                {
+                    "id": "unit-1",
+                    "title": "礼堂单元",
+                    "level": "unit",
+                    "parent_id": "cluster-1",
+                    "role": "社区活动单元",
+                    "member_space_ids": ["space-auditorium"],
+                },
+            ],
             "space_decisions": [
                 {
-                    "space_id": "unit-1",
-                    "current_state": {"use": "闲置礼堂"},
+                    "space_id": "space-auditorium",
+                    "hierarchy_id": "unit-1",
+                    "space_name": "原县政府礼堂",
+                    "current_state_category": "vacant",
+                    "current_state": {"summary": "闲置礼堂"},
                     "change_logic": {"reason": "补足社区文化活动空间"},
-                    "preferred_function": {"id": "culture"},
+                    "preferred_function": {"id": "culture", "name": "文化活动"},
                     "candidate_functions": [{"id": "culture"}, {"id": "retail"}],
+                    "compatible_functions": [{"id": "exhibition"}],
                     "excluded_functions": [{"id": "heavy-food"}],
                     "audience_scenarios": ["社区周末活动"],
                     "access_and_movement": {"public_entry": "east"},
                     "operation_strategy": {"operator": "community_partner"},
-                    "renovation_and_delivery": {"phase": 1},
+                    "renovation_and_delivery": {"scope": "轻量改造"},
+                    "implementation_phase": "phase_1",
+                    "risk_level": "high",
+                    "risk_summary": "消防条件尚待专项核验",
                     "preconditions": ["完成消防评估"],
                     "assumptions": ["社区组织愿意参与"],
                     "validation_actions": ["访谈社区组织"],
                     "evidence_refs": ["evidence-1"],
                     "hard_constraint_refs": [
-                        "ownership", "fire_safety", "structural_condition",
-                        "drainage_sewage", "parking_loading", "accessibility",
+                        "ownership",
+                        "fire_safety",
+                        "structural_condition",
+                        "drainage_sewage",
+                        "parking_loading",
+                        "accessibility",
                         "resident_noise",
                     ],
                     "recommendation_status": "conditional",
                     "confidence": "medium",
+                    "map_binding": {
+                        "status": "unavailable",
+                        "spatial_object_id": "",
+                        "reason": "未提供权威建筑轮廓",
+                    },
                 }
             ],
             "portfolio_checks": ["公共服务与经营功能平衡"],
@@ -116,6 +157,13 @@ def test_design_handoff_reuses_strategy_matrix_and_evidence_ids():
     assert handoff.positioning_option_id == "option-a"
     assert handoff.positioning_option["name"] == "社区文化客厅"
     assert handoff.space_requirements[0].evidence_refs == ["evidence-1"]
+    requirement = handoff.space_requirements[0]
+    assert requirement.hierarchy_level == "unit"
+    assert requirement.current_state["summary"] == "闲置礼堂"
+    assert requirement.change_logic["reason"] == "补足社区文化活动空间"
+    assert requirement.implementation_phase == "phase_1"
+    assert requirement.risk_level == "high"
+    assert requirement.risk_summary == "消防条件尚待专项核验"
     assert handoff.evidence_ledger_ids == ["evidence-1", "fieldwork-1"]
     assert handoff.hard_constraint_screening["status"] == "conditional"
     assert handoff.space_requirements[0].hard_constraint_refs[0] == "ownership"
@@ -152,5 +200,7 @@ def test_compiler_exposes_three_named_artifacts_from_one_source_contract():
         "design_handoff.json",
         "run_manifest.json",
     ]
-    assert deliverables.design_handoff.space_requirements[0].space_id == "unit-1"
+    assert (
+        deliverables.design_handoff.space_requirements[0].space_id == "space-auditorium"
+    )
     assert deliverables.run_manifest.run_id == "caprun-test"

@@ -4,6 +4,7 @@ from datetime import date
 from modules.agent.quality_audit import audit_stage1_package
 from modules.agent.stage1_data_quality import assess_stage1_data_quality
 from modules.agent.stage1_hard_constraints import build_hard_constraint_screening
+from modules.agent.stage1_spatial_matrix import compile_spatial_programming_matrix
 from modules.agent.stage1_provenance import (
     EvidenceProvenanceBinding,
     assess_provenance_bindings,
@@ -47,8 +48,12 @@ def complete_package():
                     "invalidation_conditions": ["居民协商无法达成"],
                     "recommendation_status": "conditional",
                     "hard_constraint_refs": [
-                        "ownership", "fire_safety", "structural_condition",
-                        "drainage_sewage", "parking_loading", "accessibility",
+                        "ownership",
+                        "fire_safety",
+                        "structural_condition",
+                        "drainage_sewage",
+                        "parking_loading",
+                        "accessibility",
                         "resident_noise",
                     ],
                     "preconditions": ["完成硬约束核验"],
@@ -58,45 +63,56 @@ def complete_package():
             ],
         },
         "spatial_matrix": {
-            "matrix_version": "1.0",
+            "matrix_version": "2.0",
             "positioning_option_id": "option-a",
             "spatial_hierarchy": [
-                {"id": "system-1", "level": "system"},
-                {"id": "cluster-1", "level": "cluster"},
-                {"id": "unit-1", "level": "unit"},
+                {
+                    "id": "system-yard",
+                    "title": "一院",
+                    "level": "system",
+                    "parent_id": "",
+                    "role": "公共文化与核心体验系统",
+                    "member_space_ids": [],
+                },
+                {
+                    "id": "cluster-culture",
+                    "title": "公共文化组团",
+                    "level": "cluster",
+                    "parent_id": "system-yard",
+                    "role": "形成可独立运营的公共文化体验",
+                    "member_space_ids": [],
+                },
+                {
+                    "id": "unit-auditorium",
+                    "title": "礼堂单元",
+                    "level": "unit",
+                    "parent_id": "cluster-culture",
+                    "role": "承载社区文化活动",
+                    "member_space_ids": ["space-auditorium"],
+                },
             ],
             "space_decisions": [
                 {
-                    "space_id": "unit-1",
+                    "space_id": "space-auditorium",
+                    "hierarchy_id": "unit-auditorium",
                     "map_binding": {
                         "status": "bound",
                         "spatial_object_id": "building:auditorium",
-                        "object_type": "building",
-                        "title": "原县政府礼堂",
-                        "source_ref": "project_gis.buildings",
-                        "source_locator": "project_gis.buildings/auditorium",
-                        "feature": {
-                            "type": "Feature",
-                            "properties": {"id": "auditorium"},
-                            "geometry": {
-                                "type": "Polygon",
-                                "coordinates": [[[112.0, 28.0], [112.01, 28.0], [112.01, 28.01], [112.0, 28.0]]],
-                            },
-                        },
-                        "reason": "",
                     },
                     "space_name": "原县政府礼堂",
                     "future_role": "社区文化锚点",
                     "core_audiences": ["社区家庭", "青年社群"],
                     "movement_role": "主游线目的地",
                     "value_role": "公共服务与活动引流",
-                    "current_state": {"use": "闲置礼堂"},
+                    "current_state_category": "vacant",
+                    "current_state": {"summary": "礼堂当前闲置"},
                     "change_logic": {"reason": "补足社区文化活动空间"},
                     "candidate_functions": [
-                        {"id": "culture"},
-                        {"id": "retail"},
+                        {"id": "culture", "name": "文化活动"},
+                        {"id": "retail", "name": "社区零售"},
                     ],
-                    "preferred_function": {"id": "culture"},
+                    "preferred_function": {"id": "culture", "name": "文化活动"},
+                    "compatible_functions": [{"id": "exhibition", "name": "社区展览"}],
                     "excluded_functions": [
                         {"id": "heavy-food", "reason": "消防与排烟受限"}
                     ],
@@ -104,14 +120,22 @@ def complete_package():
                     "access_and_movement": {"visitor_entry": "南侧主入口"},
                     "operation_strategy": {"operator": "社区文化运营主体"},
                     "renovation_and_delivery": {"phase": "一期轻量改造"},
+                    "implementation_phase": "phase_1",
+                    "risk_level": "high",
+                    "risk_summary": "消防与结构条件尚待核验",
                     "preconditions": ["完成消防评估"],
                     "validation_actions": ["开展消防与结构核验"],
                     "evidence_refs": ["evidence-1"],
                     "hard_constraint_refs": [
-                        "ownership", "fire_safety", "structural_condition",
-                        "drainage_sewage", "parking_loading", "accessibility",
+                        "ownership",
+                        "fire_safety",
+                        "structural_condition",
+                        "drainage_sewage",
+                        "parking_loading",
+                        "accessibility",
                         "resident_noise",
                     ],
+                    "assumptions": [],
                     "recommendation_status": "conditional",
                     "confidence": "medium",
                 }
@@ -119,6 +143,33 @@ def complete_package():
             "portfolio_checks": ["公共服务与经营功能保持平衡"],
         },
     }
+    package["spatial_matrix"] = compile_spatial_programming_matrix(
+        package["spatial_matrix"],
+        {
+            "building:auditorium": {
+                "spatial_object_id": "building:auditorium",
+                "object_type": "building",
+                "title": "原县政府礼堂",
+                "source_ref": "project_gis.buildings",
+                "source_locator": "project_gis.buildings/auditorium",
+                "feature": {
+                    "type": "Feature",
+                    "properties": {"id": "auditorium"},
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [112.0, 28.0],
+                                [112.01, 28.0],
+                                [112.01, 28.01],
+                                [112.0, 28.0],
+                            ]
+                        ],
+                    },
+                },
+            }
+        },
+    )
     package["hard_constraint_screening"] = build_hard_constraint_screening(
         {}, evidence_ids={"evidence-1"}
     ).model_dump(mode="json")
@@ -187,6 +238,42 @@ def test_space_decision_must_be_ready_for_design_handoff():
 
     assert result.status == "failed"
     assert "space_design_handoff_incomplete" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_spatial_hierarchy_requires_valid_parent_and_membership_relationships():
+    package = complete_package()
+    package["spatial_matrix"]["spatial_hierarchy"][2]["parent_id"] = "system-yard"
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "spatial_hierarchy_invalid" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_spatial_decision_requires_controlled_map_dimensions():
+    package = complete_package()
+    package["spatial_matrix"]["space_decisions"][0]["risk_summary"] = ""
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "spatial_decision_map_dimensions_missing" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_spatial_map_presentation_requires_all_server_derived_modes():
+    package = complete_package()
+    package["spatial_matrix"]["map_presentation"]["modes"].pop()
+
+    result = audit_stage1_package(package)
+
+    assert result.status == "failed"
+    assert "spatial_map_presentation_incomplete" in {
         issue.code for issue in result.blocking_issues
     }
 
@@ -444,22 +531,32 @@ def test_data_quality_treats_unknown_critical_source_locator_as_blocking():
 
 def test_hard_constraint_screening_must_cover_all_required_categories():
     package = complete_package()
-    package["hard_constraint_screening"]["assessments"] = package["hard_constraint_screening"]["assessments"][:-1]
+    package["hard_constraint_screening"]["assessments"] = package[
+        "hard_constraint_screening"
+    ]["assessments"][:-1]
 
     result = audit_stage1_package(package)
 
     assert result.status == "failed"
-    assert "hard_constraint_screening_invalid" in {item.code for item in result.blocking_issues}
+    assert "hard_constraint_screening_invalid" in {
+        item.code for item in result.blocking_issues
+    }
 
 
 def test_unknown_constraints_require_conditional_recommendations_and_refs():
     package = complete_package()
     package["strategy"]["options"][0]["recommendation_status"] = "strong"
-    package["spatial_matrix"]["space_decisions"][0]["hard_constraint_refs"] = ["fire_safety"]
+    package["spatial_matrix"]["space_decisions"][0]["hard_constraint_refs"] = [
+        "fire_safety"
+    ]
 
     result = audit_stage1_package(package)
 
-    issue = next(item for item in result.blocking_issues if item.code == "hard_constraint_application_invalid")
+    issue = next(
+        item
+        for item in result.blocking_issues
+        if item.code == "hard_constraint_application_invalid"
+    )
     assert "未逐项响应硬约束" in issue.message
     assert "未降级" in issue.message
 
@@ -484,21 +581,32 @@ def test_excluded_hard_constraint_blocks_delivery():
 
     result = audit_stage1_package(package)
 
-    issue = next(item for item in result.blocking_issues if item.code == "hard_constraint_application_invalid")
+    issue = next(
+        item
+        for item in result.blocking_issues
+        if item.code == "hard_constraint_application_invalid"
+    )
     assert "不可交付" in issue.message
 
 
 def test_stage1_quality_gate_reports_truthful_unavailable_map_binding_as_warning():
     package = complete_package()
-    package["spatial_matrix"]["space_decisions"][0]["map_binding"] = {
+    binding = {
         "status": "unavailable",
         "reason": "尚未提供礼堂建筑轮廓",
     }
+    package["spatial_matrix"]["space_decisions"][0]["map_binding"] = binding
+    package["spatial_matrix"]["map_presentation"]["items"][0]["map_binding"] = deepcopy(
+        binding
+    )
+    package["spatial_matrix"]["map_presentation"]["bound_item_count"] = 0
 
     result = audit_stage1_package(package)
 
     assert result.status == "passed"
-    issue = next(item for item in result.issues if item.code == "spatial_map_binding_incomplete")
+    issue = next(
+        item for item in result.issues if item.code == "spatial_map_binding_incomplete"
+    )
     assert issue.severity == "warning"
     assert "1 个空间决策" in issue.message
 

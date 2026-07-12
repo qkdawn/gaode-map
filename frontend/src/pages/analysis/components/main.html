@@ -419,12 +419,28 @@
                                     <div><strong>空间功能策划决策矩阵</strong><span>管理层总览用于比较；展开单元后核对完整决策和原始证据</span></div>
                                     <small>{{ getStage1SpatialMatrix().matrix_version || '未标版本' }} · {{ getStage1SpaceDecisionCount() }} 个空间</small>
                                 </div>
+                                <div v-if="getStage1SpatialMapPresentation()" class="agent-spatial-map-workbench">
+                                    <div class="agent-spatial-map-controls">
+                                        <div><strong>地图表达</strong><span>所有颜色和图例来自同一不可变矩阵，不在前端重新判断风险或推荐等级</span></div>
+                                        <div class="agent-spatial-map-mode-buttons" role="group" aria-label="空间策划地图表达模式">
+                                            <button v-for="mode in getStage1SpatialMapModes()" :key="mode.id" type="button" :class="{ active: getStage1SpatialMapMode()?.id === mode.id }" @click="setStage1SpatialMapMode(mode.id)">{{ mode.label }}</button>
+                                        </div>
+                                        <div class="agent-spatial-map-level-buttons" role="group" aria-label="空间策划层级筛选">
+                                            <button v-for="level in getStage1SpatialHierarchyLevels()" :key="level.id" type="button" :class="{ active: stage1SpatialHierarchyLevel === level.id }" @click="setStage1SpatialHierarchyLevel(level.id)">{{ level.label }} <small>{{ level.decision_count }}</small></button>
+                                        </div>
+                                    </div>
+                                    <div class="agent-spatial-map-legend">
+                                        <span v-for="entry in getStage1SpatialPresentationLegend()" :key="entry.key"><i :style="{ backgroundColor: entry.color }"></i>{{ entry.label }}</span>
+                                        <button type="button" :disabled="getStage1SpatialPresentationBoundCount() === 0" @click="renderStage1SpatialPresentation()">显示到地图</button>
+                                    </div>
+                                    <p v-if="stage1SpatialPresentationMessage" class="agent-spatial-map-message">{{ stage1SpatialPresentationMessage }}</p>
+                                </div>
                                 <div class="agent-spatial-management-table" role="region" aria-label="空间功能策划管理层总表" tabindex="0">
                                     <table>
-                                        <thead><tr><th>空间单元</th><th>未来角色</th><th>首选功能</th><th>核心客群</th><th>动线角色</th><th>价值角色</th><th>推荐强度</th><th>关键前提</th><th>地图</th><th>证据</th></tr></thead>
+                                        <thead><tr><th>层级 / 空间</th><th>未来角色</th><th>首选功能</th><th>核心客群</th><th>动线角色</th><th>价值角色</th><th>推荐强度</th><th>关键前提</th><th>地图</th><th>证据</th></tr></thead>
                                         <tbody>
                                             <tr v-for="row in getStage1SpaceManagementRows()" :key="`management-${row.space_id}`">
-                                                <th scope="row">{{ row.space_name }}<small>{{ row.space_id }}</small></th>
+                                                <th scope="row"><span class="agent-space-level" :class="row.hierarchy_level">{{ row.hierarchy_label }}</span>{{ row.space_name }}<small>{{ row.hierarchy_id }} · {{ row.space_id }}</small></th>
                                                 <td>{{ row.future_role }}</td>
                                                 <td>{{ row.preferred_function }}</td>
                                                 <td>{{ row.core_audiences || '未说明' }}</td>
@@ -449,7 +465,9 @@
                                         <p><span>核心客群</span>{{ getStage1DecisionDetailText(decision.core_audiences) || '未说明' }}</p>
                                         <p><span>动线角色</span>{{ decision.movement_role || '未说明' }}</p>
                                         <p><span>价值角色</span>{{ decision.value_role || '未说明' }}</p>
-                                        <p v-if="getStage1DecisionDetailText(decision.current_state)"><span>现状诊断</span>{{ getStage1DecisionDetailText(decision.current_state) }}</p>
+                                        <p v-if="getStage1DecisionDetailText(decision.current_state)"><span>现状诊断 · {{ getStage1DecisionMapValue(decision, 'current_state')?.label || '状态待核' }}</span>{{ getStage1DecisionDetailText(decision.current_state) }}</p>
+                                        <p><span>实施阶段</span>{{ getStage1DecisionMapValue(decision, 'implementation_phase')?.label || '未说明' }}</p>
+                                        <p><span>风险 · {{ getStage1DecisionMapValue(decision, 'risk')?.label || '未分级' }}</span>{{ decision.risk_summary || '未说明' }}</p>
                                         <p v-if="getStage1FunctionListText(decision.candidate_functions)"><span>候选功能</span>{{ getStage1FunctionListText(decision.candidate_functions) }}</p>
                                         <p v-if="getStage1FunctionListText(decision.excluded_functions)"><span>排除功能</span>{{ getStage1FunctionListText(decision.excluded_functions) }}</p>
                                         <p v-if="getStage1DecisionDetailText(decision.change_logic)"><span>改变逻辑</span>{{ getStage1DecisionDetailText(decision.change_logic) }}</p>

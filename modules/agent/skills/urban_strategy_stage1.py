@@ -30,8 +30,11 @@ from ..stage1_runs import (
     build_stage1_output_artifacts,
     start_stage1_run,
 )
+from ..stage1_spatial_matrix import (
+    SpatialMatrixContractError,
+    compile_spatial_programming_matrix,
+)
 from ..stage1_spatial_objects import (
-    bind_spatial_matrix_to_objects,
     build_spatial_object_registry,
     spatial_object_catalog,
 )
@@ -296,7 +299,10 @@ async def execute(
     from ..capability_catalog import get_analysis_capability
 
     capability = get_analysis_capability(capability_id)
-    if capability.executor_type != "skill" or capability.executor_id != "urban-strategy-stage1":
+    if (
+        capability.executor_type != "skill"
+        or capability.executor_id != "urban-strategy-stage1"
+    ):
         raise ValueError("capability_executor_mismatch")
     resolved_inputs = resolve_capability_inputs(capability_id, payload)
     run = start_stage1_run(
@@ -425,7 +431,9 @@ async def execute(
             {
                 "requirement_id": item.requirement_id,
                 "source_run_id": item.selected_run_id,
-                "artifact_refs": [ref.model_dump(mode="json") for ref in item.artifact_refs],
+                "artifact_refs": [
+                    ref.model_dump(mode="json") for ref in item.artifact_refs
+                ],
                 "artifact_payloads": {
                     key: value
                     for key, value in resolved_inputs.artifact_payloads.items()
@@ -630,13 +638,18 @@ async def execute(
     matrix_result = await client.chat_json(
         system_prompt=(
             "你是存量空间功能策划负责人。只输出 JSON：matrix_version、positioning_option_id、"
-            "spatial_hierarchy、space_decisions、portfolio_checks。spatial_hierarchy 必须含 system/cluster/unit。"
-            "每个 space_decision 必须含 space_id、space_name、future_role、core_audiences、movement_role、value_role、"
-            "current_state、change_logic、candidate_functions(至少2项)、preferred_function、excluded_functions、"
-            "audience_scenarios、access_and_movement、operation_strategy、"
-            "renovation_and_delivery、preconditions、evidence_refs、hard_constraint_refs、assumptions、validation_actions、"
-            "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)、"
-            "map_binding。map_binding 只能是 {status:'bound', spatial_object_id:'清单中的稳定ID'} 或"
+            "spatial_hierarchy、space_decisions、portfolio_checks。spatial_hierarchy 必须含 system/cluster/unit；"
+            "每个节点必须含稳定 id、title、level、parent_id、role、member_space_ids，cluster 的 parent_id 指向 system，"
+            "unit 的 parent_id 指向 cluster，system 的 parent_id 为空。"
+            "每个 space_decision 必须含 space_id、hierarchy_id、space_name、future_role、core_audiences、movement_role、value_role、"
+            "current_state_category(active/underused/vacant/constrained/unknown)、current_state、change_logic、"
+            "candidate_functions(至少2项)、preferred_function、compatible_functions、excluded_functions、"
+            "audience_scenarios、access_and_movement、operation_strategy、renovation_and_delivery、"
+            "implementation_phase(phase_1/phase_2/phase_3/long_term)、risk_level(low/medium/high/critical)、risk_summary、"
+            "preconditions、evidence_refs、hard_constraint_refs、assumptions、validation_actions、"
+            "recommendation_status(strong/conditional/alternative/excluded)、confidence(high/medium/low)、map_binding。"
+            "hierarchy_id 必须引用 spatial_hierarchy，且 space_id 必须登记在该节点 member_space_ids。"
+            "map_binding 只能是 {status:'bound', spatial_object_id:'清单中的稳定ID'} 或"
             "{status:'unavailable', spatial_object_id:'', reason:'无法精确绑定的原因'}。"
             "只有决策空间与清单对象精确相同时才能 bound；不得把建筑、院落或入口随意绑定到 H3 网格或路段，"
             "不得生成坐标、几何或清单外 ID。"
@@ -660,9 +673,58 @@ async def execute(
         title="生成空间功能策划矩阵",
         reasoning_id="stage1-spatial-matrix-model",
     )
-    spatial_matrix = bind_spatial_matrix_to_objects(
-        _mapping(matrix_result), spatial_object_registry
-    )
+    try:
+        spatial_matrix = compile_spatial_programming_matrix(
+            _mapping(matrix_result), spatial_object_registry
+        )
+    except SpatialMatrixContractError as error:
+        diagnostics = [
+            "模型输出的空间功能策划矩阵未通过结构契约校验。",
+            *error.diagnostics,
+        ]
+        await _emit_phase(
+            emit,
+            phase_id="stage1-spatial-matrix",
+            title="形成空间功能决策矩阵",
+            detail="模型输出缺少必需字段或层级关系无效，已停止后续报告生成。",
+            state="failed",
+        )
+        run.record_stage(
+            "spatial-decision-matrix",
+            "形成空间功能决策矩阵",
+            status="failed",
+            summary="空间矩阵未通过结构契约校验。",
+            diagnostics=diagnostics,
+        )
+        run_manifest = run.finish(
+            "failed",
+            current_stage="spatial-decision-matrix",
+            diagnostics=diagnostics,
+        )
+        return AgentTurnResponse(
+            status="failed",
+            stage="failed",
+            output=AgentTurnOutput(
+                answer="空间功能策划矩阵生成失败：模型输出未满足系统—组团—单元及空间决策字段契约。请重新运行该能力。",
+                panel_payloads={
+                    "stage1_spatial_matrix_diagnostic": {
+                        "status": "failed",
+                        "diagnostics": diagnostics,
+                        "retry_action": "重新运行城市区域策划第一阶段",
+                    },
+                    "capability_run": run_manifest.model_dump(mode="json"),
+                },
+            ),
+            diagnostics=AgentTurnDiagnostics(
+                audit_issues=diagnostics,
+                research_notes=[
+                    "空间矩阵契约校验失败，未执行来源审计、质量审计或报告生成。"
+                ],
+            ),
+            context_summary=AgentContextSummary(),
+            plan=AgentPlanEnvelope(),
+            effective_execution_profile=profile,
+        )
     run.record_stage(
         "spatial-decision-matrix",
         "形成空间功能决策矩阵",

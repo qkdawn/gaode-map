@@ -23,14 +23,26 @@ class DesignSpaceRequirement(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     space_id: str
+    hierarchy_id: str
+    hierarchy_level: Literal["system", "cluster", "unit"]
+    space_name: str
     map_binding: dict[str, Any] = Field(default_factory=dict)
+    current_state_category: Literal[
+        "active", "underused", "vacant", "constrained", "unknown"
+    ]
+    current_state: dict[str, Any] = Field(default_factory=dict)
+    change_logic: dict[str, Any] = Field(default_factory=dict)
     preferred_function: dict[str, Any] = Field(default_factory=dict)
     candidate_functions: list[Any] = Field(default_factory=list)
+    compatible_functions: list[Any] = Field(default_factory=list)
     excluded_functions: list[Any] = Field(default_factory=list)
     audience_scenarios: list[Any] = Field(default_factory=list)
     access_and_movement: dict[str, Any] = Field(default_factory=dict)
     operation_strategy: dict[str, Any] = Field(default_factory=dict)
     renovation_and_delivery: dict[str, Any] = Field(default_factory=dict)
+    implementation_phase: Literal["phase_1", "phase_2", "phase_3", "long_term"]
+    risk_level: Literal["low", "medium", "high", "critical"]
+    risk_summary: str
     preconditions: list[Any] = Field(default_factory=list)
     assumptions: list[Any] = Field(default_factory=list)
     validation_actions: list[Any] = Field(default_factory=list)
@@ -104,7 +116,10 @@ def _unresolved_constraints(package: dict[str, Any]) -> list[dict[str, Any]]:
     screening = _mapping(package.get("hard_constraint_screening"))
     for assessment in _list(screening.get("assessments")):
         node = _mapping(assessment)
-        if node.get("state") not in {"unknown", "constrained"} and node.get("decision_effect") != "exclude":
+        if (
+            node.get("state") not in {"unknown", "constrained"}
+            and node.get("decision_effect") != "exclude"
+        ):
             continue
         constraints.append(
             {
@@ -115,10 +130,14 @@ def _unresolved_constraints(package: dict[str, Any]) -> list[dict[str, Any]]:
                 "decision_effect": _text(node.get("decision_effect")),
                 "description": _text(node.get("finding")),
                 "evidence_refs": [
-                    _text(item) for item in _list(node.get("evidence_refs")) if _text(item)
+                    _text(item)
+                    for item in _list(node.get("evidence_refs"))
+                    if _text(item)
                 ],
                 "affected_space_ids": [
-                    _text(item) for item in _list(node.get("affected_space_ids")) if _text(item)
+                    _text(item)
+                    for item in _list(node.get("affected_space_ids"))
+                    if _text(item)
                 ],
                 "next_action": _text(node.get("verification_action")),
                 "executor": _text(node.get("executor")),
@@ -164,20 +183,35 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
 
     strategy = _mapping(package.get("strategy"))
     matrix = _mapping(package.get("spatial_matrix"))
+    hierarchy_levels = {
+        _text(_mapping(item).get("id")): _text(_mapping(item).get("level"))
+        for item in _list(matrix.get("spatial_hierarchy"))
+    }
     requirements = []
     for decision in _list(matrix.get("space_decisions")):
         node = _mapping(decision)
+        hierarchy_id = _text(node.get("hierarchy_id"))
         requirements.append(
             DesignSpaceRequirement(
                 space_id=_text(node.get("space_id")),
+                hierarchy_id=hierarchy_id,
+                hierarchy_level=hierarchy_levels[hierarchy_id],
+                space_name=_text(node.get("space_name")),
                 map_binding=_mapping(node.get("map_binding")),
+                current_state_category=_text(node.get("current_state_category")),
+                current_state=_mapping(node.get("current_state")),
+                change_logic=_mapping(node.get("change_logic")),
                 preferred_function=_mapping(node.get("preferred_function")),
                 candidate_functions=_list(node.get("candidate_functions")),
+                compatible_functions=_list(node.get("compatible_functions")),
                 excluded_functions=_list(node.get("excluded_functions")),
                 audience_scenarios=_list(node.get("audience_scenarios")),
                 access_and_movement=_mapping(node.get("access_and_movement")),
                 operation_strategy=_mapping(node.get("operation_strategy")),
                 renovation_and_delivery=_mapping(node.get("renovation_and_delivery")),
+                implementation_phase=_text(node.get("implementation_phase")),
+                risk_level=_text(node.get("risk_level")),
+                risk_summary=_text(node.get("risk_summary")),
                 preconditions=_list(node.get("preconditions")),
                 assumptions=_list(node.get("assumptions")),
                 validation_actions=_list(node.get("validation_actions")),
@@ -269,7 +303,11 @@ def build_evidence_appendix(package: dict[str, Any]) -> str:
             f"- **{_text(node.get('label')) or _text(node.get('constraint_id'))}**："
             f"{_text(node.get('state'))}/{_text(node.get('decision_effect'))}；"
             f"{_text(node.get('finding')) or '未提供判断'}"
-            + (f"；下一步：{_text(node.get('verification_action'))}" if _text(node.get('verification_action')) else "")
+            + (
+                f"；下一步：{_text(node.get('verification_action'))}"
+                if _text(node.get("verification_action"))
+                else ""
+            )
         )
     lines.extend(["", "## 数据质量与真实资产绑定", ""])
     data_quality = _mapping(package.get("data_quality"))
