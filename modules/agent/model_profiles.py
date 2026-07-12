@@ -120,7 +120,7 @@ def _normalize_url(value: str) -> str:
     return url
 
 
-def _system_view() -> AgentModelProfileView:
+def _system_view(*, is_default: bool = False) -> AgentModelProfileView:
     enabled = bool(
         settings.ai_enabled
         and str(settings.ai_base_url or "").strip()
@@ -137,12 +137,12 @@ def _system_view() -> AgentModelProfileView:
         base_url=str(settings.ai_base_url or "").strip().rstrip("/"),
         model=str(settings.ai_model or "").strip(),
         enabled=enabled,
-        is_default=not any(bool(row.get("enabled")) and bool(row.get("is_default")) for row in agent_model_profile_repo.list_records()),
+        is_default=is_default,
         has_api_key=bool(str(settings.ai_api_key or "").strip()),
     )
 
 
-def _system_glm_view() -> AgentModelProfileView:
+def _system_glm_view(*, is_default: bool = False) -> AgentModelProfileView:
     enabled = bool(
         settings.ai_glm_enabled
         and str(settings.ai_glm_base_url or "").strip()
@@ -157,15 +157,17 @@ def _system_glm_view() -> AgentModelProfileView:
         base_url=str(settings.ai_glm_base_url or "").strip().rstrip("/"),
         model=str(settings.ai_glm_model or "").strip(),
         enabled=enabled,
-        is_default=False,
+        is_default=is_default,
         has_api_key=bool(str(settings.ai_glm_api_key or "").strip()),
     )
 
 
-def _system_views() -> list[AgentModelProfileView]:
-    views = [_system_view()]
+def _system_views(*, has_personal_default: bool = False) -> list[AgentModelProfileView]:
+    glm = _system_glm_view()
+    glm_is_default = not has_personal_default and glm.enabled
+    views = [_system_view(is_default=not has_personal_default and not glm.enabled)]
     if settings.ai_glm_enabled:
-        views.append(_system_glm_view())
+        views.append(glm.model_copy(update={"is_default": glm_is_default}))
     return views
 
 
@@ -186,7 +188,9 @@ def _personal_view(row: dict[str, Any]) -> AgentModelProfileView:
 
 
 def list_model_profiles() -> list[AgentModelProfileView]:
-    return [*_system_views(), *[_personal_view(row) for row in agent_model_profile_repo.list_records()]]
+    personal = [_personal_view(row) for row in agent_model_profile_repo.list_records()]
+    has_personal_default = any(item.enabled and item.is_default for item in personal)
+    return [*_system_views(has_personal_default=has_personal_default), *personal]
 
 
 def create_model_profile(payload: AgentModelProfileCreate) -> AgentModelProfileView:
@@ -267,6 +271,9 @@ def resolve_model_runtime(profile_id: str = "") -> tuple[AgentModelProfileView, 
         personal_default = next((row for row in agent_model_profile_repo.list_records() if row.get("enabled") and row.get("is_default")), None)
         if personal_default is not None:
             return resolve_model_runtime(str(personal_default.get("id") or ""))
+        glm = _system_glm_view()
+        if glm.enabled:
+            return resolve_model_runtime(SYSTEM_GLM_PROFILE_ID)
     view = _system_view()
     if not view.enabled:
         raise HTTPException(status_code=503, detail="系统默认模型不可用，请先配置模型")

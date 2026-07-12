@@ -90,6 +90,7 @@ def test_glm_system_profile_is_exposed_and_resolves_its_own_runtime(repo, monkey
     assert glm.base_url == "https://glm.example.test/v1"
     assert glm.model == "glm-5.2-release"
     assert glm.enabled is True
+    assert glm.is_default is True
     assert glm.has_api_key is True
 
     _, runtime = profiles.resolve_model_runtime(profiles.SYSTEM_GLM_PROFILE_ID)
@@ -97,6 +98,33 @@ def test_glm_system_profile_is_exposed_and_resolves_its_own_runtime(repo, monkey
     assert runtime.base_url == "https://glm.example.test/v1"
     assert runtime.model == "glm-5.2-release"
     assert runtime.thinking_enabled is False
+
+
+def test_personal_default_takes_precedence_over_glm(repo, monkeypatch):
+    monkeypatch.setattr(profiles.settings, "ai_glm_enabled", True)
+    monkeypatch.setattr(profiles.settings, "ai_glm_base_url", "https://glm.example.test/v1")
+    monkeypatch.setattr(profiles.settings, "ai_glm_api_key", "glm-secret")
+    monkeypatch.setattr(profiles.settings, "ai_glm_model", "glm-5.2-release")
+    personal = profiles.create_model_profile(profiles.AgentModelProfileCreate(
+        display_name="个人默认", provider="openai_compatible",
+        base_url="https://example.test/v1", model="model-x", api_key="secret",
+        is_default=True,
+    ))
+
+    catalog = profiles.list_model_profiles()
+    assert [item.id for item in catalog if item.is_default] == [personal.id]
+    selected, _ = profiles.resolve_model_runtime()
+    assert selected.id == personal.id
+
+
+def test_system_default_is_used_when_glm_is_unavailable(repo, monkeypatch):
+    monkeypatch.setattr(profiles.settings, "ai_glm_enabled", True)
+    monkeypatch.setattr(profiles.settings, "ai_glm_base_url", "")
+    monkeypatch.setattr(profiles.settings, "ai_glm_api_key", "")
+    monkeypatch.setattr(profiles.settings, "ai_glm_model", "glm-5.2-release")
+
+    catalog = profiles.list_model_profiles()
+    assert [item.id for item in catalog if item.is_default] == [profiles.SYSTEM_PROFILE_ID]
 
 
 def test_glm_system_profile_cannot_be_changed_or_deleted(repo):
