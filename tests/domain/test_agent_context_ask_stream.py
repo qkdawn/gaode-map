@@ -2,6 +2,7 @@ import asyncio
 import json
 
 from modules.agent import context_ask_service
+from modules.agent.providers.client import LLMRuntimeConfig
 from modules.agent.schemas import AgentContextAskRequest, ContextAskTarget
 
 
@@ -84,3 +85,40 @@ def test_context_ask_stream_fails_before_model_when_ai_is_unavailable(monkeypatc
 
     events = asyncio.run(collect())
     assert events == [("error", {"error": "ai_unavailable", "message": "AI 未启用，无法回答。"})]
+
+
+def test_context_ask_stream_uses_the_selected_model_runtime(monkeypatch):
+    client = FakeStreamingClient()
+    runtime = LLMRuntimeConfig(
+        provider="openai_compatible",
+        base_url="https://glm.example.test/v1",
+        api_key="glm-secret",
+        model="glm-5.2",
+        thinking_enabled=False,
+    )
+    captured = {}
+    monkeypatch.setattr(
+        context_ask_service,
+        "resolve_model_runtime",
+        lambda profile_id: (object(), runtime) if profile_id == "system-glm" else None,
+    )
+
+    def selected_client(*, runtime):
+        captured["runtime"] = runtime
+        return client
+
+    monkeypatch.setattr(context_ask_service, "get_llm_provider_client", selected_client)
+    monkeypatch.setattr(context_ask_service, "build_scoped_dataset_context", lambda payload: {})
+    payload = AgentContextAskRequest(
+        question="现在有哪些机会？",
+        model_profile_id="system-glm",
+        target=ContextAskTarget(type="analysis_sources", source="analysis"),
+    )
+
+    async def collect():
+        return [event async for event in context_ask_service.stream_context_ask(payload)]
+
+    events = asyncio.run(collect())
+
+    assert events[-1][0] == "complete"
+    assert captured["runtime"] is runtime

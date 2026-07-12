@@ -70,6 +70,7 @@ test('agent tabs keep analysis workspace as canonical tab field', () => {
 test('analysis quick ask request uses selected source context directly', () => {
   const ctx = {
     activeAgentSessionId: 'agent-1',
+    agentSelectedModelProfileId: 'system-glm',
     getCurrentAgentHistoryId: () => 'history-1',
     buildAgentAnalysisSnapshot: () => ({ context: { history_id: 'history-1' }, frontend_analysis: { huge: ['raw'] }, h3: { summary: { grid_count: 8 }, charts: { raw: true } } }),
     getAgentAnalysisSourceState: () => ({
@@ -96,6 +97,7 @@ test('analysis quick ask request uses selected source context directly', () => {
   const selectedSources = buildAnalysisQuickAskSelectedSourcesContext(ctx)
 
   assert.equal(request.conversation_id, 'agent-1')
+  assert.equal(request.model_profile_id, 'system-glm')
   assert.equal(request.history_id, 'history-1')
   assert.equal(request.require_ai, true)
   assert.deepEqual(request.analysis_snapshot.h3, { summary: { grid_count: 8 } })

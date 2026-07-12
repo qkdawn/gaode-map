@@ -5,10 +5,12 @@ import json
 from typing import Any, AsyncIterator, Dict, Tuple
 
 import httpx
+from fastapi import HTTPException
 
 from .context_ask_compaction import as_text, compact_items, compact_value, merge_unique
 from .context_ask_datasets import build_scoped_dataset_context
 from .context_ask_prompts import CONTEXT_ASK_FAST_SYSTEM_PROMPT, CONTEXT_ASK_SYSTEM_PROMPT
+from .model_profiles import resolve_model_runtime
 from .providers.client import get_llm_provider_client, is_llm_enabled
 from .schemas import AgentContextAskRequest, AgentContextAskResponse, ContextAskTarget
 from .selected_sources import (
@@ -167,6 +169,23 @@ def _ai_failure_or_fallback(
     return _fallback_answer(question, target, warning)
 
 
+def _client_for_request(payload: AgentContextAskRequest) -> tuple[Any | None, str]:
+    """Honor an explicit model selection without changing legacy callers."""
+
+    profile_id = as_text(payload.model_profile_id)
+    if not profile_id:
+        if not is_llm_enabled():
+            return None, "AI 未启用，无法回答。"
+        client = get_llm_provider_client()
+        return (client, "") if client else (None, "AI provider 未配置，无法回答。")
+    try:
+        _, runtime = resolve_model_runtime(profile_id)
+    except HTTPException as exc:
+        return None, str(exc.detail or "所选模型不可用")
+    client = get_llm_provider_client(runtime=runtime)
+    return (client, "") if client else (None, "所选模型 Provider 未配置，无法回答。")
+
+
 def _response_support(target: ContextAskTarget, scoped_dataset_context: Dict[str, Any]) -> Tuple[list[Any], list[Any], list[str]]:
     scoped_evidence = list(scoped_dataset_context.get("evidence_nodes") or [])
     scoped_citations = list(scoped_dataset_context.get("citations") or [])
@@ -199,12 +218,9 @@ async def stream_context_ask(payload: AgentContextAskRequest, *, tool_warning: s
     target = payload.target
     if not as_text(target.title):
         target.title = "当前上下文"
-    if not is_llm_enabled():
-        yield "error", {"error": "ai_unavailable", "message": "AI 未启用，无法回答。"}
-        return
-    client = get_llm_provider_client()
+    client, client_error = _client_for_request(payload)
     if not client:
-        yield "error", {"error": "ai_unavailable", "message": "AI provider 未配置，无法回答。"}
+        yield "error", {"error": "ai_unavailable", "message": client_error}
         return
 
     scoped_dataset_context = build_scoped_dataset_context(payload)
@@ -262,21 +278,12 @@ async def answer_context_ask(payload: AgentContextAskRequest, *, tool_warning: s
 
     require_ai = bool(payload.require_ai)
 
-    if not is_llm_enabled():
-        return _ai_failure_or_fallback(
-            require_ai=require_ai,
-            error="ai_unavailable",
-            warning="AI 未启用，无法回答。" if require_ai else "AI 未启用，已返回规则解释。",
-            question=question,
-            target=target,
-        )
-
-    client = get_llm_provider_client()
+    client, client_error = _client_for_request(payload)
     if not client:
         return _ai_failure_or_fallback(
             require_ai=require_ai,
             error="ai_unavailable",
-            warning="AI provider 未配置，无法回答。" if require_ai else "AI provider 未配置，已返回规则解释。",
+            warning=client_error if require_ai else f"{client_error}，已返回规则解释。",
             question=question,
             target=target,
         )

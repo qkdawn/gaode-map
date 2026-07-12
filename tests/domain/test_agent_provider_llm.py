@@ -485,6 +485,15 @@ def test_extract_json_object_accepts_llm_control_characters_in_strings():
     assert parsed["answer"] == "第一行\n第二行"
 
 
+def test_extract_json_object_repairs_unescaped_quotes_from_model_output():
+    parsed = extract_json_object(
+        '{"answer":"证据说明**"仅用于连通性验证"**，不能推断整体结论。", "evidence": []}'
+    )
+
+    assert parsed["answer"] == '证据说明**"仅用于连通性验证"**，不能推断整体结论。'
+    assert parsed["evidence"] == []
+
+
 def test_planner_digests_do_not_include_large_frontend_analysis_or_filters():
     huge_points = [{"lng": 112.98 + index * 0.001, "lat": 28.19, "name": f"poi-{index}"} for index in range(300)]
     snapshot = AnalysisSnapshot(

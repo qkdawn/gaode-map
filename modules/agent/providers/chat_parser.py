@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
+from json_repair import repair_json
+
 
 DEBUG_DIR = Path("runtime")
 
@@ -56,6 +58,13 @@ def _load_json_object(text: str) -> Dict[str, Any]:
             raise ValueError("llm_json_output_not_object")
         except Exception as exc:
             last_error = exc
+    try:
+        repaired = repair_json(text, return_objects=True)
+        if isinstance(repaired, dict):
+            return repaired
+        raise ValueError("llm_json_output_not_object")
+    except Exception as exc:
+        last_error = exc
     if last_error:
         if isinstance(last_error, json.JSONDecodeError):
             raise LlmJsonParseError(last_error, text) from last_error

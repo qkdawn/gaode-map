@@ -29,6 +29,7 @@ export function buildAnalysisQuickAskRequest(ctx = {}, question = '') {
   return {
     conversation_id: ctx.getActiveAgentSessionId ? ctx.getActiveAgentSessionId() : asText(ctx.activeAgentSessionId),
     history_id: asText(ctx.getCurrentAgentHistoryId && ctx.getCurrentAgentHistoryId()),
+    model_profile_id: asText(ctx.agentSelectedModelProfileId),
     question: asText(question),
     analysis_snapshot: buildAnalysisQuickAskSnapshot(ctx),
     target,

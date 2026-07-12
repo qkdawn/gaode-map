@@ -253,6 +253,7 @@ class AgentContextAskRequest(BaseModel):
 
     conversation_id: str = ""
     history_id: str = ""
+    model_profile_id: str = ""
     question: str = ""
     analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
     target: ContextAskTarget = Field(default_factory=ContextAskTarget)
