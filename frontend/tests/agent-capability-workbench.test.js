@@ -1053,6 +1053,35 @@ test('Stage 1 repair loop exposes autonomous attempts without hiding external ga
   assert.equal(ctx.getStage1RepairAttempts()[0].status, 'passed')
 })
 
+test('Stage 1 spatial object registry exposes map-binding availability without mutable geometry', () => {
+  const ctx = createContext({
+    agentPanelPayloads: {
+      stage1_spatial_object_registry: {
+        status: 'partial',
+        input_count: 3,
+        accepted_count: 2,
+        rejected_count: 1,
+        object_type_counts: { building: 1, road_segment: 1 },
+        binding_capabilities: { space_decisions: true, movement_routes: false },
+        availability_message: '已建立部分权威对象目录；尚无可用于动线绑定的线要素。',
+        diagnostics: [{ index: 2, code: 'invalid_spatial_object', message: '缺少有效 GeoJSON 几何。' }],
+      },
+    },
+  })
+
+  assert.equal(ctx.getStage1SpatialObjectRegistryStatusLabel(), '部分空间对象可用；绑定能力存在缺口')
+  assert.equal(ctx.getStage1SpatialObjectRegistryTypeSummary(), 'building 1 · road segment 1')
+  const registry = ctx.getStage1SpatialObjectRegistry()
+  registry.status = 'ready'
+  registry.diagnostics[0].message = 'changed'
+  assert.equal(ctx.getStage1SpatialObjectRegistry().status, 'partial')
+  assert.equal(ctx.getStage1SpatialObjectRegistry().diagnostics[0].message, '缺少有效 GeoJSON 几何。')
+
+  ctx.agentPanelPayloads.stage1_spatial_object_registry.status = 'unavailable'
+  assert.equal(ctx.getStage1SpatialObjectRegistryStatusLabel(), '缺少可定位的权威空间对象')
+})
+
+
 test('Stage 1 matrix contract repair exposes the single autonomous attempt', () => {
   const ctx = createContext({
     agentPanelPayloads: {
@@ -1122,6 +1151,10 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /getStage1QualityGate\(\)/)
   assert.match(main, /Stage 1 Quality Gate/)
   assert.match(main, /Autonomous Quality Repair/)
+  assert.match(main, /Authoritative Spatial Objects/)
+  assert.match(main, /getStage1SpatialObjectRegistry\(\)/)
+  assert.match(main, /getStage1SpatialObjectRegistryTypeSummary\(\)/)
+  assert.match(main, /被拒绝的输入记录/)
   assert.match(main, /Matrix Contract Repair/)
   assert.match(main, /getStage1SpatialMatrixRepair\(\)/)
   assert.match(main, /getStage1RepairAttempts\(\)/)

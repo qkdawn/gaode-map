@@ -262,6 +262,24 @@
                                     <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
                                 </div>
                             </header>
+                            <section v-if="getStage1SpatialObjectRegistry()" class="agent-spatial-object-registry" :class="getStage1SpatialObjectRegistry().status" aria-label="权威空间对象目录诊断">
+                                <div class="agent-spatial-object-registry-head">
+                                    <div><span>Authoritative Spatial Objects</span><strong>{{ getStage1SpatialObjectRegistryStatusLabel() }}</strong></div>
+                                    <small>{{ getStage1SpatialObjectRegistry().accepted_count || 0 }} / {{ getStage1SpatialObjectRegistry().input_count || 0 }} 条可用 · {{ getStage1SpatialObjectRegistry().rejected_count || 0 }} 条拒绝</small>
+                                </div>
+                                <div class="agent-spatial-object-capabilities">
+                                    <span :class="{ available: getStage1SpatialObjectRegistry().binding_capabilities?.space_decisions, unavailable: !getStage1SpatialObjectRegistry().binding_capabilities?.space_decisions }">空间决策 {{ getStage1SpatialObjectRegistry().binding_capabilities?.space_decisions ? '可绑定' : '不可绑定' }}</span>
+                                    <span :class="{ available: getStage1SpatialObjectRegistry().binding_capabilities?.movement_routes, unavailable: !getStage1SpatialObjectRegistry().binding_capabilities?.movement_routes }">动线 {{ getStage1SpatialObjectRegistry().binding_capabilities?.movement_routes ? '可绑定' : '不可绑定' }}</span>
+                                </div>
+                                <p>{{ getStage1SpatialObjectRegistry().availability_message }}</p>
+                                <small class="agent-spatial-object-type-summary">对象类型：{{ getStage1SpatialObjectRegistryTypeSummary() }}</small>
+                                <details v-if="getStage1SpatialObjectRegistry().diagnostics?.length" class="agent-spatial-object-diagnostics">
+                                    <summary>查看 {{ getStage1SpatialObjectRegistry().diagnostics.length }} 条被拒绝的输入记录</summary>
+                                    <article v-for="item in getStage1SpatialObjectRegistry().diagnostics" :key="`${item.index}-${item.code}`">
+                                        <span>记录 {{ (item.index || 0) + 1 }}</span><p>{{ item.message }}</p>
+                                    </article>
+                                </details>
+                            </section>
                             <div v-if="getStage1SpatialMatrixRepair()" class="agent-stage1-repair-loop matrix-contract" :class="getStage1SpatialMatrixRepair().status">
                                 <div class="agent-stage1-repair-head">
                                     <div><span>Matrix Contract Repair</span><strong>{{ getStage1SpatialMatrixRepairStatusLabel() }}</strong></div>

@@ -195,6 +195,16 @@ def build_stage1_output_artifacts(
             evidence_refs=evidence_ids,
         )
     matrix_dependencies = ["stage1-strategy-options", *workpack_ids]
+    if "spatial_object_registry" in package:
+        add(
+            "stage1-spatial-object-registry",
+            "diagnostic_report",
+            "权威空间对象目录诊断",
+            "spatial_object_registry.json",
+            package["spatial_object_registry"],
+            input_artifact_ids,
+        )
+        matrix_dependencies.append("stage1-spatial-object-registry")
     matrix_repair = package.get("spatial_matrix_repair")
     if isinstance(matrix_repair, dict):
         add(
@@ -227,6 +237,7 @@ def build_stage1_output_artifacts(
         "stage1-strategy-options",
         "stage1-decision-matrix",
         "stage1-spatial-matrix-repair",
+        "stage1-spatial-object-registry",
         *workpack_ids,
     }
     audited_artifact_ids = [

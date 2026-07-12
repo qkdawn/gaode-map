@@ -993,6 +993,27 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1QualityAudit() {
       return (this.agentPanelPayloads || {}).stage1_quality_audit || null
     },
+    getStage1SpatialObjectRegistry() {
+      const registry = (this.agentPanelPayloads || {}).stage1_spatial_object_registry
+      return registry && typeof registry === 'object' ? clonePayloadValue(registry) : null
+    },
+    getStage1SpatialObjectRegistryStatusLabel() {
+      const labels = {
+        ready: '权威空间对象目录可用于地图绑定',
+        partial: '部分空间对象可用；绑定能力存在缺口',
+        unavailable: '缺少可定位的权威空间对象',
+      }
+      return labels[this.getStage1SpatialObjectRegistry()?.status] || '尚未核对权威空间对象目录'
+    },
+    getStage1SpatialObjectRegistryTypeSummary() {
+      const counts = this.getStage1SpatialObjectRegistry()?.object_type_counts
+      if (!counts || typeof counts !== 'object') return '尚无已接受对象'
+      const summary = Object.entries(counts)
+        .filter(([objectType, count]) => text(objectType) && Number.isFinite(Number(count)) && Number(count) > 0)
+        .map(([objectType, count]) => `${text(objectType).replaceAll('_', ' ')} ${Number(count)}`)
+        .join(' · ')
+      return summary || '尚无已接受对象'
+    },
     getStage1SpatialMatrixRepair() {
       const repair = (this.agentPanelPayloads || {}).stage1_spatial_matrix_repair
       return repair && typeof repair === 'object' ? clonePayloadValue(repair) : null

@@ -96,38 +96,119 @@ def is_valid_spatial_feature(value: Any) -> bool:
     return _normalized_feature(value) is not None
 
 
+def _registry_entry(
+    value: Any,
+    *,
+    seen_ids: set[str],
+) -> tuple[dict[str, Any] | None, str]:
+    if not isinstance(value, dict):
+        return None, "空间对象不是可解析的对象记录。"
+    object_id = _text(value.get("spatial_object_id"))
+    object_type = _text(value.get("object_type"))
+    source_ref = _text(value.get("source_ref"))
+    source_locator = _text(value.get("source_locator"))
+    feature = _normalized_feature(value.get("feature"))
+    if not object_id:
+        return None, "缺少稳定 spatial_object_id，不能作为权威地图对象。"
+    if object_id in seen_ids:
+        return None, f"spatial_object_id '{object_id}' 重复，已拒绝歧义对象。"
+    if not object_type:
+        return None, f"空间对象 '{object_id}' 缺少 object_type。"
+    if not source_ref or not source_locator:
+        return None, f"空间对象 '{object_id}' 缺少来源或来源定位，不能作为权威对象。"
+    if feature is None:
+        return None, f"空间对象 '{object_id}' 缺少有效 GeoJSON 几何。"
+    return {
+        "spatial_object_id": object_id,
+        "object_type": object_type,
+        "title": _text(value.get("title")) or object_id,
+        "source_ref": source_ref,
+        "source_locator": source_locator,
+        "feature": feature,
+    }, ""
+
+
+def assess_spatial_object_registry(snapshot: AnalysisSnapshot) -> dict[str, Any]:
+    """Compile the authoritative map-object catalog and expose every rejected input.
+
+    Geometry remains server-owned.  The returned assessment is deliberately about
+    catalog readiness rather than pretending that a generic project must contain a
+    fixed set of buildings or courtyards.
+    """
+
+    registry: dict[str, dict[str, Any]] = {}
+    diagnostics: list[dict[str, str | int]] = []
+    seen_ids: set[str] = set()
+    raw_items = list(snapshot.spatial_objects or [])
+    for index, item in enumerate(raw_items):
+        entry, reason = _registry_entry(item, seen_ids=seen_ids)
+        if entry is None:
+            diagnostics.append(
+                {
+                    "index": index,
+                    "code": "invalid_spatial_object",
+                    "message": reason,
+                }
+            )
+            continue
+        object_id = str(entry["spatial_object_id"])
+        seen_ids.add(object_id)
+        registry[object_id] = entry
+
+    type_counts: dict[str, int] = {}
+    geometry_counts: dict[str, int] = {}
+    for entry in registry.values():
+        object_type = _text(entry.get("object_type"))
+        geometry_type = _text(
+            ((entry.get("feature") or {}).get("geometry") or {}).get("type")
+        )
+        type_counts[object_type] = type_counts.get(object_type, 0) + 1
+        geometry_counts[geometry_type] = geometry_counts.get(geometry_type, 0) + 1
+
+    has_routes = any(
+        _text(((entry.get("feature") or {}).get("geometry") or {}).get("type"))
+        in {"LineString", "MultiLineString"}
+        for entry in registry.values()
+    )
+    if not registry:
+        status = "unavailable"
+        availability_message = "未提供带稳定 ID、可定位来源和有效几何的权威空间对象；地图绑定将保持不可用。"
+    elif diagnostics or not has_routes:
+        status = "partial"
+        gaps = []
+        if diagnostics:
+            gaps.append("存在被拒绝的对象记录")
+        if not has_routes:
+            gaps.append("尚无可用于动线绑定的线要素")
+        availability_message = f"已建立部分权威对象目录；{'；'.join(gaps)}。"
+    else:
+        status = "ready"
+        availability_message = "权威空间对象目录已就绪，可用于空间决策和动线地图绑定。"
+
+    return {
+        "status": status,
+        "input_count": len(raw_items),
+        "accepted_count": len(registry),
+        "rejected_count": len(diagnostics),
+        "object_type_counts": dict(sorted(type_counts.items())),
+        "geometry_type_counts": dict(sorted(geometry_counts.items())),
+        "binding_capabilities": {
+            "space_decisions": bool(registry),
+            "movement_routes": has_routes,
+        },
+        "availability_message": availability_message,
+        "diagnostics": diagnostics,
+        "catalog": spatial_object_catalog(registry),
+        "registry": registry,
+    }
+
+
 def build_spatial_object_registry(
     snapshot: AnalysisSnapshot,
 ) -> dict[str, dict[str, Any]]:
     """Keep only frontend-supplied, stable objects with valid authoritative geometry."""
 
-    registry: dict[str, dict[str, Any]] = {}
-    for item in snapshot.spatial_objects:
-        if not isinstance(item, dict):
-            continue
-        object_id = _text(item.get("spatial_object_id"))
-        object_type = _text(item.get("object_type"))
-        source_ref = _text(item.get("source_ref"))
-        source_locator = _text(item.get("source_locator"))
-        feature = _normalized_feature(item.get("feature"))
-        if (
-            not object_id
-            or object_id in registry
-            or not object_type
-            or not source_ref
-            or not source_locator
-            or feature is None
-        ):
-            continue
-        registry[object_id] = {
-            "spatial_object_id": object_id,
-            "object_type": object_type,
-            "title": _text(item.get("title")) or object_id,
-            "source_ref": source_ref,
-            "source_locator": source_locator,
-            "feature": feature,
-        }
-    return registry
+    return assess_spatial_object_registry(snapshot)["registry"]
 
 
 def spatial_object_catalog(

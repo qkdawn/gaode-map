@@ -577,6 +577,7 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
         "hard_constraint_screening.json",
         "quality_audit.json",
         "strategy_options.json",
+        "spatial_object_registry.json",
         "decision_matrix.json",
         "stage1_report.md",
         "evidence_appendix.md",
@@ -837,6 +838,24 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
             "source_ref": "analysis_snapshot.road.features",
             "source_locator": "analysis_snapshot.road.features/south-entry",
         }
+    ]
+    assert all("feature" not in item and "coordinates" not in item for item in catalog)
+    registry_panel = response.output.panel_payloads["stage1_spatial_object_registry"]
+    assert registry_panel["status"] == "ready"
+    assert registry_panel["binding_capabilities"] == {
+        "space_decisions": True,
+        "movement_routes": True,
+    }
+    assert registry_panel["catalog"] == catalog
+    assert "registry" not in registry_panel
+    assert all("feature" not in item and "coordinates" not in item for item in registry_panel["catalog"])
+    run_artifacts = {
+        item["artifact_id"]: item
+        for item in response.output.panel_payloads["capability_run"]["output_artifact_refs"]
+    }
+    assert run_artifacts["stage1-spatial-object-registry"]["filename"] == "spatial_object_registry.json"
+    assert "stage1-spatial-object-registry" in run_artifacts["stage1-decision-matrix"][
+        "source_artifact_refs"
     ]
     binding = response.output.panel_payloads["stage1_spatial_matrix"][
         "space_decisions"

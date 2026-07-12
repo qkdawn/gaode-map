@@ -29,6 +29,7 @@ def _artifact_payloads(
         "stage1-quality-audit": panels.get("stage1_quality_audit"),
         "stage1-strategy-options": panels.get("stage1_strategy"),
         "stage1-decision-matrix": panels.get("stage1_spatial_matrix"),
+        "stage1-spatial-object-registry": panels.get("stage1_spatial_object_registry"),
         "stage1-report": deliverables.get("report_markdown") or response.output.answer,
         "stage1-evidence-appendix": deliverables.get("evidence_appendix_markdown"),
         "stage1-design-handoff": deliverables.get("design_handoff"),

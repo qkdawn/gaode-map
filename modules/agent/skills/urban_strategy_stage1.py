@@ -41,8 +41,7 @@ from ..stage1_spatial_matrix import (
     compile_spatial_programming_matrix,
 )
 from ..stage1_spatial_objects import (
-    build_spatial_object_registry,
-    spatial_object_catalog,
+    assess_spatial_object_registry,
 )
 from ..schemas import (
     AgentContextSummary,
@@ -296,6 +295,7 @@ def _base_panels(
         "stage1_hard_constraint_screening": package["hard_constraint_screening"],
         "stage1_strategy": package["strategy"],
         "stage1_spatial_matrix": package["spatial_matrix"],
+        "stage1_spatial_object_registry": package.get("spatial_object_registry"),
         "stage1_spatial_matrix_repair": package.get("spatial_matrix_repair"),
         "stage1_quality_audit": _audit_payload(audit),
     }
@@ -329,7 +329,26 @@ async def execute(
         resolved_inputs=resolved_inputs,
     )
     readiness = evaluate_readiness(payload)
-    spatial_object_registry = build_spatial_object_registry(payload.analysis_snapshot)
+    spatial_object_assessment = assess_spatial_object_registry(payload.analysis_snapshot)
+    spatial_object_registry = spatial_object_assessment["registry"]
+    spatial_object_registry_payload = {
+        key: value
+        for key, value in spatial_object_assessment.items()
+        if key != "registry"
+    }
+    run.record_stage(
+        "spatial-object-registry",
+        "核对权威空间对象目录",
+        status="completed" if spatial_object_registry else "waiting_for_user",
+        summary=(
+            f"接收 {spatial_object_registry_payload['input_count']} 条对象记录，"
+            f"接受 {spatial_object_registry_payload['accepted_count']} 条。"
+        ),
+        diagnostics=[
+            str(item.get("message") or "")
+            for item in spatial_object_registry_payload["diagnostics"]
+        ],
+    )
     if capability_id == "spatial-programming-matrix" and any(
         item.state == "resolved" for item in resolved_inputs.resolutions
     ):
@@ -391,6 +410,7 @@ async def execute(
                 ],
                 panel_payloads={
                     "stage1_readiness": readiness,
+                    "stage1_spatial_object_registry": spatial_object_registry_payload,
                     "capability_run": run_manifest.model_dump(mode="json"),
                 },
             ),
@@ -551,6 +571,7 @@ async def execute(
                     "stage1_conflict_register": conflict_register,
                     "stage1_provenance_binding": provenance.model_dump(mode="json"),
                     "stage1_evidence_verification": verification_payload,
+                    "stage1_spatial_object_registry": spatial_object_registry_payload,
                     "capability_run": run_manifest.model_dump(mode="json"),
                 },
             ),
@@ -686,9 +707,7 @@ async def execute(
             "workpacks": workpacks,
             "strategy": strategy,
             "hard_constraint_screening": hard_constraint_screening,
-            "authoritative_spatial_objects": spatial_object_catalog(
-                spatial_object_registry
-            ),
+            "authoritative_spatial_objects": spatial_object_registry_payload["catalog"],
         },
         emit=emit,
         phase="executing",
@@ -727,9 +746,7 @@ async def execute(
                 "strategy": strategy,
                 "hard_constraint_screening": hard_constraint_screening,
                 "allowed_evidence_ids": sorted(evidence_ids),
-                "authoritative_spatial_objects": spatial_object_catalog(
-                    spatial_object_registry
-                ),
+                "authoritative_spatial_objects": spatial_object_registry_payload["catalog"],
             },
             emit=emit,
             phase="executing",
@@ -890,6 +907,7 @@ async def execute(
         "hard_constraint_screening": hard_constraint_screening,
         "strategy": strategy,
         "spatial_matrix": spatial_matrix,
+        "spatial_object_registry": spatial_object_registry_payload,
     }
     if matrix_contract_repair is not None:
         package["spatial_matrix_repair"] = matrix_contract_repair
@@ -930,9 +948,7 @@ async def execute(
                     ],
                     "stage1_package": package,
                     "allowed_evidence_ids": sorted(evidence_ids),
-                    "authoritative_spatial_objects": spatial_object_catalog(
-                        spatial_object_registry
-                    ),
+                    "authoritative_spatial_objects": spatial_object_registry_payload["catalog"],
                 },
                 emit=emit,
                 phase="executing",
