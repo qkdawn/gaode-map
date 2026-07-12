@@ -319,6 +319,7 @@ def test_stage1_invalid_spatial_matrix_fails_with_contract_diagnostics(monkeypat
         valid_workpacks(),
         valid_strategy(),
         {"matrix_version": "2.0"},
+        {"matrix_version": "2.0"},
     ]
     calls = []
 
@@ -334,7 +335,14 @@ def test_stage1_invalid_spatial_matrix_fails_with_contract_diagnostics(monkeypat
     response = asyncio.run(execute(ready_payload(), runtime=runtime, profile=profile))
 
     assert response.status == "failed"
-    assert calls[-1] == "stage1-spatial-matrix-model"
+    assert calls[-2:] == [
+        "stage1-spatial-matrix-model",
+        "stage1-spatial-matrix-contract-repair-model",
+    ]
+    repair = response.output.panel_payloads["stage1_spatial_matrix_repair"]
+    assert repair["status"] == "failed"
+    assert repair["attempts"][0]["initial_diagnostics"]
+    assert repair["attempts"][0]["final_diagnostics"]
     diagnostic = response.output.panel_payloads["stage1_spatial_matrix_diagnostic"]
     assert diagnostic["status"] == "failed"
     assert any("spatial_hierarchy" in item for item in diagnostic["diagnostics"])
@@ -342,6 +350,58 @@ def test_stage1_invalid_spatial_matrix_fails_with_contract_diagnostics(monkeypat
     assert run["status"] == "failed"
     assert run["current_stage"] == "spatial-decision-matrix"
     assert run["stage_records"][-1]["status"] == "failed"
+
+
+def test_stage1_repairs_spatial_matrix_contract_once_before_audit(monkeypatch):
+    runtime, profile = runtime_and_profile()
+    responses = [
+        valid_evidence(),
+        valid_workpacks(),
+        valid_strategy(),
+        {"matrix_version": "2.0"},
+        valid_matrix(),
+        {"answer": "# 契约修复后报告", "sources": ["项目资料 p.12"]},
+    ]
+    calls = []
+
+    class FakeClient:
+        async def chat_json(self, **kwargs):
+            calls.append(kwargs)
+            return responses[len(calls) - 1]
+
+    monkeypatch.setattr(
+        stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
+    )
+
+    response = asyncio.run(execute(ready_payload(), runtime=runtime, profile=profile))
+
+    assert response.status == "answered"
+    assert [item["reasoning_id"] for item in calls][-3:] == [
+        "stage1-spatial-matrix-model",
+        "stage1-spatial-matrix-contract-repair-model",
+        "stage1-report-model",
+    ]
+    repair_call = calls[-2]
+    assert repair_call["user_payload"]["contract_diagnostics"]
+    assert repair_call["user_payload"]["allowed_evidence_ids"] == ["evidence-1"]
+    repair = response.output.panel_payloads["stage1_spatial_matrix_repair"]
+    assert repair["status"] == "passed"
+    assert repair["attempts"][0]["initial_diagnostics"]
+    assert repair["attempts"][0]["final_diagnostics"] == []
+    run = response.output.panel_payloads["capability_run"]
+    assert any(
+        item["stage_id"] == "spatial-decision-matrix-repair"
+        for item in run["stage_records"]
+    )
+    artifacts = {
+        item["artifact_id"]: item for item in run["output_artifact_refs"]
+    }
+    assert artifacts["stage1-spatial-matrix-repair"]["filename"] == (
+        "spatial_matrix_repair.json"
+    )
+    assert "stage1-spatial-matrix-repair" in artifacts["stage1-decision-matrix"][
+        "source_artifact_refs"
+    ]
 
 
 def test_stage1_quality_failure_stops_before_report_model(monkeypatch):

@@ -993,6 +993,16 @@ export function createAgentCapabilityWorkbenchMethods() {
     getStage1QualityAudit() {
       return (this.agentPanelPayloads || {}).stage1_quality_audit || null
     },
+    getStage1SpatialMatrixRepair() {
+      const repair = (this.agentPanelPayloads || {}).stage1_spatial_matrix_repair
+      return repair && typeof repair === 'object' ? clonePayloadValue(repair) : null
+    },
+    getStage1SpatialMatrixRepairStatusLabel() {
+      const repair = this.getStage1SpatialMatrixRepair()
+      if (repair?.status === 'passed') return '矩阵契约已由 Agent 自主修复'
+      if (repair?.status === 'failed') return '一次自主修复后仍未通过契约'
+      return '未触发矩阵契约修复'
+    },
     getStage1RepairPlan() {
       const plan = (this.agentPanelPayloads || {}).stage1_repair_plan
       return plan && typeof plan === 'object' ? clonePayloadValue(plan) : null

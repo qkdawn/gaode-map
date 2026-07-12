@@ -262,6 +262,17 @@
                                     <span>{{ getStage1SpaceDecisionCount() }} 个空间决策</span>
                                 </div>
                             </header>
+                            <div v-if="getStage1SpatialMatrixRepair()" class="agent-stage1-repair-loop matrix-contract" :class="getStage1SpatialMatrixRepair().status">
+                                <div class="agent-stage1-repair-head">
+                                    <div><span>Matrix Contract Repair</span><strong>{{ getStage1SpatialMatrixRepairStatusLabel() }}</strong></div>
+                                    <em>最多 1 次</em>
+                                </div>
+                                <article v-for="attempt in getStage1SpatialMatrixRepair().attempts || []" :key="attempt.attempt" class="agent-stage1-repair-attempt" :class="attempt.status">
+                                    <div><span>第 {{ attempt.attempt }} 次</span><strong>{{ attempt.status === 'passed' ? '严格编译通过' : '严格编译失败' }}</strong></div>
+                                    <small>首次发现 {{ (attempt.initial_diagnostics || []).length }} 项契约问题</small>
+                                    <p v-if="attempt.final_diagnostics?.length">{{ attempt.final_diagnostics.join('；') }}</p>
+                                </article>
+                            </div>
                             <div v-if="getStage1QualityGate()" class="agent-stage1-quality-gate" :class="getStage1QualityGate().status">
                                 <div class="agent-stage1-quality-gate-head">
                                     <div>

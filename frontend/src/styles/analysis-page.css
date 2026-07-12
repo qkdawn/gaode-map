@@ -14120,6 +14120,7 @@ body.agent-ppt-source-menu-open {
 @media (max-width: 600px) { .agent-spatial-map-controls { grid-template-columns: 1fr; } .agent-spatial-map-legend > button { margin-left: 0; } }
 .agent-stage1-repair-loop { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 7px; background: #f8fafc; }
 .agent-stage1-repair-loop.passed { border-color: #86efac; background: #f0fdf4; }
+.agent-stage1-repair-loop.matrix-contract { border-left-width: 3px; }
 .agent-stage1-repair-loop.incomplete, .agent-stage1-repair-loop.failed, .agent-stage1-repair-loop.external_input_required { border-color: #fdba74; background: #fff7ed; }
 .agent-stage1-repair-head, .agent-stage1-repair-attempt > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .agent-stage1-repair-head > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }

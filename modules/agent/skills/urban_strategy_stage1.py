@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable
 from modules.documents import ProjectEvidenceDossier, build_project_evidence_dossier
 
 from ..capability_inputs import resolve_capability_inputs
+from ..capability_runs import content_digest
 from ..evidence_verification import verify_evidence_ledger
 from ..stage1_deliverables import (
     build_design_handoff,
@@ -295,6 +296,7 @@ def _base_panels(
         "stage1_hard_constraint_screening": package["hard_constraint_screening"],
         "stage1_strategy": package["strategy"],
         "stage1_spatial_matrix": package["spatial_matrix"],
+        "stage1_spatial_matrix_repair": package.get("spatial_matrix_repair"),
         "stage1_quality_audit": _audit_payload(audit),
     }
 
@@ -693,57 +695,140 @@ async def execute(
         title="生成空间功能策划矩阵",
         reasoning_id="stage1-spatial-matrix-model",
     )
+    matrix_contract_repair: dict[str, Any] | None = None
     try:
         spatial_matrix = compile_spatial_programming_matrix(
             _mapping(matrix_result), spatial_object_registry
         )
-    except SpatialMatrixContractError as error:
-        diagnostics = [
-            "模型输出的空间功能策划矩阵未通过结构契约校验。",
-            *error.diagnostics,
-        ]
+    except SpatialMatrixContractError as initial_error:
+        initial_diagnostics = list(initial_error.diagnostics)
         await _emit_phase(
             emit,
-            phase_id="stage1-spatial-matrix",
-            title="形成空间功能决策矩阵",
-            detail="模型输出缺少必需字段或层级关系无效，已停止后续报告生成。",
-            state="failed",
+            phase_id="stage1-spatial-matrix-repair",
+            title="自主修复空间矩阵契约",
+            detail=(
+                f"首次输出存在 {len(initial_diagnostics)} 项结构问题；"
+                "在不新增证据、空间对象或几何的前提下执行一次契约修复。"
+            ),
+        )
+        repaired_matrix_result = await client.chat_json(
+            system_prompt=(
+                "你是空间功能决策矩阵契约修复器。只输出一个完整 spatial matrix JSON，"
+                "必须包含 matrix_version、positioning_option_id、spatial_hierarchy、space_decisions、"
+                "movement_routes、portfolio_checks。只修复 contract_diagnostics 指出的结构、枚举、"
+                "层级和引用错误；不得修改定位策略，不得新增事实、指标、证据 ID、空间对象 ID、"
+                "坐标或几何，不得删除硬约束、冲突、假设或验证动作。evidence_refs 只能来自 "
+                "allowed_evidence_ids；map_binding 只能选择 authoritative_spatial_objects 中的稳定 ID，"
+                "无法精确绑定时必须返回 unavailable。必须保留 visitor、resident、service、fire 四类流线。"
+            ),
+            user_payload={
+                "contract_diagnostics": initial_diagnostics,
+                "invalid_spatial_matrix": _mapping(matrix_result),
+                "strategy": strategy,
+                "hard_constraint_screening": hard_constraint_screening,
+                "allowed_evidence_ids": sorted(evidence_ids),
+                "authoritative_spatial_objects": spatial_object_catalog(
+                    spatial_object_registry
+                ),
+            },
+            emit=emit,
+            phase="executing",
+            title="修复空间矩阵结构契约",
+            reasoning_id="stage1-spatial-matrix-contract-repair-model",
+        )
+        try:
+            spatial_matrix = compile_spatial_programming_matrix(
+                _mapping(repaired_matrix_result), spatial_object_registry
+            )
+        except SpatialMatrixContractError as final_error:
+            final_diagnostics = list(final_error.diagnostics)
+            matrix_contract_repair = {
+                "status": "failed",
+                "attempt_limit": 1,
+                "attempts": [
+                    {
+                        "attempt": 1,
+                        "status": "failed",
+                        "initial_diagnostics": initial_diagnostics,
+                        "final_diagnostics": final_diagnostics,
+                        "input_digest": content_digest(matrix_result),
+                        "output_digest": content_digest(repaired_matrix_result),
+                    }
+                ],
+            }
+            diagnostics = [
+                "模型输出的空间功能策划矩阵未通过结构契约校验，系统已自动修复一次。",
+                *final_diagnostics,
+            ]
+            await _emit_phase(
+                emit,
+                phase_id="stage1-spatial-matrix-repair",
+                title="自主修复空间矩阵契约",
+                detail="一次受约束修复后仍不满足契约，已停止后续报告生成。",
+                state="failed",
+            )
+            run.record_stage(
+                "spatial-decision-matrix-repair",
+                "自主修复空间矩阵契约",
+                status="failed",
+                summary="一次受约束修复后仍未通过空间矩阵契约。",
+                diagnostics=diagnostics,
+            )
+            run_manifest = run.finish(
+                "failed",
+                current_stage="spatial-decision-matrix",
+                diagnostics=diagnostics,
+            )
+            return AgentTurnResponse(
+                status="failed",
+                stage="failed",
+                output=AgentTurnOutput(
+                    answer="空间功能策划矩阵自动修复后仍未满足结构契约，已停止后续报告生成。",
+                    panel_payloads={
+                        "stage1_spatial_matrix_repair": matrix_contract_repair,
+                        "stage1_spatial_matrix_diagnostic": {
+                            "status": "failed",
+                            "diagnostics": diagnostics,
+                            "retry_action": "重新运行城市区域策划第一阶段",
+                        },
+                        "capability_run": run_manifest.model_dump(mode="json"),
+                    },
+                ),
+                diagnostics=AgentTurnDiagnostics(
+                    audit_issues=diagnostics,
+                    research_notes=[
+                        "空间矩阵契约自动修复失败，未执行来源审计、质量审计或报告生成。"
+                    ],
+                ),
+                context_summary=AgentContextSummary(),
+                plan=AgentPlanEnvelope(),
+                effective_execution_profile=profile,
+            )
+        matrix_contract_repair = {
+            "status": "passed",
+            "attempt_limit": 1,
+            "attempts": [
+                {
+                    "attempt": 1,
+                    "status": "passed",
+                    "initial_diagnostics": initial_diagnostics,
+                    "final_diagnostics": [],
+                    "input_digest": content_digest(matrix_result),
+                    "output_digest": content_digest(repaired_matrix_result),
+                }
+            ],
+        }
+        await _emit_phase(
+            emit,
+            phase_id="stage1-spatial-matrix-repair",
+            title="自主修复空间矩阵契约",
+            detail="空间矩阵已通过一次受约束修复满足现行单一契约。",
+            state="completed",
         )
         run.record_stage(
-            "spatial-decision-matrix",
-            "形成空间功能决策矩阵",
-            status="failed",
-            summary="空间矩阵未通过结构契约校验。",
-            diagnostics=diagnostics,
-        )
-        run_manifest = run.finish(
-            "failed",
-            current_stage="spatial-decision-matrix",
-            diagnostics=diagnostics,
-        )
-        return AgentTurnResponse(
-            status="failed",
-            stage="failed",
-            output=AgentTurnOutput(
-                answer="空间功能策划矩阵生成失败：模型输出未满足系统—组团—单元及空间决策字段契约。请重新运行该能力。",
-                panel_payloads={
-                    "stage1_spatial_matrix_diagnostic": {
-                        "status": "failed",
-                        "diagnostics": diagnostics,
-                        "retry_action": "重新运行城市区域策划第一阶段",
-                    },
-                    "capability_run": run_manifest.model_dump(mode="json"),
-                },
-            ),
-            diagnostics=AgentTurnDiagnostics(
-                audit_issues=diagnostics,
-                research_notes=[
-                    "空间矩阵契约校验失败，未执行来源审计、质量审计或报告生成。"
-                ],
-            ),
-            context_summary=AgentContextSummary(),
-            plan=AgentPlanEnvelope(),
-            effective_execution_profile=profile,
+            "spatial-decision-matrix-repair",
+            "自主修复空间矩阵契约",
+            summary=f"修复 {len(initial_diagnostics)} 项结构问题并重新通过严格编译。",
         )
     run.record_stage(
         "spatial-decision-matrix",
@@ -806,6 +891,8 @@ async def execute(
         "strategy": strategy,
         "spatial_matrix": spatial_matrix,
     }
+    if matrix_contract_repair is not None:
+        package["spatial_matrix_repair"] = matrix_contract_repair
 
     audit = audit_stage1_package(package)
     repair_plan = build_stage1_repair_plan(audit)

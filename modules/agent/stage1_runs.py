@@ -194,6 +194,22 @@ def build_stage1_output_artifacts(
             ],
             evidence_refs=evidence_ids,
         )
+    matrix_dependencies = ["stage1-strategy-options", *workpack_ids]
+    matrix_repair = package.get("spatial_matrix_repair")
+    if isinstance(matrix_repair, dict):
+        add(
+            "stage1-spatial-matrix-repair",
+            "diagnostic_report",
+            "空间矩阵契约自主修复记录",
+            "spatial_matrix_repair.json",
+            matrix_repair,
+            matrix_dependencies,
+            evidence_refs=evidence_ids,
+        )
+        matrix_dependencies = [
+            *matrix_dependencies,
+            "stage1-spatial-matrix-repair",
+        ]
     if "spatial_matrix" in package:
         add(
             "stage1-decision-matrix",
@@ -201,7 +217,7 @@ def build_stage1_output_artifacts(
             "空间功能策划决策矩阵",
             "decision_matrix.json",
             package["spatial_matrix"],
-            ["stage1-strategy-options", *workpack_ids],
+            matrix_dependencies,
             evidence_refs=evidence_ids,
         )
     auditable_ids = {
@@ -210,6 +226,7 @@ def build_stage1_output_artifacts(
         "stage1-hard-constraint-screening",
         "stage1-strategy-options",
         "stage1-decision-matrix",
+        "stage1-spatial-matrix-repair",
         *workpack_ids,
     }
     audited_artifact_ids = [
