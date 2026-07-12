@@ -11,6 +11,7 @@ from modules.agent.providers.chat_parser import extract_json_object
 from modules.agent.providers.llm_provider import (
     _invoke_json_role,
     _stream_chat_completion,
+    _with_provider_thinking,
     generate_answer_output_with_llm,
     run_gate_with_llm,
 )
@@ -144,6 +145,16 @@ def test_stream_chat_completion_forwards_content_deltas(monkeypatch):
 
     assert payload["choices"][0]["message"]["content"] == "快速答案"
     assert emitted == [("content_delta", {"delta": "快速答案"})]
+
+
+def test_provider_thinking_uses_the_runtime_flag_not_global_configuration(monkeypatch):
+    monkeypatch.setattr(settings, "ai_thinking_enabled", True)
+
+    disabled = _with_provider_thinking({"model": "glm-5.2"}, enabled=False)
+    enabled = _with_provider_thinking({"model": "glm-5.2"}, enabled=True)
+
+    assert "thinking" not in disabled
+    assert enabled["thinking"] == {"type": "enabled"}
 
 
 def test_langgraph_react_deep_mode_disables_llm_timeout(monkeypatch):

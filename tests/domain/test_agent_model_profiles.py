@@ -77,6 +77,38 @@ def test_system_profile_cannot_be_changed_or_deleted(repo):
     assert delete_error.value.status_code == 403
 
 
+def test_glm_system_profile_is_exposed_and_resolves_its_own_runtime(repo, monkeypatch):
+    monkeypatch.setattr(profiles.settings, "ai_glm_enabled", True)
+    monkeypatch.setattr(profiles.settings, "ai_glm_base_url", "https://glm.example.test/v1/")
+    monkeypatch.setattr(profiles.settings, "ai_glm_api_key", "glm-secret")
+    monkeypatch.setattr(profiles.settings, "ai_glm_model", "glm-5.2-release")
+    monkeypatch.setattr(profiles.settings, "ai_glm_thinking_enabled", False)
+
+    glm = next(item for item in profiles.list_model_profiles() if item.id == profiles.SYSTEM_GLM_PROFILE_ID)
+    assert glm.display_name == "GLM-5.2"
+    assert glm.provider == "openai_compatible"
+    assert glm.base_url == "https://glm.example.test/v1"
+    assert glm.model == "glm-5.2-release"
+    assert glm.enabled is True
+    assert glm.has_api_key is True
+
+    _, runtime = profiles.resolve_model_runtime(profiles.SYSTEM_GLM_PROFILE_ID)
+    assert runtime.provider == "openai_compatible"
+    assert runtime.base_url == "https://glm.example.test/v1"
+    assert runtime.model == "glm-5.2-release"
+    assert runtime.thinking_enabled is False
+
+
+def test_glm_system_profile_cannot_be_changed_or_deleted(repo):
+    with pytest.raises(HTTPException) as update_error:
+        profiles.update_model_profile(profiles.SYSTEM_GLM_PROFILE_ID, profiles.AgentModelProfilePatch(enabled=False))
+    with pytest.raises(HTTPException) as delete_error:
+        profiles.delete_model_profile(profiles.SYSTEM_GLM_PROFILE_ID)
+
+    assert update_error.value.status_code == 403
+    assert delete_error.value.status_code == 403
+
+
 def test_model_connection_error_redacts_api_key_and_authorization(repo, monkeypatch):
     secret = "sk-test-secret-value"
 

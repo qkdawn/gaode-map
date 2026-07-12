@@ -109,10 +109,10 @@ async def generate_title_with_llm(
     return title[:24]
 
 
-def _with_provider_thinking(request_body: Dict[str, Any]) -> Dict[str, Any]:
+def _with_provider_thinking(request_body: Dict[str, Any], *, enabled: bool) -> Dict[str, Any]:
     body = dict(request_body or {})
     model = str(body.get("model") or settings.ai_model or "").strip()
-    if bool(settings.ai_thinking_enabled) and model != "deepseek-reasoner":
+    if enabled and model != "deepseek-reasoner":
         body["thinking"] = {"type": "enabled"}
     return body
 
@@ -171,7 +171,7 @@ async def _stream_chat_completion(
     enable_thinking: bool = True,
 ) -> Dict[str, Any]:
     base_body = {**request_body, "stream": True}
-    body = _with_provider_thinking(base_body) if enable_thinking else base_body
+    body = _with_provider_thinking(base_body, enabled=enable_thinking)
     response_id = ""
     finish_reason = ""
     content_parts: List[str] = []
@@ -317,7 +317,7 @@ async def _invoke_json_role(
                 enable_thinking=enable_thinking,
             )
         else:
-            body = _with_provider_thinking(request_body) if enable_thinking else request_body
+            body = _with_provider_thinking(request_body, enabled=enable_thinking)
             response = await client.post(f"{base_url}/chat/completions", headers=headers, json=body)
             if response.status_code >= 400:
                 detail = response.text[:800] if response.text else str(getattr(response, "reason_phrase", "LLM provider error"))

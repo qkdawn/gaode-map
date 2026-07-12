@@ -222,6 +222,31 @@ class Settings(BaseSettings):
         validation_alias="AI_MODEL",
         description="Agent 使用的模型名，例如 deepseek-v4-flash",
     )
+    ai_glm_enabled: bool = Field(
+        False,
+        validation_alias="GLM_ENABLED",
+        description="是否启用 .env 管理的 GLM 系统模型配置",
+    )
+    ai_glm_base_url: str = Field(
+        "",
+        validation_alias="GLM_BASE_URL",
+        description="GLM OpenAI-compatible API 基础地址",
+    )
+    ai_glm_api_key: str = Field(
+        "",
+        validation_alias="GLM_API_KEY",
+        description="GLM API Key",
+    )
+    ai_glm_model: str = Field(
+        "glm-5.2",
+        validation_alias="GLM_MODEL",
+        description="GLM 实际模型 ID，由 Provider 模型目录确定",
+    )
+    ai_glm_thinking_enabled: bool = Field(
+        False,
+        validation_alias="GLM_THINKING_ENABLED",
+        description="是否向 GLM 发送 Provider 支持的 thinking 请求参数",
+    )
     ai_model_config_secret: str = Field(
         "",
         validation_alias="AI_MODEL_CONFIG_SECRET",

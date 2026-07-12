@@ -16,6 +16,8 @@ from .providers.client import LLMRuntimeConfig, get_llm_provider_client
 
 ProviderName = Literal["deepseek", "openai_compatible"]
 SYSTEM_PROFILE_ID = "system-default"
+SYSTEM_GLM_PROFILE_ID = "system-glm"
+_SYSTEM_PROFILE_IDS = frozenset({SYSTEM_PROFILE_ID, SYSTEM_GLM_PROFILE_ID})
 
 
 class AgentModelProfileView(BaseModel):
@@ -140,6 +142,33 @@ def _system_view() -> AgentModelProfileView:
     )
 
 
+def _system_glm_view() -> AgentModelProfileView:
+    enabled = bool(
+        settings.ai_glm_enabled
+        and str(settings.ai_glm_base_url or "").strip()
+        and str(settings.ai_glm_api_key or "").strip()
+        and str(settings.ai_glm_model or "").strip()
+    )
+    return AgentModelProfileView(
+        id=SYSTEM_GLM_PROFILE_ID,
+        display_name="GLM-5.2",
+        source="system",
+        provider="openai_compatible",
+        base_url=str(settings.ai_glm_base_url or "").strip().rstrip("/"),
+        model=str(settings.ai_glm_model or "").strip(),
+        enabled=enabled,
+        is_default=False,
+        has_api_key=bool(str(settings.ai_glm_api_key or "").strip()),
+    )
+
+
+def _system_views() -> list[AgentModelProfileView]:
+    views = [_system_view()]
+    if settings.ai_glm_enabled:
+        views.append(_system_glm_view())
+    return views
+
+
 def _personal_view(row: dict[str, Any]) -> AgentModelProfileView:
     return AgentModelProfileView(
         id=str(row.get("id") or ""),
@@ -157,7 +186,7 @@ def _personal_view(row: dict[str, Any]) -> AgentModelProfileView:
 
 
 def list_model_profiles() -> list[AgentModelProfileView]:
-    return [_system_view(), *[_personal_view(row) for row in agent_model_profile_repo.list_records()]]
+    return [*_system_views(), *[_personal_view(row) for row in agent_model_profile_repo.list_records()]]
 
 
 def create_model_profile(payload: AgentModelProfileCreate) -> AgentModelProfileView:
@@ -175,7 +204,7 @@ def create_model_profile(payload: AgentModelProfileCreate) -> AgentModelProfileV
 
 
 def update_model_profile(profile_id: str, payload: AgentModelProfilePatch) -> AgentModelProfileView:
-    if profile_id == SYSTEM_PROFILE_ID:
+    if profile_id in _SYSTEM_PROFILE_IDS:
         raise HTTPException(status_code=403, detail="系统模型不可修改")
     existing = agent_model_profile_repo.get_record(profile_id)
     if existing is None:
@@ -196,7 +225,7 @@ def update_model_profile(profile_id: str, payload: AgentModelProfilePatch) -> Ag
 
 
 def delete_model_profile(profile_id: str) -> None:
-    if profile_id == SYSTEM_PROFILE_ID:
+    if profile_id in _SYSTEM_PROFILE_IDS:
         raise HTTPException(status_code=403, detail="系统模型不可删除")
     if not agent_model_profile_repo.delete_record(profile_id):
         raise HTTPException(status_code=404, detail="模型配置不存在")
@@ -204,6 +233,18 @@ def delete_model_profile(profile_id: str) -> None:
 
 def resolve_model_runtime(profile_id: str = "") -> tuple[AgentModelProfileView, LLMRuntimeConfig]:
     requested = str(profile_id or "").strip()
+    if requested == SYSTEM_GLM_PROFILE_ID:
+        view = _system_glm_view()
+        if not view.enabled:
+            raise HTTPException(status_code=503, detail="GLM 系统模型不可用，请检查 GLM_ENABLED、GLM_BASE_URL、GLM_API_KEY 和 GLM_MODEL")
+        return view, LLMRuntimeConfig(
+            provider=view.provider,
+            base_url=view.base_url,
+            api_key=str(settings.ai_glm_api_key or "").strip(),
+            model=view.model,
+            thinking_enabled=bool(settings.ai_glm_thinking_enabled),
+            timeout_s=int(settings.ai_timeout_s or 60),
+        )
     if requested and requested != SYSTEM_PROFILE_ID:
         row = agent_model_profile_repo.get_record(requested)
         if row is None:
