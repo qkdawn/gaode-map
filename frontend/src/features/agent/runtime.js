@@ -1060,6 +1060,12 @@ function createAgentRuntimeMethods() {
           return null
         }
       }
+      const explicitTargetCapabilityId = asText(options && options.targetCapabilityId)
+      const prompt = asText((options && options.prompt) || this.agentInput)
+      if (!explicitTargetCapabilityId && !this.agentSelectedSkillId && !this.agentPinnedSkillId && prompt && typeof this.routeAnalysisCapabilityIntent === 'function') {
+        const routed = await this.routeAnalysisCapabilityIntent(prompt)
+        if (routed) return routed
+      }
       const isDeepAnalysisRequested = asText((options && options.mode) || this.agentComposerMode) === 'deep'
       if (activeKind === ANALYSIS_WORKSPACE_TAB_KIND && !isDeepAnalysisRequested && !this.agentSelectedSkillId && !this.agentPinnedSkillId && typeof this.submitAgentAnalysisQuickAsk === 'function') {
         return this.submitAgentAnalysisQuickAsk(options)

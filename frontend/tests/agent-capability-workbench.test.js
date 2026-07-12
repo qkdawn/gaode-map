@@ -14,6 +14,7 @@ function createContext(overrides = {}) {
     analysisCapabilitiesLoaded: false,
     analysisCapabilitiesLoading: false,
     analysisCapabilitiesError: '',
+    analysisCapabilityIntentResolution: null,
     analysisCapabilityOverview: null,
     analysisCapabilityOverviewLoaded: false,
     analysisCapabilityOverviewLoading: false,
@@ -1250,6 +1251,9 @@ test('analysis workspace template exposes recommendation, recent runs and discov
   assert.match(template, /analysisCapabilitySearchQuery/)
   assert.match(template, /analysisCapabilityStatusFilter/)
   assert.match(template, /getAnalysisCapabilityCardStateLabel/)
+  assert.match(template, /getAnalysisCapabilityIntentResolution\(\)/)
+  assert.match(template, /availability_note/)
+  assert.match(template, /activation_requirements/)
 })
 
 
@@ -1277,4 +1281,95 @@ test('late workbench overview cannot leak recommendations across histories', asy
   } finally {
     global.fetch = originalFetch
   }
+})
+
+
+test('explicit conversation capability intent opens the authoritative workbench target', async () => {
+  const originalFetch = global.fetch
+  const calls = []
+  global.fetch = async (url, options) => {
+    calls.push({ url: String(url), body: JSON.parse(options.body) })
+    return {
+      ok: true,
+      json: async () => ({
+        matched: true,
+        capability_id: 'spatial-programming-matrix',
+        action: 'open_configuration',
+        matched_phrase: '生成空间功能策划矩阵',
+        reason: '先检查输入并锁定运行版本。',
+      }),
+    }
+  }
+  try {
+    let openedPanel = false
+    let openedCapability = ''
+    const ctx = createContext({
+      agentInput: '生成空间功能策划矩阵',
+      analysisCapabilitiesLoaded: true,
+      analysisCapabilities: [{ id: 'spatial-programming-matrix', status: 'available' }],
+      openAnalysisCapabilitiesPanel: () => { openedPanel = true },
+      openAnalysisCapabilityOverviewTarget: async id => {
+        openedCapability = id
+        return ctx.analysisCapabilities[0]
+      },
+    })
+
+    const routed = await ctx.routeAnalysisCapabilityIntent(ctx.agentInput)
+
+    assert.match(calls[0].url, /analysis-capabilities\/resolve-intent$/)
+    assert.deepEqual(calls[0].body, { message: '生成空间功能策划矩阵' })
+    assert.equal(routed.type, 'capability_intent')
+    assert.equal(openedPanel, true)
+    assert.equal(openedCapability, 'spatial-programming-matrix')
+    assert.equal(ctx.agentInput, '')
+    const resolution = ctx.getAnalysisCapabilityIntentResolution()
+    resolution.capability_id = 'mutated'
+    assert.equal(ctx.getAnalysisCapabilityIntentResolution().capability_id, 'spatial-programming-matrix')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('unmatched or failed intent resolution leaves ordinary conversation untouched', async () => {
+  const originalFetch = global.fetch
+  try {
+    const ctx = createContext({ agentInput: '解释一下这个指标' })
+    global.fetch = async () => ({ ok: true, json: async () => ({ matched: false, action: 'none' }) })
+    assert.equal(await ctx.routeAnalysisCapabilityIntent(ctx.agentInput), null)
+    assert.equal(ctx.agentInput, '解释一下这个指标')
+
+    global.fetch = async () => { throw new Error('offline') }
+    assert.equal(await ctx.routeAnalysisCapabilityIntent(ctx.agentInput), null)
+    assert.equal(ctx.agentInput, '解释一下这个指标')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('unavailable capability contract is searchable and explains activation prerequisites', () => {
+  const capability = {
+    id: 'rsir-business-analysis',
+    category: 'analysis',
+    status: 'unavailable',
+    display_name: 'RSIR 商业分析',
+    description: '商业判断',
+    availability_note: '方法契约尚未确认',
+    activation_requirements: ['注册可测试的领域执行器'],
+    intent_phrases: ['生成 RSIR 商业分析'],
+    output_contract: [],
+    input_requirements: [],
+  }
+  const ctx = createContext({ analysisCapabilities: [capability] })
+
+  assert.equal(ctx.getAnalysisCapabilityCardState(capability), 'unavailable')
+  assert.equal(ctx.getAnalysisCapabilityCardMeta(capability), '需完成 1 项启用条件')
+  ctx.analysisCapabilitySearchQuery = '领域执行器'
+  assert.deepEqual(ctx.getFilteredAnalysisCapabilities().map(item => item.id), ['rsir-business-analysis'])
+})
+
+test('composer checks explicit capability intent before falling back to chat execution', () => {
+  const runtime = fs.readFileSync(new URL('../src/features/agent/runtime.js', import.meta.url), 'utf8')
+  assert.match(runtime, /await this\.routeAnalysisCapabilityIntent\(prompt\)/)
+  assert.match(runtime, /if \(routed\) return routed/)
+  assert.match(runtime, /!explicitTargetCapabilityId/)
 })

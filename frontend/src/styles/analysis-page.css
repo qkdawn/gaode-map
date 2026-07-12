@@ -13635,6 +13635,13 @@ body.agent-ppt-source-menu-open {
 .agent-capability-header p { margin: 8px 0 0; color: #64748b; font-size: 13px; }
 .agent-capability-model { align-self: flex-start; padding: 7px 10px; border: 1px solid #dbe1e8; border-radius: 6px; color: #64748b; font-size: 12px; }
 .agent-capability-model strong { color: #111827; margin-left: 6px; }
+.agent-capability-intent-notice { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 11px 13px; border: 1px solid #a7f3d0; border-left: 3px solid #059669; border-radius: 7px; background: #f0fdf8; }
+.agent-capability-intent-notice.explain_unavailable { border-color: #fed7aa; border-left-color: #d97706; background: #fffaf2; }
+.agent-capability-intent-notice > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.agent-capability-intent-notice strong { color: #065f46; font-size: 13px; }
+.agent-capability-intent-notice.explain_unavailable strong { color: #9a3412; }
+.agent-capability-intent-notice p { margin: 0; color: #475569; font-size: 10px; line-height: 1.45; }
+.agent-capability-intent-notice > button { flex: 0 0 auto; border: 0; background: transparent; color: #64748b; font-size: 18px; line-height: 1; cursor: pointer; }
 .agent-capability-recommendation { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 14px; border: 1px solid #bfdbfe; border-left: 3px solid #2563eb; border-radius: 7px; background: #f8fbff; }
 .agent-capability-recommendation > div { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .agent-capability-recommendation strong { color: #1e3a8a; font-size: 13px; }
@@ -13680,6 +13687,11 @@ body.agent-ppt-source-menu-open {
 .agent-capability-detail p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.6; }
 .agent-capability-detail-section, .agent-capability-readiness { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
 .agent-capability-detail-section span { padding-left: 10px; border-left: 2px solid #e2e8f0; color: #475569; }
+.agent-capability-availability { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #fed7aa; border-left: 3px solid #d97706; border-radius: 6px; background: #fffaf2; }
+.agent-capability-availability > strong { color: #9a3412; font-size: 12px; }
+.agent-capability-availability > p { color: #7c2d12; font-size: 10px; }
+.agent-capability-availability > div { display: flex; flex-direction: column; gap: 5px; color: #475569; font-size: 10px; }
+.agent-capability-availability ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .agent-capability-readiness { padding: 12px; border-radius: 6px; background: #f8fafc; color: #475569; }
 .agent-capability-readiness.ready { background: #ecfdf3; color: #087443; }
 .agent-capability-readiness.blocked { background: #fff7ed; color: #9a3412; }

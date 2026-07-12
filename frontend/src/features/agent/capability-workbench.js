@@ -1,6 +1,7 @@
 import { buildAnalysisQuickAskSelectedSourcesContext } from './analysis-quick-request.js'
 
 const CATALOG_URL = '/api/v1/analysis/agent/analysis-capabilities'
+const CAPABILITY_INTENT_URL = `${CATALOG_URL}/resolve-intent`
 const RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
 const RUN_COMPARISONS_URL = '/api/v1/analysis/agent/analysis-capability-run-comparisons'
 const WORKBENCH_URL = '/api/v1/analysis/agent/analysis-capabilities/workbench'
@@ -90,6 +91,43 @@ const CAPABILITY_PROMPTS = Object.freeze({
 
 export function createAgentCapabilityWorkbenchMethods() {
   return {
+    async resolveAnalysisCapabilityIntent(prompt = '') {
+      const message = text(prompt)
+      if (!message) return null
+      const response = await fetch(CAPABILITY_INTENT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      })
+      if (!response.ok) throw new Error(`能力意图识别失败(${response.status})`)
+      const payload = await response.json()
+      return payload && typeof payload === 'object' ? clonePayloadValue(payload) : null
+    },
+    async routeAnalysisCapabilityIntent(prompt = '') {
+      let resolution = null
+      try {
+        resolution = await this.resolveAnalysisCapabilityIntent(prompt)
+      } catch (_) {
+        return null
+      }
+      if (!resolution?.matched || !text(resolution.capability_id)) return null
+      await this.loadAnalysisCapabilities()
+      const registered = (this.analysisCapabilities || []).some(item => text(item?.id) === text(resolution.capability_id))
+      if (!registered) return null
+      this.analysisCapabilityIntentResolution = clonePayloadValue(resolution)
+      this.agentInput = ''
+      this.openAnalysisCapabilitiesPanel()
+      const capability = await this.openAnalysisCapabilityOverviewTarget(resolution.capability_id)
+      if (!capability) return null
+      return { type: 'capability_intent', resolution: clonePayloadValue(resolution) }
+    },
+    getAnalysisCapabilityIntentResolution() {
+      const resolution = this.analysisCapabilityIntentResolution
+      return resolution && typeof resolution === 'object' ? clonePayloadValue(resolution) : null
+    },
+    clearAnalysisCapabilityIntentResolution() {
+      this.analysisCapabilityIntentResolution = null
+    },
     async loadAnalysisCapabilities(force = false) {
       if (this.analysisCapabilitiesLoaded && !force) return this.analysisCapabilities
       this.analysisCapabilitiesLoading = true
@@ -206,6 +244,10 @@ export function createAgentCapabilityWorkbenchMethods() {
       }[this.getAnalysisCapabilityCardState(capability)] || '待检查'
     },
     getAnalysisCapabilityCardMeta(capability = null) {
+      if (capability?.status !== 'available') {
+        const requirements = Array.isArray(capability?.activation_requirements) ? capability.activation_requirements.length : 0
+        return requirements ? `需完成 ${requirements} 项启用条件` : '尚未注册可执行能力'
+      }
       const card = this.getAnalysisCapabilityOverviewCard(capability?.id)
       if (!card) return `${Number(capability?.estimated_stages || 0)} 个阶段 · ${capability?.output_contract?.length || 0} 类成果`
       const missing = Array.isArray(card.readiness?.missing_required) ? card.readiness.missing_required.length : 0
@@ -225,6 +267,9 @@ export function createAgentCapabilityWorkbenchMethods() {
           capability.display_name,
           capability.description,
           capability.category,
+          capability.availability_note,
+          ...(capability.intent_phrases || []),
+          ...(capability.activation_requirements || []),
           ...(capability.output_contract || []),
           ...(capability.input_requirements || []).map(item => item?.label),
         ].map(text).join(' ').toLowerCase()

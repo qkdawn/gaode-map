@@ -91,3 +91,45 @@ def test_downstream_readiness_exposes_explicit_upstream_version_choices(monkeypa
     assert resolution["selection_mode"] == "latest_successful"
     assert resolution["state"] == "missing"
     assert resolution["available_versions"] == []
+
+
+def test_analysis_capability_catalog_exposes_unavailable_reason_and_prerequisites():
+    with TestClient(build_app()) as client:
+        response = client.get("/api/v1/analysis/agent/analysis-capabilities")
+
+    assert response.status_code == 200
+    capabilities = {item["id"]: item for item in response.json()}
+    rsir = capabilities["rsir-business-analysis"]
+    assert rsir["status"] == "unavailable"
+    assert rsir["executor_type"] == "none"
+    assert rsir["executor_id"] == ""
+    assert rsir["availability_note"]
+    assert rsir["activation_requirements"][-1] == "注册可测试的领域执行器"
+
+
+def test_analysis_capability_intent_resolves_explicit_workbench_navigation():
+    with TestClient(build_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/agent/analysis-capabilities/resolve-intent",
+            json={"message": "请生成空间功能策划矩阵"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "matched": True,
+        "capability_id": "spatial-programming-matrix",
+        "action": "open_configuration",
+        "matched_phrase": "生成空间功能策划矩阵",
+        "reason": "已识别明确的能力执行意图；先打开统一配置页检查输入并锁定运行版本。",
+    }
+
+
+def test_analysis_capability_intent_does_not_hijack_general_questions():
+    with TestClient(build_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/agent/analysis-capabilities/resolve-intent",
+            json={"message": "空间功能矩阵通常应该包含哪些字段？"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["matched"] is False

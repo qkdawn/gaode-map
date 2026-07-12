@@ -103,6 +103,7 @@ function createAnalysisAgentInitialState() {
     analysisCapabilitiesLoaded: false,
     analysisCapabilitiesLoading: false,
     analysisCapabilitiesError: '',
+    analysisCapabilityIntentResolution: null,
     analysisCapabilityOverview: null,
     analysisCapabilityOverviewLoaded: false,
     analysisCapabilityOverviewLoading: false,

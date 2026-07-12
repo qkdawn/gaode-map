@@ -59,7 +59,13 @@ def test_workbench_overview_explains_missing_inputs_instead_of_fabricating_readi
     assert overview.recommendation.action == "resolve_inputs"
     assert overview.recommendation.capability_id == "urban-strategy-stage1"
     assert overview.recommendation.missing_required
-    assert all(item.state == "blocked" for item in overview.cards)
+    states = {item.capability_id: item.state for item in overview.cards}
+    assert states["rsir-business-analysis"] == "unavailable"
+    assert all(
+        state == "blocked"
+        for capability_id, state in states.items()
+        if capability_id != "rsir-business-analysis"
+    )
 
 
 def test_workbench_overview_prioritizes_active_run_over_duplicate_execution(monkeypatch):

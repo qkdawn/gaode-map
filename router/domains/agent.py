@@ -23,6 +23,11 @@ from modules.agent.capability_catalog import (
     evaluate_capability_readiness,
     list_analysis_capabilities,
 )
+from modules.agent.capability_intent import (
+    CapabilityIntentRequest,
+    CapabilityIntentResolution,
+    resolve_capability_intent,
+)
 from modules.agent.runtime import stream_main_agent_loop
 from modules.agent.execution_service import agent_capabilities, prepare_agent_turn
 from modules.agent.model_profiles import (
@@ -116,6 +121,14 @@ async def get_agent_capabilities():
 )
 async def get_analysis_capabilities():
     return await run_in_threadpool(list_analysis_capabilities)
+
+
+@router.post(
+    "/api/v1/analysis/agent/analysis-capabilities/resolve-intent",
+    response_model=CapabilityIntentResolution,
+)
+async def post_analysis_capability_intent(payload: CapabilityIntentRequest):
+    return await run_in_threadpool(resolve_capability_intent, payload.message)
 
 
 @router.post(

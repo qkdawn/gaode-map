@@ -56,8 +56,11 @@ class AnalysisCapability(BaseModel):
     description: str
     category: Literal["planning", "analysis", "delivery", "governance"]
     status: Literal["available", "planned", "unavailable"]
-    executor_type: Literal["skill", "service"]
-    executor_id: str
+    executor_type: Literal["skill", "service", "none"]
+    executor_id: str = ""
+    intent_phrases: list[str] = Field(default_factory=list)
+    availability_note: str = ""
+    activation_requirements: list[str] = Field(default_factory=list)
     input_requirements: list[CapabilityRequirement] = Field(default_factory=list)
     output_contract: list[str] = Field(default_factory=list)
     supports_map: bool = False
@@ -66,6 +69,18 @@ class AnalysisCapability(BaseModel):
     estimated_stages: int = 1
     icon: str
     workspace_kind: Literal["composer", "full"] = "composer"
+
+    @model_validator(mode="after")
+    def validate_availability_contract(self):
+        if self.status == "available":
+            if self.executor_type == "none" or not self.executor_id:
+                raise ValueError("available_capability_requires_executor")
+            return self
+        if self.executor_type != "none" or self.executor_id:
+            raise ValueError("non_executable_capability_cannot_register_executor")
+        if not self.availability_note or not self.activation_requirements:
+            raise ValueError("non_executable_capability_requires_explanation")
+        return self
 
 
 class CapabilityReadiness(BaseModel):
@@ -91,6 +106,11 @@ _CAPABILITIES = (
         status="available",
         executor_type="skill",
         executor_id="urban-strategy-stage1",
+        intent_phrases=[
+            "执行城市更新第一阶段策划",
+            "生成城市更新第一阶段报告",
+            "生成第一阶段策划报告",
+        ],
         input_requirements=[
             CapabilityRequirement(id="project_scope", label="项目空间范围"),
             CapabilityRequirement(id="project_brief", label="项目摘要与决策问题"),
@@ -118,6 +138,11 @@ _CAPABILITIES = (
         status="available",
         executor_type="skill",
         executor_id="urban-strategy-stage1",
+        intent_phrases=[
+            "生成空间功能策划矩阵",
+            "生成空间功能策划决策矩阵",
+            "打开空间功能策划矩阵",
+        ],
         input_requirements=[
             CapabilityRequirement(id="project_scope", label="项目空间范围"),
             CapabilityRequirement(id="project_brief", label="项目摘要与决策问题"),
@@ -149,6 +174,11 @@ _CAPABILITIES = (
         status="available",
         executor_type="skill",
         executor_id="urban-strategy-stage1",
+        intent_phrases=[
+            "审计当前项目证据",
+            "检查证据闭环",
+            "运行证据与结论审计",
+        ],
         input_requirements=[
             CapabilityRequirement(id="evidence", label="当前项目证据或分析结果"),
             CapabilityRequirement(
@@ -184,6 +214,11 @@ _CAPABILITIES = (
         status="available",
         executor_type="service",
         executor_id="ppt-planning",
+        intent_phrases=[
+            "生成成果PPT",
+            "基于分析成果生成PPT",
+            "打开PPT工作台",
+        ],
         input_requirements=[
             CapabilityRequirement(
                 id="approved_report",
@@ -205,6 +240,31 @@ _CAPABILITIES = (
         icon="presentation",
         workspace_kind="full",
     ),
+    AnalysisCapability(
+        id="rsir-business-analysis",
+        display_name="RSIR 商业分析",
+        description="围绕商圈、客群、供需、交通和风险形成结构化商业判断。",
+        category="analysis",
+        status="unavailable",
+        executor_type="none",
+        intent_phrases=[
+            "生成RSIR商业分析",
+            "运行RSIR商业分析",
+            "打开RSIR商业分析",
+        ],
+        availability_note="RSIR 的方法定义、计算口径和输出契约尚未确认，当前不能用普通 Agent 代替执行。",
+        activation_requirements=[
+            "确认 RSIR 的完整名称与方法边界",
+            "定义输入数据、核心计算和证据要求",
+            "定义结构化输出与质量验收契约",
+            "注册可测试的领域执行器",
+        ],
+        output_contract=["商业判断", "供需机会", "风险与证据缺口"],
+        supports_map=True,
+        estimated_stages=4,
+        icon="chart-no-axes-combined",
+        workspace_kind="full",
+    ),
 )
 
 
@@ -224,7 +284,12 @@ def evaluate_capability_readiness(
 ) -> CapabilityReadiness:
     capability = get_analysis_capability(capability_id)
     if capability.status != "available":
-        return CapabilityReadiness(capability_id=capability.id, status="unavailable")
+        return CapabilityReadiness(
+            capability_id=capability.id,
+            status="unavailable",
+            missing_required=list(capability.activation_requirements),
+            conflicts=[capability.availability_note],
+        )
     resolved_inputs = resolve_capability_inputs(capability.id, payload)
     if capability.executor_id == "urban-strategy-stage1":
         result: dict[str, Any] = evaluate_readiness(payload)
