@@ -66,6 +66,7 @@ def _completed_run(
     recorder.record_stage("readiness", "资料完整性检查")
     report = f"# 第一阶段报告\n\nRun: {run_id}"
     project_brief = {"project_name": "测试项目", **source_payload}
+    quality_audit = {"status": "passed", "score": 100, "checks_passed": 19, "checks_total": 19, "issues": []}
     output_refs = [
         artifact_ref(
             artifact_id="stage1-project-brief",
@@ -80,6 +81,13 @@ def _completed_run(
             title="第一阶段报告",
             source_run_id=run_id,
             payload=report,
+        ),
+        artifact_ref(
+            artifact_id="stage1-quality-audit",
+            artifact_type="diagnostic_report",
+            title="交付质量审计",
+            source_run_id=run_id,
+            payload=quality_audit,
         ),
     ]
     run = recorder.finish(
@@ -98,6 +106,7 @@ def _persist(run_repo, run, project_brief, report, *, history_id="history-1"):
             "panel_payloads": {
                 "capability_run": run.model_dump(mode="json"),
                 "stage1_project_brief": project_brief,
+                "stage1_quality_audit": {"status": "passed", "score": 100, "checks_passed": 19, "checks_total": 19, "issues": []},
                 "stage1_deliverables": {"report_markdown": report},
             },
         },
@@ -122,6 +131,7 @@ def test_persisted_run_keeps_immutable_manifest_and_output_payloads(run_repo):
     assert snapshots["document:project-brief"].direction == "input"
     assert snapshots["document:project-brief"].payload is None
     assert snapshots["stage1-report"].artifact.version == "caprun-1"
+    assert snapshots["stage1-quality-audit"].payload["checks_passed"] == 19
 
 
 def test_identical_save_is_idempotent_but_run_payload_and_owner_are_immutable(run_repo):
@@ -242,6 +252,7 @@ def test_agent_turn_persists_session_and_capability_run_together(run_repo, monke
             "panel_payloads": {
                 "capability_run": run.model_dump(mode="json"),
                 "stage1_project_brief": project_brief,
+                "stage1_quality_audit": {"status": "passed", "score": 100, "checks_passed": 19, "checks_total": 19, "issues": []},
                 "stage1_deliverables": {"report_markdown": report},
             },
         },
@@ -281,6 +292,7 @@ def test_capability_run_persists_without_conversation_session(run_repo):
             "panel_payloads": {
                 "capability_run": run.model_dump(mode="json"),
                 "stage1_project_brief": project_brief,
+                "stage1_quality_audit": {"status": "passed", "score": 100, "checks_passed": 19, "checks_total": 19, "issues": []},
                 "stage1_deliverables": {"report_markdown": report},
             },
         },

@@ -7,9 +7,11 @@ from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from modules.agent.capability_run_service import (
+    compare_capability_runs,
     get_capability_run,
     list_capability_runs,
 )
+from modules.agent.capability_run_comparison import CapabilityRunComparison
 from modules.agent.capability_runs import CapabilityRun, CapabilityRunDetail
 from modules.agent.capability_guidance import (
     CapabilityWorkbenchOverview,
@@ -137,6 +139,24 @@ async def get_analysis_capability_runs(history_id: str, capability_id: str = "")
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get(
+    "/api/v1/analysis/agent/analysis-capability-run-comparisons",
+    response_model=CapabilityRunComparison,
+)
+async def get_analysis_capability_run_comparison(
+    base_run_id: str, target_run_id: str
+):
+    try:
+        comparison = await run_in_threadpool(
+            compare_capability_runs, base_run_id, target_run_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if comparison is None:
+        raise HTTPException(status_code=404, detail="capability_run_not_found")
+    return comparison
 
 
 @router.get(

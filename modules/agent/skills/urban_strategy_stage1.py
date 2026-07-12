@@ -725,6 +725,7 @@ async def execute(
     }
 
     audit = audit_stage1_package(package)
+    package["quality_audit"] = _audit_payload(audit)
     await _emit_phase(
         emit,
         phase_id="stage1-quality-audit",

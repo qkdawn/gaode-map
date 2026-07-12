@@ -39,6 +39,11 @@ function createContext(overrides = {}) {
     selectedAnalysisCapabilityRunLoading: false,
     selectedAnalysisCapabilityRunError: '',
     selectedAnalysisCapabilityRunRequestToken: 0,
+    analysisCapabilityComparisonBaseRunId: '',
+    analysisCapabilityRunComparison: null,
+    analysisCapabilityRunComparisonLoading: false,
+    analysisCapabilityRunComparisonError: '',
+    analysisCapabilityRunComparisonRequestToken: 0,
     stage1EvidenceDrawerSpaceId: '',
     stage1EvidenceDrawerRunId: '',
     stage1ExpandedSpaceId: '',
@@ -271,6 +276,80 @@ test('run history labels stale inputs, stages, versions and timestamps', () => {
   assert.equal(ctx.getAnalysisCapabilityRunCurrentStageLabel(run), '交付编译')
   assert.deepEqual(ctx.getAnalysisCapabilityRunChangedInputIds(run), ['poi-result', 'population-grid'])
   assert.match(ctx.getAnalysisCapabilityRunTimeLabel(run), /2026/)
+})
+
+test('selected capability run compares against another immutable version', async () => {
+  const originalFetch = global.fetch
+  const urls = []
+  const comparison = {
+    history_id: 'history-1',
+    capability_id: 'urban-strategy-stage1',
+    base_run: { run_id: 'run-1', status: 'completed' },
+    target_run: { run_id: 'run-2', status: 'completed' },
+    configuration_changes: [{ field: 'configuration_snapshot.question', label: '分析任务', change_type: 'changed', before: '初稿', after: '复算' }],
+    stage_changes: [],
+    artifact_changes: [{ direction: 'output', artifact_id: 'stage1-decision-matrix', title: '空间矩阵', change_type: 'changed' }],
+    outcome_changes: [{ field: 'recommended', label: '推荐定位方案', change_type: 'changed', before: 'option-a', after: 'option-b' }],
+    entity_changes: [{ category: 'space_decision', entity_id: 'unit-1', title: '原礼堂', change_type: 'changed', changed_fields: ['future_role'] }],
+    summary: ['1 项核心结果发生变化。'],
+    has_changes: true,
+  }
+  global.fetch = async url => {
+    urls.push(String(url))
+    return { ok: true, json: async () => comparison }
+  }
+  try {
+    const ctx = createContext({
+      analysisCapabilityRuns: [
+        { run_id: 'run-2', status: 'completed', completed_at: '2026-07-12T02:00:00Z' },
+        { run_id: 'run-1', status: 'completed', completed_at: '2026-07-12T01:00:00Z' },
+      ],
+      selectedAnalysisCapabilityRunId: 'run-2',
+      selectedAnalysisCapabilityRunDetail: { run: { run_id: 'run-2' }, artifacts: [] },
+    })
+    assert.deepEqual(ctx.getAnalysisCapabilityComparisonCandidates().map(run => run.run_id), ['run-1'])
+    assert.match(ctx.getAnalysisCapabilityRunComparisonOptionLabel(ctx.analysisCapabilityRuns[1]), /历史 v1/)
+    ctx.setAnalysisCapabilityComparisonBaseRunId('run-1')
+    const result = await ctx.compareSelectedAnalysisCapabilityRun()
+    assert.match(urls[0], /base_run_id=run-1/)
+    assert.match(urls[0], /target_run_id=run-2/)
+    assert.equal(result.outcome_changes[0].label, '推荐定位方案')
+    result.summary[0] = 'mutated'
+    assert.equal(ctx.getAnalysisCapabilityRunComparison().summary[0], '1 项核心结果发生变化。')
+    assert.equal(ctx.getAnalysisCapabilityComparisonChangeLabel('removed'), '移除')
+    assert.equal(ctx.getAnalysisCapabilityComparisonEntityLabel('space_decision'), '空间决策')
+    assert.equal(ctx.formatAnalysisCapabilityComparisonValue(['A', 'B']), 'A、B')
+  } finally {
+    global.fetch = originalFetch
+  }
+})
+
+test('changing selected capability run clears comparison state and rejects late comparison response', async () => {
+  const originalFetch = global.fetch
+  let resolveComparison
+  global.fetch = async url => {
+    if (String(url).includes('run-comparisons')) {
+      return { ok: true, json: () => new Promise(resolve => { resolveComparison = resolve }) }
+    }
+    return { ok: true, json: async () => ({ run: { run_id: 'run-3' }, artifacts: [] }) }
+  }
+  try {
+    const ctx = createContext({
+      selectedAnalysisCapabilityRunId: 'run-2',
+      selectedAnalysisCapabilityRunDetail: { run: { run_id: 'run-2' }, artifacts: [] },
+      analysisCapabilityComparisonBaseRunId: 'run-1',
+    })
+    const pending = ctx.compareSelectedAnalysisCapabilityRun()
+    await Promise.resolve()
+    await ctx.selectAnalysisCapabilityRun({ run_id: 'run-3' })
+    assert.equal(ctx.analysisCapabilityComparisonBaseRunId, '')
+    assert.equal(ctx.getAnalysisCapabilityRunComparison(), null)
+    resolveComparison({ base_run: { run_id: 'run-1' }, target_run: { run_id: 'run-2' }, summary: ['late'] })
+    assert.equal(await pending, null)
+    assert.equal(ctx.getAnalysisCapabilityRunComparison(), null)
+  } finally {
+    global.fetch = originalFetch
+  }
 })
 
 test('readiness request carries analysis snapshot and selected source identities', async () => {
@@ -793,6 +872,9 @@ test('analysis workspace templates expose capability navigation and detail view'
   assert.match(main, /继续追问当前版本/)
   assert.match(main, /openCapabilityRunContextAsk\(\)/)
   assert.match(main, /getSelectedAnalysisCapabilityRunArtifacts\(\)/)
+  assert.match(main, /版本比较/)
+  assert.match(main, /compareSelectedAnalysisCapabilityRun\(\)/)
+  assert.match(main, /核心结果变化/)
   assert.match(main, /仅保存元数据/)
   assert.match(main, /getStage1QualityGate\(\)/)
   assert.match(main, /Stage 1 Quality Gate/)

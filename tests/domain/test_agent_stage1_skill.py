@@ -274,7 +274,7 @@ def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
     run = response.output.panel_payloads["capability_run"]
     assert run["status"] == "waiting_for_user"
     assert run["current_stage"] == "quality-audit"
-    assert "stage1-decision-matrix" in {
+    assert {"stage1-decision-matrix", "stage1-quality-audit"} <= {
         item["artifact_id"] for item in run["output_artifact_refs"]
     }
     assert "最终报告模型未被调用" in response.diagnostics.research_notes[0]
@@ -349,6 +349,7 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
         "evidence_ledger.jsonl",
         "conflict_register.json",
         "hard_constraint_screening.json",
+        "quality_audit.json",
         "strategy_options.json",
         "decision_matrix.json",
         "stage1_report.md",

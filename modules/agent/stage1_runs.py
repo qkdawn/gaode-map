@@ -159,6 +159,16 @@ def build_stage1_output_artifacts(
             ["stage1-evidence-ledger", "stage1-conflict-register"],
             evidence_refs=evidence_ids,
         )
+    if "quality_audit" in package:
+        add(
+            "stage1-quality-audit",
+            "diagnostic_report",
+            "交付质量审计",
+            "quality_audit.json",
+            package["quality_audit"],
+            ["stage1-evidence-ledger", "stage1-hard-constraint-screening"],
+            evidence_refs=evidence_ids,
+        )
     workpack_ids: list[str] = []
     for index, workpack in enumerate(package.get("workpacks") or []):
         if not isinstance(workpack, dict):

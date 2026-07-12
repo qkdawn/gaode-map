@@ -171,6 +171,67 @@
                                                 <small>{{ snapshot.payload === null ? '仅保存元数据' : '已保存不可变内容' }}</small>
                                             </article>
                                         </div>
+                                        <section v-if="getAnalysisCapabilityComparisonCandidates().length" class="agent-capability-run-comparison" aria-label="版本比较">
+                                            <div class="agent-capability-run-comparison-head">
+                                                <div><strong>版本比较</strong><span>基准版本 → 当前选中版本</span></div>
+                                                <div class="agent-capability-run-comparison-controls">
+                                                    <select :value="analysisCapabilityComparisonBaseRunId" aria-label="选择比较基准版本" @change="setAnalysisCapabilityComparisonBaseRunId($event.target.value)">
+                                                        <option value="">选择基准版本</option>
+                                                        <option v-for="run in getAnalysisCapabilityComparisonCandidates()" :key="run.run_id" :value="run.run_id">{{ getAnalysisCapabilityRunComparisonOptionLabel(run) }}</option>
+                                                    </select>
+                                                    <button type="button" :disabled="!analysisCapabilityComparisonBaseRunId || analysisCapabilityRunComparisonLoading" @click="compareSelectedAnalysisCapabilityRun().catch(() => {})">{{ analysisCapabilityRunComparisonLoading ? '比较中...' : '比较' }}</button>
+                                                </div>
+                                            </div>
+                                            <p v-if="analysisCapabilityRunComparisonError" class="agent-capability-run-comparison-error">{{ analysisCapabilityRunComparisonError }}</p>
+                                            <div v-if="getAnalysisCapabilityRunComparison()" class="agent-capability-run-comparison-result">
+                                                <div class="agent-capability-run-comparison-route">
+                                                    <code>{{ getAnalysisCapabilityRunComparison().base_run.run_id }}</code>
+                                                    <span>→</span>
+                                                    <code>{{ getAnalysisCapabilityRunComparison().target_run.run_id }}</code>
+                                                </div>
+                                                <div class="agent-capability-run-comparison-summary">
+                                                    <span v-for="item in getAnalysisCapabilityRunComparison().summary" :key="item">{{ item }}</span>
+                                                </div>
+                                                <div v-if="getAnalysisCapabilityRunComparison().outcome_changes.length" class="agent-capability-run-comparison-group outcome">
+                                                    <strong>核心结果变化</strong>
+                                                    <article v-for="change in getAnalysisCapabilityRunComparison().outcome_changes" :key="change.field" :class="change.change_type">
+                                                        <span>{{ getAnalysisCapabilityComparisonChangeLabel(change.change_type) }}</span>
+                                                        <div><strong>{{ change.label }}</strong><small>{{ formatAnalysisCapabilityComparisonValue(change.before) }} → {{ formatAnalysisCapabilityComparisonValue(change.after) }}</small></div>
+                                                    </article>
+                                                </div>
+                                                <div v-if="getAnalysisCapabilityRunComparison().entity_changes.length" class="agent-capability-run-comparison-group">
+                                                    <strong>策略、空间与证据对象</strong>
+                                                    <article v-for="change in getAnalysisCapabilityRunComparison().entity_changes" :key="`${change.category}-${change.entity_id}`" :class="change.change_type">
+                                                        <span>{{ getAnalysisCapabilityComparisonChangeLabel(change.change_type) }}</span>
+                                                        <div><strong>{{ getAnalysisCapabilityComparisonEntityLabel(change.category) }} · {{ change.title }}</strong><small v-if="change.changed_fields.length">变化字段：{{ change.changed_fields.join('、') }}</small><small v-else>{{ change.entity_id }}</small></div>
+                                                    </article>
+                                                </div>
+                                                <details v-if="getAnalysisCapabilityRunComparison().configuration_changes.length || getAnalysisCapabilityRunComparison().artifact_changes.length || getAnalysisCapabilityRunComparison().stage_changes.length">
+                                                    <summary>检查执行配置、产物与阶段差异</summary>
+                                                    <div v-if="getAnalysisCapabilityRunComparison().configuration_changes.length" class="agent-capability-run-comparison-group compact">
+                                                        <strong>执行配置</strong>
+                                                        <article v-for="change in getAnalysisCapabilityRunComparison().configuration_changes" :key="change.field" :class="change.change_type">
+                                                            <span>{{ getAnalysisCapabilityComparisonChangeLabel(change.change_type) }}</span>
+                                                            <div><strong>{{ change.label }}</strong><small>{{ formatAnalysisCapabilityComparisonValue(change.before) }} → {{ formatAnalysisCapabilityComparisonValue(change.after) }}</small></div>
+                                                        </article>
+                                                    </div>
+                                                    <div v-if="getAnalysisCapabilityRunComparison().artifact_changes.length" class="agent-capability-run-comparison-group compact">
+                                                        <strong>产物版本</strong>
+                                                        <article v-for="change in getAnalysisCapabilityRunComparison().artifact_changes" :key="`${change.direction}-${change.artifact_id}`" :class="change.change_type">
+                                                            <span>{{ getAnalysisCapabilityComparisonChangeLabel(change.change_type) }}</span>
+                                                            <div><strong>{{ change.title }}</strong><small>{{ change.before_version || '无' }} → {{ change.after_version || '无' }}</small></div>
+                                                        </article>
+                                                    </div>
+                                                    <div v-if="getAnalysisCapabilityRunComparison().stage_changes.length" class="agent-capability-run-comparison-group compact">
+                                                        <strong>执行阶段</strong>
+                                                        <article v-for="change in getAnalysisCapabilityRunComparison().stage_changes" :key="change.stage_id" :class="change.change_type">
+                                                            <span>{{ getAnalysisCapabilityComparisonChangeLabel(change.change_type) }}</span>
+                                                            <div><strong>{{ change.title }}</strong><small>{{ change.before_status || '无' }} → {{ change.after_status || '无' }}</small></div>
+                                                        </article>
+                                                    </div>
+                                                </details>
+                                            </div>
+                                        </section>
                                     </article>
                                 </section>
                                 <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading || !isAnalysisCapabilityReady(getActiveAnalysisCapability().id)" @click="runAnalysisCapability(getActiveAnalysisCapability())">确认并运行</button>

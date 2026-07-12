@@ -133,3 +133,59 @@ def test_capability_run_api_rejects_missing_history_and_unknown_run(monkeypatch)
         )
         assert missing_run.status_code == 404
         assert missing_run.json()["detail"] == "capability_run_not_found"
+
+def test_capability_run_comparison_api_returns_structured_diff(monkeypatch):
+    repo = _install_run_store(monkeypatch)
+    base = _manifest("caprun-base")
+    target = _manifest("caprun-target")
+    base["configuration_snapshot"]["question"] = "形成初稿"
+    target["configuration_snapshot"]["question"] = "补充约束后复算"
+    base["output_artifact_refs"][0]["content_digest"] = "sha256:base"
+    target["output_artifact_refs"][0]["content_digest"] = "sha256:target"
+    repo.save(
+        history_id="history-api",
+        manifest=base,
+        artifact_payloads={"stage1-report": "# 初稿"},
+    )
+    repo.save(
+        history_id="history-api",
+        manifest=target,
+        artifact_payloads={"stage1-report": "# 复算稿"},
+    )
+
+    with TestClient(_app()) as client:
+        response = client.get(
+            "/api/v1/analysis/agent/analysis-capability-run-comparisons",
+            params={
+                "base_run_id": "caprun-base",
+                "target_run_id": "caprun-target",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["base_run"]["run_id"] == "caprun-base"
+    assert payload["target_run"]["run_id"] == "caprun-target"
+    assert payload["has_changes"] is True
+    assert payload["configuration_changes"][0]["field"] == "configuration_snapshot.question"
+    assert payload["artifact_changes"][0]["artifact_id"] == "stage1-report"
+
+
+def test_capability_run_comparison_api_rejects_unknown_or_same_run(monkeypatch):
+    repo = _install_run_store(monkeypatch)
+    repo.save(history_id="history-api", manifest=_manifest("caprun-one"))
+
+    with TestClient(_app()) as client:
+        missing = client.get(
+            "/api/v1/analysis/agent/analysis-capability-run-comparisons",
+            params={"base_run_id": "caprun-one", "target_run_id": "unknown"},
+        )
+        same = client.get(
+            "/api/v1/analysis/agent/analysis-capability-run-comparisons",
+            params={"base_run_id": "caprun-one", "target_run_id": "caprun-one"},
+        )
+
+    assert missing.status_code == 404
+    assert missing.json()["detail"] == "capability_run_not_found"
+    assert same.status_code == 422
+    assert same.json()["detail"] == "capability_run_comparison_requires_distinct_runs"

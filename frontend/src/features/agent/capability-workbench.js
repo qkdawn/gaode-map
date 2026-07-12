@@ -2,6 +2,7 @@ import { buildAnalysisQuickAskSelectedSourcesContext } from './analysis-quick-re
 
 const CATALOG_URL = '/api/v1/analysis/agent/analysis-capabilities'
 const RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
+const RUN_COMPARISONS_URL = '/api/v1/analysis/agent/analysis-capability-run-comparisons'
 const WORKBENCH_URL = '/api/v1/analysis/agent/analysis-capabilities/workbench'
 const REQUIRED_STAGE1_ARTIFACT_IDS = Object.freeze([
   'stage1-report',
@@ -302,6 +303,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       if (!normalizedRunId) return null
       const requestToken = Number(this.selectedAnalysisCapabilityRunRequestToken || 0) + 1
       this.selectedAnalysisCapabilityRunRequestToken = requestToken
+      this.clearAnalysisCapabilityRunComparison()
       this.selectedAnalysisCapabilityRunId = normalizedRunId
       this.selectedAnalysisCapabilityRunDetail = null
       this.selectedAnalysisCapabilityRunLoading = true
@@ -335,6 +337,80 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.selectedAnalysisCapabilityRunDetail = null
       this.selectedAnalysisCapabilityRunLoading = false
       this.selectedAnalysisCapabilityRunError = ''
+      this.clearAnalysisCapabilityRunComparison()
+    },
+    getAnalysisCapabilityComparisonCandidates() {
+      const selectedRunId = text(this.selectedAnalysisCapabilityRunId)
+      return this.getAnalysisCapabilityRuns().filter(run => text(run?.run_id) && text(run.run_id) !== selectedRunId)
+    },
+    setAnalysisCapabilityComparisonBaseRunId(runId = '') {
+      const normalizedRunId = text(runId)
+      if (normalizedRunId === text(this.selectedAnalysisCapabilityRunId)) return ''
+      this.analysisCapabilityComparisonBaseRunId = normalizedRunId
+      this.analysisCapabilityRunComparison = null
+      this.analysisCapabilityRunComparisonError = ''
+      return normalizedRunId
+    },
+    clearAnalysisCapabilityRunComparison() {
+      this.analysisCapabilityRunComparisonRequestToken = Number(this.analysisCapabilityRunComparisonRequestToken || 0) + 1
+      this.analysisCapabilityComparisonBaseRunId = ''
+      this.analysisCapabilityRunComparison = null
+      this.analysisCapabilityRunComparisonLoading = false
+      this.analysisCapabilityRunComparisonError = ''
+    },
+    async compareSelectedAnalysisCapabilityRun() {
+      const baseRunId = text(this.analysisCapabilityComparisonBaseRunId)
+      const targetRunId = text(this.selectedAnalysisCapabilityRunId)
+      if (!baseRunId || !targetRunId || baseRunId === targetRunId) return null
+      const requestToken = Number(this.analysisCapabilityRunComparisonRequestToken || 0) + 1
+      this.analysisCapabilityRunComparisonRequestToken = requestToken
+      this.analysisCapabilityRunComparisonLoading = true
+      this.analysisCapabilityRunComparisonError = ''
+      this.analysisCapabilityRunComparison = null
+      const query = new URLSearchParams({ base_run_id: baseRunId, target_run_id: targetRunId })
+      try {
+        const response = await fetch(`${RUN_COMPARISONS_URL}?${query.toString()}`)
+        if (!response.ok) throw new Error(`运行版本比较失败(${response.status})`)
+        const payload = await response.json()
+        if (this.analysisCapabilityRunComparisonRequestToken !== requestToken) return null
+        this.analysisCapabilityRunComparison = payload && typeof payload === 'object' ? clonePayloadValue(payload) : null
+        return this.getAnalysisCapabilityRunComparison()
+      } catch (error) {
+        if (this.analysisCapabilityRunComparisonRequestToken !== requestToken) return null
+        this.analysisCapabilityRunComparisonError = error instanceof Error ? error.message : String(error)
+        throw error
+      } finally {
+        if (this.analysisCapabilityRunComparisonRequestToken === requestToken) this.analysisCapabilityRunComparisonLoading = false
+      }
+    },
+    getAnalysisCapabilityRunComparison() {
+      const comparison = this.analysisCapabilityRunComparison
+      return comparison && typeof comparison === 'object' ? clonePayloadValue(comparison) : null
+    },
+    getAnalysisCapabilityComparisonChangeLabel(changeType = '') {
+      return ({ added: '新增', removed: '移除', changed: '调整' })[text(changeType)] || '变化'
+    },
+    getAnalysisCapabilityComparisonEntityLabel(category = '') {
+      return ({
+        strategy_option: '定位方案', space_decision: '空间决策', evidence: '证据',
+        hard_constraint: '硬约束', quality_issue: '质量问题',
+      })[text(category)] || '对象'
+    },
+    formatAnalysisCapabilityComparisonValue(value) {
+      if (value == null || value === '') return '未设置'
+      if (Array.isArray(value)) {
+        if (!value.length) return '无'
+        if (value.every(item => item == null || ['string', 'number', 'boolean'].includes(typeof item))) {
+          return value.map(item => text(item)).filter(Boolean).join('、') || '无'
+        }
+        const serialized = JSON.stringify(value)
+        return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized
+      }
+      if (typeof value === 'object') {
+        const serialized = JSON.stringify(value)
+        return serialized.length > 180 ? `${serialized.slice(0, 177)}...` : serialized
+      }
+      return text(value)
     },
     getSelectedAnalysisCapabilityRun() {
       const runId = text(this.selectedAnalysisCapabilityRunId)
@@ -360,6 +436,12 @@ export function createAgentCapabilityWorkbenchMethods() {
       const total = this.getAnalysisCapabilityRuns().length
       const ordinal = Math.max(total - Number(index || 0), 1)
       return `${index === 0 ? '最新' : '历史'} v${ordinal}`
+    },
+    getAnalysisCapabilityRunComparisonOptionLabel(run = null) {
+      const runs = this.getAnalysisCapabilityRuns()
+      const index = runs.findIndex(item => text(item?.run_id) === text(run?.run_id))
+      const version = this.getAnalysisCapabilityRunVersionLabel(run, Math.max(index, 0))
+      return `${version} · ${this.getAnalysisCapabilityRunTimeLabel(run)} · ${this.getAnalysisCapabilityRunStatusLabel(run)}`
     },
     getAnalysisCapabilityRunTimeLabel(run = null) {
       const value = text(run?.completed_at || run?.created_at)

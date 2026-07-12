@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .capability_run_comparison import CapabilityRunComparison, compare_run_details
 from .capability_runs import CapabilityRun, CapabilityRunDetail
 from .schemas import AgentTurnRequest, AgentTurnResponse
 from store.capability_run_repo import capability_run_repo
@@ -24,6 +25,8 @@ def _artifact_payloads(
         "stage1-source-readiness": panels.get("stage1_readiness"),
         "stage1-evidence-ledger": panels.get("stage1_evidence_ledger"),
         "stage1-conflict-register": panels.get("stage1_conflict_register"),
+        "stage1-hard-constraint-screening": panels.get("stage1_hard_constraint_screening"),
+        "stage1-quality-audit": panels.get("stage1_quality_audit"),
         "stage1-strategy-options": panels.get("stage1_strategy"),
         "stage1-decision-matrix": panels.get("stage1_spatial_matrix"),
         "stage1-report": deliverables.get("report_markdown") or response.output.answer,
@@ -120,3 +123,17 @@ def get_capability_run(
         },
         deep=True,
     )
+
+def compare_capability_runs(
+    base_run_id: str,
+    target_run_id: str,
+    *,
+    repo=capability_run_repo,
+) -> CapabilityRunComparison | None:
+    """Compare two immutable Runs only when both records exist."""
+
+    base = get_capability_run(base_run_id, repo=repo)
+    target = get_capability_run(target_run_id, repo=repo)
+    if base is None or target is None:
+        return None
+    return compare_run_details(base, target)
