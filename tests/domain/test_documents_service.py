@@ -26,6 +26,9 @@ class FakeQuery:
         self.rows.sort(key=lambda row: (row.upload_time, row.id), reverse=True)
         return self
 
+    def filter(self, condition):
+        return self
+
     def all(self):
         return list(self.rows)
 

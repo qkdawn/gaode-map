@@ -13379,6 +13379,7 @@ body.agent-ppt-source-menu-open {
 .main-content {
     flex: 1;
     position: relative;
+    min-width: 0;
 }
 
 .analysis-map-stage,

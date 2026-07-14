@@ -38,16 +38,15 @@ class WebPageIndexAdapter(EvidenceSourceAdapter):
             keyword_score = _score_web_node(query.question, node)
             if keyword_score <= 0:
                 continue
-            node.score = keyword_score
             records.append(
                 EvidenceIndexRecord(
                     record_id=node.id,
-                    source_id=node.source_id,
+                    source_id=node.source_ids[0],
                     source_kind="web",
                     title=node.title,
                     summary=node.summary,
-                    content_ref=node.locator or str(node.metadata.get("url") or node.id),
-                    metadata=dict(node.metadata or {}),
+                    content_ref=node.locator or str(node.data.get("url") or node.id),
+                    metadata=dict(node.data or {}),
                     scores={"keyword": keyword_score, "total": keyword_score},
                     node=node,
                 )
@@ -58,7 +57,7 @@ class WebPageIndexAdapter(EvidenceSourceAdapter):
         del manifest
         target = str(record_id or "").strip()
         for node in self._nodes():
-            if node.id == target or str(node.metadata.get("url") or "").strip() == target:
+            if node.id == target or str(node.data.get("url") or "").strip() == target:
                 return node
         return None
 
@@ -67,7 +66,7 @@ class WebPageIndexAdapter(EvidenceSourceAdapter):
             node
             for index, item in enumerate(evidence_node_payloads_from_source(self._source), start=1)
             for node in [evidence_node_from_node_payload("", self._source, item, index=index)]
-            if node is not None and node.source_type == "web"
+            if node is not None and node.kind == "web_excerpt"
         ]
 
 
@@ -78,9 +77,9 @@ def _score_web_node(question: str, node: EvidenceNode) -> float:
             node.title,
             node.summary,
             node.content,
-            node.metadata.get("url") if isinstance(node.metadata, dict) else "",
-            node.metadata.get("source_domain") if isinstance(node.metadata, dict) else "",
-            node.metadata.get("category") if isinstance(node.metadata, dict) else "",
+            node.data.get("url") if isinstance(node.data, dict) else "",
+            node.data.get("source_domain") if isinstance(node.data, dict) else "",
+            node.data.get("category") if isinstance(node.data, dict) else "",
         ]
     ).lower()
     normalized_question = str(question or "").strip().lower()

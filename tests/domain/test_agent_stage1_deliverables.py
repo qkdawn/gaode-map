@@ -1,4 +1,4 @@
-from modules.agent.capability_runs import CapabilityRunRecorder
+from modules.agent.analysis_runs import AnalysisRunRecorder
 from modules.agent.stage1_deliverables import (
     build_design_handoff,
     build_evidence_appendix,
@@ -37,7 +37,7 @@ def movement_routes():
 
 def package():
     payload = {
-        "evidence_ledger": [
+        "evidence_nodes": [
             {
                 "id": "evidence-1",
                 "claim": "历史院落是核心空间资产",
@@ -165,7 +165,7 @@ def package():
 
 
 def run_manifest():
-    recorder = CapabilityRunRecorder(
+    recorder = AnalysisRunRecorder(
         capability_id="urban-strategy-stage1",
         project_context={"scope": {"scope_id": "scope-1"}},
         configuration_snapshot={"question": "形成 Stage 1 策划"},
@@ -173,7 +173,7 @@ def run_manifest():
             "model_profile_id": "model-1",
             "skill_id": "urban-strategy-stage1",
         },
-        run_id="caprun-test",
+        run_id="run-test",
         created_at="2026-07-12T00:00:00Z",
     )
     recorder.record_stage("formal-deliverables", "编译正式交付物")
@@ -194,7 +194,7 @@ def test_design_handoff_reuses_strategy_matrix_and_evidence_ids():
     assert requirement.implementation_phase == "phase_1"
     assert requirement.risk_level == "high"
     assert requirement.risk_summary == "消防条件尚待专项核验"
-    assert handoff.evidence_ledger_ids == ["evidence-1", "fieldwork-1"]
+    assert handoff.evidence_node_ids == ["evidence-1", "fieldwork-1"]
     assert {item.movement_type for item in handoff.movement_requirements} == {
         "visitor",
         "resident",
@@ -244,4 +244,4 @@ def test_compiler_exposes_three_named_artifacts_from_one_source_contract():
     assert (
         deliverables.design_handoff.space_requirements[0].space_id == "space-auditorium"
     )
-    assert deliverables.run_manifest.run_id == "caprun-test"
+    assert deliverables.run_manifest.run_id == "run-test"

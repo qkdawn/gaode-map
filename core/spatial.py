@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hashlib import sha1
+from hashlib import sha1, sha256
 from typing import Any, Callable, Sequence
 
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
@@ -194,3 +194,13 @@ def build_scope_id(geom_wgs84: BaseGeometry, *parts: Any) -> str:
     prefix = ":".join(str(part) for part in parts if part is not None).encode("utf-8")
     digest = sha1(prefix + b":" + geom_wgs84.wkb).hexdigest()
     return digest[:24]
+
+
+def build_scope_fingerprint(polygon_wgs84: list) -> str:
+    geom = polygon_from_payload(polygon_wgs84)
+    if geom.is_empty:
+        return ""
+    normalized = geom.buffer(0)
+    if normalized.is_empty:
+        return ""
+    return f"scope:{sha256(normalized.wkb).hexdigest()}"

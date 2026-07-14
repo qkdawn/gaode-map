@@ -6,13 +6,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from modules.agent.capability_run_service import (
-    compare_capability_runs,
-    get_capability_run,
-    list_capability_runs,
+from modules.agent.analysis_run_service import (
+    compare_analysis_runs,
+    get_analysis_run,
+    list_analysis_runs,
 )
-from modules.agent.capability_run_comparison import CapabilityRunComparison
-from modules.agent.capability_runs import CapabilityRun, CapabilityRunDetail
+from modules.agent.analysis_run_comparison import AnalysisRunComparison
+from modules.agent.analysis_runs import AnalysisRun, AnalysisRunDetail
 from modules.agent.capability_guidance import (
     CapabilityWorkbenchOverview,
     build_capability_workbench_overview,
@@ -92,6 +92,7 @@ from modules.agent.session_service import (
 )
 from modules.agent.tool_service import list_agent_tools
 from store.agent_session_repo import agent_session_repo
+from store.analysis_run_storage import AnalysisRunStorageError
 from store.history_repo import history_repo
 
 router = APIRouter()
@@ -140,46 +141,53 @@ async def post_analysis_capability_workbench(payload: AgentTurnRequest):
 
 
 @router.get(
-    "/api/v1/analysis/agent/analysis-capability-runs",
-    response_model=List[CapabilityRun],
+    "/api/v1/analysis/agent/analysis/runs",
+    response_model=List[AnalysisRun],
 )
-async def get_analysis_capability_runs(history_id: str, capability_id: str = ""):
+async def get_analysis_runs(history_id: str, capability_id: str = ""):
     try:
         return await run_in_threadpool(
-            list_capability_runs,
+            list_analysis_runs,
             history_id,
             capability_id=capability_id,
         )
+    except AnalysisRunStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get(
-    "/api/v1/analysis/agent/analysis-capability-run-comparisons",
-    response_model=CapabilityRunComparison,
+    "/api/v1/analysis/agent/analysis/run-comparisons",
+    response_model=AnalysisRunComparison,
 )
-async def get_analysis_capability_run_comparison(
+async def get_analysis_run_comparison(
     base_run_id: str, target_run_id: str
 ):
     try:
         comparison = await run_in_threadpool(
-            compare_capability_runs, base_run_id, target_run_id
+            compare_analysis_runs, base_run_id, target_run_id
         )
+    except AnalysisRunStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if comparison is None:
-        raise HTTPException(status_code=404, detail="capability_run_not_found")
+        raise HTTPException(status_code=404, detail="analysis_run_not_found")
     return comparison
 
 
 @router.get(
-    "/api/v1/analysis/agent/analysis-capability-runs/{run_id}",
-    response_model=CapabilityRunDetail,
+    "/api/v1/analysis/agent/analysis/runs/{run_id}",
+    response_model=AnalysisRunDetail,
 )
-async def get_analysis_capability_run(run_id: str):
-    detail = await run_in_threadpool(get_capability_run, run_id)
+async def get_analysis_run_detail(run_id: str):
+    try:
+        detail = await run_in_threadpool(get_analysis_run, run_id)
+    except AnalysisRunStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if detail is None:
-        raise HTTPException(status_code=404, detail="capability_run_not_found")
+        raise HTTPException(status_code=404, detail="analysis_run_not_found")
     return detail
 
 
@@ -194,6 +202,8 @@ async def post_analysis_capability_readiness(
         return await run_in_threadpool(
             evaluate_capability_readiness, capability_id, payload
         )
+    except AnalysisRunStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=404, detail="analysis_capability_not_found"
@@ -234,6 +244,8 @@ async def run_agent_main_loop_stream(request: Request, payload: AgentTurnRequest
         prepared = await run_in_threadpool(
             prepare_agent_turn, payload, agent_session_repo
         )
+    except AnalysisRunStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     payload = prepared.payload

@@ -430,8 +430,8 @@ def test_create_ppt_data_package_returns_ready_source(monkeypatch):
     assert "evidenceNodes" not in ai_payload
     assert "visualSpecs" not in ai_payload
     assert ai_payload["counts"]["evidence"] >= 2
-    assert ai_payload["evidence_nodes"][0]["source_type"] == "package"
-    assert ai_payload["evidence_nodes"][0]["source_id"] == response.source.id
+    assert ai_payload["evidence_nodes"][0]["kind"] in {"package_summary", "package_item", "spatial_carrier"}
+    assert ai_payload["evidence_nodes"][0]["source_ids"] == [response.source.id]
     assert "evidence" not in ai_payload
     assert ai_payload["evidence_nodes"][0]["id"].startswith(f"{response.source.id}:package:")
 
@@ -474,7 +474,7 @@ def test_create_ppt_evidence_package_uses_llm_plan(monkeypatch):
     assert package["items"][0]["id"] == "poi-2"
     evidence_nodes = response.source.meta["aiPayload"]["evidence_nodes"]
     assert evidence_nodes
-    assert {item["source_type"] for item in evidence_nodes} == {"package"}
+    assert {item["kind"] for item in evidence_nodes} <= {"package_summary", "package_item", "spatial_carrier"}
     assert "evidence" not in response.source.meta["aiPayload"]
 
 
@@ -775,8 +775,8 @@ def test_create_ppt_carrier_package_detects_block_loop_and_layers(monkeypatch):
     assert response.source.meta["packageVersion"] == "road-carrier-evidence-v2"
     ai_payload = response.source.meta["aiPayload"]
     assert ai_payload["source_kind"] == "package"
-    assert any(item["evidence_level"] == "package_carrier" for item in ai_payload["evidence_nodes"])
-    assert all(item["source_type"] == "package" for item in ai_payload["evidence_nodes"])
+    assert any(item["kind"] == "spatial_carrier" for item in ai_payload["evidence_nodes"])
+    assert all(item["kind"] in {"package_summary", "package_item", "spatial_carrier"} for item in ai_payload["evidence_nodes"])
     assert upserts
     assert upserts[0]["history_id"] == "history-1"
     assert upserts[0]["artifact_type"] == "ppt_data_package"
@@ -879,7 +879,7 @@ def test_list_ppt_sources_restores_package_artifacts(monkeypatch):
     assert restored.meta["package"]["carriers"][0]["carrier_id"] == "corridor_01"
     assert restored.source_kind == "package"
     assert restored.evidence_count == 2
-    assert restored.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "package"
+    assert restored.meta["aiPayload"]["evidence_nodes"][0]["kind"] in {"package_summary", "package_item", "spatial_carrier"}
     assert restored.meta["aiPayload"]["evidence_nodes"][0]["id"] == "package:poi-road-carriers:test:package:summary"
     assert restored.meta["aiPayload"]["index_manifest"]["source_kind"] == "package"
     assert restored.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "spatial_package_index"
@@ -1038,7 +1038,7 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
                 file_name="policy.pdf",
                 file_type="pdf",
                 file_path="/tmp/policy.pdf",
-                document_role="policy_document",
+                document_role="reference_document",
                 upload_time=datetime(2026, 6, 12, 1, 0, 0),
                 status="parsed",
             )
@@ -1081,7 +1081,7 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
     assert source.availability == "available"
     assert source.locator_summary == "policy.pdf / 第 3-3 页 / PageIndex 1 节"
     assert source.meta["sourceKind"] == "document"
-    assert source.meta["document"]["document_role"] == "policy_document"
+    assert source.meta["document"]["document_role"] == "reference_document"
     assert source.meta["document"]["index_count"] == 1
     assert source.meta["document_index_preview"][0]["title"] == "政策要求"
     assert "sourceId" not in source.meta["aiPayload"]
@@ -1090,7 +1090,7 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
     assert "evidenceNodes" not in source.meta["aiPayload"]
     assert "visualSpecs" not in source.meta["aiPayload"]
     assert source.meta["aiPayload"]["evidence_nodes"][0]["id"] == "document:doc-1:pageindex:n1"
-    assert source.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "document"
+    assert source.meta["aiPayload"]["evidence_nodes"][0]["kind"] == "document_excerpt"
     assert source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "pageindex"
     assert source.meta["aiPayload"]["index_manifest"]["retrieval_modes"] == ["structure", "keyword"]
     assert "evidence" not in source.meta["aiPayload"]

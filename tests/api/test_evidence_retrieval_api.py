@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from modules.evidence_retrieval import EmptySearchQuestion
-from modules.evidence_retrieval.schemas import EvidenceNode, EvidenceSearchResponse
+from modules.evidence_retrieval.schemas import EvidenceNode, EvidenceSearchHit, EvidenceSearchResponse
 from router.domains import evidence_retrieval
 from router.domains.evidence_retrieval import router
 
@@ -21,20 +21,19 @@ def test_search_api_returns_evidence_nodes(monkeypatch):
         assert payload.top_k == 8
         assert payload.source_ids == ["document:doc-1"]
         return EvidenceSearchResponse(
-            nodes=[
-                EvidenceNode(
+            hits=[
+                EvidenceSearchHit(node=EvidenceNode(
                     id="document:doc-1:pageindex:5",
-                    source_id="document:doc-1",
-                    source_type="document",
+                    kind="document_excerpt",
+                    source_ids=["document:doc-1"],
                     title="PageIndex 节点",
                     content="原文",
                     summary="摘要",
-                    metadata={"document_id": "doc-1", "page_start": 5, "page_end": 5},
+                    data={"document_id": "doc-1", "page_start": 5, "page_end": 5},
                     locator="pageindex:5",
-                    evidence_level="pageindex_node",
+                    method="pageindex_node",
                     citation="PageIndex line 5",
-                    score=1.0,
-                )
+                ), score=1.0)
             ]
         )
 
@@ -46,8 +45,9 @@ def test_search_api_returns_evidence_nodes(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert "results" not in payload
-    assert payload["nodes"][0]["evidence_level"] == "pageindex_node"
-    assert payload["nodes"][0]["citation"] == "PageIndex line 5"
+    assert payload["hits"][0]["node"]["kind"] == "document_excerpt"
+    assert payload["hits"][0]["node"]["citation"] == "PageIndex line 5"
+    assert payload["hits"][0]["score"] == 1.0
 
 
 def test_search_api_accepts_source_payload(monkeypatch):
@@ -59,15 +59,14 @@ def test_search_api_accepts_source_payload(monkeypatch):
         assert payload.sources[0].source_kind == "database"
         node = EvidenceNode(
             id="database:area-1:test:evidence:1",
-            source_id="database:area-1:test",
-            source_type="database",
+            kind="database_record",
+            source_ids=["database:area-1:test"],
             title="夜光活力摘要",
             content="该区域夜间活力较强。",
             summary="夜间活力较强",
             citation="数据库记录 history-1",
-            score=2.0,
         )
-        return EvidenceSearchResponse(nodes=[node])
+        return EvidenceSearchResponse(hits=[EvidenceSearchHit(node=node, score=2.0)])
 
     monkeypatch.setattr(evidence_retrieval, "search_evidence", fake_search)
 
@@ -91,9 +90,9 @@ def test_search_api_accepts_source_payload(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["nodes"][0]["source_id"] == "database:area-1:test"
+    assert payload["hits"][0]["node"]["source_ids"] == ["database:area-1:test"]
     assert "results" not in payload
-    assert payload["nodes"][0]["citation"] == "数据库记录 history-1"
+    assert payload["hits"][0]["node"]["citation"] == "数据库记录 history-1"
 
 
 def test_search_api_maps_errors(monkeypatch):

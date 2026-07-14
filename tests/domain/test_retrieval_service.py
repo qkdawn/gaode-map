@@ -15,6 +15,10 @@ from modules.retrieval.service import RetrievalService
 def _snapshot() -> AnalysisSnapshot:
     return AnalysisSnapshot(
         poi_summary={"total": 120},
+        pois=[
+            {"name": "后湖小吃街", "type": "餐饮服务", "address": "后湖片区", "lng": 112.95, "lat": 28.18},
+            {"name": "湖南师范大学", "type": "科教文化", "address": "岳麓区", "lng": 112.94, "lat": 28.19},
+        ],
         h3={"summary": {"grid_count": 12, "avg_density_poi_per_km2": 18.6}},
         road={"summary": {"node_count": 3682, "edge_count": 4089}},
         population={"summary": {"total_population": 54326.544, "male_ratio": 0.49, "female_ratio": 0.51}},
@@ -105,6 +109,7 @@ def test_build_analysis_chunks_from_snapshot():
 
     assert "session:current:analysis:h3.opportunity.top" in chunk_ids
     assert "session:current:analysis:poi.summary" in chunk_ids
+    assert "session:current:analysis:poi.records.1" in chunk_ids
     assert "session:current:analysis:population.summary" in chunk_ids
     assert "session:current:analysis:nightlight.summary" in chunk_ids
     assert "session:current:analysis:road.summary" in chunk_ids
@@ -145,6 +150,18 @@ def test_search_analysis_context_hits_frontend_place_anchor_chunk():
     assert hits[0].chunk_id == "session:current:analysis:poi.place_anchors"
 
 
+def test_search_analysis_context_hits_current_poi_records():
+    service = RetrievalService(snapshot=_snapshot(), artifacts={})
+    hits = service.search_analysis_context(
+        query="湖南师范大学 科教文化",
+        domains=["poi"],
+        top_k=8,
+    )
+
+    assert hits
+    assert hits[0].chunk_id == "session:current:analysis:poi.records.1"
+
+
 def test_read_analysis_evidence_node_returns_metrics_and_warnings():
     result = asyncio.run(
         read_analysis_evidence_node(
@@ -176,7 +193,24 @@ def test_read_analysis_evidence_node_returns_frontend_map_anchor_limits():
     assert result.status == "success"
     assert "湖南师范大学" in result.result["evidence_node"]["content"]
     assert result.result["evidence_node"]["metadata"]["source_artifacts"] == ["frontend_map_search_context"]
-    assert any("不能扩展成完整地名数据库" in warning for warning in result.result["evidence_node"]["warnings"])
+    assert any("优先检索 current_pois" in warning for warning in result.result["evidence_node"]["warnings"])
+
+
+def test_read_analysis_evidence_node_returns_current_poi_records():
+    result = asyncio.run(
+        read_analysis_evidence_node(
+            arguments={"node_id": "current:analysis:poi:node:session:current:analysis:poi.records.1"},
+            snapshot=_snapshot(),
+            artifacts={},
+            question="湖南师范大学在哪里",
+        )
+    )
+
+    assert result.status == "success"
+    node = result.result["evidence_node"]
+    assert "湖南师范大学" in node["content"]
+    assert node["metadata"]["metrics"]["rows"][1]["name"] == "湖南师范大学"
+    assert any("当前分析范围内已加载的 POI 结果" in warning for warning in node["warnings"])
 
 
 def test_report_context_search_and_read():

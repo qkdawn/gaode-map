@@ -75,7 +75,7 @@ class EvidenceIndexRecord(BaseModel):
 
     @property
     def score(self) -> float:
-        return float(self.scores.get("total") or self.node.score or 0.0)
+        return float(self.scores.get("total") or 0.0)
 
 
 class EvidenceTrace(BaseModel):

@@ -615,7 +615,7 @@ def assess_provenance_bindings(
                     severity="error" if critical else "warning",
                     evidence_id=binding.evidence_id,
                     message=f"证据 {binding.evidence_id} 无法绑定到真实数据资产。",
-                    repair_hint="选择可读取的文档节点或先运行对应分析，并重新生成证据台账。",
+                    repair_hint="选择可读取的文档节点或先运行对应分析，并重新生成证据节点。",
                 )
             )
         elif binding.status == "conflicting":

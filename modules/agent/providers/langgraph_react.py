@@ -256,7 +256,7 @@ async def run_langgraph_react_loop(
         model=effective.model,
         api_key=effective.api_key,
         base_url=effective.base_url or None,
-        timeout=None if effective.timeout_s <= 0 else effective.timeout_s,
+        timeout=None,
     ).bind_tools(tool_schemas)
 
     async def preflight(_state: LangGraphReactState) -> Dict[str, Any]:

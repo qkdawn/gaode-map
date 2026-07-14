@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 
-export const useAnalysisPoiStore = defineStore('analysis_poi', {
-  state: () => ({
+export function createAnalysisPoiStoreInitialState() {
+  return {
     poiKeywords: '',
     typeMapConfig: { groups: [] },
     step3NavItems: [
@@ -27,7 +27,19 @@ export const useAnalysisPoiStore = defineStore('analysis_poi', {
     pointSimplifyEnabled: false,
     pointLayersSuspendedForSyntax: false,
     poiSystemSuspendedForSyntax: false,
-  }),
+    poiMarkers: [],
+    allPoisDetails: [],
+    poiCategorySummary: [],
+    poiResultsByYear: [],
+  }
+}
+
+export const ANALYSIS_POI_STATE_KEYS = Object.freeze(
+  Object.keys(createAnalysisPoiStoreInitialState()),
+)
+
+export const useAnalysisPoiStore = defineStore('analysis_poi', {
+  state: () => createAnalysisPoiStoreInitialState(),
 })
 
 export {}

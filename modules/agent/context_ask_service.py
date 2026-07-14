@@ -62,7 +62,7 @@ def _fallback_answer(question: str, target: ContextAskTarget, reason: str = "") 
     ]
     if reason:
         warnings.append(reason)
-    if target.type == "capability_run":
+    if target.type == "analysis_run":
         run_payload = target.payload if isinstance(target.payload, dict) else {}
         run_id = as_text(run_payload.get("run_id") or target.id) or "未标识运行"
         version_kind = as_text(run_payload.get("version_kind"))
@@ -124,7 +124,7 @@ def _build_user_payload(payload: AgentContextAskRequest, scoped_dataset_context:
             "下一步分析类问题必须给出分析目的、使用来源、方法动作、预期产出和优先级。",
         ],
     }
-    if target.type == "capability_run":
+    if target.type == "analysis_run":
         user_payload["instructions"].extend([
             "回答必须明确标识 target.payload.run_id，并锁定该运行版本，不得把其他版本或当前页面结果混入。",
             "version_kind=immutable_history 时，只解释保存的不可变快照；若 stale_input_artifact_ids 非空，必须明确该结果不是当前最新结论。",

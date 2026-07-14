@@ -238,10 +238,10 @@ class AgentSiteSelectionResponse(BaseModel):
 class ContextAskTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate", "analysis_sources", "capability_run"] = "report_section"
+    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate", "analysis_sources", "analysis_run"] = "report_section"
     id: str = ""
     title: str = ""
-    source: Literal["report", "iteration", "site_selection", "analysis", "capability_run"] = "report"
+    source: Literal["report", "iteration", "site_selection", "analysis", "analysis_run"] = "report"
     summary: str = ""
     evidence: List[Any] = Field(default_factory=list)
     artifact_refs: List[str] = Field(default_factory=list)

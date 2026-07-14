@@ -116,7 +116,7 @@ async def search_selected_source_evidence(*, arguments, snapshot, artifacts, que
         question=query,
         limit=max(8, int(arguments.get("top_k") or 8)),
     )
-    retrieved_nodes = [evidence_node_payload_from_node(node) for node in response.nodes]
+    retrieved_nodes = [evidence_node_payload_from_node(hit.node) for hit in response.hits]
     nodes = []
     seen_node_ids = set()
     for node in dossier_nodes + retrieved_nodes:
@@ -133,8 +133,8 @@ async def search_selected_source_evidence(*, arguments, snapshot, artifacts, que
     hits = [
         {
             "node_id": node.get("id"),
-            "source_id": node.get("source_id"),
-            "source_type": node.get("source_type"),
+            "source_ids": node.get("source_ids"),
+            "kind": node.get("kind"),
             "title": node.get("title"),
             "summary": node.get("summary"),
             "locator": node.get("locator"),
@@ -166,7 +166,7 @@ async def read_selected_source_evidence_node(*, arguments, snapshot, artifacts, 
         return ToolResult(
             tool_name="read_selected_source_evidence_node",
             status="failed",
-            result={"node_id": "", "source_id": "", "source_type": "", "evidence_node": None, "warnings": ["node_id_required"]},
+            result={"node_id": "", "source_ids": [], "kind": "", "evidence_node": None, "warnings": ["node_id_required"]},
             warnings=["node_id_required"],
             error="node_id_required",
         )
@@ -177,8 +177,8 @@ async def read_selected_source_evidence_node(*, arguments, snapshot, artifacts, 
             tool_name="read_selected_source_evidence_node",
             result={
                 "node_id": node_id,
-                "source_id": _as_text(cached.get("source_id")),
-                "source_type": _as_text(cached.get("source_type")),
+                "source_ids": list(cached.get("source_ids") or []),
+                "kind": _as_text(cached.get("kind")),
                 "evidence_node": cached,
                 "warnings": [],
             },
@@ -194,7 +194,7 @@ async def read_selected_source_evidence_node(*, arguments, snapshot, artifacts, 
         return ToolResult(
             tool_name="read_selected_source_evidence_node",
             status="failed",
-            result={"node_id": node_id, "source_id": "", "source_type": "", "evidence_node": None, "warnings": [warning]},
+            result={"node_id": node_id, "source_ids": [], "kind": "", "evidence_node": None, "warnings": [warning]},
             warnings=[warning],
             error="source_id_not_selected",
         )
@@ -213,7 +213,7 @@ async def read_selected_source_evidence_node(*, arguments, snapshot, artifacts, 
         return ToolResult(
             tool_name="read_selected_source_evidence_node",
             status="failed",
-            result={"node_id": node_id, "source_id": "", "source_type": "", "evidence_node": None, "warnings": [warning]},
+            result={"node_id": node_id, "source_ids": [], "kind": "", "evidence_node": None, "warnings": [warning]},
             warnings=[warning],
             error="evidence_node_not_found",
         )
@@ -222,8 +222,8 @@ async def read_selected_source_evidence_node(*, arguments, snapshot, artifacts, 
         tool_name="read_selected_source_evidence_node",
         result={
             "node_id": node_id,
-            "source_id": _as_text(matched.get("source_id")),
-            "source_type": _as_text(matched.get("source_type")),
+            "source_ids": list(matched.get("source_ids") or []),
+            "kind": _as_text(matched.get("kind")),
             "evidence_node": matched,
             "warnings": [],
         },
@@ -309,7 +309,7 @@ def register_source_evidence_tools(registry: Dict[str, RegisteredTool]) -> None:
                 "required": ["node_id"],
                 "additionalProperties": False,
             },
-            output_schema={"type": "object", "properties": {"node_id": {"type": "string"}, "source_id": {"type": "string"}, "source_type": {"type": "string"}, "evidence_node": {"anyOf": [EVIDENCE_NODE_SCHEMA, {"type": "null"}]}, "warnings": {"type": "array"}}, "required": ["node_id", "source_id", "source_type", "evidence_node", "warnings"], "additionalProperties": False},
+            output_schema={"type": "object", "properties": {"node_id": {"type": "string"}, "source_ids": {"type": "array", "items": {"type": "string"}}, "kind": {"type": "string"}, "evidence_node": {"anyOf": [EVIDENCE_NODE_SCHEMA, {"type": "null"}]}, "warnings": {"type": "array"}}, "required": ["node_id", "source_ids", "kind", "evidence_node", "warnings"], "additionalProperties": False},
             readonly=True,
             cacheable=True,
         ),

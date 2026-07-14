@@ -8,12 +8,23 @@ import logging
 from pathlib import Path
 from threading import Lock
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, delete, inspect, select, text, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.engine import make_url
 
 from core.config import ENV_FILE, reload_settings_from_env, settings
-from .models import AgentSession, AnalysisArtifact, Base, PoiResult
+from core.spatial import build_scope_fingerprint
+from .artifact_identity import build_artifact_slot_key
+from .models import (
+    AgentSession,
+    AnalysisArtifact,
+    AnalysisHistory,
+    Base,
+    PoiResult,
+    ProjectDataSnapshot,
+    ProjectSpatialUnit,
+    SpatialProject,
+)
 
 logger = logging.getLogger(__name__)
 _engine_lock = Lock()
@@ -150,8 +161,85 @@ def _ensure_analysis_artifacts_schema() -> None:
     if not inspector.has_table("analysis_artifacts"):
         AnalysisArtifact.__table__.create(bind=engine, checkfirst=True)
         return
+
+    columns = {item.get("name") for item in inspector.get_columns("analysis_artifacts")}
+    if "slot_key" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE analysis_artifacts ADD COLUMN slot_key VARCHAR(128) NOT NULL DEFAULT ''"))
+
+    with engine.begin() as conn:
+        histories = {
+            str(row.id): build_scope_fingerprint(row.result_polygon if isinstance(row.result_polygon, list) else [])
+            for row in conn.execute(select(AnalysisHistory.id, AnalysisHistory.result_polygon))
+        }
+        rows = conn.execute(
+            select(
+                AnalysisArtifact.id,
+                AnalysisArtifact.history_id,
+                AnalysisArtifact.artifact_type,
+                AnalysisArtifact.params,
+                AnalysisArtifact.updated_at,
+            ).order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc())
+        ).all()
+        keepers: dict[tuple[str, str, str], int] = {}
+        duplicate_ids: list[int] = []
+        for row in rows:
+            try:
+                slot_key = build_artifact_slot_key(row.artifact_type, row.params)
+            except ValueError:
+                slot_key = "year:unknown"
+            identity = (str(row.history_id), str(row.artifact_type), slot_key)
+            if identity in keepers:
+                duplicate_ids.append(int(row.id))
+                continue
+            keepers[identity] = int(row.id)
+            conn.execute(
+                update(AnalysisArtifact)
+                .where(AnalysisArtifact.id == row.id)
+                .values(
+                    slot_key=slot_key,
+                    scope_fingerprint=histories.get(str(row.history_id), ""),
+                )
+            )
+        if duplicate_ids:
+            chunk_size = 500
+            for start in range(0, len(duplicate_ids), chunk_size):
+                conn.execute(delete(AnalysisArtifact).where(AnalysisArtifact.id.in_(duplicate_ids[start : start + chunk_size])))
+
+    inspector = inspect(engine)
+    old_unique_names = {item.get("name") for item in inspector.get_unique_constraints("analysis_artifacts")}
+    if "uq_analysis_artifact_identity" in old_unique_names:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE analysis_artifacts DROP INDEX uq_analysis_artifact_identity"))
+        except Exception:
+            logger.debug("旧 analysis artifact 唯一索引无法删除", exc_info=True)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE UNIQUE INDEX uq_analysis_artifact_slot ON analysis_artifacts (history_id, artifact_type, slot_key)"))
+    except Exception:
+        logger.debug("analysis artifact 槽位唯一索引已存在或无法创建", exc_info=True)
     for index in AnalysisArtifact.__table__.indexes:
         index.create(bind=engine, checkfirst=True)
+
+
+def _ensure_spatial_projects_schema() -> None:
+    """Create the MCP project tables without requiring DDL privileges on old FKs."""
+    _refresh_runtime_config_if_needed()
+    for table in (
+        SpatialProject.__table__,
+        ProjectDataSnapshot.__table__,
+        ProjectSpatialUnit.__table__,
+    ):
+        table.create(bind=engine, checkfirst=True)
+
+
+def _drop_legacy_analysis_artifact_versions() -> None:
+    """Remove obsolete SQL payload storage without introducing FK migrations."""
+    _refresh_runtime_config_if_needed()
+    if inspect(engine).has_table("analysis_artifact_versions"):
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE analysis_artifact_versions"))
 
 
 def init_db() -> None:
@@ -159,8 +247,15 @@ def init_db() -> None:
     创建表结构（幂等）。
     """
     _refresh_runtime_config_if_needed()
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception:
+        # Older installations can lack permissions for unrelated legacy FKs.
+        # Targeted schema ensure functions below still make current capabilities usable.
+        logger.exception("全量数据库初始化未完成，继续初始化独立领域表")
     _ensure_agent_sessions_schema()
     _ensure_poi_results_schema()
     _ensure_analysis_artifacts_schema()
+    _drop_legacy_analysis_artifact_versions()
+    _ensure_spatial_projects_schema()
     logger.info("数据库初始化完成")

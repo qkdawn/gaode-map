@@ -58,22 +58,33 @@ def _ai_payload(
     if evidence:
         included.append("evidence")
     evidence_nodes = []
+    kind_by_source = {
+        "system": "dataset_record",
+        "document": "document_excerpt",
+        "image": "image_observation",
+        "web": "web_excerpt",
+        "database": "database_record",
+        "package": "package_item",
+    }
     for index, item in enumerate(evidence, start=1):
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         node_source_id = item.get("source_id") or payload.get("source_id") or source_id
         node_type = item.get("type") or item.get("evidence_level") or "source_evidence"
         evidence_nodes.append({
             "id": item.get("id") or payload.get("evidence_node_id") or f"{node_source_id}:evidence:{index}",
-            "source_id": node_source_id,
-            "source_type": payload.get("source_type") or source_kind,
+            "kind": kind_by_source.get(source_kind, "dataset_record"),
+            "run_id": payload.get("run_id") or "",
+            "source_ids": [node_source_id],
+            "metric_ids": payload.get("metric_ids") or [],
             "title": item.get("title") or title,
             "content": item.get("content") or item.get("text") or item.get("summary") or "",
             "summary": item.get("summary") or item.get("text") or item.get("content") or "",
-            "metadata": payload,
+            "data": payload,
+            "time_scope": payload.get("time_scope") or {},
+            "spatial_scope": payload.get("spatial_scope") or {},
+            "method": node_type,
+            "quality_flags": payload.get("quality_flags") or [],
             "locator": item.get("locator") or payload.get("locator") or "",
-            "score": item.get("score") or 0,
-            "evidence_level": node_type,
-            "warnings": item.get("warnings") or [],
             "citation": item.get("citation") or "",
         })
     return {
@@ -86,7 +97,6 @@ def _ai_payload(
         "metrics": metrics,
         "metric_gaps": metric_gaps,
         "evidence_nodes": evidence_nodes,
-        "evidenceNodes": evidence_nodes,
         "visual_specs": [],
         "excluded": excluded or [{"type": "raw_payload", "reason": "不传原始数据。"}],
         "counts": {
@@ -140,7 +150,7 @@ def test_generate_ppt_spec_returns_ai_outline(monkeypatch):
     assert response.missing_inputs == []
     assert seen_kwargs["stream"] is False
     assert seen_kwargs["enable_thinking"] is False
-    assert seen_kwargs["timeout_s"] == 0.0
+    assert "timeout_s" not in seen_kwargs
 
 
 def test_generate_ppt_spec_fails_without_llm(monkeypatch):
@@ -359,9 +369,9 @@ def test_generate_ppt_spec_sends_compact_carrier_package_to_llm(monkeypatch):
     assert "package" not in source_meta
     assert source_meta["aiPayload"]["counts"]["evidence"] == 2
     assert seen_payload["source_manifest"][0]["excluded"][0]["type"] == "package_full_items"
-    assert seen_payload["evidence_context"]["items"][0]["evidence_level"] == "package_summary"
-    assert seen_payload["evidence_context"]["items"][0]["source_type"] == "package"
-    assert seen_payload["evidence_node_context"]["items"][1]["metadata"]["carrier_id"] == "corridor_01"
+    assert seen_payload["evidence_context"]["items"][0]["method"] == "package_summary"
+    assert seen_payload["evidence_context"]["items"][0]["kind"] == "package_item"
+    assert seen_payload["evidence_node_context"]["items"][1]["data"]["carrier_id"] == "corridor_01"
 
     serialized = json.dumps(seen_payload["sources"], ensure_ascii=False)
     assert "raw_payload" not in serialized
@@ -423,7 +433,7 @@ def test_generate_ppt_spec_sends_document_index_preview_to_llm(monkeypatch):
                     "title": "更新政策研究",
                     "file_name": "policy.pdf",
                     "file_type": "pdf",
-                    "document_role": "policy_document",
+                    "document_role": "reference_document",
                     "status": "parsed",
                     "index_count": 1,
                 },
@@ -449,7 +459,7 @@ def test_generate_ppt_spec_sends_document_index_preview_to_llm(monkeypatch):
     assert "document" not in source_payload["meta"]
     assert "document_index_preview" not in source_payload["meta"]
     assert seen_payload["evidence_context"]["items"][0]["content"] == "政策要求完善公共服务设施。"
-    assert seen_payload["evidence_context"]["items"][0]["source_type"] == "document"
+    assert seen_payload["evidence_context"]["items"][0]["kind"] == "document_excerpt"
     assert seen_payload["evidence_node_context"]["items"][0]["id"] == "document:doc-1:evidence:1"
     serialized = json.dumps(source_payload, ensure_ascii=False)
     assert "不应进入 LLM 的长原文" not in serialized
@@ -1942,7 +1952,7 @@ def test_ppt_context_bundle_uses_canonical_source_kind_over_meta_alias():
     ))
 
     assert bundle["source_manifest"][0]["source_kind"] == "web"
-    assert bundle["evidence_context"]["items"][0]["source_type"] == "web"
+    assert bundle["evidence_context"]["items"][0]["kind"] == "web_excerpt"
 
 
 def test_ppt_metric_context_filters_current_metrics_by_selected_source_ids():

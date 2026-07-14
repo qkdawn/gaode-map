@@ -3,15 +3,110 @@ from __future__ import annotations
 from typing import Any
 
 from .capability_inputs import ResolvedCapabilityInputs
-from .capability_runs import (
-    CapabilityArtifactRef,
-    CapabilityArtifactType,
-    CapabilityRunRecorder,
+from .analysis_runs import (
+    AnalysisArtifactRef,
+    AnalysisArtifactType,
+    AnalysisRunRecorder,
+    AnalysisSourceVersion,
     artifact_ref,
+    content_digest,
 )
 from .llm_digest import snapshot_digest
 from .schemas import AgentTurnRequest, EffectiveExecutionProfile
 from .stage1_provenance import ArtifactProvenance
+
+
+def _wgs84_origin(payload: AgentTurnRequest) -> tuple[float, float] | None:
+    candidates = (
+        payload.analysis_snapshot.param_bundles.get("center"),
+        payload.analysis_snapshot.context.get("center"),
+        payload.analysis_snapshot.scope.get("center"),
+    )
+    for value in candidates:
+        if not isinstance(value, (list, tuple)) or len(value) < 2:
+            continue
+        try:
+            lng, lat = float(value[0]), float(value[1])
+        except (TypeError, ValueError):
+            continue
+        if -180 <= lng <= 180 and -90 <= lat <= 90:
+            return (lng, lat)
+    return None
+
+
+def _source_versions(
+    payload: AgentTurnRequest,
+    selected_sources: list[dict[str, Any]],
+) -> list[AnalysisSourceVersion]:
+    scope_sha = content_digest(payload.analysis_snapshot.scope)
+    versions: list[AnalysisSourceVersion] = []
+    snapshot = payload.analysis_snapshot
+    system_sources = (
+        ("current:dataset:poi", snapshot.poi_summary or snapshot.pois),
+        ("current:dataset:h3", snapshot.h3),
+        ("current:dataset:population", snapshot.population),
+        ("current:dataset:nightlight", snapshot.nightlight),
+        ("current:dataset:road", snapshot.road),
+    )
+    sources = list(selected_sources)
+    known_ids = {
+        str(item.get("source_id") or item.get("id") or "").strip()
+        for item in sources
+    }
+    for source_id, data in system_sources:
+        if not data or source_id in known_ids:
+            continue
+        sources.append(
+            {
+                "source_id": source_id,
+                "content_sha256": content_digest(data),
+                "scope_fingerprint": scope_sha,
+                "record_count": len(data) if isinstance(data, list) else 0,
+                "year": data.get("year") if isinstance(data, dict) else None,
+            }
+        )
+    for source in sources:
+        source_id = str(source.get("source_id") or source.get("id") or "").strip()
+        if not source_id:
+            continue
+        meta = source.get("meta") if isinstance(source.get("meta"), dict) else {}
+        ai_payload = meta.get("aiPayload") or meta.get("ai_payload")
+        ai_payload = ai_payload if isinstance(ai_payload, dict) else {}
+        raw_year = source.get("year") or source.get("source_year") or ai_payload.get("year")
+        try:
+            year = int(str(raw_year)[:4]) if raw_year not in (None, "") else None
+        except (TypeError, ValueError):
+            year = None
+        sha256 = str(
+            source.get("sha256")
+            or source.get("content_sha256")
+            or ai_payload.get("dataset_content_sha256")
+            or content_digest(source)
+        )
+        raw_count = (
+            source.get("record_count")
+            or source.get("count")
+            or (ai_payload.get("counts") or {}).get("records")
+            or 0
+        )
+        try:
+            record_count = max(0, int(raw_count))
+        except (TypeError, ValueError):
+            record_count = 0
+        versions.append(
+            AnalysisSourceVersion(
+                source_id=source_id,
+                year=year,
+                sha256=sha256,
+                scope_fingerprint=str(
+                    source.get("scope_fingerprint")
+                    or ai_payload.get("scope_fingerprint")
+                    or scope_sha
+                ),
+                record_count=record_count,
+            )
+        )
+    return versions
 
 
 def start_stage1_run(
@@ -22,10 +117,11 @@ def start_stage1_run(
     selected_sources: list[dict[str, Any]],
     capability_id: str = "urban-strategy-stage1",
     resolved_inputs: ResolvedCapabilityInputs | None = None,
-) -> CapabilityRunRecorder:
+) -> AnalysisRunRecorder:
     """Lock one Stage 1 configuration before readiness or model execution begins."""
 
-    return CapabilityRunRecorder(
+    origin = _wgs84_origin(payload)
+    return AnalysisRunRecorder(
         capability_id=capability_id,
         project_context={
             "scope": payload.analysis_snapshot.scope,
@@ -48,12 +144,16 @@ def start_stage1_run(
             ),
         },
         execution_profile=profile.model_dump(mode="json"),
+        project_location=origin,
+        scope_origin=origin,
+        partition_origin=origin,
+        source_versions=_source_versions(payload, selected_sources),
     )
 
 
 def bind_stage1_input_artifacts(
     registry: list[ArtifactProvenance],
-) -> list[CapabilityArtifactRef]:
+) -> list[AnalysisArtifactRef]:
     return [
         artifact_ref(
             artifact_id=str(item.artifact_id),
@@ -80,17 +180,17 @@ def build_stage1_output_artifacts(
     evidence_appendix: str = "",
     design_handoff: dict[str, Any] | None = None,
     include_manifest: bool = False,
-) -> list[CapabilityArtifactRef]:
+) -> list[AnalysisArtifactRef]:
     evidence_ids = [
         str(item.get("id") or "").strip()
-        for item in package.get("evidence_ledger") or []
+        for item in package.get("evidence_nodes") or []
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     ]
-    artifacts: list[CapabilityArtifactRef] = []
+    artifacts: list[AnalysisArtifactRef] = []
 
     def add(
         artifact_id: str,
-        artifact_type: CapabilityArtifactType,
+        artifact_type: AnalysisArtifactType,
         title: str,
         filename: str,
         payload: Any,
@@ -129,13 +229,13 @@ def build_stage1_output_artifacts(
             package["source_readiness"],
             input_artifact_ids,
         )
-    if "evidence_ledger" in package:
+    if "evidence_nodes" in package:
         add(
-            "stage1-evidence-ledger",
-            "evidence_ledger",
-            "证据台账",
-            "evidence_ledger.jsonl",
-            package["evidence_ledger"],
+            "stage1-evidence-nodes",
+            "evidence_nodes",
+            "证据节点",
+            "evidence_nodes.jsonl",
+            package["evidence_nodes"],
             input_artifact_ids,
             evidence_refs=evidence_ids,
         )
@@ -146,7 +246,7 @@ def build_stage1_output_artifacts(
             "冲突登记表",
             "conflict_register.json",
             package["conflict_register"],
-            ["stage1-evidence-ledger"],
+            ["stage1-evidence-nodes"],
             evidence_refs=evidence_ids,
         )
     if "hard_constraint_screening" in package:
@@ -156,7 +256,7 @@ def build_stage1_output_artifacts(
             "硬约束筛选",
             "hard_constraint_screening.json",
             package["hard_constraint_screening"],
-            ["stage1-evidence-ledger", "stage1-conflict-register"],
+            ["stage1-evidence-nodes", "stage1-conflict-register"],
             evidence_refs=evidence_ids,
         )
     workpack_ids: list[str] = []
@@ -172,7 +272,7 @@ def build_stage1_output_artifacts(
             f"专业工作包：{workpack_type}",
             f"expert_workpacks/{workpack_type}.json",
             workpack,
-            ["stage1-evidence-ledger", "stage1-conflict-register"],
+            ["stage1-evidence-nodes", "stage1-conflict-register"],
             evidence_refs=[
                 str(item).strip()
                 for item in workpack.get("evidence_refs") or []
@@ -187,7 +287,7 @@ def build_stage1_output_artifacts(
             "strategy_options.json",
             package["strategy"],
             [
-                "stage1-evidence-ledger",
+                "stage1-evidence-nodes",
                 "stage1-conflict-register",
                 "stage1-hard-constraint-screening",
                 *workpack_ids,
@@ -231,7 +331,7 @@ def build_stage1_output_artifacts(
             evidence_refs=evidence_ids,
         )
     auditable_ids = {
-        "stage1-evidence-ledger",
+        "stage1-evidence-nodes",
         "stage1-conflict-register",
         "stage1-hard-constraint-screening",
         "stage1-strategy-options",
@@ -281,7 +381,7 @@ def build_stage1_output_artifacts(
             "stage1_report.md",
             report_markdown,
             [
-                "stage1-evidence-ledger",
+                "stage1-evidence-nodes",
                 "stage1-strategy-options",
                 "stage1-decision-matrix",
             ],
@@ -290,11 +390,11 @@ def build_stage1_output_artifacts(
     if evidence_appendix:
         add(
             "stage1-evidence-appendix",
-            "evidence_ledger",
+            "evidence_nodes",
             "证据附录",
             "evidence_appendix.md",
             evidence_appendix,
-            ["stage1-evidence-ledger", "stage1-conflict-register"],
+            ["stage1-evidence-nodes", "stage1-conflict-register"],
             evidence_refs=evidence_ids,
         )
     if design_handoff is not None:

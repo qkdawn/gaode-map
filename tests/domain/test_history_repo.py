@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 from datetime import datetime
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
@@ -28,6 +29,26 @@ def _build_history(params, polygon, *, description, history_id=None):
         params=params,
         result_polygon=polygon,
     )
+
+
+def test_history_year_selection_uses_business_year_not_row_order():
+    history = SimpleNamespace(params={"years": [2020, 2022, 2024], "year": 2020})
+    rows = [
+        SimpleNamespace(year=2024),
+        SimpleNamespace(year=2022),
+        SimpleNamespace(year=2020),
+    ]
+
+    assert HistoryRepo._resolve_selected_year(history, rows, None) == 2024
+    assert HistoryRepo._resolve_selected_year(history, rows, 2022) == 2022
+    assert HistoryRepo._resolve_selected_year(history, rows, 2030) == 2030
+
+
+def test_history_year_selection_has_no_hardcoded_2026_preference():
+    history = SimpleNamespace(params={"years": [2026, 2028]})
+    rows = [SimpleNamespace(year=2026), SimpleNamespace(year=2028)]
+
+    assert HistoryRepo._resolve_selected_year(history, rows, None) == 2028
 
 
 def test_get_list_extracts_only_sidebar_params_from_sqlite(monkeypatch):

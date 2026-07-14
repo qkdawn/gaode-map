@@ -74,7 +74,7 @@ def test_h3_bridge_uses_arcgis_python_path_from_settings(monkeypatch):
     monkeypatch.setattr(settings, "arcgis_bridge_token", "token")
     monkeypatch.setattr(settings, "arcgis_bridge_base_url", "http://bridge.test")
     monkeypatch.setattr(settings, "arcgis_python_path", r"C:\ArcGIS\python.exe")
-    monkeypatch.setattr(h3_bridge.httpx, "Client", lambda timeout: _DummyClient(calls))
+    monkeypatch.setattr(h3_bridge.httpx, "Client", lambda timeout, trust_env: _DummyClient(calls))
 
     h3_bridge.run_arcgis_h3_analysis(
         features=[
@@ -101,7 +101,7 @@ def test_h3_export_omits_arcgis_python_path_when_not_configured(monkeypatch):
     monkeypatch.setattr(settings, "arcgis_bridge_token", "token")
     monkeypatch.setattr(settings, "arcgis_bridge_base_url", "http://bridge.test")
     monkeypatch.setattr(settings, "arcgis_python_path", "")
-    monkeypatch.setattr(h3_bridge.httpx, "Client", lambda timeout: _DummyClient(calls))
+    monkeypatch.setattr(h3_bridge.httpx, "Client", lambda timeout, trust_env: _DummyClient(calls))
 
     h3_bridge.run_arcgis_h3_export(
         export_format="gpkg",
@@ -129,7 +129,7 @@ def test_gwr_bridge_uses_arcgis_python_path_from_settings(monkeypatch):
     monkeypatch.setattr(settings, "arcgis_bridge_token", "token")
     monkeypatch.setattr(settings, "arcgis_bridge_base_url", "http://bridge.test")
     monkeypatch.setattr(settings, "arcgis_python_path", r"C:\ArcGIS\python.exe")
-    monkeypatch.setattr(gwr_bridge.httpx, "Client", lambda timeout: _DummyClient(calls))
+    monkeypatch.setattr(gwr_bridge.httpx, "Client", lambda timeout, trust_env: _DummyClient(calls))
 
     gwr_bridge.run_arcgis_gwr_analysis(
         rows=[{"cell_id": "c1", "nightlight_radiance": 1.0, "predictors": {"poi_density_per_km2": 1.0}}],
@@ -146,7 +146,13 @@ def test_road_bridge_uses_arcgis_python_path_from_settings(monkeypatch):
     monkeypatch.setattr(settings, "arcgis_bridge_token", "token")
     monkeypatch.setattr(settings, "arcgis_bridge_base_url", "http://bridge.test")
     monkeypatch.setattr(settings, "arcgis_python_path", r"C:\ArcGIS\python.exe")
-    monkeypatch.setattr(road_bridge.httpx, "Client", lambda timeout: _DummyClient(calls))
+    client_options = []
+
+    def make_client(**kwargs):
+        client_options.append(kwargs)
+        return _DummyClient(calls)
+
+    monkeypatch.setattr(road_bridge.httpx, "Client", make_client)
 
     road_bridge.run_arcgis_road_syntax_webgl(
         road_features=[
@@ -160,3 +166,4 @@ def test_road_bridge_uses_arcgis_python_path_from_settings(monkeypatch):
 
     assert calls
     assert calls[0]["json"]["arcgis_python_path"] == r"C:\ArcGIS\python.exe"
+    assert client_options == [{"timeout": 300.0, "trust_env": False}]

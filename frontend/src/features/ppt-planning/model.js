@@ -84,37 +84,55 @@ function createEvidenceNode({
     || asText(safeMetadata.count ? `count:${safeMetadata.count}` : '')
     || resolvedTitle
   const nodeId = `${resolvedSourceId}:evidence:${resolvedLevel}:${stableKey}`.replace(/\s+/g, '-')
+  const kindBySource = {
+    document: 'document_excerpt',
+    image: 'image_observation',
+    web: 'web_excerpt',
+    database: 'database_record',
+    package: 'package_item',
+    system: 'dataset_record',
+  }
+  const kindByLevel = {
+    package_summary: 'package_summary',
+    package_carrier: 'spatial_carrier',
+    package_poi_sample: 'package_item',
+    derived_metric: 'spatial_metric',
+  }
   return {
     id: nodeId,
-    source_id: resolvedSourceId,
-    sourceId: resolvedSourceId,
-    source_type: asText(sourceType) || 'system',
-    sourceType: asText(sourceType) || 'system',
+    kind: kindByLevel[resolvedLevel]
+      || (cloneArray(safeMetadata.metric_ids).length ? 'spatial_metric' : null)
+      || kindBySource[asText(sourceType)]
+      || 'dataset_record',
+    run_id: asText(safeMetadata.run_id),
+    source_ids: [resolvedSourceId].filter(Boolean),
+    metric_ids: cloneArray(safeMetadata.metric_ids),
     title: resolvedTitle,
     content: asText(content),
     summary: asText(summary || content).slice(0, 260),
-    metadata: safeMetadata,
+    data: safeMetadata,
+    time_scope: cloneObject(safeMetadata.time_scope),
+    spatial_scope: cloneObject(safeMetadata.spatial_scope),
+    method: asText(safeMetadata.method || resolvedLevel),
+    quality_flags: cloneArray(safeMetadata.quality_flags),
     locator: asText(locator || safeMetadata.locator),
-    score: 0,
-    evidence_level: resolvedLevel,
-    evidenceLevel: resolvedLevel,
-    warnings: cloneArray(safeMetadata.warnings),
     citation: asText(citation),
   }
 }
 
 function pptEvidenceFromNode(node = {}, sourceTitle = '') {
-  const metadata = cloneObject(node.metadata)
+  const metadata = cloneObject(node.data)
   metadata.evidence_node_id = asText(node.id)
-  metadata.source_id = asText(node.source_id || node.sourceId)
-  metadata.source_type = asText(node.source_type || node.sourceType)
+  metadata.source_ids = cloneArray(node.source_ids)
+  metadata.kind = asText(node.kind)
   metadata.locator = asText(node.locator)
+  const sourceId = asText(cloneArray(node.source_ids)[0])
   return {
-    source_id: asText(node.source_id || node.sourceId),
-    sourceId: asText(node.source_id || node.sourceId),
+    source_id: sourceId,
+    sourceId,
     source_title: asText(sourceTitle || node.title),
     sourceTitle: asText(sourceTitle || node.title),
-    type: asText(node.evidence_level || node.evidenceLevel),
+    type: asText(node.method || node.kind),
     title: asText(node.title),
     text: asText(node.content),
     citation: asText(node.citation),
@@ -173,7 +191,6 @@ function createAiPayload({
   return {
     ...payload,
     evidence_nodes: evidenceNodes,
-    evidenceNodes,
   }
 }
 
@@ -411,8 +428,8 @@ function currentScopePayload(scope = {}) {
 }
 
 function currentEvidenceForSource(context = {}, sourceId = '', sourceTitle = '', readyMetrics = []) {
-  const datasets = cloneObject(context.datasets)
-  const analysis = cloneObject(context.analysis)
+  const datasets = context.datasets && typeof context.datasets === 'object' ? context.datasets : {}
+  const analysis = context.analysis && typeof context.analysis === 'object' ? context.analysis : {}
   const evidence = []
   if (readyMetrics.length) {
     evidence.push(createEvidenceItem({
@@ -446,6 +463,31 @@ function currentEvidenceForSource(context = {}, sourceId = '', sourceTitle = '',
       payload: { count: Number(h3.count || 0) || 0 },
     }))
   }
+  if (sourceId === 'current:analysis:population') {
+    const ageMetric = readyMetrics.find((metric) => asText(metric.metric_id || metric.metricId) === 'analysis:population:age_structure')
+    const ageDetails = cloneObject(ageMetric && (ageMetric.details || ageMetric.evidence_payload || ageMetric.evidencePayload))
+    if (Object.keys(ageDetails).length) {
+      evidence.push(createEvidenceItem({
+        sourceId,
+        sourceTitle,
+        type: 'derived_metric',
+        title: '年龄结构',
+        text: asText(ageMetric.description) || '已计算各年龄段占比，并以占比最高年龄段作为卡片主值。',
+        payload: {
+          metric_id: 'analysis:population:age_structure',
+          source_path: asText(ageMetric.source_path || ageMetric.sourcePath) || 'populationOverview.age_distribution',
+          calculation_method: asText(ageMetric.calculation_method || ageMetric.calculationMethod),
+          dominant_age_band: ageDetails.dominant_age_band,
+          dominant_age_band_label: ageDetails.dominant_age_band_label,
+          dominant_age_band_population: ageDetails.dominant_age_band_population,
+          dominant_age_band_ratio: ageDetails.dominant_age_band_ratio,
+          age_distribution_ratios: cloneArray(ageDetails.age_distribution_ratios),
+          locator: 'populationOverview.age_distribution',
+          evidence_level: 'derived_metric',
+        },
+      }))
+    }
+  }
   const analysisKey = {
     'current:analysis:poi_h3': 'poi_h3',
     'current:analysis:population': 'population',
@@ -470,8 +512,8 @@ function currentEvidenceForSource(context = {}, sourceId = '', sourceTitle = '',
 }
 
 function excludedForCurrentSource(context = {}, sourceId = '') {
-  const datasets = cloneObject(context.datasets)
-  const analysis = cloneObject(context.analysis)
+  const datasets = context.datasets && typeof context.datasets === 'object' ? context.datasets : {}
+  const analysis = context.analysis && typeof context.analysis === 'object' ? context.analysis : {}
   if (sourceId === 'current:dataset:poi') {
     return [{ type: 'current.datasets.poi.items', reason: '不传原始 POI 列表，只传 POI 数量和轻量摘要。', count: Number((datasets.poi || {}).count || 0) || 0 }]
   }

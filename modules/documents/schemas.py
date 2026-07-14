@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 DocumentStatus = Literal["uploaded", "parsing", "parsed", "failed"]
@@ -25,8 +25,14 @@ class DocumentRecord(BaseModel):
     file_type: Literal["pdf", "docx"]
     file_path: str
     document_role: DocumentRole
+    history_id: str = ""
     upload_time: datetime
     status: DocumentStatus
+
+    @field_validator("history_id", mode="before")
+    @classmethod
+    def normalize_history_id(cls, value: object) -> str:
+        return str(value or "").strip()
 
 
 class DocumentUploadResponse(DocumentRecord):

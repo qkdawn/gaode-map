@@ -56,12 +56,12 @@ def test_internal_agent_tools_lists_source_analysis_registry():
     payload = response.json()
     names = [item["name"] for item in payload]
     assert names[:6] == [
+        "read_project_context",
         "read_current_scope",
         "read_current_results",
+        "query_current_pois",
         "plan_business_analyst_analysis",
         "list_selected_sources",
-        "search_selected_source_evidence",
-        "read_selected_source_evidence_node",
     ]
     assert {"list_scope_datasets", "query_scope_dataset", "aggregate_scope_dataset", "read_scope_record"}.issubset(names)
     assert "search_database_context" not in names

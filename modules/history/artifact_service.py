@@ -3,17 +3,18 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from store.analysis_artifact_repo import DATA_VERSION, analysis_artifact_repo
 
 
 class AnalysisArtifactUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     artifact_type: str = Field(..., min_length=1)
     params: Dict[str, Any] = Field(default_factory=dict)
     payload: Dict[str, Any] = Field(default_factory=dict)
     summary: Dict[str, Any] = Field(default_factory=dict)
-    scope_fingerprint: str = ""
     data_version: str = DATA_VERSION
 
 
@@ -25,7 +26,6 @@ def upsert_history_artifact(history_id: str, payload: AnalysisArtifactUpsertRequ
             params=payload.params,
             payload=payload.payload,
             summary=payload.summary,
-            scope_fingerprint=payload.scope_fingerprint,
             data_version=payload.data_version or DATA_VERSION,
         )
     except ValueError as exc:

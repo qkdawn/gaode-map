@@ -348,6 +348,18 @@ function createAnalysisMapOrchestratorMethods() {
       })
       this.roadSyntaxAttachMapListeners()
     },
+    resizeAnalysisMap() {
+      const map = this.mapCore && this.mapCore.map
+      if (!map || typeof map.resize !== 'function') return
+      const resize = () => {
+        if (this.mapCore && this.mapCore.map === map) map.resize()
+      }
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(resize))
+      } else {
+        window.setTimeout(resize, 0)
+      }
+    },
   }
 }
 

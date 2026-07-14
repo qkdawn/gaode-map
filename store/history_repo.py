@@ -13,6 +13,7 @@ from modules.history.service import (
     build_lightweight_list_params,
     serialize_created_at,
 )
+from core.years import normalize_year, resolve_business_year
 from .database import SessionLocal
 from .history_keys import build_history_record_id
 from .models import AgentSession, AnalysisHistory, PoiResult
@@ -43,12 +44,7 @@ class HistoryRepo:
 
     @staticmethod
     def _normalize_year(value: Any) -> Optional[int]:
-        if value is None or value == "":
-            return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+        return normalize_year(value)
 
     @classmethod
     def _normalize_year_list(cls, params: Dict[str, Any]) -> List[int]:
@@ -165,14 +161,8 @@ class HistoryRepo:
         requested_year: Optional[int],
     ) -> Optional[int]:
         available_years = cls._collect_available_years(history, poi_rows)
-        requested = cls._normalize_year(requested_year)
-        if requested is not None and requested in available_years:
-            return requested
-        if 2026 in available_years:
-            return 2026
-        if available_years:
-            return available_years[-1]
-        return cls._normalize_year((history.params or {}).get("year") if isinstance(history.params, dict) else None)
+        fallback = (history.params or {}).get("year") if isinstance(history.params, dict) else None
+        return resolve_business_year(available_years or [fallback], requested_year)
 
     @classmethod
     def _select_snapshot_row(
@@ -409,15 +399,8 @@ class HistoryRepo:
                     if normalized is not None:
                         available_years.add(normalized)
                 sorted_years = sorted(available_years)
-                requested_year = self._normalize_year(year)
-                if requested_year is not None and requested_year in sorted_years:
-                    selected_year = requested_year
-                elif 2026 in sorted_years:
-                    selected_year = 2026
-                elif sorted_years:
-                    selected_year = sorted_years[-1]
-                else:
-                    selected_year = self._normalize_year((history.params or {}).get("year") if isinstance(history.params, dict) else None)
+                fallback = (history.params or {}).get("year") if isinstance(history.params, dict) else None
+                selected_year = resolve_business_year(sorted_years or [fallback], year)
 
                 selected_summary: Dict[str, Any] = {}
                 for row in reversed(poi_rows):

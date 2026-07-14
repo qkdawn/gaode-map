@@ -1,7 +1,7 @@
 
         <!-- Middle: Main Workspace -->
         <main class="main-content" :class="{ 'main-content-agent-mode': isAgentWorkspaceActive() }">
-            <div v-show="isAgentWorkspaceActive()" class="agent-main-stage">
+            <div v-if="isAgentWorkspaceActive()" class="agent-main-stage">
                 <div class="agent-app-main">
                     <div v-if="agentWorkspaceView === 'capabilities'" class="agent-capability-workspace">
                         <header class="agent-capability-header">
@@ -168,7 +168,7 @@
                                             <div><span>不可变历史快照</span><strong>{{ getAnalysisCapabilityRunStatusLabel(getSelectedAnalysisCapabilityRunDetail().run) }}</strong></div>
                                             <div class="agent-capability-run-snapshot-actions">
                                                 <code>{{ getSelectedAnalysisCapabilityRunDetail().run.run_id }}</code>
-                                                <button type="button" @click="openCapabilityRunContextAsk(getSelectedAnalysisCapabilityRunDetail())">继续追问此版本</button>
+                                                <button type="button" @click="openAnalysisRunContextAsk(getSelectedAnalysisCapabilityRunDetail())">继续追问此版本</button>
                                             </div>
                                         </header>
                                         <p v-if="getAnalysisCapabilityRunChangedInputIds(getSelectedAnalysisCapabilityRunDetail().run).length" class="agent-capability-run-stale-note">上游输入已更新：{{ getAnalysisCapabilityRunChangedInputIds(getSelectedAnalysisCapabilityRunDetail().run).join('、') }}。该结果保留用于审计，不代表当前最新结论。</p>
@@ -357,36 +357,36 @@
                                     </article>
                                 </div>
                             </div>
-                            <div v-if="getCapabilityRun()" class="agent-capability-run-manifest" :class="getCapabilityRun().status">
+                            <div v-if="getAnalysisRun()" class="agent-capability-run-manifest" :class="getAnalysisRun().status">
                                 <div class="agent-capability-run-manifest-head">
-                                    <div><span>Capability Run</span><strong>{{ getCapabilityRunStatusLabel() }}</strong></div>
+                                    <div><span>AnalysisRun</span><strong>{{ getAnalysisRunStatusLabel() }}</strong></div>
                                     <div class="agent-capability-run-manifest-actions">
-                                        <code>{{ getCapabilityRun().run_id }}</code>
-                                        <button type="button" @click="openCapabilityRunContextAsk()">继续追问当前版本</button>
+                                        <code>{{ getAnalysisRun().run_id }}</code>
+                                        <button type="button" @click="openAnalysisRunContextAsk()">继续追问当前版本</button>
                                     </div>
                                 </div>
                                 <div class="agent-capability-run-manifest-meta">
-                                    <span>当前阶段 <strong>{{ getCapabilityRunCurrentStageLabel() }}</strong></span>
-                                    <span>模型 <strong>{{ getCapabilityRunModelLabel() }}</strong></span>
-                                    <span>Skill <strong>{{ getCapabilityRunSkillLabel() }}</strong></span>
-                                    <span>输入产物 <strong>{{ getCapabilityRunSourceCount() }}</strong></span>
-                                    <span>输出产物 <strong>{{ getCapabilityRunOutputArtifacts().length }}</strong></span>
+                                    <span>当前阶段 <strong>{{ getAnalysisRunCurrentStageLabel() }}</strong></span>
+                                    <span>模型 <strong>{{ getAnalysisRunModelLabel() }}</strong></span>
+                                    <span>Skill <strong>{{ getAnalysisRunSkillLabel() }}</strong></span>
+                                    <span>输入产物 <strong>{{ getAnalysisRunSourceCount() }}</strong></span>
+                                    <span>输出产物 <strong>{{ getAnalysisRunOutputArtifacts().length }}</strong></span>
                                 </div>
-                                <details v-if="getCapabilityRunStages().length" class="agent-capability-run-trace">
+                                <details v-if="getAnalysisRunStages().length" class="agent-capability-run-trace">
                                     <summary>查看不可变运行快照与阶段记录</summary>
                                     <div class="agent-capability-run-stage-grid">
-                                        <article v-for="stage in getCapabilityRunStages()" :key="stage.stage_id" :class="stage.status">
+                                        <article v-for="stage in getAnalysisRunStages()" :key="stage.stage_id" :class="stage.status">
                                             <span>{{ stage.status === 'completed' ? '完成' : stage.status === 'waiting_for_user' ? '待补充' : stage.status }}</span>
                                             <strong>{{ stage.title }}</strong>
                                             <small v-if="stage.summary">{{ stage.summary }}</small>
                                         </article>
                                     </div>
-                                    <div v-if="getCapabilityRunOutputArtifacts().length" class="agent-capability-run-artifacts">
+                                    <div v-if="getAnalysisRunOutputArtifacts().length" class="agent-capability-run-artifacts">
                                         <strong>产物索引与血缘</strong>
-                                        <article v-for="artifact in getCapabilityRunOutputArtifacts()" :key="artifact.artifact_id">
-                                            <span>{{ getCapabilityRunArtifactTypeLabel(artifact) }}</span>
+                                        <article v-for="artifact in getAnalysisRunOutputArtifacts()" :key="artifact.artifact_id">
+                                            <span>{{ getAnalysisRunArtifactTypeLabel(artifact) }}</span>
                                             <div><strong>{{ artifact.title }}</strong><code>{{ artifact.filename || artifact.artifact_id }}</code></div>
-                                            <small>{{ getCapabilityRunArtifactLineageText(artifact) }}</small>
+                                            <small>{{ getAnalysisRunArtifactLineageText(artifact) }}</small>
                                         </article>
                                     </div>
                                 </details>
@@ -1620,7 +1620,7 @@
                                         <div v-if="getAgentIterationPoiPayload().notice" class="agent-summary-line agent-iteration-note">
                                             {{ getAgentIterationPoiPayload().notice }}
                                         </div>
-                                        <div v-if="getAgentIterationPoiPayload().ai_error && !isAgentIterationAiTimeout(getAgentIterationPoiPayload().ai_error)" class="agent-summary-line agent-iteration-error">
+                                        <div v-if="getAgentIterationPoiPayload().ai_error" class="agent-summary-line agent-iteration-error">
                                             {{ getAgentIterationAiErrorLabel(getAgentIterationPoiPayload().ai_error) }}
                                         </div>
                                         <div v-else class="agent-summary-line agent-iteration-note">

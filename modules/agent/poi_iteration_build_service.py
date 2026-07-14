@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 from collections import Counter, defaultdict
@@ -22,7 +21,6 @@ _STATICMAP_WIDTH = 640
 _STATICMAP_MIN_HEIGHT = 320
 _STATICMAP_MAX_HEIGHT = 860
 _STATICMAP_PADDING_PX = 28
-_POI_ITERATION_AI_TIMEOUT_S = 2.0
 
 
 def _as_text(value: Any) -> str:
@@ -903,16 +901,6 @@ async def _generate_poi_iteration_analysis(evidence: Dict[str, Any]) -> Dict[str
     from modules.agent.iteration_change_service import generate_poi_iteration_analysis
 
     return await generate_poi_iteration_analysis(evidence)
-
-
-async def _generate_poi_iteration_analysis_with_timeout(evidence: Dict[str, Any]) -> Dict[str, Any]:
-    try:
-        return await asyncio.wait_for(
-            _generate_poi_iteration_analysis(evidence),
-            timeout=max(0.1, float(_POI_ITERATION_AI_TIMEOUT_S)),
-        )
-    except asyncio.TimeoutError:
-        return {"status": "failed", "report_title": "", "report_sections": [], "report_content": "", "error": "ai_timeout"}
 
 
 async def build_agent_poi_iteration_payload(payload: Any, repo) -> Dict[str, Any]:

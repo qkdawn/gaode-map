@@ -74,7 +74,7 @@ import {
   webSourceRetryPayloadFromPptSource,
 } from '../ppt-planning/source-payloads.js'
 
-const CAPABILITY_RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
+const CAPABILITY_RUNS_URL = '/api/v1/analysis/agent/analysis/runs'
 const DEFAULT_PPT_POI_EVIDENCE_INTENT = '为 PPT 指令生成整理当前区域代表性 POI 资料'
 const DEFAULT_PPT_NIGHTLIFE_POI_INTENT = '整理夜生活与夜间消费相关 POI，并与夜光格子对应'
 const DEFAULT_PPT_CARRIER_EVIDENCE_INTENT = '识别当前区域 POI、路网、人口、夜光共同支撑的空间载体'
@@ -297,7 +297,7 @@ export function createAgentPptPlanningTabMethods() {
       if (!targetTabId || !targetRunId) return false
       try {
         const response = await fetch(`${CAPABILITY_RUNS_URL}/${encodeURIComponent(targetRunId)}`)
-        if (!response.ok) throw new Error(`Capability Run 读取失败(${response.status})`)
+        if (!response.ok) throw new Error(`AnalysisRun 读取失败(${response.status})`)
         const source = createStage1CapabilityPptSource(await response.json(), targetRunId)
         const currentState = this.getAgentPptPlanningTabState(targetTabId)
         const additionalSelectedSourceIds = currentState.sources
@@ -891,7 +891,12 @@ export function createAgentPptPlanningTabMethods() {
       ))
       let document = null
       try {
-        document = await uploadDocumentSource(file, file.name || '', documentRole)
+        const historyId = asText(
+          typeof this.getCurrentAgentHistoryId === 'function'
+            ? this.getCurrentAgentHistoryId()
+            : this.currentHistoryRecordId,
+        )
+        document = await uploadDocumentSource(file, file.name || '', documentRole, historyId)
         const documentId = asText(document && document.id)
         if (documentId) {
           this.updateAgentActivePptPlanningState(upsertPptDocumentSource(

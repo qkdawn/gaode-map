@@ -1,6 +1,6 @@
 from datetime import date
 
-from modules.agent.evidence_verification import verify_evidence_ledger
+from modules.agent.evidence_verification import verify_evidence_nodes
 from modules.agent.schemas import AnalysisSnapshot
 from modules.agent.verification_tools import list_verification_tools
 
@@ -51,7 +51,7 @@ def road_evidence(claim, **overrides):
 
 
 def verify(item, snapshot=None):
-    return verify_evidence_ledger(
+    return verify_evidence_nodes(
         [item],
         selected_sources=[],
         snapshot=snapshot or road_snapshot(),

@@ -623,7 +623,6 @@ export function createPptAiInputBlock({
   return {
     ...payload,
     evidence_nodes: evidenceNodes,
-    evidenceNodes,
   }
 }
 

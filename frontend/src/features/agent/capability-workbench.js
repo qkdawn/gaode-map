@@ -2,8 +2,8 @@ import { buildAnalysisQuickAskSelectedSourcesContext } from './analysis-quick-re
 
 const CATALOG_URL = '/api/v1/analysis/agent/analysis-capabilities'
 const CAPABILITY_INTENT_URL = `${CATALOG_URL}/resolve-intent`
-const RUNS_URL = '/api/v1/analysis/agent/analysis-capability-runs'
-const RUN_COMPARISONS_URL = '/api/v1/analysis/agent/analysis-capability-run-comparisons'
+const RUNS_URL = '/api/v1/analysis/agent/analysis/runs'
+const RUN_COMPARISONS_URL = '/api/v1/analysis/agent/analysis/run-comparisons'
 const WORKBENCH_URL = '/api/v1/analysis/agent/analysis-capabilities/workbench'
 const REQUIRED_STAGE1_ARTIFACT_IDS = Object.freeze([
   'stage1-report',
@@ -154,7 +154,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.loadAgentCapabilities()
       this.loadAnalysisCapabilities().catch(() => {})
       this.loadAnalysisCapabilityOverview(true).catch(() => {})
-      this.loadAnalysisCapabilityRuns().catch(() => {})
+      this.loadAnalysisRuns().catch(() => {})
     },
     async loadPptCapabilityLauncher() {
       await this.loadAnalysisCapabilities()
@@ -296,8 +296,8 @@ export function createAgentCapabilityWorkbenchMethods() {
       if (!capability) return null
       await this.inspectAnalysisCapability(capability)
       if (runId) {
-        const run = this.getAnalysisCapabilityRuns().find(item => text(item?.run_id) === text(runId))
-        if (run) await this.selectAnalysisCapabilityRun(run)
+        const run = this.getAnalysisRuns().find(item => text(item?.run_id) === text(runId))
+        if (run) await this.selectAnalysisRun(run)
       }
       return capability
     },
@@ -309,142 +309,142 @@ export function createAgentCapabilityWorkbenchMethods() {
     openAnalysisCapabilityRecentRun(run = null) {
       return this.openAnalysisCapabilityOverviewTarget(run?.capability_id, run?.run_id)
     },
-    async loadAnalysisCapabilityRuns({ force = false, capabilityId = '' } = {}) {
+    async loadAnalysisRuns({ force = false, capabilityId = '' } = {}) {
       const historyId = typeof this.getCurrentAgentHistoryId === 'function' ? text(this.getCurrentAgentHistoryId()) : ''
       const normalizedCapabilityId = text(capabilityId)
       if (!historyId) {
-        this.analysisCapabilityRunsRequestToken = Number(this.analysisCapabilityRunsRequestToken || 0) + 1
-        this.analysisCapabilityRuns = []
-        this.analysisCapabilityRunsLoaded = false
-        this.analysisCapabilityRunsHistoryId = ''
-        this.analysisCapabilityRunsCapabilityId = normalizedCapabilityId
-        this.analysisCapabilityRunsError = ''
-        this.analysisCapabilityRunsLoading = false
-        this.clearSelectedAnalysisCapabilityRun()
+        this.analysisRunsRequestToken = Number(this.analysisRunsRequestToken || 0) + 1
+        this.analysisRuns = []
+        this.analysisRunsLoaded = false
+        this.analysisRunsHistoryId = ''
+        this.analysisRunsCapabilityId = normalizedCapabilityId
+        this.analysisRunsError = ''
+        this.analysisRunsLoading = false
+        this.clearSelectedAnalysisRun()
         return []
       }
-      const sameQuery = this.analysisCapabilityRunsHistoryId === historyId
-        && this.analysisCapabilityRunsCapabilityId === normalizedCapabilityId
-      if (!force && sameQuery && this.analysisCapabilityRunsLoaded) return this.getAnalysisCapabilityRuns()
-      if (!force && sameQuery && this.analysisCapabilityRunsLoading) return []
+      const sameQuery = this.analysisRunsHistoryId === historyId
+        && this.analysisRunsCapabilityId === normalizedCapabilityId
+      if (!force && sameQuery && this.analysisRunsLoaded) return this.getAnalysisRuns()
+      if (!force && sameQuery && this.analysisRunsLoading) return []
 
-      const requestToken = Number(this.analysisCapabilityRunsRequestToken || 0) + 1
-      this.analysisCapabilityRunsRequestToken = requestToken
-      this.analysisCapabilityRunsLoading = true
-      this.analysisCapabilityRunsLoaded = false
-      this.analysisCapabilityRunsError = ''
-      this.analysisCapabilityRuns = []
-      this.analysisCapabilityRunsHistoryId = historyId
-      this.analysisCapabilityRunsCapabilityId = normalizedCapabilityId
-      this.clearSelectedAnalysisCapabilityRun()
+      const requestToken = Number(this.analysisRunsRequestToken || 0) + 1
+      this.analysisRunsRequestToken = requestToken
+      this.analysisRunsLoading = true
+      this.analysisRunsLoaded = false
+      this.analysisRunsError = ''
+      this.analysisRuns = []
+      this.analysisRunsHistoryId = historyId
+      this.analysisRunsCapabilityId = normalizedCapabilityId
+      this.clearSelectedAnalysisRun()
       const query = new URLSearchParams({ history_id: historyId })
       if (normalizedCapabilityId) query.set('capability_id', normalizedCapabilityId)
       try {
         const response = await fetch(`${RUNS_URL}?${query.toString()}`)
         if (!response.ok) throw new Error(`运行版本请求失败(${response.status})`)
         const payload = await response.json()
-        if (this.analysisCapabilityRunsRequestToken !== requestToken) return []
-        this.analysisCapabilityRuns = Array.isArray(payload) ? clonePayloadValue(payload) : []
-        this.analysisCapabilityRunsLoaded = true
-        return this.getAnalysisCapabilityRuns()
+        if (this.analysisRunsRequestToken !== requestToken) return []
+        this.analysisRuns = Array.isArray(payload) ? clonePayloadValue(payload) : []
+        this.analysisRunsLoaded = true
+        return this.getAnalysisRuns()
       } catch (error) {
-        if (this.analysisCapabilityRunsRequestToken !== requestToken) return []
-        this.analysisCapabilityRunsError = error instanceof Error ? error.message : String(error)
+        if (this.analysisRunsRequestToken !== requestToken) return []
+        this.analysisRunsError = error instanceof Error ? error.message : String(error)
         throw error
       } finally {
-        if (this.analysisCapabilityRunsRequestToken === requestToken) this.analysisCapabilityRunsLoading = false
+        if (this.analysisRunsRequestToken === requestToken) this.analysisRunsLoading = false
       }
     },
-    getAnalysisCapabilityRuns() {
-      return Array.isArray(this.analysisCapabilityRuns) ? clonePayloadValue(this.analysisCapabilityRuns) : []
+    getAnalysisRuns() {
+      return Array.isArray(this.analysisRuns) ? clonePayloadValue(this.analysisRuns) : []
     },
-    async loadAnalysisCapabilityRunDetail(runId = '') {
+    async loadAnalysisRunDetail(runId = '') {
       const normalizedRunId = text(runId)
       if (!normalizedRunId) return null
-      const requestToken = Number(this.selectedAnalysisCapabilityRunRequestToken || 0) + 1
-      this.selectedAnalysisCapabilityRunRequestToken = requestToken
-      this.clearAnalysisCapabilityRunComparison()
-      this.selectedAnalysisCapabilityRunId = normalizedRunId
-      this.selectedAnalysisCapabilityRunDetail = null
-      this.selectedAnalysisCapabilityRunLoading = true
-      this.selectedAnalysisCapabilityRunError = ''
+      const requestToken = Number(this.selectedAnalysisRunRequestToken || 0) + 1
+      this.selectedAnalysisRunRequestToken = requestToken
+      this.clearAnalysisRunComparison()
+      this.selectedAnalysisRunId = normalizedRunId
+      this.selectedAnalysisRunDetail = null
+      this.selectedAnalysisRunLoading = true
+      this.selectedAnalysisRunError = ''
       try {
         const response = await fetch(`${RUNS_URL}/${encodeURIComponent(normalizedRunId)}`)
         if (!response.ok) throw new Error(`运行快照请求失败(${response.status})`)
         const detail = await response.json()
-        if (this.selectedAnalysisCapabilityRunRequestToken !== requestToken) return null
-        this.selectedAnalysisCapabilityRunDetail = detail && typeof detail === 'object' ? clonePayloadValue(detail) : null
-        return this.getSelectedAnalysisCapabilityRunDetail()
+        if (this.selectedAnalysisRunRequestToken !== requestToken) return null
+        this.selectedAnalysisRunDetail = detail && typeof detail === 'object' ? clonePayloadValue(detail) : null
+        return this.getSelectedAnalysisRunDetail()
       } catch (error) {
-        if (this.selectedAnalysisCapabilityRunRequestToken !== requestToken) return null
-        this.selectedAnalysisCapabilityRunError = error instanceof Error ? error.message : String(error)
+        if (this.selectedAnalysisRunRequestToken !== requestToken) return null
+        this.selectedAnalysisRunError = error instanceof Error ? error.message : String(error)
         throw error
       } finally {
-        if (this.selectedAnalysisCapabilityRunRequestToken === requestToken) this.selectedAnalysisCapabilityRunLoading = false
+        if (this.selectedAnalysisRunRequestToken === requestToken) this.selectedAnalysisRunLoading = false
       }
     },
-    selectAnalysisCapabilityRun(run = null) {
+    selectAnalysisRun(run = null) {
       const runId = text(run?.run_id)
       if (!runId) return Promise.resolve(null)
-      if (runId === this.selectedAnalysisCapabilityRunId && this.selectedAnalysisCapabilityRunDetail) {
-        return Promise.resolve(this.getSelectedAnalysisCapabilityRunDetail())
+      if (runId === this.selectedAnalysisRunId && this.selectedAnalysisRunDetail) {
+        return Promise.resolve(this.getSelectedAnalysisRunDetail())
       }
-      return this.loadAnalysisCapabilityRunDetail(runId)
+      return this.loadAnalysisRunDetail(runId)
     },
-    clearSelectedAnalysisCapabilityRun() {
-      this.selectedAnalysisCapabilityRunRequestToken = Number(this.selectedAnalysisCapabilityRunRequestToken || 0) + 1
-      this.selectedAnalysisCapabilityRunId = ''
-      this.selectedAnalysisCapabilityRunDetail = null
-      this.selectedAnalysisCapabilityRunLoading = false
-      this.selectedAnalysisCapabilityRunError = ''
-      this.clearAnalysisCapabilityRunComparison()
+    clearSelectedAnalysisRun() {
+      this.selectedAnalysisRunRequestToken = Number(this.selectedAnalysisRunRequestToken || 0) + 1
+      this.selectedAnalysisRunId = ''
+      this.selectedAnalysisRunDetail = null
+      this.selectedAnalysisRunLoading = false
+      this.selectedAnalysisRunError = ''
+      this.clearAnalysisRunComparison()
     },
     getAnalysisCapabilityComparisonCandidates() {
-      const selectedRunId = text(this.selectedAnalysisCapabilityRunId)
-      return this.getAnalysisCapabilityRuns().filter(run => text(run?.run_id) && text(run.run_id) !== selectedRunId)
+      const selectedRunId = text(this.selectedAnalysisRunId)
+      return this.getAnalysisRuns().filter(run => text(run?.run_id) && text(run.run_id) !== selectedRunId)
     },
     setAnalysisCapabilityComparisonBaseRunId(runId = '') {
       const normalizedRunId = text(runId)
-      if (normalizedRunId === text(this.selectedAnalysisCapabilityRunId)) return ''
+      if (normalizedRunId === text(this.selectedAnalysisRunId)) return ''
       this.analysisCapabilityComparisonBaseRunId = normalizedRunId
-      this.analysisCapabilityRunComparison = null
-      this.analysisCapabilityRunComparisonError = ''
+      this.analysisRunComparison = null
+      this.analysisRunComparisonError = ''
       return normalizedRunId
     },
-    clearAnalysisCapabilityRunComparison() {
-      this.analysisCapabilityRunComparisonRequestToken = Number(this.analysisCapabilityRunComparisonRequestToken || 0) + 1
+    clearAnalysisRunComparison() {
+      this.analysisRunComparisonRequestToken = Number(this.analysisRunComparisonRequestToken || 0) + 1
       this.analysisCapabilityComparisonBaseRunId = ''
-      this.analysisCapabilityRunComparison = null
-      this.analysisCapabilityRunComparisonLoading = false
-      this.analysisCapabilityRunComparisonError = ''
+      this.analysisRunComparison = null
+      this.analysisRunComparisonLoading = false
+      this.analysisRunComparisonError = ''
     },
-    async compareSelectedAnalysisCapabilityRun() {
+    async compareSelectedAnalysisRun() {
       const baseRunId = text(this.analysisCapabilityComparisonBaseRunId)
-      const targetRunId = text(this.selectedAnalysisCapabilityRunId)
+      const targetRunId = text(this.selectedAnalysisRunId)
       if (!baseRunId || !targetRunId || baseRunId === targetRunId) return null
-      const requestToken = Number(this.analysisCapabilityRunComparisonRequestToken || 0) + 1
-      this.analysisCapabilityRunComparisonRequestToken = requestToken
-      this.analysisCapabilityRunComparisonLoading = true
-      this.analysisCapabilityRunComparisonError = ''
-      this.analysisCapabilityRunComparison = null
+      const requestToken = Number(this.analysisRunComparisonRequestToken || 0) + 1
+      this.analysisRunComparisonRequestToken = requestToken
+      this.analysisRunComparisonLoading = true
+      this.analysisRunComparisonError = ''
+      this.analysisRunComparison = null
       const query = new URLSearchParams({ base_run_id: baseRunId, target_run_id: targetRunId })
       try {
         const response = await fetch(`${RUN_COMPARISONS_URL}?${query.toString()}`)
         if (!response.ok) throw new Error(`运行版本比较失败(${response.status})`)
         const payload = await response.json()
-        if (this.analysisCapabilityRunComparisonRequestToken !== requestToken) return null
-        this.analysisCapabilityRunComparison = payload && typeof payload === 'object' ? clonePayloadValue(payload) : null
-        return this.getAnalysisCapabilityRunComparison()
+        if (this.analysisRunComparisonRequestToken !== requestToken) return null
+        this.analysisRunComparison = payload && typeof payload === 'object' ? clonePayloadValue(payload) : null
+        return this.getAnalysisRunComparison()
       } catch (error) {
-        if (this.analysisCapabilityRunComparisonRequestToken !== requestToken) return null
-        this.analysisCapabilityRunComparisonError = error instanceof Error ? error.message : String(error)
+        if (this.analysisRunComparisonRequestToken !== requestToken) return null
+        this.analysisRunComparisonError = error instanceof Error ? error.message : String(error)
         throw error
       } finally {
-        if (this.analysisCapabilityRunComparisonRequestToken === requestToken) this.analysisCapabilityRunComparisonLoading = false
+        if (this.analysisRunComparisonRequestToken === requestToken) this.analysisRunComparisonLoading = false
       }
     },
-    getAnalysisCapabilityRunComparison() {
-      const comparison = this.analysisCapabilityRunComparison
+    getAnalysisRunComparison() {
+      const comparison = this.analysisRunComparison
       return comparison && typeof comparison === 'object' ? clonePayloadValue(comparison) : null
     },
     getAnalysisCapabilityComparisonChangeLabel(changeType = '') {
@@ -472,16 +472,16 @@ export function createAgentCapabilityWorkbenchMethods() {
       }
       return text(value)
     },
-    getSelectedAnalysisCapabilityRun() {
-      const runId = text(this.selectedAnalysisCapabilityRunId)
-      return this.getAnalysisCapabilityRuns().find(run => text(run?.run_id) === runId) || null
+    getSelectedAnalysisRun() {
+      const runId = text(this.selectedAnalysisRunId)
+      return this.getAnalysisRuns().find(run => text(run?.run_id) === runId) || null
     },
-    getSelectedAnalysisCapabilityRunDetail() {
-      const detail = this.selectedAnalysisCapabilityRunDetail
+    getSelectedAnalysisRunDetail() {
+      const detail = this.selectedAnalysisRunDetail
       return detail && typeof detail === 'object' ? clonePayloadValue(detail) : null
     },
-    getSelectedAnalysisCapabilityRunArtifacts() {
-      const artifacts = this.getSelectedAnalysisCapabilityRunDetail()?.artifacts
+    getSelectedAnalysisRunArtifacts() {
+      const artifacts = this.getSelectedAnalysisRunDetail()?.artifacts
       return Array.isArray(artifacts) ? clonePayloadValue(artifacts) : []
     },
     getAnalysisCapabilityRunStatusLabel(run = null) {
@@ -492,15 +492,15 @@ export function createAgentCapabilityWorkbenchMethods() {
       }
       return labels[run?.status] || text(run?.status) || '未记录'
     },
-    getAnalysisCapabilityRunVersionLabel(run = null, index = 0) {
-      const total = this.getAnalysisCapabilityRuns().length
+    getAnalysisRunVersionLabel(run = null, index = 0) {
+      const total = this.getAnalysisRuns().length
       const ordinal = Math.max(total - Number(index || 0), 1)
       return `${index === 0 ? '最新' : '历史'} v${ordinal}`
     },
-    getAnalysisCapabilityRunComparisonOptionLabel(run = null) {
-      const runs = this.getAnalysisCapabilityRuns()
+    getAnalysisRunComparisonOptionLabel(run = null) {
+      const runs = this.getAnalysisRuns()
       const index = runs.findIndex(item => text(item?.run_id) === text(run?.run_id))
-      const version = this.getAnalysisCapabilityRunVersionLabel(run, Math.max(index, 0))
+      const version = this.getAnalysisRunVersionLabel(run, Math.max(index, 0))
       return `${version} · ${this.getAnalysisCapabilityRunTimeLabel(run)} · ${this.getAnalysisCapabilityRunStatusLabel(run)}`
     },
     getAnalysisCapabilityRunTimeLabel(run = null) {
@@ -517,14 +517,14 @@ export function createAgentCapabilityWorkbenchMethods() {
       const stage = records.find(item => item?.stage_id === run?.current_stage)
       return text(stage?.title || run?.current_stage) || '尚未开始'
     },
-    getAnalysisCapabilityRunChangedInputIds(run = null) {
+    getAnalysisRunChangedInputIds(run = null) {
       return Array.isArray(run?.stale_input_artifact_ids) ? run.stale_input_artifact_ids.map(text).filter(Boolean) : []
     },
-    buildCapabilityRunContextAskTarget(detailSeed = null) {
+    buildAnalysisRunContextAskTarget(detailSeed = null) {
       const selectedDetail = detailSeed && typeof detailSeed === 'object' && detailSeed.run
         ? clonePayloadValue(detailSeed)
         : null
-      const run = selectedDetail?.run || this.getCapabilityRun()
+      const run = selectedDetail?.run || this.getAnalysisRun()
       if (!run || !text(run.run_id)) return null
 
       const snapshots = Array.isArray(selectedDetail?.artifacts) ? selectedDetail.artifacts : []
@@ -554,7 +554,7 @@ export function createAgentCapabilityWorkbenchMethods() {
 
       const capability = (this.analysisCapabilities || []).find(item => text(item?.id) === text(run.capability_id))
       const capabilityLabel = text(capability?.display_name || run.capability_id) || '分析能力'
-      const staleInputs = this.getAnalysisCapabilityRunChangedInputIds(run)
+      const staleInputs = this.getAnalysisRunChangedInputIds(run)
       const diagnostics = uniqueTextItems(run.diagnostics, 6)
       const outputTitles = artifactContexts.filter(item => item.direction === 'output').map(item => item.title || item.artifact_id)
       const stages = (Array.isArray(run.stage_records) ? run.stage_records : []).slice(0, 10).map(stage => ({
@@ -582,10 +582,10 @@ export function createAgentCapabilityWorkbenchMethods() {
       if (diagnostics.length) summaryParts.push(`运行诊断：${diagnostics.slice(0, 3).join('；')}。`)
 
       const target = {
-        type: 'capability_run',
+        type: 'analysis_run',
         id: text(run.run_id),
         title: `${capabilityLabel} · ${run.run_id}`,
-        source: 'capability_run',
+        source: 'analysis_run',
         summary: summaryParts.join(' '),
         evidence,
         artifact_refs: artifactRefs,
@@ -607,13 +607,13 @@ export function createAgentCapabilityWorkbenchMethods() {
         ? this.normalizeContextAskTarget(target)
         : target
     },
-    openCapabilityRunContextAsk(detailSeed = null) {
-      const target = this.buildCapabilityRunContextAskTarget(detailSeed)
+    openAnalysisRunContextAsk(detailSeed = null) {
+      const target = this.buildAnalysisRunContextAskTarget(detailSeed)
       if (!target || typeof this.openContextAsk !== 'function') return null
       return this.openContextAsk(target, { resetMessages: true })
     },
-    isAnalysisCapabilityRunSelected(run = null) {
-      return !!text(run?.run_id) && text(run.run_id) === text(this.selectedAnalysisCapabilityRunId)
+    isAnalysisRunSelected(run = null) {
+      return !!text(run?.run_id) && text(run.run_id) === text(this.selectedAnalysisRunId)
     },
     getAnalysisCapabilityGroups() {
       const labels = { planning: '策划决策', analysis: '空间分析', governance: '证据治理', delivery: '成果交付' }
@@ -916,7 +916,7 @@ export function createAgentCapabilityWorkbenchMethods() {
       const id = text(capability && capability.id)
       if (!id) return
       this.activeAnalysisCapabilityId = id
-      const runsPromise = this.loadAnalysisCapabilityRuns({ capabilityId: id }).catch(() => [])
+      const runsPromise = this.loadAnalysisRuns({ capabilityId: id }).catch(() => [])
       await this.refreshAnalysisCapabilityReadiness(capability)
       await runsPromise
     },
@@ -962,25 +962,25 @@ export function createAgentCapabilityWorkbenchMethods() {
         targetCapabilityId: capability.id,
         capabilityInputSelections,
       })
-      await this.loadAnalysisCapabilityRuns({ force: true, capabilityId: capability.id }).catch(() => {})
+      await this.loadAnalysisRuns({ force: true, capabilityId: capability.id }).catch(() => {})
       await this.loadAnalysisCapabilityOverview(true).catch(() => {})
     },
-    getCapabilityRun() {
-      const run = (this.agentPanelPayloads || {}).capability_run
+    getAnalysisRun() {
+      const run = (this.agentPanelPayloads || {}).analysis_run
       return run && typeof run === 'object' ? clonePayloadValue(run) : null
     },
-    getCapabilityRunStatusLabel() {
-      return this.getAnalysisCapabilityRunStatusLabel(this.getCapabilityRun())
+    getAnalysisRunStatusLabel() {
+      return this.getAnalysisCapabilityRunStatusLabel(this.getAnalysisRun())
     },
-    getCapabilityRunStages() {
-      const records = this.getCapabilityRun()?.stage_records
+    getAnalysisRunStages() {
+      const records = this.getAnalysisRun()?.stage_records
       return Array.isArray(records) ? clonePayloadValue(records) : []
     },
-    getCapabilityRunOutputArtifacts() {
-      const artifacts = this.getCapabilityRun()?.output_artifact_refs
+    getAnalysisRunOutputArtifacts() {
+      const artifacts = this.getAnalysisRun()?.output_artifact_refs
       return Array.isArray(artifacts) ? clonePayloadValue(artifacts) : []
     },
-    getCapabilityRunArtifactTypeLabel(artifact) {
+    getAnalysisRunArtifactTypeLabel(artifact) {
       const labels = {
         structured_data: '结构化数据',
         map_layer: '地图图层',
@@ -988,14 +988,14 @@ export function createAgentCapabilityWorkbenchMethods() {
         chart: '图表',
         report: '报告',
         presentation: '演示文稿',
-        evidence_ledger: '证据台账',
+        evidence_nodes: '证据节点',
         design_handoff: '设计移交',
         export_file: '导出文件',
         diagnostic_report: '诊断记录',
       }
       return labels[artifact?.artifact_type] || text(artifact?.artifact_type) || '产物'
     },
-    getCapabilityRunArtifactLineageText(artifact) {
+    getAnalysisRunArtifactLineageText(artifact) {
       const upstream = Array.isArray(artifact?.source_artifact_refs) ? artifact.source_artifact_refs.length : 0
       const evidence = Array.isArray(artifact?.evidence_refs) ? artifact.evidence_refs.length : 0
       const parts = [`${upstream} 个上游`]
@@ -1003,19 +1003,19 @@ export function createAgentCapabilityWorkbenchMethods() {
       if (text(artifact?.content_digest)) parts.push(text(artifact.content_digest).slice(0, 18))
       return parts.join(' · ')
     },
-    getCapabilityRunCurrentStageLabel() {
-      return this.getAnalysisCapabilityRunCurrentStageLabel(this.getCapabilityRun())
+    getAnalysisRunCurrentStageLabel() {
+      return this.getAnalysisCapabilityRunCurrentStageLabel(this.getAnalysisRun())
     },
-    getCapabilityRunModelLabel() {
-      const profile = this.getCapabilityRun()?.execution_profile || {}
+    getAnalysisRunModelLabel() {
+      const profile = this.getAnalysisRun()?.execution_profile || {}
       return text(profile.model_display_name || profile.model || profile.model_profile_id) || '未锁定模型'
     },
-    getCapabilityRunSkillLabel() {
-      const profile = this.getCapabilityRun()?.execution_profile || {}
+    getAnalysisRunSkillLabel() {
+      const profile = this.getAnalysisRun()?.execution_profile || {}
       return text(profile.skill_display_name || profile.skill_id) || '未锁定 Skill'
     },
-    getCapabilityRunSourceCount() {
-      return this.getCapabilityRun()?.input_artifact_refs?.length || 0
+    getAnalysisRunSourceCount() {
+      return this.getAnalysisRun()?.input_artifact_refs?.length || 0
     },
     getStage1QualityAudit() {
       return (this.agentPanelPayloads || {}).stage1_quality_audit || null
@@ -1227,10 +1227,10 @@ export function createAgentCapabilityWorkbenchMethods() {
       return Array.isArray(constraints) ? constraints.length : 0
     },
     hasStage1Outcome() {
-      return !!(this.getCapabilityRun() || this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1HardConstraintScreening() || this.getStage1Deliverables())
+      return !!(this.getAnalysisRun() || this.getStage1QualityAudit() || this.getStage1EvidenceVerification() || this.getStage1ProvenanceBinding() || this.getStage1DataQuality() || this.getStage1HardConstraintScreening() || this.getStage1Deliverables())
     },
     getStage1EvidenceLedger() {
-      const ledger = (this.agentPanelPayloads || {}).stage1_evidence_ledger
+      const ledger = (this.agentPanelPayloads || {}).stage1_evidence_nodes
       return Array.isArray(ledger) ? clonePayloadValue(ledger) : []
     },
     getStage1EvidenceCount() {
@@ -1457,10 +1457,10 @@ export function createAgentCapabilityWorkbenchMethods() {
       const spaceId = text(decision?.space_id)
       if (!spaceId) return
       this.stage1ExpandedSpaceId = spaceId
-      this.stage1ExpandedRunId = text(this.getCapabilityRun()?.run_id)
+      this.stage1ExpandedRunId = text(this.getAnalysisRun()?.run_id)
     },
     isStage1SpaceDecisionExpanded(decision) {
-      return text(this.stage1ExpandedRunId) === text(this.getCapabilityRun()?.run_id)
+      return text(this.stage1ExpandedRunId) === text(this.getAnalysisRun()?.run_id)
         && text(this.stage1ExpandedSpaceId) === text(decision?.space_id)
     },
     toggleStage1SpaceDecision(decision, event = null) {
@@ -1492,12 +1492,12 @@ export function createAgentCapabilityWorkbenchMethods() {
       }
       this.selectStage1SpaceDecision(decision)
       this.stage1MapFocusedSpaceId = text(decision?.space_id)
-      this.stage1MapFocusedRunId = text(this.getCapabilityRun()?.run_id)
+      this.stage1MapFocusedRunId = text(this.getAnalysisRun()?.run_id)
       this.stage1MapFocusMessage = `已定位：${text(binding?.title) || text(decision?.space_name) || text(decision?.space_id)}`
       return true
     },
     isStage1SpaceMapFocused(decision) {
-      return text(this.stage1MapFocusedRunId) === text(this.getCapabilityRun()?.run_id)
+      return text(this.stage1MapFocusedRunId) === text(this.getAnalysisRun()?.run_id)
         && text(this.stage1MapFocusedSpaceId) === text(decision?.space_id)
     },
     resetStage1SpatialInteraction() {
@@ -1520,14 +1520,14 @@ export function createAgentCapabilityWorkbenchMethods() {
       const spaceId = text(decision?.space_id)
       if (!spaceId) return
       this.stage1EvidenceDrawerSpaceId = spaceId
-      this.stage1EvidenceDrawerRunId = text(this.getCapabilityRun()?.run_id)
+      this.stage1EvidenceDrawerRunId = text(this.getAnalysisRun()?.run_id)
     },
     closeStage1EvidenceDrawer() {
       this.stage1EvidenceDrawerSpaceId = ''
       this.stage1EvidenceDrawerRunId = ''
     },
     getStage1EvidenceDrawerDecision() {
-      if (text(this.stage1EvidenceDrawerRunId) !== text(this.getCapabilityRun()?.run_id)) return null
+      if (text(this.stage1EvidenceDrawerRunId) !== text(this.getAnalysisRun()?.run_id)) return null
       return this.getStage1SpaceDecisionById(this.stage1EvidenceDrawerSpaceId)
     },
     getStage1DecisionEvidenceEntries(decision) {
@@ -1590,7 +1590,7 @@ export function createAgentCapabilityWorkbenchMethods() {
     },
     getStage1EvidenceGapText(entry) {
       const parts = []
-      if (entry?.missing) parts.push('该引用未在本轮证据台账中找到')
+      if (entry?.missing) parts.push('该引用未在本轮证据节点中找到')
       if (text(entry?.limitation)) parts.push(text(entry.limitation))
       if (entry?.verification_task?.blocking_reason) parts.push(text(entry.verification_task.blocking_reason))
       if (Array.isArray(entry?.quality_issues)) parts.push(...entry.quality_issues.map(item => text(item?.message)))

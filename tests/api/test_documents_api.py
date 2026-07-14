@@ -37,6 +37,7 @@ def test_document_upload_api_returns_metadata(monkeypatch):
         assert kwargs["filename"] == "report.pdf"
         assert kwargs["title"] == "项目报告"
         assert kwargs["document_role"] == DocumentRole.PROJECT_BRIEF
+        assert kwargs["history_id"] == "history-1"
         return _record(title=kwargs["title"])
 
     monkeypatch.setattr(documents, "create_document_upload", fake_upload)
@@ -44,7 +45,7 @@ def test_document_upload_api_returns_metadata(monkeypatch):
     with TestClient(_build_test_app()) as client:
         response = client.post(
             "/documents/upload",
-            data={"title": "项目报告", "document_role": "project_brief"},
+            data={"title": "项目报告", "document_role": "project_brief", "history_id": "history-1"},
             files={"file": ("report.pdf", b"%PDF", "application/pdf")},
         )
 
@@ -107,6 +108,22 @@ def test_documents_api_lists_and_reads_records(monkeypatch):
     assert [item["id"] for item in listed.json()] == ["doc-2", "doc-1"]
     assert detail.status_code == 200
     assert detail.json()["id"] == "doc-1"
+
+
+def test_documents_api_filters_by_history_id(monkeypatch):
+    seen = {}
+
+    def fake_list(*, history_id=""):
+        seen["history_id"] = history_id
+        return [_record("doc-1")]
+
+    monkeypatch.setattr(documents, "list_documents", fake_list)
+    with TestClient(_build_test_app()) as client:
+        response = client.get("/documents", params={"history_id": "history-1"})
+
+    assert response.status_code == 200
+    assert seen["history_id"] == "history-1"
+    assert response.json()[0]["id"] == "doc-1"
 
 
 def test_document_delete_api_removes_document(monkeypatch):

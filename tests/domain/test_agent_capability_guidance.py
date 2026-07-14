@@ -1,6 +1,6 @@
 from modules.agent.capability_catalog import CapabilityReadiness
 from modules.agent.capability_guidance import build_capability_workbench_overview
-from modules.agent.capability_runs import CapabilityRun
+from modules.agent.analysis_runs import AnalysisRun
 from modules.agent.schemas import AgentMessage, AgentTurnRequest
 
 
@@ -27,7 +27,7 @@ def _all_ready(capability_id, payload):
 
 
 def _run(capability_id, status, run_id="run-1", **kwargs):
-    return CapabilityRun(
+    return AnalysisRun(
         run_id=run_id,
         capability_id=capability_id,
         status=status,
@@ -38,7 +38,7 @@ def _run(capability_id, status, run_id="run-1", **kwargs):
 
 
 def test_workbench_overview_recommends_first_ready_stage1(monkeypatch):
-    monkeypatch.setattr("modules.agent.capability_guidance.list_capability_runs", lambda history_id: [])
+    monkeypatch.setattr("modules.agent.capability_guidance.list_analysis_runs", lambda history_id: [])
 
     overview = build_capability_workbench_overview(_ready_payload())
 
@@ -51,7 +51,7 @@ def test_workbench_overview_recommends_first_ready_stage1(monkeypatch):
 
 
 def test_workbench_overview_explains_missing_inputs_instead_of_fabricating_readiness(monkeypatch):
-    monkeypatch.setattr("modules.agent.capability_guidance.list_capability_runs", lambda history_id: [])
+    monkeypatch.setattr("modules.agent.capability_guidance.list_analysis_runs", lambda history_id: [])
 
     overview = build_capability_workbench_overview(_payload())
 
@@ -68,7 +68,7 @@ def test_workbench_overview_explains_missing_inputs_instead_of_fabricating_readi
 
 def test_workbench_overview_prioritizes_active_run_over_duplicate_execution(monkeypatch):
     monkeypatch.setattr(
-        "modules.agent.capability_guidance.list_capability_runs",
+        "modules.agent.capability_guidance.list_analysis_runs",
         lambda history_id: [_run("urban-strategy-stage1", "running", run_id="run-active")],
     )
 
@@ -83,13 +83,13 @@ def test_workbench_overview_prioritizes_active_run_over_duplicate_execution(monk
 
 def test_workbench_overview_surfaces_stale_lineage_for_rerun(monkeypatch):
     monkeypatch.setattr(
-        "modules.agent.capability_guidance.list_capability_runs",
+        "modules.agent.capability_guidance.list_analysis_runs",
         lambda history_id: [
             _run(
                 "urban-strategy-stage1",
                 "stale",
                 run_id="run-stale",
-                stale_input_artifact_ids=["stage1-evidence-ledger"],
+                stale_input_artifact_ids=["stage1-evidence-nodes"],
             )
         ],
     )

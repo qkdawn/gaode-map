@@ -1,4 +1,4 @@
-from modules.agent.evidence_verification import verify_evidence_ledger
+from modules.agent.evidence_verification import verify_evidence_nodes
 from modules.agent.schemas import AnalysisSnapshot
 from modules.agent.stage1_data_quality import assess_stage1_data_quality
 from modules.agent.stage1_provenance import (
@@ -260,7 +260,7 @@ def test_unknown_artifact_is_unverifiable_and_direct_claim_is_downgraded():
         registry=[],
     )
 
-    verified_ledger, verification = verify_evidence_ledger(
+    verified_ledger, verification = verify_evidence_nodes(
         ledger,
         selected_sources=[],
         snapshot=AnalysisSnapshot(),

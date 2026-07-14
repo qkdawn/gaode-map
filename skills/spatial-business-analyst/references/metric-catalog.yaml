@@ -1,0 +1,2203 @@
+catalog_version: 1.0.0
+catalog_status: semantic_catalog
+scope: 当前仓库可用、派生或受阻的空间指标语义目录。
+interpretation_policy:
+- 仅有数量、密度、人口、夜光或路网指标时，不直接表述需求、客流、营业额、购买力或投资回报。
+- 比较性指标必须记录比较范围、时间、分类口径、空间分辨率和方法参数。
+- 前端派生指标依赖当前批次数据和前端阈值，不视为后端稳定事实。
+- implementation_status 为 not_implemented 的指标只能作为证据缺口，不得作为现有证据调用或用相似字段替代。
+metrics:
+- id: poi.count
+  name: POI 数量
+  family: poi
+  implementation_status: implemented
+  outputs:
+  - count
+  - category_counts
+  - summary_by_year.count
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - time_scope
+  - category_schema
+  definition: 研究范围或指定网格内去重后的 POI 记录数。
+  unit: places
+  spatial_unit: scope_or_grid
+  supports:
+  - 设施供给的数量分布
+  - 类别之间的数量比较
+  does_not_support:
+  - 实际营业
+  - 客流
+  - 需求强度
+  - 市场饱和
+  use_when:
+  - facility_supply
+  - category_structure
+  - competition_context
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_year
+  - same_source
+  - same_category_schema
+  - same_scope_definition
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - coverage_check
+  source:
+  - modules/poi/aggregation.py
+  - modules/poi/schemas.py
+- id: poi.category_count
+  name: POI 分类数量
+  family: poi
+  implementation_status: implemented
+  outputs:
+  - category_counts
+  - category_summary
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - time_scope
+  - category_schema
+  definition: 按前端传入的 POI 分类匹配规则统计各类别记录数。
+  unit: places
+  parameters:
+  - category_codes
+  - classification_level
+  - year
+  supports:
+  - 类别供给构成
+  - 类别数量分布
+  does_not_support:
+  - 类别需求
+  - 品牌经营质量
+  - 真实业态存续
+  use_when:
+  - facility_supply
+  - category_structure
+  - competition_context
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_year
+  - same_source
+  - same_category_schema
+  - same_scope_definition
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - coverage_check
+  source:
+  - modules/poi/aggregation.py
+  - modules/poi/schemas.py
+- id: poi.multi_year_count
+  name: POI 多年份数量
+  family: poi
+  implementation_status: implemented
+  outputs:
+  - results_by_year.count
+  - summary_by_year.count
+  - summary_by_year.category_counts
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - time_scope
+  - category_schema
+  definition: 同一查询流程按年份返回的 POI 数量及分类数量。
+  unit: places
+  parameters:
+  - years
+  - category_codes
+  - source
+  supports:
+  - 覆盖范围内数量的跨年对照
+  does_not_support:
+  - 未经口径校验的市场增长
+  - 因果变化
+  - 开闭店变化
+  use_when:
+  - facility_supply
+  - category_structure
+  - competition_context
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_year
+  - same_source
+  - same_category_schema
+  - same_scope_definition
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - coverage_check
+  source:
+  - modules/poi/aggregation.py
+  - modules/poi/schemas.py
+- id: poi.grid_count
+  name: 网格 POI 数量
+  family: poi_grid
+  implementation_status: implemented
+  outputs:
+  - poi_count
+  - assigned_poi_count
+  - max_poi_count
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: POI 点落入共享网格或 H3 网格后的计数。
+  unit: places
+  spatial_unit: grid_cell
+  supports:
+  - 设施空间分布
+  - 网格间相对数量比较
+  does_not_support:
+  - 需求或活动强度
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - modules/poi/aggregation.py
+  - modules/h3/stats.py
+- id: poi.grid_density
+  name: POI 网格密度
+  family: poi_grid
+  implementation_status: implemented
+  outputs:
+  - density_poi_per_km2
+  - avg_density_poi_per_km2
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 网格内 POI 数量除以网格面积。
+  formula: poi_count / area_km2
+  unit: places_per_km2
+  spatial_unit: grid_cell
+  supports:
+  - 单位面积设施集中程度
+  - 网格间规范化比较
+  does_not_support:
+  - 客流
+  - 消费能力
+  - 营收
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_grid_system
+  - same_category_scope
+  - same_year
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - modules/poi/aggregation.py
+  - modules/h3/stats.py
+- id: poi.category_density
+  name: POI 分类密度
+  family: poi_grid
+  implementation_status: implemented
+  execution_location: frontend
+  outputs:
+  - density_by_cat
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 总网格密度按某分类 POI 占比拆分得到的类别密度代理。
+  formula: density * category_count / poi_count
+  unit: places_per_km2
+  supports:
+  - 类别供给的空间分布
+  does_not_support:
+  - 目标业态需求
+  - 缺口的独立证明
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - frontend/src/features/h3/panel.js
+- id: poi.local_entropy
+  name: POI 类别局部熵
+  family: poi_grid
+  implementation_status: implemented
+  outputs:
+  - local_entropy
+  - avg_local_entropy
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 网格内 POI 分类比例的 Shannon 熵。
+  formula: -sum(p_i * ln(p_i))
+  unit: nats
+  spatial_unit: grid_cell
+  supports:
+  - 类别混合程度
+  - 单一类别主导与多类别混合的区分
+  does_not_support:
+  - 业态质量
+  - 活跃度
+  - 需求强度
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - category_normalization
+  - minimum_poi_count
+  source:
+  - modules/h3/stats.py
+- id: poi.local_entropy_normalized
+  name: 归一化局部熵
+  family: poi_grid
+  implementation_status: implemented
+  execution_location: frontend
+  outputs:
+  - displayed_entropy
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 局部熵除以 7 类最大熵后的相对混合度；样本少于阈值时显示无数据。
+  formula: local_entropy / ln(7)
+  unit: ratio_0_1
+  supports:
+  - 同一分类体系下的混合度比较
+  does_not_support:
+  - 多样性质量
+  - 市场成熟度
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - frontend/src/features/h3/panel.js
+  - docs/网格分析公式对照表.md
+- id: poi.lq
+  name: POI 类别区位商
+  family: poi_grid
+  implementation_status: implemented
+  outputs:
+  - lq_by_category
+  - location_quotient
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 网格内类别占比相对于全局类别占比的比值，使用平滑参数处理小样本。
+  formula: cell_share(category) / global_share(category)
+  unit: quotient
+  supports:
+  - 相对专业化
+  - 类别相对优势
+  does_not_support:
+  - 绝对供给充足
+  - 需求存在
+  - 市场饱和
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_classification
+  - same_scope
+  - same_smoothing_alpha
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - frontend/src/features/h3/panel.js
+  - skills/spatial-business-analyst/scripts/normalized_spatial_metrics.py
+  - docs/网格分析公式对照表.md
+- id: poi.neighbor_mean_density
+  name: 邻域平均 POI 密度
+  family: poi_grid
+  implementation_status: implemented
+  outputs:
+  - neighbor_mean_density
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 指定 H3 邻域圈层内相邻网格 POI 密度的算术平均。
+  formula: mean(density_neighbors)
+  unit: places_per_km2
+  parameters:
+  - neighbor_ring
+  supports:
+  - 局部环境基准
+  - 网格相对邻域的高低
+  does_not_support:
+  - 完整市场基准
+  - 客流
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - modules/h3/stats.py
+- id: poi.neighbor_mean_entropy
+  name: 邻域平均 POI 混合度
+  family: poi_grid
+  implementation_status: implemented
+  outputs:
+  - neighbor_mean_entropy
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 指定 H3 邻域圈层内相邻网格局部熵的算术平均。
+  formula: mean(entropy_neighbors)
+  unit: nats
+  parameters:
+  - neighbor_ring
+  supports:
+  - 邻域类别混合基准
+  does_not_support:
+  - 市场多样性质量
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - modules/h3/stats.py
+- id: spatial.neighbor_density_delta
+  name: 网格相对邻域密度差
+  family: poi_grid
+  implementation_status: implemented
+  execution_location: frontend
+  outputs:
+  - neighbor_delta
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 当前网格密度减去邻域平均密度。
+  formula: density - neighbor_mean_density
+  unit: places_per_km2
+  supports:
+  - 局部高于或低于邻域的识别
+  does_not_support:
+  - 绝对热点
+  - 需求缺口
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - frontend/src/features/h3/panel.js
+  - docs/网格分析公式对照表.md
+- id: spatial.global_moran_i_density
+  name: POI 密度全局莫兰指数
+  family: spatial_statistics
+  implementation_status: implemented
+  outputs:
+  - global_moran_i_density
+  - global_moran_z_score
+  required_inputs:
+  - grid_metric_values
+  - spatial_weights
+  - method_parameters
+  definition: 网格 POI 密度的全局空间自相关统计量。
+  unit: statistic
+  supports:
+  - 整体空间聚集或离散结构的统计识别
+  does_not_support:
+  - 聚集原因
+  - 商业成功
+  - 因果关系
+  use_when:
+  - hotspot_detection
+  - spatial_clustering
+  - spatial_outlier
+  combine_with:
+  - poi.grid_density
+  - poi.local_entropy
+  valid_comparisons:
+  - same_spatial_weights
+  - same_input_metric
+  - same_significance_method
+  quality_requirements:
+  - value_variance
+  - neighbor_definition
+  - significance_available
+  source:
+  - modules/h3/stats.py
+  - modules/h3/arcgis_facade.py
+- id: spatial.lisa
+  name: 局部莫兰 LISA
+  family: spatial_statistics
+  implementation_status: implemented
+  outputs:
+  - lisa_i
+  - lisa_z_score
+  - lisa_i_stats
+  required_inputs:
+  - grid_metric_values
+  - spatial_weights
+  - method_parameters
+  definition: 单个网格相对于邻域的局部空间自相关统计量。
+  unit: statistic
+  supports:
+  - 局部高高、低低及空间异常候选识别
+  does_not_support:
+  - 热点的业务原因
+  - 需求或客流
+  use_when:
+  - hotspot_detection
+  - spatial_clustering
+  - spatial_outlier
+  combine_with:
+  - poi.grid_density
+  - poi.local_entropy
+  valid_comparisons:
+  - same_spatial_weights
+  - same_input_metric
+  - same_significance_method
+  quality_requirements:
+  - value_variance
+  - neighbor_definition
+  - significance_available
+  source:
+  - modules/h3/stats.py
+  - modules/h3/arcgis_bridge.py
+- id: spatial.gi_star
+  name: Getis-Ord Gi* 热点统计
+  family: spatial_statistics
+  implementation_status: implemented
+  outputs:
+  - gi_star_value
+  - gi_star_z_score
+  - gi_z_stats
+  required_inputs:
+  - grid_metric_values
+  - spatial_weights
+  - method_parameters
+  definition: 基于邻域权重识别局部高值或低值聚集的统计量，结果由 ArcGIS 返回。
+  unit: statistic
+  supports:
+  - POI 密度局部热点和冷点的统计识别
+  does_not_support:
+  - 经济活跃原因
+  - 客流
+  - 市场机会的独立证明
+  use_when:
+  - hotspot_detection
+  - spatial_clustering
+  - spatial_outlier
+  combine_with:
+  - poi.grid_density
+  - poi.local_entropy
+  valid_comparisons:
+  - same_spatial_weights
+  - same_input_metric
+  - same_significance_method
+  quality_requirements:
+  - value_variance
+  - neighbor_definition
+  - significance_available
+  source:
+  - modules/h3/arcgis_bridge.py
+  - modules/h3/stats.py
+- id: grid.type
+  name: 网格四象限分型
+  family: grid_derived
+  implementation_status: implemented
+  execution_location: frontend
+  outputs:
+  - grid_type
+  required_inputs:
+  - aligned_grid_metrics
+  - normalization_method
+  - rule_parameters
+  definition: 按当前批次密度 P70 与熵 P70 将网格分为高密高混合、高密低混合、低密高混合、低密低混合。
+  unit: varies
+  parameters:
+  - density_percentile_70
+  - entropy_percentile_70
+  - entropy_min_poi
+  supports:
+  - 当前分析批次内的结构分组
+  does_not_support:
+  - 跨项目稳定类型
+  - 商业成熟度
+  - 机会的充分证明
+  use_when:
+  - grid_typology
+  - candidate_screening
+  - multi_metric_comparison
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  - road.integration
+  valid_comparisons:
+  - same_component_metrics
+  - same_normalization
+  - same_rule_parameters
+  quality_requirements:
+  - component_availability
+  - normalization_documented
+  - missing_value_policy
+  source:
+  - frontend/src/features/h3/panel.js
+  - docs/网格分析公式对照表.md
+- id: grid.opportunity_flag
+  name: 网格机会标记
+  family: grid_derived
+  implementation_status: implemented
+  execution_location: frontend
+  outputs:
+  - is_opportunity
+  required_inputs:
+  - aligned_grid_metrics
+  - normalization_method
+  - rule_parameters
+  definition: 高密高混合网格且密度高于邻域时的规则标记。
+  formula: high_density AND high_entropy AND neighbor_delta > 0
+  unit: boolean
+  supports:
+  - 候选网格的规则筛选
+  does_not_support:
+  - 商业机会
+  - 需求缺口
+  - 投资建议
+  use_when:
+  - grid_typology
+  - candidate_screening
+  - multi_metric_comparison
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  - road.integration
+  valid_comparisons:
+  - same_component_metrics
+  - same_normalization
+  - same_rule_parameters
+  quality_requirements:
+  - component_availability
+  - normalization_documented
+  - missing_value_policy
+  source:
+  - frontend/src/features/h3/panel.js
+- id: population.total
+  name: 总人口
+  family: population
+  implementation_status: implemented
+  outputs:
+  - total_population
+  - selected_population
+  required_inputs:
+  - population_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 指定行政/研究范围或栅格集合内人口数据的总和。
+  unit: persons
+  supports:
+  - 人口规模
+  - 人口覆盖量
+  does_not_support:
+  - 购买力
+  - 实际客流
+  - 目标客户转化
+  use_when:
+  - population_scale
+  - customer_proxy
+  - demographic_structure
+  combine_with:
+  - poi.grid_density
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_dataset_family
+  - same_year_or_comparable_release
+  - same_spatial_aggregation
+  quality_requirements:
+  - valid_numeric_values
+  - coverage_check
+  - year_available
+  source:
+  - modules/population/facade.py
+  - modules/population/schemas.py
+- id: population.sex_structure
+  name: 性别结构
+  family: population
+  implementation_status: implemented
+  outputs:
+  - male_total
+  - female_total
+  - male_ratio
+  - female_ratio
+  - sex_totals
+  required_inputs:
+  - population_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 人口数据按性别的总量及占比。
+  unit: persons_or_ratio
+  supports:
+  - 人口性别结构描述
+  does_not_support:
+  - 消费偏好
+  - 经营需求
+  use_when:
+  - population_scale
+  - customer_proxy
+  - demographic_structure
+  combine_with:
+  - poi.grid_density
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_dataset_family
+  - same_year_or_comparable_release
+  - same_spatial_aggregation
+  quality_requirements:
+  - valid_numeric_values
+  - coverage_check
+  - year_available
+  source:
+  - modules/population/facade.py
+  - modules/population/schemas.py
+- id: population.age_structure
+  name: 年龄结构
+  family: population
+  implementation_status: implemented
+  outputs:
+  - age_distribution
+  - age_band_total
+  - age_band_male
+  - age_band_female
+  required_inputs:
+  - population_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 人口按年龄段的数量分布，并可返回选定年龄段栅格值。
+  unit: persons_or_ratio
+  supports:
+  - 年龄结构
+  - 目标年龄段空间分布
+  does_not_support:
+  - 支付能力
+  - 到访意愿
+  use_when:
+  - population_scale
+  - customer_proxy
+  - demographic_structure
+  combine_with:
+  - poi.grid_density
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_dataset_family
+  - same_year_or_comparable_release
+  - same_spatial_aggregation
+  quality_requirements:
+  - valid_numeric_values
+  - coverage_check
+  - year_available
+  source:
+  - modules/population/facade.py
+  - modules/population/render.py
+- id: population.selected_ratio
+  name: 选定人口占比
+  family: population
+  implementation_status: implemented
+  outputs:
+  - selected_ratio_of_total
+  - ratio_of_total_population
+  required_inputs:
+  - population_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 选定性别或年龄段人口占范围总人口的比例。
+  formula: selected_population / total_population
+  unit: ratio_0_1
+  supports:
+  - 目标人口代理的空间覆盖
+  does_not_support:
+  - 目标客户确认
+  - 消费能力
+  use_when:
+  - population_scale
+  - customer_proxy
+  - demographic_structure
+  combine_with:
+  - poi.grid_density
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_dataset_family
+  - same_year_or_comparable_release
+  - same_spatial_aggregation
+  quality_requirements:
+  - valid_numeric_values
+  - coverage_check
+  - year_available
+  source:
+  - modules/population/facade.py
+  - modules/population/render.py
+- id: nightlight.total_radiance
+  name: 夜光总辐亮度
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - total_radiance
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 研究范围有效夜光像素辐亮度的总和。
+  unit: nWatts_per_cm2_sr
+  supports:
+  - 夜间亮度总量代理
+  - 区域间相对对照
+  does_not_support:
+  - 销售额
+  - 客流
+  - 夜经济
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/aggregate.py
+  - modules/nightlight/schemas.py
+- id: nightlight.mean_radiance
+  name: 夜光平均辐亮度
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - mean_radiance
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 有效夜光像素辐亮度的平均值。
+  unit: nWatts_per_cm2_sr
+  supports:
+  - 平均夜间亮度水平
+  does_not_support:
+  - 商业经营表现
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/aggregate.py
+- id: nightlight.max_radiance
+  name: 夜光最大辐亮度
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - max_radiance
+  - peak_radiance
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 研究范围内有效像素或网格的最大夜光辐亮度。
+  unit: nWatts_per_cm2_sr
+  supports:
+  - 最高亮度位置识别
+  does_not_support:
+  - 整体活跃度
+  - 客流规模
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/aggregate.py
+  - modules/nightlight/analysis.py
+- id: nightlight.lit_pixel_ratio
+  name: 亮灯像素比例
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - lit_pixel_ratio
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 有效范围内被判定为有夜光的像素占比。
+  unit: ratio_0_1
+  supports:
+  - 夜间亮度覆盖连续性
+  does_not_support:
+  - 夜间人口
+  - 夜间消费
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/aggregate.py
+- id: nightlight.p90
+  name: 夜光 P90
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - p90_radiance
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 有效夜光像素辐亮度的第 90 百分位。
+  unit: nWatts_per_cm2_sr
+  supports:
+  - 高亮区域的相对强度基准
+  does_not_support:
+  - 高值区的具体业态或客流
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/aggregate.py
+- id: nightlight.hotspot_class
+  name: 夜光热点等级
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - class_key
+  - class_label
+  - core_hotspot_count
+  - secondary_hotspot_count
+  - emerging_hotspot_count
+  - transition_count
+  - low_light_count
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 按研究范围有效夜光值分位数划分核心热点、高亮热点、次级热点、过渡区和低亮区。
+  unit: varies
+  parameters:
+  - q90
+  - q75
+  - q55
+  - q25
+  supports:
+  - 夜间亮度分层
+  - 高值与低值空间定位
+  does_not_support:
+  - 热点成因
+  - 夜经济证明
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/analysis.py
+- id: nightlight.hotspot_ratio
+  name: 夜光热点网格比例
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - hotspot_cell_ratio
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 被归为热点类别的有效网格占比。
+  unit: ratio_0_1
+  supports:
+  - 亮度高值覆盖程度
+  does_not_support:
+  - 客流或消费规模
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/analysis.py
+- id: nightlight.spatial_profile
+  name: 夜光空间梯度
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - core_band_count
+  - middle_band_count
+  - fringe_band_count
+  - peak_to_edge_ratio
+  - max_distance_km
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 以中心和距离圈层组织夜光高值、衰减及边缘关系。
+  unit: varies
+  supports:
+  - 亮度核心、扩散和边缘衰减结构
+  does_not_support:
+  - 商业中心成因
+  - 到访路径
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/analysis.py
+- id: nightlight.sector_profile
+  name: 夜光方向分布
+  family: nightlight
+  implementation_status: implemented
+  outputs:
+  - dominant_direction
+  - secondary_direction
+  - dominant_share
+  - secondary_share
+  - sectors
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 按相对中心的八方向扇区汇总总辐亮度、平均辐亮度和热点数量。
+  unit: varies
+  supports:
+  - 夜光高值方向比较
+  does_not_support:
+  - 方向客流或商业需求
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/analysis.py
+- id: nightlight.activity_level
+  name: 夜间经济活动强度等级
+  family: nightlight
+  implementation_status: implemented
+  proxy: true
+  outputs:
+  - economic_activity_intensity_level
+  - economic_activity_summary_text
+  required_inputs:
+  - nightlight_dataset
+  - scope_geometry
+  - dataset_year
+  definition: 根据平均辐亮度、P90、亮灯比例、热点比例和峰边比组合打分得到的夜光代理等级。
+  unit: varies
+  supports:
+  - 夜间亮度代理的分级表达
+  does_not_support:
+  - 夜经济、销售、客流的直接证明
+  use_when:
+  - night_activity_proxy
+  - spatial_intensity
+  - nightlight_pattern
+  combine_with:
+  - poi.grid_density
+  - road.choice
+  - population.total
+  valid_comparisons:
+  - same_sensor_product
+  - same_processing_method
+  - same_time_scope
+  - same_spatial_resolution
+  quality_requirements:
+  - valid_pixel_coverage
+  - sensor_year_available
+  - no_data_handling
+  source:
+  - modules/nightlight/analysis.py
+- id: road.network_size
+  name: 路网规模
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - node_count
+  - edge_count
+  - rendered_edge_count
+  - network_length_km
+  - edge_merge_ratio
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 路网节点、边、渲染边数量及线网总长度。
+  unit: count_or_km
+  supports:
+  - 路网规模和覆盖描述
+  does_not_support:
+  - 实际通行量
+  - 步行客流
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.degree
+  name: 节点度/平均连接度
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - degree
+  - degree_score
+  - avg_degree
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 节点相连路段数量及其归一化分数。
+  unit: count_or_score
+  supports:
+  - 节点直接连接程度
+  - 路网连接结构
+  does_not_support:
+  - 道路可达时间
+  - 行人流量
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.integration
+  name: 路网整合度
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - integration_global
+  - integration_local
+  - integration_score
+  - avg_integration_global
+  - avg_integration_local
+  - integration_by_radius
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: DepthmapX/ArcGIS 路网句法分析返回的全局或局部整合度及归一化显示分数。
+  unit: model_score
+  parameters:
+  - radius
+  - mode
+  - graph_model
+  supports:
+  - 空间位置在路网结构中的相对可达中心性
+  does_not_support:
+  - 实际到访量
+  - 真实步行可达时间
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.choice
+  name: 路网选择度
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - choice_global
+  - choice_local
+  - choice_score
+  - avg_choice_global
+  - avg_choice_local
+  - choice_by_radius
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 路网句法/路径选择分析返回的全局或局部选择度及归一化显示分数。
+  unit: model_score
+  parameters:
+  - radius
+  - mode
+  - graph_model
+  supports:
+  - 潜在路径穿越性和结构性经过机会
+  does_not_support:
+  - 实际道路流量
+  - 实际步行流量
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.connectivity
+  name: 路网连通度
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - connectivity_score
+  - avg_connectivity
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 从输入路网属性或节点度推导的连接度及归一化分数。
+  unit: score
+  supports:
+  - 路网连接状况
+  does_not_support:
+  - 真实可达时间或交通量
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.control
+  name: 路网控制值
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - control_score
+  - control_global
+  - avg_control
+  - control_source_column
+  - control_valid_count
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 优先读取 depthmapXcli 导出的 Control；缺失或无变化时使用路网拓扑邻接度的控制值回退。
+  unit: score
+  supports:
+  - 节点或路段对相邻连接的局部控制关系
+  does_not_support:
+  - 实际交通控制
+  - 客流
+  - 管理权属
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.mean_depth
+  name: 平均深度
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - depth_score
+  - avg_depth
+  - depth_source_column
+  - depth_valid_count
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 读取 depthmapXcli shapegraph CSV 的 Mean Depth，并在当前结果范围内归一化。
+  unit: score
+  supports:
+  - 路网结构距离层级的相对描述
+  does_not_support:
+  - 实际步行距离
+  - 实际出行时间
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.node_degree
+  name: 路网节点度
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - degree
+  - degree_score
+  - avg_degree
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 基于输出路网拓扑统计节点相连邻接节点数，并生成节点度归一化分数。
+  unit: count_or_score
+  supports:
+  - 节点连接数量
+  - 交叉连接结构的基础描述
+  does_not_support:
+  - 道路等级
+  - 实际通行能力
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: road.orientation
+  name: 道路方向分布
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - road_orientation_analysis
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 按道路线段方向分组，统计各方向长度、长度占比和边数量。
+  unit: km_or_ratio
+  supports:
+  - 路网主导方向和方向结构
+  does_not_support:
+  - 交通流向
+  - 视线方向
+  - 城市风环境
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/metrics.py
+  - modules/road/serialize.py
+- id: road.intelligibility
+  name: 路网可理解度
+  family: road_syntax
+  implementation_status: implemented
+  outputs:
+  - intelligibility_score
+  - avg_intelligibility
+  - avg_intelligibility_r2
+  - diagnostics.regression
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 基于归一化连通度与全局整合度的相关/回归关系。
+  unit: correlation_or_r2
+  supports:
+  - 局部连接结构与整体路网结构的关系
+  does_not_support:
+  - 使用者主观认知
+  - 导航成功率
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  source:
+  - modules/road/serialize.py
+  - modules/road/schemas.py
+- id: isochrone.reachable_area
+  name: 等时圈可达范围
+  family: isochrone
+  implementation_status: implemented
+  outputs:
+  - geometry
+  - time_min
+  - mode
+  - origin_mode
+  - scope_clipped
+  required_inputs:
+  - origin
+  - travel_mode
+  - time_threshold
+  - routing_network
+  definition: 给定起点、交通方式和时间阈值，通过路网服务生成的可达多边形；支持多起点合并。
+  unit: polygon
+  parameters:
+  - time_min
+  - mode
+  - origin_mode
+  - clip_output
+  supports:
+  - 理论可达空间边界
+  - 不同时间和交通方式的范围比较
+  does_not_support:
+  - 实际到访人数
+  - 实际转化率
+  - 直线半径等价
+  use_when:
+  - catchment_area
+  - travel_time_access
+  - scope_definition
+  combine_with:
+  - population.total
+  - poi.grid_density
+  - road.integration
+  valid_comparisons:
+  - same_origin_policy
+  - same_travel_mode
+  - same_time_threshold
+  - same_routing_engine
+  quality_requirements:
+  - routing_engine_status
+  - valid_origin
+  - geometry_has_area
+  source:
+  - modules/isochrone/service.py
+  - modules/isochrone/adapter.py
+- id: timeseries.population_change
+  name: 人口时间变化
+  family: timeseries
+  implementation_status: implemented
+  outputs:
+  - population_delta
+  - population_rate
+  - total_delta
+  - increase_count
+  required_inputs:
+  - comparable_years
+  - stable_spatial_units
+  - consistent_method
+  definition: 两个年份人口总量或网格人口值的差值及变化率。
+  formula: to_value - from_value; delta / from_value
+  unit: persons_or_ratio
+  supports:
+  - 人口变化方向和变化网格识别
+  does_not_support:
+  - 变化原因
+  - 客流变化
+  - 未来趋势确定性
+  use_when:
+  - temporal_change
+  - trend_comparison
+  - spatial_shift
+  combine_with:
+  - poi.multi_year_count
+  - timeseries.nightlight_change
+  valid_comparisons:
+  - consistent_source_coverage
+  - consistent_classification
+  - stable_spatial_units
+  quality_requirements:
+  - cross_year_coverage_check
+  - classification_consistency
+  - method_consistency
+  source:
+  - modules/timeseries/population_series.py
+  - modules/timeseries/common.py
+- id: timeseries.population_density_change
+  name: 人口密度时间变化
+  family: timeseries
+  implementation_status: implemented
+  outputs:
+  - density_delta
+  - rate
+  - value
+  required_inputs:
+  - comparable_years
+  - stable_spatial_units
+  - consistent_method
+  definition: 两个年份网格人口密度的差值或变化率。
+  unit: persons_per_km2_or_ratio
+  supports:
+  - 人口空间变化热点
+  does_not_support:
+  - 客流或需求变化
+  use_when:
+  - temporal_change
+  - trend_comparison
+  - spatial_shift
+  combine_with:
+  - poi.multi_year_count
+  - timeseries.nightlight_change
+  valid_comparisons:
+  - consistent_source_coverage
+  - consistent_classification
+  - stable_spatial_units
+  quality_requirements:
+  - cross_year_coverage_check
+  - classification_consistency
+  - method_consistency
+  source:
+  - modules/timeseries/population_series.py
+- id: timeseries.age_shift
+  name: 主导年龄段迁移
+  family: timeseries
+  implementation_status: implemented
+  outputs:
+  - age_shift
+  - class_key
+  - class_label
+  required_inputs:
+  - comparable_years
+  - stable_spatial_units
+  - consistent_method
+  definition: 比较两个年份网格年龄结构后标记年龄结构发生变化的网格。
+  unit: category
+  supports:
+  - 年龄结构变化位置
+  does_not_support:
+  - 人口迁移原因
+  - 消费偏好变化
+  use_when:
+  - temporal_change
+  - trend_comparison
+  - spatial_shift
+  combine_with:
+  - poi.multi_year_count
+  - timeseries.nightlight_change
+  valid_comparisons:
+  - consistent_source_coverage
+  - consistent_classification
+  - stable_spatial_units
+  quality_requirements:
+  - cross_year_coverage_check
+  - classification_consistency
+  - method_consistency
+  source:
+  - modules/timeseries/population_series.py
+- id: timeseries.nightlight_change
+  name: 夜光时间变化
+  family: timeseries
+  implementation_status: implemented
+  outputs:
+  - radiance_delta
+  - radiance_rate
+  - total_delta
+  - increase_count
+  - delta
+  - rate
+  required_inputs:
+  - comparable_years
+  - stable_spatial_units
+  - consistent_method
+  definition: 两个年份夜光总量、网格值的差值及变化率。
+  unit: radiance_or_ratio
+  supports:
+  - 夜间亮度增强、减弱和稳定区域识别
+  does_not_support:
+  - 经济增长原因
+  - 销售或客流变化
+  use_when:
+  - temporal_change
+  - trend_comparison
+  - spatial_shift
+  combine_with:
+  - poi.multi_year_count
+  - timeseries.nightlight_change
+  valid_comparisons:
+  - consistent_source_coverage
+  - consistent_classification
+  - stable_spatial_units
+  quality_requirements:
+  - cross_year_coverage_check
+  - classification_consistency
+  - method_consistency
+  source:
+  - modules/timeseries/nightlight_series.py
+- id: timeseries.hotspot_shift
+  name: 夜光热点迁移
+  family: timeseries
+  implementation_status: implemented
+  outputs:
+  - hotspot_stable
+  - hotspot_emerging
+  - hotspot_faded
+  required_inputs:
+  - comparable_years
+  - stable_spatial_units
+  - consistent_method
+  definition: 比较两个年份网格热点类别，识别热点持续、新出现和消退。
+  unit: category
+  supports:
+  - 夜光热点时序稳定性和迁移
+  does_not_support:
+  - 商业热点或真实夜经济
+  use_when:
+  - temporal_change
+  - trend_comparison
+  - spatial_shift
+  combine_with:
+  - poi.multi_year_count
+  - timeseries.nightlight_change
+  valid_comparisons:
+  - consistent_source_coverage
+  - consistent_classification
+  - stable_spatial_units
+  quality_requirements:
+  - cross_year_coverage_check
+  - classification_consistency
+  - method_consistency
+  source:
+  - modules/timeseries/nightlight_series.py
+- id: gwr.nightlight_spatial_model
+  name: 夜光局部空间关系模型
+  family: gwr
+  implementation_status: implemented
+  outputs:
+  - gwr_observed
+  - gwr_predicted
+  - gwr_residual
+  - gwr_local_r2
+  - gwr_coef_*
+  - gwr_x_*
+  required_inputs:
+  - aligned_grid_metrics
+  - dependent_variable
+  - predictor_variables
+  - sufficient_samples
+  definition: 以夜光辐亮度为观测变量，使用 POI 密度、人口密度、路网整合度、连通度和路网长度密度作为解释变量的局部回归结果。
+  unit: model_output
+  supports:
+  - 解释变量与夜光之间的空间异质关系探索
+  does_not_support:
+  - 因果证明
+  - 需求预测
+  - 投资回报
+  use_when:
+  - spatial_relationship
+  - model_diagnostics
+  - local_association
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - road.integration
+  valid_comparisons:
+  - same_variables
+  - same_bandwidth_policy
+  - same_sample_definition
+  quality_requirements:
+  - sufficient_samples
+  - valid_predictors
+  - model_diagnostics
+  source:
+  - modules/gwr/service.py
+  - modules/gwr/schemas.py
+- id: gwr.model_fit
+  name: GWR 拟合诊断
+  family: gwr
+  implementation_status: implemented
+  outputs:
+  - r2
+  - adjusted_r2
+  - mean_abs_residual
+  - rmse
+  - top_variables
+  - sample_count
+  required_inputs:
+  - aligned_grid_metrics
+  - dependent_variable
+  - predictor_variables
+  - sufficient_samples
+  definition: GWR 结果整体拟合质量和变量排序诊断。
+  unit: statistic
+  supports:
+  - 模型拟合程度和误差描述
+  does_not_support:
+  - 模型因果有效
+  - 未来预测可靠
+  use_when:
+  - spatial_relationship
+  - model_diagnostics
+  - local_association
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - road.integration
+  valid_comparisons:
+  - same_variables
+  - same_bandwidth_policy
+  - same_sample_definition
+  quality_requirements:
+  - minimum_sample_size
+  - predictor_variance
+  - model_diagnostics_available
+  source:
+  - modules/gwr/service.py
+  - modules/gwr/schemas.py
+- id: poi.kernel_density
+  name: POI 核密度
+  family: poi_grid
+  implementation_status: implemented
+  execution_location: frontend
+  outputs:
+  - heatmap_surface
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - grid_definition
+  - category_schema
+  definition: 使用当前可见 POI 点生成的前端核密度热力表面。
+  unit: relative_intensity
+  supports:
+  - 识别 POI 相对集聚位置
+  does_not_support:
+  - 需求强度
+  - 客流
+  - 经营表现
+  use_when:
+  - facility_concentration
+  - spatial_mix
+  - local_specialization
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.p90
+  valid_comparisons:
+  - same_year
+  - same_grid_definition
+  - same_category_schema
+  - same_normalization
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - grid_coverage_check
+  - minimum_sample_check
+  source:
+  - frontend/src/features/poi/panel.js
+  - frontend/src/map/core.js
+- id: poi.open_close_rate
+  name: 开闭店变化与存续率
+  family: poi
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - poi_records
+  - scope_geometry
+  - time_scope
+  - category_schema
+  definition: 基于跨年门店实体匹配计算开店、闭店与存续比例。
+  unit: ratio
+  supports:
+  - 描述对应空间现象
+  does_not_support:
+  - 未经独立证据验证的因果或经营结论
+  use_when:
+  - facility_supply
+  - category_structure
+  - competition_context
+  combine_with:
+  - population.total
+  - road.integration
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_year
+  - same_source
+  - same_category_schema
+  - same_scope_definition
+  quality_requirements:
+  - duplicate_check
+  - category_normalization
+  - coverage_check
+  implementation_gap: 当前多年份 POI 没有稳定门店实体匹配。
+  source: []
+- id: road.walk_detour_ratio
+  name: 步行绕行系数
+  family: road_syntax
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 网络最短步行距离与两点直线距离的比值。
+  unit: ratio
+  supports:
+  - 描述对应空间现象
+  does_not_support:
+  - 未经独立证据验证的因果或经营结论
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  implementation_gap: 当前没有稳定的点对点步行路由矩阵。
+  source: []
+- id: road.entrance_distance
+  name: 入口到主要道路距离
+  family: road_syntax
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - road_network
+  - scope_geometry
+  - graph_model
+  - analysis_radius
+  definition: 项目入口到目标主要道路的最短空间或网络距离。
+  unit: meters
+  supports:
+  - 描述对应空间现象
+  does_not_support:
+  - 未经独立证据验证的因果或经营结论
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  valid_comparisons:
+  - same_graph_model
+  - same_radius
+  - same_network_filter
+  - same_normalization
+  quality_requirements:
+  - connected_network_check
+  - engine_status
+  - radius_available
+  implementation_gap: 当前项目模型没有规范化入口点输入。
+  source: []
+- id: access.network_reachable_area
+  name: 多时间阈值网络可达面积
+  family: isochrone
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - origin
+  - travel_mode
+  - time_threshold
+  - routing_network
+  definition: 多个时间阈值下路网等时圈覆盖面积。
+  unit: km2
+  supports:
+  - 描述对应空间现象
+  does_not_support:
+  - 未经独立证据验证的因果或经营结论
+  use_when:
+  - catchment_area
+  - travel_time_access
+  - scope_definition
+  combine_with:
+  - population.total
+  - poi.grid_density
+  - road.integration
+  valid_comparisons:
+  - same_origin_policy
+  - same_travel_mode
+  - same_time_threshold
+  - same_routing_engine
+  quality_requirements:
+  - routing_engine_status
+  - valid_origin
+  - geometry_has_area
+  implementation_gap: 当前只稳定输出单时间阈值等时圈，尚无批量比较契约。
+  source: []
+- id: grid.project_network_distance
+  name: 网格到项目入口网络距离
+  family: cross_domain
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - aligned_spatial_units
+  - compatible_time_scope
+  - source_metrics
+  definition: 共享网格质心到项目入口的网络最短距离。
+  unit: meters
+  supports:
+  - 描述对应空间现象
+  does_not_support:
+  - 未经独立证据验证的因果或经营结论
+  use_when:
+  - multi_source_overlap
+  - combined_activity
+  - project_access
+  combine_with:
+  - poi.grid_density
+  - population.total
+  - nightlight.mean_radiance
+  - road.integration
+  valid_comparisons:
+  - aligned_spatial_units
+  - compatible_years
+  - same_normalization
+  quality_requirements:
+  - cell_id_alignment
+  - time_compatibility
+  - component_quality_available
+  implementation_gap: 当前缺少规范化项目入口及网格到入口的网络路由结果。
+  source: []

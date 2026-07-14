@@ -1,6 +1,6 @@
 from datetime import date
 
-from modules.agent.evidence_verification import verify_evidence_ledger
+from modules.agent.evidence_verification import verify_evidence_nodes
 from modules.agent.schemas import AnalysisSnapshot
 
 
@@ -25,7 +25,7 @@ def evidence(**overrides):
 
 
 def test_known_document_source_preserves_verified_status():
-    ledger, summary = verify_evidence_ledger(
+    ledger, summary = verify_evidence_nodes(
         [evidence()],
         selected_sources=[{"source_id": "project-doc", "title": "项目资料"}],
         snapshot=snapshot(),
@@ -40,7 +40,7 @@ def test_known_document_source_preserves_verified_status():
 
 
 def test_unlocatable_verified_claim_is_downgraded_before_synthesis():
-    ledger, summary = verify_evidence_ledger(
+    ledger, summary = verify_evidence_nodes(
         [evidence(source_ref="未知报告 p.3")],
         selected_sources=[],
         snapshot=snapshot(),
@@ -54,7 +54,7 @@ def test_unlocatable_verified_claim_is_downgraded_before_synthesis():
 
 
 def test_relative_claim_without_baseline_cannot_remain_verified():
-    ledger, summary = verify_evidence_ledger(
+    ledger, summary = verify_evidence_nodes(
         [evidence(claim="项目路网整合度较高", source_ref="analysis_snapshot.road")],
         selected_sources=[],
         snapshot=snapshot(road={"mean_integration": 0.63}),
@@ -67,7 +67,7 @@ def test_relative_claim_without_baseline_cannot_remain_verified():
 
 
 def test_past_future_plan_becomes_structured_authority_task():
-    ledger, summary = verify_evidence_ledger(
+    ledger, summary = verify_evidence_nodes(
         [evidence(claim="项目计划于2024年12月完成改造")],
         selected_sources=[{"title": "项目资料"}],
         snapshot=snapshot(),
@@ -87,7 +87,7 @@ def test_past_future_plan_becomes_structured_authority_task():
 
 
 def test_fieldwork_task_exposes_responsibility_method_and_decision_impact():
-    _, summary = verify_evidence_ledger(
+    _, summary = verify_evidence_nodes(
         [
             evidence(
                 status="fieldwork_required",
@@ -109,7 +109,7 @@ def test_fieldwork_task_exposes_responsibility_method_and_decision_impact():
 
 
 def test_empty_ledger_fails_gate_and_stops_report():
-    ledger, summary = verify_evidence_ledger(
+    ledger, summary = verify_evidence_nodes(
         [], selected_sources=[], snapshot=snapshot(), as_of=date(2026, 7, 12)
     )
 

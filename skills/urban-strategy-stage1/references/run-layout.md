@@ -14,7 +14,7 @@ Use one immutable input area and separate generated work/output areas:
     maps/
   work/
     source_readiness.json
-    evidence_ledger.jsonl
+    evidence_nodes.jsonl
     conflict_register.json
     expert_workpacks/
       urban_planning.json

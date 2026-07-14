@@ -130,7 +130,6 @@ def test_history_artifact_api_upserts_and_lists(monkeypatch):
         params={"mode": "walking"},
         payload={"polygon": []},
         summary={"has_polygon": False},
-        scope_fingerprint="scope-a",
     )
 
     response = history_module.upsert_history_artifact("history-1", payload, repo=FakeRepo())

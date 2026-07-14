@@ -7,6 +7,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SourceKind = Literal["system", "document", "image", "web", "database", "package", "unknown"]
 SourceStatus = Literal["ready", "pending", "generating", "failed"]
+EvidenceKind = Literal[
+    "analysis_summary",
+    "spatial_metric",
+    "dataset_record",
+    "document_excerpt",
+    "image_observation",
+    "web_excerpt",
+    "database_record",
+    "package_summary",
+    "package_item",
+    "spatial_carrier",
+]
 
 
 class SourceRecord(BaseModel):
@@ -76,20 +88,36 @@ class SourceRecord(BaseModel):
 
 
 class EvidenceNode(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
 
     id: str
-    source_id: str
-    source_type: SourceKind = "unknown"
+    kind: EvidenceKind
+    run_id: str = ""
+    source_ids: List[str] = Field(min_length=1)
+    metric_ids: List[str] = Field(default_factory=list)
     title: str = ""
-    content: str = ""
     summary: str = ""
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    locator: str = ""
-    score: float = 0.0
-    evidence_level: str = "parsed_text"
-    warnings: List[str] = Field(default_factory=list)
+    content: str = ""
+    data: Dict[str, Any] = Field(default_factory=dict)
+    time_scope: Dict[str, Any] = Field(default_factory=dict)
+    spatial_scope: Dict[str, Any] = Field(default_factory=dict)
+    method: str = ""
+    quality_flags: List[Dict[str, Any]] = Field(default_factory=list)
+    locator: str | Dict[str, Any] = ""
     citation: str = ""
+
+    @model_validator(mode="after")
+    def _require_readable_payload(self):
+        if not self.content.strip() and not self.data:
+            raise ValueError("EvidenceNode requires content or data")
+        return self
+
+
+class EvidenceSearchHit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node: EvidenceNode
+    score: float = 0.0
 
 
 class EvidenceSearchRequest(BaseModel):
@@ -112,4 +140,4 @@ class EvidenceSearchRequest(BaseModel):
 
 
 class EvidenceSearchResponse(BaseModel):
-    nodes: List[EvidenceNode] = Field(default_factory=list)
+    hits: List[EvidenceSearchHit] = Field(default_factory=list)

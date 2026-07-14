@@ -101,8 +101,10 @@ def test_scope_dataset_service_queries_and_reads_evidence_nodes():
     )
     assert queried["total_count"] == 1
     assert queried["records"][0]["record_id"] == "cell-1"
-    assert queried["evidence_nodes"][0]["source_id"] == "current:dataset:population"
-    assert queried["evidence_nodes"][0]["metadata"]["time_scope"]["year"] == 2024
+    assert queried["evidence_nodes"][0]["source_ids"] == ["current:dataset:population"]
+    assert queried["evidence_nodes"][0]["time_scope"]["year"] == 2024
+    assert "confidence" not in queried["evidence_nodes"][0]["time_scope"]
+    assert "confidence_basis" not in queried["evidence_nodes"][0]["time_scope"]
 
     read = service.read_scope_record(history_id="history-1", source_id="current:dataset:population", record_id="cell-1")
     assert read["evidence_node"]["id"] == "current:dataset:population:record:cell-1"
@@ -127,6 +129,95 @@ def test_scope_dataset_service_aggregates_poi_and_sorts_road_records():
         sort={"field": "choice", "direction": "desc"},
     )
     assert [item["record_id"] for item in road["records"]] == ["road:r1", "road:r2"]
+    assert road["selected_year"] is None
+    assert road["records"][0]["time_scope"]["kind"] == "static_snapshot"
+    assert road["warnings"] == []
+
+
+def test_scope_dataset_defaults_to_max_year_and_exactly_matches_requested_year():
+    class MultiYearRepository:
+        def list_poi_results(self, history_id):
+            return [
+                {"id": 20, "source": "local", "year": 2020, "summary": {"total": 1}},
+                {"id": 24, "source": "local", "year": 2024, "summary": {"total": 2}},
+            ]
+
+        def get_poi_data(self, poi_result_id):
+            return [{"id": f"poi-{poi_result_id}-{index}"} for index in range(2 if poi_result_id == 24 else 1)]
+
+        def list_analysis_artifacts(self, history_id):
+            def artifact(artifact_id, artifact_type, year, updated_at, count, summary=None):
+                return {
+                    "id": artifact_id,
+                    "artifact_type": artifact_type,
+                    "slot_key": f"year:{year}",
+                    "params": {"year": year, "view": "density"},
+                    "payload": {
+                        "year": year,
+                        "grid": {
+                            "features": [
+                                {"type": "Feature", "properties": {"cell_id": f"{artifact_type}-{year}-{index}", "value": index}}
+                                for index in range(count)
+                            ]
+                        },
+                    },
+                    "summary": summary or {},
+                    "data_version": "v1",
+                    "scope_fingerprint": "scope-a",
+                    "updated_at": updated_at,
+                }
+
+            return [
+                artifact(1, "poi_h3_grid", 2020, "2026-07-14T12:00:00", 1),
+                artifact(2, "poi_h3_grid", 2024, "2024-01-01T00:00:00", 2),
+                artifact(3, "population", 2024, "2026-07-14T12:00:00", 1, {"total_population": 100}),
+                artifact(4, "population", 2026, "2024-01-01T00:00:00", 2, {"total_population": 58200.628}),
+            ]
+
+    service = ScopeDatasetService(repository=MultiYearRepository())
+    default_h3 = service.query_scope_dataset(history_id="history-1", source_id="current:dataset:h3", limit=10)
+    old_h3 = service.query_scope_dataset(history_id="history-1", source_id="current:dataset:h3", year="2020", limit=10)
+    datasets = {item["source_id"]: item for item in service.list_scope_datasets("history-1")["datasets"]}
+
+    assert default_h3["selected_year"] == 2024
+    assert default_h3["available_years"] == [2020, 2024]
+    assert default_h3["total_count"] == 2
+    assert old_h3["selected_year"] == 2020
+    assert old_h3["total_count"] == 1
+    assert datasets["current:dataset:h3"]["record_count"] == 2
+    assert datasets["current:dataset:population"]["selected_year"] == 2026
+    assert datasets["current:dataset:population"]["record_count"] == 2
+    assert datasets["current:dataset:population"]["summary"]["total_population"] == 58200.628
+
+
+def test_scope_dataset_marks_h3_pending_when_current_poi_year_has_no_exact_grid():
+    class MissingCurrentGridRepository:
+        def list_poi_results(self, history_id):
+            return [{"id": 24, "source": "local", "year": 2024, "summary": {"total": 2}}]
+
+        def get_poi_data(self, poi_result_id):
+            return []
+
+        def list_analysis_artifacts(self, history_id):
+            return [{
+                "id": 1,
+                "artifact_type": "poi_raster_grid",
+                "slot_key": "year:2020",
+                "params": {"year": 2020},
+                "payload": {"year": 2020, "grid": {"features": [{"properties": {"cell_id": "old"}}]}},
+                "summary": {"grid_count": 1},
+                "updated_at": "2026-07-14T12:00:00",
+            }]
+
+    datasets = {
+        item["source_id"]: item
+        for item in ScopeDatasetService(repository=MissingCurrentGridRepository()).list_scope_datasets("history-1")["datasets"]
+    }
+
+    assert datasets["current:dataset:h3"]["status"] == "pending"
+    assert datasets["current:dataset:h3"]["selected_year"] == 2024
+    assert datasets["current:dataset:h3"]["available_years"] == [2020]
+    assert datasets["current:dataset:h3"]["record_count"] == 0
 
 
 def test_scope_dataset_repository_lists_poi_results_without_large_json(monkeypatch):
@@ -204,6 +295,7 @@ def test_scope_dataset_repository_orders_artifacts_without_large_json(monkeypatc
             return SimpleNamespace(
                 id=record_id,
                 artifact_type="population",
+                slot_key="year:2024",
                 params={"year": 2024},
                 payload={"grid": {"features": []}},
                 summary={"grid_count": 0},

@@ -192,27 +192,18 @@ AI 分析分成快速模式和深度模式。两者使用同一批来源和证�
 入口：
 
 ```text
-answer_quick_analysis()
+answer_context_ask()
 ```
 
-优先路径：
+直接路径：
 
 ```text
 用户问题
--> 如果目标是已选来源
--> run_source_qa_loop()
--> list_selected_sources
--> search_selected_source_evidence / read_selected_source_evidence_node
--> 必要时 list/query/aggregate/read_scope_dataset
+-> target / analysis_snapshot / selected sources
+-> build_scoped_dataset_context()
+-> _build_user_payload()
+-> client.chat_json(phase="context_ask")
 -> 返回 answer + evidence + citations + warnings
-```
-
-兜底路径：
-
-```text
-run_source_qa_loop 不适用或失败
--> answer_context_ask()
--> 基于当前上下文和紧凑证据回答
 ```
 
 适合：
@@ -225,8 +216,8 @@ run_source_qa_loop 不适用或失败
 
 特点：
 
-- 工具调用少。
-- 主要围绕已选来源和当前范围数据。
+- 不进入工具循环。
+- 主要围绕已选来源和后端预处理好的当前范围数据。
 - 输出快，但不主动扩展复杂分析链。
 - 仍必须带证据、引用和缺口说明。
 
@@ -281,11 +272,11 @@ business_analyst_skeleton
 
 | 维度 | 快速模式 | 深度模式 |
 | --- | --- | --- |
-| 主要入口 | `answer_quick_analysis` | 主 Agent turn / ReAct loop |
+| 主要入口 | `answer_context_ask` | 主 Agent turn / ReAct loop |
 | 核心目标 | 快速回答来源问题和当前范围问题 | 多证据综合分析和策略判断 |
-| 工具循环 | `source_qa_loop`，最多少量只读工具 | ReAct 多轮工具循环 |
+| 工具循环 | 无；只做后端确定性预处理 | ReAct 多轮工具循环 |
 | 可用来源 | 已选来源、当前范围数据源 | 当前 analysis、已选来源、工具目录、BA skeleton |
-| 证据策略 | 先检索已选来源，必要时查 scoped dataset | 先规划，再补证据，再审计，再综合 |
+| 证据策略 | 把已选来源摘要和 scoped dataset context 一次性传入 | 先规划，再补证据，再审计，再综合 |
 | 输出 | 简洁专业回答、证据、引用、warnings | 更完整回答、推理边界、引用、下一步动作 |
 | 风险 | 不适合复杂跨域推理 | 成本更高、耗时更长 |
 

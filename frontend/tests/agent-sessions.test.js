@@ -413,16 +413,16 @@ test('context ask target normalization keeps a stable schema', () => {
   assert.equal(target.payload.rank, 1)
 
   const runTarget = ctx.normalizeContextAskTarget({
-    type: 'capability_run',
+    type: 'analysis_run',
     id: 'run-1',
     title: '第一阶段运行版本',
-    source: 'capability_run',
+    source: 'analysis_run',
     summary: '锁定不可变历史版本。',
     artifact_refs: ['stage1-report'],
     payload: { run_id: 'run-1', version_kind: 'immutable_history' },
   })
-  assert.equal(runTarget.type, 'capability_run')
-  assert.equal(runTarget.source, 'capability_run')
+  assert.equal(runTarget.type, 'analysis_run')
+  assert.equal(runTarget.source, 'analysis_run')
   assert.equal(ctx.getContextAskSourceLabel(runTarget.source), '能力运行版本')
 })
 
@@ -6347,11 +6347,11 @@ test('agent iteration poi insight keeps skeleton while ai is pending even with r
   assert.equal(ctx.shouldShowAgentIterationPoiInsightPlaceholder(), true)
 })
 
-test('agent iteration poi insight does not synthesize fallback after ai timeout', () => {
+test('agent iteration poi insight does not synthesize fallback after ai failure', () => {
   const ctx = createAgentContext()
   ctx.commitAgentIterationPoiPayload({
     status: 'ready',
-    ai_error: 'ai_timeout',
+    ai_error: 'llm_unavailable',
     ai_insights: {},
     rule_insights: {},
     subcategory_spatial_trend_rows: [
@@ -6385,7 +6385,7 @@ test('agent iteration poi normalizes legacy emerging area wording without fallba
   const ctx = createAgentContext()
   ctx.commitAgentIterationPoiPayload({
     status: 'ready',
-    ai_error: 'ai_timeout',
+    ai_error: '',
     ai_insights: { emerging_area: '未发现明显新兴区域' },
     rule_insights: {},
     subcategory_spatial_trend_rows: [{
@@ -6403,20 +6403,6 @@ test('agent iteration poi normalizes legacy emerging area wording without fallba
   assert.equal(growthArea.label, '增长片区')
   assert.equal(growthArea.value, '未发现明显增长片区')
   assert.equal(growthArea.value.includes('新兴区域'), false)
-})
-
-test('agent iteration poi ai timeout is treated as progressive status', () => {
-  const ctx = createAgentContext()
-  ctx.commitAgentIterationPoiPayload({
-    status: 'ready',
-    ai_error: 'ai_timeout',
-    ai_summary: [],
-    rule_summary: ['基础规则分析已完成。'],
-  })
-
-  assert.equal(ctx.isAgentIterationAiTimeout(ctx.getAgentIterationPoiPayload().ai_error), true)
-  assert.equal(ctx.getAgentIterationPoiAiStatusText(), '基础统计和快照已完成，AI 深度解读仍在补充。')
-  assert.deepEqual(ctx.getAgentIterationPoiAiSummaryRows(), [])
 })
 
 test('agent iteration poi area heatmap explains count changes', () => {

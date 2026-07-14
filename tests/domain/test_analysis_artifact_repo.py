@@ -1,4 +1,5 @@
 from store.analysis_artifact_repo import AnalysisArtifactRepo, compute_params_hash, normalize_scope_fingerprint
+from store.artifact_identity import build_artifact_slot_key
 
 
 class FakeQuery:
@@ -80,29 +81,27 @@ def test_scope_fingerprint_keeps_short_keys_and_hashes_scope_payloads():
 def test_artifact_repo_upserts_by_identity(monkeypatch):
     fake_session = FakeSession()
     monkeypatch.setattr("store.analysis_artifact_repo.SessionLocal", lambda: fake_session)
+    monkeypatch.setattr("store.analysis_artifact_repo._history_scope_fingerprint", lambda *_args: "scope:history-wgs84")
     repo = AnalysisArtifactRepo()
 
     first = repo.upsert(
         history_id="history-1",
         artifact_type="poi_h3_grid",
-        params={"resolution": 10},
-        scope_fingerprint="scope-a",
+        params={"resolution": 10, "year": 2024},
         payload={"grid": {"features": [1]}},
         summary={"grid_count": 1},
     )
     second = repo.upsert(
         history_id="history-1",
         artifact_type="poi_h3_grid",
-        params={"resolution": 10},
-        scope_fingerprint="scope-a",
+        params={"resolution": 11, "year": 2024},
         payload={"grid": {"features": [1, 2]}},
         summary={"grid_count": 2},
     )
     third = repo.upsert(
         history_id="history-1",
         artifact_type="poi_h3_grid",
-        params={"resolution": 11},
-        scope_fingerprint="scope-a",
+        params={"resolution": 10, "year": 2020},
         payload={"grid": {"features": [3]}},
         summary={"grid_count": 1},
     )
@@ -110,13 +109,17 @@ def test_artifact_repo_upserts_by_identity(monkeypatch):
     assert first["id"] == second["id"]
     assert second["summary"]["grid_count"] == 2
     assert third["id"] != first["id"]
+    assert first["slot_key"] == "year:2024"
+    assert first["scope_fingerprint"] == "scope:history-wgs84"
     assert len(repo.list("history-1", artifact_type="poi_h3_grid")) == 2
+    assert [item["slot_key"] for item in repo.list("history-1", artifact_type="poi_h3_grid")] == ["year:2024", "year:2020"]
     assert repo.list("other-history") == []
 
 
 def test_artifact_repo_deletes_by_payload_source_id(monkeypatch):
     fake_session = FakeSession()
     monkeypatch.setattr("store.analysis_artifact_repo.SessionLocal", lambda: fake_session)
+    monkeypatch.setattr("store.analysis_artifact_repo._history_scope_fingerprint", lambda *_args: "scope:history-wgs84")
     repo = AnalysisArtifactRepo()
 
     repo.upsert(
@@ -141,3 +144,9 @@ def test_artifact_repo_deletes_by_payload_source_id(monkeypatch):
     assert deleted == 1
     remaining = repo.list("history-1")
     assert [item["payload"]["source"]["id"] for item in remaining] == ["web:history-1:b"]
+
+
+def test_artifact_slot_key_uses_year_only_for_spatial_time_data():
+    assert build_artifact_slot_key("population", {"year": "2026", "view": "density"}) == "year:2026"
+    assert build_artifact_slot_key("population", {"year": 2026, "view": "gender"}) == "year:2026"
+    assert build_artifact_slot_key("road_syntax", {"metric": "choice"}) == "current"

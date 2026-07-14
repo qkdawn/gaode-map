@@ -41,7 +41,7 @@ def movement_routes():
 
 def complete_package():
     package = {
-        "evidence_ledger": [
+        "evidence_nodes": [
             {
                 "id": "evidence-1",
                 "claim": "项目范围内存在历史建筑院落",
@@ -203,7 +203,7 @@ def complete_package():
         {}, evidence_ids={"evidence-1"}
     ).model_dump(mode="json")
     package["data_quality"] = assess_stage1_data_quality(
-        package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
+        package["evidence_nodes"], critical_evidence_ids={"evidence-1"}
     ).model_dump(mode="json")
     package["provenance_binding"] = assess_provenance_bindings(
         [
@@ -335,7 +335,7 @@ def test_proxy_overreach_is_rejected():
 
 def test_evidence_requires_scope_limitation_and_validation_status():
     package = deepcopy(complete_package())
-    package["evidence_ledger"][0].update(
+    package["evidence_nodes"][0].update(
         {"scope": "", "limitation": "", "status": "supported"}
     )
 
@@ -362,9 +362,9 @@ def test_unknown_evidence_reference_blocks_delivery():
 
 def test_duplicate_evidence_ids_and_missing_provenance_block_delivery():
     package = complete_package()
-    duplicate = deepcopy(package["evidence_ledger"][0])
+    duplicate = deepcopy(package["evidence_nodes"][0])
     duplicate["source_artifact_id"] = ""
-    package["evidence_ledger"].append(duplicate)
+    package["evidence_nodes"].append(duplicate)
 
     result = audit_stage1_package(package)
 
@@ -377,8 +377,8 @@ def test_duplicate_evidence_ids_and_missing_provenance_block_delivery():
 
 def test_recommended_option_requires_direct_verified_evidence():
     package = complete_package()
-    package["evidence_ledger"][0]["status"] = "inferred"
-    package["evidence_ledger"][0]["confidence"] = "medium"
+    package["evidence_nodes"][0]["status"] = "inferred"
+    package["evidence_nodes"][0]["confidence"] = "medium"
 
     result = audit_stage1_package(package)
 
@@ -440,7 +440,7 @@ def test_unlinked_conflict_is_exposed_without_blocking_unrelated_decision():
 
 def test_critical_analytic_evidence_requires_fresh_sample_and_spatial_metadata():
     package = complete_package()
-    evidence = package["evidence_ledger"][0]
+    evidence = package["evidence_nodes"][0]
     evidence.update(
         {
             "evidence_type": "G",
@@ -454,7 +454,7 @@ def test_critical_analytic_evidence_requires_fresh_sample_and_spatial_metadata()
         }
     )
     package["data_quality"] = assess_stage1_data_quality(
-        package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
+        package["evidence_nodes"], critical_evidence_ids={"evidence-1"}
     ).model_dump(mode="json")
 
     result = audit_stage1_package(package)
@@ -470,7 +470,7 @@ def test_critical_analytic_evidence_requires_fresh_sample_and_spatial_metadata()
 
 def test_unreferenced_data_quality_gap_is_warning_not_delivery_blocker():
     package = complete_package()
-    package["evidence_ledger"].append(
+    package["evidence_nodes"].append(
         {
             "id": "background-1",
             "claim": "旧版背景数据仅用于历史参照",
@@ -488,7 +488,7 @@ def test_unreferenced_data_quality_gap_is_warning_not_delivery_blocker():
         }
     )
     package["data_quality"] = assess_stage1_data_quality(
-        package["evidence_ledger"], critical_evidence_ids={"evidence-1"}
+        package["evidence_nodes"], critical_evidence_ids={"evidence-1"}
     ).model_dump(mode="json")
     package["provenance_binding"]["bindings"].append(
         {

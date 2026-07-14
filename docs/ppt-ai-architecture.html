@@ -184,10 +184,10 @@
       </div>
       <div class="col">
         <div class="layer agent">
-          <div class="layer-title">PPT 来源问答链</div>
-          <div class="box"><strong>context_ask_service</strong><small>modules/agent/context_ask_service.py</small><small>如果 target.type=ppt_sources，优先进入来源问答 mini loop。</small></div>
-          <div class="box"><strong>run_source_qa_loop</strong><small>modules/agent/source_qa_loop.py</small><small>只允许围绕已选 PPT 来源检索；不会访问未选来源。</small></div>
-          <div class="box"><strong>只读工具</strong><small>list_selected_sources、search/read_selected_source_evidence_node、list/query/aggregate/read_scope_dataset</small></div>
+          <div class="layer-title">PPT 来源快速问答链</div>
+          <div class="box"><strong>context_ask_service</strong><small>modules/agent/context_ask_service.py</small><small>把已选来源、当前分析快照和范围数据预处理为一次性 LLM 输入包。</small></div>
+          <div class="box"><strong>scoped_dataset_context</strong><small>modules/agent/context_ask_datasets.py</small><small>后端确定性读取、聚合和压缩当前范围数据。</small></div>
+          <div class="box"><strong>直接 JSON 问答</strong><small>client.chat_json phase=context_ask</small><small>不向快速模型暴露工具 schema。</small></div>
           <div class="box"><strong>回答产物</strong><small>自然回答 + evidence + citations + warnings；不再固定四段模板。</small></div>
         </div>
         <div class="arrow">可进入主 Agent</div>
@@ -198,7 +198,7 @@
         </div>
       </div>
     </section>
-    <div class="note">一句话：PPT AI 的核心数据面是“已选来源 -> EvidenceNode / Metric Context -> Context Bundle”。核心生成面是“目录 -> 叙事方案 -> 指令文件 -> 逐页 brief/视觉资产”。来源问答是旁路 mini loop，服务用户追问，不负责生成整套 PPT。</div>
+    <div class="note">一句话：PPT AI 的核心数据面是“已选来源 -> EvidenceNode / Metric Context -> Context Bundle”。核心生成面是“目录 -> 叙事方案 -> 指令文件 -> 逐页 brief/视觉资产”。快速来源问答是旁路 direct context ask，服务用户追问，不负责生成整套 PPT。</div>
     <section class="explain">
       <h2>流程说明</h2>
       <ul>
@@ -206,7 +206,7 @@
         <li>后端 <code>router/domains/ppt_planning.py</code> 只是 HTTP 边界，真正的编排在 <code>modules/ppt_planning/service.py</code>。</li>
         <li><code>service.py</code> 每次生成前都会构建 <code>_build_ppt_context_bundle()</code>，把 <code>sources</code>、<code>source_manifest</code>、<code>metric_context</code>、<code>evidence_context</code> 压缩成 LLM 可用上下文。</li>
         <li>生成不是一步到位：<code>generate_ppt_spec()</code> 先出目录，<code>generate_narrative_plan()</code> 出叙事方案，<code>generate_deck_brief()</code> 出整套 PPT 指令文件，<code>regenerate_deck_brief_slide()</code> 可逐页重生成，<code>generate_visual_artifacts_for_slide()</code> 处理图表、地图快照等视觉资产请求。</li>
-        <li>用户问“这个来源说明什么 / 下一步怎么分析”时，不走 PPT 生成主链，而是 <code>context_ask_service -> run_source_qa_loop</code>，只读已选来源和当前范围数据。</li>
+        <li>用户问“这个来源说明什么 / 下一步怎么分析”时，不走 PPT 生成主链，而是 <code>context_ask_service -> answer_context_ask</code>，把已选来源和当前范围数据预处理后直接传给 LLM。</li>
       </ul>
     </section>
   </main>

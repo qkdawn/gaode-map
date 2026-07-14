@@ -85,10 +85,10 @@ test('immutable Stage 1 run becomes a selected deliverable PPT source with bound
   assert.ok(payload.evidence_nodes.length >= 5)
   assert.ok(payload.evidence_nodes.every(node => node.content.length <= 680))
   assert.deepEqual(
-    new Set(payload.evidence_nodes.map(node => node.metadata.artifact_id)),
+    new Set(payload.evidence_nodes.map(node => node.data.artifact_id)),
     new Set(['stage1-report', 'stage1-evidence-appendix', 'stage1-design-handoff']),
   )
-  assert.ok(payload.evidence_nodes.every(node => node.metadata.run_id === 'run-stage1'))
+  assert.ok(payload.evidence_nodes.every(node => node.run_id === 'run-stage1'))
   assert.ok(payload.evidence_nodes.some(node => node.content.includes('社区客厅')))
   assert.ok(payload.evidence_nodes.some(node => node.content.includes('慢行断点')))
 })
@@ -102,7 +102,7 @@ test('immutable Stage 1 source is included in PPT generation requests', () => {
   assert.deepEqual(manifest.deliverableSourceIds, ['package:stage1-run:run-stage1'])
   assert.deepEqual(request.source_ids, ['package:stage1-run:run-stage1'])
   assert.equal(request.sources[0].meta.aiPayload.version, 'ppt_ai_input_block_v1')
-  assert.equal(request.sources[0].meta.aiPayload.evidence_nodes[0].metadata.run_id, 'run-stage1')
+  assert.equal(request.sources[0].meta.aiPayload.evidence_nodes[0].run_id, 'run-stage1')
 })
 
 test('missing immutable artifacts fail closed instead of falling back to current data', () => {
@@ -110,7 +110,7 @@ test('missing immutable artifacts fail closed instead of falling back to current
   detail.artifacts = detail.artifacts.filter(item => item.artifact.artifact_id !== 'stage1-design-handoff')
   assert.throws(
     () => createStage1CapabilityPptSource(detail, 'run-stage1'),
-    /capability_run_artifacts_missing:stage1-design-handoff/,
+    /analysis_run_artifacts_missing:stage1-design-handoff/,
   )
   const failed = createStage1CapabilityFailedSource('run-stage1', new Error('missing handoff'))
   assert.equal(failed.status, 'failed')
@@ -236,7 +236,7 @@ test('Stage 1 source rejects non-consumable runs while allowing an explicitly se
   running.run.status = 'running'
   assert.throws(
     () => createStage1CapabilityPptSource(running, 'run-stage1'),
-    /capability_run_not_consumable:running/,
+    /analysis_run_not_consumable:running/,
   )
 
   const stale = stage1RunDetail()

@@ -260,11 +260,12 @@ export function classifyPptSourceGroups(payload = {}) {
   return postJson('/api/v1/analysis/ppt/source-groups/classify', payload)
 }
 
-export async function uploadDocumentSource(file, title = '', documentRole = '') {
+export async function uploadDocumentSource(file, title = '', documentRole = '', historyId = '') {
   const form = new FormData()
   form.append('file', file)
   if (String(title || '').trim()) form.append('title', String(title || '').trim())
   form.append('document_role', String(documentRole || '').trim())
+  if (String(historyId || '').trim()) form.append('history_id', String(historyId || '').trim())
   const response = await fetch('/documents/upload', {
     method: 'POST',
     body: form,

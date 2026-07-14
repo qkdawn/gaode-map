@@ -6,7 +6,9 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
+from core.years import available_business_years, normalize_year, resolve_business_year
 from modules.evidence_retrieval.schemas import EvidenceNode
+from store.artifact_identity import build_artifact_slot_key
 from store.database import SessionLocal
 from store.models import AnalysisArtifact, PoiResult
 
@@ -117,13 +119,20 @@ def _time_scope(*, year: Any = None, data_version: str = "", scope_fingerprint: 
             "year": normalized_year,
             "label": f"{normalized_year} 年",
             "granularity": "year",
-            "confidence": "explicit",
             "data_version": data_version,
             "scope_fingerprint": scope_fingerprint,
         }
     return {
         "label": "未标注年份",
-        "confidence": "missing",
+        "data_version": data_version,
+        "scope_fingerprint": scope_fingerprint,
+    }
+
+
+def _static_time_scope(*, data_version: str = "", scope_fingerprint: str = "") -> Dict[str, Any]:
+    return {
+        "kind": "static_snapshot",
+        "label": "当前路网模型",
         "data_version": data_version,
         "scope_fingerprint": scope_fingerprint,
     }
@@ -151,7 +160,6 @@ class ScopeRecord:
     locator: str
     citation: str
     warnings: List[str] = field(default_factory=list)
-    evidence_level: str = "raw_record"
 
     def as_payload(self) -> Dict[str, Any]:
         return {
@@ -166,23 +174,21 @@ class ScopeRecord:
             "warnings": list(self.warnings or []),
         }
 
-    def evidence_node(self, *, score: float = 1.0) -> Dict[str, Any]:
+    def evidence_node(self) -> Dict[str, Any]:
         node = EvidenceNode(
             id=f"{self.source_id}:record:{self.record_id}",
-            source_id=self.source_id,
-            source_type="system",
+            kind="dataset_record",
+            source_ids=[self.source_id],
             title=self.title,
             content=self.content,
             summary=self.content[:260],
-            metadata={
+            data={
                 "record_id": self.record_id,
                 "properties": _clone_json(self.properties),
-                "time_scope": _clone_json(self.time_scope),
             },
+            time_scope=_clone_json(self.time_scope),
             locator=self.locator,
-            score=score,
-            evidence_level=self.evidence_level,
-            warnings=list(self.warnings or []),
+            quality_flags=[{"code": "source_quality_note", "severity": "warning", "effect": item} for item in self.warnings],
             citation=self.citation,
         )
         return node.model_dump(mode="python")
@@ -242,6 +248,7 @@ class ScopeDatasetRepository:
                 {
                     "id": row.id,
                     "artifact_type": row.artifact_type,
+                    "slot_key": row.slot_key,
                     "params": row.params if isinstance(row.params, dict) else {},
                     "payload": row.payload if isinstance(row.payload, dict) else {},
                     "summary": row.summary if isinstance(row.summary, dict) else {},
@@ -268,21 +275,30 @@ class ScopeDatasetService:
         artifacts = self.repository.list_analysis_artifacts(normalized_history_id)
         datasets = []
         if poi_rows:
-            years = sorted({year for year in (_as_int(row.get("year")) for row in poi_rows) if year is not None})
-            count = sum(self._poi_result_count(row) for row in poi_rows)
-            datasets.append(self._dataset_payload("current:dataset:poi", count, years=years, variants=len(poi_rows)))
+            years = available_business_years(row.get("year") for row in poi_rows)
+            selected_year = resolve_business_year(years)
+            selected_rows = [row for row in poi_rows if normalize_year(row.get("year")) == selected_year]
+            count = sum(self._poi_result_count(row) for row in selected_rows)
+            datasets.append(self._dataset_payload("current:dataset:poi", count, years=years, selected_year=selected_year, variants=len(selected_rows)))
         for source_id in ["current:dataset:h3", "current:dataset:population", "current:dataset:nightlight", "current:dataset:road"]:
-            matching = [item for item in artifacts if ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == source_id]
-            if not matching:
+            matching = [
+                item
+                for item in artifacts
+                if ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == source_id
+            ]
+            selected, years, selected_year = self._select_artifacts(
+                source_id=source_id,
+                artifacts=matching,
+                requested_year=None,
+                poi_rows=poi_rows,
+            )
+            if not selected and not matching:
                 continue
             records = []
-            years = []
-            for artifact in matching:
+            for artifact in selected:
                 records.extend(self._records_from_artifact(source_id, artifact))
-                year = _as_int(_year_from_artifact(artifact))
-                if year is not None:
-                    years.append(year)
-            datasets.append(self._dataset_payload(source_id, len(records), years=sorted(set(years)), variants=len(matching)))
+            summary = self._selected_artifact_summary(selected)
+            datasets.append(self._dataset_payload(source_id, len(records), years=years, selected_year=selected_year, variants=len(selected), summary=summary))
         return {"datasets": datasets, "warnings": []}
 
     def query_scope_dataset(
@@ -296,7 +312,7 @@ class ScopeDatasetService:
         offset: int = 0,
         year: Any = None,
     ) -> Dict[str, Any]:
-        records = self._records(history_id=history_id, source_id=source_id, year=year)
+        records, available_years, selected_year = self._records_with_selection(history_id=history_id, source_id=source_id, year=year)
         filtered = self._apply_filters(records, source_id, filters or {})
         sorted_records = self._apply_sort(filtered, sort or {})
         safe_limit = min(max(int(limit or DEFAULT_LIMIT), 1), MAX_LIMIT)
@@ -304,6 +320,8 @@ class ScopeDatasetService:
         page = sorted_records[safe_offset : safe_offset + safe_limit]
         return {
             "source_id": source_id,
+            "selected_year": selected_year,
+            "available_years": available_years,
             "total_count": len(filtered),
             "limit": safe_limit,
             "offset": safe_offset,
@@ -324,7 +342,12 @@ class ScopeDatasetService:
         top_k: int = 10,
         year: Any = None,
     ) -> Dict[str, Any]:
-        records = self._apply_filters(self._records(history_id=history_id, source_id=source_id, year=year), source_id, filters or {})
+        selected_records, available_years, selected_year = self._records_with_selection(
+            history_id=history_id,
+            source_id=source_id,
+            year=year,
+        )
+        records = self._apply_filters(selected_records, source_id, filters or {})
         group_field = _as_text(group_by)
         metric_specs = metrics if isinstance(metrics, list) and metrics else [{"op": "count", "field": "*", "as": "count"}]
         grouped: Dict[str, List[ScopeRecord]] = {}
@@ -349,6 +372,8 @@ class ScopeDatasetService:
         safe_top_k = min(max(int(top_k or 10), 1), 100)
         return {
             "source_id": source_id,
+            "selected_year": selected_year,
+            "available_years": available_years,
             "group_by": group_field,
             "total_groups": len(rows),
             "rows": rows[:safe_top_k],
@@ -374,18 +399,32 @@ class ScopeDatasetService:
             "warnings": [f"未找到当前范围记录: {normalized_record_id}"],
         }
 
-    def _dataset_payload(self, source_id: str, record_count: int, *, years: List[int], variants: int) -> Dict[str, Any]:
-        warnings = [] if years else ["该来源未提供明确年份，回答时不能做跨年比较。"]
+    def _dataset_payload(
+        self,
+        source_id: str,
+        record_count: int,
+        *,
+        years: List[int],
+        selected_year: int | None,
+        variants: int,
+        summary: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        is_static = source_id == "current:dataset:road"
+        warnings = [] if years or is_static else ["该来源未提供明确年份。"]
         return {
             "source_id": source_id,
             "source_kind": "system",
             "title": DATASET_TITLES.get(source_id, source_id),
             "status": "ready" if record_count else "pending",
             "record_count": int(record_count or 0),
+            "selected_year": selected_year,
+            "available_years": years,
+            "summary": _clone_json(summary or {}),
             "time_scope": {
                 "years": years,
-                "label": "、".join(f"{year} 年" for year in years) if years else "未标注年份",
-                "confidence": "explicit" if years else "missing",
+                "selected_year": selected_year,
+                "kind": "static_snapshot" if is_static else "year",
+                "label": "当前路网模型" if is_static else (f"{selected_year} 年" if selected_year else "未标注年份"),
             },
             "query_capabilities": {
                 "filter_fields": sorted(DATASET_FILTER_FIELDS.get(source_id, set())),
@@ -397,22 +436,93 @@ class ScopeDatasetService:
         }
 
     def _records(self, *, history_id: str, source_id: str, year: Any = None) -> List[ScopeRecord]:
+        records, _, _ = self._records_with_selection(history_id=history_id, source_id=source_id, year=year)
+        return records
+
+    def _records_with_selection(
+        self,
+        *,
+        history_id: str,
+        source_id: str,
+        year: Any = None,
+    ) -> tuple[List[ScopeRecord], List[int], int | None]:
         normalized_source_id = _as_text(source_id)
         if not _as_text(history_id) or normalized_source_id not in DATASET_TITLES:
-            return []
+            return [], [], normalize_year(year)
         if normalized_source_id == "current:dataset:poi":
-            return self._poi_records(history_id, year=year)
-        artifacts = [
+            rows = self.repository.list_poi_results(history_id)
+            years = available_business_years(row.get("year") for row in rows)
+            selected_year = resolve_business_year(years, year)
+            return self._poi_records(history_id, year=selected_year), years, selected_year
+        all_artifacts = [
             item
             for item in self.repository.list_analysis_artifacts(history_id)
             if ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == normalized_source_id
         ]
+        poi_rows = self.repository.list_poi_results(history_id) if normalized_source_id == "current:dataset:h3" else []
+        artifacts, years, selected_year = self._select_artifacts(
+            source_id=normalized_source_id,
+            artifacts=all_artifacts,
+            requested_year=year,
+            poi_rows=poi_rows,
+        )
         records: List[ScopeRecord] = []
         for artifact in artifacts:
-            if _as_int(year) is not None and _as_int(_year_from_artifact(artifact)) != _as_int(year):
-                continue
             records.extend(self._records_from_artifact(normalized_source_id, artifact))
-        return records
+        return records, years, selected_year
+
+    @staticmethod
+    def _artifact_sort_key(artifact: Dict[str, Any]) -> tuple[str, int]:
+        return (_as_text(artifact.get("updated_at")), int(artifact.get("id") or 0))
+
+    def _dedupe_artifacts(self, artifacts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        latest: Dict[tuple[str, str], Dict[str, Any]] = {}
+        for artifact in artifacts:
+            artifact_type = _as_text(artifact.get("artifact_type"))
+            slot_key = _as_text(artifact.get("slot_key"))
+            if not slot_key:
+                try:
+                    slot_key = build_artifact_slot_key(artifact_type, artifact.get("params"), artifact.get("payload"))
+                except ValueError:
+                    slot_key = "year:unknown"
+            key = (artifact_type, slot_key)
+            existing = latest.get(key)
+            if existing is None or self._artifact_sort_key(artifact) > self._artifact_sort_key(existing):
+                latest[key] = artifact
+        return list(latest.values())
+
+    def _select_artifacts(
+        self,
+        *,
+        source_id: str,
+        artifacts: List[Dict[str, Any]],
+        requested_year: Any,
+        poi_rows: List[Dict[str, Any]],
+    ) -> tuple[List[Dict[str, Any]], List[int], int | None]:
+        deduped = self._dedupe_artifacts(artifacts)
+        if source_id == "current:dataset:road":
+            selected = sorted(deduped, key=self._artifact_sort_key, reverse=True)[:1]
+            return selected, [], None
+        years = available_business_years(_year_from_artifact(item) for item in deduped)
+        if source_id == "current:dataset:h3":
+            poi_years = available_business_years(row.get("year") for row in poi_rows)
+            selected_year = resolve_business_year(poi_years or years, requested_year)
+        else:
+            selected_year = resolve_business_year(years, requested_year)
+        selected = [item for item in deduped if normalize_year(_year_from_artifact(item)) == selected_year]
+        return sorted(selected, key=self._artifact_sort_key, reverse=True), years, selected_year
+
+    @staticmethod
+    def _selected_artifact_summary(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if len(artifacts) == 1:
+            artifact = artifacts[0]
+            payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
+            summary = artifact.get("summary") if isinstance(artifact.get("summary"), dict) else {}
+            return _clone_json(summary or (payload.get("summary") if isinstance(payload.get("summary"), dict) else {}))
+        return {
+            _as_text(item.get("artifact_type")): _clone_json(item.get("summary") if isinstance(item.get("summary"), dict) else {})
+            for item in artifacts
+        }
 
     def _poi_records(self, history_id: str, *, year: Any = None) -> List[ScopeRecord]:
         records: List[ScopeRecord] = []
@@ -530,8 +640,7 @@ class ScopeDatasetService:
     def _road_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
         metric = payload.get("metric") or payload.get("mode") or ""
-        time_scope = _time_scope(
-            year=_year_from_artifact(artifact),
+        time_scope = _static_time_scope(
             data_version=_as_text(artifact.get("data_version")),
             scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
         )
@@ -565,8 +674,8 @@ class ScopeDatasetService:
                         raw={"feature": _clone_json(feature)},
                         time_scope=time_scope,
                         locator=f"current:dataset:road/{record_id}",
-                        citation=f"当前范围路网，{time_scope.get('label')}",
-                        warnings=_dataset_warning_for_year(_year_from_artifact(artifact)),
+                        citation="当前范围路网，当前路网模型",
+                        warnings=[],
                     )
                 )
         return records

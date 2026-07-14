@@ -15,6 +15,7 @@ from .population import router as population_router
 from .ppt_planning import router as ppt_planning_router
 from .ppt_web_source import router as ppt_web_source_router
 from .road import router as road_router
+from .spatial_projects import router as spatial_projects_router
 from .system import router as system_router
 from .timeseries import router as timeseries_router
 from .tools import router as tools_router
@@ -37,6 +38,7 @@ __all__ = [
     "ppt_planning_router",
     "ppt_web_source_router",
     "road_router",
+    "spatial_projects_router",
     "system_router",
     "timeseries_router",
     "tools_router",

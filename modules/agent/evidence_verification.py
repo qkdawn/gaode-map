@@ -147,7 +147,7 @@ def _task_for(node: dict[str, Any], *, as_of: date) -> VerificationTask | None:
     )
 
 
-def verify_evidence_ledger(
+def verify_evidence_nodes(
     ledger: list[dict[str, Any]],
     *,
     selected_sources: list[dict[str, Any]],

@@ -2458,7 +2458,6 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
   const aiPayload = {
     ...aiPayloadBase,
     evidence_nodes: evidenceNodes,
-    evidenceNodes,
   }
   const transport = ready ? createPptTransportFromAiPayload(aiPayload) : cloneObject(previous && previous.meta && previous.meta.transport)
   const nextSource = normalizePptSource({

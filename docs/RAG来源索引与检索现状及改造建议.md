@@ -475,7 +475,7 @@ analysis_history
 | `record_id` / `node_id` | 原生索引记录 ID，用于 read |
 | `content` / `text` | 可检索文本或节点摘要 |
 | `locator` | 回到原始对象的位置，如 URL、bbox、carrier、page |
-| `metadata` | bbox、year、domain、confidence、metric_id 等来源特有字段 |
+| `metadata` | bbox、year、domain、metric_id 等来源特有字段 |
 
 #### 10.5.2 `source_index_manifests` 草案
 

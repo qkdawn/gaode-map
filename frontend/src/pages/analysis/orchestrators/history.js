@@ -487,7 +487,6 @@ function createAnalysisHistoryOrchestratorMethods() {
           params: this.normalizeArtifactParams(bundle.params),
           payload: this.cloneArtifactValue(bundle.payload || {}),
           summary: this.cloneArtifactValue(bundle.summary || {}),
-          scope_fingerprint: this.buildAnalysisScopeFingerprint(),
           data_version: 'v1',
         }),
       })

@@ -7,20 +7,21 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-import store.capability_run_repo as capability_run_repo_module
-from modules.agent.capability_run_service import (
-    get_capability_run,
-    list_capability_runs,
-    persist_capability_run_response,
+import store.analysis_run_repo as analysis_run_repo_module
+from modules.agent.analysis_run_service import (
+    get_analysis_run,
+    list_analysis_runs,
+    persist_analysis_run_response,
 )
-from modules.agent.capability_runs import CapabilityRunRecorder, artifact_ref
+from modules.agent.analysis_runs import AnalysisRunRecorder, artifact_ref
 from modules.agent.schemas import AgentTurnRequest, AgentTurnResponse
 import modules.agent.session_service as session_service
 from store.models import Base
+from store.analysis_run_storage import AnalysisRunStorage
 
 
 @pytest.fixture
-def run_repo(monkeypatch):
+def run_repo(monkeypatch, tmp_path):
     engine = create_engine(
         "sqlite://",
         future=True,
@@ -34,8 +35,13 @@ def run_repo(monkeypatch):
         future=True,
     )
     Base.metadata.create_all(bind=engine)
-    monkeypatch.setattr(capability_run_repo_module, "SessionLocal", factory)
-    return capability_run_repo_module.capability_run_repo
+    monkeypatch.setattr(analysis_run_repo_module, "SessionLocal", factory)
+    monkeypatch.setattr(
+        analysis_run_repo_module.analysis_run_repo,
+        "storage",
+        AnalysisRunStorage(tmp_path / "analysis-runs"),
+    )
+    return analysis_run_repo_module.analysis_run_repo
 
 
 def _completed_run(
@@ -45,7 +51,7 @@ def _completed_run(
     source_payload: dict | None = None,
 ):
     source_payload = source_payload or {"revision": 1}
-    recorder = CapabilityRunRecorder(
+    recorder = AnalysisRunRecorder(
         capability_id="urban-strategy-stage1",
         project_context={"scope_id": "scope-1"},
         configuration_snapshot={"history_id": history_id},
@@ -104,7 +110,7 @@ def _persist(run_repo, run, project_brief, report, *, history_id="history-1"):
         output={
             "answer": report,
             "panel_payloads": {
-                "capability_run": run.model_dump(mode="json"),
+                "analysis_run": run.model_dump(mode="json"),
                 "stage1_project_brief": project_brief,
                 "stage1_quality_audit": {"status": "passed", "score": 100, "checks_passed": 19, "checks_total": 19, "issues": []},
                 "stage1_deliverables": {"report_markdown": report},
@@ -112,52 +118,52 @@ def _persist(run_repo, run, project_brief, report, *, history_id="history-1"):
         },
     )
     request = AgentTurnRequest(history_id=history_id)
-    persist_capability_run_response(request, response, repo=run_repo)
+    persist_analysis_run_response(request, response, repo=run_repo)
     return response
 
 
 def test_persisted_run_keeps_immutable_manifest_and_output_payloads(run_repo):
-    run, project_brief, report = _completed_run("caprun-1")
+    run, project_brief, report = _completed_run("run-1")
 
     _persist(run_repo, run, project_brief, report)
-    detail = get_capability_run("caprun-1", repo=run_repo)
+    detail = get_analysis_run("run-1", repo=run_repo)
 
     assert detail is not None
     assert detail.history_id == "history-1"
-    assert detail.run.run_id == "caprun-1"
+    assert detail.run.run_id == "run-1"
     snapshots = {item.artifact.artifact_id: item for item in detail.artifacts}
     assert snapshots["stage1-project-brief"].payload == project_brief
     assert snapshots["stage1-report"].payload == report
     assert snapshots["document:project-brief"].direction == "input"
     assert snapshots["document:project-brief"].payload is None
-    assert snapshots["stage1-report"].artifact.version == "caprun-1"
+    assert snapshots["stage1-report"].artifact.version == "run-1"
     assert snapshots["stage1-quality-audit"].payload["checks_passed"] == 19
 
 
 def test_identical_save_is_idempotent_but_run_payload_and_owner_are_immutable(run_repo):
-    run, project_brief, report = _completed_run("caprun-immutable")
+    run, project_brief, report = _completed_run("run-immutable")
     response = _persist(run_repo, run, project_brief, report)
 
-    persist_capability_run_response(
+    persist_analysis_run_response(
         AgentTurnRequest(history_id="history-1"),
         response,
         repo=run_repo,
     )
-    assert len(list_capability_runs("history-1", repo=run_repo)) == 1
+    assert len(list_analysis_runs("history-1", repo=run_repo)) == 1
 
     modified = response.model_copy(deep=True)
     modified.output.panel_payloads["stage1_deliverables"]["report_markdown"] = (
         "tampered report"
     )
-    with pytest.raises(ValueError, match="capability_run_immutable"):
-        persist_capability_run_response(
+    with pytest.raises(ValueError, match="analysis_run_immutable"):
+        persist_analysis_run_response(
             AgentTurnRequest(history_id="history-1"),
             modified,
             repo=run_repo,
         )
 
-    with pytest.raises(ValueError, match="capability_run_immutable"):
-        persist_capability_run_response(
+    with pytest.raises(ValueError, match="analysis_run_immutable"):
+        persist_analysis_run_response(
             AgentTurnRequest(history_id="history-2"),
             response,
             repo=run_repo,
@@ -166,33 +172,33 @@ def test_identical_save_is_idempotent_but_run_payload_and_owner_are_immutable(ru
 
 def test_newer_changed_input_marks_only_older_run_in_same_history_stale(run_repo):
     old_run, old_brief, old_report = _completed_run(
-        "caprun-old", source_payload={"revision": 1}
+        "run-old", source_payload={"revision": 1}
     )
     _persist(run_repo, old_run, old_brief, old_report)
 
-    before = list_capability_runs("history-1", repo=run_repo)
+    before = list_analysis_runs("history-1", repo=run_repo)
     assert before[0].status == "completed"
 
     new_run, new_brief, new_report = _completed_run(
-        "caprun-new", source_payload={"revision": 2}
+        "run-new", source_payload={"revision": 2}
     )
     _persist(run_repo, new_run, new_brief, new_report)
 
     runs = {
         item.run_id: item
-        for item in list_capability_runs(
+        for item in list_analysis_runs(
             "history-1",
             capability_id="urban-strategy-stage1",
             repo=run_repo,
         )
     }
-    assert runs["caprun-old"].status == "stale"
-    assert runs["caprun-old"].stale_input_artifact_ids == ["document:project-brief"]
-    assert "上游输入已更新" in runs["caprun-old"].diagnostics[-1]
-    assert runs["caprun-new"].status == "completed"
+    assert runs["run-old"].status == "stale"
+    assert runs["run-old"].stale_input_artifact_ids == ["document:project-brief"]
+    assert "上游输入已更新" in runs["run-old"].diagnostics[-1]
+    assert runs["run-new"].status == "completed"
 
     other_run, other_brief, other_report = _completed_run(
-        "caprun-other-history",
+        "run-other-history",
         history_id="history-2",
         source_payload={"revision": 3},
     )
@@ -203,8 +209,8 @@ def test_newer_changed_input_marks_only_older_run_in_same_history_stale(run_repo
         other_report,
         history_id="history-2",
     )
-    assert list_capability_runs("history-2", repo=run_repo)[0].status == "completed"
-    assert runs["caprun-new"].status == "completed"
+    assert list_analysis_runs("history-2", repo=run_repo)[0].status == "completed"
+    assert runs["run-new"].status == "completed"
 
 
 def test_artifact_ref_uses_digest_or_source_run_as_meaningful_version():
@@ -218,13 +224,13 @@ def test_artifact_ref_uses_digest_or_source_run_as_meaningful_version():
         artifact_id="output-1",
         artifact_type="report",
         title="输出",
-        source_run_id="caprun-version",
+        source_run_id="run-version",
         payload="report",
     )
 
     assert input_ref.version == input_ref.content_digest[:24]
     assert input_ref.version != "1"
-    assert output_ref.version == "caprun-version"
+    assert output_ref.version == "run-version"
 
 
 class _RecordingSessionRepo:
@@ -243,14 +249,14 @@ class _RecordingSessionRepo:
         return self.records[session_id]
 
 
-def test_agent_turn_persists_session_and_capability_run_together(run_repo, monkeypatch):
-    run, project_brief, report = _completed_run("caprun-session")
+def test_agent_turn_persists_session_and_analysis_run_together(run_repo, monkeypatch):
+    run, project_brief, report = _completed_run("run-session")
     response = AgentTurnResponse(
         status="answered",
         output={
             "answer": report,
             "panel_payloads": {
-                "capability_run": run.model_dump(mode="json"),
+                "analysis_run": run.model_dump(mode="json"),
                 "stage1_project_brief": project_brief,
                 "stage1_quality_audit": {"status": "passed", "score": 100, "checks_passed": 19, "checks_total": 19, "issues": []},
                 "stage1_deliverables": {"report_markdown": report},
@@ -278,19 +284,19 @@ def test_agent_turn_persists_session_and_capability_run_together(run_repo, monke
 
     assert result.status == "answered"
     assert session_repo.records["agent-session"]["history_id"] == "history-1"
-    detail = get_capability_run("caprun-session", repo=run_repo)
+    detail = get_analysis_run("run-session", repo=run_repo)
     assert detail is not None
     assert detail.run.status == "completed"
 
 
-def test_capability_run_persists_without_conversation_session(run_repo):
-    run, project_brief, report = _completed_run("caprun-no-session")
+def test_analysis_run_persists_without_conversation_session(run_repo):
+    run, project_brief, report = _completed_run("run-no-session")
     response = AgentTurnResponse(
         status="answered",
         output={
             "answer": report,
             "panel_payloads": {
-                "capability_run": run.model_dump(mode="json"),
+                "analysis_run": run.model_dump(mode="json"),
                 "stage1_project_brief": project_brief,
                 "stage1_quality_audit": {"status": "passed", "score": 100, "checks_passed": 19, "checks_total": 19, "issues": []},
                 "stage1_deliverables": {"report_markdown": report},
@@ -305,4 +311,4 @@ def test_capability_run_persists_without_conversation_session(run_repo):
     )
 
     assert result is response
-    assert get_capability_run("caprun-no-session", repo=run_repo) is not None
+    assert get_analysis_run("run-no-session", repo=run_repo) is not None

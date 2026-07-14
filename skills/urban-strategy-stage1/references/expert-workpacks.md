@@ -1,6 +1,6 @@
 # Expert Workpacks
 
-All workpacks must use the shared `evidence_ledger.jsonl`. Save each file under `work/expert_workpacks/`.
+All workpacks must use the shared `evidence_nodes.jsonl`. Save each file under `work/expert_workpacks/`.
 
 ## Common schema
 

@@ -51,7 +51,7 @@ Write:
 
 - `work/source_readiness.json`
 - `work/conflict_register.json`
-- `work/evidence_ledger.jsonl`
+- `work/evidence_nodes.jsonl`
 
 ### 2. Define research questions
 

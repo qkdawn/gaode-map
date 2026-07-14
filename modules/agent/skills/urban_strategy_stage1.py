@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import re
+from copy import deepcopy
 from typing import Any, Awaitable, Callable
 
 from modules.documents import ProjectEvidenceDossier, build_project_evidence_dossier
+from modules.evidence_retrieval.schemas import EvidenceNode
 
 from ..capability_inputs import resolve_capability_inputs
-from ..capability_runs import content_digest
-from ..evidence_verification import verify_evidence_ledger
+from ..analysis_runs import content_digest
+from ..evidence_verification import verify_evidence_nodes
 from ..stage1_deliverables import (
     build_design_handoff,
     build_evidence_appendix,
@@ -15,6 +18,11 @@ from ..stage1_deliverables import (
 from ..llm_digest import snapshot_digest
 from ..providers.client import LLMRuntimeConfig, get_llm_provider_client
 from ..quality_audit import QualityAuditResult, audit_stage1_package
+from ..report_validation import (
+    ReportArtifact,
+    ReportViolation,
+    generate_validated_report_async,
+)
 from ..stage1_repair import (
     Stage1RepairContractError,
     build_stage1_repair_plan,
@@ -163,6 +171,47 @@ def _list_from(value: Any, key: str) -> list[dict[str, Any]]:
     )
 
 
+def _published_evidence_nodes(items: list[dict[str, Any]], *, run_id: str) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+    for index, item in enumerate(items, start=1):
+        claim = str(item.get("claim") or "").strip()
+        if not claim:
+            continue
+        raw_refs = item.get("source_ref")
+        refs = raw_refs if isinstance(raw_refs, list) else [raw_refs]
+        source_ids = [str(value).strip() for value in refs if str(value or "").strip()]
+        node = EvidenceNode(
+            id=str(item.get("id") or f"evidence:stage1:{run_id}:{index}"),
+            kind="analysis_summary",
+            run_id=run_id,
+            source_ids=source_ids or ["current:analysis:stage1"],
+            title=str(item.get("title") or f"Stage 1 证据 {index}"),
+            summary=claim[:260],
+            content=claim,
+            data={
+                "evidence_type": str(item.get("evidence_type") or ""),
+                "comparison_baseline": str(item.get("comparison_baseline") or ""),
+            },
+            time_scope=deepcopy(item.get("time_scope")) if isinstance(item.get("time_scope"), dict) else {},
+            spatial_scope=deepcopy(item.get("spatial_scope")) if isinstance(item.get("spatial_scope"), dict) else {},
+            method=str(item.get("method") or "stage1_evidence_synthesis"),
+            quality_flags=[],
+            locator=str(item.get("locator") or item.get("source_locator") or ""),
+            citation=str(item.get("citation") or item.get("source_ref") or ""),
+        )
+        nodes.append(node.model_dump(mode="json"))
+    return nodes
+
+
+def _report_citation_map(markdown: str, nodes: list[dict[str, Any]]) -> dict[str, list[str]]:
+    labels = list(dict.fromkeys(re.findall(r"\[([A-Z]\d+)\]", markdown)))
+    return {
+        label: [str(nodes[index]["id"])]
+        for index, label in enumerate(labels)
+        if index < len(nodes)
+    }
+
+
 def _conflict_register(
     selected_sources: list[dict[str, Any]],
     *,
@@ -286,7 +335,7 @@ def _base_panels(
     return {
         "stage1_project_brief": package["project_brief"],
         "stage1_readiness": readiness,
-        "stage1_evidence_ledger": package["evidence_ledger"],
+        "stage1_evidence_nodes": package["evidence_nodes"],
         "stage1_conflict_register": package["conflict_register"],
         "stage1_data_quality": package["data_quality"],
         "stage1_provenance_binding": provenance.model_dump(mode="json"),
@@ -411,7 +460,7 @@ async def execute(
                 panel_payloads={
                     "stage1_readiness": readiness,
                     "stage1_spatial_object_registry": spatial_object_registry_payload,
-                    "capability_run": run_manifest.model_dump(mode="json"),
+                    "analysis_run": run_manifest.model_dump(mode="json"),
                 },
             ),
             diagnostics=AgentTurnDiagnostics(
@@ -484,12 +533,12 @@ async def execute(
     await _emit_phase(
         emit,
         phase_id="stage1-evidence",
-        title="建立证据台账",
+        title="建立证据节点",
         detail="逐条标注来源、适用范围、验证状态和限制。",
     )
     evidence_result = await client.chat_json(
         system_prompt=(
-            "你是城市更新项目的证据审计负责人。只输出 JSON：evidence_ledger 数组。"
+            "你是城市更新项目的证据审计负责人。只输出 JSON：evidence_nodes 数组。"
             "每项必须含 id、claim、evidence_type(F/G/P/H/V)、status(verified/cross_checked/"
             "inferred/hypothesis/blocked/fieldwork_required)、source_ref、source_artifact_id、scope、method、metric、value、"
             "comparison_baseline、confidence(high/medium/low)、limitation、next_action、executor(agent/fieldwork)，"
@@ -507,13 +556,13 @@ async def execute(
         title="构建 Claim-Evidence 台账",
         reasoning_id="stage1-evidence-model",
     )
-    evidence_ledger, provenance_bindings = bind_evidence_to_artifacts(
-        _list_from(evidence_result, "evidence_ledger"),
+    evidence_nodes, provenance_bindings = bind_evidence_to_artifacts(
+        _list_from(evidence_result, "evidence_nodes"),
         registry=provenance_registry,
     )
     provenance = assess_provenance_bindings(provenance_bindings)
-    evidence_ledger, verification = verify_evidence_ledger(
-        evidence_ledger,
+    evidence_nodes, verification = verify_evidence_nodes(
+        evidence_nodes,
         selected_sources=selected_sources,
         snapshot=payload.analysis_snapshot,
     )
@@ -528,9 +577,9 @@ async def execute(
         state="completed" if verification.report_allowed else "failed",
     )
     run.record_stage(
-        "evidence-ledger",
-        "建立证据台账",
-        summary=f"登记并绑定 {len(evidence_ledger)} 条证据。",
+        "evidence-nodes",
+        "建立证据节点",
+        summary=f"登记并绑定 {len(evidence_nodes)} 条证据。",
     )
     run.record_stage(
         "evidence-verification",
@@ -544,7 +593,7 @@ async def execute(
         partial_package = {
             "project_brief": project_brief,
             "source_readiness": readiness,
-            "evidence_ledger": evidence_ledger,
+            "evidence_nodes": evidence_nodes,
             "conflict_register": conflict_register,
         }
         output_artifacts = build_stage1_output_artifacts(
@@ -562,17 +611,17 @@ async def execute(
             status="requires_clarification",
             stage="requires_clarification",
             output=AgentTurnOutput(
-                clarification_question="证据台账未通过验证门控，已停止专业推演。请补充可定位证据后重新运行。",
+                clarification_question="证据节点未通过验证门控，已停止专业推演。请补充可定位证据后重新运行。",
                 clarification_options=verification.blocking_reasons[:4],
                 panel_payloads={
                     "stage1_project_brief": project_brief,
                     "stage1_readiness": readiness,
-                    "stage1_evidence_ledger": evidence_ledger,
+                    "stage1_evidence_nodes": evidence_nodes,
                     "stage1_conflict_register": conflict_register,
                     "stage1_provenance_binding": provenance.model_dump(mode="json"),
                     "stage1_evidence_verification": verification_payload,
                     "stage1_spatial_object_registry": spatial_object_registry_payload,
-                    "capability_run": run_manifest.model_dump(mode="json"),
+                    "analysis_run": run_manifest.model_dump(mode="json"),
                 },
             ),
             diagnostics=AgentTurnDiagnostics(
@@ -600,9 +649,9 @@ async def execute(
             "(verified/constrained/unknown/not_applicable)、decision_effect(allow/condition/exclude)、scope、finding、"
             "evidence_refs、affected_space_ids、verification_action、executor(agent/manual_authority/fieldwork)。"
             "没有证据时必须标记 unknown 并给出核验动作；不得推测产权、消防、结构或工程条件。"
-            "所有引用只能使用证据台账 ID，不得引入台账之外的事实。"
+            "所有引用只能使用 EvidenceNode ID，不得引入节点之外的事实。"
         ),
-        user_payload={"question": question, "evidence_ledger": evidence_ledger},
+        user_payload={"question": question, "evidence_nodes": evidence_nodes},
         emit=emit,
         phase="executing",
         title="生成四类专家工作包",
@@ -611,7 +660,7 @@ async def execute(
     workpacks = _list_from(workpack_result, "workpacks")
     evidence_ids = {
         str(item.get("id") or "").strip()
-        for item in evidence_ledger
+        for item in evidence_nodes
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     }
     hard_constraint_screening = build_hard_constraint_screening(
@@ -645,7 +694,7 @@ async def execute(
         ),
         user_payload={
             "question": question,
-            "evidence_ledger": evidence_ledger,
+            "evidence_nodes": evidence_nodes,
             "conflict_register": conflict_register,
             "workpacks": workpacks,
             "hard_constraint_screening": hard_constraint_screening,
@@ -702,7 +751,7 @@ async def execute(
         ),
         user_payload={
             "question": question,
-            "evidence_ledger": evidence_ledger,
+            "evidence_nodes": evidence_nodes,
             "conflict_register": conflict_register,
             "workpacks": workpacks,
             "strategy": strategy,
@@ -808,7 +857,7 @@ async def execute(
                             "diagnostics": diagnostics,
                             "retry_action": "重新运行城市区域策划第一阶段",
                         },
-                        "capability_run": run_manifest.model_dump(mode="json"),
+                        "analysis_run": run_manifest.model_dump(mode="json"),
                     },
                 ),
                 diagnostics=AgentTurnDiagnostics(
@@ -875,7 +924,7 @@ async def execute(
         state="completed" if provenance.status != "failed" else "failed",
     )
     data_quality = assess_stage1_data_quality(
-        evidence_ledger,
+        evidence_nodes,
         critical_evidence_ids=critical_evidence_ids,
     )
     await _emit_phase(
@@ -899,7 +948,7 @@ async def execute(
     package = {
         "project_brief": project_brief,
         "source_readiness": readiness,
-        "evidence_ledger": evidence_ledger,
+        "evidence_nodes": evidence_nodes,
         "conflict_register": conflict_register,
         "data_quality": data_quality.model_dump(mode="json"),
         "provenance_binding": provenance.model_dump(mode="json"),
@@ -993,7 +1042,7 @@ async def execute(
                 critical_evidence_ids=critical_evidence_ids,
             )
             data_quality = assess_stage1_data_quality(
-                evidence_ledger,
+                evidence_nodes,
                 critical_evidence_ids=critical_evidence_ids,
             )
             package.update(
@@ -1078,7 +1127,7 @@ async def execute(
             diagnostics=[item["message"] for item in repair_tasks],
             output_artifacts=output_artifacts,
         )
-        panels["capability_run"] = run_manifest.model_dump(mode="json")
+        panels["analysis_run"] = run_manifest.model_dump(mode="json")
         return AgentTurnResponse(
             status="requires_clarification",
             stage="requires_clarification",
@@ -1100,29 +1149,111 @@ async def execute(
 
     design_handoff = build_design_handoff(package)
     evidence_appendix = build_evidence_appendix(package)
-    report = await client.chat_json(
-        system_prompt=(
-            "你是城市区域策划总顾问。只输出 JSON：answer(专业中文 Markdown 报告)、sources。"
-            "报告必须含总判断、证据边界、定位方案比较、推荐定位、客群场景、功能组合、空间策略、"
-            "运营治理、分期、风险、验证计划和设计任务书。仅使用已审计包；必须分列已验证、推断、假设、"
-            "阻塞与现场核验事项；必须披露 data_quality 中的时效、样本、坐标与来源定位缺口；"
-            "inferred/hypothesis 不得写成事实，blocked/fieldwork_required 不得写成既定条件；必须单列硬约束筛选，"
-            "不得把 unknown 或 constrained 写成已经满足。"
-        ),
-        user_payload={
-            "question": question,
-            "stage1_package": package,
-            "evidence_verification": verification.model_dump(mode="json"),
-            "quality_audit": _audit_payload(audit),
-            "evidence_appendix": evidence_appendix,
-            "design_handoff": design_handoff.model_dump(mode="json"),
-        },
-        emit=emit,
-        phase="synthesizing",
-        title="编译 Stage 1 决策报告",
-        reasoning_id="stage1-report-model",
+    published_nodes = _published_evidence_nodes(evidence_nodes, run_id=run.run_id)
+    report_sources: list[Any] = []
+
+    async def generate_report(
+        violations: list[ReportViolation],
+    ) -> ReportArtifact:
+        nonlocal report_sources
+        response = await client.chat_json(
+            system_prompt=(
+                "你是城市区域策划总顾问。只输出 JSON：answer(专业中文 Markdown 报告)、sources、citations。"
+                "citations 必须把正文 [E1] 形式标签映射到输入中真实 EvidenceNode.id；每个主要事实必须引用。"
+                "报告必须含总判断、证据边界、定位方案比较、推荐定位、客群场景、功能组合、空间策略、"
+                "运营治理、分期、风险、验证计划和设计任务书。仅使用已审计包；必须分列已验证、推断、假设、"
+                "阻塞与现场核验事项；必须披露 data_quality 中的时效、样本、坐标与来源定位缺口；"
+                "inferred/hypothesis 不得写成事实，blocked/fieldwork_required 不得写成既定条件；必须单列硬约束筛选，"
+                "不得把 unknown 或 constrained 写成已经满足。若 validation_violations 非空，必须逐项修正允许表述。"
+            ),
+            user_payload={
+                "question": question,
+                "stage1_package": package,
+                "evidence_nodes": published_nodes,
+                "evidence_verification": verification.model_dump(mode="json"),
+                "quality_audit": _audit_payload(audit),
+                "evidence_appendix": evidence_appendix,
+                "design_handoff": design_handoff.model_dump(mode="json"),
+                "validation_violations": [
+                    item.model_dump(mode="json") for item in violations
+                ],
+            },
+            emit=emit,
+            phase="synthesizing",
+            title="编译 Stage 1 决策报告",
+            reasoning_id="stage1-report-model",
+        )
+        answer = str(response.get("answer") or "").strip()
+        raw_citations = response.get("citations")
+        citations = {
+            str(label): [str(node_id) for node_id in node_ids if str(node_id)]
+            for label, node_ids in raw_citations.items()
+            if isinstance(node_ids, list)
+        } if isinstance(raw_citations, dict) else _report_citation_map(answer, published_nodes)
+        report_sources = list(response.get("sources") or [])
+        return ReportArtifact(
+            report_id=f"report:{run.run_id}",
+            run_id=run.run_id,
+            markdown=answer,
+            citations=citations,
+        )
+
+    report_validation = await generate_validated_report_async(
+        generate_report,
+        run=run.snapshot(),
+        evidence_nodes=[EvidenceNode.model_validate(item) for item in published_nodes],
     )
-    answer = str(report.get("answer") or "").strip()
+    if not report_validation.publishable or report_validation.report is None:
+        diagnostics = [item.message for item in report_validation.violations]
+        run.record_stage(
+            "stage1-report",
+            "编译 Stage 1 决策报告",
+            status="failed",
+            summary="报告未通过 EvidenceNode 引用和 Metric Catalog 语义校验。",
+            diagnostics=diagnostics,
+        )
+        artifact_package = deepcopy(package)
+        artifact_package["evidence_nodes"] = published_nodes
+        artifact_package["report_validation"] = {
+            "publishable": False,
+            "attempts": report_validation.attempts,
+            "violations": [
+                item.model_dump(mode="json") for item in report_validation.violations
+            ],
+        }
+        output_artifacts = build_stage1_output_artifacts(
+            run_id=run.run_id,
+            package=artifact_package,
+            input_artifact_ids=input_artifact_ids,
+        )
+        run_manifest = run.finish(
+            "failed",
+            current_stage="stage1-report",
+            diagnostics=diagnostics,
+            output_artifacts=output_artifacts,
+        )
+        panels["stage1_evidence_nodes"] = published_nodes
+        panels["report_validation"] = artifact_package["report_validation"]
+        panels["analysis_run"] = run_manifest.model_dump(mode="json")
+        return AgentTurnResponse(
+            status="requires_clarification",
+            stage="requires_clarification",
+            output=AgentTurnOutput(
+                clarification_question="报告连续三次未通过证据引用与指标语义校验，已停止发布。",
+                clarification_options=diagnostics[:4],
+                panel_payloads=panels,
+            ),
+            diagnostics=AgentTurnDiagnostics(
+                audit_issues=diagnostics,
+                research_notes=["证据和校验诊断已保留，未生成可发布报告。"],
+            ),
+            context_summary=AgentContextSummary(),
+            plan=AgentPlanEnvelope(),
+            effective_execution_profile=profile,
+        )
+
+    report_artifact = report_validation.report
+    answer = report_artifact.markdown
     run.record_stage(
         "stage1-report",
         "编译 Stage 1 决策报告",
@@ -1134,9 +1265,11 @@ async def execute(
         summary="报告、证据附录、设计任务书与运行清单共享同一运行版本。",
     )
     handoff_payload = design_handoff.model_dump(mode="json")
+    artifact_package = deepcopy(package)
+    artifact_package["evidence_nodes"] = published_nodes
     output_artifacts = build_stage1_output_artifacts(
         run_id=run.run_id,
-        package=package,
+        package=artifact_package,
         input_artifact_ids=input_artifact_ids,
         report_markdown=answer,
         evidence_appendix=evidence_appendix,
@@ -1166,9 +1299,17 @@ async def execute(
         detail="主报告、证据附录、设计任务书与运行清单已从同一审计包生成。",
         state="completed",
     )
-    panels["claim_evidence"] = evidence_ledger
-    panels["sources_used"] = report.get("sources") or []
-    panels["capability_run"] = run_manifest.model_dump(mode="json")
+    citations = report_artifact.citations
+    panels["stage1_evidence_nodes"] = published_nodes
+    panels["report_citations"] = citations
+    panels["report_artifact"] = report_artifact.model_dump(mode="json")
+    panels["report_validation"] = {
+        "publishable": True,
+        "attempts": report_validation.attempts,
+        "violations": [],
+    }
+    panels["sources_used"] = report_sources
+    panels["analysis_run"] = run_manifest.model_dump(mode="json")
     panels["stage1_deliverables"] = deliverables.model_dump(mode="json")
     return AgentTurnResponse(
         status="answered",

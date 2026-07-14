@@ -200,7 +200,6 @@ async def _invoke_ppt_json_role(**kwargs: Any) -> Dict[str, Any]:
         **kwargs,
         enable_thinking=False,
         stream=False,
-        timeout_s=float(settings.ppt_llm_timeout_s),
     )
 
 
@@ -667,21 +666,23 @@ def _compact_evidence_item(*, source_id: str, source_title: str, evidence_type: 
 
 def _compact_evidence_node(node: Any) -> Dict[str, Any]:
     payload = node.model_dump(mode="python") if hasattr(node, "model_dump") else _safe_dict(node)
-    metadata = _safe_dict(payload.get("metadata"))
+    data = _safe_dict(payload.get("data"))
     return {
         "id": _clean_text(payload.get("id")),
-        "source_id": _clean_text(payload.get("source_id")),
-        "source_type": _clean_text(payload.get("source_type")),
+        "kind": _clean_text(payload.get("kind")),
+        "run_id": _clean_text(payload.get("run_id")),
+        "source_ids": _safe_list(payload.get("source_ids")),
+        "metric_ids": _safe_list(payload.get("metric_ids")),
         "title": _truncated_text(payload.get("title"), 120),
         "content": _truncated_text(payload.get("content"), 700),
         "summary": _truncated_text(payload.get("summary"), 260),
         "locator": _truncated_text(payload.get("locator"), 160),
-        "evidence_level": _clean_text(payload.get("evidence_level")),
+        "method": _clean_text(payload.get("method")),
         "citation": _truncated_text(payload.get("citation"), 160),
-        "warnings": _safe_list(payload.get("warnings"))[:4],
-        "metadata": {
+        "quality_flags": _safe_list(payload.get("quality_flags"))[:4],
+        "data": {
             key: value
-            for key, value in metadata.items()
+            for key, value in data.items()
             if key in {
                 "domain",
                 "page",
@@ -689,7 +690,6 @@ def _compact_evidence_node(node: Any) -> Dict[str, Any]:
                 "url",
                 "record_id",
                 "record_type",
-                "confidence",
                 "locator",
                 "node_id",
                 "carrier_id",

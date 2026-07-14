@@ -162,15 +162,18 @@ function artifactEvidenceNodes(snapshot = {}, sourceId = '', runId = '') {
       const index = nodes.length + 1
       nodes.push({
         id: `${sourceId}:${artifactId}:${index}`,
-        source_id: sourceId,
-        source_type: 'package',
+        kind: 'package_item',
+        run_id: runId,
+        source_ids: [sourceId],
+        metric_ids: [],
         title: section.heading ? `${artifactTitle} · ${section.heading}` : artifactTitle,
         content: chunk,
         summary: chunk.slice(0, 260),
         locator: `${artifactId} · 片段 ${index}`,
-        evidence_level: 'approved_analysis_artifact',
+        method: 'immutable_analysis_artifact_read',
+        quality_flags: [],
         citation: `${runId}/${artifactId}`,
-        metadata: {
+        data: {
           run_id: runId,
           source_run_id: text(artifact.source_run_id) || runId,
           artifact_id: artifactId,
@@ -186,9 +189,9 @@ function artifactEvidenceNodes(snapshot = {}, sourceId = '', runId = '') {
 function validateStage1RunDetail(detail = {}, expectedRunId = '') {
   const run = detail?.run || {}
   const runId = text(run.run_id)
-  if (!runId || runId !== text(expectedRunId)) throw new Error('capability_run_identity_mismatch')
-  if (text(run.capability_id) !== 'urban-strategy-stage1') throw new Error('capability_run_is_not_stage1')
-  if (!ALLOWED_STAGE1_RUN_STATUSES.has(text(run.status))) throw new Error(`capability_run_not_consumable:${text(run.status) || 'unknown'}`)
+  if (!runId || runId !== text(expectedRunId)) throw new Error('analysis_run_identity_mismatch')
+  if (text(run.capability_id) !== 'urban-strategy-stage1') throw new Error('analysis_run_is_not_stage1')
+  if (!ALLOWED_STAGE1_RUN_STATUSES.has(text(run.status))) throw new Error(`analysis_run_not_consumable:${text(run.status) || 'unknown'}`)
   const snapshots = (Array.isArray(detail?.artifacts) ? detail.artifacts : [])
     .filter(item => item?.direction === 'output')
   const byId = new Map(snapshots.map(item => [text(item?.artifact?.artifact_id), item]))
@@ -196,7 +199,7 @@ function validateStage1RunDetail(detail = {}, expectedRunId = '') {
     const snapshot = byId.get(artifactId)
     return !snapshot || snapshot.payload === null || snapshot.payload === undefined || snapshot.payload === ''
   })
-  if (missing.length) throw new Error(`capability_run_artifacts_missing:${missing.join(',')}`)
+  if (missing.length) throw new Error(`analysis_run_artifacts_missing:${missing.join(',')}`)
   return { run, snapshots: REQUIRED_STAGE1_ARTIFACT_IDS.map(id => byId.get(id)) }
 }
 
@@ -209,7 +212,7 @@ export function createStage1CapabilityPlaceholderSource(runId = '') {
     status: 'generating',
     selected: false,
     source_kind: 'package',
-    summary: '正在读取锁定 Capability Run 的不可变成果快照。',
+    summary: '正在读取锁定 AnalysisRun 的不可变成果快照。',
     availability: 'building',
     meta: {
       label: '正在读取不可变版本',
@@ -222,7 +225,7 @@ export function createStage1CapabilityPlaceholderSource(runId = '') {
 
 export function createStage1CapabilityFailedSource(runId = '', error = null) {
   const id = text(runId)
-  const message = text(error instanceof Error ? error.message : error) || '读取不可变 Capability Run 失败'
+  const message = text(error instanceof Error ? error.message : error) || '读取不可变 AnalysisRun 失败'
   return {
     ...createStage1CapabilityPlaceholderSource(id),
     status: 'failed',
@@ -241,7 +244,7 @@ export function createStage1CapabilityPptSource(detail = {}, expectedRunId = '')
   const runId = text(run.run_id)
   const sourceId = capabilityRunSourceId(runId)
   const evidenceNodes = snapshots.flatMap(snapshot => artifactEvidenceNodes(snapshot, sourceId, runId)).slice(0, 48)
-  if (!evidenceNodes.length) throw new Error('capability_run_has_no_ppt_evidence')
+  if (!evidenceNodes.length) throw new Error('analysis_run_has_no_ppt_evidence')
   const aiPayload = {
     version: 'ppt_ai_input_block_v1',
     source_id: sourceId,
@@ -259,7 +262,7 @@ export function createStage1CapabilityPptSource(detail = {}, expectedRunId = '')
       evidence: evidenceNodes.length,
       visual_specs: 0,
     },
-    policy: '仅使用已锁定 Capability Run 的不可变 Stage 1 报告、证据附录和设计交接成果；不回退到当前运行时文件。',
+    policy: '仅使用已锁定 AnalysisRun 的不可变 Stage 1 报告、证据附录和设计交接成果；不回退到当前运行时文件。',
   }
   return {
     id: sourceId,
@@ -271,7 +274,7 @@ export function createStage1CapabilityPptSource(detail = {}, expectedRunId = '')
     summary: `已锁定 ${runId}，包含 ${evidenceNodes.length} 个可审计证据片段。`,
     evidence_count: evidenceNodes.length,
     availability: 'available',
-    locator_summary: `Capability Run ${runId}`,
+    locator_summary: `AnalysisRun ${runId}`,
     meta: {
       label: '不可变 Stage 1 成果',
       sourceKind: 'package',

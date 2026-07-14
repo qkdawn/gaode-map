@@ -5,18 +5,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .capability_runs import (
-    CapabilityArtifactRef,
-    CapabilityArtifactSnapshot,
-    CapabilityRun,
-    CapabilityRunDetail,
+from .analysis_runs import (
+    AnalysisArtifactRef,
+    AnalysisArtifactSnapshot,
+    AnalysisRun,
+    AnalysisRunDetail,
     content_digest,
 )
 
 ChangeType = Literal["added", "removed", "changed"]
 
 
-class CapabilityRunComparisonRef(BaseModel):
+class AnalysisRunComparisonRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str
@@ -27,7 +27,7 @@ class CapabilityRunComparisonRef(BaseModel):
     stale_input_artifact_ids: list[str] = Field(default_factory=list)
 
 
-class CapabilityRunFieldChange(BaseModel):
+class AnalysisRunFieldChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     field: str
@@ -37,7 +37,7 @@ class CapabilityRunFieldChange(BaseModel):
     after: Any = None
 
 
-class CapabilityRunStageChange(BaseModel):
+class AnalysisRunStageChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stage_id: str
@@ -51,7 +51,7 @@ class CapabilityRunStageChange(BaseModel):
     diagnostics_removed: list[str] = Field(default_factory=list)
 
 
-class CapabilityRunArtifactChange(BaseModel):
+class AnalysisRunArtifactChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     direction: Literal["input", "output"]
@@ -65,7 +65,7 @@ class CapabilityRunArtifactChange(BaseModel):
     after_digest: str = ""
 
 
-class CapabilityRunEntityChange(BaseModel):
+class AnalysisRunEntityChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     category: Literal[
@@ -81,20 +81,20 @@ class CapabilityRunEntityChange(BaseModel):
     changed_fields: list[str] = Field(default_factory=list)
 
 
-class CapabilityRunComparison(BaseModel):
+class AnalysisRunComparison(BaseModel):
     """Structured, deterministic comparison of two immutable capability Runs."""
 
     model_config = ConfigDict(extra="forbid")
 
     history_id: str
     capability_id: str
-    base_run: CapabilityRunComparisonRef
-    target_run: CapabilityRunComparisonRef
-    configuration_changes: list[CapabilityRunFieldChange] = Field(default_factory=list)
-    stage_changes: list[CapabilityRunStageChange] = Field(default_factory=list)
-    artifact_changes: list[CapabilityRunArtifactChange] = Field(default_factory=list)
-    outcome_changes: list[CapabilityRunFieldChange] = Field(default_factory=list)
-    entity_changes: list[CapabilityRunEntityChange] = Field(default_factory=list)
+    base_run: AnalysisRunComparisonRef
+    target_run: AnalysisRunComparisonRef
+    configuration_changes: list[AnalysisRunFieldChange] = Field(default_factory=list)
+    stage_changes: list[AnalysisRunStageChange] = Field(default_factory=list)
+    artifact_changes: list[AnalysisRunArtifactChange] = Field(default_factory=list)
+    outcome_changes: list[AnalysisRunFieldChange] = Field(default_factory=list)
+    entity_changes: list[AnalysisRunEntityChange] = Field(default_factory=list)
     summary: list[str] = Field(default_factory=list)
     has_changes: bool = False
 
@@ -123,7 +123,7 @@ _OUTCOME_FIELDS = (
 _ENTITY_SPECS = (
     ("stage1-strategy-options", "options", "strategy_option", ("id",), ("name", "title", "id")),
     ("stage1-decision-matrix", "space_decisions", "space_decision", ("space_id",), ("space_name", "title", "space_id")),
-    ("stage1-evidence-ledger", "", "evidence", ("id",), ("claim", "title", "id")),
+    ("stage1-evidence-nodes", "", "evidence", ("id",), ("claim", "title", "id")),
     ("stage1-hard-constraint-screening", "assessments", "hard_constraint", ("constraint_id", "id"), ("label", "constraint_id", "id")),
     ("stage1-quality-audit", "issues", "quality_issue", ("code",), ("message", "code")),
 )
@@ -146,15 +146,15 @@ def _change_type(before: Any, after: Any) -> ChangeType:
     return "changed"
 
 
-def _field_changes(base: dict[str, Any], target: dict[str, Any]) -> list[CapabilityRunFieldChange]:
-    changes: list[CapabilityRunFieldChange] = []
+def _field_changes(base: dict[str, Any], target: dict[str, Any]) -> list[AnalysisRunFieldChange]:
+    changes: list[AnalysisRunFieldChange] = []
     for path, label in _CONFIGURATION_FIELDS:
         before = _value_at(base, path)
         after = _value_at(target, path)
         if before == after:
             continue
         changes.append(
-            CapabilityRunFieldChange(
+            AnalysisRunFieldChange(
                 field=path,
                 label=label,
                 change_type=_change_type(before, after),
@@ -165,10 +165,10 @@ def _field_changes(base: dict[str, Any], target: dict[str, Any]) -> list[Capabil
     return changes
 
 
-def _stage_changes(base: CapabilityRun, target: CapabilityRun) -> list[CapabilityRunStageChange]:
+def _stage_changes(base: AnalysisRun, target: AnalysisRun) -> list[AnalysisRunStageChange]:
     before_by_id = {item.stage_id: item for item in base.stage_records}
     after_by_id = {item.stage_id: item for item in target.stage_records}
-    changes: list[CapabilityRunStageChange] = []
+    changes: list[AnalysisRunStageChange] = []
     for stage_id in sorted(set(before_by_id) | set(after_by_id)):
         before = before_by_id.get(stage_id)
         after = after_by_id.get(stage_id)
@@ -184,7 +184,7 @@ def _stage_changes(base: CapabilityRun, target: CapabilityRun) -> list[Capabilit
         before_diagnostics = set(before.diagnostics if before else [])
         after_diagnostics = set(after.diagnostics if after else [])
         changes.append(
-            CapabilityRunStageChange(
+            AnalysisRunStageChange(
                 stage_id=stage_id,
                 title=(after.title if after else before.title),
                 change_type=_change_type(before, after),
@@ -199,15 +199,15 @@ def _stage_changes(base: CapabilityRun, target: CapabilityRun) -> list[Capabilit
     return changes
 
 
-def _artifact_snapshots(detail: CapabilityRunDetail) -> dict[tuple[str, str], CapabilityArtifactSnapshot]:
+def _artifact_snapshots(detail: AnalysisRunDetail) -> dict[tuple[str, str], AnalysisArtifactSnapshot]:
     return {
         (item.direction, item.artifact.artifact_id): item
         for item in detail.artifacts
     }
 
 
-def _artifact_refs(detail: CapabilityRunDetail) -> dict[tuple[str, str], CapabilityArtifactRef]:
-    refs: dict[tuple[str, str], CapabilityArtifactRef] = {}
+def _artifact_refs(detail: AnalysisRunDetail) -> dict[tuple[str, str], AnalysisArtifactRef]:
+    refs: dict[tuple[str, str], AnalysisArtifactRef] = {}
     for direction, artifacts in (
         ("input", detail.run.input_artifact_refs),
         ("output", detail.run.output_artifact_refs),
@@ -219,12 +219,12 @@ def _artifact_refs(detail: CapabilityRunDetail) -> dict[tuple[str, str], Capabil
     return refs
 
 
-def _artifact_changes(base: CapabilityRunDetail, target: CapabilityRunDetail) -> list[CapabilityRunArtifactChange]:
+def _artifact_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> list[AnalysisRunArtifactChange]:
     before_refs = _artifact_refs(base)
     after_refs = _artifact_refs(target)
     before_snapshots = _artifact_snapshots(base)
     after_snapshots = _artifact_snapshots(target)
-    changes: list[CapabilityRunArtifactChange] = []
+    changes: list[AnalysisRunArtifactChange] = []
     for key in sorted(set(before_refs) | set(after_refs)):
         before = before_refs.get(key)
         after = after_refs.get(key)
@@ -243,7 +243,7 @@ def _artifact_changes(base: CapabilityRunDetail, target: CapabilityRunDetail) ->
                 continue
         ref = after or before
         changes.append(
-            CapabilityRunArtifactChange(
+            AnalysisRunArtifactChange(
                 direction=key[0],
                 artifact_id=key[1],
                 title=ref.title,
@@ -258,7 +258,7 @@ def _artifact_changes(base: CapabilityRunDetail, target: CapabilityRunDetail) ->
     return changes
 
 
-def _output_payloads(detail: CapabilityRunDetail) -> dict[str, Any]:
+def _output_payloads(detail: AnalysisRunDetail) -> dict[str, Any]:
     return {
         item.artifact.artifact_id: deepcopy(item.payload)
         for item in detail.artifacts
@@ -266,17 +266,17 @@ def _output_payloads(detail: CapabilityRunDetail) -> dict[str, Any]:
     }
 
 
-def _outcome_changes(base: CapabilityRunDetail, target: CapabilityRunDetail) -> list[CapabilityRunFieldChange]:
+def _outcome_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> list[AnalysisRunFieldChange]:
     before_payloads = _output_payloads(base)
     after_payloads = _output_payloads(target)
-    changes: list[CapabilityRunFieldChange] = []
+    changes: list[AnalysisRunFieldChange] = []
     for artifact_id, field, label in _OUTCOME_FIELDS:
         before = _value_at(before_payloads.get(artifact_id), field)
         after = _value_at(after_payloads.get(artifact_id), field)
         if before == after:
             continue
         changes.append(
-            CapabilityRunFieldChange(
+            AnalysisRunFieldChange(
                 field=f"{artifact_id}.{field}",
                 label=label,
                 change_type=_change_type(before, after),
@@ -310,10 +310,10 @@ def _changed_entity_fields(before: dict[str, Any], after: dict[str, Any]) -> lis
     )
 
 
-def _entity_changes(base: CapabilityRunDetail, target: CapabilityRunDetail) -> list[CapabilityRunEntityChange]:
+def _entity_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> list[AnalysisRunEntityChange]:
     before_payloads = _output_payloads(base)
     after_payloads = _output_payloads(target)
-    changes: list[CapabilityRunEntityChange] = []
+    changes: list[AnalysisRunEntityChange] = []
     for artifact_id, collection_key, category, id_fields, title_fields in _ENTITY_SPECS:
         before_items = {
             _text_field(item, id_fields): item
@@ -336,7 +336,7 @@ def _entity_changes(base: CapabilityRunDetail, target: CapabilityRunDetail) -> l
                 changed_fields = []
             item = after or before
             changes.append(
-                CapabilityRunEntityChange(
+                AnalysisRunEntityChange(
                     category=category,
                     entity_id=entity_id,
                     title=_text_field(item, title_fields) or entity_id,
@@ -347,8 +347,8 @@ def _entity_changes(base: CapabilityRunDetail, target: CapabilityRunDetail) -> l
     return changes
 
 
-def _run_ref(run: CapabilityRun) -> CapabilityRunComparisonRef:
-    return CapabilityRunComparisonRef(
+def _run_ref(run: AnalysisRun) -> AnalysisRunComparisonRef:
+    return AnalysisRunComparisonRef(
         run_id=run.run_id,
         status=run.status,
         current_stage=run.current_stage,
@@ -358,13 +358,13 @@ def _run_ref(run: CapabilityRun) -> CapabilityRunComparisonRef:
     )
 
 
-def compare_run_details(base: CapabilityRunDetail, target: CapabilityRunDetail) -> CapabilityRunComparison:
+def compare_run_details(base: AnalysisRunDetail, target: AnalysisRunDetail) -> AnalysisRunComparison:
     if base.run.run_id == target.run.run_id:
-        raise ValueError("capability_run_comparison_requires_distinct_runs")
+        raise ValueError("analysis_run_comparison_requires_distinct_runs")
     if base.history_id != target.history_id:
-        raise ValueError("capability_run_history_mismatch")
+        raise ValueError("analysis_run_history_mismatch")
     if base.run.capability_id != target.run.capability_id:
-        raise ValueError("capability_run_capability_mismatch")
+        raise ValueError("analysis_run_capability_mismatch")
 
     configuration_changes = _field_changes(
         base.run.model_dump(mode="json"), target.run.model_dump(mode="json")
@@ -387,7 +387,7 @@ def compare_run_details(base: CapabilityRunDetail, target: CapabilityRunDetail) 
     if not summary:
         summary.append("两个运行版本的已保存契约未发现差异。")
 
-    return CapabilityRunComparison(
+    return AnalysisRunComparison(
         history_id=base.history_id,
         capability_id=base.run.capability_id,
         base_run=_run_ref(base.run),

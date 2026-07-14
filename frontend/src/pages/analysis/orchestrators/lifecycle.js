@@ -6,6 +6,9 @@ function createAnalysisLifecycleHooks(options = {}) {
 
   return {
     async mounted() {
+      if (typeof window !== 'undefined') {
+        window.addEventListener('resize', this.resizeAnalysisMap)
+      }
       try {
         this.config = (window.__ANALYSIS_BOOTSTRAP__ && window.__ANALYSIS_BOOTSTRAP__.config)
           ? window.__ANALYSIS_BOOTSTRAP__.config
@@ -25,6 +28,7 @@ function createAnalysisLifecycleHooks(options = {}) {
         ])
 
         this.initMap()
+        this.resizeAnalysisMap()
       } catch (e) {
         console.error('Initialization Failed:', e)
         this.errorMessage = '系统初始化失败: ' + e.message
@@ -75,9 +79,12 @@ function createAnalysisLifecycleHooks(options = {}) {
       if (typeof this.destroyAllAgentRuns === 'function') {
         this.destroyAllAgentRuns()
       }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', this.resizeAnalysisMap)
+      }
     },
     watch: {
-      'agentPanelPayloads.capability_run.run_id'(newRunId, oldRunId) {
+      'agentPanelPayloads.analysis_run.run_id'(newRunId, oldRunId) {
         if (String(newRunId || '') === String(oldRunId || '')) return
         if (typeof this.resetStage1SpatialInteraction === 'function') {
           this.resetStage1SpatialInteraction()
@@ -96,6 +103,7 @@ function createAnalysisLifecycleHooks(options = {}) {
         if (oldView === 'wizard' && newView !== 'wizard') {
           this.stopScopeDrawing()
         }
+        this.resizeAnalysisMap()
       },
       activeStep3Panel(newPanel, oldPanel) {
         if (newPanel === oldPanel) return

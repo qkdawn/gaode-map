@@ -555,7 +555,7 @@ def test_web_source_preview_uses_web_parse_without_persisting(monkeypatch):
     assert "upsert" not in captured
     assert result.items[0]["parse_status"] == "parsed"
     assert result.items[0]["web_evidence_nodes"][0]["title"] == "政策"
-    assert result.source.meta["aiPayload"]["evidence_nodes"][0]["metadata"]["parse_status"] == "parsed"
+    assert result.source.meta["aiPayload"]["evidence_nodes"][0]["data"]["parse_status"] == "parsed"
     assert result.source.meta["aiPayload"]["index_manifest"]["source_kind"] == "web"
     assert result.source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "webpage_index"
     assert result.source.meta["aiPayload"]["index_manifest"]["model_versions"]["crawler"] == "crawl4ai"
@@ -600,8 +600,10 @@ def test_web_source_preview_direct_url_builds_web_source(monkeypatch):
     assert result.source.meta["web_source"]["input_mode"] == "direct_url"
     assert result.source.meta["web_source"]["urls"] == ["https://www.gov.cn/demo.html"]
     evidence_nodes = result.source.meta["aiPayload"]["evidence_nodes"]
-    assert evidence_nodes[0]["source_type"] == "web"
-    assert evidence_nodes[0]["metadata"]["url"] == "https://www.gov.cn/demo.html"
+    assert evidence_nodes[0]["kind"] == "web_excerpt"
+    assert evidence_nodes[0]["data"]["url"] == "https://www.gov.cn/demo.html"
+    assert "confidence" not in evidence_nodes[0]["data"]
+    assert "confidence_basis" not in evidence_nodes[0]["data"]
     assert evidence_nodes[0]["id"].startswith(result.source.id)
     assert result.source.meta["aiPayload"]["index_manifest"]["read_modes"] == ["node_id", "url"]
     assert "evidence" not in result.source.meta["aiPayload"]
@@ -717,7 +719,7 @@ def test_web_source_commit_persists_preview(monkeypatch):
     assert result.source.locator_summary == "https://gov.cn/demo"
     evidence_nodes = result.source.meta["aiPayload"]["evidence_nodes"]
     assert evidence_nodes[0]["id"].startswith(result.source.id)
-    assert evidence_nodes[0]["source_type"] == "web"
+    assert evidence_nodes[0]["kind"] == "web_excerpt"
     assert "evidence" not in result.source.meta["aiPayload"]
     assert upserts[0]["artifact_type"] == service.PPT_WEB_SOURCE_ARTIFACT_TYPE
     manifest_upsert = next(item for item in upserts if item["artifact_type"] == "source_index_manifest")

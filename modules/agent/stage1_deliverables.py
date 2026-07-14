@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .capability_runs import CapabilityRun
+from .analysis_runs import AnalysisRun
 
 
 class Stage1DeliverableArtifact(BaseModel):
@@ -85,7 +85,7 @@ class DesignHandoffContract(BaseModel):
     portfolio_requirements: list[Any] = Field(default_factory=list)
     hard_constraint_screening: dict[str, Any] = Field(default_factory=dict)
     unresolved_constraints: list[dict[str, Any]] = Field(default_factory=list)
-    evidence_ledger_ids: list[str] = Field(default_factory=list)
+    evidence_node_ids: list[str] = Field(default_factory=list)
 
 
 class Stage1Deliverables(BaseModel):
@@ -96,7 +96,7 @@ class Stage1Deliverables(BaseModel):
     report_markdown: str
     evidence_appendix_markdown: str
     design_handoff: DesignHandoffContract
-    run_manifest: CapabilityRun
+    run_manifest: AnalysisRun
     artifacts: list[Stage1DeliverableArtifact] = Field(default_factory=list)
 
 
@@ -181,7 +181,7 @@ def _unresolved_constraints(package: dict[str, Any]) -> list[dict[str, Any]]:
                 ],
             }
         )
-    for evidence in _list(package.get("evidence_ledger")):
+    for evidence in _list(package.get("evidence_nodes")):
         node = _mapping(evidence)
         if node.get("status") not in {"blocked", "fieldwork_required"}:
             continue
@@ -288,7 +288,7 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
         )
     evidence_ids = [
         _text(_mapping(item).get("id"))
-        for item in _list(package.get("evidence_ledger"))
+        for item in _list(package.get("evidence_nodes"))
         if _text(_mapping(item).get("id"))
     ]
     return DesignHandoffContract(
@@ -303,24 +303,24 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
         portfolio_requirements=_list(matrix.get("portfolio_checks")),
         hard_constraint_screening=_mapping(package.get("hard_constraint_screening")),
         unresolved_constraints=_unresolved_constraints(package),
-        evidence_ledger_ids=evidence_ids,
+        evidence_node_ids=evidence_ids,
     )
 
 
 def build_evidence_appendix(package: dict[str, Any]) -> str:
-    """Render an immutable evidence appendix from the audited ledger."""
+    """Render an immutable appendix from the audited EvidenceNodes."""
 
     lines = [
         "# Stage 1 证据附录",
         "",
-        "本附录由已通过交付前质量审计的结构化证据台账确定性生成。",
+        "本附录由已通过交付前质量审计的 EvidenceNode 确定性生成。",
         "",
-        "## Claim—Evidence Ledger",
+        "## EvidenceNode 列表",
         "",
         "| ID | 类型 | 状态 | 主张 | 来源 | 精确定位 | 范围 | 置信度 | 限制 |",
         "|---|---|---|---|---|---|---|---|---|",
     ]
-    for evidence in _list(package.get("evidence_ledger")):
+    for evidence in _list(package.get("evidence_nodes")):
         node = _mapping(evidence)
         lines.append(
             "| "
@@ -385,7 +385,7 @@ def compile_stage1_deliverables(
     package: dict[str, Any],
     *,
     report_markdown: str,
-    run_manifest: CapabilityRun,
+    run_manifest: AnalysisRun,
 ) -> Stage1Deliverables:
     """Compile all Stage 1 deliverables from one audited source contract."""
 
@@ -394,7 +394,7 @@ def compile_stage1_deliverables(
         raise ValueError("Stage 1 主报告为空，不能形成交付物")
     handoff = build_design_handoff(package)
     appendix = build_evidence_appendix(package)
-    evidence_count = len(handoff.evidence_ledger_ids)
+    evidence_count = len(handoff.evidence_node_ids)
     space_count = len(handoff.space_requirements)
     return Stage1Deliverables(
         report_markdown=report,

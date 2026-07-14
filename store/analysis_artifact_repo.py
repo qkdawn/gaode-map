@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from core.spatial import build_scope_fingerprint
+from .artifact_identity import artifact_year, build_artifact_slot_key
 from .database import SessionLocal
-from .models import AnalysisArtifact
+from .models import AnalysisArtifact, AnalysisHistory
 
 
 DATA_VERSION = "v1"
@@ -45,6 +47,7 @@ def _artifact_payload(record: AnalysisArtifact) -> Dict[str, Any]:
         "id": record.id,
         "history_id": str(record.history_id or ""),
         "artifact_type": str(record.artifact_type or ""),
+        "slot_key": str(record.slot_key or ""),
         "params_hash": str(record.params_hash or ""),
         "params": _clone_json_payload(record.params if isinstance(record.params, dict) else {}),
         "scope_fingerprint": str(record.scope_fingerprint or ""),
@@ -56,6 +59,14 @@ def _artifact_payload(record: AnalysisArtifact) -> Dict[str, Any]:
     }
 
 
+def _history_scope_fingerprint(session: Session, history_id: str) -> str:
+    history = session.query(AnalysisHistory.result_polygon).filter(AnalysisHistory.id == history_id).first()
+    if history is None:
+        raise ValueError("history_not_found")
+    polygon_wgs84 = history[0] if isinstance(history, tuple) else getattr(history, "result_polygon", None)
+    return build_scope_fingerprint(polygon_wgs84 if isinstance(polygon_wgs84, list) else [])
+
+
 class AnalysisArtifactRepo:
     def upsert(
         self,
@@ -65,7 +76,6 @@ class AnalysisArtifactRepo:
         params: Dict[str, Any],
         payload: Dict[str, Any],
         summary: Optional[Dict[str, Any]] = None,
-        scope_fingerprint: str = "",
         data_version: str = DATA_VERSION,
     ) -> Dict[str, Any]:
         normalized_history_id = str(history_id or "").strip()
@@ -76,19 +86,18 @@ class AnalysisArtifactRepo:
             raise ValueError("artifact_type_required")
         canonical_params = canonicalize_params(params)
         params_hash = compute_params_hash(canonical_params)
-        normalized_scope = normalize_scope_fingerprint(scope_fingerprint)
+        slot_key = build_artifact_slot_key(normalized_type, canonical_params, payload)
         normalized_version = str(data_version or DATA_VERSION).strip() or DATA_VERSION
         now = datetime.utcnow()
         session: Session = SessionLocal()
         try:
+            normalized_scope = _history_scope_fingerprint(session, normalized_history_id)
             record = (
                 session.query(AnalysisArtifact)
                 .filter_by(
                     history_id=normalized_history_id,
                     artifact_type=normalized_type,
-                    params_hash=params_hash,
-                    scope_fingerprint=normalized_scope,
-                    data_version=normalized_version,
+                    slot_key=slot_key,
                 )
                 .first()
             )
@@ -96,6 +105,7 @@ class AnalysisArtifactRepo:
                 record = AnalysisArtifact(
                     history_id=normalized_history_id,
                     artifact_type=normalized_type,
+                    slot_key=slot_key,
                     params_hash=params_hash,
                     params=canonical_params,
                     scope_fingerprint=normalized_scope,
@@ -108,6 +118,9 @@ class AnalysisArtifactRepo:
                 session.add(record)
             else:
                 record.params = canonical_params
+                record.params_hash = params_hash
+                record.scope_fingerprint = normalized_scope
+                record.data_version = normalized_version
                 record.payload = _clone_json_payload(payload if isinstance(payload, dict) else {})
                 record.summary = _clone_json_payload(summary if isinstance(summary, dict) else {})
                 record.updated_at = now
@@ -140,7 +153,16 @@ class AnalysisArtifactRepo:
             id_rows = query.order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc()).all()
             record_ids = [int(row[0] if isinstance(row, tuple) else getattr(row, "id", row)) for row in id_rows]
             records = [session.get(AnalysisArtifact, record_id) for record_id in record_ids]
-            return [_artifact_payload(record) for record in records if record is not None]
+            payloads = [_artifact_payload(record) for record in records if record is not None]
+            return sorted(
+                payloads,
+                key=lambda item: (
+                    artifact_year(item.get("params"), item.get("payload")) or -1,
+                    str(item.get("updated_at") or ""),
+                    int(item.get("id") or 0),
+                ),
+                reverse=True,
+            )
         finally:
             session.close()
 

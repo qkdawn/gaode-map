@@ -79,16 +79,16 @@
   <text x="547" y="703" class="small">LLM 输入：sources + manifest + metrics + evidence + deck config</text>
 
   <rect x="948" y="138" width="390" height="300" class="agent panel"/>
-  <text x="972" y="174" class="section-title">PPT 来源问答链</text>
+  <text x="972" y="174" class="section-title">PPT 来源快速问答链</text>
   <rect x="972" y="194" width="342" height="48" class="box"/>
   <text x="990" y="216" class="box-title">context_ask_service</text>
-  <text x="990" y="235" class="box-text">target.type=ppt_sources 时优先进入 mini loop</text>
+  <text x="990" y="235" class="box-text">预处理已选来源、分析快照和范围数据</text>
   <rect x="972" y="254" width="342" height="48" class="box"/>
-  <text x="990" y="276" class="box-title">run_source_qa_loop</text>
-  <text x="990" y="295" class="box-text">只围绕已选 PPT 来源检索，不访问未选来源</text>
+  <text x="990" y="276" class="box-title">scoped_dataset_context</text>
+  <text x="990" y="295" class="box-text">后端确定性聚合当前范围数据</text>
   <rect x="972" y="314" width="342" height="48" class="box"/>
-  <text x="990" y="336" class="box-title">只读工具</text>
-  <text x="990" y="355" class="box-text">list/search/read EvidenceNode + scope dataset tools</text>
+  <text x="990" y="336" class="box-title">直接 JSON 问答</text>
+  <text x="990" y="355" class="box-text">不向快速模型暴露工具 schema</text>
   <rect x="972" y="374" width="342" height="46" class="box"/>
   <text x="990" y="396" class="box-title">回答产物</text>
   <text x="990" y="415" class="box-text">自然回答 + evidence + citations + warnings</text>
@@ -111,8 +111,8 @@
 
   <rect x="62" y="770" width="1276" height="74" class="note-box"/>
   <text x="86" y="800" class="note">一句话：PPT AI 的核心数据面是“已选来源 -> EvidenceNode / Metric Context -> Context Bundle”。</text>
-  <text x="86" y="826" class="note">核心生成面是“目录 -> 叙事方案 -> 指令文件 -> 逐页 brief/视觉资产”。来源问答是旁路 mini loop，服务用户追问，不负责生成整套 PPT。</text>
+  <text x="86" y="826" class="note">核心生成面是“目录 -> 叙事方案 -> 指令文件 -> 逐页 brief/视觉资产”。快速问答是旁路 direct context ask，服务用户追问，不负责生成整套 PPT。</text>
 
   <text x="62" y="888" class="section-title">关键文件</text>
-  <text x="62" y="916" class="small">frontend/src/features/agent/ppt-planning-tabs.js  ·  router/domains/ppt_planning.py  ·  modules/ppt_planning/service.py  ·  modules/agent/source_qa_loop.py  ·  modules/agent/context_ask_service.py</text>
+  <text x="62" y="916" class="small">frontend/src/features/agent/ppt-planning-tabs.js  ·  router/domains/ppt_planning.py  ·  modules/ppt_planning/service.py  ·  modules/agent/context_ask_service.py  ·  modules/agent/context_ask_datasets.py</text>
 </svg>

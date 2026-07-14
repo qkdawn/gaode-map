@@ -1026,8 +1026,6 @@ def test_build_agent_poi_iteration_payload_area_heatmap_basemap_is_pure_svg_meta
 
 def test_build_agent_poi_iteration_payload_returns_base_payload_before_ai(monkeypatch):
     monkeypatch.setattr("modules.agent.poi_iteration_build_service.settings.amap_web_service_key", "")
-    monkeypatch.setattr("modules.agent.poi_iteration_build_service._POI_ITERATION_AI_TIMEOUT_S", 0.01)
-
     class FakeRepo:
         def get_pois(self, history_id, year=None):
             year = int(year)

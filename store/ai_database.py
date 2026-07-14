@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import sessionmaker
 
@@ -61,6 +61,12 @@ def init_ai_db() -> None:
     engine = get_ai_engine()
     AiBase.metadata.create_all(bind=engine)
     with engine.begin() as connection:
+        columns = {item.get("name") for item in inspect(engine).get_columns("documents")}
+        if "history_id" not in columns:
+            connection.execute(text("ALTER TABLE documents ADD COLUMN history_id VARCHAR(64)"))
+        indexes = {item.get("name") for item in inspect(engine).get_indexes("documents")}
+        if "ix_documents_history_id" not in indexes:
+            connection.execute(text("CREATE INDEX ix_documents_history_id ON documents (history_id)"))
         connection.execute(
             text(
                 "UPDATE documents SET document_role = 'reference_document' "

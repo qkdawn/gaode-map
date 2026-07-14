@@ -61,8 +61,12 @@ services:
       context: ../search
       dockerfile: Dockerfile
     container_name: gaode-map-search
-    env_file:
-      - ../search/.env
+    environment:
+      SPRING_DATASOURCE_URL: ${LOCAL_QUERY_DB_URL}
+      SPRING_DATASOURCE_USERNAME: ${LOCAL_QUERY_DB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${LOCAL_QUERY_DB_PASSWORD}
+      SPRING_JPA_DATABASE_PLATFORM: ${LOCAL_QUERY_DB_PLATFORM:-org.hibernate.dialect.MySQLDialect}
+      SERVER_PORT: "8001"
     ports:
       - "8001:8001"
 

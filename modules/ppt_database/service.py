@@ -51,18 +51,17 @@ def _build_database_evidence_nodes(area_id: str) -> List[EvidenceNode]:
         }, ensure_ascii=False, default=str))
         nodes.append(EvidenceNode(
             id=f"database:{area_id}:history:summary",
-            source_id=f"database:{area_id}:history",
-            source_type="database",
+            kind="database_record",
+            source_ids=[f"database:{area_id}:history"],
             title="当前分析区域详情",
             content=content,
             summary=content[:260],
-            metadata={
+            data={
                 "history_id": _clean_text(detail.get("id")),
                 "available_years": _safe_list(detail.get("available_years")),
                 "selected_year": detail.get("selected_year"),
             },
             locator=f"analysis_history:{_clean_text(detail.get('id'))}",
-            evidence_level="history_summary",
             citation=f"数据库历史记录 {_clean_text(detail.get('id'))}",
         ))
 
@@ -70,18 +69,17 @@ def _build_database_evidence_nodes(area_id: str) -> List[EvidenceNode]:
         content = _compact_text(f"POI 总量 {poi_summary.get('total', 0)}，来源 {poi_summary.get('source', '')}，年份 {poi_summary.get('year', '')}。")
         nodes.append(EvidenceNode(
             id=f"database:{area_id}:poi:summary",
-            source_id=f"database:{area_id}:poi",
-            source_type="database",
+            kind="database_record",
+            source_ids=[f"database:{area_id}:poi"],
             title="POI 基础数据摘要",
             content=content,
             summary=content[:260],
-            metadata={
+            data={
                 "count": poi_summary.get("total"),
                 "source": poi_summary.get("source"),
                 "year": poi_summary.get("year"),
             },
             locator=f"poi_summary:{area_id}",
-            evidence_level="poi_summary",
             citation="数据库 POI 基础数据",
         ))
 
@@ -96,18 +94,17 @@ def _build_database_evidence_nodes(area_id: str) -> List[EvidenceNode]:
         }, ensure_ascii=False, default=str))
         nodes.append(EvidenceNode(
             id=f"database:{area_id}:pois_by_year:{year}:{index}",
-            source_id=f"database:{area_id}:pois_by_year",
-            source_type="database",
+            kind="database_record",
+            source_ids=[f"database:{area_id}:pois_by_year"],
             title=f"{year} POI 摘要",
             content=content,
             summary=content[:260],
-            metadata={
+            data={
                 "year": item_payload.get("year"),
                 "source": item_payload.get("source"),
                 "count": item_payload.get("count"),
             },
             locator=f"pois_by_year:{year}",
-            evidence_level="poi_year_summary",
             citation=f"数据库分年 POI 记录 {year}",
         ))
 

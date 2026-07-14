@@ -599,14 +599,10 @@ export function createAgentIterationChangeUiMethods() {
     hasAgentIterationPoiReport() {
       return !!(this.getAgentIterationPoiReportSections().length || asText(this.getAgentIterationPoiPayload().report_content))
     },
-    isAgentIterationAiTimeout(error = '') {
-      return /ai_timeout/i.test(asText(error))
-    },
     getAgentIterationPoiAiStatusText() {
       const payload = this.getAgentIterationPoiPayload()
       if (this.hasAgentIterationPoiReport()) return ''
       if (asText(payload.ai_status) === 'loading') return '基础统计已完成，AI 深度解读正在生成。'
-      if (this.isAgentIterationAiTimeout(payload.ai_error)) return '基础统计和快照已完成，AI 深度解读仍在补充。'
       if (payload.ai_error) return this.getAgentIterationAiErrorLabel(payload.ai_error)
       return '基础统计已完成，等待 AI 深度解读。'
     },
@@ -3757,7 +3753,6 @@ export function createAgentIterationChangeUiMethods() {
     getAgentIterationAiErrorLabel(error = '') {
       const raw = asText(error)
       if (!raw) return ''
-      if (/ai_timeout/i.test(raw)) return '基础统计和快照已完成，AI 深度解读仍在补充。'
       if (/llm_unavailable/i.test(raw)) return 'AI 服务暂未启用，当前先展示结构化变化指标与年度快照。'
       if (/invalid_ai_analysis/i.test(raw)) return 'AI 解析结果格式异常，当前先展示结构化变化指标与年度快照。'
       return raw

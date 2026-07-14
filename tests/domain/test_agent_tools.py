@@ -1,22 +1,26 @@
 import asyncio
 
 import modules.agent.tool_adapters.scope_dataset_tools as scope_dataset_tools
+import modules.agent.tool_definitions.source_evidence as source_evidence_tools
 from modules.agent.context_ask_compaction import compact_evidence_nodes
 from modules.agent.selected_sources import evidence_count_from_item, evidence_nodes_from_item, selected_sources_summary_from_items, source_records_from_items
-from modules.agent.tool_definitions.source_evidence import read_selected_source_evidence_node
+from modules.agent.tool_definitions.source_evidence import read_selected_source_evidence_node, search_selected_source_evidence
 from modules.agent.providers.tool_call_execution import execute_tool_call_step
 from modules.agent.schemas import AnalysisSnapshot, ExecutionTraceItem, PlanStep
 from modules.agent.executor import validate_tool_arguments
 from modules.agent.tools import get_tool_registry
 from modules.providers.amap.utils.get_type_info import infer_type_info_from_text, resolve_type_info
+from modules.evidence_retrieval.schemas import EvidenceSearchResponse, SourceRecord
 
 
 def test_get_tool_registry_exposes_stage1_tools():
     registry = get_tool_registry()
 
     assert set(registry.keys()) == {
+        "read_project_context",
         "read_current_scope",
         "read_current_results",
+        "query_current_pois",
         "plan_business_analyst_analysis",
         "list_selected_sources",
         "search_selected_source_evidence",
@@ -31,10 +35,15 @@ def test_get_tool_registry_exposes_stage1_tools():
         "read_scope_record",
     }
     assert registry["read_current_scope"].spec.readonly is True
+    assert registry["read_project_context"].spec.readonly is True
+    assert registry["read_project_context"].spec.input_schema["additionalProperties"] is False
     assert registry["read_current_scope"].spec.input_schema["additionalProperties"] is False
     assert registry["read_current_scope"].spec.output_schema["properties"]["has_scope"]["type"] == "boolean"
     assert registry["read_current_scope"].spec.ui_tier == "foundation"
     assert registry["read_current_results"].spec.llm_exposure == "primary"
+    assert registry["query_current_pois"].spec.readonly is True
+    assert registry["query_current_pois"].spec.data_domain == "poi"
+    assert registry["query_current_pois"].spec.input_schema["required"] == ["keyword"]
     assert registry["plan_business_analyst_analysis"].spec.readonly is True
     assert registry["plan_business_analyst_analysis"].spec.llm_exposure == "primary"
     assert registry["plan_business_analyst_analysis"].spec.produces == ["business_analyst_skeleton"]
@@ -62,8 +71,10 @@ def test_get_tool_registry_keeps_expected_tool_order():
     registry = get_tool_registry()
 
     assert list(registry.keys()) == [
+        "read_project_context",
         "read_current_scope",
         "read_current_results",
+        "query_current_pois",
         "plan_business_analyst_analysis",
         "list_selected_sources",
         "search_selected_source_evidence",
@@ -126,13 +137,13 @@ def test_read_selected_source_evidence_node_uses_unified_index_without_cache():
                     "source_id": "web:area-1",
                     "title": "网页来源",
                     "source_kind": "web",
-                    "evidence_nodes": [
-                        {
-                            "id": "web:area-1:node:1",
-                            "source_id": "web:area-1",
-                            "source_type": "web",
-                            "title": "政策网页",
-                            "content": "公共服务和城市更新政策资料。",
+                        "evidence_nodes": [
+                            {
+                                "id": "web:area-1:node:1",
+                                "kind": "web_excerpt",
+                                "source_ids": ["web:area-1"],
+                                "title": "政策网页",
+                                "content": "公共服务和城市更新政策资料。",
                         }
                     ],
                 }
@@ -151,7 +162,7 @@ def test_read_selected_source_evidence_node_uses_unified_index_without_cache():
 
     assert result.status == "success"
     assert result.result["evidence_node"]["id"] == "web:area-1:node:1"
-    assert result.result["source_type"] == "web"
+    assert result.result["kind"] == "web_excerpt"
 
 
 def test_selected_source_evidence_nodes_do_not_fallback_to_summary_evidence():
@@ -175,12 +186,12 @@ def test_compact_evidence_nodes_uses_current_source_fields_only():
             "title": "旧字段证据",
             "content": "旧 camel 字段不应再参与上下文压缩。",
         },
-        {
-            "id": "canonical-node",
-            "source_id": "canonical-source",
-            "source_type": "system",
-            "title": "当前字段证据",
-            "content": "当前 snake 字段可以进入上下文。",
+            {
+                "id": "canonical-node",
+                "kind": "dataset_record",
+                "source_ids": ["canonical-source"],
+                "title": "当前字段证据",
+                "content": "当前 snake 字段可以进入上下文。",
         },
     ])
 
@@ -188,8 +199,8 @@ def test_compact_evidence_nodes_uses_current_source_fields_only():
     assert "source_id" not in nodes[0]
     assert "source_type" not in nodes[0]
     assert nodes[1]["id"] == "canonical-node"
-    assert nodes[1]["source_id"] == "canonical-source"
-    assert nodes[1]["source_type"] == "system"
+    assert nodes[1]["source_ids"] == ["canonical-source"]
+    assert nodes[1]["kind"] == "dataset_record"
 
 
 def test_selected_source_summary_uses_current_payload_fields_only():
@@ -276,3 +287,70 @@ def test_resolve_type_info_supports_aliases_for_site_advice():
     assert coffee_by_alias["types"] == coffee_by_label["types"]
     assert inferred["keywords"] == "咖啡厅"
     assert resolve_type_info("不存在的业态") is None
+
+
+def test_generic_project_query_uses_dossier_nodes_and_caches_them(monkeypatch):
+    async def empty_native_search(request):
+        return EvidenceSearchResponse(nodes=[])
+
+    monkeypatch.setattr(source_evidence_tools, "search_evidence", empty_native_search)
+    source = SourceRecord(
+        source_id="document:brief",
+        title="项目基本情况",
+        source_kind="document",
+        status="ready",
+    )
+    node_id = "document:brief:project-evidence:residents"
+    artifacts = {
+        "selected_source_tool_context": {"records": [source]},
+        "project_evidence_dossier": {
+            "status": "ready",
+            "question": "分析这个项目",
+            "document_ids": ["brief"],
+            "document_roles": {"brief": "project_brief"},
+            "evidence": [
+                {
+                    "id": node_id,
+                    "source_id": "document:brief",
+                    "document_id": "brief",
+                    "document_title": "项目基本情况",
+                    "document_role": "project_brief",
+                    "status": "pending_verification",
+                    "category": "resident_stakeholders",
+                    "title": "居民情况",
+                    "content": "三栋住宅约102户居民继续居住并参与共建共管。",
+                    "summary": "约102户居民留存并参与共建共管。",
+                    "node_id": "residents",
+                    "page_start": 2,
+                    "page_end": 2,
+                    "locator": "pageindex:residents:p.2",
+                    "citation": "项目基本情况 p.2 / 居民情况",
+                }
+            ],
+            "conflicts": [],
+            "warnings": [],
+        },
+    }
+
+    search_result = asyncio.run(
+        search_selected_source_evidence(
+            arguments={"query": "分析这个项目", "top_k": 8},
+            snapshot=AnalysisSnapshot(),
+            artifacts=artifacts,
+            question="分析这个项目",
+        )
+    )
+    read_result = asyncio.run(
+        read_selected_source_evidence_node(
+            arguments={"node_id": node_id},
+            snapshot=AnalysisSnapshot(),
+            artifacts=artifacts,
+            question="分析这个项目",
+        )
+    )
+
+    assert search_result.status == "success"
+    assert search_result.result["evidence_nodes"][0]["id"] == node_id
+    assert search_result.result["evidence_nodes"][0]["metadata"]["document_role"] == "project_brief"
+    assert read_result.status == "success"
+    assert read_result.result["evidence_node"]["id"] == node_id

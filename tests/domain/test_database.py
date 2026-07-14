@@ -39,6 +39,8 @@ def test_init_db_does_not_create_ai_document_schema(monkeypatch):
     monkeypatch.setattr(database, "_ensure_agent_sessions_schema", lambda: called.append("agent_sessions"))
     monkeypatch.setattr(database, "_ensure_poi_results_schema", lambda: called.append("poi_results"))
     monkeypatch.setattr(database, "_ensure_analysis_artifacts_schema", lambda: called.append("analysis_artifacts"))
+    monkeypatch.setattr(database, "_drop_legacy_analysis_artifact_versions", lambda: called.append("drop_legacy_run_artifacts"))
+    monkeypatch.setattr(database, "_ensure_spatial_projects_schema", lambda: called.append("spatial_projects"))
 
     database.init_db()
 
@@ -47,6 +49,8 @@ def test_init_db_does_not_create_ai_document_schema(monkeypatch):
         "agent_sessions",
         "poi_results",
         "analysis_artifacts",
+        "drop_legacy_run_artifacts",
+        "spatial_projects",
     ]
 
 

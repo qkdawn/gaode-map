@@ -16,7 +16,6 @@ class LLMRuntimeConfig:
     api_key: str
     model: str
     thinking_enabled: bool = True
-    timeout_s: int = 60
 
     @classmethod
     def from_settings(cls) -> "LLMRuntimeConfig":
@@ -26,7 +25,6 @@ class LLMRuntimeConfig:
             api_key=str(settings.ai_api_key or ""),
             model=str(settings.ai_model or "").strip(),
             thinking_enabled=bool(settings.ai_thinking_enabled),
-            timeout_s=int(settings.ai_timeout_s or 60),
         )
 
     def configured(self) -> bool:
@@ -168,7 +166,7 @@ class OpenAICompatibleProviderClient:
         reasoning_id: str = "",
         enable_thinking: bool = True,
     ) -> Dict[str, Any]:
-        from .llm_provider import _resolve_httpx_timeout, _stream_chat_completion
+        from .llm_provider import _stream_chat_completion
 
         base_url = self.runtime.base_url
         api_key = self.runtime.api_key
@@ -177,7 +175,7 @@ class OpenAICompatibleProviderClient:
             raise ValueError("llm_provider_not_configured")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         body = {**dict(request_body or {}), "model": model}
-        async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(self.runtime.timeout_s)) as client:
+        async with httpx.AsyncClient(timeout=None) as client:
             return await _stream_chat_completion(
                 client=client,
                 base_url=base_url,
@@ -247,7 +245,7 @@ class OpenAICompatibleProviderClient:
             return False
         headers = {"Authorization": f"Bearer {api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=float(self.runtime.timeout_s or 15)) as client:
+            async with httpx.AsyncClient(timeout=None) as client:
                 response = await client.get(f"{base_url}/models", headers=headers)
             return 200 <= response.status_code < 300
         except Exception:

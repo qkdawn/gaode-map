@@ -251,6 +251,21 @@ test('history restore progress advances to the running step position', () => {
   assert.equal(ctx.historyRestoreProgress.percent, 38)
 })
 
+test('history artifact selection uses business year and never falls back across POI years', () => {
+  const ctx = Object.assign(createHistoryRestoreContext(), historyMethods)
+  const artifacts = [
+    { id: 1, artifact_type: 'poi_h3_grid', params: { year: 2024 }, updated_at: '2024-01-01T00:00:00' },
+    { id: 2, artifact_type: 'poi_h3_grid', params: { year: 2020 }, updated_at: '2026-07-14T12:00:00' },
+    { id: 3, artifact_type: 'population', params: { year: 2024 }, updated_at: '2026-07-14T12:00:00' },
+    { id: 4, artifact_type: 'population', params: { year: 2026 }, updated_at: '2024-01-01T00:00:00' },
+  ]
+
+  assert.equal(ctx.pickLatestHistoryArtifact(artifacts, 'poi_h3_grid').id, 1)
+  assert.equal(ctx.pickLatestHistoryArtifact(artifacts, 'poi_h3_grid', { preferredYear: 2024 }).id, 1)
+  assert.equal(ctx.pickLatestHistoryArtifact(artifacts, 'poi_h3_grid', { preferredYear: 2022 }), null)
+  assert.equal(ctx.pickLatestHistoryArtifact(artifacts, 'population').id, 4)
+})
+
 test('buildAnalysisArtifactBundle stores full population nightlight and road datasets', () => {
   const ctx = createArtifactBundleContext()
 
@@ -527,6 +542,8 @@ test('loadHistoryDetail keeps restoring artifacts when POI request is aborted', 
           },
           polygon: [[121.47, 31.22], [121.49, 31.22], [121.49, 31.24], [121.47, 31.22]],
           poi_count: 1,
+          available_years: [2026],
+          selected_year: 2026,
         }
       },
     }

@@ -4,7 +4,7 @@ import logging
 import json
 from typing import List
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.exc import SQLAlchemyError
 
 from modules.documents import (
@@ -45,6 +45,7 @@ def _raise_database_error(exc: SQLAlchemyError) -> None:
 async def post_document_upload(
     file: UploadFile = File(...),
     document_role: DocumentRole = Form(...),
+    history_id: str = Form(""),
     title: str = Form(""),
 ) -> DocumentUploadResponse:
     try:
@@ -53,6 +54,7 @@ async def post_document_upload(
             content_type=file.content_type or "",
             fileobj=file.file,
             document_role=document_role,
+            history_id=history_id,
             title=title,
         )
     except UnsupportedDocumentType as exc:
@@ -68,9 +70,9 @@ async def post_document_upload(
 
 
 @router.get("/documents", response_model=List[DocumentRecord])
-async def get_documents() -> List[DocumentRecord]:
+async def get_documents(history_id: str = Query("")) -> List[DocumentRecord]:
     try:
-        return list_documents()
+        return list_documents(history_id=history_id) if history_id.strip() else list_documents()
     except SQLAlchemyError as exc:
         _raise_database_error(exc)
 

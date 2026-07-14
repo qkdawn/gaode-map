@@ -628,7 +628,6 @@ V1 先采用本地文件规则库，而不是向量数据库。
 - `AI_BASE_URL`
 - `AI_API_KEY`
 - `AI_MODEL`
-- `AI_TIMEOUT_S`
 - `AI_MAX_CONTEXT_TURNS`
 
 ### 14.2 V1 实现策略

@@ -70,7 +70,7 @@ def test_stage1_executor_rejects_service_capability_target():
 
 def valid_evidence():
     return {
-        "evidence_ledger": [
+        "evidence_nodes": [
             {
                 "id": "evidence-1",
                 "claim": "项目包含历史建筑院落",
@@ -274,7 +274,7 @@ def test_stage1_reports_structured_readiness_gaps_without_calling_model():
     }
     assert response.status == "requires_clarification"
     assert response.output.panel_payloads["stage1_readiness"]["ready"] is False
-    run = response.output.panel_payloads["capability_run"]
+    run = response.output.panel_payloads["analysis_run"]
     assert run["status"] == "waiting_for_user"
     assert run["current_stage"] == "readiness"
     assert run["configuration_snapshot"]["question"] == "生成报告"
@@ -288,7 +288,7 @@ def test_stage1_evidence_gate_stops_before_professional_models(monkeypatch):
     class FakeClient:
         async def chat_json(self, **kwargs):
             calls.append(kwargs["reasoning_id"])
-            return {"evidence_ledger": []}
+            return {"evidence_nodes": []}
 
     monkeypatch.setattr(
         stage1, "get_llm_provider_client", lambda *, runtime: FakeClient()
@@ -300,13 +300,13 @@ def test_stage1_evidence_gate_stops_before_professional_models(monkeypatch):
     verification = response.output.panel_payloads["stage1_evidence_verification"]
     assert verification["status"] == "failed"
     assert verification["report_allowed"] is False
-    run = response.output.panel_payloads["capability_run"]
+    run = response.output.panel_payloads["analysis_run"]
     assert run["status"] == "waiting_for_user"
     assert run["current_stage"] == "evidence-verification"
     assert [item["artifact_id"] for item in run["output_artifact_refs"]] == [
         "stage1-project-brief",
         "stage1-source-readiness",
-        "stage1-evidence-ledger",
+        "stage1-evidence-nodes",
         "stage1-conflict-register",
     ]
     assert "后续专业模型未被调用" in response.diagnostics.research_notes[0]
@@ -346,7 +346,7 @@ def test_stage1_invalid_spatial_matrix_fails_with_contract_diagnostics(monkeypat
     diagnostic = response.output.panel_payloads["stage1_spatial_matrix_diagnostic"]
     assert diagnostic["status"] == "failed"
     assert any("spatial_hierarchy" in item for item in diagnostic["diagnostics"])
-    run = response.output.panel_payloads["capability_run"]
+    run = response.output.panel_payloads["analysis_run"]
     assert run["status"] == "failed"
     assert run["current_stage"] == "spatial-decision-matrix"
     assert run["stage_records"][-1]["status"] == "failed"
@@ -360,7 +360,7 @@ def test_stage1_repairs_spatial_matrix_contract_once_before_audit(monkeypatch):
         valid_strategy(),
         {"matrix_version": "2.0"},
         valid_matrix(),
-        {"answer": "# 契约修复后报告", "sources": ["项目资料 p.12"]},
+        {"answer": "# 契约修复后报告\n项目包含历史建筑院落。[E1]", "sources": ["项目资料 p.12"], "citations": {"E1": ["evidence-1"]}},
     ]
     calls = []
 
@@ -388,7 +388,7 @@ def test_stage1_repairs_spatial_matrix_contract_once_before_audit(monkeypatch):
     assert repair["status"] == "passed"
     assert repair["attempts"][0]["initial_diagnostics"]
     assert repair["attempts"][0]["final_diagnostics"] == []
-    run = response.output.panel_payloads["capability_run"]
+    run = response.output.panel_payloads["analysis_run"]
     assert any(
         item["stage_id"] == "spatial-decision-matrix-repair"
         for item in run["stage_records"]
@@ -439,7 +439,7 @@ def test_stage1_quality_failure_stops_before_report_model(monkeypatch):
     attempts = response.output.panel_payloads["stage1_repair_attempts"]
     assert attempts[0]["status"] == "failed"
     assert any("workpacks" in item for item in attempts[0]["diagnostics"])
-    run = response.output.panel_payloads["capability_run"]
+    run = response.output.panel_payloads["analysis_run"]
     assert run["status"] == "waiting_for_user"
     assert run["current_stage"] == "quality-audit"
     assert {"stage1-decision-matrix", "stage1-quality-audit"} <= {
@@ -462,7 +462,7 @@ def test_stage1_automatically_repairs_model_output_before_report(monkeypatch):
             "strategy": valid_strategy(),
             "spatial_matrix": valid_matrix(),
         },
-        {"answer": "# 修复后报告", "sources": ["项目资料 p.12"]},
+        {"answer": "# 修复后报告\n项目包含历史建筑院落。[E1]", "sources": ["项目资料 p.12"], "citations": {"E1": ["evidence-1"]}},
     ]
     calls = []
 
@@ -489,7 +489,7 @@ def test_stage1_automatically_repairs_model_output_before_report(monkeypatch):
     assert attempts[0]["status"] == "passed"
     assert attempts[0]["after_audit"]["score"] > attempts[0]["before_audit"]["score"]
     assert response.output.panel_payloads["stage1_quality_audit"]["status"] == "passed"
-    run = response.output.panel_payloads["capability_run"]
+    run = response.output.panel_payloads["analysis_run"]
     assert any(item["stage_id"] == "quality-repair" for item in run["stage_records"])
     artifacts = {
         item["artifact_id"]: item for item in run["output_artifact_refs"]
@@ -511,7 +511,8 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
         valid_strategy(),
         valid_matrix(),
         {
-            "answer": "# 推荐定位\n文化体验目的地",
+            "answer": "# 推荐定位\n文化体验目的地。[E1]",
+            "citations": {"E1": ["evidence-1"]},
             "sources": ["项目资料 p.12"],
         },
     ]
@@ -548,7 +549,8 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
         response.output.panel_payloads["stage1_evidence_verification"]["status"]
         == "passed"
     )
-    assert response.output.panel_payloads["claim_evidence"][0]["status"] == "verified"
+    assert response.output.panel_payloads["report_citations"] == {"E1": ["evidence-1"]}
+    assert response.output.panel_payloads["stage1_evidence_nodes"][0]["kind"] == "analysis_summary"
     assert response.output.panel_payloads["sources_used"] == ["项目资料 p.12"]
     deliverables = response.output.panel_payloads["stage1_deliverables"]
     assert [item["filename"] for item in deliverables["artifacts"]] == [
@@ -557,7 +559,7 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
         "design_handoff.json",
         "run_manifest.json",
     ]
-    run = response.output.panel_payloads["capability_run"]
+    run = response.output.panel_payloads["analysis_run"]
     assert run["run_id"] == deliverables["run_manifest"]["run_id"]
     assert run["capability_id"] == "urban-strategy-stage1"
     assert run["status"] == "completed_with_warnings"
@@ -572,7 +574,7 @@ def test_stage1_ready_path_uses_one_runtime_for_all_model_phases(monkeypatch):
     assert {
         "project_brief.json",
         "source_readiness.json",
-        "evidence_ledger.jsonl",
+        "evidence_nodes.jsonl",
         "conflict_register.json",
         "hard_constraint_screening.json",
         "quality_audit.json",
@@ -605,7 +607,7 @@ def test_stage1_stream_exposes_automatic_road_verification(monkeypatch):
     }
     responses = [
         {
-            "evidence_ledger": [
+            "evidence_nodes": [
                 {
                     "id": "road-1",
                     "claim": "可理解度0.22（R²=0.05）属于极低水平",
@@ -678,7 +680,7 @@ def test_stage1_exposes_context_conflicts_in_quality_panel(monkeypatch):
         valid_workpacks(),
         valid_strategy(),
         valid_matrix(),
-        {"answer": "# 条件式建议", "sources": ["项目资料 p.12"]},
+        {"answer": "# 条件式建议\n项目包含历史建筑院落。[E1]", "sources": ["项目资料 p.12"], "citations": {"E1": ["evidence-1"]}},
     ]
     calls = []
 
@@ -713,7 +715,7 @@ def test_stage1_exposes_context_conflicts_in_quality_panel(monkeypatch):
         calls[-1]["user_payload"]["design_handoff"]["positioning_option_id"]
         == "option-a"
     )
-    assert "Claim—Evidence Ledger" in calls[-1]["user_payload"]["evidence_appendix"]
+    assert "EvidenceNode 列表" in calls[-1]["user_payload"]["evidence_appendix"]
     assert (
         calls[2]["user_payload"]["conflict_register"][0]["label"] == conflict["label"]
     )
@@ -811,7 +813,7 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
         valid_workpacks(),
         valid_strategy(),
         matrix,
-        {"answer": "# 条件式建议", "sources": ["项目资料 p.12"]},
+        {"answer": "# 条件式建议\n项目包含历史建筑院落。[E1]", "sources": ["项目资料 p.12"], "citations": {"E1": ["evidence-1"]}},
     ]
     calls = []
 
@@ -851,7 +853,7 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
     assert all("feature" not in item and "coordinates" not in item for item in registry_panel["catalog"])
     run_artifacts = {
         item["artifact_id"]: item
-        for item in response.output.panel_payloads["capability_run"]["output_artifact_refs"]
+        for item in response.output.panel_payloads["analysis_run"]["output_artifact_refs"]
     }
     assert run_artifacts["stage1-spatial-object-registry"]["filename"] == "spatial_object_registry.json"
     assert "stage1-spatial-object-registry" in run_artifacts["stage1-decision-matrix"][

@@ -124,6 +124,7 @@ class AnalysisArtifact(Base):
         index=True,
     )
     artifact_type = Column(String(64), nullable=False, index=True)
+    slot_key = Column(String(128), nullable=False, default="", index=True)
     params_hash = Column(String(64), nullable=False, index=True)
     params = Column(JSON, nullable=False, default=dict)
     scope_fingerprint = Column(String(128), nullable=False, default="", index=True)
@@ -137,10 +138,8 @@ class AnalysisArtifact(Base):
         UniqueConstraint(
             "history_id",
             "artifact_type",
-            "params_hash",
-            "scope_fingerprint",
-            "data_version",
-            name="uq_analysis_artifact_identity",
+            "slot_key",
+            name="uq_analysis_artifact_slot",
         ),
         Index("ix_analysis_artifacts_history_type", "history_id", "artifact_type"),
         Index(
@@ -149,10 +148,10 @@ class AnalysisArtifact(Base):
     )
 
 
-class CapabilityRunRecord(Base):
-    """Immutable capability execution manifest bound to one analysis history."""
+class AnalysisRunRecord(Base):
+    """Immutable analysis execution manifest bound to one analysis history."""
 
-    __tablename__ = "capability_runs"
+    __tablename__ = "analysis_runs"
 
     run_id = Column(String(96), primary_key=True)
     history_id = Column(String(64), nullable=False, index=True)
@@ -166,52 +165,10 @@ class CapabilityRunRecord(Base):
 
     __table_args__ = (
         Index(
-            "ix_capability_runs_history_capability_persisted",
+            "ix_analysis_runs_history_capability_persisted",
             "history_id",
             "capability_id",
             "persisted_at",
-        ),
-    )
-
-
-class CapabilityArtifactVersion(Base):
-    """Run-scoped immutable artifact payload and lineage snapshot."""
-
-    __tablename__ = "capability_artifact_versions"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    run_id = Column(
-        String(96),
-        ForeignKey("capability_runs.run_id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    history_id = Column(String(64), nullable=False, index=True)
-    artifact_id = Column(String(160), nullable=False, index=True)
-    direction = Column(String(16), nullable=False, index=True)
-    artifact_type = Column(String(32), nullable=False, index=True)
-    version = Column(String(128), nullable=False)
-    title = Column(String(255), nullable=False, default="")
-    filename = Column(String(512), nullable=False, default="")
-    source_run_id = Column(String(96), nullable=False, default="", index=True)
-    source_artifact_refs = Column(JSON, nullable=False, default=list)
-    evidence_refs = Column(JSON, nullable=False, default=list)
-    content_digest = Column(String(80), nullable=False, default="", index=True)
-    payload = Column(JSON, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-
-    __table_args__ = (
-        UniqueConstraint(
-            "run_id",
-            "direction",
-            "artifact_id",
-            name="uq_capability_artifact_run_direction_id",
-        ),
-        Index(
-            "ix_capability_artifacts_history_artifact_created",
-            "history_id",
-            "artifact_id",
-            "created_at",
         ),
     )
 
@@ -252,4 +209,59 @@ class AgentSession(Base):
 
     __table_args__ = (
         Index("ix_agent_sessions_history_panel", "history_id", "panel_kind"),
+    )
+
+
+class SpatialProject(Base):
+    """A durable client project, independent from browser analysis state."""
+
+    __tablename__ = "spatial_projects"
+
+    id = Column(String(96), primary_key=True)
+    name = Column(String(255), nullable=False)
+    scope = Column(JSON, nullable=False, default=dict)
+    brief = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
+class ProjectDataSnapshot(Base):
+    """Immutable project data contract used by Agents and MCP clients."""
+
+    __tablename__ = "project_data_snapshots"
+
+    id = Column(String(96), primary_key=True)
+    project_id = Column(String(96), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="locked", index=True)
+    source_history_ids = Column(JSON, nullable=False, default=list)
+    scope = Column(JSON, nullable=False, default=dict)
+    dataset_manifest = Column(JSON, nullable=False, default=list)
+    datasets = Column(JSON, nullable=False, default=dict)
+    quality_report = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_project_snapshots_project_created", "project_id", "created_at"),
+    )
+
+
+class ProjectSpatialUnit(Base):
+    """One confirmed planning object owned by a project snapshot."""
+
+    __tablename__ = "project_spatial_units"
+
+    id = Column(String(96), primary_key=True)
+    snapshot_id = Column(String(96), nullable=False, index=True)
+    unit_id = Column(String(128), nullable=False)
+    name = Column(String(255), nullable=False)
+    unit_type = Column(String(64), nullable=False, default="unit")
+    geometry = Column(JSON, nullable=False, default=dict)
+    parent_id = Column(String(128), nullable=False, default="", index=True)
+    status = Column(String(32), nullable=False, default="eligible", index=True)
+    properties = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        Index("ix_project_units_snapshot_status", "snapshot_id", "status"),
+        UniqueConstraint("snapshot_id", "unit_id", name="uq_project_unit_snapshot_stable_id"),
     )

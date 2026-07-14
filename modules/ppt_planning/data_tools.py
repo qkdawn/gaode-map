@@ -454,15 +454,27 @@ def _load_history_pois(area_id: str, year: Optional[int] = None) -> Dict[str, An
     return payload
 
 
-def _latest_artifact(area_id: str, artifact_type: str) -> Dict[str, Any]:
+def _artifact_business_year(artifact: Dict[str, Any]) -> int | None:
+    params = _safe_dict(artifact.get("params"))
+    payload = _safe_dict(artifact.get("payload"))
+    raw = params.get("year") if params.get("year") not in (None, "") else payload.get("year")
+    try:
+        return int(raw) if raw not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _latest_artifact(area_id: str, artifact_type: str, *, year: int | None = None) -> Dict[str, Any]:
     artifacts = analysis_artifact_repo.list(area_id, artifact_type=artifact_type)
+    if year is not None:
+        artifacts = [item for item in artifacts if _artifact_business_year(_safe_dict(item)) == int(year)]
     if not artifacts:
         return {}
     return _safe_dict(artifacts[0])
 
 
-def _latest_artifact_payload(area_id: str, artifact_type: str) -> Dict[str, Any]:
-    return _safe_dict(_latest_artifact(area_id, artifact_type).get("payload"))
+def _latest_artifact_payload(area_id: str, artifact_type: str, *, year: int | None = None) -> Dict[str, Any]:
+    return _safe_dict(_latest_artifact(area_id, artifact_type, year=year).get("payload"))
 
 
 def _artifact_ready(area_id: str, source_id: str) -> bool:
@@ -565,7 +577,14 @@ def _compact_document_index_node(node: DocumentIndexNode) -> Dict[str, Any]:
     }
 
 
-def _document_ai_payload(source_id: str, title: str, index_preview: List[Dict[str, Any]], *, count: int = 0) -> Dict[str, Any]:
+def _document_ai_payload(
+    source_id: str,
+    title: str,
+    index_preview: List[Dict[str, Any]],
+    *,
+    document_role: str,
+    count: int = 0,
+) -> Dict[str, Any]:
     nodes = [
         evidence_node
         for index, item in enumerate(index_preview[:40], start=1)
@@ -578,7 +597,8 @@ def _document_ai_payload(source_id: str, title: str, index_preview: List[Dict[st
         "source_id": source_id,
         "title": title,
         "source_kind": "document",
-        "included": ["evidence"] if evidence_nodes else [],
+        "document_role": _clean_text(document_role),
+        "included": ["document_identity", "evidence"] if evidence_nodes else ["document_identity"],
         "scope": None,
         "metrics": [],
         "metric_gaps": [],
@@ -748,7 +768,13 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
             ][:PPT_DOCUMENT_INDEX_PREVIEW_LIMIT]
             source_id = f"document:{document.id}"
             title = _clean_text(document.title) or _clean_text(document.file_name) or "文档资料"
-            ai_payload = _document_ai_payload(source_id, title, index_preview, count=index_count) if status == "ready" else {}
+            ai_payload = _document_ai_payload(
+                source_id,
+                title,
+                index_preview,
+                document_role=_clean_text(document.document_role),
+                count=index_count,
+            ) if status == "ready" else {}
             evidence_count = _ai_payload_evidence_count(ai_payload)
             sources.append(
                 PptDataSourceSummary(
@@ -1337,7 +1363,13 @@ def _history_polygon_gcj02(detail: Dict[str, Any]) -> List[Any]:
 
 def _load_shared_grid_features(area_id: str, detail: Dict[str, Any]) -> tuple[List[Dict[str, Any]], List[str]]:
     warnings: List[str] = []
-    poi_raster_payload = _latest_artifact_payload(area_id, "poi_raster_grid")
+    params = _safe_dict(detail.get("params"))
+    raw_year = detail.get("selected_year") if detail.get("selected_year") not in (None, "") else params.get("year")
+    try:
+        selected_year = int(raw_year) if raw_year not in (None, "") else None
+    except (TypeError, ValueError):
+        selected_year = None
+    poi_raster_payload = _latest_artifact_payload(area_id, "poi_raster_grid", year=selected_year)
     grid = _safe_dict(poi_raster_payload.get("grid"))
     features = _safe_list(grid.get("features"))
     if features:

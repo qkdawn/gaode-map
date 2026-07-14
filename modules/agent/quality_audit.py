@@ -433,7 +433,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     issues: list[AuditIssue] = []
     checks_total = 24
     checks_passed = 0
-    ledger = _list(package.get("evidence_ledger"))
+    ledger = _list(package.get("evidence_nodes"))
     workpacks = _list(package.get("workpacks"))
     strategy = (
         package.get("strategy") if isinstance(package.get("strategy"), dict) else {}
@@ -475,7 +475,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 _issue(
                     "evidence_contract_invalid",
                     "证据节点缺少稳定 ID、F/G/P/H/V 类型、验证状态或来源定位。",
-                    path="evidence_ledger",
+                    path="evidence_nodes",
                     repair_hint="逐条补齐 id、evidence_type、status、source_ref、scope 和 limitation。",
                 )
             )
@@ -484,7 +484,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
     else:
         issues.append(
             _issue(
-                "evidence_ledger_missing", "未生成证据台账。", path="evidence_ledger"
+                "evidence_nodes_missing", "未生成证据节点。", path="evidence_nodes"
             )
         )
 
@@ -502,8 +502,8 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         issues.append(
             _issue(
                 "evidence_id_duplicate",
-                f"证据台账存在重复 ID：{'、'.join(duplicate_ids)}。",
-                path="evidence_ledger",
+                f"证据节点存在重复 ID：{'、'.join(duplicate_ids)}。",
+                path="evidence_nodes",
                 repair_hint="为每条证据生成唯一稳定 ID，禁止后写节点覆盖前一条证据。",
             )
         )
@@ -520,7 +520,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
             _issue(
                 "evidence_provenance_incomplete",
                 "证据节点缺少可追溯的来源 artifact 或取得/计算方法。",
-                path="evidence_ledger",
+                path="evidence_nodes",
                 repair_hint="逐条补齐 source_artifact_id 和 method；文档证据保留节点 ID，计算证据写明算法。",
             )
         )
@@ -534,7 +534,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 "data_quality_missing",
                 "缺少稳定的数据质量诊断结果。",
                 path="data_quality",
-                repair_hint="对证据台账执行来源日期、定位、样本和空间口径审计后再进入交付。",
+                repair_hint="对证据节点执行来源日期、定位、样本和空间口径审计后再进入交付。",
             )
         )
     else:
@@ -544,7 +544,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                     item.code,
                     item.message,
                     path=(
-                        f"evidence_ledger.{item.evidence_id}"
+                        f"evidence_nodes.{item.evidence_id}"
                         if item.evidence_id
                         else "data_quality"
                     ),
@@ -574,7 +574,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 _issue(
                     item.code,
                     item.message,
-                    path=f"evidence_ledger.{item.evidence_id}",
+                    path=f"evidence_nodes.{item.evidence_id}",
                     repair_hint=item.repair_hint,
                     warning=item.severity == "warning",
                 )
@@ -593,7 +593,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                     "provenance_binding_coverage_invalid",
                     "证据溯源绑定未完整覆盖当前台账；" + "；".join(details) + "。",
                     path="provenance_binding.bindings",
-                    repair_hint="对最终证据台账逐条重新执行 artifact 绑定。",
+                    repair_hint="对最终证据节点逐条重新执行 artifact 绑定。",
                 )
             )
         elif not provenance.blocking_issues:
@@ -626,7 +626,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
         checks_passed += 1
     else:
         message = (
-            f"专业结论引用了证据台账中不存在的 ID：{'、'.join(unknown_refs)}。"
+            f"专业结论引用了证据节点中不存在的 ID：{'、'.join(unknown_refs)}。"
             if unknown_refs
             else "专业工作包、定位方案和空间决策没有形成可追溯的证据引用。"
         )
@@ -635,7 +635,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                 "evidence_reference_invalid",
                 message,
                 path="workpacks/strategy/spatial_matrix",
-                repair_hint="只引用本轮证据台账中的稳定 evidence id，并为专业结论补齐引用。",
+                repair_hint="只引用本轮证据节点中的稳定 evidence id，并为专业结论补齐引用。",
             )
         )
 

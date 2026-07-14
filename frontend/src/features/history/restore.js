@@ -10,6 +10,8 @@ import {
             historyArtifactsAbortController: null,
             historyDetailLoadToken: 0,
             currentHistoryRecordId: '',
+            currentHistoryPolygon: [],
+            currentHistoryPolygonGcj02: [],
             currentHistoryPolygonWgs84: [],
             currentHistoryAvailablePoiYears: [],
             currentHistorySelectedPoiYear: null,
@@ -344,14 +346,22 @@ import {
             pickLatestHistoryArtifact(artifacts = [], artifactType = '', options = {}) {
                 const type = String(artifactType || '').trim();
                 const candidates = (Array.isArray(artifacts) ? artifacts : [])
-                    .filter((item) => item && String(item.artifact_type || '') === type)
-                    .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+                    .filter((item) => item && String(item.artifact_type || '') === type);
                 const preferredYear = Number(options.preferredYear || 0);
                 if (Number.isFinite(preferredYear) && preferredYear > 0) {
-                    const matched = candidates.find((item) => this.getHistoryArtifactYear(item) === preferredYear);
-                    if (matched) return matched;
+                    return candidates
+                        .filter((item) => this.getHistoryArtifactYear(item) === preferredYear)
+                        .sort((a, b) => {
+                            const updated = String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+                            return updated || Number(b.id || 0) - Number(a.id || 0);
+                        })[0] || null;
                 }
-                return candidates[0] || null;
+                return candidates.sort((a, b) => {
+                    const year = (this.getHistoryArtifactYear(b) || 0) - (this.getHistoryArtifactYear(a) || 0);
+                    if (year) return year;
+                    const updated = String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+                    return updated || Number(b.id || 0) - Number(a.id || 0);
+                })[0] || null;
             },
             pickLatestHistoryArtifactsByYear(artifacts = [], artifactType = '') {
                 const type = String(artifactType || '').trim();
@@ -365,7 +375,13 @@ import {
                         continue;
                     }
                     const existing = latestByYear.get(year);
-                    if (!existing || String(item.updated_at || '').localeCompare(String(existing.updated_at || '')) > 0) {
+                    const isNewer = !existing
+                        || String(item.updated_at || '').localeCompare(String(existing.updated_at || '')) > 0
+                        || (
+                            String(item.updated_at || '') === String(existing.updated_at || '')
+                            && Number(item.id || 0) > Number(existing.id || 0)
+                        );
+                    if (isNewer) {
                         latestByYear.set(year, item);
                     }
                 }
@@ -542,7 +558,7 @@ import {
                     const restored = await this.restoreHistoryPoiRasterArtifact(artifact, token, {
                         applyToProjection: artifact === preferredRaster,
                     });
-                    rasterRestored = rasterRestored || restored;
+                    if (artifact === preferredRaster) rasterRestored = restored;
                 }
                 const h3Artifacts = this.pickLatestHistoryArtifactsByYear(artifacts, 'poi_h3_grid');
                 const preferredH3 = this.pickLatestHistoryArtifact(artifacts, 'poi_h3_grid', { preferredYear });
@@ -551,9 +567,13 @@ import {
                     const restored = await this.restoreHistoryH3Artifact(artifact, token, {
                         applyToProjection: artifact === preferredH3,
                     });
-                    h3Restored = h3Restored || restored;
+                    if (artifact === preferredH3) h3Restored = restored;
                 }
-                this.setHistoryRestoreStep('grid', (rasterRestored || h3Restored) ? 'done' : 'skipped', (rasterRestored || h3Restored) ? '历史网格和 H3 结果已恢复' : '该历史未找到可恢复的网格/H3 结果');
+                const gridMatched = rasterRestored || h3Restored;
+                const gridMessage = gridMatched
+                    ? `已恢复 ${preferredYear || ''} 年网格和 H3 结果`
+                    : (preferredYear ? `缺少 ${preferredYear} 年网格/H3 结果，等待重新计算` : '该历史未找到可恢复的网格/H3 结果');
+                this.setHistoryRestoreStep('grid', gridMatched ? 'done' : (preferredYear ? 'pending' : 'skipped'), gridMessage);
                 this.setHistoryRestoreStep('population', 'running', '正在恢复历史人口结果...');
                 const populationRestored = await this.restoreHistoryPopulationArtifact(this.pickLatestHistoryArtifact(artifacts, 'population'), token);
                 this.setHistoryRestoreStep('population', populationRestored ? 'done' : 'skipped', populationRestored ? '历史人口结果已恢复' : '该历史未找到可恢复的人口结果');

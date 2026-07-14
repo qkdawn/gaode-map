@@ -970,12 +970,12 @@ def _web_source_ai_payload(source_id: str, title: str, items: List[Dict[str, Any
             evidence_nodes.append(
                 EvidenceNode(
                     id=f"{source_id}:web:{node_id}",
-                    source_id=source_id,
-                    source_type="web",
+                    kind="web_excerpt",
+                    source_ids=[source_id],
                     title=_clean_text(node_dict.get("title")) or item_title or f"网页证据 {index}",
                     content=text,
                     summary=_clean_text(node_dict.get("summary") or text)[:260],
-                    metadata={
+                    data={
                         "url": item_url,
                         "source_name": _clean_text(item.get("source_name")),
                         "source_domain": _clean_text(item.get("source_domain")),
@@ -983,13 +983,11 @@ def _web_source_ai_payload(source_id: str, title: str, items: List[Dict[str, Any
                         "published_at": _clean_text(item.get("published_at")) or "unknown",
                         "accessed_at": _clean_text(item.get("accessed_at")),
                         "category": _clean_text(item.get("category")),
-                        "confidence": _clean_text(item.get("confidence")),
                         "parse_status": _clean_text(item.get("parse_status")),
                         "node_id": node_id,
                         "ordinal": node_dict.get("ordinal") or index,
                     },
                     locator=locator,
-                    evidence_level="research_web_evidence",
                     citation=item_url or f"{_clean_text(item.get('source_name'))}（待人工核验）",
                 )
             )

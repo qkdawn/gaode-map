@@ -4,6 +4,10 @@ import fs from 'node:fs/promises'
 
 import { createAnalysisPoiFlowOrchestratorMethods } from '../src/pages/analysis/orchestrators/poi-flow.js'
 import { createAnalysisPoiPanelMethods } from '../src/features/poi/panel.js'
+import {
+  ANALYSIS_POI_STATE_KEYS,
+  createAnalysisPoiStoreInitialState,
+} from '../src/stores/analysis/poi.js'
 
 function createContext(overrides = {}) {
   return {
@@ -134,6 +138,15 @@ test('fetchPois streams multi-year progress and applies backend aggregation payl
   } finally {
     global.fetch = previousFetch
   }
+})
+
+test('poi store declares panel fields read by templates and agent summaries', () => {
+  const state = createAnalysisPoiStoreInitialState()
+
+  assert.equal(Object.hasOwn(state, 'poiResultsByYear'), true)
+  assert.equal(Object.hasOwn(state, 'allPoisDetails'), true)
+  assert.equal(ANALYSIS_POI_STATE_KEYS.includes('poiResultsByYear'), true)
+  assert.equal(ANALYSIS_POI_STATE_KEYS.includes('allPoisDetails'), true)
 })
 
 test('poi raster grid exposes public target label for templates', () => {

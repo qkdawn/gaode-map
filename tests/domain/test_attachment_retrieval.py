@@ -88,7 +88,7 @@ def test_ppt_sources_include_ready_image_attachment_source(monkeypatch, tmp_path
                 locator="image:full",
                 evidence_level="ocr_text",
                 source_artifacts=[record.filename],
-                metadata={"mime_type": record.mime_type, "confidence": 0.91},
+                metadata={"mime_type": record.mime_type},
             )
         ]
 
@@ -112,9 +112,8 @@ def test_ppt_sources_include_ready_image_attachment_source(monkeypatch, tmp_path
     assert image_source.status == "ready"
     assert image_source.evidence_count == 1
     assert image_source.availability == "available"
-    assert image_source.meta["aiPayload"]["sourceKind"] == "image"
+    assert image_source.meta["aiPayload"]["source_kind"] == "image"
     assert image_source.meta["aiPayload"]["evidence_nodes"][0]["source_type"] == "image"
-    assert image_source.meta["aiPayload"]["evidence_nodes"][0]["metadata"]["confidence"] == 0.91
     assert image_source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "image_visual_index"
     assert image_source.meta["aiPayload"]["index_manifest"]["model_versions"]["image_text_embedding"] == "openclip_target"
     assert "evidence" not in image_source.meta["aiPayload"]

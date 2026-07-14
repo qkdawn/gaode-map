@@ -6,7 +6,7 @@ from modules.documents.pageindex import get_pageindex_document_structure as defa
 from modules.documents.pageindex import get_pageindex_page_content as default_get_pageindex_page_content
 from modules.evidence_index.registry import EvidenceAdapterRegistry
 from modules.evidence_index.schemas import EvidenceIndexRecord, EvidenceSearchQuery, EvidenceTrace, SourceIndexManifest
-from modules.evidence_retrieval.schemas import EvidenceNode, EvidenceSearchResponse
+from modules.evidence_retrieval.schemas import EvidenceNode, EvidenceSearchHit, EvidenceSearchResponse
 from modules.evidence_retrieval.schemas import SourceRecord
 
 
@@ -39,8 +39,8 @@ class EvidenceIndexService:
             records.extend(await adapter.recall(query, manifest))
         records.sort(key=lambda item: item.score, reverse=True)
         top_k = max(1, min(int(query.top_k or 8), 50))
-        nodes: List[EvidenceNode] = [record.node for record in records[:top_k]]
-        return EvidenceSearchResponse(nodes=nodes)
+        hits = [EvidenceSearchHit(node=record.node, score=record.score) for record in records[:top_k]]
+        return EvidenceSearchResponse(hits=hits)
 
     def manifests(self, query: EvidenceSearchQuery) -> List[SourceIndexManifest]:
         return [adapter.manifest(source) for adapter, source in self._registry.adapters_for(query.sources, query.source_ids)]
@@ -70,8 +70,8 @@ class EvidenceIndexService:
                 return EvidenceTrace(
                     node_id=target,
                     matched=True,
-                    source_id=node.source_id,
-                    source_kind=node.source_type,
+                    source_id=node.source_ids[0],
+                    source_kind=manifest.source_kind,
                     native_index_kind=manifest.native_index_kind,
                     adapter=adapter.__class__.__name__,
                     diagnostics=list(manifest.diagnostics or []),

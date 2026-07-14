@@ -84,18 +84,18 @@ def test_context_ask_returns_fallback_when_ai_disabled(monkeypatch):
     assert data["warnings"]
 
 
-def test_context_ask_capability_run_fallback_locks_immutable_version(monkeypatch):
+def test_context_ask_analysis_run_fallback_locks_immutable_version(monkeypatch):
     import modules.agent.context_ask_service as service
 
     payload = _payload(question="这个版本的结论还能用吗？")
     payload["target"] = {
-        "type": "capability_run",
+        "type": "analysis_run",
         "id": "run-history-1",
         "title": "城市区域策划第一阶段 · run-history-1",
-        "source": "capability_run",
-        "summary": "该运行生成了第一阶段报告和证据台账。",
+        "source": "analysis_run",
+        "summary": "该运行生成了第一阶段报告和证据节点。",
         "evidence": [{"evidence_ref": "evidence-poi-1", "artifact_id": "stage1-report"}],
-        "artifact_refs": ["stage1-report", "evidence-ledger"],
+        "artifact_refs": ["stage1-report", "evidence-nodes"],
         "payload": {
             "run_id": "run-history-1",
             "capability_id": "urban-strategy-stage1",
@@ -122,7 +122,7 @@ def test_context_ask_capability_run_fallback_locks_immutable_version(monkeypatch
     assert "不可变历史版本" in data["answer"]
     assert "不能表述为当前最新结论" in data["answer"]
     assert "没有把其他版本结果混入回答" in data["answer"]
-    assert data["citations"] == ["stage1-report", "evidence-ledger"]
+    assert data["citations"] == ["stage1-report", "evidence-nodes"]
     assert data["evidence"][0]["evidence_ref"] == "evidence-poi-1"
 
 

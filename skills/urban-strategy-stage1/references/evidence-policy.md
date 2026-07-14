@@ -23,7 +23,7 @@ Use exactly these statuses:
 
 ## Ledger record
 
-Write one JSON object per line to `evidence_ledger.jsonl`:
+Write one JSON object per line to `evidence_nodes.jsonl`:
 
 ```json
 {

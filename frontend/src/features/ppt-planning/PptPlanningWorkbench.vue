@@ -56,6 +56,9 @@ import {
   isPackagePlaceholderSource,
   isPackageSource,
   isRetryableSource,
+  currentSourceDetailTabs,
+  currentSourceEvidenceNodes,
+  documentRoleLabel,
   removeSourceMessage,
   sourceHealth,
   sourceHealthLabel,
@@ -241,12 +244,13 @@ const emit = defineEmits([
 
 const isSourcesCollapsed = ref(false)
 const sourceMenu = ref({ kind: '', id: '', placement: 'below', x: 0, y: 0 })
-const sourceDialog = ref({ mode: '', id: '', title: '', value: '', message: '' })
+const sourceDialog = ref({ mode: '', id: '', title: '', value: '', message: '', file: null, documentRole: 'reference_document' })
 const webSourceDialog = ref(createWebSourceDialogState())
 const documentSourceInput = ref(null)
 const activeDocumentSourceId = ref('')
 const activePackageSourceId = ref('')
 const activeCurrentSourceId = ref('')
+const activeCurrentSourceDetailTab = ref('metrics')
 const activePackageCarrierId = ref('')
 const activePackageCarrierPreviewMode = ref('local')
 const flowViewMode = ref('')
@@ -600,10 +604,7 @@ const activeCurrentGapMetrics = computed(() => {
   const gaps = activeCurrentAiPayload.value.metric_gaps || activeCurrentAiPayload.value.metricGaps
   return Array.isArray(gaps) ? gaps.slice(0, 80) : []
 })
-const activeCurrentEvidenceItems = computed(() => {
-  const evidence = activeCurrentAiPayload.value.evidence
-  return Array.isArray(evidence) ? evidence.slice(0, 80) : []
-})
+const activeCurrentEvidenceNodes = computed(() => currentSourceEvidenceNodes(activeCurrentSource.value))
 const activeCurrentVisualSpecs = computed(() => {
   const visuals = activeCurrentAiPayload.value.visual_specs || activeCurrentAiPayload.value.visualSpecs
   return Array.isArray(visuals) ? visuals.slice(0, 40) : []
@@ -614,6 +615,16 @@ const activeCurrentScopePayload = computed(() => (
     : null
 ))
 const activeCurrentTransport = computed(() => sourceTransport(activeCurrentSource.value))
+const activeCurrentSourceDetailTabs = computed(() => currentSourceDetailTabs({
+  readyMetrics: activeCurrentReadyMetrics.value,
+  evidenceNodes: activeCurrentEvidenceNodes.value,
+  scopePayload: activeCurrentScopePayload.value,
+  visualSpecs: activeCurrentVisualSpecs.value,
+  gapMetrics: activeCurrentGapMetrics.value,
+}))
+const activeCurrentSourceFirstAvailableTab = computed(() => (
+  activeCurrentSourceDetailTabs.value.find((item) => item.available)?.key || 'metrics'
+))
 const activeDocumentIndexItems = computed(() => {
   const meta = activeDocumentSource.value && activeDocumentSource.value.meta && typeof activeDocumentSource.value.meta === 'object'
     ? activeDocumentSource.value.meta
@@ -1174,11 +1185,13 @@ function openDocumentEvidence(source = {}) {
 function openCurrentSourceDetail(source = {}) {
   if (!source.id || !isCurrentSource(source)) return
   activeCurrentSourceId.value = source.id
+  activeCurrentSourceDetailTab.value = 'metrics'
   closeSourceMenu()
 }
 
 function closeCurrentSourceDetail() {
   activeCurrentSourceId.value = ''
+  activeCurrentSourceDetailTab.value = 'metrics'
 }
 
 function closeDocumentEvidence() {
@@ -1264,6 +1277,17 @@ watch(
   { deep: true },
 )
 
+watch(
+  activeCurrentSourceDetailTabs,
+  (tabs) => {
+    if (!activeCurrentSource.value) return
+    const activeTab = tabs.find((item) => item.key === activeCurrentSourceDetailTab.value)
+    if (activeTab && activeTab.available) return
+    activeCurrentSourceDetailTab.value = activeCurrentSourceFirstAvailableTab.value
+  },
+  { immediate: true },
+)
+
 function openRenameSource(source = {}) {
   sourceDialog.value = { mode: 'rename-source', id: source.id, title: '重命名来源', value: source.title || '', message: '' }
   closeSourceMenu()
@@ -1325,7 +1349,7 @@ function moveSourceOutOfGroup(sourceId = '') {
 }
 
 function closeSourceDialog() {
-  sourceDialog.value = { mode: '', id: '', title: '', value: '', message: '' }
+  sourceDialog.value = { mode: '', id: '', title: '', value: '', message: '', file: null, documentRole: 'reference_document' }
 }
 
 async function openWebSourceDialog(mode = 'search') {
@@ -1528,7 +1552,15 @@ function handleDocumentSourceSelected(event) {
     return
   }
   if (mimeType === 'application/pdf' || /\.(pdf|docx)$/.test(fileName)) {
-    emit('upload-document-source', file)
+    sourceDialog.value = {
+      mode: 'select-document-role',
+      id: '',
+      title: '选择文档角色',
+      value: '',
+      message: '角色决定项目分析中的证据优先级，请确认后上传。',
+      file,
+      documentRole: 'reference_document',
+    }
     return
   }
   sourceDialog.value = {
@@ -1557,6 +1589,9 @@ async function confirmSourceDialog() {
   if (dialog.mode === 'rename-group') emit('rename-source-group', dialog.id, dialog.value)
   if (dialog.mode === 'group-emoji') emit('set-source-group-emoji', dialog.id, dialog.value)
   if (dialog.mode === 'remove-group') emit('remove-source-group', dialog.id)
+  if (dialog.mode === 'select-document-role' && dialog.file && dialog.documentRole) {
+    emit('upload-document-source', dialog.file, dialog.documentRole)
+  }
   closeSourceDialog()
 }
 </script>
@@ -1767,6 +1802,7 @@ async function confirmSourceDialog() {
                     <span class="agent-ppt-source-icon" :class="`is-${source.type || 'file'}`"></span>
                     <span class="agent-ppt-source-name">
                       <strong>{{ source.title }}</strong>
+                      <span v-if="isDocumentSource(source) && documentRoleLabel(source)" class="agent-ppt-document-role-badge">{{ documentRoleLabel(source) }}</span>
                       <small>{{ (source.meta && source.meta.label) || (source.status === 'ready' ? '已生成' : '待生成') }}</small>
                       <span class="agent-ppt-source-health" :class="`is-${sourceHealth(source).healthStatus}`" :title="sourceHealthReason(source)">
                         {{ sourceHealthLabel(source) }}
@@ -1852,6 +1888,7 @@ async function confirmSourceDialog() {
                 <span class="agent-ppt-source-icon" :class="`is-${source.type || 'file'}`"></span>
                 <span class="agent-ppt-source-name">
                   <strong>{{ source.title }}</strong>
+                  <span v-if="isDocumentSource(source) && documentRoleLabel(source)" class="agent-ppt-document-role-badge">{{ documentRoleLabel(source) }}</span>
                   <small>{{ (source.meta && source.meta.label) || (source.status === 'ready' ? '已生成' : '待生成') }}</small>
                   <span class="agent-ppt-source-health" :class="`is-${sourceHealth(source).healthStatus}`" :title="sourceHealthReason(source)">
                     {{ sourceHealthLabel(source) }}
@@ -2627,11 +2664,24 @@ async function confirmSourceDialog() {
           </div>
         </div>
 
-        <div v-if="activeCurrentScopePayload" class="agent-ppt-package-section-head">
+        <nav class="agent-ppt-current-detail-tabs" aria-label="当前分析来源详情导航">
+          <button
+            v-for="tab in activeCurrentSourceDetailTabs"
+            :key="`current-source-tab-${tab.key}`"
+            type="button"
+            :class="{ 'is-active': activeCurrentSourceDetailTab === tab.key }"
+            :disabled="!tab.available"
+            @click="activeCurrentSourceDetailTab = tab.key">
+            <span>{{ tab.label }}</span>
+            <strong>{{ tab.count }}</strong>
+          </button>
+        </nav>
+
+        <div v-if="activeCurrentSourceDetailTab === 'scope' && activeCurrentScopePayload" class="agent-ppt-package-section-head">
           <strong>范围输入</strong>
           <span>scope</span>
         </div>
-        <div v-if="activeCurrentScopePayload" class="agent-ppt-current-metric-list">
+        <div v-if="activeCurrentSourceDetailTab === 'scope' && activeCurrentScopePayload" class="agent-ppt-current-metric-list">
           <article class="agent-ppt-current-metric-card">
             <dl>
               <div v-for="(value, key) in activeCurrentScopePayload" :key="`scope-${key}`">
@@ -2642,11 +2692,11 @@ async function confirmSourceDialog() {
           </article>
         </div>
 
-        <div v-if="activeCurrentReadyMetrics.length" class="agent-ppt-package-section-head">
+        <div v-if="activeCurrentSourceDetailTab === 'metrics' && activeCurrentReadyMetrics.length" class="agent-ppt-package-section-head">
           <strong>可用于 PPT 的数值指标</strong>
           <span>{{ activeCurrentReadyMetrics.length }} 项</span>
         </div>
-        <div v-if="activeCurrentReadyMetrics.length" class="agent-ppt-current-metric-list">
+        <div v-if="activeCurrentSourceDetailTab === 'metrics' && activeCurrentReadyMetrics.length" class="agent-ppt-current-metric-list">
           <article
             v-for="metric in activeCurrentReadyMetrics"
             :key="`current-ready-${metric.metric_id}`"
@@ -2679,24 +2729,32 @@ async function confirmSourceDialog() {
           </article>
         </div>
 
-        <div v-if="activeCurrentEvidenceItems.length" class="agent-ppt-package-section-head">
-          <strong>会传给 AI 的 evidence</strong>
-          <span>{{ activeCurrentEvidenceItems.length }} 条</span>
+        <div v-if="activeCurrentSourceDetailTab === 'evidence' && activeCurrentEvidenceNodes.length" class="agent-ppt-package-section-head">
+          <strong>EvidenceNode</strong>
+          <span>{{ activeCurrentEvidenceNodes.length }} 条</span>
         </div>
-        <div v-if="activeCurrentEvidenceItems.length" class="agent-ppt-current-metric-list">
+        <div v-if="activeCurrentSourceDetailTab === 'evidence' && activeCurrentEvidenceNodes.length" class="agent-ppt-current-metric-list">
           <article
-            v-for="(item, index) in activeCurrentEvidenceItems"
-            :key="`current-evidence-${index}`"
+            v-for="(item, index) in activeCurrentEvidenceNodes"
+            :key="`current-evidence-${item.id || index}`"
             class="agent-ppt-current-metric-card">
             <header>
               <div>
-                <span>{{ item.type || 'evidence' }}</span>
+                <span>{{ item.kind || 'dataset_record' }}</span>
                 <strong>{{ item.title || '证据' }}</strong>
               </div>
             </header>
-            <p>{{ item.text || item.summary || '无摘要' }}</p>
-            <dl v-if="item.payload">
-              <div v-for="(value, key) in item.payload" :key="`evidence-${index}-${key}`">
+            <p>{{ item.content || item.summary || '无摘要' }}</p>
+            <dl>
+              <div v-if="item.id">
+                <dt>node_id</dt>
+                <dd>{{ item.id }}</dd>
+              </div>
+              <div v-if="item.locator">
+                <dt>locator</dt>
+                <dd>{{ item.locator }}</dd>
+              </div>
+              <div v-for="(value, key) in (item.data || {})" :key="`evidence-${index}-${key}`">
                 <dt>{{ key }}</dt>
                 <dd>{{ typeof value === 'object' ? JSON.stringify(value) : value }}</dd>
               </div>
@@ -2704,11 +2762,11 @@ async function confirmSourceDialog() {
           </article>
         </div>
 
-        <div v-if="activeCurrentVisualSpecs.length" class="agent-ppt-package-section-head">
+        <div v-if="activeCurrentSourceDetailTab === 'visuals' && activeCurrentVisualSpecs.length" class="agent-ppt-package-section-head">
           <strong>可视化方案</strong>
           <span>{{ activeCurrentVisualSpecs.length }} 个</span>
         </div>
-        <div v-if="activeCurrentVisualSpecs.length" class="agent-ppt-current-metric-list">
+        <div v-if="activeCurrentSourceDetailTab === 'visuals' && activeCurrentVisualSpecs.length" class="agent-ppt-current-metric-list">
           <article
             v-for="(visual, index) in activeCurrentVisualSpecs"
             :key="`current-visual-${visual.visual_id || visual.visualId || index}`"
@@ -2732,11 +2790,11 @@ async function confirmSourceDialog() {
           </article>
         </div>
 
-        <div v-if="activeCurrentGapMetrics.length" class="agent-ppt-package-section-head">
+        <div v-if="activeCurrentSourceDetailTab === 'gaps' && activeCurrentGapMetrics.length" class="agent-ppt-package-section-head">
           <strong>缺口指标</strong>
           <span>{{ activeCurrentGapMetrics.length }} 项</span>
         </div>
-        <div v-if="activeCurrentGapMetrics.length" class="agent-ppt-current-gap-list">
+        <div v-if="activeCurrentSourceDetailTab === 'gaps' && activeCurrentGapMetrics.length" class="agent-ppt-current-gap-list">
           <article
             v-for="(gap, index) in activeCurrentGapMetrics"
             :key="`current-gap-${gap.metric_id || gap.metricId || gap.gap_id || gap.gapId || index}`"
@@ -2748,8 +2806,8 @@ async function confirmSourceDialog() {
           </article>
         </div>
 
-        <div v-if="!activeCurrentMetrics.length" class="agent-ppt-package-empty">
-          这个来源目前没有可展示的标准指标。完成对应分析后会在这里显示。
+        <div v-if="!activeCurrentSourceDetailTabs.some((tab) => tab.available)" class="agent-ppt-package-empty">
+          这个来源目前没有可展示的标准指标或 EvidenceNode。完成对应分析后会在这里显示。
         </div>
       </section>
     </div>
@@ -2989,6 +3047,21 @@ async function confirmSourceDialog() {
           <span>{{ sourceDialog.mode === 'group-emoji' ? '图标' : '名称' }}</span>
           <input v-model="sourceDialog.value" type="text" autofocus>
         </label>
+        <fieldset v-if="sourceDialog.mode === 'select-document-role'" class="agent-ppt-document-role-options">
+          <legend>文档角色</legend>
+          <label>
+            <input v-model="sourceDialog.documentRole" type="radio" value="project_brief">
+            <span><strong>项目摘要</strong><small>项目事实、现状和约束的权威锚点</small></span>
+          </label>
+          <label>
+            <input v-model="sourceDialog.documentRole" type="radio" value="design_vision">
+            <span><strong>设计愿景</strong><small>已提出的空间构想和设计意图</small></span>
+          </label>
+          <label>
+            <input v-model="sourceDialog.documentRole" type="radio" value="reference_document">
+            <span><strong>参考资料（推荐默认）</strong><small>补充背景，不覆盖项目摘要</small></span>
+          </label>
+        </fieldset>
         <div class="agent-ppt-source-dialog-actions">
           <button type="button" @click="closeSourceDialog">取消</button>
           <button

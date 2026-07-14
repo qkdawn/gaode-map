@@ -97,7 +97,7 @@ def validate(run_dir: Path) -> dict[str, Any]:
 
     expected = [
         work / "source_readiness.json",
-        work / "evidence_ledger.jsonl",
+        work / "evidence_nodes.jsonl",
         work / "conflict_register.json",
         work / "strategy_options.json",
         work / "decision_matrix.json",
@@ -112,7 +112,7 @@ def validate(run_dir: Path) -> dict[str, Any]:
         _require_file(work / "expert_workpacks" / f"{name}.json", errors)
 
     evidence_ids: set[str] = set()
-    ledger_path = work / "evidence_ledger.jsonl"
+    ledger_path = work / "evidence_nodes.jsonl"
     if ledger_path.is_file():
         for line_no, raw in enumerate(ledger_path.read_text(encoding="utf-8-sig").splitlines(), start=1):
             if not raw.strip():
@@ -140,7 +140,7 @@ def validate(run_dir: Path) -> dict[str, Any]:
             if item.get("status") == "confirmed" and not _text(item.get("locator")):
                 warnings.append(f"confirmed_without_locator:{evidence_id or line_no}")
     if not evidence_ids:
-        errors.append("empty_evidence_ledger")
+        errors.append("empty_evidence_nodes")
 
     referenced: set[str] = set()
     json_paths = [

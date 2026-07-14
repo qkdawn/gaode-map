@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
 DEFAULT_CHART_OUTPUT_DIR = PROJECT_ROOT / "runtime" / "generated_charts"
 DEFAULT_DOCUMENT_UPLOAD_DIR = PROJECT_ROOT / "runtime" / "documents"
+DEFAULT_ANALYSIS_RUN_STORAGE_DIR = PROJECT_ROOT / "runtime" / "analysis-runs"
 
 
 class Settings(BaseSettings):
@@ -63,6 +64,11 @@ class Settings(BaseSettings):
         str(DEFAULT_CHART_OUTPUT_DIR),
         validation_alias="CHART_OUTPUT_DIR",
         description="Directory containing generated chart assets",
+    )
+    analysis_run_storage_dir: str = Field(
+        str(DEFAULT_ANALYSIS_RUN_STORAGE_DIR),
+        validation_alias="ANALYSIS_RUN_STORAGE_DIR",
+        description="Immutable local AnalysisRun artifact storage",
     )
     db_url: str = Field("", validation_alias="DB_URL", description="Database connection string")
     db_host: str = Field("", validation_alias="DB_HOST", description="Database host override")
@@ -187,6 +193,7 @@ class Settings(BaseSettings):
             self.amap_js_api_key = str(self.amap_web_service_key or "").split(",", 1)[0].strip()
         self.chart_output_dir = self._normalize_project_path(self.chart_output_dir, DEFAULT_CHART_OUTPUT_DIR)
         self.document_upload_dir = self._normalize_project_path(self.document_upload_dir, DEFAULT_DOCUMENT_UPLOAD_DIR)
+        self.analysis_run_storage_dir = self._normalize_project_path(self.analysis_run_storage_dir, DEFAULT_ANALYSIS_RUN_STORAGE_DIR)
 
     @staticmethod
     def _normalize_project_path(raw_value: str, default_path: Path) -> str:
@@ -256,16 +263,6 @@ class Settings(BaseSettings):
         True,
         validation_alias="AI_THINKING_ENABLED",
         description="是否为 DeepSeek chat completions 启用 thinking mode 并流式展示 reasoning_content",
-    )
-    ai_timeout_s: int = Field(
-        60,
-        validation_alias="AI_TIMEOUT_S",
-        description="AI provider 请求超时时间（秒）",
-    )
-    ppt_llm_timeout_s: int = Field(
-        0,
-        validation_alias="PPT_LLM_TIMEOUT_S",
-        description="PPT 生成 LLM 请求超时时间（秒）；0 表示不设置超时",
     )
     searxng_base_url: str = Field(
         "",

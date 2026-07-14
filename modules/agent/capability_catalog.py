@@ -122,7 +122,7 @@ _CAPABILITIES = (
             CapabilityRequirement(id="evidence", label="项目资料或分析证据"),
         ],
         output_contract=[
-            "证据台账",
+            "证据节点",
             "定位方案与反证",
             "空间功能决策矩阵",
             "Stage 1 报告",
@@ -157,7 +157,7 @@ _CAPABILITIES = (
                 input_kind="upstream_artifact",
                 upstream_capability_id="urban-strategy-stage1",
                 required_artifact_ids=[
-                    "stage1-evidence-ledger",
+                    "stage1-evidence-nodes",
                     "stage1-strategy-options",
                     "stage1-decision-matrix",
                 ],
@@ -193,7 +193,7 @@ _CAPABILITIES = (
                 input_kind="upstream_artifact",
                 upstream_capability_id="urban-strategy-stage1",
                 required_artifact_ids=[
-                    "stage1-evidence-ledger",
+                    "stage1-evidence-nodes",
                     "stage1-report",
                     "stage1-run-manifest",
                 ],

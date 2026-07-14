@@ -54,8 +54,10 @@ def compact_evidence_nodes(nodes: List[Any], *, limit: int = 3) -> List[Dict[str
         content = as_text(node.get("content") or node.get("text"))
         compacted_node: Dict[str, Any] = {
             "id": as_text(node.get("id") or node.get("node_id")),
-            "source_id": as_text(node.get("source_id")),
-            "source_type": as_text(node.get("source_type")),
+            "kind": as_text(node.get("kind")),
+            "run_id": as_text(node.get("run_id")),
+            "source_ids": compact_items(node.get("source_ids") or [], limit=4),
+            "metric_ids": compact_items(node.get("metric_ids") or [], limit=4),
             "title": as_text(node.get("title"))[:160],
         }
         if summary:

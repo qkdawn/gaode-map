@@ -6,6 +6,7 @@
         NIGHTLIGHT: 'nightlight',
         GWR: 'gwr',
         TIMESERIES: 'timeseries',
+        METRICS: 'metrics',
         SYNTAX: 'syntax',
         AGENT: 'agent',
     });
@@ -32,6 +33,7 @@
                         || this.hasSimplifyDisplayTarget('nightlight')
                         || this.hasSimplifyDisplayTarget('gwr')
                         || this.hasSimplifyDisplayTarget('timeseries')
+                        || this.hasSimplifyDisplayTarget('metrics')
                         || this.hasSimplifyDisplayTarget('syntax')
                     );
                 const displayAllowsPoi = (typeof this.hasSimplifyDisplayTarget === 'function')
@@ -261,6 +263,10 @@
                 if (nextPanelId === STEP3_PANEL_IDS.TIMESERIES) {
                     if (typeof this.ensureTimeseriesPanelEntryState === 'function') this.ensureTimeseriesPanelEntryState();
                     if (typeof this.restoreTimeseriesDisplayOnEnter === 'function') this.restoreTimeseriesDisplayOnEnter();
+                    this.applySimplifyPointVisibility();
+                    return;
+                }
+                if (nextPanelId === STEP3_PANEL_IDS.METRICS) {
                     this.applySimplifyPointVisibility();
                     return;
                 }

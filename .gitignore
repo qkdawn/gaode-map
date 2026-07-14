@@ -18,6 +18,7 @@ frontend/.cache/
 frontend/*.tsbuildinfo
 static/frontend/
 runtime/generated_charts/
+runtime/analysis-runs/
 runtime/agent_uploads/
 runtime/documents/
 runtime/searxng/

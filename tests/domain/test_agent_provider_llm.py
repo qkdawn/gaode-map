@@ -157,7 +157,7 @@ def test_provider_thinking_uses_the_runtime_flag_not_global_configuration(monkey
     assert enabled["thinking"] == {"type": "enabled"}
 
 
-def test_langgraph_react_deep_mode_disables_llm_timeout(monkeypatch):
+def test_langgraph_react_disables_llm_timeout(monkeypatch):
     captured = {}
 
     class FakeChatOpenAI:
@@ -192,7 +192,6 @@ def test_langgraph_react_deep_mode_disables_llm_timeout(monkeypatch):
 
             return FakeApp()
 
-    monkeypatch.setattr(settings, "ai_timeout_s", 5)
     monkeypatch.setattr("langchain_openai.ChatOpenAI", FakeChatOpenAI)
     monkeypatch.setattr("langgraph.graph.StateGraph", FakeStateGraph)
 
@@ -285,7 +284,6 @@ def test_generate_answer_output_with_llm_parses_natural_answer(monkeypatch):
     monkeypatch.setattr(settings, "ai_api_key", "test-key")
     monkeypatch.setattr(settings, "ai_model", "test-model")
     monkeypatch.setattr(settings, "ai_thinking_enabled", True)
-    monkeypatch.setattr(settings, "ai_timeout_s", 5)
 
     _mock_streams(
         monkeypatch,
@@ -373,7 +371,6 @@ def test_generate_answer_output_with_llm_accepts_plain_answer_only(monkeypatch):
     monkeypatch.setattr(settings, "ai_api_key", "test-key")
     monkeypatch.setattr(settings, "ai_model", "test-model")
     monkeypatch.setattr(settings, "ai_thinking_enabled", True)
-    monkeypatch.setattr(settings, "ai_timeout_s", 5)
 
     _mock_streams(
         monkeypatch,
@@ -405,7 +402,6 @@ def test_invoke_json_role_requests_json_object_response(monkeypatch):
     monkeypatch.setattr(settings, "ai_api_key", "test-key")
     monkeypatch.setattr(settings, "ai_model", "test-model")
     monkeypatch.setattr(settings, "ai_thinking_enabled", False)
-    monkeypatch.setattr(settings, "ai_timeout_s", 5)
     _mock_streams(
         monkeypatch,
         requests,
@@ -436,7 +432,6 @@ def test_invoke_json_role_sends_visual_snapshots_as_image_url(monkeypatch):
     monkeypatch.setattr(settings, "ai_api_key", "test-key")
     monkeypatch.setattr(settings, "ai_model", "test-model")
     monkeypatch.setattr(settings, "ai_thinking_enabled", False)
-    monkeypatch.setattr(settings, "ai_timeout_s", 5)
     _mock_streams(
         monkeypatch,
         requests,

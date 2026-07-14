@@ -10,8 +10,8 @@ from .capability_catalog import (
     evaluate_capability_readiness,
     list_analysis_capabilities,
 )
-from .capability_run_service import list_capability_runs
-from .capability_runs import CapabilityRun
+from .analysis_run_service import list_analysis_runs
+from .analysis_runs import AnalysisRun
 from .schemas import AgentTurnRequest
 
 
@@ -51,7 +51,7 @@ class CapabilityWorkbenchCard(BaseModel):
     capability_id: str
     state: CapabilityCardState
     readiness: CapabilityReadiness
-    latest_run: CapabilityRun | None = None
+    latest_run: AnalysisRun | None = None
     run_count: int = 0
 
 
@@ -70,13 +70,13 @@ class CapabilityWorkbenchOverview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cards: list[CapabilityWorkbenchCard] = Field(default_factory=list)
-    recent_runs: list[CapabilityRun] = Field(default_factory=list)
+    recent_runs: list[AnalysisRun] = Field(default_factory=list)
     recommendation: CapabilityRecommendation | None = None
 
 
 def _card_state(
     readiness: CapabilityReadiness,
-    latest_run: CapabilityRun | None,
+    latest_run: AnalysisRun | None,
 ) -> CapabilityCardState:
     if latest_run is not None:
         if latest_run.status in _ACTIVE_RUN_STATUSES:
@@ -165,28 +165,28 @@ def build_capability_workbench_overview(
 ) -> CapabilityWorkbenchOverview:
     """Build one project-level capability view with centralized readiness and guidance."""
 
-    runs = list_capability_runs(payload.history_id) if payload.history_id else []
+    runs = list_analysis_runs(payload.history_id) if payload.history_id else []
     runs = sorted(
         runs,
         key=lambda run: (run.completed_at or run.created_at, run.run_id),
         reverse=True,
     )
-    runs_by_capability: dict[str, list[CapabilityRun]] = {}
+    runs_by_capability: dict[str, list[AnalysisRun]] = {}
     for run in runs:
         runs_by_capability.setdefault(run.capability_id, []).append(run)
 
     cards: list[CapabilityWorkbenchCard] = []
     for capability in list_analysis_capabilities():
         readiness = evaluate_capability_readiness(capability.id, payload)
-        capability_runs = runs_by_capability.get(capability.id, [])
-        latest_run = capability_runs[0] if capability_runs else None
+        analysis_runs = runs_by_capability.get(capability.id, [])
+        latest_run = analysis_runs[0] if analysis_runs else None
         cards.append(
             CapabilityWorkbenchCard(
                 capability_id=capability.id,
                 state=_card_state(readiness, latest_run),
                 readiness=readiness,
                 latest_run=latest_run,
-                run_count=len(capability_runs),
+                run_count=len(analysis_runs),
             )
         )
 

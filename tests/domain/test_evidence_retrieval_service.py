@@ -5,10 +5,10 @@ import asyncio
 import pytest
 
 from modules.evidence_retrieval import (
-    evidence_node_from_node_payload,
     evidence_node_from_attachment_chunk,
     evidence_node_from_document_index_node,
     evidence_node_from_knowledge_chunk,
+    evidence_node_from_node_payload,
     evidence_node_payload_from_node,
 )
 from modules.evidence_retrieval.schemas import EvidenceNode, EvidenceSearchRequest, SourceRecord
@@ -16,398 +16,114 @@ from modules.evidence_retrieval.service import EmptySearchQuestion, search_evide
 from modules.retrieval.schemas import AttachmentChunk, KnowledgeChunk
 
 
+def _web_node() -> dict:
+    return EvidenceNode(
+        id="web:area-1:node:1",
+        kind="web_excerpt",
+        source_ids=["web:area-1"],
+        title="Policy page",
+        content="Urban renewal public service policy.",
+        summary="Public service policy.",
+        data={"url": "https://example.com/policy"},
+        method="web_parse",
+        locator="https://example.com/policy",
+        citation="https://example.com/policy",
+    ).model_dump(mode="json")
+
+
+def test_evidence_node_contract_contains_only_unified_fields():
+    assert set(EvidenceNode.model_fields) == {
+        "id", "kind", "run_id", "source_ids", "metric_ids", "title", "summary", "content", "data",
+        "time_scope", "spatial_scope", "method", "quality_flags", "locator", "citation",
+    }
+
+
+def test_evidence_node_requires_content_or_data():
+    with pytest.raises(ValueError, match="requires content or data"):
+        EvidenceNode(id="evidence:empty", kind="dataset_record", source_ids=["current:test"])
+
+
+def test_search_evidence_returns_hits_with_score_outside_node():
+    source = SourceRecord.model_validate({
+        "id": "web:area-1",
+        "source_kind": "web",
+        "status": "ready",
+        "meta": {"aiPayload": {"evidence_nodes": [_web_node()]}},
+    })
+    response = asyncio.run(search_evidence(EvidenceSearchRequest(
+        question="public service",
+        source_ids=["web:area-1"],
+        sources=[source],
+    )))
+    assert response.hits[0].score > 0
+    assert response.hits[0].node.kind == "web_excerpt"
+    assert "score" not in response.hits[0].node.model_dump(mode="json")
+
+
 def test_search_evidence_uses_pageindex_document_tools(monkeypatch):
     monkeypatch.setattr(
         "modules.evidence_retrieval.service.get_pageindex_document_structure",
-        lambda _document_id: '[{"title":"公共服务补位具体化问题：","node_id":"0002","line_num":5,"summary":"项目应补齐公共服务设施。"}]',
+        lambda _document_id: '[{"title":"Public service","node_id":"n1","line_num":5,"summary":"Add public services."}]',
     )
     monkeypatch.setattr(
         "modules.evidence_retrieval.service.get_pageindex_page_content",
-        lambda _document_id, _pages: '[{"page":5,"content":"项目应补齐公共服务设施，支撑居民与游客复合需求。"}]',
+        lambda _document_id, _pages: '[{"page":5,"content":"Add public service facilities."}]',
     )
-
-    response = asyncio.run(search_evidence(EvidenceSearchRequest(question="公共服务", top_k=8, source_ids=["document:doc-1"])))
-
-    assert response.nodes[0].metadata["document_id"] == "doc-1"
-    assert response.nodes[0].evidence_level == "pageindex_node"
-    assert response.nodes[0].citation == "PageIndex line 5"
-    assert "公共服务设施" in response.nodes[0].content
-
-
-def test_search_evidence_returns_empty_without_source_ids():
-    response = asyncio.run(search_evidence(EvidenceSearchRequest(question="公共服务", top_k=8, source_ids=[])))
-
-    assert response.nodes == []
+    response = asyncio.run(search_evidence(EvidenceSearchRequest(
+        question="public service", source_ids=["document:doc-1"]
+    )))
+    node = response.hits[0].node
+    assert node.kind == "document_excerpt"
+    assert node.source_ids == ["document:doc-1"]
+    assert node.data["document_id"] == "doc-1"
 
 
-def test_search_evidence_accepts_source_ids_for_document_pageindex(monkeypatch):
-    monkeypatch.setattr(
-        "modules.evidence_retrieval.service.get_pageindex_document_structure",
-        lambda _document_id: '[{"title":"城市更新政策","node_id":"policy-1","line_num":8,"summary":"鼓励补齐公共服务设施。"}]',
-    )
-    monkeypatch.setattr(
-        "modules.evidence_retrieval.service.get_pageindex_page_content",
-        lambda _document_id, _pages: '[{"page":8,"content":"城市更新政策鼓励补齐公共服务设施和慢行空间。"}]',
-    )
-
-    response = asyncio.run(search_evidence(EvidenceSearchRequest(question="公共服务", top_k=8, source_ids=["document:doc-1"])))
-
-    assert response.nodes[0].source_id == "document:doc-1"
-    assert response.nodes[0].evidence_level == "pageindex_node"
+def test_parser_rejects_legacy_node_and_accepts_unified_node():
+    source = SourceRecord.model_validate({"id": "web:area-1", "source_kind": "web", "status": "ready"})
+    legacy = evidence_node_from_node_payload("policy", source, {
+        "id": "legacy", "source_id": "web:area-1", "source_type": "web", "content": "policy"
+    })
+    current = evidence_node_from_node_payload("policy", source, _web_node())
+    assert legacy is None
+    assert current is not None
+    assert current.id == "web:area-1:node:1"
 
 
-def test_search_evidence_converts_source_payload_evidence_to_nodes():
-    response = asyncio.run(
-        search_evidence(
-            EvidenceSearchRequest(
-                question="夜间活力",
-                top_k=8,
-                source_ids=["database:area-1:test"],
-                sources=[
-                    {
-                        "id": "database:area-1:test",
-                        "title": "数据库资料包",
-                        "status": "ready",
-                        "meta": {
-                            "sourceKind": "database",
-                            "aiPayload": {
-                                "evidence_nodes": [
-                                    {
-                                        "id": "database:area-1:test:node:1",
-                                        "source_id": "database:area-1:test",
-                                        "source_type": "database",
-                                        "title": "夜光活力摘要",
-                                        "content": "该区域夜间活力较强，夜光均值高于周边。",
-                                        "citation": "数据库记录 history-1",
-                                        "metadata": {"record_id": "history-1"},
-                                    }
-                                ]
-                            },
-                        },
-                    }
-                ],
-            )
-        )
-    )
-
-    assert response.nodes[0].source_type == "database"
-    assert response.nodes[0].citation == "数据库记录 history-1"
+def test_unified_node_round_trips_without_aliases():
+    payload = evidence_node_payload_from_node(EvidenceNode.model_validate(_web_node()))
+    assert payload["source_ids"] == ["web:area-1"]
+    assert payload["kind"] == "web_excerpt"
+    for forbidden in ("source_id", "source_type", "metadata", "score", "evidence_level", "warnings"):
+        assert forbidden not in payload
 
 
-def test_search_evidence_reads_only_canonical_evidence_nodes():
-    source_payload = {
-        "id": "web:area-1:test",
-        "title": "网页来源",
-        "status": "ready",
-        "meta": {
-            "sourceKind": "web",
-            "aiPayload": {
-                "evidence_nodes": [
-                    {
-                        "id": "web:area-1:test:node:1",
-                        "source_id": "web:area-1:test",
-                        "source_type": "web",
-                        "title": "政策网页",
-                        "content": "城市更新政策鼓励公共服务补位。",
-                        "evidence_level": "web_chunk",
-                        "citation": "https://example.com/policy",
-                    }
-                ],
-            },
-        },
-    }
-    source = SourceRecord.model_validate(source_payload)
-    response = asyncio.run(
-        search_evidence(
-            EvidenceSearchRequest(
-                question="公共服务",
-                top_k=8,
-                source_ids=["web:area-1:test"],
-                sources=[source_payload],
-            )
-        )
-    )
-
-    assert source.evidence_count == 1
-    assert response.nodes[0].id == "web:area-1:test:node:1"
-    assert response.nodes[0].evidence_level == "web_chunk"
-    assert "旧 evidence view" not in response.nodes[0].content
+def test_chunk_adapters_emit_unified_nodes():
+    knowledge = evidence_node_from_knowledge_chunk(KnowledgeChunk(
+        chunk_id="poi-1", kind="analysis", domain="poi", title="POI", content="Dense services."
+    ))
+    image = evidence_node_from_attachment_chunk(AttachmentChunk(
+        chunk_id="ocr-1", attachment_id="att-1", filename="site.png", title="OCR", content="Main entrance."
+    ))
+    assert knowledge.kind == "analysis_summary"
+    assert knowledge.source_ids == ["current:analysis:poi"]
+    assert image.kind == "image_observation"
+    assert image.source_ids == ["image:att-1"]
 
 
-def test_source_record_counts_canonical_web_source_nodes():
-    source = SourceRecord.model_validate(
-        {
-            "id": "web:area-1:abc",
-            "title": "地区资料",
-            "status": "ready",
-            "meta": {
-                "sourceKind": "web",
-                "aiPayload": {
-                    "evidence_nodes": [{
-                        "id": "web:area-1:abc:node:1",
-                        "source_id": "web:area-1:abc",
-                        "source_type": "web",
-                        "title": "网页",
-                        "content": "政策资料",
-                    }]
-                },
-            },
-        }
-    )
-
-    assert source.source_kind == "web"
-    assert source.evidence_count == 1
-
-
-def test_source_record_does_not_read_legacy_meta_source_kind():
-    source = SourceRecord.model_validate(
-        {
-            "id": "external:legacy-kind",
-            "title": "旧 meta 类型",
-            "status": "ready",
-            "meta": {"sourceKind": "web"},
-        }
-    )
-
-    assert source.source_kind == "unknown"
-
-
-def test_source_record_ignores_legacy_source_field_aliases():
-    source = SourceRecord.model_validate(
-        {
-            "sourceId": "web:legacy",
-            "sourceKind": "web",
-            "title": "旧来源",
-            "status": "ready",
-            "evidenceCount": 3,
-            "locatorSummary": "旧定位摘要",
-            "meta": {
-                "aiPayload": {
-                    "evidenceNodes": [
-                        {
-                            "id": "web:legacy:node:1",
-                            "sourceId": "web:legacy",
-                            "sourceType": "web",
-                            "content": "旧 camel evidence node 不应计数。",
-                        }
-                    ]
-                },
-                "transport": {"evidenceCount": 2},
-            },
-        }
-    )
-
-    assert source.source_id == ""
-    assert source.source_kind == "unknown"
-    assert source.evidence_count == 0
-    assert source.locator_summary == ""
-
-
-def test_evidence_search_request_ignores_legacy_source_ids_alias():
-    request = EvidenceSearchRequest.model_validate({"question": "公共服务", "sourceIds": ["web:legacy"]})
-
-    assert request.source_ids == []
-
-
-def test_search_evidence_maps_web_source_to_web_nodes():
-    response = asyncio.run(
-        search_evidence(
-            EvidenceSearchRequest(
-                question="政策资料",
-                top_k=8,
-                source_ids=["web:area-1:abc"],
-                sources=[
-                    {
-                        "id": "web:area-1:abc",
-                        "title": "地区资料",
-                        "status": "ready",
-                        "meta": {
-                            "sourceKind": "web",
-                            "aiPayload": {
-                                "evidence_nodes": [
-                                    {
-                                        "id": "web:area-1:abc:node:1",
-                                        "source_id": "web:area-1:abc",
-                                        "source_type": "web",
-                                        "title": "政策网页",
-                                        "content": "该区域有城市更新政策资料。",
-                                        "citation": "https://example.com/policy",
-                                    }
-                                ]
-                            },
-                        },
-                    }
-                ],
-            )
-        )
-    )
-
-    assert response.nodes[0].source_id == "web:area-1:abc"
-    assert response.nodes[0].source_type == "web"
-
-
-def test_source_adapters_convert_chunks_to_evidence_nodes():
-    knowledge_node = evidence_node_from_knowledge_chunk(
-        KnowledgeChunk(
-            chunk_id="poi-1",
-            kind="analysis",
-            domain="poi",
-            title="POI 摘要",
-            content="餐饮和生活服务较密集。",
-            evidence_level="derived_metric",
-        ),
-        question="餐饮",
-    )
-    attachment_node = evidence_node_from_attachment_chunk(
-        AttachmentChunk(
-            chunk_id="ocr-1",
-            attachment_id="att-1",
-            filename="现场照片.png",
-            title="OCR 片段",
-            content="入口标识和商业街导视。",
-            metadata={"mime_type": "image/png"},
-        ),
-        question="导视",
-    )
-
-    assert knowledge_node.source_id == "current:analysis:poi"
-    assert knowledge_node.source_type == "system"
-    assert knowledge_node.id == "current:analysis:poi:node:poi-1"
-    assert "chunk_id" not in knowledge_node.metadata
-    assert attachment_node.source_id == "image:att-1"
-    assert attachment_node.source_type == "image"
-    assert attachment_node.id == "image:att-1:node:ocr-1"
-    assert "chunk_id" not in attachment_node.metadata
-
-
-def test_evidence_node_payload_preserves_source_identity():
-    payload = evidence_node_payload_from_node(
-        EvidenceNode(
-            id="web:area-1:node-1",
-            source_id="web:area-1",
-            source_type="web",
-            title="政策网页",
-            content="城市更新政策摘要",
-            summary="政策摘要",
-            metadata={"url": "https://example.com"},
-            locator="https://example.com",
-            evidence_level="web_chunk",
-            citation="https://example.com",
-        )
-    )
-
-    assert payload["id"] == "web:area-1:node-1"
-    assert payload["source_id"] == "web:area-1"
-    assert payload["source_type"] == "web"
-    assert payload["metadata"]["url"] == "https://example.com"
-    assert "sourceId" not in payload
-    assert "sourceType" not in payload
-    assert "evidenceLevel" not in payload
-
-
-def test_evidence_node_payload_parser_uses_current_fields_only():
-    source = SourceRecord.model_validate({"id": "web:canonical", "source_kind": "web", "status": "ready"})
-    legacy_only = evidence_node_from_node_payload(
-        "政策",
-        source,
-        {
-            "nodeId": "legacy-node",
-            "sourceId": "web:legacy",
-            "sourceType": "database",
-            "title": "旧节点",
-            "content": "旧 camel 字段不应覆盖 SourceRecord。",
-            "evidenceLevel": "legacy_level",
-        },
-    )
-    canonical = evidence_node_from_node_payload(
-        "政策",
-        source,
-        {
-            "node_id": "canonical-node",
-            "source_id": "web:canonical-node-source",
-            "source_type": "web",
-            "title": "当前节点",
-            "content": "当前 snake 字段可以进入 EvidenceNode。",
-            "evidence_level": "web_chunk",
-        },
-    )
-
-    assert legacy_only is not None
-    assert legacy_only.id == "web:canonical:evidence:1"
-    assert legacy_only.source_id == "web:canonical"
-    assert legacy_only.source_type == "web"
-    assert legacy_only.evidence_level == "source_evidence"
-    assert canonical is not None
-    assert canonical.id == "canonical-node"
-    assert canonical.source_id == "web:canonical-node-source"
-    assert canonical.evidence_level == "web_chunk"
-
-
-def test_ai_payload_evidence_nodes_round_trip_canonical_node_id():
-    node_payload = evidence_node_payload_from_node(
-        EvidenceNode(
-            id="database:history-1:analysis_history:history-1:record",
-            source_id="database:history-1:analysis_history:history-1",
-            source_type="database",
-            title="历史分析记录",
-            content="夜间活力较强，适合作为夜生活资料来源。",
-            summary="夜间活力较强",
-            metadata={"record_id": "history-1"},
-            locator="analysis_history:history-1",
-            evidence_level="database_record",
-            citation="数据库记录 analysis_history/history-1",
-        )
-    )
-
-    response = asyncio.run(
-        search_evidence(
-            EvidenceSearchRequest(
-                question="夜间活力",
-                top_k=8,
-                source_ids=["database:history-1:analysis_history:history-1"],
-                sources=[
-                    {
-                        "id": "database:history-1:analysis_history:history-1",
-                        "title": "数据库来源",
-                        "status": "ready",
-                        "meta": {
-                            "sourceKind": "database",
-                            "aiPayload": {"evidence_nodes": [node_payload]},
-                        },
-                    }
-                ],
-            )
-        )
-    )
-
-    assert response.nodes[0].id == "database:history-1:analysis_history:history-1:record"
-    assert response.nodes[0].source_type == "database"
-    assert response.nodes[0].locator == "analysis_history:history-1"
-
-
-def test_document_index_node_converts_to_evidence_node_payload():
-    node = evidence_node_from_document_index_node(
-        "document:doc-1",
-        "政策文件",
-        {
-            "node_id": "n1",
-            "parent_node_id": "root",
-            "title": "政策要求",
-            "summary": "政策要求完善公共服务设施。",
-            "page_start": 3,
-            "page_end": 3,
-            "level": 1,
-        },
-    )
-
+def test_document_index_adapter_emits_unified_node():
+    node = evidence_node_from_document_index_node("document:doc-1", "Policy", {
+        "node_id": "n1", "title": "Requirement", "summary": "Add public services.", "page_start": 3, "page_end": 3,
+    })
     assert node is not None
-    payload = evidence_node_payload_from_node(node)
-    assert payload["evidence_level"] == "pageindex_node"
-    assert payload["id"] == "document:doc-1:pageindex:n1"
-    assert payload["source_type"] == "document"
-    assert payload["citation"] == "PageIndex p.3"
+    assert node.kind == "document_excerpt"
+    assert node.locator == {"page_start": 3, "page_end": 3}
+
+
+def test_search_evidence_returns_empty_without_sources():
+    response = asyncio.run(search_evidence(EvidenceSearchRequest(question="public service")))
+    assert response.hits == []
 
 
 def test_search_evidence_rejects_empty_question():
     with pytest.raises(EmptySearchQuestion):
-        asyncio.run(search_evidence(EvidenceSearchRequest(question=" ", top_k=8, source_ids=["document:doc-1"])))
+        asyncio.run(search_evidence(EvidenceSearchRequest(question=" ", source_ids=["document:doc-1"])))

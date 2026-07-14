@@ -20,6 +20,8 @@ NIGHTLIGHT_WARNING = "夜光仅作为活力 proxy，不能直接等同客流。"
 POI_WARNING = "POI 供给不能直接等同市场需求。"
 POPULATION_WARNING = "人口指标不能直接推断消费能力。"
 ROAD_WARNING = "路网句法不能单独替代选址判断。"
+_POI_RECORD_BATCH_SIZE = 50
+_POI_RECORD_MAX_BATCHES = 12
 
 
 def _safe_dict(value: Any) -> Dict[str, Any]:
@@ -128,7 +130,7 @@ def _map_search_context_chunks(artifacts: Dict[str, Any]) -> List[KnowledgeChunk
         or "、".join(names),
         metrics={"groups": groups[:8], "names": names[:48]},
         source_artifacts=["frontend_map_search_context"],
-        warnings=[POI_WARNING, "地名锚点来自前端当前 POI 结果抽样；只能引用读取到的名称，不能扩展成完整地名数据库。"],
+        warnings=[POI_WARNING, "地名锚点来自前端当前 POI 结果的代表性归类；如需核对具体名称，应优先检索 current_pois 生成的 POI 记录 EvidenceNode。"],
         evidence_level="frontend_map_anchor",
     )
     if chunk:
@@ -216,6 +218,66 @@ def _map_search_context_chunks(artifacts: Dict[str, Any]) -> List[KnowledgeChunk
     )
     if chunk:
         chunks.append(chunk)
+    return chunks
+
+
+def _poi_record_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> List[KnowledgeChunk]:
+    pois = _safe_list(artifacts.get("current_pois") or snapshot.pois)
+    if not pois:
+        return []
+    source_refs = _source_present(artifacts, snapshot, "current_pois")
+    if snapshot.pois and "snapshot.pois" not in source_refs:
+        source_refs.append("snapshot.pois")
+    chunks: List[KnowledgeChunk] = []
+    max_records = _POI_RECORD_BATCH_SIZE * _POI_RECORD_MAX_BATCHES
+    records = [_safe_dict(item) for item in pois[:max_records] if isinstance(item, dict)]
+    for batch_index in range(0, len(records), _POI_RECORD_BATCH_SIZE):
+        batch = records[batch_index : batch_index + _POI_RECORD_BATCH_SIZE]
+        rows: List[Dict[str, Any]] = []
+        content_parts: List[str] = []
+        for offset, poi in enumerate(batch):
+            name = str(poi.get("name") or poi.get("title") or "").strip()
+            poi_type = str(poi.get("type") or poi.get("type_label") or poi.get("category") or poi.get("category_label") or "").strip()
+            address = str(poi.get("address") or poi.get("adname") or poi.get("district") or "").strip()
+            lng = poi.get("lng") if poi.get("lng") is not None else (_safe_list(poi.get("location"))[0] if _safe_list(poi.get("location")) else None)
+            lat = poi.get("lat") if poi.get("lat") is not None else (_safe_list(poi.get("location"))[1] if len(_safe_list(poi.get("location"))) > 1 else None)
+            row = {
+                "index": batch_index + offset,
+                "name": name,
+                "type": poi_type,
+                "address": address,
+                "lng": lng,
+                "lat": lat,
+            }
+            rows.append(row)
+            content_parts.append(" ".join(part for part in (name, poi_type, address) if part).strip())
+        chunk = _chunk(
+            chunk_id=f"session:current:analysis:poi.records.{(batch_index // _POI_RECORD_BATCH_SIZE) + 1}",
+            kind="analysis",
+            domain="poi",
+            title=f"当前 POI 记录 {batch_index + 1}-{batch_index + len(batch)}",
+            content="；".join(part for part in content_parts if part),
+            metrics={"rows": rows, "record_count": len(rows), "total_available": len(pois)},
+            source_artifacts=source_refs,
+            warnings=[POI_WARNING, "该 EvidenceNode 来自当前分析范围内已加载的 POI 结果；可引用其中实际出现的名称，但不能扩展成完整城市地名数据库。"],
+            evidence_level="current_poi_record",
+        )
+        if chunk:
+            chunks.append(chunk)
+    if len(pois) > max_records:
+        overflow = _chunk(
+            chunk_id="session:current:analysis:poi.records.limit",
+            kind="analysis",
+            domain="poi",
+            title="当前 POI 记录索引截断说明",
+            content=f"当前 POI 共 {len(pois)} 条，已为检索索引保留前 {max_records} 条。统计分析仍应使用摘要与结构化指标。",
+            metrics={"total_available": len(pois), "indexed_count": max_records},
+            source_artifacts=source_refs,
+            warnings=[POI_WARNING],
+            evidence_level="index_limit_note",
+        )
+        if overflow:
+            chunks.append(overflow)
     return chunks
 
 
@@ -333,6 +395,7 @@ def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any])
     for item in raw_chunks:
         if item is not None:
             chunks.append(item)
+    chunks.extend(_poi_record_chunks(snapshot, artifacts))
     chunks.extend(_map_search_context_chunks(artifacts))
     return chunks
 

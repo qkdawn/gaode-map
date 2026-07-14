@@ -3,10 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from .capability_run_comparison import CapabilityRunComparison, compare_run_details
-from .capability_runs import CapabilityRun, CapabilityRunDetail
+from .analysis_run_comparison import AnalysisRunComparison, compare_run_details
+from .analysis_runs import AnalysisRun, AnalysisRunDetail
 from .schemas import AgentTurnRequest, AgentTurnResponse
-from store.capability_run_repo import capability_run_repo
+from store.analysis_run_repo import analysis_run_repo
 
 _STALE_ELIGIBLE_STATUSES = {"completed", "completed_with_warnings"}
 
@@ -16,14 +16,14 @@ def _mapping(value: Any) -> dict[str, Any]:
 
 
 def _artifact_payloads(
-    response: AgentTurnResponse, run: CapabilityRun
+    response: AgentTurnResponse, run: AnalysisRun
 ) -> dict[str, Any]:
     panels = _mapping(response.output.panel_payloads)
     deliverables = _mapping(panels.get("stage1_deliverables"))
     payloads: dict[str, Any] = {
         "stage1-project-brief": panels.get("stage1_project_brief"),
         "stage1-source-readiness": panels.get("stage1_readiness"),
-        "stage1-evidence-ledger": panels.get("stage1_evidence_ledger"),
+        "stage1-evidence-nodes": panels.get("stage1_evidence_nodes"),
         "stage1-conflict-register": panels.get("stage1_conflict_register"),
         "stage1-hard-constraint-screening": panels.get("stage1_hard_constraint_screening"),
         "stage1-quality-audit": panels.get("stage1_quality_audit"),
@@ -48,15 +48,15 @@ def _artifact_payloads(
     }
 
 
-def persist_capability_run_response(
+def persist_analysis_run_response(
     payload: AgentTurnRequest,
     response: AgentTurnResponse,
     *,
-    repo=capability_run_repo,
+    repo=analysis_run_repo,
 ) -> AgentTurnResponse:
     """Persist a capability run and its resolved artifact payloads exactly once."""
 
-    manifest = _mapping(response.output.panel_payloads.get("capability_run"))
+    manifest = _mapping(response.output.panel_payloads.get("analysis_run"))
     history_id = str(
         payload.history_id
         or manifest.get("configuration_snapshot", {}).get("history_id")
@@ -64,16 +64,17 @@ def persist_capability_run_response(
     ).strip()
     if not manifest or not history_id:
         return response
-    run = CapabilityRun(**manifest)
+    run = AnalysisRun(**manifest)
     repo.save(
         history_id=history_id,
         manifest=run.model_dump(mode="json"),
         artifact_payloads=_artifact_payloads(response, run),
+        execution_request=payload.model_dump(mode="json"),
     )
     return response
 
 
-def _mark_stale(run: CapabilityRun, *, history_id: str, repo) -> CapabilityRun:
+def _mark_stale(run: AnalysisRun, *, history_id: str, repo) -> AnalysisRun:
     if run.status not in _STALE_ELIGIBLE_STATUSES:
         return run
     changed = repo.changed_input_artifact_ids(
@@ -96,28 +97,28 @@ def _mark_stale(run: CapabilityRun, *, history_id: str, repo) -> CapabilityRun:
     )
 
 
-def list_capability_runs(
+def list_analysis_runs(
     history_id: str,
     *,
     capability_id: str = "",
-    repo=capability_run_repo,
-) -> list[CapabilityRun]:
+    repo=analysis_run_repo,
+) -> list[AnalysisRun]:
     manifests = repo.list(history_id, capability_id=capability_id)
     return [
-        _mark_stale(CapabilityRun(**item), history_id=history_id, repo=repo)
+        _mark_stale(AnalysisRun(**item), history_id=history_id, repo=repo)
         for item in manifests
     ]
 
 
-def get_capability_run(
+def get_analysis_run(
     run_id: str,
     *,
-    repo=capability_run_repo,
-) -> CapabilityRunDetail | None:
+    repo=analysis_run_repo,
+) -> AnalysisRunDetail | None:
     payload = repo.get(run_id)
     if not isinstance(payload, dict):
         return None
-    detail = CapabilityRunDetail(**payload)
+    detail = AnalysisRunDetail(**payload)
     return detail.model_copy(
         update={
             "run": _mark_stale(detail.run, history_id=detail.history_id, repo=repo),
@@ -125,16 +126,16 @@ def get_capability_run(
         deep=True,
     )
 
-def compare_capability_runs(
+def compare_analysis_runs(
     base_run_id: str,
     target_run_id: str,
     *,
-    repo=capability_run_repo,
-) -> CapabilityRunComparison | None:
+    repo=analysis_run_repo,
+) -> AnalysisRunComparison | None:
     """Compare two immutable Runs only when both records exist."""
 
-    base = get_capability_run(base_run_id, repo=repo)
-    target = get_capability_run(target_run_id, repo=repo)
+    base = get_analysis_run(base_run_id, repo=repo)
+    target = get_analysis_run(target_run_id, repo=repo)
     if base is None or target is None:
         return None
     return compare_run_details(base, target)

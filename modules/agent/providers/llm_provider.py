@@ -98,7 +98,7 @@ async def generate_title_with_llm(
             {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
         ],
     }
-    async with httpx.AsyncClient(timeout=float(settings.ai_timeout_s or 60)) as client:
+    async with httpx.AsyncClient(timeout=None) as client:
         response = await client.post(f"{base_url}/chat/completions", headers=headers, json=request_body)
         response.raise_for_status()
         payload = response.json()
@@ -115,14 +115,6 @@ def _with_provider_thinking(request_body: Dict[str, Any], *, enabled: bool) -> D
     if enabled and model != "deepseek-reasoner":
         body["thinking"] = {"type": "enabled"}
     return body
-
-
-def _resolve_httpx_timeout(timeout_s: float | None) -> float | None:
-    if timeout_s is not None:
-        timeout_value = float(timeout_s)
-        return None if timeout_value <= 0 else timeout_value
-    settings_timeout = float(settings.ai_timeout_s or 60)
-    return None if settings_timeout <= 0 else settings_timeout
 
 
 async def _iter_sse_data(response: httpx.Response):
@@ -268,7 +260,6 @@ async def _invoke_json_role(
     reasoning_id: str,
     enable_thinking: bool = True,
     stream: bool = True,
-    timeout_s: float | None = None,
     runtime: LLMRuntimeConfig | None = None,
 ) -> Dict[str, Any]:
     effective = runtime or LLMRuntimeConfig.from_settings()
@@ -301,9 +292,8 @@ async def _invoke_json_role(
             {"role": "user", "content": user_content},
         ],
     }
-    effective_timeout = timeout_s if timeout_s is not None else effective.timeout_s
     enable_thinking = bool(enable_thinking and effective.thinking_enabled)
-    async with httpx.AsyncClient(timeout=_resolve_httpx_timeout(effective_timeout)) as client:
+    async with httpx.AsyncClient(timeout=None) as client:
         if stream:
             payload = await _stream_chat_completion(
                 client=client,

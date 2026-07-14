@@ -107,6 +107,7 @@ def create_document_upload(
     content_type: str,
     fileobj: BinaryIO,
     document_role: DocumentRole,
+    history_id: str = "",
     title: str | None = None,
 ) -> DocumentRecord:
     safe_name = _safe_file_name(filename)
@@ -128,6 +129,7 @@ def create_document_upload(
             file_name=safe_name,
             file_type=file_type,
             file_path=str(file_path),
+            history_id=str(history_id or "").strip() or None,
             document_role=document_role.value,
             upload_time=now,
             status="uploaded",
@@ -149,14 +151,14 @@ def create_document_upload(
         raise
 
 
-def list_documents() -> List[DocumentRecord]:
+def list_documents(history_id: str = "") -> List[DocumentRecord]:
     session = SessionLocal()
     try:
-        rows = (
-            session.query(Document)
-            .order_by(Document.upload_time.desc(), Document.id.desc())
-            .all()
-        )
+        query = session.query(Document)
+        normalized_history_id = str(history_id or "").strip()
+        if normalized_history_id:
+            query = query.filter(Document.history_id == normalized_history_id)
+        rows = query.order_by(Document.upload_time.desc(), Document.id.desc()).all()
         return [_record_payload(row) for row in rows]
     finally:
         session.close()

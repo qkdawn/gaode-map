@@ -88,7 +88,7 @@ def run_arcgis_road_syntax_webgl(
     )
 
     try:
-        with httpx.Client(timeout=float(bridge_timeout)) as client:
+        with httpx.Client(timeout=float(bridge_timeout), trust_env=False) as client:
             resp = client.post(endpoint, headers=headers, json=payload)
     except httpx.TimeoutException as exc:
         raise ArcGISRoadSyntaxBridgeError(f"ArcGIS road-syntax bridge timeout after {bridge_timeout}s") from exc

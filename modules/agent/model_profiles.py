@@ -247,7 +247,6 @@ def resolve_model_runtime(profile_id: str = "") -> tuple[AgentModelProfileView, 
             api_key=str(settings.ai_glm_api_key or "").strip(),
             model=view.model,
             thinking_enabled=bool(settings.ai_glm_thinking_enabled),
-            timeout_s=int(settings.ai_timeout_s or 60),
         )
     if requested and requested != SYSTEM_PROFILE_ID:
         row = agent_model_profile_repo.get_record(requested)
@@ -265,7 +264,6 @@ def resolve_model_runtime(profile_id: str = "") -> tuple[AgentModelProfileView, 
             api_key=api_key,
             model=view.model,
             thinking_enabled=bool(settings.ai_thinking_enabled),
-            timeout_s=int(settings.ai_timeout_s or 60),
         )
     if not requested:
         personal_default = next((row for row in agent_model_profile_repo.list_records() if row.get("enabled") and row.get("is_default")), None)
@@ -303,7 +301,6 @@ async def test_model_profile(payload: AgentModelProfileTestRequest) -> AgentMode
             api_key=payload.api_key.strip(),
             model=payload.model.strip(),
             thinking_enabled=False,
-            timeout_s=min(int(settings.ai_timeout_s or 60), 30),
         )
     client = get_llm_provider_client(runtime=runtime)
     if client is None:

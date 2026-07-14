@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .capability_runs import CapabilityArtifactRef, CapabilityArtifactSnapshot
+from .analysis_runs import AnalysisArtifactRef, AnalysisArtifactSnapshot
 from .schemas import AgentTurnRequest, CapabilityInputSelection
 
 _RESOLVABLE_STATUSES = {"completed", "completed_with_warnings"}
@@ -36,7 +36,7 @@ class CapabilityInputResolution(BaseModel):
         "resolved", "missing", "invalid", "recalculate_required", "ignored"
     ]
     selected_run_id: str = ""
-    artifact_refs: list[CapabilityArtifactRef] = Field(default_factory=list)
+    artifact_refs: list[AnalysisArtifactRef] = Field(default_factory=list)
     available_versions: list[CapabilityInputVersionOption] = Field(default_factory=list)
     diagnostics: list[str] = Field(default_factory=list)
 
@@ -51,7 +51,7 @@ class ResolvedCapabilityInputs(BaseModel):
     artifact_payloads: dict[str, Any] = Field(default_factory=dict, exclude=True)
 
     @property
-    def input_artifact_refs(self) -> list[CapabilityArtifactRef]:
+    def input_artifact_refs(self) -> list[AnalysisArtifactRef]:
         return [
             item.model_copy(deep=True)
             for resolution in self.resolutions
@@ -85,7 +85,7 @@ def _selection_map(payload: AgentTurnRequest) -> tuple[dict[str, CapabilityInput
     return selections, diagnostics
 
 
-def _artifact_snapshots(detail: Any, artifact_ids: set[str]) -> list[CapabilityArtifactSnapshot]:
+def _artifact_snapshots(detail: Any, artifact_ids: set[str]) -> list[AnalysisArtifactSnapshot]:
     return [
         item
         for item in detail.artifacts
@@ -128,10 +128,10 @@ def resolve_capability_inputs(
     from .capability_catalog import get_analysis_capability
 
     if list_runs is None or get_run is None:
-        from .capability_run_service import get_capability_run, list_capability_runs
+        from .analysis_run_service import get_analysis_run, list_analysis_runs
 
-        list_runs = list_runs or list_capability_runs
-        get_run = get_run or get_capability_run
+        list_runs = list_runs or list_analysis_runs
+        get_run = get_run or get_analysis_run
 
     capability = get_analysis_capability(capability_id)
     requirements = [

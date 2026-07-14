@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
-from .capability_run_service import persist_capability_run_response
+from .analysis_run_service import persist_analysis_run_response
 from .providers.llm_provider import (
     generate_title_with_llm,
     is_llm_enabled,
@@ -450,7 +450,7 @@ async def persist_main_agent_loop_response(
     *,
     conversation_profile: ConversationExecutionProfile | None = None,
 ) -> AgentTurnResponse:
-    persist_capability_run_response(payload, response)
+    persist_analysis_run_response(payload, response)
     session_id = _normalize_text(payload.conversation_id, max_length=128)
     if not session_id:
         return response

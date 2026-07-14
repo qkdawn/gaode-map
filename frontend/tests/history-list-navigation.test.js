@@ -6,6 +6,10 @@ import {
   createAnalysisHistoryListInitialState,
   createAnalysisHistoryListMethods,
 } from '../src/features/history/list.js'
+import {
+  ANALYSIS_HISTORY_STATE_KEYS,
+  createAnalysisHistoryInitialState,
+} from '../src/stores/analysis/history.js'
 
 const historyListMethods = createAnalysisHistoryListMethods()
 
@@ -134,4 +138,19 @@ test('loadHistoryList surfaces database failures instead of showing empty state'
   } finally {
     global.fetch = previousFetch
   }
+})
+
+test('history store exposes every history module state key to the component bridge', () => {
+  const state = createAnalysisHistoryInitialState()
+
+  assert.equal(Object.hasOwn(state, 'historyLoadError'), true)
+  assert.equal(Object.hasOwn(state, 'historyRestoreProgress'), true)
+  assert.equal(Object.hasOwn(state, 'currentHistoryPolygon'), true)
+  assert.equal(Object.hasOwn(state, 'currentHistoryPolygonGcj02'), true)
+  assert.equal(Object.hasOwn(state, 'currentHistoryAvailablePoiYears'), true)
+  assert.equal(ANALYSIS_HISTORY_STATE_KEYS.includes('historyLoadError'), true)
+  assert.equal(ANALYSIS_HISTORY_STATE_KEYS.includes('historyRestoreProgress'), true)
+  assert.equal(ANALYSIS_HISTORY_STATE_KEYS.includes('currentHistoryPolygon'), true)
+  assert.equal(ANALYSIS_HISTORY_STATE_KEYS.includes('currentHistoryPolygonGcj02'), true)
+  assert.equal(ANALYSIS_HISTORY_STATE_KEYS.includes('currentHistoryAvailablePoiYears'), true)
 })

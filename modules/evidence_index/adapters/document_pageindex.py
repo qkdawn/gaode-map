@@ -53,18 +53,18 @@ class DocumentPageIndexAdapter(EvidenceSourceAdapter):
         for score, node in scored[:5]:
             if score <= 0:
                 continue
-            evidence_node = self._node_from_pageindex_hit(node, float(score), manifest.source_id)
+            evidence_node = self._node_from_pageindex_hit(node, manifest.source_id)
             if evidence_node is None:
                 continue
             records.append(
                 EvidenceIndexRecord(
                     record_id=evidence_node.id,
-                    source_id=evidence_node.source_id,
+                    source_id=evidence_node.source_ids[0],
                     source_kind="document",
                     title=evidence_node.title,
                     summary=evidence_node.summary,
-                    content_ref=evidence_node.locator,
-                    metadata=dict(evidence_node.metadata or {}),
+                    content_ref=str(evidence_node.locator),
+                    metadata=dict(evidence_node.data or {}),
                     scores={"structure": float(score), "total": float(score)},
                     node=evidence_node,
                 )
@@ -83,10 +83,10 @@ class DocumentPageIndexAdapter(EvidenceSourceAdapter):
         raw_node_id = record_id[len(expected_prefix):] if record_id.startswith(expected_prefix) else record_id
         for node in _pageindex_collect_nodes(structure):
             if str(node.get("node_id") or node.get("line_num") or "").strip() == raw_node_id:
-                return self._node_from_pageindex_hit(node, 0.0, f"document:{self._document_id}")
+                return self._node_from_pageindex_hit(node, f"document:{self._document_id}")
         return None
 
-    def _node_from_pageindex_hit(self, node: dict, score: float, source_id: str) -> EvidenceNode | None:
+    def _node_from_pageindex_hit(self, node: dict, source_id: str) -> EvidenceNode | None:
         line_num = int(node.get("line_num") or 0)
         if line_num <= 0:
             return None
@@ -102,21 +102,17 @@ class DocumentPageIndexAdapter(EvidenceSourceAdapter):
             return None
         return EvidenceNode(
             id=f"document:{self._document_id}:pageindex:{node.get('node_id') or line_num}",
-            source_id=source_id or f"document:{self._document_id}",
-            source_type="document",
+            kind="document_excerpt",
+            source_ids=[source_id or f"document:{self._document_id}"],
             title=str(node.get("title") or "PageIndex 节点"),
             content=text[:1800],
             summary=str(node.get("summary") or text[:260]),
-            metadata={
+            data={
                 "document_id": self._document_id,
                 "node_id": node.get("node_id"),
                 "line_num": line_num,
-                "page_start": max(1, line_num),
-                "page_end": max(1, line_num),
             },
-            locator=f"pageindex:{line_num}",
-            score=score,
-            evidence_level="pageindex_node",
+            locator={"page_start": max(1, line_num), "page_end": max(1, line_num)},
             citation=f"PageIndex line {line_num}",
         )
 

@@ -39,16 +39,15 @@ class ImageVisualIndexAdapter(EvidenceSourceAdapter):
             keyword_score = _score_image_node(query.question, node)
             if keyword_score <= 0:
                 continue
-            node.score = keyword_score
             records.append(
                 EvidenceIndexRecord(
                     record_id=_record_key(node),
-                    source_id=node.source_id,
+                    source_id=node.source_ids[0],
                     source_kind="image",
                     title=node.title,
                     summary=node.summary,
                     content_ref=node.locator or node.id,
-                    metadata=dict(node.metadata or {}),
+                    metadata=dict(node.data or {}),
                     scores={"keyword": keyword_score, "total": keyword_score},
                     node=node,
                 )
@@ -62,7 +61,7 @@ class ImageVisualIndexAdapter(EvidenceSourceAdapter):
             return None
         for node in self._nodes():
             keys = {node.id, node.locator, _record_key(node)}
-            metadata = node.metadata if isinstance(node.metadata, dict) else {}
+            metadata = node.data if isinstance(node.data, dict) else {}
             for key in ("attachment_id", "filename", "bbox_id", "region_id"):
                 value = str(metadata.get(key) or "").strip()
                 if value:
@@ -76,12 +75,12 @@ class ImageVisualIndexAdapter(EvidenceSourceAdapter):
             node
             for index, item in enumerate(evidence_node_payloads_from_source(self._source), start=1)
             for node in [evidence_node_from_node_payload("", self._source, item, index=index)]
-            if node is not None and node.source_type == "image"
+            if node is not None and node.kind == "image_observation"
         ]
 
 
 def _record_key(node: EvidenceNode) -> str:
-    metadata = node.metadata if isinstance(node.metadata, dict) else {}
+    metadata = node.data if isinstance(node.data, dict) else {}
     for key in ("bbox_id", "region_id", "attachment_id"):
         value = str(metadata.get(key) or "").strip()
         if value:
@@ -90,7 +89,7 @@ def _record_key(node: EvidenceNode) -> str:
 
 
 def _score_image_node(question: str, node: EvidenceNode) -> float:
-    metadata = node.metadata if isinstance(node.metadata, dict) else {}
+    metadata = node.data if isinstance(node.data, dict) else {}
     haystack = " ".join(
         str(part or "")
         for part in [
@@ -98,7 +97,7 @@ def _score_image_node(question: str, node: EvidenceNode) -> float:
             node.summary,
             node.content,
             node.locator,
-            node.evidence_level,
+            node.kind,
             metadata.get("filename"),
             metadata.get("mime_type"),
             metadata.get("ocr_engine"),

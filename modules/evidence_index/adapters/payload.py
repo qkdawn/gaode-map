@@ -6,6 +6,7 @@ from modules.evidence_index.adapters.base import EvidenceSourceAdapter
 from modules.evidence_index.manifests import manifest_from_source
 from modules.evidence_index.schemas import EvidenceIndexRecord, EvidenceSearchQuery, SourceIndexManifest
 from modules.evidence_retrieval.adapters import evidence_nodes_from_source
+from modules.evidence_retrieval.adapters import evidence_search_score
 from modules.evidence_retrieval.adapters import evidence_node_from_node_payload
 from modules.evidence_retrieval.adapters import evidence_node_payloads_from_source
 from modules.evidence_retrieval.schemas import SourceRecord
@@ -36,18 +37,19 @@ class PayloadEvidenceAdapter(EvidenceSourceAdapter):
         del manifest
         records: List[EvidenceIndexRecord] = []
         for node in evidence_nodes_from_source(query.question, self._source):
-            if node.score <= 0:
+            score = evidence_search_score(query.question, node)
+            if score <= 0:
                 continue
             records.append(
                 EvidenceIndexRecord(
                     record_id=node.id,
-                    source_id=node.source_id,
-                    source_kind=node.source_type,
+                    source_id=node.source_ids[0],
+                    source_kind=self._source.source_kind,
                     title=node.title,
                     summary=node.summary,
-                    content_ref=node.locator or node.id,
-                    metadata=dict(node.metadata or {}),
-                    scores={"keyword": float(node.score or 0.0), "total": float(node.score or 0.0)},
+                    content_ref=str(node.locator or node.id),
+                    metadata=dict(node.data or {}),
+                    scores={"keyword": score, "total": score},
                     node=node,
                 )
             )

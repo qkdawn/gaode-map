@@ -4,7 +4,57 @@ import asyncio
 
 from modules.evidence_index import EvidenceIndexService, EvidenceSearchQuery, manifest_from_source
 from modules.evidence_index import attach_index_manifest, build_source_index_manifest_payload
-from modules.evidence_retrieval.schemas import SourceRecord
+from modules.evidence_retrieval.schemas import SourceRecord as _SourceRecord
+
+
+_KIND_BY_SOURCE = {
+    "system": "dataset_record",
+    "document": "document_excerpt",
+    "image": "image_observation",
+    "web": "web_excerpt",
+    "database": "database_record",
+    "package": "package_item",
+}
+
+
+def _canonicalize(value):
+    if isinstance(value, list):
+        return [_canonicalize(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    payload = {key: _canonicalize(item) for key, item in value.items()}
+    nodes = payload.get("evidence_nodes")
+    if isinstance(nodes, list):
+        canonical = []
+        for raw in nodes:
+            node = dict(raw)
+            if "kind" not in node:
+                source_id = str(node.pop("source_id", "") or "")
+                source_type = str(node.pop("source_type", "system") or "system")
+                node.update({
+                    "kind": _KIND_BY_SOURCE.get(source_type, "dataset_record"),
+                    "run_id": "",
+                    "source_ids": [source_id],
+                    "metric_ids": [],
+                    "data": node.pop("metadata", {}),
+                    "time_scope": {},
+                    "spatial_scope": {},
+                    "method": node.pop("evidence_level", ""),
+                    "quality_flags": [],
+                })
+                node.pop("score", None)
+                node.pop("warnings", None)
+            canonical.append(node)
+        payload["evidence_nodes"] = canonical
+    return payload
+
+
+def _source_record(value):
+    return _SourceRecord.model_validate(_canonicalize(value))
+
+
+def _nodes(response):
+    return [hit.node for hit in response.hits]
 
 
 def test_evidence_index_service_unifies_payload_and_pageindex_adapters():
@@ -23,7 +73,7 @@ def test_evidence_index_service_unifies_payload_and_pageindex_adapters():
                 top_k=10,
                 source_ids=["document:doc-1", "web:area-1"],
                 sources=[
-                    SourceRecord.model_validate(
+                    _source_record(
                         {
                             "id": "web:area-1",
                             "title": "网页来源",
@@ -49,10 +99,10 @@ def test_evidence_index_service_unifies_payload_and_pageindex_adapters():
         )
     )
 
-    node_ids = {node.id for node in response.nodes}
+    node_ids = {node.id for node in _nodes(response)}
     assert "document:doc-1:pageindex:n1" in node_ids
     assert "web:area-1:node:1" in node_ids
-    assert {node.source_type for node in response.nodes} == {"document", "web"}
+    assert {node.kind for node in _nodes(response)} == {"document_excerpt", "web_excerpt"}
 
 
 def test_evidence_index_service_reads_payload_and_pageindex_nodes():
@@ -68,7 +118,7 @@ def test_evidence_index_service_reads_payload_and_pageindex_nodes():
         question="公共服务",
         source_ids=["document:doc-1", "web:area-1"],
         sources=[
-            SourceRecord.model_validate(
+            _source_record(
                 {
                     "id": "web:area-1",
                     "title": "网页来源",
@@ -97,14 +147,14 @@ def test_evidence_index_service_reads_payload_and_pageindex_nodes():
     manifests = service.manifests(query)
 
     assert page_node is not None
-    assert page_node.evidence_level == "pageindex_node"
+    assert page_node.kind == "document_excerpt"
     assert web_node is not None
-    assert web_node.source_type == "web"
+    assert web_node.kind == "web_excerpt"
     assert {manifest.native_index_kind for manifest in manifests} == {"pageindex", "payload_index"}
 
 
 def test_evidence_index_service_ignores_legacy_evidence_nodes_alias():
-    source = SourceRecord.model_validate(
+    source = _source_record(
         {
             "id": "web:area-legacy",
             "title": "旧网页来源",
@@ -131,7 +181,7 @@ def test_evidence_index_service_ignores_legacy_evidence_nodes_alias():
     response = asyncio.run(service.search(query))
     node = asyncio.run(service.read("web:area-legacy:node:1", query))
 
-    assert response.nodes == []
+    assert _nodes(response) == []
     assert node is None
 
 
@@ -157,7 +207,7 @@ def test_index_manifest_payload_uses_canonical_key_only():
 
 
 def test_manifest_from_source_ignores_legacy_manifest_fields():
-    legacy_key_source = SourceRecord.model_validate(
+    legacy_key_source = _source_record(
         {
             "id": "web:area-legacy",
             "source_kind": "web",
@@ -173,7 +223,7 @@ def test_manifest_from_source_ignores_legacy_manifest_fields():
             },
         }
     )
-    legacy_kind_source = SourceRecord.model_validate(
+    legacy_kind_source = _source_record(
         {
             "id": "external:area-kind",
             "meta": {
@@ -239,8 +289,8 @@ def test_evidence_index_service_uses_declared_source_manifest():
         question="公共服务",
         source_ids=["image:att-1", "document:doc-1"],
         sources=[
-            SourceRecord.model_validate({"id": "image:att-1", "source_kind": "image", "status": "ready", "meta": {"aiPayload": image_payload}}),
-            SourceRecord.model_validate({"id": "document:doc-1", "source_kind": "document", "status": "ready", "meta": {"aiPayload": document_payload}}),
+            _source_record({"id": "image:att-1", "source_kind": "image", "status": "ready", "meta": {"aiPayload": image_payload}}),
+            _source_record({"id": "document:doc-1", "source_kind": "document", "status": "ready", "meta": {"aiPayload": document_payload}}),
         ],
     )
 
@@ -279,7 +329,7 @@ def test_evidence_index_service_routes_image_visual_index_manifest():
             read_modes=["node_id", "attachment_id", "locator", "bbox"],
         ),
     )
-    source = SourceRecord.model_validate({"id": "image:att-1", "source_kind": "image", "status": "ready", "meta": {"aiPayload": image_payload}})
+    source = _source_record({"id": "image:att-1", "source_kind": "image", "status": "ready", "meta": {"aiPayload": image_payload}})
     service = EvidenceIndexService()
     query = EvidenceSearchQuery(question="沿街商业", source_ids=["image:att-1"], sources=[source])
 
@@ -288,7 +338,7 @@ def test_evidence_index_service_routes_image_visual_index_manifest():
     by_locator = asyncio.run(service.read("image:bbox:ocr-1", query))
     manifests = service.manifests(query)
 
-    assert response.nodes[0].id == "image:att-1:node:ocr-1"
+    assert _nodes(response)[0].id == "image:att-1:node:ocr-1"
     assert by_bbox is not None
     assert by_bbox.id == "image:att-1:node:ocr-1"
     assert by_locator is not None
@@ -320,7 +370,7 @@ def test_evidence_index_service_routes_webpage_index_manifest():
             storage_ref={"urls": ["https://example.com/policy"]},
         ),
     )
-    source = SourceRecord.model_validate({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
+    source = _source_record({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
     service = EvidenceIndexService()
     query = EvidenceSearchQuery(question="公共服务", source_ids=["web:area-1"], sources=[source])
 
@@ -329,7 +379,7 @@ def test_evidence_index_service_routes_webpage_index_manifest():
     by_url = asyncio.run(service.read("https://example.com/policy", query))
     manifests = service.manifests(query)
 
-    assert response.nodes[0].id == "web:area-1:web:node-1"
+    assert _nodes(response)[0].id == "web:area-1:web:node-1"
     assert by_node_id is not None
     assert by_url is not None
     assert by_url.id == "web:area-1:web:node-1"
@@ -342,7 +392,7 @@ def test_evidence_index_service_routes_database_record_index_manifest():
             "evidence_nodes": [
                 {
                     "id": "database:history-1:history:summary",
-                    "source_id": "database:history-1:history",
+                    "source_id": "database:history-1:package",
                     "source_type": "database",
                     "title": "当前分析区域详情",
                     "content": "区域分析包含 POI 总量和公共服务配置。",
@@ -361,7 +411,7 @@ def test_evidence_index_service_routes_database_record_index_manifest():
             read_modes=["node_id", "record_id", "locator"],
         ),
     )
-    source = SourceRecord.model_validate(
+    source = _source_record(
         {
             "id": "database:history-1:package",
             "source_kind": "database",
@@ -377,7 +427,7 @@ def test_evidence_index_service_routes_database_record_index_manifest():
     by_locator = asyncio.run(service.read("analysis_history:history-1", query))
     manifests = service.manifests(query)
 
-    assert response.nodes[0].source_type == "database"
+    assert _nodes(response)[0].kind == "database_record"
     assert by_record is not None
     assert by_record.id == "database:history-1:history:summary"
     assert by_locator is not None
@@ -420,7 +470,7 @@ def test_evidence_index_service_routes_spatial_package_index_manifest():
             read_modes=["node_id", "carrier_id", "item_id", "locator"],
         ),
     )
-    source = SourceRecord.model_validate(
+    source = _source_record(
         {
             "id": "package:poi-road-carriers:test",
             "source_kind": "package",
@@ -437,7 +487,7 @@ def test_evidence_index_service_routes_spatial_package_index_manifest():
     by_locator = asyncio.run(service.read("package:item:poi-1", query))
     manifests = service.manifests(query)
 
-    assert response.nodes[0].source_type == "package"
+    assert _nodes(response)[0].kind in {"package_summary", "package_item", "spatial_carrier"}
     assert by_carrier is not None
     assert by_carrier.id == "package:poi-road-carriers:test:package:carrier:corridor_01"
     assert by_item is not None
@@ -469,7 +519,7 @@ def test_evidence_index_service_uses_manifest_routing_without_explicit_source_id
             read_modes=["node_id", "url"],
         ),
     )
-    source = SourceRecord.model_validate({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
+    source = _source_record({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
     service = EvidenceIndexService()
     query = EvidenceSearchQuery(question="公共服务", sources=[source])
 
@@ -477,7 +527,7 @@ def test_evidence_index_service_uses_manifest_routing_without_explicit_source_id
     by_url = asyncio.run(service.read("https://example.com/policy", query))
     manifests = service.manifests(query)
 
-    assert response.nodes[0].id == "web:area-1:web:node-1"
+    assert _nodes(response)[0].id == "web:area-1:web:node-1"
     assert by_url is not None
     assert manifests[0].native_index_kind == "webpage_index"
 
@@ -504,7 +554,7 @@ def test_evidence_index_service_indexes_source_and_explains_read_path():
             read_modes=["node_id", "url"],
         ),
     )
-    source = SourceRecord.model_validate({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
+    source = _source_record({"id": "web:area-1", "source_kind": "web", "status": "ready", "meta": {"aiPayload": web_payload}})
     service = EvidenceIndexService()
     query = EvidenceSearchQuery(question="公共服务", source_ids=["web:area-1"], sources=[source])
 

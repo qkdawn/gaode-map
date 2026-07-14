@@ -23,8 +23,8 @@ def _chunk_payload(chunk: KnowledgeChunk) -> Dict[str, Any]:
     evidence_node = _node_payload(node)
     return {
         "node_id": evidence_node["id"],
-        "source_id": evidence_node["source_id"],
-        "source_type": evidence_node["source_type"],
+        "source_ids": evidence_node["source_ids"],
+        "kind": evidence_node["kind"],
         "evidence_node": evidence_node,
     }
 
@@ -42,7 +42,7 @@ def _source_id_for_domain(domain: str, *, prefix: str = "current:analysis") -> s
     return f"{prefix}:{text}" if text else prefix
 
 
-def _hit_payloads(hits: List[Any], *, source_type: str = "system", source_prefix: str = "current:analysis") -> List[Dict[str, Any]]:
+def _hit_payloads(hits: List[Any], *, source_prefix: str = "current:analysis") -> List[Dict[str, Any]]:
     payloads: List[Dict[str, Any]] = []
     for hit in hits:
         payload = hit.model_dump(mode="python")
@@ -50,26 +50,30 @@ def _hit_payloads(hits: List[Any], *, source_type: str = "system", source_prefix
         node_id = f"{source_id}:node:{payload.get('chunk_id')}"
         evidence_node = {
             "id": node_id,
-            "source_id": source_id,
-            "source_type": source_type,
+            "kind": "analysis_summary",
+            "run_id": "",
+            "source_ids": [source_id],
+            "metric_ids": [],
             "title": str(payload.get("title") or payload.get("domain") or "检索命中"),
             "content": str(payload.get("snippet") or ""),
             "summary": str(payload.get("snippet") or "")[:260],
-            "metadata": {
+            "data": {
                 "domain": str(payload.get("domain") or ""),
                 "search_hit": True,
             },
+            "time_scope": {},
+            "spatial_scope": {},
+            "method": "context_keyword_search",
+            "quality_flags": [{"code": "summary_only", "severity": "info", "effect": "read_full_node"}],
             "locator": f"node:{node_id}",
-            "score": float(payload.get("score") or 0.0),
-            "evidence_level": str(payload.get("evidence_level") or "source_evidence"),
-            "warnings": ["search_hit_summary_only: read evidence_node by node_id for full content"],
             "citation": str(payload.get("title") or node_id),
         }
         payloads.append(
             {
                 "node_id": node_id,
-                "source_id": source_id,
-                "source_type": source_type,
+                "source_ids": [source_id],
+                "kind": "analysis_summary",
+                "score": float(payload.get("score") or 0.0),
                 "evidence_node": evidence_node,
             }
         )

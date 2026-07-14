@@ -1,16 +1,16 @@
-from modules.agent.capability_run_comparison import compare_run_details
-from modules.agent.capability_runs import (
-    CapabilityArtifactRef,
-    CapabilityArtifactSnapshot,
-    CapabilityRun,
-    CapabilityRunDetail,
-    CapabilityStageRecord,
+from modules.agent.analysis_run_comparison import compare_run_details
+from modules.agent.analysis_runs import (
+    AnalysisArtifactRef,
+    AnalysisArtifactSnapshot,
+    AnalysisRun,
+    AnalysisRunDetail,
+    AnalysisStageRecord,
     content_digest,
 )
 
 
 def _artifact(artifact_id, payload, *, title="产物", direction="output"):
-    ref = CapabilityArtifactRef(
+    ref = AnalysisArtifactRef(
         artifact_id=artifact_id,
         artifact_type="structured_data" if direction == "output" else "structured_data",
         title=title,
@@ -18,7 +18,7 @@ def _artifact(artifact_id, payload, *, title="产物", direction="output"):
         source_run_id="",
         content_digest=content_digest(payload),
     )
-    return ref, CapabilityArtifactSnapshot(
+    return ref, AnalysisArtifactSnapshot(
         direction=direction,
         artifact=ref,
         payload=payload,
@@ -61,7 +61,7 @@ def _detail(run_id, *, question, option, space_role, quality_score, history_id="
     ]
     output_refs = [item[0] for item in output_pairs]
     snapshots = [input_snapshot, *[item[1] for item in output_pairs]]
-    run = CapabilityRun(
+    run = AnalysisRun(
         run_id=run_id,
         capability_id=capability_id,
         project_context={},
@@ -75,7 +75,7 @@ def _detail(run_id, *, question, option, space_role, quality_score, history_id="
         status="completed",
         current_stage="formal-deliverables",
         stage_records=[
-            CapabilityStageRecord(
+            AnalysisStageRecord(
                 stage_id="quality-audit",
                 title="质量审计",
                 status="completed",
@@ -86,7 +86,7 @@ def _detail(run_id, *, question, option, space_role, quality_score, history_id="
         created_at="2026-07-12T00:00:00Z",
         completed_at="2026-07-12T00:01:00Z",
     )
-    return CapabilityRunDetail(history_id=history_id, run=run, artifacts=snapshots)
+    return AnalysisRunDetail(history_id=history_id, run=run, artifacts=snapshots)
 
 
 def test_run_comparison_exposes_configuration_artifact_outcome_and_entity_changes():
@@ -129,7 +129,7 @@ def test_run_comparison_rejects_same_run_history_or_capability_mismatch():
     try:
         compare_run_details(base, base)
     except ValueError as exc:
-        assert str(exc) == "capability_run_comparison_requires_distinct_runs"
+        assert str(exc) == "analysis_run_comparison_requires_distinct_runs"
     else:
         raise AssertionError("same run should be rejected")
 
@@ -137,7 +137,7 @@ def test_run_comparison_rejects_same_run_history_or_capability_mismatch():
     try:
         compare_run_details(base, other_history)
     except ValueError as exc:
-        assert str(exc) == "capability_run_history_mismatch"
+        assert str(exc) == "analysis_run_history_mismatch"
     else:
         raise AssertionError("history mismatch should be rejected")
 
@@ -145,6 +145,6 @@ def test_run_comparison_rejects_same_run_history_or_capability_mismatch():
     try:
         compare_run_details(base, other_capability)
     except ValueError as exc:
-        assert str(exc) == "capability_run_capability_mismatch"
+        assert str(exc) == "analysis_run_capability_mismatch"
     else:
         raise AssertionError("capability mismatch should be rejected")

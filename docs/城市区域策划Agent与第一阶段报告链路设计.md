@@ -453,7 +453,7 @@ POI 多 / 夜光亮 / 人口高
 
 - `project_brief.json`；
 - `source_readiness.json`；
-- `evidence_ledger.jsonl`；
+- `evidence_nodes.jsonl`；
 - `conflict_register.json`；
 - `expert_workpacks/*.json`；
 - `strategy_options.json`；
@@ -628,7 +628,7 @@ urban-strategy-stage1/
     design-handoff-schema.json
   scripts/
     validate_package.py
-    build_evidence_ledger.py
+    build_evidence_nodes.py
     validate_report_refs.py
 ```
 
@@ -673,7 +673,7 @@ workspace/project-a/
     maps/
   work/
     source_readiness.json
-    evidence_ledger.jsonl
+    evidence_nodes.jsonl
     conflict_register.json
     expert_workpacks/
     strategy_options.json

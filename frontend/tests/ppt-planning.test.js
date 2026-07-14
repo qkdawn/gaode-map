@@ -30,7 +30,10 @@ import {
   capturePptCarrierSnapshotAsset,
   isPptCarrierSnapshotRequest,
 } from '../src/features/ppt-planning/carrier-snapshot.js'
-import { isRetryableSource } from '../src/features/ppt-planning/source-view.js'
+import {
+  currentSourceEvidenceNodes,
+  isRetryableSource,
+} from '../src/features/ppt-planning/source-view.js'
 
 import {
   applyDeckBriefResponse,
@@ -894,7 +897,7 @@ test('ppt system sources expose prebuilt transport preview before generation', (
   assert.equal(poiH3.meta.transport.evidenceCount, 1)
   assert.equal(Object.prototype.hasOwnProperty.call(poiH3.meta.aiPayload, 'evidence'), false)
   assert.ok(String(poiH3.meta.aiPayload.evidence_nodes[0].id || '').startsWith('current:analysis:poi_h3:evidence:'))
-  assert.equal(poiH3.meta.aiPayload.evidence_nodes[0].source_type, 'system')
+  assert.equal(poiH3.meta.aiPayload.evidence_nodes[0].kind, 'spatial_metric')
 })
 
 test('agent ppt system source refresh replaces stale empty transport preview', () => {
@@ -1796,11 +1799,17 @@ test('ppt source model treats evidence nodes as canonical deliverable evidence',
     evidence_nodes: [
       {
         id: 'web:area:url:evidence:1',
-        source_id: 'web:area:url',
-        source_type: 'web',
+        kind: 'web_excerpt',
+        run_id: '',
+        source_ids: ['web:area:url'],
+        metric_ids: [],
         title: '政策网页',
         content: '正文段落',
-        evidence_level: 'web_chunk',
+        data: {},
+        time_scope: {},
+        spatial_scope: {},
+        method: 'web_chunk',
+        quality_flags: [],
       },
     ],
   }
@@ -1845,7 +1854,10 @@ test('ppt source full export payload includes source transport and grouping cont
           source_kind: 'package',
           included: ['metrics', 'evidence'],
           metrics: [{ metric_id: 'm1', label: 'POI', value: 30 }],
-          evidence_nodes: [{ id: 'e1', title: '节点', content: '证据正文' }],
+          evidence_nodes: [{
+            id: 'e1', kind: 'package_item', run_id: '', source_ids: ['package:history-1:abc'], metric_ids: [],
+            title: '节点', content: '证据正文', data: {}, time_scope: {}, spatial_scope: {}, method: '', quality_flags: [],
+          }],
         },
         transport: {
           transport_status: 'ready_to_send',
@@ -2166,16 +2178,19 @@ test('analysis source target uses only selected ready deliverable sources', () =
                   scope: { has_polygon: true },
                   evidence_nodes: [{
                     id: 'package:scope:test:package:summary',
-                    source_id: 'package:scope:test',
-                    source_type: 'package',
+                    kind: 'package_summary',
+                    run_id: '',
+                    source_ids: ['package:scope:test'],
+                    metric_ids: [],
                     title: '资料包摘要',
                     content: '范围覆盖后湖片区。',
                     summary: '范围覆盖后湖片区。',
-                    metadata: {},
+                    data: {},
+                    time_scope: {},
+                    spatial_scope: {},
+                    method: 'package_summary',
+                    quality_flags: [],
                     locator: 'package:summary',
-                    score: 0,
-                    evidence_level: 'package_summary',
-                    warnings: [],
                     citation: '资料包摘要',
                   }],
                   counts: { scope: 1, evidence: 1 },
@@ -2247,7 +2262,7 @@ test('analysis source target uses only selected ready deliverable sources', () =
   assert.deepEqual(target.payload.sources.map((source) => source.source_id), ['package:scope:test'])
   assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'evidence'), false)
   assert.equal(target.payload.sources[0].evidence_nodes[0].id, 'package:scope:test:package:summary')
-  assert.equal(target.payload.sources[0].evidence_nodes[0].source_type, 'package')
+  assert.equal(target.payload.sources[0].evidence_nodes[0].kind, 'package_summary')
   assert.deepEqual(target.evidence.map((item) => item.source_id), ['package:scope:test'])
   assert.equal(target.evidence[0].text.includes('1 条证据'), true)
 })
@@ -5534,6 +5549,24 @@ test('agent ppt population age structure reads overview age distribution without
   ])
   assert.deepEqual(age.evidence_payload, age.details)
   assert.equal(density.status, 'missing')
+
+  const populationSource = createPptSystemSources(ctx.buildAgentPptPlanningSystemSourceContext())
+    .find((item) => item.id === 'current:analysis:population')
+  const ageNode = populationSource.meta.aiPayload.evidence_nodes.find((item) => item.title === '年龄结构')
+  assert.ok(ageNode)
+  assert.equal(ageNode.kind, 'spatial_metric')
+  assert.equal(ageNode.data.metric_id, 'analysis:population:age_structure')
+  assert.equal(ageNode.data.source_path, 'populationOverview.age_distribution')
+  assert.equal(ageNode.data.locator, 'populationOverview.age_distribution')
+  assert.equal(ageNode.method, 'derived_metric')
+  assert.equal(ageNode.data.dominant_age_band_label, '25-29岁')
+  assert.equal(ageNode.data.dominant_age_band_ratio, 0.4)
+  assert.deepEqual(ageNode.data.age_distribution_ratios, [
+    { age_band: '25', age_band_label: '25-29岁', total: 400, ratio: 0.4 },
+    { age_band: '10', age_band_label: '10-14岁', total: 250, ratio: 0.25 },
+  ])
+  assert.match(ageNode.content, /已计算各年龄段占比/)
+  assert.equal(currentSourceEvidenceNodes(populationSource).find((node) => node.title === '年龄结构').data.metric_id, 'analysis:population:age_structure')
 })
 
 test('agent ppt population age structure falls back to population count without total population', () => {
@@ -5560,6 +5593,18 @@ test('agent ppt population age structure falls back to population count without 
     { age_band: '25', age_band_label: '25-29岁', total: 400, ratio: null },
     { age_band: '10', age_band_label: '10-14岁', total: 250, ratio: null },
   ])
+
+  const populationSource = createPptSystemSources(ctx.buildAgentPptPlanningSystemSourceContext())
+    .find((item) => item.id === 'current:analysis:population')
+  const ageNode = populationSource.meta.aiPayload.evidence_nodes.find((item) => item.title === '年龄结构')
+  assert.ok(ageNode)
+  assert.equal(ageNode.data.metric_id, 'analysis:population:age_structure')
+  assert.equal(ageNode.data.dominant_age_band_ratio, null)
+  assert.deepEqual(ageNode.data.age_distribution_ratios, [
+    { age_band: '25', age_band_label: '25-29岁', total: 400, ratio: null },
+    { age_band: '10', age_band_label: '10-14岁', total: 250, ratio: null },
+  ])
+  assert.match(ageNode.content, /缺少总人口，无法计算占比/)
 })
 
 test('agent ppt population age structure remains missing when age distribution is empty', () => {
@@ -5576,7 +5621,11 @@ test('agent ppt population age structure remains missing when age distribution i
   const age = metrics.find((item) => item.metric_id === 'analysis:population:age_structure')
 
   assert.equal(age.status, 'missing')
-  assert.equal(age.source_path, 'populationOverview.age_distribution')})
+  assert.equal(age.source_path, 'populationOverview.age_distribution')
+  const populationSource = createPptSystemSources(ctx.buildAgentPptPlanningSystemSourceContext())
+    .find((item) => item.id === 'current:analysis:population')
+  assert.equal(populationSource.meta.aiPayload.evidence_nodes.some((item) => item.title === '年龄结构'), false)
+})
 
 test('agent ppt h3 metrics use derived typing lq and neighbor results', () => {
   const ctx = createPptPlanningTestContext({

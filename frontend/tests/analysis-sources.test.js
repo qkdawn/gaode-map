@@ -21,6 +21,7 @@ test('analysis source target keeps only selected ready deliverable sources', () 
             source_id: 'document:ready',
             title: '规划文档',
             source_kind: 'document',
+            document_role: 'project_brief',
             included: ['metrics', 'evidence'],
             metrics: [{ metric_id: 'm1', label: '指标', value: 12 }],
             evidence_nodes: [{
@@ -75,17 +76,16 @@ test('analysis source target keeps only selected ready deliverable sources', () 
   assert.equal(target.type, ANALYSIS_SOURCES_TARGET_TYPE)
   assert.deepEqual(target.artifact_refs, ['document:ready'])
   assert.deepEqual(target.payload.sources.map((source) => source.source_id), ['document:ready'])
-  assert.equal(target.evidence[0].text, '1 个指标；1 条证据')
-  assert.equal(target.payload.sources[0].evidence_nodes[0].id, 'document:ready:e1')
-  assert.equal(target.payload.sources[0].evidence_nodes[0].source_type, 'document')
-  assert.equal(target.payload.sources[0].evidence_nodes[0].evidence_level, 'source_evidence')
+  assert.equal(target.evidence[0].text, '项目文档身份已传递（角色：project_brief），核心证据由后端档案模块读取。')
+  assert.equal(target.evidence[0].document_role, 'project_brief')
+  assert.equal(target.payload.sources[0].document_role, 'project_brief')
+  assert.deepEqual(target.payload.sources[0].included, ['document_identity'])
+  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'evidence_nodes'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'metrics'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'evidence'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'sourceId'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'sourceKind'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'evidenceNodes'), false)
-  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0].evidence_nodes[0], 'sourceId'), false)
-  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0].evidence_nodes[0], 'sourceType'), false)
-  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0].evidence_nodes[0], 'evidenceLevel'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target.evidence[0], 'sourceId'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target.evidence[0], 'sourceTitle'), false)
   assert.equal(Object.prototype.hasOwnProperty.call(target, 'artifactRefs'), false)
@@ -125,10 +125,10 @@ test('analysis source target ignores legacy ai payload aliases', () => {
 
   assert.deepEqual(target.artifact_refs, ['document:legacy-aliases'])
   assert.equal(target.payload.sources[0].source_kind, 'document')
-  assert.deepEqual(target.payload.sources[0].evidence_nodes, [])
-  assert.deepEqual(target.payload.sources[0].metric_gaps, [])
-  assert.deepEqual(target.payload.sources[0].visual_specs, [])
-  assert.equal(target.evidence[0].text, '该来源包含可用于 AI 的分析输入块。')
+  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'evidence_nodes'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'metric_gaps'), false)
+  assert.equal(Object.prototype.hasOwnProperty.call(target.payload.sources[0], 'visual_specs'), false)
+  assert.equal(target.evidence[0].text, '项目文档身份已传递（角色：未标注），核心证据由后端档案模块读取。')
 })
 
 test('analysis source target does not infer source kind from meta alias', () => {
@@ -155,5 +155,6 @@ test('analysis source target does not infer source kind from meta alias', () => 
     }],
   })
 
-  assert.equal(target.payload.sources[0].source_kind, '')
+  assert.equal(target.payload.sources[0].source_kind, 'document')
+  assert.deepEqual(target.payload.sources[0].included, ['document_identity'])
 })

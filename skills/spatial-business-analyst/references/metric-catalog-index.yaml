@@ -1,0 +1,229 @@
+index_version: 1.0.0
+catalog_version: 1.0.0
+catalog_sha256: sha256:649277687fd9e91f9c15cd74db1d4f3de5ee774de096bf2937faef4a93690f5c
+generated_from: references/metric-catalog.yaml
+runtime_rule: Intersect source_ids with the current AnalysisRun source_versions before selecting metrics.
+data_domains:
+- id: poi
+  source_ids:
+  - current:dataset:poi
+  families:
+  - poi
+  metric_ids:
+  - poi.count
+  - poi.category_count
+  - poi.multi_year_count
+  - poi.open_close_rate
+  implemented_metric_ids:
+  - poi.count
+  - poi.category_count
+  - poi.multi_year_count
+  not_implemented_metric_ids:
+  - poi.open_close_rate
+  use_when:
+  - category_structure
+  - competition_context
+  - facility_supply
+  detail_queries:
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family poi
+- id: h3_grid
+  source_ids:
+  - current:dataset:h3
+  families:
+  - poi_grid
+  - spatial_statistics
+  metric_ids:
+  - poi.grid_count
+  - poi.grid_density
+  - poi.category_density
+  - poi.local_entropy
+  - poi.local_entropy_normalized
+  - poi.lq
+  - poi.neighbor_mean_density
+  - poi.neighbor_mean_entropy
+  - spatial.neighbor_density_delta
+  - spatial.global_moran_i_density
+  - spatial.lisa
+  - spatial.gi_star
+  - poi.kernel_density
+  implemented_metric_ids:
+  - poi.grid_count
+  - poi.grid_density
+  - poi.category_density
+  - poi.local_entropy
+  - poi.local_entropy_normalized
+  - poi.lq
+  - poi.neighbor_mean_density
+  - poi.neighbor_mean_entropy
+  - spatial.neighbor_density_delta
+  - spatial.global_moran_i_density
+  - spatial.lisa
+  - spatial.gi_star
+  - poi.kernel_density
+  not_implemented_metric_ids: []
+  use_when:
+  - facility_concentration
+  - hotspot_detection
+  - local_specialization
+  - spatial_clustering
+  - spatial_mix
+  - spatial_outlier
+  detail_queries:
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family poi_grid
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family spatial_statistics
+- id: population
+  source_ids:
+  - current:dataset:population
+  families:
+  - population
+  metric_ids:
+  - population.total
+  - population.sex_structure
+  - population.age_structure
+  - population.selected_ratio
+  implemented_metric_ids:
+  - population.total
+  - population.sex_structure
+  - population.age_structure
+  - population.selected_ratio
+  not_implemented_metric_ids: []
+  use_when:
+  - customer_proxy
+  - demographic_structure
+  - population_scale
+  detail_queries:
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family population
+- id: nightlight
+  source_ids:
+  - current:dataset:nightlight
+  families:
+  - nightlight
+  metric_ids:
+  - nightlight.total_radiance
+  - nightlight.mean_radiance
+  - nightlight.max_radiance
+  - nightlight.lit_pixel_ratio
+  - nightlight.p90
+  - nightlight.hotspot_class
+  - nightlight.hotspot_ratio
+  - nightlight.spatial_profile
+  - nightlight.sector_profile
+  - nightlight.activity_level
+  implemented_metric_ids:
+  - nightlight.total_radiance
+  - nightlight.mean_radiance
+  - nightlight.max_radiance
+  - nightlight.lit_pixel_ratio
+  - nightlight.p90
+  - nightlight.hotspot_class
+  - nightlight.hotspot_ratio
+  - nightlight.spatial_profile
+  - nightlight.sector_profile
+  - nightlight.activity_level
+  not_implemented_metric_ids: []
+  use_when:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  detail_queries:
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family nightlight
+- id: road
+  source_ids:
+  - current:dataset:road
+  families:
+  - road_syntax
+  metric_ids:
+  - road.network_size
+  - road.degree
+  - road.integration
+  - road.choice
+  - road.connectivity
+  - road.control
+  - road.mean_depth
+  - road.node_degree
+  - road.orientation
+  - road.intelligibility
+  - road.walk_detour_ratio
+  - road.entrance_distance
+  implemented_metric_ids:
+  - road.network_size
+  - road.degree
+  - road.integration
+  - road.choice
+  - road.connectivity
+  - road.control
+  - road.mean_depth
+  - road.node_degree
+  - road.orientation
+  - road.intelligibility
+  not_implemented_metric_ids:
+  - road.walk_detour_ratio
+  - road.entrance_distance
+  use_when:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  detail_queries:
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family road_syntax
+- id: cross_domain
+  source_ids:
+  - current:dataset:poi
+  - current:dataset:h3
+  - current:dataset:population
+  - current:dataset:nightlight
+  - current:dataset:road
+  families:
+  - cross_domain
+  - grid_derived
+  - gwr
+  - isochrone
+  - timeseries
+  metric_ids:
+  - grid.type
+  - grid.opportunity_flag
+  - isochrone.reachable_area
+  - timeseries.population_change
+  - timeseries.population_density_change
+  - timeseries.age_shift
+  - timeseries.nightlight_change
+  - timeseries.hotspot_shift
+  - gwr.nightlight_spatial_model
+  - gwr.model_fit
+  - access.network_reachable_area
+  - grid.project_network_distance
+  implemented_metric_ids:
+  - grid.type
+  - grid.opportunity_flag
+  - isochrone.reachable_area
+  - timeseries.population_change
+  - timeseries.population_density_change
+  - timeseries.age_shift
+  - timeseries.nightlight_change
+  - timeseries.hotspot_shift
+  - gwr.nightlight_spatial_model
+  - gwr.model_fit
+  not_implemented_metric_ids:
+  - access.network_reachable_area
+  - grid.project_network_distance
+  use_when:
+  - candidate_screening
+  - catchment_area
+  - combined_activity
+  - grid_typology
+  - local_association
+  - model_diagnostics
+  - multi_metric_comparison
+  - multi_source_overlap
+  - project_access
+  - scope_definition
+  - spatial_relationship
+  - spatial_shift
+  - temporal_change
+  - travel_time_access
+  - trend_comparison
+  detail_queries:
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family cross_domain
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family grid_derived
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family gwr
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family isochrone
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family timeseries

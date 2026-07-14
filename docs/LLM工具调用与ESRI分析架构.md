@@ -414,15 +414,16 @@ recommendation_requires_validation
 快速模式主要走：
 
 ```text
-answer_quick_analysis
--> run_source_qa_loop
--> 已选来源证据工具 / 当前范围数据源工具
+answer_context_ask
+-> build_scoped_dataset_context
+-> _build_user_payload
+-> client.chat_json(phase="context_ask")
 ```
 
 特点：
 
-- 优先围绕已选来源和当前范围数据源回答。
-- 工具调用少。
+- 围绕已选来源和后端预处理好的当前范围数据回答。
+- 不进入工具循环，不向模型暴露工具 schema。
 - 通常不完整展开 ESRI / BA skeleton。
 
 ### 6.2 深度模式

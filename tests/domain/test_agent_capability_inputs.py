@@ -1,8 +1,8 @@
 from modules.agent.capability_inputs import resolve_capability_inputs
-from modules.agent.capability_runs import (
-    CapabilityArtifactSnapshot,
-    CapabilityRun,
-    CapabilityRunDetail,
+from modules.agent.analysis_runs import (
+    AnalysisArtifactSnapshot,
+    AnalysisRun,
+    AnalysisRunDetail,
     artifact_ref,
 )
 from modules.agent.schemas import AgentTurnRequest, CapabilityInputSelection, EffectiveExecutionProfile
@@ -19,7 +19,7 @@ def _run(
         "stage1-evidence-appendix",
         "stage1-design-handoff",
     ),
-) -> CapabilityRun:
+) -> AnalysisRun:
     artifacts = [
         artifact_ref(
             artifact_id=artifact_id,
@@ -30,7 +30,7 @@ def _run(
         )
         for artifact_id in artifact_ids
     ]
-    return CapabilityRun(
+    return AnalysisRun(
         run_id=run_id,
         capability_id=capability_id,
         status=status,
@@ -40,12 +40,12 @@ def _run(
     )
 
 
-def _detail(run: CapabilityRun, history_id: str = "history-1") -> CapabilityRunDetail:
-    return CapabilityRunDetail(
+def _detail(run: AnalysisRun, history_id: str = "history-1") -> AnalysisRunDetail:
+    return AnalysisRunDetail(
         history_id=history_id,
         run=run,
         artifacts=[
-            CapabilityArtifactSnapshot(
+            AnalysisArtifactSnapshot(
                 direction="output",
                 artifact=artifact,
                 payload=f"immutable:{run.run_id}:{artifact.artifact_id}",

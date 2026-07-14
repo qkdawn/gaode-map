@@ -33,9 +33,9 @@ test('ppt package payload compacts package summary, samples, and carriers for AI
   assert.equal(payload.evidence_nodes.length, 15)
   assert.equal(payload.excluded.find((item) => item.type === 'package_full_items').count, 8)
   assert.equal(payload.excluded.find((item) => item.type === 'package_carrier_geometries').count, 10)
-  assert.equal(payload.evidence_nodes.some((node) => node.evidence_level === 'package_summary'), true)
-  assert.equal(payload.evidence_nodes.filter((node) => node.evidence_level === 'package_poi_sample').length, 6)
-  assert.equal(payload.evidence_nodes.filter((node) => node.evidence_level === 'package_carrier').length, 8)
+  assert.equal(payload.evidence_nodes.some((node) => node.kind === 'package_summary'), true)
+  assert.equal(payload.evidence_nodes.filter((node) => node.kind === 'package_item').length, 6)
+  assert.equal(payload.evidence_nodes.filter((node) => node.kind === 'spatial_carrier').length, 8)
 })
 
 test('ppt package payload returns empty evidence contract when package has no summary or samples', () => {
