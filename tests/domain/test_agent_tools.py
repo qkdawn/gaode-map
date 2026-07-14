@@ -63,7 +63,8 @@ def test_get_tool_registry_exposes_stage1_tools():
         "current:dataset:h3",
         "current:dataset:population",
         "current:dataset:nightlight",
-        "current:dataset:road",
+        "current:dataset:road_edges",
+        "current:dataset:road_grid",
     ]
 
 

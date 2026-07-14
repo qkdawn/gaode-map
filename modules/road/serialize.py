@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import time
+import hashlib
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 from shapely.geometry import LineString, Polygon
@@ -306,6 +307,8 @@ def empty_result(
             "road_orientation_analysis": build_road_orientation_analysis([]),
         },
         "top_nodes": [],
+        "road_edges": {"type": "FeatureCollection", "features": [], "count": 0},
+        "road_grid": {"type": "FeatureCollection", "features": [], "count": 0},
         "roads": {"type": "FeatureCollection", "features": [], "count": 0},
         "nodes": {"type": "FeatureCollection", "features": [], "count": 0},
         "diagnostics": {
@@ -603,6 +606,13 @@ def build_road_analysis_result(
         out1 = to_output_coord(item["x1"], item["y1"], output_coord_type="gcj02")
         out2 = to_output_coord(item["x2"], item["y2"], output_coord_type="gcj02")
         props: Dict[str, Any] = {
+            "edge_id": "edge:" + hashlib.sha256(
+                ":".join(sorted((
+                    f"{safe_round(item['x1'], 7):.7f},{safe_round(item['y1'], 7):.7f}",
+                    f"{safe_round(item['x2'], 7):.7f},{safe_round(item['y2'], 7):.7f}",
+                ))).encode("utf-8")
+            ).hexdigest()[:20],
+            "record_id": "",
             "length_m": safe_round(item["length_m"], 2),
             "choice_score": safe_round(default_choice, 8),
             "integration_score": safe_round(default_integ, 8),
@@ -619,6 +629,7 @@ def build_road_analysis_result(
             "is_skeleton_choice_top20": False,
             "is_skeleton_integration_top20": False,
         }
+        props["record_id"] = props["edge_id"]
         for label in local_labels:
             props[f"choice_{label}"] = safe_round(choice_by_label.get(label, 0.0), 8)
             props[f"integration_{label}"] = safe_round(integ_by_label.get(label, 0.0), 8)
@@ -870,6 +881,8 @@ def build_road_analysis_result(
             "road_orientation_analysis": road_orientation_analysis,
         },
         "top_nodes": [],
+        "road_edges": {"type": "FeatureCollection", "features": all_scored_features, "count": len(all_scored_features)},
+        "road_grid": {"type": "FeatureCollection", "features": [], "count": 0},
         "roads": {"type": "FeatureCollection", "features": features_out, "count": len(features_out)},
         "nodes": {"type": "FeatureCollection", "features": node_features, "count": len(node_features)},
         "diagnostics": {

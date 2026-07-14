@@ -121,6 +121,7 @@ class RoadSyntaxSummary(BaseModel):
     default_radius_label: str = "global"
     analysis_engine: str = "depthmapxcli"
     road_orientation_analysis: Dict[str, Any] = Field(default_factory=dict)
+    road_grid: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RoadSyntaxFeatureCollection(BaseModel):
@@ -185,6 +186,8 @@ class RoadSyntaxResponse(BaseModel):
     summary: RoadSyntaxSummary
     top_nodes: List[RoadSyntaxNode] = Field(default_factory=list)
     roads: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
+    road_edges: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
+    road_grid: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
     nodes: RoadSyntaxNodeFeatureCollection = Field(default_factory=RoadSyntaxNodeFeatureCollection)
     diagnostics: RoadSyntaxDiagnostics = Field(default_factory=RoadSyntaxDiagnostics)
     webgl: RoadSyntaxWebGLPayload = Field(default_factory=RoadSyntaxWebGLPayload)

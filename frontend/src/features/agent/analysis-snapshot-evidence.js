@@ -389,7 +389,9 @@ function buildAgentSpatialObjects(ctx = {}, limitPerSource = 200) {
       })
     }
   }
-  append(ctx.roadSyntaxRoadFeatures, {
+  append(Array.isArray(ctx.roadSyntaxEdgeFeatures) && ctx.roadSyntaxEdgeFeatures.length
+    ? ctx.roadSyntaxEdgeFeatures
+    : ctx.roadSyntaxRoadFeatures, {
     prefix: 'road',
     objectType: 'road_segment',
     sourceRef: 'analysis_snapshot.road.features',
@@ -448,6 +450,20 @@ function buildAgentAnalysisSnapshot(ctx = {}) {
     road: {
       summary: roadSummary,
       diagnostics: ctx.roadSyntaxDiagnostics || {},
+      road_edges: {
+        type: 'FeatureCollection',
+        count: Array.isArray(ctx.roadSyntaxEdgeFeatures) && ctx.roadSyntaxEdgeFeatures.length
+          ? ctx.roadSyntaxEdgeFeatures.length
+          : (Array.isArray(ctx.roadSyntaxRoadFeatures) ? ctx.roadSyntaxRoadFeatures.length : 0),
+        features: cloneArray(Array.isArray(ctx.roadSyntaxEdgeFeatures) && ctx.roadSyntaxEdgeFeatures.length
+          ? ctx.roadSyntaxEdgeFeatures
+          : ctx.roadSyntaxRoadFeatures).slice(0, 80),
+      },
+      road_grid: {
+        type: 'FeatureCollection',
+        count: Array.isArray(ctx.roadSyntaxGridFeatures) ? ctx.roadSyntaxGridFeatures.length : 0,
+        features: cloneArray(ctx.roadSyntaxGridFeatures).slice(0, 200),
+      },
     },
     population: {
       summary: populationSummary,

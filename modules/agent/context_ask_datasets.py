@@ -18,7 +18,8 @@ _DATASET_KEYWORDS: Sequence[tuple[str, Sequence[str]]] = (
     ("current:dataset:h3", ("h3", "网格", "热点", "集聚", "热区", "冷区")),
     ("current:dataset:population", ("人口", "客群", "年龄", "常住", "承载", "人口密度")),
     ("current:dataset:nightlight", ("夜光", "夜间", "夜生活", "夜经济", "夜间活力")),
-    ("current:dataset:road", ("路网", "交通", "可达", "连通", "整合度", "选择度", "道路", "街巷", "通行")),
+    ("current:dataset:road_edges", ("路网", "交通", "可达", "连通", "整合度", "选择度", "道路", "街巷", "通行")),
+    ("current:dataset:road_grid", ("路网", "栅格", "网格", "道路密度", "路段密度")),
 )
 _NEGATIVE_TERMS = ("差", "低", "弱", "不足", "短板", "问题", "缺口", "不便", "不佳")
 
@@ -65,14 +66,24 @@ def _target_field(source_id: str, question: str) -> str:
         return "density" if "密度" in text else "population"
     if source_id == "current:dataset:nightlight":
         return "radiance"
-    if source_id == "current:dataset:road":
+    if source_id == "current:dataset:road_edges":
         if "选择" in text:
-            return "choice"
+            return "choice_score"
         if "连通" in text:
-            return "connectivity"
+            return "connectivity_score"
         if "深度" in text:
-            return "depth"
-        return "integration"
+            return "depth_score"
+        return "integration_score"
+    if source_id == "current:dataset:road_grid":
+        if "选择" in text:
+            return "road_choice"
+        if "连通" in text:
+            return "road_connectivity"
+        if "深度" in text:
+            return "road_depth"
+        if "密度" in text or "长度" in text:
+            return "road_length_km_per_km2"
+        return "road_integration"
     return ""
 
 
@@ -100,8 +111,8 @@ def _dataset_example(
         "sort": {"field": field, "direction": _query_direction(source_id, field, question)},
         "limit": 5,
     }
-    if source_id == "current:dataset:road":
-        kwargs["filters"] = {"feature_kind": "road"}
+    if source_id == "current:dataset:road_edges":
+        kwargs["filters"] = {"feature_kind": "road_edge"}
     return service.query_scope_dataset(**kwargs)
 
 

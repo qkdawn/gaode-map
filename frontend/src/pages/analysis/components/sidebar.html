@@ -1832,6 +1832,13 @@
 
                                     <div v-else style="margin-top:10px;">
                                         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666;">
+                                                视图
+                                                <select v-model="roadSyntaxViewMode" class="h3-params-select" style="width:auto;" @change="refreshRoadSyntaxOverlay">
+                                                    <option value="edges">线状路网</option>
+                                                    <option value="grid" :disabled="!roadSyntaxGridFeatures.length">共享栅格聚合</option>
+                                                </select>
+                                            </label>
                                             <label v-if="roadSyntaxMetric !== 'intelligibility'" style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666;">
                                                 色带
                                                 <select v-model="roadSyntaxDepthmapColorScale" @change="refreshRoadSyntaxOverlay"

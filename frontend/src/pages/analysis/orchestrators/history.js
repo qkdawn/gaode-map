@@ -60,6 +60,8 @@ function createAnalysisHistoryOrchestratorMethods() {
         ? this.roadSyntaxRoadFeatures
         : []
       const nodeFeatures = Array.isArray(this.roadSyntaxNodes) ? this.roadSyntaxNodes : []
+      const edgeFeatures = Array.isArray(this.roadSyntaxEdgeFeatures) ? this.roadSyntaxEdgeFeatures : roadFeatures
+      const gridFeatures = Array.isArray(this.roadSyntaxGridFeatures) ? this.roadSyntaxGridFeatures : []
       const hasData = roadFeatures.length > 0 || nodeFeatures.length > 0 || !!this.roadSyntaxSummary
       if (!hasData) return null
 
@@ -71,6 +73,8 @@ function createAnalysisHistoryOrchestratorMethods() {
           features: roadFeatures,
           count: roadFeatures.length,
         },
+        road_edges: { type: 'FeatureCollection', features: edgeFeatures, count: edgeFeatures.length },
+        road_grid: { type: 'FeatureCollection', features: gridFeatures, count: gridFeatures.length },
         nodes: {
           type: 'FeatureCollection',
           features: nodeFeatures,
@@ -82,6 +86,7 @@ function createAnalysisHistoryOrchestratorMethods() {
           main_tab: String(this.roadSyntaxMainTab || 'params'),
           metric: String(this.roadSyntaxMetric || 'connectivity'),
           radius_label: String(this.roadSyntaxRadiusLabel || 'global'),
+          view_mode: String(this.roadSyntaxViewMode || 'edges'),
           color_scale: String(this.roadSyntaxDepthmapColorScale || 'axmanesque'),
           display_blue: Number(this.roadSyntaxDisplayBlue) || 0,
           display_red: Number(this.roadSyntaxDisplayRed) || 1,
@@ -443,6 +448,8 @@ function createAnalysisHistoryOrchestratorMethods() {
           metric: String(this.roadSyntaxLastMetricTab || this.roadSyntaxMetric || ''),
         }
         const roadFeatures = Array.isArray(this.roadSyntaxRoadFeatures) ? this.roadSyntaxRoadFeatures : []
+        const edgeFeatures = Array.isArray(this.roadSyntaxEdgeFeatures) ? this.roadSyntaxEdgeFeatures : roadFeatures
+        const gridFeatures = Array.isArray(this.roadSyntaxGridFeatures) ? this.roadSyntaxGridFeatures : []
         const nodeFeatures = Array.isArray(this.roadSyntaxNodes) ? this.roadSyntaxNodes : []
         return buildAnalysisArtifactEnvelope({
           params,
@@ -450,6 +457,8 @@ function createAnalysisHistoryOrchestratorMethods() {
             summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
             diagnostics: this.cloneArtifactValue(this.roadSyntaxDiagnostics || {}),
             roads: buildFeatureCollectionArtifact({ features: roadFeatures }),
+            road_edges: buildFeatureCollectionArtifact({ features: edgeFeatures }),
+            road_grid: buildFeatureCollectionArtifact({ features: gridFeatures }),
             nodes: buildFeatureCollectionArtifact({ features: nodeFeatures }),
             webgl: this.cloneArtifactValue(this.roadSyntaxWebglPayload || {}),
             graph_model: params.graph_model,

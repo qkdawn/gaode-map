@@ -752,7 +752,10 @@ function createAgentRuntimeMethods() {
         .filter((row) => Object.keys(row).length)
 
       const h3Features = cloneArray(this.h3AnalysisGridFeatures)
-      const roadFeatures = cloneArray(this.roadSyntaxRoadFeatures)
+      const roadFeatures = cloneArray(Array.isArray(this.roadSyntaxEdgeFeatures) && this.roadSyntaxEdgeFeatures.length
+        ? this.roadSyntaxEdgeFeatures
+        : this.roadSyntaxRoadFeatures)
+      const roadGridFeatures = cloneArray(this.roadSyntaxGridFeatures)
       const populationCells = cloneArray((this.populationLayer && this.populationLayer.cells) || [])
       const nightlightCells = cloneArray((this.nightlightLayer && this.nightlightLayer.cells) || [])
       const roadMetricTabs = typeof this.roadSyntaxMetricTabs === 'function'
@@ -780,12 +783,20 @@ function createAgentRuntimeMethods() {
         },
         road: {
           feature_count: roadFeatures.length,
+          edge_count: roadFeatures.length,
+          grid_cell_count: roadGridFeatures.length,
           metric_tabs: roadMetricTabs,
           metric_keys: roadMetricKeys,
           sample_segments: topRows(
             roadFeatures,
             ['integration_score', 'choice_score', 'connectivity_score', 'control_score', 'depth_score', 'value'],
             ['id', 'name', 'road_name', 'integration_score', 'choice_score', 'connectivity_score', 'control_score', 'depth_score', 'intelligibility_score'],
+            12,
+          ),
+          top_grid_cells: topRows(
+            roadGridFeatures,
+            ['road_integration', 'road_choice', 'road_connectivity', 'road_length_km_per_km2'],
+            ['cell_id', 'road_length_km', 'road_length_km_per_km2', 'road_integration', 'road_choice', 'road_connectivity'],
             12,
           ),
         },

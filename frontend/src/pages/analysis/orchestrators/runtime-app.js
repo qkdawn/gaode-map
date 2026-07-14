@@ -1918,6 +1918,10 @@ export function runAnalysisBootstrapApp() {
                           return;
                       }
                       const metric = this.resolveRoadSyntaxActiveMetric();
+                      if (this.roadSyntaxViewMode === 'grid') {
+                          this.renderRoadSyntaxByMetric(metric);
+                          return;
+                      }
                       if (metric === 'intelligibility') {
                           const parsedActive = this.parseRoadSyntaxLayerKey(this.roadSyntaxActiveLayerKey || '');
                           const activeMetric = String((parsedActive && parsedActive.metric) || '');
@@ -1950,6 +1954,37 @@ export function runAnalysisBootstrapApp() {
                   async renderRoadSyntaxByMetric(metricValue = null) {
                       const activeMetric = metricValue || this.resolveRoadSyntaxActiveMetric();
                       this.roadSyntaxApplyRadiusCircle(activeMetric);
+                      if (this.roadSyntaxViewMode === 'grid') {
+                          const gridFeatures = Array.isArray(this.roadSyntaxGridFeatures) ? this.roadSyntaxGridFeatures : [];
+                          if (!gridFeatures.length || !this.mapCore || typeof this.mapCore.setGridFeatures !== 'function') {
+                              this.roadSyntaxSetStatus('栅格路网数据尚未就绪');
+                              return;
+                          }
+                          const field = activeMetric === 'choice' ? 'road_choice'
+                              : activeMetric === 'integration' ? 'road_integration'
+                              : activeMetric === 'connectivity' ? 'road_connectivity'
+                              : activeMetric === 'control' ? 'road_control'
+                              : activeMetric === 'depth' ? 'road_depth'
+                              : 'road_integration';
+                          const values = gridFeatures.map((feature) => Number(feature && feature.properties && feature.properties[field]))
+                              .filter((value) => Number.isFinite(value));
+                          const low = values.length ? Math.min(...values) : 0;
+                          const high = values.length ? Math.max(...values) : 0;
+                          const styled = gridFeatures.map((feature) => {
+                              const properties = Object.assign({}, feature.properties || {});
+                              const value = Number(properties[field]);
+                              const ratio = Number.isFinite(value) && high > low ? (value - low) / (high - low) : 0;
+                              properties.fillColor = Number.isFinite(value) ? `rgb(${Math.round(30 + 210 * ratio)}, ${Math.round(90 + 100 * (1 - ratio))}, ${Math.round(210 - 155 * ratio)})` : '#e5e7eb';
+                              properties.fillOpacity = Number.isFinite(value) ? 0.54 : 0.08;
+                              return Object.assign({}, feature, { properties });
+                          });
+                          this.clearRoadSyntaxOverlays();
+                          this.mapCore.setGridFeatures(styled, { strokeColor: '#64748b', strokeWeight: 0.7, fillOpacity: 0.45, clickable: true, webglBatch: true });
+                          this.roadSyntaxLegendModel = this.buildRoadSyntaxLegendModel(activeMetric);
+                          this.roadSyntaxSetStatus(`栅格聚合：${gridFeatures.filter((feature) => feature.properties && feature.properties.road_has_data).length}/${gridFeatures.length} 个共享格有路网数据`);
+                          return;
+                      }
+                      if (this.mapCore && typeof this.mapCore.clearGridPolygons === 'function') this.mapCore.clearGridPolygons();
                       const webglPayloadReady = (
                           this.roadSyntaxUseArcgisWebgl
                           && typeof this.roadSyntaxCanUseArcgisWebglPayload === 'function'
@@ -2848,6 +2883,12 @@ export function runAnalysisBootstrapApp() {
                       this.roadSyntaxRoadFeatures = Array.isArray((data && data.roads && data.roads.features) || [])
                           ? data.roads.features
                           : [];
+                      this.roadSyntaxEdgeFeatures = Array.isArray((data && data.road_edges && data.road_edges.features) || [])
+                          ? data.road_edges.features
+                          : this.roadSyntaxRoadFeatures;
+                      this.roadSyntaxGridFeatures = Array.isArray((data && data.road_grid && data.road_grid.features) || [])
+                          ? data.road_grid.features
+                          : [];
                       this.roadSyntaxNodes = Array.isArray((data && data.nodes && data.nodes.features) || [])
                           ? data.nodes.features
                           : [];
@@ -2932,6 +2973,8 @@ export function runAnalysisBootstrapApp() {
                           this.invalidateRoadSyntaxCache('recompute-road-syntax', { resetData: false, resetPerf: true });
                           this.roadSyntaxSummary = null;
                           this.roadSyntaxRoadFeatures = [];
+                          this.roadSyntaxEdgeFeatures = [];
+                          this.roadSyntaxGridFeatures = [];
                           this.roadSyntaxNodes = [];
                           this.roadSyntaxDiagnostics = null;
                           this.roadSyntaxLegendModel = null;
@@ -3011,6 +3054,8 @@ export function runAnalysisBootstrapApp() {
                           }
                           this.roadSyntaxSummary = null;
                           this.roadSyntaxRoadFeatures = [];
+                          this.roadSyntaxEdgeFeatures = [];
+                          this.roadSyntaxGridFeatures = [];
                           this.roadSyntaxNodes = [];
                           this.roadSyntaxDiagnostics = null;
                           this.roadSyntaxWebglPayload = null;

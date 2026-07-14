@@ -414,19 +414,19 @@ def test_context_ask_enriches_analysis_road_sources_with_scoped_dataset(monkeypa
             assert history_id == "history-1"
             return {
                 "datasets": [{
-                    "source_id": "current:dataset:road",
+                    "source_id": "current:dataset:road_edges",
                     "record_count": 2,
                     "time_scope": {"years": [2024], "label": "2024 年"},
-                    "query_capabilities": {"sort_fields": ["choice", "connectivity", "depth", "integration"]},
+                    "query_capabilities": {"sort_fields": ["choice_score", "connectivity_score", "depth_score", "integration_score"]},
                 }],
                 "warnings": [],
             }
 
         def aggregate_scope_dataset(self, **kwargs):
             assert kwargs["history_id"] == "history-1"
-            assert kwargs["source_id"] == "current:dataset:road"
+            assert kwargs["source_id"] == "current:dataset:road_edges"
             return {
-                "source_id": "current:dataset:road",
+                "source_id": "current:dataset:road_edges",
                 "rows": [{
                     "group": "all",
                     "count": 2,
@@ -442,32 +442,32 @@ def test_context_ask_enriches_analysis_road_sources_with_scoped_dataset(monkeypa
 
         def query_scope_dataset(self, **kwargs):
             assert kwargs["history_id"] == "history-1"
-            assert kwargs["source_id"] == "current:dataset:road"
-            assert kwargs["filters"] == {"feature_kind": "road"}
+            assert kwargs["source_id"] == "current:dataset:road_edges"
+            assert kwargs["filters"] == {"feature_kind": "road_edge"}
             field = kwargs["sort"]["field"]
             return {
-                "source_id": "current:dataset:road",
+                "source_id": "current:dataset:road_edges",
                 "total_count": 2,
                 "limit": 5,
                 "offset": 0,
                 "has_more": False,
                 "records": [{
                     "record_id": f"road-{field}",
-                    "source_id": "current:dataset:road",
-                    "properties": {"feature_kind": "road", field: 0.1},
+                    "source_id": "current:dataset:road_edges",
+                    "properties": {"feature_kind": "road_edge", field: 0.1},
                     "time_scope": {"year": 2024},
-                    "locator": f"current:dataset:road/road-{field}",
-                    "citation": "当前范围路网，2024 年",
+                    "locator": f"current:dataset:road_edges/road-{field}",
+                    "citation": "当前范围路网线段，2024 年",
                 }],
                 "evidence_nodes": [{
-                    "id": f"current:dataset:road:record:road-{field}",
-                    "source_id": "current:dataset:road",
+                    "id": f"current:dataset:road_edges:record:road-{field}",
+                    "source_id": "current:dataset:road_edges",
                     "source_type": "system",
                     "title": f"road-{field}",
                     "content": "路网路段样本",
                     "metadata": {"time_scope": {"year": 2024}},
-                    "locator": f"current:dataset:road/road-{field}",
-                    "citation": "当前范围路网，2024 年",
+                    "locator": f"current:dataset:road_edges/road-{field}",
+                    "citation": "当前范围路网线段，2024 年",
                 }],
                 "warnings": [],
             }
@@ -510,14 +510,14 @@ def test_context_ask_enriches_analysis_road_sources_with_scoped_dataset(monkeypa
     data = response.json()
     assert data["status"] == "success"
     scoped = captured["user_payload"]["scoped_dataset_context"]
-    assert "current:dataset:road" in scoped["datasets"]
-    road_context = scoped["datasets"]["current:dataset:road"]
+    assert "current:dataset:road_edges" in scoped["datasets"]
+    road_context = scoped["datasets"]["current:dataset:road_edges"]
     assert road_context["aggregate"]["rows"][0]["avg_connectivity"] == 2
     assert len(road_context["examples"]) == 1
     assert scoped["query_count"] == 2
-    assert road_context["examples"][0]["evidence_nodes"][0]["citation"] == "当前范围路网，2024 年"
-    assert data["evidence"][0]["source_id"] == "current:dataset:road"
-    assert data["citations"] == ["当前范围路网，2024 年"]
+    assert road_context["examples"][0]["evidence_nodes"][0]["citation"] == "当前范围路网线段，2024 年"
+    assert data["evidence"][0]["source_id"] == "current:dataset:road_edges"
+    assert data["citations"] == ["当前范围路网线段，2024 年"]
 
 
 def test_context_ask_warns_when_analysis_dataset_source_has_no_history_id(monkeypatch):

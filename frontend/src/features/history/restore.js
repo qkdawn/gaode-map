@@ -243,6 +243,8 @@ import {
                         ? roadResult.diagnostics
                         : {},
                     roads,
+                    road_edges: (roadResult.road_edges && typeof roadResult.road_edges === 'object') ? roadResult.road_edges : roads,
+                    road_grid: (roadResult.road_grid && typeof roadResult.road_grid === 'object') ? roadResult.road_grid : { type: 'FeatureCollection', features: [], count: 0 },
                     nodes,
                     webgl: (roadResult.webgl && typeof roadResult.webgl === 'object') ? roadResult.webgl : null,
                 };
@@ -264,6 +266,7 @@ import {
                     this.roadSyntaxMetric = preferredMetric;
                     this.roadSyntaxLastMetricTab = preferredMetric;
                 }
+                this.roadSyntaxViewMode = String(ui.view_mode || 'edges') === 'grid' && this.roadSyntaxGridFeatures.length ? 'grid' : 'edges';
 
                 const radiusLabelRaw = String(ui.radius_label || '').trim().toLowerCase();
                 if (

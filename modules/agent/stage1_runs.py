@@ -46,7 +46,8 @@ def _source_versions(
         ("current:dataset:h3", snapshot.h3),
         ("current:dataset:population", snapshot.population),
         ("current:dataset:nightlight", snapshot.nightlight),
-        ("current:dataset:road", snapshot.road),
+        ("current:dataset:road_edges", (snapshot.road or {}).get("road_edges") if isinstance(snapshot.road, dict) else None),
+        ("current:dataset:road_grid", (snapshot.road or {}).get("road_grid") if isinstance(snapshot.road, dict) else None),
     )
     sources = list(selected_sources)
     known_ids = {

@@ -26,6 +26,8 @@ from .overpass import (
     normalize_label,
 )
 from .serialize import build_road_analysis_result, empty_result
+from .grid import build_road_grid
+from modules.population.service import get_population_grid
 
 OverpassMode = Literal["walking", "bicycling", "driving"]
 GraphModel = Literal["segment", "axial"]
@@ -435,6 +437,14 @@ def analyze_road_syntax(
         started_at=started_at,
         report_progress=_report_progress,
     )
+    road_edges = (result.get("road_edges") or {}).get("features") or []
+    try:
+        shared_grid = get_population_grid(polygon, coord_type)
+        road_grid, road_grid_summary = build_road_grid(road_edges, shared_grid)
+        result["road_grid"] = road_grid
+        result["summary"]["road_grid"] = road_grid_summary
+    except Exception:
+        logger.exception("[road-syntax] shared road grid aggregation failed")
     logger.info(
         "[road-syntax] completed graph_model=%s edge_count=%d rendered_edge_count=%d elapsed_ms=%.2f",
         normalized_graph_model,

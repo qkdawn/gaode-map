@@ -17,7 +17,8 @@ SOURCE_ID_ENUM = [
     "current:dataset:h3",
     "current:dataset:population",
     "current:dataset:nightlight",
-    "current:dataset:road",
+    "current:dataset:road_edges",
+    "current:dataset:road_grid",
 ]
 
 FILTER_SCHEMA = {

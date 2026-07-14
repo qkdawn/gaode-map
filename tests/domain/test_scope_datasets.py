@@ -58,17 +58,17 @@ class FakeScopeDatasetRepository:
                 "params": {"metric": "choice"},
                 "payload": {
                     "metric": "choice",
-                    "roads": {
+                    "road_edges": {
                         "type": "FeatureCollection",
                         "features": [
-                            {"type": "Feature", "properties": {"road_id": "r1", "choice": 0.7}},
-                            {"type": "Feature", "properties": {"road_id": "r2", "choice": 0.2}},
+                            {"type": "Feature", "properties": {"edge_id": "r1", "choice_score": 0.7}},
+                            {"type": "Feature", "properties": {"edge_id": "r2", "choice_score": 0.2}},
                         ],
                     },
-                    "nodes": {
+                    "road_grid": {
                         "type": "FeatureCollection",
                         "features": [
-                            {"type": "Feature", "properties": {"node_id": "n1", "connectivity": 3}},
+                            {"type": "Feature", "properties": {"cell_id": "cell-1", "road_length_km": 0.4, "road_choice": 0.5}},
                         ],
                     },
                 },
@@ -85,7 +85,8 @@ def test_scope_dataset_service_lists_normalized_sources():
     sources = {item["source_id"]: item for item in payload["datasets"]}
     assert sources["current:dataset:poi"]["record_count"] == 2
     assert sources["current:dataset:population"]["record_count"] == 2
-    assert sources["current:dataset:road"]["record_count"] == 3
+    assert sources["current:dataset:road_edges"]["record_count"] == 2
+    assert sources["current:dataset:road_grid"]["record_count"] == 1
     assert sources["current:dataset:population"]["time_scope"]["years"] == [2024]
 
 
@@ -124,11 +125,11 @@ def test_scope_dataset_service_aggregates_poi_and_sorts_road_records():
 
     road = service.query_scope_dataset(
         history_id="history-1",
-        source_id="current:dataset:road",
-        filters={"feature_kind": "road"},
-        sort={"field": "choice", "direction": "desc"},
+        source_id="current:dataset:road_edges",
+        filters={"feature_kind": "road_edge"},
+        sort={"field": "choice_score", "direction": "desc"},
     )
-    assert [item["record_id"] for item in road["records"]] == ["road:r1", "road:r2"]
+    assert [item["record_id"] for item in road["records"]] == ["road_edge:r1", "road_edge:r2"]
     assert road["selected_year"] is None
     assert road["records"][0]["time_scope"]["kind"] == "static_snapshot"
     assert road["warnings"] == []

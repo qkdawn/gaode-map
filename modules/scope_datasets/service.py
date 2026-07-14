@@ -18,7 +18,8 @@ DATASET_TITLES = {
     "current:dataset:h3": "当前范围 H3 / 栅格",
     "current:dataset:population": "当前范围人口网格",
     "current:dataset:nightlight": "当前范围夜光网格",
-    "current:dataset:road": "当前范围路网",
+    "current:dataset:road_edges": "当前范围路网线段",
+    "current:dataset:road_grid": "当前范围路网共享栅格",
 }
 
 ARTIFACT_SOURCE_MAP = {
@@ -26,7 +27,7 @@ ARTIFACT_SOURCE_MAP = {
     "poi_raster_grid": "current:dataset:h3",
     "population": "current:dataset:population",
     "nightlight": "current:dataset:nightlight",
-    "road_syntax": "current:dataset:road",
+    "road_syntax": "current:dataset:road_edges",
 }
 
 DATASET_FILTER_FIELDS = {
@@ -34,7 +35,8 @@ DATASET_FILTER_FIELDS = {
     "current:dataset:h3": {"record_id", "cell_id", "h3_id", "poi_count", "density", "lq", "year"},
     "current:dataset:population": {"record_id", "cell_id", "value", "population", "density", "year", "view"},
     "current:dataset:nightlight": {"record_id", "cell_id", "value", "radiance", "year", "view"},
-    "current:dataset:road": {"record_id", "feature_kind", "choice", "integration", "connectivity", "depth", "metric"},
+    "current:dataset:road_edges": {"record_id", "edge_id", "choice_score", "integration_score", "connectivity_score", "control_score", "depth_score", "metric"},
+    "current:dataset:road_grid": {"record_id", "cell_id", "road_has_data", "road_length_km", "road_length_km_per_km2", "road_choice", "road_integration", "road_connectivity", "road_control", "road_depth"},
 }
 
 DEFAULT_LIMIT = 20
@@ -102,6 +104,7 @@ def _feature_record_id(feature: Dict[str, Any], fallback: str) -> str:
             "feature.id",
             "properties.id",
             "properties.record_id",
+            "properties.edge_id",
             "properties.cell_id",
             "properties.h3_id",
             "properties.road_id",
@@ -280,11 +283,13 @@ class ScopeDatasetService:
             selected_rows = [row for row in poi_rows if normalize_year(row.get("year")) == selected_year]
             count = sum(self._poi_result_count(row) for row in selected_rows)
             datasets.append(self._dataset_payload("current:dataset:poi", count, years=years, selected_year=selected_year, variants=len(selected_rows)))
-        for source_id in ["current:dataset:h3", "current:dataset:population", "current:dataset:nightlight", "current:dataset:road"]:
+        for source_id in ["current:dataset:h3", "current:dataset:population", "current:dataset:nightlight", "current:dataset:road_edges", "current:dataset:road_grid"]:
             matching = [
-                item
-                for item in artifacts
-                if ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == source_id
+                item for item in artifacts
+                if (
+                    ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == source_id
+                    or (_as_text(item.get("artifact_type")) == "road_syntax" and source_id == "current:dataset:road_grid")
+                )
             ]
             selected, years, selected_year = self._select_artifacts(
                 source_id=source_id,
@@ -409,7 +414,7 @@ class ScopeDatasetService:
         variants: int,
         summary: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        is_static = source_id == "current:dataset:road"
+        is_static = source_id in {"current:dataset:road_edges", "current:dataset:road_grid"}
         warnings = [] if years or is_static else ["该来源未提供明确年份。"]
         return {
             "source_id": source_id,
@@ -500,7 +505,7 @@ class ScopeDatasetService:
         poi_rows: List[Dict[str, Any]],
     ) -> tuple[List[Dict[str, Any]], List[int], int | None]:
         deduped = self._dedupe_artifacts(artifacts)
-        if source_id == "current:dataset:road":
+        if source_id in {"current:dataset:road_edges", "current:dataset:road_grid"}:
             selected = sorted(deduped, key=self._artifact_sort_key, reverse=True)[:1]
             return selected, [], None
         years = available_business_years(_year_from_artifact(item) for item in deduped)
@@ -579,8 +584,10 @@ class ScopeDatasetService:
 
     def _records_from_artifact(self, source_id: str, artifact: Dict[str, Any]) -> List[ScopeRecord]:
         artifact_type = _as_text(artifact.get("artifact_type"))
-        if source_id == "current:dataset:road":
-            return self._road_records(artifact)
+        if source_id == "current:dataset:road_edges":
+            return self._road_edge_records(artifact)
+        if source_id == "current:dataset:road_grid":
+            return self._road_grid_records(artifact)
         return self._grid_records(source_id, artifact, artifact_type)
 
     def _grid_records(self, source_id: str, artifact: Dict[str, Any], artifact_type: str) -> List[ScopeRecord]:
@@ -637,7 +644,7 @@ class ScopeDatasetService:
             )
         return records
 
-    def _road_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
+    def _road_edge_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
         metric = payload.get("metric") or payload.get("mode") or ""
         time_scope = _static_time_scope(
@@ -645,7 +652,7 @@ class ScopeDatasetService:
             scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
         )
         records: List[ScopeRecord] = []
-        for kind, collection_key in [("road", "roads"), ("node", "nodes")]:
+        for kind, collection_key in [("road_edge", "road_edges")]:
             collection = payload.get(collection_key) if isinstance(payload.get(collection_key), dict) else {}
             for index, feature in enumerate(collection.get("features") or []):
                 if not isinstance(feature, dict):
@@ -661,23 +668,51 @@ class ScopeDatasetService:
                 }
                 title = _as_text(merged.get("name") or merged.get("road_name") or merged.get("node_id") or record_id)
                 metric_value = _first_value(merged, ["choice", "integration", "connectivity", "depth", "value"])
-                content = f"路网{('路段' if kind == 'road' else '节点')} {title}"
+                content = f"路网线段 {title}"
                 if metric_value not in (None, ""):
                     content += f"，指标值 {metric_value}"
                 records.append(
                     ScopeRecord(
-                        source_id="current:dataset:road",
+                        source_id="current:dataset:road_edges",
                         record_id=record_id,
                         title=title,
                         content=content,
                         properties=merged,
                         raw={"feature": _clone_json(feature)},
                         time_scope=time_scope,
-                        locator=f"current:dataset:road/{record_id}",
-                        citation="当前范围路网，当前路网模型",
+                        locator=f"current:dataset:road_edges/{record_id}",
+                        citation="当前范围路网线段，当前路网模型",
                         warnings=[],
                     )
                 )
+        return records
+
+    def _road_grid_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
+        payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
+        collection = payload.get("road_grid") if isinstance(payload.get("road_grid"), dict) else {}
+        time_scope = _static_time_scope(
+            data_version=_as_text(artifact.get("data_version")),
+            scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
+        )
+        records: List[ScopeRecord] = []
+        for index, feature in enumerate(collection.get("features") or []):
+            if not isinstance(feature, dict):
+                continue
+            props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+            record_id = _as_text(props.get("cell_id") or props.get("h3_id")) or _feature_record_id(feature, f"road_grid:{index}")
+            merged = {**_clone_json(props), "record_id": record_id, "feature_kind": "road_grid"}
+            records.append(ScopeRecord(
+                source_id="current:dataset:road_grid",
+                record_id=record_id,
+                title=record_id,
+                content=f"路网共享栅格 {record_id}，道路长度 {merged.get('road_length_km', 0)} km",
+                properties=merged,
+                raw={"feature": _clone_json(feature)},
+                time_scope=time_scope,
+                locator=f"current:dataset:road_grid/{record_id}",
+                citation="当前范围路网共享栅格，当前路网模型",
+                warnings=[],
+            ))
         return records
 
     def _apply_filters(self, records: List[ScopeRecord], source_id: str, filters: Dict[str, Any]) -> List[ScopeRecord]:
