@@ -187,6 +187,8 @@ AI 不应执行任意 SQL。范围数据查询通过 `modules/scope_datasets/` �
 - 数据年份或版本
 - 记录数
 - 可查询字段
+- geometry type、grid type、空间关系和空间聚合方法
+- `spatial_ready` 与内部统一 WGS84 几何状态
 - 存储状态
 - warnings
 
@@ -202,6 +204,9 @@ AI 不应执行任意 SQL。范围数据查询通过 `modules/scope_datasets/` �
 - `limit`
 - `offset`
 - `year`
+- `spatial`：`at_point`、`nearest`、`within_distance` 或 `intersects`
+
+`spatial` 目标可以是坐标点、GeoJSON geometry，或来自 `query_scope_dataset` 的 `source_id + record_id`。使用 record 目标时不需要再次传坐标系，同源查询默认排除目标自身。
 
 约束：
 
@@ -209,6 +214,8 @@ AI 不应执行任意 SQL。范围数据查询通过 `modules/scope_datasets/` �
 - 默认限制返回条数。
 - 必须返回 `total_count` 或 `has_more`，避免 AI 误以为读完了所有记录。
 - 返回 `records` 用于结构化检查，返回 `evidence_nodes` 用于最终回答引用。
+- 临近问题必须使用真实空间关系，不能用指标排序代替距离查询。
+- 返回 `spatial_diagnostics`，明确跳过记录数和结果完整性。
 
 ### 4.3 `aggregate_scope_dataset`
 
@@ -222,6 +229,7 @@ AI 不应执行任意 SQL。范围数据查询通过 `modules/scope_datasets/` �
 - `filters`
 - `top_k`
 - `year`
+- `spatial`
 
 示例能力：
 
@@ -230,7 +238,13 @@ AI 不应执行任意 SQL。范围数据查询通过 `modules/scope_datasets/` �
 - 夜光 cell 按辐射值取 TopN。
 - 路网 feature 按 `choice`、`integration`、`connectivity` 排序或聚合。
 
-当前第一版支持 `count`、`sum`、`avg`、`min`、`max`，并按 `group_by` 输出分组结果。字段仍受 `list_scope_datasets` 暴露的能力约束。
+基础字段聚合支持 `count`、`sum`、`avg`、`min`、`max`，并按 `group_by` 输出分组结果。空间范围聚合另外支持：
+
+- 人口 `area_weighted_sum`：按栅格覆盖比例估算，明确单元内均匀分布假设；
+- 夜光 `area_weighted_avg`：按相交面积计算加权均值；
+- 道路 `intersection_length_sum`：只累计范围内裁剪后的道路长度。
+
+聚合结果包含方法、假设、空间摘要和 EvidenceNode。人口或夜光在相交范围内使用会误算整格的普通聚合时，工具会返回明确错误。字段和计算方法仍受 `list_scope_datasets` 暴露的能力约束。
 
 ### 4.4 `read_scope_record`
 
@@ -274,6 +288,7 @@ AI 回答中引用 POI 时，应能说明数据年份和数据源，例如：
 - `analysis_artifacts.payload.year`
 - `analysis_artifacts.data_version`
 - `analysis_artifacts.scope_fingerprint`
+- `analysis_artifacts.payload.geometry_coord_type`
 
 如果 payload 或 params 中存在年份，Source 和 EvidenceNode 都必须携带 `time_scope`。
 
@@ -337,6 +352,9 @@ AI 使用当前范围数据源时必须遵守：
 4. 年份缺失时必须提示限制，不得进行跨年比较。
 5. 数据库存储位置不能作为用户结论出现。用户应该看到的是来源、年份、指标和引用。
 6. 全量 payload 不进入 prompt；AI 只能通过分页、聚合或单条读取工具获取必要证据。
+7. 点落格、最近、半径和相交问题必须使用 `spatial`，不能以指标排序冒充空间临近。
+8. 空间聚合必须引用返回的 `method` 和 `assumptions`；人口估算不能表述为精确普查值，夜光不能表述为消费额。
+9. `spatial_diagnostics.result_complete=false` 时必须说明记录缺失对结论的影响。
 
 ## 8. 当前实现与后续增强
 
