@@ -3,9 +3,10 @@ import math
 from types import SimpleNamespace
 
 import pytest
-from shapely.geometry import LineString, Point, box
+from shapely.geometry import LineString, MultiLineString, MultiPolygon, Point, box
 
 import modules.scope_datasets.spatial as spatial_module
+from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84
 from modules.scope_datasets import ScopeDatasetQueryError, ScopeDatasetService
 from modules.scope_datasets.spatial import SpatialQueryError, query_spatial_records
 from modules.agent.tool_adapters import scope_dataset_tools
@@ -103,6 +104,55 @@ def test_at_point_and_intersects_return_polygon_overlap_evidence():
     assert 0.49 < match["query_overlap_ratio"] < 0.51
     assert match["overlap_area_m2"] > 500_000
 
+    boundary = query_spatial_records(
+        records,
+        {"relation": "at_point", "point": [0.0, 0.005], "coord_type": "wgs84"},
+    )
+    assert list(boundary.matches) == [0]
+
+
+def test_gcj02_query_is_normalized_against_wgs84_record_geometry():
+    gcj_point = [112.98, 28.2]
+    wgs_point = gcj02_to_wgs84(*gcj_point)
+
+    result = query_spatial_records(
+        [SimpleNamespace(geometry=Point(*wgs_point), record_id="aligned")],
+        {"relation": "nearest", "point": gcj_point, "coord_type": "gcj02"},
+    )
+
+    assert result.matches[0].distance_m < 0.01
+    assert result.matches[0].coord_type == "gcj02"
+
+
+def test_intersects_supports_multi_polygon_and_multi_line_string():
+    records = [
+        SimpleNamespace(
+            geometry=MultiPolygon([box(0, 0, 0.01, 0.01), box(0.02, 0, 0.03, 0.01)]),
+            record_id="multi-polygon",
+        ),
+        SimpleNamespace(
+            geometry=MultiLineString([
+                [(0, 0.005), (0.03, 0.005)],
+                [(0, 0.02), (0.03, 0.02)],
+            ]),
+            record_id="multi-line",
+        ),
+    ]
+    query = {
+        "relation": "intersects",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[0.005, 0], [0.025, 0], [0.025, 0.01], [0.005, 0.01], [0.005, 0]]],
+        },
+        "coord_type": "wgs84",
+    }
+
+    result = query_spatial_records(records, query)
+
+    assert set(result.matches) == {0, 1}
+    assert result.matches[0].overlap_area_m2 > 0
+    assert result.matches[1].intersection_length_m > 2_000
+
 
 def test_spatial_query_rejects_missing_coordinate_type():
     with pytest.raises(SpatialQueryError) as error:
@@ -138,6 +188,22 @@ class _SpatialRepository:
         return []
 
 
+class _SpatialCombinationRepository:
+    def list_poi_results(self, history_id):
+        return [{"id": 2, "source": "local", "year": 2024, "summary": {"total": 4}}]
+
+    def get_poi_data(self, poi_result_id):
+        return [
+            {"id": "food-near", "name": "餐饮近点", "type": "餐饮", "location": [0.001, 0]},
+            {"id": "shop", "name": "商店", "type": "零售", "location": [0.002, 0]},
+            {"id": "food-far", "name": "餐饮远点", "type": "餐饮", "location": [0.003, 0]},
+            {"id": "missing-geometry", "name": "坐标缺失", "type": "餐饮"},
+        ]
+
+    def list_analysis_artifacts(self, history_id):
+        return []
+
+
 def test_scope_service_attaches_spatial_match_to_record_and_evidence():
     result = ScopeDatasetService(repository=_SpatialRepository()).query_scope_dataset(
         history_id="history-1",
@@ -161,6 +227,32 @@ def test_scope_service_attaches_spatial_match_to_record_and_evidence():
         "skipped_record_count": 0,
         "result_complete": True,
     }
+
+
+def test_scope_service_combines_spatial_filter_attributes_and_pagination():
+    result = ScopeDatasetService(repository=_SpatialCombinationRepository()).query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:poi",
+        spatial={
+            "relation": "within_distance",
+            "point": [0, 0],
+            "coord_type": "wgs84",
+            "max_distance_m": 500,
+        },
+        filters={"category": {"contains": "餐饮"}},
+        limit=1,
+        offset=1,
+    )
+
+    assert result["total_count"] == 2
+    assert result["records"][0]["record_id"] == "food-far"
+    assert result["has_more"] is False
+    assert result["spatial_diagnostics"] == {
+        "matched_record_count": 3,
+        "skipped_record_count": 1,
+        "result_complete": False,
+    }
+    assert "1 条记录缺少可用 geometry" in result["warnings"][0]
 
 
 def test_scope_service_uses_existing_record_as_spatial_target_and_excludes_itself():
