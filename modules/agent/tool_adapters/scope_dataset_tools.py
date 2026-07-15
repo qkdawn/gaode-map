@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from modules.scope_datasets import ScopeDatasetService
+from modules.scope_datasets import ScopeDatasetQueryError, ScopeDatasetService
 from modules.scope_datasets.spatial import SpatialQueryError
 
 from ..schemas import AnalysisSnapshot, ToolResult
@@ -65,7 +65,7 @@ async def query_scope_dataset(
             year=arguments.get("year"),
             spatial=arguments.get("spatial") if isinstance(arguments.get("spatial"), dict) else None,
         )
-    except SpatialQueryError as exc:
+    except (ScopeDatasetQueryError, SpatialQueryError) as exc:
         return ToolResult(
             tool_name="query_scope_dataset",
             status="failed",

@@ -147,6 +147,9 @@ def normalize_spatial_target(spatial: dict[str, Any]) -> tuple[str, BaseGeometry
     relation = str(spatial.get("relation") or "").strip().lower()
     if relation not in SUPPORTED_SPATIAL_RELATIONS:
         raise SpatialQueryError("spatial_relation_unsupported", f"不支持的空间关系: {relation or '空'}")
+    target_fields = [field for field in ("point", "geometry") if spatial.get(field) is not None]
+    if len(target_fields) != 1:
+        raise SpatialQueryError("spatial_query_invalid", "spatial 必须且只能提供 point 或 geometry")
     coord_type = str(spatial.get("coord_type") or "").strip().lower()
     if coord_type not in {"gcj02", "wgs84"}:
         raise SpatialQueryError("spatial_coord_type_unknown", "spatial.coord_type 必须是 gcj02 或 wgs84")

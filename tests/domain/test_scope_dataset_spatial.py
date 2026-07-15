@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from shapely.geometry import LineString, Point, box
 
-from modules.scope_datasets import ScopeDatasetService
+from modules.scope_datasets import ScopeDatasetQueryError, ScopeDatasetService
 from modules.scope_datasets.spatial import SpatialQueryError, query_spatial_records
 from modules.agent.tool_adapters import scope_dataset_tools
 
@@ -144,6 +144,43 @@ def test_scope_service_attaches_spatial_match_to_record_and_evidence():
     assert result["records"][0]["spatial_match"]["distance_m"] > 0
     assert result["evidence_nodes"][0]["data"]["spatial_match"]["relation"] == "nearest"
     assert result["spatial_query"]["max_distance_m"] == 100
+
+
+def test_scope_service_uses_existing_record_as_spatial_target_and_excludes_itself():
+    result = ScopeDatasetService(repository=_SpatialRepository()).query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:poi",
+        spatial={
+            "relation": "nearest",
+            "record": {"source_id": "current:dataset:poi", "record_id": "poi-near", "year": 2024},
+        },
+        limit=5,
+    )
+
+    assert result["total_count"] == 1
+    assert result["records"][0]["record_id"] == "poi-far"
+    assert result["records"][0]["spatial_match"]["distance_m"] > 1_000
+    assert result["spatial_query"]["record"]["record_id"] == "poi-near"
+
+
+def test_scope_service_rejects_unadvertised_filter_and_sort_fields():
+    service = ScopeDatasetService(repository=_SpatialRepository())
+
+    with pytest.raises(ScopeDatasetQueryError) as filter_error:
+        service.query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:poi",
+            filters={"not_a_real_field": "x"},
+        )
+    assert filter_error.value.code == "scope_dataset_field_unsupported"
+
+    with pytest.raises(ScopeDatasetQueryError) as sort_error:
+        service.query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:poi",
+            sort={"field": "not_a_real_field", "direction": "desc"},
+        )
+    assert sort_error.value.code == "scope_dataset_field_unsupported"
 
 
 def test_scope_service_queries_road_grid_as_polygon_source():

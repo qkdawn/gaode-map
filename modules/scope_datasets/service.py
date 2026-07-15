@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Dict, Iterable, List, Optional
 
-from shapely.geometry import Point, shape
+from shapely.geometry import Point, mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform
 
@@ -44,8 +44,8 @@ DATASET_FILTER_FIELDS = {
     "current:dataset:poi_grid": {"record_id", "cell_id", "poi_count", "density", "lq", "year"},
     "current:dataset:population": {"record_id", "cell_id", "value", "population", "density", "year", "view"},
     "current:dataset:nightlight": {"record_id", "cell_id", "value", "radiance", "year", "view"},
-    "current:dataset:road_edges": {"record_id", "edge_id", "choice_score", "integration_score", "connectivity_score", "control_score", "depth_score", "metric"},
-    "current:dataset:road_grid": {"record_id", "cell_id", "road_has_data", "road_length_km", "road_length_km_per_km2", "road_choice", "road_integration", "road_connectivity", "road_control", "road_depth"},
+    "current:dataset:road_edges": {"record_id", "edge_id", "feature_kind", "choice_score", "integration_score", "connectivity_score", "control_score", "depth_score", "metric"},
+    "current:dataset:road_grid": {"record_id", "cell_id", "feature_kind", "road_has_data", "road_length_km", "road_length_km_per_km2", "road_choice", "road_integration", "road_connectivity", "road_control", "road_depth"},
 }
 
 DATASET_SPATIAL_CAPABILITIES = {
@@ -90,6 +90,20 @@ POI_GEOMETRY_COORD_TYPE = "gcj02"
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+
+
+class ScopeDatasetQueryError(ValueError):
+    def __init__(self, code: str, message: str):
+        self.code = str(code)
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class _SpatialSelection:
+    records: List[ScopeRecord]
+    matches: Dict[int, Dict[str, Any]]
+    warnings: List[str]
+    skipped_record_count: int
 
 
 def _clone_json(value: Any) -> Any:
@@ -429,6 +443,7 @@ class ScopeDatasetService:
         year: Any = None,
         spatial: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        self._validate_query_fields(source_id, filters=filters or {}, sort=sort or {})
         records, available_years, selected_year = self._records_with_selection(
             history_id=history_id,
             source_id=source_id,
@@ -440,24 +455,16 @@ class ScopeDatasetService:
         spatial_query = _clone_json(spatial) if isinstance(spatial, dict) else None
         spatial_records = records
         if spatial is not None:
-            relation = _as_text(spatial.get("relation")).lower() if isinstance(spatial, dict) else ""
-            supported_relations = DATASET_SPATIAL_CAPABILITIES.get(source_id, {}).get("spatial_relations") or []
-            if relation not in supported_relations:
-                raise SpatialQueryError(
-                    "spatial_relation_unsupported",
-                    f"{source_id} 不支持空间关系: {relation or '空'}",
-                )
-            spatial_result = query_spatial_records(
-                records,
-                spatial,
-                cache_key=self._spatial_cache_key(history_id, source_id, selected_year, records),
+            selection = self._select_spatial_records(
+                history_id=history_id,
+                source_id=source_id,
+                selected_year=selected_year,
+                records=records,
+                spatial=spatial,
             )
-            spatial_records = [records[index] for index in spatial_result.matches]
-            spatial_matches = {
-                id(records[index]): match.as_payload()
-                for index, match in spatial_result.matches.items()
-            }
-            spatial_warnings.extend(spatial_result.warnings)
+            spatial_records = selection.records
+            spatial_matches = selection.matches
+            spatial_warnings.extend(selection.warnings)
         filtered = self._apply_filters(spatial_records, source_id, filters or {})
         if spatial is not None and str(spatial.get("relation") or "").strip().lower() in {"nearest", "within_distance"}:
             sorted_records = list(filtered)
@@ -481,6 +488,112 @@ class ScopeDatasetService:
             "evidence_nodes": [record.evidence_node(spatial_matches.get(id(record))) for record in page],
             "warnings": sorted(set(warnings)),
         }
+
+    def _select_spatial_records(
+        self,
+        *,
+        history_id: str,
+        source_id: str,
+        selected_year: int | None,
+        records: List[ScopeRecord],
+        spatial: Dict[str, Any],
+    ) -> _SpatialSelection:
+        relation = _as_text(spatial.get("relation")).lower() if isinstance(spatial, dict) else ""
+        supported_relations = DATASET_SPATIAL_CAPABILITIES.get(source_id, {}).get("spatial_relations") or []
+        if relation not in supported_relations:
+            raise SpatialQueryError(
+                "spatial_relation_unsupported",
+                f"{source_id} 不支持空间关系: {relation or '空'}",
+            )
+        engine_query, target_record = self._resolve_spatial_target(history_id, spatial)
+        spatial_result = query_spatial_records(
+            records,
+            engine_query,
+            cache_key=self._spatial_cache_key(history_id, source_id, selected_year, records),
+        )
+        exclude_target = bool(spatial.get("exclude_target", True))
+        selected: List[ScopeRecord] = []
+        matches: Dict[int, Dict[str, Any]] = {}
+        for index, match in spatial_result.matches.items():
+            record = records[index]
+            if (
+                target_record
+                and exclude_target
+                and target_record["source_id"] == source_id
+                and target_record["record_id"] == record.record_id
+            ):
+                continue
+            selected.append(record)
+            matches[id(record)] = match.as_payload()
+        return _SpatialSelection(
+            records=selected,
+            matches=matches,
+            warnings=list(spatial_result.warnings),
+            skipped_record_count=spatial_result.skipped_record_count,
+        )
+
+    def _resolve_spatial_target(
+        self,
+        history_id: str,
+        spatial: Dict[str, Any],
+    ) -> tuple[Dict[str, Any], Dict[str, str] | None]:
+        engine_query = _clone_json(spatial)
+        target = spatial.get("record") if isinstance(spatial.get("record"), dict) else None
+        if target is None:
+            engine_query.pop("exclude_target", None)
+            return engine_query, None
+        if spatial.get("point") is not None or spatial.get("geometry") is not None:
+            raise SpatialQueryError(
+                "spatial_query_invalid",
+                "spatial.record 不能与 point 或 geometry 同时使用",
+            )
+        target_source_id = _as_text(target.get("source_id"))
+        target_record_id = _as_text(target.get("record_id"))
+        if target_source_id not in DATASET_TITLES or not target_record_id:
+            raise SpatialQueryError(
+                "spatial_query_invalid",
+                "spatial.record 必须提供有效 source_id 和 record_id",
+            )
+        target_records, _, _ = self._records_with_selection(
+            history_id=history_id,
+            source_id=target_source_id,
+            year=target.get("year"),
+            require_geometry_metadata=True,
+        )
+        matched_target = next((record for record in target_records if record.record_id == target_record_id), None)
+        if matched_target is None:
+            raise SpatialQueryError(
+                "spatial_target_record_not_found",
+                f"未找到空间目标记录: {target_source_id}/{target_record_id}",
+            )
+        if matched_target.geometry is None:
+            raise SpatialQueryError(
+                "spatial_geometry_missing",
+                f"空间目标记录没有可用 geometry: {target_source_id}/{target_record_id}",
+            )
+        engine_query.pop("record", None)
+        engine_query.pop("exclude_target", None)
+        engine_query["geometry"] = mapping(matched_target.geometry)
+        engine_query["coord_type"] = "wgs84"
+        return engine_query, {"source_id": target_source_id, "record_id": target_record_id}
+
+    @staticmethod
+    def _validate_query_fields(source_id: str, *, filters: Dict[str, Any], sort: Dict[str, Any]) -> None:
+        allowed = DATASET_FILTER_FIELDS.get(source_id)
+        if allowed is None:
+            raise ScopeDatasetQueryError("scope_dataset_source_unsupported", f"不支持的数据源: {source_id}")
+        unsupported_filters = sorted(set(filters) - allowed)
+        if unsupported_filters:
+            raise ScopeDatasetQueryError(
+                "scope_dataset_field_unsupported",
+                f"{source_id} 不支持筛选字段: {', '.join(unsupported_filters)}",
+            )
+        sort_field = _as_text(sort.get("field")) if isinstance(sort, dict) else ""
+        if sort_field and sort_field not in allowed:
+            raise ScopeDatasetQueryError(
+                "scope_dataset_field_unsupported",
+                f"{source_id} 不支持排序字段: {sort_field}",
+            )
 
     @staticmethod
     def _spatial_cache_key(history_id: str, source_id: str, selected_year: int | None, records: List[ScopeRecord]) -> str:

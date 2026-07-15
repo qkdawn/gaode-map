@@ -58,11 +58,22 @@ SPATIAL_SCHEMA = {
             "items": {"type": "number"},
         },
         "geometry": {"type": "object"},
+        "record": {
+            "type": "object",
+            "properties": {
+                "source_id": {"type": "string", "enum": SOURCE_ID_ENUM},
+                "record_id": {"type": "string"},
+                "year": {"type": "integer"},
+            },
+            "required": ["source_id", "record_id"],
+            "additionalProperties": False,
+        },
+        "exclude_target": {"type": "boolean"},
         "coord_type": {"type": "string", "enum": ["gcj02", "wgs84"]},
         "max_distance_m": {"type": "number", "minimum": 0},
         "min_overlap_ratio": {"type": "number", "minimum": 0, "maximum": 1},
     },
-    "required": ["relation", "coord_type"],
+    "required": ["relation"],
     "additionalProperties": False,
 }
 
@@ -119,7 +130,7 @@ def register_scope_dataset_tools(registry: Dict[str, RegisteredTool]) -> None:
     registry["query_scope_dataset"] = _register(
         _tool_spec(
             name="query_scope_dataset",
-            description="分页读取当前范围数据源的明细记录，并把返回记录转换为 EvidenceNode。只能查询当前 history_id 的数据。",
+            description="分页读取当前范围数据源的明细记录并生成 EvidenceNode。临近、半径、点落格和范围相交问题必须使用 spatial；record 可直接引用另一条范围记录作为空间目标。",
             category="information",
             layer="L1",
             ui_tier="foundation",
@@ -127,8 +138,8 @@ def register_scope_dataset_tools(registry: Dict[str, RegisteredTool]) -> None:
             capability_type="fetch",
             llm_exposure="primary",
             evidence_contract=["scope_dataset.records", "scope_dataset.evidence_nodes"],
-            applicable_scenarios=["查询当前范围内有哪些 POI、人口或夜光最高 cell、路网指标最高路段、H3 网格明细"],
-            cautions=["默认分页，不能把返回页当作全量；只使用 list_scope_datasets 暴露的白名单字段过滤排序"],
+            applicable_scenarios=["查询点落入的 H3 或栅格、最近道路和 POI、半径内记录、与范围相交的道路或网格"],
+            cautions=["默认分页，不能把返回页当作全量；临近不能用指标排序代替；先按 list_scope_datasets 暴露的字段和空间关系构造查询"],
             produces=["scope_dataset_evidence_nodes"],
             input_schema={
                 "type": "object",
@@ -156,6 +167,8 @@ def register_scope_dataset_tools(registry: Dict[str, RegisteredTool]) -> None:
                 "type": "object",
                 "properties": {
                     "source_id": {"type": "string"},
+                    "selected_year": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                    "available_years": {"type": "array", "items": {"type": "integer"}},
                     "spatial_query": {"anyOf": [{"type": "object"}, {"type": "null"}]},
                     "total_count": {"type": "integer"},
                     "limit": {"type": "integer"},
@@ -165,7 +178,7 @@ def register_scope_dataset_tools(registry: Dict[str, RegisteredTool]) -> None:
                     "evidence_nodes": {"type": "array", "items": EVIDENCE_NODE_SCHEMA},
                     "warnings": {"type": "array"},
                 },
-                "required": ["source_id", "total_count", "limit", "offset", "has_more", "spatial_query", "records", "evidence_nodes", "warnings"],
+                "required": ["source_id", "selected_year", "available_years", "total_count", "limit", "offset", "has_more", "spatial_query", "records", "evidence_nodes", "warnings"],
                 "additionalProperties": False,
             },
             readonly=True,

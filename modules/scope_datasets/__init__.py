@@ -1,3 +1,3 @@
-from .service import ScopeDatasetService
+from .service import ScopeDatasetQueryError, ScopeDatasetService
 
-__all__ = ["ScopeDatasetService"]
+__all__ = ["ScopeDatasetQueryError", "ScopeDatasetService"]
