@@ -437,6 +437,16 @@ def test_context_ask_enriches_analysis_road_sources_with_scoped_dataset(monkeypa
                     "avg_integration": 0.2,
                     "max_integration": 0.3,
                 }],
+                "evidence_node": {
+                    "id": "current:dataset:road_edges:aggregate:test",
+                    "source_id": "current:dataset:road_edges",
+                    "source_type": "system",
+                    "title": "路网聚合",
+                    "content": "当前范围路网聚合证据",
+                    "metadata": {"method": "avg"},
+                    "locator": "current:dataset:road_edges/aggregate/test",
+                    "citation": "当前范围路网聚合，2024 年",
+                },
                 "warnings": [],
             }
 
@@ -517,7 +527,7 @@ def test_context_ask_enriches_analysis_road_sources_with_scoped_dataset(monkeypa
     assert scoped["query_count"] == 2
     assert road_context["examples"][0]["evidence_nodes"][0]["citation"] == "当前范围路网线段，2024 年"
     assert data["evidence"][0]["source_id"] == "current:dataset:road_edges"
-    assert data["citations"] == ["当前范围路网线段，2024 年"]
+    assert data["citations"] == ["当前范围路网聚合，2024 年", "当前范围路网线段，2024 年"]
 
 
 def test_context_ask_warns_when_analysis_dataset_source_has_no_history_id(monkeypatch):

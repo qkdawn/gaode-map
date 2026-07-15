@@ -441,3 +441,29 @@ def test_scope_dataset_tool_returns_domain_error_for_invalid_spatial_query(monke
 
     assert result.status == "failed"
     assert result.error == "spatial_relation_unsupported"
+
+
+def test_scope_dataset_aggregate_tool_publishes_citable_spatial_evidence(monkeypatch):
+    monkeypatch.setattr(
+        scope_dataset_tools,
+        "_service",
+        lambda: ScopeDatasetService(repository=_SpatialAggregateRepository()),
+    )
+    result = asyncio.run(
+        scope_dataset_tools.aggregate_scope_dataset(
+            arguments={
+                "source_id": "current:dataset:population",
+                "metrics": [{"op": "area_weighted_sum", "field": "population", "as": "estimated_population"}],
+                "spatial": _aggregate_polygon(),
+            },
+            snapshot=SimpleNamespace(context={"history_id": "history-1"}),
+            artifacts={},
+            question="这个范围内估算人口是多少",
+        )
+    )
+
+    assert result.status == "success"
+    assert result.result["rows"][0]["estimated_population"] > 0
+    nodes = result.artifacts["scope_dataset_evidence_nodes"]
+    assert nodes[0]["kind"] == "spatial_metric"
+    assert nodes[0]["citation"]

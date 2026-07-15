@@ -226,6 +226,12 @@ def build_scoped_dataset_context(payload: AgentContextAskRequest) -> Dict[str, A
             continue
 
         warnings.extend([as_text(item) for item in list(raw_example.get("warnings") or []) if as_text(item)])
+        aggregate_node = aggregate.get("evidence_node") if isinstance(aggregate.get("evidence_node"), dict) else None
+        if aggregate_node is not None:
+            evidence_nodes.append(aggregate_node)
+            citation = aggregate_node.get("citation")
+            if citation not in (None, "", [], {}) and citation not in citations:
+                citations.append(citation)
         for node in list(raw_example.get("evidence_nodes") or []):
             if not isinstance(node, dict):
                 continue
