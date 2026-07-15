@@ -182,6 +182,10 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
   const nightlight = ctx.buildAnalysisArtifactBundle('nightlight')
   const road = ctx.buildAnalysisArtifactBundle('road_syntax')
 
+  for (const bundle of [raster, h3, population, nightlight, road]) {
+    assert.equal(bundle.payload.geometry_coord_type, 'gcj02')
+  }
+
   assert.equal(raster.payload.grid.type, 'FeatureCollection')
   assert.equal(raster.payload.grid.scope_id, 'shared-scope')
   assert.equal(raster.payload.grid.cell_count, 1)

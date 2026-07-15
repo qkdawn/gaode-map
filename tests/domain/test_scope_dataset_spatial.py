@@ -158,6 +158,7 @@ def test_scope_service_queries_road_grid_as_polygon_source():
                     "artifact_type": "road_syntax",
                     "params": {"metric": "choice"},
                     "payload": {
+                        "geometry_coord_type": "wgs84",
                         "road_grid": {
                             "type": "FeatureCollection",
                             "features": [
@@ -188,6 +189,51 @@ def test_scope_service_queries_road_grid_as_polygon_source():
     assert result["total_count"] == 1
     assert result["records"][0]["record_id"] == "road-cell-1"
     assert result["records"][0]["spatial_match"]["geometry_type"] == "Polygon"
+
+
+def test_scope_service_rejects_spatial_query_when_artifact_coord_type_is_missing():
+    class MissingCoordTypeRepository:
+        def list_poi_results(self, history_id):
+            return []
+
+        def list_analysis_artifacts(self, history_id):
+            return [
+                {
+                    "id": 43,
+                    "artifact_type": "population",
+                    "params": {"year": 2024},
+                    "payload": {
+                        "grid": {
+                            "features": [
+                                {
+                                    "type": "Feature",
+                                    "properties": {"cell_id": "population-cell-1"},
+                                    "geometry": {
+                                        "type": "Polygon",
+                                        "coordinates": [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]]],
+                                    },
+                                }
+                            ]
+                        }
+                    },
+                    "data_version": "v1",
+                    "scope_fingerprint": "scope-a",
+                }
+            ]
+
+    service = ScopeDatasetService(repository=MissingCoordTypeRepository())
+    assert service.query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:population",
+    )["total_count"] == 1
+
+    with pytest.raises(SpatialQueryError) as error:
+        service.query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:population",
+            spatial={"relation": "at_point", "point": [0.005, 0.005], "coord_type": "wgs84"},
+        )
+    assert error.value.code == "spatial_coord_type_unknown"
 
 
 def test_scope_service_rejects_relation_not_declared_by_source():

@@ -273,6 +273,10 @@ test('buildAnalysisArtifactBundle stores full population nightlight and road dat
   const nightlightBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'nightlight')
   const roadBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'road_syntax')
 
+  assert.equal(populationBundle.payload.geometry_coord_type, 'gcj02')
+  assert.equal(nightlightBundle.payload.geometry_coord_type, 'gcj02')
+  assert.equal(roadBundle.payload.geometry_coord_type, 'gcj02')
+
   assert.equal(populationBundle.payload.grid.type, 'FeatureCollection')
   assert.equal(populationBundle.payload.grid.scope_id, 'population-grid-scope')
   assert.equal(populationBundle.payload.grid.count, 1)

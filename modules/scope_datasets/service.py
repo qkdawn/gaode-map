@@ -86,15 +86,7 @@ DATASET_SPATIAL_CAPABILITIES = {
     },
 }
 
-SOURCE_GEOMETRY_COORD_TYPES = {
-    "current:dataset:poi": "gcj02",
-    "current:dataset:h3": "gcj02",
-    "current:dataset:poi_grid": "gcj02",
-    "current:dataset:population": "gcj02",
-    "current:dataset:nightlight": "gcj02",
-    "current:dataset:road_edges": "gcj02",
-    "current:dataset:road_grid": "gcj02",
-}
+POI_GEOMETRY_COORD_TYPE = "gcj02"
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
@@ -220,7 +212,10 @@ def _geometry_from_feature(feature: Dict[str, Any], source_id: str, coord_type: 
             geometry = geometry.buffer(0)
         if geometry.is_empty:
             return None
-        if str(coord_type or "").strip().lower() == "gcj02":
+        normalized_coord_type = str(coord_type or "").strip().lower()
+        if normalized_coord_type not in {"gcj02", "wgs84"}:
+            return None
+        if normalized_coord_type == "gcj02":
             geometry = transform(
                 lambda x, y, z=None: _transform_xy(x, y, gcj02_to_wgs84),
                 geometry,
@@ -434,7 +429,12 @@ class ScopeDatasetService:
         year: Any = None,
         spatial: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        records, available_years, selected_year = self._records_with_selection(history_id=history_id, source_id=source_id, year=year)
+        records, available_years, selected_year = self._records_with_selection(
+            history_id=history_id,
+            source_id=source_id,
+            year=year,
+            require_geometry_metadata=spatial is not None,
+        )
         spatial_matches: Dict[int, Dict[str, Any]] = {}
         spatial_warnings: List[str] = []
         spatial_query = _clone_json(spatial) if isinstance(spatial, dict) else None
@@ -592,7 +592,7 @@ class ScopeDatasetService:
             "summary": _clone_json(summary or {}),
             "geometry_type": _as_text(spatial_capabilities.get("geometry_type")),
             "grid_type": _as_text(spatial_capabilities.get("grid_type")),
-            "geometry_coord_type": "source_defined",
+            "geometry_coord_type": "wgs84",
             "time_scope": {
                 "years": years,
                 "selected_year": selected_year,
@@ -621,6 +621,7 @@ class ScopeDatasetService:
         history_id: str,
         source_id: str,
         year: Any = None,
+        require_geometry_metadata: bool = False,
     ) -> tuple[List[ScopeRecord], List[int], int | None]:
         normalized_source_id = _as_text(source_id)
         if not _as_text(history_id) or normalized_source_id not in DATASET_TITLES:
@@ -647,7 +648,13 @@ class ScopeDatasetService:
         )
         records: List[ScopeRecord] = []
         for artifact in artifacts:
-            records.extend(self._records_from_artifact(normalized_source_id, artifact))
+            records.extend(
+                self._records_from_artifact(
+                    normalized_source_id,
+                    artifact,
+                    require_geometry_metadata=require_geometry_metadata,
+                )
+            )
         return records, years, selected_year
 
     @staticmethod
@@ -744,7 +751,7 @@ class ScopeDatasetService:
                         locator=f"current:dataset:poi/{record_id}",
                         citation=f"当前范围 POI，{time_scope.get('label')}",
                         warnings=warnings,
-                        geometry=_point_from_poi(poi, SOURCE_GEOMETRY_COORD_TYPES["current:dataset:poi"]),
+                        geometry=_point_from_poi(poi, POI_GEOMETRY_COORD_TYPE),
                     )
                 )
         return records
@@ -757,29 +764,60 @@ class ScopeDatasetService:
             return total
         return len(row.get("poi_data") or [])
 
-    def _records_from_artifact(self, source_id: str, artifact: Dict[str, Any]) -> List[ScopeRecord]:
+    def _records_from_artifact(
+        self,
+        source_id: str,
+        artifact: Dict[str, Any],
+        *,
+        require_geometry_metadata: bool = False,
+    ) -> List[ScopeRecord]:
         artifact_type = _as_text(artifact.get("artifact_type"))
         if source_id == "current:dataset:road_edges":
-            return self._road_edge_records(artifact)
+            return self._road_edge_records(artifact, require_geometry_metadata=require_geometry_metadata)
         if source_id == "current:dataset:road_grid":
-            return self._road_grid_records(artifact)
-        return self._grid_records(source_id, artifact, artifact_type)
+            return self._road_grid_records(artifact, require_geometry_metadata=require_geometry_metadata)
+        return self._grid_records(
+            source_id,
+            artifact,
+            artifact_type,
+            require_geometry_metadata=require_geometry_metadata,
+        )
 
     @staticmethod
-    def _artifact_coord_type(source_id: str, artifact: Dict[str, Any]) -> str:
+    def _artifact_coord_type(
+        source_id: str,
+        artifact: Dict[str, Any],
+        *,
+        required: bool = False,
+    ) -> str:
         params = artifact.get("params") if isinstance(artifact.get("params"), dict) else {}
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
-        return _as_text(
+        coord_type = _as_text(
             payload.get("geometry_coord_type")
             or payload.get("coord_type")
             or params.get("geometry_coord_type")
             or params.get("coord_type")
-            or SOURCE_GEOMETRY_COORD_TYPES.get(source_id)
-        )
+        ).lower()
+        if coord_type in {"gcj02", "wgs84"}:
+            return coord_type
+        if required:
+            artifact_type = _as_text(artifact.get("artifact_type")) or "unknown"
+            raise SpatialQueryError(
+                "spatial_coord_type_unknown",
+                f"{source_id} 的 {artifact_type} artifact 缺少有效 geometry_coord_type",
+            )
+        return ""
 
-    def _grid_records(self, source_id: str, artifact: Dict[str, Any], artifact_type: str) -> List[ScopeRecord]:
+    def _grid_records(
+        self,
+        source_id: str,
+        artifact: Dict[str, Any],
+        artifact_type: str,
+        *,
+        require_geometry_metadata: bool = False,
+    ) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
-        coord_type = self._artifact_coord_type(source_id, artifact)
+        coord_type = self._artifact_coord_type(source_id, artifact, required=require_geometry_metadata)
         grid = payload.get("grid") if isinstance(payload.get("grid"), dict) else {}
         layer = payload.get("layer") if isinstance(payload.get("layer"), dict) else {}
         cells_by_id = {}
@@ -833,10 +871,14 @@ class ScopeDatasetService:
             )
         return records
 
-    def _road_edge_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
+    def _road_edge_records(self, artifact: Dict[str, Any], *, require_geometry_metadata: bool = False) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
         metric = payload.get("metric") or payload.get("mode") or ""
-        coord_type = self._artifact_coord_type("current:dataset:road_edges", artifact)
+        coord_type = self._artifact_coord_type(
+            "current:dataset:road_edges",
+            artifact,
+            required=require_geometry_metadata,
+        )
         time_scope = _static_time_scope(
             data_version=_as_text(artifact.get("data_version")),
             scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
@@ -878,10 +920,14 @@ class ScopeDatasetService:
                 )
         return records
 
-    def _road_grid_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
+    def _road_grid_records(self, artifact: Dict[str, Any], *, require_geometry_metadata: bool = False) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
         collection = payload.get("road_grid") if isinstance(payload.get("road_grid"), dict) else {}
-        coord_type = self._artifact_coord_type("current:dataset:road_grid", artifact)
+        coord_type = self._artifact_coord_type(
+            "current:dataset:road_grid",
+            artifact,
+            required=require_geometry_metadata,
+        )
         time_scope = _static_time_scope(
             data_version=_as_text(artifact.get("data_version")),
             scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),

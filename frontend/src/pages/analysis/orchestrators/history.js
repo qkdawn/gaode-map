@@ -5,6 +5,8 @@ import {
   cloneArtifactValue,
 } from '../../../features/history/artifacts.js'
 
+const ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE = 'gcj02'
+
 function createAnalysisHistoryOrchestratorMethods() {
   return {
     cancelHistoryDetailLoading() {
@@ -330,6 +332,7 @@ function createAnalysisHistoryOrchestratorMethods() {
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
+            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
             year: params.year,
             params: this.cloneArtifactValue(params),
             grid: buildFeatureCollectionArtifact({
@@ -359,6 +362,7 @@ function createAnalysisHistoryOrchestratorMethods() {
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
+            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
             year: params.year,
             params: this.cloneArtifactValue(params),
             grid: buildFeatureCollectionArtifact({
@@ -395,6 +399,7 @@ function createAnalysisHistoryOrchestratorMethods() {
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
+            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
             overview: this.cloneArtifactValue(this.populationOverview || {}),
             summary,
             grid: buildFeatureCollectionArtifact({
@@ -427,6 +432,7 @@ function createAnalysisHistoryOrchestratorMethods() {
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
+            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
             overview: this.cloneArtifactValue(this.nightlightOverview || {}),
             summary,
             grid: buildFeatureCollectionArtifact({
@@ -454,6 +460,7 @@ function createAnalysisHistoryOrchestratorMethods() {
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
+            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
             summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
             diagnostics: this.cloneArtifactValue(this.roadSyntaxDiagnostics || {}),
             roads: buildFeatureCollectionArtifact({ features: roadFeatures }),
