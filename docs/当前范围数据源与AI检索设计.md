@@ -11,6 +11,17 @@
 
 这里的 MySQL 不是产品语义。MySQL 只是可能的数据存储介质之一。产品语义应该是“当前范围数据源”：所有查询都必须被限定在当前 `history_id`、当前空间范围、当前年份或数据版本内，不能让 AI 扫描整个库。
 
+### 1.1 H3 与栅格不是同一个概念
+
+必须特别区分：
+
+- **H3** 是当前 POI 相关分析使用的六边形空间单元，主要承载 POI 数量、密度、类别结构、集聚和热点等结果。
+- **栅格** 是多个分析域可以使用的空间承载方式。当前人口、夜光、路网聚合以及部分 POI 分析都可能使用栅格，但它们不必共享分辨率、原点、投影、`cell_id` 命名空间或统计口径。
+
+因此，不能因为人口、夜光和路网结果都表现为 Polygon，就把它们归入 H3，也不能把不同来源的栅格当成可以直接连接的同一套格网。后续空间查询设计应按来源暴露真实的 `geometry_type`、`grid_type`、分辨率和空间关系能力。
+
+完整的空间关系契约、迁移规则、实现拆分和测试计划见：[多源空间证据查询层探索](./空间证据查询层探索.md)。
+
 ## 2. 当前存储现状
 
 当前系统里的范围数据主要有三种位置。
@@ -41,8 +52,10 @@ POI 当前有专门的持久化表：
 | --- | --- | --- |
 | `current:dataset:population` | `population` | 人口 overview、summary、grid、grid evidence、layer、year、view |
 | `current:dataset:nightlight` | `nightlight` | 夜光 overview、summary、grid、layer、raster、year、view |
-| `current:dataset:road` | `road_syntax` | 路网 summary、diagnostics、roads、nodes、webgl、mode、metric |
-| `current:dataset:h3` | `poi_h3_grid` / `poi_raster_grid` | H3 或共享栅格 feature、summary、charts、year、参数 |
+| `current:dataset:road_edges` | `road_syntax` | 路网线段 summary、diagnostics、roads、nodes、webgl、mode、metric |
+| `current:dataset:road_grid` | `road_syntax` | 路网聚合栅格 summary、road_grid、指标和范围版本 |
+| `current:dataset:h3` | `poi_h3_grid` | POI 相关 H3 feature、summary、charts、year、参数 |
+| `current:dataset:poi_grid` | `poi_raster_grid` | POI 规则栅格 feature、summary、charts、year、参数 |
 | `current:scope` | `scope` | 当前等时圈或空间范围信息 |
 
 因此，AI 未来查询人口、夜光、路网和 H3 明细时，应从 `analysis_artifacts` 中读取当前范围对应的 artifact payload，而不是直接查询某个全局业务表。
@@ -54,10 +67,12 @@ POI 当前有专门的持久化表：
 | 数据 | 当前是否保存明细 | 当前保存形态 | 适合 AI 查询的程度 |
 | --- | --- | --- | --- |
 | POI | 是 | `poi_results.poi_data` 保存当前范围 POI 列表；按 `history_id + source + year` 区分 | 可以直接作为 `current:dataset:poi` 的明细查询底座 |
-| H3 / POI 栅格 | 是 | `analysis_artifacts.payload.grid.features` 保存 `poi_h3_grid` 或 `poi_raster_grid` 的 feature 列表 | 可以作为 `current:dataset:h3` 查询底座 |
+| H3 | 是 | `analysis_artifacts.payload.grid.features` 保存 `poi_h3_grid` 的 feature 列表 | 可以作为 `current:dataset:h3` 查询底座 |
+| POI 规则栅格 | 是 | `analysis_artifacts.payload.grid.features` 保存 `poi_raster_grid` 的 feature 列表 | 应作为独立的 `current:dataset:poi_grid` 查询底座，不能伪装成 H3 |
 | 人口 | 是 | `analysis_artifacts.payload.grid.features` 保存完整人口 base grid geometry；`payload.layer.cells` 保存当前视图 cell 指标；`grid_evidence` 保存 Top/Low 等抽样证据 | 重新跑分析后的新 artifact 可作为 `current:dataset:population` 查询底座 |
 | 夜光 | 是 | `analysis_artifacts.payload.grid.features` 保存完整夜光 base grid geometry；`payload.layer.cells` 保存当前视图 cell 指标；`raster` 保存预览信息 | 重新跑分析后的新 artifact 可作为 `current:dataset:nightlight` 查询底座 |
-| 路网 | 是 | `analysis_artifacts.payload.roads.features` 和 `payload.nodes.features` 保存路段与节点 FeatureCollection | 可以作为 `current:dataset:road` 查询底座 |
+| 路网线段 | 是 | `analysis_artifacts.payload.roads.features` 和 `payload.nodes.features` 保存路段与节点 FeatureCollection | 应作为 `current:dataset:road_edges` 查询底座 |
+| 路网共享栅格 | 是 | `analysis_artifacts.payload.road_grid.features` 保存道路聚合栅格 FeatureCollection | 应作为 `current:dataset:road_grid` 查询底座 |
 
 这意味着重新跑分析后，POI、H3、人口、夜光和路网都具备作为 scoped dataset 查询底座的持久化数据。当前代码已提供第一版受控查询层：`modules/scope_datasets/` 负责从 `poi_results` 和规范化 `analysis_artifacts.payload` 读取当前范围数据，Agent 通过 `list_scope_datasets`、`query_scope_dataset`、`aggregate_scope_dataset` 和 `read_scope_record` 使用这些数据。
 
@@ -121,7 +136,9 @@ Agent 执行过程中还会维护运行时 artifacts / snapshot，例如：
 - `current:dataset:poi`
 - `current:dataset:population`
 - `current:dataset:nightlight`
-- `current:dataset:road`
+- `current:dataset:road_edges`
+- `current:dataset:road_grid`
+- `current:dataset:poi_grid`
 - `current:dataset:h3`
 
 这些来源用于受控查询、聚合和分页读取。AI 可以通过工具问它们“有多少”“哪些最高”“按类别统计”“读取某一条记录”，但不能直接获得完整原始 payload。
@@ -166,7 +183,7 @@ AI 不应执行任意 SQL。范围数据查询通过 `modules/scope_datasets/` �
 
 当前输出：
 
-- source 列表：`current:dataset:poi`、`current:dataset:h3`、`current:dataset:population`、`current:dataset:nightlight`、`current:dataset:road`
+- source 列表：`current:dataset:poi`、`current:dataset:h3`、`current:dataset:poi_grid`、`current:dataset:population`、`current:dataset:nightlight`、`current:dataset:road_edges`、`current:dataset:road_grid`
 - 数据年份或版本
 - 记录数
 - 可查询字段
