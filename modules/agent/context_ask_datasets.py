@@ -15,7 +15,8 @@ from .selected_sources import (
 
 _DATASET_KEYWORDS: Sequence[tuple[str, Sequence[str]]] = (
     ("current:dataset:poi", ("poi", "业态", "商业", "餐饮", "设施", "配套", "供需", "店铺", "门店")),
-    ("current:dataset:h3", ("h3", "网格", "热点", "集聚", "热区", "冷区")),
+    ("current:dataset:h3", ("h3", "六边形", "热点", "集聚", "热区", "冷区")),
+    ("current:dataset:poi_grid", ("poi栅格", "poi网格", "规则栅格", "poi密度")),
     ("current:dataset:population", ("人口", "客群", "年龄", "常住", "承载", "人口密度")),
     ("current:dataset:nightlight", ("夜光", "夜间", "夜生活", "夜经济", "夜间活力")),
     ("current:dataset:road_edges", ("路网", "交通", "可达", "连通", "整合度", "选择度", "道路", "街巷", "通行")),
@@ -62,6 +63,8 @@ def _target_field(source_id: str, question: str) -> str:
     text = as_text(question).lower()
     if source_id == "current:dataset:h3":
         return "poi_count" if "poi" in text or "数量" in text else "density"
+    if source_id == "current:dataset:poi_grid":
+        return "poi_count" if "数量" in text else "density"
     if source_id == "current:dataset:population":
         return "density" if "密度" in text else "population"
     if source_id == "current:dataset:nightlight":

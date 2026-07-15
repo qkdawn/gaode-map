@@ -27,6 +27,40 @@ class FakeScopeDatasetRepository:
         assert history_id == "history-1"
         return [
             {
+                "id": 9,
+                "artifact_type": "poi_h3_grid",
+                "params": {"year": 2024, "view": "density"},
+                "payload": {
+                    "year": 2024,
+                    "grid": {
+                        "type": "FeatureCollection",
+                        "features": [
+                            {"type": "Feature", "properties": {"h3_id": "h3-cell-1", "poi_count": 4}},
+                        ],
+                    },
+                },
+                "summary": {"grid_count": 1},
+                "data_version": "v1",
+                "scope_fingerprint": "scope-a",
+            },
+            {
+                "id": 10,
+                "artifact_type": "poi_raster_grid",
+                "params": {"year": 2024, "view": "density"},
+                "payload": {
+                    "year": 2024,
+                    "grid": {
+                        "type": "FeatureCollection",
+                        "features": [
+                            {"type": "Feature", "properties": {"cell_id": "poi-cell-1", "poi_count": 5}},
+                        ],
+                    },
+                },
+                "summary": {"grid_count": 1},
+                "data_version": "v1",
+                "scope_fingerprint": "scope-a",
+            },
+            {
                 "id": 11,
                 "artifact_type": "population",
                 "params": {"year": 2024, "view": "density"},
@@ -85,9 +119,14 @@ def test_scope_dataset_service_lists_normalized_sources():
     sources = {item["source_id"]: item for item in payload["datasets"]}
     assert sources["current:dataset:poi"]["record_count"] == 2
     assert sources["current:dataset:population"]["record_count"] == 2
+    assert sources["current:dataset:h3"]["record_count"] == 1
+    assert sources["current:dataset:poi_grid"]["record_count"] == 1
     assert sources["current:dataset:road_edges"]["record_count"] == 2
     assert sources["current:dataset:road_grid"]["record_count"] == 1
     assert sources["current:dataset:population"]["time_scope"]["years"] == [2024]
+    assert sources["current:dataset:h3"]["grid_type"] == "h3"
+    assert sources["current:dataset:poi_grid"]["grid_type"] == "regular_raster"
+    assert "at_point" in sources["current:dataset:population"]["query_capabilities"]["spatial_relations"]
 
 
 def test_scope_dataset_service_queries_and_reads_evidence_nodes():
@@ -191,7 +230,7 @@ def test_scope_dataset_defaults_to_max_year_and_exactly_matches_requested_year()
     assert datasets["current:dataset:population"]["summary"]["total_population"] == 58200.628
 
 
-def test_scope_dataset_marks_h3_pending_when_current_poi_year_has_no_exact_grid():
+def test_scope_dataset_keeps_poi_raster_separate_from_h3():
     class MissingCurrentGridRepository:
         def list_poi_results(self, history_id):
             return [{"id": 24, "source": "local", "year": 2024, "summary": {"total": 2}}]
@@ -215,10 +254,11 @@ def test_scope_dataset_marks_h3_pending_when_current_poi_year_has_no_exact_grid(
         for item in ScopeDatasetService(repository=MissingCurrentGridRepository()).list_scope_datasets("history-1")["datasets"]
     }
 
-    assert datasets["current:dataset:h3"]["status"] == "pending"
-    assert datasets["current:dataset:h3"]["selected_year"] == 2024
-    assert datasets["current:dataset:h3"]["available_years"] == [2020]
-    assert datasets["current:dataset:h3"]["record_count"] == 0
+    assert "current:dataset:h3" not in datasets
+    assert datasets["current:dataset:poi_grid"]["status"] == "pending"
+    assert datasets["current:dataset:poi_grid"]["selected_year"] == 2024
+    assert datasets["current:dataset:poi_grid"]["available_years"] == [2020]
+    assert datasets["current:dataset:poi_grid"]["record_count"] == 0
 
 
 def test_scope_dataset_repository_lists_poi_results_without_large_json(monkeypatch):

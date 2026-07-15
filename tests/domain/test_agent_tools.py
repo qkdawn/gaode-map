@@ -61,6 +61,7 @@ def test_get_tool_registry_exposes_stage1_tools():
     assert registry["query_scope_dataset"].spec.input_schema["properties"]["source_id"]["enum"] == [
         "current:dataset:poi",
         "current:dataset:h3",
+        "current:dataset:poi_grid",
         "current:dataset:population",
         "current:dataset:nightlight",
         "current:dataset:road_edges",

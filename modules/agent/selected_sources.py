@@ -10,7 +10,7 @@ from .context_ask_compaction import as_text, compact_evidence_nodes, compact_val
 ANALYSIS_SOURCES_TARGET_TYPE = "analysis_sources"
 
 ANALYSIS_TO_DATASET_SOURCES = {
-    "current:analysis:poi_h3": ["current:dataset:h3", "current:dataset:poi"],
+    "current:analysis:poi_h3": ["current:dataset:h3", "current:dataset:poi_grid", "current:dataset:poi"],
     "current:analysis:population": ["current:dataset:population"],
     "current:analysis:nightlight": ["current:dataset:nightlight"],
     "current:analysis:road": ["current:dataset:road_edges", "current:dataset:road_grid"],

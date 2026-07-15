@@ -15,7 +15,8 @@ from store.models import AnalysisArtifact, PoiResult
 
 DATASET_TITLES = {
     "current:dataset:poi": "当前范围 POI",
-    "current:dataset:h3": "当前范围 H3 / 栅格",
+    "current:dataset:h3": "当前范围 POI H3",
+    "current:dataset:poi_grid": "当前范围 POI 规则栅格",
     "current:dataset:population": "当前范围人口网格",
     "current:dataset:nightlight": "当前范围夜光网格",
     "current:dataset:road_edges": "当前范围路网线段",
@@ -24,7 +25,7 @@ DATASET_TITLES = {
 
 ARTIFACT_SOURCE_MAP = {
     "poi_h3_grid": "current:dataset:h3",
-    "poi_raster_grid": "current:dataset:h3",
+    "poi_raster_grid": "current:dataset:poi_grid",
     "population": "current:dataset:population",
     "nightlight": "current:dataset:nightlight",
     "road_syntax": "current:dataset:road_edges",
@@ -33,10 +34,49 @@ ARTIFACT_SOURCE_MAP = {
 DATASET_FILTER_FIELDS = {
     "current:dataset:poi": {"id", "name", "type", "typecode", "address", "category", "source", "year"},
     "current:dataset:h3": {"record_id", "cell_id", "h3_id", "poi_count", "density", "lq", "year"},
+    "current:dataset:poi_grid": {"record_id", "cell_id", "poi_count", "density", "lq", "year"},
     "current:dataset:population": {"record_id", "cell_id", "value", "population", "density", "year", "view"},
     "current:dataset:nightlight": {"record_id", "cell_id", "value", "radiance", "year", "view"},
     "current:dataset:road_edges": {"record_id", "edge_id", "choice_score", "integration_score", "connectivity_score", "control_score", "depth_score", "metric"},
     "current:dataset:road_grid": {"record_id", "cell_id", "road_has_data", "road_length_km", "road_length_km_per_km2", "road_choice", "road_integration", "road_connectivity", "road_control", "road_depth"},
+}
+
+DATASET_SPATIAL_CAPABILITIES = {
+    "current:dataset:poi": {
+        "geometry_type": "Point",
+        "grid_type": "none",
+        "spatial_relations": ["nearest", "within_distance", "intersects"],
+    },
+    "current:dataset:h3": {
+        "geometry_type": "Polygon",
+        "grid_type": "h3",
+        "spatial_relations": ["at_point", "nearest", "intersects"],
+    },
+    "current:dataset:poi_grid": {
+        "geometry_type": "Polygon",
+        "grid_type": "regular_raster",
+        "spatial_relations": ["at_point", "nearest", "intersects"],
+    },
+    "current:dataset:population": {
+        "geometry_type": "Polygon",
+        "grid_type": "population_raster",
+        "spatial_relations": ["at_point", "nearest", "intersects"],
+    },
+    "current:dataset:nightlight": {
+        "geometry_type": "Polygon",
+        "grid_type": "nightlight_raster",
+        "spatial_relations": ["at_point", "nearest", "intersects"],
+    },
+    "current:dataset:road_edges": {
+        "geometry_type": "LineString",
+        "grid_type": "none",
+        "spatial_relations": ["nearest", "within_distance", "intersects"],
+    },
+    "current:dataset:road_grid": {
+        "geometry_type": "Polygon",
+        "grid_type": "road_raster",
+        "spatial_relations": ["at_point", "nearest", "intersects"],
+    },
 }
 
 DEFAULT_LIMIT = 20
@@ -283,7 +323,7 @@ class ScopeDatasetService:
             selected_rows = [row for row in poi_rows if normalize_year(row.get("year")) == selected_year]
             count = sum(self._poi_result_count(row) for row in selected_rows)
             datasets.append(self._dataset_payload("current:dataset:poi", count, years=years, selected_year=selected_year, variants=len(selected_rows)))
-        for source_id in ["current:dataset:h3", "current:dataset:population", "current:dataset:nightlight", "current:dataset:road_edges", "current:dataset:road_grid"]:
+        for source_id in ["current:dataset:h3", "current:dataset:poi_grid", "current:dataset:population", "current:dataset:nightlight", "current:dataset:road_edges", "current:dataset:road_grid"]:
             matching = [
                 item for item in artifacts
                 if (
@@ -416,6 +456,7 @@ class ScopeDatasetService:
     ) -> Dict[str, Any]:
         is_static = source_id in {"current:dataset:road_edges", "current:dataset:road_grid"}
         warnings = [] if years or is_static else ["该来源未提供明确年份。"]
+        spatial_capabilities = DATASET_SPATIAL_CAPABILITIES.get(source_id, {})
         return {
             "source_id": source_id,
             "source_kind": "system",
@@ -425,6 +466,9 @@ class ScopeDatasetService:
             "selected_year": selected_year,
             "available_years": years,
             "summary": _clone_json(summary or {}),
+            "geometry_type": _as_text(spatial_capabilities.get("geometry_type")),
+            "grid_type": _as_text(spatial_capabilities.get("grid_type")),
+            "geometry_coord_type": "source_defined",
             "time_scope": {
                 "years": years,
                 "selected_year": selected_year,
@@ -435,6 +479,9 @@ class ScopeDatasetService:
                 "filter_fields": sorted(DATASET_FILTER_FIELDS.get(source_id, set())),
                 "sort_fields": sorted(DATASET_FILTER_FIELDS.get(source_id, set())),
                 "aggregate_fields": sorted(DATASET_FILTER_FIELDS.get(source_id, set())),
+                "spatial_relations": list(spatial_capabilities.get("spatial_relations") or []),
+                "input_coord_types": ["gcj02", "wgs84"],
+                "distance_unit": "m",
                 "variants": int(variants or 0),
             },
             "warnings": warnings,
@@ -464,7 +511,7 @@ class ScopeDatasetService:
             for item in self.repository.list_analysis_artifacts(history_id)
             if ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == normalized_source_id
         ]
-        poi_rows = self.repository.list_poi_results(history_id) if normalized_source_id == "current:dataset:h3" else []
+        poi_rows = self.repository.list_poi_results(history_id) if normalized_source_id in {"current:dataset:h3", "current:dataset:poi_grid"} else []
         artifacts, years, selected_year = self._select_artifacts(
             source_id=normalized_source_id,
             artifacts=all_artifacts,
@@ -509,7 +556,7 @@ class ScopeDatasetService:
             selected = sorted(deduped, key=self._artifact_sort_key, reverse=True)[:1]
             return selected, [], None
         years = available_business_years(_year_from_artifact(item) for item in deduped)
-        if source_id == "current:dataset:h3":
+        if source_id in {"current:dataset:h3", "current:dataset:poi_grid"}:
             poi_years = available_business_years(row.get("year") for row in poi_rows)
             selected_year = resolve_business_year(poi_years or years, requested_year)
         else:

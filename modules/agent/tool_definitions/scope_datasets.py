@@ -15,6 +15,7 @@ from ..tool_adapters.scope_dataset_tools import (
 SOURCE_ID_ENUM = [
     "current:dataset:poi",
     "current:dataset:h3",
+    "current:dataset:poi_grid",
     "current:dataset:population",
     "current:dataset:nightlight",
     "current:dataset:road_edges",
