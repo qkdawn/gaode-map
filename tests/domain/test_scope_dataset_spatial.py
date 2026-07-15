@@ -105,6 +105,65 @@ def test_scope_service_attaches_spatial_match_to_record_and_evidence():
     assert result["spatial_query"]["max_distance_m"] == 100
 
 
+def test_scope_service_queries_road_grid_as_polygon_source():
+    class RoadGridRepository:
+        def list_poi_results(self, history_id):
+            return []
+
+        def list_analysis_artifacts(self, history_id):
+            return [
+                {
+                    "id": 42,
+                    "artifact_type": "road_syntax",
+                    "params": {"metric": "choice"},
+                    "payload": {
+                        "road_grid": {
+                            "type": "FeatureCollection",
+                            "features": [
+                                {
+                                    "type": "Feature",
+                                    "properties": {"cell_id": "road-cell-1", "road_choice": 0.8},
+                                    "geometry": {
+                                        "type": "Polygon",
+                                        "coordinates": [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]]],
+                                    },
+                                }
+                            ],
+                        }
+                    },
+                    "summary": {},
+                    "data_version": "v1",
+                    "scope_fingerprint": "scope-a",
+                }
+            ]
+
+    result = ScopeDatasetService(repository=RoadGridRepository()).query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:road_grid",
+        spatial={"relation": "at_point", "point": [0.005, 0.005], "coord_type": "wgs84"},
+        limit=5,
+    )
+
+    assert result["total_count"] == 1
+    assert result["records"][0]["record_id"] == "road-cell-1"
+    assert result["records"][0]["spatial_match"]["geometry_type"] == "Polygon"
+
+
+def test_scope_service_rejects_relation_not_declared_by_source():
+    with pytest.raises(SpatialQueryError) as error:
+        ScopeDatasetService(repository=_SpatialRepository()).query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:population",
+            spatial={
+                "relation": "within_distance",
+                "point": [0, 0],
+                "coord_type": "wgs84",
+                "max_distance_m": 100,
+            },
+        )
+    assert error.value.code == "spatial_relation_unsupported"
+
+
 def test_scope_dataset_tool_returns_domain_error_for_invalid_spatial_query(monkeypatch):
     class FailingService:
         def query_scope_dataset(self, **kwargs):
