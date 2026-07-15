@@ -250,6 +250,14 @@ def _ratio(value: float, denominator: float) -> float | None:
     return round(value / denominator, 6) if denominator > 1e-9 else None
 
 
+def _linear_length(geometry: BaseGeometry) -> float:
+    if geometry.geom_type in {"LineString", "MultiLineString"}:
+        return float(geometry.length)
+    if geometry.geom_type == "GeometryCollection":
+        return sum(_linear_length(part) for part in geometry.geoms)
+    return 0.0
+
+
 def query_spatial_records(records: Sequence[Any], spatial: dict[str, Any], *, cache_key: str = "") -> SpatialQueryResult:
     relation, target, output_coord_type = normalize_spatial_target(spatial)
     index, skipped = _build_index(records, cache_key)
@@ -288,8 +296,9 @@ def query_spatial_records(records: Sequence[Any], spatial: dict[str, Any], *, ca
                 query_ratio = _ratio(overlap_area, float(metric_target.area))
                 if min_overlap is not None and (record_ratio or 0.0) < min_overlap:
                     continue
-            if intersection.geom_type in {"LineString", "MultiLineString"}:
-                intersection_length = round(float(intersection.length), 3)
+            linear_length = _linear_length(intersection)
+            if linear_length > 0:
+                intersection_length = round(linear_length, 3)
 
         if relation in {"nearest", "within_distance"}:
             _, metric_match = nearest_points(metric_target, metric_geometry)

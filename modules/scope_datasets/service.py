@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -85,6 +86,37 @@ DATASET_SPATIAL_CAPABILITIES = {
         "spatial_relations": ["at_point", "nearest", "intersects"],
     },
 }
+
+DATASET_SPATIAL_AGGREGATIONS = {
+    "current:dataset:population": [
+        {
+            "op": "area_weighted_sum",
+            "fields": ["population", "value"],
+            "method": "record_value_times_record_overlap_ratio",
+            "assumptions": ["uniform_distribution_within_cell"],
+        }
+    ],
+    "current:dataset:nightlight": [
+        {
+            "op": "area_weighted_avg",
+            "fields": ["radiance", "value"],
+            "method": "overlap_area_weighted_mean",
+            "assumptions": [],
+        }
+    ],
+    "current:dataset:road_edges": [
+        {
+            "op": "intersection_length_sum",
+            "fields": ["intersection_length_m"],
+            "method": "sum_clipped_intersection_length",
+            "assumptions": [],
+            "unit": "m",
+        }
+    ],
+}
+
+GENERIC_AGGREGATE_OPS = {"count", "sum", "avg", "min", "max"}
+SPATIAL_AGGREGATE_OPS = {"area_weighted_sum", "area_weighted_avg", "intersection_length_sum"}
 
 POI_GEOMETRY_COORD_TYPE = "gcj02"
 
@@ -623,15 +655,40 @@ class ScopeDatasetService:
         filters: Optional[Dict[str, Any]] = None,
         top_k: int = 10,
         year: Any = None,
+        spatial: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        metric_specs = metrics if isinstance(metrics, list) and metrics else [{"op": "count", "field": "*", "as": "count"}]
+        self._validate_aggregate_request(
+            source_id,
+            group_by=group_by,
+            metrics=metric_specs,
+            filters=filters or {},
+            spatial=spatial,
+        )
         selected_records, available_years, selected_year = self._records_with_selection(
             history_id=history_id,
             source_id=source_id,
             year=year,
+            require_geometry_metadata=spatial is not None,
         )
-        records = self._apply_filters(selected_records, source_id, filters or {})
+        spatial_matches: Dict[int, Dict[str, Any]] = {}
+        spatial_warnings: List[str] = []
+        skipped_record_count = 0
+        spatial_records = selected_records
+        if spatial is not None:
+            selection = self._select_spatial_records(
+                history_id=history_id,
+                source_id=source_id,
+                selected_year=selected_year,
+                records=selected_records,
+                spatial=spatial,
+            )
+            spatial_records = selection.records
+            spatial_matches = selection.matches
+            spatial_warnings.extend(selection.warnings)
+            skipped_record_count = selection.skipped_record_count
+        records = self._apply_filters(spatial_records, source_id, filters or {})
         group_field = _as_text(group_by)
-        metric_specs = metrics if isinstance(metrics, list) and metrics else [{"op": "count", "field": "*", "as": "count"}]
         grouped: Dict[str, List[ScopeRecord]] = {}
         if group_field:
             for record in records:
@@ -648,19 +705,191 @@ class ScopeDatasetService:
                 op = _as_text(spec.get("op") or "count").lower()
                 field_name = _as_text(spec.get("field") or "*")
                 alias = _as_text(spec.get("as")) or f"{op}_{field_name.replace('.', '_')}"
-                row[alias] = self._metric_value(items, op=op, field=field_name)
+                row[alias] = self._metric_value(
+                    items,
+                    op=op,
+                    field=field_name,
+                    spatial_matches=spatial_matches,
+                )
             rows.append(row)
         rows.sort(key=lambda item: item.get("count") or 0, reverse=True)
         safe_top_k = min(max(int(top_k or 10), 1), 100)
-        return {
+        warnings = self._missing_year_warnings(records)
+        warnings.extend(spatial_warnings)
+        payload = {
             "source_id": source_id,
             "selected_year": selected_year,
             "available_years": available_years,
             "group_by": group_field,
+            "spatial_query": _clone_json(spatial) if isinstance(spatial, dict) else None,
+            "spatial_summary": self._spatial_aggregate_summary(
+                records,
+                spatial_matches=spatial_matches,
+                skipped_record_count=skipped_record_count,
+                relation=_as_text(spatial.get("relation")) if isinstance(spatial, dict) else "",
+            ),
+            "metric_methods": [self._aggregate_metric_method(source_id, spec) for spec in metric_specs],
             "total_groups": len(rows),
             "rows": rows[:safe_top_k],
-            "warnings": self._missing_year_warnings(records),
+            "warnings": sorted(set(warnings)),
         }
+        payload["evidence_node"] = self._aggregate_evidence_node(payload)
+        return payload
+
+    @staticmethod
+    def _validate_aggregate_request(
+        source_id: str,
+        *,
+        group_by: str,
+        metrics: List[Dict[str, Any]],
+        filters: Dict[str, Any],
+        spatial: Optional[Dict[str, Any]],
+    ) -> None:
+        ScopeDatasetService._validate_query_fields(source_id, filters=filters, sort={})
+        allowed = DATASET_FILTER_FIELDS[source_id]
+        group_field = _as_text(group_by)
+        if group_field and group_field not in allowed:
+            raise ScopeDatasetQueryError(
+                "scope_dataset_field_unsupported",
+                f"{source_id} 不支持分组字段: {group_field}",
+            )
+        spatial_capabilities = DATASET_SPATIAL_AGGREGATIONS.get(source_id, [])
+        for spec in metrics:
+            if not isinstance(spec, dict):
+                raise ScopeDatasetQueryError("scope_dataset_metric_invalid", "聚合 metric 必须是对象")
+            op = _as_text(spec.get("op") or "count").lower()
+            field_name = _as_text(spec.get("field") or "*")
+            if op in GENERIC_AGGREGATE_OPS:
+                if op != "count" and field_name not in allowed:
+                    raise ScopeDatasetQueryError(
+                        "scope_dataset_field_unsupported",
+                        f"{source_id} 不支持聚合字段: {field_name}",
+                    )
+                relation = _as_text((spatial or {}).get("relation")).lower()
+                unsafe_population = (
+                    source_id == "current:dataset:population"
+                    and relation == "intersects"
+                    and op == "sum"
+                    and field_name in {"population", "value"}
+                )
+                unsafe_nightlight = (
+                    source_id == "current:dataset:nightlight"
+                    and relation == "intersects"
+                    and op in {"sum", "avg"}
+                    and field_name in {"radiance", "value"}
+                )
+                if unsafe_population or unsafe_nightlight:
+                    recommended = "area_weighted_sum" if unsafe_population else "area_weighted_avg"
+                    raise ScopeDatasetQueryError(
+                        "spatial_aggregate_unsafe",
+                        f"{source_id} 的范围聚合不能使用 {op}({field_name})，请使用 {recommended}",
+                    )
+                continue
+            if op not in SPATIAL_AGGREGATE_OPS:
+                raise ScopeDatasetQueryError("scope_dataset_metric_unsupported", f"不支持的聚合方法: {op}")
+            if not isinstance(spatial, dict) or _as_text(spatial.get("relation")).lower() != "intersects":
+                raise ScopeDatasetQueryError(
+                    "spatial_aggregate_invalid",
+                    f"{op} 必须与 spatial.relation=intersects 一起使用",
+                )
+            capability = next((item for item in spatial_capabilities if item.get("op") == op), None)
+            if capability is None or field_name not in (capability.get("fields") or []):
+                raise ScopeDatasetQueryError(
+                    "spatial_aggregate_unsupported",
+                    f"{source_id} 不支持 {op}({field_name})",
+                )
+
+    @staticmethod
+    def _aggregate_metric_method(source_id: str, spec: Dict[str, Any]) -> Dict[str, Any]:
+        op = _as_text(spec.get("op") or "count").lower()
+        field_name = _as_text(spec.get("field") or "*")
+        alias = _as_text(spec.get("as")) or f"{op}_{field_name.replace('.', '_')}"
+        capability = next(
+            (item for item in DATASET_SPATIAL_AGGREGATIONS.get(source_id, []) if item.get("op") == op),
+            None,
+        )
+        return {
+            "alias": alias,
+            "op": op,
+            "field": field_name,
+            "method": _as_text((capability or {}).get("method")) or op,
+            "assumptions": list((capability or {}).get("assumptions") or []),
+            "unit": _as_text((capability or {}).get("unit")),
+        }
+
+    @staticmethod
+    def _spatial_aggregate_summary(
+        records: List[ScopeRecord],
+        *,
+        spatial_matches: Dict[int, Dict[str, Any]],
+        skipped_record_count: int,
+        relation: str,
+    ) -> Dict[str, Any]:
+        if not relation:
+            return {}
+        matches = [spatial_matches.get(id(record)) or {} for record in records]
+        overlap_area = sum(_as_float(match.get("overlap_area_m2")) or 0.0 for match in matches)
+        intersection_length = sum(_as_float(match.get("intersection_length_m")) or 0.0 for match in matches)
+        return {
+            "relation": relation,
+            "matched_record_count": len(records),
+            "skipped_record_count": int(skipped_record_count or 0),
+            "overlap_area_m2": round(overlap_area, 3),
+            "intersection_length_m": round(intersection_length, 3),
+        }
+
+    @staticmethod
+    def _aggregate_evidence_node(payload: Dict[str, Any]) -> Dict[str, Any]:
+        source_id = _as_text(payload.get("source_id"))
+        selected_year = _as_int(payload.get("selected_year"))
+        methods = payload.get("metric_methods") if isinstance(payload.get("metric_methods"), list) else []
+        assumptions = sorted({
+            _as_text(assumption)
+            for method in methods
+            if isinstance(method, dict)
+            for assumption in (method.get("assumptions") or [])
+            if _as_text(assumption)
+        })
+        identity_payload = {
+            "source_id": source_id,
+            "selected_year": selected_year,
+            "group_by": payload.get("group_by"),
+            "spatial_query": payload.get("spatial_query"),
+            "rows": payload.get("rows"),
+        }
+        identity = sha256(
+            json.dumps(identity_payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:20]
+        title = f"{DATASET_TITLES.get(source_id, source_id)}空间聚合"
+        matched_count = _as_int((payload.get("spatial_summary") or {}).get("matched_record_count"))
+        content = f"{title}，返回 {len(payload.get('rows') or [])} 个聚合分组"
+        if matched_count is not None:
+            content += f"，匹配 {matched_count} 条空间记录"
+        warnings = list(payload.get("warnings") or [])
+        node = EvidenceNode(
+            id=f"{source_id}:aggregate:{identity}",
+            kind="spatial_metric",
+            source_ids=[source_id],
+            title=title,
+            content=content,
+            summary=content,
+            data={
+                "group_by": payload.get("group_by"),
+                "rows": _clone_json(payload.get("rows") or []),
+                "spatial_query": _clone_json(payload.get("spatial_query")),
+                "spatial_summary": _clone_json(payload.get("spatial_summary") or {}),
+                "metric_methods": _clone_json(methods),
+                "assumptions": assumptions,
+            },
+            time_scope=_time_scope(year=selected_year),
+            locator=f"{source_id}/aggregate/{identity}",
+            quality_flags=[
+                {"code": "aggregate_warning", "severity": "warning", "effect": warning}
+                for warning in warnings
+            ],
+            citation=f"{DATASET_TITLES.get(source_id, source_id)}空间聚合，{selected_year or '当前版本'}",
+        )
+        return node.model_dump(mode="python")
 
     def read_scope_record(self, *, history_id: str, source_id: str, record_id: str, year: Any = None) -> Dict[str, Any]:
         normalized_record_id = _as_text(record_id)
@@ -717,6 +946,7 @@ class ScopeDatasetService:
                 "sort_fields": sorted(DATASET_FILTER_FIELDS.get(source_id, set())),
                 "aggregate_fields": sorted(DATASET_FILTER_FIELDS.get(source_id, set())),
                 "spatial_relations": list(spatial_capabilities.get("spatial_relations") or []),
+                "spatial_aggregations": _clone_json(DATASET_SPATIAL_AGGREGATIONS.get(source_id, [])),
                 "input_coord_types": ["gcj02", "wgs84"],
                 "distance_unit": "m",
                 "variants": int(variants or 0),
@@ -1105,9 +1335,41 @@ class ScopeDatasetService:
 
         return sorted(records, key=key, reverse=direction == "desc")
 
-    def _metric_value(self, records: List[ScopeRecord], *, op: str, field: str) -> Any:
+    def _metric_value(
+        self,
+        records: List[ScopeRecord],
+        *,
+        op: str,
+        field: str,
+        spatial_matches: Optional[Dict[int, Dict[str, Any]]] = None,
+    ) -> Any:
         if op == "count":
             return len(records)
+        matches = spatial_matches or {}
+        if op == "intersection_length_sum":
+            total = sum(
+                _as_float((matches.get(id(record)) or {}).get("intersection_length_m")) or 0.0
+                for record in records
+            )
+            return round(total, 3)
+        if op == "area_weighted_sum":
+            total = 0.0
+            for record in records:
+                value = _as_float(record.properties.get(field))
+                ratio = _as_float((matches.get(id(record)) or {}).get("record_overlap_ratio"))
+                if value is not None and ratio is not None:
+                    total += value * ratio
+            return round(total, 6)
+        if op == "area_weighted_avg":
+            weighted_total = 0.0
+            total_area = 0.0
+            for record in records:
+                value = _as_float(record.properties.get(field))
+                area = _as_float((matches.get(id(record)) or {}).get("overlap_area_m2"))
+                if value is not None and area is not None and area > 0:
+                    weighted_total += value * area
+                    total_area += area
+            return round(weighted_total / total_area, 6) if total_area > 0 else None
         values = [_as_float(record.properties.get(field)) for record in records]
         numbers = [value for value in values if value is not None]
         if not numbers:

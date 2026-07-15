@@ -70,6 +70,9 @@ def test_get_tool_registry_exposes_stage1_tools():
     spatial_schema = registry["query_scope_dataset"].spec.input_schema["properties"]["spatial"]
     assert spatial_schema["required"] == ["relation"]
     assert spatial_schema["properties"]["record"]["required"] == ["source_id", "record_id"]
+    aggregate_schema = registry["aggregate_scope_dataset"].spec.input_schema
+    assert aggregate_schema["properties"]["spatial"] == spatial_schema
+    assert "area_weighted_sum" in aggregate_schema["properties"]["metrics"]["items"]["properties"]["op"]["enum"]
     assert "nearest" in spatial_schema["properties"]["relation"]["enum"]
     assert "spatial_match" in registry["query_scope_dataset"].spec.output_schema["properties"]["records"]["items"]["properties"]
 

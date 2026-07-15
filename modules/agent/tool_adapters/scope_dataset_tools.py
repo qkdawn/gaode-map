@@ -93,21 +93,31 @@ async def aggregate_scope_dataset(
     history_id = _history_id(arguments, snapshot)
     if not history_id:
         return ToolResult(tool_name="aggregate_scope_dataset", status="failed", error="history_id_required", warnings=["history_id_required"])
-    payload = _service().aggregate_scope_dataset(
-        history_id=history_id,
-        source_id=str(arguments.get("source_id") or ""),
-        group_by=str(arguments.get("group_by") or ""),
-        metrics=arguments.get("metrics") if isinstance(arguments.get("metrics"), list) else [],
-        filters=arguments.get("filters") if isinstance(arguments.get("filters"), dict) else {},
-        top_k=int(arguments.get("top_k") or 10),
-        year=arguments.get("year"),
-    )
+    try:
+        payload = _service().aggregate_scope_dataset(
+            history_id=history_id,
+            source_id=str(arguments.get("source_id") or ""),
+            group_by=str(arguments.get("group_by") or ""),
+            metrics=arguments.get("metrics") if isinstance(arguments.get("metrics"), list) else [],
+            filters=arguments.get("filters") if isinstance(arguments.get("filters"), dict) else {},
+            top_k=int(arguments.get("top_k") or 10),
+            year=arguments.get("year"),
+            spatial=arguments.get("spatial") if isinstance(arguments.get("spatial"), dict) else None,
+        )
+    except (ScopeDatasetQueryError, SpatialQueryError) as exc:
+        return ToolResult(
+            tool_name="aggregate_scope_dataset",
+            status="failed",
+            error=exc.code,
+            warnings=[str(exc)],
+        )
     return ToolResult(
         tool_name="aggregate_scope_dataset",
         status="success",
         result=payload,
         evidence=[{"field": "scope_dataset.group_count", "value": len(payload.get("rows") or [])}],
         warnings=list(payload.get("warnings") or []),
+        artifacts={"scope_dataset_evidence_nodes": [payload.get("evidence_node")]},
     )
 
 

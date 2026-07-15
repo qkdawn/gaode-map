@@ -288,6 +288,142 @@ def test_scope_service_rejects_relation_not_declared_by_source():
     assert error.value.code == "spatial_relation_unsupported"
 
 
+class _SpatialAggregateRepository:
+    @staticmethod
+    def _cell(cell_id, west, east, value_field, value):
+        return {
+            "type": "Feature",
+            "properties": {"cell_id": cell_id, value_field: value},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[west, 0], [east, 0], [east, 0.01], [west, 0.01], [west, 0]]],
+            },
+        }
+
+    def list_poi_results(self, history_id):
+        return []
+
+    def list_analysis_artifacts(self, history_id):
+        return [
+            {
+                "id": 51,
+                "artifact_type": "population",
+                "params": {"year": 2024},
+                "payload": {
+                    "geometry_coord_type": "wgs84",
+                    "year": 2024,
+                    "grid": {
+                        "features": [
+                            self._cell("population-a", 0, 0.01, "population", 100),
+                            self._cell("population-b", 0.01, 0.02, "population", 200),
+                        ]
+                    },
+                },
+                "data_version": "v1",
+                "scope_fingerprint": "scope-a",
+            },
+            {
+                "id": 52,
+                "artifact_type": "nightlight",
+                "params": {"year": 2024},
+                "payload": {
+                    "geometry_coord_type": "wgs84",
+                    "year": 2024,
+                    "grid": {
+                        "features": [
+                            self._cell("nightlight-a", 0, 0.01, "radiance", 10),
+                            self._cell("nightlight-b", 0.01, 0.02, "radiance", 30),
+                        ]
+                    },
+                },
+                "data_version": "v1",
+                "scope_fingerprint": "scope-a",
+            },
+            {
+                "id": 53,
+                "artifact_type": "road_syntax",
+                "params": {"metric": "choice"},
+                "payload": {
+                    "geometry_coord_type": "wgs84",
+                    "road_edges": {
+                        "features": [
+                            {
+                                "type": "Feature",
+                                "properties": {"edge_id": "road-1", "choice_score": 0.8},
+                                "geometry": {"type": "LineString", "coordinates": [[0, 0.005], [0.02, 0.005]]},
+                            }
+                        ]
+                    },
+                },
+                "data_version": "v1",
+                "scope_fingerprint": "scope-a",
+            },
+        ]
+
+
+def _aggregate_polygon():
+    return {
+        "relation": "intersects",
+        "geometry": {
+            "type": "Polygon",
+            "coordinates": [[[0.005, 0], [0.015, 0], [0.015, 0.01], [0.005, 0.01], [0.005, 0]]],
+        },
+        "coord_type": "wgs84",
+    }
+
+
+def test_spatial_aggregate_uses_overlap_weights_and_clipped_road_length():
+    service = ScopeDatasetService(repository=_SpatialAggregateRepository())
+
+    population = service.aggregate_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:population",
+        metrics=[{"op": "area_weighted_sum", "field": "population", "as": "estimated_population"}],
+        spatial=_aggregate_polygon(),
+    )
+    nightlight = service.aggregate_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:nightlight",
+        metrics=[{"op": "area_weighted_avg", "field": "radiance", "as": "mean_radiance"}],
+        spatial=_aggregate_polygon(),
+    )
+    roads = service.aggregate_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:road_edges",
+        metrics=[{"op": "intersection_length_sum", "field": "intersection_length_m", "as": "road_length_m"}],
+        spatial=_aggregate_polygon(),
+    )
+
+    assert 149.9 < population["rows"][0]["estimated_population"] < 150.1
+    assert population["metric_methods"][0]["assumptions"] == ["uniform_distribution_within_cell"]
+    assert population["spatial_summary"]["matched_record_count"] == 2
+    assert population["evidence_node"]["kind"] == "spatial_metric"
+    assert population["evidence_node"]["data"]["assumptions"] == ["uniform_distribution_within_cell"]
+    assert 19.9 < nightlight["rows"][0]["mean_radiance"] < 20.1
+    assert nightlight["metric_methods"][0]["method"] == "overlap_area_weighted_mean"
+    assert 1_110 < roads["rows"][0]["road_length_m"] < 1_115
+    assert roads["spatial_summary"]["intersection_length_m"] == roads["rows"][0]["road_length_m"]
+
+
+def test_spatial_aggregate_rejects_unsafe_whole_cell_sum():
+    with pytest.raises(ScopeDatasetQueryError) as error:
+        ScopeDatasetService(repository=_SpatialAggregateRepository()).aggregate_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:population",
+            metrics=[{"op": "area_weighted_sum", "field": "population"}],
+        )
+    assert error.value.code == "spatial_aggregate_invalid"
+
+    with pytest.raises(ScopeDatasetQueryError) as unsafe_error:
+        ScopeDatasetService(repository=_SpatialAggregateRepository()).aggregate_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:population",
+            metrics=[{"op": "sum", "field": "population"}],
+            spatial=_aggregate_polygon(),
+        )
+    assert unsafe_error.value.code == "spatial_aggregate_unsafe"
+
+
 def test_scope_dataset_tool_returns_domain_error_for_invalid_spatial_query(monkeypatch):
     class FailingService:
         def query_scope_dataset(self, **kwargs):

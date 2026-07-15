@@ -127,6 +127,7 @@ def test_scope_dataset_service_lists_normalized_sources():
     assert sources["current:dataset:h3"]["grid_type"] == "h3"
     assert sources["current:dataset:poi_grid"]["grid_type"] == "regular_raster"
     assert "at_point" in sources["current:dataset:population"]["query_capabilities"]["spatial_relations"]
+    assert sources["current:dataset:population"]["query_capabilities"]["spatial_aggregations"][0]["op"] == "area_weighted_sum"
 
 
 def test_scope_dataset_service_queries_and_reads_evidence_nodes():
