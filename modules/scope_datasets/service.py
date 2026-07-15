@@ -440,6 +440,13 @@ class ScopeDatasetService:
         spatial_query = _clone_json(spatial) if isinstance(spatial, dict) else None
         spatial_records = records
         if spatial is not None:
+            relation = _as_text(spatial.get("relation")).lower() if isinstance(spatial, dict) else ""
+            supported_relations = DATASET_SPATIAL_CAPABILITIES.get(source_id, {}).get("spatial_relations") or []
+            if relation not in supported_relations:
+                raise SpatialQueryError(
+                    "spatial_relation_unsupported",
+                    f"{source_id} 不支持空间关系: {relation or '空'}",
+                )
             spatial_result = query_spatial_records(
                 records,
                 spatial,
@@ -614,7 +621,10 @@ class ScopeDatasetService:
         all_artifacts = [
             item
             for item in self.repository.list_analysis_artifacts(history_id)
-            if ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == normalized_source_id
+            if (
+                ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == normalized_source_id
+                or (_as_text(item.get("artifact_type")) == "road_syntax" and normalized_source_id == "current:dataset:road_grid")
+            )
         ]
         poi_rows = self.repository.list_poi_results(history_id) if normalized_source_id in {"current:dataset:h3", "current:dataset:poi_grid"} else []
         artifacts, years, selected_year = self._select_artifacts(

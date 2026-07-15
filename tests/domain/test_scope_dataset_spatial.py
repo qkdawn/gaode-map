@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -5,6 +6,7 @@ from shapely.geometry import LineString, Point, box
 
 from modules.scope_datasets import ScopeDatasetService
 from modules.scope_datasets.spatial import SpatialQueryError, query_spatial_records
+from modules.agent.tool_adapters import scope_dataset_tools
 
 
 def test_nearest_uses_real_line_geometry_and_returns_projection_point():
@@ -101,3 +103,22 @@ def test_scope_service_attaches_spatial_match_to_record_and_evidence():
     assert result["records"][0]["spatial_match"]["distance_m"] > 0
     assert result["evidence_nodes"][0]["data"]["spatial_match"]["relation"] == "nearest"
     assert result["spatial_query"]["max_distance_m"] == 100
+
+
+def test_scope_dataset_tool_returns_domain_error_for_invalid_spatial_query(monkeypatch):
+    class FailingService:
+        def query_scope_dataset(self, **kwargs):
+            raise SpatialQueryError("spatial_relation_unsupported", "不支持 nearest")
+
+    monkeypatch.setattr(scope_dataset_tools, "_service", lambda: FailingService())
+    result = asyncio.run(
+        scope_dataset_tools.query_scope_dataset(
+            arguments={"source_id": "current:dataset:population", "spatial": {"relation": "nearest"}},
+            snapshot=SimpleNamespace(context={"history_id": "history-1"}),
+            artifacts={},
+            question="",
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.error == "spatial_relation_unsupported"

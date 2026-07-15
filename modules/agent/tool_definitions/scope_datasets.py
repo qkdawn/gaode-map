@@ -44,6 +44,28 @@ FILTER_SCHEMA = {
     },
 }
 
+SPATIAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "relation": {
+            "type": "string",
+            "enum": ["at_point", "nearest", "within_distance", "intersects"],
+        },
+        "point": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {"type": "number"},
+        },
+        "geometry": {"type": "object"},
+        "coord_type": {"type": "string", "enum": ["gcj02", "wgs84"]},
+        "max_distance_m": {"type": "number", "minimum": 0},
+        "min_overlap_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["relation", "coord_type"],
+    "additionalProperties": False,
+}
+
 SCOPE_DATASET_RECORD_SCHEMA = {
     "type": "object",
     "properties": {
@@ -56,6 +78,7 @@ SCOPE_DATASET_RECORD_SCHEMA = {
         "locator": {"type": "string"},
         "citation": {"type": "string"},
         "warnings": {"type": "array"},
+        "spatial_match": {"type": "object"},
     },
     "required": ["record_id", "source_id", "title", "content", "properties", "time_scope", "locator", "citation", "warnings"],
     "additionalProperties": False,
@@ -123,6 +146,7 @@ def register_scope_dataset_tools(registry: Dict[str, RegisteredTool]) -> None:
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100},
                     "offset": {"type": "integer", "minimum": 0},
                     "year": {"type": "integer"},
+                    "spatial": SPATIAL_SCHEMA,
                     "history_id": {"type": "string"},
                 },
                 "required": ["source_id"],
@@ -132,6 +156,7 @@ def register_scope_dataset_tools(registry: Dict[str, RegisteredTool]) -> None:
                 "type": "object",
                 "properties": {
                     "source_id": {"type": "string"},
+                    "spatial_query": {"anyOf": [{"type": "object"}, {"type": "null"}]},
                     "total_count": {"type": "integer"},
                     "limit": {"type": "integer"},
                     "offset": {"type": "integer"},
@@ -140,7 +165,7 @@ def register_scope_dataset_tools(registry: Dict[str, RegisteredTool]) -> None:
                     "evidence_nodes": {"type": "array", "items": EVIDENCE_NODE_SCHEMA},
                     "warnings": {"type": "array"},
                 },
-                "required": ["source_id", "total_count", "limit", "offset", "has_more", "records", "evidence_nodes", "warnings"],
+                "required": ["source_id", "total_count", "limit", "offset", "has_more", "spatial_query", "records", "evidence_nodes", "warnings"],
                 "additionalProperties": False,
             },
             readonly=True,

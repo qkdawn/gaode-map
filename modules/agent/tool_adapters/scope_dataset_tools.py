@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from modules.scope_datasets import ScopeDatasetService
+from modules.scope_datasets.spatial import SpatialQueryError
 
 from ..schemas import AnalysisSnapshot, ToolResult
 
@@ -53,15 +54,24 @@ async def query_scope_dataset(
     history_id = _history_id(arguments, snapshot)
     if not history_id:
         return ToolResult(tool_name="query_scope_dataset", status="failed", error="history_id_required", warnings=["history_id_required"])
-    payload = _service().query_scope_dataset(
-        history_id=history_id,
-        source_id=str(arguments.get("source_id") or ""),
-        filters=arguments.get("filters") if isinstance(arguments.get("filters"), dict) else {},
-        sort=arguments.get("sort") if isinstance(arguments.get("sort"), dict) else {},
-        limit=int(arguments.get("limit") or 20),
-        offset=int(arguments.get("offset") or 0),
-        year=arguments.get("year"),
-    )
+    try:
+        payload = _service().query_scope_dataset(
+            history_id=history_id,
+            source_id=str(arguments.get("source_id") or ""),
+            filters=arguments.get("filters") if isinstance(arguments.get("filters"), dict) else {},
+            sort=arguments.get("sort") if isinstance(arguments.get("sort"), dict) else {},
+            limit=int(arguments.get("limit") or 20),
+            offset=int(arguments.get("offset") or 0),
+            year=arguments.get("year"),
+            spatial=arguments.get("spatial") if isinstance(arguments.get("spatial"), dict) else None,
+        )
+    except SpatialQueryError as exc:
+        return ToolResult(
+            tool_name="query_scope_dataset",
+            status="failed",
+            error=exc.code,
+            warnings=[str(exc)],
+        )
     return ToolResult(
         tool_name="query_scope_dataset",
         status="success",

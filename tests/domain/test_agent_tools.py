@@ -67,6 +67,10 @@ def test_get_tool_registry_exposes_stage1_tools():
         "current:dataset:road_edges",
         "current:dataset:road_grid",
     ]
+    spatial_schema = registry["query_scope_dataset"].spec.input_schema["properties"]["spatial"]
+    assert spatial_schema["required"] == ["relation", "coord_type"]
+    assert "nearest" in spatial_schema["properties"]["relation"]["enum"]
+    assert "spatial_match" in registry["query_scope_dataset"].spec.output_schema["properties"]["records"]["items"]["properties"]
 
 
 def test_get_tool_registry_keeps_expected_tool_order():
