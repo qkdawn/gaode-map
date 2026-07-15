@@ -258,6 +258,64 @@ def _linear_length(geometry: BaseGeometry) -> float:
     return 0.0
 
 
+def _match_spatial_geometry(
+    *,
+    geometry: BaseGeometry,
+    target: BaseGeometry,
+    metric_target: BaseGeometry,
+    relation: str,
+    max_distance_m: float | None,
+    min_overlap: float | None,
+    output_coord_type: str,
+    to_metric,
+    from_metric,
+) -> SpatialMatch | None:
+    metric_geometry = transform(to_metric, geometry)
+    distance_m = float(metric_geometry.distance(metric_target))
+    if relation == "at_point" and not geometry.covers(target):
+        return None
+    if relation == "intersects" and not geometry.intersects(target):
+        return None
+    if relation in {"nearest", "within_distance"} and max_distance_m is not None and distance_m > max_distance_m + 1e-6:
+        return None
+
+    overlap_area = None
+    record_ratio = None
+    query_ratio = None
+    intersection_length = None
+    if relation == "intersects":
+        intersection = metric_geometry.intersection(metric_target)
+        if metric_geometry.area > 1e-9 and metric_target.area > 1e-9:
+            overlap_area = float(intersection.area)
+            record_ratio = _ratio(overlap_area, float(metric_geometry.area))
+            query_ratio = _ratio(overlap_area, float(metric_target.area))
+            if min_overlap is not None and (record_ratio or 0.0) < min_overlap:
+                return None
+        linear_length = _linear_length(intersection)
+        if linear_length > 0:
+            intersection_length = round(linear_length, 3)
+
+    if relation in {"nearest", "within_distance"}:
+        _, metric_match = nearest_points(metric_target, metric_geometry)
+        matched_wgs = transform(from_metric, metric_match)
+    else:
+        matched_wgs = target if target.geom_type == "Point" else geometry.representative_point()
+    matched_point = [float(matched_wgs.x), float(matched_wgs.y)]
+    if output_coord_type == "gcj02":
+        matched_point = list(wgs84_to_gcj02(*matched_point))
+    return SpatialMatch(
+        relation=relation,
+        distance_m=round(distance_m, 3) if relation in {"nearest", "within_distance"} else None,
+        geometry_type=geometry.geom_type,
+        matched_point=matched_point,
+        overlap_area_m2=round(overlap_area, 3) if overlap_area is not None else None,
+        record_overlap_ratio=record_ratio,
+        query_overlap_ratio=query_ratio,
+        intersection_length_m=intersection_length,
+        coord_type=output_coord_type,
+    )
+
+
 def query_spatial_records(records: Sequence[Any], spatial: dict[str, Any], *, cache_key: str = "") -> SpatialQueryResult:
     relation, target, output_coord_type = normalize_spatial_target(spatial)
     index, skipped = _build_index(records, cache_key)
@@ -266,59 +324,35 @@ def query_spatial_records(records: Sequence[Any], spatial: dict[str, Any], *, ca
 
     to_metric, from_metric = _metric_transform(target)
     metric_target = transform(to_metric, target)
-    query_area = metric_target.area
     max_distance_m = _finite_number(spatial.get("max_distance_m"))
     min_overlap = _finite_number(spatial.get("min_overlap_ratio"))
     matches: dict[int, SpatialMatch] = {}
 
-    for position in _candidate_positions(index, target, relation, max_distance_m):
-        if position < 0 or position >= len(index.geometries):
-            continue
-        geometry = index.geometries[position]
-        metric_geometry = transform(to_metric, geometry)
-        distance_m = float(metric_geometry.distance(metric_target))
-        if relation == "at_point" and not geometry.covers(target):
-            continue
-        if relation == "intersects" and not geometry.intersects(target):
-            continue
-        if relation in {"nearest", "within_distance"} and max_distance_m is not None and distance_m > max_distance_m + 1e-6:
-            continue
-
-        overlap_area = None
-        record_ratio = None
-        query_ratio = None
-        intersection_length = None
-        if relation == "intersects":
-            intersection = metric_geometry.intersection(metric_target)
-            if metric_geometry.area > 1e-9 and metric_target.area > 1e-9:
-                overlap_area = float(intersection.area)
-                record_ratio = _ratio(overlap_area, float(metric_geometry.area))
-                query_ratio = _ratio(overlap_area, float(metric_target.area))
-                if min_overlap is not None and (record_ratio or 0.0) < min_overlap:
-                    continue
-            linear_length = _linear_length(intersection)
-            if linear_length > 0:
-                intersection_length = round(linear_length, 3)
-
-        if relation in {"nearest", "within_distance"}:
-            _, metric_match = nearest_points(metric_target, metric_geometry)
-            matched_wgs = transform(from_metric, metric_match)
-        else:
-            matched_wgs = target if target.geom_type == "Point" else geometry.representative_point()
-        matched_point = [float(matched_wgs.x), float(matched_wgs.y)]
-        if output_coord_type == "gcj02":
-            matched_point = list(wgs84_to_gcj02(*matched_point))
-        matches[index.record_positions[position]] = SpatialMatch(
-            relation=relation,
-            distance_m=round(distance_m, 3) if relation in {"nearest", "within_distance"} else None,
-            geometry_type=geometry.geom_type,
-            matched_point=matched_point,
-            overlap_area_m2=round(overlap_area, 3) if overlap_area is not None else None,
-            record_overlap_ratio=record_ratio,
-            query_overlap_ratio=query_ratio,
-            intersection_length_m=intersection_length,
-            coord_type=output_coord_type,
-        )
+    try:
+        candidate_positions = _candidate_positions(index, target, relation, max_distance_m)
+        for position in candidate_positions:
+            if position < 0 or position >= len(index.geometries):
+                continue
+            match = _match_spatial_geometry(
+                geometry=index.geometries[position],
+                target=target,
+                metric_target=metric_target,
+                relation=relation,
+                max_distance_m=max_distance_m,
+                min_overlap=min_overlap,
+                output_coord_type=output_coord_type,
+                to_metric=to_metric,
+                from_metric=from_metric,
+            )
+            if match is not None:
+                matches[index.record_positions[position]] = match
+    except SpatialQueryError:
+        raise
+    except Exception as exc:
+        raise SpatialQueryError(
+            "spatial_metric_calculation_failed",
+            f"空间距离、面积或长度计算失败: {type(exc).__name__}",
+        ) from exc
 
     if relation in {"nearest", "within_distance"}:
         matches = dict(sorted(matches.items(), key=lambda item: (item[1].distance_m is None, item[1].distance_m or 0.0)))

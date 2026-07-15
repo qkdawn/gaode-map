@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from shapely.geometry import LineString, Point, box
 
+import modules.scope_datasets.spatial as spatial_module
 from modules.scope_datasets import ScopeDatasetQueryError, ScopeDatasetService
 from modules.scope_datasets.spatial import SpatialQueryError, query_spatial_records
 from modules.agent.tool_adapters import scope_dataset_tools
@@ -110,6 +111,17 @@ def test_spatial_query_rejects_missing_coordinate_type():
             {"relation": "nearest", "point": [0, 0]},
         )
     assert error.value.code == "spatial_coord_type_unknown"
+
+
+def test_spatial_query_wraps_unexpected_metric_failures(monkeypatch):
+    monkeypatch.setattr(spatial_module, "_candidate_positions", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(SpatialQueryError) as error:
+        query_spatial_records(
+            [SimpleNamespace(geometry=Point(0, 0), record_id="p")],
+            {"relation": "nearest", "point": [0, 0], "coord_type": "wgs84"},
+        )
+    assert error.value.code == "spatial_metric_calculation_failed"
 
 
 class _SpatialRepository:
