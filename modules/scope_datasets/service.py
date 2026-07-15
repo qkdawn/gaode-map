@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from hashlib import sha1
+from hashlib import sha256
 from typing import Any, Dict, Iterable, List, Optional
 
 from shapely.geometry import Point, shape
@@ -484,8 +484,20 @@ class ScopeDatasetService:
 
     @staticmethod
     def _spatial_cache_key(history_id: str, source_id: str, selected_year: int | None, records: List[ScopeRecord]) -> str:
-        record_ids = "|".join(record.record_id for record in records)
-        digest = sha1(record_ids.encode("utf-8")).hexdigest()[:16]
+        fingerprint = sha256()
+        for record in records:
+            fingerprint.update(record.record_id.encode("utf-8"))
+            fingerprint.update(b"\0")
+            fingerprint.update(record.locator.encode("utf-8"))
+            fingerprint.update(b"\0")
+            fingerprint.update(_as_text(record.time_scope.get("data_version")).encode("utf-8"))
+            fingerprint.update(b"\0")
+            fingerprint.update(_as_text(record.time_scope.get("scope_fingerprint")).encode("utf-8"))
+            fingerprint.update(b"\0")
+            if record.geometry is not None:
+                fingerprint.update(record.geometry.wkb)
+            fingerprint.update(b"\xff")
+        digest = fingerprint.hexdigest()[:24]
         return f"{history_id}:{source_id}:{selected_year or 'static'}:{len(records)}:{digest}"
 
     def aggregate_scope_dataset(

@@ -1,4 +1,5 @@
 import asyncio
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -30,6 +31,46 @@ def test_nearest_uses_real_line_geometry_and_returns_projection_point():
     assert match["geometry_type"] == "LineString"
     assert 20 < match["distance_m"] < 25
     assert match["matched_point"] == [0.005, 0.0]
+
+
+def test_within_distance_does_not_drop_east_west_candidate_at_changsha_latitude():
+    latitude = 28.2
+    longitude = 112.98
+    longitude_delta = math.degrees(95 / (6_378_137 * math.cos(math.radians(latitude))))
+    records = [
+        SimpleNamespace(
+            geometry=Point(longitude + longitude_delta, latitude),
+            record_id="east-95m",
+        )
+    ]
+
+    result = query_spatial_records(
+        records,
+        {
+            "relation": "within_distance",
+            "point": [longitude, latitude],
+            "coord_type": "wgs84",
+            "max_distance_m": 100,
+        },
+    )
+
+    assert list(result.matches) == [0]
+    assert 94.9 < result.matches[0].distance_m < 95.1
+
+
+def test_spatial_cache_key_changes_when_geometry_changes():
+    common = {
+        "record_id": "same-record",
+        "locator": "current:dataset:poi/same-record",
+        "time_scope": {"data_version": "v1", "scope_fingerprint": "scope-a"},
+    }
+    first = SimpleNamespace(**common, geometry=Point(112.98, 28.2))
+    moved = SimpleNamespace(**common, geometry=Point(112.99, 28.2))
+
+    first_key = ScopeDatasetService._spatial_cache_key("history-1", "current:dataset:poi", 2024, [first])
+    moved_key = ScopeDatasetService._spatial_cache_key("history-1", "current:dataset:poi", 2024, [moved])
+
+    assert first_key != moved_key
 
 
 def test_at_point_and_intersects_return_polygon_overlap_evidence():

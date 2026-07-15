@@ -235,14 +235,11 @@ def _build_index(records: Sequence[Any], cache_key: str) -> tuple[_SpatialIndex 
 def _candidate_positions(index: _SpatialIndex, target: BaseGeometry, relation: str, max_distance_m: float | None) -> Iterable[int]:
     if relation in {"at_point", "intersects"}:
         return index.tree.query(target, predicate="intersects").tolist()
-    if relation == "within_distance":
-        to_metric, _ = _metric_transform(target)
-        metric_target = transform(to_metric, target)
-        degree_buffer = float(max_distance_m or 0.0) / 111_000.0
-        return index.tree.query(target.buffer(degree_buffer)).tolist()
     if max_distance_m is not None:
-        degree_buffer = float(max_distance_m) / 111_000.0
-        return index.tree.query(target.buffer(degree_buffer)).tolist()
+        to_metric, from_metric = _metric_transform(target)
+        metric_search_area = transform(to_metric, target).buffer(float(max_distance_m))
+        search_area = transform(from_metric, metric_search_area)
+        return index.tree.query(search_area).tolist()
     return range(len(index.geometries))
 
 
