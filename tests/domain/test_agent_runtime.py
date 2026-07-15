@@ -643,9 +643,12 @@ def test_runtime_reads_finalizer_evidence_for_high_value_map_questions(monkeypat
     assert pack["search_queries"]
     assert pack["evidence_nodes"]
     assert set(pack["coverage_domains"]) == {"poi", "h3", "road", "population", "nightlight"}
-    assert {node["metadata"]["domain"] for node in pack["evidence_nodes"]}.issuperset({"poi", "h3", "road", "population", "nightlight"})
+    assert {node["data"]["domain"] for node in pack["evidence_nodes"]}.issuperset({"poi", "h3", "road", "population", "nightlight"})
     assert any(node["title"] == "POI 地名锚点" for node in pack["evidence_nodes"])
-    assert all(node.get("source_type") == "system" for node in pack["evidence_nodes"])
+    assert all(
+        any(str(source_id).startswith("current:analysis:") for source_id in node.get("source_ids") or [])
+        for node in pack["evidence_nodes"]
+    )
     assert "search_analysis_context" in response.diagnostics.used_tools
     assert "read_analysis_evidence_node" in response.diagnostics.used_tools
     assert any(item.id == "finalizer-evidence" and item.meta.get("read_count", 0) > 0 for item in response.diagnostics.thinking_timeline)

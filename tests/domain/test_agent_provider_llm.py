@@ -540,8 +540,8 @@ def test_run_gate_with_llm_preserves_llm_clarification_options(monkeypatch):
     snapshot = _snapshot_with_scope()
     context = build_context_bundle(snapshot)
 
-    async def fake_invoke_json_role(*, system_prompt, user_payload, emit, phase, title, reasoning_id):
-        del system_prompt, user_payload, emit, phase, title, reasoning_id
+    async def fake_invoke_json_role(*, system_prompt, user_payload, emit, phase, title, reasoning_id, runtime):
+        del system_prompt, user_payload, emit, phase, title, reasoning_id, runtime
         return {
             "status": "clarify",
             "question_type": "area_character",
@@ -569,8 +569,8 @@ def test_run_gate_with_llm_backfills_missing_clarification_options(monkeypatch):
     snapshot = _snapshot_with_scope()
     context = build_context_bundle(snapshot)
 
-    async def fake_invoke_json_role(*, system_prompt, user_payload, emit, phase, title, reasoning_id):
-        del system_prompt, user_payload, emit, phase, title, reasoning_id
+    async def fake_invoke_json_role(*, system_prompt, user_payload, emit, phase, title, reasoning_id, runtime):
+        del system_prompt, user_payload, emit, phase, title, reasoning_id, runtime
         return {
             "status": "clarify",
             "question_type": "area_character",
@@ -606,8 +606,8 @@ def test_run_gate_with_llm_normalizes_null_gate_fields(monkeypatch):
     snapshot = _snapshot_with_scope()
     context = build_context_bundle(snapshot)
 
-    async def fake_invoke_json_role(*, system_prompt, user_payload, emit, phase, title, reasoning_id):
-        del system_prompt, user_payload, emit, phase, title, reasoning_id
+    async def fake_invoke_json_role(*, system_prompt, user_payload, emit, phase, title, reasoning_id, runtime):
+        del system_prompt, user_payload, emit, phase, title, reasoning_id, runtime
         return {
             "status": "pass",
             "question_type": "area_character",
