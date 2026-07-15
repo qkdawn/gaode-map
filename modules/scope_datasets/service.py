@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from hashlib import sha1
 from typing import Any, Dict, Iterable, List, Optional
 
+from shapely.geometry import Point, shape
+from shapely.geometry.base import BaseGeometry
+from shapely.ops import transform
+
+from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84
 from sqlalchemy.orm import Session
 
 from core.years import available_business_years, normalize_year, resolve_business_year
@@ -11,6 +17,7 @@ from modules.evidence_retrieval.schemas import EvidenceNode
 from store.artifact_identity import build_artifact_slot_key
 from store.database import SessionLocal
 from store.models import AnalysisArtifact, PoiResult
+from .spatial import SpatialQueryError, query_spatial_records
 
 
 DATASET_TITLES = {
@@ -77,6 +84,16 @@ DATASET_SPATIAL_CAPABILITIES = {
         "grid_type": "road_raster",
         "spatial_relations": ["at_point", "nearest", "intersects"],
     },
+}
+
+SOURCE_GEOMETRY_COORD_TYPES = {
+    "current:dataset:poi": "gcj02",
+    "current:dataset:h3": "gcj02",
+    "current:dataset:poi_grid": "gcj02",
+    "current:dataset:population": "gcj02",
+    "current:dataset:nightlight": "gcj02",
+    "current:dataset:road_edges": "gcj02",
+    "current:dataset:road_grid": "gcj02",
 }
 
 DEFAULT_LIMIT = 20
@@ -191,6 +208,58 @@ def _dataset_warning_for_year(year: Any) -> List[str]:
     return [] if _as_int(year) is not None else ["该来源未提供明确年份，回答时不能做跨年比较。"]
 
 
+def _geometry_from_feature(feature: Dict[str, Any], source_id: str, coord_type: str) -> BaseGeometry | None:
+    raw_geometry = feature.get("geometry") if isinstance(feature, dict) else None
+    if not isinstance(raw_geometry, dict):
+        return None
+    try:
+        geometry = shape(raw_geometry)
+        if geometry.is_empty:
+            return None
+        if not geometry.is_valid:
+            geometry = geometry.buffer(0)
+        if geometry.is_empty:
+            return None
+        if str(coord_type or "").strip().lower() == "gcj02":
+            geometry = transform(
+                lambda x, y, z=None: _transform_xy(x, y, gcj02_to_wgs84),
+                geometry,
+            )
+        return geometry
+    except Exception:
+        return None
+
+
+def _transform_xy(x: Any, y: Any, converter):
+    if hasattr(x, "__iter__"):
+        converted = [converter(float(px), float(py)) for px, py in zip(x, y)]
+        xs, ys = zip(*converted) if converted else ((), ())
+        return tuple(xs), tuple(ys)
+    return converter(float(x), float(y))
+
+
+def _point_from_poi(poi: Dict[str, Any], coord_type: str) -> BaseGeometry | None:
+    location = poi.get("location")
+    if isinstance(location, str):
+        parts = [item.strip() for item in location.split(",")]
+        location = parts if len(parts) >= 2 else None
+    if isinstance(location, (list, tuple)) and len(location) >= 2:
+        lon = _as_float(location[0])
+        lat = _as_float(location[1])
+    else:
+        lon = _as_float(poi.get("lng") if poi.get("lng") is not None else poi.get("longitude"))
+        lat = _as_float(poi.get("lat") if poi.get("lat") is not None else poi.get("latitude"))
+    if lon is None or lat is None:
+        return None
+    try:
+        point = Point(lon, lat)
+        if str(coord_type or "").strip().lower() == "gcj02":
+            point = transform(lambda x, y, z=None: gcj02_to_wgs84(float(x), float(y)), point)
+        return point
+    except Exception:
+        return None
+
+
 @dataclass
 class ScopeRecord:
     source_id: str
@@ -203,9 +272,10 @@ class ScopeRecord:
     locator: str
     citation: str
     warnings: List[str] = field(default_factory=list)
+    geometry: BaseGeometry | None = None
 
-    def as_payload(self) -> Dict[str, Any]:
-        return {
+    def as_payload(self, spatial_match: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        payload = {
             "record_id": self.record_id,
             "source_id": self.source_id,
             "title": self.title,
@@ -216,8 +286,17 @@ class ScopeRecord:
             "citation": self.citation,
             "warnings": list(self.warnings or []),
         }
+        if spatial_match is not None:
+            payload["spatial_match"] = _clone_json(spatial_match)
+        return payload
 
-    def evidence_node(self) -> Dict[str, Any]:
+    def evidence_node(self, spatial_match: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        evidence_data = {
+            "record_id": self.record_id,
+            "properties": _clone_json(self.properties),
+        }
+        if spatial_match is not None:
+            evidence_data["spatial_match"] = _clone_json(spatial_match)
         node = EvidenceNode(
             id=f"{self.source_id}:record:{self.record_id}",
             kind="dataset_record",
@@ -225,10 +304,7 @@ class ScopeRecord:
             title=self.title,
             content=self.content,
             summary=self.content[:260],
-            data={
-                "record_id": self.record_id,
-                "properties": _clone_json(self.properties),
-            },
+            data=evidence_data,
             time_scope=_clone_json(self.time_scope),
             locator=self.locator,
             quality_flags=[{"code": "source_quality_note", "severity": "warning", "effect": item} for item in self.warnings],
@@ -356,13 +432,35 @@ class ScopeDatasetService:
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
         year: Any = None,
+        spatial: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         records, available_years, selected_year = self._records_with_selection(history_id=history_id, source_id=source_id, year=year)
-        filtered = self._apply_filters(records, source_id, filters or {})
-        sorted_records = self._apply_sort(filtered, sort or {})
+        spatial_matches: Dict[int, Dict[str, Any]] = {}
+        spatial_warnings: List[str] = []
+        spatial_query = _clone_json(spatial) if isinstance(spatial, dict) else None
+        spatial_records = records
+        if spatial is not None:
+            spatial_result = query_spatial_records(
+                records,
+                spatial,
+                cache_key=self._spatial_cache_key(history_id, source_id, selected_year, records),
+            )
+            spatial_records = [records[index] for index in spatial_result.matches]
+            spatial_matches = {
+                id(records[index]): match.as_payload()
+                for index, match in spatial_result.matches.items()
+            }
+            spatial_warnings.extend(spatial_result.warnings)
+        filtered = self._apply_filters(spatial_records, source_id, filters or {})
+        if spatial is not None and str(spatial.get("relation") or "").strip().lower() in {"nearest", "within_distance"}:
+            sorted_records = list(filtered)
+        else:
+            sorted_records = self._apply_sort(filtered, sort or {})
         safe_limit = min(max(int(limit or DEFAULT_LIMIT), 1), MAX_LIMIT)
         safe_offset = max(int(offset or 0), 0)
         page = sorted_records[safe_offset : safe_offset + safe_limit]
+        warnings = self._missing_year_warnings(page)
+        warnings.extend(spatial_warnings)
         return {
             "source_id": source_id,
             "selected_year": selected_year,
@@ -371,10 +469,17 @@ class ScopeDatasetService:
             "limit": safe_limit,
             "offset": safe_offset,
             "has_more": safe_offset + safe_limit < len(filtered),
-            "records": [record.as_payload() for record in page],
-            "evidence_nodes": [record.evidence_node() for record in page],
-            "warnings": self._missing_year_warnings(page),
+            "spatial_query": spatial_query,
+            "records": [record.as_payload(spatial_matches.get(id(record))) for record in page],
+            "evidence_nodes": [record.evidence_node(spatial_matches.get(id(record))) for record in page],
+            "warnings": sorted(set(warnings)),
         }
+
+    @staticmethod
+    def _spatial_cache_key(history_id: str, source_id: str, selected_year: int | None, records: List[ScopeRecord]) -> str:
+        record_ids = "|".join(record.record_id for record in records)
+        digest = sha1(record_ids.encode("utf-8")).hexdigest()[:16]
+        return f"{history_id}:{source_id}:{selected_year or 'static'}:{len(records)}:{digest}"
 
     def aggregate_scope_dataset(
         self,
@@ -617,6 +722,7 @@ class ScopeDatasetService:
                         locator=f"current:dataset:poi/{record_id}",
                         citation=f"当前范围 POI，{time_scope.get('label')}",
                         warnings=warnings,
+                        geometry=_point_from_poi(poi, SOURCE_GEOMETRY_COORD_TYPES["current:dataset:poi"]),
                     )
                 )
         return records
@@ -637,8 +743,21 @@ class ScopeDatasetService:
             return self._road_grid_records(artifact)
         return self._grid_records(source_id, artifact, artifact_type)
 
+    @staticmethod
+    def _artifact_coord_type(source_id: str, artifact: Dict[str, Any]) -> str:
+        params = artifact.get("params") if isinstance(artifact.get("params"), dict) else {}
+        payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
+        return _as_text(
+            payload.get("geometry_coord_type")
+            or payload.get("coord_type")
+            or params.get("geometry_coord_type")
+            or params.get("coord_type")
+            or SOURCE_GEOMETRY_COORD_TYPES.get(source_id)
+        )
+
     def _grid_records(self, source_id: str, artifact: Dict[str, Any], artifact_type: str) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
+        coord_type = self._artifact_coord_type(source_id, artifact)
         grid = payload.get("grid") if isinstance(payload.get("grid"), dict) else {}
         layer = payload.get("layer") if isinstance(payload.get("layer"), dict) else {}
         cells_by_id = {}
@@ -687,6 +806,7 @@ class ScopeDatasetService:
                     locator=f"{source_id}/{feature_id}",
                     citation=f"{DATASET_TITLES.get(source_id, source_id)}，{time_scope.get('label')}",
                     warnings=warnings,
+                    geometry=_geometry_from_feature(feature, source_id, coord_type),
                 )
             )
         return records
@@ -694,6 +814,7 @@ class ScopeDatasetService:
     def _road_edge_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
         metric = payload.get("metric") or payload.get("mode") or ""
+        coord_type = self._artifact_coord_type("current:dataset:road_edges", artifact)
         time_scope = _static_time_scope(
             data_version=_as_text(artifact.get("data_version")),
             scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
@@ -730,6 +851,7 @@ class ScopeDatasetService:
                         locator=f"current:dataset:road_edges/{record_id}",
                         citation="当前范围路网线段，当前路网模型",
                         warnings=[],
+                        geometry=_geometry_from_feature(feature, "current:dataset:road_edges", coord_type),
                     )
                 )
         return records
@@ -737,6 +859,7 @@ class ScopeDatasetService:
     def _road_grid_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
         payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
         collection = payload.get("road_grid") if isinstance(payload.get("road_grid"), dict) else {}
+        coord_type = self._artifact_coord_type("current:dataset:road_grid", artifact)
         time_scope = _static_time_scope(
             data_version=_as_text(artifact.get("data_version")),
             scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
@@ -759,6 +882,7 @@ class ScopeDatasetService:
                 locator=f"current:dataset:road_grid/{record_id}",
                 citation="当前范围路网共享栅格，当前路网模型",
                 warnings=[],
+                geometry=_geometry_from_feature(feature, "current:dataset:road_grid", coord_type),
             ))
         return records
 
