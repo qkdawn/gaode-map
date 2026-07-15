@@ -31,6 +31,7 @@ class FakeScopeDatasetRepository:
                 "artifact_type": "poi_h3_grid",
                 "params": {"year": 2024, "view": "density"},
                 "payload": {
+                    "geometry_coord_type": "gcj02",
                     "year": 2024,
                     "grid": {
                         "type": "FeatureCollection",
@@ -48,6 +49,7 @@ class FakeScopeDatasetRepository:
                 "artifact_type": "poi_raster_grid",
                 "params": {"year": 2024, "view": "density"},
                 "payload": {
+                    "geometry_coord_type": "gcj02",
                     "year": 2024,
                     "grid": {
                         "type": "FeatureCollection",
@@ -65,6 +67,7 @@ class FakeScopeDatasetRepository:
                 "artifact_type": "population",
                 "params": {"year": 2024, "view": "density"},
                 "payload": {
+                    "geometry_coord_type": "gcj02",
                     "year": 2024,
                     "view": "density",
                     "grid": {
@@ -91,6 +94,7 @@ class FakeScopeDatasetRepository:
                 "artifact_type": "road_syntax",
                 "params": {"metric": "choice"},
                 "payload": {
+                    "geometry_coord_type": "gcj02",
                     "metric": "choice",
                     "road_edges": {
                         "type": "FeatureCollection",
@@ -127,6 +131,7 @@ def test_scope_dataset_service_lists_normalized_sources():
     assert sources["current:dataset:h3"]["grid_type"] == "h3"
     assert sources["current:dataset:poi_grid"]["grid_type"] == "regular_raster"
     assert "at_point" in sources["current:dataset:population"]["query_capabilities"]["spatial_relations"]
+    assert sources["current:dataset:population"]["query_capabilities"]["spatial_ready"] is True
     assert sources["current:dataset:population"]["query_capabilities"]["spatial_aggregations"][0]["op"] == "area_weighted_sum"
 
 

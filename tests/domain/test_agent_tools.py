@@ -75,6 +75,7 @@ def test_get_tool_registry_exposes_stage1_tools():
     assert "area_weighted_sum" in aggregate_schema["properties"]["metrics"]["items"]["properties"]["op"]["enum"]
     assert "nearest" in spatial_schema["properties"]["relation"]["enum"]
     assert "spatial_match" in registry["query_scope_dataset"].spec.output_schema["properties"]["records"]["items"]["properties"]
+    assert "spatial_diagnostics" in registry["query_scope_dataset"].spec.output_schema["properties"]
 
 
 def test_get_tool_registry_keeps_expected_tool_order():

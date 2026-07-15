@@ -144,6 +144,11 @@ def test_scope_service_attaches_spatial_match_to_record_and_evidence():
     assert result["records"][0]["spatial_match"]["distance_m"] > 0
     assert result["evidence_nodes"][0]["data"]["spatial_match"]["relation"] == "nearest"
     assert result["spatial_query"]["max_distance_m"] == 100
+    assert result["spatial_diagnostics"] == {
+        "matched_record_count": 1,
+        "skipped_record_count": 0,
+        "result_complete": True,
+    }
 
 
 def test_scope_service_uses_existing_record_as_spatial_target_and_excludes_itself():
@@ -259,6 +264,9 @@ def test_scope_service_rejects_spatial_query_when_artifact_coord_type_is_missing
             ]
 
     service = ScopeDatasetService(repository=MissingCoordTypeRepository())
+    manifest = service.list_scope_datasets("history-1")["datasets"][0]
+    assert manifest["query_capabilities"]["spatial_ready"] is False
+    assert "空间查询不可用" in manifest["warnings"][0]
     assert service.query_scope_dataset(
         history_id="history-1",
         source_id="current:dataset:population",

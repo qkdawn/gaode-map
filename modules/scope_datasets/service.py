@@ -460,7 +460,18 @@ class ScopeDatasetService:
             for artifact in selected:
                 records.extend(self._records_from_artifact(source_id, artifact))
             summary = self._selected_artifact_summary(selected)
-            datasets.append(self._dataset_payload(source_id, len(records), years=years, selected_year=selected_year, variants=len(selected), summary=summary))
+            spatial_ready = bool(selected) and all(self._artifact_coord_type(source_id, artifact) for artifact in selected)
+            datasets.append(
+                self._dataset_payload(
+                    source_id,
+                    len(records),
+                    years=years,
+                    selected_year=selected_year,
+                    variants=len(selected),
+                    summary=summary,
+                    spatial_ready=spatial_ready,
+                )
+            )
         return {"datasets": datasets, "warnings": []}
 
     def query_scope_dataset(
@@ -485,6 +496,7 @@ class ScopeDatasetService:
         spatial_matches: Dict[int, Dict[str, Any]] = {}
         spatial_warnings: List[str] = []
         spatial_query = _clone_json(spatial) if isinstance(spatial, dict) else None
+        spatial_diagnostics: Dict[str, Any] = {}
         spatial_records = records
         if spatial is not None:
             selection = self._select_spatial_records(
@@ -497,6 +509,11 @@ class ScopeDatasetService:
             spatial_records = selection.records
             spatial_matches = selection.matches
             spatial_warnings.extend(selection.warnings)
+            spatial_diagnostics = {
+                "matched_record_count": len(selection.records),
+                "skipped_record_count": selection.skipped_record_count,
+                "result_complete": selection.skipped_record_count == 0,
+            }
         filtered = self._apply_filters(spatial_records, source_id, filters or {})
         if spatial is not None and str(spatial.get("relation") or "").strip().lower() in {"nearest", "within_distance"}:
             sorted_records = list(filtered)
@@ -516,6 +533,7 @@ class ScopeDatasetService:
             "offset": safe_offset,
             "has_more": safe_offset + safe_limit < len(filtered),
             "spatial_query": spatial_query,
+            "spatial_diagnostics": spatial_diagnostics,
             "records": [record.as_payload(spatial_matches.get(id(record))) for record in page],
             "evidence_nodes": [record.evidence_node(spatial_matches.get(id(record))) for record in page],
             "warnings": sorted(set(warnings)),
@@ -919,9 +937,12 @@ class ScopeDatasetService:
         selected_year: int | None,
         variants: int,
         summary: Optional[Dict[str, Any]] = None,
+        spatial_ready: bool = True,
     ) -> Dict[str, Any]:
         is_static = source_id in {"current:dataset:road_edges", "current:dataset:road_grid"}
         warnings = [] if years or is_static else ["该来源未提供明确年份。"]
+        if record_count and not spatial_ready:
+            warnings.append("artifact 缺少有效 geometry_coord_type，属性查询可用，但空间查询不可用。")
         spatial_capabilities = DATASET_SPATIAL_CAPABILITIES.get(source_id, {})
         return {
             "source_id": source_id,
@@ -947,6 +968,7 @@ class ScopeDatasetService:
                 "aggregate_fields": sorted(DATASET_FILTER_FIELDS.get(source_id, set())),
                 "spatial_relations": list(spatial_capabilities.get("spatial_relations") or []),
                 "spatial_aggregations": _clone_json(DATASET_SPATIAL_AGGREGATIONS.get(source_id, [])),
+                "spatial_ready": bool(spatial_ready),
                 "input_coord_types": ["gcj02", "wgs84"],
                 "distance_unit": "m",
                 "variants": int(variants or 0),
