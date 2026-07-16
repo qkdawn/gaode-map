@@ -129,6 +129,9 @@ def new_local_spatial_stat() -> Dict[str, Any]:
         "lisa_z_score": None,
         "gi_star_value": None,
         "gi_star_z_score": None,
+        "p_value": None,
+        "adjusted_p_value": None,
+        "cluster_type": None,
     }
 
 
@@ -321,13 +324,24 @@ def build_local_spatial_stats_from_arcgis(
         if not h3_id or h3_id not in local_stats:
             continue
         stats = local_stats[h3_id]
-        gi_z = safe_round(safe_float((item or {}).get("gi_z_score")), 6)
+        row = item or {}
+        gi_z = safe_round(safe_float(row.get("gi_z_score")), 6)
+        p_value = row.get("p_value")
+        if p_value is None:
+            p_value = row.get("gi_p_value", row.get("lisa_p_value"))
+        adjusted_p_value = row.get("adjusted_p_value")
+        if adjusted_p_value is None:
+            adjusted_p_value = row.get("fdr_p_value")
+        cluster_type = row.get("cluster_type") or row.get("lisa_cluster_type") or row.get("gi_cluster_type")
         stats.update(
             {
-                "lisa_i": safe_round(safe_float((item or {}).get("lisa_i")), 6),
-                "lisa_z_score": safe_round(safe_float((item or {}).get("lisa_z_score")), 6),
-                "gi_star_value": None,
+                "lisa_i": safe_round(safe_float(row.get("lisa_i")), 6),
+                "lisa_z_score": safe_round(safe_float(row.get("lisa_z_score")), 6),
+                "gi_star_value": safe_round(safe_float(row.get("gi_star_value")), 6),
                 "gi_star_z_score": gi_z,
+                "p_value": safe_round(safe_float(p_value), 8),
+                "adjusted_p_value": safe_round(safe_float(adjusted_p_value), 8),
+                "cluster_type": str(cluster_type).strip() if cluster_type is not None else None,
             }
         )
     return finalize_native_spatial_fields(local_stats)

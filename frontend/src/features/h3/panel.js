@@ -2192,6 +2192,7 @@
                     if (!this.isComputingH3Analysis) return;
                     pollProgress();
                 }, 800);
+                let calculationCompleted = false;
                 try {
                     const polygon = this.getIsochronePolygonPayload();
                     const neighborRing = Math.max(1, Math.min(3, Math.round(this._toNumber(this.h3NeighborRing, 1))));
@@ -2276,14 +2277,21 @@
                     if (typeof this.commitCurrentPoiGridResult === 'function') {
                         this.commitCurrentPoiGridResult('h3', Number(this.poiYearSource || this.resultPoiYear || 0) || null);
                     }
-                    if (typeof this.persistAnalysisArtifactQuietly === 'function') {
-                        this.persistAnalysisArtifactQuietly('poi_h3_grid');
+                    calculationCompleted = true;
+                    if (typeof this.persistAnalysisArtifact === 'function') {
+                        const saved = await this.persistAnalysisArtifact('poi_h3_grid');
+                        if (!saved) throw new Error('POI H3 artifact 保存失败');
                     }
                     return { progress: { ...latestProgress } };
                 } catch (e) {
                     console.error(e);
                     applyProgress({ status: 'failed', stage: 'failed', message: String((e && e.message) || e || '网格分析失败') });
-                    this.h3GridStatus = '网格分析失败: ' + e.message;
+                    if (calculationCompleted && e && typeof e === 'object') {
+                        e.analysisArtifactSaveFailed = true;
+                    }
+                    this.h3GridStatus = calculationCompleted
+                        ? `POI H3 计算完成，但保存失败：${e && e.message ? e.message : String(e)}`
+                        : '网格分析失败: ' + e.message;
                     throw e;
                 } finally {
                     if (progressTimer) {

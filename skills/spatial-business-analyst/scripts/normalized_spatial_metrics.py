@@ -15,6 +15,8 @@ from typing import Any, Iterable
 from shapely.geometry import Point, Polygon
 from shapely.ops import transform
 
+from modules.agent.analysis_runs import AnalysisRun
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
@@ -314,21 +316,26 @@ def compute(payload: dict[str, Any]) -> dict[str, Any]:
     valid_bands = [unit for unit in bands if unit["area_km2"] > 0]
     metric_attempts = [
         {
+            "plan_entry_id": "metric:poi-count-scope",
             "metric_id": "poi.count",
-            "spatial_target": "scope",
+            "spatial_target": {"unit": "scope", "target_id": "analysis-scope"},
             "execution_status": "succeeded",
             "reason": "",
             "evidence_node_ids": [evidence_id],
         }
     ]
     for unit in [*sectors, *bands]:
+        spatial_unit = "sector" if unit in sectors else "distance_band"
+        density_entry_id = f"metric:poi-density-{spatial_unit}"
+        lq_entry_id = f"metric:poi-lq-{spatial_unit}"
         status = "succeeded" if unit["area_km2"] > 0 else "not_applicable"
         reason = "" if status == "succeeded" else "empty_geometry_intersection"
         refs = [evidence_id] if status == "succeeded" else []
         metric_attempts.append(
             {
+                "plan_entry_id": density_entry_id,
                 "metric_id": "poi.grid_density",
-                "spatial_target": unit["geometry_id"],
+                "spatial_target": {"unit": spatial_unit, "target_id": unit["geometry_id"]},
                 "execution_status": status,
                 "reason": reason,
                 "evidence_node_ids": refs,
@@ -339,8 +346,12 @@ def compute(payload: dict[str, Any]) -> dict[str, Any]:
             lq_reason = reason if status != "succeeded" else ("" if lq_status == "succeeded" else "zero_baseline_share")
             metric_attempts.append(
                 {
+                    "plan_entry_id": lq_entry_id,
                     "metric_id": "poi.lq",
-                    "spatial_target": f"{unit['geometry_id']}:{category['category']}",
+                    "spatial_target": {
+                        "unit": spatial_unit,
+                        "target_id": f"{unit['geometry_id']}:{category['category']}",
+                    },
                     "execution_status": lq_status,
                     "reason": lq_reason,
                     "evidence_node_ids": [evidence_id] if lq_status == "succeeded" else [],
@@ -416,7 +427,7 @@ def compute(payload: dict[str, Any]) -> dict[str, Any]:
         "run_id": run_id,
         "capability_id": "spatial-business-analyst",
         "manifest_sha256": "",
-        "catalog_version": "1.0.0",
+        "catalog_version": "2.0.0",
         "code_version": "normalized_spatial_metrics_v2",
         "analysis_code_sha256": f"sha256:{_digest({'method': METHOD, 'script': 'normalized_spatial_metrics.py'})}",
         "project_location": list(center),
@@ -431,6 +442,102 @@ def compute(payload: dict[str, Any]) -> dict[str, Any]:
                 "record_count": total,
             }
         ],
+        "decision_agenda": {
+            "agenda_id": "agenda:daily-approach",
+            "user_question": "哪个方向的局部设施接触机会更适合作为日常到达侧？",
+            "analysis_scope": "focused_diagnostic",
+            "decision_questions": [
+                {
+                    "question_id": "question:daily-approach",
+                    "text": "哪个方向的局部设施接触机会更适合作为日常到达侧？",
+                    "decision_target": "site_direction",
+                    "hypotheses": [
+                        {
+                            "hypothesis_id": "hypothesis:directional-density",
+                            "statement": "设施密度更高且类别专业化明确的方向具有更多日常接触机会。",
+                            "disconfirming_condition": "入口观测或真实步行路径不支持该方向的到达优势。",
+                        }
+                    ],
+                }
+            ],
+        },
+        "metric_plan": {
+            "catalog_version": "2.0.0",
+            "decision_questions": [
+                {
+                    "question_id": "question:daily-approach",
+                    "text": "哪个方向的局部设施接触机会更适合作为日常到达侧？",
+                    "decision_target": "site_direction",
+                    "hypotheses": [
+                        {
+                            "hypothesis_id": "hypothesis:directional-density",
+                            "statement": "设施密度更高且类别专业化明确的方向具有更多日常接触机会。",
+                            "disconfirming_condition": "入口观测或真实步行路径不支持该方向的到达优势。",
+                        }
+                    ],
+                }
+            ],
+            "entries": [
+                {
+                    "plan_entry_id": "metric:poi-count-scope",
+                    "metric_id": "poi.count",
+                    "role": "diagnostic",
+                    "decision_question_id": "question:daily-approach",
+                    "hypothesis_ids": ["hypothesis:directional-density"],
+                    "planned_spatial_target": {"unit": "scope", "source": "analysis_boundary", "runtime_parameters": []},
+                    "selection_reason": "检查方向与距离带分析的样本基数。",
+                    "expected_decision_use": "识别样本不足造成的证据限制。",
+                    "required_source_ids": [str(payload.get("source_id") or "")],
+                    "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
+                    "exclusion_reason": "",
+                },
+                *[
+                    {
+                        "plan_entry_id": f"metric:poi-density-{unit}",
+                        "metric_id": "poi.grid_density",
+                        "role": "primary",
+                        "decision_question_id": "question:daily-approach",
+                        "hypothesis_ids": ["hypothesis:directional-density"],
+                        "planned_spatial_target": {"unit": unit, "source": "derived_partition", "runtime_parameters": ["center", "boundary"]},
+                        "selection_reason": "直接比较不同空间分区的单位面积设施接触机会。",
+                        "expected_decision_use": "改变优先测试的项目方向或距离带。",
+                        "required_source_ids": [str(payload.get("source_id") or "")],
+                        "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
+                        "exclusion_reason": "",
+                    }
+                    for unit in ("sector", "distance_band")
+                ],
+                *[
+                    {
+                        "plan_entry_id": f"metric:poi-lq-{unit}",
+                        "metric_id": "poi.lq",
+                        "role": "supporting",
+                        "decision_question_id": "question:daily-approach",
+                        "hypothesis_ids": ["hypothesis:directional-density"],
+                        "planned_spatial_target": {"unit": unit, "source": "derived_partition", "runtime_parameters": ["category_schema"]},
+                        "selection_reason": "解释高密度分区是否由特定类别专业化驱动。",
+                        "expected_decision_use": "补充方向选择背后的设施机制。",
+                        "required_source_ids": [str(payload.get("source_id") or "")],
+                        "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
+                        "exclusion_reason": "",
+                    }
+                    for unit in ("sector", "distance_band")
+                ],
+                {
+                    "plan_entry_id": "metric:poi-kernel-density-excluded",
+                    "metric_id": "poi.kernel_density",
+                    "role": "excluded",
+                    "decision_question_id": "question:daily-approach",
+                    "hypothesis_ids": ["hypothesis:directional-density"],
+                    "planned_spatial_target": {"unit": "grid_cell", "source": "h3_grid", "runtime_parameters": ["bandwidth"]},
+                    "selection_reason": "",
+                    "expected_decision_use": "",
+                    "required_source_ids": [str(payload.get("source_id") or "")],
+                    "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
+                    "exclusion_reason": "本次方向筛选使用可审计分区密度，暂不引入带宽敏感的核密度。",
+                },
+            ],
+        },
         "metric_attempts": metric_attempts,
         "project_context": {"history_id": payload.get("history_id")},
         "configuration_snapshot": analysis_spec,
@@ -445,7 +552,9 @@ def compute(payload: dict[str, Any]) -> dict[str, Any]:
         "created_at": "",
         "completed_at": "",
     }
-    analysis_run["manifest_sha256"] = f"sha256:{_digest({key: value for key, value in analysis_run.items() if key != 'manifest_sha256'})}"
+    validated_run = AnalysisRun.model_validate(analysis_run)
+    analysis_run = validated_run.model_dump(mode="json")
+    analysis_run["manifest_sha256"] = validated_run.canonical_manifest_sha256()
     result["analysis_run"] = analysis_run
     return result
 

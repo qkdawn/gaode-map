@@ -8,8 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from .analysis_runs import (
     AnalysisArtifactRef,
     AnalysisArtifactSnapshot,
-    AnalysisRun,
-    AnalysisRunDetail,
+    AnalysisRunV3,
+    AnalysisRunV3Detail,
     content_digest,
 )
 
@@ -108,6 +108,13 @@ _CONFIGURATION_FIELDS = (
     ("configuration_snapshot.capability_input_selections", "上游能力输入"),
     ("execution_profile.model_profile_id", "模型配置"),
     ("execution_profile.skill_id", "Skill"),
+    ("run_kind", "Run 类型"),
+    ("upstream_run_id", "上游 Run"),
+    ("source_versions", "来源版本"),
+    # Kept for direct comparison of already materialized v2 details. Public
+    # comparison entry points reject those details before reaching this layer.
+    ("metric_plan.decision_questions", "决策问题与假设"),
+    ("metric_plan.entries", "指标计划"),
 )
 
 _OUTCOME_FIELDS = (
@@ -165,7 +172,7 @@ def _field_changes(base: dict[str, Any], target: dict[str, Any]) -> list[Analysi
     return changes
 
 
-def _stage_changes(base: AnalysisRun, target: AnalysisRun) -> list[AnalysisRunStageChange]:
+def _stage_changes(base: AnalysisRunV3, target: AnalysisRunV3) -> list[AnalysisRunStageChange]:
     before_by_id = {item.stage_id: item for item in base.stage_records}
     after_by_id = {item.stage_id: item for item in target.stage_records}
     changes: list[AnalysisRunStageChange] = []
@@ -199,14 +206,14 @@ def _stage_changes(base: AnalysisRun, target: AnalysisRun) -> list[AnalysisRunSt
     return changes
 
 
-def _artifact_snapshots(detail: AnalysisRunDetail) -> dict[tuple[str, str], AnalysisArtifactSnapshot]:
+def _artifact_snapshots(detail: AnalysisRunV3Detail) -> dict[tuple[str, str], AnalysisArtifactSnapshot]:
     return {
         (item.direction, item.artifact.artifact_id): item
         for item in detail.artifacts
     }
 
 
-def _artifact_refs(detail: AnalysisRunDetail) -> dict[tuple[str, str], AnalysisArtifactRef]:
+def _artifact_refs(detail: AnalysisRunV3Detail) -> dict[tuple[str, str], AnalysisArtifactRef]:
     refs: dict[tuple[str, str], AnalysisArtifactRef] = {}
     for direction, artifacts in (
         ("input", detail.run.input_artifact_refs),
@@ -219,7 +226,7 @@ def _artifact_refs(detail: AnalysisRunDetail) -> dict[tuple[str, str], AnalysisA
     return refs
 
 
-def _artifact_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> list[AnalysisRunArtifactChange]:
+def _artifact_changes(base: AnalysisRunV3Detail, target: AnalysisRunV3Detail) -> list[AnalysisRunArtifactChange]:
     before_refs = _artifact_refs(base)
     after_refs = _artifact_refs(target)
     before_snapshots = _artifact_snapshots(base)
@@ -258,7 +265,7 @@ def _artifact_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> lis
     return changes
 
 
-def _output_payloads(detail: AnalysisRunDetail) -> dict[str, Any]:
+def _output_payloads(detail: AnalysisRunV3Detail) -> dict[str, Any]:
     return {
         item.artifact.artifact_id: deepcopy(item.payload)
         for item in detail.artifacts
@@ -266,7 +273,7 @@ def _output_payloads(detail: AnalysisRunDetail) -> dict[str, Any]:
     }
 
 
-def _outcome_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> list[AnalysisRunFieldChange]:
+def _outcome_changes(base: AnalysisRunV3Detail, target: AnalysisRunV3Detail) -> list[AnalysisRunFieldChange]:
     before_payloads = _output_payloads(base)
     after_payloads = _output_payloads(target)
     changes: list[AnalysisRunFieldChange] = []
@@ -310,7 +317,7 @@ def _changed_entity_fields(before: dict[str, Any], after: dict[str, Any]) -> lis
     )
 
 
-def _entity_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> list[AnalysisRunEntityChange]:
+def _entity_changes(base: AnalysisRunV3Detail, target: AnalysisRunV3Detail) -> list[AnalysisRunEntityChange]:
     before_payloads = _output_payloads(base)
     after_payloads = _output_payloads(target)
     changes: list[AnalysisRunEntityChange] = []
@@ -347,7 +354,7 @@ def _entity_changes(base: AnalysisRunDetail, target: AnalysisRunDetail) -> list[
     return changes
 
 
-def _run_ref(run: AnalysisRun) -> AnalysisRunComparisonRef:
+def _run_ref(run: AnalysisRunV3) -> AnalysisRunComparisonRef:
     return AnalysisRunComparisonRef(
         run_id=run.run_id,
         status=run.status,
@@ -358,7 +365,7 @@ def _run_ref(run: AnalysisRun) -> AnalysisRunComparisonRef:
     )
 
 
-def compare_run_details(base: AnalysisRunDetail, target: AnalysisRunDetail) -> AnalysisRunComparison:
+def compare_run_details(base: AnalysisRunV3Detail, target: AnalysisRunV3Detail) -> AnalysisRunComparison:
     if base.run.run_id == target.run.run_id:
         raise ValueError("analysis_run_comparison_requires_distinct_runs")
     if base.history_id != target.history_id:

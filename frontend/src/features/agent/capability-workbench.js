@@ -19,6 +19,49 @@ const clonePayloadValue = value => {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clonePayloadValue(item)]))
 }
 
+const collectAnalysisRunSpatialObjects = detail => {
+  const attempts = Array.isArray(detail?.run?.metric_attempts) ? detail.run.metric_attempts : []
+  const attemptsByTarget = new Map()
+  for (const attempt of attempts) {
+    const targetId = text(attempt?.spatial_target?.target_id)
+    if (!targetId) continue
+    const existing = attemptsByTarget.get(targetId) || { metricIds: [], evidenceNodeIds: [] }
+    existing.metricIds.push(text(attempt?.metric_id))
+    existing.evidenceNodeIds.push(...(Array.isArray(attempt?.evidence_node_ids) ? attempt.evidence_node_ids.map(text) : []))
+    attemptsByTarget.set(targetId, existing)
+  }
+  const objects = new Map()
+  let visited = 0
+  const visit = (value, depth = 0) => {
+    if (value == null || visited >= 3000 || depth > 8) return
+    visited += 1
+    if (Array.isArray(value)) { value.forEach(item => visit(item, depth + 1)); return }
+    if (typeof value !== 'object') return
+    const geometry = value.geometry
+    const objectId = text(value.zone_id || value.route_id || value.entrance_id)
+    let objectType = ''
+    if (value.zone_id && Array.isArray(value.cell_ids)) objectType = 'hotspot_zone'
+    else if (value.route_id && value.entrance_id && value.destination_id) objectType = 'route'
+    else if (value.entrance_id && (value.snapped_road_segment_id !== undefined || value.source_type)) objectType = 'entrance'
+    if (objectId && objectType && geometry && typeof geometry === 'object' && !objects.has(objectId)) {
+      const linkage = attemptsByTarget.get(objectId) || { metricIds: [], evidenceNodeIds: [] }
+      const sourceMetricIds = Array.isArray(value.source_metric_ids) ? value.source_metric_ids.map(text) : []
+      objects.set(objectId, {
+        object_id: objectId,
+        object_type: objectType,
+        label: text(value.label) || ({ hotspot_zone: '热点区', entrance: '入口', route: '步行路径' })[objectType],
+        feature: { type: 'Feature', properties: { object_id: objectId, object_type: objectType }, geometry: clonePayloadValue(geometry) },
+        metric_ids: uniqueTextItems([...sourceMetricIds, ...linkage.metricIds]),
+        evidence_node_ids: uniqueTextItems(linkage.evidenceNodeIds),
+        source_type: text(value.source_type),
+      })
+    }
+    Object.values(value).forEach(item => visit(item, depth + 1))
+  }
+  ;(Array.isArray(detail?.artifacts) ? detail.artifacts : []).forEach(snapshot => visit(snapshot?.payload))
+  return Array.from(objects.values())
+}
+
 const collectPayloadText = (value) => {
   if (Array.isArray(value)) return value.flatMap(collectPayloadText)
   if (value && typeof value === 'object') return Object.values(value).flatMap(collectPayloadText)
@@ -87,7 +130,6 @@ const CAPABILITY_PROMPTS = Object.freeze({
   'urban-strategy-stage1': '基于当前项目范围、资料和分析结果，执行城市更新第一阶段策划并生成可审计报告。',
   'spatial-programming-matrix': '基于当前项目证据，重点生成空间功能策划决策矩阵，并说明候选功能、排除理由和前置条件。',
   'evidence-audit': '审计当前项目分析的 Claim-Evidence 关系、代理指标边界、冲突与待验证事项。',
-  'esri-business-analyst-report': '生成当前范围的 ESRI Business Analyst / MAPC 区域商业深度画像报告。必须先调用 plan_business_analyst_analysis 选择模型路径，再按 Trade Area、Model Scorecard、Market Potential、Retail Gap、Opportunity Screening、Competition / Huff、Customer Fit、Site Suitability 和验证计划组织报告；缺失模型标为 partial 或 skipped，不得虚构客流、租金、销售、市场份额或客户来源。',
 })
 
 export function createAgentCapabilityWorkbenchMethods() {
@@ -366,6 +408,8 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.clearAnalysisRunComparison()
       this.selectedAnalysisRunId = normalizedRunId
       this.selectedAnalysisRunDetail = null
+      this.selectedAnalysisRunSpatialObjectId = ''
+      this.analysisRunSpatialPresentationMessage = ''
       this.selectedAnalysisRunLoading = true
       this.selectedAnalysisRunError = ''
       try {
@@ -397,6 +441,8 @@ export function createAgentCapabilityWorkbenchMethods() {
       this.selectedAnalysisRunDetail = null
       this.selectedAnalysisRunLoading = false
       this.selectedAnalysisRunError = ''
+      this.selectedAnalysisRunSpatialObjectId = ''
+      this.analysisRunSpatialPresentationMessage = ''
       this.clearAnalysisRunComparison()
     },
     getAnalysisCapabilityComparisonCandidates() {
@@ -483,6 +529,42 @@ export function createAgentCapabilityWorkbenchMethods() {
     getSelectedAnalysisRunArtifacts() {
       const artifacts = this.getSelectedAnalysisRunDetail()?.artifacts
       return Array.isArray(artifacts) ? clonePayloadValue(artifacts) : []
+    },
+    getSelectedAnalysisRunMetricPlanDiagnostics() {
+      const diagnostics = this.getSelectedAnalysisRunDetail()?.metric_plan_diagnostics
+      return diagnostics && typeof diagnostics === 'object' ? clonePayloadValue(diagnostics) : null
+    },
+    getSelectedAnalysisRunMetricPlanEntries(entryIds = []) {
+      const ids = new Set(Array.isArray(entryIds) ? entryIds.map(text) : [])
+      const entries = this.getSelectedAnalysisRunDetail()?.run?.metric_plan?.entries
+      return (Array.isArray(entries) ? entries : []).filter(entry => ids.has(text(entry?.plan_entry_id))).map(clonePayloadValue)
+    },
+    getSelectedAnalysisRunSpatialObjects() {
+      return collectAnalysisRunSpatialObjects(this.getSelectedAnalysisRunDetail())
+    },
+    getSelectedAnalysisRunSpatialObject() {
+      const objectId = text(this.selectedAnalysisRunSpatialObjectId)
+      return this.getSelectedAnalysisRunSpatialObjects().find(item => item.object_id === objectId) || null
+    },
+    selectAnalysisRunSpatialObject(item = null) {
+      const objectId = text(item?.object_id)
+      this.selectedAnalysisRunSpatialObjectId = objectId
+      return this.getSelectedAnalysisRunSpatialObject()
+    },
+    renderSelectedAnalysisRunSpatialObjects({ fitView = true } = {}) {
+      const mapCore = this.mapCore
+      const objects = this.getSelectedAnalysisRunSpatialObjects()
+      if (!mapCore || typeof mapCore.showSpatialPresentation !== 'function') {
+        this.analysisRunSpatialPresentationMessage = '地图尚未就绪，无法显示空间动作对象。'
+        return 0
+      }
+      const colors = { hotspot_zone: '#dc2626', entrance: '#2563eb', route: '#0f766e' }
+      const count = mapCore.showSpatialPresentation(objects.map(item => ({
+        object_id: item.object_id, feature: item.feature, color: colors[item.object_type],
+        fillOpacity: item.object_type === 'hotspot_zone' ? 0.28 : 0.18, strokeWeight: item.object_type === 'route' ? 6 : 4,
+      })), { fitView, onClick: rendered => this.selectAnalysisRunSpatialObject(objects.find(item => item.object_id === rendered?.object_id)) })
+      this.analysisRunSpatialPresentationMessage = count ? `已显示 ${objects.length} 个空间动作对象；点击地图对象查看指标与证据。` : '当前运行没有可定位的热点区、入口或路径对象。'
+      return count
     },
     getAnalysisCapabilityRunStatusLabel(run = null) {
       const labels = {
@@ -935,18 +1017,6 @@ export function createAgentCapabilityWorkbenchMethods() {
       const capabilityInputSelections = this.buildLockedAnalysisCapabilityInputSelections(capability.id)
       if (capability.executor_type === 'service' && capability.executor_id === 'ppt-planning') {
         this.openAgentPptPlanningFromReport({ capabilityInputSelections })
-        return
-      }
-      if (capability.executor_type === 'service' && capability.executor_id === 'business-analyst-agent') {
-        this.agentWorkspaceView = 'report'
-        await this.submitAgentComposer({
-          prompt: CAPABILITY_PROMPTS[capability.id],
-          targetCapabilityId: capability.id,
-          capabilityInputSelections,
-          executionSkillId: '',
-          mode: 'deep',
-        })
-        await this.loadAnalysisCapabilityOverview(true).catch(() => {})
         return
       }
       await this.loadAgentCapabilities()

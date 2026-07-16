@@ -296,8 +296,10 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : String(err);
                     this.commitPoiGridResult(targetYear, type, { status: 'failed', error: message });
-                    if (type === 'h3') this.h3GridStatus = `POI H3 六边形网格生成失败: ${message}`;
-                    else this.poiGridStatus = `POI 共享栅格分析失败: ${message}`;
+                    if (!(err && err.analysisArtifactSaveFailed)) {
+                        if (type === 'h3') this.h3GridStatus = `POI H3 六边形网格生成失败: ${message}`;
+                        else this.poiGridStatus = `POI 共享栅格分析失败: ${message}`;
+                    }
                     throw err;
                 }
             },
@@ -454,6 +456,13 @@
             },
             async startPoiGridAnalysis() {
                 return this.ensureActivePoiGridResult(true);
+            },
+            hasActivePoiGridResult() {
+                const result = this.getPoiGridResult(
+                    this.getActivePoiGridYear(),
+                    this.normalizePoiGridType(this.poiGridType),
+                );
+                return !!(result && String(result.status || '') === 'ready');
             },
             setPoiSubTab(tab) {
                 const normalized = String(tab || '').trim().toLowerCase();
@@ -751,6 +760,7 @@
                     this.clearPoiRasterGridDisplayOnLeave();
                 }
                 this.poiGridStatus = '正在生成 POI 共享栅格底座...';
+                let calculationCompleted = false;
                 try {
                     const polygon = this.getIsochronePolygonPayload();
                     const res = await fetch('/api/v1/analysis/pois/grid', {
@@ -785,13 +795,22 @@
                         this.restorePoiRasterGridDisplayOnEnter();
                     }
                     this.commitCurrentPoiGridResult('shared', this.getPoiRasterGridYear());
-                    if (typeof this.persistAnalysisArtifactQuietly === 'function') {
-                        this.persistAnalysisArtifactQuietly('poi_raster_grid');
+                    calculationCompleted = true;
+                    if (typeof this.persistAnalysisArtifact === 'function') {
+                        const saved = await this.persistAnalysisArtifact('poi_raster_grid');
+                        if (!saved) throw new Error('POI 共享栅格 artifact 保存失败');
                     }
                     return data;
                 } catch (err) {
                     console.error(err);
-                    this.poiGridStatus = 'POI 共享栅格底座生成失败: ' + (err && err.message ? err.message : String(err));
+                    const message = err && err.message ? err.message : String(err);
+                    this.poiGridStatus = calculationCompleted
+                        ? `POI 共享栅格计算完成，但保存失败：${message}`
+                        : `POI 共享栅格底座生成失败: ${message}`;
+                    if (calculationCompleted) {
+                        if (err && typeof err === 'object') err.analysisArtifactSaveFailed = true;
+                        throw err;
+                    }
                     return null;
                 } finally {
                     this.isLoadingPoiGrid = false;
@@ -879,6 +898,7 @@
                     if (!this.isLoadingPoiGrid) return;
                     pollProgress();
                 }, 800);
+                let calculationCompleted = false;
                 try {
                     const polygon = this.getIsochronePolygonPayload();
                     const neighborRing = Math.max(1, Math.min(3, Math.round(this._toNumber(this.h3NeighborRing, 1))));
@@ -938,13 +958,21 @@
                         if (typeof this.updateDecisionCards === 'function') this.$nextTick(() => this.updateDecisionCards());
                     }
                     this.commitCurrentPoiGridResult('shared', this.getPoiRasterGridYear());
-                    if (typeof this.persistAnalysisArtifactQuietly === 'function') {
-                        this.persistAnalysisArtifactQuietly('poi_raster_grid');
+                    calculationCompleted = true;
+                    if (typeof this.persistAnalysisArtifact === 'function') {
+                        const saved = await this.persistAnalysisArtifact('poi_raster_grid');
+                        if (!saved) throw new Error('POI 共享栅格 artifact 保存失败');
                     }
                     return data;
                 } catch (err) {
                     console.error(err);
                     const message = err && err.message ? err.message : String(err);
+                    if (calculationCompleted) {
+                        applyProgress({ status: 'failed', stage: 'failed', message });
+                        this.poiGridStatus = `POI 共享栅格计算完成，但保存失败：${message}`;
+                        if (err && typeof err === 'object') err.analysisArtifactSaveFailed = true;
+                        throw err;
+                    }
                     applyProgress({ status: 'failed', stage: 'failed', message });
                     this.h3AnalysisGridFeatures = [];
                     this.h3AnalysisSummary = null;

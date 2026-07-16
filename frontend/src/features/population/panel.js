@@ -1023,14 +1023,16 @@ function createAnalysisPopulationMethods() {
       }
       this.restorePopulationRasterDisplayOnEnter()
     },
-    async computePopulationAnalysis() {
+    async computePopulationAnalysis(options = {}) {
       const rawRing = this.getIsochronePolygonRing()
-      if (!rawRing || this.isComputingPopulation) return
+      if (!rawRing || this.isComputingPopulation) return false
+      const force = options.force === true
       this.isComputingPopulation = true
       this.populationStatus = '正在加载人口格子...'
+      let calculationCompleted = false
       try {
         await this.loadPopulationMeta(false)
-        await this.ensurePopulationBaseGrid(false)
+        await this.ensurePopulationBaseGrid(force)
         const polygon = this.getIsochronePolygonPayload()
         this.populationStatus = '正在计算人口总览...'
         const overviewResp = await fetch('/api/v1/analysis/population/overview', {
@@ -1063,15 +1065,27 @@ function createAnalysisPopulationMethods() {
         this.$nextTick(() => {
           this.updatePopulationCharts()
         })
-        if (typeof this.persistAnalysisArtifactQuietly === 'function') {
-          this.persistAnalysisArtifactQuietly('population')
+        calculationCompleted = true
+        if (typeof this.persistAnalysisArtifact === 'function') {
+          this.populationStatus = '人口计算完成，正在保存结果...'
+          const saved = await this.persistAnalysisArtifact('population')
+          if (!saved) throw new Error('人口 artifact 保存失败')
         }
+        this.populationStatus = `人口分析完成：${this.getPopulationSelectedYearLabel()}`
+        return true
       } catch (e) {
         console.error(e)
-        this.populationStatus = '人口分析失败: ' + (e && e.message ? e.message : String(e))
+        const message = e && e.message ? e.message : String(e)
+        this.populationStatus = calculationCompleted
+          ? `人口计算完成，但保存失败：${message}`
+          : `人口分析失败: ${message}`
+        return false
       } finally {
         this.isComputingPopulation = false
       }
+    },
+    async regeneratePopulationAnalysis() {
+      return this.computePopulationAnalysis({ force: true })
     },
     async onPopulationYearChange() {
       const year = String(this.populationSelectedYear || '').trim()

@@ -1,4 +1,4 @@
 interface:
   display_name: "Spatial Business Analyst"
-  short_description: "Select cataloged spatial metrics and turn them into defensible project decisions."
-  default_prompt: "Use $spatial-business-analyst to inspect the metric catalog, select comparable evidence, and produce a spatial decision report with a technical evidence appendix."
+  short_description: "Build six-object, evidence-grounded spatial reports."
+  default_prompt: "Use $spatial-business-analyst to create a schema v3 spatial project report through a locked AnalysisBlueprint, deterministic EvidenceSnapshot, specialist ChapterPackages, editorial claim control, and secure SVG-backed compilation."

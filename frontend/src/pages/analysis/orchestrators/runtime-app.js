@@ -741,7 +741,17 @@ export function runAnalysisBootstrapApp() {
                       this.roadSyntaxResetProgressState();
                       this.invalidateRoadSyntaxCache('reset-state', { resetData: true, resetPerf: true });
                   },
-                  clearRoadSyntaxOverlays() {
+                  clearRoadSyntaxOverlays(options = {}) {
+                      if (options && options.preserveData) {
+                          if (typeof this.roadSyntaxHideAllPolylineLayers === 'function') {
+                              this.roadSyntaxHideAllPolylineLayers();
+                          }
+                          if (typeof this.setRoadSyntaxArcgisWebglVisible === 'function') {
+                              this.setRoadSyntaxArcgisWebglVisible(false);
+                          }
+                          this.roadSyntaxDisplaySuspended = true;
+                          return;
+                      }
                       this.invalidateRoadSyntaxCache('clear-overlays', { resetData: false, resetPerf: false });
                   },
                   suspendRoadSyntaxDisplay() {
@@ -1951,6 +1961,23 @@ export function runAnalysisBootstrapApp() {
                       }
                       this.renderRoadSyntaxByMetric(this.resolveRoadSyntaxActiveMetric());
                   },
+                  onRoadSyntaxViewModeChange() {
+                      const metric = this.resolveRoadSyntaxActiveMetric();
+                      if (this.roadSyntaxViewMode === 'grid') {
+                          if (typeof this.roadSyntaxHideAllPolylineLayers === 'function') {
+                              this.roadSyntaxHideAllPolylineLayers();
+                          }
+                          if (typeof this.setRoadSyntaxArcgisWebglVisible === 'function') {
+                              this.setRoadSyntaxArcgisWebglVisible(false);
+                          }
+                      } else {
+                          this.roadSyntaxDisplaySuspended = false;
+                          if (this.mapCore && typeof this.mapCore.clearGridPolygons === 'function') {
+                              this.mapCore.clearGridPolygons();
+                          }
+                      }
+                      this.renderRoadSyntaxByMetric(metric);
+                  },
                   async renderRoadSyntaxByMetric(metricValue = null) {
                       const activeMetric = metricValue || this.resolveRoadSyntaxActiveMetric();
                       this.roadSyntaxApplyRadiusCircle(activeMetric);
@@ -1978,7 +2005,7 @@ export function runAnalysisBootstrapApp() {
                               properties.fillOpacity = Number.isFinite(value) ? 0.54 : 0.08;
                               return Object.assign({}, feature, { properties });
                           });
-                          this.clearRoadSyntaxOverlays();
+                          this.clearRoadSyntaxOverlays({ preserveData: true });
                           this.mapCore.setGridFeatures(styled, { strokeColor: '#64748b', strokeWeight: 0.7, fillOpacity: 0.45, clickable: true, webglBatch: true });
                           this.roadSyntaxLegendModel = this.buildRoadSyntaxLegendModel(activeMetric);
                           this.roadSyntaxSetStatus(`栅格聚合：${gridFeatures.filter((feature) => feature.properties && feature.properties.road_has_data).length}/${gridFeatures.length} 个共享格有路网数据`);

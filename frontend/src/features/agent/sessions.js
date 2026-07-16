@@ -129,6 +129,8 @@ function createAnalysisAgentInitialState() {
     selectedAnalysisRunLoading: false,
     selectedAnalysisRunError: '',
     selectedAnalysisRunRequestToken: 0,
+    selectedAnalysisRunSpatialObjectId: '',
+    analysisRunSpatialPresentationMessage: '',
     analysisCapabilityComparisonBaseRunId: '',
     analysisRunComparison: null,
     analysisRunComparisonLoading: false,

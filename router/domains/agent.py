@@ -12,7 +12,13 @@ from modules.agent.analysis_run_service import (
     list_analysis_runs,
 )
 from modules.agent.analysis_run_comparison import AnalysisRunComparison
-from modules.agent.analysis_runs import AnalysisRun, AnalysisRunDetail
+from modules.agent.analysis_runs import (
+    AnalysisRunReadDetail,
+    AnalysisRunV3,
+    AnalysisRunV3Detail,
+    LegacyAnalysisRunV2View,
+    LegacyAnalysisRunView,
+)
 from modules.agent.capability_guidance import (
     CapabilityWorkbenchOverview,
     build_capability_workbench_overview,
@@ -142,7 +148,7 @@ async def post_analysis_capability_workbench(payload: AgentTurnRequest):
 
 @router.get(
     "/api/v1/analysis/agent/analysis/runs",
-    response_model=List[AnalysisRun],
+    response_model=List[AnalysisRunV3 | LegacyAnalysisRunView | LegacyAnalysisRunV2View],
 )
 async def get_analysis_runs(history_id: str, capability_id: str = ""):
     try:
@@ -179,7 +185,7 @@ async def get_analysis_run_comparison(
 
 @router.get(
     "/api/v1/analysis/agent/analysis/runs/{run_id}",
-    response_model=AnalysisRunDetail,
+    response_model=AnalysisRunV3Detail | AnalysisRunReadDetail,
 )
 async def get_analysis_run_detail(run_id: str):
     try:

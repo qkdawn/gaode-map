@@ -12,15 +12,25 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from store.analysis_run_storage import AnalysisRunStorage
+from store.analysis_run_repo import AnalysisRunRepo  # noqa: E402
+from store.analysis_run_storage import AnalysisRunStorage  # noqa: E402
 
 
 def _load(path: str) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
-
 def _artifact_payloads(workspace: Path, manifest: dict) -> dict:
-    folders = {"evidence_nodes": "evidence", "report": "report", "diagnostic_report": "diagnostics"}
+    folders = {
+        "analysis_blueprint": "",
+        "evidence_snapshot": "",
+        "chapter_assignments": "",
+        "analyst_chapters": "",
+        "editorial_review": "",
+        "report_assembly": "",
+        "report": "report",
+        "report_visual": "report/assets",
+        "report_chapter": "chapters",
+    }
     payloads = {}
     for artifact in manifest.get("output_artifact_refs") or []:
         artifact_id = str(artifact.get("artifact_id") or "")
@@ -29,7 +39,7 @@ def _artifact_payloads(workspace: Path, manifest: dict) -> dict:
         path = workspace / folder / filename
         if not path.exists():
             continue
-        payloads[artifact_id] = path.read_text(encoding="utf-8") if path.suffix.lower() == ".md" else json.loads(path.read_text(encoding="utf-8"))
+        payloads[artifact_id] = path.read_text(encoding="utf-8") if path.suffix.lower() in {".md", ".svg"} else json.loads(path.read_text(encoding="utf-8"))
     return payloads
 
 
@@ -45,6 +55,7 @@ def main() -> int:
     parser.add_argument("--payloads", help="JSON map keyed by output artifact ID")
     args = parser.parse_args()
     storage = AnalysisRunStorage(args.root or None)
+    repo = AnalysisRunRepo(storage=storage)
     if args.command == "validate":
         storage.validate(args.capability_id, args.run_id)
         print(storage._path(args.capability_id, args.run_id))
@@ -56,7 +67,7 @@ def main() -> int:
     if args.command == "init":
         staging = storage.root / args.capability_id / f".{args.run_id}.workspace"
         staging.mkdir(parents=True, exist_ok=True)
-        for folder in ("inputs/upstream", "artifacts", "evidence", "report", "diagnostics"):
+        for folder in ("inputs/upstream", "artifacts", "report/assets", "chapters"):
             (staging / folder).mkdir(parents=True, exist_ok=True)
         (staging / "analysis-run.json").write_text(json.dumps({"history_id": history_id, "manifest": manifest}, ensure_ascii=False), encoding="utf-8")
         (staging / "inputs" / "execution-request.json").write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
@@ -64,7 +75,7 @@ def main() -> int:
         return 0
     workspace = storage.root / args.capability_id / f".{args.run_id}.workspace"
     payloads = _load(args.payloads) if args.payloads else _artifact_payloads(workspace, manifest)
-    storage.create(history_id=history_id, manifest=manifest, artifact_payloads=payloads, execution_request=request)
+    repo.save(history_id=history_id, manifest=manifest, artifact_payloads=payloads, execution_request=request)
     if workspace.exists():
         import shutil
         shutil.rmtree(workspace)

@@ -14,6 +14,43 @@ import yaml
 
 
 ALLOWED_IMPLEMENTATION_STATUSES = {"implemented", "not_implemented"}
+ALLOWED_SPATIAL_UNITS = {
+    "scope",
+    "sector",
+    "distance_band",
+    "catchment",
+    "grid_cell",
+    "hotspot_zone",
+    "entrance",
+    "road_segment",
+    "route",
+    "origin_destination_pair",
+}
+ALLOWED_NEIGHBORHOODS = {"none", "h3_k_ring", "distance", "network_radius", "origin_destination"}
+ALLOWED_ACTION_TARGETS = {
+    "site_direction",
+    "program_location",
+    "entrance",
+    "boundary_interface",
+    "street_segment",
+    "route",
+    "public_space",
+    "operations",
+    "data_collection",
+    "analysis_method",
+}
+ALLOWED_FOLLOWUP_PURPOSES = {"explain", "validate", "locate", "disconfirm"}
+ALLOWED_BASELINE_TYPES = {
+    "same_scope_previous_period",
+    "same_source_peer_scope",
+    "same_scope_category_share",
+    "normalized_spatial_unit",
+    "statistical_null_expectation",
+    "route_or_entrance_alternative",
+    "scenario_or_design_alternative",
+    "documented_project_requirement",
+}
+LEGACY_FIELDS = {"combine_with", "spatial_unit"}
 REQUIRED_FIELDS = {
     "id",
     "name",
@@ -23,10 +60,14 @@ REQUIRED_FIELDS = {
     "required_inputs",
     "definition",
     "unit",
+    "answers_questions",
+    "spatial_granularities",
     "supports",
     "does_not_support",
     "use_when",
-    "combine_with",
+    "actionability",
+    "followup_metrics",
+    "comparison_baseline",
     "valid_comparisons",
     "quality_requirements",
     "source",
@@ -74,6 +115,16 @@ DATA_DOMAINS = (
             "timeseries",
         ],
     },
+    {
+        "id": "project_evidence_gates",
+        "source_ids": [
+            "project:boundary",
+            "project:competitor-operations",
+            "project:operator-plan",
+            "project:financial-model",
+        ],
+        "families": ["project_evidence_gate"],
+    },
 )
 
 
@@ -97,6 +148,8 @@ def load_catalog(path: Path | None = None) -> dict[str, Any]:
 
 
 def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = None) -> None:
+    if str(payload.get("catalog_version") or "") != "2.0.0":
+        raise ValueError("catalog_version must be 2.0.0")
     metrics = payload.get("metrics")
     if not isinstance(metrics, list):
         raise ValueError("catalog.metrics must be a list")
@@ -107,6 +160,9 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
     for index, metric in enumerate(metrics):
         if not isinstance(metric, dict):
             raise ValueError(f"metrics[{index}] must be an object")
+        legacy = sorted(LEGACY_FIELDS.intersection(metric))
+        if legacy:
+            raise ValueError(f"metrics[{index}] uses legacy fields: {legacy}")
         missing = sorted(REQUIRED_FIELDS.difference(metric))
         if missing:
             raise ValueError(f"metrics[{index}] missing fields: {missing}")
@@ -124,28 +180,29 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
         for field in ("name", "family", "definition", "unit"):
             if not str(metric.get(field) or "").strip():
                 raise ValueError(f"{metric_id}.{field} is required")
-        list_fields = REQUIRED_FIELDS.intersection(
-            {
-                "outputs",
-                "required_inputs",
-                "supports",
-                "does_not_support",
-                "use_when",
-                "combine_with",
-                "valid_comparisons",
-                "quality_requirements",
-                "source",
-            }
+        list_fields = (
+            "outputs",
+            "required_inputs",
+            "answers_questions",
+            "spatial_granularities",
+            "supports",
+            "does_not_support",
+            "use_when",
+            "followup_metrics",
+            "valid_comparisons",
+            "quality_requirements",
+            "source",
         )
         for field in list_fields:
             if not isinstance(metric.get(field), list):
                 raise ValueError(f"{metric_id}.{field} must be a list")
         for field in (
             "required_inputs",
+            "answers_questions",
+            "spatial_granularities",
             "supports",
             "does_not_support",
             "use_when",
-            "combine_with",
             "valid_comparisons",
             "quality_requirements",
         ):
@@ -160,6 +217,53 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
                 source_path = repository_root / str(source)
                 if not source_path.exists():
                     raise ValueError(f"{metric_id} references missing source: {source}")
+
+        for granularity in metric["spatial_granularities"]:
+            if not isinstance(granularity, dict):
+                raise ValueError(f"{metric_id}.spatial_granularities entries must be objects")
+            if set(granularity) != {"unit", "neighborhood", "runtime_parameters"}:
+                raise ValueError(f"{metric_id}.spatial_granularities has invalid fields")
+            if granularity["unit"] not in ALLOWED_SPATIAL_UNITS:
+                raise ValueError(f"{metric_id} has unsupported spatial unit: {granularity['unit']}")
+            if granularity["neighborhood"] not in ALLOWED_NEIGHBORHOODS:
+                raise ValueError(f"{metric_id} has unsupported neighborhood: {granularity['neighborhood']}")
+            if not isinstance(granularity["runtime_parameters"], list):
+                raise ValueError(f"{metric_id}.runtime_parameters must be a list")
+
+        actionability = metric.get("actionability")
+        if not isinstance(actionability, dict) or set(actionability) != {"action_targets", "possible_actions"}:
+            raise ValueError(f"{metric_id}.actionability must contain action_targets and possible_actions")
+        if not isinstance(actionability["action_targets"], list) or not actionability["action_targets"]:
+            raise ValueError(f"{metric_id}.actionability.action_targets must be a non-empty list")
+        unknown_targets = sorted(set(actionability["action_targets"]) - ALLOWED_ACTION_TARGETS)
+        if unknown_targets:
+            raise ValueError(f"{metric_id} has unsupported action targets: {unknown_targets}")
+        if not isinstance(actionability["possible_actions"], list) or not actionability["possible_actions"]:
+            raise ValueError(f"{metric_id}.actionability.possible_actions must be a non-empty list")
+
+        for followup in metric["followup_metrics"]:
+            if not isinstance(followup, dict) or set(followup) != {"metric_id", "purpose", "trigger"}:
+                raise ValueError(f"{metric_id}.followup_metrics entries must contain metric_id, purpose, trigger")
+            if followup["purpose"] not in ALLOWED_FOLLOWUP_PURPOSES:
+                raise ValueError(f"{metric_id} has unsupported followup purpose: {followup['purpose']}")
+            if not str(followup["trigger"] or "").strip():
+                raise ValueError(f"{metric_id}.followup_metrics.trigger is required")
+
+        baseline = metric.get("comparison_baseline")
+        if not isinstance(baseline, dict) or set(baseline) != {"required", "preferred", "if_missing"}:
+            raise ValueError(
+                f"{metric_id}.comparison_baseline must contain required, preferred, if_missing"
+            )
+        if not isinstance(baseline["required"], bool):
+            raise ValueError(f"{metric_id}.comparison_baseline.required must be boolean")
+        if not isinstance(baseline["preferred"], list) or not baseline["preferred"]:
+            raise ValueError(f"{metric_id}.comparison_baseline.preferred must be a non-empty list")
+        unknown_baselines = sorted(set(baseline["preferred"]) - ALLOWED_BASELINE_TYPES)
+        if unknown_baselines:
+            raise ValueError(f"{metric_id} has unsupported comparison baselines: {unknown_baselines}")
+        if not str(baseline["if_missing"] or "").strip():
+            raise ValueError(f"{metric_id}.comparison_baseline.if_missing is required")
+
     known_families = {str(metric.get("family") or "") for metric in metrics}
     indexed_families = {family for domain in DATA_DOMAINS for family in domain["families"]}
     if known_families != indexed_families:
@@ -168,9 +272,11 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
             f"unknown={sorted(indexed_families - known_families)}"
         )
     for metric in metrics:
-        unknown_companions = sorted(set(metric.get("combine_with") or []).difference(seen))
-        if unknown_companions:
-            raise ValueError(f"{metric['id']} references unknown combine_with metrics: {unknown_companions}")
+        unknown_followups = sorted(
+            {str(item.get("metric_id") or "") for item in metric["followup_metrics"]} - seen
+        )
+        if unknown_followups:
+            raise ValueError(f"{metric['id']} references unknown followup metrics: {unknown_followups}")
 
 
 def build_index_payload(payload: dict[str, Any], *, catalog_file: Path) -> dict[str, Any]:
@@ -179,32 +285,23 @@ def build_index_payload(payload: dict[str, Any], *, catalog_file: Path) -> dict[
     for spec in DATA_DOMAINS:
         family_set = set(spec["families"])
         selected = [item for item in metrics if str(item.get("family") or "") in family_set]
-        implemented = [
-            str(item["id"])
-            for item in selected
-            if item.get("implementation_status") == "implemented"
-        ]
-        not_implemented = [
-            str(item["id"])
-            for item in selected
-            if item.get("implementation_status") == "not_implemented"
-        ]
         domains.append(
             {
                 "id": spec["id"],
                 "source_ids": list(spec["source_ids"]),
                 "families": list(spec["families"]),
-                "metric_ids": [str(item["id"]) for item in selected],
-                "implemented_metric_ids": implemented,
-                "not_implemented_metric_ids": not_implemented,
-                "use_when": sorted(
+                "metrics": [
                     {
-                        str(tag)
-                        for item in selected
-                        for tag in item.get("use_when") or []
-                        if str(tag).strip()
+                        "metric_id": str(item["id"]),
+                        "decision_tags": sorted(
+                            {str(tag) for tag in item.get("use_when") or [] if str(tag).strip()}
+                        ),
+                        "primary_spatial_unit": str(item["spatial_granularities"][0]["unit"]),
+                        "action_targets": list(item["actionability"]["action_targets"]),
+                        "implementation_status": str(item["implementation_status"]),
                     }
-                ),
+                    for item in selected
+                ],
                 "detail_queries": [
                     f"python skills/spatial-business-analyst/scripts/metric_catalog.py list --family {family}"
                     for family in spec["families"]
@@ -212,11 +309,11 @@ def build_index_payload(payload: dict[str, Any], *, catalog_file: Path) -> dict[
             }
         )
     return {
-        "index_version": "1.0.0",
+        "index_version": "2.0.0",
         "catalog_version": payload.get("catalog_version"),
         "catalog_sha256": _catalog_sha256(catalog_file),
         "generated_from": "references/metric-catalog.yaml",
-        "runtime_rule": "Intersect source_ids with the current AnalysisRun source_versions before selecting metrics.",
+        "runtime_rule": "Use source coverage to predict succeeded versus blocked attempts; keep decision-critical unavailable metrics in MetricPlan and exclude only metrics judged irrelevant.",
         "data_domains": domains,
     }
 

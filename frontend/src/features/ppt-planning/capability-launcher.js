@@ -1,6 +1,5 @@
 export const PPT_LAUNCHER_CAPABILITY_IDS = Object.freeze([
   'ppt-planning',
-  'esri-business-analyst-report',
   'spatial-programming-matrix',
 ])
 
@@ -18,7 +17,6 @@ const STATUS_LABELS = Object.freeze({
 
 const CARD_META = Object.freeze({
   'ppt-planning': { shortLabel: 'PPT', accent: 'presentation', actionLabel: '打开 PPT 工作台' },
-  'esri-business-analyst-report': { shortLabel: 'BA', accent: 'business', actionLabel: '配置商业分析报告' },
   'spatial-programming-matrix': { shortLabel: '矩阵', accent: 'planning', actionLabel: '配置空间决策矩阵' },
 })
 

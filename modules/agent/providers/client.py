@@ -16,6 +16,7 @@ class LLMRuntimeConfig:
     api_key: str
     model: str
     thinking_enabled: bool = True
+    timeout_s: float = 60.0
 
     @classmethod
     def from_settings(cls) -> "LLMRuntimeConfig":
@@ -25,6 +26,7 @@ class LLMRuntimeConfig:
             api_key=str(settings.ai_api_key or ""),
             model=str(settings.ai_model or "").strip(),
             thinking_enabled=bool(settings.ai_thinking_enabled),
+            timeout_s=float(settings.ai_timeout_s),
         )
 
     def configured(self) -> bool:

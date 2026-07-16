@@ -41,6 +41,8 @@ function createContext(overrides = {}) {
     selectedAnalysisRunLoading: false,
     selectedAnalysisRunError: '',
     selectedAnalysisRunRequestToken: 0,
+    selectedAnalysisRunSpatialObjectId: '',
+    analysisRunSpatialPresentationMessage: '',
     analysisCapabilityComparisonBaseRunId: '',
     analysisRunComparison: null,
     analysisRunComparisonLoading: false,
@@ -194,6 +196,101 @@ test('selecting a run loads an immutable detail without replacing current panel 
   } finally {
     global.fetch = originalFetch
   }
+})
+
+
+test('selected run exposes MetricPlan diagnostics and maps localized spatial action objects', () => {
+  let rendered = []
+  let clickHandler = null
+  const ctx = createContext({
+    selectedAnalysisRunId: 'run-spatial-1',
+    selectedAnalysisRunDetail: {
+      history_id: 'history-1',
+      metric_plan_diagnostics: {
+        role_counts: { primary: 1, supporting: 1, diagnostic: 1, excluded: 1 },
+        blocked_primary_entry_ids: ['plan:primary'],
+        missing_attempt_entry_ids: ['plan:supporting'],
+        unplanned_attempt_entry_ids: [],
+        excluded_entry_ids: ['plan:excluded'],
+      },
+      run: {
+        run_id: 'run-spatial-1',
+        metric_plan: {
+          entries: [
+            { plan_entry_id: 'plan:primary', metric_id: 'spatial.gi_star', role: 'primary' },
+            { plan_entry_id: 'plan:supporting', metric_id: 'road.integration', role: 'supporting' },
+            { plan_entry_id: 'plan:diagnostic', metric_id: 'road.entrance_distance', role: 'diagnostic' },
+            { plan_entry_id: 'plan:excluded', metric_id: 'population.total', role: 'excluded', exclusion_reason: '空间粒度不足以支持入口选择' },
+          ],
+        },
+        metric_attempts: [
+          {
+            plan_entry_id: 'plan:primary', metric_id: 'spatial.gi_star', status: 'succeeded',
+            spatial_target: { unit: 'hotspot_zone', target_id: 'zone:001' }, evidence_node_ids: ['evidence:zone'],
+          },
+          {
+            plan_entry_id: 'plan:supporting', metric_id: 'road.integration', status: 'succeeded',
+            spatial_target: { unit: 'entrance', target_id: 'entrance:north' }, evidence_node_ids: ['evidence:entrance'],
+          },
+          {
+            plan_entry_id: 'plan:diagnostic', metric_id: 'road.walk_detour_ratio', status: 'succeeded',
+            spatial_target: { unit: 'route', target_id: 'route:north' }, evidence_node_ids: ['evidence:route'],
+          },
+        ],
+      },
+      artifacts: [{
+        direction: 'output',
+        artifact: { artifact_id: 'spatial-actions', title: '空间动作对象' },
+        payload: {
+          zones: [{
+            zone_id: 'zone:001', cell_ids: ['a', 'b'], pattern_type: 'hotspot',
+            geometry: { type: 'Polygon', coordinates: [[[116, 39], [116.01, 39], [116.01, 39.01], [116, 39]]] },
+            source_metric_ids: ['spatial.gi_star'],
+          }],
+          entrances: [{
+            entrance_id: 'entrance:north', label: '北侧入口', source_type: 'project_planned',
+            snapped_road_segment_id: 'road:north', geometry: { type: 'Point', coordinates: [116, 39] },
+          }],
+          paths: [{
+            route_id: 'route:north', entrance_id: 'entrance:north', destination_id: 'destination:daily',
+            geometry: { type: 'LineString', coordinates: [[116, 39], [116.01, 39.01]] },
+          }],
+        },
+      }],
+    },
+    mapCore: {
+      showSpatialPresentation(items, options) {
+        rendered = items
+        clickHandler = options.onClick
+        return items.length
+      },
+    },
+  })
+
+  const diagnostics = ctx.getSelectedAnalysisRunMetricPlanDiagnostics()
+  assert.deepEqual(diagnostics.role_counts, { primary: 1, supporting: 1, diagnostic: 1, excluded: 1 })
+  diagnostics.role_counts.primary = 99
+  assert.equal(ctx.getSelectedAnalysisRunMetricPlanDiagnostics().role_counts.primary, 1)
+
+  const excluded = ctx.getSelectedAnalysisRunMetricPlanEntries(diagnostics.excluded_entry_ids)
+  assert.equal(excluded[0].exclusion_reason, '空间粒度不足以支持入口选择')
+  excluded[0].exclusion_reason = 'mutated'
+  assert.equal(ctx.getSelectedAnalysisRunMetricPlanEntries(['plan:excluded'])[0].exclusion_reason, '空间粒度不足以支持入口选择')
+
+  const objects = ctx.getSelectedAnalysisRunSpatialObjects()
+  assert.deepEqual(objects.map(item => item.object_type).sort(), ['entrance', 'hotspot_zone', 'route'])
+  assert.deepEqual(objects.find(item => item.object_id === 'zone:001').evidence_node_ids, ['evidence:zone'])
+  assert.deepEqual(objects.find(item => item.object_id === 'entrance:north').metric_ids, ['road.integration'])
+  assert.equal(objects.find(item => item.object_id === 'entrance:north').source_type, 'project_planned')
+
+  assert.equal(ctx.renderSelectedAnalysisRunSpatialObjects(), 3)
+  assert.equal(rendered.length, 3)
+  assert.deepEqual(rendered.find(item => item.object_id === 'route:north').feature.geometry.coordinates, [[116, 39], [116.01, 39.01]])
+  assert.match(ctx.analysisRunSpatialPresentationMessage, /已显示 3 个空间动作对象/)
+
+  clickHandler({ object_id: 'entrance:north' })
+  assert.equal(ctx.selectedAnalysisRunSpatialObjectId, 'entrance:north')
+  assert.equal(ctx.getSelectedAnalysisRunSpatialObject().object_type, 'entrance')
 })
 
 test('run detail failure exposes an explicit error and keeps current results intact', async () => {
@@ -455,52 +552,25 @@ test('PPT capability reuses the existing planning workbench', async () => {
   assert.equal(opened, 1)
 })
 
-test('ESRI Business Analyst capability runs through the deep Agent tool loop', async () => {
-  const submitted = []
-  const capability = {
-    id: 'esri-business-analyst-report',
-    status: 'available',
-    executor_type: 'service',
-    executor_id: 'business-analyst-agent',
-  }
-  const ctx = createContext({
-    analysisCapabilityReadiness: { [capability.id]: { status: 'ready', input_resolutions: [] } },
-    submitAgentComposer: async options => submitted.push(options),
-    loadAnalysisCapabilityOverview: async () => null,
-  })
-
-  await ctx.runAnalysisCapability(capability)
-
-  assert.equal(submitted.length, 1)
-  assert.equal(submitted[0].targetCapabilityId, capability.id)
-  assert.equal(submitted[0].mode, 'deep')
-  assert.equal(submitted[0].executionSkillId, '')
-  assert.match(submitted[0].prompt, /plan_business_analyst_analysis/)
-  assert.match(submitted[0].prompt, /Model Scorecard/)
-})
-
-test('PPT right-side launcher keeps the three requested capabilities in product order', () => {
+test('PPT right-side launcher keeps the requested capabilities in product order', () => {
   const capabilities = [
     { id: 'spatial-programming-matrix', status: 'available', display_name: '空间功能策划矩阵', output_contract: ['决策矩阵'] },
     { id: 'ppt-planning', status: 'available', display_name: '成果 PPT', output_contract: ['可编辑 PPT'] },
-    { id: 'esri-business-analyst-report', status: 'available', display_name: 'ESRI Business Analyst 报告', output_contract: ['区域商业画像报告'] },
     { id: 'evidence-audit', status: 'available', display_name: '证据审计' },
   ]
   const cards = buildPptCapabilityLauncherCards(capabilities, {
     cards: [
       { capability_id: 'ppt-planning', state: 'blocked' },
-      { capability_id: 'esri-business-analyst-report', state: 'ready' },
       { capability_id: 'spatial-programming-matrix', state: 'completed' },
     ],
   })
 
   assert.deepEqual(cards.map(card => card.id), [
     'ppt-planning',
-    'esri-business-analyst-report',
     'spatial-programming-matrix',
   ])
-  assert.deepEqual(cards.map(card => card.statusLabel), ['缺少输入', '可运行', '已有结果'])
-  assert.deepEqual(cards.map(card => card.shortLabel), ['PPT', 'BA', '矩阵'])
+  assert.deepEqual(cards.map(card => card.statusLabel), ['缺少输入', '已有结果'])
+  assert.deepEqual(cards.map(card => card.shortLabel), ['PPT', '矩阵'])
 })
 
 test('Stage 1 quality accessors expose verification gaps without mutating payloads', () => {

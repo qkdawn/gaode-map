@@ -293,7 +293,8 @@ async def _invoke_json_role(
         ],
     }
     enable_thinking = bool(enable_thinking and effective.thinking_enabled)
-    async with httpx.AsyncClient(timeout=None) as client:
+    timeout_s = max(float(effective.timeout_s), 0.1)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s)) as client:
         if stream:
             payload = await _stream_chat_completion(
                 client=client,

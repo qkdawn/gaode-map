@@ -14,6 +14,17 @@ from uuid import uuid4
 from core.config import settings
 
 
+_V3_ROOT_ARTIFACT_FILENAMES = {
+    "analysis_blueprint": "analysis-blueprint.json",
+    "evidence_snapshot": "evidence-snapshot.json",
+    "chapter_assignments": "chapter-assignments.json",
+    "analyst_chapters": "analyst-chapters.json",
+    "editorial_review": "editorial-review.json",
+    "report_assembly": "report-assembly.json",
+}
+_SUCCESS_STATUSES = {"completed", "completed_with_warnings"}
+
+
 class AnalysisRunStorageError(ValueError):
     """A persisted run cannot be safely read or reused."""
 
@@ -33,14 +44,16 @@ def _safe_part(value: str, field: str) -> str:
     return value
 
 
-def _filename(value: str, fallback: str, markdown: bool) -> str:
+def _filename(value: str, fallback: str, *, markdown: bool = False, svg: bool = False) -> str:
     candidate = Path(str(value or "").strip() or fallback)
     if candidate.is_absolute() or ".." in candidate.parts or not candidate.name:
         raise ValueError("analysis_run_filename_invalid")
     name = candidate.name
     if markdown and not name.lower().endswith(".md"):
         name = f"{name}.md"
-    if not markdown and not Path(name).suffix:
+    if svg and not name.lower().endswith(".svg"):
+        name = f"{name}.svg"
+    if not markdown and not svg and not Path(name).suffix:
         name = f"{name}.json"
     return name
 
@@ -66,12 +79,20 @@ class AnalysisRunStorage:
         try:
             staging.mkdir(parents=True, exist_ok=False)
             (staging / "inputs" / "upstream").mkdir(parents=True)
-            for folder in ("artifacts", "evidence", "report", "diagnostics"):
-                (staging / folder).mkdir()
+            if str(manifest.get("schema_version") or "") != "3.0":
+                for folder in ("artifacts", "evidence", "chapters", "report", "diagnostics"):
+                    (staging / folder).mkdir()
             self._write_json(staging / "analysis-run.json", {"history_id": history_id, "manifest": manifest})
             self._write_json(staging / "inputs" / "execution-request.json", execution_request)
             self._write_json(staging / "artifact-index.json", self._write_artifacts(staging, manifest, artifact_payloads))
-            (staging / ".complete").write_text(_sha256((staging / "artifact-index.json").read_bytes()), encoding="utf-8")
+            index_sha256 = _sha256((staging / "artifact-index.json").read_bytes())
+            if self._is_publishable(manifest):
+                (staging / ".complete").write_text(index_sha256, encoding="utf-8")
+            else:
+                self._write_json(
+                    staging / ".run-state.json",
+                    {"status": str(manifest.get("status") or ""), "artifact_index_sha256": index_sha256},
+                )
             self._validate_directory(staging)
             final.parent.mkdir(parents=True, exist_ok=True)
             os.replace(staging, final)
@@ -99,7 +120,9 @@ class AnalysisRunStorage:
 
     def validate(self, capability_id: str, run_id: str) -> None:
         path = self._path(capability_id, run_id)
-        if not path.is_dir() or not (path / ".complete").is_file():
+        if not path.is_dir() or not (
+            (path / ".complete").is_file() or (path / ".run-state.json").is_file()
+        ):
             raise AnalysisRunStorageError("analysis_run_storage_missing")
         self._validate_directory(path)
 
@@ -122,15 +145,26 @@ class AnalysisRunStorage:
 
     def _write_artifact(self, base: Path, direction: str, artifact: dict[str, Any], payload: Any) -> tuple[Path, str]:
         artifact_type = str(artifact.get("artifact_type") or "structured_data")
-        folder = "inputs" if direction == "input" else {"evidence_nodes": "evidence", "report": "report", "diagnostic_report": "diagnostics"}.get(artifact_type, "artifacts")
-        markdown = isinstance(payload, str) and (artifact_type in {"report", "evidence_nodes"} or str(artifact.get("filename") or "").lower().endswith(".md"))
-        relative = Path(folder) / _filename(artifact.get("filename", ""), artifact["artifact_id"], markdown)
+        root_filename = _V3_ROOT_ARTIFACT_FILENAMES.get(artifact_type) if direction == "output" else None
+        folder = "inputs" if direction == "input" else {"evidence_nodes": "evidence", "evidence_gates": "evidence", "report": "report", "report_visual": "report/assets", "report_chapter": "chapters", "diagnostic_report": "diagnostics"}.get(artifact_type, "artifacts")
+        svg = artifact_type == "report_visual"
+        if svg and not isinstance(payload, str):
+            raise ValueError("analysis_run_report_visual_svg_required")
+        markdown = not svg and isinstance(payload, str) and (artifact_type in {"report", "evidence_nodes"} or str(artifact.get("filename") or "").lower().endswith(".md"))
+        relative = (
+            Path(root_filename)
+            if root_filename
+            else Path(folder) / _filename(artifact.get("filename", ""), artifact["artifact_id"], markdown=markdown, svg=svg)
+        )
         target = base / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             raise ValueError("analysis_run_artifact_path_conflict")
+        if svg:
+            target.write_text(payload, encoding="utf-8", newline="\n")
+            return relative, "svg"
         if markdown:
-            target.write_text(payload or "", encoding="utf-8")
+            target.write_text(payload or "", encoding="utf-8", newline="\n")
             return relative, "markdown"
         self._write_json(target, payload)
         return relative, "json"
@@ -154,15 +188,46 @@ class AnalysisRunStorage:
     def _validate_directory(self, path: Path) -> None:
         try:
             index_raw = (path / "artifact-index.json").read_bytes()
-            if (path / ".complete").read_text(encoding="utf-8").strip() != _sha256(index_raw):
+            run_payload = self._read_json(path / "analysis-run.json")
+            manifest = run_payload.get("manifest") if isinstance(run_payload, dict) else None
+            if not isinstance(manifest, dict):
                 raise ValueError
+            expected_index_sha256 = _sha256(index_raw)
+            if self._is_publishable(manifest):
+                if not (path / ".complete").is_file() or (path / ".run-state.json").exists():
+                    raise ValueError
+                if (path / ".complete").read_text(encoding="utf-8").strip() != expected_index_sha256:
+                    raise ValueError
+            elif str(manifest.get("schema_version") or "") == "3.0":
+                if (path / ".complete").exists() or not (path / ".run-state.json").is_file():
+                    raise ValueError
+                state = self._read_json(path / ".run-state.json")
+                if state != {
+                    "status": str(manifest.get("status") or ""),
+                    "artifact_index_sha256": expected_index_sha256,
+                }:
+                    raise ValueError
             index = json.loads(index_raw)
-            self._read_json(path / "analysis-run.json")
             self._read_json(path / "inputs" / "execution-request.json")
+            if str(manifest.get("schema_version") or "") == "3.0" and not self._is_publishable(manifest):
+                forbidden = {"report", "report_visual"}
+                if any(
+                    item.get("direction") == "output" and item.get("artifact_type") in forbidden
+                    for item in index.get("artifacts", [])
+                ):
+                    raise ValueError
             for item in index.get("artifacts", []):
                 relative = Path(str(item["path"]))
                 if relative.is_absolute() or ".." in relative.parts or not (path / relative).is_file() or _sha256((path / relative).read_bytes()) != item["sha256"]:
                     raise ValueError
+                fmt = str(item["format"])
+                if item.get("direction") == "output" and item.get("artifact_type") == "report_visual":
+                    if fmt != "svg" or relative.suffix.lower() != ".svg" or relative.parent.as_posix() != "report/assets":
+                        raise ValueError
+                if item.get("direction") == "output" and item.get("artifact_type") == "report_chapter":
+                    if fmt != "json" or relative.suffix.lower() != ".json" or relative.parent.as_posix() != "chapters":
+                        raise ValueError
+                self._read_payload(path / relative, fmt)
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             raise AnalysisRunStorageError("analysis_run_storage_corrupt") from exc
 
@@ -170,6 +235,12 @@ class AnalysisRunStorage:
     def _same(existing: dict[str, Any], history_id: str, manifest: dict[str, Any], payloads: dict[str, Any], request: dict[str, Any]) -> bool:
         outputs = {item["artifact"]["artifact_id"]: item["payload"] for item in existing["artifacts"] if item["direction"] == "output"}
         return existing["history_id"] == history_id and existing["run"] == manifest and existing["execution_request"] == request and outputs == payloads
+
+    @staticmethod
+    def _is_publishable(manifest: dict[str, Any]) -> bool:
+        if str(manifest.get("schema_version") or "") != "3.0":
+            return True
+        return str(manifest.get("status") or "") in _SUCCESS_STATUSES
 
     @staticmethod
     def _write_json(path: Path, value: Any) -> None:
@@ -182,7 +253,11 @@ class AnalysisRunStorage:
 
     @staticmethod
     def _read_payload(path: Path, fmt: str) -> Any:
-        return path.read_text(encoding="utf-8") if fmt == "markdown" else AnalysisRunStorage._read_json(path)
+        if fmt in {"markdown", "svg"}:
+            return path.read_text(encoding="utf-8")
+        if fmt == "json":
+            return AnalysisRunStorage._read_json(path)
+        raise ValueError("analysis_run_artifact_format_invalid")
 
 
 analysis_run_storage = AnalysisRunStorage()

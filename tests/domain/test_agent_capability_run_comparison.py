@@ -148,3 +148,146 @@ def test_run_comparison_rejects_same_run_history_or_capability_mismatch():
         assert str(exc) == "analysis_run_capability_mismatch"
     else:
         raise AssertionError("capability mismatch should be rejected")
+
+
+
+def _detail_with_metric_plan(run_id: str, *, secondary_role: str, primary_unit: str, exclusion_reason: str):
+    detail = _detail(
+        run_id,
+        question="入口方案复算",
+        option="option-a",
+        space_role="文化锚点",
+        quality_score=100,
+    )
+    run_payload = detail.run.model_dump(mode="json")
+    run_payload["source_versions"] = [
+        {
+            "source_id": "current:dataset:road",
+            "year": 2024,
+            "sha256": "sha256:road",
+            "record_count": 12,
+        }
+    ]
+    run_payload["metric_plan"] = {
+        "catalog_version": "2.0.0",
+        "decision_questions": [
+            {
+                "question_id": "question:entrance",
+                "text": "哪个入口最适合作为日常入口？",
+                "decision_target": "entrance",
+                "hypotheses": [
+                    {
+                        "hypothesis_id": "hypothesis:north",
+                        "statement": "北侧入口更适合作为日常入口。",
+                        "disconfirming_condition": "真实到达不支持北侧。",
+                    }
+                ],
+            }
+        ],
+        "entries": [
+            {
+                "plan_entry_id": "plan:primary",
+                "metric_id": "road.entrance_distance",
+                "role": "primary",
+                "decision_question_id": "question:entrance",
+                "hypothesis_ids": ["hypothesis:north"],
+                "planned_spatial_target": {
+                    "unit": primary_unit,
+                    "source": "planned spatial target",
+                    "runtime_parameters": [],
+                },
+                "selection_reason": "直接比较入口或路径条件。",
+                "expected_decision_use": "改变首选日常入口。",
+                "required_source_ids": ["current:dataset:road"],
+                "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
+                "exclusion_reason": "",
+            },
+            {
+                "plan_entry_id": "plan:secondary",
+                "metric_id": "road.integration",
+                "role": secondary_role,
+                "decision_question_id": "question:entrance",
+                "hypothesis_ids": [],
+                "planned_spatial_target": {
+                    "unit": "entrance",
+                    "source": "snapped entrance segment",
+                    "runtime_parameters": [],
+                },
+                "selection_reason": "解释局部路网条件。",
+                "expected_decision_use": "补充或诊断入口判断。",
+                "required_source_ids": ["current:dataset:road"],
+                "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
+                "exclusion_reason": "",
+            },
+            {
+                "plan_entry_id": "plan:excluded",
+                "metric_id": "nightlight.mean",
+                "role": "excluded",
+                "decision_question_id": "question:entrance",
+                "hypothesis_ids": [],
+                "planned_spatial_target": {
+                    "unit": "scope",
+                    "source": "project scope",
+                    "runtime_parameters": [],
+                },
+                "selection_reason": "",
+                "expected_decision_use": "",
+                "required_source_ids": [],
+                "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
+                "exclusion_reason": exclusion_reason,
+            },
+        ],
+    }
+    run_payload["decision_agenda"] = {
+        "agenda_id": f"agenda:{run_id}",
+        "user_question": "入口方案复算",
+        "analysis_scope": "focused_diagnostic",
+        "decision_questions": run_payload["metric_plan"]["decision_questions"],
+    }
+    run_payload["metric_attempts"] = [
+        {
+            "plan_entry_id": "plan:primary",
+            "metric_id": "road.entrance_distance",
+            "spatial_target": {"unit": primary_unit, "target_id": f"{primary_unit}:north"},
+            "execution_status": "succeeded",
+            "reason": "",
+            "evidence_node_ids": [f"evidence:{run_id}:primary"],
+        },
+        {
+            "plan_entry_id": "plan:secondary",
+            "metric_id": "road.integration",
+            "spatial_target": {"unit": "entrance", "target_id": "entrance:north"},
+            "execution_status": "succeeded",
+            "reason": "",
+            "evidence_node_ids": [f"evidence:{run_id}:secondary"],
+        },
+    ]
+    return detail.model_copy(update={"run": AnalysisRun.model_validate(run_payload)}, deep=True)
+
+
+def test_run_comparison_preserves_metric_plan_role_target_and_exclusion_changes():
+    comparison = compare_run_details(
+        _detail_with_metric_plan(
+            "run-1",
+            secondary_role="supporting",
+            primary_unit="entrance",
+            exclusion_reason="全局夜光不能定位入口。",
+        ),
+        _detail_with_metric_plan(
+            "run-2",
+            secondary_role="diagnostic",
+            primary_unit="route",
+            exclusion_reason="真实步行路径已足够回答问题，夜光不进入本轮证据。",
+        ),
+    )
+
+    plan_change = next(
+        item for item in comparison.configuration_changes if item.field == "metric_plan.entries"
+    )
+    before = {item["plan_entry_id"]: item for item in plan_change.before}
+    after = {item["plan_entry_id"]: item for item in plan_change.after}
+    assert before["plan:secondary"]["role"] == "supporting"
+    assert after["plan:secondary"]["role"] == "diagnostic"
+    assert before["plan:primary"]["planned_spatial_target"]["unit"] == "entrance"
+    assert after["plan:primary"]["planned_spatial_target"]["unit"] == "route"
+    assert before["plan:excluded"]["exclusion_reason"] != after["plan:excluded"]["exclusion_reason"]

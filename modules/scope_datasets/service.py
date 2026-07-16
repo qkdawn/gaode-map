@@ -474,6 +474,28 @@ class ScopeDatasetService:
             )
         return {"datasets": datasets, "warnings": []}
 
+    def load_scope_records(
+        self,
+        *,
+        history_id: str,
+        source_id: str,
+        year: Any = None,
+        require_geometry_metadata: bool = False,
+    ) -> tuple[List[ScopeRecord], List[int], int | None]:
+        """Load normalized typed records for a selected historical dataset snapshot.
+
+        This is the domain-level counterpart to query_scope_dataset: callers that
+        need to compose multiple spatial metrics can use stable WGS84 geometries
+        without reaching into artifact payloads or this service's private loaders.
+        """
+        return self._records_with_selection(
+            history_id=history_id,
+            source_id=source_id,
+            year=year,
+            require_geometry_metadata=require_geometry_metadata,
+        )
+
+
     def query_scope_dataset(
         self,
         *,

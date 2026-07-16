@@ -83,8 +83,9 @@ def _sample_gcj02_polygon():
 
 def _configure_population_dirs(tmp_path: Path):
     data_dir = tmp_path / "population_data"
-    _write_population_test_rasters(data_dir)
+    _write_population_test_rasters(data_dir / "2026")
     settings.population_data_dir = str(data_dir)
+    settings.population_data_year = "2026"
     settings.population_preview_max_size = 512
 
 

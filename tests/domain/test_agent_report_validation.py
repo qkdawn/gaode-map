@@ -1,17 +1,61 @@
-from modules.agent.analysis_runs import AnalysisRun, MetricAttempt
+from modules.agent.analysis_runs import (
+    AnalysisRun,
+    DecisionHypothesis,
+    DecisionQuestion,
+    MetricAttempt,
+    MetricPlan,
+    MetricPlanEntry,
+    PlannedSpatialTarget,
+    ProjectDecisionAgenda,
+    SpatialTargetRef,
+)
 from modules.agent.report_validation import ReportArtifact, generate_validated_report, validate_report
 from modules.evidence_retrieval.schemas import EvidenceNode
 
 
 def _run() -> AnalysisRun:
+    question = DecisionQuestion(
+        question_id="q:location",
+        text="哪个局部区域适合优先布置功能？",
+        decision_target="program_location",
+        hypotheses=[
+            DecisionHypothesis(
+                hypothesis_id="h:density",
+                statement="高密度区域具有更多设施接触机会。",
+                disconfirming_condition="现场到达观测不支持。",
+            )
+        ],
+    )
     return AnalysisRun(
         run_id="run:test",
         capability_id="spatial-business-analyst",
         status="completed",
         created_at="2026-07-14T00:00:00Z",
+        decision_agenda=ProjectDecisionAgenda(
+            agenda_id="agenda:location",
+            user_question="选择优先功能位置",
+            decision_questions=[question],
+        ),
+        metric_plan=MetricPlan(
+            decision_questions=[question],
+            entries=[
+                MetricPlanEntry(
+                    plan_entry_id="entry:poi-density",
+                    metric_id="poi.grid_density",
+                    role="primary",
+                    decision_question_id="q:location",
+                    hypothesis_ids=["h:density"],
+                    planned_spatial_target=PlannedSpatialTarget(unit="grid_cell", source="h3_grid"),
+                    selection_reason="直接定位局部设施集中。",
+                    expected_decision_use="改变功能位置候选。",
+                )
+            ],
+        ),
         metric_attempts=[
             MetricAttempt(
+                plan_entry_id="entry:poi-density",
                 metric_id="poi.grid_density",
+                spatial_target=SpatialTargetRef(unit="grid_cell", target_id="cell:test"),
                 execution_status="succeeded",
                 evidence_node_ids=["evidence:poi"],
             )

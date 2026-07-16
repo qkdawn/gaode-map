@@ -229,6 +229,12 @@ class Settings(BaseSettings):
         validation_alias="AI_MODEL",
         description="Agent 使用的模型名，例如 deepseek-v4-flash",
     )
+    ai_timeout_s: float = Field(
+        60.0,
+        validation_alias="AI_TIMEOUT_S",
+        gt=0,
+        description="OpenAI-compatible provider 单次请求的连接、读取和写入超时（秒）",
+    )
     ai_glm_enabled: bool = Field(
         False,
         validation_alias="GLM_ENABLED",
@@ -393,6 +399,11 @@ class Settings(BaseSettings):
         "http://overpass/api/interpreter",
         validation_alias="OVERPASS_ENDPOINT",
         description="Local Overpass API endpoint",
+    )
+    overpass_fallback_endpoints: str = Field(
+        "https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter",
+        validation_alias="OVERPASS_FALLBACK_ENDPOINTS",
+        description="Comma-separated fallback Overpass endpoints used when the primary endpoint is unavailable",
     )
     overpass_query_timeout_s: int = Field(
         60,

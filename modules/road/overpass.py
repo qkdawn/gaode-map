@@ -71,10 +71,42 @@ out body geom;
 
 
 def resolve_overpass_endpoint() -> str:
-    endpoint = str(getattr(settings, "overpass_endpoint", "") or "").strip()
-    if not endpoint:
+    return resolve_overpass_endpoints()[0]
+
+
+def resolve_overpass_endpoints() -> List[str]:
+    primary = str(getattr(settings, "overpass_endpoint", "") or "").strip()
+    fallback_raw = str(getattr(settings, "overpass_fallback_endpoints", "") or "").strip()
+    candidates = [primary, *re.split(r"[,;\s]+", fallback_raw)]
+    endpoints: List[str] = []
+    for candidate in candidates:
+        endpoint = str(candidate or "").strip().rstrip("/")
+        if endpoint and endpoint not in endpoints:
+            endpoints.append(endpoint)
+    if not endpoints:
         raise RuntimeError("OVERPASS_ENDPOINT 未配置，请设置本地 Overpass 地址。")
-    return endpoint
+    return endpoints
+
+
+def _is_retryable_overpass_error(exc: Exception) -> bool:
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return True
+    text = str(exc).lower()
+    retryable_markers = (
+        "http 408",
+        "http 429",
+        "http 5",
+        "timeout",
+        "timed out",
+        "runtime error",
+        "connection refused",
+        "connection aborted",
+        "connection reset",
+        "empty response body",
+        "non-json response",
+        "invalid json payload",
+    )
+    return any(marker in text for marker in retryable_markers)
 
 
 def get_overpass_cache(query: str, ttl_s: int) -> Optional[List[Dict[str, Any]]]:
@@ -113,7 +145,7 @@ def set_overpass_cache(query: str, elements: List[Dict[str, Any]], ttl_s: int, m
 
 
 def fetch_overpass_elements(query: str) -> List[Dict[str, Any]]:
-    endpoint = resolve_overpass_endpoint()
+    endpoints = resolve_overpass_endpoints()
     cache_ttl_s = max(0, int(getattr(settings, "overpass_cache_ttl_s", 45) or 0))
     cache_max_entries = max(1, int(getattr(settings, "overpass_cache_max_entries", 16) or 16))
     cached = get_overpass_cache(query, cache_ttl_s)
@@ -124,8 +156,11 @@ def fetch_overpass_elements(query: str) -> List[Dict[str, Any]]:
     read_timeout_s = max(20, int(getattr(settings, "overpass_http_timeout_s", 90) or 90))
     connect_timeout_s = min(15, max(3, read_timeout_s // 8))
 
+    attempt_count = max(len(endpoints), retry_count + 1)
+    failures: List[str] = []
     last_error: Optional[Exception] = None
-    for attempt in range(retry_count + 1):
+    for attempt in range(attempt_count):
+        endpoint = endpoints[attempt % len(endpoints)]
         try:
             response = requests.post(
                 endpoint,
@@ -145,23 +180,23 @@ def fetch_overpass_elements(query: str) -> List[Dict[str, Any]]:
                     raise RuntimeError(f"Overpass query timeout/error: {preview}")
                 raise RuntimeError(f"non-JSON response: {preview}")
             payload = response.json()
+            if not isinstance(payload, dict):
+                raise RuntimeError("invalid JSON payload")
             elements = payload.get("elements") or []
             set_overpass_cache(query, elements, cache_ttl_s, cache_max_entries)
             return elements
         except Exception as exc:
             last_error = exc
-            text = str(exc).lower()
-            can_retry = attempt < retry_count and (
-                "timeout" in text
-                or "timed out" in text
-                or "runtime error" in text
-                or isinstance(exc, requests.Timeout)
-            )
+            failures.append(f"{endpoint}: {exc}")
+            can_retry = attempt + 1 < attempt_count and _is_retryable_overpass_error(exc)
             if not can_retry:
                 break
             time.sleep(0.8 + attempt * 0.7)
 
-    raise RuntimeError(f"Local Overpass request failed ({endpoint}): {last_error}") from last_error
+    detail = " | ".join(failures)
+    raise RuntimeError(
+        f"Overpass query timeout/error after {len(failures)} endpoint attempt(s): {detail}"
+    ) from last_error
 
 
 def normalize_label(radius_m: int) -> str:

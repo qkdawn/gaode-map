@@ -67,10 +67,13 @@ def validate_report(
 ) -> ReportValidationResult:
     nodes = {node.id: node for node in evidence_nodes}
     metrics = _catalog_metrics(catalog_path)
+    planned_entries = {item.plan_entry_id: item for item in run.metric_plan.entries}
     succeeded = {
         (attempt.metric_id, node_id)
         for attempt in run.metric_attempts
         if attempt.execution_status == "succeeded"
+        and attempt.plan_entry_id in planned_entries
+        and planned_entries[attempt.plan_entry_id].role != "excluded"
         for node_id in attempt.evidence_node_ids
     }
     violations: list[ReportViolation] = []
@@ -105,6 +108,17 @@ def validate_report(
                     continue
                 if metric.get("implementation_status") != "implemented":
                     violations.append(ReportViolation(code="metric_not_implemented", message="报告引用了未实现指标。", citation_label=label, node_id=node_id, metric_id=metric_id))
+                planned_roles = {
+                    planned_entries[attempt.plan_entry_id].role
+                    for attempt in run.metric_attempts
+                    if attempt.metric_id == metric_id
+                    and node_id in attempt.evidence_node_ids
+                    and attempt.plan_entry_id in planned_entries
+                }
+                if not planned_roles:
+                    violations.append(ReportViolation(code="metric_not_planned", message="报告引用了未进入 MetricPlan 的指标。", citation_label=label, node_id=node_id, metric_id=metric_id))
+                elif "excluded" in planned_roles:
+                    violations.append(ReportViolation(code="excluded_metric_cited", message="报告引用了已排除指标。", citation_label=label, node_id=node_id, metric_id=metric_id))
                 if (metric_id, node_id) not in succeeded:
                     violations.append(ReportViolation(code="metric_attempt_not_succeeded", message="指标本次运行未成功产出该节点。", citation_label=label, node_id=node_id, metric_id=metric_id))
                 for boundary in metric.get("does_not_support") or []:

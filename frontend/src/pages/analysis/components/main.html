@@ -175,6 +175,36 @@
                                         <div v-if="getSelectedAnalysisCapabilityRunDetail().run.diagnostics.length" class="agent-capability-run-snapshot-diagnostics">
                                             <span v-for="diagnostic in getSelectedAnalysisCapabilityRunDetail().run.diagnostics" :key="diagnostic">{{ diagnostic }}</span>
                                         </div>
+                                        <section v-if="getSelectedAnalysisRunMetricPlanDiagnostics()" class="agent-metric-plan-diagnostics" aria-label="MetricPlan 诊断">
+                                            <div class="agent-metric-plan-diagnostics-head">
+                                                <div><span>MetricPlan</span><strong>决策指标计划</strong></div>
+                                                <button v-if="getSelectedAnalysisRunSpatialObjects().length" type="button" @click="renderSelectedAnalysisRunSpatialObjects()">在地图显示空间对象</button>
+                                            </div>
+                                            <div class="agent-metric-plan-role-counts">
+                                                <span>主指标 <strong>{{ getSelectedAnalysisRunMetricPlanDiagnostics().role_counts.primary || 0 }}</strong></span>
+                                                <span>辅助 <strong>{{ getSelectedAnalysisRunMetricPlanDiagnostics().role_counts.supporting || 0 }}</strong></span>
+                                                <span>诊断 <strong>{{ getSelectedAnalysisRunMetricPlanDiagnostics().role_counts.diagnostic || 0 }}</strong></span>
+                                                <span>排除 <strong>{{ getSelectedAnalysisRunMetricPlanDiagnostics().role_counts.excluded || 0 }}</strong></span>
+                                            </div>
+                                            <div v-if="getSelectedAnalysisRunMetricPlanDiagnostics().blocked_primary_entry_ids.length || getSelectedAnalysisRunMetricPlanDiagnostics().missing_attempt_entry_ids.length" class="agent-metric-plan-deviations">
+                                                <p v-for="entry in getSelectedAnalysisRunMetricPlanEntries(getSelectedAnalysisRunMetricPlanDiagnostics().blocked_primary_entry_ids)" :key="`blocked-${entry.plan_entry_id}`"><strong>阻塞主指标</strong>{{ entry.metric_id }} · {{ entry.plan_entry_id }}</p>
+                                                <p v-for="entry in getSelectedAnalysisRunMetricPlanEntries(getSelectedAnalysisRunMetricPlanDiagnostics().missing_attempt_entry_ids)" :key="`missing-${entry.plan_entry_id}`"><strong>缺失执行</strong>{{ entry.metric_id }} · {{ entry.plan_entry_id }}</p>
+                                            </div>
+                                            <details v-if="getSelectedAnalysisRunMetricPlanDiagnostics().excluded_entry_ids.length">
+                                                <summary>查看明确排除项</summary>
+                                                <p v-for="entry in getSelectedAnalysisRunMetricPlanEntries(getSelectedAnalysisRunMetricPlanDiagnostics().excluded_entry_ids)" :key="entry.plan_entry_id"><code>{{ entry.metric_id }}</code>{{ entry.exclusion_reason }}</p>
+                                            </details>
+                                            <div v-if="getSelectedAnalysisRunSpatialObjects().length" class="agent-run-spatial-objects">
+                                                <button v-for="item in getSelectedAnalysisRunSpatialObjects()" :key="item.object_id" type="button" :class="[{ active: getSelectedAnalysisRunSpatialObject()?.object_id === item.object_id }, item.object_type]" @click="selectAnalysisRunSpatialObject(item)">{{ item.label }} · {{ item.object_id }}</button>
+                                            </div>
+                                            <p v-if="analysisRunSpatialPresentationMessage" class="agent-run-spatial-message">{{ analysisRunSpatialPresentationMessage }}</p>
+                                            <div v-if="getSelectedAnalysisRunSpatialObject()" class="agent-run-spatial-object-detail">
+                                                <strong>{{ getSelectedAnalysisRunSpatialObject().object_id }}</strong>
+                                                <span>指标：{{ getSelectedAnalysisRunSpatialObject().metric_ids.join('、') || '未关联' }}</span>
+                                                <span>证据：{{ getSelectedAnalysisRunSpatialObject().evidence_node_ids.join('、') || '未关联' }}</span>
+                                                <span v-if="getSelectedAnalysisRunSpatialObject().source_type">来源：{{ getSelectedAnalysisRunSpatialObject().source_type }}</span>
+                                            </div>
+                                        </section>
                                         <div class="agent-capability-run-snapshot-artifacts">
                                             <strong>产物快照</strong>
                                             <span v-if="!getSelectedAnalysisCapabilityRunArtifacts().length">未保存产物快照。</span>
@@ -3293,7 +3323,6 @@
                         </aside>
                     </div>
                 </div>
-            </div>
             </div>
 
             <div v-show="!isAgentWorkspaceActive()" class="analysis-map-stage">

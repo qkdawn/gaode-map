@@ -1,4 +1,4 @@
-catalog_version: 1.0.0
+catalog_version: 2.0.0
 catalog_status: semantic_catalog
 scope: 当前仓库可用、派生或受阻的空间指标语义目录。
 interpretation_policy:
@@ -22,7 +22,16 @@ metrics:
   - category_schema
   definition: 研究范围或指定网格内去重后的 POI 记录数。
   unit: places
-  spatial_unit: scope_or_grid
+  answers_questions:
+  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 设施供给的数量分布
   - 类别之间的数量比较
@@ -35,10 +44,19 @@ metrics:
   - facility_supply
   - category_structure
   - competition_context
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: &id001
+    - program_location
+    - operations
+    possible_actions:
+    - 据设施供给与类别缺口调整功能组合、招商或运营验证。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_source
@@ -51,6 +69,13 @@ metrics:
   source:
   - modules/poi/aggregation.py
   - modules/poi/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - same_scope_category_share
+    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
 - id: poi.category_count
   name: POI 分类数量
   family: poi
@@ -69,6 +94,16 @@ metrics:
   - category_codes
   - classification_level
   - year
+  answers_questions:
+  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 类别供给构成
   - 类别数量分布
@@ -80,10 +115,17 @@ metrics:
   - facility_supply
   - category_structure
   - competition_context
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id001
+    possible_actions:
+    - 据设施供给与类别缺口调整功能组合、招商或运营验证。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_source
@@ -96,6 +138,13 @@ metrics:
   source:
   - modules/poi/aggregation.py
   - modules/poi/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - same_scope_category_share
+    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
 - id: poi.multi_year_count
   name: POI 多年份数量
   family: poi
@@ -115,6 +164,16 @@ metrics:
   - years
   - category_codes
   - source
+  answers_questions:
+  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 覆盖范围内数量的跨年对照
   does_not_support:
@@ -125,10 +184,17 @@ metrics:
   - facility_supply
   - category_structure
   - competition_context
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id001
+    possible_actions:
+    - 据设施供给与类别缺口调整功能组合、招商或运营验证。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_source
@@ -141,6 +207,13 @@ metrics:
   source:
   - modules/poi/aggregation.py
   - modules/poi/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - same_scope_category_share
+    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
 - id: poi.grid_count
   name: 网格 POI 数量
   family: poi_grid
@@ -156,7 +229,14 @@ metrics:
   - category_schema
   definition: POI 点落入共享网格或 H3 网格后的计数。
   unit: places
-  spatial_unit: grid_cell
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 设施空间分布
   - 网格间相对数量比较
@@ -166,10 +246,19 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: &id002
+    - program_location
+    - entrance
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -183,6 +272,251 @@ metrics:
   source:
   - modules/poi/aggregation.py
   - modules/h3/stats.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
+- id: project.document_constraints
+  name: 项目文件约束与意图提取
+  family: project_evidence_gate
+  implementation_status: implemented
+  outputs:
+  - documented_constraints
+  - documented_intentions
+  - document_conflicts
+  required_inputs:
+  - versioned_project_documents
+  definition: 从已版本化项目文件中提取硬约束、项目意图和文件间冲突，并保持原文来源可追溯。
+  unit: evidence_items
+  answers_questions:
+  - 哪些项目约束和既有承诺必须先于空间、定位和实施方案处理？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  supports:
+  - 项目文件明确记载的约束、意图与冲突
+  does_not_support:
+  - 把项目意图自动视为已验证事实或已批准实施条件
+  use_when:
+  - hard_constraints
+  - project_delivery
+  actionability:
+    action_targets:
+    - data_collection
+    - operations
+    possible_actions:
+    - 先解决文件冲突和硬约束，再进入空间与实施承诺。
+  followup_metrics:
+  - metric_id: project.boundary_geometry
+    purpose: locate
+    trigger: 文件提到项目红线、入口或界面但尚无正式几何时
+  valid_comparisons:
+  - documented_constraint_version
+  quality_requirements:
+  - document_version_traceability
+  - intention_fact_separation
+  comparison_baseline:
+    required: true
+    preferred:
+    - documented_project_requirement
+    if_missing: 项目文件未版本化或来源冲突未解决时，不把项目意图写成既定条件。
+  source:
+  - modules/spatial_action/project_context.py
+- id: project.boundary_geometry
+  name: 正式项目边界完整性
+  family: project_evidence_gate
+  implementation_status: implemented
+  outputs:
+  - project_boundary_geometry
+  required_inputs:
+  - formal_project_boundary
+  definition: 由项目正式资料或用户明确锚定的项目红线，用于区分项目内部、界面与区域背景。
+  unit: geometry
+  answers_questions:
+  - 哪些空间判断可以安全落到项目内部、边界界面与入口？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  supports:
+  - 项目内外、边界界面和后续入口分析的正式空间基准
+  does_not_support:
+  - 用等时圈、中心点或区域分析范围替代项目红线
+  use_when:
+  - hard_constraints
+  - project_boundary
+  actionability:
+    action_targets:
+    - boundary_interface
+    - entrance
+    - data_collection
+    possible_actions:
+    - 补充正式红线后再启动项目内部、入口和公共界面比较。
+  followup_metrics:
+  - metric_id: road.entrance_distance
+    purpose: locate
+    trigger: 正式项目边界与入口锚点可用时
+  valid_comparisons:
+  - documented_boundary_version
+  quality_requirements:
+  - formal_source_traceability
+  - coordinate_system_declared
+  comparison_baseline:
+    required: true
+    preferred:
+    - documented_project_requirement
+    if_missing: 在正式项目边界到位前停止项目内部、入口和界面优劣判断。
+  source:
+  - modules/spatial_action/project_context.py
+- id: competition.operating_performance
+  name: 竞品经营表现证据门槛
+  family: project_evidence_gate
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - named_competitor_set
+  - comparable_operating_period
+  - visits_or_occupancy_or_revenue_evidence
+  definition: 对同层级竞品的到访、出租、活动、营收或运营表现进行可比核验的证据门槛。
+  unit: evidence_gate
+  answers_questions:
+  - 哪个定位方向具有相对竞争优势，而不是仅有设施供给差异？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  supports:
+  - 竞品相对表现与定位差异的可核验比较
+  does_not_support:
+  - 用 POI 数量推断竞品经营表现、客流或收入
+  use_when:
+  - competition_positioning
+  - operating_performance
+  actionability:
+    action_targets:
+    - operations
+    - data_collection
+    possible_actions:
+    - 建立同口径竞品清单并收集经营表现后再收敛定位方向。
+  followup_metrics:
+  - metric_id: poi.category_count
+    purpose: explain
+    trigger: 需要解释竞品周边设施供给结构时
+  valid_comparisons:
+  - comparable_competitor_class
+  - comparable_operating_period
+  quality_requirements:
+  - competitor_identity_verified
+  - operating_measure_definition
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - documented_project_requirement
+    if_missing: 没有同层级、同口径竞品经营证据时，只保留定位假设，不下竞争优劣结论。
+  source: []
+  implementation_gap: 当前没有竞品经营、到访、出租或收入数据适配器。
+- id: operations.operator_commitment
+  name: 运营主体与交付承诺证据门槛
+  family: project_evidence_gate
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - operator_identity
+  - team_and_resource_plan
+  - operating_calendar
+  - delivery_responsibilities
+  definition: 核验运营主体、团队能力、开放时段、资源投入与分期交付责任的证据门槛。
+  unit: evidence_gate
+  answers_questions:
+  - 空间与内容方案是否有明确主体和资源可以持续交付？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  supports:
+  - 运营责任、资源承诺和实施节奏的可核验判断
+  does_not_support:
+  - 用空间潜力或设施供给代理运营能力
+  use_when:
+  - operations_delivery
+  - operator_readiness
+  actionability:
+    action_targets:
+    - operations
+    - data_collection
+    possible_actions:
+    - 明确运营主体、责任矩阵和试运营资源后再扩大空间投入。
+  followup_metrics: []
+  valid_comparisons:
+  - documented_delivery_responsibility
+  quality_requirements:
+  - operator_identity_verified
+  - resource_commitment_documented
+  comparison_baseline:
+    required: true
+    preferred:
+    - documented_project_requirement
+    - scenario_or_design_alternative
+    if_missing: 运营主体和资源承诺未锁定时，只允许可逆试点，不进入不可逆建设承诺。
+  source: []
+  implementation_gap: 当前没有运营主体、团队资源和交付责任的结构化输入适配器。
+- id: finance.cost_revenue_model
+  name: 成本收入与敏感性模型证据门槛
+  family: project_evidence_gate
+  implementation_status: not_implemented
+  outputs: []
+  required_inputs:
+  - capital_cost
+  - operating_cost
+  - revenue_assumptions
+  - phasing_and_sensitivity_model
+  definition: 对建设成本、运营成本、收入假设、分期投入与敏感性进行同一模型核验的证据门槛。
+  unit: evidence_gate
+  answers_questions:
+  - 哪些方案在明确成本、收入和分期假设后仍具有财务可行性？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  supports:
+  - 财务假设、情景敏感性与停止条件的可核验比较
+  does_not_support:
+  - 从人口、夜光、POI 或路网代理直接推导收入、成本或回报率
+  use_when:
+  - financial_feasibility
+  - operations_delivery
+  actionability:
+    action_targets:
+    - operations
+    - data_collection
+    possible_actions:
+    - 建立分期成本收入模型并设置敏感性阈值后再作投资承诺。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 需要说明区域人口背景但不把其直接转为收入时
+  - metric_id: nightlight.activity_level
+    purpose: explain
+    trigger: 需要说明夜间活动背景但不把其直接转为营业额时
+  valid_comparisons:
+  - scenario_cost_revenue_assumptions
+  - comparable_phasing_horizon
+  quality_requirements:
+  - assumption_source_traceability
+  - sensitivity_range_declared
+  comparison_baseline:
+    required: true
+    preferred:
+    - scenario_or_design_alternative
+    - documented_project_requirement
+    if_missing: 成本、收入与分期模型缺失时，不输出回报率或财务可行性结论，只保留补数门槛。
+  source: []
+  implementation_gap: 当前没有项目成本、收入、分期与敏感性模型的结构化输入适配器。
 - id: poi.grid_density
   name: POI 网格密度
   family: poi_grid
@@ -198,7 +532,23 @@ metrics:
   definition: 网格内 POI 数量除以网格面积。
   formula: poi_count / area_km2
   unit: places_per_km2
-  spatial_unit: grid_cell
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
+  - unit: sector
+    neighborhood: distance
+    runtime_parameters:
+    - sector_count
+    - radius_m
+  - unit: distance_band
+    neighborhood: distance
+    runtime_parameters:
+    - band_edges_m
   supports:
   - 单位面积设施集中程度
   - 网格间规范化比较
@@ -210,10 +560,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_grid_system
   - same_category_scope
@@ -226,11 +583,17 @@ metrics:
   source:
   - modules/poi/aggregation.py
   - modules/h3/stats.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.category_density
   name: POI 分类密度
   family: poi_grid
   implementation_status: implemented
-  execution_location: frontend
   outputs:
   - density_by_cat
   required_inputs:
@@ -241,6 +604,14 @@ metrics:
   definition: 总网格密度按某分类 POI 占比拆分得到的类别密度代理。
   formula: density * category_count / poi_count
   unit: places_per_km2
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 类别供给的空间分布
   does_not_support:
@@ -250,10 +621,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -266,6 +644,14 @@ metrics:
   - minimum_sample_check
   source:
   - frontend/src/features/h3/panel.js
+  execution_location: frontend
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.local_entropy
   name: POI 类别局部熵
   family: poi_grid
@@ -281,7 +667,14 @@ metrics:
   definition: 网格内 POI 分类比例的 Shannon 熵。
   formula: -sum(p_i * ln(p_i))
   unit: nats
-  spatial_unit: grid_cell
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 类别混合程度
   - 单一类别主导与多类别混合的区分
@@ -293,10 +686,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -307,11 +707,17 @@ metrics:
   - minimum_poi_count
   source:
   - modules/h3/stats.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.local_entropy_normalized
   name: 归一化局部熵
   family: poi_grid
   implementation_status: implemented
-  execution_location: frontend
   outputs:
   - displayed_entropy
   required_inputs:
@@ -322,6 +728,14 @@ metrics:
   definition: 局部熵除以 7 类最大熵后的相对混合度；样本少于阈值时显示无数据。
   formula: local_entropy / ln(7)
   unit: ratio_0_1
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 同一分类体系下的混合度比较
   does_not_support:
@@ -331,10 +745,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -348,6 +769,14 @@ metrics:
   source:
   - frontend/src/features/h3/panel.js
   - docs/网格分析公式对照表.md
+  execution_location: frontend
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.lq
   name: POI 类别区位商
   family: poi_grid
@@ -363,6 +792,23 @@ metrics:
   definition: 网格内类别占比相对于全局类别占比的比值，使用平滑参数处理小样本。
   formula: cell_share(category) / global_share(category)
   unit: quotient
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
+  - unit: sector
+    neighborhood: distance
+    runtime_parameters:
+    - sector_count
+    - radius_m
+  - unit: distance_band
+    neighborhood: distance
+    runtime_parameters:
+    - band_edges_m
   supports:
   - 相对专业化
   - 类别相对优势
@@ -374,10 +820,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_classification
   - same_scope
@@ -391,6 +844,13 @@ metrics:
   - frontend/src/features/h3/panel.js
   - skills/spatial-business-analyst/scripts/normalized_spatial_metrics.py
   - docs/网格分析公式对照表.md
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.neighbor_mean_density
   name: 邻域平均 POI 密度
   family: poi_grid
@@ -407,6 +867,14 @@ metrics:
   unit: places_per_km2
   parameters:
   - neighbor_ring
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 局部环境基准
   - 网格相对邻域的高低
@@ -417,10 +885,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -433,6 +908,13 @@ metrics:
   - minimum_sample_check
   source:
   - modules/h3/stats.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.neighbor_mean_entropy
   name: 邻域平均 POI 混合度
   family: poi_grid
@@ -449,6 +931,14 @@ metrics:
   unit: nats
   parameters:
   - neighbor_ring
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 邻域类别混合基准
   does_not_support:
@@ -457,10 +947,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -473,11 +970,17 @@ metrics:
   - minimum_sample_check
   source:
   - modules/h3/stats.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: spatial.neighbor_density_delta
   name: 网格相对邻域密度差
   family: poi_grid
   implementation_status: implemented
-  execution_location: frontend
   outputs:
   - neighbor_delta
   required_inputs:
@@ -488,6 +991,14 @@ metrics:
   definition: 当前网格密度减去邻域平均密度。
   formula: density - neighbor_mean_density
   unit: places_per_km2
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 局部高于或低于邻域的识别
   does_not_support:
@@ -497,10 +1008,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -514,6 +1032,14 @@ metrics:
   source:
   - frontend/src/features/h3/panel.js
   - docs/网格分析公式对照表.md
+  execution_location: frontend
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: spatial.global_moran_i_density
   name: POI 密度全局莫兰指数
   family: spatial_statistics
@@ -527,9 +1053,17 @@ metrics:
   - method_parameters
   definition: 网格 POI 密度的全局空间自相关统计量。
   unit: statistic
+  answers_questions:
+  - 研究范围内的输入指标整体上是否表现为空间聚集、离散或随机？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
-  - 整体空间聚集或离散结构的统计识别
+  - 识别研究范围整体是否存在显著空间自相关，并决定是否需要继续局部定位。
   does_not_support:
+  - 局部热点位置
+  - 入口或功能分配位置
   - 聚集原因
   - 商业成功
   - 因果关系
@@ -537,9 +1071,18 @@ metrics:
   - hotspot_detection
   - spatial_clustering
   - spatial_outlier
-  combine_with:
-  - poi.grid_density
-  - poi.local_entropy
+  actionability:
+    action_targets:
+    - analysis_method
+    possible_actions:
+    - 若整体聚集显著，继续执行 Gi* 与 LISA 定位连续热点和局部异常；若不显著，停止把全局聚集作为空间动作依据。
+  followup_metrics:
+  - metric_id: spatial.gi_star
+    purpose: locate
+    trigger: 全局 Moran’s I 显著且决策需要定位连续高值或低值区域
+  - metric_id: spatial.lisa
+    purpose: disconfirm
+    trigger: 需要检查全局聚集是否由局部异常或不同聚类类型驱动
   valid_comparisons:
   - same_spatial_weights
   - same_input_metric
@@ -551,6 +1094,12 @@ metrics:
   source:
   - modules/h3/stats.py
   - modules/h3/arcgis_facade.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - statistical_null_expectation
+    - same_source_peer_scope
+    if_missing: 执行同一空间权重与显著性方法下的置换或零假设检验；缺失时只报告描述性分布，不称显著聚集、热点或异常。
 - id: spatial.lisa
   name: 局部莫兰 LISA
   family: spatial_statistics
@@ -565,6 +1114,21 @@ metrics:
   - method_parameters
   definition: 单个网格相对于邻域的局部空间自相关统计量。
   unit: statistic
+  answers_questions:
+  - 观察到的局部集聚是否显著、连续并足以支持空间动作？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
+    - alpha
+    - fdr_method
+  - unit: hotspot_zone
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - alpha
+    - fdr_method
   supports:
   - 局部高高、低低及空间异常候选识别
   does_not_support:
@@ -574,9 +1138,17 @@ metrics:
   - hotspot_detection
   - spatial_clustering
   - spatial_outlier
-  combine_with:
-  - poi.grid_density
-  - poi.local_entropy
+  actionability:
+    action_targets: &id003
+    - program_location
+    - entrance
+    - analysis_method
+    possible_actions:
+    - 将显著连续区域转为空间候选，并对孤立异常单元追加诊断。
+  followup_metrics:
+  - metric_id: spatial.gi_star
+    purpose: validate
+    trigger: 局部聚类需要检查是否形成连续高值或低值区域
   valid_comparisons:
   - same_spatial_weights
   - same_input_metric
@@ -588,6 +1160,12 @@ metrics:
   source:
   - modules/h3/stats.py
   - modules/h3/arcgis_bridge.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - statistical_null_expectation
+    - same_source_peer_scope
+    if_missing: 执行同一空间权重与显著性方法下的置换或零假设检验；缺失时只报告描述性分布，不称显著聚集、热点或异常。
 - id: spatial.gi_star
   name: Getis-Ord Gi* 热点统计
   family: spatial_statistics
@@ -602,6 +1180,21 @@ metrics:
   - method_parameters
   definition: 基于邻域权重识别局部高值或低值聚集的统计量，结果由 ArcGIS 返回。
   unit: statistic
+  answers_questions:
+  - 观察到的局部集聚是否显著、连续并足以支持空间动作？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
+    - alpha
+    - fdr_method
+  - unit: hotspot_zone
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - alpha
+    - fdr_method
   supports:
   - POI 密度局部热点和冷点的统计识别
   does_not_support:
@@ -612,9 +1205,14 @@ metrics:
   - hotspot_detection
   - spatial_clustering
   - spatial_outlier
-  combine_with:
-  - poi.grid_density
-  - poi.local_entropy
+  actionability:
+    action_targets: *id003
+    possible_actions:
+    - 将显著连续区域转为空间候选，并对孤立异常单元追加诊断。
+  followup_metrics:
+  - metric_id: spatial.lisa
+    purpose: disconfirm
+    trigger: Gi* 热点需要检查是否由单个异常单元造成
   valid_comparisons:
   - same_spatial_weights
   - same_input_metric
@@ -626,11 +1224,16 @@ metrics:
   source:
   - modules/h3/arcgis_bridge.py
   - modules/h3/stats.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - statistical_null_expectation
+    - same_source_peer_scope
+    if_missing: 执行同一空间权重与显著性方法下的置换或零假设检验；缺失时只报告描述性分布，不称显著聚集、热点或异常。
 - id: grid.type
   name: 网格四象限分型
   family: grid_derived
   implementation_status: implemented
-  execution_location: frontend
   outputs:
   - grid_type
   required_inputs:
@@ -643,6 +1246,14 @@ metrics:
   - density_percentile_70
   - entropy_percentile_70
   - entropy_min_poi
+  answers_questions:
+  - 哪些局部单元应被优先布置功能、界面或进一步验证？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 当前分析批次内的结构分组
   does_not_support:
@@ -653,11 +1264,19 @@ metrics:
   - grid_typology
   - candidate_screening
   - multi_metric_comparison
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
-  - road.integration
+  actionability:
+    action_targets: &id004
+    - program_location
+    - public_space
+    possible_actions:
+    - 把机会单元转为功能、公共空间或界面布置候选。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_component_metrics
   - same_normalization
@@ -669,11 +1288,18 @@ metrics:
   source:
   - frontend/src/features/h3/panel.js
   - docs/网格分析公式对照表.md
+  execution_location: frontend
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: grid.opportunity_flag
   name: 网格机会标记
   family: grid_derived
   implementation_status: implemented
-  execution_location: frontend
   outputs:
   - is_opportunity
   required_inputs:
@@ -683,6 +1309,14 @@ metrics:
   definition: 高密高混合网格且密度高于邻域时的规则标记。
   formula: high_density AND high_entropy AND neighbor_delta > 0
   unit: boolean
+  answers_questions:
+  - 哪些局部单元应被优先布置功能、界面或进一步验证？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 候选网格的规则筛选
   does_not_support:
@@ -693,11 +1327,17 @@ metrics:
   - grid_typology
   - candidate_screening
   - multi_metric_comparison
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
-  - road.integration
+  actionability:
+    action_targets: *id004
+    possible_actions:
+    - 把机会单元转为功能、公共空间或界面布置候选。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_component_metrics
   - same_normalization
@@ -708,6 +1348,14 @@ metrics:
   - missing_value_policy
   source:
   - frontend/src/features/h3/panel.js
+  execution_location: frontend
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: population.total
   name: 总人口
   family: population
@@ -721,6 +1369,16 @@ metrics:
   - dataset_year
   definition: 指定行政/研究范围或栅格集合内人口数据的总和。
   unit: persons
+  answers_questions:
+  - 哪些人口规模或结构差异会改变功能配置与服务策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 人口规模
   - 人口覆盖量
@@ -732,10 +1390,19 @@ metrics:
   - population_scale
   - customer_proxy
   - demographic_structure
-  combine_with:
-  - poi.grid_density
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: &id005
+    - program_location
+    - operations
+    possible_actions:
+    - 依据人口规模与结构调整服务容量、功能配置和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_dataset_family
   - same_year_or_comparable_release
@@ -747,6 +1414,13 @@ metrics:
   source:
   - modules/population/facade.py
   - modules/population/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: population.sex_structure
   name: 性别结构
   family: population
@@ -763,6 +1437,16 @@ metrics:
   - dataset_year
   definition: 人口数据按性别的总量及占比。
   unit: persons_or_ratio
+  answers_questions:
+  - 哪些人口规模或结构差异会改变功能配置与服务策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 人口性别结构描述
   does_not_support:
@@ -772,10 +1456,17 @@ metrics:
   - population_scale
   - customer_proxy
   - demographic_structure
-  combine_with:
-  - poi.grid_density
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id005
+    possible_actions:
+    - 依据人口规模与结构调整服务容量、功能配置和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_dataset_family
   - same_year_or_comparable_release
@@ -787,6 +1478,13 @@ metrics:
   source:
   - modules/population/facade.py
   - modules/population/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: population.age_structure
   name: 年龄结构
   family: population
@@ -802,6 +1500,16 @@ metrics:
   - dataset_year
   definition: 人口按年龄段的数量分布，并可返回选定年龄段栅格值。
   unit: persons_or_ratio
+  answers_questions:
+  - 哪些人口规模或结构差异会改变功能配置与服务策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 年龄结构
   - 目标年龄段空间分布
@@ -812,10 +1520,17 @@ metrics:
   - population_scale
   - customer_proxy
   - demographic_structure
-  combine_with:
-  - poi.grid_density
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id005
+    possible_actions:
+    - 依据人口规模与结构调整服务容量、功能配置和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_dataset_family
   - same_year_or_comparable_release
@@ -827,6 +1542,13 @@ metrics:
   source:
   - modules/population/facade.py
   - modules/population/render.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: population.selected_ratio
   name: 选定人口占比
   family: population
@@ -841,6 +1563,16 @@ metrics:
   definition: 选定性别或年龄段人口占范围总人口的比例。
   formula: selected_population / total_population
   unit: ratio_0_1
+  answers_questions:
+  - 哪些人口规模或结构差异会改变功能配置与服务策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 目标人口代理的空间覆盖
   does_not_support:
@@ -850,10 +1582,17 @@ metrics:
   - population_scale
   - customer_proxy
   - demographic_structure
-  combine_with:
-  - poi.grid_density
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id005
+    possible_actions:
+    - 依据人口规模与结构调整服务容量、功能配置和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_dataset_family
   - same_year_or_comparable_release
@@ -865,6 +1604,13 @@ metrics:
   source:
   - modules/population/facade.py
   - modules/population/render.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: nightlight.total_radiance
   name: 夜光总辐亮度
   family: nightlight
@@ -877,6 +1623,12 @@ metrics:
   - dataset_year
   definition: 研究范围有效夜光像素辐亮度的总和。
   unit: nWatts_per_cm2_sr
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 夜间亮度总量代理
   - 区域间相对对照
@@ -888,10 +1640,20 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: &id006
+    - site_direction
+    - operations
+    - public_space
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -904,6 +1666,13 @@ metrics:
   source:
   - modules/nightlight/aggregate.py
   - modules/nightlight/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.mean_radiance
   name: 夜光平均辐亮度
   family: nightlight
@@ -916,6 +1685,12 @@ metrics:
   - dataset_year
   definition: 有效夜光像素辐亮度的平均值。
   unit: nWatts_per_cm2_sr
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 平均夜间亮度水平
   does_not_support:
@@ -924,10 +1699,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -939,6 +1721,13 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/aggregate.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.max_radiance
   name: 夜光最大辐亮度
   family: nightlight
@@ -952,6 +1741,12 @@ metrics:
   - dataset_year
   definition: 研究范围内有效像素或网格的最大夜光辐亮度。
   unit: nWatts_per_cm2_sr
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 最高亮度位置识别
   does_not_support:
@@ -961,10 +1756,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -977,6 +1779,13 @@ metrics:
   source:
   - modules/nightlight/aggregate.py
   - modules/nightlight/analysis.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.lit_pixel_ratio
   name: 亮灯像素比例
   family: nightlight
@@ -989,6 +1798,12 @@ metrics:
   - dataset_year
   definition: 有效范围内被判定为有夜光的像素占比。
   unit: ratio_0_1
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 夜间亮度覆盖连续性
   does_not_support:
@@ -998,10 +1813,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -1013,6 +1835,13 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/aggregate.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.p90
   name: 夜光 P90
   family: nightlight
@@ -1025,6 +1854,12 @@ metrics:
   - dataset_year
   definition: 有效夜光像素辐亮度的第 90 百分位。
   unit: nWatts_per_cm2_sr
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 高亮区域的相对强度基准
   does_not_support:
@@ -1033,10 +1868,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -1048,6 +1890,13 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/aggregate.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.hotspot_class
   name: 夜光热点等级
   family: nightlight
@@ -1071,6 +1920,12 @@ metrics:
   - q75
   - q55
   - q25
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 夜间亮度分层
   - 高值与低值空间定位
@@ -1081,10 +1936,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -1096,6 +1958,13 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/analysis.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.hotspot_ratio
   name: 夜光热点网格比例
   family: nightlight
@@ -1108,6 +1977,12 @@ metrics:
   - dataset_year
   definition: 被归为热点类别的有效网格占比。
   unit: ratio_0_1
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 亮度高值覆盖程度
   does_not_support:
@@ -1116,10 +1991,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -1131,6 +2013,13 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/analysis.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.spatial_profile
   name: 夜光空间梯度
   family: nightlight
@@ -1147,6 +2036,13 @@ metrics:
   - dataset_year
   definition: 以中心和距离圈层组织夜光高值、衰减及边缘关系。
   unit: varies
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: distance_band
+    neighborhood: distance
+    runtime_parameters:
+    - band_edges_m
   supports:
   - 亮度核心、扩散和边缘衰减结构
   does_not_support:
@@ -1156,10 +2052,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -1171,6 +2074,13 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/analysis.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.sector_profile
   name: 夜光方向分布
   family: nightlight
@@ -1187,6 +2097,14 @@ metrics:
   - dataset_year
   definition: 按相对中心的八方向扇区汇总总辐亮度、平均辐亮度和热点数量。
   unit: varies
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: sector
+    neighborhood: distance
+    runtime_parameters:
+    - sector_count
+    - radius_m
   supports:
   - 夜光高值方向比较
   does_not_support:
@@ -1195,10 +2113,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -1210,11 +2135,17 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/analysis.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.activity_level
   name: 夜间经济活动强度等级
   family: nightlight
   implementation_status: implemented
-  proxy: true
   outputs:
   - economic_activity_intensity_level
   - economic_activity_summary_text
@@ -1224,6 +2155,12 @@ metrics:
   - dataset_year
   definition: 根据平均辐亮度、P90、亮灯比例、热点比例和峰边比组合打分得到的夜光代理等级。
   unit: varies
+  answers_questions:
+  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 夜间亮度代理的分级表达
   does_not_support:
@@ -1232,10 +2169,17 @@ metrics:
   - night_activity_proxy
   - spatial_intensity
   - nightlight_pattern
-  combine_with:
-  - poi.grid_density
-  - road.choice
-  - population.total
+  actionability:
+    action_targets: *id006
+    possible_actions:
+    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.choice
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_sensor_product
   - same_processing_method
@@ -1247,6 +2191,14 @@ metrics:
   - no_data_handling
   source:
   - modules/nightlight/analysis.py
+  proxy: true
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - normalized_spatial_unit
+    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: road.network_size
   name: 路网规模
   family: road_syntax
@@ -1264,6 +2216,13 @@ metrics:
   - analysis_radius
   definition: 路网节点、边、渲染边数量及线网总长度。
   unit: count_or_km
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 路网规模和覆盖描述
   does_not_support:
@@ -1273,10 +2232,21 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: &id007
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1289,6 +2259,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.degree
   name: 节点度/平均连接度
   family: road_syntax
@@ -1304,6 +2280,13 @@ metrics:
   - analysis_radius
   definition: 节点相连路段数量及其归一化分数。
   unit: count_or_score
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 节点直接连接程度
   - 路网连接结构
@@ -1314,10 +2297,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1330,6 +2320,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.integration
   name: 路网整合度
   family: road_syntax
@@ -1352,6 +2348,21 @@ metrics:
   - radius
   - mode
   - graph_model
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
+  - unit: entrance
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
+  - unit: route
+    neighborhood: origin_destination
+    runtime_parameters:
+    - route_id
   supports:
   - 空间位置在路网结构中的相对可达中心性
   does_not_support:
@@ -1361,10 +2372,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: road.choice
+    purpose: explain
+    trigger: 高整合路段需要区分到达潜力与穿行潜力
+  - metric_id: road.entrance_distance
+    purpose: locate
+    trigger: 需要把网络优势落实到具体入口时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1377,6 +2395,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.choice
   name: 路网选择度
   family: road_syntax
@@ -1399,6 +2423,21 @@ metrics:
   - radius
   - mode
   - graph_model
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
+  - unit: entrance
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
+  - unit: route
+    neighborhood: origin_destination
+    runtime_parameters:
+    - route_id
   supports:
   - 潜在路径穿越性和结构性经过机会
   does_not_support:
@@ -1408,10 +2447,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: road.integration
+    purpose: explain
+    trigger: 高选择度路段需要检查是否同时具有本地到达能力
+  - metric_id: road.walk_detour_ratio
+    purpose: validate
+    trigger: 拟定入口—目的地路径需要验证真实绕行时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1424,6 +2470,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.connectivity
   name: 路网连通度
   family: road_syntax
@@ -1438,6 +2490,13 @@ metrics:
   - analysis_radius
   definition: 从输入路网属性或节点度推导的连接度及归一化分数。
   unit: score
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 路网连接状况
   does_not_support:
@@ -1446,10 +2505,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1462,6 +2528,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.control
   name: 路网控制值
   family: road_syntax
@@ -1479,6 +2551,13 @@ metrics:
   - analysis_radius
   definition: 优先读取 depthmapXcli 导出的 Control；缺失或无变化时使用路网拓扑邻接度的控制值回退。
   unit: score
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 节点或路段对相邻连接的局部控制关系
   does_not_support:
@@ -1489,10 +2568,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1505,6 +2591,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.mean_depth
   name: 平均深度
   family: road_syntax
@@ -1521,6 +2613,13 @@ metrics:
   - analysis_radius
   definition: 读取 depthmapXcli shapegraph CSV 的 Mean Depth，并在当前结果范围内归一化。
   unit: score
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 路网结构距离层级的相对描述
   does_not_support:
@@ -1530,10 +2629,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1546,6 +2652,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.node_degree
   name: 路网节点度
   family: road_syntax
@@ -1561,6 +2673,13 @@ metrics:
   - analysis_radius
   definition: 基于输出路网拓扑统计节点相连邻接节点数，并生成节点度归一化分数。
   unit: count_or_score
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 节点连接数量
   - 交叉连接结构的基础描述
@@ -1571,10 +2690,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1587,6 +2713,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.orientation
   name: 道路方向分布
   family: road_syntax
@@ -1600,6 +2732,13 @@ metrics:
   - analysis_radius
   definition: 按道路线段方向分组，统计各方向长度、长度占比和边数量。
   unit: km_or_ratio
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: road_segment
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 路网主导方向和方向结构
   does_not_support:
@@ -1610,10 +2749,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1626,6 +2772,12 @@ metrics:
   source:
   - modules/road/metrics.py
   - modules/road/serialize.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.intelligibility
   name: 路网可理解度
   family: road_syntax
@@ -1642,6 +2794,13 @@ metrics:
   - analysis_radius
   definition: 基于归一化连通度与全局整合度的相关/回归关系。
   unit: correlation_or_r2
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: network_radius
+    runtime_parameters:
+    - network_radius_m
   supports:
   - 局部连接结构与整体路网结构的关系
   does_not_support:
@@ -1651,10 +2810,17 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -1667,6 +2833,12 @@ metrics:
   source:
   - modules/road/serialize.py
   - modules/road/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - route_or_entrance_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: isochrone.reachable_area
   name: 等时圈可达范围
   family: isochrone
@@ -1689,6 +2861,14 @@ metrics:
   - mode
   - origin_mode
   - clip_output
+  answers_questions:
+  - 真实网络可达范围是否覆盖目标客群与关键目的地？
+  spatial_granularities:
+  - unit: catchment
+    neighborhood: network_radius
+    runtime_parameters:
+    - travel_mode
+    - time_minutes
   supports:
   - 理论可达空间边界
   - 不同时间和交通方式的范围比较
@@ -1700,10 +2880,20 @@ metrics:
   - catchment_area
   - travel_time_access
   - scope_definition
-  combine_with:
-  - population.total
-  - poi.grid_density
-  - road.integration
+  actionability:
+    action_targets: &id010
+    - entrance
+    - route
+    - program_location
+    possible_actions:
+    - 依据真实网络覆盖范围调整入口、路径或服务功能位置。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: poi.grid_density
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_origin_policy
   - same_travel_mode
@@ -1716,6 +2906,12 @@ metrics:
   source:
   - modules/isochrone/service.py
   - modules/isochrone/adapter.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - route_or_entrance_alternative
+    - scenario_or_design_alternative
+    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一入口、起点或时长方案；在此之前只描述可达边界。
 - id: timeseries.population_change
   name: 人口时间变化
   family: timeseries
@@ -1732,6 +2928,12 @@ metrics:
   definition: 两个年份人口总量或网格人口值的差值及变化率。
   formula: to_value - from_value; delta / from_value
   unit: persons_or_ratio
+  answers_questions:
+  - 哪些变化趋势足以改变项目阶段、方向或运营安排？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 人口变化方向和变化网格识别
   does_not_support:
@@ -1742,9 +2944,20 @@ metrics:
   - temporal_change
   - trend_comparison
   - spatial_shift
-  combine_with:
-  - poi.multi_year_count
-  - timeseries.nightlight_change
+  actionability:
+    action_targets: &id008
+    - operations
+    - program_location
+    - data_collection
+    possible_actions:
+    - 依据变化方向调整阶段策略，并对口径变化或异常年份追加采集。
+  followup_metrics:
+  - metric_id: poi.multi_year_count
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: timeseries.nightlight_change
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - consistent_source_coverage
   - consistent_classification
@@ -1756,6 +2969,11 @@ metrics:
   source:
   - modules/timeseries/population_series.py
   - modules/timeseries/common.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_scope_previous_period
+    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.population_density_change
   name: 人口密度时间变化
   family: timeseries
@@ -1770,6 +2988,12 @@ metrics:
   - consistent_method
   definition: 两个年份网格人口密度的差值或变化率。
   unit: persons_per_km2_or_ratio
+  answers_questions:
+  - 哪些变化趋势足以改变项目阶段、方向或运营安排？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 人口空间变化热点
   does_not_support:
@@ -1778,9 +3002,17 @@ metrics:
   - temporal_change
   - trend_comparison
   - spatial_shift
-  combine_with:
-  - poi.multi_year_count
-  - timeseries.nightlight_change
+  actionability:
+    action_targets: *id008
+    possible_actions:
+    - 依据变化方向调整阶段策略，并对口径变化或异常年份追加采集。
+  followup_metrics:
+  - metric_id: poi.multi_year_count
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: timeseries.nightlight_change
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - consistent_source_coverage
   - consistent_classification
@@ -1791,6 +3023,11 @@ metrics:
   - method_consistency
   source:
   - modules/timeseries/population_series.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_scope_previous_period
+    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.age_shift
   name: 主导年龄段迁移
   family: timeseries
@@ -1805,6 +3042,12 @@ metrics:
   - consistent_method
   definition: 比较两个年份网格年龄结构后标记年龄结构发生变化的网格。
   unit: category
+  answers_questions:
+  - 哪些变化趋势足以改变项目阶段、方向或运营安排？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 年龄结构变化位置
   does_not_support:
@@ -1814,9 +3057,17 @@ metrics:
   - temporal_change
   - trend_comparison
   - spatial_shift
-  combine_with:
-  - poi.multi_year_count
-  - timeseries.nightlight_change
+  actionability:
+    action_targets: *id008
+    possible_actions:
+    - 依据变化方向调整阶段策略，并对口径变化或异常年份追加采集。
+  followup_metrics:
+  - metric_id: poi.multi_year_count
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: timeseries.nightlight_change
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - consistent_source_coverage
   - consistent_classification
@@ -1827,6 +3078,11 @@ metrics:
   - method_consistency
   source:
   - modules/timeseries/population_series.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_scope_previous_period
+    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.nightlight_change
   name: 夜光时间变化
   family: timeseries
@@ -1844,6 +3100,12 @@ metrics:
   - consistent_method
   definition: 两个年份夜光总量、网格值的差值及变化率。
   unit: radiance_or_ratio
+  answers_questions:
+  - 哪些变化趋势足以改变项目阶段、方向或运营安排？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
   - 夜间亮度增强、减弱和稳定区域识别
   does_not_support:
@@ -1853,9 +3115,17 @@ metrics:
   - temporal_change
   - trend_comparison
   - spatial_shift
-  combine_with:
-  - poi.multi_year_count
-  - timeseries.nightlight_change
+  actionability:
+    action_targets: *id008
+    possible_actions:
+    - 依据变化方向调整阶段策略，并对口径变化或异常年份追加采集。
+  followup_metrics:
+  - metric_id: poi.multi_year_count
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: timeseries.nightlight_change
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - consistent_source_coverage
   - consistent_classification
@@ -1866,6 +3136,11 @@ metrics:
   - method_consistency
   source:
   - modules/timeseries/nightlight_series.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_scope_previous_period
+    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.hotspot_shift
   name: 夜光热点迁移
   family: timeseries
@@ -1880,6 +3155,15 @@ metrics:
   - consistent_method
   definition: 比较两个年份网格热点类别，识别热点持续、新出现和消退。
   unit: category
+  answers_questions:
+  - 哪些变化趋势足以改变项目阶段、方向或运营安排？
+  spatial_granularities:
+  - unit: hotspot_zone
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
+    - year_pair
   supports:
   - 夜光热点时序稳定性和迁移
   does_not_support:
@@ -1888,9 +3172,17 @@ metrics:
   - temporal_change
   - trend_comparison
   - spatial_shift
-  combine_with:
-  - poi.multi_year_count
-  - timeseries.nightlight_change
+  actionability:
+    action_targets: *id008
+    possible_actions:
+    - 依据变化方向调整阶段策略，并对口径变化或异常年份追加采集。
+  followup_metrics:
+  - metric_id: poi.multi_year_count
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: timeseries.nightlight_change
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - consistent_source_coverage
   - consistent_classification
@@ -1901,6 +3193,11 @@ metrics:
   - method_consistency
   source:
   - modules/timeseries/nightlight_series.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_scope_previous_period
+    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: gwr.nightlight_spatial_model
   name: 夜光局部空间关系模型
   family: gwr
@@ -1919,6 +3216,14 @@ metrics:
   - sufficient_samples
   definition: 以夜光辐亮度为观测变量，使用 POI 密度、人口密度、路网整合度、连通度和路网长度密度作为解释变量的局部回归结果。
   unit: model_output
+  answers_questions:
+  - 不同局部因素与活动强度的空间关系是否稳定并可用于定位？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 解释变量与夜光之间的空间异质关系探索
   does_not_support:
@@ -1929,10 +3234,19 @@ metrics:
   - spatial_relationship
   - model_diagnostics
   - local_association
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - road.integration
+  actionability:
+    action_targets: &id009
+    - program_location
+    - analysis_method
+    possible_actions:
+    - 仅在局部关系稳定且诊断通过时调整空间定位或分析方法。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_variables
   - same_bandwidth_policy
@@ -1944,6 +3258,12 @@ metrics:
   source:
   - modules/gwr/service.py
   - modules/gwr/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - statistical_null_expectation
+    - scenario_or_design_alternative
+    if_missing: 建立同变量、同样本与同带宽政策的全局或替代模型；在此之前只报告模型输出，不解释局部关系改善。
 - id: gwr.model_fit
   name: GWR 拟合诊断
   family: gwr
@@ -1962,6 +3282,14 @@ metrics:
   - sufficient_samples
   definition: GWR 结果整体拟合质量和变量排序诊断。
   unit: statistic
+  answers_questions:
+  - 不同局部因素与活动强度的空间关系是否稳定并可用于定位？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 模型拟合程度和误差描述
   does_not_support:
@@ -1971,10 +3299,17 @@ metrics:
   - spatial_relationship
   - model_diagnostics
   - local_association
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - road.integration
+  actionability:
+    action_targets: *id009
+    possible_actions:
+    - 仅在局部关系稳定且诊断通过时调整空间定位或分析方法。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_variables
   - same_bandwidth_policy
@@ -1986,11 +3321,16 @@ metrics:
   source:
   - modules/gwr/service.py
   - modules/gwr/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - statistical_null_expectation
+    - scenario_or_design_alternative
+    if_missing: 建立同变量、同样本与同带宽政策的全局或替代模型；在此之前只报告模型输出，不解释局部关系改善。
 - id: poi.kernel_density
   name: POI 核密度
   family: poi_grid
   implementation_status: implemented
-  execution_location: frontend
   outputs:
   - heatmap_surface
   required_inputs:
@@ -2000,6 +3340,14 @@ metrics:
   - category_schema
   definition: 使用当前可见 POI 点生成的前端核密度热力表面。
   unit: relative_intensity
+  answers_questions:
+  - 哪些局部网格形成稳定的设施集中、混合或专业化机会？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: h3_k_ring
+    runtime_parameters:
+    - h3_resolution
+    - neighbor_ring
   supports:
   - 识别 POI 相对集聚位置
   does_not_support:
@@ -2010,10 +3358,17 @@ metrics:
   - facility_concentration
   - spatial_mix
   - local_specialization
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.p90
+  actionability:
+    action_targets: *id002
+    possible_actions:
+    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_grid_definition
@@ -2027,6 +3382,14 @@ metrics:
   source:
   - frontend/src/features/poi/panel.js
   - frontend/src/map/core.js
+  execution_location: frontend
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.open_close_rate
   name: 开闭店变化与存续率
   family: poi
@@ -2039,6 +3402,16 @@ metrics:
   - category_schema
   definition: 基于跨年门店实体匹配计算开店、闭店与存续比例。
   unit: ratio
+  answers_questions:
+  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  - unit: catchment
+    neighborhood: distance
+    runtime_parameters:
+    - catchment_id
   supports:
   - 描述对应空间现象
   does_not_support:
@@ -2047,10 +3420,17 @@ metrics:
   - facility_supply
   - category_structure
   - competition_context
-  combine_with:
-  - population.total
-  - road.integration
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id001
+    possible_actions:
+    - 据设施供给与类别缺口调整功能组合、招商或运营验证。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: road.integration
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_year
   - same_source
@@ -2060,20 +3440,42 @@ metrics:
   - duplicate_check
   - category_normalization
   - coverage_check
-  implementation_gap: 当前多年份 POI 没有稳定门店实体匹配。
   source: []
+  implementation_gap: 当前多年份 POI 没有稳定门店实体匹配。
+  comparison_baseline:
+    required: true
+    preferred:
+    - same_source_peer_scope
+    - same_scope_previous_period
+    - same_scope_category_share
+    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
 - id: road.walk_detour_ratio
   name: 步行绕行系数
   family: road_syntax
-  implementation_status: not_implemented
-  outputs: []
+  implementation_status: implemented
+  outputs:
+  - network_distance_m
+  - straight_line_distance_m
+  - detour_ratio
+  - route_geometry
   required_inputs:
-  - road_network
-  - scope_geometry
-  - graph_model
-  - analysis_radius
-  definition: 网络最短步行距离与两点直线距离的比值。
+  - entrance_anchor
+  - destination_anchor
+  - valhalla_pedestrian_route
+  definition: Valhalla 真实步行网络距离除以投影米制直线距离；路由失败时指标阻塞，不使用直线替代路径。
   unit: ratio
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: origin_destination_pair
+    neighborhood: origin_destination
+    runtime_parameters:
+    - entrance_id
+    - destination_id
+  - unit: route
+    neighborhood: origin_destination
+    runtime_parameters:
+    - route_id
   supports:
   - 描述对应空间现象
   does_not_support:
@@ -2082,33 +3484,55 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: road.choice
+    purpose: explain
+    trigger: 绕行率异常时检查路径是否错过高穿行潜力路段
   valid_comparisons:
   - same_graph_model
   - same_radius
   - same_network_filter
   - same_normalization
   quality_requirements:
-  - connected_network_check
-  - engine_status
-  - radius_available
-  implementation_gap: 当前没有稳定的点对点步行路由矩阵。
-  source: []
+  - valhalla_route_success
+  - projected_distance_check
+  - origin_destination_identity_check
+  source:
+  - modules/spatial_action/service.py
+  - modules/spatial_action/valhalla.py
+  - modules/spatial_action/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - route_or_entrance_alternative
+    - documented_project_requirement
+    if_missing: 建立至少两个同口径入口或路径方案，或补充项目规定阈值；在此之前只报告单对象距离，不作优劣排序。
 - id: road.entrance_distance
   name: 入口到主要道路距离
   family: road_syntax
-  implementation_status: not_implemented
-  outputs: []
+  implementation_status: implemented
+  outputs:
+  - snapped_road_segment_id
+  - snap_distance_m
+  - target_road_distances_m
   required_inputs:
-  - road_network
-  - scope_geometry
-  - graph_model
-  - analysis_radius
-  definition: 项目入口到目标主要道路的最短空间或网络距离。
+  - entrance_anchor
+  - walkable_road_segments
+  - planned_target_road_segment_ids
+  definition: 入口到可步行路段的投影米制挂接距离，以及入口所挂接路段到计划指定目标路段的网络距离。
   unit: meters
+  answers_questions:
+  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  spatial_granularities:
+  - unit: entrance
+    neighborhood: network_radius
+    runtime_parameters:
+    - snap_tolerance_m
+    - destination_segment_id
   supports:
   - 描述对应空间现象
   does_not_support:
@@ -2117,21 +3541,32 @@ metrics:
   - network_access
   - route_structure
   - spatial_connectivity
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
+  actionability:
+    action_targets: *id007
+    possible_actions:
+    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+  followup_metrics:
+  - metric_id: road.integration
+    purpose: locate
+    trigger: 入口完成路网挂接后需要读取局部句法条件
   valid_comparisons:
   - same_graph_model
   - same_radius
   - same_network_filter
   - same_normalization
   quality_requirements:
-  - connected_network_check
-  - engine_status
-  - radius_available
-  implementation_gap: 当前项目模型没有规范化入口点输入。
-  source: []
+  - projected_distance_check
+  - walkable_network_check
+  - entrance_source_traceability
+  source:
+  - modules/spatial_action/service.py
+  - modules/spatial_action/schemas.py
+  comparison_baseline:
+    required: true
+    preferred:
+    - route_or_entrance_alternative
+    - documented_project_requirement
+    if_missing: 建立至少两个同口径入口或路径方案，或补充项目规定阈值；在此之前只报告单对象距离，不作优劣排序。
 - id: access.network_reachable_area
   name: 多时间阈值网络可达面积
   family: isochrone
@@ -2144,6 +3579,14 @@ metrics:
   - routing_network
   definition: 多个时间阈值下路网等时圈覆盖面积。
   unit: km2
+  answers_questions:
+  - 真实网络可达范围是否覆盖目标客群与关键目的地？
+  spatial_granularities:
+  - unit: catchment
+    neighborhood: network_radius
+    runtime_parameters:
+    - travel_mode
+    - time_minutes
   supports:
   - 描述对应空间现象
   does_not_support:
@@ -2152,10 +3595,17 @@ metrics:
   - catchment_area
   - travel_time_access
   - scope_definition
-  combine_with:
-  - population.total
-  - poi.grid_density
-  - road.integration
+  actionability:
+    action_targets: *id010
+    possible_actions:
+    - 依据真实网络覆盖范围调整入口、路径或服务功能位置。
+  followup_metrics:
+  - metric_id: population.total
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: poi.grid_density
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - same_origin_policy
   - same_travel_mode
@@ -2165,8 +3615,14 @@ metrics:
   - routing_engine_status
   - valid_origin
   - geometry_has_area
-  implementation_gap: 当前只稳定输出单时间阈值等时圈，尚无批量比较契约。
   source: []
+  implementation_gap: 当前只稳定输出单时间阈值等时圈，尚无批量比较契约。
+  comparison_baseline:
+    required: true
+    preferred:
+    - route_or_entrance_alternative
+    - scenario_or_design_alternative
+    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一入口、起点或时长方案；在此之前只描述可达边界。
 - id: grid.project_network_distance
   name: 网格到项目入口网络距离
   family: cross_domain
@@ -2178,6 +3634,17 @@ metrics:
   - source_metrics
   definition: 共享网格质心到项目入口的网络最短距离。
   unit: meters
+  answers_questions:
+  - 项目与周边机会之间的真实网络关系会如何改变空间选择？
+  spatial_granularities:
+  - unit: grid_cell
+    neighborhood: origin_destination
+    runtime_parameters:
+    - project_anchor_id
+  - unit: entrance
+    neighborhood: origin_destination
+    runtime_parameters:
+    - project_anchor_id
   supports:
   - 描述对应空间现象
   does_not_support:
@@ -2186,11 +3653,20 @@ metrics:
   - multi_source_overlap
   - combined_activity
   - project_access
-  combine_with:
-  - poi.grid_density
-  - population.total
-  - nightlight.mean_radiance
-  - road.integration
+  actionability:
+    action_targets:
+    - program_location
+    - entrance
+    - route
+    possible_actions:
+    - 依据项目锚点与机会单元的网络关系调整入口、路径和功能位置。
+  followup_metrics:
+  - metric_id: poi.grid_density
+    purpose: explain
+    trigger: 当前指标形成需要解释的差异时
+  - metric_id: population.total
+    purpose: validate
+    trigger: 当前结论将直接改变项目动作时
   valid_comparisons:
   - aligned_spatial_units
   - compatible_years
@@ -2199,5 +3675,12 @@ metrics:
   - cell_id_alignment
   - time_compatibility
   - component_quality_available
-  implementation_gap: 当前缺少规范化项目入口及网格到入口的网络路由结果。
   source: []
+  implementation_gap: 当前缺少规范化项目入口及网格到入口的网络路由结果。
+  comparison_baseline:
+    required: true
+    preferred:
+    - normalized_spatial_unit
+    - same_source_peer_scope
+    - same_scope_category_share
+    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。

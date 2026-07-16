@@ -19,6 +19,8 @@ $RuntimeDir = Join-Path $RepoRoot "runtime"
 $BackendUrl = "http://127.0.0.1:$BackendPort/analysis"
 $SearxngUrl = "http://127.0.0.1:$SearxngPort"
 $ArcGISBridgeUrl = "http://127.0.0.1:$ArcGISBridgePort"
+$LocalOverpassUrl = "http://127.0.0.1:8003/api/interpreter"
+$PublicOverpassUrl = "https://overpass-api.de/api/interpreter"
 $ArcGISBridgeRoot = Join-Path (Split-Path $RepoRoot -Parent) "host_bridge"
 $ArcGISBridgeParent = Split-Path $ArcGISBridgeRoot -Parent
 
@@ -98,6 +100,31 @@ function Wait-Http {
             }
         } catch {
             Start-Sleep -Seconds 1
+        }
+    }
+    return $false
+}
+
+function Wait-Overpass {
+    param(
+        [string]$Url,
+        [int]$Seconds
+    )
+
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $response = Invoke-WebRequest `
+                -Uri $Url `
+                -Method Post `
+                -Body @{ data = '[out:json][timeout:5];node(1);out;' } `
+                -UseBasicParsing `
+                -TimeoutSec 8
+            if ($response.StatusCode -eq 200 -and $response.Content.TrimStart().StartsWith('{')) {
+                return $true
+            }
+        } catch {
+            Start-Sleep -Seconds 2
         }
     }
     return $false
@@ -235,6 +262,14 @@ if ($Restart) {
 Write-Host "Starting Docker infrastructure on ports 8001-8003..."
 & (Join-Path $PSScriptRoot "dev_infra.ps1")
 
+$localOverpassAvailable = Wait-Overpass -Url $LocalOverpassUrl -Seconds 60
+$backendOverpassEndpoint = if ($localOverpassAvailable) { $LocalOverpassUrl } else { $PublicOverpassUrl }
+if ($localOverpassAvailable) {
+    Write-Host "Local Overpass is ready at $LocalOverpassUrl"
+} else {
+    Write-Warning "Local Overpass did not become ready within 60 seconds; road queries will use $PublicOverpassUrl."
+}
+
 $arcgisBridgeAvailable = Start-ArcGISBridge
 
 $backendOwner = Get-PortOwner $BackendPort
@@ -336,7 +371,8 @@ Set-Location -LiteralPath "$RepoRoot"
 `$env:FRONTEND_DEV_ORIGIN = "http://127.0.0.1:$FrontendPort"
 `$env:LOCAL_QUERY_BASE_URL = "http://127.0.0.1:8001"
 `$env:VALHALLA_BASE_URL = "http://127.0.0.1:8002"
-`$env:OVERPASS_ENDPOINT = "http://127.0.0.1:8003/api/interpreter"
+`$env:OVERPASS_ENDPOINT = "$backendOverpassEndpoint"
+`$env:OVERPASS_FALLBACK_ENDPOINTS = "https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter"
 `$env:ARCGIS_BRIDGE_BASE_URL = "$ArcGISBridgeUrl"
 `$env:SEARXNG_BASE_URL = "$SearxngUrl"
 `$env:SEARXNG_TIMEOUT_MS = "8000"

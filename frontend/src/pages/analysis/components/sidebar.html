@@ -795,7 +795,9 @@
                                             <button class="h3-btn h3-btn-primary h3-params-compute-btn"
                                                 :disabled="isPoiRasterGridMode() ? (isLoadingPoiGrid || !lastIsochroneGeoJSON) : (isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON)"
                                                 @click="startPoiGridAnalysis">
-                                                {{ (isPoiRasterGridMode() ? isLoadingPoiGrid : isComputingH3Analysis) ? '生成中...' : '生成当前' }}
+                                                {{ (isPoiRasterGridMode() ? isLoadingPoiGrid : isComputingH3Analysis)
+                                                    ? '生成中...'
+                                                    : (hasActivePoiGridResult() ? '重新生成当前格子' : '生成当前格子') }}
                                             </button>
                                             <button class="h3-btn h3-btn-primary h3-params-compute-btn poi-grid-generate-all-btn"
                                                 :disabled="isLoadingPoiGrid || isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON"
@@ -1426,6 +1428,11 @@
                                                     </option>
                                                 </select>
                                             </label>
+                                            <button type="button" class="h3-btn h3-btn-primary h3-params-compute-btn"
+                                                :disabled="isComputingPopulation || !getIsochronePolygonRing()"
+                                                @click="regeneratePopulationAnalysis">
+                                                {{ isComputingPopulation ? '生成中...' : '重新生成' }}
+                                            </button>
                                             <label v-if="populationAnalysisView === 'sex'" class="population-inline-field">
                                                 <span>地图图层</span>
                                                 <select v-model="populationSexMetricMode" @change="onPopulationSexMetricModeChange" class="h3-params-select">
@@ -1497,6 +1504,11 @@
                                                     </option>
                                                 </select>
                                             </label>
+                                            <button type="button" class="h3-btn h3-btn-primary h3-params-compute-btn"
+                                                :disabled="isComputingNightlight || !getIsochronePolygonRing()"
+                                                @click="regenerateNightlightAnalysis">
+                                                {{ isComputingNightlight ? '生成中...' : '重新生成' }}
+                                            </button>
                                         </div>
                                         <div v-if="nightlightLayer && nightlightLayer.legend" class="population-legend-card" style="margin-top:10px;">
                                             <div class="population-legend-title">
@@ -1816,6 +1828,13 @@
                                                     class="h3-params-select"
                                                     @change="onRoadSyntaxDisplayRangeChange">
                                             </label>
+                                            <label class="h3-params-field">
+                                                <span class="h3-params-label">地图视图</span>
+                                                <select v-model="roadSyntaxViewMode" class="h3-params-select" @change="onRoadSyntaxViewModeChange">
+                                                    <option value="edges">线状路网</option>
+                                                    <option value="grid" :disabled="!roadSyntaxGridFeatures.length">共享栅格聚合</option>
+                                                </select>
+                                            </label>
                                         </div>
                                         <div class="h3-params-chips">
                                             <span class="count-badge">渲染档位 {{ roadSyntaxPerformanceProfile }}</span>
@@ -1832,13 +1851,6 @@
 
                                     <div v-else style="margin-top:10px;">
                                         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                            <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666;">
-                                                视图
-                                                <select v-model="roadSyntaxViewMode" class="h3-params-select" style="width:auto;" @change="refreshRoadSyntaxOverlay">
-                                                    <option value="edges">线状路网</option>
-                                                    <option value="grid" :disabled="!roadSyntaxGridFeatures.length">共享栅格聚合</option>
-                                                </select>
-                                            </label>
                                             <label v-if="roadSyntaxMetric !== 'intelligibility'" style="display:flex; align-items:center; gap:6px; font-size:12px; color:#666;">
                                                 色带
                                                 <select v-model="roadSyntaxDepthmapColorScale" @change="refreshRoadSyntaxOverlay"

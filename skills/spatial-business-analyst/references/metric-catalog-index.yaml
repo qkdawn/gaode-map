@@ -1,29 +1,56 @@
-index_version: 1.0.0
-catalog_version: 1.0.0
-catalog_sha256: sha256:649277687fd9e91f9c15cd74db1d4f3de5ee774de096bf2937faef4a93690f5c
+index_version: 2.0.0
+catalog_version: 2.0.0
+catalog_sha256: sha256:60af2e3727c972ce5fc0ad423d2abbe85e23727ce8f4cfe0117302f189b63352
 generated_from: references/metric-catalog.yaml
-runtime_rule: Intersect source_ids with the current AnalysisRun source_versions before selecting metrics.
+runtime_rule: Use source coverage to predict succeeded versus blocked attempts; keep decision-critical unavailable metrics
+  in MetricPlan and exclude only metrics judged irrelevant.
 data_domains:
 - id: poi
   source_ids:
   - current:dataset:poi
   families:
   - poi
-  metric_ids:
-  - poi.count
-  - poi.category_count
-  - poi.multi_year_count
-  - poi.open_close_rate
-  implemented_metric_ids:
-  - poi.count
-  - poi.category_count
-  - poi.multi_year_count
-  not_implemented_metric_ids:
-  - poi.open_close_rate
-  use_when:
-  - category_structure
-  - competition_context
-  - facility_supply
+  metrics:
+  - metric_id: poi.count
+    decision_tags:
+    - category_structure
+    - competition_context
+    - facility_supply
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: implemented
+  - metric_id: poi.category_count
+    decision_tags:
+    - category_structure
+    - competition_context
+    - facility_supply
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: implemented
+  - metric_id: poi.multi_year_count
+    decision_tags:
+    - category_structure
+    - competition_context
+    - facility_supply
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: implemented
+  - metric_id: poi.open_close_rate
+    decision_tags:
+    - category_structure
+    - competition_context
+    - facility_supply
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: not_implemented
   detail_queries:
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family poi
 - id: h3_grid
@@ -32,42 +59,138 @@ data_domains:
   families:
   - poi_grid
   - spatial_statistics
-  metric_ids:
-  - poi.grid_count
-  - poi.grid_density
-  - poi.category_density
-  - poi.local_entropy
-  - poi.local_entropy_normalized
-  - poi.lq
-  - poi.neighbor_mean_density
-  - poi.neighbor_mean_entropy
-  - spatial.neighbor_density_delta
-  - spatial.global_moran_i_density
-  - spatial.lisa
-  - spatial.gi_star
-  - poi.kernel_density
-  implemented_metric_ids:
-  - poi.grid_count
-  - poi.grid_density
-  - poi.category_density
-  - poi.local_entropy
-  - poi.local_entropy_normalized
-  - poi.lq
-  - poi.neighbor_mean_density
-  - poi.neighbor_mean_entropy
-  - spatial.neighbor_density_delta
-  - spatial.global_moran_i_density
-  - spatial.lisa
-  - spatial.gi_star
-  - poi.kernel_density
-  not_implemented_metric_ids: []
-  use_when:
-  - facility_concentration
-  - hotspot_detection
-  - local_specialization
-  - spatial_clustering
-  - spatial_mix
-  - spatial_outlier
+  metrics:
+  - metric_id: poi.grid_count
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: poi.grid_density
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: poi.category_density
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: poi.local_entropy
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: poi.local_entropy_normalized
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: poi.lq
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: poi.neighbor_mean_density
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: poi.neighbor_mean_entropy
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: spatial.neighbor_density_delta
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
+  - metric_id: spatial.global_moran_i_density
+    decision_tags:
+    - hotspot_detection
+    - spatial_clustering
+    - spatial_outlier
+    primary_spatial_unit: scope
+    action_targets:
+    - analysis_method
+    implementation_status: implemented
+  - metric_id: spatial.lisa
+    decision_tags:
+    - hotspot_detection
+    - spatial_clustering
+    - spatial_outlier
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    - analysis_method
+    implementation_status: implemented
+  - metric_id: spatial.gi_star
+    decision_tags:
+    - hotspot_detection
+    - spatial_clustering
+    - spatial_outlier
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    - analysis_method
+    implementation_status: implemented
+  - metric_id: poi.kernel_density
+    decision_tags:
+    - facility_concentration
+    - local_specialization
+    - spatial_mix
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    implementation_status: implemented
   detail_queries:
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family poi_grid
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family spatial_statistics
@@ -76,21 +199,47 @@ data_domains:
   - current:dataset:population
   families:
   - population
-  metric_ids:
-  - population.total
-  - population.sex_structure
-  - population.age_structure
-  - population.selected_ratio
-  implemented_metric_ids:
-  - population.total
-  - population.sex_structure
-  - population.age_structure
-  - population.selected_ratio
-  not_implemented_metric_ids: []
-  use_when:
-  - customer_proxy
-  - demographic_structure
-  - population_scale
+  metrics:
+  - metric_id: population.total
+    decision_tags:
+    - customer_proxy
+    - demographic_structure
+    - population_scale
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: implemented
+  - metric_id: population.sex_structure
+    decision_tags:
+    - customer_proxy
+    - demographic_structure
+    - population_scale
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: implemented
+  - metric_id: population.age_structure
+    decision_tags:
+    - customer_proxy
+    - demographic_structure
+    - population_scale
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: implemented
+  - metric_id: population.selected_ratio
+    decision_tags:
+    - customer_proxy
+    - demographic_structure
+    - population_scale
+    primary_spatial_unit: scope
+    action_targets:
+    - program_location
+    - operations
+    implementation_status: implemented
   detail_queries:
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family population
 - id: nightlight
@@ -98,33 +247,117 @@ data_domains:
   - current:dataset:nightlight
   families:
   - nightlight
-  metric_ids:
-  - nightlight.total_radiance
-  - nightlight.mean_radiance
-  - nightlight.max_radiance
-  - nightlight.lit_pixel_ratio
-  - nightlight.p90
-  - nightlight.hotspot_class
-  - nightlight.hotspot_ratio
-  - nightlight.spatial_profile
-  - nightlight.sector_profile
-  - nightlight.activity_level
-  implemented_metric_ids:
-  - nightlight.total_radiance
-  - nightlight.mean_radiance
-  - nightlight.max_radiance
-  - nightlight.lit_pixel_ratio
-  - nightlight.p90
-  - nightlight.hotspot_class
-  - nightlight.hotspot_ratio
-  - nightlight.spatial_profile
-  - nightlight.sector_profile
-  - nightlight.activity_level
-  not_implemented_metric_ids: []
-  use_when:
-  - night_activity_proxy
-  - nightlight_pattern
-  - spatial_intensity
+  metrics:
+  - metric_id: nightlight.total_radiance
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.mean_radiance
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.max_radiance
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.lit_pixel_ratio
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.p90
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.hotspot_class
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.hotspot_ratio
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.spatial_profile
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: distance_band
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.sector_profile
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: sector
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
+  - metric_id: nightlight.activity_level
+    decision_tags:
+    - night_activity_proxy
+    - nightlight_pattern
+    - spatial_intensity
+    primary_spatial_unit: scope
+    action_targets:
+    - site_direction
+    - operations
+    - public_space
+    implementation_status: implemented
   detail_queries:
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family nightlight
 - id: road
@@ -132,37 +365,151 @@ data_domains:
   - current:dataset:road
   families:
   - road_syntax
-  metric_ids:
-  - road.network_size
-  - road.degree
-  - road.integration
-  - road.choice
-  - road.connectivity
-  - road.control
-  - road.mean_depth
-  - road.node_degree
-  - road.orientation
-  - road.intelligibility
-  - road.walk_detour_ratio
-  - road.entrance_distance
-  implemented_metric_ids:
-  - road.network_size
-  - road.degree
-  - road.integration
-  - road.choice
-  - road.connectivity
-  - road.control
-  - road.mean_depth
-  - road.node_degree
-  - road.orientation
-  - road.intelligibility
-  not_implemented_metric_ids:
-  - road.walk_detour_ratio
-  - road.entrance_distance
-  use_when:
-  - network_access
-  - route_structure
-  - spatial_connectivity
+  metrics:
+  - metric_id: road.network_size
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: scope
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.degree
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.integration
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.choice
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.connectivity
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.control
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.mean_depth
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.node_degree
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.orientation
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: road_segment
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.intelligibility
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: scope
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.walk_detour_ratio
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: origin_destination_pair
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
+  - metric_id: road.entrance_distance
+    decision_tags:
+    - network_access
+    - route_structure
+    - spatial_connectivity
+    primary_spatial_unit: entrance
+    action_targets:
+    - entrance
+    - street_segment
+    - route
+    - boundary_interface
+    implementation_status: implemented
   detail_queries:
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family road_syntax
 - id: cross_domain
@@ -178,52 +525,195 @@ data_domains:
   - gwr
   - isochrone
   - timeseries
-  metric_ids:
-  - grid.type
-  - grid.opportunity_flag
-  - isochrone.reachable_area
-  - timeseries.population_change
-  - timeseries.population_density_change
-  - timeseries.age_shift
-  - timeseries.nightlight_change
-  - timeseries.hotspot_shift
-  - gwr.nightlight_spatial_model
-  - gwr.model_fit
-  - access.network_reachable_area
-  - grid.project_network_distance
-  implemented_metric_ids:
-  - grid.type
-  - grid.opportunity_flag
-  - isochrone.reachable_area
-  - timeseries.population_change
-  - timeseries.population_density_change
-  - timeseries.age_shift
-  - timeseries.nightlight_change
-  - timeseries.hotspot_shift
-  - gwr.nightlight_spatial_model
-  - gwr.model_fit
-  not_implemented_metric_ids:
-  - access.network_reachable_area
-  - grid.project_network_distance
-  use_when:
-  - candidate_screening
-  - catchment_area
-  - combined_activity
-  - grid_typology
-  - local_association
-  - model_diagnostics
-  - multi_metric_comparison
-  - multi_source_overlap
-  - project_access
-  - scope_definition
-  - spatial_relationship
-  - spatial_shift
-  - temporal_change
-  - travel_time_access
-  - trend_comparison
+  metrics:
+  - metric_id: grid.type
+    decision_tags:
+    - candidate_screening
+    - grid_typology
+    - multi_metric_comparison
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - public_space
+    implementation_status: implemented
+  - metric_id: grid.opportunity_flag
+    decision_tags:
+    - candidate_screening
+    - grid_typology
+    - multi_metric_comparison
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - public_space
+    implementation_status: implemented
+  - metric_id: isochrone.reachable_area
+    decision_tags:
+    - catchment_area
+    - scope_definition
+    - travel_time_access
+    primary_spatial_unit: catchment
+    action_targets:
+    - entrance
+    - route
+    - program_location
+    implementation_status: implemented
+  - metric_id: timeseries.population_change
+    decision_tags:
+    - spatial_shift
+    - temporal_change
+    - trend_comparison
+    primary_spatial_unit: scope
+    action_targets:
+    - operations
+    - program_location
+    - data_collection
+    implementation_status: implemented
+  - metric_id: timeseries.population_density_change
+    decision_tags:
+    - spatial_shift
+    - temporal_change
+    - trend_comparison
+    primary_spatial_unit: scope
+    action_targets:
+    - operations
+    - program_location
+    - data_collection
+    implementation_status: implemented
+  - metric_id: timeseries.age_shift
+    decision_tags:
+    - spatial_shift
+    - temporal_change
+    - trend_comparison
+    primary_spatial_unit: scope
+    action_targets:
+    - operations
+    - program_location
+    - data_collection
+    implementation_status: implemented
+  - metric_id: timeseries.nightlight_change
+    decision_tags:
+    - spatial_shift
+    - temporal_change
+    - trend_comparison
+    primary_spatial_unit: scope
+    action_targets:
+    - operations
+    - program_location
+    - data_collection
+    implementation_status: implemented
+  - metric_id: timeseries.hotspot_shift
+    decision_tags:
+    - spatial_shift
+    - temporal_change
+    - trend_comparison
+    primary_spatial_unit: hotspot_zone
+    action_targets:
+    - operations
+    - program_location
+    - data_collection
+    implementation_status: implemented
+  - metric_id: gwr.nightlight_spatial_model
+    decision_tags:
+    - local_association
+    - model_diagnostics
+    - spatial_relationship
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - analysis_method
+    implementation_status: implemented
+  - metric_id: gwr.model_fit
+    decision_tags:
+    - local_association
+    - model_diagnostics
+    - spatial_relationship
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - analysis_method
+    implementation_status: implemented
+  - metric_id: access.network_reachable_area
+    decision_tags:
+    - catchment_area
+    - scope_definition
+    - travel_time_access
+    primary_spatial_unit: catchment
+    action_targets:
+    - entrance
+    - route
+    - program_location
+    implementation_status: not_implemented
+  - metric_id: grid.project_network_distance
+    decision_tags:
+    - combined_activity
+    - multi_source_overlap
+    - project_access
+    primary_spatial_unit: grid_cell
+    action_targets:
+    - program_location
+    - entrance
+    - route
+    implementation_status: not_implemented
   detail_queries:
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family cross_domain
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family grid_derived
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family gwr
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family isochrone
   - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family timeseries
+- id: project_evidence_gates
+  source_ids:
+  - project:boundary
+  - project:competitor-operations
+  - project:operator-plan
+  - project:financial-model
+  families:
+  - project_evidence_gate
+  metrics:
+  - metric_id: project.document_constraints
+    decision_tags:
+    - hard_constraints
+    - project_delivery
+    primary_spatial_unit: scope
+    action_targets:
+    - data_collection
+    - operations
+    implementation_status: implemented
+  - metric_id: project.boundary_geometry
+    decision_tags:
+    - hard_constraints
+    - project_boundary
+    primary_spatial_unit: scope
+    action_targets:
+    - boundary_interface
+    - entrance
+    - data_collection
+    implementation_status: implemented
+  - metric_id: competition.operating_performance
+    decision_tags:
+    - competition_positioning
+    - operating_performance
+    primary_spatial_unit: scope
+    action_targets:
+    - operations
+    - data_collection
+    implementation_status: not_implemented
+  - metric_id: operations.operator_commitment
+    decision_tags:
+    - operations_delivery
+    - operator_readiness
+    primary_spatial_unit: scope
+    action_targets:
+    - operations
+    - data_collection
+    implementation_status: not_implemented
+  - metric_id: finance.cost_revenue_model
+    decision_tags:
+    - financial_feasibility
+    - operations_delivery
+    primary_spatial_unit: scope
+    action_targets:
+    - operations
+    - data_collection
+    implementation_status: not_implemented
+  detail_queries:
+  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family project_evidence_gate

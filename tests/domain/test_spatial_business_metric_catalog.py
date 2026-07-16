@@ -30,10 +30,14 @@ REQUIRED_FIELDS = {
     "unit",
     "supports",
     "does_not_support",
+    "answers_questions",
+    "spatial_granularities",
     "use_when",
-    "combine_with",
+    "actionability",
+    "followup_metrics",
     "valid_comparisons",
     "quality_requirements",
+    "comparison_baseline",
     "source",
 }
 
@@ -73,8 +77,35 @@ def test_metric_catalog_has_one_complete_metric_list_and_valid_sources():
             assert metric["source"]
             for source in metric["source"]:
                 assert (ROOT / source).exists(), f"{metric['id']} source does not exist: {source}"
-        assert set(metric["combine_with"]) <= set(ids)
+        assert "combine_with" not in metric
+        assert "spatial_unit" not in metric
+        assert metric["answers_questions"]
+        assert metric["spatial_granularities"]
+        assert metric["actionability"]["action_targets"]
+        assert metric["actionability"]["possible_actions"]
+        baseline = metric["comparison_baseline"]
+        assert set(baseline) == {"required", "preferred", "if_missing"}
+        assert isinstance(baseline["required"], bool)
+        assert baseline["preferred"]
+        assert baseline["if_missing"]
+        assert {item["metric_id"] for item in metric["followup_metrics"]} <= set(ids)
 
+
+
+def test_global_moran_is_global_diagnostic_and_advances_to_local_metrics():
+    moran = next(item for item in _catalog()["metrics"] if item["id"] == "spatial.global_moran_i_density")
+
+    assert moran["spatial_granularities"] == [
+        {"unit": "scope", "neighborhood": "none", "runtime_parameters": []}
+    ]
+    assert moran["actionability"]["action_targets"] == ["analysis_method"]
+    followups = {(item["metric_id"], item["purpose"]) for item in moran["followup_metrics"]}
+    assert ("spatial.gi_star", "locate") in followups
+    assert ("spatial.lisa", "disconfirm") in followups
+    unsupported = " ".join(moran["does_not_support"])
+    assert "局部热点" in unsupported
+    assert "入口" in unsupported
+    assert "功能" in unsupported
 
 def test_metric_catalog_cli_lists_describes_and_rejects_unknown_ids():
     listed = subprocess.run(
@@ -108,21 +139,25 @@ def test_metric_catalog_cli_lists_describes_and_rejects_unknown_ids():
     assert "missing.metric" in missing.stderr
 
 
-def test_skill_requires_ordered_startup_protocol_and_recipe_ids_are_canonical():
+def test_skill_delegates_metric_selection_and_recipe_ids_are_canonical():
     skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    selection_text = (SKILL_ROOT / "references" / "metric-selection.md").read_text(encoding="utf-8")
+    for required in (
+        "references/metric-selection.md",
+        "scripts/metric_catalog.py",
+        "references/analysis-recipes.md",
+    ):
+        assert required in skill_text
+    assert "metric-catalog-index.yaml" in skill_text
     for required in (
         "references/metric-catalog.yaml",
-        "references/metric-catalog-index.yaml",
-        "scripts/metric_catalog.py",
-        "Startup Metric Selection Protocol",
-        "Metric Use Guardrails",
-        "references/analysis-recipes.md",
         "metric_id",
         "does_not_support",
         "valid_comparisons",
         "quality_requirements",
+        "comparison_baseline",
     ):
-        assert required in skill_text
+        assert required in selection_text
 
     metric_ids = {item["id"] for item in _catalog()["metrics"]}
     recipe_text = (SKILL_ROOT / "references" / "analysis-recipes.md").read_text(encoding="utf-8")
@@ -131,20 +166,22 @@ def test_skill_requires_ordered_startup_protocol_and_recipe_ids_are_canonical():
     assert recipe_ids <= metric_ids
 
 
-def test_skill_startup_metric_selection_steps_cannot_be_reordered():
+def test_metric_selection_steps_are_ordered_without_loading_full_catalog_at_startup():
     skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-    startup_protocol = skill_text.split("## Startup Metric Selection Protocol", 1)[1].split("## 1. Frame the decision", 1)[0]
+    selection_text = (SKILL_ROOT / "references" / "metric-selection.md").read_text(encoding="utf-8")
     ordered_markers = (
-        "**Frame the question and hypotheses.**",
-        "**Discover candidates from the lightweight Index.**",
-        "**Match a combination recipe.**",
-        "**Intersect candidates with the current run.**",
-        "**Query detailed semantics by metric ID.**",
-        "**Validate before use.**",
+        "Resolve the capability against the locked registry version",
+        "Discover eligible metric candidates from `metric-catalog-index.yaml`",
+        "Use `analysis-recipes.md` only to form candidate combinations",
+        "Query detailed semantics only for shortlisted IDs",
+        "Resolve parameters, adapters, activation rules, and execution order deterministically",
+        "Persist the resolved internal plan and every terminal attempt",
     )
-    positions = [startup_protocol.index(marker) for marker in ordered_markers]
+    positions = [selection_text.index(marker) for marker in ordered_markers]
     assert positions == sorted(positions)
-    assert "never load it in full at startup" in startup_protocol
+    assert "Never load the detailed `references/metric-catalog.yaml` at startup" in selection_text
+    assert "never load the detailed catalog at startup" in skill_text
+    assert "evidence engine, not the Agent, selects Metric IDs" in skill_text
 
 
 def test_cultural_destination_recipe_runs_before_detailed_catalog_lookup():
@@ -174,8 +211,8 @@ def test_metric_catalog_index_is_deterministic_and_synchronized():
         check=True,
     )
     payload = json.loads(validated.stdout)
-    assert payload["metric_count"] == 55
-    assert payload["data_domain_count"] == 6
+    assert payload["metric_count"] == 60
+    assert payload["data_domain_count"] == 7
 
 
 def test_normalized_spatial_metrics_emits_catalog_metric_ids():

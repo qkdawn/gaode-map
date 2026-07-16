@@ -39,7 +39,6 @@ _FAILED_RUN_STATUSES = {"failed", "cancelled"}
 _WORKFLOW_PRIORITY = {
     "urban-strategy-stage1": 10,
     "spatial-programming-matrix": 20,
-    "esri-business-analyst-report": 25,
     "ppt-planning": 30,
     "evidence-audit": 40,
 }
