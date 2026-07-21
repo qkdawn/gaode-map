@@ -133,12 +133,12 @@ function Wait-Overpass {
 function Test-ArcGISBridge {
     param([string]$BaseUrl)
     try {
+        # V4 intentionally exposes only a liveness contract here. Configuration,
+        # tokens, scripts, and template readiness stay behind authenticated APIs.
         $payload = Invoke-RestMethod -Uri "$($BaseUrl.TrimEnd('/'))/health" -TimeoutSec 5
         return ($payload.status -eq "ok") -and
-            [bool]$payload.python_exists -and
-            [bool]$payload.script_exists -and
-            [bool]$payload.road_syntax_script_exists -and
-            [bool]$payload.token_configured
+            ($payload.service -eq "arcgis-host-bridge") -and
+            ($payload.version -eq "2.0")
     } catch {
         return $false
     }
@@ -179,7 +179,7 @@ function Start-ArcGISBridge {
 
     Start-Process `
         -FilePath $pythonCommand.Source `
-        -ArgumentList @("-m", "uvicorn", "host_bridge.main:app", "--host", "0.0.0.0", "--port", "$ArcGISBridgePort") `
+        -ArgumentList @("-m", "uvicorn", "host_bridge.main:app", "--host", "127.0.0.1", "--port", "$ArcGISBridgePort") `
         -WorkingDirectory $ArcGISBridgeParent `
         -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $ArcGISBridgeRoot "bridge.out.log") `

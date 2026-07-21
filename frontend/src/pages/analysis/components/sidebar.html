@@ -793,21 +793,21 @@
                                                 {{ poiGridConfigExpanded ? '收起配置' : '配置' }}
                                             </button>
                                             <button class="h3-btn h3-btn-primary h3-params-compute-btn"
-                                                :disabled="isPoiRasterGridMode() ? (isLoadingPoiGrid || !lastIsochroneGeoJSON) : (isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON)"
+                                                :disabled="isPoiRasterGridMode() ? (isLoadingPoiGrid || !lastIsochroneGeoJSON) : (isComputingH3Analysis || !lastIsochroneGeoJSON)"
                                                 @click="startPoiGridAnalysis">
                                                 {{ (isPoiRasterGridMode() ? isLoadingPoiGrid : isComputingH3Analysis)
                                                     ? '生成中...'
                                                     : (hasActivePoiGridResult() ? '重新生成当前格子' : '生成当前格子') }}
                                             </button>
                                             <button class="h3-btn h3-btn-primary h3-params-compute-btn poi-grid-generate-all-btn"
-                                                :disabled="isLoadingPoiGrid || isComputingH3Analysis || isGeneratingH3ArcgisSnapshot || !lastIsochroneGeoJSON"
+                                                :disabled="isLoadingPoiGrid || isComputingH3Analysis || !lastIsochroneGeoJSON"
                                                 @click="ensureAllPoiGridMatrixResults(true)">
                                                 生成全部年份网格
                                             </button>
                                         </div>
                                         <div v-if="poiGridConfigExpanded" class="poi-grid-config-panel">
                                             <div v-if="isPoiRasterGridMode()" class="poi-grid-config-notes">
-                                                <div class="h3-analysis-hint">共享栅格口径</div>
+                                                <div class="h3-analysis-hint">POI 专项网格口径</div>
                                                 <div class="count-badge">同源 cell_id：人口/夜光共享 cell</div>
                                                 <div class="count-badge">POI 坐标：GCJ02 匹配</div>
                                                 <div class="count-badge">年份 {{ getActivePoiGridYear() || getPoiRasterGridYear() || '当前' }}</div>
@@ -850,7 +850,7 @@
                                         </div>
                                     </div>
                                     <div v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && h3MainStage !== 'params' && !poiGridFeatures.length" class="panel-placeholder" style="margin-top:10px;">
-                                        当前还没有 POI 共享栅格结果。请先回到“参数”页点击“生成当前”。
+                                        当前还没有 POI 专项网格结果。请先回到“参数”页点击“生成当前”。
                                     </div>
                                     <div class="filter-section h3-control-row h3-control-row-tight"
                                         v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && poiGridFeatures.length > 0 && (h3MainStage === 'diagnosis' || h3MainStage === 'evaluate')"
@@ -874,7 +874,7 @@
                                     </div>
                                     <div v-if="isPoiRasterGridMode() && !shouldUsePoiUnifiedGridUi() && poiGridFeatures.length > 0 && h3MainStage === 'analysis'" style="margin-top:10px;">
                                         <div class="h3-analysis-hint">
-                                            POI 共享栅格按人口/夜光同源 cell_id 聚合，用于 POI-人口-夜光耦合判断。
+                                            POI 专项网格仅呈现 POI 密度、类别构成与空间结构；人口、夜光与路网请在“共享网格”查看。
                                         </div>
                                         <div class="h3-decision-cards">
                                             <div class="h3-decision-card">
@@ -1174,31 +1174,21 @@
                                             class="h3-analysis-hint" style="margin-top:8px;">
                                             {{ h3AnalysisSummary.arcgis_status }}
                                         </div>
-                                        <div v-if="h3AnalysisSummary" style="margin-top:8px; display:flex; justify-content:flex-end;">
-                                            <button
-                                                type="button"
-                                                class="btn-outline btn-compact"
-                                                :disabled="isComputingH3Analysis || isGeneratingH3ArcgisSnapshot"
-                                                @click="generateH3ArcgisSnapshot">
-                                                {{ isGeneratingH3ArcgisSnapshot ? '生成快照中...' : '生成结构快照' }}
-                                            </button>
-                                        </div>
-                                        <div v-if="h3AnalysisSummary && !getArcgisSnapshotUrl()"
-                                            class="h3-analysis-hint" style="margin-top:8px;">
-                                            当前未生成结构快照，可点击“生成结构快照”按需生成。
-                                        </div>
-                                        <div v-if="h3AnalysisSummary && getArcgisSnapshotUrl()"
+                                        <div v-if="h3AnalysisSummary && getArcgisReportMap()"
                                             style="margin-top:10px; border:1px solid #eef1f4; border-radius:10px; padding:8px; background:#fafbfc;">
                                             <div style="font-size:12px; color:#374151; font-weight:600; margin-bottom:6px;">
-                                                {{ getArcgisSnapshotTitle() }}
+                                                {{ getArcgisReportMapTitle() }}
                                             </div>
-                                            <img :src="getArcgisSnapshotSrc()"
-                                                @load="h3ArcgisSnapshotLoadError = false"
-                                                @error="h3ArcgisSnapshotLoadError = true"
-                                                alt="ArcGIS结构图"
+                                            <img v-if="getArcgisReportMapSrc()" :src="getArcgisReportMapSrc()"
+                                                @load="h3ArcgisReportMapLoadError = false"
+                                                @error="h3ArcgisReportMapLoadError = true"
+                                                alt="ArcGIS专题图"
                                                 style="width:100%; border-radius:8px; border:1px solid #dbe2ea;" />
-                                            <div v-if="h3ArcgisSnapshotLoadError" class="h3-analysis-hint" style="margin-top:8px;">
-                                                ArcGIS结构快照加载失败，请重算一次或切换结构图层后重试。
+                                            <div v-else class="h3-analysis-hint">
+                                                {{ getArcgisReportMap().summary || 'ArcGIS 专题图当前不可用。' }}
+                                            </div>
+                                            <div v-if="h3ArcgisReportMapLoadError" class="h3-analysis-hint" style="margin-top:8px;">
+                                                ArcGIS 专题图加载失败，请重新执行本次 H3 分析。
                                             </div>
                                         </div>
                                         <div class="h3-decision-cards">
@@ -1756,6 +1746,71 @@
 
                                         <div v-if="!getCurrentTimeseriesPayload() && !timeseriesStatus" class="panel-placeholder" style="margin-top:10px;">
                                             {{ isComputingTimeseries ? '正在自动计算时序分析...' : '进入时序面板后会自动计算并展示结果。' }}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="panel poi-panel" v-show="activeStep3Panel === 'shared_grid'">
+                                    <div class="poi-subpanel">
+                                        <div class="panel-title-row">
+                                            <h4>共享网格</h4>
+                                        </div>
+                                        <p class="hint-text">
+                                            以人口格网的 <code>cell_id</code> 对齐 POI、人口、夜光与路网；仅展示空间条件和代理指标，不提供投资评分或全域最优点位排序。
+                                        </p>
+
+                                        <div class="population-analysis-grid" style="margin-top:10px;">
+                                            <div v-for="row in getSharedGridSourceRows()" :key="row.key" class="population-analysis-card">
+                                                <div class="population-analysis-card-label">{{ row.label }}</div>
+                                                <div class="population-analysis-card-value" :style="{ color: row.ready ? '#15803d' : '#b45309' }">
+                                                    {{ row.ready ? '已就绪' : '未就绪' }}
+                                                </div>
+                                                <div class="population-analysis-card-note">{{ row.detail }}</div>
+                                            </div>
+                                        </div>
+
+                                        <button type="button" class="h3-btn h3-btn-primary" style="width:100%; margin-top:12px;"
+                                            :disabled="isGeneratingSharedGrid || !isSharedGridReadyToGenerate()"
+                                            @click="generateSharedGrid">
+                                            {{ isGeneratingSharedGrid ? '生成中…' : (sharedGrid ? '刷新共享网格' : '生成共享网格') }}
+                                        </button>
+                                        <div v-if="!isSharedGridReadyToGenerate()" class="hint-text" style="margin-top:8px; color:#92400e;">
+                                            {{ getSharedGridBlockingText() }}
+                                        </div>
+                                        <div v-if="sharedGridStatus" class="status-text" style="margin-top:8px;">{{ sharedGridStatus }}</div>
+
+                                        <template v-if="sharedGrid && sharedGrid.features && sharedGrid.features.length">
+                                            <label class="field-label" style="display:block; margin-top:14px;">地图指标</label>
+                                            <select class="h3-select" :value="sharedGridMetric" @change="setSharedGridMetric($event.target.value)">
+                                                <option v-for="option in getSharedGridMetricOptions()" :key="option.value" :value="option.value">{{ option.label }}</option>
+                                            </select>
+
+                                            <div class="population-analysis-grid" style="margin-top:10px;">
+                                                <div class="population-analysis-card">
+                                                    <div class="population-analysis-card-label">网格总数</div>
+                                                    <div class="population-analysis-card-value">{{ sharedGrid.features.length }}</div>
+                                                </div>
+                                                <div class="population-analysis-card">
+                                                    <div class="population-analysis-card-label">已分配 POI</div>
+                                                    <div class="population-analysis-card-value">{{ formatSharedGridValue(sharedGridSummary.assigned_poi_count || sharedGridSummary.assigned_pois || 0, 0) }}</div>
+                                                </div>
+                                            </div>
+
+                                            <div style="margin-top:12px; font-size:12px; color:#4b5563;">按 <code>cell_id</code> 核验（最多显示 24 格）</div>
+                                            <div style="max-height:260px; overflow:auto; margin-top:6px; border:1px solid #e5e7eb; border-radius:8px;">
+                                                <button v-for="feature in sharedGrid.features.slice(0, 24)" :key="feature.properties.cell_id" type="button"
+                                                    @click="sharedGridSelectedCellId = feature.properties.cell_id"
+                                                    :style="{ display:'block', width:'100%', textAlign:'left', padding:'8px 10px', border:'0', borderBottom:'1px solid #eef2f7', background: sharedGridSelectedCellId === feature.properties.cell_id ? '#eff6ff' : '#fff', cursor:'pointer' }">
+                                                    <strong>{{ feature.properties.cell_id }}</strong>
+                                                    <span style="margin-left:8px; color:#64748b;">POI {{ formatSharedGridValue(feature.properties.density_poi_per_km2) }} · 人口 {{ formatSharedGridValue(feature.properties.population_density, 0) }} · 夜光 {{ formatSharedGridValue(feature.properties.nightlight_radiance, 3) }}</span>
+                                                    <div style="margin-top:3px; color:#64748b;">整合度 {{ formatSharedGridValue(feature.properties.road_integration, 3) }} · 连通度 {{ formatSharedGridValue(feature.properties.road_connectivity, 3) }} · 道路密度 {{ formatSharedGridValue(feature.properties.road_length_km_per_km2, 3) }}</div>
+                                                </button>
+                                            </div>
+                                        </template>
+
+                                        <div v-if="sharedGridLimitations && sharedGridLimitations.length" class="hint-text" style="margin-top:12px;">
+                                            <strong>来源与限制：</strong>
+                                            <div v-for="(item, index) in sharedGridLimitations" :key="`shared-grid-limitation-${index}`">• {{ item }}</div>
                                         </div>
                                     </div>
                                 </div>

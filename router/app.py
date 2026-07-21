@@ -26,6 +26,7 @@ from router.domains import (
     ppt_web_source_router,
     road_router,
     spatial_action_router,
+    shared_grid_router,
     spatial_projects_router,
     system_router,
     timeseries_router,
@@ -53,6 +54,7 @@ router.include_router(history_router)
 router.include_router(h3_router)
 router.include_router(road_router)
 router.include_router(spatial_action_router)
+router.include_router(shared_grid_router)
 router.include_router(spatial_projects_router)
 router.include_router(isochrone_router)
 

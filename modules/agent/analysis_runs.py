@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from store.artifact_identity import content_digest
 
 AnalysisRunStatus = Literal[
     "draft",
@@ -47,12 +47,9 @@ AnalysisArtifactType = Literal[
     "design_handoff",
     "export_file",
     "diagnostic_report",
-    "analysis_blueprint",
-    "evidence_snapshot",
-    "chapter_assignments",
-    "analyst_chapters",
     "editorial_review",
-    "report_assembly",
+    "source_index",
+    "analysis_plan",
 ]
 MetricExecutionStatus = Literal["succeeded", "blocked", "not_applicable", "failed"]
 MetricPlanRole = Literal["primary", "supporting", "diagnostic", "excluded"]
@@ -63,7 +60,6 @@ SpatialUnit = Literal[
     "catchment",
     "grid_cell",
     "hotspot_zone",
-    "entrance",
     "road_segment",
     "route",
     "origin_destination_pair",
@@ -75,33 +71,10 @@ MetricActivationType = Literal[
     "if_pattern_detected",
 ]
 AnalysisScope = Literal["full_project", "focused_diagnostic"]
-AnalysisRunKind = Literal["full_analysis", "delivery_view"]
-
-V3_ROOT_ARTIFACT_FILENAMES: dict[str, str] = {
-    "analysis_blueprint": "analysis-blueprint.json",
-    "evidence_snapshot": "evidence-snapshot.json",
-    "chapter_assignments": "chapter-assignments.json",
-    "analyst_chapters": "analyst-chapters.json",
-    "editorial_review": "editorial-review.json",
-    "report_assembly": "report-assembly.json",
-}
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def content_digest(value: Any) -> str:
-    """Return a stable digest for lineage comparisons without leaking payloads."""
-
-    serialized = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return f"sha256:{hashlib.sha256(serialized.encode('utf-8')).hexdigest()}"
 
 
 class AnalysisArtifactRef(BaseModel):
@@ -139,7 +112,7 @@ class AnalysisSourceVersion(BaseModel):
     year: int | None = None
     sha256: str
     scope_fingerprint: str = ""
-    record_count: int = Field(default=0, ge=0)
+    record_count: int | None = Field(default=None, ge=0)
 
 
 class DecisionHypothesis(BaseModel):
@@ -420,92 +393,6 @@ class AnalysisRun(BaseModel):
         return self
 
 
-class AnalysisRunV3(BaseModel):
-    """Current six-object report Run manifest.
-
-    Metric planning and attempt lineage deliberately live inside the persisted
-    EvidenceSnapshot artifact and are not part of this public manifest.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal["3.0"] = "3.0"
-    read_only: Literal[False] = False
-    run_kind: AnalysisRunKind = "full_analysis"
-    upstream_run_id: str = ""
-    run_id: str
-    capability_id: str
-    manifest_sha256: str = ""
-    catalog_version: str = "3.0.0"
-    code_version: str = "unversioned"
-    analysis_code_sha256: str = ""
-    project_location: tuple[float, float] | None = None
-    scope_origin: tuple[float, float] | None = None
-    partition_origin: tuple[float, float] | None = None
-    source_versions: list[AnalysisSourceVersion] = Field(default_factory=list)
-    project_context: dict[str, Any] = Field(default_factory=dict)
-    configuration_snapshot: dict[str, Any] = Field(default_factory=dict)
-    execution_profile: dict[str, Any] = Field(default_factory=dict)
-    input_artifact_refs: list[AnalysisArtifactRef] = Field(default_factory=list)
-    status: AnalysisRunStatus
-    current_stage: str = ""
-    stage_records: list[AnalysisStageRecord] = Field(default_factory=list)
-    diagnostics: list[str] = Field(default_factory=list)
-    stale_input_artifact_ids: list[str] = Field(default_factory=list)
-    output_artifact_refs: list[AnalysisArtifactRef] = Field(default_factory=list)
-    created_at: str
-    completed_at: str = ""
-
-    def canonical_manifest_sha256(self) -> str:
-        payload = self.model_dump(mode="json", exclude={"manifest_sha256"})
-        return content_digest(payload)
-
-    @model_validator(mode="after")
-    def _validate_artifact_contract(self):
-        roots: dict[str, AnalysisArtifactRef] = {}
-        for artifact in self.output_artifact_refs:
-            canonical = V3_ROOT_ARTIFACT_FILENAMES.get(artifact.artifact_type)
-            if canonical is None:
-                continue
-            if artifact.artifact_type in roots:
-                raise ValueError(f"analysis_run_v3_duplicate_root_artifact:{artifact.artifact_type}")
-            if artifact.filename and artifact.filename != canonical:
-                raise ValueError(f"analysis_run_v3_root_filename_mismatch:{artifact.artifact_type}")
-            roots[artifact.artifact_type] = artifact
-        if self.run_kind == "delivery_view":
-            if not self.upstream_run_id.strip():
-                raise ValueError("analysis_run_v3_delivery_view_requires_upstream_run")
-        elif self.upstream_run_id.strip():
-            raise ValueError("analysis_run_v3_full_analysis_cannot_reference_upstream_run")
-        if self.status in {"completed", "completed_with_warnings"}:
-            required = set(V3_ROOT_ARTIFACT_FILENAMES)
-            if self.run_kind == "delivery_view":
-                required = {"report_assembly"}
-            missing = sorted(required - set(roots))
-            if missing:
-                raise ValueError(f"analysis_run_v3_missing_root_artifacts:{missing}")
-            if self.run_kind == "full_analysis" and not any(
-                item.artifact_type == "report_chapter" for item in self.output_artifact_refs
-            ):
-                raise ValueError("analysis_run_v3_completed_requires_chapter_package")
-            report_count = sum(item.artifact_type == "report" for item in self.output_artifact_refs)
-            if report_count != 1:
-                raise ValueError("analysis_run_v3_completed_requires_one_report")
-            report = next(item for item in self.output_artifact_refs if item.artifact_type == "report")
-            if report.filename != "project-report.md":
-                raise ValueError("analysis_run_v3_report_filename_mismatch")
-        elif any(
-            item.artifact_type in {"report", "report_visual"}
-            for item in self.output_artifact_refs
-        ):
-            raise ValueError("analysis_run_v3_unpublished_cannot_reference_report_assets")
-        return self
-
-    @model_validator(mode="after")
-    def _validate_manifest_digest(self):
-        if self.manifest_sha256 and self.manifest_sha256 != self.canonical_manifest_sha256():
-            raise ValueError("analysis_run_manifest_sha256_mismatch")
-        return self
 
 
 class AnalysisArtifactSnapshot(BaseModel):
@@ -527,66 +414,6 @@ class AnalysisRunDetail(BaseModel):
     metric_plan_diagnostics: MetricPlanDiagnostics = Field(default_factory=MetricPlanDiagnostics)
 
 
-class EvidenceExecutionDiagnostics(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    execution_status_counts: dict[str, int] = Field(default_factory=dict)
-    gap_count: int = Field(default=0, ge=0)
-    question_readiness_counts: dict[str, int] = Field(default_factory=dict)
-    publication_decision: str = ""
-
-
-class AnalysisRunV3Detail(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    history_id: str
-    run: AnalysisRunV3
-    artifacts: list[AnalysisArtifactSnapshot] = Field(default_factory=list)
-    evidence_diagnostics: EvidenceExecutionDiagnostics = Field(
-        default_factory=EvidenceExecutionDiagnostics
-    )
-
-
-class LegacyAnalysisRunView(BaseModel):
-    """Read-only schema-v1 view; it is never accepted by new write paths."""
-
-    model_config = ConfigDict(extra="allow")
-
-    schema_version: Literal["1.0"] = "1.0"
-    read_only: Literal[True] = True
-    run_id: str
-    capability_id: str
-    status: str
-    current_stage: str = ""
-    diagnostics: list[str] = Field(default_factory=list)
-    created_at: str = ""
-    completed_at: str = ""
-
-
-class LegacyAnalysisRunV2View(BaseModel):
-    """Read-only schema-v2 view retained for historical inspection only."""
-
-    model_config = ConfigDict(extra="allow")
-
-    schema_version: Literal["2.0"] = "2.0"
-    read_only: Literal[True] = True
-    run_id: str
-    capability_id: str
-    status: str
-    current_stage: str = ""
-    diagnostics: list[str] = Field(default_factory=list)
-    stale_input_artifact_ids: list[str] = Field(default_factory=list)
-    created_at: str = ""
-    completed_at: str = ""
-
-
-class AnalysisRunReadDetail(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    history_id: str
-    run: LegacyAnalysisRunView | LegacyAnalysisRunV2View
-    artifacts: list[AnalysisArtifactSnapshot] = Field(default_factory=list)
-    metric_plan_diagnostics: MetricPlanDiagnostics = Field(default_factory=MetricPlanDiagnostics)
 
 
 class AnalysisRunRecorder:

@@ -90,7 +90,7 @@
                 return this.normalizePoiGridType(this.poiGridType) === 'shared';
             },
             getPoiGridTypeLabel() {
-                return this.isPoiRasterGridMode() ? '共享栅格' : 'H3 六边形网格';
+                return this.isPoiRasterGridMode() ? 'POI 专项网格' : 'H3 六边形网格';
             },
             getPoiGridRuntimeStatus() {
                 return this.isPoiRasterGridMode()
@@ -298,7 +298,7 @@
                     this.commitPoiGridResult(targetYear, type, { status: 'failed', error: message });
                     if (!(err && err.analysisArtifactSaveFailed)) {
                         if (type === 'h3') this.h3GridStatus = `POI H3 六边形网格生成失败: ${message}`;
-                        else this.poiGridStatus = `POI 共享栅格分析失败: ${message}`;
+                        else this.poiGridStatus = `POI 专项网格分析失败: ${message}`;
                     }
                     throw err;
                 }
@@ -328,7 +328,7 @@
                 return result ? String(result.status || 'ready') : 'pending';
             },
             getPoiGridMatrixRows() {
-                const labels = { shared: '共享栅格', h3: 'H3' };
+                const labels = { shared: 'POI 专项网格', h3: 'H3' };
                 return this.getPoiGridMatrixYears().flatMap((year) => ['shared', 'h3'].map((type) => {
                     const result = this.getPoiGridResult(year, type);
                     const status = result ? String(result.status || 'ready') : 'pending';
@@ -759,7 +759,7 @@
                     this.selectedH3Id = null;
                     this.clearPoiRasterGridDisplayOnLeave();
                 }
-                this.poiGridStatus = '正在生成 POI 共享栅格底座...';
+                this.poiGridStatus = '正在生成 POI 专项网格底座...';
                 let calculationCompleted = false;
                 try {
                     const polygon = this.getIsochronePolygonPayload();
@@ -780,7 +780,7 @@
                         try {
                             detail = await res.text();
                         } catch (_) {}
-                        throw new Error(detail || 'POI 共享栅格底座生成失败');
+                        throw new Error(detail || 'POI 专项网格底座生成失败');
                     }
                     const data = await res.json();
                     this.poiGridFeatures = Array.isArray(data.features) ? data.features : [];
@@ -789,8 +789,8 @@
                     const activeCount = Number((this.poiGridSummary && this.poiGridSummary.active_cell_count) || 0);
                     const assigned = Number((this.poiGridSummary && this.poiGridSummary.assigned_poi_count) || 0);
                     this.poiGridStatus = count > 0
-                        ? `已生成 ${count} 个共享栅格，${activeCount} 个共享栅格含 POI，已匹配 ${assigned} 个 POI`
-                        : '当前范围没有可用共享栅格';
+                        ? `已生成 ${count} 个 POI 专项网格，${activeCount} 个 POI 专项网格含 POI，已匹配 ${assigned} 个 POI`
+                        : '当前范围没有可用 POI 专项网格';
                     if (this.poiSubTab === 'grid' && this.isPoiRasterGridMode()) {
                         this.restorePoiRasterGridDisplayOnEnter();
                     }
@@ -798,15 +798,15 @@
                     calculationCompleted = true;
                     if (typeof this.persistAnalysisArtifact === 'function') {
                         const saved = await this.persistAnalysisArtifact('poi_raster_grid');
-                        if (!saved) throw new Error('POI 共享栅格 artifact 保存失败');
+                        if (!saved) throw new Error('POI 专项网格 artifact 保存失败');
                     }
                     return data;
                 } catch (err) {
                     console.error(err);
                     const message = err && err.message ? err.message : String(err);
                     this.poiGridStatus = calculationCompleted
-                        ? `POI 共享栅格计算完成，但保存失败：${message}`
-                        : `POI 共享栅格底座生成失败: ${message}`;
+                        ? `POI 专项网格计算完成，但保存失败：${message}`
+                        : `POI 专项网格底座生成失败: ${message}`;
                     if (calculationCompleted) {
                         if (err && typeof err === 'object') err.analysisArtifactSaveFailed = true;
                         throw err;
@@ -846,7 +846,7 @@
                 }
                 const stageLabelMap = {
                     queued: '排队中',
-                    build_grid: '生成共享栅格中',
+                    build_grid: '生成 POI 专项网格中',
                     aggregate_poi: '聚合 POI 中',
                     compute_metrics: '计算指标中',
                     arcgis_prepare: '准备 ArcGIS 中',
@@ -879,7 +879,7 @@
                     const step = Math.max(0, Math.min(total, Number(latestProgress.step || 0) || 0));
                     const sec = Math.max(0, Math.floor(Number(latestProgress.elapsed_sec || 0) || 0));
                     const detail = String(latestProgress.message || '').trim();
-                    this.poiGridStatus = `共享栅格分析进度 ${step}/${total}：${label}${detail && detail !== label ? ` · ${detail}` : ''}（${sec}s）`;
+                    this.poiGridStatus = `POI 专项网格分析进度 ${step}/${total}：${label}${detail && detail !== label ? ` · ${detail}` : ''}（${sec}s）`;
                     this.poiGridProgress = { ...latestProgress };
                 };
                 const pollProgress = async () => {
@@ -927,7 +927,7 @@
                         } catch (_) {
                             try { detail = await res.text(); } catch (_) {}
                         }
-                        throw new Error(detail || 'POI 共享栅格分析失败');
+                        throw new Error(detail || 'POI 专项网格分析失败');
                     }
                     await pollProgress();
                     const data = await res.json();
@@ -947,10 +947,10 @@
                     const assigned = Number((this.poiGridSummary && this.poiGridSummary.poi_count) || 0);
                     const moran = this.poiGridSummary && this.poiGridSummary.global_moran_i_density;
                     await pollProgress();
-                    applyProgress({ status: 'success', stage: 'completed', message: 'POI 共享栅格分析计算完成' });
+                    applyProgress({ status: 'success', stage: 'completed', message: 'POI 专项网格分析计算完成' });
                     this.poiGridStatus = count > 0
-                        ? `已完成 ${count} 个共享栅格分析，已匹配 ${assigned} 个 POI${Number.isFinite(Number(moran)) ? `，Moran I=${Number(moran).toFixed(3)}` : ''}`
-                        : '当前范围没有可用共享栅格';
+                        ? `已完成 ${count} 个 POI 专项网格分析，已匹配 ${assigned} 个 POI${Number.isFinite(Number(moran)) ? `，Moran I=${Number(moran).toFixed(3)}` : ''}`
+                        : '当前范围没有可用 POI 专项网格';
                     if (this.poiSubTab === 'grid') {
                         if (typeof this.ensureH3PanelEntryState === 'function') this.ensureH3PanelEntryState();
                         if (typeof this.restoreH3GridDisplayOnEnter === 'function') this.restoreH3GridDisplayOnEnter();
@@ -961,7 +961,7 @@
                     calculationCompleted = true;
                     if (typeof this.persistAnalysisArtifact === 'function') {
                         const saved = await this.persistAnalysisArtifact('poi_raster_grid');
-                        if (!saved) throw new Error('POI 共享栅格 artifact 保存失败');
+                        if (!saved) throw new Error('POI 专项网格 artifact 保存失败');
                     }
                     return data;
                 } catch (err) {
@@ -969,7 +969,7 @@
                     const message = err && err.message ? err.message : String(err);
                     if (calculationCompleted) {
                         applyProgress({ status: 'failed', stage: 'failed', message });
-                        this.poiGridStatus = `POI 共享栅格计算完成，但保存失败：${message}`;
+                        this.poiGridStatus = `POI 专项网格计算完成，但保存失败：${message}`;
                         if (err && typeof err === 'object') err.analysisArtifactSaveFailed = true;
                         throw err;
                     }
@@ -981,18 +981,18 @@
                     if (typeof this.clearH3GridDisplayOnLeave === 'function') {
                         this.clearH3GridDisplayOnLeave();
                     }
-                    this.poiGridStatus = 'POI 共享栅格完整分析失败，正在回退到底座栅格: ' + message;
+                    this.poiGridStatus = 'POI 专项网格完整分析失败，正在回退到底座栅格: ' + message;
                     this.poiGridProgress = null;
                     this.isLoadingPoiGrid = false;
                     const fallback = await this.ensurePoiRasterGrid(force);
                     if (fallback) {
-                        this.poiGridStatus = 'POI 共享栅格完整分析暂不可用，当前展示共享栅格底座';
+                        this.poiGridStatus = 'POI 专项网格完整分析暂不可用，当前展示 POI 专项网格底座';
                         if (this.poiSubTab === 'grid' && typeof this.restorePoiRasterGridDisplayOnEnter === 'function') {
                             this.restorePoiRasterGridDisplayOnEnter();
                         }
                         return fallback;
                     }
-                    this.poiGridStatus = 'POI 共享栅格分析失败: ' + message;
+                    this.poiGridStatus = 'POI 专项网格分析失败: ' + message;
                     return null;
                 } finally {
                     if (progressTimer) {
@@ -1130,7 +1130,7 @@
                 const lowMax = Math.max(1, Math.ceil(maxCount / 3));
                 const midMax = Math.max(lowMax + 1, Math.ceil(maxCount * 2 / 3));
                 return {
-                    title: 'POI共享栅格密度',
+                    title: 'POI 专项网格密度',
                     unit: 'POI数/格',
                     items: [
                         { color: '#f8fafc', label: '0' },
@@ -1155,7 +1155,7 @@
                     strokeColor: '#1d4ed8',
                     pulseColor: '#bfdbfe',
                 });
-                this.poiGridStatus = found ? `已定位共享栅格：${id}` : `未找到对应共享栅格：${id}`;
+                this.poiGridStatus = found ? `已定位 POI 专项网格：${id}` : `未找到对应 POI 专项网格：${id}`;
             },
             _getPoiKdeSourcePoints() {
                 if (this.markerManager && typeof this.markerManager.getVisiblePointsData === 'function') {

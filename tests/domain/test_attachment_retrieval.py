@@ -22,7 +22,7 @@ def test_attachment_ingest_search_and_read_are_scoped(monkeypatch, tmp_path):
                 attachment_id=record.attachment_id,
                 filename=record.filename,
                 title="规划图说明",
-                content="这张规划图显示首层沿街商业和人行入口集中在北侧。",
+                content="这张规划图显示首层沿街商业和公共空间集中在北侧。",
                 locator="page:1",
                 source_artifacts=[record.filename],
             )
@@ -46,7 +46,7 @@ def test_attachment_ingest_search_and_read_are_scoped(monkeypatch, tmp_path):
     hits = search_attachment_context(
         conversation_id="conversation-a",
         attachment_ids=[record.attachment_id],
-        query="沿街商业 人行入口",
+        query="沿街商业 公共空间",
     )
     assert hits
     assert hits[0].filename == "plan.txt"
@@ -84,7 +84,7 @@ def test_ppt_sources_include_ready_image_attachment_source(monkeypatch, tmp_path
                 attachment_id=record.attachment_id,
                 filename=record.filename,
                 title="现场照片 OCR",
-                content="OCR 识别到图中标注：主入口、沿街商业、停车场。",
+                content="OCR 识别到图中标注：中心广场、沿街商业、停车场。",
                 locator="image:full",
                 evidence_level="ocr_text",
                 source_artifacts=[record.filename],

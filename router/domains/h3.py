@@ -162,7 +162,7 @@ async def analyze_h3_metrics(payload: H3MetricsRequest):
             stage="queued",
             message="已接收请求，等待开始计算",
             step=0,
-            total=7,
+            total=8,
             extra={
                 "resolution": int(payload.resolution),
                 "arcgis_enabled": True,
@@ -200,7 +200,6 @@ async def analyze_h3_metrics(payload: H3MetricsRequest):
             use_arcgis=True,
             arcgis_neighbor_ring=payload.arcgis_neighbor_ring,
             arcgis_knn_neighbors=None,
-            arcgis_export_image=payload.arcgis_export_image,
             arcgis_timeout_sec=payload.arcgis_timeout_sec,
             progress_callback=_progress_callback,
         )
@@ -211,8 +210,8 @@ async def analyze_h3_metrics(payload: H3MetricsRequest):
                 status="failed",
                 stage="failed",
                 message=str(exc),
-                step=7,
-                total=7,
+                step=8,
+                total=8,
                 extra={
                     "resolution": int(payload.resolution),
                     "arcgis_enabled": True,
@@ -232,7 +231,7 @@ async def get_h3_metrics_progress(run_id: str = Query(..., description="H3 metri
             "stage": "queued",
             "message": "任务已提交，等待进度同步",
             "step": 0,
-            "total": 7,
+            "total": 8,
             "started_at": 0.0,
             "updated_at": 0.0,
             "elapsed_sec": 0.0,

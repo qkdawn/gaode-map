@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+from copy import deepcopy
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
-
-from modules.agent.analysis_runs import AnalysisRun
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,82 +52,58 @@ def _catalog() -> dict:
     return yaml.safe_load(CATALOG_PATH.read_text(encoding="utf-8"))
 
 
-def test_metric_catalog_has_one_complete_metric_list_and_valid_sources():
+def test_metric_details_are_complete_and_reference_implemented_sources():
     payload = _catalog()
-    assert "available_derived_metrics" not in payload
-    assert "planned_metrics" not in payload
     metrics = payload["metrics"]
     ids = [item["id"] for item in metrics]
     assert len(ids) == len(set(ids))
-    assert not {
-        "nightlight.spatial_continuity",
-        "nightlight.overlap_with_poi",
-        "road.intersection_density",
-        "grid.activity_index",
-    }.intersection(ids)
     assert {item["implementation_status"] for item in metrics} <= {"implemented", "not_implemented"}
     for metric in metrics:
         assert REQUIRED_FIELDS <= metric.keys()
         if metric["implementation_status"] == "not_implemented":
             assert metric.get("implementation_gap")
         else:
-            assert metric["outputs"]
-            assert metric["source"]
             for source in metric["source"]:
                 assert (ROOT / source).exists(), f"{metric['id']} source does not exist: {source}"
-        assert "combine_with" not in metric
-        assert "spatial_unit" not in metric
-        assert metric["answers_questions"]
-        assert metric["spatial_granularities"]
-        assert metric["actionability"]["action_targets"]
-        assert metric["actionability"]["possible_actions"]
-        baseline = metric["comparison_baseline"]
-        assert set(baseline) == {"required", "preferred", "if_missing"}
-        assert isinstance(baseline["required"], bool)
-        assert baseline["preferred"]
-        assert baseline["if_missing"]
-        assert {item["metric_id"] for item in metric["followup_metrics"]} <= set(ids)
 
 
-
-def test_global_moran_is_global_diagnostic_and_advances_to_local_metrics():
-    moran = next(item for item in _catalog()["metrics"] if item["id"] == "spatial.global_moran_i_density")
-
-    assert moran["spatial_granularities"] == [
-        {"unit": "scope", "neighborhood": "none", "runtime_parameters": []}
-    ]
-    assert moran["actionability"]["action_targets"] == ["analysis_method"]
-    followups = {(item["metric_id"], item["purpose"]) for item in moran["followup_metrics"]}
-    assert ("spatial.gi_star", "locate") in followups
-    assert ("spatial.lisa", "disconfirm") in followups
-    unsupported = " ".join(moran["does_not_support"])
-    assert "局部热点" in unsupported
-    assert "入口" in unsupported
-    assert "功能" in unsupported
-
-def test_metric_catalog_cli_lists_describes_and_rejects_unknown_ids():
-    listed = subprocess.run(
-        [sys.executable, str(CATALOG_SCRIPT), "list", "--family", "poi_grid", "--implementation-status", "implemented"],
+def test_catalog_cli_exposes_only_lightweight_v4_fields_and_detail_is_explicit():
+    catalog = subprocess.run(
+        [sys.executable, str(CATALOG_SCRIPT), "catalog"],
         cwd=ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
-    list_payload = json.loads(listed.stdout)
-    assert list_payload["count"] > 0
-    assert all(item["family"] == "poi_grid" and item["implementation_status"] == "implemented" for item in list_payload["metrics"])
+    catalog_payload = json.loads(catalog.stdout)
+    expected_keys = {
+        "tool_id",
+        "name",
+        "purpose",
+        "question_tags",
+        "primary_spatial_unit",
+        "action_targets",
+        "implementation_status",
+    }
+    assert catalog_payload["count"] == 57
+    assert all(set(metric) == expected_keys for metric in catalog_payload["metrics"])
+    assert all("definition" not in metric and "required_inputs" not in metric for metric in catalog_payload["metrics"])
 
-    described = subprocess.run(
-        [sys.executable, str(CATALOG_SCRIPT), "describe", "poi.grid_density", "poi.lq"],
+    detailed = subprocess.run(
+        [sys.executable, str(CATALOG_SCRIPT), "detail", "poi.grid_density"],
         cwd=ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
-    assert [item["id"] for item in json.loads(described.stdout)["metrics"]] == ["poi.grid_density", "poi.lq"]
+    detail = json.loads(detailed.stdout)["metric"]
+    assert detail["id"] == "poi.grid_density"
+    assert detail["required_inputs"]
+    assert detail["outputs"]
+    assert detail["definition"]
 
     missing = subprocess.run(
-        [sys.executable, str(CATALOG_SCRIPT), "describe", "missing.metric"],
+        [sys.executable, str(CATALOG_SCRIPT), "detail", "missing.metric"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -139,67 +113,110 @@ def test_metric_catalog_cli_lists_describes_and_rejects_unknown_ids():
     assert "missing.metric" in missing.stderr
 
 
-def test_skill_delegates_metric_selection_and_recipe_ids_are_canonical():
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("name", "夜间经济活动强度"),
+        ("supports", ["消费人口覆盖和商业机会排序"]),
+    ],
+)
+def test_catalog_rejects_overpromising_discovery_names_and_purposes(field, value):
+    module = _load_module("metric_catalog_discovery_language", CATALOG_SCRIPT)
+    payload = deepcopy(_catalog())
+    payload["metrics"][0][field] = value
+
+    with pytest.raises(ValueError, match="overpromising discovery language"):
+        module.validate_catalog(payload, repository_root=ROOT)
+
+
+def test_metric_tool_service_uses_light_catalog_and_loads_real_details_on_request():
+    from modules.spatial_action.project_context import ProjectSpatialAnalysisService
+    from modules.spatial_action.metric_tools import MetricToolService
+
+    tools = MetricToolService()
+    catalog = tools.catalog()
+    assert len(catalog) == 57
+    item = next(value for value in catalog if value.tool_id == "poi.grid_density")
+    assert set(item.model_dump()) == {
+        "tool_id",
+        "name",
+        "purpose",
+        "question_tags",
+        "primary_spatial_unit",
+        "action_targets",
+        "implementation_status",
+    }
+    detail = tools.detail(item.tool_id)
+    assert detail.measures.definition
+    assert detail.measures.outputs
+    assert detail.measures.calculation
+    assert detail.use_for.decision_questions
+    assert detail.use_for.action_targets
+    assert detail.compare_by.candidate_targets
+    assert detail.compare_by.area_units
+    assert detail.interpret_with.combinations
+    assert detail.watch_out.risks
+    assert detail.unavailable_semantics
+
+    directional = tools.detail("regional.directional_evidence_matrix")
+    assert directional.measures.outputs == [
+        "direction_distance_rows",
+        "shared_grid_baseline",
+        "observation_universe",
+        "source_versions",
+    ]
+
+    focused_poi = tools.detail("poi.focused_accessibility")
+    assert focused_poi.measures.outputs == [
+        "route_verified_poi_groups",
+        "route_verified_poi_rows",
+        "route_verification_diagnostics",
+    ]
+    assert "连续道路" in focused_poi.measures.definition
+
+    supply_poi = tools.detail("poi.supply_structure")
+    assert supply_poi.measures.outputs == [
+        "isochrone_verified_real_taxonomy_counts",
+        "nearby_5_min_road_accessible_counts",
+        "isochrone_and_taxonomy_audit",
+    ]
+    assert "5 分钟" in supply_poi.measures.definition
+    assert "poi.supply_structure" in ProjectSpatialAnalysisService.executable_metric_ids()
+
+
+def test_all_metric_details_expose_the_analysis_knowledge_card():
+    from modules.spatial_action.metric_tools import MetricToolService
+
+    tools = MetricToolService()
+    for item in tools.catalog():
+        detail = tools.detail(item.tool_id)
+        assert set(detail.model_dump()) == {
+            "tool_id", "name", "measures", "use_for", "compare_by",
+            "interpret_with", "watch_out", "unavailable_semantics", "asset_types",
+        }
+        assert detail.measures.definition and detail.measures.unit
+        assert detail.use_for.decision_questions and detail.use_for.action_targets
+        assert detail.compare_by.candidate_targets and detail.compare_by.area_units
+        assert detail.interpret_with.combinations and detail.watch_out.risks
+
+
+def test_v4_skill_documents_catalog_detail_execute_result_flow():
     skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     selection_text = (SKILL_ROOT / "references" / "metric-selection.md").read_text(encoding="utf-8")
-    for required in (
-        "references/metric-selection.md",
-        "scripts/metric_catalog.py",
-        "references/analysis-recipes.md",
+    for marker in (
+        "spatial_metric_catalog",
+        "spatial_metric_detail",
+        "execute_spatial_metric",
+        "list_spatial_metric_results",
+        "read_spatial_metric_result",
     ):
-        assert required in skill_text
-    assert "metric-catalog-index.yaml" in skill_text
-    for required in (
-        "references/metric-catalog.yaml",
-        "metric_id",
-        "does_not_support",
-        "valid_comparisons",
-        "quality_requirements",
-        "comparison_baseline",
-    ):
-        assert required in selection_text
-
-    metric_ids = {item["id"] for item in _catalog()["metrics"]}
-    recipe_text = (SKILL_ROOT / "references" / "analysis-recipes.md").read_text(encoding="utf-8")
-    recipe_ids = set(re.findall(r"`([a-z]+(?:\.[a-z0-9_]+)+)`", recipe_text))
-    assert recipe_ids
-    assert recipe_ids <= metric_ids
+        assert marker in skill_text
+    assert "MetricToolService" in selection_text
+    assert "decision_metric_bundles" in selection_text
+    assert "不要把指标组合复制成新的报告流程" in selection_text
 
 
-def test_metric_selection_steps_are_ordered_without_loading_full_catalog_at_startup():
-    skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-    selection_text = (SKILL_ROOT / "references" / "metric-selection.md").read_text(encoding="utf-8")
-    ordered_markers = (
-        "Resolve the capability against the locked registry version",
-        "Discover eligible metric candidates from `metric-catalog-index.yaml`",
-        "Use `analysis-recipes.md` only to form candidate combinations",
-        "Query detailed semantics only for shortlisted IDs",
-        "Resolve parameters, adapters, activation rules, and execution order deterministically",
-        "Persist the resolved internal plan and every terminal attempt",
-    )
-    positions = [selection_text.index(marker) for marker in ordered_markers]
-    assert positions == sorted(positions)
-    assert "Never load the detailed `references/metric-catalog.yaml` at startup" in selection_text
-    assert "never load the detailed catalog at startup" in skill_text
-    assert "evidence engine, not the Agent, selects Metric IDs" in skill_text
-
-
-def test_cultural_destination_recipe_runs_before_detailed_catalog_lookup():
-    recipe_text = (SKILL_ROOT / "references" / "analysis-recipes.md").read_text(encoding="utf-8")
-    introduction, cultural_recipe = recipe_text.split("## Cultural destination", 1)
-    assert "after discovering candidate domains and metric IDs" in introduction
-    assert "before querying detailed entries" in introduction
-    assert "only after selecting available metrics" not in introduction
-    for metric_id in (
-        "poi.category_count",
-        "poi.lq",
-        "isochrone.reachable_area",
-        "road.integration",
-    ):
-        assert f"`{metric_id}`" in cultural_recipe
-
-
-def test_metric_catalog_index_is_deterministic_and_synchronized():
+def test_metric_catalog_index_is_deterministic_and_contains_no_legacy_domain_contract():
     before = INDEX_PATH.read_text(encoding="utf-8")
     subprocess.run([sys.executable, str(CATALOG_SCRIPT), "build-index"], cwd=ROOT, check=True)
     assert INDEX_PATH.read_text(encoding="utf-8") == before
@@ -211,9 +228,9 @@ def test_metric_catalog_index_is_deterministic_and_synchronized():
         check=True,
     )
     payload = json.loads(validated.stdout)
-    assert payload["metric_count"] == 60
-    assert payload["data_domain_count"] == 7
-
+    assert payload == {"valid": True, "metric_count": 57}
+    index = yaml.safe_load(INDEX_PATH.read_text(encoding="utf-8"))
+    assert set(index) == {"metrics"}
 
 def test_normalized_spatial_metrics_emits_catalog_metric_ids():
     module = _load_module("normalized_spatial_metrics_for_test", METRIC_SCRIPT)
@@ -224,7 +241,7 @@ def test_normalized_spatial_metrics_emits_catalog_metric_ids():
             "year": 2024,
             "center": [112.985, 28.195],
             "center_crs": "wgs84",
-            "boundary": [
+            "analysis_scope": [
                 [112.98, 28.19],
                 [112.99, 28.19],
                 [112.99, 28.20],
@@ -238,20 +255,23 @@ def test_normalized_spatial_metrics_emits_catalog_metric_ids():
         }
     )
     catalog_ids = {item["id"] for item in _catalog()["metrics"]}
-    nodes = result["evidence_nodes"]
-    assert len(nodes) == 1
-    assert nodes[0]["kind"] == "spatial_metric"
-    assert nodes[0]["run_id"] == result["run_id"]
-    assert nodes[0]["metric_ids"] == ["poi.count", "poi.grid_density", "poi.lq"]
-    assert all("confidence" not in node and "confidence_basis" not in node for node in nodes)
-    assert set(nodes[0]["metric_ids"]) <= catalog_ids
-    assert all(attempt["metric_id"] in catalog_ids for attempt in result["metric_attempts"])
-    assert all(attempt["evidence_node_ids"] for attempt in result["metric_attempts"] if attempt["execution_status"] == "succeeded")
-    assert all(not attempt["evidence_node_ids"] for attempt in result["metric_attempts"] if attempt["execution_status"] != "succeeded")
-    run = AnalysisRun.model_validate(result["analysis_run"])
-    assert run.manifest_sha256 == run.canonical_manifest_sha256()
-    assert run.project_location == run.scope_origin == run.partition_origin
-    assert run.source_versions[0].record_count == 2
+    assert result["status"] == "available"
+    assert result["tool_ids"] == ["poi.count", "poi.grid_density", "poi.lq"]
+    assert set(result["tool_ids"]) <= catalog_ids
+    assert result["result_id"].startswith("result:poi.normalized_spatial:")
+    assert result["structured_result"]["accepted_record_count"] == 2
+    assert result["input_sources"] == ["current:dataset:poi@sha256:" + result["structured_result"]["dataset_content_sha256"].removeprefix("sha256:")]
+    assert set(result) == {
+        "result_id",
+        "tool_ids",
+        "status",
+        "summary",
+        "input_sources",
+        "time_scope",
+        "spatial_scope",
+        "structured_result",
+        "limitations",
+    }
 
 
 def _metric_payload(center, center_crs="wgs84"):
@@ -261,7 +281,7 @@ def _metric_payload(center, center_crs="wgs84"):
         "year": 2024,
         "center": center,
         "center_crs": center_crs,
-        "boundary": [
+        "analysis_scope": [
             [112.97, 28.18],
             [113.00, 28.18],
             [113.00, 28.21],
@@ -281,12 +301,11 @@ def test_normalized_metric_run_hash_includes_analysis_origin():
     first = module.compute(_metric_payload([112.985, 28.195]))
     second = module.compute(_metric_payload([112.986, 28.195]))
 
-    assert first["dataset_content_sha256"] == second["dataset_content_sha256"]
-    assert first["analysis_spec_sha256"] != second["analysis_spec_sha256"]
-    assert first["run_sha256"] != second["run_sha256"]
-    assert {node["id"] for node in first["evidence_nodes"]}.isdisjoint(
-        node["id"] for node in second["evidence_nodes"]
-    )
+    first_data = first["structured_result"]
+    second_data = second["structured_result"]
+    assert first_data["dataset_content_sha256"] == second_data["dataset_content_sha256"]
+    assert first_data["analysis_spec_sha256"] != second_data["analysis_spec_sha256"]
+    assert first["result_id"] != second["result_id"]
 
 
 def test_normalized_metric_rejects_non_wgs84_input():

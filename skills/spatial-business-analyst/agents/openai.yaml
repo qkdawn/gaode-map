@@ -1,4 +1,4 @@
 interface:
   display_name: "Spatial Business Analyst"
-  short_description: "Build six-object, evidence-grounded spatial reports."
-  default_prompt: "Use $spatial-business-analyst to create a schema v3 spatial project report through a locked AnalysisBlueprint, deterministic EvidenceSnapshot, specialist ChapterPackages, editorial claim control, and secure SVG-backed compilation."
+  short_description: "基于真实项目材料与空间数据形成定位、空间产品和运营分期决策报告"
+  default_prompt: "使用 $spatial-business-analyst，基于现有项目材料和空间数据形成定位、空间产品与运营分期决策报告。"

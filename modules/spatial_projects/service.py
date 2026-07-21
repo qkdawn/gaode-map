@@ -6,7 +6,8 @@ from typing import Any
 from uuid import uuid4
 
 from modules.scope_datasets.service import ScopeDatasetService
-from modules.documents.service import list_documents
+from modules.documents.service import get_document_source_metadata, list_documents
+from modules.spatial_projects.query_snapshot_store import SpatialQuerySnapshotStore
 from store.history_repo import HistoryRepo
 from store.spatial_project_repo import SpatialProjectRepo
 
@@ -24,10 +25,17 @@ def _text(value: Any) -> str:
 class SpatialProjectService:
     """Own project facts after they have left the map workbench."""
 
-    def __init__(self, repo: SpatialProjectRepo | None = None, history_repo: HistoryRepo | None = None, datasets: ScopeDatasetService | None = None):
+    def __init__(
+        self,
+        repo: SpatialProjectRepo | None = None,
+        history_repo: HistoryRepo | None = None,
+        datasets: ScopeDatasetService | None = None,
+        query_snapshots: SpatialQuerySnapshotStore | None = None,
+    ):
         self.repo = repo or SpatialProjectRepo()
         self.history_repo = history_repo or HistoryRepo()
         self.datasets = datasets or ScopeDatasetService()
+        self.query_snapshots = query_snapshots or SpatialQuerySnapshotStore()
 
     def create_project(self, *, name: str, scope: dict[str, Any] | None = None, brief: dict[str, Any] | None = None) -> dict[str, Any]:
         normalized_name = _text(name)
@@ -58,6 +66,7 @@ class SpatialProjectService:
             "project_name": _text(history.get("description")) or normalized_history_id,
             "description": _text(history.get("description")),
             "created_at": history.get("created_at") or "",
+            "params": deepcopy(history.get("params") or {}),
             "scope": deepcopy(history.get("polygon") or history.get("result_polygon") or {}),
             "documents": self.list_history_project_documents(normalized_history_id),
             "datasets": deepcopy(datasets.get("datasets") or []),
@@ -85,6 +94,15 @@ class SpatialProjectService:
             for document in list_documents(history_id=normalized_history_id)
         ]
 
+    def get_history_project_document_resource(self, *, history_id: str, document_id: str) -> dict[str, Any]:
+        """Return safe metadata for an original project-document resource."""
+        normalized_history_id = _text(history_id)
+        if not normalized_history_id:
+            raise ValueError("history_id_required")
+        self._require_history(normalized_history_id)
+        metadata = get_document_source_metadata(document_id, history_id=normalized_history_id)
+        return {"history_id": normalized_history_id, **metadata}
+
     def list_history_project_datasets(self, history_id: str) -> dict[str, Any]:
         normalized_history_id = _text(history_id)
         self._require_history(normalized_history_id)
@@ -103,6 +121,7 @@ class SpatialProjectService:
         source_id: str,
         filters: dict[str, Any] | None = None,
         sort: dict[str, Any] | None = None,
+        spatial: dict[str, Any] | None = None,
         limit: int = 20,
         offset: int = 0,
         year: int | None = None,
@@ -114,11 +133,52 @@ class SpatialProjectService:
             source_id=_text(source_id),
             filters=filters,
             sort=sort,
+            spatial=spatial,
             limit=limit,
             offset=offset,
             year=year,
         )
         return {"history_id": normalized_history_id, "snapshot_id": normalized_history_id, **result}
+
+    def create_history_project_dataset_query_snapshot(
+        self,
+        *,
+        history_id: str,
+        source_id: str,
+        filters: dict[str, Any] | None = None,
+        spatial: dict[str, Any] | None = None,
+        year: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist a complete immutable geometry selection for later rendering."""
+        normalized_history_id = _text(history_id)
+        normalized_source_id = _text(source_id)
+        self._require_history(normalized_history_id)
+        selection = self.datasets.materialize_query_snapshot(
+            history_id=normalized_history_id,
+            source_id=normalized_source_id,
+            filters=filters,
+            spatial=spatial,
+            year=year,
+        )
+        if selection.get("status") != "available":
+            return {
+                "status": "unavailable",
+                "history_id": normalized_history_id,
+                "source_id": normalized_source_id,
+                "record_count": int(selection.get("record_count") or 0),
+                "normalized_feature_count": int(selection.get("normalized_feature_count") or 0),
+                "warnings": list(selection.get("warnings") or []),
+                "failure_reasons": list(selection.get("failure_reasons") or []),
+            }
+        metadata = self.query_snapshots.create(
+            history_id=normalized_history_id,
+            source_id=normalized_source_id,
+            year=year,
+            filters=filters,
+            spatial=spatial,
+            selection=selection,
+        )
+        return {"status": "available", **metadata, "failure_reasons": []}
 
     def aggregate_history_project_dataset(
         self,
@@ -128,6 +188,7 @@ class SpatialProjectService:
         group_by: str = "",
         metrics: list[dict[str, Any]] | None = None,
         filters: dict[str, Any] | None = None,
+        spatial: dict[str, Any] | None = None,
         top_k: int = 20,
         year: int | None = None,
     ) -> dict[str, Any]:
@@ -139,6 +200,7 @@ class SpatialProjectService:
             group_by=group_by,
             metrics=metrics,
             filters=filters,
+            spatial=spatial,
             top_k=top_k,
             year=year,
         )

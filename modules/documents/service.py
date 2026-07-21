@@ -178,6 +178,44 @@ def get_document(document_id: str) -> DocumentRecord:
         session.close()
 
 
+def _resolve_document_source(document_id: str, *, history_id: str = "") -> tuple[DocumentRecord, Path]:
+    record = get_document(document_id)
+    normalized_history_id = str(history_id or "").strip()
+    if normalized_history_id and record.history_id != normalized_history_id:
+        raise DocumentNotFound("document_not_found")
+    path = Path(record.file_path).resolve()
+    root = _document_root()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise DocumentNotFound("document_not_found") from exc
+    if not path.is_file():
+        raise DocumentNotFound("document_source_missing")
+    _validate_size(path)
+    return record, path
+
+
+def get_document_source_metadata(document_id: str, *, history_id: str = "") -> dict[str, object]:
+    """Describe one source file without exposing its server-side path."""
+    record, path = _resolve_document_source(document_id, history_id=history_id)
+    mime_type = _ALLOWED_TYPES[path.suffix.lower()]["mime_types"]
+    preferred_mime = next(value for value in mime_type if value != "application/octet-stream")
+    return {
+        "document_id": record.id,
+        "title": record.title,
+        "file_name": record.file_name,
+        "file_type": record.file_type,
+        "mime_type": preferred_mime,
+        "size": path.stat().st_size,
+    }
+
+
+def read_document_source(document_id: str, *, history_id: str = "") -> tuple[DocumentRecord, bytes]:
+    """Read one uploaded source file after validating its project and storage boundary."""
+    record, path = _resolve_document_source(document_id, history_id=history_id)
+    return record, path.read_bytes()
+
+
 def delete_document(document_id: str) -> DocumentRecord:
     normalized_id = str(document_id or "").strip()
     if not normalized_id:

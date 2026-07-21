@@ -56,7 +56,10 @@ class Repo:
 
 class History:
     def get_detail(self, history_id, include_pois=False):
-        return {"polygon": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]}} if history_id == "history-1" else None
+        return {
+            "polygon": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]},
+            "params": {"center": [0.5, 0.5], "coord_type": "wgs84"},
+        } if history_id == "history-1" else None
 
 
 class Datasets:
@@ -83,6 +86,7 @@ def test_history_backed_project_reads_documents_and_uses_history_as_snapshot(mon
 
     assert result["history_id"] == "history-1"
     assert result["snapshot"] == {"snapshot_id": "history-1", "status": "available", "source": "analysis_history"}
+    assert result["params"] == {"center": [0.5, 0.5], "coord_type": "wgs84"}
     assert result["documents"][0]["document_role"] == "project_brief"
     assert result["datasets"][0]["source_id"] == "current:dataset:poi"
 
@@ -106,6 +110,38 @@ def test_dataset_query_applies_manifest_limited_filters_and_sorting():
     result = service.query_dataset(project_id=project["project_id"], snapshot_id=snapshot["snapshot_id"], source_id="current:dataset:poi", filters={"category": "coffee"}, sort={"field": "score", "direction": "desc"})
 
     assert [record["record_id"] for record in result["records"]] == ["p2", "p1"]
+
+
+def test_history_dataset_operations_pass_spatial_target_to_dataset_service():
+    class CapturingDatasets(Datasets):
+        def __init__(self):
+            self.query_kwargs = {}
+            self.aggregate_kwargs = {}
+
+        def query_scope_dataset(self, **kwargs):
+            self.query_kwargs = kwargs
+            return super().query_scope_dataset(**kwargs)
+
+        def aggregate_scope_dataset(self, **kwargs):
+            self.aggregate_kwargs = kwargs
+            return super().aggregate_scope_dataset(**kwargs)
+
+    datasets = CapturingDatasets()
+    service = SpatialProjectService(repo=Repo(), history_repo=History(), datasets=datasets)
+    spatial = {"relation": "within_distance", "point": [0.5, 0.5], "max_distance_m": 500}
+    service.query_history_project_dataset(
+        history_id="history-1",
+        source_id="current:dataset:poi",
+        spatial=spatial,
+    )
+    service.aggregate_history_project_dataset(
+        history_id="history-1",
+        source_id="current:dataset:poi",
+        spatial=spatial,
+    )
+
+    assert datasets.query_kwargs["spatial"] == spatial
+    assert datasets.aggregate_kwargs["spatial"] == spatial
 
 
 def test_import_units_records_invalid_features_instead_of_silently_omitting_them():

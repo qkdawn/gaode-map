@@ -8,7 +8,18 @@ from core.years import normalize_year
 
 
 YEAR_SCOPED_ARTIFACT_TYPES = {"population", "nightlight", "poi_raster_grid", "poi_h3_grid"}
-CURRENT_ARTIFACT_TYPES = {"road_syntax", "scope"}
+CURRENT_ARTIFACT_TYPES = {"road_syntax", "scope", "shared_grid"}
+
+
+def content_digest(value: Any) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return f"sha256:{hashlib.sha256(raw.encode('utf-8')).hexdigest()}"
 
 
 def artifact_year(params: Any, payload: Any = None) -> int | None:

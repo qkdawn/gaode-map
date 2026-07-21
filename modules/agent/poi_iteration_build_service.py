@@ -10,11 +10,10 @@ from urllib.parse import urlencode
 from fastapi import HTTPException
 
 from core.config import settings
+from core.poi_taxonomy import get_poi_taxonomy
 from modules.history.service import get_history_pois_payload
 
 
-_TYPE_MAP_PATH = Path(__file__).resolve().parents[2] / "share" / "type_map.json"
-_TYPE_CONFIG: Dict[str, Any] = json.loads(_TYPE_MAP_PATH.read_text(encoding="utf-8"))
 _HEATMAP_VIEW_WIDTH = 100.0
 _HEATMAP_BOUNDS_PADDING_RATIO = 0.08
 _STATICMAP_WIDTH = 640
@@ -489,50 +488,14 @@ def build_area_heatmap_boundary(polygon: Any, bounds: Optional[Dict[str, float]]
     return result
 
 
-def _normalize_type_code(value: Any) -> str:
-    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
-    return digits[:6] if len(digits) >= 6 else digits
-
-
-def _build_type_indexes() -> Dict[str, Dict[str, Any]]:
-    by_id: Dict[str, Dict[str, Any]] = {}
-    by_label: Dict[str, Dict[str, Any]] = {}
-    by_typecode: Dict[str, Dict[str, Any]] = {}
-    for group in _TYPE_CONFIG.get("groups") or []:
-        group_title = _as_text(group.get("title")) or _as_text(group.get("id")) or "未分类"
-        for item in group.get("items") or []:
-            row = {
-                "id": _as_text(item.get("id")),
-                "label": _as_text(item.get("label")),
-                "parent": group_title,
-            }
-            if row["id"]:
-                by_id[row["id"]] = row
-            if row["label"]:
-                by_label[row["label"]] = row
-            for raw_code in _as_text(item.get("types")).split("|"):
-                code = _normalize_type_code(raw_code)
-                if code:
-                    by_typecode[code] = row
-    return {"by_id": by_id, "by_label": by_label, "by_typecode": by_typecode}
-
-
-_TYPE_INDEXES = _build_type_indexes()
-
-
 def _resolve_poi_type(poi: Dict[str, Any]) -> Dict[str, str]:
     raw_type = _as_text(poi.get("type") or poi.get("typecode") or poi.get("type_code"))
-    typecode = _normalize_type_code(poi.get("typecode") or poi.get("type_code") or raw_type)
-    item = (
-        _TYPE_INDEXES["by_id"].get(raw_type)
-        or _TYPE_INDEXES["by_label"].get(raw_type)
-        or _TYPE_INDEXES["by_typecode"].get(typecode)
-    )
+    item = get_poi_taxonomy().resolve_item_or_label(raw_type)
     if item:
         return {
-            "category": item["parent"] or "未分类",
-            "subcategory": item["label"] or "未分类小类",
-            "subcategory_id": item["id"],
+            "category": item.main_category,
+            "subcategory": item.subcategory,
+            "subcategory_id": item.item_id,
             "raw_type": raw_type,
         }
     labels = [part.strip() for part in raw_type.replace("，", ";").replace(",", ";").replace("/", ";").split(";") if part.strip()]

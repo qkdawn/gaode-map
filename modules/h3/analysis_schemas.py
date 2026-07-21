@@ -55,10 +55,6 @@ class H3MetricsRequest(BaseModel):
         le=64,
         description="Optional KNN input; currently ignored because ring is authoritative.",
     )
-    arcgis_export_image: bool = Field(
-        True,
-        description="Whether to export ArcGIS structure preview image for frontend display",
-    )
     arcgis_timeout_sec: int = Field(
         240,
         ge=30,
@@ -80,9 +76,7 @@ class H3AnalysisSummary(BaseModel):
     global_moran_z_score: Optional[float] = None
     analysis_engine: Literal["arcgis"] = "arcgis"
     arcgis_status: Optional[str] = None
-    arcgis_image_url: Optional[str] = None
-    arcgis_image_url_gi: Optional[str] = None
-    arcgis_image_url_lisa: Optional[str] = None
+    arcgis_report_maps: Dict[str, Any] = Field(default_factory=dict)
     gi_render_meta: Dict[str, Any] = Field(default_factory=dict)
     lisa_render_meta: Dict[str, Any] = Field(default_factory=dict)
     gi_z_stats: Dict[str, Any] = Field(default_factory=dict)

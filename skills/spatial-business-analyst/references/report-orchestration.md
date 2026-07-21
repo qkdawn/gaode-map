@@ -1,157 +1,146 @@
-# Schema v3 report orchestration
+# Codex 原生分析编排
 
-## Contents
+正式综合报告使用“问题驱动研究 -> 专业章节纵向循环 -> 全稿冲突审校 -> 低损耗合编”。专业 Subagent 对自己的章节及其中决策负责，主 Agent 负责语义、依赖和出版装配，不充当压缩专业内容的 reducer。
 
-- Pipeline and ownership
-- First lock: AnalysisBlueprint
-- Evidence execution and projections
-- Second lock: ChapterAssignments
-- Versioned specialist chapters
-- Editorial review and accepted claims
-- Assembly and compilation
-- Derived delivery views
-- Failure and compatibility rules
+本流程只产生 Markdown 与 JSON 运行产物，不恢复旧版 `ChapterPackage`、数据库 schema、compiler 或后端报告管线。
 
-## Pipeline and ownership
+## 波次 0：事实底稿与问题地图
 
-```text
-project sources + locked history snapshot
-→ main analyst: AnalysisBlueprint draft
-→ independent role: completeness review
-→ save locked AnalysisBlueprint
-→ deterministic engine: EvidenceSnapshot
-→ main analyst: locked ChapterAssignments
-→ specialist subagents: versioned ChapterPackages
-→ main analyst: EditorialReview
-→ at most one targeted specialist revision
-→ system: accepted claims
-→ main analyst: ReportAssembly
-→ compiler: project-report.md + referenced SVG assets
-```
+主 Agent 读取授权原件、分析范围、数据集目录和已有指标目录，按 `adaptive-report-model.md` 建立项目事实表、保留原始名称的对象清单、`project_semantic_model`、待确认的 `problem_map`、材料冲突和口径修正。
 
-The six root domain objects are `AnalysisBlueprint`, `EvidenceSnapshot`, `ChapterAssignments`, `ChapterPackage`, `EditorialReview`, and `ReportAssembly`. `analyst-chapters.json` is an immutable version index, not a seventh reasoning object.
+此时只定义要作出的选择、候选解释、共享证据和可能的专业责任范围：
 
-The main analyst owns framing, assignments, editorial decisions, conflict adjudication, and claim-bound synthesis. Specialists own publication-ready chapter prose. The evidence engine owns all deterministic selection, execution, gaps, visuals, and provenance.
+- 不作确定定位，不生成 `decision_inventory` 或正式目录；
+- 不按人口、POI、夜光、路网等数据类型预设章节；
+- 每个重要决策只有一个预定专业所有者，跨章只声明证据共享和必要依赖；
+- 标题、顺序、章节数量和拆分方式保持开放。
 
-## First lock: AnalysisBlueprint
+主 Agent 以自然 Markdown 展示“项目理解 -> 需要共同确认的问题地图 -> 拟开展的证据研究 -> 请确认或修订上述问题地图”。用户明确确认前，不读取专项指标结果、不执行新指标、不启动 Subagent。用户修订后重新展示完整问题地图，直至确认。
 
-Create a mutable draft from the actual project decision. Include project judgment, ordered decision questions, evidence requirements, exclusions with reasons, report logic, and shared terminology.
+## 波次 1-3：问题驱动的专项研究
 
-Commission an independent completeness review. It returns `accepted` or `revise` and records obligation-level findings and repair instructions. The main analyst may repair a correctable draft once. Missing external authority or input produces `waiting_for_user`; unresolved structural invalidity produces `publication_blocked`.
+确认后，主 Agent 以问题为分派单位，为角色投影必要事实、候选假设、所需证据和反证，不按数据来源生成待填工作包。
 
-Write `analysis-blueprint.json` only after acceptance. The embedded first lock binds:
+1. 区域与人群分析师、空间结构分析师并行研究外部条件如何支持或推翻候选解释。
+2. 定位与产品策略师接收两者的研究备忘录，比较真实候选方向并形成工作定位、使用者、产品层级和方向取舍。
+3. 空间功能策划师、运营与分期策略师接收定位结论并行推演实际对象、使用系统、内容服务、实施阶段和调整机制。
 
-- source snapshot hash;
-- canonical content hash;
-- capability-registry version;
-- ordered question and requirement semantics.
+波次 1-3 可以输出简洁研究备忘录。它们是证据收敛的输入，不是最终章节，也不能被主 Agent直接压缩成正式报告。
 
-Changing any locked semantic creates a new Run. Drafts and independent-review raw responses may remain in provider trace storage but are not public Run artifacts.
+## 波次 4：决策底稿与章节责任
 
-## Evidence execution and projections
+主 Agent 把已研究问题、候选比较、支持与反证、空间后果和运营承接要求收敛为 `decision_inventory`。仍会改变行动的未解决问题必须补充研究，或形成带明确改判条件的条件性判断。
 
-The evidence engine resolves each semantic capability into its private metric plan, parameters, adapters, spatial targets, activation rules, and execution order. Every requirement receives a terminal attempt.
+随后建立章节责任图：
 
-EvidenceSnapshot exposes:
+- 每项重要决策只有一个章节所有者；
+- 章节边界跟随决策关系，不跟随数据类型或固定角色模板；
+- 每章记录所有者、决策 ID、共享证据、依赖和可消费的上游接受版本；
+- 标题、小节和最终顺序可随专业写作与审校调整；
+- 最终目录由接受章节自然形成，不在波次 0 冻结。
 
-- positive evidence with state `measured` or `proxy`;
-- explicit gaps with decision limits, collection actions, and stop conditions;
-- question readiness;
-- ready, evidence-bound visual specifications and hashes;
-- private `execution_lineage` for audit and diagnostics.
+正式运行将责任图持续写入 `report/chapter-index.json`。最小契约如下：
 
-Nothing disappears: blocked, failed, or registered-gap requirements that limit a decision become public gaps. `not_applicable` remains in lineage and creates a gap when its absence limits the question.
+~~~json
+{
+  "schema_version": "spatial-business-chapter-index.v1",
+  "report_mode": "formal_comprehensive",
+  "chapters": [
+    {
+      "chapter_id": "regional-people",
+      "role": "区域与人群分析师",
+      "decision_ids": ["decision:people"],
+      "dependencies": [],
+      "versions": [
+        {
+          "version": 1,
+          "path": "chapters/regional-people.v1.md",
+          "review_path": "chapter-reviews/regional-people.v1.md",
+          "review_status": "accepted"
+        }
+      ],
+      "accepted_version": 1,
+      "status": "accepted",
+      "character_count": 1860
+    }
+  ]
+}
+~~~
 
-Create role-specific projections before prompting an Agent:
+`chapters` 的顺序就是接受版本的依赖与最终装配顺序。依赖只能指向列表中更早且已经接受的章节。`character_count` 是接受版本的中文内容字符审计值，不是接受与否的唯一标准。
 
-- main-analyst projection: public evidence, gaps, readiness, and visual metadata; omit execution lineage and rendered data not needed for framing;
-- specialist projection: only evidence, gaps, and visuals authorized by that specialist's assignment; omit execution lineage and all unassigned items.
+## 波次 5：专业章节纵向循环
 
-Never ask an LLM to repair attempts, infer missing numeric values, or author visual provenance.
+原专业 Subagent 持有自己的证据包、决策和章节，从研究持续写到接受版本：
 
-### Visual safety
+~~~text
+v1 出版级章节
+-> 逐章反方审查与深度审校
+-> 问题路由回原章节所有者
+-> 原证据包上的定向返写 v2
+-> 必要时再次审校与定向返写 v3
+-> 接受或阻止交付
+~~~
 
-Render deterministic SVG bytes before assignment. Each ready visual binds evidence IDs, source and transformation lineage, spatial objects and CRS where applicable, rendering specification, `spec_hash`, and `asset_hash`.
+每章通常为 1,500-3,000 个中文内容字符，并形成完整论证，而不是五段式摘要。长度仅用于发现过短或异常冗长章节；审校必须实质检查判断、证据比较、项目特有机制、方案代价、反例与失效条件、能力缺口、动作、验证和退出方式。
 
-Reject scripts, event attributes, `foreignObject`, JavaScript URLs, remote styles or fonts, external images or resources, network references, and non-fragment links. A visual may not exceed the weakest source evidence state. Missing inputs produce a gap or evidence-gate block, never a placeholder numeric chart.
+版本与审校产物为：
 
-## Second lock: ChapterAssignments
+~~~text
+report/
+  chapter-index.json
+  chapters/<chapter-id>.v1.md
+  chapters/<chapter-id>.v2.md
+  chapters/<chapter-id>.v3.md
+  chapter-reviews/<chapter-id>.v1.md
+  chapter-reviews/<chapter-id>.v2.md
+  chapter-reviews/<chapter-id>.v3.md
+~~~
 
-Create final chapters only after the EvidenceSnapshot is complete. Chapter boundaries follow coherent professional arguments, not a fixed taxonomy or data-source ownership.
+初稿加最多两次返写。新版本不得覆盖旧版本；审校员只指出问题和返写要求，不直接代写正文。三版后仍不合格，章节状态不得标为 `accepted`，正式报告停止交付。
 
-Every decision question has exactly one owning chapter. An assignment declares:
+依赖消费遵循接受门槛：区域与人群、空间结构章节可并行；定位与产品只能读取两者的接受版本；空间功能、运营与分期只能读取定位与产品的接受版本并可并行。下游不得读取上游草稿或未解决审校意见来替代接受版本。
 
-- professional role, objective, question IDs, subsection tasks, and required ArgumentUnits;
-- `primary`, `shared`, `gaps`, `visuals`, and `forbidden` access;
-- dependencies and assignment hash.
+## 波次 6：全稿审校与定向返写
 
-The access lists are disjoint. Unlisted evidence is forbidden. `shared` enables explicit cross-chapter use; `gaps` supports only limits and collection gates. Assigned visuals require a factual caption and bounded interpretation in the chapter.
+所有章节接受后，反方审查员和分析深度审校员读取全部接受版本、`problem_map`、`decision_inventory` 与证据摘要，检查：
 
-The bundle and each assignment bind the blueprint hash and evidence snapshot hash. Any change after this lock requires a new Run.
+- 定位、服务对象、产品、空间和运营机制是否互相冲突；
+- 某章是否把其他章的条件误写成已确认事实；
+- 方案代价、能力障碍、失败场景和退出路径是否跨章闭合；
+- 依赖关系是否造成无法兑现的实施顺序或隐藏前提；
+- 最强替代解释是否会推翻、降级或改变当前判断。
 
-## Versioned specialist chapters
+审校员逐项裁定重大意见，不直接修改章节。问题必须路由到拥有相关决策的原章节 Subagent；该作者使用原证据包与审校意见生成下一版本，再复核受影响章节和全稿。若某章已用完 v3 仍有重大问题，阻止交付。主 Agent 不得静默调和冲突或用风险句关闭问题。
 
-Each specialist returns a `ChapterPackage` that covers exactly one assignment. Every substantive ArgumentUnit contains:
+## 波次 7：低损耗合编与装配验收
 
-```text
-claim
-→ evidence or gap
-→ comparison basis
-→ mechanism
-→ project implication
-→ action
-→ assumptions
-→ stop condition
-```
+深度通过后，主 Agent 才生成 `report/project-report.md`。它只能确定顺序、统一术语、添加短过渡、编写执行摘要和综合结论。每个接受章节必须在以下标记之间逐字完整包含：
 
-Subsections contain publication-ready prose and structured blocks such as comparison matrices, implementation timelines, evidence gates, metric cards, and action lists. Specialists reference visual IDs and write captions; they never create chart values.
+~~~md
+<!-- chapter:start id="regional-people" version="v2" -->
+此处原样放入 chapters/regional-people.v2.md 的完整正文
+<!-- chapter:end id="regional-people" -->
+~~~
 
-Hard failures include missing tasks, incomplete reasoning, fabricated numbers, evidence-field mismatch, unauthorized evidence or visuals, treating a gap as positive evidence, and presenting inference as measurement. Length targets create warnings only.
+需要删除重复、改变论证、压缩实质内容或统一正文措辞时，退回章节所有者生成新版本。主 Agent 不在标记内部编辑。执行摘要、过渡和综合结论位于标记外，也不能用来替代任何接受章节。
 
-Persist `chapters/<chapter-id>.v1.json`. Never overwrite it. A targeted repair becomes `v2`; `v3` is forbidden. Update `analyst-chapters.json` with both versions and exactly one accepted version per accepted chapter.
+合编后先运行：
 
-## Editorial review and accepted claims
+~~~text
+python skills/spatial-business-analyst/scripts/validate_chapter_assembly.py --report-dir <report-directory>
+~~~
 
-Review concrete chapter version IDs. Preserve every decision:
+验收器检查决策唯一所有权、依赖顺序、版本上限、接受状态、审校产物、字符审计、章节标记顺序和正文完整包含关系。失败时不得进入视觉渲染或导出。
 
-- accept a valid version;
-- request one targeted revision with specific failed obligations;
-- reject `v2` and set `chapter_failed` when the repair remains invalid.
+## 波次 8：独立视觉证据编辑
 
-The main analyst cannot edit specialist prose. It may define terminology rules and identify conflicts. Every cross-chapter conflict names source ArgumentUnits and ends in a ruling, targeted revision, or block; never merge conflicts silently.
+`formal_comprehensive` 每次都启动独立视觉证据编辑 Subagent，允许评估后选择零张视觉。它只读取通过装配验收的 `project-report.md`、接受章节索引、`decision_inventory`、真实持久化指标、数据范围和现有视觉清单；主 Agent、章节作者与渲染器都不兼任视觉策划。
 
-After chapter decisions and conflict rulings, the system generates `accepted_claims` inside EditorialReview from accepted ArgumentUnits and accepted conflict rulings. LLM output must not supply these records. A conflict ruling inherits the weakest evidence state, narrowest scope, and all material caveats of its sources.
+视觉 Subagent 负责视觉价值判断、当前批准模板选择、插入位置、计划、渲染编排和实际验收。正式报告中的锚点、图片和题注只能出现在章节标记之外；需要支持某章时，放在该章结束标记之后，不得改变接受正文。视觉完成后重新运行装配验证，再核验视觉资产与 manifest。
 
-Editorial publication decision is `ready`, `revision_required`, or `blocked`. Only `ready` permits assembly.
+正式报告即使零图也保存 `report/visual-plan.json` 与 `report/visual-manifest.json` 并记录省略原因。具体输入、工具链、插入、失败降级和多格式验收遵守 `report-visual-workflow.md`。PDF 使用自然分页；除封面、目录和确有出版必要的主分隔外，不按标题强制一章一页。
 
-## Assembly and compilation
+## 简单任务边界
 
-ReportAssembly stores only accepted chapter references, order, title, executive summary, transitions, integrated recommendations, conflict references, and a content hash. Its synthesis statements cite accepted claim IDs. It cannot contain specialist prose, ArgumentUnits, or replacement chapter fields.
-
-Compile with:
-
-```bash
-python skills/spatial-business-analyst/scripts/compile_project_report.py --run-dir <run-directory>
-python skills/spatial-business-analyst/scripts/compile_project_report.py --run-dir <run-directory> --validate-only
-```
-
-The compiler loads the Run objects and chapter index, validates all hashes and cross-object invariants, and renders accepted prose without rewriting it. It resolves numbering, evidence citations, structural blocks, and visual links. `--validate-only` performs no publication writes.
-
-Successful compilation publishes exactly `report/project-report.md` and the SVG files referenced by accepted chapters, then creates `.complete`. Failure removes or leaves absent the report directory and `.complete`.
-
-## Derived delivery views
-
-A `delivery_view` references one completed schema v3 full Run through hash-bound upstream references. Chained delivery views are forbidden.
-
-The derived Run creates a new ReportAssembly and compiled report by selecting or reordering accepted chapters and approved structural blocks. It does not call Agents, create new evidence or claims, change chapter prose, or copy unused SVG assets.
-
-Schema v1 and v2 Runs cannot be delivery-view sources.
-
-## Failure and compatibility rules
-
-- `waiting_for_user`: required external input, decision, source, or authority is missing.
-- `chapter_failed`: a required ChapterPackage remains invalid after `v2`.
-- `publication_blocked`: blueprint, evidence, coverage, lineage, conflict, claim, asset, or assembly validation prevents safe publication.
-- `system_failed`: unexpected provider, runtime, storage, serialization, or infrastructure failure.
-
-All new writes use schema v3. Historical v1 and v2 Runs remain readable for inspection, audit, and lineage display only. Never mutate, repair, append chapters, rebuild indexes, derive views, or republish them.
+简单问答、单项诊断和局部分析仍由主 Agent 直接完成，不创建 `chapter-index.json`、版本章节或审校目录，也不受 1,500-3,000 字符带约束。只有用户要求完整项目报告、正式综合报告或同等深度成果时才进入上述正式流程。

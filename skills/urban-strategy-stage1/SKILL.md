@@ -18,7 +18,7 @@ Do not design building form, façade, structure, or construction details. End wi
 If the user only has a full source export, scaffold a run first:
 
 ```powershell
-python scripts/prepare_project_run.py --sources-export <ppt_sources_full_export.json> --out <run-dir> --project-name "<项目名>" --boundary <project_boundary.geojson>
+python scripts/prepare_project_run.py --sources-export <ppt_sources_full_export.json> --out <run-dir> --project-name "<项目名>" --analysis-scope <analysis_scope.geojson>
 ```
 
 The initializer refuses to overwrite a non-empty target directory. Edit the generated `project_brief.md` and package before analysis.
@@ -41,7 +41,7 @@ python scripts/validate_project_package.py <package-path> --write-readiness <run
 
 ### 1. Inspect and normalize
 
-- Treat the package as the project boundary of truth.
+- Treat the package as the authoritative analysis record.
 - Resolve referenced files relative to the package file.
 - Record source dates, spatial scopes, locators, and quality limitations.
 - Separate project facts, policy/plan evidence, measured GIS results, visual observations, external references, design intent, inference, and hypotheses.

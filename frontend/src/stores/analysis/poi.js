@@ -11,6 +11,7 @@ export function createAnalysisPoiStoreInitialState() {
       { id: 'gwr', label: 'GWR', title: '夜光地理加权回归' },
       { id: 'timeseries', label: '时序', title: '人口与夜光时序变化' },
       { id: 'syntax', label: '路网', title: '路网分析' },
+      { id: 'shared_grid', label: '共享网格', title: 'POI、人口、夜光与路网统一格网' },
       { id: 'agent', label: 'AI', title: 'AI Agent 区域报告' },
     ],
     activeStep3Panel: 'poi',

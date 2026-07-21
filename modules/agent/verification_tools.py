@@ -334,7 +334,7 @@ def _verify_road_claim(
         if any(term in claim for term in _FRONTAGE_TERMS):
             proposed_status = _check_status(proposed_status, "hypothesis")
             diagnostics.append(
-                "连接度不能单独证明商业界面连续性；仍需沿街开口、围墙、入口和POI贴边证据。"
+                "连接度不能单独证明商业界面连续性；仍需沿街开口、围墙和 POI 贴边证据。"
             )
 
     if "before_after_network_change" in claim_types:

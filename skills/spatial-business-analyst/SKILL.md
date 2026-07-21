@@ -1,91 +1,234 @@
 ---
 name: spatial-business-analyst
-description: Analyze locked spatial-project snapshots or versioned history-backed projects and produce evidence-grounded professional reports through a reviewed AnalysisBlueprint, deterministic EvidenceSnapshot, dynamically assigned specialist ChapterPackages, claim-controlled EditorialReview, and direct compilation. Use for trade areas, positioning, demand, competition, access, spatial programming, operations, delivery, feasibility, or any full-project spatial business report that needs specialist subagents, secure SVG evidence, explicit gaps, and auditable conclusions.
+description: 面向城市更新、园区、商业选址、空间策划和文旅项目，联合项目原始材料、POI、人口、夜光、路网、服务范围与建筑空间，形成有工作定位、空间产品、建筑承载和运营分期的中文决策报告。适用于用户要求区域分析、项目定位、空间规划、业态与内容组合、建筑再利用或完整空间商业报告时。
 ---
 
 # Spatial Business Analyst
 
-## Objective
+担任项目主分析师和总编。使用当前能够获得的真实项目材料与空间数据作出工作判断，不把数据清单、Agent 流程或重复边界文字当作成果。报告深度由项目需要解决的决策决定，不由页数、字数或固定章节数量决定。
 
-Produce a traceable project judgment rather than a dataset inventory. Connect every material conclusion to evidence or a named gap, a comparison basis, mechanism, project implication, action, assumption, and stop condition.
+正式成果是普通决策者可直接阅读的 Markdown 报告；用户要求时再使用 design-html 生成本地 HTML。不要创建项目网页 Agent，不调用项目内 LLM、AI_*、GLM_*、DeepSeek 或旧模型配置。
 
-Use schema v3 for every new Run:
+## 核心目标
 
-```text
-AnalysisBlueprint
-→ EvidenceSnapshot
-→ ChapterAssignments
-→ versioned ChapterPackages
-→ EditorialReview, with at most one targeted revision
-→ ReportAssembly
-→ compiler
-→ report/project-report.md + report/assets/*.svg
-```
+读取项目材料后，先建立 `project_semantic_model` 和待确认的 `problem_map`，不得先写正式大纲或给出确定定位。问题地图经用户确认、专项研究完成后，再把有证据的选择收敛为 `decision_inventory`，由它决定章节责任与结构候选；最终目录由通过审校的章节自然形成。对象必须保留材料中的原始名称；通用语义角色只用于编排，不预设项目拥有某种建筑、开放空间或居民构成。
 
-Treat v1 and v2 Runs as immutable inspection sources. Never repair, derive, or republish them in place.
+每个重要决策形成“判断 → 证据 → 方案 → 动作 → 验证”闭环。报告至少覆盖当前项目实际涉及的定位、人群、供给、空间关系、运营和实施问题；简单项目合并章节，复杂项目按对象、组团、阶段或方案自然展开。
 
-## Roles
+人口、POI、夜光、路网和等时圈用于解释空间条件、供给和场景；主报告应把这些证据转化为清晰的空间判断、首轮动作和验证重点，而非堆叠方法说明。
 
-The main analyst creates the project-specific blueprint and assignments, commissions an independent completeness review, reviews chapter versions, adjudicates conflicts, and writes only synthesis bound to accepted claim IDs. It must not write, rewrite, or silently replace specialist ArgumentUnits.
+用户要求完整项目报告、正式综合报告或同等深度成果时，进入 `formal_comprehensive` 模式。该模式由专业 Subagent 拥有出版级章节，每章通常为 1,500–3,000 个中文内容字符；长度只产生过短或异常冗长警告，是否接受仍由分析义务和深度审校决定。简单问答、单一诊断和局部分析不进入该模式，也不受章节长度带约束。
 
-The deterministic evidence engine owns capability-to-metric mapping, parameters, adapters, attempts, gaps, readiness, visual rendering, provenance, and hashes. Agents do not author or repair its execution lineage.
+## 数据读取顺序
 
-Each specialist receives one assignment plus an authorized projection of the EvidenceSnapshot and returns one publication-ready ChapterPackage. It cannot change locked questions, widen evidence access, invent evidence or visual values, publish files, or create `.complete`.
+从已保存项目开始时，依次执行：
 
-## Load references
+~~~text
+list_history_projects
+→ read_history_project
+→ list_history_project_documents
+→ get_history_project_document_resource
+→ 读取返回的原始 DOCX/PDF ResourceLink
+→ list_history_project_datasets
+→ list_spatial_metric_results
+→ 展示 problem_map 并等待用户确认
+→ read_spatial_metric_result
+→ 必要时 spatial_metric_catalog
+→ spatial_metric_detail
+→ execute_spatial_metric
+→ 必要的数据查询
+~~~
 
-1. Read `references/decision-framework.md` before creating an AnalysisBlueprint.
-2. Read `references/metric-selection.md` when defining or interpreting an `evidence_capability`; the evidence engine, not the Agent, selects Metric IDs.
-3. Read `references/spatial-inference-rules.md` for spatial objects and proxy boundaries.
-4. Read `references/report-orchestration.md` before delegation, review, revision, derived delivery views, or failure handling.
-5. Read `references/report-contract.md` before writing any schema v3 report object.
-6. Read `references/run-layout.md` before persistence, validation, compilation, or publication.
-7. Read the lightweight `references/metric-catalog-index.yaml`, then `references/analysis-recipes.md`, only when evaluating candidate metric families. Query shortlisted metric semantics with `scripts/metric_catalog.py describe <metric_ids>`; never load the detailed catalog at startup.
+- 对会改变判断的授权材料，必须读取 get_history_project_document_resource 返回的原件，不以文件名、旧摘要或解析状态代替正文。
+- 首次问题建图只读取项目原件、范围、数据集目录和已有指标目录以确认可研究内容；用户确认问题地图前，不读取专项结果明细、不执行新指标、不启动 Subagent，也不生成正式大纲。
+- 优先复用范围、年份和口径适用的已有指标；只有结果缺失、过期或口径不匹配时才读取指标知识卡并执行新指标。
+- POI 名称、附近设施、人口、夜光、路网明细和空间聚合必须通过 query_history_project_dataset 或 aggregate_history_project_dataset 完成。
+- 回答“某坐标周边有什么”时必须使用 MCP spatial 参数，不得下载全量数据后本地估算距离。
+- 地图所需真实几何先通过 create_history_project_dataset_query_snapshot 固化，地图请求同时引用指标结果与几何快照。
+- 数据源暂时不可用时，继续使用已成功读取的材料和结果完成可支持的工作判断；只降低受影响结论，不把整份报告改写成缺口清单。
 
-## Required workflow
+需要细化工具、对象和比较方法时读取 references/analysis-blueprint-and-tools.md、references/metric-selection.md 与 references/spatial-inference-rules.md。
 
-### Lock the analysis blueprint
+## Codex 原生 Subagent DAG
 
-Translate the actual project decision into dynamic questions and evidence requirements. Use `document`, `metric`, `spatial`, `comparison`, or `gap`; executable analytic requirements use stable `evidence_capability` keys rather than raw Metric IDs. Embed an independent completeness review and save the blueprint only after acceptance. Its lock binds the source snapshot, content, and capability-registry version.
+正式综合报告使用以下波次。简单、单一问题可以由主 Agent 直接完成研究，但同样必须先展示问题地图并等待确认。
 
-### Execute and freeze evidence
+### 波次 0：主 Agent 建立事实底稿与问题地图
 
-Let the evidence engine resolve capabilities and produce one EvidenceSnapshot. Every requirement must terminate as usable `measured` or `proxy` evidence, or as an explicit gap with a decision limit and stop condition. Keep attempts and internal MetricPlan details in `execution_lineage`; omit that private field from main-analyst and specialist prompt projections.
+- 读取原件、范围、数据集目录和已有指标目录；
+- 统一年份、空间范围、坐标系和项目对象；
+- 从原始材料建立项目语义模型和待确认的 `problem_map`；
+- 为每项重要决策指定唯一专业所有者，记录共享证据与必要的上游依赖；
+- 记录材料冲突与口径修正；
+- 不把文化生活或任何材料偏好升级为结论，只作为候选假设记录；
+- 不写人口、POI、夜光、路网等数据章节，也不生成正式大纲。
 
-Only evidence-bound deterministic visuals may enter the snapshot. Reject SVG scripts, event handlers, external resources, non-fragment links, and `foreignObject`. Missing or failed data produces a gap structure block, never a fabricated numeric chart.
+首次展示必须使用自然 Markdown，按以下结构表达，并在结尾明确请求确认或修订：
 
-### Lock dynamic assignments
+~~~text
+项目理解
+- 已确认的关键事实与对象关系
 
-Create final chapters only after evidence execution. Give every decision question exactly one owning chapter. Declare `primary`, `shared`, `gaps`, `visuals`, and `forbidden` access; unlisted evidence is forbidden. Every assigned visual is a required chapter deliverable.
+需要共同确认的问题地图
+1. 当前项目真正需要作出的选择
+2. 材料支持的候选路径及替代路径
+3. 会阻断产品或实施的利益与使用冲突
+4. 关键对象如何形成空间系统
+5. 推荐方向需要的运营承接能力
+6. 足以推翻、缩减或切换当前假设的证据
 
-### Author and review chapters
+拟开展的证据研究
+- 每个问题对应的专业视角、候选证据和反证来源
 
-Build each chapter from complete ArgumentUnits:
+请确认或修订上述问题地图
+~~~
 
-```text
-claim → evidence or gap → baseline → mechanism → project implication
-→ action → assumptions → stop condition
-```
+以上六类是复杂项目的检查视角，不是固定六项模板；简单项目只保留会改变行动的问题。展示内容不是报告目录，不进入最终报告正文。
 
-Length diagnostics are warnings only. Missing reasoning links, omitted tasks, unauthorized citations, fabricated values, or unassigned visuals are hard failures.
+若材料确实出现文化生活候选、居民、礼堂、庭院和多栋建筑，可把问题具体化为“为什么选择文化生活、替代路径为什么不优先、居民共存会阻断哪些产品、礼堂与庭院及各栋建筑怎样形成系统、运营主体必须具备什么能力、什么证据会推翻当前选择”。这些仍是待研究问题，不能在首次展示中预填答案。
 
-Store immutable versions at `chapters/<chapter-id>.vN.json`. Accept `v1` or issue one targeted repair. If `v2` remains invalid, set `chapter_failed`; the main analyst must not author the missing chapter.
+### 人工确认门槛
 
-Generate `accepted_claims` deterministically from accepted ArgumentUnits and conflict rulings after editorial decisions. The main analyst never writes claim-registry records and cannot synthesize beyond the weakest source state, scope, or caveat.
+- 展示后停止研究，等待用户明确确认或修订；不得以默认同意、超时或“先行分析”越过门槛。
+- 用户修订后先更新并重新展示完整问题地图，再次等待确认。
+- 确认后才读取适用结果明细、执行必要指标并分派专项研究。
+- 分派单位是问题及其候选解释、所需证据和反证，不是人口、POI、夜光或路网等数据类型。
 
-### Assemble and publish
+### 波次 1：多视角证据研究
 
-ReportAssembly contains order, accepted chapter references, transitions, executive summary, and integrated recommendations; it never contains specialist chapter prose. Every substantive synthesis statement cites accepted claim IDs.
+- **区域与人群分析师**：围绕获派问题联合人口、年龄、POI 与周边设施，判断使用场景、已有供给、竞争、互补关系及反证。
+- **空间结构分析师**：围绕获派问题联合路网、服务范围、POI、人口和夜光，解释外部到达、空间连接、内部路径、停留机制及阻断条件。
+- 两者只返回能回答问题或推翻假设的证据解释，不为填充未来章节而罗列指标。
 
-Compile from the Run directory. Publish exactly one stakeholder report plus its referenced secure SVG assets. Only successful compilation creates `.complete`.
+### 波次 2：定位与产品综合
 
-Use precise failures:
+- **定位与产品策略师**接收已确认问题地图和波次 1 的自然语言结论；
+- 比较问题地图中来自材料或合理推导的真实候选路径；文化生活、社区服务、商业或展陈都只能是待检验候选，不是固定菜单；
+- 给出工作定位、客群优先级、核心内容、日常使用、运营支持和增长路径；
+- 明确推荐、保留和不建议优先推进的方向。
 
-- `waiting_for_user`: required external input, decision, source, or authority is missing;
-- `chapter_failed`: a required chapter remains invalid after `v2`;
-- `publication_blocked`: contract, lineage, coverage, claim, asset, or assembly validation prevents publication;
-- `system_failed`: unexpected runtime or infrastructure failure.
+### 波次 3：空间与运营并行
 
-## Completion gate
+- **空间功能策划师**：把工作定位转成关键空间对象、组团关系、流线、服务和居民/使用者共存安排，不预设对象名称或空间类型。
+- **运营与分期策略师**：形成内容组合、运营阶段、首轮产品、记录指标和调整机制。
 
-Verify both locks, complete requirement outcomes, filtered evidence access, immutable chapter versions, one-revision enforcement, system-generated accepted claims, secure visual hashes, claim-bound synthesis, exact report contents, and absence of `.complete` on failure.
+### 波次 4：证据收敛与章节责任
+
+- 主 Agent 把已研究问题、候选比较、反证、空间后果和运营能力要求收敛为 `decision_inventory`；
+- 仍未解决但会改变行动的问题必须触发补充研究，或被明确转成条件性判断和改判条件；
+- 只有此时才能形成章节责任图。每项重要决策只由一个章节拥有，章节边界跟随决策关系，不按人口、POI、夜光、路网或专家角色机械分章；
+- 人口、POI、夜光和路网只有在独立承担一个完整决策论证时才能成为章节，否则作为跨章节证据使用；
+- 章节责任图只确定目标、所有者、决策 ID、依赖和证据权限；标题、小节和最终顺序仍可由专业写作与审校结果调整，不能把它当成待填充的固定目录。
+
+### 波次 5：专业章节纵向循环
+
+- 原专业 Subagent 根据章节责任图和自己的专项研究直接写出版级 Markdown 章节，不把研究备忘录交给主 Agent 压缩；
+- 区域与人群、空间结构章节可以并行；定位与产品章节只读取它们的接受版本；空间功能、运营与分期章节只读取定位与产品的接受版本并可以并行；
+- 每章依次完成 `v1 初稿 → 逐章反方审查 → 逐章深度审校 → 原作者定向返写 → 接受版本`；初稿加最多两次返写，仍未通过则阻止正式报告交付；
+- 每个版本与对应审校意见分别保存到 `report/chapters/` 和 `report/chapter-reviews/`，不得覆盖旧版本；下游角色只能读取上游接受版本。
+
+### 波次 6A：全稿反方审查
+
+- **反方审查员**读取全部接受章节、`problem_map`、`decision_inventory` 和证据摘要，重点识别跨章定位、对象、空间、产品、运营和实施依赖中的最强反方论证、替代解释、隐藏假设、遗漏冲突、方案代价、能力障碍和执行失败场景；
+- 按“章节与关键判断 → 最强反方观点 → 暴露的问题 → 对决策的影响 → 必须回应的问题”返回自然 Markdown；没有实质问题的章节明确写“无重大反方意见”；
+- 反方审查员不发明事实、不代写新定位、不承担文字润色或一般校对，也不得为完成形式而制造无关异议。
+
+### 波次 6B：全稿分析深度审校
+
+- **分析深度审校员**读取全部接受章节、`problem_map`、`decision_inventory`、证据摘要和全稿反方意见，独立检查跨章深度并逐项裁定反方意见为接受、部分接受或不成立，说明它是否推翻、降级或改变当前判断；
+- 正确性、代理边界、内部一致性和视觉真实性是最低底线，通过这些检查不代表报告具有分析深度；
+- 审校员可以挑战工作定位和上游分析，但不得直接发明或代写新定位，也不得把报告退回成“还需要更多数据”；
+- 成立的重大意见必须退回原章节所有者生成新版本，主 Agent 不得自行重写，不能用风险句或免责声明关闭。修订后重新审查受影响章节并复核整份报告；未解决前不得进入视觉编辑和最终交付。
+
+### 波次 7：低损耗合编与装配验收
+
+- 主 Agent 只装配接受章节、执行摘要、短过渡、综合结论和证据审计，不改写章节标记内正文；
+- 生成 `report/project-report.md` 后运行 `validate_chapter_assembly.py`；失败时不得启动视觉 Subagent 或导出。
+
+### 波次 8：独立视觉证据编辑
+
+- `formal_comprehensive` 每次都由独立**视觉证据编辑 Subagent**评估视觉价值，允许输出零视觉；简单任务只在视觉会帮助当前回答时启动；
+- 它只读取通过装配验收的报告、接受章节索引、`decision_inventory`、真实持久化指标和现有视觉清单，负责选图、定位、计划和验收，不改定位或章节正文；
+- 视觉只能使用当前批准模板与受控工具，必须支持相邻判断；失败时记录省略，不制作替代或占位视觉；
+- 启动前完整读取 `references/report-visual-workflow.md`。
+
+波次 1–3 的专项研究可以使用简洁的自然 Markdown 备忘录。`formal_comprehensive` 模式的波次 5 中，专业 Subagent 必须直接返回可发布的章节正文，而不是五段式摘要。章节至少完成：
+
+~~~text
+当前判断
+→ 项目原件、空间证据与比较基准
+→ 证据改变判断的项目特有机制
+→ 真实候选方案及各自代价
+→ 反例、失效条件与改判路径
+→ 组织和运营承接能力缺口
+→ 具体动作、验证、缩减与退出方式
+~~~
+
+章节标题和小节由项目问题自然决定，不机械展示上述字段。反方审查员和分析深度审校员使用各自角色定义的自然 Markdown 结构，不输出机器 schema。原始反方意见只在内部审校流转；成立的反例、代价、失败条件和改判逻辑由原章节所有者吸收进新版本，不展示协作过程。
+
+角色详细责任和分派提示词见 references/specialist-roles.md，波次与主编责任见 references/report-orchestration.md。
+
+## 主 Agent 低损耗合编
+
+主 Agent 不重写已接受的专业章节。它可以：
+
+- 根据接受章节确定最终顺序和目录；
+- 统一项目术语；
+- 添加章节之间的短过渡；
+- 基于接受章节编写执行摘要和综合结论；
+- 把材料冲突、数据口径和证据审计放入附录。
+
+需要删除重复、改变论证、压缩实质内容或处理专业冲突时，主 Agent 必须把具体问题退回章节所有者返写，不得静默改写。最终 `project-report.md` 使用章节边界注释原样嵌入每个接受版本，并通过 `validate_chapter_assembly.py` 验证正文完整性、版本、依赖与未解决审校项。
+
+## 报告顺序
+
+按照 `references/report-contract.md` 的最小逻辑主线组织，但由 `decision_inventory` 决定章节拆分、合并和命名。通常从当前判断开始，经过项目事实、外部证据、方案选择、空间/产品/运营方案，落到实施验证和证据审计；不强制所有项目使用同一目录。
+
+报告开头先给工作定位和当前判断，不以数据缺失、风险提示或方法说明开场。缺少客流、经营或投资数据时，仍应给出可逆的工作定位和规划建议，只是不预测销量、营收或回报。
+
+## 视觉
+
+- 视觉由独立 Subagent 在装配验收后处理，主 Agent、章节作者和渲染器都不兼任视觉策划；
+- 图表和地图只有在会改变相邻判断时才进入报告，只使用真实持久化结果、当前批准模板和受控工具；
+- 正式综合报告零图也保存视觉计划与 manifest；视觉失败时省略，不改变分析正文；
+- 视觉选择、工具链、插入、资产和验收完整遵守 `references/report-visual-workflow.md`。
+
+## 交付前验收
+
+按 references/quality-gates.md 审校。重点确认：
+
+- 每个影响决策的实质章节都经过反方挑战，最强反驳得到明确裁定和正文回应；
+- 关键判断解释了为什么成立、为什么优于真实候选方向，以及何时会失败或需要改判；
+- 空间、产品和运营方案揭示具体代价、能力缺口、路径依赖与调整或退出成本，而不是只列优点和动作；
+- 有明确工作定位、候选路径比较和不建议方向；
+- 数据已经改变产品、空间或运营决定；
+- 所有影响定位、使用、运营或实施的关键对象及关系均已覆盖；复杂空间项目形成适合自身层级的整体、组团或单元承载关系；
+- 分期具有交付成果、进入条件和运营记录指标；
+- 限制没有淹没正文；
+- 视觉真实、可读并支持相邻判断。
+
+报告达到标准后直接保存 Markdown；生成报告视觉时一并保存 `report/assets/`、`report/visual-plan.json` 和 `report/visual-manifest.json`。用户要求 HTML 时使用 design-html，并完成桌面端和移动端检查；用户要求 PDF 时从报告目录解析相对 SVG 后使用 make-pdf 导出。交付时只返回实际生成成果的可点击绝对链接。
+
+正式综合报告在视觉和导出前运行：
+
+~~~text
+python skills/spatial-business-analyst/scripts/validate_chapter_assembly.py --report-dir <report-directory>
+~~~
+
+验收失败时不得导出。PDF 使用自然分页，除封面、目录或确有出版需要的主要分隔外，不按标题强制一章一页；页数由接受章节和真实视觉自然形成。
+
+## 按需参考
+
+- 自适应对象、决策清单、深度和视觉选择：references/adaptive-report-model.md
+- Skill 改动后的五类前向测试：references/adaptive-forward-tests.md
+
+- 分析对象、工具与比较方法：references/analysis-blueprint-and-tools.md
+- 指标选择：references/metric-selection.md
+- 代理解释边界：references/spatial-inference-rules.md
+- 专业角色：references/specialist-roles.md
+- 波次与总编：references/report-orchestration.md
+- 报告契约与自适应章节：references/report-contract.md
+- 质量门槛：references/quality-gates.md
+- 报告视觉工作流：references/report-visual-workflow.md
+- 多建筑空间策划：references/spatial-unit-programming.md
+- 去项目事实化范例：references/report-example.md

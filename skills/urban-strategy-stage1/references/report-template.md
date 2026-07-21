@@ -10,7 +10,7 @@ State the preferred direction, target users, problem solved, decisive evidence, 
 
 ## 2. 任务与研究边界
 
-State decision questions, project boundary, wider analysis scopes, dates, methods, and what the report cannot determine.
+State decision questions, analysis scopes, dates, methods, and what the report cannot determine.
 
 ## 3. 资料系统与可信度
 

@@ -83,17 +83,17 @@ def test_analysis_run_waiting_state_preserves_blocking_diagnostics():
         "readiness",
         "资料完整性检查",
         status="waiting_for_user",
-        diagnostics=["缺少项目范围"],
+        diagnostics=["缺少分析范围"],
     )
     run = recorder.finish(
         "waiting_for_user",
         current_stage="readiness",
-        diagnostics=["缺少项目范围"],
+        diagnostics=["缺少分析范围"],
     )
 
     assert run.status == "waiting_for_user"
     assert run.stage_records[0].status == "waiting_for_user"
-    assert run.diagnostics == ["缺少项目范围"]
+    assert run.diagnostics == ["缺少分析范围"]
 
 
 def test_stage1_run_locks_wgs84_origin_and_source_versions():

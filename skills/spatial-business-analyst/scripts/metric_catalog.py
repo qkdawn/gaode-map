@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -21,16 +20,15 @@ ALLOWED_SPATIAL_UNITS = {
     "catchment",
     "grid_cell",
     "hotspot_zone",
-    "entrance",
     "road_segment",
     "route",
     "origin_destination_pair",
+    "shared_grid_direction_distance_band",
 }
-ALLOWED_NEIGHBORHOODS = {"none", "h3_k_ring", "distance", "network_radius", "origin_destination"}
+ALLOWED_NEIGHBORHOODS = {"none", "h3_k_ring", "distance", "network_radius", "origin_destination", "eight_direction_distance_band"}
 ALLOWED_ACTION_TARGETS = {
     "site_direction",
     "program_location",
-    "entrance",
     "boundary_interface",
     "street_segment",
     "route",
@@ -46,11 +44,21 @@ ALLOWED_BASELINE_TYPES = {
     "same_scope_category_share",
     "normalized_spatial_unit",
     "statistical_null_expectation",
-    "route_or_entrance_alternative",
+    "route_or_spatial_alternative",
     "scenario_or_design_alternative",
     "documented_project_requirement",
+    "all_shared_cells",
+    "same_distance_band_other_sectors",
 }
 LEGACY_FIELDS = {"combine_with", "spatial_unit"}
+# The discovery layer must describe observed spatial conditions, not promise an
+# unmeasured commercial outcome. Detailed cards retain the appropriate boundary
+# and validation guidance separately.
+OVERPROMISING_DISCOVERY_TERMS = {
+    "夜间经济活动": "夜间亮度空间分布或分级",
+    "消费人口": "服务范围内人口分布",
+    "商业机会": "空间条件或候选筛选",
+}
 REQUIRED_FIELDS = {
     "id",
     "name",
@@ -72,62 +80,6 @@ REQUIRED_FIELDS = {
     "quality_requirements",
     "source",
 }
-DATA_DOMAINS = (
-    {
-        "id": "poi",
-        "source_ids": ["current:dataset:poi"],
-        "families": ["poi"],
-    },
-    {
-        "id": "h3_grid",
-        "source_ids": ["current:dataset:h3"],
-        "families": ["poi_grid", "spatial_statistics"],
-    },
-    {
-        "id": "population",
-        "source_ids": ["current:dataset:population"],
-        "families": ["population"],
-    },
-    {
-        "id": "nightlight",
-        "source_ids": ["current:dataset:nightlight"],
-        "families": ["nightlight"],
-    },
-    {
-        "id": "road",
-        "source_ids": ["current:dataset:road"],
-        "families": ["road_syntax"],
-    },
-    {
-        "id": "cross_domain",
-        "source_ids": [
-            "current:dataset:poi",
-            "current:dataset:h3",
-            "current:dataset:population",
-            "current:dataset:nightlight",
-            "current:dataset:road",
-        ],
-        "families": [
-            "cross_domain",
-            "grid_derived",
-            "gwr",
-            "isochrone",
-            "timeseries",
-        ],
-    },
-    {
-        "id": "project_evidence_gates",
-        "source_ids": [
-            "project:boundary",
-            "project:competitor-operations",
-            "project:operator-plan",
-            "project:financial-model",
-        ],
-        "families": ["project_evidence_gate"],
-    },
-)
-
-
 def catalog_path() -> Path:
     return Path(__file__).resolve().parents[1] / "references" / "metric-catalog.yaml"
 
@@ -136,15 +88,28 @@ def index_path() -> Path:
     return Path(__file__).resolve().parents[1] / "references" / "metric-catalog-index.yaml"
 
 
-def _catalog_sha256(path: Path) -> str:
-    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
-
 
 def load_catalog(path: Path | None = None) -> dict[str, Any]:
     target = path or catalog_path()
     payload = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
     validate_catalog(payload, repository_root=target.resolve().parents[3])
     return payload
+
+
+def _validate_discovery_language(metric: dict[str, Any]) -> None:
+    """Keep catalog labels factual while allowing detailed boundary notes."""
+
+    discovery_text = "\n".join(
+        str(value).strip()
+        for value in [metric.get("name"), *(metric.get("supports") or [])]
+        if str(value).strip()
+    )
+    for term, replacement in OVERPROMISING_DISCOVERY_TERMS.items():
+        if term in discovery_text:
+            raise ValueError(
+                f"{metric.get('id')} uses overpromising discovery language {term!r}; "
+                f"use {replacement!r} instead"
+            )
 
 
 def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = None) -> None:
@@ -180,6 +145,7 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
         for field in ("name", "family", "definition", "unit"):
             if not str(metric.get(field) or "").strip():
                 raise ValueError(f"{metric_id}.{field} is required")
+        _validate_discovery_language(metric)
         list_fields = (
             "outputs",
             "required_inputs",
@@ -264,13 +230,6 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
         if not str(baseline["if_missing"] or "").strip():
             raise ValueError(f"{metric_id}.comparison_baseline.if_missing is required")
 
-    known_families = {str(metric.get("family") or "") for metric in metrics}
-    indexed_families = {family for domain in DATA_DOMAINS for family in domain["families"]}
-    if known_families != indexed_families:
-        raise ValueError(
-            f"catalog families and index domains differ: missing={sorted(known_families - indexed_families)}, "
-            f"unknown={sorted(indexed_families - known_families)}"
-        )
     for metric in metrics:
         unknown_followups = sorted(
             {str(item.get("metric_id") or "") for item in metric["followup_metrics"]} - seen
@@ -279,50 +238,39 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
             raise ValueError(f"{metric['id']} references unknown followup metrics: {unknown_followups}")
 
 
-def build_index_payload(payload: dict[str, Any], *, catalog_file: Path) -> dict[str, Any]:
-    metrics = list(payload.get("metrics") or [])
-    domains = []
-    for spec in DATA_DOMAINS:
-        family_set = set(spec["families"])
-        selected = [item for item in metrics if str(item.get("family") or "") in family_set]
-        domains.append(
-            {
-                "id": spec["id"],
-                "source_ids": list(spec["source_ids"]),
-                "families": list(spec["families"]),
-                "metrics": [
-                    {
-                        "metric_id": str(item["id"]),
-                        "decision_tags": sorted(
-                            {str(tag) for tag in item.get("use_when") or [] if str(tag).strip()}
-                        ),
-                        "primary_spatial_unit": str(item["spatial_granularities"][0]["unit"]),
-                        "action_targets": list(item["actionability"]["action_targets"]),
-                        "implementation_status": str(item["implementation_status"]),
-                    }
-                    for item in selected
-                ],
-                "detail_queries": [
-                    f"python skills/spatial-business-analyst/scripts/metric_catalog.py list --family {family}"
-                    for family in spec["families"]
-                ],
-            }
-        )
+def _catalog_item(metric: dict[str, Any]) -> dict[str, Any]:
+    """Project one detailed metric into the V4.1 discovery contract."""
+
+    spatial_granularities = metric.get("spatial_granularities") or []
+    first_granularity = spatial_granularities[0] if spatial_granularities else {}
+    actionability = metric.get("actionability") or {}
+    purpose_candidates = metric.get("supports") or metric.get("answers_questions") or [metric.get("definition")]
+    purpose = next((str(value).strip() for value in purpose_candidates if str(value).strip()), "空间项目判断")
     return {
-        "index_version": "2.0.0",
-        "catalog_version": payload.get("catalog_version"),
-        "catalog_sha256": _catalog_sha256(catalog_file),
-        "generated_from": "references/metric-catalog.yaml",
-        "runtime_rule": "Use source coverage to predict succeeded versus blocked attempts; keep decision-critical unavailable metrics in MetricPlan and exclude only metrics judged irrelevant.",
-        "data_domains": domains,
+        "tool_id": str(metric["id"]),
+        "name": str(metric["name"]),
+        "purpose": purpose,
+        "question_tags": sorted({str(tag) for tag in metric.get("use_when") or [] if str(tag).strip()}),
+        "primary_spatial_unit": str(first_granularity.get("unit") or "scope"),
+        "action_targets": sorted({str(target) for target in actionability.get("action_targets") or [] if str(target).strip()}),
+        "implementation_status": str(metric["implementation_status"]),
     }
 
 
+def build_index_payload(payload: dict[str, Any], *, catalog_file: Path) -> dict[str, Any]:
+    """Build the catalog authors see before selecting a tool.
+
+    Deliberately omit source coverage, runtime rules, input schemas, and detailed
+    semantics. Those belong to the tool module and ``detail(tool_id)``.
+    """
+
+    del catalog_file  # The V4.1 discovery artifact intentionally has no provenance internals.
+    metrics = [_catalog_item(metric) for metric in payload.get("metrics") or []]
+    return {"metrics": sorted(metrics, key=lambda item: item["tool_id"])}
+
 def write_index(payload: dict[str, Any], *, target: Path) -> None:
-    target.write_text(
-        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False, width=120),
-        encoding="utf-8",
-    )
+    with target.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False, width=120))
 
 
 def validate_index(payload: dict[str, Any], *, catalog: dict[str, Any], catalog_file: Path) -> None:
@@ -331,95 +279,54 @@ def validate_index(payload: dict[str, Any], *, catalog: dict[str, Any], catalog_
         raise ValueError("metric catalog index is stale; run build-index")
 
 
-def _matches(value: str, filters: list[str]) -> bool:
-    if not filters:
-        return True
-    normalized = value.strip().lower()
-    return any(normalized == item.strip().lower() for item in filters)
-
-
-def list_metrics(
-    payload: dict[str, Any],
-    *,
-    families: list[str] | None = None,
-    implementation_statuses: list[str] | None = None,
-    use_when: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    family_filters = families or []
-    status_filters = implementation_statuses or []
-    use_filters = [item.strip().lower() for item in (use_when or []) if item.strip()]
-    result = []
-    for metric in payload.get("metrics") or []:
-        if not _matches(str(metric.get("family") or ""), family_filters):
-            continue
-        if not _matches(str(metric.get("implementation_status") or ""), status_filters):
-            continue
-        tags = [str(item).strip().lower() for item in metric.get("use_when") or []]
-        if use_filters and not any(any(query in tag for tag in tags) for query in use_filters):
-            continue
-        result.append(metric)
-    return result
-
-
-def describe_metrics(payload: dict[str, Any], metric_ids: list[str]) -> list[dict[str, Any]]:
+def detail_metric(payload: dict[str, Any], metric_id: str) -> dict[str, Any]:
     by_id = {str(item.get("id")): item for item in payload.get("metrics") or []}
-    missing = [metric_id for metric_id in metric_ids if metric_id not in by_id]
-    if missing:
-        raise KeyError(", ".join(missing))
-    return [by_id[metric_id] for metric_id in metric_ids]
-
+    try:
+        return by_id[metric_id]
+    except KeyError as exc:
+        raise KeyError(metric_id) from exc
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=catalog_path())
     parser.add_argument("--index", type=Path, default=index_path())
     subparsers = parser.add_subparsers(dest="command", required=True)
-    list_parser = subparsers.add_parser("list", help="List metrics with optional filters")
-    list_parser.add_argument("--family", action="append", default=[])
-    list_parser.add_argument("--implementation-status", action="append", default=[])
-    list_parser.add_argument("--use-when", action="append", default=[])
-    describe_parser = subparsers.add_parser("describe", help="Describe one or more metric ids")
-    describe_parser.add_argument("metric_id", nargs="+")
-    subparsers.add_parser("validate", help="Validate the detailed catalog contract")
-    subparsers.add_parser("build-index", help="Generate the compact startup index")
-    subparsers.add_parser("validate-index", help="Validate that the startup index matches the catalog")
+    subparsers.add_parser("catalog", help="Read the lightweight V4.1 metric catalog")
+    detail_parser = subparsers.add_parser("detail", help="Read details for a selected metric")
+    detail_parser.add_argument("tool_id")
+    subparsers.add_parser("validate", help="Validate the detailed tool definitions")
+    subparsers.add_parser("build-index", help="Generate the lightweight V4.1 metric catalog")
+    subparsers.add_parser("validate-index", help="Validate that the V4.1 catalog matches tool definitions")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        payload = load_catalog(args.catalog)
-        if args.command == "list":
-            metrics = list_metrics(
-                payload,
-                families=args.family,
-                implementation_statuses=args.implementation_status,
-                use_when=args.use_when,
-            )
-            output = {"count": len(metrics), "metrics": metrics}
-        elif args.command == "describe":
-            metrics = describe_metrics(payload, args.metric_id)
-            output = {"count": len(metrics), "metrics": metrics}
-        elif args.command == "build-index":
-            index = build_index_payload(payload, catalog_file=args.catalog)
-            write_index(index, target=args.index)
-            output = {"written": str(args.index), "data_domain_count": len(index["data_domains"])}
-        elif args.command == "validate-index":
+        if args.command == "catalog":
             index = yaml.safe_load(args.index.read_text(encoding="utf-8")) or {}
-            validate_index(index, catalog=payload, catalog_file=args.catalog)
-            output = {
-                "valid": True,
-                "catalog_sha256": index.get("catalog_sha256"),
-                "metric_count": len(payload.get("metrics") or []),
-                "data_domain_count": len(index.get("data_domains") or []),
-            }
+            metrics = index.get("metrics")
+            if not isinstance(metrics, list):
+                raise ValueError("metric catalog index must contain metrics")
+            output = {"count": len(metrics), "metrics": metrics}
         else:
-            output = {
-                "valid": True,
-                "catalog_version": payload.get("catalog_version"),
-                "metric_count": len(payload.get("metrics") or []),
-            }
+            payload = load_catalog(args.catalog)
+            if args.command == "detail":
+                output = {"metric": detail_metric(payload, args.tool_id)}
+            elif args.command == "build-index":
+                index = build_index_payload(payload, catalog_file=args.catalog)
+                write_index(index, target=args.index)
+                output = {"written": str(args.index), "metric_count": len(index["metrics"])}
+            elif args.command == "validate-index":
+                index = yaml.safe_load(args.index.read_text(encoding="utf-8")) or {}
+                validate_index(index, catalog=payload, catalog_file=args.catalog)
+                output = {"valid": True, "metric_count": len(index["metrics"])}
+            else:
+                output = {
+                    "valid": True,
+                    "catalog_version": payload.get("catalog_version"),
+                    "metric_count": len(payload.get("metrics") or []),
+                }
     except (OSError, ValueError, yaml.YAMLError, KeyError) as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         return 2

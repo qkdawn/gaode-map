@@ -56,9 +56,9 @@ def _validation_steps(strategy: str, scenario: str, place_type: str) -> List[str
     if scenario == "night_social":
         steps.append("field_check_1900_2200_stay_and_outdoor_conditions")
     if scenario == "community":
-        steps.append("field_check_community_entrances_daily_routes")
+        steps.append("field_check_community_daily_routes")
     if scenario == "student":
-        steps.append("field_check_school_entrances_after_school_peak_price_band")
+        steps.append("field_check_school_after_school_peak_price_band")
     if scenario == "family":
         steps.append("field_check_family_stay_space_parking_weekend_flow")
     return steps[:5]

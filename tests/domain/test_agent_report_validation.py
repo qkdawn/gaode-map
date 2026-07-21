@@ -28,7 +28,7 @@ def _run() -> AnalysisRun:
     )
     return AnalysisRun(
         run_id="run:test",
-        capability_id="spatial-business-analyst",
+        capability_id="urban-strategy-stage1",
         status="completed",
         created_at="2026-07-14T00:00:00Z",
         decision_agenda=ProjectDecisionAgenda(

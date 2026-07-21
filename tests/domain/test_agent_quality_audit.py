@@ -18,8 +18,8 @@ def movement_routes():
             "route_id": f"route-{movement_type}",
             "movement_type": movement_type,
             "title": labels[movement_type],
-            "role": "连接项目入口与礼堂",
-            "entry_or_origin": "南侧入口",
+            "role": "连接南侧道路与礼堂",
+            "origin": "南侧道路",
             "destinations": ["原县政府礼堂"],
             "affected_space_ids": ["space-auditorium"],
             "operating_windows": ["日常开放时段"],
@@ -44,7 +44,7 @@ def complete_package():
         "evidence_nodes": [
             {
                 "id": "evidence-1",
-                "claim": "项目范围内存在历史建筑院落",
+                "claim": "分析范围内存在历史建筑院落",
                 "evidence_type": "F",
                 "status": "verified",
                 "source_ref": "项目基础资料 p.12",
@@ -52,7 +52,7 @@ def complete_package():
                 "source_date": "2026-07-01",
                 "source_locator": "document:project-doc#page=12&node=document-node-12",
                 "method": "document_read",
-                "scope": "项目红线",
+                "scope": "分析范围",
                 "comparison_baseline": "",
                 "confidence": "high",
                 "limitation": "建筑状态仍需逐栋勘察",
@@ -145,7 +145,7 @@ def complete_package():
                         {"id": "heavy-food", "reason": "消防与排烟受限"}
                     ],
                     "audience_scenarios": ["社区周末文化活动"],
-                    "access_and_movement": {"visitor_entry": "南侧主入口"},
+                    "access_and_movement": {"visitor_origin": "南侧道路"},
                     "operation_strategy": {"operator": "社区文化运营主体"},
                     "renovation_and_delivery": {"phase": "一期轻量改造"},
                     "implementation_phase": "phase_1",

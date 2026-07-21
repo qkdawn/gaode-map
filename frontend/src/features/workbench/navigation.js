@@ -8,6 +8,7 @@
         TIMESERIES: 'timeseries',
         METRICS: 'metrics',
         SYNTAX: 'syntax',
+        SHARED_GRID: 'shared_grid',
         AGENT: 'agent',
     });
 
@@ -35,6 +36,7 @@
                         || this.hasSimplifyDisplayTarget('timeseries')
                         || this.hasSimplifyDisplayTarget('metrics')
                         || this.hasSimplifyDisplayTarget('syntax')
+                        || this.hasSimplifyDisplayTarget('shared_grid')
                     );
                 const displayAllowsPoi = (typeof this.hasSimplifyDisplayTarget === 'function')
                     ? (this.hasSimplifyDisplayTarget('poi') && !analysisDisplayActive)
@@ -267,6 +269,13 @@
                     return;
                 }
                 if (nextPanelId === STEP3_PANEL_IDS.METRICS) {
+                    this.applySimplifyPointVisibility();
+                    return;
+                }
+                if (nextPanelId === STEP3_PANEL_IDS.SHARED_GRID) {
+                    if (typeof this.ensureSharedGridPanelEntryState === 'function') {
+                        this.ensureSharedGridPanelEntryState();
+                    }
                     this.applySimplifyPointVisibility();
                     return;
                 }

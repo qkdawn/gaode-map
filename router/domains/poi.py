@@ -181,7 +181,7 @@ async def build_poi_grid_metrics(payload: PoiGridMetricsRequest):
                 total=7,
                 extra={"grid_type": "shared_raster", "arcgis_enabled": True},
             )
-        logger.exception("POI shared grid metrics failed")
+        logger.exception("POI raster grid metrics failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

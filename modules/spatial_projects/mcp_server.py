@@ -6,17 +6,47 @@ when deploying the same server for a remote MCP client.
 """
 
 import argparse
+import base64
 import inspect
 import json
+import re
 import sys
-from typing import Any
+import types
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy.exc import SQLAlchemyError
+
+from modules.documents.service import read_document_source
+from modules.report_visuals.agent_tools import (
+    get_report_vega_visual_asset as _get_report_vega_visual_asset,
+    read_report_vega_rendered_report as _read_report_vega_rendered_report,
+    read_report_vega_visual_asset as _read_report_vega_visual_asset,
+    read_report_vega_visual_manifest as _read_report_vega_visual_manifest,
+    read_report_vega_visual_plan as _read_report_vega_visual_plan,
+    render_report_vega_visuals as _render_report_vega_visuals,
+    report_visual_template_catalog as _report_visual_template_catalog,
+)
 from modules.spatial_projects.service import SpatialProjectService
+from modules.spatial_projects.skill_tools import (
+    check_arcgis_report_status as _check_arcgis_report_status,
+    create_spatial_report_visual as _create_spatial_report_visual,
+    get_spatial_report_visual_asset as _get_spatial_report_visual_asset,
+    read_spatial_report_visual_asset as _read_spatial_report_visual_asset,
+    read_spatial_report_visual_manifest as _read_spatial_report_visual_manifest,
+    execute_metric as _execute_metric,
+    metric_catalog as _metric_catalog,
+    metric_detail as _metric_detail,
+    list_metric_results as _list_metric_results,
+    read_metric_result as _read_metric_result,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
+    from mcp.types import ResourceLink
 except ImportError:  # pragma: no cover - exercised in dependency-light local environments
     FastMCP = None
+    ResourceLink = None
 
 
 class _StdioMcpFallback:
@@ -29,6 +59,7 @@ class _StdioMcpFallback:
     def __init__(self, name: str):
         self.name = name
         self._tools: dict[str, Any] = {}
+        self._resources: list[tuple[str, Any, str]] = []
 
     def tool(self):
         def register(callback):
@@ -37,17 +68,52 @@ class _StdioMcpFallback:
 
         return register
 
+    def resource(self, uri: str, *, mime_type: str = "application/octet-stream", **_kwargs: Any):
+        def register(callback):
+            self._resources.append((uri, callback, mime_type))
+            return callback
+        return register
+
     @staticmethod
     def _schema(callback: Any) -> dict[str, Any]:
         properties: dict[str, Any] = {}
         required = []
+        try:
+            resolved_annotations = get_type_hints(callback)
+        except (NameError, TypeError):
+            resolved_annotations = {}
         for parameter in inspect.signature(callback).parameters.values():
-            annotation = parameter.annotation
-            type_name = "integer" if annotation is int else "boolean" if annotation is bool else "string"
-            properties[parameter.name] = {"type": type_name}
+            annotation = resolved_annotations.get(parameter.name, parameter.annotation)
+            properties[parameter.name] = _StdioMcpFallback._annotation_schema(annotation)
             if parameter.default is inspect.Parameter.empty:
                 required.append(parameter.name)
         return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
+
+    @staticmethod
+    def _annotation_schema(annotation: Any) -> dict[str, Any]:
+        origin = get_origin(annotation)
+        args = get_args(annotation)
+        if origin in {Union, types.UnionType}:
+            non_null = [item for item in args if item is not type(None)]
+            if len(non_null) == 1:
+                return _StdioMcpFallback._annotation_schema(non_null[0])
+            return {"anyOf": [_StdioMcpFallback._annotation_schema(item) for item in non_null]}
+        if annotation is int:
+            return {"type": "integer"}
+        if annotation is float:
+            return {"type": "number"}
+        if annotation is bool:
+            return {"type": "boolean"}
+        if annotation is str:
+            return {"type": "string"}
+        if origin in {list, set, tuple}:
+            item_schema = _StdioMcpFallback._annotation_schema(args[0]) if args else {}
+            return {"type": "array", "items": item_schema}
+        if origin in {dict} or annotation in {dict, Any}:
+            return {"type": "object", "additionalProperties": True}
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            return annotation.model_json_schema()
+        return {"type": "string"}
 
     def _tool_list(self) -> dict[str, Any]:
         return {
@@ -77,6 +143,20 @@ class _StdioMcpFallback:
             return {"jsonrpc": "2.0", "id": request_id, "result": {}}
         if method == "tools/list":
             return {"jsonrpc": "2.0", "id": request_id, "result": self._tool_list()}
+        if method == "resources/read":
+            params = request.get("params") if isinstance(request.get("params"), dict) else {}
+            uri = str(params.get("uri") or "")
+            for template, callback, mime_type in self._resources:
+                pattern = re.escape(template).replace(r"\{history_id\}", r"(?P<history_id>[^/]+)").replace(r"\{document_id\}", r"(?P<document_id>[^/]+)")
+                match = re.fullmatch(pattern, uri)
+                if match:
+                    payload = callback(**match.groupdict())
+                    if isinstance(payload, bytes):
+                        contents = {"uri": uri, "mimeType": mime_type, "blob": base64.b64encode(payload).decode("ascii")}
+                    else:
+                        contents = {"uri": uri, "mimeType": "text/plain", "text": str(payload)}
+                    return {"jsonrpc": "2.0", "id": request_id, "result": {"contents": [contents]}}
+            return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "unknown_resource"}}
         if method == "tools/call":
             params = request.get("params") if isinstance(request.get("params"), dict) else {}
             name = str(params.get("name") or "")
@@ -111,13 +191,74 @@ service = SpatialProjectService()
 mcp = FastMCP("Spatial Project") if FastMCP is not None else _StdioMcpFallback("spatial-project")
 
 
-def _call(callback, **kwargs: Any) -> dict[str, Any]:
+def _call(callback, **kwargs: Any) -> Any:
     try:
         return callback(**kwargs)
     except LookupError as exc:
         return {"status": "not_found", "error": str(exc)}
     except ValueError as exc:
         return {"status": "invalid_request", "error": str(exc)}
+    except SQLAlchemyError:
+        return {
+            "status": "unavailable",
+            "error": "data_source_unavailable",
+            "retryable": True,
+            "limitations": ["项目数据源当前不可用，未执行或读取本次请求。"],
+        }
+
+
+class GeoJSONGeometryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon"]
+    coordinates: list[Any]
+
+
+class SpatialRecordInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_id: str
+    record_id: str
+    year: int | None = None
+
+
+class SpatialQueryInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    relation: Literal["nearest", "within_distance", "intersects", "at_point"]
+    point: list[float] | None = Field(default=None, min_length=2, max_length=2)
+    geometry: GeoJSONGeometryInput | None = None
+    coord_type: Literal["wgs84", "gcj02"]
+    max_distance_m: float | None = Field(default=None, ge=0)
+    min_overlap_ratio: float | None = Field(default=None, ge=0, le=1)
+    record: SpatialRecordInput | None = None
+    exclude_target: bool = True
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        targets = [self.point is not None, self.geometry is not None, self.record is not None]
+        if sum(targets) != 1:
+            raise ValueError("spatial 必须且只能提供 point、geometry 或 record 之一")
+        if self.relation == "within_distance" and self.max_distance_m is None:
+            raise ValueError("within_distance 必须提供 max_distance_m")
+        if self.relation == "at_point" and self.point is None and self.record is None:
+            raise ValueError("at_point 只能使用 point 或 record")
+        return self
+
+
+class SortInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    field: str
+    direction: Literal["asc", "desc"] = "asc"
+
+
+class AggregateMetricInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    op: Literal["count", "sum", "avg", "min", "max", "area_weighted_sum", "area_weighted_avg", "intersection_length_sum"] = "count"
+    field: str = "*"
+    as_: str | None = Field(default=None, alias="as")
+
+    def to_payload(self) -> dict[str, Any]:
+        payload = self.model_dump(by_alias=True, exclude_none=True)
+        return payload
 
 
 @mcp.tool()
@@ -139,27 +280,335 @@ def list_history_project_documents(history_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def get_history_project_document_resource(history_id: str, document_id: str) -> Any:
+    """Return a link to the original DOCX or PDF so the client can read it on demand."""
+    metadata = _call(
+        service.get_history_project_document_resource,
+        history_id=history_id,
+        document_id=document_id,
+    )
+    if not isinstance(metadata, dict) or metadata.get("status") in {"not_found", "invalid_request", "unavailable"}:
+        return metadata
+    resource = {
+        "type": "resource_link",
+        "uri": f"spatial-document://{history_id}/{document_id}/original",
+        "name": metadata["file_name"],
+        "title": metadata["title"],
+        "description": "项目上传的原始文档。读取该资源可获得未经摘要的 DOCX 或 PDF。",
+        "mimeType": metadata["mime_type"],
+        "size": metadata["size"],
+    }
+    return ResourceLink.model_validate(resource) if ResourceLink is not None else resource
+
+
+@mcp.resource(
+    "spatial-document://{history_id}/{document_id}/original",
+    name="history-project-original-document",
+    description="Original DOCX or PDF uploaded for one history project.",
+    mime_type="application/octet-stream",
+)
+def read_history_project_document_resource(history_id: str, document_id: str) -> bytes:
+    """Read a project document through its opaque MCP URI without exposing a local path."""
+    _, content = read_document_source(document_id, history_id=history_id)
+    return content
+
+
+@mcp.tool()
 def list_history_project_datasets(history_id: str) -> dict[str, Any]:
     """List datasets available for one analysis history, including years, counts, and warnings."""
     return _call(service.list_history_project_datasets, history_id=history_id)
 
 
 @mcp.tool()
-def query_history_project_dataset(history_id: str, source_id: str, filters: dict[str, Any] | None = None, sort: dict[str, Any] | None = None, limit: int = 20, offset: int = 0, year: int | None = None) -> dict[str, Any]:
-    """Read a bounded page from a history-backed spatial dataset."""
-    return _call(service.query_history_project_dataset, history_id=history_id, source_id=source_id, filters=filters, sort=sort, limit=limit, offset=offset, year=year)
+def query_history_project_dataset(
+    history_id: str,
+    source_id: str,
+    filters: dict[str, Any] | None = None,
+    sort: SortInput | None = None,
+    spatial: SpatialQueryInput | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    year: int | None = None,
+) -> dict[str, Any]:
+    """Read dataset records, optionally around a coordinate or inside a geometry.
+
+    ``spatial`` accepts ``relation`` (nearest, within_distance, intersects, or
+    at_point), exactly one of ``point: [lng, lat]`` or GeoJSON ``geometry``,
+    ``coord_type`` (wgs84 or gcj02), and ``max_distance_m`` when required.
+    """
+    return _call(
+        service.query_history_project_dataset,
+        history_id=history_id,
+        source_id=source_id,
+        filters=filters,
+        sort=sort.model_dump(exclude_none=True) if sort else None,
+        spatial=spatial.model_dump(exclude_none=True) if spatial else None,
+        limit=limit,
+        offset=offset,
+        year=year,
+    )
 
 
 @mcp.tool()
-def aggregate_history_project_dataset(history_id: str, source_id: str, group_by: str = "", metrics: list[dict[str, Any]] | None = None, filters: dict[str, Any] | None = None, top_k: int = 20, year: int | None = None) -> dict[str, Any]:
-    """Aggregate a history-backed dataset without loading every record into the Agent context."""
-    return _call(service.aggregate_history_project_dataset, history_id=history_id, source_id=source_id, group_by=group_by, metrics=metrics, filters=filters, top_k=top_k, year=year)
+def create_history_project_dataset_query_snapshot(
+    history_id: str,
+    source_id: str,
+    filters: dict[str, Any] | None = None,
+    spatial: SpatialQueryInput | None = None,
+    year: int | None = None,
+) -> dict[str, Any]:
+    """Create an immutable geometry snapshot for a complete spatial dataset query.
+
+    The response contains provenance and counts only. Geometry remains private
+    and can be referenced later through ``input_snapshot_ids`` when rendering.
+    """
+    return _call(
+        service.create_history_project_dataset_query_snapshot,
+        history_id=history_id,
+        source_id=source_id,
+        filters=filters,
+        spatial=spatial.model_dump(exclude_none=True) if spatial else None,
+        year=year,
+    )
+
+
+@mcp.tool()
+def aggregate_history_project_dataset(
+    history_id: str,
+    source_id: str,
+    group_by: str = "",
+    metrics: list[AggregateMetricInput] | None = None,
+    filters: dict[str, Any] | None = None,
+    spatial: SpatialQueryInput | None = None,
+    top_k: int = 20,
+    year: int | None = None,
+) -> dict[str, Any]:
+    """Aggregate dataset records around a coordinate or inside a geometry.
+
+    ``spatial`` uses the same relation, point/geometry, coordinate type, and
+    distance contract as ``query_history_project_dataset``.
+    """
+    return _call(
+        service.aggregate_history_project_dataset,
+        history_id=history_id,
+        source_id=source_id,
+        group_by=group_by,
+        metrics=[item.to_payload() for item in metrics] if metrics else None,
+        filters=filters,
+        spatial=spatial.model_dump(exclude_none=True) if spatial else None,
+        top_k=top_k,
+        year=year,
+    )
 
 
 @mcp.tool()
 def read_history_project_dataset_record(history_id: str, source_id: str, record_id: str, year: int | None = None) -> dict[str, Any]:
     """Read one spatial dataset record from a history-backed project."""
     return _call(service.read_history_project_dataset_record, history_id=history_id, source_id=source_id, record_id=record_id, year=year)
+
+
+@mcp.tool()
+def list_spatial_metric_results(history_id: str, run_id: str | None = None, tool_id: str | None = None) -> dict[str, Any]:
+    """List persisted metric results from completed spatial-business analysis runs."""
+    return _call(_list_metric_results, history_id=history_id, run_id=run_id, tool_id=tool_id)
+
+
+@mcp.tool()
+def read_spatial_metric_result(history_id: str, result_id: str, run_id: str | None = None) -> dict[str, Any]:
+    """Read one persisted metric result without executing the metric again."""
+    return _call(_read_metric_result, history_id=history_id, result_id=result_id, run_id=run_id)
+
+
+@mcp.tool()
+def spatial_metric_catalog() -> dict[str, Any]:
+    """Discover the business-semantic spatial metrics that both main and specialist Agents may use."""
+    return _metric_catalog()
+
+
+@mcp.tool()
+def spatial_metric_detail(tool_id: str) -> dict[str, Any]:
+    """Read one metric knowledge card before deciding whether to execute it."""
+    return _call(_metric_detail, tool_id=tool_id)
+
+
+@mcp.tool()
+def execute_spatial_metric(
+    history_id: str,
+    tool_id: str,
+    parameters: dict[str, Any] | None = None,
+    comparison_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute an authorized metric for one saved project without exposing raw geometry or GIS infrastructure."""
+    return _call(
+        _execute_metric,
+        history_id=history_id,
+        tool_id=tool_id,
+        parameters=parameters,
+        comparison_context=comparison_context,
+    )
+
+
+@mcp.tool()
+def check_arcgis_report_status() -> dict[str, Any]:
+    """Check ArcGIS Bridge connectivity, credentials, and approved report templates."""
+    return _call(_check_arcgis_report_status)
+
+
+@mcp.tool()
+def create_spatial_report_visual(history_id: str, visual_request: dict[str, Any]) -> dict[str, Any]:
+    """Render an approved real-data thematic SVG map from prior authorized metric results."""
+    return _call(
+        _create_spatial_report_visual,
+        history_id=history_id,
+        visual_request=visual_request,
+    )
+
+
+@mcp.tool()
+def get_spatial_report_visual_asset(history_id: str, asset_id: str) -> Any:
+    """Return a resource link for one generated ArcGIS report visual."""
+    metadata = _call(
+        _get_spatial_report_visual_asset,
+        history_id=history_id,
+        asset_id=asset_id,
+    )
+    if not isinstance(metadata, dict) or metadata.get("status") != "available":
+        return metadata
+    result = metadata["result"]
+    resource = {
+        "type": "resource_link",
+        "uri": result["resource_uri"],
+        "name": result["filename"],
+        "title": "ArcGIS 报告视觉",
+        "description": "已通过安全校验的 ArcGIS SVG 报告视觉。",
+        "mimeType": "image/svg+xml",
+    }
+    return ResourceLink.model_validate(resource) if ResourceLink is not None else resource
+
+
+@mcp.tool()
+def read_spatial_report_visual_manifest(history_id: str, asset_id: str) -> dict[str, Any]:
+    """Re-audit a generated ArcGIS map through its persisted quality manifest."""
+    return _call(
+        _read_spatial_report_visual_manifest,
+        history_id=history_id,
+        asset_id=asset_id,
+    )
+
+
+@mcp.resource(
+    "spatial-report-visual://{history_id}/{asset_id}",
+    name="spatial-report-visual-asset",
+    description="Validated ArcGIS SVG report visual generated for one history project.",
+    mime_type="image/svg+xml",
+)
+def read_spatial_report_visual_resource(history_id: str, asset_id: str) -> str:
+    """Read one persisted ArcGIS report visual without exposing local paths."""
+    return _read_spatial_report_visual_asset(history_id, asset_id)
+
+
+@mcp.tool()
+def report_visual_template_catalog() -> dict[str, Any]:
+    """Discover the only approved constrained Vega report-visual templates for the visual-evidence editor."""
+    return _report_visual_template_catalog()
+
+
+@mcp.tool()
+def render_report_vega_visuals(
+    history_id: str,
+    report_id: str,
+    report_markdown: str,
+    visual_plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Render a reviewed Vega report-visual plan from same-history persisted metric results only."""
+    return _call(
+        _render_report_vega_visuals,
+        history_id=history_id,
+        report_id=report_id,
+        report_markdown=report_markdown,
+        visual_plan=visual_plan,
+    )
+
+
+@mcp.tool()
+def get_report_vega_visual_asset(history_id: str, report_id: str, asset_id: str) -> Any:
+    """Return a resource link for one generated constrained Vega SVG report visual."""
+    metadata = _call(
+        _get_report_vega_visual_asset,
+        history_id=history_id,
+        report_id=report_id,
+        asset_id=asset_id,
+    )
+    if not isinstance(metadata, dict) or metadata.get("status") != "available":
+        return metadata
+    result = metadata["result"]
+    resource = {
+        "type": "resource_link",
+        "uri": result["resource_uri"],
+        "name": result["filename"],
+        "title": "Vega 报告视觉",
+        "description": "已通过安全校验、由批准模板生成的 SVG 报告视觉。",
+        "mimeType": "image/svg+xml",
+    }
+    return ResourceLink.model_validate(resource) if ResourceLink is not None else resource
+
+
+@mcp.tool()
+def read_report_vega_visual_manifest(history_id: str, report_id: str) -> dict[str, Any]:
+    """Read the traceability manifest for a constrained Vega report-visual bundle."""
+    return _call(
+        _read_report_vega_visual_manifest,
+        history_id=history_id,
+        report_id=report_id,
+    )
+
+
+@mcp.resource(
+    "report-vega-visual://{history_id}/{report_id}/{asset_id}",
+    name="report-vega-visual-asset",
+    description="Validated SVG generated from an approved constrained Vega report visual template.",
+    mime_type="image/svg+xml",
+)
+def read_report_vega_visual_resource(history_id: str, report_id: str, asset_id: str) -> str:
+    """Read one persisted constrained Vega SVG without exposing local paths."""
+    return _read_report_vega_visual_asset(history_id, report_id, asset_id)
+
+
+@mcp.resource(
+    "report-vega-report://{history_id}/{report_id}",
+    name="report-vega-rendered-report",
+    description="Markdown report after constrained Vega visual blocks are assembled.",
+    mime_type="text/markdown",
+)
+def read_report_vega_report_resource(history_id: str, report_id: str) -> str:
+    """Read the assembled Markdown report for one constrained Vega bundle."""
+    return _read_report_vega_rendered_report(history_id, report_id)
+
+
+@mcp.resource(
+    "report-vega-visual-plan://{history_id}/{report_id}",
+    name="report-vega-visual-plan",
+    description="Auditable template-selection plan submitted by the visual-evidence editor.",
+    mime_type="application/json",
+)
+def read_report_vega_visual_plan_resource(history_id: str, report_id: str) -> str:
+    """Read the persisted visual plan without exposing any filesystem path."""
+    return _read_report_vega_visual_plan(history_id, report_id)
+
+
+@mcp.resource(
+    "report-vega-visual-manifest://{history_id}/{report_id}",
+    name="report-vega-visual-manifest",
+    description="Traceability manifest for constrained Vega report visual assets.",
+    mime_type="application/json",
+)
+def read_report_vega_visual_manifest_resource(history_id: str, report_id: str) -> str:
+    """Read the persisted traceability manifest without exposing any filesystem path."""
+    return json.dumps(
+        _read_report_vega_visual_manifest(history_id, report_id)["result"]["visual_manifest"],
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
 
 
 def main() -> None:

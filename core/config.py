@@ -137,6 +137,16 @@ class Settings(BaseSettings):
         validation_alias="AMAP_JS_API_KEY",
         description="高德 Web JS API Key",
     )
+    amap_route_timeout_s: float = Field(
+        15.0,
+        validation_alias="AMAP_ROUTE_TIMEOUT_S",
+        description="高德步行路径规划请求超时时间（秒）",
+    )
+    amap_route_min_interval_s: float = Field(
+        0.15,
+        validation_alias="AMAP_ROUTE_MIN_INTERVAL_S",
+        description="高德步行路径规划请求之间的最小间隔（秒）",
+    )
     amap_js_security_code: str = Field(
         "",
         validation_alias="AMAP_JS_SECURITY_CODE",

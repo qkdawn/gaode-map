@@ -8,9 +8,7 @@
             h3NeighborRing: 1,
             h3GridMinOverlapRatio: 0.15,
             h3ParamsSubTab: 'grid',
-            h3ArcgisImageVersion: 0,
-            h3ArcgisSnapshotLoadError: false,
-            isGeneratingH3ArcgisSnapshot: false,
+            h3ArcgisReportMapLoadError: false,
             h3BasemapMuted: false,
             h3SimplifyMenuOpen: false,
             h3SimplifyTargets: ['map', 'isochrone', 'drawn_polygon', 'poi'],
@@ -231,10 +229,10 @@
                 return ['map', 'isochrone', 'drawn_polygon', 'poi'];
             },
             getSimplifyAnalysisTargets() {
-                return ['h3', 'population', 'nightlight', 'gwr', 'timeseries', 'syntax'];
+                return ['h3', 'population', 'nightlight', 'gwr', 'timeseries', 'syntax', 'shared_grid'];
             },
             getSimplifyGridAnalysisTargets() {
-                return ['h3', 'population', 'nightlight', 'gwr', 'timeseries'];
+                return ['h3', 'population', 'nightlight', 'gwr', 'timeseries', 'shared_grid'];
             },
             getAllowedSimplifyTargets() {
                 return [
@@ -260,6 +258,7 @@
                 if (panel === 'gwr') return 'gwr';
                 if (panel === 'timeseries') return 'timeseries';
                 if (panel === 'syntax') return 'syntax';
+                if (panel === 'shared_grid') return 'shared_grid';
                 if (panel === 'poi' && poiSubTab === 'grid') return 'h3';
                 return '';
             },
@@ -578,6 +577,7 @@
                 const showGwr = this.step === 2 && normalizedTargets.indexOf('gwr') >= 0;
                 const showTimeseries = this.step === 2 && normalizedTargets.indexOf('timeseries') >= 0;
                 const showSyntax = this.step === 2 && normalizedTargets.indexOf('syntax') >= 0;
+                const showSharedGrid = this.step === 2 && normalizedTargets.indexOf('shared_grid') >= 0;
 
                 const clearGridDisplay = () => {
                     if (this.isPoiRasterGridMode && this.isPoiRasterGridMode()
@@ -588,15 +588,24 @@
                     }
                 };
 
-                if (showPopulation) {
+                if (showSharedGrid) {
+                    clearGridDisplay();
+                    this.clearPopulationRasterDisplayOnLeave();
+                    this.clearNightlightDisplayOnLeave();
+                    if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
+                    if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
+                    if (typeof this.applySharedGridToMap === 'function') this.applySharedGridToMap();
+                } else if (showPopulation) {
                     clearGridDisplay();
                     this.clearNightlightDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
+                    if (typeof this.clearSharedGridDisplayOnLeave === 'function') this.clearSharedGridDisplayOnLeave();
                     this.restorePopulationRasterDisplayOnEnter();
                 } else if (showNightlight) {
                     clearGridDisplay();
                     this.clearPopulationRasterDisplayOnLeave();
+                    if (typeof this.clearSharedGridDisplayOnLeave === 'function') this.clearSharedGridDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
                     this.restoreNightlightDisplayOnEnter();
@@ -604,12 +613,14 @@
                     clearGridDisplay();
                     this.clearPopulationRasterDisplayOnLeave();
                     this.clearNightlightDisplayOnLeave();
+                    if (typeof this.clearSharedGridDisplayOnLeave === 'function') this.clearSharedGridDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
                     if (typeof this.restoreGwrDisplayOnEnter === 'function') this.restoreGwrDisplayOnEnter();
                 } else if (showTimeseries) {
                     clearGridDisplay();
                     this.clearPopulationRasterDisplayOnLeave();
                     this.clearNightlightDisplayOnLeave();
+                    if (typeof this.clearSharedGridDisplayOnLeave === 'function') this.clearSharedGridDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
                     if (typeof this.restoreTimeseriesDisplayOnEnter === 'function') this.restoreTimeseriesDisplayOnEnter();
                 } else if (showH3) {
@@ -617,6 +628,7 @@
                     this.clearNightlightDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
+                    if (typeof this.clearSharedGridDisplayOnLeave === 'function') this.clearSharedGridDisplayOnLeave();
                     this.restoreH3GridDisplayOnEnter();
                 } else {
                     clearGridDisplay();
@@ -624,6 +636,7 @@
                     this.clearNightlightDisplayOnLeave();
                     if (typeof this.clearGwrDisplayOnLeave === 'function') this.clearGwrDisplayOnLeave();
                     if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave();
+                    if (typeof this.clearSharedGridDisplayOnLeave === 'function') this.clearSharedGridDisplayOnLeave();
                 }
 
                 if (showSyntax) {
@@ -768,55 +781,23 @@
                     : '-';
                 return `Gi*z=${giText} | LISA I=${lisaText} | 结构信号=${signalText} | 密度=${densityText}`;
             },
-            getArcgisSnapshotUrl() {
+            getArcgisReportMap() {
                 const summary = this.h3AnalysisSummary || {};
-                const giUrl = this._normalizeArcgisSnapshotUrl(summary.arcgis_image_url_gi);
-                const lisaUrl = this._normalizeArcgisSnapshotUrl(summary.arcgis_image_url_lisa);
-                const fallbackUrl = this._normalizeArcgisSnapshotUrl(summary.arcgis_image_url);
-                if (this.h3SubTab === 'structure_map') {
-                    if (this.h3StructureFillMode === 'lisa_i') {
-                        // Keep snapshot layer-consistent: never fallback to Gi* image in LISA mode.
-                        return lisaUrl || null;
-                    }
-                    // Keep snapshot layer-consistent: never fallback to LISA image in Gi* mode.
-                    return giUrl || null;
-                }
-                return fallbackUrl || giUrl || lisaUrl || null;
+                const maps = summary.arcgis_report_maps || {};
+                const mode = this.h3StructureFillMode === 'lisa_i' ? 'lisa_i' : 'gi_z';
+                const map = maps[mode];
+                return map && typeof map === 'object' ? map : null;
             },
-            getArcgisSnapshotSrc() {
-                const url = this.getArcgisSnapshotUrl();
-                if (!url) return '';
-                if (String(url).startsWith('data:')) return url;
-                const joiner = String(url).includes('?') ? '&' : '?';
-                return `${url}${joiner}v=${this.h3ArcgisImageVersion}`;
+            getArcgisReportMapSrc() {
+                const map = this.getArcgisReportMap();
+                const svg = map && typeof map.svg === 'string' ? map.svg.trim() : '';
+                return svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : '';
             },
-            _normalizeArcgisSnapshotUrl(rawUrl) {
-                const raw = String(rawUrl || '').trim();
-                if (!raw || raw.toLowerCase() === 'null' || raw.toLowerCase() === 'none') return null;
-                if (raw.startsWith('data:') || raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('/')) {
-                    return raw;
-                }
-                const slashNorm = raw.replace(/\\\\/g, '/').replace(/\\/g, '/');
-                const marker = '/static/generated/arcgis/';
-                const idx = slashNorm.indexOf(marker);
-                if (idx >= 0) {
-                    return slashNorm.slice(idx);
-                }
-                const marker2 = 'static/generated/arcgis/';
-                const idx2 = slashNorm.indexOf(marker2);
-                if (idx2 >= 0) {
-                    return '/' + slashNorm.slice(idx2);
-                }
-                return null;
-            },
-            getArcgisSnapshotTitle() {
-                if (this.h3SubTab === 'structure_map') {
-                    if (this.h3StructureFillMode === 'lisa_i') {
-                        return 'ArcGIS 结构快照（LISA / LMiIndex）';
-                    }
-                    return 'ArcGIS 结构快照（Gi* / Z-score）';
-                }
-                return 'ArcGIS 结构快照';
+            getArcgisReportMapTitle() {
+                const map = this.getArcgisReportMap();
+                return (map && map.title) || (this.h3StructureFillMode === 'lisa_i'
+                    ? 'ArcGIS LISA 局部空间自相关专题图'
+                    : 'ArcGIS Gi* 热点结构专题图');
             },
             clearGridLock() {
                 if (this.mapCore && this.mapCore.clearGridFocus) {
@@ -2145,6 +2126,7 @@
                     compute_metrics: '计算指标中',
                     arcgis_prepare: '准备 ArcGIS 中',
                     arcgis_running: 'ArcGIS 热点分析中',
+                    render_report_map: 'ArcGIS 专题图制图中',
                     finalize: '整理结果中',
                     completed: '已完成',
                     failed: '失败',
@@ -2156,7 +2138,7 @@
                     stage: 'queued',
                     message: '已接收请求，等待开始计算',
                     step: 0,
-                    total: 7,
+                    total: 8,
                     elapsed_sec: 0,
                     extra: {},
                 };
@@ -2213,7 +2195,6 @@
                         neighbor_ring: neighborRing,
                         use_arcgis: true,
                         arcgis_neighbor_ring: neighborRing,
-                        arcgis_export_image: false,
                         arcgis_timeout_sec: 240,
                         run_id: progressRunId,
                     };
@@ -2247,8 +2228,7 @@
                     // 分析完成后默认进入“分析”主栏，避免停留在参数页。
                     this.h3MainStage = 'analysis';
                     this.h3SubTab = this.getH3DefaultSubTabByStage('analysis');
-                    this.h3ArcgisSnapshotLoadError = false;
-                    this.h3ArcgisImageVersion = Date.now();
+                    this.h3ArcgisReportMapLoadError = false;
                     this.computeH3DerivedStats();
                     const baseStatus = this.h3GridCount > 0
                         ? `分析完成：${this.h3GridCount} 个网格，${(this.h3AnalysisSummary && this.h3AnalysisSummary.poi_count) || 0} 个POI`
@@ -2299,99 +2279,6 @@
                         progressTimer = null;
                     }
                     this.isComputingH3Analysis = false;
-                }
-            },
-            async generateH3ArcgisSnapshot() {
-                if (this.isComputingH3Analysis || this.isGeneratingH3ArcgisSnapshot) return;
-                if (!this.h3AnalysisGridFeatures || this.h3AnalysisGridFeatures.length === 0) {
-                    this.h3GridStatus = '请先完成网格分析，再生成结构快照';
-                    return;
-                }
-                const rawRing = this.getIsochronePolygonRing();
-                if (!rawRing) {
-                    this.h3GridStatus = '当前无有效范围，无法生成结构快照';
-                    return;
-                }
-                this.isGeneratingH3ArcgisSnapshot = true;
-                this.h3ArcgisSnapshotLoadError = false;
-                const startedAt = Date.now();
-                this.h3GridStatus = '正在生成 ArcGIS 结构快照...';
-                try {
-                    const polygon = this.getIsochronePolygonPayload();
-                    const neighborRing = Math.max(1, Math.min(3, Math.round(this._toNumber(this.h3NeighborRing, 1))));
-                    const analysisPois = this._buildH3AnalysisPois();
-                    if (!analysisPois.length) {
-                        throw new Error('当前“分析POI”配置下无可计算样本，请先勾选至少一个有数据的POI分类');
-                    }
-                    const payload = {
-                        polygon: polygon,
-                        resolution: this.h3GridResolution,
-                        coord_type: 'gcj02',
-                        include_mode: this.h3GridIncludeMode,
-                        min_overlap_ratio: this.h3GridIncludeMode === 'intersects' ? this.h3GridMinOverlapRatio : 0,
-                        pois: analysisPois,
-                        poi_coord_type: 'gcj02',
-                        neighbor_ring: neighborRing,
-                        use_arcgis: true,
-                        arcgis_neighbor_ring: neighborRing,
-                        arcgis_export_image: true,
-                        arcgis_timeout_sec: 240
-                    };
-                    const res = await fetch('/api/v1/analysis/h3-metrics', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload),
-                    });
-                    if (!res.ok) {
-                        let detail = '';
-                        try {
-                            const errJson = await res.json();
-                            if (errJson && typeof errJson === 'object') {
-                                detail = errJson.detail || JSON.stringify(errJson);
-                            } else {
-                                detail = String(errJson || '');
-                            }
-                        } catch (_) {
-                            try { detail = await res.text(); } catch (_) { }
-                        }
-                        throw new Error(detail || '结构快照生成失败');
-                    }
-                    const data = await res.json();
-                    const grid = data.grid || {};
-                    if (Array.isArray(grid.features) && grid.features.length) {
-                        this.h3AnalysisGridFeatures = grid.features;
-                        this.h3GridFeatures = this.h3AnalysisGridFeatures;
-                        this.h3GridCount = Number.isFinite(grid.count) ? grid.count : this.h3AnalysisGridFeatures.length;
-                    }
-                    this.h3AnalysisSummary = data.summary || this.h3AnalysisSummary;
-                    this.h3AnalysisCharts = data.charts || this.h3AnalysisCharts;
-                    this.computeH3DerivedStats();
-                    this.h3ArcgisImageVersion = Date.now();
-                    this.h3ArcgisSnapshotLoadError = false;
-                    const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-                    if (this.isH3DisplayActive()) {
-                        this.renderH3BySubTab();
-                        if (this.isH3PanelActive()) {
-                            await this.$nextTick();
-                            this.updateH3Charts();
-                            this.updateDecisionCards();
-                        }
-                        this.h3GridStatus = `ArcGIS 结构快照已生成（${sec}s）`;
-                    } else {
-                        this.clearH3GridDisplayOnLeave();
-                        this.h3GridStatus = `ArcGIS 结构快照已生成（${sec}s），切换到“网格”查看`;
-                    }
-                    if (typeof this.commitCurrentPoiGridResult === 'function') {
-                        this.commitCurrentPoiGridResult('h3', Number(this.poiYearSource || this.resultPoiYear || 0) || null);
-                    }
-                    if (typeof this.persistAnalysisArtifactQuietly === 'function') {
-                        this.persistAnalysisArtifactQuietly('poi_h3_grid');
-                    }
-                } catch (e) {
-                    console.error(e);
-                    this.h3GridStatus = '结构快照生成失败: ' + ((e && e.message) ? e.message : String(e));
-                } finally {
-                    this.isGeneratingH3ArcgisSnapshot = false;
                 }
             },
             disposeH3Charts() {

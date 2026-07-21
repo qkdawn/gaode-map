@@ -26,7 +26,7 @@ class HardConstraintAssessment(BaseModel):
     label: str
     state: HardConstraintState
     decision_effect: HardConstraintEffect
-    scope: str = "项目范围"
+    scope: str = "分析范围"
     finding: str
     evidence_refs: list[str] = Field(default_factory=list)
     affected_space_ids: list[str] = Field(default_factory=list)
@@ -79,7 +79,7 @@ HARD_CONSTRAINT_DEFINITIONS: tuple[HardConstraintDefinition, ...] = (
     HardConstraintDefinition(
         constraint_id="accessibility",
         label="无障碍连续性",
-        default_verification_action="核验入口、路径、垂直交通和公共服务空间的无障碍连续性。",
+        default_verification_action="核验路径、垂直交通和公共服务空间的无障碍连续性。",
         default_executor="fieldwork",
     ),
     HardConstraintDefinition(
@@ -178,7 +178,7 @@ def build_hard_constraint_screening(
                 label=definition.label,
                 state=state,
                 decision_effect=effect,
-                scope=_text(raw.get("scope")) or "项目范围",
+                scope=_text(raw.get("scope")) or "分析范围",
                 finding=finding,
                 evidence_refs=evidence_refs,
                 affected_space_ids=_text_list(raw.get("affected_space_ids")),

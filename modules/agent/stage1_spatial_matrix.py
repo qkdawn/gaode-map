@@ -105,7 +105,7 @@ class MovementRoute(BaseModel):
     movement_type: MovementType
     title: str = Field(min_length=1)
     role: str = Field(min_length=1)
-    entry_or_origin: str = Field(min_length=1)
+    origin: str = Field(min_length=1)
     destinations: list[str] = Field(min_length=1)
     affected_space_ids: list[str] = Field(min_length=1)
     operating_windows: list[str] = Field(min_length=1)
@@ -386,7 +386,7 @@ def _build_movement_presentation(matrix: dict[str, Any]) -> dict[str, Any]:
                 "role": _text(route.get("role")),
                 "status": _text(route.get("status")),
                 "status_label": _MOVEMENT_STATUS_LABELS[_text(route.get("status"))],
-                "entry_or_origin": _text(route.get("entry_or_origin")),
+                "origin": _text(route.get("origin")),
                 "destinations": deepcopy(route.get("destinations") or []),
                 "affected_space_ids": deepcopy(route.get("affected_space_ids") or []),
                 "operating_windows": deepcopy(route.get("operating_windows") or []),

@@ -41,6 +41,10 @@ def test_system_readiness_api_reports_runtime_checks(monkeypatch, tmp_path):
     monkeypatch.setattr("modules.system.readiness.settings.nightlight_data_dir", str(nightlight_dir))
     monkeypatch.setattr("modules.system.readiness.settings.arcgis_bridge_enabled", True)
     monkeypatch.setattr("modules.system.readiness.settings.arcgis_bridge_base_url", "http://127.0.0.1:18081")
+    monkeypatch.setattr("modules.system.readiness.ArcGISSpatialToolModule.report_status", lambda self: {
+        "status": "available", "ready": True, "summary": "ArcGIS 报告视觉服务已就绪。",
+        "checks": {"service_connection": {"ready": True, "status": "reachable"}}, "limitations": [],
+    })
 
     resp = client.get("/api/v1/system/readiness")
 
@@ -55,6 +59,7 @@ def test_system_readiness_api_reports_runtime_checks(monkeypatch, tmp_path):
     assert payload["checks"]["nightlight_data_dir"]["exists"] is True
     assert payload["checks"]["arcgis_bridge"]["enabled"] is True
     assert payload["checks"]["arcgis_bridge"]["base_url"] == "http://127.0.0.1:18081"
+    assert payload["checks"]["arcgis_bridge"]["checks"]["service_connection"]["ready"] is True
 
 
 def test_system_readiness_api_marks_missing_depthmap_and_disabled_arcgis(monkeypatch, tmp_path):

@@ -150,3 +150,31 @@ def test_artifact_slot_key_uses_year_only_for_spatial_time_data():
     assert build_artifact_slot_key("population", {"year": "2026", "view": "density"}) == "year:2026"
     assert build_artifact_slot_key("population", {"year": 2026, "view": "gender"}) == "year:2026"
     assert build_artifact_slot_key("road_syntax", {"metric": "choice"}) == "current"
+    assert build_artifact_slot_key("shared_grid", {"source_versions": {}}) == "current"
+
+
+def test_shared_grid_artifact_refresh_replaces_current_history_result(monkeypatch):
+    fake_session = FakeSession()
+    monkeypatch.setattr("store.analysis_artifact_repo.SessionLocal", lambda: fake_session)
+    monkeypatch.setattr("store.analysis_artifact_repo._history_scope_fingerprint", lambda *_args: "scope:history-wgs84")
+    repo = AnalysisArtifactRepo()
+
+    first = repo.upsert(
+        history_id="history-1",
+        artifact_type="shared_grid",
+        params={"source_versions": {"population": {"year": "2025"}}},
+        payload={"grid": {"features": [{"id": "old"}]}},
+        summary={"grid_count": 1},
+    )
+    refreshed = repo.upsert(
+        history_id="history-1",
+        artifact_type="shared_grid",
+        params={"source_versions": {"population": {"year": "2026"}}},
+        payload={"grid": {"features": [{"id": "new"}]}},
+        summary={"grid_count": 1, "assigned_poi_count": 8},
+    )
+
+    assert first["id"] == refreshed["id"]
+    assert refreshed["slot_key"] == "current"
+    assert refreshed["payload"]["grid"]["features"][0]["id"] == "new"
+    assert len(repo.list("history-1", artifact_type="shared_grid")) == 1

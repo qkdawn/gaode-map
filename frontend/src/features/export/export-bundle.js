@@ -970,9 +970,11 @@
                     Number.isFinite(row.structure_signal) ? this._formatExportNumber(row.structure_signal, 2) : '-',
                     row.density === null ? '-' : this._formatExportNumber(row.density, 2),
                 ]));
-                const snapshotUrl = (typeof this.getArcgisSnapshotUrl === 'function') ? this.getArcgisSnapshotUrl() : '';
-                const snapshotSrc = snapshotUrl && typeof this.getArcgisSnapshotSrc === 'function' ? this.getArcgisSnapshotSrc() : '';
-                const snapshotTitle = snapshotUrl && typeof this.getArcgisSnapshotTitle === 'function' ? this.getArcgisSnapshotTitle() : 'ArcGIS 结构快照';
+                const reportMap = (typeof this.getArcgisReportMap === 'function') ? this.getArcgisReportMap() : null;
+                const reportMapSrc = reportMap && typeof this.getArcgisReportMapSrc === 'function' ? this.getArcgisReportMapSrc() : '';
+                const reportMapTitle = reportMap && typeof this.getArcgisReportMapTitle === 'function'
+                    ? this.getArcgisReportMapTitle()
+                    : 'ArcGIS 结构专题图';
                 const { panel, body } = this._createExportPanelHost('H3 分析 · 结构图');
                 this._appendExportHtml(body, '<div class="h3-analysis-hint">结构图口径：仅使用 ArcGIS 连续字段。Gi* 使用 GiZScore；LISA 使用 LMiIndex；网格边框统一蓝色。</div>');
                 this._appendExportHtml(body, this._buildExportCountBadgeGridHtml([
@@ -987,15 +989,15 @@
                 if (summary.arcgis_status) {
                     this._appendExportHtml(body, `<div class="h3-analysis-hint">${this._escapeExportHtml(summary.arcgis_status)}</div>`);
                 }
-                if (snapshotSrc) {
+                if (reportMapSrc) {
                     this._appendExportHtml(body, `
                         <div style="border:1px solid #eef1f4;border-radius:10px;padding:8px;background:#fafbfc;">
-                            <div style="font-size:12px;color:#374151;font-weight:600;margin-bottom:6px;">${this._escapeExportHtml(snapshotTitle)}</div>
-                            <img src="${snapshotSrc}" alt="ArcGIS结构图" style="width:100%;border-radius:8px;border:1px solid #dbe2ea;" />
+                            <div style="font-size:12px;color:#374151;font-weight:600;margin-bottom:6px;">${this._escapeExportHtml(reportMapTitle)}</div>
+                            <img src="${reportMapSrc}" alt="ArcGIS结构专题图" style="width:100%;border-radius:8px;border:1px solid #dbe2ea;" />
                         </div>
                     `);
                 } else {
-                    this._appendExportHtml(body, '<div class="h3-analysis-hint">当前未生成结构快照。</div>');
+                    this._appendExportHtml(body, '<div class="h3-analysis-hint">ArcGIS 专题图当前不可用，未使用本地图片替代。</div>');
                 }
                 this._appendExportHtml(body, this._buildExportLegendHtml(this._buildH3StructureLegendForExport()));
                 this._appendExportHtml(body, this._buildExportDecisionCardsHtml([

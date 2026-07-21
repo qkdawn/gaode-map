@@ -15,8 +15,6 @@ from typing import Any, Iterable
 from shapely.geometry import Point, Polygon
 from shapely.ops import transform
 
-from modules.agent.analysis_runs import AnalysisRun
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
@@ -61,7 +59,7 @@ def _digest(payload: dict[str, Any]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _boundary(payload: Any) -> list[tuple[float, float]]:
+def _analysis_scope_ring(payload: Any) -> list[tuple[float, float]]:
     value = payload
     if isinstance(value, dict):
         value = value.get("coordinates") or []
@@ -71,7 +69,7 @@ def _boundary(payload: Any) -> list[tuple[float, float]]:
     if points and points[0] != points[-1]:
         points.append(points[0])
     if len(points) < 4:
-        raise ValueError("boundary must contain a polygon ring")
+        raise ValueError("analysis_scope must contain a polygon ring")
     return points
 
 
@@ -195,11 +193,11 @@ def _category_metrics(unit_counts: Counter[str], unit_total: int, totals: Counte
 
 def compute(payload: dict[str, Any]) -> dict[str, Any]:
     center = _wgs84_center(payload.get("center"), payload.get("center_crs"))
-    ring = _boundary(payload.get("boundary"))
+    ring = _analysis_scope_ring(payload.get("analysis_scope"))
     project = _projector(center)
     scope = transform(project, Polygon(ring)).buffer(0)
     if scope.is_empty or scope.area <= 0:
-        raise ValueError("boundary has no usable area")
+        raise ValueError("analysis_scope has no usable area")
 
     raw_edges = payload.get("bands_m") or [0, 500, 1000, 1500]
     edges = sorted({float(value) for value in raw_edges if _number(value) is not None and float(value) >= 0})
@@ -291,7 +289,7 @@ def compute(payload: dict[str, Any]) -> dict[str, Any]:
         "history_id": payload.get("history_id"),
         "source_id": payload.get("source_id"),
         "year": payload.get("year"),
-        "boundary": ring,
+        "analysis_scope": ring,
         "records": sorted(digest_rows),
     }
     dataset_digest = _digest(dataset_digest_payload)
@@ -310,253 +308,50 @@ def compute(payload: dict[str, Any]) -> dict[str, Any]:
         }
     )
     source_ref = f"{payload.get('source_id')}@sha256:{dataset_digest}"
-    run_id = f"run:poi-spatial-analysis:{run_digest[:12]}"
-    evidence_id = f"evidence:poi-spatial-analysis:{payload.get('year') or 'undated'}:{run_digest[:12]}"
-    valid_sectors = [unit for unit in sectors if unit["area_km2"] > 0]
-    valid_bands = [unit for unit in bands if unit["area_km2"] > 0]
-    metric_attempts = [
-        {
-            "plan_entry_id": "metric:poi-count-scope",
-            "metric_id": "poi.count",
-            "spatial_target": {"unit": "scope", "target_id": "analysis-scope"},
-            "execution_status": "succeeded",
-            "reason": "",
-            "evidence_node_ids": [evidence_id],
-        }
-    ]
-    for unit in [*sectors, *bands]:
-        spatial_unit = "sector" if unit in sectors else "distance_band"
-        density_entry_id = f"metric:poi-density-{spatial_unit}"
-        lq_entry_id = f"metric:poi-lq-{spatial_unit}"
-        status = "succeeded" if unit["area_km2"] > 0 else "not_applicable"
-        reason = "" if status == "succeeded" else "empty_geometry_intersection"
-        refs = [evidence_id] if status == "succeeded" else []
-        metric_attempts.append(
-            {
-                "plan_entry_id": density_entry_id,
-                "metric_id": "poi.grid_density",
-                "spatial_target": {"unit": spatial_unit, "target_id": unit["geometry_id"]},
-                "execution_status": status,
-                "reason": reason,
-                "evidence_node_ids": refs,
-            }
+    result_id = f"result:poi.normalized_spatial:{run_digest[:16]}"
+    quality_flags = [
+        {"code": code, "severity": "info", "effect": f"excluded_record_count:{count}"}
+        for code, count in (
+            ("duplicate_records_excluded", duplicate_count),
+            ("invalid_locations_excluded", invalid_location_count),
+            ("outside_scope_records_excluded", outside_count),
         )
-        for category in unit["categories"]:
-            lq_status = status if category["location_quotient"] is not None else "not_applicable"
-            lq_reason = reason if status != "succeeded" else ("" if lq_status == "succeeded" else "zero_baseline_share")
-            metric_attempts.append(
-                {
-                    "plan_entry_id": lq_entry_id,
-                    "metric_id": "poi.lq",
-                    "spatial_target": {
-                        "unit": spatial_unit,
-                        "target_id": f"{unit['geometry_id']}:{category['category']}",
-                    },
-                    "execution_status": lq_status,
-                    "reason": lq_reason,
-                    "evidence_node_ids": [evidence_id] if lq_status == "succeeded" else [],
-                }
-            )
-    quality_flags = []
-    for code, count in (
-        ("duplicate_records_excluded", duplicate_count),
-        ("invalid_locations_excluded", invalid_location_count),
-        ("outside_scope_records_excluded", outside_count),
-    ):
-        if count:
-            quality_flags.append({"code": code, "severity": "info", "effect": f"excluded_record_count:{count}"})
-    evidence_nodes = [
-        {
-            "id": evidence_id,
-            "kind": "spatial_metric",
-            "run_id": run_id,
-            "source_ids": [source_ref],
-            "metric_ids": ["poi.count", "poi.grid_density", "poi.lq"],
-            "title": f"{payload.get('year') or '未标年'}年项目范围 POI 空间分布",
-            "summary": "项目范围 POI 总量、方向、有效距离带和类别区位商。",
-            "content": "",
-            "data": {
-                "total_count": total,
-                "scope_area_km2": round(total_area_km2, 6),
-                "total_density_poi_per_km2": round(total_density, 4),
-                "sectors": valid_sectors,
-                "distance_bands": valid_bands,
-            },
-            "time_scope": {"year": payload.get("year")},
-            "spatial_scope": {
-                "scope_sha256": dataset_digest,
-                "partition_origin": list(center),
-                "crs": CANONICAL_CRS,
-            },
-            "method": METHOD,
-            "quality_flags": quality_flags,
-            "locator": {"history_id": payload.get("history_id"), "source_id": payload.get("source_id")},
-            "citation": f"POI spatial analysis {payload.get('year') or 'undated'}",
-        }
+        if count
     ]
-    result = {
-        "method": METHOD,
-        "history_id": payload.get("history_id"),
-        "source_id": payload.get("source_id"),
-        "year": payload.get("year"),
-        "dataset_content_sha256": dataset_digest,
-        "analysis_spec_sha256": analysis_spec_digest,
-        "run_sha256": run_digest,
-        "run_id": run_id,
-        "center": list(center),
-        "center_crs": CANONICAL_CRS,
-        "analysis_spec": analysis_spec,
-        "scope_area_km2": round(total_area_km2, 6),
-        "accepted_record_count": total,
-        "total_density_poi_per_km2": round(total_density, 4),
-        "duplicate_count": duplicate_count,
-        "invalid_location_count": invalid_location_count,
-        "outside_scope_count": outside_count,
-        "category_level": "single configured top-level category",
-        "sectors": sectors,
-        "distance_bands": bands,
-        "evidence_nodes": evidence_nodes,
-        "metric_attempts": metric_attempts,
+    return {
+        "result_id": result_id,
+        "tool_ids": ["poi.count", "poi.grid_density", "poi.lq"],
+        "status": "available",
+        "summary": "分析范围 POI 总量、方向、有效距离带和类别区位商。",
+        "input_sources": [source_ref],
+        "time_scope": {"year": payload.get("year")},
+        "spatial_scope": {
+            "scope_sha256": f"sha256:{dataset_digest}",
+            "partition_origin": list(center),
+            "crs": CANONICAL_CRS,
+        },
+        "structured_result": {
+            "method": METHOD,
+            "dataset_content_sha256": f"sha256:{dataset_digest}",
+            "analysis_spec_sha256": f"sha256:{analysis_spec_digest}",
+            "analysis_spec": analysis_spec,
+            "scope_area_km2": round(total_area_km2, 6),
+            "accepted_record_count": total,
+            "total_density_poi_per_km2": round(total_density, 4),
+            "duplicate_count": duplicate_count,
+            "invalid_location_count": invalid_location_count,
+            "outside_scope_count": outside_count,
+            "category_level": "single configured top-level category",
+            "sectors": [unit for unit in sectors if unit["area_km2"] > 0],
+            "distance_bands": [unit for unit in bands if unit["area_km2"] > 0],
+            "quality_flags": quality_flags,
+        },
         "limitations": [
             "Area uses a local metric approximation suitable for neighborhood-scale analysis.",
             "Density measures mapped POI supply, not demand, footfall, employment, or operating performance.",
-            "Distance bands use straight-line distance inside the walk-network boundary.",
+            "Distance bands use straight-line distance inside the walk-network coverage area.",
         ],
     }
-    analysis_run = {
-        "run_id": run_id,
-        "capability_id": "spatial-business-analyst",
-        "manifest_sha256": "",
-        "catalog_version": "2.0.0",
-        "code_version": "normalized_spatial_metrics_v2",
-        "analysis_code_sha256": f"sha256:{_digest({'method': METHOD, 'script': 'normalized_spatial_metrics.py'})}",
-        "project_location": list(center),
-        "scope_origin": list(center),
-        "partition_origin": list(center),
-        "source_versions": [
-            {
-                "source_id": str(payload.get("source_id") or ""),
-                "year": payload.get("year"),
-                "sha256": f"sha256:{dataset_digest}",
-                "scope_fingerprint": f"sha256:{_digest({'boundary': ring})}",
-                "record_count": total,
-            }
-        ],
-        "decision_agenda": {
-            "agenda_id": "agenda:daily-approach",
-            "user_question": "哪个方向的局部设施接触机会更适合作为日常到达侧？",
-            "analysis_scope": "focused_diagnostic",
-            "decision_questions": [
-                {
-                    "question_id": "question:daily-approach",
-                    "text": "哪个方向的局部设施接触机会更适合作为日常到达侧？",
-                    "decision_target": "site_direction",
-                    "hypotheses": [
-                        {
-                            "hypothesis_id": "hypothesis:directional-density",
-                            "statement": "设施密度更高且类别专业化明确的方向具有更多日常接触机会。",
-                            "disconfirming_condition": "入口观测或真实步行路径不支持该方向的到达优势。",
-                        }
-                    ],
-                }
-            ],
-        },
-        "metric_plan": {
-            "catalog_version": "2.0.0",
-            "decision_questions": [
-                {
-                    "question_id": "question:daily-approach",
-                    "text": "哪个方向的局部设施接触机会更适合作为日常到达侧？",
-                    "decision_target": "site_direction",
-                    "hypotheses": [
-                        {
-                            "hypothesis_id": "hypothesis:directional-density",
-                            "statement": "设施密度更高且类别专业化明确的方向具有更多日常接触机会。",
-                            "disconfirming_condition": "入口观测或真实步行路径不支持该方向的到达优势。",
-                        }
-                    ],
-                }
-            ],
-            "entries": [
-                {
-                    "plan_entry_id": "metric:poi-count-scope",
-                    "metric_id": "poi.count",
-                    "role": "diagnostic",
-                    "decision_question_id": "question:daily-approach",
-                    "hypothesis_ids": ["hypothesis:directional-density"],
-                    "planned_spatial_target": {"unit": "scope", "source": "analysis_boundary", "runtime_parameters": []},
-                    "selection_reason": "检查方向与距离带分析的样本基数。",
-                    "expected_decision_use": "识别样本不足造成的证据限制。",
-                    "required_source_ids": [str(payload.get("source_id") or "")],
-                    "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
-                    "exclusion_reason": "",
-                },
-                *[
-                    {
-                        "plan_entry_id": f"metric:poi-density-{unit}",
-                        "metric_id": "poi.grid_density",
-                        "role": "primary",
-                        "decision_question_id": "question:daily-approach",
-                        "hypothesis_ids": ["hypothesis:directional-density"],
-                        "planned_spatial_target": {"unit": unit, "source": "derived_partition", "runtime_parameters": ["center", "boundary"]},
-                        "selection_reason": "直接比较不同空间分区的单位面积设施接触机会。",
-                        "expected_decision_use": "改变优先测试的项目方向或距离带。",
-                        "required_source_ids": [str(payload.get("source_id") or "")],
-                        "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
-                        "exclusion_reason": "",
-                    }
-                    for unit in ("sector", "distance_band")
-                ],
-                *[
-                    {
-                        "plan_entry_id": f"metric:poi-lq-{unit}",
-                        "metric_id": "poi.lq",
-                        "role": "supporting",
-                        "decision_question_id": "question:daily-approach",
-                        "hypothesis_ids": ["hypothesis:directional-density"],
-                        "planned_spatial_target": {"unit": unit, "source": "derived_partition", "runtime_parameters": ["category_schema"]},
-                        "selection_reason": "解释高密度分区是否由特定类别专业化驱动。",
-                        "expected_decision_use": "补充方向选择背后的设施机制。",
-                        "required_source_ids": [str(payload.get("source_id") or "")],
-                        "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
-                        "exclusion_reason": "",
-                    }
-                    for unit in ("sector", "distance_band")
-                ],
-                {
-                    "plan_entry_id": "metric:poi-kernel-density-excluded",
-                    "metric_id": "poi.kernel_density",
-                    "role": "excluded",
-                    "decision_question_id": "question:daily-approach",
-                    "hypothesis_ids": ["hypothesis:directional-density"],
-                    "planned_spatial_target": {"unit": "grid_cell", "source": "h3_grid", "runtime_parameters": ["bandwidth"]},
-                    "selection_reason": "",
-                    "expected_decision_use": "",
-                    "required_source_ids": [str(payload.get("source_id") or "")],
-                    "activation": {"type": "always", "source_entry_ids": [], "rule": ""},
-                    "exclusion_reason": "本次方向筛选使用可审计分区密度，暂不引入带宽敏感的核密度。",
-                },
-            ],
-        },
-        "metric_attempts": metric_attempts,
-        "project_context": {"history_id": payload.get("history_id")},
-        "configuration_snapshot": analysis_spec,
-        "execution_profile": {"execution_location": "skill_script"},
-        "input_artifact_refs": [],
-        "status": "completed",
-        "current_stage": "spatial_metrics",
-        "stage_records": [],
-        "diagnostics": [],
-        "stale_input_artifact_ids": [],
-        "output_artifact_refs": [],
-        "created_at": "",
-        "completed_at": "",
-    }
-    validated_run = AnalysisRun.model_validate(analysis_run)
-    analysis_run = validated_run.model_dump(mode="json")
-    analysis_run["manifest_sha256"] = validated_run.canonical_manifest_sha256()
-    result["analysis_run"] = analysis_run
-    return result
 
 
 def _load(path: str) -> dict[str, Any]:
@@ -603,7 +398,7 @@ def _load_history(history_id: str, year: int) -> dict[str, Any]:
         "year": year,
         "center": list(center),
         "center_crs": CANONICAL_CRS,
-        "boundary": project.get("scope") or [],
+        "analysis_scope": project.get("scope") or [],
         "records": records,
     }
 

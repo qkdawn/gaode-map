@@ -15,7 +15,7 @@ def evidence(**overrides):
         "evidence_type": "F",
         "status": "verified",
         "source_ref": "项目资料 p.12",
-        "scope": "项目红线",
+        "scope": "分析范围",
         "comparison_baseline": "",
         "confidence": "high",
         "limitation": "仍需逐栋勘察",

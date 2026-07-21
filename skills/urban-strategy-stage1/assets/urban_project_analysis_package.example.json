@@ -18,15 +18,15 @@
     "preferred_report_language": "zh-CN"
   },
   "scope": {
-    "project_boundary": {"type": "Feature", "geometry_ref": "project_boundary.geojson"},
-    "analysis_areas": [{"id": "project-boundary", "label": "项目红线", "kind": "project_boundary"}],
+    "analysis_scope": {"type": "Feature", "geometry_ref": "analysis_scope.geojson"},
+    "analysis_areas": [{"id": "analysis-scope", "label": "分析范围", "kind": "analysis_scope"}],
     "coordinate_system": "GCJ-02",
-    "scope_ids": ["project-boundary"]
+    "scope_ids": ["analysis-scope"]
   },
   "inputs": {
     "sources_export": "ppt_sources_full_export.json",
     "project_brief": "project_brief.md",
-    "boundary_geojson": "project_boundary.geojson",
+    "analysis_scope_geojson": "analysis_scope.geojson",
     "visual_snapshots": [],
     "additional_files": []
   },

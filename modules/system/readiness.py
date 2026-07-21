@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from core.config import settings
 from modules.road.depthmap import resolve_depthmap_cli_path
+from modules.spatial_action.arcgis_spatial_tools import ArcGISSpatialToolModule
 
 
 def _directory_writable(path: Path) -> bool:
@@ -74,20 +75,24 @@ def _check_arcgis_bridge() -> Dict[str, Any]:
     if not enabled:
         return {
             "ready": True,
-            "message": "ArcGIS bridge 已禁用",
+            "status": "disabled",
+            "message": "ArcGIS bridge 已禁用，报告视觉不会调用 ArcGIS。",
             "enabled": False,
             "base_url": base_url,
         }
-    if base_url:
+    try:
+        status = ArcGISSpatialToolModule().report_status()
+    except Exception as exc:  # readiness must remain diagnostic if optional ArcGIS deps fail
         return {
-            "ready": True,
-            "message": "ArcGIS bridge 已配置",
+            "ready": False,
+            "status": "failed",
+            "message": f"ArcGIS 状态检查失败：{exc}",
             "enabled": True,
             "base_url": base_url,
         }
     return {
-        "ready": False,
-        "message": "ArcGIS bridge 已启用，但缺少 ARCGIS_BRIDGE_BASE_URL",
+        **status,
+        "message": status.get("summary", "ArcGIS 报告视觉状态已检查"),
         "enabled": True,
         "base_url": base_url,
     }

@@ -12,7 +12,7 @@ from modules.h3.stats import build_gi_render_meta, build_lisa_render_meta, calc_
 from modules.nightlight.service import get_nightlight_layer
 from modules.poi.aggregation import build_category_matchers, normalize_type_code, resolve_category_id
 from modules.population.service import get_population_grid, get_population_layer
-from modules.providers.amap.utils.transform_posi import wgs84_to_gcj02
+from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
 
 
 def _safe_float(value: Any, default: Optional[float] = 0.0) -> Optional[float]:
@@ -136,11 +136,6 @@ def shared_raster_cells_from_grid(grid_payload: Dict[str, Any]) -> List[Dict[str
                 "lisa_z_score": None,
                 "gi_star_value": None,
                 "gi_star_z_score": None,
-                "population_density": 0.0,
-                "nightlight_radiance": None,
-                "road_integration": 0.0,
-                "road_connectivity": 0.0,
-                "road_length_km_per_km2": 0.0,
             }
         )
     return cells
@@ -362,12 +357,13 @@ def apply_poi_cell_metrics(
 
 def apply_layer_cell_values(cells: List[Dict[str, Any]], layer: Dict[str, Any], target_key: str) -> None:
     value_by_id = {
-        str(item.get("cell_id") or ""): _safe_float(item.get("value"), 0.0)
+        str(item.get("cell_id") or ""): _safe_float(item.get("value"), None)
         for item in (layer.get("cells") or [])
         if isinstance(item, dict)
     }
     for cell in cells:
-        cell[target_key] = round_float(value_by_id.get(cell["cell_id"], 0.0), 6)
+        value = value_by_id.get(cell["cell_id"])
+        cell[target_key] = None if value is None else round_float(value, 6)
 
 
 def apply_nightlight_cell_values(cells: List[Dict[str, Any]], layer: Dict[str, Any]) -> None:
@@ -391,8 +387,13 @@ def _road_feature_line(feature: Dict[str, Any]) -> BaseGeometry | None:
     return geom
 
 
-def apply_road_cell_metrics(cells: List[Dict[str, Any]], road_features: List[Dict[str, Any]]) -> None:
-    if not cells or not road_features:
+def apply_road_cell_metrics(
+    cells: List[Dict[str, Any]],
+    road_features: List[Dict[str, Any]],
+    *,
+    source_ready: bool = False,
+) -> None:
+    if not cells or (not road_features and not source_ready):
         return
     roads: List[tuple[BaseGeometry, Dict[str, Any]]] = []
     for feature in road_features:
@@ -402,9 +403,14 @@ def apply_road_cell_metrics(cells: List[Dict[str, Any]], road_features: List[Dic
         if line is None:
             continue
         roads.append((line, feature.get("properties") or {}))
-    if not roads:
+    if not roads and not source_ready:
         return
     for cell in cells:
+        # A loaded road source with no intersecting segment is a factual zero, not a missing value.
+        cell["road_has_data"] = False
+        cell["road_integration"] = 0.0
+        cell["road_connectivity"] = 0.0
+        cell["road_length_km_per_km2"] = 0.0
         geom = cell["geometry"]
         total_len = 0.0
         integ_sum = 0.0
@@ -420,6 +426,7 @@ def apply_road_cell_metrics(cells: List[Dict[str, Any]], road_features: List[Dic
             integ_sum += length_km * float(_safe_float(props.get("integration_score"), 0.0) or 0.0)
             conn_sum += length_km * float(_safe_float(props.get("connectivity_score"), 0.0) or 0.0)
         if total_len > 1e-9:
+            cell["road_has_data"] = True
             cell["road_integration"] = round_float(integ_sum / total_len, 6)
             cell["road_connectivity"] = round_float(conn_sum / total_len, 6)
             cell["road_length_km_per_km2"] = round_float(total_len / max(float(cell["area_km2"]), 1e-9), 6)
@@ -450,13 +457,21 @@ def _cell_feature(cell: Dict[str, Any]) -> Dict[str, Any]:
             "lisa_z_score": cell.get("lisa_z_score"),
             "gi_star_value": cell.get("gi_star_value"),
             "gi_star_z_score": cell.get("gi_star_z_score"),
-            "population_density": round_float(cell.get("population_density"), 6),
-            "nightlight_radiance": cell.get("nightlight_radiance"),
-            "road_length_km_per_km2": round_float(cell.get("road_length_km_per_km2"), 6),
-            "road_integration": round_float(cell.get("road_integration"), 6),
-            "road_connectivity": round_float(cell.get("road_connectivity"), 6),
         }
     )
+    for key in (
+        "population_density",
+        "nightlight_radiance",
+        "road_length_km_per_km2",
+        "road_integration",
+        "road_connectivity",
+    ):
+        if key not in cell:
+            continue
+        value = cell.get(key)
+        props[key] = None if value is None else round_float(value, 6)
+    if "road_has_data" in cell:
+        props["road_has_data"] = bool(cell["road_has_data"])
     feature["properties"] = props
     return feature
 
@@ -583,14 +598,14 @@ def analyze_shared_grid(
 
     del year
     total_steps = 7
-    report("build_grid", "正在生成共享栅格底座", 1, total_steps, {"arcgis_enabled": True})
+    report("build_grid", "正在生成 POI 专项网格底座", 1, total_steps, {"arcgis_enabled": True})
     grid = get_population_grid(polygon, coord_type)
     cells = shared_raster_cells_from_grid(grid)
     if not cells:
-        report("completed", "当前范围没有可用共享栅格", total_steps, total_steps, {"grid_count": 0, "poi_count": len(pois or [])})
+        report("completed", "当前范围没有可用 POI 专项网格", total_steps, total_steps, {"grid_count": 0, "poi_count": len(pois or [])})
         return _empty_shared_grid_metrics(scope_id=grid.get("scope_id"), poi_count=len(pois or []))
 
-    report("aggregate_poi", "正在聚合 POI 到共享栅格", 2, total_steps, {"grid_count": len(cells), "arcgis_enabled": True})
+    report("aggregate_poi", "正在聚合 POI 到 POI 专项网格", 2, total_steps, {"grid_count": len(cells), "arcgis_enabled": True})
     poi_metrics = apply_poi_cell_metrics(cells, pois or [], poi_coord_type=poi_coord_type, categories=categories)
     neighbor_ring = _normalized_ring(neighbor_ring, default=1)
     report(
@@ -654,7 +669,7 @@ def analyze_shared_grid(
                 export_image=arcgis_export_image,
             )
         except RuntimeError as exc:
-            raise RuntimeError(f"ArcGIS不可用，共享网格空间结构分析已停止：{exc}") from exc
+            raise RuntimeError(f"ArcGIS不可用，POI 专项网格空间结构分析已停止：{exc}") from exc
         global_moran = arcgis_result.get("global_moran") or {}
         global_moran_i = None if _safe_float(global_moran.get("i"), None) is None else round_float(global_moran.get("i"), 6)
         global_moran_z_score = None if _safe_float(global_moran.get("z_score"), None) is None else round_float(global_moran.get("z_score"), 6)
@@ -672,7 +687,7 @@ def analyze_shared_grid(
     else:
         report(
             "arcgis_running",
-            "共享栅格密度无差异，跳过 ArcGIS 结构分析",
+            "POI 专项网格密度无差异，跳过 ArcGIS 结构分析",
             5,
             total_steps,
             {
@@ -698,7 +713,7 @@ def analyze_shared_grid(
     avg_entropy = (sum(entropy_values) / grid_count) if grid_count else 0.0
     report(
         "finalize",
-        "正在整理共享栅格分析结果",
+        "正在整理 POI 专项网格分析结果",
         6,
         total_steps,
         {
@@ -738,7 +753,7 @@ def analyze_shared_grid(
     }
     report(
         "completed",
-        "POI 共享栅格分析计算完成",
+        "POI 专项网格分析计算完成",
         total_steps,
         total_steps,
         {
@@ -759,6 +774,7 @@ def build_unified_spatial_cells(
     pois: List[Dict[str, Any]] | None = None,
     poi_coord_type: str = "gcj02",
     road_features: List[Dict[str, Any]] | None = None,
+    road_source_ready: bool = False,
     categories: List[Any] | None = None,
 ) -> Dict[str, Any]:
     grid = get_population_grid(polygon, coord_type, population_year)
@@ -779,7 +795,7 @@ def build_unified_spatial_cells(
     apply_layer_cell_values(cells, population_layer, "population_density")
     nightlight_layer = get_nightlight_layer(polygon=polygon, coord_type=coord_type, year=nightlight_year, view="radiance")
     apply_nightlight_cell_values(cells, nightlight_layer)
-    apply_road_cell_metrics(cells, road_features or [])
+    apply_road_cell_metrics(cells, road_features or [], source_ready=road_source_ready)
 
     features = [_cell_feature(cell) for cell in cells]
     return {
@@ -790,4 +806,243 @@ def build_unified_spatial_cells(
         "cell_count": len(features),
         "features": features,
         "summary": _summary(cells, poi_metrics),
+    }
+
+def build_shared_grid_analysis(
+    *,
+    polygon: list,
+    coord_type: str = "gcj02",
+    population_year: str,
+    nightlight_year: int,
+    pois: List[Dict[str, Any]],
+    poi_coord_type: str = "gcj02",
+    poi_year: int | None = None,
+    poi_ready: bool = False,
+    road_features: List[Dict[str, Any]],
+    road_ready: bool = False,
+    categories: List[Any] | None = None,
+) -> Dict[str, Any]:
+    """Build the only cross-layer cell artifact used for shared-grid display.
+
+    The POI raster endpoint remains POI-only.  This boundary makes absent sources
+    explicit rather than letting default zeros look like a successful spatial join.
+    """
+    readiness = {
+        "poi": {
+            "ready": bool(poi_ready),
+            "year": poi_year,
+            "record_count": len(pois or []),
+            "reason": "" if poi_ready else "请先完成 POI 数据加载",
+        },
+        "population": {
+            "ready": bool(str(population_year or "").strip()),
+            "year": str(population_year or "").strip() or None,
+            "record_count": None,
+            "reason": "" if str(population_year or "").strip() else "请选择并计算人口年份",
+        },
+        "nightlight": {
+            "ready": isinstance(nightlight_year, int) and nightlight_year > 0,
+            "year": nightlight_year if isinstance(nightlight_year, int) and nightlight_year > 0 else None,
+            "record_count": None,
+            "reason": "" if isinstance(nightlight_year, int) and nightlight_year > 0 else "请选择并计算夜光年份",
+        },
+        "road": {
+            "ready": bool(road_ready),
+            "year": None,
+            "record_count": len(road_features or []),
+            "reason": "" if road_ready else "请先完成路网分析",
+        },
+    }
+    missing = [name for name, source in readiness.items() if not source["ready"]]
+    if missing:
+        labels = {"poi": "POI", "population": "人口", "nightlight": "夜光", "road": "路网"}
+        raise ValueError("shared_grid_sources_not_ready:" + ",".join(labels[name] for name in missing))
+
+    grid = build_unified_spatial_cells(
+        polygon=polygon,
+        coord_type=coord_type,
+        population_year=str(population_year),
+        nightlight_year=nightlight_year,
+        pois=pois,
+        poi_coord_type=poi_coord_type,
+        road_features=road_features,
+        road_source_ready=road_ready,
+        categories=categories,
+    )
+    for source in ("population", "nightlight"):
+        readiness[source]["record_count"] = int(grid.get("cell_count") or 0)
+    return {
+        "evidence_version": "shared_grid_v1",
+        "join_key": "cell_id",
+        "grid": grid,
+        "summary": dict(grid.get("summary") or {}),
+        "source_versions": readiness,
+        "source_readiness": readiness,
+        "limitations": [
+            "POI、人口、夜光与路网仅用于空间条件和代理线索，不代表消费、客流、营收或投资回报。",
+            "各来源年份可能不同，比较时应以面板显示的来源年份为准。",
+        ],
+    }
+
+
+_DIRECTION_CODES = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+_DIRECTION_LABELS = {
+    "N": "北", "NE": "东北", "E": "东", "SE": "东南",
+    "S": "南", "SW": "西南", "W": "西", "NW": "西北",
+}
+_DEFAULT_DISTANCE_BANDS_M = ((0.0, 500.0), (500.0, 1000.0), (1000.0, 1600.0))
+
+
+def _direction_distance_m(center: tuple[float, float], point: tuple[float, float]) -> tuple[float, str]:
+    """Measure WGS84 points locally and classify the point into one of eight sectors."""
+    lon0, lat0 = center
+    lon, lat = point
+    latitude = math.radians((lat0 + lat) / 2.0)
+    dx = (lon - lon0) * 111_320.0 * math.cos(latitude)
+    dy = (lat - lat0) * 110_574.0
+    distance_m = math.hypot(dx, dy)
+    bearing = math.degrees(math.atan2(dx, dy)) % 360.0
+    return distance_m, _DIRECTION_CODES[int((bearing + 22.5) // 45.0) % len(_DIRECTION_CODES)]
+
+
+def _normalized_distance_bands(value: Any) -> tuple[tuple[float, float], ...]:
+    raw = value if isinstance(value, list) else _DEFAULT_DISTANCE_BANDS_M
+    bands: list[tuple[float, float]] = []
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise ValueError("directional_matrix_invalid_distance_bands")
+        start, end = _safe_float(item[0], None), _safe_float(item[1], None)
+        if start is None or end is None or start < 0 or end <= start:
+            raise ValueError("directional_matrix_invalid_distance_bands")
+        bands.append((float(start), float(end)))
+    if not bands or any(next_start < previous_end for (_, previous_end), (next_start, _) in zip(bands, bands[1:])):
+        raise ValueError("directional_matrix_invalid_distance_bands")
+    return tuple(bands)
+
+
+def _weighted_mean(rows: List[Dict[str, Any]], key: str) -> Optional[float]:
+    weighted = [
+        (_safe_float(row.get(key), None), _safe_float(row.get("area_km2"), 0.0) or 0.0)
+        for row in rows
+    ]
+    available = [(value, area) for value, area in weighted if value is not None]
+    if not available:
+        return None
+    total_area = sum(area for _, area in available)
+    if total_area <= 0:
+        return None
+    return round_float(sum(value * area for value, area in available) / total_area, 6)
+
+
+def _matrix_summary(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    area_km2 = sum(float(row.get("area_km2") or 0.0) for row in rows)
+    covered = [row for row in rows if row["road_covered"]]
+    category_counts: Dict[str, int] = {}
+    for row in rows:
+        for category, count in (row.get("category_counts") or {}).items():
+            category_counts[str(category)] = category_counts.get(str(category), 0) + int(_safe_float(count, 0.0) or 0.0)
+    return {
+        "cell_count": len(rows),
+        "area_km2": round_float(area_km2, 6),
+        "poi_count": sum(int(row.get("poi_count") or 0) for row in rows),
+        "poi_density": round_float(sum(int(row.get("poi_count") or 0) for row in rows) / area_km2, 6) if area_km2 > 0 else None,
+        "top_categories": [
+            {"category": category, "count": count}
+            for category, count in sorted(category_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+        ],
+        "population_density_mean": _weighted_mean(rows, "population_density"),
+        "nightlight_mean": _weighted_mean(rows, "nightlight_radiance"),
+        "road_coverage_ratio": round_float(len(covered) / len(rows), 6) if rows else None,
+        "road_density_covered_mean": _weighted_mean(covered, "road_length_km_per_km2"),
+        "road_integration_covered_mean": _weighted_mean(covered, "road_integration"),
+        "road_connectivity_covered_mean": _weighted_mean(covered, "road_connectivity"),
+    }
+
+
+def build_directional_evidence_matrix(
+    shared_grid: Dict[str, Any],
+    *,
+    center_wgs84: List[float] | Tuple[float, float],
+    distance_bands_m: Any = None,
+) -> Dict[str, Any]:
+    """Summarize a shared grid by direction and distance without leaking geometry.
+
+    The caller supplies the WGS84 analysis center used for grouping cells.
+    """
+    if not isinstance(center_wgs84, (list, tuple)) or len(center_wgs84) < 2:
+        raise ValueError("directional_matrix_center_required")
+    center = (_safe_float(center_wgs84[0], None), _safe_float(center_wgs84[1], None))
+    if center[0] is None or center[1] is None or not -180 <= center[0] <= 180 or not -90 <= center[1] <= 90:
+        raise ValueError("directional_matrix_center_invalid")
+    bands = _normalized_distance_bands(distance_bands_m)
+    grid = shared_grid.get("grid") if isinstance(shared_grid, dict) else {}
+    features = grid.get("features") if isinstance(grid, dict) else []
+    if not isinstance(features, list) or not features:
+        raise ValueError("directional_matrix_shared_grid_missing")
+
+    rows: List[Dict[str, Any]] = []
+    for feature in features:
+        props = feature.get("properties") if isinstance(feature, dict) else None
+        centroid = props.get("centroid_gcj02") if isinstance(props, dict) else None
+        if not isinstance(centroid, (list, tuple)) or len(centroid) < 2:
+            continue
+        try:
+            centroid_wgs84 = gcj02_to_wgs84(float(centroid[0]), float(centroid[1]))
+        except (TypeError, ValueError):
+            continue
+        distance_m, sector = _direction_distance_m((float(center[0]), float(center[1])), centroid_wgs84)
+        road_has_data = props.get("road_has_data")
+        if not isinstance(road_has_data, bool):
+            road_has_data = (_safe_float(props.get("road_length_km_per_km2"), 0.0) or 0.0) > 0.0
+        rows.append({
+            "cell_id": str(props.get("cell_id") or ""),
+            "area_km2": _safe_float(props.get("area_km2"), 0.0) or 0.0,
+            "poi_count": int(_safe_float(props.get("poi_count"), 0.0) or 0.0),
+            "category_counts": dict(props.get("category_counts") or {}),
+            "population_density": _safe_float(props.get("population_density"), None),
+            "nightlight_radiance": _safe_float(props.get("nightlight_radiance"), None),
+            "road_length_km_per_km2": _safe_float(props.get("road_length_km_per_km2"), None),
+            "road_integration": _safe_float(props.get("road_integration"), None),
+            "road_connectivity": _safe_float(props.get("road_connectivity"), None),
+            "road_covered": road_has_data,
+            "sector": sector,
+            "distance_m": round_float(distance_m, 3),
+        })
+    if not rows:
+        raise ValueError("directional_matrix_cells_missing_centroids")
+
+    grouped: List[Dict[str, Any]] = []
+    for start, end in bands:
+        for sector in _DIRECTION_CODES:
+            group = [row for row in rows if row["sector"] == sector and start <= row["distance_m"] < end]
+            grouped.append({
+                "sector": sector,
+                "label": _DIRECTION_LABELS[sector],
+                "distance_band": f"{int(start)}-{int(end)}m",
+                "distance_start_m": start,
+                "distance_end_m": end,
+                **_matrix_summary(group),
+            })
+    return {
+        "schema_version": "directional_evidence_matrix.v1",
+        "spatial_unit": {
+            "type": "shared_raster",
+            "join_key": str(shared_grid.get("join_key") or "cell_id"),
+            "center_wgs84": [float(center[0]), float(center[1])],
+            "direction_method": "shared-grid centroid relative to the declared center, eight sectors",
+            "distance_bands_m": [[start, end] for start, end in bands],
+        },
+        "observation_universe": {
+            "input_record_count": int((shared_grid.get("source_readiness") or {}).get("poi", {}).get("record_count") or 0),
+            "assigned_record_count": int((shared_grid.get("summary") or {}).get("assigned_poi_count") or 0),
+            "unassigned_record_count": max(0, int((shared_grid.get("source_readiness") or {}).get("poi", {}).get("record_count") or 0) - int((shared_grid.get("summary") or {}).get("assigned_poi_count") or 0)),
+            "spatial_unit": "shared_raster_cell",
+            "assignment_rule": "POI and road features are spatially aggregated into the population/nightlight shared grid by intersection or containment.",
+        },
+        "overall_baseline": _matrix_summary(rows),
+        "rows": grouped,
+        "source_versions": dict(shared_grid.get("source_versions") or {}),
+        "limitations": [
+            "POI, population, nightlight, and road metrics describe spatial conditions and do not prove footfall, demand, spending, revenue, or ROI.",
+        ],
     }

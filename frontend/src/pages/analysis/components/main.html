@@ -530,7 +530,7 @@
                                             <header><span><i :style="{ backgroundColor: route.color }"></i>{{ route.movement_label }}</span><strong>{{ route.title }}</strong><em>{{ route.status_label }}</em></header>
                                             <p>{{ route.role }}</p>
                                             <dl>
-                                                <div><dt>起点</dt><dd>{{ route.entry_or_origin }}</dd></div>
+                                                <div><dt>起点</dt><dd>{{ route.origin }}</dd></div>
                                                 <div><dt>目的地</dt><dd>{{ getStage1DecisionDetailText(route.destinations) || '未说明' }}</dd></div>
                                                 <div><dt>关联空间</dt><dd>{{ getStage1MovementAffectedSpaceNames(route) }}</dd></div>
                                                 <div><dt>运营时段</dt><dd>{{ getStage1DecisionDetailText(route.operating_windows) || '未说明' }}</dd></div>

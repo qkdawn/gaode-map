@@ -88,7 +88,6 @@ def test_h3_bridge_uses_arcgis_python_path_from_settings(monkeypatch):
             }
         ],
         stats_by_cell={"8928308280fffff": {"density_poi_per_km2": 1.2}},
-        export_image=False,
     )
 
     assert calls

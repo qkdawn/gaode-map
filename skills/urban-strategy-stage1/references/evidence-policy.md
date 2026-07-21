@@ -36,7 +36,7 @@ Write one JSON object per line to `evidence_nodes.jsonl`:
   "source_id": "document:project-brief",
   "evidence_node_id": "node-12",
   "locator": "项目任务书，第3页",
-  "spatial_scope": "project_boundary",
+  "spatial_scope": "analysis_scope",
   "time_scope": "2026",
   "limitations": [],
   "supports_questions": ["q-01"]
@@ -100,7 +100,7 @@ Record conflicts in `conflict_register.json`:
       "severity": "critical",
       "resolution": "unresolved",
       "decision_impact": "Program capacity cannot be fixed",
-      "next_action": "Confirm cadastral boundary"
+      "next_action": "Confirm land-use authorization"
     }
   ]
 }

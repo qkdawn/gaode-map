@@ -1,38 +1,29 @@
-# Analysis Recipes
+# V4.1 指标组合配方
 
-Read this file after discovering candidate domains and metric IDs from `metric-catalog-index.yaml`, and before querying detailed entries from `metric-catalog.yaml`. A recipe forms a candidate metric combination; it does not prove that a metric is implemented, available, comparable, or usable in the current run. Intersect the candidates with the current AnalysisRun first, then validate the remaining metric IDs against the detailed Catalog. Preserve contradictory evidence and every metric limitation.
+配方帮助 Agent 形成互补解释，不是固定章节模板，也不生成商业总分。
 
-## Community daily-life area
+## 社区 / 生活服务 B2C
 
-- Required families: population, POI, road syntax, nightlight.
-- Candidate metrics: `population.total`, `poi.grid_density`, `poi.local_entropy`, `road.integration`, `nightlight.mean_radiance`.
-- Support only a stable daily-life-area hypothesis when population and daily-service supply are both strong, POI mix is not single-category dominated, and the road/nightlight proxies do not contradict it.
-- Do not convert population or POI density into purchasing power or observed visits.
+- **判断**：哪个候选点更值得先踏勘，以及首批店型和品类角色应如何假设。
+- **组合**：同参数服务范围 + POI 设施构成 + 路网进入/连通线索 + 人口分布或夜间亮度。
+- **解释**：设施密度、可达性和人口/亮度可以相互支持，也可能冲突；冲突用于提出时段、同类竞争和实际可进入性核查。
+- **行动**：优先踏勘点位、调整店型/服务场景/首批品类角色；通过时段观察、拦访、竞店商品与试卖验证。
 
-## Office and business area
+## 办公通勤 / 工作日场景 B2C
 
-- Required families: POI, road syntax, nightlight or time-series evidence.
-- Candidate metrics: `poi.lq`, `poi.category_density`, `road.integration`, `road.choice`, `nightlight.sector_profile`.
-- Require an office-related category specialization plus independent access or temporal evidence.
-- Treat company POIs as facilities, not employment counts.
+- **组合**：办公与通勤设施结构 + 步行/驾车覆盖 + 路网连续性 + 时段性亮度线索。
+- **行动**：把店型、营业时段和快取/停留型服务设为待验证方案；不要用亮度或 POI 直接预测订单。
 
-## Night-time activity
+## 园区 / 账户服务 B2B
 
-- Required families: nightlight, POI, road syntax.
-- Candidate metrics: `nightlight.p90`, `nightlight.hotspot_ratio`, `poi.lq`, `road.choice`.
-- Use nightlight as an activity proxy and require relevant evening POI supply or route evidence before discussing a night-time activity cluster.
-- Do not claim sales, footfall, or night-economy performance.
+- **组合**：企业/园区节点 + 行业或配套设施 + 驾车服务范围 + 路网/交付路径。
+- **行动**：区分优先拜访账户、服务节点和产品/服务包；通过账户名单、采购访谈、询价、SLA 与试点验证。
 
-## Commercial supply gap
+## 物流 / 履约节点 B2B
 
-- Required families: target-category POI, population or activity proxy, road syntax.
-- Candidate metrics: `poi.category_density`, `poi.lq`, `population.total`, `nightlight.mean_radiance`, `road.integration`.
-- A low target-category supply value is only a candidate gap when an independent customer/activity proxy and access evidence are present.
-- Search for a no-demand explanation and named competitors before recommending investment.
+- **组合**：园区/仓储设施 + 路网连接与路径 + 服务范围 + 直接货量/成本资料（若有）。
+- **行动**：形成节点、产品服务范围和履约路径假设；没有货量、订单或成本时不写成效率或 ROI 结论。
 
-## Cultural destination
+## Mixed
 
-- Required families: cultural POI, access, road syntax, project documents or confirmed spatial assets.
-- Candidate metrics: `poi.category_count`, `poi.lq`, `isochrone.reachable_area`, `road.integration`.
-- Metrics can support surrounding cultural context and access, but a destination anchor also requires a confirmed asset, operating content, capacity, and an accountable operator.
-- Do not treat a historic building or design intention as validated demand.
+先分别完成 B2B 与 B2C 的对象、空间证据和行动建议，再解释共享场地、时段、库存或履约的约束。不得把企业数量和消费者人口合成单一需求指标。

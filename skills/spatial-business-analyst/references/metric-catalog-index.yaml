@@ -1,719 +1,704 @@
-index_version: 2.0.0
-catalog_version: 2.0.0
-catalog_sha256: sha256:60af2e3727c972ce5fc0ad423d2abbe85e23727ce8f4cfe0117302f189b63352
-generated_from: references/metric-catalog.yaml
-runtime_rule: Use source coverage to predict succeeded versus blocked attempts; keep decision-critical unavailable metrics
-  in MetricPlan and exclude only metrics judged irrelevant.
-data_domains:
-- id: poi
-  source_ids:
-  - current:dataset:poi
-  families:
-  - poi
-  metrics:
-  - metric_id: poi.count
-    decision_tags:
-    - category_structure
-    - competition_context
-    - facility_supply
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: implemented
-  - metric_id: poi.category_count
-    decision_tags:
-    - category_structure
-    - competition_context
-    - facility_supply
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: implemented
-  - metric_id: poi.multi_year_count
-    decision_tags:
-    - category_structure
-    - competition_context
-    - facility_supply
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: implemented
-  - metric_id: poi.open_close_rate
-    decision_tags:
-    - category_structure
-    - competition_context
-    - facility_supply
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: not_implemented
-  detail_queries:
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family poi
-- id: h3_grid
-  source_ids:
-  - current:dataset:h3
-  families:
-  - poi_grid
-  - spatial_statistics
-  metrics:
-  - metric_id: poi.grid_count
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: poi.grid_density
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: poi.category_density
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: poi.local_entropy
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: poi.local_entropy_normalized
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: poi.lq
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: poi.neighbor_mean_density
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: poi.neighbor_mean_entropy
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: spatial.neighbor_density_delta
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  - metric_id: spatial.global_moran_i_density
-    decision_tags:
-    - hotspot_detection
-    - spatial_clustering
-    - spatial_outlier
-    primary_spatial_unit: scope
-    action_targets:
-    - analysis_method
-    implementation_status: implemented
-  - metric_id: spatial.lisa
-    decision_tags:
-    - hotspot_detection
-    - spatial_clustering
-    - spatial_outlier
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    - analysis_method
-    implementation_status: implemented
-  - metric_id: spatial.gi_star
-    decision_tags:
-    - hotspot_detection
-    - spatial_clustering
-    - spatial_outlier
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    - analysis_method
-    implementation_status: implemented
-  - metric_id: poi.kernel_density
-    decision_tags:
-    - facility_concentration
-    - local_specialization
-    - spatial_mix
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    implementation_status: implemented
-  detail_queries:
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family poi_grid
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family spatial_statistics
-- id: population
-  source_ids:
-  - current:dataset:population
-  families:
-  - population
-  metrics:
-  - metric_id: population.total
-    decision_tags:
-    - customer_proxy
-    - demographic_structure
-    - population_scale
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: implemented
-  - metric_id: population.sex_structure
-    decision_tags:
-    - customer_proxy
-    - demographic_structure
-    - population_scale
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: implemented
-  - metric_id: population.age_structure
-    decision_tags:
-    - customer_proxy
-    - demographic_structure
-    - population_scale
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: implemented
-  - metric_id: population.selected_ratio
-    decision_tags:
-    - customer_proxy
-    - demographic_structure
-    - population_scale
-    primary_spatial_unit: scope
-    action_targets:
-    - program_location
-    - operations
-    implementation_status: implemented
-  detail_queries:
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family population
-- id: nightlight
-  source_ids:
-  - current:dataset:nightlight
-  families:
-  - nightlight
-  metrics:
-  - metric_id: nightlight.total_radiance
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.mean_radiance
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.max_radiance
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.lit_pixel_ratio
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.p90
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.hotspot_class
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.hotspot_ratio
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.spatial_profile
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: distance_band
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.sector_profile
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: sector
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  - metric_id: nightlight.activity_level
-    decision_tags:
-    - night_activity_proxy
-    - nightlight_pattern
-    - spatial_intensity
-    primary_spatial_unit: scope
-    action_targets:
-    - site_direction
-    - operations
-    - public_space
-    implementation_status: implemented
-  detail_queries:
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family nightlight
-- id: road
-  source_ids:
-  - current:dataset:road
-  families:
-  - road_syntax
-  metrics:
-  - metric_id: road.network_size
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: scope
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.degree
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.integration
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.choice
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.connectivity
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.control
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.mean_depth
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.node_degree
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.orientation
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: road_segment
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.intelligibility
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: scope
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.walk_detour_ratio
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: origin_destination_pair
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  - metric_id: road.entrance_distance
-    decision_tags:
-    - network_access
-    - route_structure
-    - spatial_connectivity
-    primary_spatial_unit: entrance
-    action_targets:
-    - entrance
-    - street_segment
-    - route
-    - boundary_interface
-    implementation_status: implemented
-  detail_queries:
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family road_syntax
-- id: cross_domain
-  source_ids:
-  - current:dataset:poi
-  - current:dataset:h3
-  - current:dataset:population
-  - current:dataset:nightlight
-  - current:dataset:road
-  families:
-  - cross_domain
-  - grid_derived
-  - gwr
-  - isochrone
-  - timeseries
-  metrics:
-  - metric_id: grid.type
-    decision_tags:
-    - candidate_screening
-    - grid_typology
-    - multi_metric_comparison
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - public_space
-    implementation_status: implemented
-  - metric_id: grid.opportunity_flag
-    decision_tags:
-    - candidate_screening
-    - grid_typology
-    - multi_metric_comparison
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - public_space
-    implementation_status: implemented
-  - metric_id: isochrone.reachable_area
-    decision_tags:
-    - catchment_area
-    - scope_definition
-    - travel_time_access
-    primary_spatial_unit: catchment
-    action_targets:
-    - entrance
-    - route
-    - program_location
-    implementation_status: implemented
-  - metric_id: timeseries.population_change
-    decision_tags:
-    - spatial_shift
-    - temporal_change
-    - trend_comparison
-    primary_spatial_unit: scope
-    action_targets:
-    - operations
-    - program_location
-    - data_collection
-    implementation_status: implemented
-  - metric_id: timeseries.population_density_change
-    decision_tags:
-    - spatial_shift
-    - temporal_change
-    - trend_comparison
-    primary_spatial_unit: scope
-    action_targets:
-    - operations
-    - program_location
-    - data_collection
-    implementation_status: implemented
-  - metric_id: timeseries.age_shift
-    decision_tags:
-    - spatial_shift
-    - temporal_change
-    - trend_comparison
-    primary_spatial_unit: scope
-    action_targets:
-    - operations
-    - program_location
-    - data_collection
-    implementation_status: implemented
-  - metric_id: timeseries.nightlight_change
-    decision_tags:
-    - spatial_shift
-    - temporal_change
-    - trend_comparison
-    primary_spatial_unit: scope
-    action_targets:
-    - operations
-    - program_location
-    - data_collection
-    implementation_status: implemented
-  - metric_id: timeseries.hotspot_shift
-    decision_tags:
-    - spatial_shift
-    - temporal_change
-    - trend_comparison
-    primary_spatial_unit: hotspot_zone
-    action_targets:
-    - operations
-    - program_location
-    - data_collection
-    implementation_status: implemented
-  - metric_id: gwr.nightlight_spatial_model
-    decision_tags:
-    - local_association
-    - model_diagnostics
-    - spatial_relationship
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - analysis_method
-    implementation_status: implemented
-  - metric_id: gwr.model_fit
-    decision_tags:
-    - local_association
-    - model_diagnostics
-    - spatial_relationship
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - analysis_method
-    implementation_status: implemented
-  - metric_id: access.network_reachable_area
-    decision_tags:
-    - catchment_area
-    - scope_definition
-    - travel_time_access
-    primary_spatial_unit: catchment
-    action_targets:
-    - entrance
-    - route
-    - program_location
-    implementation_status: not_implemented
-  - metric_id: grid.project_network_distance
-    decision_tags:
-    - combined_activity
-    - multi_source_overlap
-    - project_access
-    primary_spatial_unit: grid_cell
-    action_targets:
-    - program_location
-    - entrance
-    - route
-    implementation_status: not_implemented
-  detail_queries:
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family cross_domain
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family grid_derived
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family gwr
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family isochrone
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family timeseries
-- id: project_evidence_gates
-  source_ids:
-  - project:boundary
-  - project:competitor-operations
-  - project:operator-plan
-  - project:financial-model
-  families:
-  - project_evidence_gate
-  metrics:
-  - metric_id: project.document_constraints
-    decision_tags:
-    - hard_constraints
-    - project_delivery
-    primary_spatial_unit: scope
-    action_targets:
-    - data_collection
-    - operations
-    implementation_status: implemented
-  - metric_id: project.boundary_geometry
-    decision_tags:
-    - hard_constraints
-    - project_boundary
-    primary_spatial_unit: scope
-    action_targets:
-    - boundary_interface
-    - entrance
-    - data_collection
-    implementation_status: implemented
-  - metric_id: competition.operating_performance
-    decision_tags:
-    - competition_positioning
-    - operating_performance
-    primary_spatial_unit: scope
-    action_targets:
-    - operations
-    - data_collection
-    implementation_status: not_implemented
-  - metric_id: operations.operator_commitment
-    decision_tags:
-    - operations_delivery
-    - operator_readiness
-    primary_spatial_unit: scope
-    action_targets:
-    - operations
-    - data_collection
-    implementation_status: not_implemented
-  - metric_id: finance.cost_revenue_model
-    decision_tags:
-    - financial_feasibility
-    - operations_delivery
-    primary_spatial_unit: scope
-    action_targets:
-    - operations
-    - data_collection
-    implementation_status: not_implemented
-  detail_queries:
-  - python skills/spatial-business-analyst/scripts/metric_catalog.py list --family project_evidence_gate
+metrics:
+- tool_id: access.network_reachable_area
+  name: 多时间阈值网络可达面积
+  purpose: 描述对应空间现象
+  question_tags:
+  - catchment_area
+  - scope_definition
+  - travel_time_access
+  primary_spatial_unit: catchment
+  action_targets:
+  - program_location
+  - route
+  implementation_status: not_implemented
+- tool_id: grid.opportunity_flag
+  name: 网格空间条件标记
+  purpose: 候选网格的规则筛选
+  question_tags:
+  - candidate_screening
+  - grid_typology
+  - multi_metric_comparison
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  - public_space
+  implementation_status: implemented
+- tool_id: grid.type
+  name: 网格四象限分型
+  purpose: 当前分析批次内的结构分组
+  question_tags:
+  - candidate_screening
+  - grid_typology
+  - multi_metric_comparison
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  - public_space
+  implementation_status: implemented
+- tool_id: gwr.model_fit
+  name: GWR 拟合诊断
+  purpose: 模型拟合程度和误差描述
+  question_tags:
+  - local_association
+  - model_diagnostics
+  - spatial_relationship
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - analysis_method
+  - program_location
+  implementation_status: implemented
+- tool_id: gwr.nightlight_spatial_model
+  name: 夜光局部空间关系模型
+  purpose: 解释变量与夜光之间的空间异质关系探索
+  question_tags:
+  - local_association
+  - model_diagnostics
+  - spatial_relationship
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - analysis_method
+  - program_location
+  implementation_status: implemented
+- tool_id: isochrone.reachable_area
+  name: 等时圈可达范围
+  purpose: 理论可达空间边界
+  question_tags:
+  - catchment_area
+  - scope_definition
+  - travel_time_access
+  primary_spatial_unit: catchment
+  action_targets:
+  - program_location
+  - route
+  implementation_status: implemented
+- tool_id: nightlight.activity_level
+  name: 夜间亮度空间分级
+  purpose: 夜间亮度空间分级
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.hotspot_class
+  name: 夜光热点等级
+  purpose: 夜间亮度分层
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.hotspot_ratio
+  name: 夜光热点网格比例
+  purpose: 亮度高值覆盖程度
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.lit_pixel_ratio
+  name: 亮灯像素比例
+  purpose: 夜间亮度覆盖连续性
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.max_radiance
+  name: 夜光最大辐亮度
+  purpose: 最高亮度位置识别
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.mean_radiance
+  name: 夜光平均辐亮度
+  purpose: 平均夜间亮度水平
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.p90
+  name: 夜光 P90
+  purpose: 高亮区域的相对强度基准
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.sector_profile
+  name: 夜光方向分布
+  purpose: 夜光高值方向比较
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: sector
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.spatial_profile
+  name: 夜光空间梯度
+  purpose: 亮度核心、扩散和边缘衰减结构
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: distance_band
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: nightlight.total_radiance
+  name: 夜光总辐亮度
+  purpose: 夜间亮度总量代理
+  question_tags:
+  - night_activity_proxy
+  - nightlight_pattern
+  - spatial_intensity
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - public_space
+  - site_direction
+  implementation_status: implemented
+- tool_id: poi.category_count
+  name: POI 分类数量
+  purpose: 类别供给构成
+  question_tags:
+  - category_structure
+  - competition_context
+  - facility_supply
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.category_density
+  name: POI 分类密度
+  purpose: 类别供给的空间分布
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.count
+  name: POI 数量
+  purpose: 将经 15 分钟 walking 等时圈几何核验的 POI 按真实主类／附属类和互补配套／同类对标角色分别盘点
+  question_tags:
+  - category_structure
+  - competition_context
+  - facility_supply
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.focused_accessibility
+  name: 重点 POI 真实步行可达性
+  purpose: 在当前 POI 快照与保存路网中识别经连续道路路径计算的近期可达地点
+  question_tags:
+  - comparison_supply
+  - complementary_supply
+  - poi_accessibility
+  primary_spatial_unit: route
+  action_targets:
+  - data_collection
+  - program_location
+  - route
+  implementation_status: implemented
+- tool_id: poi.grid_count
+  name: 网格 POI 数量
+  purpose: 设施空间分布
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.grid_density
+  name: POI 网格密度
+  purpose: 单位面积设施集中程度
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.kernel_density
+  name: POI 核密度
+  purpose: 识别 POI 相对集聚位置
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.local_entropy
+  name: POI 类别局部熵
+  purpose: 类别混合程度
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.local_entropy_normalized
+  name: 归一化局部熵
+  purpose: 同一分类体系下的混合度比较
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.lq
+  name: POI 类别区位商
+  purpose: 相对专业化
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.multi_year_count
+  name: POI 多年份数量
+  purpose: 覆盖范围内数量的跨年对照
+  question_tags:
+  - category_structure
+  - competition_context
+  - facility_supply
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.neighbor_mean_density
+  name: 邻域平均 POI 密度
+  purpose: 局部环境基准
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.neighbor_mean_entropy
+  name: 邻域平均 POI 混合度
+  purpose: 邻域类别混合基准
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: poi.open_close_rate
+  name: 开闭店变化与存续率
+  purpose: 描述对应空间现象
+  question_tags:
+  - category_structure
+  - competition_context
+  - facility_supply
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: not_implemented
+- tool_id: poi.supply_structure
+  name: POI 供给结构
+  purpose: 将经 15 分钟 walking 等时圈几何核验的 POI 按真实主类／附属类和互补配套／同类对标角色分别盘点
+  question_tags:
+  - comparison_supply
+  - complementary_supply
+  - poi_supply_structure
+  primary_spatial_unit: scope
+  action_targets:
+  - data_collection
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: population.age_structure
+  name: 年龄结构
+  purpose: 年龄结构
+  question_tags:
+  - customer_proxy
+  - demographic_structure
+  - population_scale
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: population.selected_ratio
+  name: 选定人口占比
+  purpose: 目标人口代理的空间覆盖
+  question_tags:
+  - customer_proxy
+  - demographic_structure
+  - population_scale
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: population.sex_structure
+  name: 性别结构
+  purpose: 人口性别结构描述
+  question_tags:
+  - customer_proxy
+  - demographic_structure
+  - population_scale
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: population.total
+  name: 总人口
+  purpose: 人口规模
+  question_tags:
+  - customer_proxy
+  - demographic_structure
+  - population_scale
+  primary_spatial_unit: scope
+  action_targets:
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: regional.directional_evidence_matrix
+  name: 区域方向距离带证据矩阵
+  purpose: 同一共同空间单元内的 POI、人口、夜光与路网条件比较
+  question_tags:
+  - multi_metric_comparison
+  - regional_direction
+  - spatial_structure
+  primary_spatial_unit: shared_grid_direction_distance_band
+  action_targets:
+  - data_collection
+  - route
+  - site_direction
+  implementation_status: implemented
+- tool_id: report.decision_visual
+  name: 决策报告图表表达
+  purpose: 比较、趋势、散点、关系和阶段节奏的报告表达
+  question_tags:
+  - action_sequence
+  - comparison_communication
+  - decision_briefing
+  primary_spatial_unit: scope
+  action_targets:
+  - analysis_method
+  - data_collection
+  - operations
+  implementation_status: not_implemented
+- tool_id: road.choice
+  name: 路网选择度
+  purpose: 潜在路径穿越性和结构性经过机会
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.connectivity
+  name: 路网连通度
+  purpose: 路网连接状况
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.control
+  name: 路网控制值
+  purpose: 节点或路段对相邻连接的局部控制关系
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.degree
+  name: 节点度/平均连接度
+  purpose: 节点直接连接程度
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.integration
+  name: 路网整合度
+  purpose: 空间位置在路网结构中的相对可达中心性
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.intelligibility
+  name: 路网可理解度
+  purpose: 局部连接结构与整体路网结构的关系
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: scope
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.mean_depth
+  name: 平均深度
+  purpose: 路网结构距离层级的相对描述
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.network_size
+  name: 路网规模
+  purpose: 路网规模和覆盖描述
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: scope
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.node_degree
+  name: 路网节点度
+  purpose: 节点连接数量
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: road.orientation
+  name: 道路方向分布
+  purpose: 路网主导方向和方向结构
+  question_tags:
+  - network_access
+  - route_structure
+  - spatial_connectivity
+  primary_spatial_unit: road_segment
+  action_targets:
+  - boundary_interface
+  - route
+  - street_segment
+  implementation_status: implemented
+- tool_id: spatial.gi_star
+  name: Getis-Ord Gi* 热点统计
+  purpose: POI 密度局部热点和冷点的统计识别
+  question_tags:
+  - hotspot_detection
+  - spatial_clustering
+  - spatial_outlier
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - analysis_method
+  - program_location
+  implementation_status: implemented
+- tool_id: spatial.global_moran_i_density
+  name: POI 密度全局莫兰指数
+  purpose: 识别研究范围整体是否存在显著空间自相关，并决定是否需要继续局部定位。
+  question_tags:
+  - hotspot_detection
+  - spatial_clustering
+  - spatial_outlier
+  primary_spatial_unit: scope
+  action_targets:
+  - analysis_method
+  implementation_status: implemented
+- tool_id: spatial.lisa
+  name: 局部莫兰 LISA
+  purpose: 局部高高、低低及空间异常候选识别
+  question_tags:
+  - hotspot_detection
+  - spatial_clustering
+  - spatial_outlier
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - analysis_method
+  - program_location
+  implementation_status: implemented
+- tool_id: spatial.neighbor_density_delta
+  name: 网格相对邻域密度差
+  purpose: 局部高于或低于邻域的识别
+  question_tags:
+  - facility_concentration
+  - local_specialization
+  - spatial_mix
+  primary_spatial_unit: grid_cell
+  action_targets:
+  - program_location
+  implementation_status: implemented
+- tool_id: spatial.thematic_visual
+  name: 已归档空间结果专题表达
+  purpose: 表达已归档的空间范围、点线面或专题结果
+  question_tags:
+  - decision_briefing
+  - scope_comparison
+  - spatial_communication
+  primary_spatial_unit: scope
+  action_targets:
+  - program_location
+  - public_space
+  - site_direction
+  implementation_status: not_implemented
+- tool_id: timeseries.age_shift
+  name: 主导年龄段迁移
+  purpose: 年龄结构变化位置
+  question_tags:
+  - spatial_shift
+  - temporal_change
+  - trend_comparison
+  primary_spatial_unit: scope
+  action_targets:
+  - data_collection
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: timeseries.hotspot_shift
+  name: 夜光热点迁移
+  purpose: 夜光热点时序稳定性和迁移
+  question_tags:
+  - spatial_shift
+  - temporal_change
+  - trend_comparison
+  primary_spatial_unit: hotspot_zone
+  action_targets:
+  - data_collection
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: timeseries.nightlight_change
+  name: 夜光时间变化
+  purpose: 夜间亮度增强、减弱和稳定区域识别
+  question_tags:
+  - spatial_shift
+  - temporal_change
+  - trend_comparison
+  primary_spatial_unit: scope
+  action_targets:
+  - data_collection
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: timeseries.population_change
+  name: 人口时间变化
+  purpose: 人口变化方向和变化网格识别
+  question_tags:
+  - spatial_shift
+  - temporal_change
+  - trend_comparison
+  primary_spatial_unit: scope
+  action_targets:
+  - data_collection
+  - operations
+  - program_location
+  implementation_status: implemented
+- tool_id: timeseries.population_density_change
+  name: 人口密度时间变化
+  purpose: 人口空间变化热点
+  question_tags:
+  - spatial_shift
+  - temporal_change
+  - trend_comparison
+  primary_spatial_unit: scope
+  action_targets:
+  - data_collection
+  - operations
+  - program_location
+  implementation_status: implemented

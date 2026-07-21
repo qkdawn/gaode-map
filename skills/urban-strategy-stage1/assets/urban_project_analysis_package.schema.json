@@ -37,9 +37,9 @@
     "scope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["project_boundary", "analysis_areas", "coordinate_system", "scope_ids"],
+      "required": ["analysis_scope", "analysis_areas", "coordinate_system", "scope_ids"],
       "properties": {
-        "project_boundary": {"type": "object"},
+        "analysis_scope": {"type": "object"},
         "analysis_areas": {"type": "array", "minItems": 1, "items": {"type": "object"}},
         "coordinate_system": {"type": "string", "minLength": 1},
         "scope_ids": {"type": "array", "items": {"type": "string"}}
@@ -52,7 +52,7 @@
       "properties": {
         "sources_export": {"type": "string", "minLength": 1},
         "project_brief": {"type": "string", "minLength": 1},
-        "boundary_geojson": {"type": "string"},
+        "analysis_scope_geojson": {"type": "string"},
         "visual_snapshots": {"type": "array", "items": {"type": "string"}},
         "additional_files": {"type": "array", "items": {"type": "string"}}
       }

@@ -170,6 +170,24 @@ def test_identical_save_is_idempotent_but_run_payload_and_owner_are_immutable(ru
         )
 
 
+def test_list_omits_runs_with_corrupt_immutable_storage(run_repo):
+    valid_run, valid_brief, valid_report = _completed_run("run-valid")
+    _persist(run_repo, valid_run, valid_brief, valid_report)
+    corrupt_run, corrupt_brief, corrupt_report = _completed_run("run-corrupt")
+    _persist(run_repo, corrupt_run, corrupt_brief, corrupt_report)
+
+    corrupt_report_path = (
+        run_repo.storage.root
+        / "urban-strategy-stage1"
+        / "run-corrupt"
+        / "report"
+        / "stage1-report.md"
+    )
+    corrupt_report_path.write_text("tampered", encoding="utf-8")
+
+    assert [item["run_id"] for item in run_repo.list("history-1")] == ["run-valid"]
+
+
 def test_newer_changed_input_marks_only_older_run_in_same_history_stale(run_repo):
     old_run, old_brief, old_report = _completed_run(
         "run-old", source_payload={"revision": 1}

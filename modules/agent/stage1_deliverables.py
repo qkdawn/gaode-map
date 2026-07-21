@@ -59,7 +59,7 @@ class DesignMovementRequirement(BaseModel):
     movement_type: Literal["visitor", "resident", "service", "fire"]
     title: str
     role: str
-    entry_or_origin: str
+    origin: str
     destinations: list[str] = Field(default_factory=list)
     affected_space_ids: list[str] = Field(default_factory=list)
     operating_windows: list[str] = Field(default_factory=list)
@@ -259,7 +259,7 @@ def build_design_handoff(package: dict[str, Any]) -> DesignHandoffContract:
                 movement_type=_text(node.get("movement_type")),
                 title=_text(node.get("title")),
                 role=_text(node.get("role")),
-                entry_or_origin=_text(node.get("entry_or_origin")),
+                origin=_text(node.get("origin")),
                 destinations=[
                     _text(item) for item in _list(node.get("destinations")) if _text(item)
                 ],

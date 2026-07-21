@@ -180,7 +180,7 @@ flowchart TD
   "evidence_class": "project_fact",
   "confidence": "high",
   "status": "confirmed",
-  "spatial_scope": "项目红线/15分钟圈/35分钟圈",
+  "spatial_scope": "分析范围/15分钟圈/35分钟圈",
   "time_scope": "2024",
   "limitations": []
 }
@@ -367,7 +367,7 @@ POI 多 / 夜光亮 / 人口高
 
 2. **任务与研究边界**
    - 项目问题；
-   - 项目红线与分析圈层；
+   - 分析范围与比较圈层；
    - 数据时点；
    - 本报告能回答和不能回答的问题。
 
@@ -546,7 +546,7 @@ POI 多 / 夜光亮 / 人口高
     "preferred_report_language": "zh-CN"
   },
   "scope": {
-    "project_boundary": {},
+    "analysis_scope": {},
     "analysis_areas": [],
     "coordinate_system": "",
     "scope_ids": []
@@ -706,7 +706,7 @@ workspace/project-a/
 
 1. 从当前网站导出 `ppt_sources_full_export.json`；
 2. 补一份 1—2 页的 `project_brief.md`；
-3. 补项目范围 GeoJSON 和关键地图快照；
+3. 补分析范围 GeoJSON 和关键地图快照；
 4. 在 Codex 工作区执行 Stage 1 Skill；
 5. 生成报告、证据附录和设计交接合同；
 6. 由人工规划/策划人员审阅并记录问题。
@@ -774,7 +774,7 @@ workspace/project-a/
 
 1. `ppt_sources_full_export.json`；
 2. `project_brief.md`；
-3. 项目范围 GeoJSON 与关键地图快照。
+3. 分析范围 GeoJSON 与关键地图快照。
 
 然后先离线跑出：
 
@@ -843,7 +843,7 @@ python skills/urban-strategy-stage1/scripts/prepare_project_run.py `
   --sources-export <ppt_sources_full_export.json> `
   --out <run-dir> `
   --project-name "<项目名>" `
-  --boundary <project_boundary.geojson>
+  --analysis-scope <analysis_scope.geojson>
 ```
 
 该脚本不会覆盖非空目录，会复制来源导出、范围文件和任务书模板，并生成统一项目包。生成后需要人工补全 `project_brief.md`，再进入输入检查。

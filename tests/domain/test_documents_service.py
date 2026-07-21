@@ -13,8 +13,10 @@ from modules.documents.service import (
     EmptyDocument,
     UnsupportedDocumentType,
     create_document_upload,
+    get_document_source_metadata,
     get_document,
     list_documents,
+    read_document_source,
 )
 
 
@@ -102,6 +104,29 @@ def test_document_upload_defaults_title_to_file_stem(monkeypatch, tmp_path):
 
     assert record.title == "strategy"
     assert record.file_type == "docx"
+
+
+def test_document_source_returns_original_bytes_without_exposing_path(monkeypatch, tmp_path):
+    fake_session = FakeSession()
+    monkeypatch.setattr("modules.documents.service.settings.document_upload_dir", str(tmp_path))
+    monkeypatch.setattr("modules.documents.service.SessionLocal", lambda: fake_session)
+    original = b"PK\x03\x04original docx"
+    record = create_document_upload(
+        filename="project.docx",
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        fileobj=BytesIO(original),
+        document_role=DocumentRole.PROJECT_BRIEF,
+        history_id="history-1",
+    )
+
+    metadata = get_document_source_metadata(record.id, history_id="history-1")
+    assert metadata["file_name"] == "project.docx"
+    assert metadata["mime_type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert "file_path" not in metadata
+    _, content = read_document_source(record.id, history_id="history-1")
+    assert content == original
+    with pytest.raises(DocumentNotFound):
+        read_document_source(record.id, history_id="another-history")
 
 
 def test_document_upload_rejects_unsupported_empty_and_large(monkeypatch, tmp_path):

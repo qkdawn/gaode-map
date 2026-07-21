@@ -33,7 +33,7 @@ File: `urban_planning.json`
 Analyze:
 
 - regional role and surrounding functional relationships;
-- project boundary versus wider analysis circles;
+- analysis scope versus wider comparison areas;
 - land use, public service, ecological, and transport structure;
 - nodes, corridors, edges, barriers, interfaces, and catchments;
 - access and movement at relevant modes and times;

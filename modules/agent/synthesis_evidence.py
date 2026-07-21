@@ -112,7 +112,7 @@ def build_analysis_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, obj
                 interpretation="raw_signal: road node and edge counts are available.",
                 source="analysis_snapshot.road.summary / current_road_summary",
                 confidence=evidence_confidence(metrics["road_node_count"] or metrics["road_edge_count"]),
-                limitation="路网结构不能替代实际步行环境、出入口、停车和公共交通条件。",
+                limitation="路网结构不能替代实际步行环境、停车和公共交通条件。",
             )
         )
     if metrics["population_total"] is not None:

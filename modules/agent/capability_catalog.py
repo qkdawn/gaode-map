@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .capability_inputs import CapabilityInputResolution, resolve_capability_inputs
 from .schemas import AgentTurnRequest
-from .skills.urban_strategy_stage1 import evaluate_readiness
+from .skills.urban_strategy_stage1 import evaluate_readiness as evaluate_stage1_readiness
 
 
 class CapabilityAction(BaseModel):
@@ -267,7 +267,7 @@ def evaluate_capability_readiness(
         )
     resolved_inputs = resolve_capability_inputs(capability.id, payload)
     if capability.executor_id == "urban-strategy-stage1":
-        result: dict[str, Any] = evaluate_readiness(payload)
+        result: dict[str, Any] = evaluate_stage1_readiness(payload)
         if capability.id == "spatial-programming-matrix" and any(
             item.state == "resolved" for item in resolved_inputs.resolutions
         ):

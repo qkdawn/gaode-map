@@ -97,7 +97,7 @@ def validate(package_path: Path) -> dict[str, Any]:
     require(bool(_list(brief.get("goals"))), "project_goals", "at least one goal is required")
 
     scope = _dict(package.get("scope"))
-    require(bool(_dict(scope.get("project_boundary"))), "project_boundary", "scope.project_boundary is required")
+    require(bool(_dict(scope.get("analysis_scope"))), "analysis_scope", "scope.analysis_scope is required")
     require(bool(_list(scope.get("analysis_areas"))), "analysis_areas", "at least one analysis area is required")
     require(bool(_text(scope.get("coordinate_system"))), "coordinate_system", "scope.coordinate_system is required")
 
@@ -107,10 +107,10 @@ def validate(package_path: Path) -> dict[str, Any]:
 
     inputs = _dict(package.get("inputs"))
     paths: dict[str, str] = {}
-    for key in ("sources_export", "project_brief", "boundary_geojson"):
+    for key in ("sources_export", "project_brief", "analysis_scope_geojson"):
         path = _resolve(base, inputs.get(key))
         if path is None:
-            if key != "boundary_geojson":
+            if key != "analysis_scope_geojson":
                 errors.append(f"input_path:{key} is required")
             continue
         paths[key] = str(path)

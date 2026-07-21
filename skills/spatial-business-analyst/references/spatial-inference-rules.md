@@ -1,59 +1,26 @@
-# Spatial inference rules
+# V4.1 空间推断边界
 
-Use this reference for local hotspots, directions, entrances, roads, routes, and spatial-program actions.
+人口、夜光、POI、路网、等时圈与网格可以描述项目内部的覆盖、设施结构、可达性、连通性、亮度与空间分布差异。它们可用于候选筛选、踏勘优先级、店型/服务/选品或产品方案的**待验证假设**。
 
-## Move from global pattern to local object
+它们不是消费、真实客流、订单、交易、营收、ROI、SKU 销量或因果效果的直接测量。
 
-A global total, average, or Moran's I may establish that a pattern exists, but it cannot locate an entrance, program, interface, or route. Continue to a localizable object when the decision is spatial:
+写作时使用简洁专业表述：
 
-- direction: sector or distance band;
-- concentration: grid cell plus hotspot zone;
-- access: entrance plus snapped road segment;
-- movement: route plus matched road segments and break points;
-- program allocation: hotspot zone, public space, street segment, or boundary interface.
+- 可以写：在当前候选对象中，A 点的生活服务设施组合相对更完整；建议优先核实同类供给和目标使用场景。
+- 不可以写：A 点消费更强、客流一定更高、预计营收更高或因此必然开店。
 
-Preserve object IDs and geometries in EvidenceSnapshot entries and artifacts.
+需要经营结论时，补充目标账户、消费者访谈、现场观察、试卖、订单、交易、成本、SLA、竞店商品或其他直接证据，并说明什么结果支持、调整或停止当前行动。
 
-## Hotspots and local clusters
+## 方位、距离与多指标融合
 
-- Use `alpha=0.05` unless the plan states otherwise.
-- Apply Benjamini–Hochberg FDR for multiple cells by default.
-- Merge adjacent significant cells only when cluster types agree.
-- Keep a single significant cell as `local_outlier`; do not call it a continuous hotspot.
-- Complete p-values and cluster classes can support `measured` local-statistical evidence.
-- Quantiles, high values, or z-scores without significance produce a “high-value concentration area” with `proxy` state, not a statistical hotspot.
+### 必答空间问题
 
-Global Moran's I answers whether the full distribution is spatially autocorrelated. It cannot locate project actions. If the decision concerns an entrance or program location, continue to Gi*, LISA, and the relevant entrance or route relationship.
+空间证据进入结论前，先回答：它在哪里、离项目多远、相对哪个共同单元比较、是否沿着可用路网分布、与其他指标是共同支持还是相互冲突。
 
-## Direction and distance
+### 可写的融合判断
 
-Compare normalized rates, densities, shares, or accessible exposure. Raw directional counts are descriptive only when sector area, reachable area, distance opportunity, or network exposure differs. Keep the project origin and coordinate system explicit.
+可以把同一共享栅格中的 POI 密度、类别、人口密度、夜光和路网覆盖/整合度组合为“空间条件”。例如：某方向 POI 和人口都高，且有路网覆盖，可作为日常服务与到达体验的优先核验方向；某方向 POI 高但夜光和路网密度低，则只能说明设施存在与夜间/到达条件不同步，应优先核验连接和开放时段。
 
-## Entrance semantics
+### 不可越界
 
-An entrance is a physical project-to-network access anchor, not a generic analysis origin.
-
-- `existing_observed`: documented or observed entrance.
-- `project_planned`: explicit design entrance.
-- `inferred_candidate`: project-boundary × walkable-road intersection; always `experimental_assumption`.
-
-A selected map center, POI centroid, isochrone boundary, or area-sampling seed is not automatically an entrance. If the run lacks a project boundary or explicit entrance and the question does not require entrance choice, exclude entrance metrics as not applicable.
-
-Compare entrances through planned primary, supporting, and diagnostic metrics; do not hide unlike measures in an unexplained weighted score.
-
-## Routes
-
-Route only entrance–destination pairs resolved from locked evidence capabilities. Valhalla supplies real walking geometry, distance, and duration. Do not replace a blocked route with a straight line or circular buffer. Straight-line distance is only the denominator for detour ratio.
-
-If depthmapX is unavailable, preserve successful route distance and duration while marking syntax-overlap metrics blocked. Match route geometry to road segments before calculating integration or choice overlap.
-
-## Translating evidence into action
-
-A spatial finding is complete only when it identifies:
-
-1. the local object;
-2. the observed or proxy pattern;
-3. the mechanism being tested;
-4. the project object that can change;
-5. the action or prototype;
-6. the assumption and disconfirming observation.
+这些代理不直接证明客流、消费、订单、收入或回报。没有路网覆盖时，不得说“道路连通性低”；没有直接经营数据时，不得写“商业机会指数”或预测营业结果。

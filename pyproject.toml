@@ -66,6 +66,7 @@ dependencies = [
     "cryptography",
     "crawl4ai==0.9.0",
     "docling",
+    "vl-convert-python>=1.8.0",
 ]
 
 [dependency-groups]

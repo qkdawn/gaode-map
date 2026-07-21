@@ -88,7 +88,7 @@ def evaluate_readiness(payload: AgentTurnRequest) -> dict[str, Any]:
             "项目空间范围",
             "可识别的项目空间范围",
             "select-scope",
-            "选择项目范围",
+            "选择分析范围",
             "scope-selection",
         ),
         (
@@ -432,7 +432,7 @@ async def execute(
         emit,
         phase_id="stage1-readiness",
         title="检查 Stage 1 资料完整性",
-        detail="核对项目范围、摘要、核心文档和分析证据。",
+        detail="核对分析范围、摘要、核心文档和分析证据。",
         state="completed",
     )
     if not readiness["ready"]:
@@ -736,10 +736,10 @@ async def execute(
             "hierarchy_id 必须引用 spatial_hierarchy，且 space_id 必须登记在该节点 member_space_ids。"
             "map_binding 只能是 {status:'bound', spatial_object_id:'清单中的稳定ID'} 或"
             "{status:'unavailable', spatial_object_id:'', reason:'无法精确绑定的原因'}。"
-            "只有决策空间与清单对象精确相同时才能 bound；不得把建筑、院落或入口随意绑定到 H3 网格或路段，"
+            "只有决策空间与清单对象精确相同时才能 bound；不得把建筑或院落随意绑定到 H3 网格或路段，"
             "不得生成坐标、几何或清单外 ID。"
             "movement_routes 必须完整覆盖 visitor、resident、service、fire 四类流线；service 的用户展示语义是后勤。"
-            "每条流线必须含 route_id、movement_type、title、role、entry_or_origin、destinations、affected_space_ids、"
+            "每条流线必须含 route_id、movement_type、title、role、origin、destinations、affected_space_ids、"
             "operating_windows、constraints、conflicts、evidence_refs、assumptions、validation_actions、"
             "status(verified/proposed/blocked/unavailable)、map_binding。route_id 必须唯一，affected_space_ids 只能引用本矩阵空间。"
             "流线 map_binding 同样只能选择清单中的稳定 ID 或明确 unavailable；只有 LineString/MultiLineString 权威路径对象可绑定，"

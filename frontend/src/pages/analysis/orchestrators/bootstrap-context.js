@@ -11,6 +11,8 @@ import { createAnalysisPopulationInitialState, createAnalysisPopulationMethods }
 import { createAnalysisNightlightInitialState, createAnalysisNightlightMethods } from '../../../features/nightlight/panel'
 import { createAnalysisGwrInitialState, createAnalysisGwrMethods } from '../../../features/gwr/panel'
 import { createAnalysisTimeseriesInitialState, createAnalysisTimeseriesMethods } from '../../../features/timeseries/panel'
+import { createAnalysisSharedGridMethods } from '../../../features/shared-grid/panel'
+import { createAnalysisSharedGridInitialState } from '../../../features/shared-grid/state'
 import { createAnalysisExportInitialState, createAnalysisExportMethods } from '../../../features/export/export-bundle'
 import { createRoadSyntaxUiMethods } from '../../../features/road/ui'
 import { createRoadSyntaxControllerCoreMethods } from '../../../features/road/controller-core'
@@ -28,6 +30,7 @@ import { useAnalysisGwrStore, ANALYSIS_GWR_STATE_KEYS } from '../../../stores/an
 import { useAnalysisTimeseriesStore, ANALYSIS_TIMESERIES_STATE_KEYS } from '../../../stores/analysis/timeseries'
 import { useAnalysisExportStore, ANALYSIS_EXPORT_STATE_KEYS } from '../../../stores/analysis/export'
 import { useAnalysisRoadStore, ANALYSIS_ROAD_STATE_KEYS } from '../../../stores/analysis/road'
+import { useAnalysisSharedGridStore, ANALYSIS_SHARED_GRID_STATE_KEYS } from '../../../stores/analysis/shared-grid'
 import { createStoreBackedComputed } from '../adapters/store-computed-bridge'
 import { createAnalysisPoiMapVisibilityAdapterMethods } from '../adapters/poi-map-visibility'
 import { createAnalysisMapOrchestratorMethods } from './map'
@@ -78,6 +81,8 @@ function createAnalysisBootstrapContext(options = {}) {
   const buildAnalysisTimeseriesInitialState = () => createAnalysisTimeseriesInitialState()
   const timeseriesMethods = createAnalysisTimeseriesMethods()
   const buildAnalysisExportInitialState = () => createAnalysisExportInitialState()
+  const buildAnalysisSharedGridInitialState = () => createAnalysisSharedGridInitialState()
+  const sharedGridMethods = createAnalysisSharedGridMethods()
   const exportMethods = createAnalysisExportMethods()
   const roadSyntaxUiMethods = createRoadSyntaxUiMethods(roadSyntaxConst)
   const roadSyntaxOverlayCommitMethods = createRoadSyntaxOverlayCommitMethods(roadSyntaxConst)
@@ -123,6 +128,7 @@ function createAnalysisBootstrapContext(options = {}) {
     buildAnalysisGwrInitialState,
     buildAnalysisTimeseriesInitialState,
     buildAnalysisExportInitialState,
+    buildAnalysisSharedGridInitialState,
     buildRoadSyntaxInitialState,
   })
 
@@ -135,6 +141,7 @@ function createAnalysisBootstrapContext(options = {}) {
   const timeseriesStore = useAnalysisTimeseriesStore(pinia)
   const exportStore = useAnalysisExportStore(pinia)
   const roadStore = useAnalysisRoadStore(pinia)
+  const sharedGridStore = useAnalysisSharedGridStore(pinia)
   const storeBackedComputed = createStoreBackedComputed([
     { store: sessionStore, fieldKeys: ANALYSIS_SESSION_STATE_KEYS },
     { store: historyStore, fieldKeys: ANALYSIS_HISTORY_STATE_KEYS },
@@ -145,6 +152,7 @@ function createAnalysisBootstrapContext(options = {}) {
     { store: timeseriesStore, fieldKeys: ANALYSIS_TIMESERIES_STATE_KEYS },
     { store: exportStore, fieldKeys: ANALYSIS_EXPORT_STATE_KEYS },
     { store: roadStore, fieldKeys: ANALYSIS_ROAD_STATE_KEYS },
+    { store: sharedGridStore, fieldKeys: ANALYSIS_SHARED_GRID_STATE_KEYS },
   ])
 
   return {
@@ -166,6 +174,7 @@ function createAnalysisBootstrapContext(options = {}) {
       nightlightMethods,
       gwrMethods,
       timeseriesMethods,
+      sharedGridMethods,
       exportMethods,
       roadSyntaxOverlayCommitMethods,
       roadSyntaxControllerCoreMethods,

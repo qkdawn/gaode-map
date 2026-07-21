@@ -120,8 +120,22 @@ SPATIAL_AGGREGATE_OPS = {"area_weighted_sum", "area_weighted_avg", "intersection
 
 POI_GEOMETRY_COORD_TYPE = "gcj02"
 
+# Analysis artifacts created by the current frontend have always stored their
+# GeoJSON coordinates in GCJ-02.  Older history rows predate the explicit
+# geometry_coord_type field, so retain that producer contract when reading
+# those known artifact types.  Unknown artifact types must still provide an
+# explicit coordinate system rather than being guessed.
+LEGACY_ARTIFACT_GEOMETRY_COORD_TYPES = {
+    "poi_h3_grid": "gcj02",
+    "poi_raster_grid": "gcj02",
+    "population": "gcj02",
+    "nightlight": "gcj02",
+    "road_syntax": "gcj02",
+}
+
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
+MAX_QUERY_SNAPSHOT_FEATURES = 10_000
 
 
 class ScopeDatasetQueryError(ValueError):
@@ -423,9 +437,91 @@ class ScopeDatasetRepository:
             session.close()
 
 
+class SavedProjectSnapshotRepository(ScopeDatasetRepository):
+    """Read-only repository for an explicitly supplied saved-project snapshot.
+
+    The production path remains the database-backed repository.  This adapter is
+    intentionally opt-in: it is useful when an immutable run already contains a
+    saved spatial extraction and the database is temporarily unreachable.  It
+    exposes the same normalized artifact shape as the database repository, so the
+    spatial tool does not gain a second geometry or renderer contract.
+    """
+
+    _SUPPORTED_ARTIFACT_TYPES = {"population", "nightlight", "poi_raster_grid", "road_syntax"}
+
+    def __init__(self, snapshot: Dict[str, Any]):
+        if not isinstance(snapshot, dict):
+            raise ValueError("saved spatial snapshot must be an object")
+        history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+        history_id = _as_text(snapshot.get("history_id") or history.get("id"))
+        if not history_id:
+            raise ValueError("saved spatial snapshot must include history id")
+        self.history_id = history_id
+        self.snapshot = _clone_json(snapshot)
+        self._artifacts = [
+            _clone_json(value)
+            for key, value in snapshot.items()
+            if str(key).isdigit()
+            and isinstance(value, dict)
+            and _as_text(value.get("artifact_type")) in self._SUPPORTED_ARTIFACT_TYPES
+        ]
+        self._pois = []
+        poi_payload = snapshot.get("pois_2024")
+        if isinstance(poi_payload, dict) and isinstance(poi_payload.get("pois"), list):
+            self._pois = [item for item in poi_payload["pois"] if isinstance(item, dict)]
+
+    @classmethod
+    def from_json_path(cls, path: Any) -> "SavedProjectSnapshotRepository":
+        from pathlib import Path
+
+        snapshot_path = Path(path)
+        try:
+            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            raise ValueError("saved spatial snapshot cannot be read") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError("saved spatial snapshot is not valid JSON") from exc
+        return cls(payload)
+
+    def list_poi_results(self, history_id: str) -> List[Dict[str, Any]]:
+        if str(history_id or "").strip() != self.history_id or not self._pois:
+            return []
+        return [{
+            "id": f"snapshot:poi:{self.history_id}:2024",
+            "source": "saved-project",
+            "year": 2024,
+            "summary": {"total": len(self._pois)},
+        }]
+
+    def get_poi_data(self, poi_result_id: Any) -> List[Dict[str, Any]]:
+        if str(poi_result_id or "") != f"snapshot:poi:{self.history_id}:2024":
+            return []
+        return _clone_json(self._pois)
+
+    def list_analysis_artifacts(self, history_id: str) -> List[Dict[str, Any]]:
+        if str(history_id or "").strip() != self.history_id:
+            return []
+        return _clone_json(self._artifacts)
+
+    def history_detail(self) -> Dict[str, Any]:
+        history = self.snapshot.get("history") if isinstance(self.snapshot.get("history"), dict) else {}
+        polygon = history.get("polygon_wgs84") or history.get("polygon")
+        detail: Dict[str, Any] = {"history_id": self.history_id}
+        if isinstance(polygon, list) and polygon:
+            detail["polygon_wgs84"] = {
+                "type": "Polygon",
+                "coordinates": [polygon],
+            }
+        return detail
+
+
 class ScopeDatasetService:
     def __init__(self, repository: Optional[ScopeDatasetRepository] = None):
         self.repository = repository or ScopeDatasetRepository()
+
+    @classmethod
+    def from_saved_snapshot(cls, path: Any) -> "ScopeDatasetService":
+        return cls(repository=SavedProjectSnapshotRepository.from_json_path(path))
 
     def list_scope_datasets(self, history_id: str) -> Dict[str, Any]:
         normalized_history_id = _as_text(history_id)
@@ -560,6 +656,96 @@ class ScopeDatasetService:
             "evidence_nodes": [record.evidence_node(spatial_matches.get(id(record))) for record in page],
             "warnings": sorted(set(warnings)),
         }
+
+    def materialize_query_snapshot(
+        self,
+        *,
+        history_id: str,
+        source_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+        year: Any = None,
+        spatial: Optional[Dict[str, Any]] = None,
+        max_features: int = MAX_QUERY_SNAPSHOT_FEATURES,
+    ) -> Dict[str, Any]:
+        """Materialize one complete, reproducible WGS84 dataset selection.
+
+        Unlike the Agent-facing paged query, this method returns every matching
+        geometry to the private snapshot boundary. It never samples or truncates.
+        """
+        self._validate_query_fields(source_id, filters=filters or {}, sort={})
+        records, available_years, selected_year = self._records_with_selection(
+            history_id=history_id,
+            source_id=source_id,
+            year=year,
+            require_geometry_metadata=True,
+        )
+        spatial_warnings: List[str] = []
+        if spatial is not None:
+            selection = self._select_spatial_records(
+                history_id=history_id,
+                source_id=source_id,
+                selected_year=selected_year,
+                records=records,
+                spatial=spatial,
+            )
+            records = selection.records
+            spatial_warnings.extend(selection.warnings)
+        records = self._apply_filters(records, source_id, filters or {})
+
+        features: List[Dict[str, Any]] = []
+        missing_geometry_count = 0
+        for record_index, record in enumerate(sorted(records, key=lambda item: item.record_id), 1):
+            parts = self._standard_geometry_parts(record.geometry)
+            if not parts:
+                missing_geometry_count += 1
+                continue
+            for part_index, geometry in enumerate(parts, 1):
+                features.append({
+                    "id": f"{record.record_id}:record:{record_index}:part:{part_index}",
+                    "record_id": record.record_id,
+                    "source_id": source_id,
+                    "title": record.title,
+                    "properties": _clone_json(record.properties),
+                    "geometry": json.loads(json.dumps(mapping(geometry), ensure_ascii=False)),
+                })
+                if len(features) > max_features:
+                    return {
+                        "status": "unavailable",
+                        "source_id": source_id,
+                        "selected_year": selected_year,
+                        "available_years": available_years,
+                        "record_count": len(records),
+                        "normalized_feature_count": len(features),
+                        "features": [],
+                        "warnings": sorted(set(spatial_warnings)),
+                        "failure_reasons": [f"normalized_feature_count_exceeds_limit:{max_features}"],
+                    }
+
+        warnings = list(spatial_warnings)
+        if missing_geometry_count:
+            warnings.append(f"records_without_geometry:{missing_geometry_count}")
+        return {
+            "status": "available",
+            "source_id": source_id,
+            "selected_year": selected_year,
+            "available_years": available_years,
+            "record_count": len(records),
+            "normalized_feature_count": len(features),
+            "features": features,
+            "warnings": sorted(set(warnings)),
+            "failure_reasons": [],
+        }
+
+    @staticmethod
+    def _standard_geometry_parts(geometry: BaseGeometry | None) -> List[BaseGeometry]:
+        if geometry is None or geometry.is_empty:
+            return []
+        if geometry.geom_type in {"Point", "LineString", "Polygon"}:
+            return [geometry]
+        parts: List[BaseGeometry] = []
+        for child in getattr(geometry, "geoms", ()):
+            parts.extend(ScopeDatasetService._standard_geometry_parts(child))
+        return parts
 
     def _select_spatial_records(
         self,
@@ -1187,6 +1373,11 @@ class ScopeDatasetService:
         ).lower()
         if coord_type in {"gcj02", "wgs84"}:
             return coord_type
+        inferred_coord_type = LEGACY_ARTIFACT_GEOMETRY_COORD_TYPES.get(
+            _as_text(artifact.get("artifact_type"))
+        )
+        if inferred_coord_type:
+            return inferred_coord_type
         if required:
             artifact_type = _as_text(artifact.get("artifact_type")) or "unknown"
             raise SpatialQueryError(

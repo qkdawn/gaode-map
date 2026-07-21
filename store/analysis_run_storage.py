@@ -14,14 +14,6 @@ from uuid import uuid4
 from core.config import settings
 
 
-_V3_ROOT_ARTIFACT_FILENAMES = {
-    "analysis_blueprint": "analysis-blueprint.json",
-    "evidence_snapshot": "evidence-snapshot.json",
-    "chapter_assignments": "chapter-assignments.json",
-    "analyst_chapters": "analyst-chapters.json",
-    "editorial_review": "editorial-review.json",
-    "report_assembly": "report-assembly.json",
-}
 _SUCCESS_STATUSES = {"completed", "completed_with_warnings"}
 
 
@@ -79,9 +71,8 @@ class AnalysisRunStorage:
         try:
             staging.mkdir(parents=True, exist_ok=False)
             (staging / "inputs" / "upstream").mkdir(parents=True)
-            if str(manifest.get("schema_version") or "") != "3.0":
-                for folder in ("artifacts", "evidence", "chapters", "report", "diagnostics"):
-                    (staging / folder).mkdir()
+            for folder in ("artifacts", "evidence", "chapters", "report", "diagnostics"):
+                (staging / folder).mkdir()
             self._write_json(staging / "analysis-run.json", {"history_id": history_id, "manifest": manifest})
             self._write_json(staging / "inputs" / "execution-request.json", execution_request)
             self._write_json(staging / "artifact-index.json", self._write_artifacts(staging, manifest, artifact_payloads))
@@ -139,22 +130,34 @@ class AnalysisRunStorage:
                 if direction == "input" and str(artifact.get("source_run_id") or "").strip():
                     relative, fmt = self._copy_upstream(base, artifact)
                 else:
-                    relative, fmt = self._write_artifact(base, direction, artifact, payloads.get(artifact_id) if direction == "output" else None)
+                    relative, fmt = self._write_artifact(
+                        base,
+                        direction,
+                        artifact,
+                        payloads.get(artifact_id) if direction == "output" else None,
+                    )
                 entries.append({"direction": direction, "artifact_id": artifact_id, "artifact_type": str(artifact.get("artifact_type") or "structured_data"), "path": relative.as_posix(), "format": fmt, "content_digest": str(artifact.get("content_digest") or ""), "sha256": _sha256((base / relative).read_bytes()), "artifact": deepcopy(artifact)})
         return {"version": 1, "artifacts": entries}
 
     def _write_artifact(self, base: Path, direction: str, artifact: dict[str, Any], payload: Any) -> tuple[Path, str]:
         artifact_type = str(artifact.get("artifact_type") or "structured_data")
-        root_filename = _V3_ROOT_ARTIFACT_FILENAMES.get(artifact_type) if direction == "output" else None
-        folder = "inputs" if direction == "input" else {"evidence_nodes": "evidence", "evidence_gates": "evidence", "report": "report", "report_visual": "report/assets", "report_chapter": "chapters", "diagnostic_report": "diagnostics"}.get(artifact_type, "artifacts")
+        folder = "inputs" if direction == "input" else {
+            "evidence_nodes": "evidence",
+            "evidence_gates": "evidence",
+            "report": "report",
+            "report_visual": "report/assets",
+            "report_chapter": "chapters",
+            "diagnostic_report": "diagnostics",
+        }.get(artifact_type, "artifacts")
         svg = artifact_type == "report_visual"
         if svg and not isinstance(payload, str):
             raise ValueError("analysis_run_report_visual_svg_required")
         markdown = not svg and isinstance(payload, str) and (artifact_type in {"report", "evidence_nodes"} or str(artifact.get("filename") or "").lower().endswith(".md"))
-        relative = (
-            Path(root_filename)
-            if root_filename
-            else Path(folder) / _filename(artifact.get("filename", ""), artifact["artifact_id"], markdown=markdown, svg=svg)
+        relative = Path(folder) / _filename(
+            artifact.get("filename", ""),
+            artifact["artifact_id"],
+            markdown=markdown,
+            svg=svg,
         )
         target = base / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -198,24 +201,14 @@ class AnalysisRunStorage:
                     raise ValueError
                 if (path / ".complete").read_text(encoding="utf-8").strip() != expected_index_sha256:
                     raise ValueError
-            elif str(manifest.get("schema_version") or "") == "3.0":
+            else:
                 if (path / ".complete").exists() or not (path / ".run-state.json").is_file():
                     raise ValueError
                 state = self._read_json(path / ".run-state.json")
-                if state != {
-                    "status": str(manifest.get("status") or ""),
-                    "artifact_index_sha256": expected_index_sha256,
-                }:
+                if state != {"status": str(manifest.get("status") or ""), "artifact_index_sha256": expected_index_sha256}:
                     raise ValueError
             index = json.loads(index_raw)
             self._read_json(path / "inputs" / "execution-request.json")
-            if str(manifest.get("schema_version") or "") == "3.0" and not self._is_publishable(manifest):
-                forbidden = {"report", "report_visual"}
-                if any(
-                    item.get("direction") == "output" and item.get("artifact_type") in forbidden
-                    for item in index.get("artifacts", [])
-                ):
-                    raise ValueError
             for item in index.get("artifacts", []):
                 relative = Path(str(item["path"]))
                 if relative.is_absolute() or ".." in relative.parts or not (path / relative).is_file() or _sha256((path / relative).read_bytes()) != item["sha256"]:
@@ -238,8 +231,6 @@ class AnalysisRunStorage:
 
     @staticmethod
     def _is_publishable(manifest: dict[str, Any]) -> bool:
-        if str(manifest.get("schema_version") or "") != "3.0":
-            return True
         return str(manifest.get("status") or "") in _SUCCESS_STATUSES
 
     @staticmethod

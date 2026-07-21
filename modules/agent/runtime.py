@@ -787,11 +787,12 @@ async def stream_main_agent_loop(
         try:
             if effective_profile is not None:
                 await emit("meta", {"effective_execution_profile": effective_profile.model_dump(mode="json")})
-            if skill_id == "urban-strategy-stage1":
-                from .skills.urban_strategy_stage1 import execute as execute_stage1
-                response = await execute_stage1(payload, runtime=llm_runtime or LLMRuntimeConfig.from_settings(), profile=effective_profile or EffectiveExecutionProfile(), emit=emit)
-            else:
-                response = await _run_main_agent_loop(payload, emit=emit, llm_runtime=llm_runtime, effective_profile=effective_profile)
+            response = await _run_main_agent_loop(
+                payload,
+                emit=emit,
+                llm_runtime=llm_runtime,
+                effective_profile=effective_profile,
+            )
             if effective_profile is not None:
                 response = response.model_copy(update={"effective_execution_profile": effective_profile})
             if response.status == "failed" and response.diagnostics.error:

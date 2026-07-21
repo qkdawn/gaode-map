@@ -102,7 +102,7 @@ def test_chunk_adapters_emit_unified_nodes():
         chunk_id="poi-1", kind="analysis", domain="poi", title="POI", content="Dense services."
     ))
     image = evidence_node_from_attachment_chunk(AttachmentChunk(
-        chunk_id="ocr-1", attachment_id="att-1", filename="site.png", title="OCR", content="Main entrance."
+        chunk_id="ocr-1", attachment_id="att-1", filename="site.png", title="OCR", content="Main plaza."
     ))
     assert knowledge.kind == "analysis_summary"
     assert knowledge.source_ids == ["current:analysis:poi"]

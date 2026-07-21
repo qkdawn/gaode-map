@@ -6,7 +6,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from .analysis_run_storage import AnalysisRunStorage, analysis_run_storage
+from .analysis_run_storage import (
+    AnalysisRunStorage,
+    AnalysisRunStorageError,
+    analysis_run_storage,
+)
 from .database import SessionLocal
 from .models import AnalysisRunRecord
 
@@ -88,7 +92,17 @@ class AnalysisRunRepo:
             query = session.query(AnalysisRunRecord).filter_by(history_id=normalized_history_id)
             if str(capability_id or "").strip():
                 query = query.filter_by(capability_id=str(capability_id).strip())
-            return [_clone_json(record.manifest) for record in query.order_by(AnalysisRunRecord.persisted_at.desc(), AnalysisRunRecord.run_id.desc()).all()]
+            manifests: list[dict[str, Any]] = []
+            for record in query.order_by(
+                AnalysisRunRecord.persisted_at.desc(),
+                AnalysisRunRecord.run_id.desc(),
+            ).all():
+                try:
+                    self.storage.validate(str(record.capability_id), str(record.run_id))
+                except AnalysisRunStorageError:
+                    continue
+                manifests.append(_clone_json(record.manifest))
+            return manifests
         finally:
             session.close()
 

@@ -33,7 +33,7 @@ def main() -> int:
     parser.add_argument("--project-name", required=True)
     parser.add_argument("--project-id", default="")
     parser.add_argument("--location", default="")
-    parser.add_argument("--boundary", type=Path)
+    parser.add_argument("--analysis-scope", type=Path)
     parser.add_argument("--coordinate-system", default="GCJ-02")
     parser.add_argument("--source-cutoff-date", default=str(date.today()))
     args = parser.parse_args()
@@ -66,18 +66,18 @@ def main() -> int:
     brief_target = input_dir / "project_brief.md"
     shutil.copy2(skill_root / "assets" / "project_brief.template.md", brief_target)
 
-    boundary_ref = ""
-    project_boundary: dict[str, Any] = {"type": "unresolved", "status": "pending_verification"}
-    analysis_areas = [{"id": "project-boundary", "label": "项目红线", "kind": "project_boundary", "status": "pending_verification"}]
-    if args.boundary:
-        boundary_path = args.boundary.resolve()
-        if not boundary_path.is_file():
-            print(f"boundary_not_found:{boundary_path}", file=sys.stderr)
+    scope_ref = ""
+    analysis_scope: dict[str, Any] = {"type": "unresolved", "status": "pending_verification"}
+    analysis_areas = [{"id": "analysis-scope", "label": "分析范围", "kind": "analysis_scope", "status": "pending_verification"}]
+    if args.analysis_scope:
+        scope_path = args.analysis_scope.resolve()
+        if not scope_path.is_file():
+            print(f"analysis_scope_not_found:{scope_path}", file=sys.stderr)
             return 1
-        boundary_target = input_dir / "project_boundary.geojson"
-        shutil.copy2(boundary_path, boundary_target)
-        boundary_ref = boundary_target.name
-        project_boundary = {"type": "Feature", "geometry_ref": boundary_ref, "status": "provided"}
+        scope_target = input_dir / "analysis_scope.geojson"
+        shutil.copy2(scope_path, scope_target)
+        scope_ref = scope_target.name
+        analysis_scope = {"type": "Feature", "geometry_ref": scope_ref, "status": "provided"}
         analysis_areas[0]["status"] = "provided"
 
     sources = source_export.get("sources") if isinstance(source_export.get("sources"), list) else []
@@ -112,10 +112,10 @@ def main() -> int:
             "preferred_report_language": "zh-CN",
         },
         "scope": {
-            "project_boundary": project_boundary,
+            "analysis_scope": analysis_scope,
             "analysis_areas": analysis_areas,
             "coordinate_system": args.coordinate_system,
-            "scope_ids": ["project-boundary"],
+            "scope_ids": ["analysis-scope"],
         },
         "inputs": {
             "sources_export": source_target.name,
@@ -124,14 +124,14 @@ def main() -> int:
             "additional_files": [],
         },
         "quality": {
-            "known_missing_items": [] if boundary_ref else ["项目范围 GeoJSON 尚未提供"],
+            "known_missing_items": [] if scope_ref else ["分析范围 GeoJSON 尚未提供"],
             "known_conflicts": [],
             "notes": ["请编辑 project_brief.md，并确认 core_source_ids。"],
         },
         "requested_deliverables": ["stage1_report", "evidence_appendix", "design_handoff"],
     }
-    if boundary_ref:
-        package["inputs"]["boundary_geojson"] = boundary_ref
+    if scope_ref:
+        package["inputs"]["analysis_scope_geojson"] = scope_ref
 
     package_path = input_dir / "urban_project_analysis_package.json"
     package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

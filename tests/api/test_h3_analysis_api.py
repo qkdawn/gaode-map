@@ -67,12 +67,26 @@ def _mock_arcgis_success(monkeypatch):
             "status": "ArcGIS test double completed",
             "global_moran": {"i": 0.397161, "z_score": 2.4},
             "cells": cells,
-            "image_url": None,
-            "image_url_gi": None,
-            "image_url_lisa": None,
         }
 
     monkeypatch.setattr("modules.h3.analysis.run_h3_arcgis_analysis", _fake_arcgis_analysis)
+    monkeypatch.setattr(
+        "modules.h3.analysis.render_h3_structure_report_maps",
+        lambda **_kwargs: {
+            "gi_z": {
+                "status": "available", "mode": "gi_z", "asset_id": "asset:h3:gi",
+                "title": "H3 Gi* 热点结构专题图", "summary": "ArcGIS 已直出专题图。",
+                "limitations": [], "svg": '<svg xmlns="http://www.w3.org/2000/svg"><title>Gi</title></svg>',
+                "visual_manifest": {"quality_status": "passed"},
+            },
+            "lisa_i": {
+                "status": "available", "mode": "lisa_i", "asset_id": "asset:h3:lisa",
+                "title": "H3 LISA 局部空间自相关专题图", "summary": "ArcGIS 已直出专题图。",
+                "limitations": [], "svg": '<svg xmlns="http://www.w3.org/2000/svg"><title>LISA</title></svg>',
+                "visual_manifest": {"quality_status": "passed"},
+            },
+        },
+    )
 
 
 def test_h3_metrics_api_shape(monkeypatch):
@@ -101,8 +115,11 @@ def test_h3_metrics_api_shape(monkeypatch):
     assert data["summary"].get("lisa_render_meta", {}).get("mode") == "stddev"
     assert "gi_z_stats" in data["summary"]
     assert "lisa_i_stats" in data["summary"]
-    assert "arcgis_image_url_gi" in data["summary"]
-    assert "arcgis_image_url_lisa" in data["summary"]
+    assert "arcgis_image_url" not in data["summary"]
+    report_maps = data["summary"].get("arcgis_report_maps", {})
+    assert report_maps["gi_z"]["status"] == "available"
+    assert report_maps["lisa_i"]["status"] == "available"
+    assert report_maps["gi_z"]["svg"].startswith("<svg")
 
 
 def test_h3_metrics_progress_api_roundtrip(monkeypatch):
@@ -130,8 +147,8 @@ def test_h3_metrics_progress_api_roundtrip(monkeypatch):
     assert progress["run_id"] == run_id
     assert progress["status"] == "success"
     assert progress["stage"] == "completed"
-    assert progress["step"] == 7
-    assert progress["total"] == 7
+    assert progress["step"] == 8
+    assert progress["total"] == 8
     assert progress["extra"]["resolution"] == 10
 
 
@@ -143,7 +160,7 @@ def test_h3_metrics_progress_api_returns_queued_fallback():
     assert progress["status"] == "running"
     assert progress["stage"] == "queued"
     assert progress["step"] == 0
-    assert progress["total"] == 7
+    assert progress["total"] == 8
 
 
 def test_h3_metrics_poi_count_consistency(monkeypatch):

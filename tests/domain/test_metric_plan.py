@@ -22,29 +22,29 @@ from modules.agent.analysis_runs import (
 
 def _question():
     return DecisionQuestion(
-        question_id="q:entrance",
-        text="哪个入口适合作为日常入口？",
-        decision_target="entrance",
+        question_id="q:site",
+        text="哪个候选场地更适合首期实施？",
+        decision_target="candidate_site",
         hypotheses=[
             DecisionHypothesis(
                 hypothesis_id="h:north",
-                statement="北侧入口具有更高日常接触机会。",
-                disconfirming_condition="入口计数不支持北侧。",
+                statement="北侧候选场地具有更好的路网联系。",
+                disconfirming_condition="路网指标不支持北侧候选场地。",
             )
         ],
     )
 
 
-def _entry(entry_id="entry:primary", *, role="primary", metric_id="road.integration", unit="entrance", **updates):
+def _entry(entry_id="entry:primary", *, role="primary", metric_id="road.integration", unit="grid_cell", **updates):
     payload = dict(
         plan_entry_id=entry_id,
         metric_id=metric_id,
         role=role,
-        decision_question_id="q:entrance",
+        decision_question_id="q:site",
         hypothesis_ids=["h:north"],
-        planned_spatial_target=PlannedSpatialTarget(unit=unit, source="project_entrances"),
-        selection_reason="直接改变入口选择。" if role != "excluded" else "",
-        expected_decision_use="排序入口候选。" if role != "excluded" else "",
+        planned_spatial_target=PlannedSpatialTarget(unit=unit, source="candidate_cells"),
+        selection_reason="直接改变候选场地选择。" if role != "excluded" else "",
+        expected_decision_use="排序候选场地。" if role != "excluded" else "",
         exclusion_reason="本次不满足输入要求。" if role == "excluded" else "",
     )
     payload.update(updates)
@@ -58,7 +58,7 @@ def _plan(*entries):
 def _run(plan, attempts, status="completed"):
     return AnalysisRun(
         run_id="run:test",
-        capability_id="spatial-business-analyst",
+        capability_id="urban-strategy-stage1",
         catalog_version="2.0.0",
         decision_agenda=ProjectDecisionAgenda(
             agenda_id="agenda:test",
@@ -98,8 +98,8 @@ def test_metric_plan_allows_questions_without_entries_or_partial_metric_coverage
     assert question_only.entries == []
     assert _run(question_only, []).metric_plan.decision_questions == [first]
     partial = MetricPlan(decision_questions=[first, second], entries=[_entry()])
-    assert [item.question_id for item in partial.decision_questions] == ["q:entrance", "q:operations"]
-    assert {item.decision_question_id for item in partial.entries} == {"q:entrance"}
+    assert [item.question_id for item in partial.decision_questions] == ["q:site", "q:operations"]
+    assert {item.decision_question_id for item in partial.entries} == {"q:site"}
 
 
 def test_metric_plan_entries_still_require_known_questions():
@@ -123,7 +123,7 @@ def test_conditional_activation_requires_sources_and_rule():
     diagnostic = _entry(
         "entry:diagnostic",
         role="diagnostic",
-        metric_id="road.entrance_distance",
+        metric_id="road.choice",
         activation=activation,
     )
     assert _plan(_entry(), diagnostic).entries[1].activation.type == "if_primary_blocked"
@@ -135,14 +135,14 @@ def test_attempt_alignment_allows_multiple_targets_but_rejects_unplanned_or_unit
         MetricAttempt(
             plan_entry_id="entry:primary",
             metric_id="road.integration",
-            spatial_target=SpatialTargetRef(unit="entrance", target_id="entrance:north"),
+            spatial_target=SpatialTargetRef(unit="grid_cell", target_id="cell:north"),
             execution_status="succeeded",
             evidence_node_ids=["e:north"],
         ),
         MetricAttempt(
             plan_entry_id="entry:primary",
             metric_id="road.integration",
-            spatial_target=SpatialTargetRef(unit="entrance", target_id="entrance:south"),
+            spatial_target=SpatialTargetRef(unit="grid_cell", target_id="cell:south"),
             execution_status="succeeded",
             evidence_node_ids=["e:south"],
         ),
@@ -158,7 +158,7 @@ def test_completed_run_requires_attempt_and_conditional_not_triggered_is_explici
     diagnostic = _entry(
         "entry:diagnostic",
         role="diagnostic",
-        metric_id="road.entrance_distance",
+        metric_id="road.choice",
         activation=MetricPlanActivation(
             type="if_primary_blocked",
             source_entry_ids=["entry:primary"],
@@ -169,7 +169,7 @@ def test_completed_run_requires_attempt_and_conditional_not_triggered_is_explici
     primary = MetricAttempt(
         plan_entry_id="entry:primary",
         metric_id="road.integration",
-        spatial_target=SpatialTargetRef(unit="entrance", target_id="entrance:north"),
+        spatial_target=SpatialTargetRef(unit="grid_cell", target_id="cell:north"),
         execution_status="succeeded",
         evidence_node_ids=["e:north"],
     )
@@ -177,8 +177,8 @@ def test_completed_run_requires_attempt_and_conditional_not_triggered_is_explici
         _run(plan, [primary])
     not_applicable = MetricAttempt(
         plan_entry_id="entry:diagnostic",
-        metric_id="road.entrance_distance",
-        spatial_target=SpatialTargetRef(unit="entrance", target_id="entrance:north"),
+        metric_id="road.choice",
+        spatial_target=SpatialTargetRef(unit="grid_cell", target_id="cell:north"),
         execution_status="not_applicable",
         reason="condition_not_met",
     )
@@ -187,7 +187,7 @@ def test_completed_run_requires_attempt_and_conditional_not_triggered_is_explici
 
 def test_recorder_locks_plan_when_ready_or_execution_starts():
     recorder = AnalysisRunRecorder(
-        capability_id="spatial-business-analyst",
+        capability_id="urban-strategy-stage1",
         project_context={},
         configuration_snapshot={},
         execution_profile={},
@@ -196,7 +196,7 @@ def test_recorder_locks_plan_when_ready_or_execution_starts():
     recorder.set_decision_agenda(
         ProjectDecisionAgenda(
             agenda_id="agenda:recorder",
-            user_question="选择入口",
+            user_question="选择候选场地",
             decision_questions=plan.decision_questions,
         )
     )
@@ -208,7 +208,7 @@ def test_recorder_locks_plan_when_ready_or_execution_starts():
 
 def test_recorder_rejects_plan_without_matching_agenda():
     recorder = AnalysisRunRecorder(
-        capability_id="spatial-business-analyst",
+        capability_id="urban-strategy-stage1",
         project_context={},
         configuration_snapshot={},
         execution_profile={},
@@ -220,7 +220,7 @@ def test_recorder_rejects_plan_without_matching_agenda():
 @pytest.mark.parametrize("status", ["chapter_failed", "publication_blocked", "system_failed"])
 def test_recorder_supports_distinct_terminal_failure_statuses(status):
     recorder = AnalysisRunRecorder(
-        capability_id="spatial-business-analyst",
+        capability_id="urban-strategy-stage1",
         project_context={},
         configuration_snapshot={},
         execution_profile={},
@@ -235,7 +235,7 @@ def test_analysis_run_requires_exact_agenda_and_metric_plan_questions():
     with pytest.raises(ValidationError, match="must exactly match"):
         AnalysisRun(
             run_id="run:mismatch",
-            capability_id="spatial-business-analyst",
+            capability_id="urban-strategy-stage1",
             metric_plan=plan,
             status="running",
             created_at="2026-07-16T00:00:00Z",
@@ -248,7 +248,7 @@ def test_metric_plan_diagnostics_aggregates_concrete_targets():
     blocked = MetricAttempt(
         plan_entry_id="entry:primary",
         metric_id="road.integration",
-        spatial_target=SpatialTargetRef(unit="entrance", target_id="entrance:north"),
+        spatial_target=SpatialTargetRef(unit="grid_cell", target_id="cell:north"),
         execution_status="blocked",
         reason="depthmapx_unavailable",
     )

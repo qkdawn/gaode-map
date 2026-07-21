@@ -337,7 +337,10 @@ def test_scope_service_queries_road_grid_as_polygon_source():
     assert result["records"][0]["spatial_match"]["geometry_type"] == "Polygon"
 
 
-def test_scope_service_rejects_spatial_query_when_artifact_coord_type_is_missing():
+def test_scope_service_infers_legacy_artifact_coord_type_for_spatial_query():
+    gcj_center = [112.9863, 28.2208]
+    wgs_center = gcj02_to_wgs84(*gcj_center)
+
     class MissingCoordTypeRepository:
         def list_poi_results(self, history_id):
             return []
@@ -356,7 +359,13 @@ def test_scope_service_rejects_spatial_query_when_artifact_coord_type_is_missing
                                     "properties": {"cell_id": "population-cell-1"},
                                     "geometry": {
                                         "type": "Polygon",
-                                        "coordinates": [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]]],
+                                        "coordinates": [[
+                                            [112.9813, 28.2158],
+                                            [112.9913, 28.2158],
+                                            [112.9913, 28.2258],
+                                            [112.9813, 28.2258],
+                                            [112.9813, 28.2158],
+                                        ]],
                                     },
                                 }
                             ]
@@ -369,18 +378,27 @@ def test_scope_service_rejects_spatial_query_when_artifact_coord_type_is_missing
 
     service = ScopeDatasetService(repository=MissingCoordTypeRepository())
     manifest = service.list_scope_datasets("history-1")["datasets"][0]
-    assert manifest["query_capabilities"]["spatial_ready"] is False
-    assert "空间查询不可用" in manifest["warnings"][0]
+    assert manifest["query_capabilities"]["spatial_ready"] is True
+    assert manifest["warnings"] == []
     assert service.query_scope_dataset(
         history_id="history-1",
         source_id="current:dataset:population",
     )["total_count"] == 1
 
+    result = service.query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:population",
+        spatial={"relation": "at_point", "point": list(wgs_center), "coord_type": "wgs84"},
+    )
+    assert result["total_count"] == 1
+
+
+def test_scope_service_still_rejects_unknown_artifact_coord_type():
     with pytest.raises(SpatialQueryError) as error:
-        service.query_scope_dataset(
-            history_id="history-1",
-            source_id="current:dataset:population",
-            spatial={"relation": "at_point", "point": [0.005, 0.005], "coord_type": "wgs84"},
+        ScopeDatasetService._artifact_coord_type(
+            "current:dataset:population",
+            {"artifact_type": "unknown_grid", "payload": {}},
+            required=True,
         )
     assert error.value.code == "spatial_coord_type_unknown"
 

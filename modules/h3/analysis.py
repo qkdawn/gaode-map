@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from .arcgis_facade import run_h3_arcgis_analysis
+from .arcgis_report_map import render_h3_structure_report_maps
 from .category_rules import empty_category_counts
 from .core import build_h3_grid_feature_collection
 from .stats import (
@@ -36,7 +37,6 @@ def analyze_h3_grid(
     use_arcgis: bool = False,
     arcgis_neighbor_ring: int = 1,
     arcgis_knn_neighbors: Optional[int] = None,
-    arcgis_export_image: bool = True,
     arcgis_timeout_sec: int = 240,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
@@ -53,7 +53,7 @@ def analyze_h3_grid(
             }
         )
 
-    total_steps = 7
+    total_steps = 8
     report("build_grid", "正在生成 H3 网格", 1, total_steps, {"resolution": resolution, "arcgis_enabled": bool(use_arcgis)})
     grid = build_h3_grid_feature_collection(
         polygon_coords=polygon,
@@ -79,9 +79,7 @@ def analyze_h3_grid(
                 "global_moran_z_score": None,
                 "analysis_engine": "arcgis",
                 "arcgis_status": None,
-                "arcgis_image_url": None,
-                "arcgis_image_url_gi": None,
-                "arcgis_image_url_lisa": None,
+                "arcgis_report_maps": {},
                 "gi_render_meta": build_gi_render_meta(),
                 "lisa_render_meta": build_lisa_render_meta(empty_lisa_stats),
                 "gi_z_stats": empty_gi_stats,
@@ -114,9 +112,7 @@ def analyze_h3_grid(
     compute_neighbor_metrics(stats_by_cell, neighbor_ring=neighbor_ring)
 
     arcgis_status: Optional[str] = None
-    arcgis_image_url: Optional[str] = None
-    arcgis_image_url_gi: Optional[str] = None
-    arcgis_image_url_lisa: Optional[str] = None
+    arcgis_report_maps: Dict[str, Dict[str, Any]] = {}
     global_moran_i: Optional[float] = compute_global_moran_i(stats_by_cell, neighbor_ring=neighbor_ring)
     global_moran_z_score: Optional[float] = None
     local_spatial_stats = {cell_id: new_local_spatial_stat() for cell_id in stats_by_cell.keys()}
@@ -166,7 +162,6 @@ def analyze_h3_grid(
                 stats_by_cell=stats_by_cell,
                 knn_neighbors=arcgis_knn,
                 timeout_sec=arcgis_timeout_sec,
-                export_image=arcgis_export_image,
             )
         except RuntimeError as exc:
             raise RuntimeError(f"ArcGIS不可用，H3 空间结构分析已停止：{exc}") from exc
@@ -179,9 +174,6 @@ def analyze_h3_grid(
                 arcgis_result.get("cells") or [],
             )
             arcgis_status = str(arcgis_result.get("status") or "ArcGIS计算完成")
-            arcgis_image_url = arcgis_result.get("image_url")
-            arcgis_image_url_gi = arcgis_result.get("image_url_gi") or arcgis_image_url
-            arcgis_image_url_lisa = arcgis_result.get("image_url_lisa")
     else:
         for stat in local_spatial_stats.values():
             stat.update(
@@ -241,6 +233,28 @@ def analyze_h3_grid(
             }
         )
 
+    if grid_count := len(features):
+        report(
+            "render_report_map",
+            "正在由 ArcGIS 生成正式专题图",
+            7,
+            total_steps,
+            {"resolution": resolution, "grid_count": grid_count, "arcgis_enabled": bool(use_arcgis)},
+        )
+        try:
+            arcgis_report_maps = render_h3_structure_report_maps(
+                grid_features=features, polygon=polygon, coord_type=coord_type, resolution=resolution,
+            )
+        except Exception as exc:
+            arcgis_report_maps = {
+                mode: {
+                    "status": "failed", "mode": mode, "asset_id": "", "title": "",
+                    "summary": "ArcGIS 专题图生成失败。", "limitations": [str(exc)], "svg": None,
+                    "visual_manifest": None,
+                }
+                for mode in ("gi_z", "lisa_i")
+            }
+
     grid_count = len(features)
     avg_density = (sum(density_values) / grid_count) if grid_count else 0.0
     avg_entropy = (sum(entropy_values) / grid_count) if grid_count else 0.0
@@ -257,9 +271,7 @@ def analyze_h3_grid(
             "global_moran_z_score": global_moran_z_score,
             "analysis_engine": "arcgis",
             "arcgis_status": arcgis_status,
-            "arcgis_image_url": arcgis_image_url,
-            "arcgis_image_url_gi": arcgis_image_url_gi,
-            "arcgis_image_url_lisa": arcgis_image_url_lisa,
+            "arcgis_report_maps": arcgis_report_maps,
             "gi_render_meta": build_gi_render_meta(),
             "lisa_render_meta": build_lisa_render_meta(lisa_i_stats),
             "gi_z_stats": gi_z_stats,
@@ -270,7 +282,7 @@ def analyze_h3_grid(
     report(
         "completed",
         "H3 网格分析计算完成",
-        7,
+        8,
         total_steps,
         {
             "resolution": resolution,

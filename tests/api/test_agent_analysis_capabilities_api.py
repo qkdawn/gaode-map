@@ -10,12 +10,13 @@ def build_app():
     return app
 
 
-def test_analysis_capability_catalog_exposes_stage1_outputs():
+def test_analysis_capability_catalog_exposes_only_app_owned_executors():
     with TestClient(build_app()) as client:
         response = client.get("/api/v1/analysis/agent/analysis-capabilities")
 
     assert response.status_code == 200
     capabilities = {item["id"]: item for item in response.json()}
+    assert "spatial-business-analyst" not in capabilities
     stage1 = capabilities["urban-strategy-stage1"]
     assert stage1["status"] == "available"
     assert "质量审计" in stage1["output_contract"]

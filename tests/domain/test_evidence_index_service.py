@@ -313,7 +313,7 @@ def test_evidence_index_service_routes_image_visual_index_manifest():
                     "source_id": "image:att-1",
                     "source_type": "image",
                     "title": "现场照片 OCR",
-                    "content": "OCR 识别到图中标注：主入口、沿街商业、停车场。",
+                    "content": "OCR 识别到图中标注：中心广场、沿街商业、停车场。",
                     "metadata": {"attachment_id": "att-1", "filename": "site-photo.png", "bbox_id": "ocr-1"},
                     "locator": "image:bbox:ocr-1",
                     "evidence_level": "ocr_text",

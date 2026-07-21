@@ -219,8 +219,8 @@ test('selected run exposes MetricPlan diagnostics and maps localized spatial act
           entries: [
             { plan_entry_id: 'plan:primary', metric_id: 'spatial.gi_star', role: 'primary' },
             { plan_entry_id: 'plan:supporting', metric_id: 'road.integration', role: 'supporting' },
-            { plan_entry_id: 'plan:diagnostic', metric_id: 'road.entrance_distance', role: 'diagnostic' },
-            { plan_entry_id: 'plan:excluded', metric_id: 'population.total', role: 'excluded', exclusion_reason: '空间粒度不足以支持入口选择' },
+            { plan_entry_id: 'plan:diagnostic', metric_id: 'road.choice', role: 'diagnostic' },
+            { plan_entry_id: 'plan:excluded', metric_id: 'population.total', role: 'excluded', exclusion_reason: '空间粒度不足以支持候选场地选择' },
           ],
         },
         metric_attempts: [
@@ -230,7 +230,7 @@ test('selected run exposes MetricPlan diagnostics and maps localized spatial act
           },
           {
             plan_entry_id: 'plan:supporting', metric_id: 'road.integration', status: 'succeeded',
-            spatial_target: { unit: 'entrance', target_id: 'entrance:north' }, evidence_node_ids: ['evidence:entrance'],
+            spatial_target: { unit: 'grid_cell', target_id: 'cell:north' }, evidence_node_ids: ['evidence:cell'],
           },
           {
             plan_entry_id: 'plan:diagnostic', metric_id: 'road.walk_detour_ratio', status: 'succeeded',
@@ -247,12 +247,8 @@ test('selected run exposes MetricPlan diagnostics and maps localized spatial act
             geometry: { type: 'Polygon', coordinates: [[[116, 39], [116.01, 39], [116.01, 39.01], [116, 39]]] },
             source_metric_ids: ['spatial.gi_star'],
           }],
-          entrances: [{
-            entrance_id: 'entrance:north', label: '北侧入口', source_type: 'project_planned',
-            snapped_road_segment_id: 'road:north', geometry: { type: 'Point', coordinates: [116, 39] },
-          }],
           paths: [{
-            route_id: 'route:north', entrance_id: 'entrance:north', destination_id: 'destination:daily',
+            route_id: 'route:north', destination_id: 'destination:daily',
             geometry: { type: 'LineString', coordinates: [[116, 39], [116.01, 39.01]] },
           }],
         },
@@ -273,24 +269,21 @@ test('selected run exposes MetricPlan diagnostics and maps localized spatial act
   assert.equal(ctx.getSelectedAnalysisRunMetricPlanDiagnostics().role_counts.primary, 1)
 
   const excluded = ctx.getSelectedAnalysisRunMetricPlanEntries(diagnostics.excluded_entry_ids)
-  assert.equal(excluded[0].exclusion_reason, '空间粒度不足以支持入口选择')
+  assert.equal(excluded[0].exclusion_reason, '空间粒度不足以支持候选场地选择')
   excluded[0].exclusion_reason = 'mutated'
-  assert.equal(ctx.getSelectedAnalysisRunMetricPlanEntries(['plan:excluded'])[0].exclusion_reason, '空间粒度不足以支持入口选择')
+  assert.equal(ctx.getSelectedAnalysisRunMetricPlanEntries(['plan:excluded'])[0].exclusion_reason, '空间粒度不足以支持候选场地选择')
 
   const objects = ctx.getSelectedAnalysisRunSpatialObjects()
-  assert.deepEqual(objects.map(item => item.object_type).sort(), ['entrance', 'hotspot_zone', 'route'])
+  assert.deepEqual(objects.map(item => item.object_type).sort(), ['hotspot_zone', 'route'])
   assert.deepEqual(objects.find(item => item.object_id === 'zone:001').evidence_node_ids, ['evidence:zone'])
-  assert.deepEqual(objects.find(item => item.object_id === 'entrance:north').metric_ids, ['road.integration'])
-  assert.equal(objects.find(item => item.object_id === 'entrance:north').source_type, 'project_planned')
-
-  assert.equal(ctx.renderSelectedAnalysisRunSpatialObjects(), 3)
-  assert.equal(rendered.length, 3)
+  assert.equal(ctx.renderSelectedAnalysisRunSpatialObjects(), 2)
+  assert.equal(rendered.length, 2)
   assert.deepEqual(rendered.find(item => item.object_id === 'route:north').feature.geometry.coordinates, [[116, 39], [116.01, 39.01]])
-  assert.match(ctx.analysisRunSpatialPresentationMessage, /已显示 3 个空间动作对象/)
+  assert.match(ctx.analysisRunSpatialPresentationMessage, /已显示 2 个空间动作对象/)
 
-  clickHandler({ object_id: 'entrance:north' })
-  assert.equal(ctx.selectedAnalysisRunSpatialObjectId, 'entrance:north')
-  assert.equal(ctx.getSelectedAnalysisRunSpatialObject().object_type, 'entrance')
+  clickHandler({ object_id: 'route:north' })
+  assert.equal(ctx.selectedAnalysisRunSpatialObjectId, 'route:north')
+  assert.equal(ctx.getSelectedAnalysisRunSpatialObject().object_type, 'route')
 })
 
 test('run detail failure exposes an explicit error and keeps current results intact', async () => {
@@ -625,7 +618,7 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
         status_counts: { verified: 1, unknown: 1 },
         required_constraint_ids: ['ownership', 'fire_safety'],
         assessments: [
-          { constraint_id: 'ownership', label: '产权与使用权', state: 'verified', decision_effect: 'allow', scope: '项目范围', finding: '统一运营授权已核验', evidence_refs: ['e1'], verification_action: '' },
+          { constraint_id: 'ownership', label: '产权与使用权', state: 'verified', decision_effect: 'allow', scope: '分析范围', finding: '统一运营授权已核验', evidence_refs: ['e1'], verification_action: '' },
           { constraint_id: 'fire_safety', label: '消防与疏散', state: 'unknown', decision_effect: 'condition', scope: '礼堂', finding: '尚缺消防检测', evidence_refs: [], verification_action: '完成消防专项检测', executor: 'manual_authority' },
         ],
         pending_actions: [{ constraint_id: 'fire_safety', label: '消防与疏散', action: '完成消防专项检测', executor: 'manual_authority' }],
@@ -652,7 +645,7 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
           preferred_function: { id: 'culture', name: '文化活动' },
           compatible_functions: [{ id: 'exhibition', name: '社区展览' }],
           excluded_functions: [{ id: 'heavy-food', name: '重餐饮', reason: '排烟受限' }],
-          audience_scenarios: ['社区周末活动'], access_and_movement: { visitor_entry: '南侧主入口' },
+          audience_scenarios: ['社区周末活动'], access_and_movement: { visitor_origin: '南侧道路' },
           operation_strategy: { operator: '社区文化运营主体' }, renovation_and_delivery: { scope: '一期轻量改造' },
           implementation_phase: 'phase_1', risk_level: 'high', risk_summary: '消防与结构条件尚待核验',
           preconditions: ['完成消防评估'], assumptions: [], validation_actions: ['开展消防与结构核验'],
@@ -699,11 +692,11 @@ test('Stage 1 quality accessors expose verification gaps without mutating payloa
           ],
           items: [
             {
-              route_id: 'route-visitor', movement_type: 'visitor', movement_label: '游客', color: '#2563eb', title: '游客主游线', role: '连接入口与礼堂', status: 'proposed', status_label: '策划建议', entry_or_origin: '南侧入口', destinations: ['礼堂'], affected_space_ids: ['unit-1'], operating_windows: ['日间'], constraints: ['无障碍待核'], conflicts: [], evidence_refs: ['e1'], assumptions: [], validation_actions: ['现场踏勘'],
-              map_binding: { status: 'bound', title: '入口路径', feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] } } },
+              route_id: 'route-visitor', movement_type: 'visitor', movement_label: '游客', color: '#2563eb', title: '游客主游线', role: '连接南侧道路与礼堂', status: 'proposed', status_label: '策划建议', origin: '南侧道路', destinations: ['礼堂'], affected_space_ids: ['unit-1'], operating_windows: ['日间'], constraints: ['无障碍待核'], conflicts: [], evidence_refs: ['e1'], assumptions: [], validation_actions: ['现场踏勘'],
+              map_binding: { status: 'bound', title: '南侧连接路径', feature: { type: 'Feature', geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] } } },
             },
             ...['resident', 'service', 'fire'].map((movementType, index) => ({
-              route_id: `route-${movementType}`, movement_type: movementType, movement_label: ['居民', '后勤', '消防应急'][index], color: ['#16a34a', '#d97706', '#dc2626'][index], title: `${['居民', '后勤', '消防应急'][index]}流线`, role: '待核验流线', status: 'unavailable', status_label: '路径待补', entry_or_origin: '待核入口', destinations: ['礼堂'], affected_space_ids: ['unit-1'], operating_windows: ['待核'], constraints: [], conflicts: movementType === 'service' ? ['与游客流线交叉'] : [], evidence_refs: ['e1'], assumptions: [], validation_actions: ['补充路径测绘'], map_binding: { status: 'unavailable', reason: '尚无权威路径几何' },
+              route_id: `route-${movementType}`, movement_type: movementType, movement_label: ['居民', '后勤', '消防应急'][index], color: ['#16a34a', '#d97706', '#dc2626'][index], title: `${['居民', '后勤', '消防应急'][index]}流线`, role: '待核验流线', status: 'unavailable', status_label: '路径待补', origin: '待核起点', destinations: ['礼堂'], affected_space_ids: ['unit-1'], operating_windows: ['待核'], constraints: [], conflicts: movementType === 'service' ? ['与游客流线交叉'] : [], evidence_refs: ['e1'], assumptions: [], validation_actions: ['补充路径测绘'], map_binding: { status: 'unavailable', reason: '尚无权威路径几何' },
             })),
           ],
           bound_item_count: 1,
@@ -1028,12 +1021,12 @@ test('Stage 1 map focus is bound to the immutable capability Run', () => {
       stage1_spatial_matrix: {
         space_decisions: [{
           space_id: 'road-space',
-          space_name: '南侧入口',
+          space_name: '南侧道路',
           map_binding: {
             status: 'bound',
             spatial_object_id: 'road:south-entry',
             object_type: 'road_segment',
-            title: '南侧入口道路',
+            title: '南侧道路',
             source_ref: 'analysis_snapshot.road.features',
             source_locator: 'analysis_snapshot.road.features/south-entry',
             feature: {
@@ -1053,7 +1046,7 @@ test('Stage 1 map focus is bound to the immutable capability Run', () => {
   assert.equal(focusCalls[0].options.fitView, true)
   assert.equal(ctx.isStage1SpaceMapFocused(decision), true)
   assert.equal(ctx.isStage1SpaceDecisionExpanded(decision), true)
-  assert.match(ctx.stage1MapFocusMessage, /南侧入口道路/)
+  assert.match(ctx.stage1MapFocusMessage, /南侧道路/)
 
   ctx.stage1ExpandedSpaceId = ''
   ctx.stage1ExpandedRunId = ''

@@ -8,7 +8,7 @@ Use one immutable input area and separate generated work/output areas:
     urban_project_analysis_package.json
     ppt_sources_full_export.json
     project_brief.md
-    project_boundary.geojson
+    analysis_scope.geojson
     documents/
     images/
     maps/

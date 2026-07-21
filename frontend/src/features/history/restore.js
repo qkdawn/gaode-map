@@ -535,7 +535,7 @@ import {
             },
             async restoreHistoryArtifactsAsync(historyId, token, signal = null) {
                 if (token !== this.historyDetailLoadToken) {
-                    return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
+                    return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false, sharedGridRestored: false };
                 }
                 let artifacts;
                 try {
@@ -545,12 +545,12 @@ import {
                 } catch (e) {
                     if (e && (e.name === 'AbortError' || String(e.message || '').toLowerCase().includes('aborted'))) {
                         this.setHistoryRestoreStep('artifacts', 'failed', '历史分析产物读取已中断');
-                        return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
+                        return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false, sharedGridRestored: false };
                     }
                     throw e;
                 }
                 if (token !== this.historyDetailLoadToken) {
-                    return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false };
+                    return { rasterRestored: false, h3Restored: false, populationRestored: false, nightlightRestored: false, roadRestored: false, sharedGridRestored: false };
                 }
                 const preferredYear = this.getHistoryArtifactPreferredYear();
                 const rasterArtifacts = this.pickLatestHistoryArtifactsByYear(artifacts, 'poi_raster_grid');
@@ -587,14 +587,17 @@ import {
                 const roadArtifact = this.pickLatestHistoryArtifact(artifacts, 'road_syntax');
                 const roadRestored = await this._restoreHistoryRoadResultAsync(roadArtifact && roadArtifact.payload, token);
                 this.setHistoryRestoreStep('road', roadRestored ? 'done' : 'skipped', roadRestored ? '历史路网结果已恢复' : '该历史未找到可恢复的路网结果');
+                const sharedGridRestored = typeof this.restoreHistorySharedGridArtifact === 'function'
+                    ? this.restoreHistorySharedGridArtifact(this.pickLatestHistoryArtifact(artifacts, 'shared_grid'), token)
+                    : false;
                 if (
                     token === this.historyDetailLoadToken
-                    && (rasterRestored || h3Restored || populationRestored || nightlightRestored || roadRestored)
+                    && (rasterRestored || h3Restored || populationRestored || nightlightRestored || roadRestored || sharedGridRestored)
                     && typeof this.syncSummaryTaskBoardFromLocalResults === 'function'
                 ) {
                     this.syncSummaryTaskBoardFromLocalResults({ sync: false });
                 }
-                return { rasterRestored, h3Restored, populationRestored, nightlightRestored, roadRestored };
+                return { rasterRestored, h3Restored, populationRestored, nightlightRestored, roadRestored, sharedGridRestored };
             },
             _applyHistoryDetailBaseResult(data) {
                 this.clearH3Grid();
@@ -872,6 +875,7 @@ import {
                             rasterRestored: artifactSnapshots.rasterRestored,
                             populationRestored: artifactSnapshots.populationRestored,
                             nightlightRestored: artifactSnapshots.nightlightRestored,
+                            sharedGridRestored: artifactSnapshots.sharedGridRestored,
                         };
                     })()
                         .catch((artifactErr) => {
@@ -886,6 +890,7 @@ import {
                                 rasterRestored: false,
                                 populationRestored: false,
                                 nightlightRestored: false,
+                                sharedGridRestored: false,
                             };
                         });
                     await Promise.all([poiPromise, artifactPromise]);

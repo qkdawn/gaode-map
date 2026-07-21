@@ -7938,7 +7938,7 @@ test('agent analysis snapshot keeps poi raster out of summary evidence', () => {
 test('analysis snapshot exposes stable authoritative road and H3 map objects', () => {
   const roadFeature = {
     type: 'Feature',
-    properties: { road_id: 'south-entry', name: '南侧入口道路', nested: { lane_count: 2 } },
+    properties: { road_id: 'south-approach', name: '南侧道路', nested: { lane_count: 2 } },
     geometry: { type: 'LineString', coordinates: [[112, 28], [112.01, 28.01]] },
   }
   const h3Feature = {
@@ -7960,10 +7960,10 @@ test('analysis snapshot exposes stable authoritative road and H3 map objects', (
   const objects = buildAgentSpatialObjects(ctx, 2)
   const snapshot = buildAgentAnalysisSnapshot(ctx)
 
-  assert.deepEqual(objects.map(item => item.spatial_object_id), ['road:south-entry', 'road:second', 'h3:h3-a'])
-  assert.equal(objects[0].source_locator, 'analysis_snapshot.road.features/south-entry')
-  assert.equal(objects[0].title, '南侧入口道路')
-  assert.equal(snapshot.spatial_objects[0].spatial_object_id, 'road:south-entry')
+  assert.deepEqual(objects.map(item => item.spatial_object_id), ['road:south-approach', 'road:second', 'h3:h3-a'])
+  assert.equal(objects[0].source_locator, 'analysis_snapshot.road.features/south-approach')
+  assert.equal(objects[0].title, '南侧道路')
+  assert.equal(snapshot.spatial_objects[0].spatial_object_id, 'road:south-approach')
   assert.equal(snapshot.spatial_objects.at(-1).spatial_object_id, 'h3:h3-a')
 
   objects[0].feature.geometry.coordinates[0][0] = 0

@@ -19,8 +19,8 @@ def _movement_routes(visitor_binding=None):
             "route_id": f"route-{movement_type}",
             "movement_type": movement_type,
             "title": labels[movement_type],
-            "role": "连接南侧入口与礼堂",
-            "entry_or_origin": "南侧入口",
+            "role": "连接南侧道路与礼堂",
+            "origin": "南侧道路",
             "destinations": ["原县政府礼堂"],
             "affected_space_ids": ["space-auditorium"],
             "operating_windows": ["日常开放时段"],
@@ -86,7 +86,7 @@ def _matrix():
                 "compatible_functions": [{"id": "exhibition", "name": "社区展览"}],
                 "excluded_functions": [{"id": "heavy-food", "name": "重餐饮"}],
                 "audience_scenarios": ["社区周末活动"],
-                "access_and_movement": {"visitor_entry": "南侧主入口"},
+                "access_and_movement": {"visitor_origin": "南侧道路"},
                 "operation_strategy": {"operator": "社区文化运营主体"},
                 "renovation_and_delivery": {"scope": "轻量改造"},
                 "implementation_phase": "phase_1",
@@ -117,7 +117,7 @@ def _registry():
         "path:main": {
             "spatial_object_id": "path:main",
             "object_type": "internal_path",
-            "title": "南侧入口至礼堂路径",
+            "title": "南侧道路至礼堂路径",
             "source_ref": "project_gis.paths",
             "source_locator": "project_gis.paths/main",
             "feature": {

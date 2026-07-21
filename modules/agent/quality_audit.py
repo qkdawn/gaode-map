@@ -300,7 +300,7 @@ def _audit_spatial_matrix_semantics(
         or any(
             not _text(route.get("title"))
             or not _text(route.get("role"))
-            or not _text(route.get("entry_or_origin"))
+            or not _text(route.get("origin"))
             or not _list(route.get("destinations"))
             or not _list(route.get("operating_windows"))
             or not isinstance(route.get("constraints"), list)
@@ -1029,7 +1029,7 @@ def audit_stage1_package(package: dict[str, Any]) -> QualityAuditResult:
                     f"当前已绑定 {len(bound_map_bindings)} 个。"
                 ),
                 path="spatial_matrix.space_decisions.map_binding",
-                repair_hint="补充带稳定对象 ID、来源定位和 GeoJSON 几何的建筑、庭院、入口或路径数据后重新运行。",
+                repair_hint="补充带稳定对象 ID、来源定位和 GeoJSON 几何的建筑、庭院或路径数据后重新运行。",
                 warning=True,
             )
         )

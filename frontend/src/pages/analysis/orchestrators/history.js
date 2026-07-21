@@ -447,6 +447,34 @@ function createAnalysisHistoryOrchestratorMethods() {
           summary,
         })
       }
+      if (type === 'shared_grid') {
+        const params = {
+          grid_type: 'shared_raster',
+          cell_id_source: 'population_nightlight_shared_cell_id',
+          source_versions: this.cloneArtifactValue(this.sharedGridSourceVersions || {}),
+        }
+        const grid = this.sharedGrid && typeof this.sharedGrid === 'object' ? this.sharedGrid : { type: 'FeatureCollection', features: [] }
+        const features = Array.isArray(grid.features) ? grid.features : []
+        const summary = this.cloneArtifactValue(this.sharedGridSummary || {})
+        return buildAnalysisArtifactEnvelope({
+          params,
+          payload: {
+            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
+            grid: buildFeatureCollectionArtifact({
+              features,
+              scopeId: String(grid.scope_id || summary.scope_id || ''),
+              extra: { grid_type: 'shared_raster', cell_id_source: params.cell_id_source },
+            }),
+            summary,
+            source_versions: this.cloneArtifactValue(this.sharedGridSourceVersions || {}),
+            source_readiness: this.cloneArtifactValue(this.sharedGridSourceReadiness || {}),
+            evidence_version: 'shared_grid_v1',
+            join_key: 'cell_id',
+            limitations: Array.isArray(this.sharedGridLimitations) ? this.sharedGridLimitations.slice() : [],
+          },
+          summary,
+        })
+      }
       if (type === 'road_syntax') {
         const params = {
           graph_model: String(this.roadSyntaxGraphModel || 'segment'),

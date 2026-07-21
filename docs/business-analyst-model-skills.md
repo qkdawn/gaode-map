@@ -554,7 +554,7 @@ graph.missing_inputs_for("HuffGravityModel", evidence_state)
 -> Agent gate 判断意图和缺失输入
 -> skill_registry 召回 1-3 个候选 Skill
 -> Skill 引用 Model Graph
--> Agent 在图上选择入口节点、目标节点、必走路径和可选分支
+-> Agent 在图上选择起始节点、目标节点、必走路径和可选分支
 -> Agent 根据 model_tool_map 调工具补 EvidenceNode / 当前范围数据
 -> Agent 调用 Business Analyst Models 得到结构化 ModelResult
 -> Guardrails 检查越界风险和必提边界

@@ -1,426 +1,93 @@
-# Schema v3 report contract
+# 自适应决策报告契约
 
-## Contents
+最终报告面向项目业主、规划设计、运营负责人和普通决策者。正文从现有材料与空间数据推进当前选择，不写成数据汇报、风险清单、调研任务书或免责声明。
 
-- Common rules
-- AnalysisBlueprint
-- EvidenceSnapshot
-- ChapterAssignments
-- ChapterPackage and chapter index
-- EditorialReview and accepted claims
-- ReportAssembly
-- AnalysisRun v3 manifest
-- Compiler invariants
+## 生成依据
 
-## Common rules
+写作前读取 `adaptive-report-model.md`。先建立并由用户确认 `problem_map`，完成专项研究、候选比较、空间与运营推演后，再建立 `decision_inventory` 和章节责任；最终目录由通过审校的章节自然形成。正文使用项目材料中的原始对象名称，不展示问题地图、内部角色、ID、Agent 流程或机器字段。
 
-Every new root object uses:
+报告不设固定页数、图数和章节数量。分析深度来自对项目特有机制、相对优势、反例与失败条件、方案后果、承接能力和路径依赖的解释与挑战，不来自章节展开、字段数量或篇幅。简单项目可以合并内容；复杂项目必须展开到足以解释关键判断的层级。
 
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01"
-}
-```
+用户要求完整项目报告、正式综合报告或同等深度成果时进入 `formal_comprehensive` 模式。每个专业章节由唯一 Subagent 所有，通常为 1,500-3,000 个中文内容字符；过短或异常冗长只产生警告，接受仍取决于分析义务和深度审校。执行摘要、章节过渡、综合结论与证据附录不计入专业章节长度。简单问答、单项诊断和局部分析不创建章节产物，也不受该长度带约束。
 
-Use canonical JSON for all content hashes. IDs are unique within the Run. Root models and ReportAssembly use `extra = "forbid"`. Hashes use `sha256:<lowercase hex>`.
+正式章节在交付前必须逐章经过反方审查和分析深度审校。审校员提出问题并逐项裁定，不直接代写；成立的反例、代价、失败条件和改判逻辑退回原章节所有者，以新版本吸收进正文。初稿加最多两次定向返写，仍未通过则阻止正式报告交付。原始反方意见、裁定和内部返工过程不属于报告内容。
 
-EvidenceSnapshot positive evidence uses only `measured` or `proxy`. Chapter claims may use `measured`, `proxy`, `inference`, `recommendation`, or `experimental_assumption`; a claim may not exceed the weakest cited source.
+## 章节所有权与正文保真
 
-## AnalysisBlueprint
+正式运行必须保存 `report/chapter-index.json`、独立版本章节和对应审校意见。每项重要决策只有一个章节所有者；共享证据不产生共同所有权。下游角色只读取依赖章节的接受版本，不以草稿或主 Agent 摘要替代上游正文。
 
-`analysis-blueprint.json` combines the accepted project blueprint, evidence requirements, independent completeness review, and first lock.
+主 Agent 只负责确定接受章节顺序、统一术语、添加短过渡、编写执行摘要和综合结论。`report/project-report.md` 必须通过章节边界注释完整、逐字包含每个接受版本。删除重复、压缩内容、改变论证或解决专业冲突必须退回原章节所有者返写，不能由主 Agent 静默完成。
 
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01",
-  "blueprint_id": "blueprint:project-01",
-  "project_judgment": "本次项目真正需要决定什么",
-  "decision_questions": [
-    {
-      "question_id": "question:01",
-      "question": "...",
-      "decision_use": "...",
-      "hypotheses": ["..."],
-      "scope": {"spatial": "...", "temporal": "..."},
-      "irreversible_risks": ["..."],
-      "disconfirming_conditions": ["..."]
-    }
-  ],
-  "evidence_requirements": [
-    {
-      "requirement_id": "requirement:01",
-      "question_id": "question:01",
-      "kind": "metric",
-      "objective": "证明或排除什么",
-      "evidence_capability": "facility_supply_structure",
-      "required_source_ids": ["current:dataset:poi"],
-      "scope": {},
-      "failure_effect": "缺失时不能判断什么"
-    },
-    {
-      "requirement_id": "requirement:02",
-      "question_id": "question:01",
-      "kind": "gap",
-      "objective": "验证运营承诺",
-      "required_source_ids": ["project:operator-plan"],
-      "scope": {},
-      "failure_effect": "不能确认长期运营可交付性"
-    }
-  ],
-  "excluded_topics": [
-    {"topic": "...", "reason": "..."}
-  ],
-  "report_logic": {
-    "audience": "...",
-    "judgment_sequence": ["..."],
-    "shared_terms": {"...": "..."}
-  },
-  "completeness_review": {
-    "review_id": "blueprint-review:01",
-    "reviewer_role": "independent_blueprint_reviewer",
-    "status": "accepted",
-    "findings": [],
-    "repair_instructions": []
-  },
-  "lock": {
-    "source_snapshot_hash": "sha256:...",
-    "capability_registry_version": "3.0.0",
-    "content_hash": "sha256:...",
-    "locked_at": "..."
-  }
-}
-```
+正式目录在全部证据收敛并形成章节责任后自然生成。波次 0 的问题地图只定义决策和研究责任，不冻结标题、顺序、章节数量或小节。
 
-Allowed requirement kinds are `document`, `metric`, `spatial`, `comparison`, and `gap`. Executable `metric`, `spatial`, and `comparison` requirements use an authoritative registry key when deterministic execution is needed. Raw Metric IDs, adapter names, and execution order are forbidden in the public blueprint.
+## 最小逻辑主线
 
-Every question needs one or more requirements. Every exclusion needs a reason. `completeness_review.status` must be `accepted` before persistence as the authoritative blueprint.
+以下是逻辑覆盖，不是固定目录。章节所有者可依据决策责任拆分、合并和命名；主 Agent 可在不改变接受正文的前提下确定最终顺序：
 
-## EvidenceSnapshot
+1. **当前判断与推荐方向**：一句可复述的工作定位、主要选择、关键理由和暂不优先方向。
+2. **项目事实与关键关系**：分析范围、材料目标、真实对象、对象关系及会改变选择的约束。
+3. **外部空间与市场证据**：联合解释适用的人群、POI、人口、夜光、路网、服务范围和比较对象，说明它们改变了什么。
+4. **备选方案与取舍**：只比较材料和证据支持的真实候选方向，明确推荐、保留和不优先方案。
+5. **空间、产品与运营方案**：把定位落实到实际对象、服务对象、使用场景、协同关系、内容产品和运营机制。
+6. **实施与验证**：按项目真实阶段说明当前动作、交付成果、进入条件、调整或停止条件。
+7. **证据审计**：记录实际使用的来源、年份、范围、口径修正和证据等级。
 
-`evidence-snapshot.json` combines usable evidence, gaps, readiness, visuals, and private execution lineage.
+未涉及的逻辑不强行创建空章节。任何新增章节必须闭合至少一个 `decision_inventory` 项；删除主要章节时，应能指出会丢失的决策闭环。
 
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01",
-  "snapshot_id": "evidence-snapshot:project-01",
-  "blueprint_id": "blueprint:project-01",
-  "blueprint_hash": "sha256:...",
-  "evidence": [
-    {
-      "evidence_id": "evidence:01",
-      "requirement_ids": ["requirement:01"],
-      "question_ids": ["question:01"],
-      "state": "measured",
-      "source_ids": ["current:dataset:poi"],
-      "scope": {"spatial": {}, "temporal": {}},
-      "method": "...",
-      "result": {"category_count": 12},
-      "limitations": [],
-      "object_ids": ["scope:project-context"]
-    }
-  ],
-  "gaps": [
-    {
-      "gap_id": "gap:01",
-      "requirement_ids": ["requirement:02"],
-      "question_id": "question:01",
-      "missing_inputs": ["已承诺运营主体和期限"],
-      "decision_limit": "不能确认长期运营可交付性",
-      "collection_action": "取得签署的运营协议",
-      "stop_condition": "补数前禁止将运营意向表述为已落实",
-      "next_run_trigger": "运营协议纳入锁定来源"
-    }
-  ],
-  "question_readiness": {
-    "question:01": "conditional"
-  },
-  "visuals": [
-    {
-      "visual_id": "visual:01",
-      "title": "设施供给结构",
-      "visual_type": "bar_chart",
-      "evidence_ids": ["evidence:01"],
-      "data_fields": ["result.category_count"],
-      "object_ids": [],
-      "coordinate_system": "",
-      "transformations": ["..."],
-      "render_spec": {},
-      "filename": "visual-01.svg",
-      "spec_hash": "sha256:...",
-      "asset_hash": "sha256:...",
-      "interpretation_boundary": "仅表示已记录设施供给"
-    }
-  ],
-  "execution_lineage": {
-    "capability_registry_version": "3.0.0",
-    "requirement_resolutions": [],
-    "internal_metric_plan": [],
-    "attempts": [],
-    "transformations": []
-  },
-  "content_hash": "sha256:..."
-}
-```
+章节责任只能在证据收敛后形成，章节必须由决策之间的关系组织。人口、POI、夜光或路网只有在独立承担一项完整决策论证时才可成为章节，否则应作为跨章节证据。最终标题、顺序和目录以接受版本为准；报告开头继续结论先行，这不等于在研究开始前预设结论。
 
-Readiness values are `ready`, `conditional`, `gap_bound`, and `not_reportable`.
+## 决策闭环
 
-Every blueprint requirement has a terminal attempt in `execution_lineage` and is covered by positive evidence or a public gap when it limits a decision. Attempt statuses are `succeeded`, `blocked`, `failed`, `not_applicable`, and `registered_gap`.
+每个重要决策按以下关系写作：
 
-Only succeeded non-gap attempts create positive evidence. An `inference`, recommendation, failed attempt, or gap cannot appear as positive evidence. Numeric visuals require succeeded evidence and exact result-field lineage. Gap visuals are semantic evidence-gate structures without fabricated values.
+~~~text
+判断
+→ 证据与比较
+→ 可选方案及取舍
+→ 当前动作
+→ 验证、调整或停止条件
+~~~
 
-Agent prompt projections always omit `execution_lineage`. Specialist projections also omit every unassigned evidence, gap, and visual record.
+这条关系不是内容检查表。报告必须说明证据为什么能改变判断、推荐为何优于真实候选方向、什么条件会使判断失效，以及方案对空间、产品、运营能力和后续改向造成什么具体后果。仅出现“比较”“验证”“停止”等字段不构成分析深度。
 
-## ChapterAssignments
+定位必须具体说明项目是什么、服务谁、由什么资产、空间或内容驱动，不使用空泛口号。空间方案覆盖所有会影响定位、使用、运营或实施的关键对象及关系，但不虚构材料中不存在的建筑、开放空间、居民或其他对象。
 
-`chapter-assignments.json` is the second lock.
+重要建议还必须识别承接它所需的组织、内容生产、招商、服务交付或现场运营能力。能力缺口应改变首开范围、合作方式或实施顺序。对于会形成长期投入或空间锁定的选择，说明扩大、改向、缩减、暂停和退出的实际成本与办法。
 
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01",
-  "assignment_bundle_id": "assignments:project-01",
-  "blueprint_hash": "sha256:...",
-  "evidence_snapshot_hash": "sha256:...",
-  "assignments": [
-    {
-      "assignment_id": "assignment:market",
-      "chapter_id": "chapter:market",
-      "working_title": "市场与需求基础",
-      "role": "市场与需求分析师",
-      "objective": "...",
-      "question_ids": ["question:01"],
-      "subsection_tasks": [
-        {"subsection_id": "market:01", "title": "...", "task": "..."}
-      ],
-      "required_argument_units": [
-        {"argument_id": "argument:market:01", "purpose": "...", "suggested_characters": [600, 1000]}
-      ],
-      "evidence_access": {
-        "primary": ["evidence:01"],
-        "shared": [],
-        "gaps": ["gap:01"],
-        "visuals": ["visual:01"],
-        "forbidden": []
-      },
-      "dependencies": [],
-      "assignment_hash": "sha256:..."
-    }
-  ],
-  "content_hash": "sha256:..."
-}
-```
+多对象或多层级项目应形成适合自身的系统、组团和单元关系；单体选址、线性空间或无建筑项目不得被强行套用多建筑结构。资料不足时可以给出有依据的条件性方案，不得把全部对象写成“待核实”。
 
-Every decision question appears in exactly one assignment's `question_ids`. Access lists are disjoint; unlisted items are forbidden. Every assigned visual is a required chapter placement. Each assignment hash binds its content, blueprint hash, and evidence snapshot hash.
+## 外部证据
 
-## ChapterPackage and chapter index
+人口描述居住背景，POI 描述设施供给，夜光描述观测到的辐亮度，路网指标描述模型中的网络位置或可达性。主 Agent 将它们组合成场景和空间机制，但不得将代理数据升级为确认客群、真实需求、客流、消费、营收或投资回报。
 
-Each `chapters/<chapter-id>.vN.json` is immutable.
+需要展示具体附近地点和道路路线时，遵守指标知识卡、视觉模板目录和已保存几何的当前契约。几何接近、模型可达、现场可进入和运营可履约必须分开表达。数据不可用时降低对应判断，不取消其他已有证据支持的方案。
 
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01",
-  "chapter_id": "chapter:market",
-  "chapter_version_id": "chapter:market:v1",
-  "assignment_id": "assignment:market",
-  "assignment_hash": "sha256:...",
-  "evidence_snapshot_hash": "sha256:...",
-  "analyst_role": "市场与需求分析师",
-  "title": "...",
-  "thesis": "...",
-  "subsections": [
-    {
-      "subsection_id": "market:01",
-      "title": "...",
-      "body": "可直接发布的正文……",
-      "argument_units": [
-        {
-          "argument_id": "argument:market:01",
-          "claim": "...",
-          "claim_state": "inference",
-          "evidence_refs": [
-            {"evidence_id": "evidence:01", "result_paths": ["result.category_count"]}
-          ],
-          "gap_ids": ["gap:01"],
-          "baseline": "...",
-          "mechanism": "...",
-          "project_implication": "...",
-          "action": "...",
-          "assumptions": ["..."],
-          "stop_condition": "..."
-        }
-      ],
-      "structure_blocks": [],
-      "visual_refs": [
-        {"visual_id": "visual:01", "caption": "...", "interpretation": "..."}
-      ]
-    }
-  ],
-  "unresolved_tensions": [],
-  "warnings": [],
-  "content_hash": "sha256:..."
-}
-```
+## 实施与运营
 
-Every required subsection and ArgumentUnit appears exactly once. Numeric claims identify source result paths. Evidence, gaps, and visuals must be assignment-authorized. Assigned visuals must be placed exactly once unless the assignment explicitly allows repeated placement.
+阶段名称和数量由项目实施逻辑决定，不固定为某一套模板。每个实际阶段必须包含：
 
-`analyst-chapters.json` indexes immutable versions:
+- 主要任务和对应空间/产品；
+- 可交付成果；
+- 进入下一阶段的条件；
+- 可观察的行为或运营记录；
+- 对应的调整或停止动作。
 
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01",
-  "chapters": [
-    {
-      "chapter_id": "chapter:market",
-      "versions": [
-        {
-          "chapter_version_id": "chapter:market:v1",
-          "filename": "market.v1.json",
-          "content_hash": "sha256:...",
-          "review_status": "revision_required"
-        },
-        {
-          "chapter_version_id": "chapter:market:v2",
-          "filename": "market.v2.json",
-          "content_hash": "sha256:...",
-          "review_status": "accepted"
-        }
-      ],
-      "accepted_version_id": "chapter:market:v2"
-    }
-  ],
-  "content_hash": "sha256:..."
-}
-```
+指标应贴合项目真实机制，例如到达、使用、停留、重复参与、服务完成、冲突、成本或单位经济；不存在活动、居民或交易机制时，不强制生成相应指标。没有基线时定义真实记录方法，不编造阈值。
 
-Only `v1` and optional `v2` are allowed. Exactly one accepted version exists for every accepted chapter; prior review history is never overwritten.
+## 边界与附录
 
-## EditorialReview and accepted claims
+- 正文不设置“免责声明”“局限性声明”或“建议进一步研究”章节。
+- 会改变行动的未知事项只出现一次，写成前置条件、验证动作或停止条件。
+- 失败条件必须能触发改判或动作变化，不能作为不影响推荐的附加免责声明。
+- 图注、脚注或证据审计承载数据期间、范围、比较口径、证据等级和不能支持的事项。
+- 正文与附录不展示反方审查原文、裁定记录、角色名称或内部返工过程。
+- 不写“仅供参考”等通用免责句，不预测没有直接数据支持的销量、营收、客流或回报。
 
-`editorial-review.json` preserves version-specific decisions and embeds system-generated accepted claims.
+## 写作要求
 
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01",
-  "review_id": "editorial-review:project-01",
-  "chapter_decisions": [
-    {
-      "chapter_version_id": "chapter:market:v1",
-      "decision": "revise",
-      "failed_obligations": ["..."],
-      "repair_instructions": ["..."]
-    },
-    {
-      "chapter_version_id": "chapter:market:v2",
-      "decision": "accepted",
-      "failed_obligations": [],
-      "repair_instructions": []
-    }
-  ],
-  "conflicts": [
-    {
-      "conflict_id": "conflict:01",
-      "argument_ids": ["argument:market:01", "argument:access:01"],
-      "tension": "...",
-      "decision": "resolved",
-      "ruling": "..."
-    }
-  ],
-  "terminology_rules": {},
-  "accepted_claims": [
-    {
-      "claim_id": "claim:argument:market:01",
-      "source_type": "argument_unit",
-      "source_ids": ["argument:market:01"],
-      "chapter_version_ids": ["chapter:market:v2"],
-      "text": "...",
-      "evidence_ids": ["evidence:01"],
-      "gap_ids": ["gap:01"],
-      "state": "inference",
-      "scope": {},
-      "caveats": ["..."]
-    }
-  ],
-  "publication_decision": "ready",
-  "content_hash": "sha256:..."
-}
-```
-
-Chapter decisions are `accepted`, `revise`, or `rejected`. Publication decision is `ready`, `revision_required`, or `blocked`.
-
-The system creates `accepted_claims` only after validating decisions. Agent-authored accepted claims are invalid. Claims come only from accepted ArgumentUnits or resolved conflict rulings and inherit the weakest state, narrowest scope, and all material caveats. Rejected chapter versions contribute no claims.
-
-## ReportAssembly
-
-`report-assembly.json` contains assembly instructions, never specialist prose.
-
-```json
-{
-  "schema_version": "3.0",
-  "run_id": "run:project-01",
-  "assembly_id": "report-assembly:project-01",
-  "title": "项目报告",
-  "editorial_review_id": "editorial-review:project-01",
-  "accepted_chapters": [
-    {"chapter_id": "chapter:market", "chapter_version_id": "chapter:market:v2"}
-  ],
-  "chapter_order": ["chapter:market"],
-  "executive_summary": {
-    "text": "...",
-    "claim_ids": ["claim:argument:market:01"]
-  },
-  "transitions": [],
-  "integrated_recommendations": [
-    {"text": "...", "claim_ids": ["claim:argument:market:01"]}
-  ],
-  "conflict_ids": ["conflict:01"],
-  "content_hash": "sha256:..."
-}
-```
-
-Accepted chapters and order must match the chapter index and EditorialReview. Every substantive synthesis statement cites known accepted claim IDs. Fields for chapter body, subsections, ArgumentUnits, or rewritten specialist content are forbidden.
-
-## AnalysisRun v3 manifest
-
-`analysis-run.json` is an infrastructure manifest, not a report reasoning object. v3 removes public `decision_agenda`, `metric_plan`, and `metric_attempts` fields. It records:
-
-- `schema_version: "3.0"`, run identity, kind, capability, status, and stage;
-- input artifact digest and upstream references;
-- typed artifact references and hashes for the six root objects and chapter index;
-- diagnostics derived from EvidenceSnapshot execution lineage and publication state;
-- failure state and reason when applicable.
-
-Use `run_kind: full_analysis` for source reports and `run_kind: delivery_view` for a derived selection/reordering of one completed v3 Run. A delivery view cannot reference another delivery view.
-
-API readers may return a union of v3 and legacy v1/v2 read-only views. New writes, comparison outputs, and delivery views use v3 only.
-
-## Compiler invariants
-
-The compiler validates:
-
-- schema v3 and legacy read-only boundaries;
-- blueprint completeness, registry key validity, and first-lock hash;
-- terminal coverage for every evidence requirement;
-- evidence/gap/readiness consistency and private-lineage hash;
-- deterministic visual provenance, security, spec hash, and asset hash;
-- one question owner, assignment access, and second-lock hash;
-- chapter task coverage, ArgumentUnit completeness, result-field lineage, visual placement, immutable versions, and one-revision limit;
-- version-specific editorial decisions, explicit conflict handling, and system-generated accepted claims;
-- ReportAssembly claim references and prohibition on specialist prose;
-- exact publication contents.
-
-The compiler preserves specialist body text. It changes only numbering, evidence citation labels, structural-block rendering, and visual links.
-
-It publishes:
-
-```text
-report/project-report.md
-report/assets/<referenced-visual>.svg
-```
-
-No failure state writes report files or `.complete`.
+- 开头先给定位和当前判断，不以方法、风险或数据缺失开场。
+- 一个段落承担一个判断；数字后说明其规划含义。
+- 表格只用于真实比较、承载关系或阶段安排，不用来包装普通散文。
+- 只保留会改变决定的数字、图表和地图。
+- 默认保存 Markdown；只有用户要求时再生成 HTML 或 PDF。
+- PDF 采用自然分页，除封面、目录或确有出版需要的主要分隔外，不按标题强制一章一页。

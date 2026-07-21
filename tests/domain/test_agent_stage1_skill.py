@@ -81,7 +81,7 @@ def valid_evidence():
                 "source_date": "2026-07-01",
                 "source_locator": "document:project-doc#page=12&node=document-node-12",
                 "method": "document_read",
-                "scope": "项目红线",
+                "scope": "分析范围",
                 "comparison_baseline": "",
                 "confidence": "high",
                 "limitation": "仍需逐栋勘察",
@@ -111,7 +111,7 @@ def valid_hard_constraint_screening():
                 "constraint_id": constraint_id,
                 "state": "unknown",
                 "decision_effect": "condition",
-                "scope": "项目范围",
+                "scope": "分析范围",
                 "finding": f"{constraint_id} 尚待专项核验",
                 "evidence_refs": [],
                 "affected_space_ids": ["unit-1"],
@@ -162,8 +162,8 @@ def valid_movement_routes(space_id="unit-1"):
             "route_id": f"route-{movement_type}",
             "movement_type": movement_type,
             "title": labels[movement_type],
-            "role": "连接入口与礼堂",
-            "entry_or_origin": "南侧入口",
+            "role": "连接南侧道路与礼堂",
+            "origin": "南侧道路",
             "destinations": ["原县政府礼堂"],
             "affected_space_ids": [space_id],
             "operating_windows": ["日常开放时段"],
@@ -233,7 +233,7 @@ def valid_matrix():
                 "compatible_functions": [{"id": "exhibition", "name": "社区展览"}],
                 "excluded_functions": [{"id": "heavy-food", "name": "重餐饮"}],
                 "audience_scenarios": ["社区周末活动"],
-                "access_and_movement": {"visitor_entry": "南侧主入口"},
+                "access_and_movement": {"visitor_origin": "南侧道路"},
                 "operation_strategy": {"operator": "社区文化运营主体"},
                 "renovation_and_delivery": {"scope": "轻量改造"},
                 "implementation_phase": "phase_1",
@@ -780,14 +780,14 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
     payload = ready_payload()
     payload.analysis_snapshot.spatial_objects = [
         {
-            "spatial_object_id": "road:south-entry",
+            "spatial_object_id": "road:south-approach",
             "object_type": "road_segment",
-            "title": "南侧入口道路",
+            "title": "南侧道路",
             "source_ref": "analysis_snapshot.road.features",
-            "source_locator": "analysis_snapshot.road.features/south-entry",
+            "source_locator": "analysis_snapshot.road.features/south-approach",
             "feature": {
                 "type": "Feature",
-                "properties": {"road_id": "south-entry"},
+                "properties": {"road_id": "south-approach"},
                 "geometry": {
                     "type": "LineString",
                     "coordinates": [[112.0, 28.0], [112.01, 28.01]],
@@ -798,11 +798,11 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
     matrix = deepcopy(valid_matrix())
     matrix["movement_routes"][0]["map_binding"] = {
         "status": "bound",
-        "spatial_object_id": "road:south-entry",
+        "spatial_object_id": "road:south-approach",
     }
     matrix["space_decisions"][0]["map_binding"] = {
         "status": "bound",
-        "spatial_object_id": "road:south-entry",
+        "spatial_object_id": "road:south-approach",
         "feature": {
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [0, 0]},
@@ -834,11 +834,11 @@ def test_stage1_resolves_map_binding_from_authoritative_snapshot_objects(monkeyp
     catalog = matrix_call["user_payload"]["authoritative_spatial_objects"]
     assert catalog == [
         {
-            "spatial_object_id": "road:south-entry",
+            "spatial_object_id": "road:south-approach",
             "object_type": "road_segment",
-            "title": "南侧入口道路",
+            "title": "南侧道路",
             "source_ref": "analysis_snapshot.road.features",
-            "source_locator": "analysis_snapshot.road.features/south-entry",
+            "source_locator": "analysis_snapshot.road.features/south-approach",
         }
     ]
     assert all("feature" not in item and "coordinates" not in item for item in catalog)

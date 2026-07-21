@@ -126,6 +126,12 @@ function createAnalysisLifecycleHooks(options = {}) {
         } else if (oldPanel === 'syntax') {
           this.resumePoiSystemAfterSyntax()
         }
+        const sharedGridEnabled = (typeof this.hasSimplifyDisplayTarget === 'function')
+          && this.hasSimplifyDisplayTarget('shared_grid')
+        if (oldPanel === 'shared_grid' && newPanel !== 'shared_grid' && !sharedGridEnabled
+          && typeof this.clearSharedGridDisplayOnLeave === 'function') {
+          this.clearSharedGridDisplayOnLeave()
+        }
         const populationEnabled = (typeof this.hasSimplifyDisplayTarget === 'function')
           && this.hasSimplifyDisplayTarget('population')
         if (oldPanel === 'population' && newPanel !== 'population' && !populationEnabled) {
@@ -145,6 +151,9 @@ function createAnalysisLifecycleHooks(options = {}) {
           && this.hasSimplifyDisplayTarget('timeseries')
         if (oldPanel === 'timeseries' && newPanel !== 'timeseries' && !timeseriesEnabled) {
           if (typeof this.clearTimeseriesDisplayOnLeave === 'function') this.clearTimeseriesDisplayOnLeave()
+        }
+        if (newPanel === 'shared_grid' && typeof this.ensureSharedGridPanelEntryState === 'function') {
+          this.ensureSharedGridPanelEntryState()
         }
         if (newPanel === 'population') {
           this.ensurePopulationPanelEntryState()

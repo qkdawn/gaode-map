@@ -6,6 +6,82 @@ interpretation_policy:
 - 比较性指标必须记录比较范围、时间、分类口径、空间分辨率和方法参数。
 - 前端派生指标依赖当前批次数据和前端阈值，不视为后端稳定事实。
 - implementation_status 为 not_implemented 的指标只能作为证据缺口，不得作为现有证据调用或用相似字段替代。
+
+decision_metric_policy:
+  selection_rule: 一个决策问题必须先选择一个互补指标组合，再从组合中执行可用指标；不得按数据集机械罗列指标。
+  minimum_metric_count: 2
+  shared_spatial_unit_required: true
+  comparison_required: true
+  action_change_required: true
+  missing_data_rule: 缺少组合中的关键直接数据时，明确标记缺口并转为验证条件，不用其他代理指标强行替代。
+  publication_rule: implemented 只表示可以计算；只有完成组合比较、证据可追溯且会改变行动的指标，才进入普通读者报告。
+
+decision_metric_bundles:
+  - bundle_id: regional-direction
+    decision_question: 哪些方向值得优先做现场踏勘、公共界面和内容差异验证？
+    required_metrics:
+      - regional.directional_evidence_matrix
+    spatial_contract: 同一共同栅格、八方向和距离带；与共同栅格总体平均比较。
+    synthesis_rule: 设施、人口、夜光和路网必须联合解释；冲突关系本身也是判断，不得把单项最高值写成机会。
+    action_change: 改变现场踏勘顺序、公共界面核验和首期试验方向。
+    cannot_conclude: 客流、消费、营收、ROI或正式连接节点。
+
+  - bundle_id: people-scenarios
+    decision_question: 哪些人群场景和时段值得先做低容量验证？
+    required_metrics:
+      - population.age_structure
+      - population.total
+      - nightlight.sector_profile
+      - poi.grid_density
+    spatial_contract: 同一共同栅格和方向/距离带；区域代理与项目内居民约束分开比较。
+    synthesis_rule: 人口提出场景，夜光提出观察时段，POI提供周边供给背景；三者都不能替代访谈、参与和复访数据。
+    action_change: 改变访谈对象、试验时段、活动规模和居民影响核验顺序。
+    cannot_conclude: 已确认客群、偏好、付费意愿或真实客流。
+
+  - bundle_id: content-service
+    decision_question: 哪些内容或公共服务值得先做可逆小样？
+    required_metrics:
+      - poi.category_density
+      - poi.local_entropy
+      - population.age_structure
+      - grid.opportunity_flag
+    spatial_contract: POI、人口和派生空间条件必须在同一共同栅格中比较，并与项目材料明确的空间角色对照。
+    synthesis_rule: 先判断已有供给、类别混合和人群场景是否互补，再形成内容假设；单个类别少不等于市场空白。
+    action_change: 改变首期内容组合、试验空间和合作方验证顺序。
+    cannot_conclude: 需求缺口、市场饱和、收入或招商规模。
+
+  - bundle_id: connection
+    decision_question: 哪些道路和周边单元值得优先做连接与人行核验？
+    required_metrics:
+      - road.integration
+      - road.choice
+      - road.connectivity
+      - poi.grid_density
+    spatial_contract: 路网指标按同一图模型比较，空间背景按共同栅格对齐，连接节点和人行路径另行核验。
+    synthesis_rule: 整合度、选择度和连通性用于区分到达/穿行/断点条件；POI只提供界面背景，不生成连接节点结论。
+    action_change: 改变道路踏勘、界面记录、连接节点测绘和无障碍核验优先级。
+    cannot_conclude: 实际人流、正式连接节点、步行时间或开放容量。
+
+restricted_metric_use:
+  - metric_id: poi.multi_year_count
+    status: proxy_only
+    rule: 只作数据覆盖和采集差异背景，不直接解释真实开闭店趋势。
+  - metric_id: spatial.global_moran_i_density
+    status: internal_only
+    rule: 只有同时提供位置、空间单元和统计解释时才可作为内部分析；不能单独支撑方向行动。
+  - metric_id: spatial.lisa
+    status: internal_only
+    rule: 必须提供局部位置、类别/变量和显著性口径；当前不能用汇总数字替代空间图示。
+  - metric_id: spatial.gi_star
+    status: internal_only
+    rule: 必须提供热点位置、显著性和统一空间口径；不直接等同于商业热点。
+  - metric_id: nightlight.hotspot_class
+    status: proxy_only
+    rule: 只表示亮度空间分级，不表示夜间客流、消费或经营强度。
+  - metric_id: road.control
+    status: proxy_only
+    rule: 只表示网络结构中的控制关系，不表示人流、车流或连接节点优先级。
+
 metrics:
 - id: poi.count
   name: POI 数量
@@ -23,7 +99,7 @@ metrics:
   definition: 研究范围或指定网格内去重后的 POI 记录数。
   unit: places
   answers_questions:
-  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  - 经 15 分钟 walking 等时圈几何核验后，已成立的项目所需配套和同类对标供给各有什么真实主类／附属类结构？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -33,8 +109,8 @@ metrics:
     runtime_parameters:
     - catchment_id
   supports:
-  - 设施供给的数量分布
-  - 类别之间的数量比较
+  - 将经 15 分钟 walking 等时圈几何核验的 POI 按真实主类／附属类和互补配套／同类对标角色分别盘点
+  - 以连续保存道路网络上的五分钟可达记录补充供给空间关系；道路不可用时仍保留等时圈统计
   does_not_support:
   - 实际营业
   - 客流
@@ -49,7 +125,7 @@ metrics:
     - program_location
     - operations
     possible_actions:
-    - 据设施供给与类别缺口调整功能组合、招商或运营验证。
+    - 将已审校类型组的等时圈核验供给与五分钟道路可达性作为补充、回避和同类对标的事实背景；道路不可达时保留等时圈总量并省略五分钟值。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -63,7 +139,9 @@ metrics:
   - same_category_schema
   - same_scope_definition
   quality_requirements:
-  - duplicate_check
+  - verified_15_minute_walking_isochrone_polygon_or_multipolygon
+  - point_inclusion_uses_covers
+  - real_taxonomy_resolves_from_share_type_map
   - category_normalization
   - coverage_check
   source:
@@ -75,7 +153,7 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - same_scope_category_share
-    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
+    if_missing: 缺少有效 15 分钟 walking 等时圈时返回 unavailable；缺少分析范围、保存道路或连续道路路径时返回 partial，保留等时圈核验统计并省略五分钟值；不生成直线距离或替代性可达数量。
 - id: poi.category_count
   name: POI 分类数量
   family: poi
@@ -95,7 +173,7 @@ metrics:
   - classification_level
   - year
   answers_questions:
-  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  - 哪些设施供给或类别差异会改变项目定位、运营或服务对象？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -165,7 +243,7 @@ metrics:
   - category_codes
   - source
   answers_questions:
-  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  - 哪些设施供给或类别差异会改变项目定位、运营或服务对象？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -249,9 +327,8 @@ metrics:
   actionability:
     action_targets: &id002
     - program_location
-    - entrance
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -279,244 +356,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_category_share
     if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
-- id: project.document_constraints
-  name: 项目文件约束与意图提取
-  family: project_evidence_gate
-  implementation_status: implemented
-  outputs:
-  - documented_constraints
-  - documented_intentions
-  - document_conflicts
-  required_inputs:
-  - versioned_project_documents
-  definition: 从已版本化项目文件中提取硬约束、项目意图和文件间冲突，并保持原文来源可追溯。
-  unit: evidence_items
-  answers_questions:
-  - 哪些项目约束和既有承诺必须先于空间、定位和实施方案处理？
-  spatial_granularities:
-  - unit: scope
-    neighborhood: none
-    runtime_parameters: []
-  supports:
-  - 项目文件明确记载的约束、意图与冲突
-  does_not_support:
-  - 把项目意图自动视为已验证事实或已批准实施条件
-  use_when:
-  - hard_constraints
-  - project_delivery
-  actionability:
-    action_targets:
-    - data_collection
-    - operations
-    possible_actions:
-    - 先解决文件冲突和硬约束，再进入空间与实施承诺。
-  followup_metrics:
-  - metric_id: project.boundary_geometry
-    purpose: locate
-    trigger: 文件提到项目红线、入口或界面但尚无正式几何时
-  valid_comparisons:
-  - documented_constraint_version
-  quality_requirements:
-  - document_version_traceability
-  - intention_fact_separation
-  comparison_baseline:
-    required: true
-    preferred:
-    - documented_project_requirement
-    if_missing: 项目文件未版本化或来源冲突未解决时，不把项目意图写成既定条件。
-  source:
-  - modules/spatial_action/project_context.py
-- id: project.boundary_geometry
-  name: 正式项目边界完整性
-  family: project_evidence_gate
-  implementation_status: implemented
-  outputs:
-  - project_boundary_geometry
-  required_inputs:
-  - formal_project_boundary
-  definition: 由项目正式资料或用户明确锚定的项目红线，用于区分项目内部、界面与区域背景。
-  unit: geometry
-  answers_questions:
-  - 哪些空间判断可以安全落到项目内部、边界界面与入口？
-  spatial_granularities:
-  - unit: scope
-    neighborhood: none
-    runtime_parameters: []
-  supports:
-  - 项目内外、边界界面和后续入口分析的正式空间基准
-  does_not_support:
-  - 用等时圈、中心点或区域分析范围替代项目红线
-  use_when:
-  - hard_constraints
-  - project_boundary
-  actionability:
-    action_targets:
-    - boundary_interface
-    - entrance
-    - data_collection
-    possible_actions:
-    - 补充正式红线后再启动项目内部、入口和公共界面比较。
-  followup_metrics:
-  - metric_id: road.entrance_distance
-    purpose: locate
-    trigger: 正式项目边界与入口锚点可用时
-  valid_comparisons:
-  - documented_boundary_version
-  quality_requirements:
-  - formal_source_traceability
-  - coordinate_system_declared
-  comparison_baseline:
-    required: true
-    preferred:
-    - documented_project_requirement
-    if_missing: 在正式项目边界到位前停止项目内部、入口和界面优劣判断。
-  source:
-  - modules/spatial_action/project_context.py
-- id: competition.operating_performance
-  name: 竞品经营表现证据门槛
-  family: project_evidence_gate
-  implementation_status: not_implemented
-  outputs: []
-  required_inputs:
-  - named_competitor_set
-  - comparable_operating_period
-  - visits_or_occupancy_or_revenue_evidence
-  definition: 对同层级竞品的到访、出租、活动、营收或运营表现进行可比核验的证据门槛。
-  unit: evidence_gate
-  answers_questions:
-  - 哪个定位方向具有相对竞争优势，而不是仅有设施供给差异？
-  spatial_granularities:
-  - unit: scope
-    neighborhood: none
-    runtime_parameters: []
-  supports:
-  - 竞品相对表现与定位差异的可核验比较
-  does_not_support:
-  - 用 POI 数量推断竞品经营表现、客流或收入
-  use_when:
-  - competition_positioning
-  - operating_performance
-  actionability:
-    action_targets:
-    - operations
-    - data_collection
-    possible_actions:
-    - 建立同口径竞品清单并收集经营表现后再收敛定位方向。
-  followup_metrics:
-  - metric_id: poi.category_count
-    purpose: explain
-    trigger: 需要解释竞品周边设施供给结构时
-  valid_comparisons:
-  - comparable_competitor_class
-  - comparable_operating_period
-  quality_requirements:
-  - competitor_identity_verified
-  - operating_measure_definition
-  comparison_baseline:
-    required: true
-    preferred:
-    - same_source_peer_scope
-    - documented_project_requirement
-    if_missing: 没有同层级、同口径竞品经营证据时，只保留定位假设，不下竞争优劣结论。
-  source: []
-  implementation_gap: 当前没有竞品经营、到访、出租或收入数据适配器。
-- id: operations.operator_commitment
-  name: 运营主体与交付承诺证据门槛
-  family: project_evidence_gate
-  implementation_status: not_implemented
-  outputs: []
-  required_inputs:
-  - operator_identity
-  - team_and_resource_plan
-  - operating_calendar
-  - delivery_responsibilities
-  definition: 核验运营主体、团队能力、开放时段、资源投入与分期交付责任的证据门槛。
-  unit: evidence_gate
-  answers_questions:
-  - 空间与内容方案是否有明确主体和资源可以持续交付？
-  spatial_granularities:
-  - unit: scope
-    neighborhood: none
-    runtime_parameters: []
-  supports:
-  - 运营责任、资源承诺和实施节奏的可核验判断
-  does_not_support:
-  - 用空间潜力或设施供给代理运营能力
-  use_when:
-  - operations_delivery
-  - operator_readiness
-  actionability:
-    action_targets:
-    - operations
-    - data_collection
-    possible_actions:
-    - 明确运营主体、责任矩阵和试运营资源后再扩大空间投入。
-  followup_metrics: []
-  valid_comparisons:
-  - documented_delivery_responsibility
-  quality_requirements:
-  - operator_identity_verified
-  - resource_commitment_documented
-  comparison_baseline:
-    required: true
-    preferred:
-    - documented_project_requirement
-    - scenario_or_design_alternative
-    if_missing: 运营主体和资源承诺未锁定时，只允许可逆试点，不进入不可逆建设承诺。
-  source: []
-  implementation_gap: 当前没有运营主体、团队资源和交付责任的结构化输入适配器。
-- id: finance.cost_revenue_model
-  name: 成本收入与敏感性模型证据门槛
-  family: project_evidence_gate
-  implementation_status: not_implemented
-  outputs: []
-  required_inputs:
-  - capital_cost
-  - operating_cost
-  - revenue_assumptions
-  - phasing_and_sensitivity_model
-  definition: 对建设成本、运营成本、收入假设、分期投入与敏感性进行同一模型核验的证据门槛。
-  unit: evidence_gate
-  answers_questions:
-  - 哪些方案在明确成本、收入和分期假设后仍具有财务可行性？
-  spatial_granularities:
-  - unit: scope
-    neighborhood: none
-    runtime_parameters: []
-  supports:
-  - 财务假设、情景敏感性与停止条件的可核验比较
-  does_not_support:
-  - 从人口、夜光、POI 或路网代理直接推导收入、成本或回报率
-  use_when:
-  - financial_feasibility
-  - operations_delivery
-  actionability:
-    action_targets:
-    - operations
-    - data_collection
-    possible_actions:
-    - 建立分期成本收入模型并设置敏感性阈值后再作投资承诺。
-  followup_metrics:
-  - metric_id: population.total
-    purpose: explain
-    trigger: 需要说明区域人口背景但不把其直接转为收入时
-  - metric_id: nightlight.activity_level
-    purpose: explain
-    trigger: 需要说明夜间活动背景但不把其直接转为营业额时
-  valid_comparisons:
-  - scenario_cost_revenue_assumptions
-  - comparable_phasing_horizon
-  quality_requirements:
-  - assumption_source_traceability
-  - sensitivity_range_declared
-  comparison_baseline:
-    required: true
-    preferred:
-    - scenario_or_design_alternative
-    - documented_project_requirement
-    if_missing: 成本、收入与分期模型缺失时，不输出回报率或财务可行性结论，只保留补数门槛。
-  source: []
-  implementation_gap: 当前没有项目成本、收入、分期与敏感性模型的结构化输入适配器。
 - id: poi.grid_density
   name: POI 网格密度
   family: poi_grid
@@ -563,7 +402,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -624,7 +463,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -689,7 +528,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -748,7 +587,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -769,7 +608,7 @@ metrics:
   source:
   - frontend/src/features/h3/panel.js
   - docs/网格分析公式对照表.md
-  execution_location: frontend
+  execution_location: backend_history_snapshot_adapter
   comparison_baseline:
     required: true
     preferred:
@@ -823,7 +662,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -888,7 +727,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -950,7 +789,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -1011,7 +850,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -1032,7 +871,7 @@ metrics:
   source:
   - frontend/src/features/h3/panel.js
   - docs/网格分析公式对照表.md
-  execution_location: frontend
+  execution_location: backend_history_snapshot_adapter
   comparison_baseline:
     required: true
     preferred:
@@ -1063,7 +902,7 @@ metrics:
   - 识别研究范围整体是否存在显著空间自相关，并决定是否需要继续局部定位。
   does_not_support:
   - 局部热点位置
-  - 入口或功能分配位置
+  - 具体功能分配位置
   - 聚集原因
   - 商业成功
   - 因果关系
@@ -1141,7 +980,6 @@ metrics:
   actionability:
     action_targets: &id003
     - program_location
-    - entrance
     - analysis_method
     possible_actions:
     - 将显著连续区域转为空间候选，并对孤立异常单元追加诊断。
@@ -1269,7 +1107,7 @@ metrics:
     - program_location
     - public_space
     possible_actions:
-    - 把机会单元转为功能、公共空间或界面布置候选。
+    - 把标记单元转为功能、公共空间或界面布置候选。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1297,11 +1135,11 @@ metrics:
     - same_scope_category_share
     if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: grid.opportunity_flag
-  name: 网格机会标记
+  name: 网格空间条件标记
   family: grid_derived
   implementation_status: implemented
   outputs:
-  - is_opportunity
+  - is_spatial_condition_flag
   required_inputs:
   - aligned_grid_metrics
   - normalization_method
@@ -1330,7 +1168,7 @@ metrics:
   actionability:
     action_targets: *id004
     possible_actions:
-    - 把机会单元转为功能、公共空间或界面布置候选。
+    - 把标记单元转为功能、公共空间或界面布置候选。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1348,7 +1186,7 @@ metrics:
   - missing_value_policy
   source:
   - frontend/src/features/h3/panel.js
-  execution_location: frontend
+  execution_location: backend_history_snapshot_adapter
   comparison_baseline:
     required: true
     preferred:
@@ -1624,7 +1462,7 @@ metrics:
   definition: 研究范围有效夜光像素辐亮度的总和。
   unit: nWatts_per_cm2_sr
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -1646,7 +1484,7 @@ metrics:
     - operations
     - public_space
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1686,7 +1524,7 @@ metrics:
   definition: 有效夜光像素辐亮度的平均值。
   unit: nWatts_per_cm2_sr
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -1702,7 +1540,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1742,7 +1580,7 @@ metrics:
   definition: 研究范围内有效像素或网格的最大夜光辐亮度。
   unit: nWatts_per_cm2_sr
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -1759,7 +1597,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1799,7 +1637,7 @@ metrics:
   definition: 有效范围内被判定为有夜光的像素占比。
   unit: ratio_0_1
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -1816,7 +1654,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1855,7 +1693,7 @@ metrics:
   definition: 有效夜光像素辐亮度的第 90 百分位。
   unit: nWatts_per_cm2_sr
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -1871,7 +1709,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1921,7 +1759,7 @@ metrics:
   - q55
   - q25
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -1939,7 +1777,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -1978,7 +1816,7 @@ metrics:
   definition: 被归为热点类别的有效网格占比。
   unit: ratio_0_1
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -1994,7 +1832,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2037,7 +1875,7 @@ metrics:
   definition: 以中心和距离圈层组织夜光高值、衰减及边缘关系。
   unit: varies
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: distance_band
     neighborhood: distance
@@ -2055,7 +1893,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2098,7 +1936,7 @@ metrics:
   definition: 按相对中心的八方向扇区汇总总辐亮度、平均辐亮度和热点数量。
   unit: varies
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: sector
     neighborhood: distance
@@ -2116,7 +1954,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2143,12 +1981,12 @@ metrics:
     - normalized_spatial_unit
     if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.activity_level
-  name: 夜间经济活动强度等级
+  name: 夜间亮度空间分级
   family: nightlight
   implementation_status: implemented
   outputs:
-  - economic_activity_intensity_level
-  - economic_activity_summary_text
+  - nightlight_spatial_level
+  - nightlight_spatial_summary_text
   required_inputs:
   - nightlight_dataset
   - scope_geometry
@@ -2156,13 +1994,13 @@ metrics:
   definition: 根据平均辐亮度、P90、亮灯比例、热点比例和峰边比组合打分得到的夜光代理等级。
   unit: varies
   answers_questions:
-  - 哪些时空活动强弱差异会改变项目方向、时段或运营策略？
+  - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？
   spatial_granularities:
   - unit: scope
     neighborhood: none
     runtime_parameters: []
   supports:
-  - 夜间亮度代理的分级表达
+  - 夜间亮度空间分级
   does_not_support:
   - 夜经济、销售、客流的直接证明
   use_when:
@@ -2172,7 +2010,7 @@ metrics:
   actionability:
     action_targets: *id006
     possible_actions:
-    - 依据活动强弱与方向差异安排开放界面、夜间功能和运营时段。
+    - 依据亮度方向差异安排开放界面、夜间功能和运营时段的验证重点。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2217,7 +2055,7 @@ metrics:
   definition: 路网节点、边、渲染边数量及线网总长度。
   unit: count_or_km
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: scope
     neighborhood: network_radius
@@ -2234,12 +2072,11 @@ metrics:
   - spatial_connectivity
   actionability:
     action_targets: &id007
-    - entrance
     - street_segment
     - route
     - boundary_interface
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2263,8 +2100,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.degree
   name: 节点度/平均连接度
   family: road_syntax
@@ -2281,7 +2118,7 @@ metrics:
   definition: 节点相连路段数量及其归一化分数。
   unit: count_or_score
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
     neighborhood: network_radius
@@ -2300,7 +2137,7 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2324,8 +2161,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.integration
   name: 路网整合度
   family: road_syntax
@@ -2349,13 +2186,9 @@ metrics:
   - mode
   - graph_model
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
-    neighborhood: network_radius
-    runtime_parameters:
-    - network_radius_m
-  - unit: entrance
     neighborhood: network_radius
     runtime_parameters:
     - network_radius_m
@@ -2375,14 +2208,11 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: road.choice
     purpose: explain
     trigger: 高整合路段需要区分到达潜力与穿行潜力
-  - metric_id: road.entrance_distance
-    purpose: locate
-    trigger: 需要把网络优势落实到具体入口时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -2399,8 +2229,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.choice
   name: 路网选择度
   family: road_syntax
@@ -2424,13 +2254,9 @@ metrics:
   - mode
   - graph_model
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
-    neighborhood: network_radius
-    runtime_parameters:
-    - network_radius_m
-  - unit: entrance
     neighborhood: network_radius
     runtime_parameters:
     - network_radius_m
@@ -2450,14 +2276,11 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: road.integration
     purpose: explain
     trigger: 高选择度路段需要检查是否同时具有本地到达能力
-  - metric_id: road.walk_detour_ratio
-    purpose: validate
-    trigger: 拟定入口—目的地路径需要验证真实绕行时
   valid_comparisons:
   - same_graph_model
   - same_radius
@@ -2474,8 +2297,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.connectivity
   name: 路网连通度
   family: road_syntax
@@ -2491,7 +2314,7 @@ metrics:
   definition: 从输入路网属性或节点度推导的连接度及归一化分数。
   unit: score
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
     neighborhood: network_radius
@@ -2508,7 +2331,7 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2532,8 +2355,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.control
   name: 路网控制值
   family: road_syntax
@@ -2552,7 +2375,7 @@ metrics:
   definition: 优先读取 depthmapXcli 导出的 Control；缺失或无变化时使用路网拓扑邻接度的控制值回退。
   unit: score
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
     neighborhood: network_radius
@@ -2571,7 +2394,7 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2595,8 +2418,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.mean_depth
   name: 平均深度
   family: road_syntax
@@ -2614,7 +2437,7 @@ metrics:
   definition: 读取 depthmapXcli shapegraph CSV 的 Mean Depth，并在当前结果范围内归一化。
   unit: score
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
     neighborhood: network_radius
@@ -2632,7 +2455,7 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2656,8 +2479,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.node_degree
   name: 路网节点度
   family: road_syntax
@@ -2674,7 +2497,7 @@ metrics:
   definition: 基于输出路网拓扑统计节点相连邻接节点数，并生成节点度归一化分数。
   unit: count_or_score
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
     neighborhood: network_radius
@@ -2693,7 +2516,7 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2717,8 +2540,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.orientation
   name: 道路方向分布
   family: road_syntax
@@ -2733,7 +2556,7 @@ metrics:
   definition: 按道路线段方向分组，统计各方向长度、长度占比和边数量。
   unit: km_or_ratio
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: road_segment
     neighborhood: network_radius
@@ -2752,7 +2575,7 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2776,8 +2599,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.intelligibility
   name: 路网可理解度
   family: road_syntax
@@ -2795,7 +2618,7 @@ metrics:
   definition: 基于归一化连通度与全局整合度的相关/回归关系。
   unit: correlation_or_r2
   answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
+  - 哪些路段或路径体现出更好的网络接触、穿行与连通条件？
   spatial_granularities:
   - unit: scope
     neighborhood: network_radius
@@ -2813,7 +2636,7 @@ metrics:
   actionability:
     action_targets: *id007
     possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
+    - 优先关注网络接触更好且断点更少的路段与步行路径。
   followup_metrics:
   - metric_id: poi.grid_density
     purpose: explain
@@ -2837,8 +2660,8 @@ metrics:
     required: true
     preferred:
     - same_source_peer_scope
-    - route_or_entrance_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段、入口或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
+    - route_or_spatial_alternative
+    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: isochrone.reachable_area
   name: 等时圈可达范围
   family: isochrone
@@ -2882,11 +2705,10 @@ metrics:
   - scope_definition
   actionability:
     action_targets: &id010
-    - entrance
     - route
     - program_location
     possible_actions:
-    - 依据真实网络覆盖范围调整入口、路径或服务功能位置。
+    - 依据真实网络覆盖范围调整路径或服务功能位置。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -2909,9 +2731,9 @@ metrics:
   comparison_baseline:
     required: true
     preferred:
-    - route_or_entrance_alternative
+    - route_or_spatial_alternative
     - scenario_or_design_alternative
-    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一入口、起点或时长方案；在此之前只描述可达边界。
+    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一处起点或时长方案；在此之前只描述可达边界。
 - id: timeseries.population_change
   name: 人口时间变化
   family: timeseries
@@ -3361,7 +3183,7 @@ metrics:
   actionability:
     action_targets: *id002
     possible_actions:
-    - 将高接触功能或日常入口优先测试在连续局部高值区附近。
+    - 将高接触功能优先测试在连续局部高值区附近。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -3382,7 +3204,7 @@ metrics:
   source:
   - frontend/src/features/poi/panel.js
   - frontend/src/map/core.js
-  execution_location: frontend
+  execution_location: backend_history_snapshot_adapter
   comparison_baseline:
     required: true
     preferred:
@@ -3403,7 +3225,7 @@ metrics:
   definition: 基于跨年门店实体匹配计算开店、闭店与存续比例。
   unit: ratio
   answers_questions:
-  - 哪些设施供给或类别差异会改变项目定位、运营或入口服务对象？
+  - 哪些设施供给或类别差异会改变项目定位、运营或服务对象？
   spatial_granularities:
   - unit: scope
     neighborhood: none
@@ -3449,124 +3271,6 @@ metrics:
     - same_scope_previous_period
     - same_scope_category_share
     if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
-- id: road.walk_detour_ratio
-  name: 步行绕行系数
-  family: road_syntax
-  implementation_status: implemented
-  outputs:
-  - network_distance_m
-  - straight_line_distance_m
-  - detour_ratio
-  - route_geometry
-  required_inputs:
-  - entrance_anchor
-  - destination_anchor
-  - valhalla_pedestrian_route
-  definition: Valhalla 真实步行网络距离除以投影米制直线距离；路由失败时指标阻塞，不使用直线替代路径。
-  unit: ratio
-  answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
-  spatial_granularities:
-  - unit: origin_destination_pair
-    neighborhood: origin_destination
-    runtime_parameters:
-    - entrance_id
-    - destination_id
-  - unit: route
-    neighborhood: origin_destination
-    runtime_parameters:
-    - route_id
-  supports:
-  - 描述对应空间现象
-  does_not_support:
-  - 未经独立证据验证的因果或经营结论
-  use_when:
-  - network_access
-  - route_structure
-  - spatial_connectivity
-  actionability:
-    action_targets: *id007
-    possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
-  followup_metrics:
-  - metric_id: road.choice
-    purpose: explain
-    trigger: 绕行率异常时检查路径是否错过高穿行潜力路段
-  valid_comparisons:
-  - same_graph_model
-  - same_radius
-  - same_network_filter
-  - same_normalization
-  quality_requirements:
-  - valhalla_route_success
-  - projected_distance_check
-  - origin_destination_identity_check
-  source:
-  - modules/spatial_action/service.py
-  - modules/spatial_action/valhalla.py
-  - modules/spatial_action/schemas.py
-  comparison_baseline:
-    required: true
-    preferred:
-    - route_or_entrance_alternative
-    - documented_project_requirement
-    if_missing: 建立至少两个同口径入口或路径方案，或补充项目规定阈值；在此之前只报告单对象距离，不作优劣排序。
-- id: road.entrance_distance
-  name: 入口到主要道路距离
-  family: road_syntax
-  implementation_status: implemented
-  outputs:
-  - snapped_road_segment_id
-  - snap_distance_m
-  - target_road_distances_m
-  required_inputs:
-  - entrance_anchor
-  - walkable_road_segments
-  - planned_target_road_segment_ids
-  definition: 入口到可步行路段的投影米制挂接距离，以及入口所挂接路段到计划指定目标路段的网络距离。
-  unit: meters
-  answers_questions:
-  - 哪些入口、路段或路径具有更好的网络接触与通行条件？
-  spatial_granularities:
-  - unit: entrance
-    neighborhood: network_radius
-    runtime_parameters:
-    - snap_tolerance_m
-    - destination_segment_id
-  supports:
-  - 描述对应空间现象
-  does_not_support:
-  - 未经独立证据验证的因果或经营结论
-  use_when:
-  - network_access
-  - route_structure
-  - spatial_connectivity
-  actionability:
-    action_targets: *id007
-    possible_actions:
-    - 优先测试网络接触更好且断点更少的入口、路段与步行路径。
-  followup_metrics:
-  - metric_id: road.integration
-    purpose: locate
-    trigger: 入口完成路网挂接后需要读取局部句法条件
-  valid_comparisons:
-  - same_graph_model
-  - same_radius
-  - same_network_filter
-  - same_normalization
-  quality_requirements:
-  - projected_distance_check
-  - walkable_network_check
-  - entrance_source_traceability
-  source:
-  - modules/spatial_action/service.py
-  - modules/spatial_action/schemas.py
-  comparison_baseline:
-    required: true
-    preferred:
-    - route_or_entrance_alternative
-    - documented_project_requirement
-    if_missing: 建立至少两个同口径入口或路径方案，或补充项目规定阈值；在此之前只报告单对象距离，不作优劣排序。
 - id: access.network_reachable_area
   name: 多时间阈值网络可达面积
   family: isochrone
@@ -3598,7 +3302,7 @@ metrics:
   actionability:
     action_targets: *id010
     possible_actions:
-    - 依据真实网络覆盖范围调整入口、路径或服务功能位置。
+    - 依据真实网络覆盖范围调整路径或服务功能位置。
   followup_metrics:
   - metric_id: population.total
     purpose: explain
@@ -3620,67 +3324,340 @@ metrics:
   comparison_baseline:
     required: true
     preferred:
-    - route_or_entrance_alternative
+    - route_or_spatial_alternative
     - scenario_or_design_alternative
-    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一入口、起点或时长方案；在此之前只描述可达边界。
-- id: grid.project_network_distance
-  name: 网格到项目入口网络距离
-  family: cross_domain
+    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一处起点或时长方案；在此之前只描述可达边界。
+
+- id: spatial.thematic_visual
+  name: 已归档空间结果专题表达
+  family: report_visual
   implementation_status: not_implemented
-  outputs: []
+  outputs:
+  - 安全 SVG 专题图资产
   required_inputs:
-  - aligned_spatial_units
-  - compatible_time_scope
-  - source_metrics
-  definition: 共享网格质心到项目入口的网络最短距离。
-  unit: meters
+  - existing_result_id
+  - approved_visual_semantics
+  - study_scope
+  definition: 将已归档的空间结果按受限专题图语义表达为报告视觉，不计算新的空间数值或业务结论。
+  unit: svg_asset
   answers_questions:
-  - 项目与周边机会之间的真实网络关系会如何改变空间选择？
+  - 哪些已归档空间条件需要以地图形式帮助负责人理解范围、分布或比较？
   spatial_granularities:
-  - unit: grid_cell
-    neighborhood: origin_destination
-    runtime_parameters:
-    - project_anchor_id
-  - unit: entrance
-    neighborhood: origin_destination
-    runtime_parameters:
-    - project_anchor_id
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
   supports:
-  - 描述对应空间现象
+  - 表达已归档的空间范围、点线面或专题结果
   does_not_support:
-  - 未经独立证据验证的因果或经营结论
+  - 新的分析数值
+  - 消费、客流、营收或投资回报推断
   use_when:
-  - multi_source_overlap
-  - combined_activity
-  - project_access
+  - spatial_communication
+  - scope_comparison
+  - decision_briefing
   actionability:
     action_targets:
+    - site_direction
     - program_location
-    - entrance
-    - route
+    - public_space
     possible_actions:
-    - 依据项目锚点与机会单元的网络关系调整入口、路径和功能位置。
-  followup_metrics:
-  - metric_id: poi.grid_density
-    purpose: explain
-    trigger: 当前指标形成需要解释的差异时
-  - metric_id: population.total
-    purpose: validate
-    trigger: 当前结论将直接改变项目动作时
+    - 将已归档的空间条件与建议范围一并呈现在项目报告中。
+  followup_metrics: []
   valid_comparisons:
-  - aligned_spatial_units
-  - compatible_years
-  - same_normalization
+  - same_archived_result
+  - same_study_scope
   quality_requirements:
-  - cell_id_alignment
-  - time_compatibility
-  - component_quality_available
-  source: []
-  implementation_gap: 当前缺少规范化项目入口及网格到入口的网络路由结果。
+  - archived_result_available
+  - approved_visual_semantics
+  - svg_safety_validation
+  comparison_baseline:
+    required: false
+    preferred:
+    - documented_project_requirement
+    if_missing: 该工具只表达已归档结果；没有可用结果时明确缺图，不生成替代结论。
+  source:
+  - modules/spatial_action/arcgis_spatial_tools.py
+  implementation_gap: 仅当本机受控 ArcGIS 服务与批准专题模板可用时启用；否则返回 unavailable。
+- id: report.decision_visual
+  name: 决策报告图表表达
+  family: report_visual
+  implementation_status: not_implemented
+  outputs:
+  - 安全 SVG 报告图表资产
+  required_inputs:
+  - existing_result_id_or_archived_data_view
+  - approved_visual_semantics
+  definition: 将已归档材料或结果表达为比较、趋势、关系或阶段图表，不产生新的分析结果或业务判断。
+  unit: svg_asset
+  answers_questions:
+  - 哪些比较、趋势、关系或行动节奏需要图表帮助负责人作出下一步判断？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: none
+    runtime_parameters: []
+  supports:
+  - 比较、趋势、散点、关系和阶段节奏的报告表达
+  does_not_support:
+  - 新的分析结论
+  - 对代理数据的经营结果外推
+  use_when:
+  - decision_briefing
+  - comparison_communication
+  - action_sequence
+  actionability:
+    action_targets:
+    - operations
+    - data_collection
+    - analysis_method
+    possible_actions:
+    - 用已归档的比较或阶段信息说明建议的验证顺序与停止条件。
+  followup_metrics: []
+  valid_comparisons:
+  - same_archived_result
+  - same_time_scope
+  quality_requirements:
+  - archived_data_view_available
+  - approved_visual_semantics
+  - svg_safety_validation
+  comparison_baseline:
+    required: false
+    preferred:
+    - documented_project_requirement
+    if_missing: 该工具只解释已有材料；没有可用数据时明确缺图，不以图形暗示结论。
+  source:
+  - modules/spatial_action/arcgis_spatial_tools.py
+  implementation_gap: 仅当本机受控 ArcGIS 服务与批准图表模板可用时启用；否则返回 unavailable。
+- id: regional.directional_evidence_matrix
+  name: 区域方向距离带证据矩阵
+  family: regional
+  implementation_status: implemented
+  outputs:
+  - direction_distance_rows
+  - shared_grid_baseline
+  - observation_universe
+  - source_versions
+  required_inputs:
+  - declared_center_wgs84
+  - poi_dataset
+  - population_dataset
+  - nightlight_dataset
+  - road_dataset
+  definition: 以声明中心为锚点，将 POI、人口、夜光和路网聚合到同一共享栅格，并按八方位与距离带输出可比较的空间条件矩阵。
+  unit: shared_grid_direction_distance_row
+  answers_questions:
+  - 哪些方向和距离带值得优先进行空间与现场核验？
+  spatial_granularities:
+  - unit: shared_grid_direction_distance_band
+    neighborhood: eight_direction_distance_band
+    runtime_parameters:
+    - center
+    - distance_bands_m
+  supports:
+  - 同一共同空间单元内的 POI、人口、夜光与路网条件比较
+  - 方向和距离带的踏勘优先级
+  does_not_support:
+  - 客流、消费、营收或投资回报
+  - 到达点或服务范围
+  use_when:
+  - regional_direction
+  - multi_metric_comparison
+  - spatial_structure
+  actionability:
+    action_targets:
+    - site_direction
+    - route
+    - data_collection
+    possible_actions:
+    - 根据支持和冲突证据安排方向、连接条件与时段的现场核验。
+  followup_metrics: []
+  valid_comparisons:
+  - same_declared_center
+  - same_shared_grid
+  - same_distance_bands
+  - source_years_disclosed
+  quality_requirements:
+  - all_sources_ready
+  - shared_grid_join_complete
+  - observation_universe_reported
+  - road_coverage_separated_from_connectivity
   comparison_baseline:
     required: true
     preferred:
-    - normalized_spatial_unit
+    - all_shared_cells
+    - same_distance_band_other_sectors
+    if_missing: 缺少共同网格或任一必要来源时返回 unavailable，不以单源方向结果替代。
+  source:
+  - modules/spatial_cells/service.py
+  - modules/spatial_action/project_context.py
+
+- id: poi.supply_structure
+  name: POI 供给结构
+  family: poi
+  implementation_status: implemented
+  outputs:
+  - isochrone_verified_real_taxonomy_counts
+  - nearby_5_min_road_accessible_counts
+  - isochrone_and_taxonomy_audit
+  required_inputs:
+  - analysis_polygon_or_multipolygon_for_optional_five_minute_origin
+  - report_approved_poi_supply_groups
+  - saved_15_minute_walking_isochrone_polygon_or_multipolygon
+  - current_poi_snapshot
+  - optional_saved_current_road_edges_snapshot
+  definition: 对报告已审校的互补配套和同类对标类别组，先仅以 `share/type_map.json` 的真实主类和附属类解析 POI，再逐点以保存的 15 分钟 walking 等时圈 Polygon/MultiPolygon 的 `covers` 关系核验。深色数量是经几何核验的等时圈内 POI；如项目 Polygon/MultiPolygon 的几何中心和保存的 current:dataset:road_edges 均可用，再在同一批 POI 上运行本地最短路径并以统一 4.5 km/h 参考步行速度换算不超过 5 分钟的浅色辅助数量。没有连续道路路径时不使用直线距离或替代数量，且不把缺失显示为 0。
+  unit: poi_group
+  answers_questions:
+  - 经 15 分钟 walking 等时圈几何核验后，已成立的项目所需配套和同类对标供给各有什么真实主类／附属类结构？
+  - 哪些已审校类型组在项目中心五分钟连续道路范围内已有真实 POI？
+  spatial_granularities:
+  - unit: scope
+    neighborhood: network_radius
+    runtime_parameters:
+    - groups
+  parameter_schema:
+    groups:
+      type: array
+      per_role_max_items: 6
+      item:
+        required:
+        - group_id
+        - title
+        - role
+        - type_codes
+        - statement_ref
+        properties:
+          role:
+            enum: [complementary_anchor, comparison_supply]
+          type_codes:
+            description: 仅可使用当前 POI 快照中真实存在的类别值或 typecode 前缀；同一 typecode 不得出现在多个组。
+          statement_ref:
+            required: true
+            description: 回指报告中已审校的项目所需配套或同类对标判断；工具不自行生成定位或业态建议。
+  supports:
+  - 将经 15 分钟 walking 等时圈几何核验的 POI 按真实主类／附属类和互补配套／同类对标角色分别盘点
+  - 以连续保存道路网络上的五分钟可达记录补充供给空间关系；道路不可用时仍保留等时圈统计
+  does_not_support:
+  - 项目定位、业态选择、合作对象、客流、消费、营收、市场规模或综合评分
+  - 直线距离、在线路线、真实到访量或支付能力
+  use_when:
+  - poi_supply_structure
+  - complementary_supply
+  - comparison_supply
+  actionability:
+    action_targets:
+    - program_location
+    - data_collection
+    - operations
+    possible_actions:
+    - 将已审校类型组的等时圈核验供给与五分钟道路可达性作为补充、回避和同类对标的事实背景；道路不可达时保留等时圈总量并省略五分钟值。
+  followup_metrics:
+  - metric_id: poi.focused_accessibility
+    purpose: locate
+    trigger: 需要核验某个已审校类别组的具体 POI 名称、道路距离和连续路线时。
+  valid_comparisons:
+  - same_current_poi_isochrone_snapshot
+  - same_analysis_geometry_centroid
+  - same_saved_road_edges_snapshot
+  - same_poi_type_group_definition
+  quality_requirements:
+  - verified_15_minute_walking_isochrone_polygon_or_multipolygon
+  - point_inclusion_uses_covers
+  - real_taxonomy_resolves_from_share_type_map
+  - statement_ref_present_for_each_group
+  - type_codes_exist_in_current_poi_snapshot
+  - no_type_code_overlap_across_groups
+  - no_more_than_six_groups_per_role
+  - local_continuous_road_path_only
+  - no_direct_distance_fallback
+  comparison_baseline:
+    required: false
+    preferred:
     - same_source_peer_scope
-    - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
+    - route_or_spatial_alternative
+    if_missing: 缺少有效 15 分钟 walking 等时圈时返回 unavailable；缺少分析范围、保存道路或连续道路路径时返回 partial，保留等时圈核验统计并省略五分钟值；不生成直线距离或替代性可达数量。
+  source:
+  - modules/spatial_action/poi_supply_structure.py
+  - modules/spatial_action/road_network_routing.py
+  - modules/spatial_action/project_context.py
+- id: poi.focused_accessibility
+  name: 重点 POI 真实步行可达性
+  family: poi
+  implementation_status: implemented
+  outputs:
+  - route_verified_poi_groups
+  - route_verified_poi_rows
+  - route_verification_diagnostics
+  required_inputs:
+  - analysis_polygon_or_multipolygon
+  - report_approved_poi_type_groups
+  - poi_dataset
+  - saved_current_road_edges_snapshot
+  definition: 从项目 Polygon 或 MultiPolygon 的 Shapely 几何中心点出发，在中心 2 km 内按直线距离筛出的最近 30 个真实 POI 候选上，使用保存的 current:dataset:road_edges 建立本地道路图、将起终点吸附到道路并运行 Dijkstra 最短路径；只输出不超过 15 分钟且存在连续道路几何的真实地点、类别、道路距离和参考步行分钟。分钟按统一 4.5 km/h 换算，路径保留道路转角与曲线，不使用直线、Bezier 或在线路由服务。
+  unit: route_verified_poi
+  answers_questions:
+  - 项目周边哪些真实配套、互补或同类 POI 可经步行路线核验，并值得写入首轮场景与对标判断？
+  spatial_granularities:
+  - unit: route
+    neighborhood: origin_destination
+    runtime_parameters:
+    - groups
+  parameter_schema:
+    groups:
+      type: array
+      max_items: 4
+      item:
+        required:
+        - group_id
+        - title
+        - role
+        - type_codes
+        - statement_ref
+        properties:
+          role:
+            enum: [complementary_anchor, comparison_supply]
+          type_codes:
+            description: 仅可使用当前 poi.category_count 或当前 POI 快照中存在的类别值或 typecode 前缀
+          statement_ref:
+            required: true
+            description: 回指报告中已成立的项目所需配套或同类对标判断
+  supports:
+  - 在当前 POI 快照与保存路网中识别经连续道路路径计算的近期可达地点
+  - 为项目配套与互补锚点、同类与对标供给分别提供可读表格或合并卡片图证据
+  does_not_support:
+  - 合作关系、客流导入、消费转化、经营质量或市场规模
+  - 真实进场量、项目进场节点定案、客流预测或营收
+  use_when:
+  - poi_accessibility
+  - complementary_supply
+  - comparison_supply
+  actionability:
+    action_targets:
+    - program_location
+    - route
+    - data_collection
+    possible_actions:
+    - 将可达地点作为首轮现场核验、协同内容和同类供给对标的真实参照；路线失败时保留文字结论并省略表格。
+  followup_metrics: []
+  valid_comparisons:
+  - same_analysis_geometry_centroid
+  - same_poi_snapshot
+  - same_saved_road_edges_snapshot
+  - same_poi_type_group_definition
+  quality_requirements:
+  - polygon_or_multipolygon_geometry_valid
+  - poi_names_and_categories_present
+  - local_continuous_road_route_verified
+  - no_straight_line_duration_fallback
+  - candidate_pool_within_2km_and_nearest_30
+  - route_duration_no_more_than_15_minutes
+  - statement_ref_present_for_each_group
+  - no_more_than_four_groups_or_three_pois_per_group
+  comparison_baseline:
+    required: false
+    preferred:
+    - route_or_spatial_alternative
+    if_missing: 路由不可用、分析范围无效或 POI 不足时返回 unavailable；不以直线距离、速度估算或占位表替代。
+  source:
+  - modules/spatial_action/focused_poi_accessibility.py
+  - modules/spatial_action/road_network_routing.py
+  - modules/spatial_action/project_context.py

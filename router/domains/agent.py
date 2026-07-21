@@ -7,17 +7,12 @@ from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from modules.agent.analysis_run_service import (
-    compare_analysis_runs,
     get_analysis_run,
     list_analysis_runs,
 )
-from modules.agent.analysis_run_comparison import AnalysisRunComparison
 from modules.agent.analysis_runs import (
-    AnalysisRunReadDetail,
-    AnalysisRunV3,
-    AnalysisRunV3Detail,
-    LegacyAnalysisRunV2View,
-    LegacyAnalysisRunView,
+    AnalysisRun,
+    AnalysisRunDetail,
 )
 from modules.agent.capability_guidance import (
     CapabilityWorkbenchOverview,
@@ -148,7 +143,7 @@ async def post_analysis_capability_workbench(payload: AgentTurnRequest):
 
 @router.get(
     "/api/v1/analysis/agent/analysis/runs",
-    response_model=List[AnalysisRunV3 | LegacyAnalysisRunView | LegacyAnalysisRunV2View],
+    response_model=List[AnalysisRun],
 )
 async def get_analysis_runs(history_id: str, capability_id: str = ""):
     try:
@@ -164,28 +159,8 @@ async def get_analysis_runs(history_id: str, capability_id: str = ""):
 
 
 @router.get(
-    "/api/v1/analysis/agent/analysis/run-comparisons",
-    response_model=AnalysisRunComparison,
-)
-async def get_analysis_run_comparison(
-    base_run_id: str, target_run_id: str
-):
-    try:
-        comparison = await run_in_threadpool(
-            compare_analysis_runs, base_run_id, target_run_id
-        )
-    except AnalysisRunStorageError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if comparison is None:
-        raise HTTPException(status_code=404, detail="analysis_run_not_found")
-    return comparison
-
-
-@router.get(
     "/api/v1/analysis/agent/analysis/runs/{run_id}",
-    response_model=AnalysisRunV3Detail | AnalysisRunReadDetail,
+    response_model=AnalysisRunDetail,
 )
 async def get_analysis_run_detail(run_id: str):
     try:

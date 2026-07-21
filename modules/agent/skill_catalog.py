@@ -18,9 +18,6 @@ class AgentSkillView(BaseModel):
     diagnostic: str = ""
 
 
-_EXECUTABLE_SKILLS = {"urban-strategy-stage1"}
-
-
 def _skills_root() -> Path:
     return Path(__file__).resolve().parents[2] / "skills"
 
@@ -45,14 +42,13 @@ def list_agent_skills() -> list[AgentSkillView]:
             interface_doc = yaml.safe_load(interface_file.read_text(encoding="utf-8")) or {} if interface_file.exists() else {}
             interface = interface_doc.get("interface") if isinstance(interface_doc.get("interface"), dict) else {}
             skill_id = str(meta.get("name") or skill_file.parent.name).strip()
-            executable = skill_id in _EXECUTABLE_SKILLS
             result.append(AgentSkillView(
                 id=skill_id,
                 display_name=str(interface.get("display_name") or skill_id).strip(),
                 description=str(interface.get("short_description") or meta.get("description") or "").strip(),
                 color=str(interface.get("brand_color") or "").strip(),
-                executable=executable,
-                diagnostic="" if executable else "Skill 尚未注册执行器",
+                executable=False,
+                diagnostic="Skill 尚未注册执行器",
             ))
         except (OSError, yaml.YAMLError, TypeError, ValueError):
             continue

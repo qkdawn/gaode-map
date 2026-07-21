@@ -6,6 +6,7 @@ import { useAnalysisNightlightStore } from './nightlight'
 import { useAnalysisGwrStore } from './gwr'
 import { useAnalysisTimeseriesStore } from './timeseries'
 import { useAnalysisRoadStore } from './road'
+import { useAnalysisSharedGridStore } from './shared-grid'
 import { useAnalysisExportStore } from './export'
 import { useAnalysisHistoryStore } from './history'
 
@@ -25,6 +26,7 @@ export function createAnalysisInitialStateFromPinia(pinia, options = {}) {
     buildAnalysisTimeseriesInitialState = () => ({}),
     buildAnalysisExportInitialState = () => ({}),
     buildRoadSyntaxInitialState = () => ({}),
+    buildAnalysisSharedGridInitialState = () => ({}),
   } = options
 
   const sessionStore = useAnalysisSessionStore(pinia)
@@ -35,6 +37,7 @@ export function createAnalysisInitialStateFromPinia(pinia, options = {}) {
   const gwrStore = useAnalysisGwrStore(pinia)
   const timeseriesStore = useAnalysisTimeseriesStore(pinia)
   const roadStore = useAnalysisRoadStore(pinia)
+  const sharedGridStore = useAnalysisSharedGridStore(pinia)
   const exportStore = useAnalysisExportStore(pinia)
   const historyStore = useAnalysisHistoryStore(pinia)
 
@@ -46,6 +49,7 @@ export function createAnalysisInitialStateFromPinia(pinia, options = {}) {
   gwrStore.$reset()
   timeseriesStore.$reset()
   roadStore.$reset()
+  sharedGridStore.$reset()
   exportStore.$reset()
   historyStore.$reset()
 
@@ -71,6 +75,7 @@ export function createAnalysisInitialStateFromPinia(pinia, options = {}) {
     ...buildRoadSyntaxInitialState(),
   })
   exportStore.$patch(buildAnalysisExportInitialState())
+  sharedGridStore.$patch(buildAnalysisSharedGridInitialState())
 
   const debugState = {
     isochroneDebugOpen: false,
