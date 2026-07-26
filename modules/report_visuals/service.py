@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import json
 import re
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 
 from core.svg_safety import validate_safe_svg
 
 from .planning import APPROVED_TEMPLATE_REGISTRY, validate_visual_plan
-from .schemas import EditorialAction, ReportVisualRequest, VisualManifest, VisualManifestItem, VisualPlanItem
+from .schemas import EditorialAction, ReportVisualRequest, VisualManifest, VisualManifestItem, VisualPlan, VisualPlanItem
 from .templates import (
     AGE_CAPTION,
     AGE_TITLE,
@@ -21,12 +22,16 @@ from .templates import (
     FOCUSED_POI_ROUTE_MAP_TITLE,
     POI_SUPPLY_STRUCTURE_CAPTION,
     POI_SUPPLY_STRUCTURE_TITLE,
+    POI_DISTANCE_BAND_SUPPLY_CAPTION,
+    POI_DISTANCE_BAND_SUPPLY_TITLE,
     directional_action_priority_matrix_spec,
     focused_poi_walking_route_map_spec,
     normalize_age_structure,
     normalize_directional_matrix,
     normalize_focused_poi_route_map,
     normalize_poi_supply_structure,
+    normalize_poi_distance_band_supply_structure,
+    poi_distance_band_supply_structure_spec,
     poi_supply_structure_spec,
     population_age_structure_spec,
     population_supply_context_spec,
@@ -34,10 +39,72 @@ from .templates import (
 
 _ASSET_DIR = "assets"
 _BLOCK_PATTERN = re.compile(r"\n?<!-- report-visual:(?P<name>[a-z_]+):start -->.*?<!-- report-visual:(?P=name):end -->\n?", re.DOTALL)
+_VISUAL_BLOCK_PATTERN = re.compile(r"<!-- report-visual:(?P<name>[a-z_]+):start -->(?P<body>.*?)<!-- report-visual:(?P=name):end -->", re.DOTALL)
 
 
 def _report_root(report_path: Path) -> Path:
     return report_path.parent.resolve()
+
+
+def _canonical_sha256(value: Any) -> str:
+    return sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
+
+
+def _assert_scope_year_compatible(plan: VisualPlanItem, provenance: dict[str, dict[str, Any]]) -> None:
+    """Reject an editor plan that names a different scope/year than its result."""
+    if not plan.scope_year:
+        return
+
+    def values_for_key(value: Any, keys: set[str]) -> list[Any]:
+        values: list[Any] = []
+        if isinstance(value, dict):
+            values.extend(item for key, item in value.items() if key in keys)
+            for item in value.values():
+                values.extend(values_for_key(item, keys))
+        elif isinstance(value, list):
+            for item in value:
+                values.extend(values_for_key(item, keys))
+        return values
+
+    result_scopes = [
+        (
+            str(provenance.get(result_id, {}).get("tool_id") or ""),
+            provenance.get(result_id, {}).get("time_scope", {}),
+        )
+        for result_id in plan.metric_result_ids
+    ]
+    for key, expected in plan.scope_year.items():
+        metric_prefix = key[:-5] if key.endswith("_year") else ""
+        keys = {key, "year"} if metric_prefix else {key}
+        matching_scopes = [
+            scope for tool_id, scope in result_scopes
+            if not metric_prefix or tool_id == metric_prefix or tool_id.startswith(f"{metric_prefix}.")
+        ]
+        if not matching_scopes:
+            raise ValueError(f"visual_scope_year_conflict:{plan.template_id}:{key}")
+        matches = [
+            any(str(value) == str(expected) for value in values_for_key(scope, keys))
+            for scope in matching_scopes
+        ]
+        # A generic expectation applies to every result; a metric-prefixed one
+        # applies only to that result family. Results may never satisfy each
+        # other's year or scope fields.
+        if expected is not None and not all(matches):
+            raise ValueError(f"visual_scope_year_conflict:{plan.template_id}:{key}")
+
+
+def _remove_stale_template_assets(report_dir: Path) -> None:
+    """A new run may never inherit a prior run's template asset or spec."""
+    assets_dir = report_dir / _ASSET_DIR
+    for definition in APPROVED_TEMPLATE_REGISTRY.values():
+        for suffix in (".svg", ".vl.json"):
+            candidate = assets_dir / f"{definition.filename}{suffix}"
+            if candidate.is_file():
+                candidate.unlink()
 
 
 def _render_asset(*, report_dir: Path, filename: str, spec: dict[str, Any]) -> tuple[str, str]:
@@ -85,6 +152,7 @@ def _omitted(plan: VisualPlanItem, *, title: str, caption: str, reason: str, dat
         status="omitted",
         chapter_anchor=plan.chapter_anchor,
         metric_ids=plan.metric_ids,
+        metric_result_ids=plan.metric_result_ids,
         title=title,
         caption=caption,
         supports_judgment=plan.supports_judgment,
@@ -109,6 +177,7 @@ def _generated(
         status="generated",
         chapter_anchor=plan.chapter_anchor,
         metric_ids=plan.metric_ids,
+        metric_result_ids=plan.metric_result_ids,
         title=title,
         caption=caption,
         supports_judgment=plan.supports_judgment,
@@ -259,6 +328,25 @@ def _render_poi_supply_structure(plan: VisualPlanItem, request: ReportVisualRequ
         _visual_markdown(plan, title, asset_path, POI_SUPPLY_STRUCTURE_CAPTION),
     )
 
+
+def _render_poi_distance_band_supply_structure(plan: VisualPlanItem, request: ReportVisualRequest, report_dir: Path, markdown: str) -> tuple[VisualManifestItem, str]:
+    missing_anchor = _anchor_ready(plan, markdown, title=POI_DISTANCE_BAND_SUPPLY_TITLE, caption=POI_DISTANCE_BAND_SUPPLY_CAPTION)
+    if missing_anchor:
+        return missing_anchor, markdown
+    normalized = normalize_poi_distance_band_supply_structure(request.poi_distance_band_supply_structure)
+    if isinstance(normalized, str):
+        return _omitted(plan, title=POI_DISTANCE_BAND_SUPPLY_TITLE, caption=POI_DISTANCE_BAND_SUPPLY_CAPTION, reason=normalized), markdown
+    definition = APPROVED_TEMPLATE_REGISTRY[plan.template_id]
+    asset_path, spec_path = _render_asset(
+        report_dir=report_dir,
+        filename=definition.filename,
+        spec=poi_distance_band_supply_structure_spec(normalized["categories"], year=normalized["year"]),
+    )
+    title = f"{POI_DISTANCE_BAND_SUPPLY_TITLE}（{normalized['year']}）"
+    scope = {"poi_year": normalized["year"], "scope": normalized["scope"], "total_count": normalized["total_count"], "categories": normalized["categories"]}
+    return _generated(plan, title=title, caption=POI_DISTANCE_BAND_SUPPLY_CAPTION, asset_path=asset_path, spec_path=spec_path, data_scope=scope), _insert_before_anchor(
+        markdown, plan.template_id, plan.chapter_anchor, _visual_markdown(plan, title, asset_path, POI_DISTANCE_BAND_SUPPLY_CAPTION)
+    )
 def _render_focused_poi_route_map(plan: VisualPlanItem, request: ReportVisualRequest, report_dir: Path, markdown: str) -> tuple[VisualManifestItem, str]:
     missing_anchor = _anchor_ready(plan, markdown, title=FOCUSED_POI_ROUTE_MAP_TITLE, caption=FOCUSED_POI_ROUTE_MAP_CAPTION)
     if missing_anchor:
@@ -291,6 +379,7 @@ _RENDERERS: dict[str, Callable[[VisualPlanItem, ReportVisualRequest, Path, str],
     "population_supply_context": _render_population_supply_context,
     "directional_action_priority_matrix": _render_directional,
     "poi_supply_structure": _render_poi_supply_structure,
+    "poi_distance_band_supply_structure": _render_poi_distance_band_supply_structure,
     "focused_poi_walking_route_map": _render_focused_poi_route_map,
 }
 
@@ -309,6 +398,10 @@ def render_report_visuals(raw_request: ReportVisualRequest | dict[str, Any]) -> 
     if not report_path.is_file():
         raise FileNotFoundError(f"报告 Markdown 不存在：{report_path}")
     report_dir = _report_root(report_path)
+    report_id = request.report_id
+    for plan in request.visual_plan.items:
+        _assert_scope_year_compatible(plan, request.metric_result_provenance)
+    _remove_stale_template_assets(report_dir)
     (report_dir / "visual-plan.json").write_text(request.visual_plan.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
     markdown = _BLOCK_PATTERN.sub("\n", report_path.read_text(encoding="utf-8"))
     manifest_items: list[VisualManifestItem] = []
@@ -321,6 +414,92 @@ def render_report_visuals(raw_request: ReportVisualRequest | dict[str, Any]) -> 
         item, markdown = renderer(plan, request, report_dir, markdown)
         manifest_items.append(item)
     report_path.write_text(markdown.rstrip() + "\n", encoding="utf-8", newline="\n")
-    manifest = VisualManifest(run_id=request.run_id, items=manifest_items)
+    for plan, item in zip(request.visual_plan.items, manifest_items):
+        item.history_id = request.history_id
+        item.report_id = request.report_id
+        item.run_id = request.run_id
+        item.scope_year_fingerprint = _canonical_sha256(
+            {
+                "expected": plan.scope_year,
+                "result_provenance": {result_id: request.metric_result_provenance.get(result_id, {}) for result_id in plan.metric_result_ids},
+                "data_scope": item.data_scope,
+            }
+        )
+        if item.status == "generated":
+            item.asset_sha256 = _file_sha256(report_dir / str(item.asset_path))
+            item.spec_sha256 = _file_sha256(report_dir / str(item.spec_path))
+    manifest = VisualManifest(
+        history_id=request.history_id,
+        report_id=report_id,
+        run_id=request.run_id,
+        metric_result_ids=sorted({result_id for plan in request.visual_plan.items for result_id in plan.metric_result_ids}),
+        visual_plan_sha256=_file_sha256(report_dir / "visual-plan.json"),
+        report_markdown_sha256=_file_sha256(report_path),
+        items=manifest_items,
+    )
     (report_dir / "visual-manifest.json").write_text(manifest.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
     return manifest
+
+
+def validate_report_visual_bundle(report_dir: str | Path) -> list[str]:
+    """Validate plan, manifest, Markdown blocks and generated files as one contract."""
+    root = Path(report_dir).resolve()
+    plan_path, manifest_path, report_path = root / "visual-plan.json", root / "visual-manifest.json", root / "project-report.md"
+    if not plan_path.exists() and not manifest_path.exists():
+        return []
+    errors: list[str] = []
+    if not plan_path.is_file() or not manifest_path.is_file() or not report_path.is_file():
+        return ["visual_bundle_missing_required_file"]
+    try:
+        plan = VisualPlan.model_validate_json(plan_path.read_text(encoding="utf-8"))
+        manifest = VisualManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [f"visual_bundle_invalid:{exc}"]
+    if manifest.visual_plan_sha256 != _file_sha256(plan_path):
+        errors.append("visual_plan_checksum_mismatch")
+    if manifest.report_markdown_sha256 != _file_sha256(report_path):
+        errors.append("visual_report_checksum_mismatch")
+    if manifest.run_id != plan.run_id:
+        errors.append("visual_run_id_mismatch")
+    plan_by_id = {item.template_id: item for item in plan.items}
+    manifest_by_id = {item.template_id: item for item in manifest.items}
+    if set(plan_by_id) != set(manifest_by_id):
+        errors.append("visual_plan_manifest_item_mismatch")
+    markdown = report_path.read_text(encoding="utf-8")
+    blocks = {match.group("name"): match.group("body") for match in _VISUAL_BLOCK_PATTERN.finditer(markdown)}
+    if len(blocks) != len(list(_VISUAL_BLOCK_PATTERN.finditer(markdown))):
+        errors.append("visual_markdown_block_duplicate")
+    for template_id, plan_item in plan_by_id.items():
+        item = manifest_by_id.get(template_id)
+        if item is None:
+            continue
+        if item.status == "omitted":
+            if not item.omission_reason:
+                errors.append(f"visual_omission_reason_missing:{template_id}")
+            if template_id in blocks or item.asset_path or item.spec_path:
+                errors.append(f"visual_omitted_item_has_asset_or_block:{template_id}")
+            continue
+        if plan_item.status != "planned" or template_id not in blocks:
+            errors.append(f"visual_generated_block_missing:{template_id}")
+        if item.metric_ids != plan_item.metric_ids:
+            errors.append(f"visual_metric_ids_mismatch:{template_id}")
+        if item.metric_result_ids != plan_item.metric_result_ids:
+            errors.append(f"visual_metric_result_ids_mismatch:{template_id}")
+        if not item.asset_path or not item.spec_path:
+            errors.append(f"visual_generated_paths_missing:{template_id}")
+            continue
+        asset, spec = root / item.asset_path, root / item.spec_path
+        if not asset.is_file() or not spec.is_file():
+            errors.append(f"visual_generated_file_missing:{template_id}")
+        else:
+            if item.asset_sha256 != _file_sha256(asset):
+                errors.append(f"visual_asset_checksum_mismatch:{template_id}")
+            if item.spec_sha256 != _file_sha256(spec):
+                errors.append(f"visual_spec_checksum_mismatch:{template_id}")
+        # The renderer may include trusted result provenance; require at least a
+        # full SHA-256 rather than accepting a free-form fingerprint.
+        if not re.fullmatch(r"[0-9a-f]{64}", item.scope_year_fingerprint):
+            errors.append(f"visual_scope_year_fingerprint_invalid:{template_id}")
+    if set(blocks) != {item.template_id for item in manifest.items if item.status == "generated"}:
+        errors.append("visual_markdown_manifest_block_mismatch")
+    return errors

@@ -19,13 +19,15 @@
 
 每个候选视觉必须回指一个已接受判断，并通过“删除后会改变相邻判断吗”检查。没有真实结果、批准模板、准确插入位置或明确决策价值时省略，不制作装饰图或占位图。
 
-正式综合报告即使零图，也保存 `report/visual-plan.json` 和 `report/visual-manifest.json`。计划记录已完成评估但没有选择视觉；manifest 记录各候选的省略原因。零视觉是有效结果，不阻止 Markdown、HTML 或 PDF 交付。
+正式综合报告即使零图，也保存 `report/visual-plan.json` 和 `report/visual-manifest.json`。计划记录已完成评估但没有选择视觉；manifest 逐项记录没有当前数据、批准模板、有效锚点或决策价值等具体省略原因。只要存在由本轮真实指标支撑、具有准确插入位置且会改变相邻判断的候选，视觉编辑就必须完成渲染和插入，不能以“已有计划”结束。零视觉只在所有候选均有有效省略理由时成立。
 
 ## 指标与模板
 
 先通过 `report_visual_template_catalog` 获取当前批准模板及输入契约，不把历史模板清单当成固定菜单。视觉涉及具体指标时，完整读取 `metric-selection.md` 和对应指标知识卡；所有空间范围、候选筛选、路由、速度、分钟、分组和几何规则以指标所有者为准，不在视觉提示词中另写一份。
 
-视觉计划必须记录模板、准确位置、`statement_ref`、同一历史的持久化结果来源、支持与不能证明的事项、选图理由、生成或省略状态，以及目录允许的模板输入。渲染器只从持久化结果取数。
+视觉计划必须记录模板、准确位置、`statement_ref`、同一历史的持久化结果来源、支持与不能证明的事项、选图理由、生成或省略状态，以及目录允许的模板输入。渲染器只从本轮引用的持久化结果取数，并核对 `history_id`、`report_id`、`run_id`、指标结果 ID、范围指纹和数据年份。范围、年份或结果 ID 与报告口径不一致时拒绝生成。
+
+历史报告的 SVG、Vega 规格、截图、manifest 或 Markdown 视觉块不得复制到本轮报告。即使模板和标题相同，也必须由本轮 report/run 重新渲染；缺少本轮来源指纹的资产视为未生成。
 
 ## 受控工具链
 
@@ -59,7 +61,7 @@ check_arcgis_report_status
 
 ## 资产与验收
 
-生成结果保存在 `report/assets/`，并更新 `report/visual-plan.json` 与 `report/visual-manifest.json`。每项生成或省略结果都必须可追溯到真实指标、模板版本、插入位置和相邻判断。
+生成结果保存在 `report/assets/`，并更新 `report/visual-plan.json` 与 `report/visual-manifest.json`。每项生成或省略结果都必须可追溯到本轮 `history_id`、`report_id`、`run_id`、真实指标结果、范围与年份指纹、模板版本、插入位置和相邻判断；生成资产与规格文件记录 SHA-256。
 
 交付前必须读取实际资产和 manifest，检查：
 
@@ -68,5 +70,6 @@ check_arcgis_report_status
 - Markdown、HTML、PDF 及真实桌面、平板和移动视口能够解析相对 `assets/*`；
 - 视觉没有把人口、POI、夜光、路网或其他代理升级为客流、消费、营收、合作或经营质量；
 - 视觉没有改变接受章节正文，且确实支持相邻判断。
+- Markdown 中每个 `report-visual` 块都有唯一 generated manifest 项和真实资产；每个 generated manifest 项也被 Markdown 唯一引用；资产与规格文件校验和与 manifest 一致。
 
-不满足时省略对应视觉并记录原因。视觉失败不能触发分析正文降级，也不能阻塞已有分析能够独立成立的报告。
+运行 `python skills/spatial-business-analyst/scripts/validate_report_visuals.py --report-dir <report-directory>` 完成上述双向校验。不满足时省略对应视觉并记录原因；不得保留不受 manifest 管理的视觉块或资产。视觉失败不能触发分析正文降级，但 planned 项未渲染、来源错配或装配不一致时不能把视觉阶段标记为完成。

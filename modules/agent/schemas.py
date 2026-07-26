@@ -484,6 +484,116 @@ class ToolResult(BaseModel):
     error: Optional[str] = None
 
 
+class ToolAllocationDecision(BaseModel):
+    """A bounded tool grant produced by the tool-allocation subagent."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    agent_role: str = ""
+    allowed_tools: List[str] = Field(default_factory=list)
+    rationale: str = ""
+    evidence_goals: List[str] = Field(default_factory=list)
+    status: Literal["allocated"] = "allocated"
+
+
+ProductRecheckVerdict = Literal["成立", "缩减", "条件性", "延后", "退出"]
+ProductRecheckOwnerRole = Literal[
+    "spatial_structure",
+    "positioning_product",
+    "spatial_function_programming",
+    "operations_phasing",
+]
+
+
+class ProductDraftItem(BaseModel):
+    """Stable product identity published by the positioning draft."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class ProductDraftInventory(BaseModel):
+    """The complete product set that both market rechecks must cover."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["draft"]
+    products: List[ProductDraftItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _require_unique_products(self):
+        product_ids = [item.product_id.strip() for item in self.products]
+        if len(product_ids) != len(set(product_ids)):
+            raise ValueError("duplicate_product_id")
+        return self
+
+
+class FirstProductRecheckItem(BaseModel):
+    """One product decision and its exact owners after the first recheck."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: str = Field(min_length=1)
+    verdict: ProductRecheckVerdict
+    rationale: str = Field(min_length=1)
+    revision_required: bool = False
+    owner_roles: List[ProductRecheckOwnerRole] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _revision_has_explicit_owners(self):
+        roles = [item.strip() for item in self.owner_roles]
+        if len(roles) != len(set(roles)):
+            raise ValueError("duplicate_owner_role")
+        if self.revision_required != bool(roles):
+            raise ValueError("revision_required_must_match_owner_roles")
+        return self
+
+
+class FirstProductRecheckDecision(BaseModel):
+    """The first recheck fixes product identity and routes one bounded rewrite."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["first"]
+    products: List[FirstProductRecheckItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _require_unique_products(self):
+        product_ids = [item.product_id.strip() for item in self.products]
+        if len(product_ids) != len(set(product_ids)):
+            raise ValueError("duplicate_product_id")
+        return self
+
+
+class FinalProductRecheckItem(BaseModel):
+    """One terminal product decision from the second and final market recheck."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: str = Field(min_length=1)
+    verdict: ProductRecheckVerdict
+    rationale: str = Field(min_length=1)
+    conditions: List[str] = Field(default_factory=list)
+
+
+class FinalProductRecheckDecision(BaseModel):
+    """The second recheck closes every product without opening another rewrite."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["final"]
+    products: List[FinalProductRecheckItem] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _require_unique_products(self):
+        product_ids = [item.product_id.strip() for item in self.products]
+        if len(product_ids) != len(set(product_ids)):
+            raise ValueError("duplicate_product_id")
+        return self
+
+
 class ExecutionTraceItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

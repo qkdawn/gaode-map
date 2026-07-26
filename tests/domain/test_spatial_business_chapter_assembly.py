@@ -359,6 +359,26 @@ def test_requires_formal_report_artifacts(tmp_path):
     assert "chapter_index_missing" in _codes(result.errors)
 
 
+def test_rejects_legacy_alternate_reader_report(tmp_path):
+    report_dir = _write_report(tmp_path)
+    (report_dir / "scenario-simulation.md").write_text("# 旧情景报告", encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert result.valid is False
+    assert "alternate_reader_report_forbidden" in _codes(result.errors)
+
+
+def test_rejects_any_unregistered_root_reader_markdown(tmp_path):
+    report_dir = _write_report(tmp_path)
+    (report_dir / "desktop-research-report.md").write_text("# 另一份读者报告", encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert result.valid is False
+    assert "alternate_reader_report_forbidden" in _codes(result.errors)
+
+
 def test_rejects_dependency_that_is_not_an_earlier_accepted_chapter(tmp_path):
     report_dir = _write_report(tmp_path)
     index_path = report_dir / "chapter-index.json"

@@ -18,6 +18,7 @@ from modules.agent.schemas import (
     GateDecision,
     PlanStep,
     ToolLoopResult,
+    ToolAllocationDecision,
     ToolResult,
 )
 
@@ -184,6 +185,7 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, answer_o
         max_steps_override=None,
         max_errors_override=None,
         initial_artifacts=None,
+        allowed_tool_names=None,
     ):
         del messages, snapshot, context, registry, governance_mode, confirmed_tools, emit
         if captured is not None:
@@ -191,6 +193,7 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, answer_o
             captured["max_steps_override"] = max_steps_override
             captured["max_errors_override"] = max_errors_override
             captured["initial_artifacts"] = dict(initial_artifacts or {})
+            captured["allowed_tool_names"] = list(allowed_tool_names or [])
         return loop_result or ToolLoopResult(status="completed")
 
     async def fake_answer(*, messages, snapshot, context, answer_evidence_payload, translation_pack=None, image_inputs=None, emit=None):
@@ -204,6 +207,15 @@ def _install_runtime_stubs(monkeypatch, *, gate=None, loop_result=None, answer_o
     monkeypatch.setattr(agent_runtime, "run_gate_with_llm", fake_gate)
     monkeypatch.setattr(agent_runtime, "run_langgraph_react_loop", fake_loop)
     monkeypatch.setattr(agent_runtime, "generate_answer_output_with_llm", fake_answer)
+
+    async def fake_allocate(**kwargs):
+        return ToolAllocationDecision(
+            agent_role=str(kwargs["agent_role"]),
+            allowed_tools=[item["name"] for item in kwargs["candidate_tools"][:2]],
+            rationale="测试授权。",
+        )
+
+    monkeypatch.setattr(agent_runtime, "run_tool_allocator_with_llm", fake_allocate)
 
 
 def test_runtime_requires_clarification_from_gate(monkeypatch):
@@ -230,6 +242,39 @@ def test_runtime_requires_clarification_from_gate(monkeypatch):
     assert response.status == "requires_clarification"
     assert response.output.clarification_options == ["总结这个区域的商业特征", "为什么这里路网差"]
     assert response.stage == "requires_clarification"
+
+
+def test_runtime_does_not_start_research_dependencies_before_gate_passes(monkeypatch):
+    _install_runtime_stubs(
+        monkeypatch,
+        gate=GateDecision(
+            status="clarify",
+            question_type="summary",
+            summary="还缺少关键信息。",
+            clarification_questions=["请先确认问题地图。"],
+            clarification_options=["确认问题地图"],
+        ),
+    )
+    dependency_called = False
+
+    async def fail_if_called(**_kwargs):
+        nonlocal dependency_called
+        dependency_called = True
+        return ""
+
+    monkeypatch.setattr(agent_runtime, "_run_required_skill_dependencies", fail_if_called)
+
+    response = asyncio.run(
+        process_main_agent_loop(
+            AgentTurnRequest(
+                messages=[AgentMessage(role="user", content="分析一下")],
+                analysis_snapshot=_snapshot_with_scope(),
+            )
+        )
+    )
+
+    assert response.status == "requires_clarification"
+    assert dependency_called is False
 
 
 def test_runtime_uses_tool_loop_then_answers(monkeypatch):

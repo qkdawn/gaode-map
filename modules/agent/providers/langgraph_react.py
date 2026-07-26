@@ -19,7 +19,7 @@ from ..selected_sources import source_id_from_item, source_items_from_artifacts,
 from ..tools import RegisteredTool
 from .client import LLMRuntimeConfig
 from .prompts import loop_system_prompt
-from .tool_loop import chat_completion_tools, select_react_tool_registry
+from .tool_loop import apply_tool_allocation, chat_completion_tools, select_react_tool_registry
 from .tool_call_execution import execute_tool_call_step, tool_finish_trace_payload, tool_start_trace_payload
 
 GraphEmit = Callable[[str, Dict[str, Any]], Awaitable[None]]
@@ -244,6 +244,7 @@ async def run_langgraph_react_loop(
     initial_artifacts: Optional[Dict[str, Any]] = None,
     llm_runtime: LLMRuntimeConfig | None = None,
     system_instruction: str = "",
+    allowed_tool_names: Optional[List[str]] = None,
 ) -> ToolLoopResult:
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
     from langchain_openai import ChatOpenAI
@@ -253,11 +254,15 @@ async def run_langgraph_react_loop(
     context_bundle = context or build_context_bundle(snapshot)
     max_steps = _optional_positive_limit(max_steps_override if max_steps_override is not None else settings.ai_max_tool_steps)
     max_errors = max(1, int(max_errors_override or settings.ai_max_tool_errors or 2))
-    visible_registry = select_react_tool_registry(
-        registry,
-        question=question,
-        artifacts=dict(initial_artifacts or {}),
-        include_secondary=include_secondary_tools,
+    visible_registry = (
+        apply_tool_allocation(registry, allowed_tool_names)
+        if allowed_tool_names is not None
+        else select_react_tool_registry(
+            registry,
+            question=question,
+            artifacts=dict(initial_artifacts or {}),
+            include_secondary=include_secondary_tools,
+        )
     )
     tool_schemas = chat_completion_tools(visible_registry)
     effective = llm_runtime or LLMRuntimeConfig.from_settings()

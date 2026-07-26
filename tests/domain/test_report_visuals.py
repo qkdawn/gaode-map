@@ -8,7 +8,7 @@ import pytest
 
 from core.svg_safety import validate_safe_svg
 from modules.report_visuals.schemas import EditorialAction
-from modules.report_visuals.service import render_report_visuals
+from modules.report_visuals.service import render_report_visuals, validate_report_visual_bundle
 from modules.report_visuals.templates import (
     normalize_age_structure,
     normalize_directional_matrix,
@@ -176,9 +176,18 @@ def _plan(*template_ids: str) -> dict:
         "focused_poi_walking_route_map": ["poi.focused_accessibility"],
         "poi_supply_structure": ["poi.supply_structure"],
     }
+    result_ids = {
+        "population_age_structure": ["result-age"],
+        "population_supply_context": ["result-age", "result-supply"],
+        "directional_action_priority_matrix": ["result-direction"],
+        "focused_poi_walking_route_map": ["result-focused"],
+        "poi_supply_structure": ["result-supply"],
+    }
     return {"schema_version": "report-visual-plan.v1", "run_id": "test-run", "items": [
         {
             "template_id": identifier, "chapter_anchor": anchors[identifier], "metric_ids": metrics[identifier],
+            "metric_result_ids": result_ids[identifier], "scope_year": {"year": 2026},
+            "statement_ref": f"statement:{identifier}",
             "supports_judgment": "这张图删除后会改变相邻的已审校判断。", "does_not_prove": "不表示客流、营收或合作关系。",
             "selection_reason": "视觉证据编辑已确认其支持相邻判断。",
             "template_input": {"editorial_actions": _actions()} if identifier == "directional_action_priority_matrix" else {},
@@ -188,7 +197,14 @@ def _plan(*template_ids: str) -> dict:
 
 def _request(report: Path, *template_ids: str) -> dict:
     return {
-        "run_id": "test-run", "report_path": str(report), "visual_plan": _plan(*template_ids),
+        "run_id": "test-run", "history_id": "test-history", "report_id": "test-report",
+        "report_path": str(report), "visual_plan": _plan(*template_ids),
+        "metric_result_provenance": {
+            "result-age": {"tool_id": "population.age_structure", "time_scope": {"year": 2026}, "result_sha256": "a" * 64},
+            "result-direction": {"tool_id": "regional.directional_evidence_matrix", "time_scope": {"year": 2026}, "result_sha256": "b" * 64},
+            "result-focused": {"tool_id": "poi.focused_accessibility", "time_scope": {"year": 2026}, "result_sha256": "c" * 64},
+            "result-supply": {"tool_id": "poi.supply_structure", "time_scope": {"year": 2026}, "result_sha256": "d" * 64},
+        },
         "age_structure": _age(), "directional_evidence_matrix": _matrix(), "focused_poi_accessibility": _focused(), "poi_supply_structure": _supply_structure(),
     }
 
@@ -394,3 +410,127 @@ def test_poi_supply_structure_omits_when_scope_or_semantic_anchor_is_missing(tmp
     invalid_scope = render_report_visuals(request)
     assert invalid_scope.items[0].status == "omitted"
     assert "15 分钟 walking 等时圈几何口径" in str(invalid_scope.items[0].omission_reason)
+
+
+def test_visual_bundle_binds_manifest_blocks_and_asset_hashes(tmp_path: Path) -> None:
+    report = tmp_path / "project-report.md"
+    report.write_text(f"# 报告\n\n{POI_SUPPLY_STRUCTURE_ANCHOR}\n", encoding="utf-8")
+    request = _request(report, "poi_supply_structure")
+    request["history_id"] = "history-visual"
+    request["report_id"] = "report-visual"
+    request["visual_plan"]["items"][0]["metric_result_ids"] = ["result-poi"]
+    request["metric_result_provenance"] = {
+        "result-poi": {"tool_id": "poi.supply_structure", "time_scope": {"year": 2026, "scope_id": "scope-a"}, "result_sha256": "a" * 64}
+    }
+    manifest = render_report_visuals(request)
+
+    saved = json.loads((tmp_path / "visual-manifest.json").read_text(encoding="utf-8"))
+    assert saved["schema_version"] == "report-visuals.v2"
+    assert saved["history_id"] == "history-visual"
+    assert saved["report_id"] == "report-visual"
+    assert saved["metric_result_ids"] == ["result-poi"]
+    assert saved["items"][0]["history_id"] == "history-visual"
+    assert saved["items"][0]["report_id"] == "report-visual"
+    assert saved["items"][0]["run_id"] == "test-run"
+    assert len(manifest.items[0].asset_sha256 or "") == 64
+    assert len(manifest.items[0].spec_sha256 or "") == 64
+    assert validate_report_visual_bundle(tmp_path) == []
+
+    (tmp_path / "assets" / "poi-supply-structure.svg").write_text("tampered", encoding="utf-8")
+    assert "visual_asset_checksum_mismatch:poi_supply_structure" in validate_report_visual_bundle(tmp_path)
+
+
+def test_visual_renderer_rejects_plan_scope_year_conflict(tmp_path: Path) -> None:
+    report = _report(tmp_path)
+    request = _request(report, "poi_supply_structure")
+    request["visual_plan"]["items"][0]["metric_result_ids"] = ["result-poi"]
+    request["visual_plan"]["items"][0]["scope_year"] = {"poi_year": 2025}
+    request["metric_result_provenance"] = {
+        "result-poi": {"tool_id": "poi.supply_structure", "time_scope": {"year": 2026}, "result_sha256": "a" * 64}
+    }
+    with pytest.raises(ValueError, match="visual_scope_year_conflict"):
+        render_report_visuals(request)
+
+
+def test_visual_renderer_scope_year_comparison_is_exact_not_substring(tmp_path: Path) -> None:
+    report = _report(tmp_path)
+    request = _request(report, "poi_supply_structure")
+    request["visual_plan"]["items"][0]["scope_year"] = {"year": 26}
+
+    with pytest.raises(ValueError, match="visual_scope_year_conflict"):
+        render_report_visuals(request)
+
+    request = _request(report, "poi_supply_structure")
+    request["visual_plan"]["items"][0]["scope_year"] = {"scope_fingerprint": "sha256:abc"}
+    with pytest.raises(ValueError, match="visual_scope_year_conflict"):
+        render_report_visuals(request)
+
+
+def test_composite_visual_cannot_swap_years_between_metric_results(tmp_path: Path) -> None:
+    report = _report(tmp_path)
+    request = _request(report, "population_supply_context")
+    request["visual_plan"]["items"][0]["scope_year"] = {
+        "population_year": 2026,
+        "poi_year": 2025,
+    }
+    request["metric_result_provenance"]["result-age"]["time_scope"] = {"year": 2025}
+    request["metric_result_provenance"]["result-supply"]["time_scope"] = {"year": 2026}
+
+    with pytest.raises(ValueError, match="visual_scope_year_conflict:population_supply_context:population_year"):
+        render_report_visuals(request)
+
+
+def test_new_run_does_not_reuse_prior_template_asset(tmp_path: Path) -> None:
+    report = tmp_path / "project-report.md"
+    report.write_text(f"# 报告\n\n{POI_SUPPLY_STRUCTURE_ANCHOR}\n", encoding="utf-8")
+    request = _request(report, "poi_supply_structure")
+    request["history_id"] = "history-visual"
+    request["report_id"] = "report-visual"
+    render_report_visuals(request)
+    assert (tmp_path / "assets" / "poi-supply-structure.svg").is_file()
+
+    request["run_id"] = "next-run"
+    request["visual_plan"]["run_id"] = "next-run"
+    request["visual_plan"]["items"][0].update({"status": "omitted", "omission_reason": "本轮无可用指标"})
+    render_report_visuals(request)
+    assert not (tmp_path / "assets" / "poi-supply-structure.svg").exists()
+    assert validate_report_visual_bundle(tmp_path) == []
+
+
+def test_distance_band_template_requires_explicit_0_500m_scope(tmp_path: Path) -> None:
+    report = tmp_path / "project-report.md"
+    anchor = "<!-- report-anchor:poi-distance-band-supply -->"
+    report.write_text(f"# 报告\n\n{anchor}\n", encoding="utf-8")
+    plan = {
+        "schema_version": "report-visual-plan.v1",
+        "run_id": "band-run",
+        "items": [{
+            "template_id": "poi_distance_band_supply_structure",
+            "chapter_anchor": anchor,
+            "metric_ids": ["poi.distance_band_supply_structure"],
+            "metric_result_ids": ["result:poi-band"],
+            "scope_year": {"year": 2024, "scope_kind": "radial_distance_band"},
+            "statement_ref": "statement:poi-distance-band-supply",
+            "supports_judgment": "支持近域供给背景判断。",
+            "does_not_prove": "不证明客流。",
+            "selection_reason": "距离带事实直接支撑相邻判断。",
+        }],
+    }
+    payload = {
+        "poi_distance_band_supply_structure": {
+            "year": 2024,
+            "scope": {"kind": "radial_distance_band", "distance_method": "geodesic_center_band", "inner_radius_m": 0, "outer_radius_m": 500},
+            "total_count": 3,
+            "categories": [{"label": "餐饮", "count": 2}, {"label": "公司", "count": 1}],
+        }
+    }
+    provenance = {"result:poi-band": {"tool_id": "poi.distance_band_supply_structure", "time_scope": {"year": 2024, "scope_kind": "radial_distance_band"}, "result_sha256": "e" * 64}}
+    manifest = render_report_visuals({"run_id": "band-run", "history_id": "history-1", "report_id": "band-report", "report_path": report, "visual_plan": plan, "metric_result_provenance": provenance, "poi_distance_band_supply_structure": payload})
+    assert manifest.items[0].status == "generated"
+    assert "0–500m 距离带" in (tmp_path / "assets" / "poi-distance-band-supply.vl.json").read_text(encoding="utf-8")
+
+    payload["poi_distance_band_supply_structure"]["scope"]["kind"] = "verified_walking_isochrone"
+    # A different run rejects the walking-scope payload by omitting the visual.
+    omitted = render_report_visuals({"run_id": "band-run-2", "history_id": "history-1", "report_id": "band-report-2", "report_path": report, "visual_plan": {**plan, "run_id": "band-run-2"}, "metric_result_provenance": provenance, "poi_distance_band_supply_structure": payload})
+    assert omitted.items[0].status == "omitted"
+    assert "不能使用 walking 等时圈" in str(omitted.items[0].omission_reason)

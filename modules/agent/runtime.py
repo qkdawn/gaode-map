@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from contextlib import suppress
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List
 
@@ -20,7 +21,9 @@ from .providers.llm_provider import (
     generate_answer_output_with_llm,
     is_llm_enabled,
     run_gate_with_llm,
+    run_tool_allocator_with_llm,
 )
+from .providers.tool_loop import tool_allocation_candidates
 from .schemas import (
     AgentMessage,
     AgentPlanEnvelope,
@@ -33,13 +36,20 @@ from .schemas import (
     AgentTurnStreamEvent,
     AuditResult,
     EffectiveExecutionProfile,
+    FinalProductRecheckDecision,
+    FirstProductRecheckDecision,
+    ProductDraftInventory,
+    ToolAllocationDecision,
 )
 from .selected_sources import selected_sources_artifact_from_items
 from .skill_dependencies import (
     cultural_tourism_child_request,
+    formal_specialist_request,
+    market_audience_child_request,
     resolve_skill_dependencies,
     skill_instruction,
 )
+from .tool_adapters.public_web_tools import DEFAULT_CATEGORIES as REQUIRED_MARKET_WEB_CATEGORIES
 from .synthesizer import (
     build_answer_evidence_payload,
     build_answer_fallback,
@@ -232,6 +242,301 @@ def _merge_notes(existing: List[str], incoming: List[Any]) -> List[str]:
     return merged
 
 
+_FORMAL_SPECIALIST_ROLES = (
+    "spatial_structure",
+    "positioning_product",
+    "spatial_function_programming",
+    "operations_phasing",
+)
+_TERMINAL_RECHECK_FORBIDDEN_TEXT = (
+    "revision_required",
+    "third rewrite",
+    "third_rewrite",
+    "第三次返写",
+    "第三轮返写",
+    "继续返写",
+    "再次返写",
+)
+
+
+def _market_public_web_coverage_error(artifacts: dict[str, Any]) -> str:
+    public_sources = artifacts.get("public_web_sources")
+    if not isinstance(public_sources, dict):
+        return "市场发现未返回 public_web_sources，不能登记完成"
+    if str(public_sources.get("coverage_status") or "").strip() not in {
+        "usable_sources_found",
+        "searched_no_usable_source",
+    }:
+        return "市场发现的 public_web_sources.coverage_status 未正常闭合"
+    category_coverage = public_sources.get("category_coverage")
+    if not isinstance(category_coverage, list):
+        return "市场发现缺少 public_web_sources.category_coverage，不能登记完成"
+    allowed_statuses = {"usable_sources_found", "searched_no_usable_source"}
+    statuses = {
+        str(item.get("category") or "").strip(): str(item.get("coverage_status") or "").strip()
+        for item in category_coverage
+        if isinstance(item, dict) and str(item.get("category") or "").strip()
+    }
+    missing = [category for category in REQUIRED_MARKET_WEB_CATEGORIES if category not in statuses]
+    invalid = [category for category in REQUIRED_MARKET_WEB_CATEGORIES if statuses.get(category) not in allowed_statuses]
+    if missing:
+        return f"市场公开检索类别覆盖不完整，缺少：{'、'.join(missing)}"
+    if invalid:
+        return f"市场公开检索类别未正常闭合：{'、'.join(invalid)}"
+    return ""
+
+
+def _market_discovery_contract_error(discovery: Any) -> str:
+    if not isinstance(discovery, dict):
+        return "市场发现工件不存在"
+    if discovery.get("stage") != "market_discovery":
+        return "市场发现工件阶段无效"
+    if discovery.get("status") != "completed":
+        return "市场发现工件尚未完成"
+    artifacts = discovery.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return "市场发现工件缺少结构化 artifacts"
+    return _market_public_web_coverage_error(artifacts)
+
+
+def _product_recheck_payload(result, artifact_key: str) -> Any:
+    artifacts = dict(result.artifacts or {})
+    existing = artifacts.get(artifact_key)
+    if existing is not None:
+        return existing
+    text = str(result.assistant_summary or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().lower() in {"```", "```json"}:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed.get(artifact_key, parsed)
+
+
+def _new_loop_artifacts(result, initial_artifacts: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in dict(result.artifacts or {}).items()
+        if key not in initial_artifacts or initial_artifacts[key] != value
+    }
+
+
+def _specialist_artifacts(memory) -> dict[str, Any]:
+    return {
+        role: memory.artifacts[role]
+        for role in _FORMAL_SPECIALIST_ROLES
+        if isinstance(memory.artifacts.get(role), dict)
+    }
+
+
+def _product_inventory_payload(value: Any) -> Any:
+    if not isinstance(value, dict):
+        return None
+    artifacts = value.get("artifacts") if isinstance(value.get("artifacts"), dict) else value
+    return artifacts.get("product_inventory") if isinstance(artifacts, dict) else None
+
+
+def _record_specialist_result(memory, *, role: str, result, revision: bool) -> None:
+    current = memory.artifacts.get(role)
+    versions = list(current.get("versions") or []) if isinstance(current, dict) else []
+    version = len(versions) + 1
+    versions.append({
+        "version": version,
+        "summary": str(result.assistant_summary or "").strip(),
+        "artifacts": dict(result.artifacts or {}),
+        "research_notes": list(result.research_notes or []),
+        "used_tools": list(result.used_tools or []),
+        "revision": bool(revision),
+    })
+    memory.artifacts[role] = {
+        "role": role,
+        "status": "completed",
+        "current_version": version,
+        "summary": str(result.assistant_summary or "").strip(),
+        "artifacts": dict(result.artifacts or {}),
+        "versions": versions,
+    }
+    memory.execution_trace.extend(list(result.execution_trace or []))
+    memory.tool_results.extend(list(result.tool_results or []))
+    memory.research_notes = _merge_notes(memory.research_notes, list(result.research_notes or []))
+
+
+async def _run_formal_specialist_roles(
+    *,
+    payload: AgentTurnRequest,
+    context,
+    memory,
+    llm_runtime: LLMRuntimeConfig | None,
+    emit_thinking,
+    roles: tuple[str, ...] = _FORMAL_SPECIALIST_ROLES,
+    revision_context: dict[str, Any] | None = None,
+) -> str:
+    """Run each formal specialist in its own allocated tool loop."""
+
+    discovery = memory.artifacts.get("market_audience_research")
+    if discovery is None:
+        return ""
+    discovery_error = _market_discovery_contract_error(discovery)
+    if discovery_error:
+        return discovery_error
+    max_steps_override, max_errors_override = _tool_loop_limits()
+    for role in roles:
+        is_revision = revision_context is not None
+        upstream = {
+            "cultural_tourism_research": memory.artifacts.get("cultural_tourism_research"),
+            "market_audience_research": discovery,
+            **_specialist_artifacts(memory),
+        }
+        prompt = formal_specialist_request(
+            payload,
+            role=role,
+            upstream_artifacts=upstream,
+            revision_context=revision_context,
+        )
+        await emit_thinking(
+            {
+                "phase": "executing",
+                "title": f"启动专项角色：{role}",
+                "detail": "该角色在独立工具授权和独立工具循环中形成自己的本轮工件。",
+                "state": "active",
+            },
+            f"formal-specialist:{role}:{'revision' if is_revision else 'draft'}",
+        )
+        role_payload = payload.model_copy(
+            update={
+                "messages": [
+                    *[item.model_copy(deep=True) for item in payload.messages if item.role != "system"],
+                    AgentMessage(role="user", content=prompt),
+                ]
+            }
+        )
+        try:
+            allowed_tools = await _allocate_tools_for_role(
+                payload=role_payload,
+                context=context,
+                memory=memory,
+                llm_runtime=llm_runtime,
+                agent_role=role,
+                task=prompt,
+                emit_thinking=emit_thinking,
+            )
+        except Exception as exc:
+            return f"专项角色 {role} 的工具授权失败：{exc}"
+        initial_artifacts = {
+            **dict(memory.artifacts or {}),
+            "formal_specialist_role": role,
+            "formal_specialist_upstream": upstream,
+            "product_recheck_revision": revision_context or {},
+        }
+        try:
+            result = await run_langgraph_react_loop(
+                messages=role_payload.messages,
+                snapshot=payload.analysis_snapshot,
+                context=context,
+                registry=get_tool_registry(),
+                governance_mode=payload.governance_mode,
+                confirmed_tools=list(payload.risk_confirmations or []),
+                include_secondary_tools=True,
+                max_steps_override=max_steps_override,
+                max_errors_override=max_errors_override,
+                initial_artifacts=initial_artifacts,
+                llm_runtime=llm_runtime,
+                system_instruction=skill_instruction("spatial-business-analyst"),
+                allowed_tool_names=allowed_tools,
+            )
+        except Exception as exc:
+            return f"专项角色 {role} 调用失败：{exc}"
+        if result.status != "completed":
+            return result.error or result.stop_reason or f"专项角色 {role} 未完成"
+        result.artifacts = _new_loop_artifacts(result, initial_artifacts)
+        if role == "positioning_product":
+            try:
+                inventory = ProductDraftInventory.model_validate(_product_inventory_payload(result.artifacts))
+            except Exception as exc:
+                return f"定位产品草案缺少合法的完整 product_inventory：{exc}"
+            current_inventory_payload = _product_inventory_payload(memory.artifacts.get(role))
+            if revision_context is not None and current_inventory_payload is not None:
+                current_inventory = ProductDraftInventory.model_validate(current_inventory_payload)
+                current_ids = {item.product_id.strip() for item in current_inventory.products}
+                revised_ids = {item.product_id.strip() for item in inventory.products}
+                if revised_ids != current_ids:
+                    return "定位产品定向返写必须保留同一组 product_id，不得新增或静默删除产品"
+            result.artifacts["product_inventory"] = inventory.model_dump(mode="json")
+        _record_specialist_result(memory, role=role, result=result, revision=is_revision)
+        await emit_thinking(
+            {
+                "phase": "executing",
+                "title": f"专项角色完成：{role}",
+                "detail": "已持久化该角色的本轮完整工件，供下一专业角色和再校核消费。",
+                "state": "completed",
+            },
+            f"formal-specialist:{role}:{'revision' if is_revision else 'draft'}",
+        )
+    return ""
+
+
+async def _allocate_tools_for_role(
+    *,
+    payload: AgentTurnRequest,
+    context,
+    memory,
+    llm_runtime: LLMRuntimeConfig | None,
+    agent_role: str,
+    task: str,
+    emit_thinking,
+) -> List[str]:
+    registry = get_tool_registry()
+    candidates = tool_allocation_candidates(registry, agent_role=agent_role)
+    candidate_payload = [
+        {
+            "name": name,
+            "description": item.spec.description,
+            "evidence_contract": list(item.spec.evidence_contract or []),
+            "cautions": list(item.spec.cautions or []),
+        }
+        for name, item in candidates.items()
+    ]
+    try:
+        proposed = await run_tool_allocator_with_llm(
+            messages=payload.messages,
+            snapshot=payload.analysis_snapshot,
+            context=context,
+            agent_role=agent_role,
+            task=task,
+            candidate_tools=candidate_payload,
+            emit=None,
+            runtime=llm_runtime,
+        )
+        allowed = [name for name in proposed.allowed_tools if name in candidates]
+        if not allowed:
+            raise RuntimeError("工具分派子代理未授予任何有效候选工具")
+        decision = proposed.model_copy(update={"agent_role": agent_role, "allowed_tools": allowed})
+    except Exception as exc:
+        raise RuntimeError(f"工具分派子代理未完成授权：{agent_role}（{exc}）") from exc
+    allocations = memory.artifacts.setdefault("tool_allocations", {})
+    role_allocations = allocations.setdefault(agent_role, [])
+    role_allocations.append(decision.model_dump(mode="json"))
+    await emit_thinking(
+        {
+            "phase": "tool_allocation",
+            "title": f"工具授权：{agent_role}",
+            "detail": decision.rationale or "已按任务与证据目标生成工具授权。",
+            "items": list(decision.allowed_tools),
+            "state": "completed",
+        },
+        f"tool-allocation:{agent_role}",
+    )
+    return list(decision.allowed_tools)
+
+
 async def _run_required_skill_dependencies(
     *,
     payload: AgentTurnRequest,
@@ -241,25 +546,31 @@ async def _run_required_skill_dependencies(
     llm_runtime: LLMRuntimeConfig | None,
     emit_thinking,
 ) -> str:
-    """Execute required child Skills and publish only their completed artifacts.
-
-    This is intentionally an orchestration boundary.  It does not inspect the
-    child Skill's POI, source, or eight-category checks; that contract remains
-    entirely with the child Skill.
-    """
+    """Execute declared pre-parent research stages and publish their artifacts."""
 
     dependencies = resolve_skill_dependencies(payload, effective_profile)
     for dependency in dependencies:
+        stage = dependency.stage
         await emit_thinking(
             {
                 "phase": "preflight",
-                "title": f"启动前置调研：{dependency.skill_id}",
-                "detail": "该项目命中文旅/遗产/活化条件，主分析将在前置调研完成后继续。",
+                "title": f"启动研究阶段：{dependency.skill_id}/{stage}",
+                "detail": "前置研究将在父级分析前完成，并把可复核工件交给后续阶段。",
                 "state": "active",
             },
-            f"dependency-start:{dependency.skill_id}",
+            f"dependency-start:{dependency.skill_id}:{stage}",
         )
-        if dependency.skill_id != "cultural-tourism-theme-research":
+        if dependency.skill_id == "cultural-tourism-theme-research" and stage == "preflight":
+            child_instruction = cultural_tourism_child_request(payload)
+            artifact_key = "cultural_tourism_research"
+            agent_role = "cultural_tourism_research"
+            task = "完成八类资源、周边关系、主题判断与公开网页核验；仅使用能支撑当前研究的工具。"
+        elif dependency.skill_id == "spatial-market-audience-research" and stage == "market_discovery":
+            child_instruction = market_audience_child_request(payload, stage=stage)
+            artifact_key = "market_audience_research"
+            agent_role = "market_audience_research"
+            task = "完成项目条件、候选客群、市场母体、竞争/替代供给与需求或公共服务履约的发现研究。"
+        else:
             return f"未注册前置 Skill 执行器：{dependency.skill_id}"
         child_snapshot = payload.analysis_snapshot.model_copy(
             deep=True,
@@ -272,9 +583,22 @@ async def _run_required_skill_dependencies(
         )
         child_messages = [
             *[item.model_copy(deep=True) for item in payload.messages if item.role != "system"],
-            AgentMessage(role="user", content=cultural_tourism_child_request(payload)),
+            AgentMessage(role="user", content=child_instruction),
         ]
+        try:
+            child_allowed_tools = await _allocate_tools_for_role(
+                payload=payload.model_copy(update={"messages": child_messages}),
+                context=context,
+                memory=memory,
+                llm_runtime=llm_runtime,
+                agent_role=agent_role,
+                task=task,
+                emit_thinking=emit_thinking,
+            )
+        except Exception as exc:
+            return f"前置 Skill {dependency.skill_id} 的工具授权失败：{exc}"
         max_steps_override, max_errors_override = _tool_loop_limits()
+        child_initial_artifacts = dict(memory.artifacts or {})
         try:
             child = await run_langgraph_react_loop(
                 messages=child_messages,
@@ -286,14 +610,20 @@ async def _run_required_skill_dependencies(
                 include_secondary_tools=True,
                 max_steps_override=max_steps_override,
                 max_errors_override=max_errors_override,
-                initial_artifacts=dict(memory.artifacts or {}),
+                initial_artifacts=child_initial_artifacts,
                 llm_runtime=llm_runtime,
                 system_instruction=skill_instruction(dependency.skill_id),
+                allowed_tool_names=child_allowed_tools,
             )
         except Exception as exc:
             return f"前置 Skill {dependency.skill_id} 调用失败：{exc}"
         if child.status != "completed":
             return child.error or child.stop_reason or f"前置 Skill {dependency.skill_id} 未完成"
+        child.artifacts = _new_loop_artifacts(child, child_initial_artifacts)
+        if artifact_key == "market_audience_research":
+            coverage_error = _market_public_web_coverage_error(dict(child.artifacts or {}))
+            if coverage_error:
+                return coverage_error
         artifact = {
             "skill_id": dependency.skill_id,
             "status": "completed",
@@ -302,19 +632,221 @@ async def _run_required_skill_dependencies(
             "research_notes": list(child.research_notes or []),
             "used_tools": list(child.used_tools or []),
         }
-        memory.artifacts["cultural_tourism_research"] = artifact
+        if artifact_key == "market_audience_research":
+            artifact["stage"] = stage
+            artifact["revision_budget"] = 1
+            artifact["recheck_status"] = "pending_parent_drafts"
+        memory.artifacts[artifact_key] = artifact
         memory.execution_trace.extend(list(child.execution_trace or []))
         memory.tool_results.extend(list(child.tool_results or []))
         memory.research_notes = _merge_notes(memory.research_notes, child.research_notes)
         await emit_thinking(
             {
                 "phase": "preflight",
-                "title": f"前置调研完成：{dependency.skill_id}",
-                "detail": "已将本轮文旅调研结果交给主分析；主分析不会重复核验其八类资源、POI 和网页检索过程。",
+                "title": f"研究阶段完成：{dependency.skill_id}/{stage}",
+                "detail": "已将本轮研究工件交给后续分析；后续阶段复用结论与证据边界，不重复伪造证据。",
                 "state": "completed",
             },
-            f"dependency-complete:{dependency.skill_id}",
+            f"dependency-complete:{dependency.skill_id}:{stage}",
         )
+    return ""
+
+
+async def _run_market_product_recheck(
+    *,
+    payload: AgentTurnRequest,
+    context,
+    memory,
+    parent_drafts: dict[str, Any],
+    llm_runtime: LLMRuntimeConfig | None,
+    emit_thinking,
+) -> str:
+    """Run first recheck, one bounded parent rewrite, then the final recheck."""
+
+    discovery = memory.artifacts.get("market_audience_research")
+    if discovery is None:
+        return ""
+    discovery_error = _market_discovery_contract_error(discovery)
+    if discovery_error:
+        return discovery_error
+    draft_artifacts = parent_drafts.get("artifacts") if isinstance(parent_drafts, dict) else None
+    missing_drafts = [
+        role for role in _FORMAL_SPECIALIST_ROLES
+        if not isinstance(draft_artifacts, dict) or not isinstance(draft_artifacts.get(role), dict)
+    ]
+    if missing_drafts:
+        return f"产品市场再校核缺少本轮专项草案：{'、'.join(missing_drafts)}"
+    try:
+        draft_inventory = ProductDraftInventory.model_validate(
+            _product_inventory_payload(draft_artifacts["positioning_product"])
+        )
+    except Exception as exc:
+        return f"产品市场再校核缺少定位草案的完整 product_inventory：{exc}"
+    draft_product_ids = {item.product_id.strip() for item in draft_inventory.products}
+    await emit_thinking(
+        {
+            "phase": "executing",
+            "title": "启动研究阶段：spatial-market-audience-research/product_recheck",
+            "detail": "父级定位、空间和运营草案已形成，开始逐产品市场再校核。",
+            "state": "active",
+        },
+        "market-product-recheck-start",
+    )
+    max_steps_override, max_errors_override = _tool_loop_limits()
+
+    async def run_recheck(check_number: int, drafts: dict[str, Any]):
+        messages = [
+            *[item.model_copy(deep=True) for item in payload.messages if item.role != "system"],
+            AgentMessage(
+                role="user",
+                content=market_audience_child_request(
+                    payload,
+                    stage="product_recheck",
+                    parent_drafts=drafts,
+                    check_number=check_number,
+                ),
+            ),
+        ]
+        allowed_tools = await _allocate_tools_for_role(
+            payload=payload.model_copy(update={"messages": messages}),
+            context=context,
+            memory=memory,
+            llm_runtime=llm_runtime,
+            agent_role="market_audience_research",
+            task=f"执行第 {check_number} 次产品市场再校核；第二次必须形成逐产品终局裁决。",
+            emit_thinking=emit_thinking,
+        )
+        initial_artifacts = {
+            **dict(memory.artifacts or {}),
+            "parent_drafts": drafts,
+            "product_recheck_number": check_number,
+        }
+        result = await run_langgraph_react_loop(
+            messages=messages,
+            snapshot=payload.analysis_snapshot,
+            context=context,
+            registry=get_tool_registry(),
+            governance_mode=payload.governance_mode,
+            confirmed_tools=list(payload.risk_confirmations or []),
+            include_secondary_tools=True,
+            max_steps_override=max_steps_override,
+            max_errors_override=max_errors_override,
+            initial_artifacts=initial_artifacts,
+            llm_runtime=llm_runtime,
+            system_instruction=skill_instruction("spatial-market-audience-research"),
+            allowed_tool_names=allowed_tools,
+        )
+        result.artifacts = _new_loop_artifacts(result, initial_artifacts)
+        return result
+
+    try:
+        first_check = await run_recheck(1, parent_drafts)
+    except Exception as exc:
+        return f"第一次产品市场再校核调用失败：{exc}"
+    if first_check.status != "completed":
+        return first_check.error or first_check.stop_reason or "第一次产品市场再校核未完成"
+
+    first_payload = _product_recheck_payload(first_check, "first_product_recheck")
+    try:
+        first_decision = FirstProductRecheckDecision.model_validate(first_payload)
+    except Exception as exc:
+        return f"第一次产品市场再校核缺少合法的逐产品返写裁决：{exc}"
+    first_product_ids = {item.product_id.strip() for item in first_decision.products}
+    if first_product_ids != draft_product_ids:
+        missing = sorted(draft_product_ids - first_product_ids)
+        added = sorted(first_product_ids - draft_product_ids)
+        return f"第一次产品市场再校核必须覆盖定位草案的完整产品清单；缺少={missing}，新增={added}"
+    first_check.artifacts["first_product_recheck"] = first_decision.model_dump(mode="json")
+    revision_roles = tuple(
+        role
+        for role in _FORMAL_SPECIALIST_ROLES
+        if any(item.revision_required and role in item.owner_roles for item in first_decision.products)
+    )
+
+    revision_context = {
+        "summary": str(first_check.assistant_summary or "").strip(),
+        "artifacts": dict(first_check.artifacts or {}),
+        "decision": first_decision.model_dump(mode="json"),
+    }
+    if revision_roles:
+        revision_error = await _run_formal_specialist_roles(
+            payload=payload,
+            context=context,
+            memory=memory,
+            llm_runtime=llm_runtime,
+            emit_thinking=emit_thinking,
+            roles=revision_roles,
+            revision_context=revision_context,
+        )
+        if revision_error:
+            return revision_error
+    revised_drafts = {
+        "status": "revised_for_final_product_recheck",
+        "artifacts": _specialist_artifacts(memory),
+        "first_product_recheck": revision_context,
+    }
+    try:
+        second_check = await run_recheck(2, revised_drafts)
+    except Exception as exc:
+        return f"第二次产品市场再校核调用失败：{exc}"
+    if second_check.status != "completed":
+        return second_check.error or second_check.stop_reason or "第二次产品市场再校核未完成"
+    final_payload = _product_recheck_payload(second_check, "final_product_recheck")
+    try:
+        final_decision = FinalProductRecheckDecision.model_validate(final_payload)
+    except Exception as exc:
+        return f"第二次产品市场再校核缺少合法的逐产品终局裁决：{exc}"
+    final_product_ids = {item.product_id.strip() for item in final_decision.products}
+    if final_product_ids != first_product_ids:
+        missing = sorted(first_product_ids - final_product_ids)
+        added = sorted(final_product_ids - first_product_ids)
+        return f"第二次产品市场再校核必须覆盖首轮同一组产品；缺少={missing}，新增={added}"
+    terminal_text = f"{second_check.assistant_summary} {final_decision.model_dump(mode='json')}".lower()
+    forbidden = next((item for item in _TERMINAL_RECHECK_FORBIDDEN_TEXT if item in terminal_text), "")
+    if forbidden:
+        return f"第二次产品市场再校核不是终局裁决，出现禁止的返写信号：{forbidden}"
+    second_check.artifacts["final_product_recheck"] = final_decision.model_dump(mode="json")
+    discovery["revision_budget"] = 0
+    revision_used_tools: list[str] = []
+    revision_notes: list[str] = []
+    for role in revision_roles:
+        artifact = memory.artifacts.get(role)
+        versions = artifact.get("versions") if isinstance(artifact, dict) else []
+        latest = versions[-1] if isinstance(versions, list) and versions else {}
+        if isinstance(latest, dict):
+            revision_used_tools.extend(str(item).strip() for item in latest.get("used_tools") or [] if str(item).strip())
+            revision_notes.extend(str(item).strip() for item in latest.get("research_notes") or [] if str(item).strip())
+
+    discovery["product_recheck"] = {
+        "status": "completed",
+        "stage": "product_recheck",
+        "revision_budget": 0,
+        "recheck_status": "second_check_completed",
+        "checks": [
+            {"number": 1, "summary": str(first_check.assistant_summary or "").strip(), "artifacts": dict(first_check.artifacts or {})},
+            {"number": 2, "summary": str(second_check.assistant_summary or "").strip(), "artifacts": dict(second_check.artifacts or {})},
+        ],
+        "first_decision": first_decision.model_dump(mode="json"),
+        "revision_roles": list(revision_roles),
+        "revision": revised_drafts,
+        "final_decision": final_decision.model_dump(mode="json"),
+        "summary": str(second_check.assistant_summary or "").strip(),
+        "artifacts": dict(second_check.artifacts or {}),
+        "research_notes": _merge_notes(list(first_check.research_notes or []), [*revision_notes, *list(second_check.research_notes or [])]),
+        "used_tools": list(dict.fromkeys([*list(first_check.used_tools or []), *revision_used_tools, *list(second_check.used_tools or [])])),
+    }
+    memory.execution_trace.extend([*list(first_check.execution_trace or []), *list(second_check.execution_trace or [])])
+    memory.tool_results.extend([*list(first_check.tool_results or []), *list(second_check.tool_results or [])])
+    memory.research_notes = _merge_notes(memory.research_notes, discovery["product_recheck"]["research_notes"])
+    await emit_thinking(
+        {
+            "phase": "executing",
+            "title": "产品市场再校核完成",
+            "detail": "已完成第一次校核、唯一一次定向返写和第二次最终校核；主分析据此写入最终决策。",
+            "state": "completed",
+        },
+        "market-product-recheck-complete",
+    )
     return ""
 
 
@@ -383,24 +915,6 @@ async def _run_main_agent_loop(
                     memory.research_notes,
                     ["核心项目文档未成功读取；最终回答必须明确失败，不能退化为自信的 GIS-only 项目结论。"],
                 )
-    dependency_error = await _run_required_skill_dependencies(
-        payload=payload,
-        effective_profile=effective_profile,
-        context=context,
-        memory=memory,
-        llm_runtime=llm_runtime,
-        emit_thinking=emit_thinking,
-    )
-    if dependency_error:
-        await _emit_status(emit, "failed")
-        return AgentTurnResponse(
-            status="failed",
-            stage="failed",
-            output=AgentTurnOutput(),
-            diagnostics=_build_diagnostics(memory=memory, error=dependency_error, thinking_timeline=thinking_timeline, latency_ms=latency.finish()),
-            context_summary=build_context_summary(snapshot, memory.artifacts),
-            plan=AgentPlanEnvelope(),
-        )
     visual_image_inputs, visual_snapshot_meta, visual_snapshot_warnings = _visual_snapshot_inputs(payload)
     if visual_snapshot_meta:
         memory.artifacts["visual_snapshots"] = visual_snapshot_meta
@@ -569,6 +1083,64 @@ async def _run_main_agent_loop(
             "gating-check",
         )
 
+    dependency_error = await _run_required_skill_dependencies(
+        payload=payload,
+        effective_profile=effective_profile,
+        context=context,
+        memory=memory,
+        llm_runtime=llm_runtime,
+        emit_thinking=emit_thinking,
+    )
+    if dependency_error:
+        await _emit_status(emit, "failed")
+        return AgentTurnResponse(
+            status="failed",
+            stage="failed",
+            output=AgentTurnOutput(),
+            diagnostics=_build_diagnostics(memory=memory, error=dependency_error, thinking_timeline=thinking_timeline, latency_ms=latency.finish()),
+            context_summary=build_context_summary(snapshot, memory.artifacts),
+            plan=AgentPlanEnvelope(),
+        )
+    specialist_error = await _run_formal_specialist_roles(
+        payload=payload,
+        context=context,
+        memory=memory,
+        llm_runtime=llm_runtime,
+        emit_thinking=emit_thinking,
+    )
+    if specialist_error:
+        await _emit_status(emit, "failed")
+        return AgentTurnResponse(
+            status="failed",
+            stage="failed",
+            output=AgentTurnOutput(),
+            diagnostics=_build_diagnostics(memory=memory, error=specialist_error, thinking_timeline=thinking_timeline, latency_ms=latency.finish()),
+            context_summary=build_context_summary(snapshot, memory.artifacts),
+            plan=AgentPlanEnvelope(),
+        )
+    parent_drafts = {
+        "status": "ready_for_product_recheck",
+        "artifacts": _specialist_artifacts(memory),
+    }
+    recheck_error = await _run_market_product_recheck(
+        payload=payload,
+        context=context,
+        memory=memory,
+        parent_drafts=parent_drafts,
+        llm_runtime=llm_runtime,
+        emit_thinking=emit_thinking,
+    )
+    if recheck_error:
+        await _emit_status(emit, "failed")
+        return AgentTurnResponse(
+            status="failed",
+            stage="failed",
+            output=AgentTurnOutput(),
+            diagnostics=_build_diagnostics(memory=memory, error=recheck_error, thinking_timeline=thinking_timeline, latency_ms=latency.finish()),
+            context_summary=build_context_summary(snapshot, memory.artifacts),
+            plan=AgentPlanEnvelope(),
+        )
+
     await _emit_status(emit, "executing")
     await emit_thinking(
         {
@@ -580,7 +1152,17 @@ async def _run_main_agent_loop(
         "tool-loop",
     )
     try:
+        main_allowed_tools = await _allocate_tools_for_role(
+            payload=payload,
+            context=context,
+            memory=memory,
+            llm_runtime=llm_runtime,
+            agent_role="main_analysis",
+            task="围绕用户当前问题整合项目材料、空间指标、前置研究和必要的公开资料，形成可追溯结论。",
+            emit_thinking=emit_thinking,
+        )
         max_steps_override, max_errors_override = _tool_loop_limits()
+        main_initial_artifacts = dict(memory.artifacts or {})
         with latency.track("tool_loop"):
             loop_kwargs = dict(
                 messages=payload.messages,
@@ -593,11 +1175,13 @@ async def _run_main_agent_loop(
                 include_secondary_tools=True,
                 max_steps_override=max_steps_override,
                 max_errors_override=max_errors_override,
-                initial_artifacts=dict(memory.artifacts or {}),
+                initial_artifacts=main_initial_artifacts,
+                allowed_tool_names=main_allowed_tools,
             )
             if llm_runtime is not None:
                 loop_kwargs["llm_runtime"] = llm_runtime
             loop_result = await run_langgraph_react_loop(**loop_kwargs)
+            loop_result.artifacts = _new_loop_artifacts(loop_result, main_initial_artifacts)
     except Exception as exc:
         await _emit_status(emit, "failed")
         return AgentTurnResponse(
@@ -617,15 +1201,37 @@ async def _run_main_agent_loop(
 
     dependency_used_tools = [
         str(item).strip()
-        for item in (memory.artifacts.get("cultural_tourism_research", {}).get("used_tools", []) if isinstance(memory.artifacts.get("cultural_tourism_research"), dict) else [])
+        for artifact_name in ("cultural_tourism_research", "market_audience_research")
+        for item in (memory.artifacts.get(artifact_name, {}).get("used_tools", []) if isinstance(memory.artifacts.get(artifact_name), dict) else [])
         if str(item).strip()
     ]
+    for role in _FORMAL_SPECIALIST_ROLES:
+        artifact = memory.artifacts.get(role)
+        if not isinstance(artifact, dict):
+            continue
+        for version in artifact.get("versions") or []:
+            if isinstance(version, dict):
+                dependency_used_tools.extend(
+                    str(item).strip() for item in version.get("used_tools") or [] if str(item).strip()
+                )
+    market_artifact = memory.artifacts.get("market_audience_research")
+    if isinstance(market_artifact, dict) and isinstance(market_artifact.get("product_recheck"), dict):
+        dependency_used_tools.extend(
+            str(item).strip()
+            for item in market_artifact["product_recheck"].get("used_tools") or []
+            if str(item).strip()
+        )
     used_tools = list(dict.fromkeys([*dependency_used_tools, *list(loop_result.used_tools or [])]))
     dependency_traces = list(memory.execution_trace or [])
     dependency_results = list(memory.tool_results or [])
     memory.execution_trace = [*dependency_traces, *list(loop_result.execution_trace or [])]
     memory.tool_results = [*dependency_results, *list(loop_result.tool_results or [])]
-    memory.artifacts.update(dict(loop_result.artifacts or {}))
+    protected_specialist_keys = {"market_audience_research", *_FORMAL_SPECIALIST_ROLES}
+    memory.artifacts.update({
+        key: value
+        for key, value in dict(loop_result.artifacts or {}).items()
+        if key not in protected_specialist_keys
+    })
     memory.research_notes = _merge_notes(memory.research_notes, list(loop_result.research_notes or []))
     planning_summary = _build_loop_plan_summary(
         used_tools=used_tools,

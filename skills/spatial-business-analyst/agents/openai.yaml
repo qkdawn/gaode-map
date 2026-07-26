@@ -5,3 +5,20 @@ interface:
 dependencies:
   - skill_id: cultural-tourism-theme-research
     when: cultural_heritage_or_destination_activation
+    stage: preflight
+  - skill_id: spatial-market-audience-research
+    when: formal_problem_map_confirmed
+    stage: market_discovery
+workflow_stages:
+  - stage: preflight
+    owner: cultural-tourism-theme-research
+    after: project_loaded
+  - stage: market_discovery
+    owner: spatial-market-audience-research
+    after: problem_map_confirmed
+  - stage: product_recheck
+    owner: spatial-market-audience-research
+    after: parent_drafts_ready
+  - stage: visual_editorial
+    owner: visual_evidence_editor
+    after: publication_assembly_validated

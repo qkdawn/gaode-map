@@ -14,6 +14,7 @@ AGE_ANCHOR = "由此形成四类优先使用情境："
 DIRECTION_ANCHOR = "<!-- report-anchor:directional-action-priority -->"
 POI_ROUTE_MAP_ANCHOR = "<!-- report-anchor:poi-route-map -->"
 POI_SUPPLY_STRUCTURE_ANCHOR = "<!-- report-anchor:poi-supply-structure -->"
+POI_DISTANCE_BAND_SUPPLY_ANCHOR = "<!-- report-anchor:poi-distance-band-supply -->"
 POPULATION_SUPPLY_CONTEXT_ANCHOR = "<!-- report-anchor:population-supply-context -->"
 
 
@@ -47,6 +48,10 @@ APPROVED_TEMPLATE_REGISTRY: dict[ReportVisualTemplateId, ApprovedVisualTemplate]
     "poi_supply_structure": ApprovedVisualTemplate(
         "poi_supply_structure", "15 分钟等时圈内的 POI 供给结构", "统计对象为逐点经保存的 15 分钟步行等时圈几何核验后的 POI；“≤5 分钟道路可达”仅在保存 road_edges 能形成连续道路路径时显示，未出现不代表 0。它不表示项目定位、客流、消费、经营质量、市场规模或合作关系。",
         "poi-supply-structure", ("poi.supply_structure",), POI_SUPPLY_STRUCTURE_ANCHOR,
+    ),
+    "poi_distance_band_supply_structure": ApprovedVisualTemplate(
+        "poi_distance_band_supply_structure", "项目原址 0–500m 距离带的 POI 供给结构", "统计对象为以项目分析中心为圆心、0–500m 距离带内的 2024 POI 快照。它只描述周边供给背景，不表示步行等时圈、客流、消费、经营质量或合作关系。",
+        "poi-distance-band-supply", ("poi.distance_band_supply_structure",), POI_DISTANCE_BAND_SUPPLY_ANCHOR,
     ),
 }
 

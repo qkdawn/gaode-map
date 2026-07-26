@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from modules.spatial_action.metric_result_registry import MetricResultRegistry
@@ -40,3 +42,23 @@ def test_registry_rejects_mutating_an_existing_result_id() -> None:
 
     with pytest.raises(ValueError, match="runtime_metric_result_immutable"):
         registry.register(**{**arguments, "structured_result": {"value": 2}})
+
+
+def test_registry_loads_a_versioned_persisted_metric_artifact(tmp_path) -> None:
+    artifact = tmp_path / "metric.json"
+    artifact.write_text(json.dumps({
+        "schema": "spatial-runtime-metric-result.v1",
+        "history_id": "history-1",
+        "result_id": "result:poi-band",
+        "tool_id": "poi.distance_band_supply_structure",
+        "status": "available",
+        "structured_result": {"poi_distance_band_supply_structure": {"year": 2024}},
+        "time_scope": {"year": 2024, "scope_kind": "radial_distance_band"},
+    }), encoding="utf-8")
+    registry = MetricResultRegistry()
+
+    loaded = registry.register_persisted_artifact(artifact)
+
+    assert loaded.history_id == "history-1"
+    assert loaded.tool_id == "poi.distance_band_supply_structure"
+    assert registry.list("history-1")[0].time_scope["scope_kind"] == "radial_distance_band"

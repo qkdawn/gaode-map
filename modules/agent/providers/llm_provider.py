@@ -15,7 +15,7 @@ from ..llm_digest import (
     snapshot_digest,
     trim_messages as _trim_messages_from_module,
 )
-from ..schemas import AgentMessage, AgentTranslationPack, AgentTurnOutput, AnalysisSnapshot, ContextBundle, GateDecision
+from ..schemas import AgentMessage, AgentTranslationPack, AgentTurnOutput, AnalysisSnapshot, ContextBundle, GateDecision, ToolAllocationDecision
 from .chat_parser import (
     extract_chat_completion_text as _extract_chat_completion_text_from_module,
     extract_json_object as _extract_json_object_from_module,
@@ -34,6 +34,7 @@ from .client import (
 from .prompts import (
     gate_system_prompt as _gate_system_prompt_from_module,
     synthesizer_system_prompt as _synthesizer_system_prompt_from_module,
+    tool_allocator_system_prompt as _tool_allocator_system_prompt_from_module,
 )
 
 LoopEmit = Callable[[str, Dict[str, Any]], Awaitable[None] | None]
@@ -359,6 +360,39 @@ async def run_gate_with_llm(
     if rule_decision.status == "pass" and decision.status == "pass" and not decision.summary:
         decision.summary = rule_decision.summary
     return decision
+
+
+async def run_tool_allocator_with_llm(
+    *,
+    messages: List[AgentMessage],
+    snapshot: AnalysisSnapshot,
+    context: ContextBundle,
+    agent_role: str,
+    task: str,
+    candidate_tools: List[Dict[str, Any]],
+    emit: LoopEmit | None = None,
+    runtime: LLMRuntimeConfig | None = None,
+) -> ToolAllocationDecision:
+    """Ask a tool-free specialist to make a bounded grant for one agent role."""
+
+    payload = await _invoke_json_role(
+        system_prompt=_tool_allocator_system_prompt_from_module(),
+        user_payload={
+            "agent_role": agent_role,
+            "task": task,
+            "latest_user_message": latest_user_message(messages),
+            "analysis_snapshot_digest": snapshot_digest(snapshot),
+            "context_summary": compact_context_summary_dump(context.context_summary),
+            "available_artifacts": list(context.available_artifacts or []),
+            "candidate_tools": candidate_tools,
+        },
+        emit=emit,
+        phase="tool_allocation",
+        title=f"分派工具：{agent_role}",
+        reasoning_id=f"tool-allocation:{agent_role}",
+        runtime=runtime,
+    )
+    return ToolAllocationDecision(**payload)
 
 
 async def generate_answer_output_with_llm(

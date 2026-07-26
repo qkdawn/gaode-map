@@ -13,6 +13,7 @@ _CORE_TOOL_NAMES = {
 
 _PROJECT_TOOL_NAMES = {
     "read_project_context",
+    "search_public_web",
 }
 
 _PROJECT_TOKENS = (
@@ -45,6 +46,18 @@ _SCOPE_DATASET_TOOL_NAMES = {
     "query_scope_dataset",
     "aggregate_scope_dataset",
     "read_scope_record",
+}
+
+_CORE_RESEARCH_TOOL_NAMES = _CORE_TOOL_NAMES | {"read_project_context"}
+_SPATIAL_RESEARCH_TOOL_NAMES = _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES | {"query_current_pois"}
+_ROLE_TOOL_CANDIDATES = {
+    "cultural_tourism_research": _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES | {"query_current_pois", "search_public_web"},
+    "market_audience_research": _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES | {"query_current_pois", "plan_business_analyst_analysis", "search_public_web"},
+    "spatial_structure": _SPATIAL_RESEARCH_TOOL_NAMES,
+    "positioning_product": _CORE_RESEARCH_TOOL_NAMES | {"query_current_pois"},
+    "spatial_function_programming": _SPATIAL_RESEARCH_TOOL_NAMES,
+    "operations_phasing": _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES,
+    "main_analysis": _CORE_RESEARCH_TOOL_NAMES | _SOURCE_TOOL_NAMES | _REPORT_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES | {"query_current_pois", "plan_business_analyst_analysis", "search_public_web"},
 }
 
 _BUSINESS_ANALYST_TOOL_NAMES = {
@@ -173,6 +186,22 @@ def select_react_tool_registry(
     if not selected:
         return visible
     return selected
+
+
+def tool_allocation_candidates(
+    registry: Dict[str, RegisteredTool], *, agent_role: str,
+) -> Dict[str, RegisteredTool]:
+    """Return the bounded candidate set a tool-allocation specialist may grant."""
+
+    names = _ROLE_TOOL_CANDIDATES.get(agent_role, _ROLE_TOOL_CANDIDATES["main_analysis"])
+    return {name: registry[name] for name in names if name in registry}
+
+
+def apply_tool_allocation(
+    registry: Dict[str, RegisteredTool], allowed_tools: List[str],
+) -> Dict[str, RegisteredTool]:
+    granted = {str(name).strip() for name in allowed_tools if str(name).strip()}
+    return {name: registered for name, registered in registry.items() if name in granted}
 
 
 def llm_visible_registry(registry: Dict[str, RegisteredTool], *, include_secondary: bool = False) -> Dict[str, RegisteredTool]:

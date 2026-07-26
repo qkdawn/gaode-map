@@ -17,6 +17,7 @@ from typing import Any
 CHAPTER_INDEX_SCHEMA = "spatial-business-chapter-index"
 STATE_MANIFEST_SCHEMA = "spatial-business-state-manifest"
 STATE_MANIFEST_PATH = "state/manifest.json"
+ALLOWED_ROOT_MARKDOWN = {"project-report.md", "decision-logic-map.md"}
 STATE_ARTIFACTS = {
     "project_semantic_model": {
         "path": "state/project-semantic-model.json",
@@ -373,6 +374,12 @@ def _validate_versions(
 def validate_report_dir(report_dir: str | Path) -> ValidationResult:
     root = Path(report_dir).resolve()
     result = ValidationResult(report_dir=str(root))
+    for markdown_path in sorted(root.glob("*.md")):
+        if markdown_path.name not in ALLOWED_ROOT_MARKDOWN:
+            result.errors.append(Finding(
+                "alternate_reader_report_forbidden",
+                f"Formal mode has one reader report; move or remove root Markdown output {markdown_path.name}.",
+            ))
     payload = _load_index(root, result)
     if payload is None:
         return result
@@ -484,6 +491,15 @@ def validate_report_dir(report_dir: str | Path) -> ValidationResult:
         result.errors.append(Finding("chapter_order_mismatch", "Assembled chapter order must match chapter-index.json."))
     for chapter_id in set(expected_order) - assembled_ids:
         result.errors.append(Finding("chapter_marker_missing", "Accepted chapter is missing from project-report.md.", chapter_id))
+    # Visual assets live outside accepted chapter prose, but still need to be
+    # bound to this assembled Markdown, its plan and their immutable files.
+    try:
+        from modules.report_visuals.service import validate_report_visual_bundle
+
+        for error in validate_report_visual_bundle(root):
+            result.errors.append(Finding(error.split(":", 1)[0], error))
+    except ImportError as exc:
+        result.errors.append(Finding("visual_bundle_validator_unavailable", str(exc)))
     return result
 
 

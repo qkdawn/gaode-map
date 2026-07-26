@@ -25,7 +25,7 @@ def test_skill_drives_an_adaptive_decision_report():
         "Codex 原生 Subagent",
         "请确认或修订上述问题地图",
         "publication-editorial.md",
-        "总编裁决与出版装配",
+        "总编裁决",
     ):
         assert phrase in skill
 
@@ -52,10 +52,10 @@ def test_problem_map_precedes_research_decisions_and_outline():
     assert "report/research/cultural-tourism-theme-research.md" in skill
     assert skill.index("空的对象型 `payload` 容器") < skill.index("## Step 2：取得用户确认")
     assert skill.index("report/state/problem-map.json") < skill.index("## Step 2：取得用户确认")
-    assert skill.index("## Step 2：取得用户确认") < skill.index("## Confirmed workflow")
+    assert skill.index("## Step 2：取得用户确认") < skill.index("## Step 3：完成专项研究并标注证据边界")
     assert skill.index("## Step 2：取得用户确认") < skill.index("$spatial-market-audience-research")
-    assert "report/research/spatial-market-audience-research.md" in skill
-    assert "report/research/spatial-product-market-recheck.md" in skill
+    assert "report/research/spatial-market-audience-research.md" in orchestration
+    assert "report/research/spatial-product-market-recheck.md" in orchestration
     assert model.index("## 问题地图") < model.index("## 决策清单")
     assert "波次 0 将 `decision_logic_map`、`decision_inventory` 与 `evidence_summary` 初始化为对象型空容器" in model
     assert "波次 4 写入决策条目和证据摘要" in model
@@ -68,7 +68,7 @@ def test_problem_map_precedes_research_decisions_and_outline():
     assert "章节边界按决策关系组织，数据类型进入拥有相应决策的证据包" in orchestration
     assert "章节边界跟随决策关系，不跟随数据类型" not in orchestration
 
-    problem_contract = model[model.index("## 问题地图") : model.index("## 决策清单")]
+    problem_contract = model[model.index("## 问题地图") : model.index("## 决策逻辑图")]
     for field in (
         "question:",
         "why_decisive:",
@@ -119,7 +119,7 @@ def test_orchestration_uses_editor_instead_of_low_loss_assembly():
     orchestration = read("report-orchestration.md")
 
     headings = (
-        "## 波次 0：事实底稿与问题地图",
+        "## 波次 0：事实底稿、问题地图与逻辑图容器",
         "## 波次 1-3：问题驱动的专项研究",
         "## 波次 4：决策底稿与章节责任",
         "## 波次 5：专业章节纵向循环",
@@ -235,8 +235,8 @@ def test_project_resource_research_is_a_complete_pre_semantic_workflow():
         assert phrase in workflow or phrase in research_skill
 
     assert "POI/空间搜算和公开网页检索" in skill
-    assert "项目材料、POI/空间查询和网页来源可追溯" in skill
-    assert "本轮文旅调研完成八类资源清单后" in skill
+    assert "项目材料、POI/空间查询和已打开的原始网页可追溯" in skill
+    assert "八类资源覆盖检查" in skill
     assert "历史底稿可提供线索和比较参照" in skill
     assert "specialist-workpacks.md" in research_skill
     for role in (
@@ -357,9 +357,11 @@ def test_report_example_is_retired_and_all_references_are_routed():
 def test_skill_hygiene_has_positive_steering():
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-    assert skill.count("**完成条件：**") == 3
-    for directive in ("不得", "不要", "不能", "禁止", "不重写", "不以"):
-        assert directive not in skill
+    assert skill.count("**完成条件：**") == 10
+    assert "始终交付 `report/project-report.md`" in skill
+    assert "scenario_ready" not in skill
+    assert "research_incomplete" not in skill
+    assert "条件性建议" in skill
 
 
 def test_production_has_no_retired_v41_report_contract():

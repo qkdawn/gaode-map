@@ -4,7 +4,7 @@ import json
 from modules.agent.context_builder import build_context_bundle
 from modules.agent.providers.langgraph_react import _initial_payload, _react_tool_result_payload
 from modules.agent.providers.prompts import loop_system_prompt, synthesizer_system_prompt
-from modules.agent.providers.tool_loop import select_react_tool_registry
+from modules.agent.providers.tool_loop import apply_tool_allocation, select_react_tool_registry, tool_allocation_candidates
 from modules.agent.schemas import AnalysisSnapshot, ToolResult
 from modules.agent.tool_definitions.source_evidence import search_selected_source_evidence
 from modules.agent.tools import get_tool_registry
@@ -167,6 +167,26 @@ def test_react_tool_registry_opens_contextual_tool_windows():
         include_secondary=True,
     )
     assert "plan_business_analyst_analysis" in ba_selected
+
+    web_research_selected = select_react_tool_registry(
+        registry,
+        question="请为这个历史建筑更新项目检索公开网页和竞品资料",
+        artifacts={},
+        include_secondary=True,
+    )
+    assert "search_public_web" in web_research_selected
+
+
+def test_tool_allocation_candidates_are_role_bound_and_override_keyword_windows():
+    registry = get_tool_registry()
+    cultural_candidates = tool_allocation_candidates(registry, agent_role="cultural_tourism_research")
+    market_candidates = tool_allocation_candidates(registry, agent_role="market_audience_research")
+
+    assert {"search_public_web", "query_scope_dataset", "aggregate_scope_dataset"}.issubset(cultural_candidates)
+    assert {"search_public_web", "plan_business_analyst_analysis", "query_scope_dataset"}.issubset(market_candidates)
+
+    granted = apply_tool_allocation(registry, ["read_current_scope", "search_public_web"])
+    assert list(granted) == ["read_current_scope", "search_public_web"]
 
 
 def test_selected_source_search_miss_warning_is_scoped_to_selected_sources():

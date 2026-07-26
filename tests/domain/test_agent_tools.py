@@ -33,6 +33,7 @@ def test_get_tool_registry_exposes_stage1_tools():
         "query_scope_dataset",
         "aggregate_scope_dataset",
         "read_scope_record",
+        "search_public_web",
     }
     assert registry["read_current_scope"].spec.readonly is True
     assert registry["read_project_context"].spec.readonly is True
@@ -98,6 +99,7 @@ def test_get_tool_registry_keeps_expected_tool_order():
         "query_scope_dataset",
         "aggregate_scope_dataset",
         "read_scope_record",
+        "search_public_web",
     ]
 
 

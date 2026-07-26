@@ -28,7 +28,7 @@ description: 基于项目原始材料、项目周边空间、POI 与空间搜算
 
 项目原始材料可作为其明确记载的资源、条件、约束和项目意图的直接证据，必须标注材料名称、章节或页码及其说明边界；不得把材料未明确记载的历史关系、当代活动或运营能力自行补足。POI 通常读取 `current:dataset:poi`；记录数据年份、保存时间、上游来源和查询范围。高德仅可作为快照的上游来源标识，本次调研不实时抓取高德 POI。使用 `query_history_project_dataset`、`aggregate_history_project_dataset`、`poi.supply_structure` 和 `poi.focused_accessibility` 时保留范围、年份、类别组、距离或时间阈值与数据来源。
 
-网页检索优先使用 Exa MCP：用 `web_search_exa` 建立候选来源池，再用 `web_fetch_exa` 读取候选原页正文；仅在 Exa 无法读取、页面需要交互、附件无法解析或遇到验证码时才使用浏览器兜底。优先选择政府、统计、文保、地方志、馆藏、项目或经营主体的资料。搜索摘要、二手转述和无法打开的页面仅用于发现来源。外部网页不导入项目数据库，也不要求转成 `SourceRecord` 或 `EvidenceNode`。项目材料资源表必须先行建立；外部研究按 `references/research-workflow.md`、`web-discovery-protocol.md` 和 `external-research-protocol.md` 并行补强，不得取代或阻断提示词的资源梳理与后续转译。
+网页检索使用已注册的 `search_public_web`：按项目区域、主题和来源类别建立候选来源池，并保留返回的标题、链接和摘要。优先选择政府、统计、文保、地方志、馆藏、项目或经营主体资料。搜索摘要、二手转述和无法打开的页面仅用于发现来源；未能取得可核验原页内容时，相关主张保留为待验证。外部网页不导入项目数据库，也不要求转成 `SourceRecord` 或 `EvidenceNode`。项目材料资源表必须先行建立；外部研究按 `references/research-workflow.md`、`web-discovery-protocol.md` 和 `external-research-protocol.md` 并行补强，不得取代或阻断提示词的资源梳理与后续转译。
 
 保存调研底稿至：
 

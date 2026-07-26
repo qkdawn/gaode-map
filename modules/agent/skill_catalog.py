@@ -17,6 +17,7 @@ class AgentSkillView(BaseModel):
     executable: bool = False
     diagnostic: str = ""
     dependencies: list["SkillDependencyView"] = Field(default_factory=list)
+    workflow_stages: list["SkillWorkflowStageView"] = Field(default_factory=list)
 
 
 class SkillDependencyView(BaseModel):
@@ -24,6 +25,15 @@ class SkillDependencyView(BaseModel):
 
     skill_id: str
     when: str = "always"
+    stage: str = "preflight"
+
+
+class SkillWorkflowStageView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stage: str
+    owner: str
+    after: str
 
 
 def _skills_root() -> Path:
@@ -40,6 +50,7 @@ def _frontmatter(path: Path) -> dict[str, Any]:
 
 _PROMPT_DRIVEN_SKILLS = frozenset({
     "cultural-tourism-theme-research",
+    "spatial-market-audience-research",
     "spatial-business-analyst",
 })
 
@@ -55,7 +66,27 @@ def _dependencies(interface_doc: dict[str, Any]) -> list[SkillDependencyView]:
         skill_id = str(raw.get("skill_id") or "").strip()
         if not skill_id:
             continue
-        result.append(SkillDependencyView(skill_id=skill_id, when=str(raw.get("when") or "always").strip() or "always"))
+        result.append(SkillDependencyView(
+            skill_id=skill_id,
+            when=str(raw.get("when") or "always").strip() or "always",
+            stage=str(raw.get("stage") or "preflight").strip() or "preflight",
+        ))
+    return result
+
+
+def _workflow_stages(interface_doc: dict[str, Any]) -> list[SkillWorkflowStageView]:
+    raw_stages = interface_doc.get("workflow_stages")
+    if not isinstance(raw_stages, list):
+        return []
+    result: list[SkillWorkflowStageView] = []
+    for raw in raw_stages:
+        if not isinstance(raw, dict):
+            continue
+        stage = str(raw.get("stage") or "").strip()
+        owner = str(raw.get("owner") or "").strip()
+        after = str(raw.get("after") or "").strip()
+        if stage and owner and after:
+            result.append(SkillWorkflowStageView(stage=stage, owner=owner, after=after))
     return result
 
 
@@ -80,6 +111,7 @@ def list_agent_skills() -> list[AgentSkillView]:
                 executable=executable,
                 diagnostic="" if executable else "Skill 尚未注册执行器",
                 dependencies=_dependencies(interface_doc),
+                workflow_stages=_workflow_stages(interface_doc),
             ))
         except (OSError, yaml.YAMLError, TypeError, ValueError):
             continue

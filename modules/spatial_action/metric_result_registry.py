@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import json
+from pathlib import Path
 from threading import RLock
 from typing import Any, Mapping
 
@@ -74,6 +76,24 @@ class MetricResultRegistry:
                 for (record_history_id, _), record in self._results.items()
                 if record_history_id == normalized_history_id
             ]
+
+    def register_persisted_artifact(self, artifact_path: str | Path) -> RuntimeMetricResult:
+        """Load one immutable, versioned result produced outside this process."""
+        path = Path(artifact_path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema") != "spatial-runtime-metric-result.v1":
+            raise ValueError("persisted_metric_result_schema_invalid")
+        required = ("history_id", "result_id", "tool_id", "status", "structured_result", "time_scope")
+        if any(field not in payload for field in required):
+            raise ValueError("persisted_metric_result_fields_missing")
+        return self.register(
+            history_id=payload["history_id"],
+            result_id=payload["result_id"],
+            tool_id=payload["tool_id"],
+            status=payload["status"],
+            structured_result=payload["structured_result"],
+            time_scope=payload["time_scope"],
+        )
 
     @staticmethod
     def _copy(record: RuntimeMetricResult) -> RuntimeMetricResult:

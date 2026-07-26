@@ -4,11 +4,13 @@ from __future__ import annotations
 import json
 import os
 import re
+from hashlib import sha256
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
 from core.svg_safety import validate_safe_svg
+from .schemas import VisualManifest
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 _ASSET_PATH = re.compile(r"^assets/[A-Za-z0-9._-]+\.svg$")
@@ -80,6 +82,8 @@ class ReportVegaVisualAssetStore:
     def read_asset(self, *, history_id: str, report_id: str, asset_id: str) -> str:
         item = self._manifest_asset_item(history_id=history_id, report_id=report_id, asset_id=asset_id)
         target = self._asset_path_from_item(history_id=history_id, report_id=report_id, item=item)
+        if item.get("asset_sha256") != sha256(target.read_bytes()).hexdigest():
+            raise LookupError("report_vega_visual_asset_checksum_mismatch")
         svg = target.read_text(encoding="utf-8")
         validate_safe_svg(svg)
         return svg
@@ -87,17 +91,21 @@ class ReportVegaVisualAssetStore:
     def write_manifest(self, *, history_id: str, report_id: str, manifest: dict[str, Any]) -> None:
         directory = self._directory(history_id, report_id)
         directory.mkdir(parents=True, exist_ok=True)
+        validated = VisualManifest.model_validate(manifest)
         target = directory / "visual-manifest.json"
         temporary = target.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        temporary.write_text(validated.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n")
         os.replace(temporary, target)
 
     def read_manifest(self, *, history_id: str, report_id: str) -> dict[str, Any]:
         target = self._required_file(self._directory(history_id, report_id) / "visual-manifest.json", "report_vega_visual_manifest_not_found")
-        value = json.loads(target.read_text(encoding="utf-8"))
-        if not isinstance(value, dict) or value.get("history_id") != history_id or value.get("report_id") != report_id:
+        try:
+            value = VisualManifest.model_validate_json(target.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise LookupError("report_vega_visual_manifest_not_found") from exc
+        if value.history_id != history_id or value.report_id != report_id:
             raise LookupError("report_vega_visual_manifest_not_found")
-        return deepcopy(value)
+        return value.model_dump(mode="json")
 
     @staticmethod
     def validate_asset_path(value: str) -> None:

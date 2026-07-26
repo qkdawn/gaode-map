@@ -45,6 +45,7 @@ _METRIC_REQUEST_FIELDS = {
     "population.age_structure": "age_structure",
     "regional.directional_evidence_matrix": "directional_evidence_matrix",
     "poi.supply_structure": "poi_supply_structure",
+    "poi.distance_band_supply_structure": "poi_distance_band_supply_structure",
     "poi.focused_accessibility": "focused_poi_accessibility",
 }
 
@@ -129,6 +130,7 @@ class ReportVegaVisualTools:
         self._validate_editor_plan(plan)
         current_results = self._runtime_metric_results(normalized_history_id)
         renderer_payload = self._resolve_renderer_payload(plan, current_results)
+        provenance = self._metric_provenance(plan, current_results)
         report_path = self._assets.prepare_report(
             history_id=normalized_history_id,
             report_id=normalized_report_id,
@@ -137,8 +139,11 @@ class ReportVegaVisualTools:
         manifest = render_report_visuals(
             {
                 "run_id": plan.run_id,
+                "history_id": normalized_history_id,
+                "report_id": normalized_report_id,
                 "report_path": report_path,
                 "visual_plan": plan.model_dump(mode="json"),
+                "metric_result_provenance": provenance,
                 **renderer_payload,
             }
         )
@@ -313,6 +318,25 @@ class ReportVegaVisualTools:
                 request_values[field] = value
         return request_values
 
+    @staticmethod
+    def _metric_provenance(plan: VisualPlan, persisted: Mapping[str, _PersistedMetricResult]) -> dict[str, dict[str, Any]]:
+        """Expose only immutable result identity, scope and content fingerprint."""
+        import hashlib
+        import json
+
+        selected = {result_id for item in plan.items for result_id in item.metric_result_ids}
+        return {
+            result_id: {
+                "tool_id": persisted[result_id].tool_id,
+                "time_scope": deepcopy(persisted[result_id].time_scope),
+                "result_sha256": hashlib.sha256(
+                    json.dumps(persisted[result_id].structured_result, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest(),
+            }
+            for result_id in selected
+            if result_id in persisted
+        }
+
     def _enriched_manifest(
         self,
         *,
@@ -337,15 +361,16 @@ class ReportVegaVisualTools:
                 self._assets.validate_asset_path(asset_path)
                 item["resource_uri"] = self._assets.asset_resource_uri(history_id, report_id, template_id)
             items.append(item)
-        return {
-            "schema_version": "report-vega-visuals.v1",
+        enriched = deepcopy(dict(manifest))
+        enriched.update({
             "history_id": history_id,
             "report_id": report_id,
             "run_id": plan.run_id,
             "report_resource_uri": self._assets.report_resource_uri(history_id, report_id),
             "visual_plan_resource_uri": self._assets.plan_resource_uri(history_id, report_id),
             "items": items,
-        }
+        })
+        return enriched
 
 
 _default_tools = ReportVegaVisualTools()

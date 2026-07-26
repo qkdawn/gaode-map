@@ -18,8 +18,16 @@ def test_spatial_business_analyst_registers_dependency_executor():
     assert skills["spatial-business-analyst"].executable is True
     assert skills["spatial-business-analyst"].dependencies[0].skill_id == "cultural-tourism-theme-research"
     assert "spatial-market-audience-research" in skills
-    assert skills["spatial-market-audience-research"].executable is False
-    assert skills["spatial-market-audience-research"].diagnostic == "Skill 尚未注册执行器"
+    assert skills["spatial-market-audience-research"].executable is True
+    assert skills["spatial-market-audience-research"].diagnostic == ""
+    assert skills["spatial-business-analyst"].dependencies[1].skill_id == "spatial-market-audience-research"
+    assert skills["spatial-business-analyst"].dependencies[1].stage == "market_discovery"
+    assert [stage.stage for stage in skills["spatial-business-analyst"].workflow_stages] == [
+        "preflight",
+        "market_discovery",
+        "product_recheck",
+        "visual_editorial",
+    ]
 
 
 def test_spatial_business_skill_focuses_on_codex_workflow_and_reader_report():
@@ -27,7 +35,7 @@ def test_spatial_business_skill_focuses_on_codex_workflow_and_reader_report():
     for phrase in (
         "Codex 原生 Subagent",
         "定位、空间产品、运营与分期",
-        "自然 Markdown",
+        "始终交付 `report/project-report.md`",
         "list_spatial_metric_results",
         "report/state/manifest.json",
         "report-visual-workflow.md",
@@ -83,9 +91,9 @@ def test_cultural_tourism_theme_research_skill_has_standard_metadata_and_workflo
     assert "aggregate_history_project_dataset" in skill_text
     assert "poi.supply_structure" in skill_text
     assert "poi.focused_accessibility" in skill_text
-    assert "## 前置完成门" in skill_text
-    assert "八类资源的清单" in skill_text
-    assert "本轮项目材料、POI/空间查询与公开来源检索" in skill_text
+    assert "## 执行步骤" in skill_text
+    assert "八类资源" in skill_text
+    assert "项目材料资源表必须先行建立" in skill_text
     assert "历史调研底稿可用于发现线索和比较变化" in skill_text
     assert interface["display_name"] == "文旅主题调研"
     assert 25 <= len(interface["short_description"]) <= 80

@@ -76,17 +76,17 @@ report/state/manifest.json
 
 **完成条件：** 当前问题地图获得明确确认，状态文件与 manifest 的 snapshot version 和 checksum 一致。
 
-## Step 3：完成专项研究并裁定证据状态
+## Step 3：完成专项研究并标注证据边界
 
-读取 `references/report-orchestration.md`、`references/specialist-roles.md`、`references/analysis-blueprint-and-tools.md` 与 `references/decision-rulebook.md`。先按规则手册建立“事实/证据 -> 条件判断 -> 候选与反例 -> 当前动作 -> 验证条件”的决策逻辑图，再分派专项研究。所有正式报告完整执行 `$spatial-market-audience-research`：先以 `market_discovery` 建立客群证据，再在定位、空间和运营草案后以 `product_recheck` 完成逐产品校核。用户要求依据现有资料完成完整但非确证的推演时，额外读取 `references/scenario-simulation-contract.md`，以完整十部分情景推演替代“只交付缺口清单”的出口。选择空间指标时读取 `references/metric-selection.md`、`references/spatial-inference-rules.md`；多空间对象或再利用项目读取 `references/spatial-unit-programming.md`。先复用持久化指标，只有会改变规则节点的行动时才补充执行。
+读取 `references/report-orchestration.md`、`references/specialist-roles.md`、`references/analysis-blueprint-and-tools.md` 与 `references/decision-rulebook.md`。先按规则手册建立“事实/证据 -> 条件判断 -> 候选与反例 -> 当前动作 -> 验证条件”的决策逻辑图，再分派专项研究。所有正式报告完整执行 `$spatial-market-audience-research`：先以 `market_discovery` 建立客群证据，再在定位、空间和运营草案后以 `product_recheck` 完成逐产品校核。市场公开研究覆盖统计、政策规划、文保档案、片区供给、直接及区域竞品、文化机构或机构采购、公开价格与活动；单页失效或一次查询为空时继续改写查询和替换来源。用户要求依据现有资料完成完整但非确证的推演时，按 `report-contract.md` 的条件性建议规则将完整十部分推演写入同一份正式报告。选择空间指标时读取 `references/metric-selection.md`、`references/spatial-inference-rules.md`；多空间对象或再利用项目读取 `references/spatial-unit-programming.md`。先复用持久化指标，只有会改变规则节点的行动时才补充执行。
 
-将每个问题的来源、比较基准、反证、证据等级和未闭合义务写入证据摘要；每个规则节点必须写明其条件、结论、反例、指标边界和改判条件，再按本 Skill 的证据状态规则裁定：`decision_ready`、`scenario_ready` 或 `research_incomplete`。
+将每个问题的来源、比较基准、反证、证据等级和未闭合义务写入证据摘要；每个规则节点必须写明其条件、结论、反例、指标边界和改判条件。对无法由项目材料直接回答的问题，先完成公开网页检索；仍无直接记录时，以可追溯代理、显式假设和验证动作完成条件性推断，不能把缺口变成停止撰写报告的理由。
 
-**完成条件：** 所有适用专项的输出均已形成。`decision_ready` 的每项正式选择通过 evidence-closed 检查；`scenario_ready` 的每项情景均已声明事实输入、假设参数、推演规则、结果范围、反证和停止条件。`research_incomplete` 时交付研究底稿和取证/试验计划后结束；不得进入 Step 4。
+**完成条件：** 所有适用专项的输出均已形成；每项建议均已标明为直接证据、公开检索证据、代理推断、情景假设或待验证，并包含反证和改判条件。
 
 ## Step 4：收敛可决策选择
 
-仅在 `decision_ready` 时将决策逻辑图中已闭合的规则节点写入 `decision_inventory`。每项重要选择记录候选取舍、证据 ID、反例、能力要求、机会成本和改判条件；每项只有一个章节所有者。`scenario_ready` 时保留带显式假设的规则节点，不创建正式决策清单，改为交付情景推演：比较可控变量、候选服务对象、空间与运营安排、结果范围、失效信号和校准记录。`research_pending`、`conditional_test` 和 `excluded` 保留在逻辑图、证据摘要与取证计划中，不升级为当前选择。
+将所有能改变项目路径的规则节点写入 `decision_inventory`。每项重要选择记录候选取舍、证据 ID、反例、能力要求、机会成本和改判条件，并标明“当前建议”“条件性建议”或“暂不建议”；每项只有一个章节所有者。条件性建议必须给出事实输入、假设参数、推演规则、结果范围、失效信号和校准记录。`research_pending`、`conditional_test` 和 `excluded` 保留在逻辑图、证据摘要与取证计划中，并在正式报告中说明其对当前建议的影响。
 
 **完成条件：** 决策清单覆盖所有当前选择，每项有唯一所有者与准入证据，依赖关系可由后续章节消费。
 
@@ -98,7 +98,7 @@ report/state/manifest.json
 
 ## Step 6：全稿审校与总编裁决
 
-完成逐章接受后，执行跨章反方与深度审校。读取 `references/publication-editorial.md`，将跨章冲突、重复论证和不清楚的决策归属退回唯一章节所有者定向返写。
+完成逐章接受后，执行跨章反方与深度审校。读取 `references/publication-editorial.md`，将跨章冲突、重复论证和不清楚的决策归属退回唯一章节所有者定向返写。总编必须让资源主题、区位市场竞争、客群行为、定位比较、空间产品、运营分期、产品市场再校核和实施验证门形成读者可见的结论链；专项底稿不能只被压缩成共同风险。
 
 **完成条件：** 全稿意见均已裁定并闭合；每个重要选择、共同事实和代理边界都有唯一完整正文归属。
 
@@ -111,39 +111,35 @@ python skills/spatial-business-analyst/scripts/validate_chapter_assembly.py --re
 python skills/spatial-business-analyst/scripts/render_decision_logic_map.py --report-dir <report-directory>
 ~~~
 
-**完成条件：** 装配校验通过。该结果仅表示结构和正文保真通过，不能替代 Step 3 的 evidence-closed 状态。
+**完成条件：** 装配校验通过。该结果仅表示结构和正文保真通过，不能替代 Step 3 的证据边界、结论强度和公开检索完成检查。
 
 ## Step 8：独立视觉证据编辑
 
-装配通过后，启动独立视觉证据编辑并完整读取 `references/report-visual-workflow.md`。它仅选择能改变相邻判断、且能由真实持久化结果与批准模板支撑的视觉；零视觉是有效结果。
+装配通过后，启动独立视觉证据编辑并完整读取 `references/report-visual-workflow.md`。它仅选择能改变相邻判断、且能由本轮同一项目、范围和年份的真实持久化结果与批准模板支撑的视觉。存在有效候选时必须重新渲染并插入，不得复制历史资产；零视觉只在所有候选均有具体省略理由时有效。
 
-**完成条件：** `visual-plan.json` 和 `visual-manifest.json` 记录每项生成或省略理由；视觉不改变接受章节正文，生成后重新通过装配校验。
+**完成条件：** `visual-plan.json` 和 `visual-manifest.json` 记录每项生成或省略理由；planned 项均已生成，Markdown、manifest、资产和校验和一致；视觉不改变接受章节正文，生成后重新通过装配与视觉来源校验。
 
 ## Step 9：交付与回归
 
-`decision_ready` 时交付正式综合报告，并说明当前选择、关键证据、反证和实施前提。`scenario_ready` 时交付情景推演报告，明确它不是最终定位、客流预测、收入预测或实施承诺。`research_incomplete` 时只交付研究底稿与下一轮取证计划。修改本 Skill 或回归验证时读取 `references/adaptive-forward-tests.md`。
+始终交付 `report/project-report.md` 正式综合报告，并说明当前建议、条件性建议、关键证据、公开检索结果、代理边界、反证和实施前提。只有公开检索仍无法取得的项目级客流、支付、许可、成本、容量或运营记录进入参数、范围、公式和验证计划，不伪装为事实。修改本 Skill 或回归验证时读取 `references/adaptive-forward-tests.md`。
 
-**完成条件：** 交付名称与 Step 3 的证据状态一致；用户不会把研究底稿误解为完成报告。
+**完成条件：** 已交付唯一的正式综合报告；读者不会将条件性建议或暂不建议误解为已验证的实施承诺。
 
 `report-contract.md` 是正式模式的硬契约唯一事实源；编排、角色、分析质量、出版裁决和视觉文件分别拥有时序、职责、质量判断、读者表达和视觉工具细节。正式报告默认保存 Markdown，用户明确要求时再导出 HTML 或 PDF。
 
-## Evidence-closed gate
+## 证据表达门
 
-将 **evidence-closed** 作为正式报告的完成锚点：状态文件完整、章节被接受和装配通过只说明报告可恢复、可装配，不能说明研究已经完成。
+将 **evidence-closed** 作为“可直接实施”的判断锚点，而不是正式报告的交付门槛。状态文件完整、章节被接受和装配通过说明报告可恢复、可装配；每项建议的证据强度由报告内的证据标签和实施前提说明。
 
-在波次 4 写入决策清单前，主 Agent 必须为每个已确认决策问题完成下列闭合检查，并把结果写入证据摘要：
+在波次 4 写入决策清单前，主 Agent 必须为每个已确认决策问题完成下列检查，并把结果写入证据摘要：
 
 1. 逐一列出适用的主题、市场、空间、运营或实施研究义务，以及每项所用原始来源、比较基准、反证结果和当前证据等级；不适用项写明项目特征与不适用理由。
 2. 市场研究的每个候选客群均有“市场母体/服务对象、可达或到达机制、竞争或替代供给、需求与支付或公共服务履约”四项结果。缺少直接证据时，结果必须包含获取方式、样本或记录口径、责任方、完成日期前的验收记录；“缺数据”本身不是通过结果。
 3. 文旅主题研究须完整交付其 Skill 要求的资源分级、关系分析与网络、候选比较、主题裁决或“不形成主叙事”的裁决，以及与现有证据相称的故事线、空间场景和运营转化。每个未能提出的场景都说明缺少的真实对象或约束，不以概念段落代替。
-4. 进入正式选择的定位、目标客群、产品、业态和分期分别有满足其项目类型的准入证据。未满足的内容保留为 `research_pending`、`conditional_test` 或 `excluded`，不写入“当前选择”“首开方案”或“目标客群”。
+4. 定位、客群、产品、业态和分期分别标明其结论类型。具有准入证据的内容可写为“当前建议”；缺少直接记录但可由公开检索、代理或比较推演支撑的内容写为“条件性建议”；无法形成合理比较的内容写为“暂不建议”，并说明需要补取的记录。
 
-证据状态有三种输出：
-
-- `decision_ready`：所有进入决策清单的选择均已满足准入；可以进入章节、装配和“正式综合报告”交付。
-- `scenario_ready`：项目事实、空间条件和比较路径足以构造一个或多个可复核情景，但正式选择的直接市场、许可、支付、运营或承载证据尚未闭合。完整阅读 `references/scenario-simulation-contract.md`，按其十部分结构交付 `report/scenario-simulation.md`：可形成推演客群、推演产品、推演业态、容量与经济情景以及推演分期，但每项必须逐项列出事实输入、显式假设及其范围、推演规则或公式、输出范围、反证、停止条件和校准数据。不得把推演服务对象称为已确认目标客群，不得将结果写成真实客流、收入、ROI 或实施承诺；不得进入正式决策清单、章节装配或完成报告。
-- `research_incomplete`：至少一个必需研究义务仍未闭合；只可交付“研究底稿与取证/试验计划”，明确未完成的工作包、责任、证据口径和重新进入决策的条件。不得将其称为完成报告、最终定位、目标客群或实施方案。
+所有结论进入同一份正式综合报告。报告必须使用以下证据标签：`直接证据`、`公开检索证据`、`代理推断`、`情景假设`、`待验证`。代理推断和情景假设必须标明事实输入、参数范围、推演规则、输出范围、反证、停止条件和校准记录；不得把它们写成真实客流、收入、ROI、许可或已获批的实施承诺。
 
 ## Completion gate
 
-只有 `decision_ready` 才能交付完成报告。交付前确认问题地图已确认、evidence-closed 检查逐项通过、状态 manifest 可恢复、`decision_inventory` 覆盖的重要选择均具备准入证据且唯一归属章节、章节双审校与总编裁决已闭合、装配校验通过，以及视觉和导出遵守各自契约。`scenario_ready` 的交付名称必须如实表述为情景推演；`research_incomplete` 的交付名称和摘要必须如实表述为研究底稿，二者均不得使用完成性措辞。
+每次完整运行都交付正式综合报告。交付前确认问题地图已确认、状态 manifest 可恢复、`decision_inventory` 覆盖重要选择且具有唯一章节归属、章节双审校与总编裁决已闭合、装配校验通过，以及视觉和导出遵守各自契约。报告必须让读者能一眼区分当前建议、条件性建议和暂不建议，并看到每项条件性建议升级或退出的记录条件。

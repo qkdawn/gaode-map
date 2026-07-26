@@ -146,6 +146,8 @@ POI_SUPPLY_STRUCTURE_CAPTION = (
     "统计对象为逐点经保存的 15 分钟步行等时圈几何核验后的 POI；深色表示等时圈内数量。"
     "浅色仅在保存路网的连续道路可达性可用时表示≤5分钟可达数量，未出现不代表 0。"
 )
+POI_DISTANCE_BAND_SUPPLY_TITLE = "项目原址 0–500m 距离带的 POI 供给结构"
+POI_DISTANCE_BAND_SUPPLY_CAPTION = "统计口径：以项目分析中心为圆心的 0–500m 距离带，数据年份为 2024。该距离带不是 15 分钟步行等时圈，不证明客流、进入、停留、消费或支付。"
 _SUPPLY_ROLE_TITLES = {
     "complementary_anchor": "项目所需配套",
     "comparison_supply": "同类对标供给",
@@ -228,6 +230,60 @@ def normalize_poi_supply_structure(raw: dict[str, Any] | None) -> dict[str, Any]
             for item in payload.get("groups") or []
             if isinstance(item, dict) and str(item.get("status") or "available") not in {"available", "partial"}
         ],
+    }
+
+
+def normalize_poi_distance_band_supply_structure(raw: dict[str, Any] | None) -> dict[str, Any] | str:
+    """Accept only an explicit 0–500m radial distance-band result."""
+    if not isinstance(raw, dict):
+        return "缺少 poi.distance_band_supply_structure 结构化指标"
+    payload = raw.get("poi_distance_band_supply_structure") if isinstance(raw.get("poi_distance_band_supply_structure"), dict) else raw
+    scope = payload.get("scope") if isinstance(payload.get("scope"), dict) else {}
+    if (
+        scope.get("kind") != "radial_distance_band"
+        or scope.get("inner_radius_m") != 0
+        or scope.get("outer_radius_m") != 500
+        or scope.get("distance_method") != "geodesic_center_band"
+    ):
+        return "POI 距离带图只接受明确的项目原址 0–500m geodesic 距离带口径，不能使用 walking 等时圈"
+    try:
+        year = int(payload.get("year"))
+    except (TypeError, ValueError):
+        return "POI 距离带图缺少数据年份"
+    categories = payload.get("categories")
+    if not isinstance(categories, list) or not categories:
+        return "POI 距离带图缺少分类计数"
+    values: list[dict[str, Any]] = []
+    for category in categories:
+        if not isinstance(category, dict):
+            return "POI 距离带图包含无效分类"
+        label = str(category.get("label") or "").strip()
+        count = _nonnegative_integer(category.get("count"))
+        if not label or count is None:
+            return "POI 距离带图分类缺少名称或整数计数"
+        values.append({"label": label, "count": count, "display": str(count)})
+    return {
+        "year": year,
+        "scope": scope,
+        "categories": sorted(values, key=lambda item: (-item["count"], item["label"])),
+        "total_count": _nonnegative_integer(payload.get("total_count")),
+    }
+
+
+def poi_distance_band_supply_structure_spec(categories: list[dict[str, Any]], *, year: int) -> dict[str, Any]:
+    maximum = max(item["count"] for item in categories)
+    return {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "description": "项目原址 0–500m geodesic 距离带的 2024 POI 分类供给，不是步行等时圈。",
+        "width": 680,
+        "height": max(260, len(categories) * 30),
+        "title": {"text": f"{POI_DISTANCE_BAND_SUPPLY_TITLE}（{year}）", "anchor": "start", "font": _FONT, "fontSize": 20, "fontWeight": 700, "color": "#172033", "offset": 18},
+        "data": {"values": categories},
+        "layer": [
+            {"mark": {"type": "bar", "cornerRadiusEnd": 4, "color": "#2F6B8A", "height": 17}, "encoding": {"y": {"field": "label", "type": "ordinal", "sort": {"field": "count", "order": "descending"}, "axis": {"title": None, "labelFont": _FONT, "labelFontSize": 12, "labelColor": "#334155", "domain": False, "ticks": False}}, "x": {"field": "count", "type": "quantitative", "scale": {"domain": [0, max(2, math.ceil(maximum * 1.15))]}, "axis": {"title": "POI 数量", "titleFont": _FONT, "labelFont": _FONT, "titleColor": "#475569", "labelColor": "#64748B", "gridColor": "#E2E8F0", "domain": False}}, "tooltip": [{"field": "label", "title": "分类"}, {"field": "count", "title": "POI 数量"}]}} ,
+            {"mark": {"type": "text", "align": "left", "baseline": "middle", "dx": 5, "font": _FONT, "fontSize": 11, "fontWeight": 700, "color": "#172033"}, "encoding": {"y": {"field": "label", "type": "ordinal", "sort": {"field": "count", "order": "descending"}}, "x": {"field": "count", "type": "quantitative"}, "text": {"field": "display"}}},
+        ],
+        "config": {"view": {"stroke": None}, "background": "#FFFFFF"},
     }
 
 
