@@ -104,6 +104,14 @@ def _artifact_catalog(artifacts: Dict[str, Any]) -> Dict[str, Any]:
             "conflict_count": len(conflicts),
             "warnings": list(dossier.get("warnings") or [])[:6],
         }
+    if artifacts.get("cultural_tourism_research"):
+        research = artifacts.get("cultural_tourism_research") if isinstance(artifacts.get("cultural_tourism_research"), dict) else {}
+        catalog["cultural_tourism_research"] = {
+            "purpose": "本轮已完成的文旅前置调研结果。spatial-business-analyst 只消费其资源关系、约束、候选主题和待验证事项，不重复执行八类资源、POI 或网页检索。",
+            "skill_id": str(research.get("skill_id") or "cultural-tourism-theme-research"),
+            "status": str(research.get("status") or ""),
+            "summary": str(research.get("summary") or ""),
+        }
     if artifacts.get("business_analyst_skeleton"):
         ba_skeleton = artifacts.get("business_analyst_skeleton") if isinstance(artifacts.get("business_analyst_skeleton"), dict) else {}
         selected_skill = ba_skeleton.get("selected_skill") if isinstance(ba_skeleton.get("selected_skill"), dict) else {}
@@ -235,6 +243,7 @@ async def run_langgraph_react_loop(
     max_errors_override: Optional[int] = None,
     initial_artifacts: Optional[Dict[str, Any]] = None,
     llm_runtime: LLMRuntimeConfig | None = None,
+    system_instruction: str = "",
 ) -> ToolLoopResult:
     from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
     from langchain_openai import ChatOpenAI
@@ -476,8 +485,11 @@ async def run_langgraph_react_loop(
     app = graph.compile()
 
     result = ToolLoopResult(status="completed", artifacts=dict(initial_artifacts or {}))
+    prompt = loop_system_prompt()
+    if str(system_instruction or "").strip():
+        prompt = f"{prompt}\n\n## 当前执行的 Skill 合同\n{str(system_instruction).strip()}"
     initial_messages = [
-        SystemMessage(content=loop_system_prompt()),
+        SystemMessage(content=prompt),
         HumanMessage(content=_safe_json(_initial_payload(question=question, snapshot=snapshot, context=context_bundle, registry=visible_registry, artifacts=initial_artifacts))),
     ]
     final_state = await app.ainvoke(

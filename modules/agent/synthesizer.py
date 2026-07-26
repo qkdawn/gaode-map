@@ -488,6 +488,11 @@ def build_answer_evidence_payload(
     key_evidence = _select_key_evidence(evidence, question=question)
     business_analyst_skeleton = _business_analyst_skeleton_block(artifacts)
     project_evidence_dossier = _project_evidence_dossier_block(artifacts)
+    cultural_tourism_research = (
+        dict(artifacts.get("cultural_tourism_research"))
+        if isinstance(artifacts.get("cultural_tourism_research"), dict)
+        else {}
+    )
     base_payload = {
         "question": question,
         "tool_chain": [result.tool_name for result in tool_results if result.status == "success"],
@@ -505,6 +510,7 @@ def build_answer_evidence_payload(
         "target_supply_gap": target_supply_gap,
         "frontend_visual_snapshots": _frontend_visual_snapshot_block(artifacts, research_notes),
         "project_evidence_dossier": project_evidence_dossier,
+        "cultural_tourism_research": cultural_tourism_research,
         "map_search_context": {
             "available": bool((artifacts or {}).get("frontend_map_search_context")),
             "artifact_key": "frontend_map_search_context" if (artifacts or {}).get("frontend_map_search_context") else "",

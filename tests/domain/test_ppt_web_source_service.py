@@ -1,9 +1,16 @@
 import asyncio
 
+import pytest
+
 from modules.ppt_planning.schemas import PptWebSourceCommitRequest, PptWebSourceLocationDefaultRequest, PptWebSourceSearchRequest
 from modules.ppt_web_source import service
 from modules.web_crawler import WebPageCrawlResult
 from modules.web_crawler import crawler
+
+
+@pytest.fixture(autouse=True)
+def _use_searxng_in_existing_web_source_tests(monkeypatch):
+    monkeypatch.setattr(service.settings, "web_search_provider", "searxng")
 
 
 def test_web_source_location_default_uses_amap_regeo_names(monkeypatch):
@@ -157,6 +164,61 @@ def test_web_source_fetches_and_ranks_searxng_candidates(monkeypatch):
     assert result["title"] == "岳麓区概况"
     assert captured["url"] == "http://searxng.local/search"
     assert "site:yuelu.gov.cn" in captured["params"]["q"]
+
+
+def test_web_source_fetches_anysearch_candidates(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def json(self):
+            return {
+                "result": {
+                    "content": [{
+                        "type": "text",
+                        "text": (
+                            "## Search Results\n\n"
+                            "### 1. 岳麓区文旅案例\n"
+                            "- **URL**: https://example.gov.cn/tourism\n"
+                            "- 岳麓区文旅项目的公开资料。"
+                        ),
+                    }],
+                },
+            }
+
+        def raise_for_status(self):
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(service.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(service.settings, "web_search_provider", "anysearch")
+    monkeypatch.setattr(service.settings, "anysearch_api_key", "as_sk_test")
+
+    result = asyncio.run(service._search_public_web("岳麓区 文旅案例", limit=3))
+
+    assert result == [{
+        "title": "岳麓区文旅案例",
+        "url": "https://example.gov.cn/tourism",
+        "content": "岳麓区文旅项目的公开资料。",
+    }]
+    assert captured["url"] == service.ANYSEARCH_MCP_URL
+    assert captured["json"]["params"]["name"] == "search"
+    assert captured["json"]["params"]["arguments"] == {"query": "岳麓区 文旅案例", "max_results": 3}
+    assert captured["headers"]["Authorization"] == "Bearer as_sk_test"
 
 
 def test_web_source_preview_backfills_open_search_when_trusted_results_are_sparse(monkeypatch):

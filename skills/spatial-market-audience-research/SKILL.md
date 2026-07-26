@@ -1,0 +1,54 @@
+---
+name: spatial-market-audience-research
+description: 基于项目材料、空间范围、空间指标与公开市场资料，完成项目条件、候选客群、客源圈、竞争缺口、需求支付、目标客群、行为断点、产品任务和产品市场再校核。用于独立开展市场与客群研究、竞品与可达性验证、产品规模和分期校核，或作为 spatial-business-analyst 正式综合报告的问题地图确认后研究环节。
+---
+
+# Spatial Market Audience Research
+
+把空间与市场证据转成可改判的客群和产品判断。根据当前调用阶段读取下方指定内容并执行对应工作流。
+
+## 输入
+
+读取项目原始材料、项目位置或空间范围、可用数据集与指标、已知政策和运营约束。作为 `$spatial-business-analyst` 的组成部分时，同时读取已确认的 `problem-map.json`、项目语义模型和可用的主题调研底稿；只研究已确认问题及其反证。
+
+公开资料的取证、引用和证据边界遵循 `references/research-workflow.md` 的“研究原则与证据等级”。
+
+## 两阶段调用
+
+### market_discovery
+
+本阶段读取：
+
+- `references/research-workflow.md` 的“研究原则与证据等级”、第一步至第六步、“项目类型适配”，以及“输出与自检”中的 `market_discovery` 要求。
+- `references/specialist-workpacks.md` 的“编排原则”、工作包 1-5，以及第一份稳定报告的交付约定。
+
+在问题地图确认后启动六个工作包中的前五个。形成项目条件、候选客群以及市场母体与客源圈流向、竞争缺口、需求与支付三路验证，再由目标客群与行为综合师作出唯一的目标客群判断。保存：
+
+```text
+report/research/spatial-market-audience-research.md
+```
+
+该报告包含项目条件、候选客群、验证结果、目标与排除客群、行为链、行为断点和产品任务。产品任务说明需要解决的使用或消费问题，不代替主分析中的具体定位、空间产品和业态裁决。
+
+### product_recheck
+
+本阶段读取：
+
+- `references/research-workflow.md` 的“研究原则与证据等级”、“第七步：产品市场再校核”、“项目类型适配”，以及“输出与自检”中的 `product_recheck` 要求。
+- `references/specialist-workpacks.md` 的“编排原则”、工作包 6，以及第二份稳定报告的交付约定。
+
+在定位、空间功能和运营方案初稿形成后启动产品市场再校核分析师。校核客群覆盖、容量、价格或价值交换、收入与成本、运营主体和实施分期，保存：
+
+```text
+report/research/spatial-product-market-recheck.md
+```
+
+校核报告提出成立、缩减、验证后实施或退出建议；返写与再次校核遵循研究工作流，最终裁决由主 Agent 写入 `decision_inventory`。
+
+## 独立使用
+
+用户单独要求完整市场、客群、产品或业态研究时，先执行 `market_discovery`，再基于已验证客群形成明确标注为候选的产品与业态，最后执行 `product_recheck`。用户明确要求情景推演时，即使直接经营、支付或使用证据不完整，也可完成项目条件、候选客群、市场参数、推演客群、行为链、产品、业态、容量、经济和分期的完整推演；每项缺失数据必须转成显式参数范围、推演规则或公式、输出范围、失效信号和校准记录，不补造真实客流、价格、收入或回报。作为 `$spatial-business-analyst` 的组成部分时，完整结构、命名和审校遵循其 `references/scenario-simulation-contract.md`。
+
+## 完成条件
+
+对应阶段的稳定报告已经形成，并通过 `references/research-workflow.md` 中该阶段的输出与自检要求。

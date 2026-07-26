@@ -33,9 +33,9 @@ decision_metric_bundles:
       - population.total
       - nightlight.sector_profile
       - poi.grid_density
-    spatial_contract: 同一共同栅格和方向/距离带；区域代理与项目内居民约束分开比较。
+    spatial_contract: 同一共同栅格和方向/距离带；区域代理与项目内利益相关者约束分开比较。
     synthesis_rule: 人口提出场景，夜光提出观察时段，POI提供周边供给背景；三者都不能替代访谈、参与和复访数据。
-    action_change: 改变访谈对象、试验时段、活动规模和居民影响核验顺序。
+    action_change: 改变访谈对象、试验时段、活动规模和利益相关者影响核验顺序。
     cannot_conclude: 已确认客群、偏好、付费意愿或真实客流。
 
   - bundle_id: content-service

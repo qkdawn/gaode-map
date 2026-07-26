@@ -13,6 +13,8 @@ from .schemas import EditorialAction, ReportVisualRequest, VisualManifest, Visua
 from .templates import (
     AGE_CAPTION,
     AGE_TITLE,
+    POPULATION_SUPPLY_CONTEXT_CAPTION,
+    POPULATION_SUPPLY_CONTEXT_TITLE,
     DIRECTION_CAPTION,
     DIRECTION_TITLE,
     FOCUSED_POI_ROUTE_MAP_CAPTION,
@@ -27,6 +29,7 @@ from .templates import (
     normalize_poi_supply_structure,
     poi_supply_structure_spec,
     population_age_structure_spec,
+    population_supply_context_spec,
 )
 
 _ASSET_DIR = "assets"
@@ -57,12 +60,15 @@ def _render_asset(*, report_dir: Path, filename: str, spec: dict[str, Any]) -> t
     return f"{_ASSET_DIR}/{svg_path.name}", f"{_ASSET_DIR}/{spec_path.name}"
 
 
-def _visual_markdown(template_id: str, title: str, asset_path: str, caption: str) -> str:
+def _visual_markdown(plan: VisualPlanItem, title: str, asset_path: str, caption: str) -> str:
+    result_refs = "、".join(f"`{result_id}`" for result_id in plan.metric_result_ids)
+    evidence_line = f"\n证据结果：{result_refs}\n" if result_refs else ""
     return (
-        f"<!-- report-visual:{template_id}:start -->\n"
+        f"<!-- report-visual:{plan.template_id}:start -->\n"
         f"![{title}]({asset_path})\n\n"
         f"*图注：{caption}*\n"
-        f"<!-- report-visual:{template_id}:end -->\n\n"
+        f"{evidence_line}"
+        f"<!-- report-visual:{plan.template_id}:end -->\n\n"
     )
 
 
@@ -130,7 +136,57 @@ def _render_population(plan: VisualPlanItem, request: ReportVisualRequest, repor
     year, values = normalized
     title = AGE_TITLE.replace("2026", str(year))
     asset_path, spec_path = _render_asset(report_dir=report_dir, filename="population-age-structure", spec=population_age_structure_spec(year, values))
-    return _generated(plan, title=title, caption=AGE_CAPTION, asset_path=asset_path, spec_path=spec_path, data_scope={"year": year, "age_bands": values}), _insert_before_anchor(markdown, plan.template_id, plan.chapter_anchor, _visual_markdown(plan.template_id, title, asset_path, AGE_CAPTION))
+    return _generated(plan, title=title, caption=AGE_CAPTION, asset_path=asset_path, spec_path=spec_path, data_scope={"year": year, "age_bands": values}), _insert_before_anchor(markdown, plan.template_id, plan.chapter_anchor, _visual_markdown(plan, title, asset_path, AGE_CAPTION))
+
+
+def _render_population_supply_context(plan: VisualPlanItem, request: ReportVisualRequest, report_dir: Path, markdown: str) -> tuple[VisualManifestItem, str]:
+    missing_anchor = _anchor_ready(
+        plan,
+        markdown,
+        title=POPULATION_SUPPLY_CONTEXT_TITLE,
+        caption=POPULATION_SUPPLY_CONTEXT_CAPTION,
+    )
+    if missing_anchor:
+        return missing_anchor, markdown
+    age = normalize_age_structure(request.age_structure)
+    if isinstance(age, str):
+        return _omitted(plan, title=POPULATION_SUPPLY_CONTEXT_TITLE, caption=POPULATION_SUPPLY_CONTEXT_CAPTION, reason=age), markdown
+    supply = normalize_poi_supply_structure(request.poi_supply_structure)
+    if isinstance(supply, str):
+        return _omitted(plan, title=POPULATION_SUPPLY_CONTEXT_TITLE, caption=POPULATION_SUPPLY_CONTEXT_CAPTION, reason=supply), markdown
+    population_year, age_values = age
+    asset_path, spec_path = _render_asset(
+        report_dir=report_dir,
+        filename="population-supply-context",
+        spec=population_supply_context_spec(
+            population_year=population_year,
+            age_values=age_values,
+            poi_year=supply["year"],
+            supply_roles=supply["roles"],
+        ),
+    )
+    scope = {
+        "population_year": population_year,
+        "poi_year": supply["year"],
+        "population_scope": "saved_15_minute_walking_background",
+        "poi_scope": supply["scope"],
+        "age_bands": age_values,
+        "display_roles": supply["roles"],
+        "taxonomy_audit": supply["taxonomy_audit"],
+    }
+    return _generated(
+        plan,
+        title=POPULATION_SUPPLY_CONTEXT_TITLE,
+        caption=POPULATION_SUPPLY_CONTEXT_CAPTION,
+        asset_path=asset_path,
+        spec_path=spec_path,
+        data_scope=scope,
+    ), _insert_before_anchor(
+        markdown,
+        plan.template_id,
+        plan.chapter_anchor,
+        _visual_markdown(plan, POPULATION_SUPPLY_CONTEXT_TITLE, asset_path, POPULATION_SUPPLY_CONTEXT_CAPTION),
+    )
 
 
 def _plan_actions(plan: VisualPlanItem) -> list[EditorialAction] | str:
@@ -153,8 +209,21 @@ def _render_directional(plan: VisualPlanItem, request: ReportVisualRequest, repo
     normalized = normalize_directional_matrix(request.directional_evidence_matrix, actions)
     if isinstance(normalized, str):
         return _omitted(plan, title=DIRECTION_TITLE, caption=DIRECTION_CAPTION, reason=normalized), markdown
-    asset_path, spec_path = _render_asset(report_dir=report_dir, filename="directional-action-priority", spec=directional_action_priority_matrix_spec(normalized))
-    return _generated(plan, title=DIRECTION_TITLE, caption=DIRECTION_CAPTION, asset_path=asset_path, spec_path=spec_path, data_scope={"actions": [item.model_dump() for item in actions]}), _insert_before_anchor(markdown, plan.template_id, plan.chapter_anchor, _visual_markdown(plan.template_id, DIRECTION_TITLE, asset_path, DIRECTION_CAPTION))
+    matrix = request.directional_evidence_matrix.get("directional_evidence_matrix", {})
+    source_versions = matrix.get("source_versions", {}) if isinstance(matrix, dict) else {}
+    source_years = {
+        source: details.get("year")
+        for source, details in source_versions.items()
+        if source in {"poi", "population", "nightlight"}
+        and isinstance(details, dict)
+        and details.get("year") is not None
+    }
+    asset_path, spec_path = _render_asset(
+        report_dir=report_dir,
+        filename="directional-action-priority",
+        spec=directional_action_priority_matrix_spec(normalized, source_years=source_years),
+    )
+    return _generated(plan, title=DIRECTION_TITLE, caption=DIRECTION_CAPTION, asset_path=asset_path, spec_path=spec_path, data_scope={"actions": [item.model_dump() for item in actions], "source_years": source_years}), _insert_before_anchor(markdown, plan.template_id, plan.chapter_anchor, _visual_markdown(plan, DIRECTION_TITLE, asset_path, DIRECTION_CAPTION))
 
 
 def _render_poi_supply_structure(plan: VisualPlanItem, request: ReportVisualRequest, report_dir: Path, markdown: str) -> tuple[VisualManifestItem, str]:
@@ -187,7 +256,7 @@ def _render_poi_supply_structure(plan: VisualPlanItem, request: ReportVisualRequ
         markdown,
         plan.template_id,
         plan.chapter_anchor,
-        _visual_markdown(plan.template_id, title, asset_path, POI_SUPPLY_STRUCTURE_CAPTION),
+        _visual_markdown(plan, title, asset_path, POI_SUPPLY_STRUCTURE_CAPTION),
     )
 
 def _render_focused_poi_route_map(plan: VisualPlanItem, request: ReportVisualRequest, report_dir: Path, markdown: str) -> tuple[VisualManifestItem, str]:
@@ -198,6 +267,10 @@ def _render_focused_poi_route_map(plan: VisualPlanItem, request: ReportVisualReq
     if isinstance(normalized, str):
         return _omitted(plan, title=FOCUSED_POI_ROUTE_MAP_TITLE, caption=FOCUSED_POI_ROUTE_MAP_CAPTION, reason=normalized), markdown
     year, route_map = normalized
+    snap_offset = route_map.get("origin_snap_offset_m")
+    caption = FOCUSED_POI_ROUTE_MAP_CAPTION
+    if snap_offset is not None:
+        caption += f" 本次分析中心吸附至最近路网约 {snap_offset:.0f} 米；该连接仅为路网计算起点，不表示正式入口或门到门路线。"
     definition = APPROVED_TEMPLATE_REGISTRY[plan.template_id]
     asset_path, spec_path = _render_asset(report_dir=report_dir, filename=definition.filename, spec=focused_poi_walking_route_map_spec(route_map))
     scope = {
@@ -209,11 +282,13 @@ def _render_focused_poi_route_map(plan: VisualPlanItem, request: ReportVisualReq
         "road_edges_rendered_count": route_map["road_edges_rendered_count"],
         "omitted_groups": route_map["omitted_groups"],
     }
-    return _generated(plan, title=FOCUSED_POI_ROUTE_MAP_TITLE, caption=FOCUSED_POI_ROUTE_MAP_CAPTION, asset_path=asset_path, spec_path=spec_path, data_scope=scope), _insert_before_anchor(markdown, plan.template_id, plan.chapter_anchor, _visual_markdown(plan.template_id, FOCUSED_POI_ROUTE_MAP_TITLE, asset_path, FOCUSED_POI_ROUTE_MAP_CAPTION))
+    scope["origin_snap_offset_m"] = snap_offset
+    return _generated(plan, title=FOCUSED_POI_ROUTE_MAP_TITLE, caption=caption, asset_path=asset_path, spec_path=spec_path, data_scope=scope), _insert_before_anchor(markdown, plan.template_id, plan.chapter_anchor, _visual_markdown(plan, FOCUSED_POI_ROUTE_MAP_TITLE, asset_path, caption))
 
 
 _RENDERERS: dict[str, Callable[[VisualPlanItem, ReportVisualRequest, Path, str], tuple[VisualManifestItem, str]]] = {
     "population_age_structure": _render_population,
+    "population_supply_context": _render_population_supply_context,
     "directional_action_priority_matrix": _render_directional,
     "poi_supply_structure": _render_poi_supply_structure,
     "focused_poi_walking_route_map": _render_focused_poi_route_map,

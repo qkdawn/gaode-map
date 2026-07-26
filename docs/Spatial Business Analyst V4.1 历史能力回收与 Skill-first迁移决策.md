@@ -433,7 +433,7 @@ Moran I=0.394364，z=5.752525。
 3. V4.1 业务设计草案和 V4 目标架构；
 4. `skills/spatial-business-analyst/references/` 中的指标选择、分析 recipes 和空间推理规则；
 5. `docs/空间功能策划决策矩阵.md`；
-6. `skills/spatial-unit-planning` 和 `skills/spatial-client-presentation`；
+6. Git 历史中的空间单元策划与甲方汇报能力；
 7. 历史真实 run、章节包和最终报告；
 8. 用户对真实报告提出的遗漏空间单元、表格价值和可读性反馈。
 

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentSkillView(BaseModel):
@@ -16,6 +16,14 @@ class AgentSkillView(BaseModel):
     color: str = ""
     executable: bool = False
     diagnostic: str = ""
+    dependencies: list["SkillDependencyView"] = Field(default_factory=list)
+
+
+class SkillDependencyView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skill_id: str
+    when: str = "always"
 
 
 def _skills_root() -> Path:
@@ -30,6 +38,27 @@ def _frontmatter(path: Path) -> dict[str, Any]:
     return yaml.safe_load(parts[1]) or {} if len(parts) == 3 else {}
 
 
+_PROMPT_DRIVEN_SKILLS = frozenset({
+    "cultural-tourism-theme-research",
+    "spatial-business-analyst",
+})
+
+
+def _dependencies(interface_doc: dict[str, Any]) -> list[SkillDependencyView]:
+    raw_dependencies = interface_doc.get("dependencies")
+    if not isinstance(raw_dependencies, list):
+        return []
+    result: list[SkillDependencyView] = []
+    for raw in raw_dependencies:
+        if not isinstance(raw, dict):
+            continue
+        skill_id = str(raw.get("skill_id") or "").strip()
+        if not skill_id:
+            continue
+        result.append(SkillDependencyView(skill_id=skill_id, when=str(raw.get("when") or "always").strip() or "always"))
+    return result
+
+
 def list_agent_skills() -> list[AgentSkillView]:
     result: list[AgentSkillView] = []
     root = _skills_root()
@@ -42,13 +71,15 @@ def list_agent_skills() -> list[AgentSkillView]:
             interface_doc = yaml.safe_load(interface_file.read_text(encoding="utf-8")) or {} if interface_file.exists() else {}
             interface = interface_doc.get("interface") if isinstance(interface_doc.get("interface"), dict) else {}
             skill_id = str(meta.get("name") or skill_file.parent.name).strip()
+            executable = skill_id in _PROMPT_DRIVEN_SKILLS
             result.append(AgentSkillView(
                 id=skill_id,
                 display_name=str(interface.get("display_name") or skill_id).strip(),
                 description=str(interface.get("short_description") or meta.get("description") or "").strip(),
                 color=str(interface.get("brand_color") or "").strip(),
-                executable=False,
-                diagnostic="Skill 尚未注册执行器",
+                executable=executable,
+                diagnostic="" if executable else "Skill 尚未注册执行器",
+                dependencies=_dependencies(interface_doc),
             ))
         except (OSError, yaml.YAMLError, TypeError, ValueError):
             continue

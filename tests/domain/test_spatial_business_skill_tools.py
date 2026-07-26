@@ -13,6 +13,7 @@ from modules.spatial_action.metric_tools import (
     MetricWatchOut,
 )
 from modules.spatial_action.source_index import SourceIndexItem
+from modules.spatial_action.metric_result_registry import MetricResultRegistry
 from modules.spatial_projects.skill_tools import SpatialBusinessSkillTools
 from modules.spatial_projects.visual_asset_store import SpatialReportVisualAssetStore
 
@@ -359,6 +360,48 @@ def test_execute_metric_assembles_history_context_and_scrubs_nonsemantic_values(
         },
     ]
     _assert_semantic_only(result)
+
+
+def test_execute_metric_registers_current_result_without_analysis_run():
+    registry = MetricResultRegistry()
+    tools = SpatialBusinessSkillTools(
+        project_service=FakeSpatialProjectService(),
+        metric_service=FakeMetricToolService(),
+        result_registry=registry,
+    )
+
+    tools.execute_metric("history-001", "poi.grid_density")
+
+    stored = registry.get("history-001", "result:poi.grid_density:test")
+    assert stored is not None
+    assert stored.tool_id == "poi.grid_density"
+    assert stored.status == "available"
+    assert stored.structured_result["density"] == 12.5
+    assert stored.time_scope == {"year": 2024, "coordinates": [[113.0, 28.0]]}
+    assert registry.get("history-002", "result:poi.grid_density:test") is None
+
+
+def test_execute_metric_registry_uses_context_time_scope_when_result_omits_it():
+    class MetricWithoutTimeScope(FakeMetricToolService):
+        def execute(self, **kwargs: Any) -> MetricResult:
+            result = super().execute(**kwargs)
+            return result.model_copy(update={"time_scope": {}})
+
+    registry = MetricResultRegistry()
+    tools = SpatialBusinessSkillTools(
+        project_service=FakeSpatialProjectService(),
+        metric_service=MetricWithoutTimeScope(),
+        result_registry=registry,
+    )
+
+    response = tools.execute_metric("history-001", "poi.grid_density")
+
+    stored = registry.get("history-001", "result:poi.grid_density:test")
+    assert stored is not None
+    assert stored.time_scope == response["time_scope"]
+    assert stored.time_scope["datasets"] == [
+        {"source_id": "poi-snapshot", "year": 2024}
+    ]
 
 
 def test_execute_metric_uses_history_params_center_when_scope_has_none():

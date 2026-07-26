@@ -2,3 +2,6 @@ interface:
   display_name: "Spatial Business Analyst"
   short_description: "基于真实项目材料与空间数据形成定位、空间产品和运营分期决策报告"
   default_prompt: "使用 $spatial-business-analyst，基于现有项目材料和空间数据形成定位、空间产品与运营分期决策报告。"
+dependencies:
+  - skill_id: cultural-tourism-theme-research
+    when: cultural_heritage_or_destination_activation

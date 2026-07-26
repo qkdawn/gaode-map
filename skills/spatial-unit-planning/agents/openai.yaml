@@ -1,4 +1,0 @@
-interface:
-  display_name: "Spatial Unit Planning"
-  short_description: "Plan confirmed spatial units with complete coverage."
-  default_prompt: "Use $spatial-unit-planning to plan every confirmed spatial unit."

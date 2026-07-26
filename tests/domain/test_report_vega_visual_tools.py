@@ -8,6 +8,7 @@ import pytest
 from core.svg_safety import validate_safe_svg
 from modules.report_visuals.agent_tools import ReportVegaVisualTools
 from modules.report_visuals.asset_store import ReportVegaVisualAssetStore
+from modules.spatial_action.metric_result_registry import MetricResultRegistry
 
 
 class _Projects:
@@ -15,27 +16,6 @@ class _Projects:
         if history_id != "history-1":
             raise LookupError("history_not_found")
         return {"history_id": history_id}
-
-
-class _Runs:
-    def __init__(self, items: list[dict]) -> None:
-        self._items = items
-
-    def list(self, history_id: str, *, capability_id: str = "") -> list[dict]:
-        assert history_id == "history-1"
-        assert capability_id == "spatial-business-analyst"
-        return [{"run_id": "run-1"}]
-
-    def get(self, run_id: str) -> dict:
-        assert run_id == "run-1"
-        return {
-            "artifacts": [
-                {
-                    "artifact": {"artifact_type": "source_index"},
-                    "payload": {"items": self._items},
-                }
-            ]
-        }
 
 
 def _supply_payload() -> dict:
@@ -99,9 +79,20 @@ def _plan(**overrides: object) -> dict:
 
 
 def _tools(tmp_path: Path, items: list[dict] | None = None) -> ReportVegaVisualTools:
+    registry = MetricResultRegistry()
+    for item in items or [_result()]:
+        payload = item["payload"]
+        registry.register(
+            history_id="history-1",
+            result_id=item["resource_id"],
+            tool_id=payload["tool_id"],
+            status=payload["status"],
+            structured_result=payload["structured_result"],
+            time_scope=item.get("time_scope") or {},
+        )
     return ReportVegaVisualTools(
         project_service=_Projects(),
-        run_repo=_Runs(items or [_result()]),
+        result_registry=registry,
         asset_store=ReportVegaVisualAssetStore(tmp_path / "bundles"),
     )
 
@@ -111,6 +102,7 @@ def test_catalog_only_exposes_approved_templates_and_minimal_inputs(tmp_path: Pa
     templates = {item["template_id"]: item for item in catalog["result"]["templates"]}
 
     assert "poi_supply_structure" in templates
+    assert templates["population_supply_context"]["required_metric_ids"] == ["population.age_structure", "poi.supply_structure"]
     assert templates["poi_supply_structure"]["required_metric_ids"] == ["poi.supply_structure"]
     assert templates["poi_supply_structure"]["allowed_template_input_keys"] == []
     assert templates["directional_action_priority_matrix"]["allowed_template_input_keys"] == ["editorial_actions"]
@@ -122,7 +114,7 @@ def test_catalog_only_exposes_approved_templates_and_minimal_inputs(tmp_path: Pa
     assert all("spec" not in item and "svg" not in item and "raw_metric" not in item for item in templates.values())
 
 
-def test_render_resolves_same_history_persisted_result_and_exposes_safe_resources(tmp_path: Path) -> None:
+def test_render_resolves_same_session_result_without_analysis_run_and_exposes_safe_resources(tmp_path: Path) -> None:
     tools = _tools(tmp_path)
     response = tools.render(
         history_id="history-1",
@@ -135,6 +127,9 @@ def test_render_resolves_same_history_persisted_result_and_exposes_safe_resource
     assert result["report_resource_uri"] == "report-vega-report://history-1/report-1"
     assert result["visual_plan_resource_uri"] == "report-vega-visual-plan://history-1/report-1"
     assert result["visual_manifest_resource_uri"] == "report-vega-visual-manifest://history-1/report-1"
+    assert "证据结果：`result-poi-supply`" in tools.read_report(
+        history_id="history-1", report_id="report-1"
+    )
     assert result["assets"] == [
         {
             "asset_id": "poi_supply_structure",
@@ -191,6 +186,28 @@ def test_render_rejects_free_specs_and_missing_editorial_audit_fields(tmp_path: 
             report_id="report-1",
             report_markdown="<!-- report-anchor:poi-supply-structure -->",
             visual_plan=bad_spec,
+        )
+
+    foreign_registry = MetricResultRegistry()
+    item = _result()
+    foreign_registry.register(
+        history_id="history-2",
+        result_id=item["resource_id"],
+        tool_id=item["payload"]["tool_id"],
+        status="available",
+        structured_result=item["payload"]["structured_result"],
+    )
+    foreign = ReportVegaVisualTools(
+        project_service=_Projects(),
+        result_registry=foreign_registry,
+        asset_store=ReportVegaVisualAssetStore(tmp_path / "foreign-bundles"),
+    )
+    with pytest.raises(ValueError, match="visual_metric_result_not_found"):
+        foreign.render(
+            history_id="history-1",
+            report_id="report-1",
+            report_markdown="<!-- report-anchor:poi-supply-structure -->",
+            visual_plan=_plan(),
         )
 
 

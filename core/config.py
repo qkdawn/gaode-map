@@ -280,6 +280,21 @@ class Settings(BaseSettings):
         validation_alias="AI_THINKING_ENABLED",
         description="是否为 DeepSeek chat completions 启用 thinking mode 并流式展示 reasoning_content",
     )
+    web_search_provider: Literal["anysearch", "searxng"] = Field(
+        "anysearch",
+        validation_alias="WEB_SEARCH_PROVIDER",
+        description="Provider used to discover public-web source candidates.",
+    )
+    anysearch_api_key: str = Field(
+        "",
+        validation_alias="ANYSEARCH_API_KEY",
+        description="Optional AnySearch API key. Anonymous requests use the provider's lower limits.",
+    )
+    anysearch_timeout_ms: int = Field(
+        12000,
+        validation_alias="ANYSEARCH_TIMEOUT_MS",
+        description="AnySearch request timeout in milliseconds.",
+    )
     searxng_base_url: str = Field(
         "",
         validation_alias="SEARXNG_BASE_URL",

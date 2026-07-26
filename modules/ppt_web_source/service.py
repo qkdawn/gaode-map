@@ -98,6 +98,8 @@ LOW_TRUST_DOMAINS = (
     "weibo.com",
 )
 WEB_SOURCE_MARKDOWN_EXCERPT_CHARS = 3600
+ANYSEARCH_MCP_URL = "https://api.anysearch.com/mcp"
+ANYSEARCH_CLIENT_HEADER = "gaode-map/1.0"
 
 
 class PptWebSourceAreaNotFound(RuntimeError):
@@ -533,6 +535,77 @@ async def _search_searxng(query: str, *, limit: int) -> List[Dict[str, Any]]:
     return [_safe_dict(item) for item in results[: max(1, limit)]]
 
 
+def _anysearch_candidates(markdown: str) -> List[Dict[str, Any]]:
+    """Normalize AnySearch's readable MCP text into the candidate shape used below."""
+
+    candidates: List[Dict[str, Any]] = []
+    current: Dict[str, str] | None = None
+    for raw_line in _clean_text(markdown).splitlines():
+        line = raw_line.strip()
+        heading = re.match(r"^###\s+\d+\.\s+(.+)$", line)
+        if heading:
+            if current and current.get("url"):
+                candidates.append(current)
+            current = {"title": heading.group(1).strip(), "content": ""}
+            continue
+        if current is None:
+            continue
+        url_match = re.match(r"^-\s+\*\*URL\*\*:\s*(https?://\S+)", line, flags=re.IGNORECASE)
+        if url_match:
+            current["url"] = url_match.group(1).rstrip(".,;)")
+            continue
+        if line.startswith("-"):
+            excerpt = line.lstrip("- ").strip()
+            if excerpt:
+                current["content"] = " ".join(part for part in [current.get("content", ""), excerpt] if part)
+    if current and current.get("url"):
+        candidates.append(current)
+    return candidates
+
+
+async def _search_anysearch(query: str, *, limit: int) -> List[Dict[str, Any]]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-Anysearch-Client": ANYSEARCH_CLIENT_HEADER,
+    }
+    api_key = _clean_text(getattr(settings, "anysearch_api_key", ""))
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "search", "arguments": {"query": query, "max_results": max(1, min(limit, 10))}},
+    }
+    timeout_s = max(1.0, int(getattr(settings, "anysearch_timeout_ms", 12000) or 12000) / 1000)
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=True, trust_env=False) as client:
+            response = await client.post(ANYSEARCH_MCP_URL, json=payload, headers=headers)
+            response.raise_for_status()
+            result = _safe_dict(response.json().get("result"))
+    except Exception as exc:
+        raise PptWebSourceSearchUnavailable("anysearch_unavailable") from exc
+    text = "\n".join(
+        _clean_text(_safe_dict(item).get("text"))
+        for item in _safe_list(result.get("content"))
+        if _clean_text(_safe_dict(item).get("type")) == "text"
+    )
+    return _anysearch_candidates(text)[: max(1, limit)]
+
+
+async def _search_public_web(query: str, *, limit: int) -> List[Dict[str, Any]]:
+    provider = _clean_text(getattr(settings, "web_search_provider", "anysearch")).lower() or "anysearch"
+    if provider == "searxng":
+        return await _search_searxng(query, limit=limit)
+    try:
+        return await _search_anysearch(query, limit=limit)
+    except PptWebSourceSearchUnavailable:
+        if _clean_text(getattr(settings, "searxng_base_url", "")):
+            logger.warning("AnySearch unavailable; falling back to configured SearXNG", extra={"query": query})
+            return await _search_searxng(query, limit=limit)
+        raise
+
+
 def _candidate_region_score(term: str, candidate: Dict[str, Any]) -> int:
     haystack = " ".join(
         _clean_text(candidate.get(key))
@@ -615,7 +688,7 @@ async def _fetch_whitelisted_results_impl(term: str, source: Dict[str, str], *, 
     search_top_k = max(limit, int(getattr(settings, "research_search_top_k", 8) or 8))
     for query_term in _search_query_variants(term):
         query = f"site:{source['site']} {query_term}"
-        candidates = await _search_searxng(query, limit=search_top_k)
+        candidates = await _search_public_web(query, limit=search_top_k)
         items.extend(_rank_searxng_candidates(term, candidates, source=source, source_modes=[_source_tier(source)]))
         items = _dedupe_items(items)
         if len(items) >= limit:
@@ -663,7 +736,7 @@ async def _fetch_open_search_results(term: str, *, limit: int = 4, source_modes:
         return []
     search_top_k = max(limit, int(getattr(settings, "research_search_top_k", 8) or 8))
     for query_term in _search_query_variants(term):
-        candidates = await _search_searxng(query_term, limit=search_top_k)
+        candidates = await _search_public_web(query_term, limit=search_top_k)
         ranked = _rank_searxng_candidates(term, candidates, source=rental_source, source_modes=source_modes)
         if rental_source:
             ranked = [{**item, "search_strategy": "rental_market_open_web"} for item in ranked]
@@ -831,7 +904,8 @@ async def _search_bucket_items(request: PptWebSourceSearchRequest, category: str
         preferred_sources = _preferred_sources_for_term(term, query_index, source_modes)
         if _clean_text(category_bucket) == "周边房租":
             preferred_sources = [source for source in preferred_sources if _clean_text(source.get("domain")) == "58.com"] or preferred_sources[:1]
-        base_url_available = bool(_clean_text(getattr(settings, "searxng_base_url", "")))
+        provider = _clean_text(getattr(settings, "web_search_provider", "anysearch")).lower() or "anysearch"
+        search_provider_available = provider == "anysearch" or bool(_clean_text(getattr(settings, "searxng_base_url", "")))
         for source in preferred_sources:
             try:
                 candidates = await _fetch_whitelisted_results(term, source, limit=max(1, quota - len(collected)))
@@ -852,7 +926,7 @@ async def _search_bucket_items(request: PptWebSourceSearchRequest, category: str
                 break
         collected = _dedupe_items(collected)
     if len(collected) < quota:
-        if not base_url_available and globals().get("_fetch_open_search_results") is _ORIGINAL_FETCH_OPEN_SEARCH_RESULTS:
+        if not search_provider_available and globals().get("_fetch_open_search_results") is _ORIGINAL_FETCH_OPEN_SEARCH_RESULTS:
             return _select_diverse_bucket_items(
                 sorted(collected, key=lambda item: _bucket_item_score(item, category_bucket, 0), reverse=True),
                 quota=quota,

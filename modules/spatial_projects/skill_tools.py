@@ -20,6 +20,10 @@ from modules.spatial_action.metric_tools import (
     MetricResult,
     MetricToolService,
 )
+from modules.spatial_action.metric_result_registry import (
+    MetricResultRegistry,
+    metric_result_registry,
+)
 from modules.spatial_action.source_index import (
     SourceIndex,
     SourceIndexItem,
@@ -201,12 +205,14 @@ class SpatialBusinessSkillTools:
         visual_tools: ArcGISSpatialToolModule | None = None,
         visual_asset_store: SpatialReportVisualAssetStore | None = None,
         run_repo: Any = None,
+        result_registry: MetricResultRegistry | None = None,
     ) -> None:
         self._projects = project_service or SpatialProjectService()
         self._metrics = metric_service or MetricToolService()
         self._visuals = visual_tools or ArcGISSpatialToolModule()
         self._visual_assets = visual_asset_store or SpatialReportVisualAssetStore()
         self._runs = run_repo or analysis_run_repo
+        self._result_registry = result_registry or metric_result_registry
         # A live MCP session may execute several complementary metrics before it
         # asks ArcGIS for a map.  Retain only the immutable project's bounded
         # execution context and generated result/asset metadata; this is not a
@@ -372,6 +378,14 @@ class SpatialBusinessSkillTools:
             project_anchors=normalized_comparison,
         )
         self._retain_metric_result(context.source_index, result)
+        self._result_registry.register(
+            history_id=normalized_history_id,
+            result_id=result.result_id,
+            tool_id=result.tool_id,
+            status=result.status,
+            structured_result=result.structured_result,
+            time_scope=result.time_scope or context.time_scope,
+        )
         return self._execution_envelope(result, catalog_item, detail, context)
 
     def create_spatial_report_visual(

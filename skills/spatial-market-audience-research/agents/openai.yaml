@@ -1,0 +1,4 @@
+interface:
+  display_name: "空间市场与客群研究"
+  short_description: "基于项目条件验证目标客群、市场缺口、支付与产品可行性"
+  default_prompt: "使用 $spatial-market-audience-research，验证项目目标客群、市场缺口，并校核产品规模与分期。"

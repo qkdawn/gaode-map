@@ -7,30 +7,31 @@ from modules.agent.skill_catalog import list_agent_skills
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL_ROOT = ROOT / "skills" / "spatial-business-analyst"
+RESEARCH_SKILL_ROOT = ROOT / "skills" / "cultural-tourism-theme-research"
+MARKET_SKILL_ROOT = ROOT / "skills" / "spatial-market-audience-research"
 
 
-def test_spatial_business_analyst_is_codex_skill_not_app_executor():
+def test_spatial_business_analyst_registers_dependency_executor():
     skills = {skill.id: skill for skill in list_agent_skills()}
 
-    assert {"spatial-project-data", "spatial-business-analyst", "spatial-unit-planning", "spatial-client-presentation"}.issubset(skills)
-    assert skills["spatial-business-analyst"].executable is False
-    assert skills["spatial-business-analyst"].diagnostic == "Skill 尚未注册执行器"
-    assert all(not skills[skill_id].executable for skill_id in {"spatial-project-data", "spatial-unit-planning", "spatial-client-presentation"})
+    assert "spatial-business-analyst" in skills
+    assert skills["spatial-business-analyst"].executable is True
+    assert skills["spatial-business-analyst"].dependencies[0].skill_id == "cultural-tourism-theme-research"
+    assert "spatial-market-audience-research" in skills
+    assert skills["spatial-market-audience-research"].executable is False
+    assert skills["spatial-market-audience-research"].diagnostic == "Skill 尚未注册执行器"
 
 
 def test_spatial_business_skill_focuses_on_codex_workflow_and_reader_report():
     skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     for phrase in (
         "Codex 原生 Subagent",
-        "工作定位",
-        "定位与产品策略师",
-        "空间功能策划师",
-        "运营与分期策略师",
+        "定位、空间产品、运营与分期",
         "自然 Markdown",
         "list_spatial_metric_results",
-        "视觉证据编辑 Subagent",
+        "report/state/manifest.json",
         "report-visual-workflow.md",
-        "直接保存 Markdown",
+        "正式报告默认保存 Markdown",
     ):
         assert phrase in skill_text
 
@@ -52,10 +53,10 @@ def test_spatial_business_skill_focuses_on_codex_workflow_and_reader_report():
         "analysis-blueprint-and-tools.md",
         "quality-gates.md",
         "report-contract.md",
+        "publication-editorial.md",
         "spatial-unit-programming.md",
         "specialist-roles.md",
         "report-orchestration.md",
-        "report-example.md",
         "report-visual-workflow.md",
     ):
         assert (SKILL_ROOT / "references" / reference).is_file()
@@ -68,3 +69,46 @@ def test_spatial_business_skill_agent_metadata_is_standard_and_invokes_skill():
     assert interface["display_name"] == "Spatial Business Analyst"
     assert 25 <= len(interface["short_description"]) <= 80
     assert "$spatial-business-analyst" in interface["default_prompt"]
+
+
+def test_cultural_tourism_theme_research_skill_has_standard_metadata_and_workflow():
+    skill_text = (RESEARCH_SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    metadata = yaml.safe_load((RESEARCH_SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8"))
+    interface = metadata["interface"]
+
+    assert "cultural-tourism-theme-research" in skill_text
+    assert "references/research-workflow.md" in skill_text
+    assert "report/research/cultural-tourism-theme-research.md" in skill_text
+    assert "query_history_project_dataset" in skill_text
+    assert "aggregate_history_project_dataset" in skill_text
+    assert "poi.supply_structure" in skill_text
+    assert "poi.focused_accessibility" in skill_text
+    assert "## 前置完成门" in skill_text
+    assert "八类资源的清单" in skill_text
+    assert "本轮项目材料、POI/空间查询与公开来源检索" in skill_text
+    assert "历史调研底稿可用于发现线索和比较变化" in skill_text
+    assert interface["display_name"] == "文旅主题调研"
+    assert 25 <= len(interface["short_description"]) <= 80
+    assert "$cultural-tourism-theme-research" in interface["default_prompt"]
+
+
+def test_spatial_market_audience_research_skill_has_standard_metadata_and_two_stage_outputs():
+    skill_text = (MARKET_SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    workflow = (MARKET_SKILL_ROOT / "references" / "research-workflow.md").read_text(encoding="utf-8")
+    workpacks = (MARKET_SKILL_ROOT / "references" / "specialist-workpacks.md").read_text(encoding="utf-8")
+    metadata = yaml.safe_load((MARKET_SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8"))
+    interface = metadata["interface"]
+
+    assert "market_discovery" in skill_text
+    assert "product_recheck" in skill_text
+    assert "report/research/spatial-market-audience-research.md" in skill_text
+    assert "report/research/spatial-product-market-recheck.md" in skill_text
+    assert "项目条件" in workflow
+    assert "候选客群假设" in workflow
+    assert "市场母体、客源圈与流向" in workflow
+    assert "产品市场再校核" in workflow
+    assert "目标客群与行为综合师" in workpacks
+    assert "产品市场再校核分析师" in workpacks
+    assert interface["display_name"] == "空间市场与客群研究"
+    assert 25 <= len(interface["short_description"]) <= 80
+    assert "$spatial-market-audience-research" in interface["default_prompt"]

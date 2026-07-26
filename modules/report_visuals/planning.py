@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from .schemas import ReportVisualTemplateId, VisualPlan
 
 AGE_ANCHOR = "由此形成四类优先使用情境："
-DIRECTION_ANCHOR = "现状大门应设置"
+DIRECTION_ANCHOR = "<!-- report-anchor:directional-action-priority -->"
 POI_ROUTE_MAP_ANCHOR = "<!-- report-anchor:poi-route-map -->"
 POI_SUPPLY_STRUCTURE_ANCHOR = "<!-- report-anchor:poi-supply-structure -->"
+POPULATION_SUPPLY_CONTEXT_ANCHOR = "<!-- report-anchor:population-supply-context -->"
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,10 @@ APPROVED_TEMPLATE_REGISTRY: dict[ReportVisualTemplateId, ApprovedVisualTemplate]
     "population_age_structure": ApprovedVisualTemplate(
         "population_age_structure", "15 分钟范围居住背景的年龄结构", "人口反映居住背景，不等同于客流、到访概率或支付能力。",
         "population-age-structure", ("population.age_structure",), AGE_ANCHOR,
+    ),
+    "population_supply_context": ApprovedVisualTemplate(
+        "population_supply_context", "居民使用背景与周边供给结构", "人口用于描述居住背景，POI 用于描述设施供给；二者均不证明项目客群、需求、客流、消费、经营质量或合作关系。",
+        "population-supply-context", ("population.age_structure", "poi.supply_structure"), POPULATION_SUPPLY_CONTEXT_ANCHOR,
     ),
     "directional_action_priority_matrix": ApprovedVisualTemplate(
         "directional_action_priority_matrix", "方向 × 距离圈层的首轮行动优先级", "规则结果只表达行动优先级，不表示真实进场量、客流预测或消费。",

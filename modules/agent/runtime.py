@@ -22,6 +22,7 @@ from .providers.llm_provider import (
     run_gate_with_llm,
 )
 from .schemas import (
+    AgentMessage,
     AgentPlanEnvelope,
     AgentTranslationPack,
     AgentThinkingItem,
@@ -34,6 +35,11 @@ from .schemas import (
     EffectiveExecutionProfile,
 )
 from .selected_sources import selected_sources_artifact_from_items
+from .skill_dependencies import (
+    cultural_tourism_child_request,
+    resolve_skill_dependencies,
+    skill_instruction,
+)
 from .synthesizer import (
     build_answer_evidence_payload,
     build_answer_fallback,
@@ -226,6 +232,92 @@ def _merge_notes(existing: List[str], incoming: List[Any]) -> List[str]:
     return merged
 
 
+async def _run_required_skill_dependencies(
+    *,
+    payload: AgentTurnRequest,
+    effective_profile: EffectiveExecutionProfile | None,
+    context,
+    memory,
+    llm_runtime: LLMRuntimeConfig | None,
+    emit_thinking,
+) -> str:
+    """Execute required child Skills and publish only their completed artifacts.
+
+    This is intentionally an orchestration boundary.  It does not inspect the
+    child Skill's POI, source, or eight-category checks; that contract remains
+    entirely with the child Skill.
+    """
+
+    dependencies = resolve_skill_dependencies(payload, effective_profile)
+    for dependency in dependencies:
+        await emit_thinking(
+            {
+                "phase": "preflight",
+                "title": f"启动前置调研：{dependency.skill_id}",
+                "detail": "该项目命中文旅/遗产/活化条件，主分析将在前置调研完成后继续。",
+                "state": "active",
+            },
+            f"dependency-start:{dependency.skill_id}",
+        )
+        if dependency.skill_id != "cultural-tourism-theme-research":
+            return f"未注册前置 Skill 执行器：{dependency.skill_id}"
+        child_snapshot = payload.analysis_snapshot.model_copy(
+            deep=True,
+            update={
+                "context": {
+                    **dict(payload.analysis_snapshot.context or {}),
+                    "history_id": str(payload.history_id or "").strip(),
+                }
+            },
+        )
+        child_messages = [
+            *[item.model_copy(deep=True) for item in payload.messages if item.role != "system"],
+            AgentMessage(role="user", content=cultural_tourism_child_request(payload)),
+        ]
+        max_steps_override, max_errors_override = _tool_loop_limits()
+        try:
+            child = await run_langgraph_react_loop(
+                messages=child_messages,
+                snapshot=child_snapshot,
+                context=context,
+                registry=get_tool_registry(),
+                governance_mode=payload.governance_mode,
+                confirmed_tools=list(payload.risk_confirmations or []),
+                include_secondary_tools=True,
+                max_steps_override=max_steps_override,
+                max_errors_override=max_errors_override,
+                initial_artifacts=dict(memory.artifacts or {}),
+                llm_runtime=llm_runtime,
+                system_instruction=skill_instruction(dependency.skill_id),
+            )
+        except Exception as exc:
+            return f"前置 Skill {dependency.skill_id} 调用失败：{exc}"
+        if child.status != "completed":
+            return child.error or child.stop_reason or f"前置 Skill {dependency.skill_id} 未完成"
+        artifact = {
+            "skill_id": dependency.skill_id,
+            "status": "completed",
+            "summary": str(child.assistant_summary or "").strip(),
+            "artifacts": dict(child.artifacts or {}),
+            "research_notes": list(child.research_notes or []),
+            "used_tools": list(child.used_tools or []),
+        }
+        memory.artifacts["cultural_tourism_research"] = artifact
+        memory.execution_trace.extend(list(child.execution_trace or []))
+        memory.tool_results.extend(list(child.tool_results or []))
+        memory.research_notes = _merge_notes(memory.research_notes, child.research_notes)
+        await emit_thinking(
+            {
+                "phase": "preflight",
+                "title": f"前置调研完成：{dependency.skill_id}",
+                "detail": "已将本轮文旅调研结果交给主分析；主分析不会重复核验其八类资源、POI 和网页检索过程。",
+                "state": "completed",
+            },
+            f"dependency-complete:{dependency.skill_id}",
+        )
+    return ""
+
+
 async def _run_main_agent_loop(
     payload: AgentTurnRequest, *, emit: StreamEmit | None = None,
     llm_runtime: LLMRuntimeConfig | None = None,
@@ -291,6 +383,24 @@ async def _run_main_agent_loop(
                     memory.research_notes,
                     ["核心项目文档未成功读取；最终回答必须明确失败，不能退化为自信的 GIS-only 项目结论。"],
                 )
+    dependency_error = await _run_required_skill_dependencies(
+        payload=payload,
+        effective_profile=effective_profile,
+        context=context,
+        memory=memory,
+        llm_runtime=llm_runtime,
+        emit_thinking=emit_thinking,
+    )
+    if dependency_error:
+        await _emit_status(emit, "failed")
+        return AgentTurnResponse(
+            status="failed",
+            stage="failed",
+            output=AgentTurnOutput(),
+            diagnostics=_build_diagnostics(memory=memory, error=dependency_error, thinking_timeline=thinking_timeline, latency_ms=latency.finish()),
+            context_summary=build_context_summary(snapshot, memory.artifacts),
+            plan=AgentPlanEnvelope(),
+        )
     visual_image_inputs, visual_snapshot_meta, visual_snapshot_warnings = _visual_snapshot_inputs(payload)
     if visual_snapshot_meta:
         memory.artifacts["visual_snapshots"] = visual_snapshot_meta
@@ -505,9 +615,16 @@ async def _run_main_agent_loop(
             plan=AgentPlanEnvelope(),
         )
 
-    used_tools = list(loop_result.used_tools or [])
-    memory.execution_trace = list(loop_result.execution_trace or [])
-    memory.tool_results = list(loop_result.tool_results or [])
+    dependency_used_tools = [
+        str(item).strip()
+        for item in (memory.artifacts.get("cultural_tourism_research", {}).get("used_tools", []) if isinstance(memory.artifacts.get("cultural_tourism_research"), dict) else [])
+        if str(item).strip()
+    ]
+    used_tools = list(dict.fromkeys([*dependency_used_tools, *list(loop_result.used_tools or [])]))
+    dependency_traces = list(memory.execution_trace or [])
+    dependency_results = list(memory.tool_results or [])
+    memory.execution_trace = [*dependency_traces, *list(loop_result.execution_trace or [])]
+    memory.tool_results = [*dependency_results, *list(loop_result.tool_results or [])]
     memory.artifacts.update(dict(loop_result.artifacts or {}))
     memory.research_notes = _merge_notes(memory.research_notes, list(loop_result.research_notes or []))
     planning_summary = _build_loop_plan_summary(

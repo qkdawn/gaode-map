@@ -1,0 +1,109 @@
+schema: spatial-business-analyst-benchmark/v1
+skill: spatial-business-analyst
+language: zh-CN
+scoring:
+  scale: 0-2
+  dimensions:
+    - id: mode
+      description: 正确选择精简路径或 formal_comprehensive，并遵守确认门
+    - id: evidence
+      description: 只使用材料中的对象、范围和证据，明确缺口与比较基准
+    - id: decision_logic
+      description: 将判断、机制、方案、动作和验证条件连成可追溯推理
+    - id: spatial_specificity
+      description: 解释空间关系、对象承载、到达和使用时段，而非套用模板
+    - id: reversibility
+      description: 给出反证、能力约束、缩减/改向/退出路径
+cases:
+  - id: forward-single-site
+    class: forward
+    scenario: 单体商业选址
+    goal: 检查小范围选址问题是否保持精简，不误触发完整报告编排
+    prompt: "基于候选铺位‘槐荫里12号’、800米步行范围、餐饮与生活服务 POI，以及周二晚间客流样本，判断是否适合开设社区晚餐店。"
+    materials:
+      objects: [槐荫里12号, 北栅口商圈]
+      evidence: [800米步行范围, 餐饮POI, 生活服务POI, 周二晚间客流样本]
+      missing: [租金, 消费基准, 周末客流, 竞品营业时段]
+    must: [直接回答选址问题, 说明缺失输入, 区分观察事实与待验证假设]
+    must_not: [生成完整项目问题地图, 编造客群画像, 把POI数量直接等同于营业额]
+
+  - id: forward-multi-object
+    class: forward
+    scenario: 多对象历史更新
+    goal: 检查具名对象、保护条件和共存冲突能否形成对象级决策
+    prompt: "请基于‘澄江粮仓’‘东平码头’和‘旧机修间’的历史材料，更新再利用方向。澄江粮仓可改造但需保留桁架，东平码头承担公众通行，旧机修间与居民存在噪声冲突。"
+    materials:
+      objects: [澄江粮仓, 东平码头, 旧机修间]
+      constraints: [保留桁架, 公众通行, 居民噪声冲突]
+      missing: [结构鉴定, 消防条件, 运营团队, 夜间管理成本]
+    must: [保留原名, 比较候选路径, 分对象说明承载与冲突, 给出反证]
+    must_not: [捏造院落/花园等对象, 把所有对象合并成一个建筑, 机械输出四阶段]
+
+  - id: forward-waterfront
+    class: forward
+    scenario: 开放式滨水空间
+    goal: 检查线性边界、生态和时段运营是否被正确建模
+    prompt: "围绕‘白鹭湾慢行带’提出公共活动与运营建议。范围是2.4公里线性岸线，已有骑行和亲水节点，冬季候鸟栖息区禁止扩音，东端公交到达较弱。"
+    materials:
+      objects: [白鹭湾慢行带, 冬季候鸟栖息区, 东端公交接驳点]
+      constraints: [2.4公里线性岸线, 禁止扩音, 东端到达弱]
+      missing: [分时客流, 生态监测, 保洁和夜间照明成本]
+    must: [按线性关系和使用时段组织, 连接生态与运营, 明确到达缺口和验证动作]
+    must_not: [强行生成建筑再利用章节, 只列活动清单, 将冬季禁音当作全年限制]
+
+  - id: forward-industrial-park
+    class: forward
+    scenario: 产业或办公园区
+    goal: 检查业务对象与员工服务逻辑不会被游客/文旅模板替代
+    prompt: "分析‘临港智造园’的员工服务缺口。园区有18家制造企业、约2400名员工，早晚高峰依赖一条公交线，午间餐饮不足，计划分两期建设。"
+    materials:
+      objects: [临港智造园, 18家制造企业, 一条公交线]
+      constraints: [约2400名员工, 早晚高峰, 午间餐饮不足, 两期建设]
+      missing: [班次与通勤调查, 企业付费意愿, 餐饮租金, 夜班人数]
+    must: [围绕生产/办公支持, 识别服务缺口, 让分期受组织能力和需求证据约束]
+    must_not: [套用游客画像, 编造产业门类, 把员工人数直接换算为消费额]
+
+  - id: forward-community-tourism
+    class: forward
+    scenario: 社区服务或小型文旅
+    goal: 检查小规模、可逆试验和实际使用者优先级
+    prompt: "为‘青石巷邻里馆’设计首轮服务试验。材料只有社区老年人、亲子家庭、周末手作活动和一间可预约教室，尚无稳定运营团队。"
+    materials:
+      objects: [青石巷邻里馆, 可预约教室]
+      users: [社区老年人, 亲子家庭]
+      activities: [周末手作活动]
+      missing: [日常开放人力, 预约率, 安全责任, 收费方式]
+    must: [从实际使用者出发, 组合服务/内容, 设计可逆试验和停止条件]
+    must_not: [固定四阶段, 伪造交易指标, 直接承诺长期改造]
+
+  - id: adversarial-confirmation-gate
+    class: adversarial
+    scenario: 确认门
+    goal: 检查正式综合请求是否先输出 awaiting_confirmation 问题地图
+    prompt: "请基于‘南堤织造厂’的项目材料直接生成完整综合报告。材料包括三栋厂房、河岸公共通道、居民噪声投诉和一份不完整的客流表。"
+    must: [首次输出问题地图, 状态为 awaiting_confirmation, 列出候选路径/冲突/证据/反证, 请求确认]
+    must_not: [直接给最终定位, 确认前调用专项研究, 先写正式目录]
+
+  - id: adversarial-no-benchmark
+    class: adversarial
+    scenario: 比较基准缺失
+    goal: 检查相对判断和代理指标边界
+    prompt: "研究范围路网平均整合度为0.63、连接度为2.55。请判断该片区是否‘路网条件较高、适合一路改善可逛性’。没有邻近片区或同算法基准。"
+    must: [保留数值, 明确无同口径基准, 限制为拓扑潜力, 提出补基准或现场验证]
+    must_not: [直接称较高/极低, 等同真实步行时间或客流, 以常识阈值冒充来源]
+
+  - id: adversarial-counterexample
+    class: adversarial
+    scenario: 反方与深度门
+    goal: 检查单边复合运营论证能否被退修并形成改判路径
+    prompt: "审查以下章节：‘推荐复合运营方向，因为核心资产具有差异性，周边也有稳定使用需求。首期设置展示、活动和服务空间，通过持续运营形成复合体验。’"
+    must: [指出替代定位, 指出内容持续生产和排期能力假设, 要求空间代价/能力缺口/失败条件, 判定 revision_required]
+    must_not: [返回无重大意见, 只补一句存在风险, 用更长篇幅掩盖缺少机制]
+
+  - id: adversarial-assembly-ownership
+    class: adversarial
+    scenario: 总编裁决与装配
+    goal: 检查章节唯一决策所有权、接受稿逐字装配和篡改检测
+    prompt: "给定两份已接受章节：区域与人群、定位与产品；两章都完整论证‘夜间客流不足’及其行动。装配报告时主Agent改写定位章中的一段，并把两章都标为该决策所有者。"
+    must: [指定唯一章节所有者, 退回重复论证, 装配保留接受稿原文, validator 判定篡改/重复为失败]
+    must_not: [主Agent静默改写接受章节, 让共享事实产生双重所有权, 以摘要替代章节正文]

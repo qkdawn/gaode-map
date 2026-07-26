@@ -4,6 +4,8 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 SKILL_ROOT = ROOT / "skills" / "spatial-business-analyst"
 REFERENCES = SKILL_ROOT / "references"
+RESEARCH_SKILL_ROOT = ROOT / "skills" / "cultural-tourism-theme-research"
+MARKET_SKILL_ROOT = ROOT / "skills" / "spatial-market-audience-research"
 
 
 def read(name: str) -> str:
@@ -14,17 +16,20 @@ def test_skill_drives_an_adaptive_decision_report():
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
     for phrase in (
-        "工作定位",
+        "定位、空间产品、运营与分期",
         "project_semantic_model",
         "problem_map",
+        "decision_logic_map",
         "decision_inventory",
         "list_spatial_metric_results",
-        "query_history_project_dataset",
-        "Codex 原生 Subagent DAG",
+        "Codex 原生 Subagent",
         "请确认或修订上述问题地图",
+        "publication-editorial.md",
+        "总编裁决与出版装配",
     ):
         assert phrase in skill
 
+    assert "report-example.md" not in skill
     for legacy in (
         "ChapterDeliveryPackage",
         "ChapterAssignment",
@@ -36,59 +41,33 @@ def test_skill_drives_an_adaptive_decision_report():
         assert legacy not in skill
 
 
-def test_report_contract_is_decision_complete_without_fixed_sections():
-    report = read("report-contract.md")
-
-    for concept in (
-        "最小逻辑主线",
-        "当前判断与推荐方向",
-        "项目事实与关键关系",
-        "备选方案与取舍",
-        "空间、产品与运营方案",
-        "实施与验证",
-        "证据审计",
-        "decision_inventory",
-    ):
-        assert concept in report
-    assert "未涉及的逻辑不强行创建空章节" in report
-    assert "报告不设固定页数、图数和章节数量" in report
-    assert "章节责任只能在证据收敛后形成" in report
-    assert "报告开头继续结论先行" in report
-    for depth_concept in (
-        "项目特有机制",
-        "相对优势",
-        "反例与失败条件",
-        "承接能力",
-        "路径依赖",
-        "不来自章节展开、字段数量或篇幅",
-    ):
-        assert depth_concept in report
-
-
 def test_problem_map_precedes_research_decisions_and_outline():
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
     model = read("adaptive-report-model.md")
+    orchestration = read("report-orchestration.md")
 
-    assert skill.index("→ 展示 problem_map 并等待用户确认") < skill.index("→ read_spatial_metric_result")
-    assert skill.index("### 人工确认门槛") < skill.index("### 波次 1：多视角证据研究")
-    for blocked_action in (
-        "不读取专项结果明细",
-        "不执行新指标",
-        "不启动 Subagent",
-        "不生成正式大纲",
-    ):
-        assert blocked_action in skill
-    for concrete_question in (
-        "为什么选择文化生活",
-        "替代路径为什么不优先",
-        "居民共存会阻断哪些产品",
-        "礼堂与庭院及各栋建筑怎样形成系统",
-        "运营主体必须具备什么能力",
-        "什么证据会推翻当前选择",
-    ):
-        assert concrete_question in skill
-
+    assert skill.index("## Step 0：前置项目资源调研") < skill.index("## Step 1：准备材料与问题地图")
+    assert skill.index("$cultural-tourism-theme-research") < skill.index("`references/adaptive-report-model.md`")
+    assert skill.index("`references/adaptive-report-model.md`") < skill.index("从已保存项目开始读取")
+    assert "report/research/cultural-tourism-theme-research.md" in skill
+    assert skill.index("空的对象型 `payload` 容器") < skill.index("## Step 2：取得用户确认")
+    assert skill.index("report/state/problem-map.json") < skill.index("## Step 2：取得用户确认")
+    assert skill.index("## Step 2：取得用户确认") < skill.index("## Confirmed workflow")
+    assert skill.index("## Step 2：取得用户确认") < skill.index("$spatial-market-audience-research")
+    assert "report/research/spatial-market-audience-research.md" in skill
+    assert "report/research/spatial-product-market-recheck.md" in skill
     assert model.index("## 问题地图") < model.index("## 决策清单")
+    assert "波次 0 将 `decision_logic_map`、`decision_inventory` 与 `evidence_summary` 初始化为对象型空容器" in model
+    assert "波次 4 写入决策条目和证据摘要" in model
+    assert "再列待确认问题及其研究价值，并据此组织研究视角、候选证据和反证来源" in model
+    assert "`decision_inventory` 收敛后形成正式章节标题" in model
+    assert "## 决策逻辑图" in model
+    assert "decision-rulebook.md" in model
+    assert "不得把问题改写成" not in model
+    assert "项目语义模型与问题地图已完成，决策逻辑图、决策与证据容器为空" in orchestration
+    assert "章节边界按决策关系组织，数据类型进入拥有相应决策的证据包" in orchestration
+    assert "章节边界跟随决策关系，不跟随数据类型" not in orchestration
+
     problem_contract = model[model.index("## 问题地图") : model.index("## 决策清单")]
     for field in (
         "question:",
@@ -102,10 +81,41 @@ def test_problem_map_precedes_research_decisions_and_outline():
         assert field in problem_contract
     assert "current_judgment:" not in problem_contract
     assert "action:" not in problem_contract
-    assert "文化生活及其他材料偏好只作为候选假设" in model
+    assert "## 自适应深度" not in model
+    assert "## 边界表达" not in model
 
 
-def test_native_subagent_dag_validates_assembly_before_independent_visual_editing():
+def test_report_contract_owns_only_hard_formal_contracts():
+    report = read("report-contract.md")
+
+    for concept in (
+        "spatial-business-chapter-index",
+        "spatial-business-state-manifest",
+        "spatial-business-decision-logic-map",
+        "adversarial_review_path",
+        "depth_review_path",
+        "state_manifest: \"state/manifest.json\"",
+        "完整、逐字包含每个接受版本",
+        "validate_chapter_assembly.py",
+        "publication-editorial.md",
+    ):
+        assert concept in report
+
+    for leaked_editorial_rule in (
+        "## 最小逻辑主线",
+        "## 决策闭环",
+        "## 写作要求",
+        "## 外部证据",
+        "## 实施与运营",
+        "## 边界与附录",
+    ):
+        assert leaked_editorial_rule not in report
+
+    assert "把返写请求交回原章节作者" not in report
+    assert "返写后的版本通过双审校后成为接受正文" not in report
+
+
+def test_orchestration_uses_editor_instead_of_low_loss_assembly():
     orchestration = read("report-orchestration.md")
 
     headings = (
@@ -114,54 +124,48 @@ def test_native_subagent_dag_validates_assembly_before_independent_visual_editin
         "## 波次 4：决策底稿与章节责任",
         "## 波次 5：专业章节纵向循环",
         "## 波次 6：全稿审校与定向返写",
-        "## 波次 7：低损耗合编与装配验收",
+        "## 波次 7：总编裁决与出版装配",
         "## 波次 8：独立视觉证据编辑",
     )
     positions = [orchestration.index(heading) for heading in headings]
     assert positions == sorted(positions)
-    assert "用户明确确认前，不读取专项指标结果、不执行新指标、不启动 Subagent" in orchestration
-    assert "每项重要决策只有一个章节所有者" in orchestration
-    assert "失败时不得进入视觉渲染或导出" in orchestration
-    assert "主 Agent、章节作者与渲染器都不兼任视觉策划" in orchestration
-    assert "只能出现在章节标记之外" in orchestration
-    assert "即使零图也保存" in orchestration
+    assert "低损耗合编" not in orchestration
+    assert "publication-editorial.md" in orchestration
+    assert "完成该文件定义的出版核对与定向返写循环" in orchestration
+    assert "按 `report-contract.md` 装配" in orchestration
+    assert orchestration.index("market_discovery") < orchestration.index("定位与产品策略师只消费")
+    assert orchestration.index("定位与产品策略师只消费") < orchestration.index("product_recheck")
+    assert orchestration.index("product_recheck") < orchestration.index("## 波次 4：决策底稿与章节责任")
+    assert "主 Agent 在波次 4 作最终裁决" in orchestration
+    assert "共同事实和证据边界的正文归属" not in orchestration
+    assert "审校语言泄漏" not in orchestration
 
 
-def test_quality_gate_prioritizes_analytical_depth_over_baseline_correctness():
+def test_quality_gate_owns_analysis_depth_and_evidence_discipline():
     quality = read("quality-gates.md")
 
-    assert quality.index("## 分析深度一票退修") < quality.index("## 正确性最低底线")
-    for depth_failure in (
-        "用户确认问题地图前已经启动专项研究",
-        "正式大纲只是把人口、POI、夜光、路网或专家角色转换成章节名称",
-        "项目特有资产、关系、约束或使用机制",
-        "反例、失效条件和触发改判的信号",
-        "牺牲什么、制造什么后续约束",
-        "组织、内容生产、招商、服务交付或现场运营能力",
-        "改向、缩减、暂停或退出的成本和办法",
-        "替换项目名称后",
+    for heading in (
+        "## 分析深度一票退修",
+        "## 反方审查",
+        "## 深度审校方法",
+        "## 正确性与证据纪律",
+        "## 证据删除测试",
     ):
-        assert depth_failure in quality
-
-    for adversarial_gate in (
-        "没有经过反方审查",
-        "最强反驳",
-        "静默忽略反方意见",
-        "接受、部分接受或不成立",
-        "原始反方意见和裁定只用于内部审校",
-    ):
-        assert adversarial_gate in quality
-
-    assert "全部通过仍不代表报告有深度" in quality
-    assert "不展示 Agent、Prompt、内部结构或工具日志" in quality
-    assert "删除后，定位、空间、产品或运营决定是否变化" in quality
+        assert heading in quality
+    assert "项目特有机制" in quality
+    assert "真实候选方向" in quality
+    assert "替换项目名称和专有对象后" in quality
+    assert "项目条件 → 客群假设 → 客源圈/竞争/需求与支付验证" in quality
+    assert "实际使用、政策任务、机构采购和服务履约" in quality
+    assert "## 表达密度" not in quality
+    assert "## 视觉最低底线" not in quality
 
 
-def test_specialists_return_natural_markdown_and_cover_required_decisions():
+def test_roles_keep_specialist_scope_and_delegate_shared_rules():
     roles = read("specialist-roles.md")
 
     for role in (
-        "区域与人群分析师",
+        "目标客群与行为综合师",
         "空间结构分析师",
         "定位与产品策略师",
         "空间功能策划师",
@@ -172,105 +176,190 @@ def test_specialists_return_natural_markdown_and_cover_required_decisions():
     ):
         assert f"## {role}" in roles
 
-    for section in ("核心判断", "数据依据", "规划含义", "具体动作", "简短边界"):
-        assert section in roles
-    assert "机器 schema" in roles
-    assert "不得全部写成待核实" in roles
-    assert "不得只给措辞修补" in roles
-    assert "只检查" not in roles
-    assert "章节与关键判断" in roles
-    assert "无重大反方意见" in roles
-    assert "逐项将反方意见裁定为接受、部分接受或不成立" in roles
-    assert "所有角色只在用户确认问题地图后启动" in roles
-    assert "不按人口、POI、夜光、路网等数据类型分章" in roles
-    assert "文化生活或文旅都不是固定菜单" in roles
+    assert "quality-gates.md" in roles
+    assert "publication-editorial.md" in roles
+    assert "每个正式章节必须完整解释" not in roles
+    assert "判断；项目原件和空间证据及其比较基准" not in roles
+    assert "文旅资源与叙事研究员" not in roles
+    assert "文旅市场与客群验证研究员" not in roles
+    assert "## 区域与人群分析师" not in roles
+    assert "外部客源圈、市场流向和到访频率由市场 Skill 拥有" in roles
 
 
-def test_visual_workflow_is_owned_by_reference_and_independent_subagent():
+def test_project_resource_research_is_a_complete_pre_semantic_workflow():
     skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-    workflow = read("report-visual-workflow.md")
+    research_skill = (RESEARCH_SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    workflow = (RESEARCH_SKILL_ROOT / "references" / "research-workflow.md").read_text(encoding="utf-8")
+    workpacks = (RESEARCH_SKILL_ROOT / "references" / "specialist-workpacks.md").read_text(encoding="utf-8")
 
-    assert "### 波次 7：低损耗合编与装配验收" in skill
-    assert "### 波次 8：独立视觉证据编辑" in skill
-    assert "启动前完整读取 `references/report-visual-workflow.md`" in skill
-    for leaked_detail in (
+    assert "$cultural-tourism-theme-research" in skill
+    assert "cultural-tourism-decision-workflow.md" not in skill
+    assert not (REFERENCES / "cultural-tourism-decision-workflow.md").exists()
+    assert "report/research/cultural-tourism-theme-research.md" in research_skill
+    assert "SourceRecord" in research_skill
+    assert "EvidenceNode" in research_skill
+    assert "不要求转成" in research_skill
+    for heading in (
+        "## 第一阶段：资源全面收集",
+        "## 第二阶段：核心资源筛选",
+        "## 第三阶段：共同关系分析",
+        "## 第四阶段：资源关系网络",
+        "## 第五、六阶段：主题候选与筛选",
+        "## 第七、八阶段：故事线与空间结构",
+        "## 第九、十阶段：场景与运营转化",
+        "## 输出与自检",
+    ):
+        assert heading in workflow
+    for phrase in (
+        "自然与地理",
+        "物质文化",
+        "历史过程",
+        "人物与群体",
+        "非物质文化",
+        "产业与生产",
+        "生活方式与日常",
+        "精神与价值",
+        "来源标题、链接、发布或更新日期",
+        "不得为了完成资源数量、主题数量或场景数量而编造事实",
+        "## 空间搜算与网页检索",
+        "list_history_project_datasets",
+        "query_history_project_dataset",
+        "aggregate_history_project_dataset",
+        "current:dataset:poi",
+        "本次调研不实时抓取高德 POI",
         "poi.supply_structure",
         "poi.focused_accessibility",
-        "中心 2 km",
-        "Dijkstra",
-        "4.5 km/h",
-        "report-anchor:poi-route-map",
-        "render_report_vega_visuals(history_id",
+        "### 八类资源的来源分工",
+        "POI 数量不证明真实客流",
     ):
-        assert leaked_detail not in skill
+        assert phrase in workflow or phrase in research_skill
 
-    for contract in (
-        "本文件是报告视觉编排、插入、验收和失败降级的唯一事实来源",
-        "正式综合报告每次都启动独立的视觉证据编辑 Subagent",
-        "即使零图",
-        "主 Agent 不替它选图",
-        "确定性工具负责取数和渲染",
-        "只能在章节边界之外",
-        "视觉生成后重新运行 `validate_chapter_assembly.py`",
-        "视觉失败不能触发分析正文降级",
+    assert "POI/空间搜算和公开网页检索" in skill
+    assert "项目材料、POI/空间查询和网页来源可追溯" in skill
+    assert "本轮文旅调研完成八类资源清单后" in skill
+    assert "历史底稿可提供线索和比较参照" in skill
+    assert "specialist-workpacks.md" in research_skill
+    for role in (
+        "项目本体与八类资源证据分析师",
+        "周边空间与文化网络分析师",
+        "历史、社会与生产生活关系分析师",
+        "主题与叙事综合师",
+        "叙事空间转译分析师",
+        "场景与运营转化分析师",
+        "主题证据与转译审校员",
     ):
-        assert contract in workflow
-
-    assert "2 km" not in workflow
-    assert "4.5 km/h" not in workflow
-
-
-def test_visual_quality_gate_delegates_details_to_visual_workflow():
-    quality = read("quality-gates.md")
-
-    visual_gate = quality[quality.index("## 视觉最低底线") : quality.index("## 最终删除测试")]
-    assert "完整遵守 `report-visual-workflow.md`" in visual_gate
-    assert "独立视觉 Subagent" in visual_gate
-    assert "零图也要保存计划、manifest 和省略原因" in visual_gate
-    assert "章节标记之外" in visual_gate
-    assert "Dijkstra" not in visual_gate
-    assert "4.5 km/h" not in visual_gate
+        assert role in workpacks
+    assert "工作包 2 与工作包 3 在工作包 1 完成后并行执行" in workpacks
+    assert "唯一拥有核心资源分级、资源关系网络和主题裁决" in workpacks
 
 
-def test_forward_tests_reject_correct_but_shallow_reports():
+def test_market_research_is_a_complete_post_confirmation_two_stage_workflow():
+    skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    market_skill = (MARKET_SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+    workflow = (MARKET_SKILL_ROOT / "references" / "research-workflow.md").read_text(encoding="utf-8")
+    workpacks = (MARKET_SKILL_ROOT / "references" / "specialist-workpacks.md").read_text(encoding="utf-8")
+
+    assert "$spatial-market-audience-research" in skill
+    assert skill.index("## Step 2：取得用户确认") < skill.index("$spatial-market-audience-research")
+    assert "market_discovery" in market_skill
+    assert "product_recheck" in market_skill
+    assert "SourceRecord" not in market_skill
+    assert "EvidenceNode" not in market_skill
+    assert "SourceRecord" in workflow
+    assert "EvidenceNode" in workflow
+    assert "不要求转成" in workflow
+    assert "第一步至第六步" in market_skill
+    assert "第七步：产品市场再校核" in market_skill
+    for heading in (
+        "## 第一步：项目条件识别",
+        "## 第二步：候选客群假设",
+        "## 第三步：市场验证",
+        "## 第四步：目标客群确定",
+        "## 第五步：目标客群与行为链",
+        "## 第六步：产品任务与候选业态",
+        "## 第七步：产品市场再校核",
+        "## 项目类型适配",
+        "## 输出与自检",
+    ):
+        assert heading in workflow
+    for role in (
+        "项目条件与候选客群分析师",
+        "市场母体、客源圈与流向验证分析师",
+        "竞争供给与市场缺口分析师",
+        "需求与支付验证分析师",
+        "目标客群与行为综合师",
+        "产品市场再校核分析师",
+    ):
+        assert role in workpacks
+    assert "工作包 2、3、4 在工作包 1 完成后并行" in workpacks
+    assert "第二次校核仍不成立" in workflow
+    assert "第二次校核仍不成立" not in workpacks
+    assert "市场母体" in workflow
+    assert "宏观母体只能限定市场上限和结构" in workflow
+    assert "多个产品是否争夺同一小客群" in workflow
+    assert "没有明确客群的产品降级或退出" in workflow
+
+
+def test_publication_editorial_is_the_single_source_for_reader_expression():
+    editorial = read("publication-editorial.md")
+
+    for concept in (
+        "面向读者表达的唯一事实来源",
+        "总编职责",
+        "出版核对",
+        "定向返写",
+        "完成条件",
+        "唯一完整正文归属",
+        "项目对象、当前选择或下一步行动",
+        "总编综合只引用接受章节",
+        "就绪",
+    ):
+        assert concept in editorial
+
+    for legacy_return_trigger in (
+        "两个章节重复同一决策",
+        "章节承担相同读者职责，无法形成连续主线",
+        "标题或段落使用反方审查",
+        "执行摘要、过渡或综合结论复述章节",
+        "一段文本没有改变定位",
+    ):
+        assert legacy_return_trigger not in editorial
+
+    revision_loop = "作者沿用原证据包生成新版本，通过双审校后回到出版装配。"
+    assert editorial.count(revision_loop) == 1
+    assert editorial.index("## 定向返写") < editorial.index(revision_loop)
+    assert "并把发现的问题定向交回拥有相应决策的原作者" not in editorial
+
+
+def test_forward_tests_cover_editorial_returns_and_preserved_assembly():
     forward_tests = read("adaptive-forward-tests.md")
 
-    assert "## 对抗性深度测试" in forward_tests
-    assert "即使事实、年份、范围和代理边界全部正确，章节也完整，仍必须退修" in forward_tests
-    for missing_analysis in (
-        "文化生活为何相对更优",
-        "空间选择各自代价",
-        "方向失败条件",
-        "内容与现场运营能力缺口",
-        "付出什么成本",
-    ):
-        assert missing_analysis in forward_tests
-    assert "不需要编造数值阈值" in forward_tests
-    assert "项目条件之间的机制、可推翻结论的反例、能力约束对顺序的影响以及可执行的改向路径" in forward_tests
-    for process_gate in (
-        "首次输出是待用户确认的问题地图",
-        "确认前不启动专项研究",
-        "简单项目不机械补齐六项",
-        "当反证成立时，能够降级为条件性方向或被真实替代方案取代",
-        "章节责任只在专项研究和 `decision_inventory` 完成后生成",
-    ):
-        assert process_gate in forward_tests
+    assert "## 总编裁决与出版装配对抗测试" in forward_tests
+    assert "唯一完整正文归属" in forward_tests
+    assert "退回原作者" in forward_tests
+    assert "重新执行反方审查和深度审校" in forward_tests
+    assert "完整包含关系" in forward_tests
+    assert "低损耗装配" not in forward_tests
+    assert "## 市场与客群链路前向测试" in forward_tests
+    assert "没有支付或真实使用证据" in forward_tests
+    assert "不机械生成游客、OTA、住宿或商业支付分析" in forward_tests
+    assert "第二次校核仍不成立" in forward_tests
 
 
-def test_forward_tests_challenge_one_sided_chapters_without_forcing_objections():
-    forward_tests = read("adaptive-forward-tests.md")
+def test_report_example_is_retired_and_all_references_are_routed():
+    skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "## 反方审查对抗测试" in forward_tests
-    assert "结构完整但单边论证的章节" in forward_tests
-    for critique in (
-        "低频展示加日常服务",
-        "持续生产可重复内容",
-        "排期、履约与现场协调能力",
-        "可能降级定位并缩小首开范围",
-    ):
-        assert critique in forward_tests
-    assert "不得为凑数量继续制造反对" in forward_tests
-    assert "原始反方意见和裁定仍只保留在内部审校中" in forward_tests
+    assert not (REFERENCES / "report-example.md").exists()
+    for reference in REFERENCES.glob("*.md"):
+        assert f"references/{reference.name}" in skill, f"unreachable reference: {reference.name}"
+
+
+def test_skill_hygiene_has_positive_steering():
+    skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+    assert skill.count("**完成条件：**") == 3
+    for directive in ("不得", "不要", "不能", "禁止", "不重写", "不以"):
+        assert directive not in skill
 
 
 def test_production_has_no_retired_v41_report_contract():
@@ -293,31 +382,15 @@ def test_production_has_no_retired_v41_report_contract():
         assert token not in corpus
 
 
-def test_deprojected_example_demonstrates_decision_density_without_project_facts():
-    example = read("report-example.md")
-
-    assert "不好的写法" in example
-    assert "好的写法" in example
-    assert "候选定位比较" in example
-    assert "空间机制" in example
-    assert "条件性建筑建议" in example
-    assert "分期" in example
-    for depth_example in (
-        "为什么推荐方向胜出",
-        "反方审查示例",
-        "方向何时失败",
-        "多个空间选择的代价",
-        "运营能力缺口",
-        "改向成本与退出机制",
-    ):
-        assert depth_example in example
-    assert "最终正文只呈现补强后的机制、失败条件和收缩路径" in example
-    assert "长沙" not in example
-
-
-def test_report_contract_keeps_raw_adversarial_review_internal():
-    report = read("report-contract.md")
-
-    assert "正式章节在交付前必须逐章经过反方审查和分析深度审校" in report
-    assert "原始反方意见、裁定和内部返工过程不属于报告内容" in report
-    assert "正文与附录不展示反方审查原文、裁定记录、角色名称或内部返工过程" in report
+def test_skill_bundle_contains_only_reachable_current_assets():
+    retired = (
+        "references/analysis-recipes.md",
+        "references/business-model-profiles.md",
+        "references/decision-framework.md",
+        "references/directional-spatial-fusion.md",
+        "references/report-example.md",
+        "scripts/render_report_visuals.py",
+        "scripts/run_workspace.py",
+    )
+    for relative_path in retired:
+        assert not (SKILL_ROOT / relative_path).exists()

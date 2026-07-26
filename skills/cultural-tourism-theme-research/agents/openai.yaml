@@ -1,0 +1,4 @@
+interface:
+  display_name: "文旅主题调研"
+  short_description: "检索项目本体与周边真实关系，形成有来源边界的文旅主题调研"
+  default_prompt: "Use $cultural-tourism-theme-research to extract this project's eight resource categories from the provided materials, analyze their relationships, and turn the resulting themes into spatial scenes and operations. Use neighborhood and external sources to supplement or verify claims when they are relevant and available."

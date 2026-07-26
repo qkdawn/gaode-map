@@ -78,6 +78,31 @@ def test_spatial_project_mcp_exposes_history_and_skill_first_metric_tools():
     assert schemas["read_spatial_metric_result"]["required"] == ["history_id", "result_id"]
 
 
+def test_history_project_document_list_mcp_output_is_an_object():
+    async def exercise() -> dict:
+        root = Path(__file__).resolve().parents[2]
+        params = StdioServerParameters(
+            command="python",
+            args=["-m", "modules.spatial_projects.mcp_server"],
+            cwd=str(root),
+        )
+        async with stdio_client(params) as streams:
+            async with ClientSession(*streams) as session:
+                await session.initialize()
+                result = await session.list_tools()
+                return next(tool.outputSchema for tool in result.tools if tool.name == "list_history_project_documents")
+
+    output_schema = asyncio.run(exercise())
+    assert output_schema["type"] == "object"
+
+
+def test_history_project_document_list_wraps_documents(monkeypatch):
+    records = [{"document_id": "doc_1", "title": "source.docx"}]
+    monkeypatch.setattr(mcp_server.service, "list_history_project_documents", lambda history_id: records)
+
+    assert mcp_server.list_history_project_documents("history_1") == {"documents": records}
+
+
 def test_fallback_schema_keeps_object_and_array_arguments_structured():
     def callback(spatial: dict | None = None, metrics: list[dict] | None = None):
         return {"spatial": spatial, "metrics": metrics}
@@ -85,6 +110,44 @@ def test_fallback_schema_keeps_object_and_array_arguments_structured():
     schema = _StdioMcpFallback._schema(callback)
     assert schema["properties"]["spatial"]["type"] == "object"
     assert schema["properties"]["metrics"]["type"] == "array"
+
+
+def test_fallback_reads_resource_templates_with_arbitrary_parameters_and_mime_types():
+    fallback = _StdioMcpFallback("test")
+
+    @fallback.resource("spatial-document://{history_id}/{document_id}/original", mime_type="application/octet-stream")
+    def document_resource(history_id: str, document_id: str) -> bytes:
+        return f"{history_id}/{document_id}".encode("utf-8")
+
+    @fallback.resource("spatial-report-visual://{history_id}/{asset_id}", mime_type="image/svg+xml")
+    def visual_resource(history_id: str, asset_id: str) -> str:
+        return f"<svg>{history_id}/{asset_id}</svg>"
+
+    @fallback.resource("report-vega-visual://{history_id}/{report_id}/{asset_id}", mime_type="image/svg+xml")
+    def vega_resource(history_id: str, report_id: str, asset_id: str) -> str:
+        return f"<svg>{history_id}/{report_id}/{asset_id}</svg>"
+
+    def read(uri: str) -> dict:
+        response = fallback._handle({"id": 1, "method": "resources/read", "params": {"uri": uri}})
+        assert response is not None
+        return response
+
+    document = read("spatial-document://history-1/document-1/original")["result"]["contents"][0]
+    visual = read("spatial-report-visual://history-1/asset-1")["result"]["contents"][0]
+    vega = read("report-vega-visual://history-1/report-1/asset-1")["result"]["contents"][0]
+
+    assert document["mimeType"] == "application/octet-stream"
+    assert document["blob"]
+    assert visual == {
+        "uri": "spatial-report-visual://history-1/asset-1",
+        "mimeType": "image/svg+xml",
+        "text": "<svg>history-1/asset-1</svg>",
+    }
+    assert vega == {
+        "uri": "report-vega-visual://history-1/report-1/asset-1",
+        "mimeType": "image/svg+xml",
+        "text": "<svg>history-1/report-1/asset-1</svg>",
+    }
 
 
 def test_persisted_metric_results_are_read_without_execution():

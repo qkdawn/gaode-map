@@ -13,14 +13,16 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from modules.spatial_projects.service import SpatialProjectService
-from store.analysis_run_repo import analysis_run_repo
+from modules.spatial_action.metric_result_registry import (
+    MetricResultRegistry,
+    metric_result_registry,
+)
 
 from .asset_store import ReportVegaVisualAssetStore
 from .planning import APPROVED_TEMPLATE_REGISTRY
 from .schemas import VisualPlan
 from .service import render_report_visuals
 
-_CAPABILITY_ID = "spatial-business-analyst"
 _DIRECTIONAL_TEMPLATE = "directional_action_priority_matrix"
 _ALLOWED_TEMPLATE_INPUTS: dict[str, frozenset[str]] = {
     _DIRECTIONAL_TEMPLATE: frozenset({"editorial_actions"}),
@@ -73,11 +75,11 @@ class ReportVegaVisualTools:
         self,
         *,
         project_service: SpatialProjectService | None = None,
-        run_repo: Any = None,
+        result_registry: MetricResultRegistry | None = None,
         asset_store: ReportVegaVisualAssetStore | None = None,
     ) -> None:
         self._projects = project_service or SpatialProjectService()
-        self._runs = run_repo or analysis_run_repo
+        self._result_registry = result_registry or metric_result_registry
         self._assets = asset_store or ReportVegaVisualAssetStore()
 
     def template_catalog(self) -> dict[str, Any]:
@@ -125,8 +127,8 @@ class ReportVegaVisualTools:
 
         plan = VisualPlan.model_validate(_mapping(visual_plan, field="visual_plan"))
         self._validate_editor_plan(plan)
-        persisted = self._persisted_metric_results(normalized_history_id)
-        renderer_payload = self._resolve_renderer_payload(plan, persisted)
+        current_results = self._runtime_metric_results(normalized_history_id)
+        renderer_payload = self._resolve_renderer_payload(plan, current_results)
         report_path = self._assets.prepare_report(
             history_id=normalized_history_id,
             report_id=normalized_report_id,
@@ -236,58 +238,17 @@ class ReportVegaVisualTools:
         ReportVegaVisualAssetStore._validate_id(text, field)
         return text
 
-    def _persisted_metric_results(self, history_id: str) -> dict[str, _PersistedMetricResult]:
-        results: dict[str, _PersistedMetricResult] = {}
-        runs = self._runs.list(history_id, capability_id=_CAPABILITY_ID)
-        for run in runs:
-            if not isinstance(run, Mapping):
-                continue
-            run_id = _text(run.get("run_id"))
-            if not run_id:
-                continue
-            detail = self._runs.get(run_id)
-            if not isinstance(detail, Mapping):
-                continue
-            for item in self._analysis_result_items(detail):
-                result_id = _text(item.get("resource_id"))
-                payload = item.get("payload")
-                if not result_id or not isinstance(payload, Mapping):
-                    continue
-                tool_id = _text(payload.get("tool_id") or item.get("title"))
-                structured_result = payload.get("structured_result")
-                status = _text(payload.get("status") or item.get("status"))
-                if not tool_id or not isinstance(structured_result, Mapping):
-                    continue
-                # Runs arrive newest-first. A duplicated ID cannot escape its
-                # immutable source index, and the newest retained copy wins.
-                results.setdefault(
-                    result_id,
-                    _PersistedMetricResult(
-                        result_id=result_id,
-                        tool_id=tool_id,
-                        status=status,
-                        structured_result=deepcopy(dict(structured_result)),
-                        time_scope=deepcopy(
-                            dict(item.get("time_scope") or payload.get("time_scope") or {})
-                        ),
-                    ),
-                )
-        return results
-
-    @staticmethod
-    def _analysis_result_items(detail: Mapping[str, Any]) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        for artifact_entry in detail.get("artifacts") or []:
-            if not isinstance(artifact_entry, Mapping):
-                continue
-            artifact = artifact_entry.get("artifact")
-            payload = artifact_entry.get("payload")
-            if not isinstance(artifact, Mapping) or artifact.get("artifact_type") != "source_index" or not isinstance(payload, Mapping):
-                continue
-            for item in payload.get("items") or []:
-                if isinstance(item, Mapping) and item.get("resource_type") == "analysis_result":
-                    results.append(deepcopy(dict(item)))
-        return results
+    def _runtime_metric_results(self, history_id: str) -> dict[str, _PersistedMetricResult]:
+        return {
+            result.result_id: _PersistedMetricResult(
+                result_id=result.result_id,
+                tool_id=result.tool_id,
+                status=result.status,
+                structured_result=result.structured_result,
+                time_scope=result.time_scope,
+            )
+            for result in self._result_registry.list(history_id)
+        }
 
     def _validate_editor_plan(self, plan: VisualPlan) -> None:
         for item in plan.items:

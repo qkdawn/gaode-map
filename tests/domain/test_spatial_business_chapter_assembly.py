@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -20,51 +21,117 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
+def _review(review_type: str, verdict: str) -> str:
+    label = "反方审查" if review_type == "adversarial" else "分析深度审校"
+    return (
+        "---\n"
+        f"review_type: {review_type}\n"
+        f"verdict: {verdict}\n"
+        "---\n"
+        f"# {label}\n\n"
+        "已核验关键判断、候选解释、证据机制、方案代价与改判路径，结论能够影响当前决策。"
+    )
+
+
+def _write_reviews(reviews_dir: Path, chapter_id: str, version: int, verdict: str) -> dict[str, str | int]:
+    adversarial = f"{chapter_id}.v{version}.adversarial.md"
+    depth = f"{chapter_id}.v{version}.depth.md"
+    (reviews_dir / adversarial).write_text(_review("adversarial", verdict), encoding="utf-8")
+    (reviews_dir / depth).write_text(_review("depth", verdict), encoding="utf-8")
+    return {
+        "version": version,
+        "path": f"chapters/{chapter_id}.v{version}.md",
+        "adversarial_review_path": f"chapter-reviews/{adversarial}",
+        "depth_review_path": f"chapter-reviews/{depth}",
+        "review_status": verdict,
+    }
+
+
+def _write_state_bundle(report_dir: Path) -> None:
+    state_dir = report_dir / "state"
+    state_dir.mkdir()
+    snapshot_version = 4
+    payloads = {
+        "project_semantic_model": {"objects": []},
+        "problem_map": {"status": "confirmed", "questions": []},
+        "decision_logic_map": {
+            "status": "ready",
+            "rules": [
+                {
+                    "id": "R1",
+                    "decision_question": "项目首期应验证什么？",
+                    "when": ["当前直接市场证据尚未闭合。"],
+                    "judgment": "先采用低容量可逆试验。",
+                    "action": "首期不投入重资产。",
+                    "alternatives": ["直接建设重资产内容"],
+                    "counterexample": "若直接市场证据闭合，则可比较重资产方案。",
+                    "evidence_refs": ["evidence:market:1"],
+                    "limitations": ["空间指标不能证明支付意愿。"],
+                    "validation": "以试验到访和支付记录决定后续投资。",
+                    "status": "conditional",
+                    "metric_refs": [],
+                }
+            ],
+        },
+        "decision_inventory": {"decisions": []},
+        "evidence_summary": {"items": []},
+    }
+    artifacts = {}
+    for state_id, contract in MODULE.STATE_ARTIFACTS.items():
+        artifact = {
+            "state_id": state_id,
+            "schema": contract["schema"],
+            "snapshot_version": snapshot_version,
+            "updated_at": "2026-07-22T10:00:00+08:00",
+            "payload": payloads[state_id],
+        }
+        path = report_dir / contract["path"]
+        path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
+        artifacts[state_id] = {
+            "path": contract["path"],
+            "schema": contract["schema"],
+            "snapshot_version": snapshot_version,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    manifest = {
+        "schema": MODULE.STATE_MANIFEST_SCHEMA,
+        "snapshot_version": snapshot_version,
+        "artifacts": artifacts,
+    }
+    (state_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _write_report(tmp_path: Path, *, second_version: bool = True, mutate_assembly: bool = False) -> Path:
     report_dir = tmp_path / "report"
     chapters_dir = report_dir / "chapters"
     reviews_dir = report_dir / "chapter-reviews"
     chapters_dir.mkdir(parents=True)
     reviews_dir.mkdir()
+    _write_state_bundle(report_dir)
 
-    first_v1 = "# 区域与人群\n\n" + "区域证据改变使用场景。" * 170
-    first_v2 = "# 区域与人群\n\n" + "区域证据通过日常使用机制改变产品时段。" * 130
-    positioning = "# 定位与产品\n\n" + "文化生活方向的相对优势来自项目特有资产与使用关系。" * 100
+    first_v1 = "# 目标客群与行为\n\n" + "市场证据改变使用场景。" * 170
+    first_v2 = "# 目标客群与行为\n\n" + "市场证据通过日常使用机制改变产品时段。" * 130
+    positioning = "# 定位与产品\n\n" + "推荐方向的相对优势来自项目特有资产与使用关系。" * 100
     (chapters_dir / "regional-people.v1.md").write_text(first_v1, encoding="utf-8")
-    (reviews_dir / "regional-people.v1.md").write_text("需要解释机制并返写。", encoding="utf-8")
-    versions = [
-        {
-            "version": 1,
-            "path": "chapters/regional-people.v1.md",
-            "review_path": "chapter-reviews/regional-people.v1.md",
-            "review_status": "revision_required" if second_version else "accepted",
-        }
-    ]
+    versions = [_write_reviews(reviews_dir, "regional-people", 1, "revision_required" if second_version else "accepted")]
     accepted_first = first_v1
     accepted_version = 1
     if second_version:
         (chapters_dir / "regional-people.v2.md").write_text(first_v2, encoding="utf-8")
-        (reviews_dir / "regional-people.v2.md").write_text("accepted", encoding="utf-8")
-        versions.append(
-            {
-                "version": 2,
-                "path": "chapters/regional-people.v2.md",
-                "review_path": "chapter-reviews/regional-people.v2.md",
-                "review_status": "accepted",
-            }
-        )
+        versions.append(_write_reviews(reviews_dir, "regional-people", 2, "accepted"))
         accepted_first = first_v2
         accepted_version = 2
     (chapters_dir / "positioning-product.v1.md").write_text(positioning, encoding="utf-8")
-    (reviews_dir / "positioning-product.v1.md").write_text("accepted", encoding="utf-8")
+    positioning_review = _write_reviews(reviews_dir, "positioning-product", 1, "accepted")
 
     index = {
-        "schema_version": MODULE.SCHEMA_VERSION,
+        "schema": MODULE.CHAPTER_INDEX_SCHEMA,
         "report_mode": "formal_comprehensive",
+        "state_manifest": MODULE.STATE_MANIFEST_PATH,
         "chapters": [
             {
                 "chapter_id": "regional-people",
-                "role": "区域与人群分析师",
+                "role": "目标客群与行为综合师",
                 "decision_ids": ["decision:people"],
                 "dependencies": [],
                 "versions": versions,
@@ -77,14 +144,7 @@ def _write_report(tmp_path: Path, *, second_version: bool = True, mutate_assembl
                 "role": "定位与产品策略师",
                 "decision_ids": ["decision:positioning"],
                 "dependencies": ["regional-people"],
-                "versions": [
-                    {
-                        "version": 1,
-                        "path": "chapters/positioning-product.v1.md",
-                        "review_path": "chapter-reviews/positioning-product.v1.md",
-                        "review_status": "accepted",
-                    }
-                ],
+                "versions": [positioning_review],
                 "accepted_version": 1,
                 "status": "accepted",
                 "character_count": MODULE.content_character_count(positioning),
@@ -118,6 +178,165 @@ def test_validates_versioned_low_loss_assembly(tmp_path):
     assert result.valid is True
     assert result.chapter_count == 2
     assert not result.errors
+
+
+def test_rejects_single_line_review(tmp_path):
+    report_dir = _write_report(tmp_path)
+    review = report_dir / "chapter-reviews" / "regional-people.v2.adversarial.md"
+    review.write_text("accepted", encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert result.valid is False
+    assert "chapter_review_metadata_missing" in _codes(result.errors)
+
+
+def test_rejects_missing_independent_review(tmp_path):
+    report_dir = _write_report(tmp_path)
+    (report_dir / "chapter-reviews" / "regional-people.v2.depth.md").unlink()
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "chapter_depth_review_missing" in _codes(result.errors)
+
+
+def test_rejects_wrong_review_type(tmp_path):
+    report_dir = _write_report(tmp_path)
+    review = report_dir / "chapter-reviews" / "regional-people.v2.adversarial.md"
+    review.write_text(_review("depth", "accepted"), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "chapter_review_type" in _codes(result.errors)
+
+
+def test_rejects_review_without_substantive_rationale(tmp_path):
+    report_dir = _write_report(tmp_path)
+    review = report_dir / "chapter-reviews" / "regional-people.v2.depth.md"
+    review.write_text("---\nreview_type: depth\nverdict: accepted\n---\n# 好", encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "chapter_review_rationale_missing" in _codes(result.errors)
+
+
+def test_rejects_latest_revision_required_verdict(tmp_path):
+    report_dir = _write_report(tmp_path)
+    review = report_dir / "chapter-reviews" / "regional-people.v2.depth.md"
+    review.write_text(_review("depth", "revision_required"), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert {"chapter_review_status", "chapter_review_status_mismatch"} <= _codes(result.errors)
+
+
+def test_requires_explicit_state_manifest_reference(tmp_path):
+    report_dir = _write_report(tmp_path)
+    index_path = report_dir / "chapter-index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    del index["state_manifest"]
+    index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "state_manifest_reference_missing" in _codes(result.errors)
+
+
+def test_rejects_missing_state_manifest(tmp_path):
+    report_dir = _write_report(tmp_path)
+    (report_dir / MODULE.STATE_MANIFEST_PATH).unlink()
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "state_manifest_missing" in _codes(result.errors)
+
+
+def test_rejects_state_path_escape(tmp_path):
+    report_dir = _write_report(tmp_path)
+    manifest_path = report_dir / MODULE.STATE_MANIFEST_PATH
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"]["problem_map"]["path"] = "../problem-map.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert {"state_artifact_path", "state_artifact_missing"} <= _codes(result.errors)
+
+
+def test_rejects_snapshot_version_mismatch(tmp_path):
+    report_dir = _write_report(tmp_path)
+    manifest_path = report_dir / MODULE.STATE_MANIFEST_PATH
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"]["problem_map"]["snapshot_version"] += 1
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "state_artifact_snapshot" in _codes(result.errors)
+
+
+def test_rejects_incomplete_decision_logic_rule(tmp_path):
+    report_dir = _write_report(tmp_path)
+    state_path = report_dir / MODULE.STATE_ARTIFACTS["decision_logic_map"]["path"]
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["payload"]["rules"][0].pop("counterexample")
+    state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    manifest_path = report_dir / MODULE.STATE_MANIFEST_PATH
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"]["decision_logic_map"]["sha256"] = hashlib.sha256(state_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "decision_logic_rule_invalid" in _codes(result.errors)
+
+
+def test_rejects_legacy_index_schema_version(tmp_path):
+    report_dir = _write_report(tmp_path)
+    index_path = report_dir / "chapter-index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["schema_version"] = index.pop("schema")
+    index_path.write_text(json.dumps(index, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert {"chapter_index_legacy_schema", "chapter_index_schema"} <= _codes(result.errors)
+
+
+def test_rejects_legacy_state_version(tmp_path):
+    report_dir = _write_report(tmp_path)
+    manifest_path = report_dir / MODULE.STATE_MANIFEST_PATH
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["state_version"] = 1
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "state_manifest_legacy_version" in _codes(result.errors)
+
+
+def test_rejects_wrong_state_schema(tmp_path):
+    report_dir = _write_report(tmp_path)
+    manifest_path = report_dir / MODULE.STATE_MANIFEST_PATH
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema"] = "wrong-state-manifest"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "state_manifest_schema" in _codes(result.errors)
+
+
+def test_rejects_state_checksum_mismatch(tmp_path):
+    report_dir = _write_report(tmp_path)
+    state_path = report_dir / MODULE.STATE_ARTIFACTS["evidence_summary"]["path"]
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["payload"]["items"].append({"id": "evidence:tampered"})
+    state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "state_artifact_checksum" in _codes(result.errors)
 
 
 def test_rejects_duplicate_decision_ownership(tmp_path):
@@ -162,7 +381,7 @@ def test_rejects_unresolved_latest_review(tmp_path):
 
     result = MODULE.validate_report_dir(report_dir)
 
-    assert {"chapter_not_accepted", "chapter_review_status"} <= _codes(result.errors)
+    assert {"chapter_not_accepted", "chapter_review_status_mismatch"} <= _codes(result.errors)
 
 
 def test_rejects_non_latest_accepted_version(tmp_path):

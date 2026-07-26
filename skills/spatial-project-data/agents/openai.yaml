@@ -1,4 +1,0 @@
-interface:
-  display_name: "Spatial Project Data"
-  short_description: "Read locked spatial project data and quality limits."
-  default_prompt: "Use $spatial-project-data to inspect a locked spatial project snapshot."

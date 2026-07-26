@@ -10,6 +10,7 @@ from .tool_definitions import (
     register_retrieval_tools,
     register_scope_dataset_tools,
     register_source_evidence_tools,
+    register_public_web_tools,
 )
 
 
@@ -20,6 +21,7 @@ def get_tool_registry() -> Dict[str, RegisteredTool]:
     register_source_evidence_tools(registry)
     register_retrieval_tools(registry)
     register_scope_dataset_tools(registry)
+    register_public_web_tools(registry)
     return registry
 
 

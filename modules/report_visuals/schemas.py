@@ -13,6 +13,7 @@ DISTANCE_BAND_LABELS = {"0-500m": "0–500m", "500-1000m": "500–1000m", "1000-
 AGE_BANDS = ("0–14", "15–24", "25–44", "45–59", "60+")
 ReportVisualTemplateId = Literal[
     "population_age_structure",
+    "population_supply_context",
     "directional_action_priority_matrix",
     "focused_poi_walking_route_map",
     "poi_supply_structure",

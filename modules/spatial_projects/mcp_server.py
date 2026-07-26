@@ -147,14 +147,18 @@ class _StdioMcpFallback:
             params = request.get("params") if isinstance(request.get("params"), dict) else {}
             uri = str(params.get("uri") or "")
             for template, callback, mime_type in self._resources:
-                pattern = re.escape(template).replace(r"\{history_id\}", r"(?P<history_id>[^/]+)").replace(r"\{document_id\}", r"(?P<document_id>[^/]+)")
+                pattern = re.sub(
+                    r"\\\{([A-Za-z_][A-Za-z0-9_]*)\\\}",
+                    r"(?P<\1>[^/]+)",
+                    re.escape(template),
+                )
                 match = re.fullmatch(pattern, uri)
                 if match:
                     payload = callback(**match.groupdict())
                     if isinstance(payload, bytes):
                         contents = {"uri": uri, "mimeType": mime_type, "blob": base64.b64encode(payload).decode("ascii")}
                     else:
-                        contents = {"uri": uri, "mimeType": "text/plain", "text": str(payload)}
+                        contents = {"uri": uri, "mimeType": mime_type, "text": str(payload)}
                     return {"jsonrpc": "2.0", "id": request_id, "result": {"contents": [contents]}}
             return {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "unknown_resource"}}
         if method == "tools/call":
@@ -276,7 +280,10 @@ def read_history_project(history_id: str) -> dict[str, Any]:
 @mcp.tool()
 def list_history_project_documents(history_id: str) -> dict[str, Any]:
     """List project documents linked to one analysis history, including their roles and parse status."""
-    return _call(service.list_history_project_documents, history_id=history_id)
+    result = _call(service.list_history_project_documents, history_id=history_id)
+    if isinstance(result, dict) and result.get("status") in {"not_found", "invalid_request", "unavailable"}:
+        return result
+    return {"documents": result}
 
 
 @mcp.tool()
@@ -520,7 +527,7 @@ def render_report_vega_visuals(
     report_markdown: str,
     visual_plan: dict[str, Any],
 ) -> dict[str, Any]:
-    """Render a reviewed Vega report-visual plan from same-history persisted metric results only."""
+    """Render a reviewed Vega report-visual plan from same-session metric results only."""
     return _call(
         _render_report_vega_visuals,
         history_id=history_id,

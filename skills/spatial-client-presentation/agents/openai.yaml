@@ -1,4 +1,0 @@
-interface:
-  display_name: "Spatial Client Presentation"
-  short_description: "Build client decks from approved project decisions."
-  default_prompt: "Use $spatial-client-presentation to prepare a client presentation from approved project artifacts."

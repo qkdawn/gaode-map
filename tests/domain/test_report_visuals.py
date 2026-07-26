@@ -16,7 +16,8 @@ from modules.report_visuals.templates import (
 
 
 AGE_ANCHOR = "由此形成四类优先使用情境："
-DIRECTION_ANCHOR = "现状大门应设置"
+DIRECTION_ANCHOR = "<!-- report-anchor:directional-action-priority -->"
+POPULATION_SUPPLY_CONTEXT_ANCHOR = "<!-- report-anchor:population-supply-context -->"
 POI_ROUTE_MAP_ANCHOR = "<!-- report-anchor:poi-route-map -->"
 POI_SUPPLY_STRUCTURE_ANCHOR = "<!-- report-anchor:poi-supply-structure -->"
 
@@ -30,6 +31,7 @@ def _report(tmp_path: Path, *, route_anchor: bool = True, supply_anchor: bool = 
         "年龄结构描述。",
         AGE_ANCHOR,
         "四类使用情境表。",
+        POPULATION_SUPPLY_CONTEXT_ANCHOR,
         *( [POI_SUPPLY_STRUCTURE_ANCHOR] if supply_anchor else [] ),
         *( [POI_ROUTE_MAP_ANCHOR] if route_anchor else [] ),
         "## 4. 空间与可达性",
@@ -57,7 +59,15 @@ def _matrix() -> dict:
                 "poi_density": 10, "nightlight_mean": 2, "road_integration": 0.2,
                 "road_coverage_ratio": 0.2, "signals": {"road_coverage_available": True},
             })
-    return {"sectors": rows}
+    return {
+        "sectors": rows,
+        "source_versions": {
+            "poi": {"year": 2024},
+            "nightlight": {"year": 2025},
+            "population": {"year": 2026},
+            "road": {"year": None},
+        },
+    }
 
 
 def _focused() -> dict:
@@ -154,12 +164,14 @@ def test_current_metric_payloads_normalize_for_age_and_direction() -> None:
 def _plan(*template_ids: str) -> dict:
     anchors = {
         "population_age_structure": AGE_ANCHOR,
+        "population_supply_context": POPULATION_SUPPLY_CONTEXT_ANCHOR,
         "directional_action_priority_matrix": DIRECTION_ANCHOR,
         "focused_poi_walking_route_map": POI_ROUTE_MAP_ANCHOR,
         "poi_supply_structure": POI_SUPPLY_STRUCTURE_ANCHOR,
     }
     metrics = {
         "population_age_structure": ["population.age_structure"],
+        "population_supply_context": ["population.age_structure", "poi.supply_structure"],
         "directional_action_priority_matrix": ["regional.directional_evidence_matrix"],
         "focused_poi_walking_route_map": ["poi.focused_accessibility"],
         "poi_supply_structure": ["poi.supply_structure"],
@@ -204,6 +216,21 @@ def test_visual_plan_drives_exactly_selected_assets_and_persists_both_manifests(
     svg = (tmp_path / "assets" / "poi-supply-structure.svg").read_text(encoding="utf-8")
     validate_safe_svg(svg)
     assert "项目所需配套" in svg and "同类对标供给" in svg
+
+
+def test_population_supply_context_combines_both_results_without_scoring(tmp_path: Path) -> None:
+    report = _report(tmp_path)
+    manifest = render_report_visuals(_request(report, "population_supply_context"))
+
+    assert manifest.items[0].status == "generated"
+    assert manifest.items[0].data_scope["population_year"] == 2026
+    assert manifest.items[0].data_scope["poi_year"] == 2026
+    svg = (tmp_path / "assets" / "population-supply-context.svg").read_text(encoding="utf-8")
+    validate_safe_svg(svg)
+    assert "居民使用背景与周边供给结构" in svg
+    assert "人口使用背景" in svg and "周边 POI 供给" in svg
+    spec = json.loads((tmp_path / "assets" / "population-supply-context.vl.json").read_text(encoding="utf-8"))
+    assert '"score"' not in json.dumps(spec, ensure_ascii=False)
 
 
 def test_plan_rejects_unapproved_anchor_duplicate_template_and_omitted_reason(tmp_path: Path) -> None:

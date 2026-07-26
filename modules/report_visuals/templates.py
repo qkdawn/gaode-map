@@ -16,6 +16,8 @@ from .schemas import (
 
 AGE_TITLE = "15 分钟范围居住背景的年龄结构（2026）"
 AGE_CAPTION = "统计口径：15 分钟范围内的居住背景年龄结构。"
+POPULATION_SUPPLY_CONTEXT_TITLE = "居民使用背景与周边供给结构"
+POPULATION_SUPPLY_CONTEXT_CAPTION = "人口用于描述居住背景，POI 用于描述设施供给；二者均不证明项目客群、需求、客流、消费、经营质量或合作关系。"
 DIRECTION_TITLE = "方向 × 距离圈层的首轮行动优先级"
 DIRECTION_CAPTION = "规则：仅在报告已成立的方向性证据同时满足时标出行动类别；未列为首轮动作的单元保持中性。用于安排首轮现场验证与试验。"
 
@@ -428,15 +430,26 @@ def normalize_directional_matrix(
             })
     return normalized
 
-def directional_action_priority_matrix_spec(values: list[dict[str, Any]]) -> dict[str, Any]:
+def directional_action_priority_matrix_spec(
+    values: list[dict[str, Any]],
+    *,
+    source_years: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     action_domain = ["导向验证", "通达诊断", "夜间联动测试", "未列为首轮动作"]
     action_range = ["#2F6B8A", "#C66A27", "#7657B8", "#E2E8F0"]
+    years = source_years or {}
+    subtitle_parts = [
+        f"POI {years['poi']}" if years.get("poi") is not None else "",
+        f"夜光 {years['nightlight']}" if years.get("nightlight") is not None else "",
+        f"人口 {years['population']}" if years.get("population") is not None else "",
+        "路网当前快照",
+    ]
     return {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
         "description": "分类行动优先级矩阵；原始空间代理保持分项验证，图中不含数值预测。",
         "width": 640,
         "height": 260,
-        "title": {"text": DIRECTION_TITLE, "anchor": "start", "font": _FONT, "fontSize": 20, "fontWeight": 700, "color": "#172033", "offset": 18},
+        "title": {"text": DIRECTION_TITLE, "subtitle": " · ".join(part for part in subtitle_parts if part), "anchor": "start", "font": _FONT, "subtitleFont": _FONT, "fontSize": 20, "subtitleFontSize": 11, "fontWeight": 700, "color": "#172033", "subtitleColor": "#64748B", "offset": 18},
         "data": {"values": values},
         "layer": [
             {
@@ -607,6 +620,7 @@ def normalize_focused_poi_route_map(raw: dict[str, Any] | None) -> tuple[int | N
     sidebar: list[dict[str, Any]] = []
     group_headers: list[dict[str, Any]] = []
     number = 0
+    origin_snap_offsets: list[float] = []
     for group_index, group in enumerate(groups):
         if not isinstance(group, dict) or str(group.get("status") or "available").lower() != "available":
             continue
@@ -631,6 +645,9 @@ def normalize_focused_poi_route_map(raw: dict[str, Any] | None) -> tuple[int | N
             coordinates = _line_coordinates(geometry.get("coordinates"))
             if len(coordinates) < 2:
                 continue
+            snap_offset = _route_number(poi.get("origin_snap_distance_m"))
+            if snap_offset is not None:
+                origin_snap_offsets.append(snap_offset)
             number += 1
             route_id = f"route-{number}"
             for order, (x, y) in enumerate(coordinates):
@@ -665,6 +682,7 @@ def normalize_focused_poi_route_map(raw: dict[str, Any] | None) -> tuple[int | N
         "extent": extent,
         "road_edges_clipped_count": int(context.get("road_edges_clipped_count") or len(road_values)),
         "road_edges_rendered_count": int(context.get("road_edges_rendered_count") or len(road_values)),
+        "origin_snap_offset_m": round(max(origin_snap_offsets), 1) if origin_snap_offsets else None,
     }
 
 
@@ -690,6 +708,10 @@ def focused_poi_walking_route_map_spec(data: dict[str, Any]) -> dict[str, Any]:
         {"data": {"values": [{}]}, "mark": {"type": "point", "shape": "diamond", "filled": True, "size": 72, "fill": "#FFFFFF", "stroke": "#172033", "strokeWidth": 1.5}, "encoding": {"x": {"value": origin_legend_x}, "y": {"value": legend_y}}},
         {"data": {"values": [{}]}, "mark": {"type": "text", "align": "left", "baseline": "middle", "font": _FONT, "fontSize": 10, "color": "#475467"}, "encoding": {"x": {"value": origin_legend_x + 10}, "y": {"value": legend_y}, "text": {"value": "分析中心（路线起点）"}}},
     ])
+    if data.get("origin_snap_offset_m") is not None:
+        legend_layers.append(
+            {"data": {"values": [{}]}, "mark": {"type": "text", "align": "left", "baseline": "middle", "font": _FONT, "fontSize": 10, "color": "#8B5E34"}, "encoding": {"x": {"value": 470}, "y": {"value": legend_y}, "text": {"value": f"起点吸附至路网约 {data['origin_snap_offset_m']:.0f} m"}}}
+        )
     map_panel = {
         "width": 620,
         "height": map_height,
@@ -727,6 +749,59 @@ def focused_poi_walking_route_map_spec(data: dict[str, Any]) -> dict[str, Any]:
         "spacing": 18,
         "padding": {"left": 6, "right": 6, "top": 6, "bottom": 36},
         "config": {"view": {"stroke": "#E2E8F0", "cornerRadius": 8}, "background": "#FFFFFF"},
+    }
+
+
+def population_supply_context_spec(
+    *,
+    population_year: int,
+    age_values: list[dict[str, Any]],
+    poi_year: int | None,
+    supply_roles: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Combine resident background and verified POI supply without scoring them."""
+
+    age = population_age_structure_spec(population_year, age_values)
+    supply = poi_supply_structure_spec(supply_roles, year=poi_year)
+    age.pop("$schema", None)
+    supply.pop("$schema", None)
+    age["title"] = {
+        "text": f"人口使用背景（{population_year}）",
+        "anchor": "start",
+        "font": _FONT,
+        "fontSize": 17,
+        "fontWeight": 700,
+        "color": "#172033",
+        "offset": 14,
+    }
+    supply["title"] = {
+        "text": f"周边 POI 供给（{poi_year}）" if poi_year is not None else "周边 POI 供给",
+        "anchor": "start",
+        "font": _FONT,
+        "fontSize": 17,
+        "fontWeight": 700,
+        "color": "#172033",
+        "offset": 14,
+    }
+    return {
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "description": "人口居住背景与真实分类 POI 供给的并列证据，不生成综合评分。",
+        "title": {
+            "text": POPULATION_SUPPLY_CONTEXT_TITLE,
+            "subtitle": "人口校准服务测试覆盖；POI 识别成熟供给与补充任务",
+            "anchor": "start",
+            "font": _FONT,
+            "subtitleFont": _FONT,
+            "fontSize": 22,
+            "subtitleFontSize": 13,
+            "fontWeight": 700,
+            "color": "#172033",
+            "subtitleColor": "#64748B",
+            "offset": 22,
+        },
+        "vconcat": [age, supply],
+        "spacing": 34,
+        "config": {"view": {"stroke": None}, "background": "#FFFFFF"},
     }
 
 def _route_map_sidebar_layout(rows: list[dict[str, Any]], *, height: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
