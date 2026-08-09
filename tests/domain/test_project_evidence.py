@@ -6,16 +6,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from modules.documents.project_evidence import EvidenceStatus, build_project_evidence_dossier
-from store.ai_models import AiBase, Document, DocumentIndexNode
+from store.ai_models import AiBase, Document, DocumentBlock
 
 
-def _install_db(monkeypatch, documents, nodes):
+def _install_db(monkeypatch, documents, blocks):
     engine = create_engine("sqlite:///:memory:", future=True)
     AiBase.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, future=True)
     with factory() as session:
         session.add_all(documents)
-        session.add_all(nodes)
+        session.add_all(blocks)
         session.commit()
     monkeypatch.setattr("modules.documents.project_evidence.SessionLocal", factory)
 
@@ -34,21 +34,13 @@ def _document(document_id, title, role, status="parsed"):
 
 
 def _node(document_id, node_id, title, text, ordinal, page=1):
-    return DocumentIndexNode(
+    return DocumentBlock(
         document_id=document_id,
-        node_id=node_id,
-        parent_node_id="root",
-        title=title,
-        level=1,
-        ordinal=ordinal,
-        start_block_index=ordinal,
-        end_block_index=ordinal,
-        page_start=page,
-        page_end=page,
-        summary=text,
+        page_index=page - 1,
+        block_index=ordinal,
+        block_type="paragraph",
         text=text,
-        meta={},
-        created_at=datetime(2026, 7, 10),
+        section_title=title,
     )
 
 

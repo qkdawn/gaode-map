@@ -295,7 +295,7 @@ def _process_text_attachment_index(record: AttachmentRecord) -> List[AttachmentC
                 attachment_id=record.attachment_id,
                 filename=record.filename,
                 title=f"{record.filename} 附件索引",
-                content="附件已登记到文件索引；当前仅保存文件定位和元数据，文档正文应通过文档库 PageIndex 或专用解析器进入证据层。",
+                content="附件已登记到文件索引；当前仅保存文件定位和元数据，文档正文应通过文档解析契约进入知识库。",
                 locator="file:metadata",
                 evidence_level="attachment_metadata",
                 warnings=["attachment_text_parser_not_configured"],

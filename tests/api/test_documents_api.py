@@ -6,7 +6,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
-from modules.documents.schemas import DocumentBlocksResponse, DocumentRecord, DocumentRole
+from modules.documents.schemas import (
+    DocumentBlocksResponse,
+    DocumentRagSourceResponse,
+    DocumentRecord,
+    DocumentRole,
+)
 from modules.documents.service import DocumentTooLarge, EmptyDocument, UnsupportedDocumentType
 from modules.jobs import JobCreateResponse
 from router.domains import documents
@@ -224,37 +229,57 @@ def test_document_blocks_api_returns_status_object(monkeypatch):
     assert payload["blocks"][0]["blockType"] == "title"
 
 
-def test_document_index_api_returns_pageindex_nodes(monkeypatch):
-    from modules.documents.schemas import DocumentIndexNodeRecord
+def test_document_rag_source_api_parses_then_returns_direct_chunk_contract(monkeypatch):
+    parsed = _record()
+    parsed.status = "uploaded"
+    parse_calls = []
 
-    monkeypatch.setattr(
-        documents,
-        "list_document_index_nodes",
-        lambda document_id: [
-            DocumentIndexNodeRecord(
-                id=1,
-                document_id=document_id,
-                node_id="n1",
-                parent_node_id="root",
-                title="区域功能再定义问题：",
-                level=2,
-                ordinal=1,
-                start_block_index=3,
-                end_block_index=4,
-                page_start=1,
-                page_end=1,
-                summary="项目需要明确社区、综合体、街区之间的关系。",
-                text="项目需要明确社区、综合体、街区之间的关系。",
-                created_at=datetime(2026, 6, 13, 1, 0, 0),
-            )
-        ],
-    )
+    async def fake_parse(document_id):
+        parse_calls.append(document_id)
+        return _record(document_id)
+
+    def fake_rag_source(document_id, options):
+        assert document_id == "doc-1"
+        assert options.tenant_id == "tenant-1"
+        assert options.access_groups == ["planning"]
+        return DocumentRagSourceResponse.model_validate(
+            {
+                "document": {
+                    "source_key": "document:doc-1",
+                    "title": "报告",
+                    "source_type": "project_document",
+                    "object_key": "documents/doc-1/source/report.pdf",
+                    "version": 1,
+                    "checksum": "a" * 64,
+                    "tenant_id": "tenant-1",
+                    "visibility": "restricted",
+                    "access_groups": ["planning"],
+                    "metadata": {"parse_contract": "document-blocks-v1"},
+                    "chunks": [
+                        {
+                            "ordinal": 0,
+                            "page_start": 1,
+                            "page_end": 1,
+                            "section": "背景",
+                            "content": "原始正文",
+                            "search_terms": "背景 原始正文",
+                            "metadata": {"source_locator": "document:doc-1:p.1"},
+                        }
+                    ],
+                }
+            }
+        )
+
+    monkeypatch.setattr(documents, "get_document", lambda _document_id: parsed)
+    monkeypatch.setattr(documents, "parse_document", fake_parse)
+    monkeypatch.setattr(documents, "build_document_rag_source", fake_rag_source)
 
     with TestClient(_build_test_app()) as client:
-        response = client.get("/documents/doc-1/index")
+        response = client.post(
+            "/documents/doc-1/rag-source",
+            json={"tenant_id": "tenant-1", "access_groups": ["planning"]},
+        )
 
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["document_id"] == "doc-1"
-    assert payload["nodes"][0]["title"] == "区域功能再定义问题："
-    assert payload["nodes"][0]["parent_node_id"] == "root"
+    assert parse_calls == ["doc-1"]
+    assert response.json()["document"]["chunks"][0]["metadata"]["source_locator"] == "document:doc-1:p.1"

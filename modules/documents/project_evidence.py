@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, List, Literal, Sequence
 from pydantic import BaseModel, Field
 
 from store.ai_database import SessionLocal
-from store.ai_models import Document, DocumentIndexNode
+from store.ai_models import Document, DocumentBlock
 
 from .schemas import DocumentRole
 
@@ -144,14 +144,14 @@ def build_project_evidence_dossier(
                     core_failures += 1
                 continue
             rows = (
-                session.query(DocumentIndexNode)
+                session.query(DocumentBlock)
                 .filter_by(document_id=document.id)
-                .order_by(DocumentIndexNode.ordinal.asc(), DocumentIndexNode.id.asc())
+                .order_by(DocumentBlock.page_index.asc(), DocumentBlock.block_index.asc(), DocumentBlock.id.asc())
                 .all()
             )
-            rows = [row for row in rows if str(row.node_id or "") != "root" and str(row.text or row.summary or "").strip()]
+            rows = [row for row in rows if str(row.text or "").strip()]
             if not rows:
-                dossier.warnings.append(f"文档没有可读取的 PageIndex 节点：{document.title or document.id}")
+                dossier.warnings.append(f"文档没有可读取的解析正文块：{document.title or document.id}")
                 dossier.unreadable_document_ids.append(str(document.id))
                 if role in _CORE_ROLES:
                     core_failures += 1
@@ -262,23 +262,26 @@ def _selected_document_ids(items: Iterable[Dict[str, Any]]) -> List[str]:
     return results
 
 
-def _document_evidence_items(document: Document, role: DocumentRole, rows: Iterable[DocumentIndexNode]) -> List[EvidenceItem]:
+def _document_evidence_items(document: Document, role: DocumentRole, rows: Iterable[DocumentBlock]) -> List[EvidenceItem]:
     results: List[EvidenceItem] = []
     title = str(document.title or document.file_name or document.id).strip()
     source_id = f"document:{document.id}"
     for row in rows:
-        content = str(row.text or row.summary or "").strip()[:2400]
-        node_title = str(row.title or "PageIndex 节点").strip()
-        page_start = max(1, int(row.page_start or 1))
-        page_end = max(page_start, int(row.page_end or page_start))
+        content = str(row.text or "").strip()[:2400]
+        page_start = max(1, int(row.page_index or 0) + 1)
+        page_end = page_start
+        node_title = str(row.section_title or "").strip()
+        if not node_title:
+            node_title = content[:120] if str(row.block_type or "") == "title" else f"第 {page_start} 页正文"
         page_label = f"p.{page_start}" if page_start == page_end else f"p.{page_start}-{page_end}"
+        block_id = str(row.id or row.block_index)
         segments = _evidence_segments(content, role=role)
         for segment_index, segment in enumerate(segments):
             combined = f"{node_title}\n{segment}"
             segment_suffix = "" if len(segments) == 1 else f":claim:{segment_index + 1}"
             results.append(
                 EvidenceItem(
-                    id=f"{source_id}:project-evidence:{row.node_id}{segment_suffix}",
+                    id=f"{source_id}:block:{block_id}{segment_suffix}",
                     source_id=source_id,
                     document_id=str(document.id),
                     document_title=title,
@@ -288,10 +291,10 @@ def _document_evidence_items(document: Document, role: DocumentRole, rows: Itera
                     title=node_title,
                     content=segment,
                     summary=segment[:420],
-                    node_id=str(row.node_id),
+                    node_id=f"block:{block_id}",
                     page_start=page_start,
                     page_end=page_end,
-                    locator=f"pageindex:{row.node_id}:{page_label}",
+                    locator=f"document:{document.id}:{page_label}:block.{block_id}",
                     citation=f"{title} {page_label} / {node_title}",
                 )
             )

@@ -8,11 +8,13 @@ import pytest
 
 from modules.documents.docling_parser import _normalize_blocks
 from modules.documents.service import (
+    build_document_rag_source,
     DocumentNotFound,
     list_document_blocks,
     parse_document,
     schedule_document_parse,
 )
+from modules.documents.schemas import DocumentRagSourceRequest
 from store.ai_models import Document, DocumentBlock
 
 
@@ -146,8 +148,6 @@ def test_parse_document_replaces_blocks_and_marks_parsed(monkeypatch):
             {"label": "text", "text": "新正文"},
         ]),
     )
-    monkeypatch.setattr("modules.documents.pageindex.rebuild_document_index", lambda _document_id: None)
-
     record = asyncio.run(parse_document("doc-1"))
 
     assert record.status == "parsed"
@@ -201,3 +201,48 @@ def test_schedule_document_parse_missing_document(monkeypatch):
 
     with pytest.raises(DocumentNotFound):
         schedule_document_parse("missing")
+
+
+def test_build_document_rag_source_uses_full_blocks_and_page_locators(monkeypatch, tmp_path):
+    source_path = tmp_path / "doc-1" / "source" / "report.pdf"
+    source_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"%PDF original source")
+    document = _document("parsed")
+    document.file_path = str(source_path)
+    document.history_id = "history-1"
+    state = {
+        "documents": [document],
+        "blocks": [
+            DocumentBlock(document_id="doc-1", page_index=0, block_index=0, block_type="title", text="项目背景", section_title=""),
+            DocumentBlock(document_id="doc-1", page_index=0, block_index=1, block_type="paragraph", text="正文事实一。", section_title="项目背景"),
+            DocumentBlock(document_id="doc-1", page_index=1, block_index=2, block_type="paragraph", text="正文事实二。", section_title="项目背景"),
+        ],
+        "commits": 0,
+    }
+    for index, block in enumerate(state["blocks"], 1):
+        block.id = index
+    monkeypatch.setattr("modules.documents.service.settings.document_upload_dir", str(tmp_path))
+    monkeypatch.setattr("modules.documents.service.SessionLocal", lambda: FakeSession(state))
+
+    result = build_document_rag_source(
+        "doc-1",
+        DocumentRagSourceRequest(
+            tenant_id="tenant-1",
+            visibility="restricted",
+            access_groups=["planning"],
+            decision_steps=["step_01_policy_site"],
+            metadata={"project": "demo"},
+        ),
+    )
+
+    document_payload = result.document
+    assert document_payload.source_key == "document:doc-1"
+    assert document_payload.tenant_id == "tenant-1"
+    assert document_payload.access_groups == ["planning"]
+    assert document_payload.metadata["parse_contract"] == "document-blocks-v1"
+    assert len(document_payload.checksum) == 64
+    assert "正文事实一。" in document_payload.chunks[0].content
+    assert "正文事实二。" in document_payload.chunks[0].content
+    assert document_payload.chunks[0].page_start == 1
+    assert document_payload.chunks[0].page_end == 2
+    assert document_payload.chunks[0].metadata["source_locator"] == "document:doc-1:p.1-2"

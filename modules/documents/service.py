@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 import shutil
 from datetime import datetime
@@ -11,10 +12,19 @@ from uuid import uuid4
 from core.config import settings
 from modules.jobs import JobCreateResponse, create_job, schedule_job
 from store.ai_database import SessionLocal
-from store.ai_models import Document, DocumentBlock, DocumentIndexNode
+from store.ai_models import Document, DocumentBlock
 
 from .docling_parser import ParsedDocumentBlock, parse_document_with_docling
-from .schemas import DocumentBlockResponse, DocumentBlocksResponse, DocumentRecord, DocumentRole
+from .schemas import (
+    DocumentBlockResponse,
+    DocumentBlocksResponse,
+    DocumentRagChunk,
+    DocumentRagSource,
+    DocumentRagSourceRequest,
+    DocumentRagSourceResponse,
+    DocumentRecord,
+    DocumentRole,
+)
 
 
 _SAFE_NAME_RE = re.compile(r"[^\w._-]+", re.UNICODE)
@@ -43,6 +53,10 @@ class DocumentTooLarge(ValueError):
 
 
 class DocumentNotFound(LookupError):
+    pass
+
+
+class DocumentNotReady(RuntimeError):
     pass
 
 
@@ -235,7 +249,6 @@ def delete_document(document_id: str) -> DocumentRecord:
                 file_root = file_path.parent.parent if file_path.parent.name == "source" else file_path.parent
             except ValueError:
                 file_root = None
-        session.query(DocumentIndexNode).filter_by(document_id=normalized_id).delete()
         session.query(DocumentBlock).filter_by(document_id=normalized_id).delete()
         session.delete(record)
         session.commit()
@@ -291,9 +304,6 @@ async def parse_document(document_id: str) -> DocumentRecord:
         raise
 
     record = _replace_document_blocks(normalized_id, parsed_blocks)
-    from .pageindex import rebuild_document_index
-
-    await asyncio.to_thread(rebuild_document_index, normalized_id)
     return record
 
 
@@ -304,7 +314,6 @@ def _mark_document_failed(document_id: str) -> None:
         if record is not None:
             record.status = "failed"
         session.query(DocumentBlock).filter_by(document_id=document_id).delete()
-        session.query(DocumentIndexNode).filter_by(document_id=document_id).delete()
         session.commit()
     except Exception:
         session.rollback()
@@ -319,7 +328,6 @@ def _replace_document_blocks(document_id: str, blocks: List[ParsedDocumentBlock]
         record = session.get(Document, document_id)
         if record is None:
             raise DocumentNotFound("document_not_found")
-        session.query(DocumentIndexNode).filter_by(document_id=document_id).delete()
         session.query(DocumentBlock).filter_by(document_id=document_id).delete()
         for block in blocks:
             session.add(
@@ -365,3 +373,164 @@ def list_document_blocks(document_id: str) -> DocumentBlocksResponse:
         )
     finally:
         session.close()
+
+
+def build_document_rag_source(
+    document_id: str,
+    options: DocumentRagSourceRequest,
+) -> DocumentRagSourceResponse:
+    parsed = list_document_blocks(document_id)
+    if parsed.status != "parsed":
+        raise DocumentNotReady("document_not_parsed")
+    if not parsed.blocks:
+        raise EmptyDocument("parsed_document_empty")
+
+    _, source_path = _resolve_document_source(document_id)
+    checksum = _sha256_file(source_path)
+    chunks = _rag_chunks(parsed, options)
+    if not chunks:
+        raise EmptyDocument("parsed_document_empty")
+
+    record = parsed.document
+    metadata = {
+        **options.metadata,
+        "document_id": record.id,
+        "history_id": record.history_id,
+        "document_role": record.document_role.value,
+        "file_type": record.file_type,
+        "parse_contract": "document-blocks-v1",
+        "source_checksum": checksum,
+    }
+    return DocumentRagSourceResponse(
+        document=DocumentRagSource(
+            source_key=f"document:{record.id}",
+            title=record.title,
+            source_type=options.source_type,
+            source_url=options.source_url,
+            object_key=f"documents/{record.id}/source/{record.file_name}",
+            version=1,
+            checksum=checksum,
+            tenant_id=options.tenant_id,
+            visibility=options.visibility,
+            access_groups=options.access_groups,
+            metadata=metadata,
+            chunks=chunks,
+        )
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _rag_chunks(
+    parsed: DocumentBlocksResponse,
+    options: DocumentRagSourceRequest,
+    *,
+    max_chars: int = 1800,
+) -> List[DocumentRagChunk]:
+    units: List[dict[str, object]] = []
+    current_section = ""
+    for block in parsed.blocks:
+        text = str(block.text or "").strip()
+        if not text:
+            continue
+        if block.blockType == "title":
+            current_section = text[:255]
+        section = str(block.sectionTitle or current_section).strip()[:255]
+        page = max(1, int(block.pageIndex) + 1)
+        for segment in _split_source_text(text, max_chars=max_chars):
+            units.append(
+                {
+                    "text": segment,
+                    "section": section,
+                    "page": page,
+                    "block_id": int(block.id),
+                    "block_index": int(block.blockIndex),
+                    "block_type": str(block.blockType),
+                }
+            )
+
+    grouped: List[List[dict[str, object]]] = []
+    pending: List[dict[str, object]] = []
+    pending_chars = 0
+    pending_section = ""
+    for unit in units:
+        text = str(unit["text"])
+        section = str(unit["section"])
+        boundary = pending and (
+            pending_chars + len(text) + 2 > max_chars
+            or (pending_section and section and pending_section != section)
+        )
+        if boundary:
+            grouped.append(pending)
+            pending = []
+            pending_chars = 0
+        if not pending:
+            pending_section = section
+        pending.append(unit)
+        pending_chars += len(text) + (2 if pending_chars else 0)
+    if pending:
+        grouped.append(pending)
+
+    chunks: List[DocumentRagChunk] = []
+    for ordinal, group in enumerate(grouped):
+        content = "\n\n".join(str(unit["text"]) for unit in group)
+        pages = [int(unit["page"]) for unit in group]
+        block_ids = [int(unit["block_id"]) for unit in group]
+        block_indexes = [int(unit["block_index"]) for unit in group]
+        section = str(group[0]["section"] or "")
+        page_start = min(pages)
+        page_end = max(pages)
+        locator = (
+            f"document:{parsed.document.id}:p.{page_start}"
+            if page_start == page_end
+            else f"document:{parsed.document.id}:p.{page_start}-{page_end}"
+        )
+        chunks.append(
+            DocumentRagChunk(
+                ordinal=ordinal,
+                page_start=page_start,
+                page_end=page_end,
+                section=section,
+                content=content,
+                search_terms=" ".join(
+                    part for part in (parsed.document.title, section, content) if part
+                ),
+                decision_steps=options.decision_steps,
+                project_types=options.project_types,
+                geography=options.geography,
+                metadata={
+                    "source_locator": locator,
+                    "block_ids": block_ids,
+                    "block_start": min(block_indexes),
+                    "block_end": max(block_indexes),
+                    "block_types": sorted({str(unit["block_type"]) for unit in group}),
+                },
+            )
+        )
+    return chunks
+
+
+def _split_source_text(text: str, *, max_chars: int) -> List[str]:
+    remaining = str(text or "").strip()
+    segments: List[str] = []
+    while len(remaining) > max_chars:
+        cut = remaining.rfind("\n", 0, max_chars + 1)
+        if cut < max_chars // 2:
+            cut = remaining.rfind("。", 0, max_chars + 1)
+            if cut >= max_chars // 2:
+                cut += 1
+        if cut < max_chars // 2:
+            cut = max_chars
+        segment = remaining[:cut].strip()
+        if segment:
+            segments.append(segment)
+        remaining = remaining[cut:].strip()
+    if remaining:
+        segments.append(remaining)
+    return segments

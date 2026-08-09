@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Callable, Iterable, List, Tuple
+from typing import Iterable, List, Tuple
 
 from modules.evidence_index.adapters.base import EvidenceSourceAdapter
 from modules.evidence_index.adapters.database_record import DatabaseEvidenceAdapter
-from modules.evidence_index.adapters.document_pageindex import DocumentPageIndexAdapter
+from modules.evidence_index.adapters.document_block import DocumentBlockAdapter
 from modules.evidence_index.adapters.image_visual import ImageVisualIndexAdapter
 from modules.evidence_index.adapters.package import PackageEvidenceAdapter
 from modules.evidence_index.adapters.payload import PayloadEvidenceAdapter
@@ -13,20 +13,7 @@ from modules.evidence_index.manifests import manifest_from_source
 from modules.evidence_retrieval.schemas import SourceRecord
 
 
-PageIndexStructureReader = Callable[[str], str]
-PageIndexContentReader = Callable[[str, str], str]
-
-
 class EvidenceAdapterRegistry:
-    def __init__(
-        self,
-        *,
-        get_pageindex_document_structure: PageIndexStructureReader,
-        get_pageindex_page_content: PageIndexContentReader,
-    ):
-        self._get_pageindex_document_structure = get_pageindex_document_structure
-        self._get_pageindex_page_content = get_pageindex_page_content
-
     def adapters_for(self, sources: Iterable[SourceRecord], source_ids: List[str]) -> List[Tuple[EvidenceSourceAdapter, SourceRecord]]:
         allowed = {str(item or "").strip() for item in (source_ids or []) if str(item or "").strip()}
         adapters: List[Tuple[EvidenceSourceAdapter, SourceRecord]] = []
@@ -42,11 +29,7 @@ class EvidenceAdapterRegistry:
                 document_source = source or SourceRecord.model_validate({"id": source_id, "source_kind": "document", "status": "ready"})
                 adapters.append(
                     (
-                        DocumentPageIndexAdapter(
-                            source_id.split(":", 1)[1].strip(),
-                            get_structure=self._get_pageindex_document_structure,
-                            get_content=self._get_pageindex_page_content,
-                        ),
+                        DocumentBlockAdapter(source_id.split(":", 1)[1].strip()),
                         document_source,
                     )
                 )
@@ -62,6 +45,6 @@ class EvidenceAdapterRegistry:
             return ImageVisualIndexAdapter(source)
         if declared is not None and declared.native_index_kind == "spatial_package_index":
             return PackageEvidenceAdapter(source)
-        if declared is not None and declared.native_index_kind == "pageindex":
+        if declared is not None and declared.native_index_kind == "document_block_index":
             return None
         return PayloadEvidenceAdapter(source)

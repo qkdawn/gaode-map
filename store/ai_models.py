@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 
 AiBase = declarative_base()
@@ -44,34 +44,6 @@ class DocumentBlock(AiBase):
 
     __table_args__ = (
         Index("ix_document_blocks_document_order", "document_id", "page_index", "block_index"),
-    )
-
-
-class DocumentIndexNode(AiBase):
-    """
-    PageIndex-style semantic outline node built from parsed document blocks.
-    """
-    __tablename__ = "document_index_nodes"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    document_id = Column(String(64), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
-    node_id = Column(String(128), nullable=False)
-    parent_node_id = Column(String(128), nullable=False, default="", index=True)
-    title = Column(String(255), nullable=False)
-    level = Column(Integer, nullable=False, default=1, index=True)
-    ordinal = Column(Integer, nullable=False, default=0, index=True)
-    start_block_index = Column(Integer, nullable=False, default=0)
-    end_block_index = Column(Integer, nullable=False, default=0)
-    page_start = Column(Integer, nullable=False, default=1, index=True)
-    page_end = Column(Integer, nullable=False, default=1)
-    summary = Column(Text, nullable=False, default="")
-    text = Column(Text, nullable=False, default="")
-    meta = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-
-    __table_args__ = (
-        UniqueConstraint("document_id", "node_id", name="uq_document_index_nodes_document_node"),
-        Index("ix_document_index_nodes_document_order", "document_id", "ordinal", "id"),
     )
 
 

@@ -152,34 +152,34 @@ def attachment_source_id(attachment_id: Any, filename: Any = "", mime_type: Any 
     return f"{prefix}:{stable_id}"
 
 
-def evidence_node_from_document_index_node(
+def evidence_node_from_document_block(
     source_id: str,
     source_title: str,
     node: dict,
     *,
     index: int = 1,
 ) -> EvidenceNode | None:
-    title = str(node.get("title") or f"文档章节 {index}").strip()
-    content = str(node.get("summary") or node.get("text") or "").strip()
+    title = str(node.get("section") or node.get("title") or f"文档正文块 {index}").strip()
+    content = str(node.get("content") or node.get("text") or "").strip()
     if not content:
         return None
-    node_id = str(node.get("node_id") or node.get("nodeId") or index).strip()
+    block_id = str(node.get("block_id") or node.get("blockId") or index).strip()
     page_start = node.get("page_start") or node.get("pageStart") or 0
     page_end = node.get("page_end") or node.get("pageEnd") or page_start or 0
     return EvidenceNode(
-        id=f"{source_id}:pageindex:{node_id}",
+        id=f"{source_id}:block:{block_id}",
         kind="document_excerpt",
         source_ids=[source_id],
         title=title,
         content=content[:1800],
         summary=str(node.get("summary") or content[:260]),
         data={
-            "node_id": node_id,
-            "parent_node_id": str(node.get("parent_node_id") or node.get("parentNodeId") or "").strip(),
-            "level": node.get("level"),
+            "block_id": block_id,
+            "block_index": node.get("block_index") or node.get("blockIndex"),
+            "block_type": node.get("block_type") or node.get("blockType"),
         },
         locator={"page_start": page_start, "page_end": page_end},
-        citation=f"PageIndex p.{page_start}" if page_start else source_title,
+        citation=f"{source_title} p.{page_start}" if page_start else source_title,
     )
 
 

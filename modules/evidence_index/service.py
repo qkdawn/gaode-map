@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from typing import Callable, List
+from typing import List
 
-from modules.documents.pageindex import get_pageindex_document_structure as default_get_pageindex_document_structure
-from modules.documents.pageindex import get_pageindex_page_content as default_get_pageindex_page_content
 from modules.evidence_index.registry import EvidenceAdapterRegistry
 from modules.evidence_index.schemas import EvidenceIndexRecord, EvidenceSearchQuery, EvidenceTrace, SourceIndexManifest
 from modules.evidence_retrieval.schemas import EvidenceNode, EvidenceSearchHit, EvidenceSearchResponse
@@ -11,16 +9,8 @@ from modules.evidence_retrieval.schemas import SourceRecord
 
 
 class EvidenceIndexService:
-    def __init__(
-        self,
-        *,
-        get_pageindex_document_structure: Callable[[str], str] = default_get_pageindex_document_structure,
-        get_pageindex_page_content: Callable[[str, str], str] = default_get_pageindex_page_content,
-    ):
-        self._registry = EvidenceAdapterRegistry(
-            get_pageindex_document_structure=get_pageindex_document_structure,
-            get_pageindex_page_content=get_pageindex_page_content,
-        )
+    def __init__(self):
+        self._registry = EvidenceAdapterRegistry()
 
     def index_source(self, source: SourceRecord) -> SourceIndexManifest:
         adapters = self._registry.adapters_for([source], [source.source_id])

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import json
 from typing import List
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
@@ -9,25 +8,24 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from modules.documents import (
     DocumentBlocksResponse,
-    DocumentIndexResponse,
     DocumentNotFound,
+    DocumentNotReady,
+    DocumentRagSourceRequest,
+    DocumentRagSourceResponse,
     DocumentRecord,
     DocumentRole,
     DocumentTooLarge,
     DocumentUploadResponse,
-    PageIndexContentResponse,
     EmptyDocument,
     UnsupportedDocumentType,
     create_document_upload,
+    build_document_rag_source,
     delete_document,
     get_document,
-    get_pageindex_document,
-    get_pageindex_document_structure,
-    get_pageindex_page_content,
     list_document_blocks,
-    list_document_index_nodes,
     list_documents,
     schedule_document_parse,
+    parse_document,
 )
 from modules.jobs import JobCreateResponse
 
@@ -38,7 +36,9 @@ logger = logging.getLogger(__name__)
 
 def _raise_database_error(exc: SQLAlchemyError) -> None:
     logger.warning("Document database request failed", exc_info=exc)
-    raise HTTPException(status_code=503, detail="document_database_unavailable") from exc
+    raise HTTPException(
+        status_code=503, detail="document_database_unavailable"
+    ) from exc
 
 
 @router.post("/documents/upload", response_model=DocumentUploadResponse)
@@ -58,7 +58,9 @@ async def post_document_upload(
             title=title,
         )
     except UnsupportedDocumentType as exc:
-        raise HTTPException(status_code=400, detail="unsupported_document_type") from exc
+        raise HTTPException(
+            status_code=400, detail="unsupported_document_type"
+        ) from exc
     except EmptyDocument as exc:
         raise HTTPException(status_code=400, detail="empty_document") from exc
     except DocumentTooLarge as exc:
@@ -72,7 +74,11 @@ async def post_document_upload(
 @router.get("/documents", response_model=List[DocumentRecord])
 async def get_documents(history_id: str = Query("")) -> List[DocumentRecord]:
     try:
-        return list_documents(history_id=history_id) if history_id.strip() else list_documents()
+        return (
+            list_documents(history_id=history_id)
+            if history_id.strip()
+            else list_documents()
+        )
     except SQLAlchemyError as exc:
         _raise_database_error(exc)
 
@@ -117,44 +123,23 @@ async def get_document_blocks(document_id: str) -> DocumentBlocksResponse:
         _raise_database_error(exc)
 
 
-@router.get("/documents/{document_id}/index", response_model=DocumentIndexResponse)
-async def get_document_index(document_id: str) -> DocumentIndexResponse:
+@router.post(
+    "/documents/{document_id}/rag-source", response_model=DocumentRagSourceResponse
+)
+async def post_document_rag_source(
+    document_id: str,
+    payload: DocumentRagSourceRequest,
+) -> DocumentRagSourceResponse:
     try:
-        return DocumentIndexResponse(document_id=document_id, nodes=list_document_index_nodes(document_id))
+        record = get_document(document_id)
+        if record.status != "parsed":
+            await parse_document(document_id)
+        return build_document_rag_source(document_id, payload)
     except DocumentNotFound as exc:
         raise HTTPException(status_code=404, detail="document_not_found") from exc
-    except SQLAlchemyError as exc:
-        _raise_database_error(exc)
-
-
-@router.get("/documents/{document_id}/pageindex/document")
-async def get_document_pageindex_metadata(document_id: str):
-    try:
-        return json.loads(get_pageindex_document(document_id))
-    except DocumentNotFound as exc:
-        raise HTTPException(status_code=404, detail="document_not_found") from exc
-    except SQLAlchemyError as exc:
-        _raise_database_error(exc)
-
-
-@router.get("/documents/{document_id}/pageindex/structure")
-async def get_document_pageindex_structure(document_id: str):
-    try:
-        return json.loads(get_pageindex_document_structure(document_id))
-    except DocumentNotFound as exc:
-        raise HTTPException(status_code=404, detail="document_not_found") from exc
-    except SQLAlchemyError as exc:
-        _raise_database_error(exc)
-
-
-@router.get("/documents/{document_id}/pageindex/content", response_model=PageIndexContentResponse)
-async def get_document_pageindex_content(document_id: str, pages: str) -> PageIndexContentResponse:
-    try:
-        items = json.loads(get_pageindex_page_content(document_id, pages))
-        return PageIndexContentResponse(document_id=document_id, pages=pages, items=items if isinstance(items, list) else [])
-    except DocumentNotFound as exc:
-        raise HTTPException(status_code=404, detail="document_not_found") from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="invalid_pageindex_pages") from exc
+    except DocumentNotReady as exc:
+        raise HTTPException(status_code=409, detail="document_not_parsed") from exc
+    except EmptyDocument as exc:
+        raise HTTPException(status_code=422, detail="parsed_document_empty") from exc
     except SQLAlchemyError as exc:
         _raise_database_error(exc)
