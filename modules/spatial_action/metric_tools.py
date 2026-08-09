@@ -186,7 +186,6 @@ class MetricToolService:
                 and card.compare_by.area_units
                 and card.compare_by.normalization
                 and card.interpret_with.combinations
-                and card.watch_out.risks
             ):
                 raise ValueError(f"metric_analysis_card_incomplete:{tool_id}")
 
@@ -286,8 +285,7 @@ class MetricToolService:
             f"{value.get('metric_id')}：{value.get('purpose') or '解释'}（{value.get('trigger') or '出现需要解释的差异时'}）"
             for value in _list(raw.get("followup_metrics")) if isinstance(value, dict)
         ]
-        risks = [str(value) for value in _list(raw.get("does_not_support"))]
-        risks.extend(str(value) for value in _list(raw.get("limitations") or raw.get("caveats")))
+        risks = [str(value) for value in _list(raw.get("limitations") or raw.get("caveats"))]
         return MetricDetail(
             tool_id=item.tool_id,
             name=item.name,

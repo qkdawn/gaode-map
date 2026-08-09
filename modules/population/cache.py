@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 PREVIEW_STYLE_VERSION = "v3"
-GRID_STYLE_VERSION = "v6"
+GRID_STYLE_VERSION = "v7"
 IN_MEMORY_JSON_CACHE_MAX_ENTRIES = 512
 
 _IN_MEMORY_CACHE_LOCK = threading.Lock()

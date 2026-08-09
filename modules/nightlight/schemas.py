@@ -100,6 +100,7 @@ class NightlightLayerAnalysis(BaseModel):
 class NightlightGridResponse(BaseModel):
     scope_id: str
     year: int
+    source: str
     cell_count: int = 0
     features: List[Dict[str, Any]] = Field(default_factory=list)
 

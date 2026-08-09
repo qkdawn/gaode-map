@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -81,6 +82,58 @@ def _palette_color(ratio: float) -> tuple[int, int, int]:
     )
 
 
+def radiance_percentile(values: Iterable[float], percentile: float) -> float:
+    materialized: list[float] = []
+    for value in values:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(numeric):
+            materialized.append(max(0.0, numeric))
+    usable = np.asarray(materialized, dtype=np.float64)
+    positive = usable[usable > 0]
+    return float(np.percentile(positive, percentile)) if positive.size else 0.0
+
+
+def radiance_domain(values: Iterable[float]) -> tuple[float, float]:
+    materialized = list(values)
+    min_value = radiance_percentile(materialized, 5)
+    max_value = radiance_percentile(materialized, 98)
+    if max_value <= min_value:
+        positive = []
+        for value in materialized:
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(numeric) and numeric > 0:
+                positive.append(numeric)
+        min_value = min(positive, default=0.0)
+        max_value = max(positive, default=0.0)
+    return min_value, max_value
+
+
+def radiance_style(value: float, *, min_value: float, max_value: float, has_data: bool = True) -> dict[str, Any]:
+    raw_value = max(0.0, float(value))
+    if not has_data:
+        return {
+            "fill_color": "#94a3b8",
+            "stroke_color": "#64748b",
+            "fill_opacity": 0.16,
+            "normalized": 0.0,
+        }
+    span = max(max_value - min_value, 1e-9)
+    normalized = 0.0 if max_value <= min_value else max(0.0, min(1.0, (raw_value - min_value) / span))
+    color = _palette_color(normalized if raw_value > 0 else 0.0)
+    return {
+        "fill_color": f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}",
+        "stroke_color": "#94a3b8" if raw_value <= 0 else "#ffffff",
+        "fill_opacity": round_float(0.28 + (0.40 * normalized), 3),
+        "normalized": round_float(normalized, 6),
+    }
+
+
 def build_legend(title: str, min_value: float, max_value: float, unit: str = RADIANCE_UNIT) -> dict[str, Any]:
     stops = []
     for ratio in (0.0, 0.25, 0.5, 0.75, 1.0):
@@ -111,30 +164,18 @@ def build_layer_cells(
     if not aggregated_cells:
         return [], build_legend(RADIANCE_VIEW_LABEL, 0.0, 0.0, unit)
     data_cells = [cell for cell in aggregated_cells if int(cell.valid_pixel_count) > 0]
-    values = np.asarray([max(0.0, float(cell.raw_value)) for cell in data_cells], dtype=np.float64)
-    positive = values[values > 0]
-    if positive.size:
-        min_value = float(np.percentile(positive, 5))
-        max_value = float(np.percentile(positive, 98))
-        if max_value <= min_value:
-            min_value = float(np.min(positive))
-            max_value = float(np.max(positive))
-    else:
-        min_value = 0.0
-        max_value = 0.0
-
-    span = max(max_value - min_value, 1e-9)
+    values = [max(0.0, float(cell.raw_value)) for cell in data_cells]
+    min_value, max_value = radiance_domain(values)
     cells = []
     for cell in aggregated_cells:
         valid_pixel_count = int(max(0, int(cell.valid_pixel_count)))
         has_data = valid_pixel_count > 0
         raw_value = max(0.0, float(cell.raw_value))
         if has_data:
-            normalized = 0.0 if max_value <= min_value else max(0.0, min(1.0, (raw_value - min_value) / span))
-            color = _palette_color(normalized if raw_value > 0 else 0.0)
-            opacity = 0.28 + (0.40 * normalized)
-            fill_color = f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
-            stroke_color = "#94a3b8" if raw_value <= 0 else "#ffffff"
+            style = radiance_style(raw_value, min_value=min_value, max_value=max_value)
+            fill_color = str(style["fill_color"])
+            stroke_color = str(style["stroke_color"])
+            opacity = float(style["fill_opacity"])
             label = f"{RADIANCE_VIEW_LABEL} {round_float(raw_value, 2)} {unit}"
         else:
             fill_color = "#94a3b8"

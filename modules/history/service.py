@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from core.spatial import transform_geojson_coordinates, transform_nested_coords, transform_polygon_payload_coords
 from modules.poi.schemas import HistorySaveRequest
+from modules.poi.records import PoiRecordContractError, complete_poi_record
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
 
 logger = logging.getLogger(__name__)
@@ -183,22 +184,29 @@ def _build_history_description(payload: HistorySaveRequest, params_payload: Dict
     return desc
 
 
-def _normalize_poi_snapshot_rows(payload: HistorySaveRequest, params_payload: Dict[str, Any], pois: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _complete_wgs84_poi(value: Dict[str, Any], *, source: str, year: Optional[int]) -> Dict[str, Any]:
+    item = dict(value or {})
+    if item.get("location"):
+        lx, ly = item["location"]
+        wx, wy = gcj02_to_wgs84(lx, ly)
+        item["location"] = [wx, wy]
+    return complete_poi_record(item, source=source, year=year)
+
+
+def _normalize_poi_snapshot_rows(payload: HistorySaveRequest, params_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     if payload.poi_results_by_year:
         result: List[Dict[str, Any]] = []
         for row in payload.poi_results_by_year:
-            row_pois: List[Dict[str, Any]] = []
-            for poi in row.pois:
-                item = dict(poi or {})
-                if item.get("location"):
-                    lx, ly = item["location"]
-                    wx, wy = gcj02_to_wgs84(lx, ly)
-                    item["location"] = [wx, wy]
-                row_pois.append(item)
+            row_source = str(row.source or params_payload["source"]).strip().lower()
+            row_year = int(row.year) if row.year is not None else None
+            row_pois = [
+                _complete_wgs84_poi(poi, source=row_source, year=row_year)
+                for poi in row.pois
+            ]
             result.append(
                 {
-                    "source": str(row.source or params_payload["source"]).strip().lower(),
-                    "year": int(row.year) if row.year is not None else None,
+                    "source": row_source,
+                    "year": row_year,
                     "pois": row_pois,
                 }
             )
@@ -208,7 +216,10 @@ def _normalize_poi_snapshot_rows(payload: HistorySaveRequest, params_payload: Di
         {
             "source": params_payload["source"],
             "year": payload.year,
-            "pois": pois,
+            "pois": [
+                _complete_wgs84_poi(poi, source=params_payload["source"], year=payload.year)
+                for poi in payload.pois
+            ],
         }
     ]
 
@@ -222,16 +233,14 @@ def save_history_request(payload: HistorySaveRequest, repo) -> Dict[str, Any]:
         else (transform_polygon_payload_coords(payload.polygon, gcj02_to_wgs84) if payload.polygon else [])
     )
 
-    pois: List[Dict[str, Any]] = []
-    for poi in payload.pois:
-        item = poi.copy()
-        if item.get("location"):
-            lx, ly = item["location"]
-            wx, wy = gcj02_to_wgs84(lx, ly)
-            item["location"] = [wx, wy]
-        pois.append(item)
-
-    snapshots = _normalize_poi_snapshot_rows(payload, params_payload, pois)
+    try:
+        snapshots = _normalize_poi_snapshot_rows(payload, params_payload)
+    except PoiRecordContractError as exc:
+        raise HTTPException(status_code=422, detail=f"POI 记录不符合 spatial_records/v1: {exc}") from exc
+    pois = next(
+        (list(row["pois"]) for row in snapshots if row.get("year") == payload.year),
+        list(snapshots[0]["pois"]) if snapshots else [],
+    )
     desc = _build_history_description(payload, params_payload, len(pois))
     try:
         history_id = repo.create_record(

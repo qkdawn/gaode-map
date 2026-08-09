@@ -174,14 +174,28 @@ def test_spatial_query_wraps_unexpected_metric_failures(monkeypatch):
     assert error.value.code == "spatial_metric_calculation_failed"
 
 
+def _complete_poi(poi_id, name, category, typecode, location, subcategory="测试小类"):
+    return {
+        "poi_id": poi_id,
+        "name": name,
+        "category": category,
+        "subcategory": subcategory,
+        "typecode": typecode,
+        "address": "",
+        "location": location,
+        "year": 2024,
+        "source": "local",
+    }
+
+
 class _SpatialRepository:
     def list_poi_results(self, history_id):
-        return [{"id": 1, "source": "local", "year": 2024, "summary": {"total": 2}}]
+        return [{"id": 1, "source": "local", "year": 2024, "summary": {"total": 2, "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84"}}]
 
     def get_poi_data(self, poi_result_id):
         return [
-            {"id": "poi-near", "name": "近点", "type": "餐饮", "location": "0.005,0.0002"},
-            {"id": "poi-far", "name": "远点", "type": "餐饮", "location": "0.005,0.01"},
+            _complete_poi("poi-near", "近点", "餐饮", "050100", [0.005, 0.0002], "中餐厅"),
+            _complete_poi("poi-far", "远点", "餐饮", "050100", [0.005, 0.01], "中餐厅"),
         ]
 
     def list_analysis_artifacts(self, history_id):
@@ -190,14 +204,13 @@ class _SpatialRepository:
 
 class _SpatialCombinationRepository:
     def list_poi_results(self, history_id):
-        return [{"id": 2, "source": "local", "year": 2024, "summary": {"total": 4}}]
+        return [{"id": 2, "source": "local", "year": 2024, "summary": {"total": 3, "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84"}}]
 
     def get_poi_data(self, poi_result_id):
         return [
-            {"id": "food-near", "name": "餐饮近点", "type": "餐饮", "location": [0.001, 0]},
-            {"id": "shop", "name": "商店", "type": "零售", "location": [0.002, 0]},
-            {"id": "food-far", "name": "餐饮远点", "type": "餐饮", "location": [0.003, 0]},
-            {"id": "missing-geometry", "name": "坐标缺失", "type": "餐饮"},
+            _complete_poi("food-near", "餐饮近点", "餐饮", "050100", [0.001, 0], "中餐厅"),
+            _complete_poi("shop", "商店", "购物", "060200", [0.002, 0], "便利店"),
+            _complete_poi("food-far", "餐饮远点", "餐饮", "050100", [0.003, 0], "中餐厅"),
         ]
 
     def list_analysis_artifacts(self, history_id):
@@ -249,10 +262,10 @@ def test_scope_service_combines_spatial_filter_attributes_and_pagination():
     assert result["has_more"] is False
     assert result["spatial_diagnostics"] == {
         "matched_record_count": 3,
-        "skipped_record_count": 1,
-        "result_complete": False,
+        "skipped_record_count": 0,
+        "result_complete": True,
     }
-    assert "1 条记录缺少可用 geometry" in result["warnings"][0]
+    assert result["warnings"] == []
 
 
 def test_scope_service_uses_existing_record_as_spatial_target_and_excludes_itself():
@@ -304,7 +317,10 @@ def test_scope_service_queries_road_grid_as_polygon_source():
                     "artifact_type": "road_syntax",
                     "params": {"metric": "choice"},
                     "payload": {
+                        "schema_version": "spatial_records/v1",
                         "geometry_coord_type": "wgs84",
+                        "nodes": {"type": "FeatureCollection", "features": []},
+                        "road_edges": {"type": "FeatureCollection", "features": []},
                         "road_grid": {
                             "type": "FeatureCollection",
                             "features": [
@@ -337,10 +353,7 @@ def test_scope_service_queries_road_grid_as_polygon_source():
     assert result["records"][0]["spatial_match"]["geometry_type"] == "Polygon"
 
 
-def test_scope_service_infers_legacy_artifact_coord_type_for_spatial_query():
-    gcj_center = [112.9863, 28.2208]
-    wgs_center = gcj02_to_wgs84(*gcj_center)
-
+def test_scope_service_rejects_legacy_artifact_without_new_contract():
     class MissingCoordTypeRepository:
         def list_poi_results(self, history_id):
             return []
@@ -377,20 +390,45 @@ def test_scope_service_infers_legacy_artifact_coord_type_for_spatial_query():
             ]
 
     service = ScopeDatasetService(repository=MissingCoordTypeRepository())
-    manifest = service.list_scope_datasets("history-1")["datasets"][0]
-    assert manifest["query_capabilities"]["spatial_ready"] is True
-    assert manifest["warnings"] == []
-    assert service.query_scope_dataset(
-        history_id="history-1",
-        source_id="current:dataset:population",
-    )["total_count"] == 1
+    with pytest.raises(ScopeDatasetQueryError) as error:
+        service.list_scope_datasets("history-1")
+    assert error.value.code == "schema_version_unsupported"
 
-    result = service.query_scope_dataset(
-        history_id="history-1",
-        source_id="current:dataset:population",
-        spatial={"relation": "at_point", "point": list(wgs_center), "coord_type": "wgs84"},
-    )
-    assert result["total_count"] == 1
+
+def test_scope_service_rejects_versioned_artifact_with_missing_required_fields():
+    class IncompletePopulationRepository:
+        def list_poi_results(self, history_id):
+            return []
+
+        def list_analysis_artifacts(self, history_id):
+            return [{
+                "id": 44,
+                "artifact_type": "population",
+                "params": {"year": 2024},
+                "payload": {
+                    "schema_version": "spatial_records/v1",
+                    "geometry_coord_type": "wgs84",
+                    "records": [{
+                        "cell_id": "population-cell-1",
+                        "year": 2024,
+                        "population_total": 100,
+                        "age_5_19": 20,
+                        "age_30_39": 30,
+                        "source": "test",
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                        },
+                    }],
+                },
+                "data_version": "v1",
+                "scope_fingerprint": "scope-a",
+            }]
+
+    with pytest.raises(ScopeDatasetQueryError) as error:
+        ScopeDatasetService(repository=IncompletePopulationRepository()).list_scope_datasets("history-1")
+
+    assert error.value.code == "schema_version_unsupported"
 
 
 def test_scope_service_still_rejects_unknown_artifact_coord_type():
@@ -434,20 +472,31 @@ class _SpatialAggregateRepository:
         return []
 
     def list_analysis_artifacts(self, history_id):
+        def record(cell_id, west, east, **properties):
+            return {
+                "cell_id": cell_id,
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[west, 0], [east, 0], [east, 0.01], [west, 0.01], [west, 0]]],
+                },
+                "year": 2024,
+                "source": "test",
+                **properties,
+            }
+
         return [
             {
                 "id": 51,
                 "artifact_type": "population",
                 "params": {"year": 2024},
                 "payload": {
+                    "schema_version": "spatial_records/v1",
                     "geometry_coord_type": "wgs84",
                     "year": 2024,
-                    "grid": {
-                        "features": [
-                            self._cell("population-a", 0, 0.01, "population", 100),
-                            self._cell("population-b", 0.01, 0.02, "population", 200),
-                        ]
-                    },
+                    "records": [
+                        record("population-a", 0, 0.01, population_total=100, age_5_19=10, age_30_39=20, age_50_64=30),
+                        record("population-b", 0.01, 0.02, population_total=200, age_5_19=20, age_30_39=40, age_50_64=60),
+                    ],
                 },
                 "data_version": "v1",
                 "scope_fingerprint": "scope-a",
@@ -457,14 +506,13 @@ class _SpatialAggregateRepository:
                 "artifact_type": "nightlight",
                 "params": {"year": 2024},
                 "payload": {
+                    "schema_version": "spatial_records/v1",
                     "geometry_coord_type": "wgs84",
                     "year": 2024,
-                    "grid": {
-                        "features": [
-                            self._cell("nightlight-a", 0, 0.01, "radiance", 10),
-                            self._cell("nightlight-b", 0.01, 0.02, "radiance", 30),
-                        ]
-                    },
+                    "records": [
+                        record("nightlight-a", 0, 0.01, radiance=10, unit="nW/(cm2 sr)", has_data=True),
+                        record("nightlight-b", 0.01, 0.02, radiance=30, unit="nW/(cm2 sr)", has_data=True),
+                    ],
                 },
                 "data_version": "v1",
                 "scope_fingerprint": "scope-a",
@@ -474,12 +522,21 @@ class _SpatialAggregateRepository:
                 "artifact_type": "road_syntax",
                 "params": {"metric": "choice"},
                 "payload": {
+                    "schema_version": "spatial_records/v1",
                     "geometry_coord_type": "wgs84",
+                    "nodes": {"type": "FeatureCollection", "features": [
+                        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0, 0.005]}, "properties": {"node_id": "node:1", "degree": 1}},
+                        {"type": "Feature", "geometry": {"type": "Point", "coordinates": [0.02, 0.005]}, "properties": {"node_id": "node:2", "degree": 1}},
+                    ]},
                     "road_edges": {
                         "features": [
                             {
                                 "type": "Feature",
-                                "properties": {"edge_id": "road-1", "choice_score": 0.8},
+                                "properties": {
+                                    "edge_id": "road-1", "from_node": "node:1", "to_node": "node:2",
+                                    "road_name": "测试路", "road_class": "residential", "length_m": 2220,
+                                    "metrics": {"integration": 0.7, "choice": 0.8, "connectivity": 1, "depth": 2, "control": 0.5},
+                                },
                                 "geometry": {"type": "LineString", "coordinates": [[0, 0.005], [0.02, 0.005]]},
                             }
                         ]
@@ -508,7 +565,7 @@ def test_spatial_aggregate_uses_overlap_weights_and_clipped_road_length():
     population = service.aggregate_scope_dataset(
         history_id="history-1",
         source_id="current:dataset:population",
-        metrics=[{"op": "area_weighted_sum", "field": "population", "as": "estimated_population"}],
+        metrics=[{"op": "area_weighted_sum", "field": "population_total", "as": "estimated_population"}],
         spatial=_aggregate_polygon(),
     )
     nightlight = service.aggregate_scope_dataset(
@@ -527,6 +584,8 @@ def test_spatial_aggregate_uses_overlap_weights_and_clipped_road_length():
     assert 149.9 < population["rows"][0]["estimated_population"] < 150.1
     assert population["metric_methods"][0]["assumptions"] == ["uniform_distribution_within_cell"]
     assert population["spatial_summary"]["matched_record_count"] == 2
+    assert population["spatial_summary"]["input_record_ids"] == ["population-a", "population-b"]
+    assert population["spatial_summary"]["coverage_ratio"] == 1.0
     assert population["evidence_node"]["kind"] == "spatial_metric"
     assert population["evidence_node"]["data"]["assumptions"] == ["uniform_distribution_within_cell"]
     assert 19.9 < nightlight["rows"][0]["mean_radiance"] < 20.1
@@ -540,7 +599,7 @@ def test_spatial_aggregate_rejects_unsafe_whole_cell_sum():
         ScopeDatasetService(repository=_SpatialAggregateRepository()).aggregate_scope_dataset(
             history_id="history-1",
             source_id="current:dataset:population",
-            metrics=[{"op": "area_weighted_sum", "field": "population"}],
+            metrics=[{"op": "area_weighted_sum", "field": "population_total"}],
         )
     assert error.value.code == "spatial_aggregate_invalid"
 
@@ -548,7 +607,7 @@ def test_spatial_aggregate_rejects_unsafe_whole_cell_sum():
         ScopeDatasetService(repository=_SpatialAggregateRepository()).aggregate_scope_dataset(
             history_id="history-1",
             source_id="current:dataset:population",
-            metrics=[{"op": "sum", "field": "population"}],
+            metrics=[{"op": "sum", "field": "population_total"}],
             spatial=_aggregate_polygon(),
         )
     assert unsafe_error.value.code == "spatial_aggregate_unsafe"
@@ -583,7 +642,7 @@ def test_scope_dataset_aggregate_tool_publishes_citable_spatial_evidence(monkeyp
         scope_dataset_tools.aggregate_scope_dataset(
             arguments={
                 "source_id": "current:dataset:population",
-                "metrics": [{"op": "area_weighted_sum", "field": "population", "as": "estimated_population"}],
+                "metrics": [{"op": "area_weighted_sum", "field": "population_total", "as": "estimated_population"}],
                 "spatial": _aggregate_polygon(),
             },
             snapshot=SimpleNamespace(context={"history_id": "history-1"}),

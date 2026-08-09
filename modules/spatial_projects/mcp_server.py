@@ -9,6 +9,7 @@ import argparse
 import base64
 import inspect
 import json
+import os
 import re
 import sys
 import types
@@ -28,6 +29,13 @@ from modules.report_visuals.agent_tools import (
     report_visual_template_catalog as _report_visual_template_catalog,
 )
 from modules.spatial_projects.service import SpatialProjectService
+from modules.spatial_projects.data_contract import ProjectDataContractService
+from modules.spatial_projects.public_web import (
+    PublicWebUnavailable,
+    fetch_public_web_page as _fetch_public_web_page,
+    run as _run_public_web,
+    search_public_web as _search_public_web,
+)
 from modules.spatial_projects.skill_tools import (
     check_arcgis_report_status as _check_arcgis_report_status,
     create_spatial_report_visual as _create_spatial_report_visual,
@@ -192,7 +200,16 @@ class _StdioMcpFallback:
 
 
 service = SpatialProjectService()
-mcp = FastMCP("Spatial Project") if FastMCP is not None else _StdioMcpFallback("spatial-project")
+mcp = (
+    FastMCP(
+        "Spatial Project",
+        host=os.getenv("FASTMCP_HOST", "127.0.0.1"),
+        port=int(os.getenv("FASTMCP_PORT", "8000")),
+    )
+    if FastMCP is not None
+    else _StdioMcpFallback("spatial-project")
+)
+data_contract = ProjectDataContractService(projects=service, metric_results=_list_metric_results)
 
 
 def _call(callback, **kwargs: Any) -> Any:
@@ -201,7 +218,11 @@ def _call(callback, **kwargs: Any) -> Any:
     except LookupError as exc:
         return {"status": "not_found", "error": str(exc)}
     except ValueError as exc:
-        return {"status": "invalid_request", "error": str(exc)}
+        code = str(getattr(exc, "code", "") or str(exc))
+        response = {"status": "invalid_request", "error": code}
+        if code != str(exc):
+            response["message"] = str(exc)
+        return response
     except SQLAlchemyError:
         return {
             "status": "unavailable",
@@ -266,18 +287,114 @@ class AggregateMetricInput(BaseModel):
 
 
 @mcp.tool()
+def project_context(history_id: str = "") -> dict[str, Any]:
+    """List one project's complete datasets and separate computed results."""
+    normalized_history_id = history_id.strip()
+    if not normalized_history_id:
+        projects = _call(service.list_history_projects, limit=100)
+        if isinstance(projects, dict):
+            return projects
+        if not projects:
+            return {"status": "not_found", "error": "history_not_found"}
+        latest = max(projects, key=lambda item: str(item.get("created_at") or ""))
+        normalized_history_id = str(latest.get("history_id") or "").strip()
+    return _call(data_contract.project_context, history_id=normalized_history_id)
+
+
+@mcp.tool()
+def query_data(
+    history_id: str,
+    dataset_id: str,
+    operation: Literal["records", "aggregate"] = "records",
+    filters: dict[str, Any] | None = None,
+    spatial: dict[str, Any] | None = None,
+    sort: dict[str, Any] | None = None,
+    group_by: list[str] | None = None,
+    metrics: list[dict[str, Any]] | None = None,
+    continue_token: str = "",
+) -> dict[str, Any]:
+    """Query project data.
+
+    Document datasets return every matching DocumentBlock, a merged full_text value,
+    and the original file resource URI from parsed document blocks. Spatial datasets keep
+    snapshot-bound continuation when their record sets exceed one response.
+    """
+    return _call(
+        data_contract.query_data,
+        history_id=history_id,
+        dataset_id=dataset_id,
+        operation=operation,
+        filters=filters,
+        spatial=spatial,
+        sort=sort,
+        group_by=group_by,
+        metrics=metrics,
+        continue_token=continue_token,
+    )
+
+
 def list_history_projects(limit: int = 100) -> list[dict[str, Any]]:
     """List history-backed spatial projects by identity only; read one for documents and datasets."""
     return _call(service.list_history_projects, limit=limit)
 
 
-@mcp.tool()
 def read_history_project(history_id: str) -> dict[str, Any]:
     """Read one history-backed spatial project, its documents, datasets, scope, and version status."""
     return _call(service.read_history_project, history_id=history_id)
 
 
-@mcp.tool()
+def _require_history_project(history_id: str) -> dict[str, Any] | None:
+    project = _call(service.read_history_project, history_id=history_id)
+    if isinstance(project, dict) and project.get("status") in {"not_found", "invalid_request", "unavailable"}:
+        return project
+    return None
+
+
+def search_public_web(
+    history_id: str,
+    query: str,
+    provider: Literal["anysearch", "exa"] = "anysearch",
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Discover public-web sources for one saved project through AnySearch or Exa.
+
+    Results are research leads only. Fetch the selected page before citing it as evidence.
+    """
+    blocked = _require_history_project(history_id)
+    if blocked:
+        return blocked
+    normalized_query = query.strip()
+    if not normalized_query:
+        return {"status": "invalid_request", "error": "query_required"}
+    try:
+        result = _run_public_web(_search_public_web(normalized_query, provider, max(1, min(limit, 10))))
+    except PublicWebUnavailable as exc:
+        return {"status": "unavailable", "error": str(exc), "retryable": True}
+    result["history_id"] = history_id
+    return result
+
+
+def fetch_public_web_page(
+    history_id: str,
+    urls: list[str],
+    provider: Literal["anysearch", "exa"] = "exa",
+    max_characters: int = 5000,
+) -> dict[str, Any]:
+    """Read selected public-web pages for one saved project through AnySearch or Exa."""
+    blocked = _require_history_project(history_id)
+    if blocked:
+        return blocked
+    normalized_urls = [url.strip() for url in urls if url.strip().startswith(("https://", "http://"))][:5]
+    if not normalized_urls:
+        return {"status": "invalid_request", "error": "urls_required"}
+    try:
+        result = _run_public_web(_fetch_public_web_page(normalized_urls, provider, max(500, min(max_characters, 20000))))
+    except PublicWebUnavailable as exc:
+        return {"status": "unavailable", "error": str(exc), "retryable": True}
+    result["history_id"] = history_id
+    return result
+
+
 def list_history_project_documents(history_id: str) -> dict[str, Any]:
     """List project documents linked to one analysis history, including their roles and parse status."""
     result = _call(service.list_history_project_documents, history_id=history_id)
@@ -286,7 +403,6 @@ def list_history_project_documents(history_id: str) -> dict[str, Any]:
     return {"documents": result}
 
 
-@mcp.tool()
 def get_history_project_document_resource(history_id: str, document_id: str) -> Any:
     """Return a link to the original DOCX or PDF so the client can read it on demand."""
     metadata = _call(
@@ -320,13 +436,11 @@ def read_history_project_document_resource(history_id: str, document_id: str) ->
     return content
 
 
-@mcp.tool()
 def list_history_project_datasets(history_id: str) -> dict[str, Any]:
     """List datasets available for one analysis history, including years, counts, and warnings."""
     return _call(service.list_history_project_datasets, history_id=history_id)
 
 
-@mcp.tool()
 def query_history_project_dataset(
     history_id: str,
     source_id: str,
@@ -356,7 +470,6 @@ def query_history_project_dataset(
     )
 
 
-@mcp.tool()
 def create_history_project_dataset_query_snapshot(
     history_id: str,
     source_id: str,
@@ -379,7 +492,6 @@ def create_history_project_dataset_query_snapshot(
     )
 
 
-@mcp.tool()
 def aggregate_history_project_dataset(
     history_id: str,
     source_id: str,
@@ -408,37 +520,31 @@ def aggregate_history_project_dataset(
     )
 
 
-@mcp.tool()
 def read_history_project_dataset_record(history_id: str, source_id: str, record_id: str, year: int | None = None) -> dict[str, Any]:
     """Read one spatial dataset record from a history-backed project."""
     return _call(service.read_history_project_dataset_record, history_id=history_id, source_id=source_id, record_id=record_id, year=year)
 
 
-@mcp.tool()
 def list_spatial_metric_results(history_id: str, run_id: str | None = None, tool_id: str | None = None) -> dict[str, Any]:
     """List persisted metric results from completed spatial-business analysis runs."""
     return _call(_list_metric_results, history_id=history_id, run_id=run_id, tool_id=tool_id)
 
 
-@mcp.tool()
 def read_spatial_metric_result(history_id: str, result_id: str, run_id: str | None = None) -> dict[str, Any]:
     """Read one persisted metric result without executing the metric again."""
     return _call(_read_metric_result, history_id=history_id, result_id=result_id, run_id=run_id)
 
 
-@mcp.tool()
 def spatial_metric_catalog() -> dict[str, Any]:
     """Discover the business-semantic spatial metrics that both main and specialist Agents may use."""
     return _metric_catalog()
 
 
-@mcp.tool()
 def spatial_metric_detail(tool_id: str) -> dict[str, Any]:
     """Read one metric knowledge card before deciding whether to execute it."""
     return _call(_metric_detail, tool_id=tool_id)
 
 
-@mcp.tool()
 def execute_spatial_metric(
     history_id: str,
     tool_id: str,
@@ -455,13 +561,11 @@ def execute_spatial_metric(
     )
 
 
-@mcp.tool()
 def check_arcgis_report_status() -> dict[str, Any]:
     """Check ArcGIS Bridge connectivity, credentials, and approved report templates."""
     return _call(_check_arcgis_report_status)
 
 
-@mcp.tool()
 def create_spatial_report_visual(history_id: str, visual_request: dict[str, Any]) -> dict[str, Any]:
     """Render an approved real-data thematic SVG map from prior authorized metric results."""
     return _call(
@@ -471,7 +575,6 @@ def create_spatial_report_visual(history_id: str, visual_request: dict[str, Any]
     )
 
 
-@mcp.tool()
 def get_spatial_report_visual_asset(history_id: str, asset_id: str) -> Any:
     """Return a resource link for one generated ArcGIS report visual."""
     metadata = _call(
@@ -493,7 +596,6 @@ def get_spatial_report_visual_asset(history_id: str, asset_id: str) -> Any:
     return ResourceLink.model_validate(resource) if ResourceLink is not None else resource
 
 
-@mcp.tool()
 def read_spatial_report_visual_manifest(history_id: str, asset_id: str) -> dict[str, Any]:
     """Re-audit a generated ArcGIS map through its persisted quality manifest."""
     return _call(
@@ -514,13 +616,11 @@ def read_spatial_report_visual_resource(history_id: str, asset_id: str) -> str:
     return _read_spatial_report_visual_asset(history_id, asset_id)
 
 
-@mcp.tool()
 def report_visual_template_catalog() -> dict[str, Any]:
     """Discover the only approved constrained Vega report-visual templates for the visual-evidence editor."""
     return _report_visual_template_catalog()
 
 
-@mcp.tool()
 def render_report_vega_visuals(
     history_id: str,
     report_id: str,
@@ -537,7 +637,6 @@ def render_report_vega_visuals(
     )
 
 
-@mcp.tool()
 def get_report_vega_visual_asset(history_id: str, report_id: str, asset_id: str) -> Any:
     """Return a resource link for one generated constrained Vega SVG report visual."""
     metadata = _call(
@@ -560,7 +659,6 @@ def get_report_vega_visual_asset(history_id: str, report_id: str, asset_id: str)
     return ResourceLink.model_validate(resource) if ResourceLink is not None else resource
 
 
-@mcp.tool()
 def read_report_vega_visual_manifest(history_id: str, report_id: str) -> dict[str, Any]:
     """Read the traceability manifest for a constrained Vega report-visual bundle."""
     return _call(

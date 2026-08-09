@@ -5,6 +5,8 @@ import copy
 import io
 from typing import Any
 
+from shapely.geometry import mapping
+
 from core.config import settings
 
 from .analysis import (
@@ -60,10 +62,11 @@ def _resolve_context(
     return dataset, resolved_scope_id, clip
 
 
-def _empty_grid_payload(scope_id: str, year: int) -> dict[str, Any]:
+def _empty_grid_payload(scope_id: str, year: int, source: str) -> dict[str, Any]:
     return {
         "scope_id": scope_id,
         "year": int(year),
+        "source": str(source),
         "cell_count": 0,
         "features": [],
     }
@@ -183,12 +186,15 @@ def get_nightlight_grid(
 ) -> dict[str, Any]:
     dataset, resolved_scope_id, clip = _resolve_context(polygon, coord_type, year)
     if clip.empty:
-        return _empty_grid_payload(resolved_scope_id, int(dataset.year))
+        return _empty_grid_payload(resolved_scope_id, int(dataset.year), str(dataset.label or dataset.file))
     target_cells = load_target_cells(polygon, coord_type)
     features = [copy.deepcopy(cell.feature) for cell in target_cells if cell.feature is not None]
+    for feature, cell in zip(features, (cell for cell in target_cells if cell.feature is not None)):
+        feature["geometry_wgs84"] = mapping(cell.geometry_wgs84)
     return {
         "scope_id": resolved_scope_id,
         "year": int(dataset.year),
+        "source": str(dataset.label or dataset.file),
         "cell_count": len(features),
         "features": features,
     }

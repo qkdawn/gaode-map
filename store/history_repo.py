@@ -17,6 +17,7 @@ from core.years import normalize_year, resolve_business_year
 from .database import SessionLocal
 from .history_keys import build_history_record_id
 from .models import AgentSession, AnalysisHistory, PoiResult
+from modules.poi.records import validate_complete_poi_records
 
 
 def _normalize_history_material(value: Any) -> Any:
@@ -281,7 +282,10 @@ class HistoryRepo:
                 source = self._normalize_source(snapshot.get("source"))
                 year = self._normalize_year(snapshot.get("year"))
                 row_pois = list(snapshot.get("pois") or [])
+                validate_complete_poi_records(row_pois, year=year, source=source)
                 summary = {
+                    "schema_version": "spatial_records/v1",
+                    "geometry_coord_type": "wgs84",
                     "total": len(row_pois),
                     "source": source,
                     "year": year,

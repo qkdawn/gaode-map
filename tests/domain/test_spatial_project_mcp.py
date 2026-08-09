@@ -5,13 +5,14 @@ from pathlib import Path
 
 import modules.spatial_projects.mcp_server as mcp_server
 from modules.spatial_projects.mcp_server import _StdioMcpFallback, _call
+from modules.scope_datasets.service import ScopeDatasetQueryError
 from modules.spatial_projects.skill_tools import SpatialBusinessSkillTools
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from sqlalchemy.exc import SQLAlchemyError
 
 
-def test_spatial_project_mcp_exposes_history_and_skill_first_metric_tools():
+def test_spatial_project_mcp_exposes_complete_data_tools():
     async def exercise() -> dict[str, dict]:
         root = Path(__file__).resolve().parents[2]
         params = StdioServerParameters(
@@ -26,59 +27,18 @@ def test_spatial_project_mcp_exposes_history_and_skill_first_metric_tools():
                 return {tool.name: tool.inputSchema for tool in result.tools}
 
     schemas = asyncio.run(exercise())
-    assert list(schemas) == [
-        "list_history_projects",
-        "read_history_project",
-        "list_history_project_documents",
-        "get_history_project_document_resource",
-        "list_history_project_datasets",
-        "query_history_project_dataset",
-        "create_history_project_dataset_query_snapshot",
-        "aggregate_history_project_dataset",
-        "read_history_project_dataset_record",
-        "list_spatial_metric_results",
-        "read_spatial_metric_result",
-        "spatial_metric_catalog",
-        "spatial_metric_detail",
-        "execute_spatial_metric",
-        "check_arcgis_report_status",
-        "create_spatial_report_visual",
-        "get_spatial_report_visual_asset",
-        "read_spatial_report_visual_manifest",
-        "report_visual_template_catalog",
-        "render_report_vega_visuals",
-        "get_report_vega_visual_asset",
-        "read_report_vega_visual_manifest",
-    ]
-    assert "history_id" in schemas["read_history_project"]["properties"]
-    assert set(schemas["get_history_project_document_resource"]["required"]) == {"history_id", "document_id"}
-    assert {"filters", "sort", "spatial", "limit", "offset", "year"}.issubset(schemas["query_history_project_dataset"]["properties"])
-    snapshot_schema = schemas["create_history_project_dataset_query_snapshot"]
-    assert set(snapshot_schema["required"]) == {"history_id", "source_id"}
-    assert {"filters", "spatial", "year"}.issubset(snapshot_schema["properties"])
-    assert "limit" not in snapshot_schema["properties"] and "offset" not in snapshot_schema["properties"]
-    assert {"history_id", "source_id", "spatial"}.issubset(schemas["create_history_project_dataset_query_snapshot"]["properties"])
-    assert {"metrics", "filters", "spatial", "top_k", "year"}.issubset(schemas["aggregate_history_project_dataset"]["properties"])
-    assert schemas["spatial_metric_catalog"].get("required", []) == []
-    assert schemas["spatial_metric_detail"]["required"] == ["tool_id"]
-    assert {"history_id", "tool_id", "parameters", "comparison_context"}.issubset(schemas["execute_spatial_metric"]["properties"])
-    assert set(schemas["execute_spatial_metric"]["required"]) == {"history_id", "tool_id"}
-    assert schemas["check_arcgis_report_status"].get("required", []) == []
-    assert {"history_id", "visual_request"}.issubset(schemas["create_spatial_report_visual"]["properties"])
-    assert set(schemas["create_spatial_report_visual"]["required"]) == {"history_id", "visual_request"}
-    assert set(schemas["get_spatial_report_visual_asset"]["required"]) == {"history_id", "asset_id"}
-    assert set(schemas["read_spatial_report_visual_manifest"]["required"]) == {"history_id", "asset_id"}
-    assert schemas["report_visual_template_catalog"].get("required", []) == []
-    assert set(schemas["render_report_vega_visuals"]["required"]) == {"history_id", "report_id", "report_markdown", "visual_plan"}
-    assert set(schemas["get_report_vega_visual_asset"]["required"]) == {"history_id", "report_id", "asset_id"}
-    assert set(schemas["read_report_vega_visual_manifest"]["required"]) == {"history_id", "report_id"}
-    assert "publish_spatial_business_run" not in schemas
-    assert schemas["query_history_project_dataset"]["properties"]["spatial"]["anyOf"]
-    assert schemas["list_spatial_metric_results"]["required"] == ["history_id"]
-    assert schemas["read_spatial_metric_result"]["required"] == ["history_id", "result_id"]
+    assert list(schemas) == ["project_context", "query_data"]
+    assert schemas["project_context"].get("required", []) == []
+    query_schema = schemas["query_data"]
+    assert set(query_schema["required"]) == {"history_id", "dataset_id"}
+    assert {"operation", "filters", "spatial", "sort", "group_by", "metrics", "continue_token"}.issubset(query_schema["properties"])
+    assert "cursor" not in query_schema["properties"]
+    assert "limit" not in query_schema["properties"]
+    assert "max_records" not in query_schema["properties"]
+    assert query_schema["properties"]["group_by"]["anyOf"][0]["type"] == "array"
 
 
-def test_history_project_document_list_mcp_output_is_an_object():
+def test_complete_data_mcp_outputs_are_objects():
     async def exercise() -> dict:
         root = Path(__file__).resolve().parents[2]
         params = StdioServerParameters(
@@ -90,10 +50,84 @@ def test_history_project_document_list_mcp_output_is_an_object():
             async with ClientSession(*streams) as session:
                 await session.initialize()
                 result = await session.list_tools()
-                return next(tool.outputSchema for tool in result.tools if tool.name == "list_history_project_documents")
+                return {tool.name: tool.outputSchema for tool in result.tools}
 
-    output_schema = asyncio.run(exercise())
-    assert output_schema["type"] == "object"
+    output_schemas = asyncio.run(exercise())
+    assert output_schemas["project_context"]["type"] == "object"
+    assert output_schemas["query_data"]["type"] == "object"
+
+
+def test_project_context_uses_latest_history(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server.service,
+        "list_history_projects",
+        lambda limit: [
+            {"history_id": "history-old", "created_at": "2026-01-01T00:00:00Z"},
+            {"history_id": "history-new", "created_at": "2026-07-29T00:00:00Z"},
+        ],
+    )
+    expected = {"schema_version": "spatial_records/v1", "datasets": []}
+    calls = []
+
+    def fake_context(history_id):
+        calls.append(history_id)
+        return expected
+
+    monkeypatch.setattr(mcp_server.data_contract, "project_context", fake_context)
+
+    result = mcp_server.project_context()
+
+    assert result is expected
+    assert calls == ["history-new"]
+
+
+def test_project_context_uses_explicit_history_without_listing(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server.service,
+        "list_history_projects",
+        lambda limit: (_ for _ in ()).throw(AssertionError("history list should not be read")),
+    )
+    monkeypatch.setattr(mcp_server.data_contract, "project_context", lambda history_id: {"history_id": history_id})
+
+    assert mcp_server.project_context("history-1") == {"history_id": "history-1"}
+
+
+def test_query_data_passes_complete_query_contract(monkeypatch):
+    captured = {}
+
+    def fake_query(**kwargs):
+        captured.update(kwargs)
+        return {"records": [], "computed_results": []}
+
+    monkeypatch.setattr(mcp_server.data_contract, "query_data", fake_query)
+
+    result = mcp_server.query_data(
+        "history-1",
+        "road_edges",
+        filters={"road_class": "primary"},
+        sort={"field": "integration", "direction": "desc"},
+        group_by=["road_class", "road_name"],
+    )
+
+    assert result == {"records": [], "computed_results": []}
+    assert captured["dataset_id"] == "road_edges"
+    assert captured["filters"] == {"road_class": "primary"}
+    assert captured["group_by"] == ["road_class", "road_name"]
+    assert "max_records" not in captured
+
+
+def test_call_preserves_unsupported_schema_error_code():
+    response = _call(
+        lambda: (_ for _ in ()).throw(
+            ScopeDatasetQueryError("schema_version_unsupported", "旧 artifact 必须重新计算")
+        )
+    )
+
+    assert response == {
+        "status": "invalid_request",
+        "error": "schema_version_unsupported",
+        "message": "旧 artifact 必须重新计算",
+    }
 
 
 def test_history_project_document_list_wraps_documents(monkeypatch):

@@ -48,6 +48,25 @@ def _coord_key(point: List[float], digits: int = 6) -> Tuple[float, float]:
     return (safe_round(float(point[0]), digits), safe_round(float(point[1]), digits))
 
 
+def _stable_node_id(node_key: Tuple[float, float]) -> str:
+    coordinate = f"{safe_round(node_key[0], 7):.7f},{safe_round(node_key[1], 7):.7f}"
+    return f"node:{hashlib.sha256(coordinate.encode('utf-8')).hexdigest()[:20]}"
+
+
+def _render_feature_gcj02(feature: Dict[str, Any]) -> Dict[str, Any]:
+    geometry = feature.get("geometry") or {}
+    coordinates = geometry.get("coordinates") or []
+    rendered_coordinates = []
+    for point in coordinates:
+        lon, lat = to_output_coord(float(point[0]), float(point[1]), output_coord_type="gcj02")
+        rendered_coordinates.append([safe_round(lon, 6), safe_round(lat, 6)])
+    return {
+        "type": "Feature",
+        "properties": dict(feature.get("properties") or {}),
+        "geometry": {"type": "LineString", "coordinates": rendered_coordinates},
+    }
+
+
 def _vector_from_to(a: List[float], b: List[float]) -> Tuple[float, float]:
     return (float(b[0]) - float(a[0]), float(b[1]) - float(a[1]))
 
@@ -160,6 +179,12 @@ def merge_linestring_features(
             bool(props.get("is_skeleton_choice_top20", False)),
             bool(props.get("is_skeleton_integration_top20", False)),
         )
+        road_identity = (
+            str(props.get("road_name") or ""),
+            str(props.get("road_ref") or ""),
+            str(props.get("highway") or ""),
+            str(props.get("osm_way_id") or ""),
+        )
         length_m = float(props.get("length_m", 0.0) or 0.0)
         if length_m <= 0:
             length_m = _line_length_by_coords(coords)
@@ -172,6 +197,7 @@ def merge_linestring_features(
             "end_key": end_key,
             "bucket": bucket,
             "flags": flags,
+            "road_identity": road_identity,
             "length_m": max(0.0, length_m),
         }
         segments.append(segment)
@@ -192,6 +218,7 @@ def merge_linestring_features(
         chain_ids: List[int] = [seg_id]
         chain_bucket = int(segment["bucket"])
         chain_flags = segment["flags"]
+        chain_road_identity = segment["road_identity"]
         path: List[List[float]] = [list(point) for point in segment["coords"]]
 
         def _extend_side(at_start: bool) -> bool:
@@ -207,7 +234,11 @@ def merge_linestring_features(
                 return False
             next_id = int(candidates[0])
             next_seg = segments[next_id]
-            if int(next_seg["bucket"]) != chain_bucket or next_seg["flags"] != chain_flags:
+            if (
+                int(next_seg["bucket"]) != chain_bucket
+                or next_seg["flags"] != chain_flags
+                or next_seg["road_identity"] != chain_road_identity
+            ):
                 return False
 
             oriented = next_seg["coords"] if next_seg["start_key"] == current_key else list(reversed(next_seg["coords"]))
@@ -273,6 +304,9 @@ def empty_result(
     local_labels = [normalize_label(r) for r in sorted({int(value) for value in (radii_m or []) if int(value) > 0})]
     default_radius_label = local_labels[0] if local_labels else "global"
     return {
+        "schema_version": "spatial_records/v1",
+        "geometry_coord_type": "wgs84",
+        "render_geometry_coord_type": "gcj02",
         "summary": {
             "node_count": 0,
             "edge_count": 0,
@@ -331,6 +365,7 @@ def build_road_analysis_result(
     *,
     rows: List[Dict[str, Any]],
     fieldnames: List[str],
+    edge_inputs: Optional[List[Dict[str, Any]]] = None,
     context_wgs_poly: Polygon,
     output_wgs_poly: Polygon,
     mode: str,
@@ -400,6 +435,38 @@ def build_road_analysis_result(
     metric_values_control_raw: List[float] = []
     metric_values_depth_raw: List[float] = []
     parsed_edges_context: List[Dict[str, Any]] = []
+    road_attribute_fields = (
+        "osm_way_id",
+        "road_name",
+        "road_ref",
+        "highway",
+        "service",
+        "access",
+        "oneway",
+        "bridge",
+        "tunnel",
+        "surface",
+        "lanes",
+        "maxspeed",
+    )
+
+    def _edge_coord_key(x1: float, y1: float, x2: float, y2: float, digits: int) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        first = (safe_round(x1, digits), safe_round(y1, digits))
+        second = (safe_round(x2, digits), safe_round(y2, digits))
+        return (first, second) if first <= second else (second, first)
+
+    edge_attributes_by_coord: Dict[Tuple[int, Tuple[Tuple[float, float], Tuple[float, float]]], Dict[str, str]] = {}
+    for edge_input in edge_inputs or []:
+        try:
+            endpoints = tuple(float(edge_input[key]) for key in ("x1", "y1", "x2", "y2"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        attributes = {
+            field: str(edge_input.get(field) or "").strip()
+            for field in road_attribute_fields
+        }
+        for digits in (7, 6):
+            edge_attributes_by_coord[(digits, _edge_coord_key(*endpoints, digits))] = attributes
 
     for row in rows:
         try:
@@ -467,6 +534,14 @@ def build_road_analysis_result(
 
         key1 = (safe_round(x1, 7), safe_round(y1, 7))
         key2 = (safe_round(x2, 7), safe_round(y2, 7))
+        road_attributes: Dict[str, str] = {}
+        for digits in (7, 6):
+            road_attributes = edge_attributes_by_coord.get(
+                (digits, _edge_coord_key(x1, y1, x2, y2, digits)),
+                {},
+            )
+            if road_attributes:
+                break
         parsed_edges_context.append(
             {
                 "x1": x1,
@@ -481,6 +556,7 @@ def build_road_analysis_result(
                 "raw_connectivity": raw_connectivity,
                 "raw_control": raw_control,
                 "raw_depth": raw_depth,
+                **road_attributes,
             }
         )
 
@@ -603,8 +679,8 @@ def build_road_analysis_result(
         if depth_score is not None:
             global_depth_values.append(float(depth_score))
 
-        out1 = to_output_coord(item["x1"], item["y1"], output_coord_type="gcj02")
-        out2 = to_output_coord(item["x2"], item["y2"], output_coord_type="gcj02")
+        from_node = _stable_node_id(item["key1"])
+        to_node = _stable_node_id(item["key2"])
         props: Dict[str, Any] = {
             "edge_id": "edge:" + hashlib.sha256(
                 ":".join(sorted((
@@ -613,7 +689,18 @@ def build_road_analysis_result(
                 ))).encode("utf-8")
             ).hexdigest()[:20],
             "record_id": "",
+            "from_node": from_node,
+            "to_node": to_node,
+            "road_name": str(item.get("road_name") or ""),
+            "road_class": str(item.get("highway") or ""),
             "length_m": safe_round(item["length_m"], 2),
+            "metrics": {
+                "integration": safe_round(default_integ, 8),
+                "choice": safe_round(default_choice, 8),
+                "connectivity": safe_round(connectivity_score, 8),
+                "depth": safe_round(depth_score if depth_score is not None else 0.0, 8),
+                "control": safe_round(control_score if control_score is not None else 0.0, 8),
+            },
             "choice_score": safe_round(default_choice, 8),
             "integration_score": safe_round(default_integ, 8),
             "accessibility_score": safe_round(default_integ, 8),
@@ -629,6 +716,12 @@ def build_road_analysis_result(
             "is_skeleton_choice_top20": False,
             "is_skeleton_integration_top20": False,
         }
+        props.update(
+            {
+                field: str(item.get(field) or "")
+                for field in road_attribute_fields
+            }
+        )
         props["record_id"] = props["edge_id"]
         for label in local_labels:
             props[f"choice_{label}"] = safe_round(choice_by_label.get(label, 0.0), 8)
@@ -660,8 +753,8 @@ def build_road_analysis_result(
                     "geometry": {
                         "type": "LineString",
                         "coordinates": [
-                            [safe_round(out1[0], 6), safe_round(out1[1], 6)],
-                            [safe_round(out2[0], 6), safe_round(out2[1], 6)],
+                            [safe_round(item["x1"], 7), safe_round(item["y1"], 7)],
+                            [safe_round(item["x2"], 7), safe_round(item["y2"], 7)],
                         ],
                     },
                 },
@@ -738,15 +831,14 @@ def build_road_analysis_result(
     node_features: List[Dict[str, Any]] = []
     for node_key, deg in degree_by_node.items():
         lon_wgs, lat_wgs = node_key
-        lon_out, lat_out = to_output_coord(lon_wgs, lat_wgs, output_coord_type="gcj02")
         degree_raw = float(deg)
         degree_score = float(degree_score_by_node.get(node_key, 0.0))
         integ_global = float(integ_global_by_node.get(node_key, 0.0))
-        node_id = f"{safe_round(lon_out, 6):.6f},{safe_round(lat_out, 6):.6f}"
+        node_id = _stable_node_id(node_key)
         node_features.append(
             {
                 "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [safe_round(lon_out, 6), safe_round(lat_out, 6)]},
+                "geometry": {"type": "Point", "coordinates": [safe_round(lon_wgs, 7), safe_round(lat_wgs, 7)]},
                 "properties": {
                     "node_id": node_id,
                     "degree": int(round(degree_raw)),
@@ -758,7 +850,10 @@ def build_road_analysis_result(
 
     all_scored_features = [item["feature"] for item in scored_edges]
     max_features = len(scored_edges) if max_edge_features is None else max(100, int(max_edge_features))
-    features_out = all_scored_features[:max_features] if include_geojson else []
+    features_out = [
+        _render_feature_gcj02(feature)
+        for feature in all_scored_features[:max_features]
+    ] if include_geojson else []
     pre_merge_feature_count = len(features_out)
     if include_geojson and merge_geojson_edges and len(features_out) >= 2:
         features_out = merge_linestring_features(features_out, bucket_step=merge_bucket_step, angle_cos_min=0.92)
@@ -847,6 +942,9 @@ def build_road_analysis_result(
         },
     )
     return {
+        "schema_version": "spatial_records/v1",
+        "geometry_coord_type": "wgs84",
+        "render_geometry_coord_type": "gcj02",
         "summary": {
             "node_count": int(node_count),
             "edge_count": raw_edge_count,

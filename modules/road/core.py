@@ -217,6 +217,20 @@ def analyze_road_syntax(
     for way in ways:
         tags = way.get("tags") or {}
         highway = str(tags.get("highway") or "")
+        road_attributes = {
+            "osm_way_id": str(way.get("id") or ""),
+            "road_name": str(tags.get("name") or "").strip(),
+            "road_ref": str(tags.get("ref") or "").strip(),
+            "highway": highway,
+            "service": str(tags.get("service") or "").strip(),
+            "access": str(tags.get("access") or "").strip(),
+            "oneway": str(tags.get("oneway") or "").strip(),
+            "bridge": str(tags.get("bridge") or "").strip(),
+            "tunnel": str(tags.get("tunnel") or "").strip(),
+            "surface": str(tags.get("surface") or "").strip(),
+            "lanes": str(tags.get("lanes") or "").strip(),
+            "maxspeed": str(tags.get("maxspeed") or "").strip(),
+        }
         node_ids = way.get("nodes") or []
         used_node_segments = False
         if node_ids and node_coords:
@@ -248,8 +262,8 @@ def analyze_road_syntax(
                         "y1": lat1,
                         "x2": lon2,
                         "y2": lat2,
-                        "highway": highway,
                         "length_m": length_m,
+                        **road_attributes,
                     }
                 )
 
@@ -289,8 +303,8 @@ def analyze_road_syntax(
                     "y1": lat1,
                     "x2": lon2,
                     "y2": lat2,
-                    "highway": highway,
                     "length_m": length_m,
+                    **road_attributes,
                 }
             )
 
@@ -420,6 +434,7 @@ def analyze_road_syntax(
     result = build_road_analysis_result(
         rows=rows,
         fieldnames=fieldnames,
+        edge_inputs=edge_inputs,
         context_wgs_poly=context_wgs_poly,
         output_wgs_poly=output_wgs_poly,
         mode=mode,

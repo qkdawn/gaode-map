@@ -11,6 +11,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform
 
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84
+from modules.poi.records import PoiRecordContractError, validate_complete_poi_records
 from sqlalchemy.orm import Session
 
 from core.years import available_business_years, normalize_year, resolve_business_year
@@ -27,6 +28,7 @@ DATASET_TITLES = {
     "current:dataset:poi_grid": "当前范围 POI 规则栅格",
     "current:dataset:population": "当前范围人口网格",
     "current:dataset:nightlight": "当前范围夜光网格",
+    "current:dataset:road_nodes": "当前范围路网节点",
     "current:dataset:road_edges": "当前范围路网线段",
     "current:dataset:road_grid": "当前范围路网共享栅格",
 }
@@ -40,12 +42,22 @@ ARTIFACT_SOURCE_MAP = {
 }
 
 DATASET_FILTER_FIELDS = {
-    "current:dataset:poi": {"id", "name", "type", "typecode", "address", "category", "source", "year"},
+    "current:dataset:poi": {"record_id", "poi_id", "name", "category", "subcategory", "typecode", "address", "location", "source", "year"},
     "current:dataset:h3": {"record_id", "cell_id", "h3_id", "poi_count", "density", "lq", "year"},
     "current:dataset:poi_grid": {"record_id", "cell_id", "poi_count", "density", "lq", "year"},
-    "current:dataset:population": {"record_id", "cell_id", "value", "population", "density", "year", "view"},
-    "current:dataset:nightlight": {"record_id", "cell_id", "value", "radiance", "year", "view"},
-    "current:dataset:road_edges": {"record_id", "edge_id", "feature_kind", "choice_score", "integration_score", "connectivity_score", "control_score", "depth_score", "metric"},
+    "current:dataset:population": {"record_id", "cell_id", "year", "population_total", "age_5_19", "age_30_39", "age_50_64", "source"},
+    "current:dataset:nightlight": {"record_id", "cell_id", "year", "radiance", "unit", "has_data", "source"},
+    "current:dataset:road_nodes": {"record_id", "node_id", "location", "degree"},
+    "current:dataset:road_edges": {
+        "record_id",
+        "edge_id",
+        "road_name",
+        "road_class",
+        "from_node",
+        "to_node",
+        "length_m",
+        "metrics",
+    },
     "current:dataset:road_grid": {"record_id", "cell_id", "feature_kind", "road_has_data", "road_length_km", "road_length_km_per_km2", "road_choice", "road_integration", "road_connectivity", "road_control", "road_depth"},
 }
 
@@ -75,6 +87,11 @@ DATASET_SPATIAL_CAPABILITIES = {
         "grid_type": "nightlight_raster",
         "spatial_relations": ["at_point", "nearest", "intersects"],
     },
+    "current:dataset:road_nodes": {
+        "geometry_type": "Point",
+        "grid_type": "none",
+        "spatial_relations": ["nearest", "within_distance", "intersects"],
+    },
     "current:dataset:road_edges": {
         "geometry_type": "LineString",
         "grid_type": "none",
@@ -91,7 +108,7 @@ DATASET_SPATIAL_AGGREGATIONS = {
     "current:dataset:population": [
         {
             "op": "area_weighted_sum",
-            "fields": ["population", "value"],
+            "fields": ["population_total"],
             "method": "record_value_times_record_overlap_ratio",
             "assumptions": ["uniform_distribution_within_cell"],
         }
@@ -99,7 +116,7 @@ DATASET_SPATIAL_AGGREGATIONS = {
     "current:dataset:nightlight": [
         {
             "op": "area_weighted_avg",
-            "fields": ["radiance", "value"],
+            "fields": ["radiance"],
             "method": "overlap_area_weighted_mean",
             "assumptions": [],
         }
@@ -118,23 +135,19 @@ DATASET_SPATIAL_AGGREGATIONS = {
 GENERIC_AGGREGATE_OPS = {"count", "sum", "avg", "min", "max"}
 SPATIAL_AGGREGATE_OPS = {"area_weighted_sum", "area_weighted_avg", "intersection_length_sum"}
 
-POI_GEOMETRY_COORD_TYPE = "gcj02"
+POI_GEOMETRY_COORD_TYPE = "wgs84"
 
-# Analysis artifacts created by the current frontend have always stored their
-# GeoJSON coordinates in GCJ-02.  Older history rows predate the explicit
-# geometry_coord_type field, so retain that producer contract when reading
-# those known artifact types.  Unknown artifact types must still provide an
-# explicit coordinate system rather than being guessed.
+# The POI-derived grid producers still store GeoJSON in GCJ-02. Their
+# coordinate contract is producer-specific and does not apply to the complete
+# spatial-record artifacts below, which must declare WGS84 explicitly.
 LEGACY_ARTIFACT_GEOMETRY_COORD_TYPES = {
     "poi_h3_grid": "gcj02",
     "poi_raster_grid": "gcj02",
-    "population": "gcj02",
-    "nightlight": "gcj02",
-    "road_syntax": "gcj02",
 }
 
+SPATIAL_RECORDS_SCHEMA_VERSION = "spatial_records/v1"
 DEFAULT_LIMIT = 20
-MAX_LIMIT = 100
+MAX_LIMIT = 500
 MAX_QUERY_SNAPSHOT_FEATURES = 10_000
 
 
@@ -340,9 +353,21 @@ class ScopeRecord:
             "locator": self.locator,
             "citation": self.citation,
             "warnings": list(self.warnings or []),
+            "geometry": (
+                json.loads(json.dumps(mapping(self.geometry), ensure_ascii=False))
+                if self.geometry is not None and not self.geometry.is_empty
+                else None
+            ),
+            "geometry_coord_type": "wgs84",
         }
         if spatial_match is not None:
             payload["spatial_match"] = _clone_json(spatial_match)
+        return payload
+
+    def as_complete_record(self) -> Dict[str, Any]:
+        """Return the stable, lossless public record representation."""
+        payload = self.as_payload()
+        payload["raw"] = _clone_json(self.raw)
         return payload
 
     def evidence_node(self, spatial_match: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -534,14 +559,16 @@ class ScopeDatasetService:
             years = available_business_years(row.get("year") for row in poi_rows)
             selected_year = resolve_business_year(years)
             selected_rows = [row for row in poi_rows if normalize_year(row.get("year")) == selected_year]
+            for row in selected_rows:
+                self._validate_poi_result(row, self.repository.get_poi_data(row.get("id")))
             count = sum(self._poi_result_count(row) for row in selected_rows)
             datasets.append(self._dataset_payload("current:dataset:poi", count, years=years, selected_year=selected_year, variants=len(selected_rows)))
-        for source_id in ["current:dataset:h3", "current:dataset:poi_grid", "current:dataset:population", "current:dataset:nightlight", "current:dataset:road_edges", "current:dataset:road_grid"]:
+        for source_id in ["current:dataset:h3", "current:dataset:poi_grid", "current:dataset:population", "current:dataset:nightlight", "current:dataset:road_nodes", "current:dataset:road_edges", "current:dataset:road_grid"]:
             matching = [
                 item for item in artifacts
                 if (
                     ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == source_id
-                    or (_as_text(item.get("artifact_type")) == "road_syntax" and source_id == "current:dataset:road_grid")
+                    or (_as_text(item.get("artifact_type")) == "road_syntax" and source_id in {"current:dataset:road_nodes", "current:dataset:road_grid"})
                 )
             ]
             selected, years, selected_year = self._select_artifacts(
@@ -679,6 +706,7 @@ class ScopeDatasetService:
             year=year,
             require_geometry_metadata=True,
         )
+
         spatial_warnings: List[str] = []
         if spatial is not None:
             selection = self._select_spatial_records(
@@ -734,6 +762,27 @@ class ScopeDatasetService:
             "features": features,
             "warnings": sorted(set(warnings)),
             "failure_reasons": [],
+        }
+
+    @staticmethod
+    def serialize_scope_records(records: Iterable[ScopeRecord]) -> Dict[str, Any]:
+        """Serialize a complete record set with a deterministic content checksum."""
+        serialized = [
+            record.as_complete_record()
+            for record in sorted(records, key=lambda item: (item.source_id, item.record_id))
+        ]
+        encoded = json.dumps(
+            serialized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return {
+            "schema_version": SPATIAL_RECORDS_SCHEMA_VERSION,
+            "geometry_coord_type": "wgs84",
+            "record_count": len(serialized),
+            "checksum": f"sha256:{sha256(encoded).hexdigest()}",
+            "records": serialized,
         }
 
     @staticmethod
@@ -876,10 +925,10 @@ class ScopeDatasetService:
         *,
         history_id: str,
         source_id: str,
-        group_by: str = "",
+        group_by: str | List[str] | None = None,
         metrics: Optional[List[Dict[str, Any]]] = None,
         filters: Optional[Dict[str, Any]] = None,
-        top_k: int = 10,
+        top_k: Optional[int] = 10,
         year: Any = None,
         spatial: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -914,17 +963,20 @@ class ScopeDatasetService:
             spatial_warnings.extend(selection.warnings)
             skipped_record_count = selection.skipped_record_count
         records = self._apply_filters(spatial_records, source_id, filters or {})
-        group_field = _as_text(group_by)
-        grouped: Dict[str, List[ScopeRecord]] = {}
-        if group_field:
+        group_fields = self._normalize_group_fields(group_by)
+        grouped: Dict[tuple[str, ...], List[ScopeRecord]] = {}
+        if group_fields:
             for record in records:
-                key = _as_text(record.properties.get(group_field)) or "未标注"
+                key = tuple(_as_text(record.properties.get(field)) or "未标注" for field in group_fields)
                 grouped.setdefault(key, []).append(record)
         else:
-            grouped["all"] = list(records)
+            grouped[()] = list(records)
         rows = []
         for key, items in grouped.items():
-            row: Dict[str, Any] = {"group": key, "count": len(items)}
+            row: Dict[str, Any] = {
+                "group": {field: key[index] for index, field in enumerate(group_fields)},
+                "count": len(items),
+            }
             for spec in metric_specs:
                 if not isinstance(spec, dict):
                     continue
@@ -939,24 +991,25 @@ class ScopeDatasetService:
                 )
             rows.append(row)
         rows.sort(key=lambda item: item.get("count") or 0, reverse=True)
-        safe_top_k = min(max(int(top_k or 10), 1), 100)
+        safe_top_k = None if top_k is None else min(max(int(top_k or 10), 1), 500)
         warnings = self._missing_year_warnings(records)
         warnings.extend(spatial_warnings)
         payload = {
             "source_id": source_id,
             "selected_year": selected_year,
             "available_years": available_years,
-            "group_by": group_field,
+            "group_by": group_fields,
             "spatial_query": _clone_json(spatial) if isinstance(spatial, dict) else None,
             "spatial_summary": self._spatial_aggregate_summary(
                 records,
+                source_id=source_id,
                 spatial_matches=spatial_matches,
                 skipped_record_count=skipped_record_count,
                 relation=_as_text(spatial.get("relation")) if isinstance(spatial, dict) else "",
             ),
             "metric_methods": [self._aggregate_metric_method(source_id, spec) for spec in metric_specs],
             "total_groups": len(rows),
-            "rows": rows[:safe_top_k],
+            "rows": rows if safe_top_k is None else rows[:safe_top_k],
             "warnings": sorted(set(warnings)),
         }
         payload["evidence_node"] = self._aggregate_evidence_node(payload)
@@ -966,18 +1019,19 @@ class ScopeDatasetService:
     def _validate_aggregate_request(
         source_id: str,
         *,
-        group_by: str,
+        group_by: str | List[str] | None,
         metrics: List[Dict[str, Any]],
         filters: Dict[str, Any],
         spatial: Optional[Dict[str, Any]],
     ) -> None:
         ScopeDatasetService._validate_query_fields(source_id, filters=filters, sort={})
         allowed = DATASET_FILTER_FIELDS[source_id]
-        group_field = _as_text(group_by)
-        if group_field and group_field not in allowed:
+        group_fields = ScopeDatasetService._normalize_group_fields(group_by)
+        unsupported_group_fields = [field for field in group_fields if field not in allowed]
+        if unsupported_group_fields:
             raise ScopeDatasetQueryError(
                 "scope_dataset_field_unsupported",
-                f"{source_id} 不支持分组字段: {group_field}",
+                f"{source_id} 不支持分组字段: {', '.join(unsupported_group_fields)}",
             )
         spatial_capabilities = DATASET_SPATIAL_AGGREGATIONS.get(source_id, [])
         for spec in metrics:
@@ -996,13 +1050,14 @@ class ScopeDatasetService:
                     source_id == "current:dataset:population"
                     and relation == "intersects"
                     and op == "sum"
-                    and field_name in {"population", "value"}
+                    and field_name == "population_total"
                 )
+
                 unsafe_nightlight = (
                     source_id == "current:dataset:nightlight"
                     and relation == "intersects"
                     and op in {"sum", "avg"}
-                    and field_name in {"radiance", "value"}
+                    and field_name == "radiance"
                 )
                 if unsafe_population or unsafe_nightlight:
                     recommended = "area_weighted_sum" if unsafe_population else "area_weighted_avg"
@@ -1026,6 +1081,16 @@ class ScopeDatasetService:
                 )
 
     @staticmethod
+    def _normalize_group_fields(group_by: str | List[str] | None) -> List[str]:
+        values = group_by if isinstance(group_by, list) else ([group_by] if _as_text(group_by) else [])
+        fields: List[str] = []
+        for value in values:
+            field = _as_text(value)
+            if field and field not in fields:
+                fields.append(field)
+        return fields
+
+    @staticmethod
     def _aggregate_metric_method(source_id: str, spec: Dict[str, Any]) -> Dict[str, Any]:
         op = _as_text(spec.get("op") or "count").lower()
         field_name = _as_text(spec.get("field") or "*")
@@ -1047,6 +1112,7 @@ class ScopeDatasetService:
     def _spatial_aggregate_summary(
         records: List[ScopeRecord],
         *,
+        source_id: str,
         spatial_matches: Dict[int, Dict[str, Any]],
         skipped_record_count: int,
         relation: str,
@@ -1056,13 +1122,18 @@ class ScopeDatasetService:
         matches = [spatial_matches.get(id(record)) or {} for record in records]
         overlap_area = sum(_as_float(match.get("overlap_area_m2")) or 0.0 for match in matches)
         intersection_length = sum(_as_float(match.get("intersection_length_m")) or 0.0 for match in matches)
-        return {
+        summary = {
             "relation": relation,
             "matched_record_count": len(records),
             "skipped_record_count": int(skipped_record_count or 0),
             "overlap_area_m2": round(overlap_area, 3),
             "intersection_length_m": round(intersection_length, 3),
         }
+        if source_id in {"current:dataset:population", "current:dataset:nightlight"}:
+            query_overlap = sum(_as_float(match.get("query_overlap_ratio")) or 0.0 for match in matches)
+            summary["input_record_ids"] = [record.record_id for record in records]
+            summary["coverage_ratio"] = round(min(max(query_overlap, 0.0), 1.0), 6)
+        return summary
 
     @staticmethod
     def _aggregate_evidence_node(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1147,7 +1218,7 @@ class ScopeDatasetService:
         summary: Optional[Dict[str, Any]] = None,
         spatial_ready: bool = True,
     ) -> Dict[str, Any]:
-        is_static = source_id in {"current:dataset:road_edges", "current:dataset:road_grid"}
+        is_static = source_id in {"current:dataset:road_nodes", "current:dataset:road_edges", "current:dataset:road_grid"}
         warnings = [] if years or is_static else ["该来源未提供明确年份。"]
         if record_count and not spatial_ready:
             warnings.append("artifact 缺少有效 geometry_coord_type，属性查询可用，但空间查询不可用。")
@@ -1209,7 +1280,7 @@ class ScopeDatasetService:
             for item in self.repository.list_analysis_artifacts(history_id)
             if (
                 ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == normalized_source_id
-                or (_as_text(item.get("artifact_type")) == "road_syntax" and normalized_source_id == "current:dataset:road_grid")
+                or (_as_text(item.get("artifact_type")) == "road_syntax" and normalized_source_id in {"current:dataset:road_nodes", "current:dataset:road_grid"})
             )
         ]
         poi_rows = self.repository.list_poi_results(history_id) if normalized_source_id in {"current:dataset:h3", "current:dataset:poi_grid"} else []
@@ -1259,7 +1330,7 @@ class ScopeDatasetService:
         poi_rows: List[Dict[str, Any]],
     ) -> tuple[List[Dict[str, Any]], List[int], int | None]:
         deduped = self._dedupe_artifacts(artifacts)
-        if source_id in {"current:dataset:road_edges", "current:dataset:road_grid"}:
+        if source_id in {"current:dataset:road_nodes", "current:dataset:road_edges", "current:dataset:road_grid"}:
             selected = sorted(deduped, key=self._artifact_sort_key, reverse=True)[:1]
             return selected, [], None
         years = available_business_years(_year_from_artifact(item) for item in deduped)
@@ -1290,22 +1361,31 @@ class ScopeDatasetService:
             row_year = _as_int(row.get("year"))
             if requested_year is not None and row_year != requested_year:
                 continue
+            poi_data = self.repository.get_poi_data(row.get("id"))
+            self._validate_poi_result(row, poi_data)
             source = _as_text(row.get("source")) or "local"
             time_scope = _time_scope(year=row_year)
             warnings = _dataset_warning_for_year(row_year)
-            for index, poi in enumerate(self.repository.get_poi_data(row.get("id"))):
+            for index, poi in enumerate(poi_data):
                 if not isinstance(poi, dict):
                     continue
-                record_id = _as_text(poi.get("id") or poi.get("uid") or poi.get("poi_id")) or f"{source}:{row_year or 'unknown'}:{index}"
-                name = _as_text(poi.get("name")) or f"POI {index + 1}"
-                category = _as_text(poi.get("type") or poi.get("category") or poi.get("typecode"))
+                record_id = _as_text(poi.get("poi_id"))
+                name = _as_text(poi.get("name"))
+                category = _as_text(poi.get("category"))
                 address = _as_text(poi.get("address"))
+                geometry = _point_from_poi(poi, POI_GEOMETRY_COORD_TYPE)
+                location = list(geometry.coords[0]) if geometry is not None else None
                 props = {
-                    **_clone_json(poi),
                     "record_id": record_id,
-                    "source": source,
-                    "year": row_year,
+                    "poi_id": record_id,
+                    "name": name,
                     "category": category,
+                    "subcategory": _as_text(poi.get("subcategory")),
+                    "typecode": _as_text(poi.get("typecode")),
+                    "address": address,
+                    "location": location,
+                    "year": row_year,
+                    "source": source,
                 }
                 content_parts = [name]
                 if category:
@@ -1324,7 +1404,7 @@ class ScopeDatasetService:
                         locator=f"current:dataset:poi/{record_id}",
                         citation=f"当前范围 POI，{time_scope.get('label')}",
                         warnings=warnings,
-                        geometry=_point_from_poi(poi, POI_GEOMETRY_COORD_TYPE),
+                        geometry=geometry,
                     )
                 )
         return records
@@ -1345,10 +1425,16 @@ class ScopeDatasetService:
         require_geometry_metadata: bool = False,
     ) -> List[ScopeRecord]:
         artifact_type = _as_text(artifact.get("artifact_type"))
+        if artifact_type in {"population", "nightlight", "road_syntax"}:
+            self._validate_spatial_records_artifact(source_id, artifact)
+        if source_id == "current:dataset:road_nodes":
+            return self._road_node_records(artifact)
         if source_id == "current:dataset:road_edges":
-            return self._road_edge_records(artifact, require_geometry_metadata=require_geometry_metadata)
+            return self._road_edge_records(artifact)
         if source_id == "current:dataset:road_grid":
             return self._road_grid_records(artifact, require_geometry_metadata=require_geometry_metadata)
+        if artifact_type in {"population", "nightlight"}:
+            return self._spatial_array_records(source_id, artifact, artifact_type)
         return self._grid_records(
             source_id,
             artifact,
@@ -1385,6 +1471,78 @@ class ScopeDatasetService:
                 f"{source_id} 的 {artifact_type} artifact 缺少有效 geometry_coord_type",
             )
         return ""
+
+    @staticmethod
+    def _validate_spatial_records_artifact(source_id: str, artifact: Dict[str, Any]) -> None:
+        payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
+        artifact_type = _as_text(artifact.get("artifact_type"))
+        version = _as_text(payload.get("schema_version"))
+        coord_type = _as_text(payload.get("geometry_coord_type")).lower()
+        valid_data_shape = (
+            isinstance(payload.get("records"), list)
+            if artifact_type in {"population", "nightlight"}
+            else (
+                isinstance(payload.get("nodes"), dict)
+                and isinstance(payload["nodes"].get("features"), list)
+                and isinstance(payload.get("road_edges"), dict)
+                and isinstance(payload["road_edges"].get("features"), list)
+            )
+        )
+        if version != SPATIAL_RECORDS_SCHEMA_VERSION or coord_type != "wgs84" or not valid_data_shape:
+            raise ScopeDatasetQueryError(
+                "schema_version_unsupported",
+                f"{source_id} 仅支持 {SPATIAL_RECORDS_SCHEMA_VERSION} WGS84 完整记录 artifact",
+            )
+        if artifact_type in {"population", "nightlight"}:
+            required = (
+                {"cell_id", "geometry", "year", "population_total", "age_5_19", "age_30_39", "age_50_64", "source"}
+                if artifact_type == "population"
+                else {"cell_id", "geometry", "year", "radiance", "unit", "has_data", "source"}
+            )
+            valid_records = all(
+                isinstance(item, dict)
+                and required.issubset(item)
+                and isinstance(item.get("geometry"), dict)
+                and item["geometry"].get("type") in {"Polygon", "MultiPolygon"}
+                for item in payload["records"]
+            )
+        else:
+            node_required = {"node_id", "degree"}
+            edge_required = {"edge_id", "road_name", "road_class", "from_node", "to_node", "length_m", "metrics"}
+            metric_required = {"integration", "choice", "connectivity", "depth"}
+            node_features = payload["nodes"]["features"]
+            edge_features = payload["road_edges"]["features"]
+            valid_nodes = all(
+                isinstance(feature, dict)
+                and isinstance(feature.get("geometry"), dict)
+                and feature["geometry"].get("type") == "Point"
+                and isinstance(feature.get("properties"), dict)
+                and node_required.issubset(feature["properties"])
+                for feature in node_features
+            )
+            node_ids = {
+                _as_text(feature["properties"].get("node_id"))
+                for feature in node_features
+                if isinstance(feature, dict) and isinstance(feature.get("properties"), dict)
+            }
+            valid_edges = all(
+                isinstance(feature, dict)
+                and isinstance(feature.get("geometry"), dict)
+                and feature["geometry"].get("type") == "LineString"
+                and isinstance(feature.get("properties"), dict)
+                and edge_required.issubset(feature["properties"])
+                and isinstance(feature["properties"].get("metrics"), dict)
+                and metric_required.issubset(feature["properties"]["metrics"])
+                and _as_text(feature["properties"].get("from_node")) in node_ids
+                and _as_text(feature["properties"].get("to_node")) in node_ids
+                for feature in edge_features
+            )
+            valid_records = valid_nodes and valid_edges
+        if not valid_records:
+            raise ScopeDatasetQueryError(
+                "schema_version_unsupported",
+                f"{source_id} artifact 缺少 {SPATIAL_RECORDS_SCHEMA_VERSION} 必填记录字段或闭合节点引用",
+            )
 
     def _grid_records(
         self,
@@ -1449,35 +1607,141 @@ class ScopeDatasetService:
             )
         return records
 
-    def _road_edge_records(self, artifact: Dict[str, Any], *, require_geometry_metadata: bool = False) -> List[ScopeRecord]:
-        payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
-        metric = payload.get("metric") or payload.get("mode") or ""
-        coord_type = self._artifact_coord_type(
-            "current:dataset:road_edges",
-            artifact,
-            required=require_geometry_metadata,
+    @staticmethod
+    def _validate_poi_result(row: Dict[str, Any], records: List[Dict[str, Any]]) -> None:
+        summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
+        if (
+            _as_text(summary.get("schema_version")) != SPATIAL_RECORDS_SCHEMA_VERSION
+            or _as_text(summary.get("geometry_coord_type")).lower() != "wgs84"
+        ):
+            raise ScopeDatasetQueryError(
+                "schema_version_unsupported",
+                f"current:dataset:poi 仅支持 {SPATIAL_RECORDS_SCHEMA_VERSION} WGS84 完整记录",
+            )
+        try:
+            validate_complete_poi_records(
+                records,
+                year=_as_int(row.get("year")),
+                source=_as_text(row.get("source")) or "local",
+            )
+            total = _as_int(summary.get("total"))
+            if total is None or total != len(records):
+                raise PoiRecordContractError("poi_record_count_mismatch")
+        except PoiRecordContractError as exc:
+            raise ScopeDatasetQueryError(
+                "schema_version_unsupported",
+                f"current:dataset:poi 缺少 {SPATIAL_RECORDS_SCHEMA_VERSION} 必填记录字段: {exc}",
+            ) from exc
+
+    def _spatial_array_records(
+        self,
+        source_id: str,
+        artifact: Dict[str, Any],
+        artifact_type: str,
+    ) -> List[ScopeRecord]:
+        payload = artifact["payload"]
+        time_scope = _time_scope(
+            year=_year_from_artifact(artifact),
+            data_version=_as_text(artifact.get("data_version")),
+            scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
         )
+        fields = (
+            ("cell_id", "year", "population_total", "age_5_19", "age_30_39", "age_50_64", "source")
+            if artifact_type == "population"
+            else ("cell_id", "year", "radiance", "unit", "has_data", "source")
+        )
+        records: List[ScopeRecord] = []
+        for index, item in enumerate(payload["records"]):
+            if not isinstance(item, dict):
+                continue
+            record_id = _as_text(item.get("cell_id")) or f"{artifact_type}:{index}"
+            properties = {"record_id": record_id, **{field: _clone_json(item.get(field)) for field in fields}}
+            properties["year"] = _as_int(item.get("year"))
+            geometry = _geometry_from_feature(item, source_id, "wgs84")
+            value = item.get("population_total") if artifact_type == "population" else item.get("radiance")
+            records.append(ScopeRecord(
+                source_id=source_id,
+                record_id=record_id,
+                title=record_id,
+                content=f"{DATASET_TITLES[source_id]}记录 {record_id}，指标值 {value}",
+                properties=properties,
+                raw=_clone_json(item),
+                time_scope=time_scope,
+                locator=f"{source_id}/{record_id}",
+                citation=f"{DATASET_TITLES[source_id]}，{time_scope.get('label')}",
+                warnings=_dataset_warning_for_year(item.get("year")),
+                geometry=geometry,
+            ))
+        return records
+
+    def _road_node_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
+        payload = artifact["payload"]
+        collection = payload["nodes"]
+        time_scope = _static_time_scope(
+            data_version=_as_text(artifact.get("data_version")),
+            scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
+        )
+        records: List[ScopeRecord] = []
+        for index, feature in enumerate(collection.get("features") or []):
+            if not isinstance(feature, dict):
+                continue
+            source_properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+            node_id = _as_text(source_properties.get("node_id")) or _feature_record_id(feature, f"node:{index}")
+            geometry = _geometry_from_feature(feature, "current:dataset:road_nodes", "wgs84")
+            location = list(geometry.coords[0]) if geometry is not None and geometry.geom_type == "Point" else None
+            record_id = f"road_node:{node_id}"
+            properties = {
+                "record_id": record_id,
+                "node_id": node_id,
+                "location": location,
+                "degree": source_properties.get("degree"),
+            }
+            records.append(ScopeRecord(
+                source_id="current:dataset:road_nodes",
+                record_id=record_id,
+                title=node_id,
+                content=f"路网节点 {node_id}，度数 {properties['degree']}",
+                properties=properties,
+                raw={"feature": _clone_json(feature)},
+                time_scope=time_scope,
+                locator=f"current:dataset:road_nodes/{record_id}",
+                citation="当前范围路网节点，当前路网模型",
+                warnings=[],
+                geometry=geometry,
+            ))
+        return records
+
+    def _road_edge_records(self, artifact: Dict[str, Any]) -> List[ScopeRecord]:
+        payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
         time_scope = _static_time_scope(
             data_version=_as_text(artifact.get("data_version")),
             scope_fingerprint=_as_text(artifact.get("scope_fingerprint")),
         )
         records: List[ScopeRecord] = []
         for kind, collection_key in [("road_edge", "road_edges")]:
-            collection = payload.get(collection_key) if isinstance(payload.get(collection_key), dict) else {}
+            collection = payload[collection_key]
             for index, feature in enumerate(collection.get("features") or []):
                 if not isinstance(feature, dict):
                     continue
                 props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
                 base_id = _feature_record_id(feature, f"{kind}:{index}")
                 record_id = f"{kind}:{base_id}"
+                raw_metrics = props.get("metrics") if isinstance(props.get("metrics"), dict) else {}
                 merged = {
-                    **_clone_json(props),
                     "record_id": record_id,
-                    "feature_kind": kind,
-                    "metric": metric,
+                    "edge_id": base_id,
+                    "road_name": _as_text(props.get("road_name")),
+                    "road_class": _as_text(props.get("road_class")),
+                    "from_node": _clone_json(props.get("from_node")),
+                    "to_node": _clone_json(props.get("to_node")),
+                    "length_m": props.get("length_m"),
+                    "metrics": {
+                        field: _clone_json(raw_metrics.get(field))
+                        for field in ("integration", "choice", "connectivity", "depth", "control")
+                    },
                 }
                 title = _as_text(merged.get("name") or merged.get("road_name") or merged.get("node_id") or record_id)
-                metric_value = _first_value(merged, ["choice", "integration", "connectivity", "depth", "value"])
+                metric_value = _first_value(merged, ["metrics.integration", "metrics.choice", "metrics.connectivity"])
                 content = f"路网线段 {title}"
                 if metric_value not in (None, ""):
                     content += f"，指标值 {metric_value}"
@@ -1493,7 +1757,7 @@ class ScopeDatasetService:
                         locator=f"current:dataset:road_edges/{record_id}",
                         citation="当前范围路网线段，当前路网模型",
                         warnings=[],
-                        geometry=_geometry_from_feature(feature, "current:dataset:road_edges", coord_type),
+                        geometry=_geometry_from_feature(feature, "current:dataset:road_edges", "wgs84"),
                     )
                 )
         return records

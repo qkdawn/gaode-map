@@ -42,6 +42,7 @@ def mask_dataset(dataset_path: Path, geom_wgs84: BaseGeometry):
                 [mapping(geom_wgs84)],
                 crop=True,
                 filled=False,
+                all_touched=True,
             )
         except ValueError:
             return None

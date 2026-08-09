@@ -110,6 +110,8 @@ def test_nightlight_grid_layer_and_raster_alignment(tmp_path):
     assert grid_ids == population_ids
     assert grid_ids == layer_ids
     assert len(layer["cells"]) == grid["cell_count"]
+    assert grid["source"] == "2025 年"
+    assert all(feature["geometry_wgs84"]["type"] == "Polygon" for feature in grid["features"])
     assert any(float(cell["value"]) > 0.0 for cell in layer["cells"])
     assert raster["image_url"].startswith("data:image/png;base64,")
     assert len(raster["bounds_gcj02"]) == 2

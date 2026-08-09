@@ -10,6 +10,7 @@ import math
 import re
 import unicodedata
 from numbers import Number
+from pathlib import Path
 from urllib.parse import urlencode
 
 from shapely.geometry import Point, box
@@ -17,6 +18,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.prepared import prep
 
 from core.spatial import polygon_from_payload
+from modules.poi.records import poi_semantics
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
 
 logger = logging.getLogger(__name__)
@@ -751,8 +753,6 @@ def _load_type_children_by_parent() -> Dict[str, List[str]]:
 
     children: Dict[str, set] = {}
     try:
-        from pathlib import Path
-
         path = Path(__file__).resolve().parents[2] / "share" / "type_map.json"
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -1238,8 +1238,7 @@ def _normalize_pois(raw_list: List[Dict]) -> List[Dict]:
             if not loc_str or isinstance(loc_str, list): continue
             lng, lat = map(float, loc_str.split(","))
             
-            p_type = p.get("typecode") or p.get("type") or ""
-            if isinstance(p_type, list): p_type = str(p_type[0])
+            semantics = poi_semantics(p)
             
             address = p.get("address")
             if isinstance(address, list): address = str(address[0]) if address else ""
@@ -1252,12 +1251,15 @@ def _normalize_pois(raw_list: List[Dict]) -> List[Dict]:
             
             results.append({
                 "id": str(p.get("id", "")),
+                "poi_id": str(p.get("id", "")),
                 "name": str(p.get("name", "未命名")),
                 "location": [lng, lat],
                 "address": str(address),
-                "type": str(p_type),
+                "type": semantics["typecode"],
+                **semantics,
                 "adname": str(p.get("adname", "")),
                 "year": _safe_int(p.get("year")),
+                "source": str(p.get("source") or ""),
                 "lines": lines
             })
         except:

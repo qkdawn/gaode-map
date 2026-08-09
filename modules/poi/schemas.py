@@ -24,8 +24,12 @@ class PoiPoint(BaseModel):
     location: List[float] = Field(..., description="[lng, lat]")
     address: Optional[str] = None
     type: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    typecode: Optional[str] = None
     adname: Optional[str] = None
     year: Optional[int] = None
+    source: Optional[str] = None
     lines: Optional[List[str]] = []
 
 class PoiResponse(BaseModel):

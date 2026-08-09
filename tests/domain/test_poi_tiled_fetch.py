@@ -437,7 +437,10 @@ def test_amap_qps_limit_retries_with_backoff(monkeypatch):
             self.calls += 1
             if self.calls == 1:
                 return FakeResponse({"status": "0", "infocode": "10003", "info": "QPS_HAS_EXCEEDED_THE_LIMIT"})
-            return FakeResponse({"status": "1", "count": "1", "pois": [{"id": "p1", "name": "POI", "location": "116.39,39.90", "typecode": "050101"}]})
+            return FakeResponse({"status": "1", "count": "1", "pois": [{
+                "id": "p1", "name": "POI", "location": "116.39,39.90",
+                "type": "餐饮服务;中餐厅", "typecode": "050101", "address": "测试路",
+            }]})
 
     class FakeLimiter:
         def __init__(self):
@@ -471,6 +474,10 @@ def test_amap_qps_limit_retries_with_backoff(monkeypatch):
 
     assert count == 1
     assert len(pois) == 1
+    assert pois[0]["category"] == "餐饮服务"
+    assert pois[0]["subcategory"] == "中餐厅"
+    assert pois[0]["typecode"] == "050101"
+    assert pois[0]["address"] == "测试路"
     assert session.calls == 2
     assert limiter.backoffs
 

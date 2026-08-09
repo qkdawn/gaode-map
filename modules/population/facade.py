@@ -4,6 +4,8 @@ import base64
 import io
 from typing import Any, Dict
 
+import numpy as np
+
 from core.config import settings
 from core.spatial import build_scope_id, round_float, to_wgs84_geometry
 
@@ -48,6 +50,12 @@ from .render import (
 )
 
 DEFAULT_ANALYSIS_AGE_BAND = "25"
+POPULATION_RECORD_SOURCE = "WorldPop"
+POPULATION_RECORD_AGE_BANDS = {
+    "age_5_19": ("05", "10", "15"),
+    "age_30_39": ("30", "35"),
+    "age_50_64": ("50", "55", "60"),
+}
 
 
 def _population_year(year: str | None = None) -> str:
@@ -126,40 +134,93 @@ def _load_or_compute_population_overview(scope_id: str, geom_wgs84, year: str | 
 
 
 def _compute_population_grid(scope_id: str, geom_wgs84, year: str | None = None) -> Dict[str, Any]:
-    data_dir = _population_data_dir(year)
+    safe_year = _population_year(year)
+    data_dir = _population_data_dir(safe_year)
     if not data_dir.exists():
         raise RuntimeError(f"population data directory not found: {data_dir}")
 
-    base_data = combine_population_layers(data_dir, "male", "all", geom_wgs84, _population_year(year))
+    base_data = combine_population_layers(data_dir, "total", "all", geom_wgs84, safe_year)
     if base_data is None:
-        payload = {"scope_id": scope_id, "cell_count": 0, "features": []}
+        payload = {"scope_id": scope_id, "year": safe_year, "source": POPULATION_RECORD_SOURCE, "cell_count": 0, "features": []}
         write_json(grid_cache_path(scope_id), payload)
         return payload
 
+    age_arrays: dict[str, Any] = {}
+    for field, bands in POPULATION_RECORD_AGE_BANDS.items():
+        combined = None
+        for band in bands:
+            layer = combine_population_layers(data_dir, "total", band, geom_wgs84, safe_year)
+            if layer is None:
+                continue
+            if combined is None:
+                combined = layer
+            else:
+                if combined["shape"] != layer["shape"] or combined["transform"] != layer["transform"]:
+                    raise RuntimeError("population artifact raster alignment mismatch")
+                combined["array"] = np.ma.asarray(combined["array"], dtype=np.float64) + np.ma.asarray(
+                    layer["array"], dtype=np.float64
+                )
+        age_arrays[field] = combined["array"] if combined is not None else None
+
+    population_values = np.ma.filled(base_data["array"], 0.0)
+    age_values = {
+        field: np.ma.filled(array, 0.0) if array is not None else None
+        for field, array in age_arrays.items()
+    }
     features: list[dict[str, Any]] = []
     for cell in iter_population_cells(base_data["array"], base_data["transform"]):
+        row = int(cell["row"])
+        col = int(cell["col"])
+        population_total = max(0.0, float(population_values[row, col]))
         features.append(
             {
                 "type": "Feature",
                 "geometry": {"type": "Polygon", "coordinates": cell["geometry_gcj02"]},
+                "geometry_wgs84": {"type": "Polygon", "coordinates": cell["geometry_wgs84"]},
                 "properties": {
                     "cell_id": cell["cell_id"],
                     "h3_id": cell["cell_id"],
                     "row": cell["row"],
                     "col": cell["col"],
                     "centroid_gcj02": cell["centroid_gcj02"],
+                    "year": safe_year,
+                    "population_total": round_float(population_total, 6),
+                    **{
+                        field: round_float(max(0.0, float(array[row, col])), 6)
+                        if array is not None else 0.0
+                        for field, array in age_values.items()
+                    },
+                    "source": POPULATION_RECORD_SOURCE,
                 },
             }
         )
 
-    payload = {"scope_id": scope_id, "cell_count": len(features), "features": features}
+    payload = {
+        "scope_id": scope_id,
+        "year": safe_year,
+        "source": POPULATION_RECORD_SOURCE,
+        "cell_count": len(features),
+        "features": features,
+    }
     write_json(grid_cache_path(scope_id), payload)
     return payload
 
 
 def _load_or_compute_population_grid(scope_id: str, geom_wgs84, year: str | None = None) -> Dict[str, Any]:
     cached = read_json(grid_cache_path(scope_id))
-    if cached:
+    features = cached.get("features") if isinstance(cached, dict) else None
+    if (
+        cached
+        and cached.get("year") == _population_year(year)
+        and cached.get("source") == POPULATION_RECORD_SOURCE
+        and isinstance(features, list)
+        and all(
+            isinstance(feature, dict)
+            and isinstance(feature.get("geometry_wgs84"), dict)
+            and all(key in (feature.get("properties") or {}) for key in ("population_total", *POPULATION_RECORD_AGE_BANDS))
+            for feature in features
+        )
+    ):
         return cached
     return _compute_population_grid(scope_id, geom_wgs84, year)
 

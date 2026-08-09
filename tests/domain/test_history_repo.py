@@ -14,6 +14,20 @@ from store.history_keys import build_history_record_id
 from store.models import AgentSession, AnalysisHistory, Base, PoiResult
 
 
+def _complete_poi(poi_id, name, location, year):
+    return {
+        "poi_id": poi_id,
+        "name": name,
+        "category": "餐饮",
+        "subcategory": "中餐厅",
+        "typecode": "050100",
+        "address": "",
+        "location": location,
+        "year": year,
+        "source": "local",
+    }
+
+
 def _install_repo(monkeypatch):
     engine = create_engine("sqlite:///:memory:", future=True)
     testing_session_local = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
@@ -291,7 +305,7 @@ def test_create_record_updates_created_at_when_params_polygon_description_or_poi
         ("params", {"params": {"time_min": 30}}),
         ("polygon", {"polygon": [[112.9, 28.2], [113.1, 28.4], [112.9, 28.2]]}),
         ("description", {"description": "changed"}),
-        ("pois", {"pois": [{"id": "poi-2", "name": "changed", "location": [113.0, 28.3]}]}),
+        ("pois", {"pois": [_complete_poi("poi-2", "changed", [113.0, 28.3], 2024)]}),
     ]
     for case_name, override in cases:
         repo, testing_session_local = _install_repo(monkeypatch)
@@ -302,11 +316,11 @@ def test_create_record_updates_created_at_when_params_polygon_description_or_poi
             "keywords": "椁愰ギ",
             "mode": "walking",
             "source": "local",
-            "year": None,
-            "years": [],
+            "year": 2024,
+            "years": [2024],
         }
         polygon = [[112.9, 28.2], [113.0, 28.3], [112.9, 28.2]]
-        pois = [{"id": "poi-1", "name": "test", "location": [112.9, 28.2]}]
+        pois = [_complete_poi("poi-1", "test", [112.9, 28.2], 2024)]
 
         session = testing_session_local()
         try:
@@ -317,6 +331,8 @@ def test_create_record_updates_created_at_when_params_polygon_description_or_poi
             session.add(
                 PoiResult(
                     history_id=f"history-{case_name}",
+                    source="local",
+                    year=2024,
                     poi_data=pois,
                     summary={"total": len(pois)},
                     created_at=created_at,
@@ -417,10 +433,10 @@ def test_create_record_appends_multi_year_snapshots_without_overwriting_existing
             "years": [2022],
         },
         [[112.9, 28.2], [113.0, 28.3], [112.9, 28.2]],
-        [{"id": "poi-2022", "name": "2022", "location": [112.9, 28.2]}],
+        [_complete_poi("poi-2022", "2022", [112.9, 28.2], 2022)],
         "multi",
         preferred_history_id="history-multi",
-        poi_results_by_year=[{"source": "local", "year": 2022, "pois": [{"id": "poi-2022", "name": "2022", "location": [112.9, 28.2]}]}],
+        poi_results_by_year=[{"source": "local", "year": 2022, "pois": [_complete_poi("poi-2022", "2022", [112.9, 28.2], 2022)]}],
     )
 
     repo.create_record(
@@ -434,10 +450,10 @@ def test_create_record_appends_multi_year_snapshots_without_overwriting_existing
             "years": [2022, 2024],
         },
         [[112.9, 28.2], [113.0, 28.3], [112.9, 28.2]],
-        [{"id": "poi-2024", "name": "2024", "location": [112.9, 28.2]}],
+        [_complete_poi("poi-2024", "2024", [112.9, 28.2], 2024)],
         "multi",
         preferred_history_id=history_id,
-        poi_results_by_year=[{"source": "local", "year": 2024, "pois": [{"id": "poi-2024", "name": "2024", "location": [112.9, 28.2]}]}],
+        poi_results_by_year=[{"source": "local", "year": 2024, "pois": [_complete_poi("poi-2024", "2024", [112.9, 28.2], 2024)]}],
     )
 
     verify = testing_session_local()
@@ -446,8 +462,8 @@ def test_create_record_appends_multi_year_snapshots_without_overwriting_existing
         poi_rows = verify.query(PoiResult).filter_by(history_id=history_id).order_by(PoiResult.year.asc()).all()
         assert history.params["years"] == [2022, 2024]
         assert [row.year for row in poi_rows] == [2022, 2024]
-        assert poi_rows[0].poi_data[0]["id"] == "poi-2022"
-        assert poi_rows[1].poi_data[0]["id"] == "poi-2024"
+        assert poi_rows[0].poi_data[0]["poi_id"] == "poi-2022"
+        assert poi_rows[1].poi_data[0]["poi_id"] == "poi-2024"
     finally:
         verify.close()
 
@@ -466,10 +482,10 @@ def test_create_record_does_not_sort_large_poi_json_when_updating(monkeypatch):
             "years": [2022],
         },
         [[112.9, 28.2], [113.0, 28.3], [112.9, 28.2]],
-        [{"id": "poi-2022", "name": "2022", "location": [112.9, 28.2]}],
+        [_complete_poi("poi-2022", "2022", [112.9, 28.2], 2022)],
         "multi",
         preferred_history_id="history-no-large-sort",
-        poi_results_by_year=[{"source": "local", "year": 2022, "pois": [{"id": "poi-2022", "name": "2022", "location": [112.9, 28.2]}]}],
+        poi_results_by_year=[{"source": "local", "year": 2022, "pois": [_complete_poi("poi-2022", "2022", [112.9, 28.2], 2022)]}],
     )
 
     engine = testing_session_local.kw["bind"]
@@ -491,10 +507,10 @@ def test_create_record_does_not_sort_large_poi_json_when_updating(monkeypatch):
                 "years": [2022, 2024],
             },
             [[112.9, 28.2], [113.0, 28.3], [112.9, 28.2]],
-            [{"id": "poi-2024", "name": "2024", "location": [112.9, 28.2]}],
+            [_complete_poi("poi-2024", "2024", [112.9, 28.2], 2024)],
             "multi",
             preferred_history_id=history_id,
-            poi_results_by_year=[{"source": "local", "year": 2024, "pois": [{"id": "poi-2024", "name": "2024", "location": [112.9, 28.2]}]}],
+            poi_results_by_year=[{"source": "local", "year": 2024, "pois": [_complete_poi("poi-2024", "2024", [112.9, 28.2], 2024)]}],
         )
     finally:
         event.remove(engine, "before_cursor_execute", _record_statement)

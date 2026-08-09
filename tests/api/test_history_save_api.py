@@ -113,6 +113,43 @@ def test_save_history_passes_multi_year_snapshots(monkeypatch):
     assert [item["year"] for item in captured["poi_results_by_year"]] == [2022, 2024]
 
 
+def test_save_history_persists_complete_named_poi_contract(monkeypatch):
+    captured = {}
+
+    def fake_create_record(params, polygon, pois, desc, *, preferred_history_id="", poi_results_by_year=None):
+        captured["pois"] = pois
+        captured["poi_results_by_year"] = poi_results_by_year
+        return "history-complete-poi"
+
+    monkeypatch.setattr(history_module.history_repo, "create_record", fake_create_record)
+    payload = HistorySaveRequest(
+        center=[112.98, 28.22],
+        polygon=[[112.97, 28.21], [112.99, 28.21], [112.98, 28.23], [112.97, 28.21]],
+        pois=[{
+            "id": "B0FFHDUNAL",
+            "name": "万达影城（华创店）",
+            "location": [112.982516, 28.228419],
+            "address": "开福区",
+            "typecode": "080601",
+        }],
+        source="local",
+        year=2024,
+    )
+
+    response = asyncio.run(history_module.save_history_manually(payload))
+
+    assert response["history_id"] == "history-complete-poi"
+    record = captured["pois"][0]
+    assert set(record) == {
+        "poi_id", "name", "category", "subcategory", "typecode",
+        "address", "location", "year", "source",
+    }
+    assert record["category"] == "体育"
+    assert record["subcategory"] == "影剧院"
+    assert record["typecode"] == "080601"
+    assert captured["poi_results_by_year"][0]["pois"] == captured["pois"]
+
+
 def test_history_artifact_api_upserts_and_lists(monkeypatch):
     calls = {}
 

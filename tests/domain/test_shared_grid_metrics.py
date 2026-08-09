@@ -1,4 +1,7 @@
+from shapely.geometry import Polygon
+
 from modules.poi.schemas import PoiCategoryRequest
+from modules.providers.amap.utils.transform_posi import wgs84_to_gcj02
 from modules.spatial_cells import service as spatial_cell_service
 
 
@@ -113,3 +116,41 @@ def test_shared_grid_metrics_align_with_h3_shape_and_arcgis_writeback(monkeypatc
     assert props["r0_c0"]["gi_star_value"] == 1.5
     assert props["r0_c0"]["lisa_i"] == 0.11
     assert props["r1_c1"]["lisa_z_score"] == -0.41
+
+
+def test_road_metrics_convert_wgs84_features_and_read_nested_metrics():
+    gx, gy = wgs84_to_gcj02(112.98, 28.22)
+    cell = {
+        "cell_id": "cell-1",
+        "geometry": Polygon([
+            (gx - 0.001, gy - 0.001),
+            (gx + 0.001, gy - 0.001),
+            (gx + 0.001, gy + 0.001),
+            (gx - 0.001, gy + 0.001),
+            (gx - 0.001, gy - 0.001),
+        ]),
+        "area_km2": 0.04,
+    }
+    road = {
+        "type": "Feature",
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [[112.979, 28.22], [112.981, 28.22]],
+        },
+        "properties": {
+            "edge_id": "edge:1",
+            "metrics": {"integration": 0.82, "connectivity": 4},
+        },
+    }
+
+    spatial_cell_service.apply_road_cell_metrics(
+        [cell],
+        [road],
+        source_ready=True,
+        road_coord_type="wgs84",
+    )
+
+    assert cell["road_has_data"] is True
+    assert cell["road_integration"] == 0.82
+    assert cell["road_connectivity"] == 4.0
+    assert cell["road_length_km_per_km2"] > 0

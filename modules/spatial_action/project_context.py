@@ -2159,7 +2159,7 @@ class ProjectSpatialAnalysisService:
                 population_year=str(settings.population_data_year),
                 nightlight_year=nightlight_year,
                 pois=[dict(record.raw) for record in poi_records if isinstance(record.raw, dict)],
-                poi_coord_type="gcj02",
+                poi_coord_type="wgs84",
                 poi_year=selected_years.get("current:dataset:poi"),
                 poi_ready=True,
                 road_features=[
@@ -2167,6 +2167,7 @@ class ProjectSpatialAnalysisService:
                     for record in road_records
                     if isinstance(record.raw, dict) and isinstance(record.raw.get("feature"), dict)
                 ],
+                road_coord_type="wgs84",
                 road_ready=True,
             )
             matrix = build_directional_evidence_matrix(

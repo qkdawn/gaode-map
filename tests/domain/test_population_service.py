@@ -101,6 +101,32 @@ def test_population_grid_and_layer_alignment(tmp_path):
     layer_ids = {str((cell or {}).get("cell_id") or "") for cell in layer["cells"]}
     assert "" not in grid_ids
     assert grid_ids == layer_ids
+    assert grid["year"] == "2026"
+    assert grid["source"] == "WorldPop"
+    first_feature = grid["features"][0]
+    assert first_feature["geometry_wgs84"]["type"] == "Polygon"
+    properties = first_feature["properties"]
+    assert properties["population_total"] > 0
+    assert properties["age_5_19"] > 0
+    assert properties["age_30_39"] > 0
+    assert properties["age_50_64"] > 0
+    assert properties["source"] == "WorldPop"
+
+
+def test_population_grid_includes_cells_touching_scope_boundary(tmp_path):
+    _configure_population_dirs(tmp_path)
+    polygon_wgs84 = [
+        [121.4601, 31.2499],
+        [121.4602, 31.2499],
+        [121.4602, 31.2498],
+        [121.4601, 31.2498],
+        [121.4601, 31.2499],
+    ]
+
+    grid = get_population_grid(polygon_wgs84, "wgs84")
+
+    assert grid["cell_count"] == 1
+    assert grid["features"][0]["properties"]["cell_id"] == "r0_c0"
 
 
 def test_population_density_conversion_matches_counts(tmp_path):

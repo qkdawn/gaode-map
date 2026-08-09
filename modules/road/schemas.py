@@ -130,13 +130,50 @@ class RoadSyntaxFeatureCollection(BaseModel):
     count: int = 0
 
 
+class RoadSyntaxEdgeGeometry(BaseModel):
+    type: Literal["LineString"] = "LineString"
+    coordinates: List[List[float]] = Field(default_factory=list)
+
+
+class RoadSyntaxEdgeMetrics(BaseModel):
+    integration: float
+    choice: float
+    connectivity: float
+    depth: float
+    control: float
+
+
+class RoadSyntaxEdgeProperties(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    edge_id: str
+    from_node: str
+    to_node: str
+    road_name: str
+    road_class: str
+    length_m: float
+    metrics: RoadSyntaxEdgeMetrics
+
+
+class RoadSyntaxEdgeFeature(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    geometry: RoadSyntaxEdgeGeometry
+    properties: RoadSyntaxEdgeProperties
+
+
+class RoadSyntaxEdgeFeatureCollection(BaseModel):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: List[RoadSyntaxEdgeFeature] = Field(default_factory=list)
+    count: int = 0
+
+
 class RoadSyntaxNodeGeometry(BaseModel):
     type: Literal["Point"] = "Point"
     coordinates: List[float] = Field(default_factory=lambda: [0.0, 0.0], min_length=2, max_length=2)
 
 
 class RoadSyntaxNodeProperties(BaseModel):
-    node_id: str = ""
+    node_id: str
     degree: int = 0
     degree_score: float = 0.0
     integration_global: float = 0.0
@@ -144,8 +181,8 @@ class RoadSyntaxNodeProperties(BaseModel):
 
 class RoadSyntaxNodeFeature(BaseModel):
     type: Literal["Feature"] = "Feature"
-    geometry: RoadSyntaxNodeGeometry = Field(default_factory=RoadSyntaxNodeGeometry)
-    properties: RoadSyntaxNodeProperties = Field(default_factory=RoadSyntaxNodeProperties)
+    geometry: RoadSyntaxNodeGeometry
+    properties: RoadSyntaxNodeProperties
 
 
 class RoadSyntaxNodeFeatureCollection(BaseModel):
@@ -183,10 +220,13 @@ class RoadSyntaxWebGLPayload(BaseModel):
 
 
 class RoadSyntaxResponse(BaseModel):
+    schema_version: Literal["spatial_records/v1"] = "spatial_records/v1"
+    geometry_coord_type: Literal["wgs84"] = "wgs84"
+    render_geometry_coord_type: Literal["gcj02"] = "gcj02"
     summary: RoadSyntaxSummary
     top_nodes: List[RoadSyntaxNode] = Field(default_factory=list)
     roads: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
-    road_edges: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
+    road_edges: RoadSyntaxEdgeFeatureCollection = Field(default_factory=RoadSyntaxEdgeFeatureCollection)
     road_grid: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
     nodes: RoadSyntaxNodeFeatureCollection = Field(default_factory=RoadSyntaxNodeFeatureCollection)
     diagnostics: RoadSyntaxDiagnostics = Field(default_factory=RoadSyntaxDiagnostics)

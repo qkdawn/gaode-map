@@ -100,6 +100,17 @@ def cell_polygon_gcj02(masked_transform, row: int, col: int) -> list[list[list[f
     return [ring_gcj02]
 
 
+def cell_polygon_wgs84(masked_transform, row: int, col: int) -> list[list[list[float]]]:
+    west, south, east, north = cell_bounds_from_transform(masked_transform, row, col)
+    return [[
+        [round_float(west, 6), round_float(north, 6)],
+        [round_float(east, 6), round_float(north, 6)],
+        [round_float(east, 6), round_float(south, 6)],
+        [round_float(west, 6), round_float(south, 6)],
+        [round_float(west, 6), round_float(north, 6)],
+    ]]
+
+
 def cell_centroid_gcj02(masked_transform, row: int, col: int) -> list[float]:
     center = masked_transform * (col + 0.5, row + 0.5)
     lng, lat = wgs84_to_gcj02(float(center[0]), float(center[1]))
@@ -122,6 +133,7 @@ def iter_population_cells(masked_array: np.ma.MaskedArray, masked_transform):
                 "raw_value": round_float(raw_value, 6),
                 "centroid_gcj02": cell_centroid_gcj02(masked_transform, row, col),
                 "geometry_gcj02": cell_polygon_gcj02(masked_transform, row, col),
+                "geometry_wgs84": cell_polygon_wgs84(masked_transform, row, col),
             }
 
 

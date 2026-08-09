@@ -1,7 +1,34 @@
 from types import SimpleNamespace
 
+import pytest
+
 import modules.scope_datasets.service as scope_service
-from modules.scope_datasets import ScopeDatasetService
+from modules.scope_datasets import ScopeDatasetQueryError, ScopeDatasetService
+
+
+def _complete_poi(
+    poi_id,
+    name,
+    category,
+    subcategory,
+    typecode,
+    location,
+    *,
+    year=2024,
+    source="local",
+    address="",
+):
+    return {
+        "poi_id": poi_id,
+        "name": name,
+        "category": category,
+        "subcategory": subcategory,
+        "typecode": typecode,
+        "address": address,
+        "location": location,
+        "year": year,
+        "source": source,
+    }
 
 
 class FakeScopeDatasetRepository:
@@ -12,15 +39,15 @@ class FakeScopeDatasetRepository:
                 "id": 1,
                 "source": "local",
                 "year": 2024,
-                "summary": {"total": 2},
+                "summary": {"total": 2, "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84"},
             }
         ]
 
     def get_poi_data(self, poi_result_id):
         assert poi_result_id == 1
         return [
-            {"id": "poi-1", "name": "咖啡 A", "type": "咖啡厅", "address": "A 路"},
-            {"id": "poi-2", "name": "便利 B", "type": "便利店", "address": "B 路"},
+            _complete_poi("poi-1", "咖啡 A", "餐饮", "咖啡厅", "050500", [120, 30], address="A 路"),
+            _complete_poi("poi-2", "便利 B", "购物", "便利店", "060200", [120.01, 30], address="B 路"),
         ]
 
     def list_analysis_artifacts(self, history_id):
@@ -67,23 +94,21 @@ class FakeScopeDatasetRepository:
                 "artifact_type": "population",
                 "params": {"year": 2024, "view": "density"},
                 "payload": {
-                    "geometry_coord_type": "gcj02",
+                    "schema_version": "spatial_records/v1",
+                    "geometry_coord_type": "wgs84",
                     "year": 2024,
-                    "view": "density",
-                    "grid": {
-                        "type": "FeatureCollection",
-                        "features": [
-                            {"type": "Feature", "properties": {"cell_id": "cell-1", "population": 120}},
-                            {"type": "Feature", "properties": {"cell_id": "cell-2", "population": 80}},
-                        ],
-                    },
-                    "layer": {
-                        "view": "density",
-                        "cells": [
-                            {"cell_id": "cell-1", "value": 12.5},
-                            {"cell_id": "cell-2", "value": 8.0},
-                        ],
-                    },
+                    "records": [
+                        {
+                            "cell_id": "cell-1", "year": 2024, "population_total": 120,
+                            "age_5_19": 20, "age_30_39": 30, "age_50_64": 25, "source": "worldpop",
+                            "geometry": {"type": "Polygon", "coordinates": [[[120, 30], [120.01, 30], [120.01, 30.01], [120, 30.01], [120, 30]]]},
+                        },
+                        {
+                            "cell_id": "cell-2", "year": 2024, "population_total": 80,
+                            "age_5_19": 10, "age_30_39": 20, "age_50_64": 15, "source": "worldpop",
+                            "geometry": {"type": "Polygon", "coordinates": [[[120.01, 30], [120.02, 30], [120.02, 30.01], [120.01, 30.01], [120.01, 30]]]},
+                        },
+                    ],
                 },
                 "summary": {},
                 "data_version": "v1",
@@ -94,19 +119,39 @@ class FakeScopeDatasetRepository:
                 "artifact_type": "road_syntax",
                 "params": {"metric": "choice"},
                 "payload": {
-                    "geometry_coord_type": "gcj02",
-                    "metric": "choice",
+                    "schema_version": "spatial_records/v1",
+                    "geometry_coord_type": "wgs84",
+                    "nodes": {
+                        "type": "FeatureCollection",
+                        "features": [
+                            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [120, 30]}, "properties": {"node_id": "n1", "degree": 2}},
+                            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [120.01, 30]}, "properties": {"node_id": "n2", "degree": 3}},
+                            {"type": "Feature", "geometry": {"type": "Point", "coordinates": [120.02, 30]}, "properties": {"node_id": "n3", "degree": 1}},
+                        ],
+                    },
                     "road_edges": {
                         "type": "FeatureCollection",
                         "features": [
-                            {"type": "Feature", "properties": {"edge_id": "r1", "choice_score": 0.7}},
-                            {"type": "Feature", "properties": {"edge_id": "r2", "choice_score": 0.2}},
-                        ],
-                    },
-                    "road_grid": {
-                        "type": "FeatureCollection",
-                        "features": [
-                            {"type": "Feature", "properties": {"cell_id": "cell-1", "road_length_km": 0.4, "road_choice": 0.5}},
+                            {
+                                "type": "Feature",
+                                "geometry": {"type": "LineString", "coordinates": [[120, 30], [120.01, 30]]},
+                                "properties": {
+                                    "edge_id": "r1",
+                                    "road_name": "测试路",
+                                    "road_class": "residential",
+                                    "from_node": "n1", "to_node": "n2", "length_m": 1000,
+                                    "metrics": {"integration": 0.6, "choice": 0.7, "connectivity": 0.8, "depth": 2, "control": 0.4},
+                                },
+                            },
+                            {
+                                "type": "Feature",
+                                "geometry": {"type": "LineString", "coordinates": [[120.01, 30], [120.02, 30]]},
+                                "properties": {
+                                    "edge_id": "r2", "road_name": "支路", "road_class": "service",
+                                    "from_node": "n2", "to_node": "n3", "length_m": 900,
+                                    "metrics": {"integration": 0.3, "choice": 0.2, "connectivity": 1, "depth": 3},
+                                },
+                            },
                         ],
                     },
                 },
@@ -126,13 +171,60 @@ def test_scope_dataset_service_lists_normalized_sources():
     assert sources["current:dataset:h3"]["record_count"] == 1
     assert sources["current:dataset:poi_grid"]["record_count"] == 1
     assert sources["current:dataset:road_edges"]["record_count"] == 2
-    assert sources["current:dataset:road_grid"]["record_count"] == 1
+    assert sources["current:dataset:road_nodes"]["record_count"] == 3
+    assert sources["current:dataset:road_grid"]["record_count"] == 0
     assert sources["current:dataset:population"]["time_scope"]["years"] == [2024]
     assert sources["current:dataset:h3"]["grid_type"] == "h3"
     assert sources["current:dataset:poi_grid"]["grid_type"] == "regular_raster"
     assert "at_point" in sources["current:dataset:population"]["query_capabilities"]["spatial_relations"]
     assert sources["current:dataset:population"]["query_capabilities"]["spatial_ready"] is True
     assert sources["current:dataset:population"]["query_capabilities"]["spatial_aggregations"][0]["op"] == "area_weighted_sum"
+    road_fields = sources["current:dataset:road_edges"]["query_capabilities"]["filter_fields"]
+    assert road_fields == ["edge_id", "from_node", "length_m", "metrics", "record_id", "road_class", "road_name", "to_node"]
+
+
+def test_scope_dataset_service_queries_road_name_and_classification():
+    service = ScopeDatasetService(repository=FakeScopeDatasetRepository())
+
+    queried = service.query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:road_edges",
+        filters={"road_name": {"eq": "测试路"}, "road_class": {"eq": "residential"}},
+        limit=10,
+    )
+
+    assert queried["total_count"] == 1
+    assert queried["records"][0]["properties"]["road_name"] == "测试路"
+    assert queried["records"][0]["properties"]["road_class"] == "residential"
+
+
+def test_scope_dataset_aggregates_by_road_class_and_name():
+    result = ScopeDatasetService(repository=FakeScopeDatasetRepository()).aggregate_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:road_edges",
+        group_by=["road_class", "road_name"],
+        metrics=[
+            {"op": "count", "field": "*", "as": "road_count"},
+            {"op": "sum", "field": "length_m", "as": "length_m"},
+        ],
+        top_k=None,
+    )
+
+    assert result["group_by"] == ["road_class", "road_name"]
+    assert result["rows"] == [
+        {
+            "group": {"road_class": "residential", "road_name": "测试路"},
+            "count": 1,
+            "road_count": 1,
+            "length_m": 1000.0,
+        },
+        {
+            "group": {"road_class": "service", "road_name": "支路"},
+            "count": 1,
+            "road_count": 1,
+            "length_m": 900.0,
+        },
+    ]
 
 
 def test_scope_dataset_service_queries_and_reads_evidence_nodes():
@@ -141,12 +233,14 @@ def test_scope_dataset_service_queries_and_reads_evidence_nodes():
     queried = service.query_scope_dataset(
         history_id="history-1",
         source_id="current:dataset:population",
-        filters={"value": {"gte": 10}},
-        sort={"field": "value", "direction": "desc"},
+        filters={"population_total": {"gte": 100}},
+        sort={"field": "population_total", "direction": "desc"},
         limit=10,
     )
     assert queried["total_count"] == 1
     assert queried["records"][0]["record_id"] == "cell-1"
+    assert queried["records"][0]["geometry"]["type"] == "Polygon"
+    assert queried["records"][0]["geometry_coord_type"] == "wgs84"
     assert queried["evidence_nodes"][0]["source_ids"] == ["current:dataset:population"]
     assert queried["evidence_nodes"][0]["time_scope"]["year"] == 2024
     assert "confidence" not in queried["evidence_nodes"][0]["time_scope"]
@@ -155,6 +249,60 @@ def test_scope_dataset_service_queries_and_reads_evidence_nodes():
     read = service.read_scope_record(history_id="history-1", source_id="current:dataset:population", record_id="cell-1")
     assert read["evidence_node"]["id"] == "current:dataset:population:record:cell-1"
     assert "当前范围人口网格" in read["evidence_node"]["citation"]
+
+    poi = service.query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:poi",
+        filters={"poi_id": "poi-1"},
+    )["records"][0]
+    assert set(poi["properties"]) == {
+        "record_id", "poi_id", "name", "category", "subcategory", "typecode",
+        "address", "location", "year", "source",
+    }
+    assert poi["geometry"]["type"] == "Point"
+
+
+def test_scope_dataset_normalizes_nightlight_record_contract():
+    class NightlightRepository:
+        def list_poi_results(self, history_id):
+            return []
+
+        def get_poi_data(self, poi_result_id):
+            return []
+
+        def list_analysis_artifacts(self, history_id):
+            return [{
+                "id": 1,
+                "artifact_type": "nightlight",
+                "slot_key": "year:2024",
+                "params": {"year": 2024},
+                "payload": {
+                    "schema_version": "spatial_records/v1",
+                    "geometry_coord_type": "wgs84",
+                    "year": 2024,
+                    "records": [{
+                        "cell_id": "night-1", "year": 2024, "radiance": 6.2,
+                        "unit": "nW/cm2/sr", "has_data": True, "source": "viirs",
+                        "geometry": {"type": "Polygon", "coordinates": [[[120, 30], [120.01, 30], [120.01, 30.01], [120, 30.01], [120, 30]]]},
+                        "producer_detail": "retained in raw",
+                    }],
+                },
+                "summary": {},
+                "data_version": "v1",
+                "scope_fingerprint": "scope-a",
+            }]
+
+    service = ScopeDatasetService(repository=NightlightRepository())
+    records, _, _ = service.load_scope_records(
+        history_id="history-1",
+        source_id="current:dataset:nightlight",
+    )
+
+    assert records[0].properties == {
+        "record_id": "night-1", "cell_id": "night-1", "year": 2024,
+        "radiance": 6.2, "unit": "nW/cm2/sr", "has_data": True, "source": "viirs",
+    }
+    assert records[0].raw["producer_detail"] == "retained in raw"
 
 
 def test_scope_dataset_service_aggregates_poi_and_sorts_road_records():
@@ -166,13 +314,12 @@ def test_scope_dataset_service_aggregates_poi_and_sorts_road_records():
         group_by="category",
         metrics=[{"op": "count", "field": "*", "as": "count"}],
     )
-    assert {row["group"]: row["count"] for row in aggregate["rows"]} == {"咖啡厅": 1, "便利店": 1}
+    assert {row["group"]["category"]: row["count"] for row in aggregate["rows"]} == {"餐饮": 1, "购物": 1}
 
     road = service.query_scope_dataset(
         history_id="history-1",
         source_id="current:dataset:road_edges",
-        filters={"feature_kind": "road_edge"},
-        sort={"field": "choice_score", "direction": "desc"},
+        sort={"field": "length_m", "direction": "desc"},
     )
     assert [item["record_id"] for item in road["records"]] == ["road_edge:r1", "road_edge:r2"]
     assert road["selected_year"] is None
@@ -180,25 +327,230 @@ def test_scope_dataset_service_aggregates_poi_and_sorts_road_records():
     assert road["warnings"] == []
 
 
+def test_scope_dataset_normalizes_complete_road_nodes_and_serializes_checksum():
+    service = ScopeDatasetService(repository=FakeScopeDatasetRepository())
+
+    records, years, selected_year = service.load_scope_records(
+        history_id="history-1",
+        source_id="current:dataset:road_nodes",
+    )
+    serialized = service.serialize_scope_records(reversed(records))
+
+    assert years == []
+    assert selected_year is None
+    assert [record.properties for record in records] == [
+        {"record_id": "road_node:n1", "node_id": "n1", "location": [120.0, 30.0], "degree": 2},
+        {"record_id": "road_node:n2", "node_id": "n2", "location": [120.01, 30.0], "degree": 3},
+        {"record_id": "road_node:n3", "node_id": "n3", "location": [120.02, 30.0], "degree": 1},
+    ]
+    assert serialized["record_count"] == 3
+    assert serialized["checksum"].startswith("sha256:")
+    assert serialized == service.serialize_scope_records(records)
+    assert serialized["records"][0]["geometry"]["type"] == "Point"
+
+
+def test_scope_dataset_uses_all_road_nodes_and_edges_instead_of_top_nodes():
+    class CompleteRoadRepository:
+        def list_poi_results(self, history_id):
+            return []
+
+        def get_poi_data(self, poi_result_id):
+            return []
+
+        def list_analysis_artifacts(self, history_id):
+            nodes = [
+                {"type": "Feature", "geometry": {"type": "Point", "coordinates": [120 + index / 10000, 30]}, "properties": {"node_id": f"n{index}", "degree": index % 5}}
+                for index in range(130)
+            ]
+            edges = [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "LineString", "coordinates": [[120 + index / 10000, 30], [120 + (index + 1) / 10000, 30]]},
+                    "properties": {
+                        "edge_id": f"e{index}", "road_name": "", "road_class": "local",
+                        "from_node": f"n{index}", "to_node": f"n{index + 1}", "length_m": 10,
+                        "metrics": {"integration": 0.0, "choice": 0.0, "connectivity": 2, "depth": 0.0},
+                    },
+                }
+                for index in range(129)
+            ]
+            return [{
+                "id": 1, "artifact_type": "road_syntax", "params": {},
+                "payload": {
+                    "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84",
+                    "top_nodes": nodes[:10],
+                    "nodes": {"type": "FeatureCollection", "features": nodes},
+                    "road_edges": {"type": "FeatureCollection", "features": edges},
+                },
+                "summary": {}, "data_version": "v1", "scope_fingerprint": "scope-a",
+            }]
+
+    service = ScopeDatasetService(repository=CompleteRoadRepository())
+
+    nodes = service.query_scope_dataset(history_id="history-1", source_id="current:dataset:road_nodes", limit=500)
+    edges = service.query_scope_dataset(history_id="history-1", source_id="current:dataset:road_edges", limit=500)
+
+    assert nodes["total_count"] == 130
+    assert len(nodes["records"]) == 130
+    assert edges["total_count"] == 129
+    assert len(edges["records"]) == 129
+
+
+def test_scope_dataset_rejects_legacy_spatial_artifact_schema():
+    class LegacyRepository(FakeScopeDatasetRepository):
+        def list_analysis_artifacts(self, history_id):
+            artifact = super().list_analysis_artifacts(history_id)[2]
+            artifact["payload"].pop("schema_version")
+            return [artifact]
+
+    with pytest.raises(ScopeDatasetQueryError) as exc_info:
+        ScopeDatasetService(repository=LegacyRepository()).query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:population",
+        )
+
+    assert exc_info.value.code == "schema_version_unsupported"
+
+
+def test_scope_dataset_rejects_poi_rows_without_wgs84_schema_marker():
+    class LegacyPoiRepository:
+        def list_poi_results(self, history_id):
+            return [{"id": 1, "source": "local", "year": 2024, "summary": {"total": 1}}]
+
+        def get_poi_data(self, poi_result_id):
+            return [{"id": "legacy", "location": "120,30"}]
+
+        def list_analysis_artifacts(self, history_id):
+            return []
+
+    with pytest.raises(ScopeDatasetQueryError) as exc_info:
+        ScopeDatasetService(repository=LegacyPoiRepository()).query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:poi",
+        )
+
+    assert exc_info.value.code == "schema_version_unsupported"
+
+
+def test_scope_dataset_rejects_incomplete_poi_records_with_new_schema_marker():
+    class FalselyStampedPoiRepository:
+        def list_poi_results(self, history_id):
+            return [{
+                "id": 1,
+                "source": "local",
+                "year": 2024,
+                "summary": {
+                    "total": 1,
+                    "schema_version": "spatial_records/v1",
+                    "geometry_coord_type": "wgs84",
+                },
+            }]
+
+        def get_poi_data(self, poi_result_id):
+            return [{
+                "poi_id": "legacy",
+                "name": "旧记录",
+                "category": "050100",
+                "subcategory": "",
+                "typecode": "",
+                "address": "",
+                "location": [120, 30],
+                "year": 2024,
+                "source": "local",
+            }]
+
+        def list_analysis_artifacts(self, history_id):
+            return []
+
+    with pytest.raises(ScopeDatasetQueryError) as exc_info:
+        ScopeDatasetService(repository=FalselyStampedPoiRepository()).query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:poi",
+        )
+
+    assert exc_info.value.code == "schema_version_unsupported"
+
+
+def test_scope_dataset_supports_500_records_and_unlimited_group_output():
+    class ManyPoiRepository:
+        def list_poi_results(self, history_id):
+            return [{"id": 1, "source": "local", "year": 2024, "summary": {"total": 550, "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84"}}]
+
+        def get_poi_data(self, poi_result_id):
+            return [
+                _complete_poi(
+                    f"poi-{index}", f"POI {index}", f"category-{index}", f"subcategory-{index}",
+                    f"{index % 1_000_000:06d}", [120 + index / 100_000, 30],
+                )
+                for index in range(550)
+            ]
+
+        def list_analysis_artifacts(self, history_id):
+            return []
+
+    service = ScopeDatasetService(repository=ManyPoiRepository())
+    queried = service.query_scope_dataset(history_id="history-1", source_id="current:dataset:poi", limit=999)
+    aggregate = service.aggregate_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:poi",
+        group_by="category",
+        top_k=None,
+    )
+
+    assert queried["limit"] == 500
+    assert len(queried["records"]) == 500
+    assert queried["has_more"] is True
+    assert aggregate["total_groups"] == 550
+    assert len(aggregate["rows"]) == 550
+
+
 def test_scope_dataset_defaults_to_max_year_and_exactly_matches_requested_year():
     class MultiYearRepository:
         def list_poi_results(self, history_id):
             return [
-                {"id": 20, "source": "local", "year": 2020, "summary": {"total": 1}},
-                {"id": 24, "source": "local", "year": 2024, "summary": {"total": 2}},
+                {"id": 20, "source": "local", "year": 2020, "summary": {"total": 1, "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84"}},
+                {"id": 24, "source": "local", "year": 2024, "summary": {"total": 2, "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84"}},
             ]
 
         def get_poi_data(self, poi_result_id):
-            return [{"id": f"poi-{poi_result_id}-{index}"} for index in range(2 if poi_result_id == 24 else 1)]
+            year = 2024 if poi_result_id == 24 else 2020
+            return [
+                _complete_poi(
+                    f"poi-{poi_result_id}-{index}", f"POI {index}", "餐饮", "中餐厅", "050100",
+                    [120 + index / 1000, 30], year=year,
+                )
+                for index in range(2 if poi_result_id == 24 else 1)
+            ]
 
         def list_analysis_artifacts(self, history_id):
             def artifact(artifact_id, artifact_type, year, updated_at, count, summary=None):
-                return {
-                    "id": artifact_id,
-                    "artifact_type": artifact_type,
-                    "slot_key": f"year:{year}",
-                    "params": {"year": year, "view": "density"},
-                    "payload": {
+                if artifact_type == "population":
+                    payload = {
+                        "schema_version": "spatial_records/v1",
+                        "geometry_coord_type": "wgs84",
+                        "year": year,
+                        "records": [
+                            {
+                                "cell_id": f"{artifact_type}-{year}-{index}",
+                                "year": year,
+                                "population_total": index,
+                                "age_5_19": 0, "age_30_39": 0, "age_50_64": 0, "source": "test",
+                                    "geometry": {
+                                        "type": "Polygon",
+                                        "coordinates": [[
+                                            [120 + index / 1000, 30],
+                                            [120.0005 + index / 1000, 30],
+                                            [120.0005 + index / 1000, 30.0005],
+                                            [120 + index / 1000, 30.0005],
+                                            [120 + index / 1000, 30],
+                                        ]],
+                                    },
+                            }
+                            for index in range(count)
+                        ],
+                    }
+                else:
+                    payload = {
                         "year": year,
                         "grid": {
                             "features": [
@@ -206,7 +558,13 @@ def test_scope_dataset_defaults_to_max_year_and_exactly_matches_requested_year()
                                 for index in range(count)
                             ]
                         },
-                    },
+                    }
+                return {
+                    "id": artifact_id,
+                    "artifact_type": artifact_type,
+                    "slot_key": f"year:{year}",
+                    "params": {"year": year, "view": "density"},
+                    "payload": payload,
                     "summary": summary or {},
                     "data_version": "v1",
                     "scope_fingerprint": "scope-a",
@@ -239,10 +597,13 @@ def test_scope_dataset_defaults_to_max_year_and_exactly_matches_requested_year()
 def test_scope_dataset_keeps_poi_raster_separate_from_h3():
     class MissingCurrentGridRepository:
         def list_poi_results(self, history_id):
-            return [{"id": 24, "source": "local", "year": 2024, "summary": {"total": 2}}]
+            return [{"id": 24, "source": "local", "year": 2024, "summary": {"total": 2, "schema_version": "spatial_records/v1", "geometry_coord_type": "wgs84"}}]
 
         def get_poi_data(self, poi_result_id):
-            return []
+            return [
+                _complete_poi("poi-1", "POI 1", "餐饮", "中餐厅", "050100", [120, 30]),
+                _complete_poi("poi-2", "POI 2", "购物", "便利店", "060200", [120.01, 30]),
+            ]
 
         def list_analysis_artifacts(self, history_id):
             return [{

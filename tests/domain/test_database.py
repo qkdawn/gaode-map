@@ -116,7 +116,6 @@ def test_ai_db_initializes_document_pipeline_schema_and_migrates_legacy_role(mon
 
     assert sorted(inspect(engine).get_table_names()) == [
         "document_blocks",
-        "document_index_nodes",
         "documents",
         "jobs",
     ]

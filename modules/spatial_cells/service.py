@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from shapely.geometry import LineString, Point, shape
 from shapely.geometry.base import BaseGeometry
 
-from core.spatial import round_float
+from core.spatial import round_float, transform_geojson_coordinates
 from modules.h3.arcgis_facade import run_h3_arcgis_analysis
 from modules.h3.stats import build_gi_render_meta, build_lisa_render_meta, calc_continuous_stats
 from modules.nightlight.service import get_nightlight_layer
@@ -324,11 +324,12 @@ def apply_poi_cell_metrics(
                 continue
             poi_count += 1
             assigned_count += 1
-            cat_id = resolve_category_id(poi.get("type"), matchers) if matchers else _fallback_category_id(poi.get("type"))
+            poi_type = poi.get("typecode") or poi.get("type")
+            cat_id = resolve_category_id(poi_type, matchers) if matchers else _fallback_category_id(poi_type)
             if cat_id:
                 counts[cat_id] = int(counts.get(cat_id, 0)) + 1
-                category_names.setdefault(cat_id, str(poi.get("type") or cat_id))
-            point_type = str(poi.get("type") or "").strip()
+                category_names.setdefault(cat_id, str(poi.get("category") or poi_type or cat_id))
+            point_type = str(poi.get("subcategory") or poi_type or "").strip()
             if point_type:
                 subcategory_counts[point_type] = int(subcategory_counts.get(point_type, 0)) + 1
         cell["poi_count"] = poi_count
@@ -377,9 +378,12 @@ def apply_nightlight_cell_values(cells: List[Dict[str, Any]], layer: Dict[str, A
         cell["nightlight_radiance"] = None if value is None else round_float(value, 6)
 
 
-def _road_feature_line(feature: Dict[str, Any]) -> BaseGeometry | None:
+def _road_feature_line(feature: Dict[str, Any], coord_type: str) -> BaseGeometry | None:
     try:
-        geom = shape(feature.get("geometry") or {})
+        geometry = feature.get("geometry") or {}
+        if coord_type == "wgs84":
+            geometry = transform_geojson_coordinates(geometry, wgs84_to_gcj02)
+        geom = shape(geometry)
     except Exception:
         return None
     if geom.is_empty or geom.geom_type not in {"LineString", "MultiLineString"}:
@@ -392,6 +396,7 @@ def apply_road_cell_metrics(
     road_features: List[Dict[str, Any]],
     *,
     source_ready: bool = False,
+    road_coord_type: str = "gcj02",
 ) -> None:
     if not cells or (not road_features and not source_ready):
         return
@@ -399,7 +404,7 @@ def apply_road_cell_metrics(
     for feature in road_features:
         if not isinstance(feature, dict):
             continue
-        line = _road_feature_line(feature)
+        line = _road_feature_line(feature, road_coord_type)
         if line is None:
             continue
         roads.append((line, feature.get("properties") or {}))
@@ -423,8 +428,11 @@ def apply_road_cell_metrics(
             if length_km <= 1e-9:
                 continue
             total_len += length_km
-            integ_sum += length_km * float(_safe_float(props.get("integration_score"), 0.0) or 0.0)
-            conn_sum += length_km * float(_safe_float(props.get("connectivity_score"), 0.0) or 0.0)
+            metrics = props.get("metrics") if isinstance(props.get("metrics"), dict) else {}
+            integration = metrics.get("integration", props.get("integration_score"))
+            connectivity = metrics.get("connectivity", props.get("connectivity_score"))
+            integ_sum += length_km * float(_safe_float(integration, 0.0) or 0.0)
+            conn_sum += length_km * float(_safe_float(connectivity, 0.0) or 0.0)
         if total_len > 1e-9:
             cell["road_has_data"] = True
             cell["road_integration"] = round_float(integ_sum / total_len, 6)
@@ -774,6 +782,7 @@ def build_unified_spatial_cells(
     pois: List[Dict[str, Any]] | None = None,
     poi_coord_type: str = "gcj02",
     road_features: List[Dict[str, Any]] | None = None,
+    road_coord_type: str = "gcj02",
     road_source_ready: bool = False,
     categories: List[Any] | None = None,
 ) -> Dict[str, Any]:
@@ -795,7 +804,12 @@ def build_unified_spatial_cells(
     apply_layer_cell_values(cells, population_layer, "population_density")
     nightlight_layer = get_nightlight_layer(polygon=polygon, coord_type=coord_type, year=nightlight_year, view="radiance")
     apply_nightlight_cell_values(cells, nightlight_layer)
-    apply_road_cell_metrics(cells, road_features or [], source_ready=road_source_ready)
+    apply_road_cell_metrics(
+        cells,
+        road_features or [],
+        source_ready=road_source_ready,
+        road_coord_type=road_coord_type,
+    )
 
     features = [_cell_feature(cell) for cell in cells]
     return {
@@ -819,6 +833,7 @@ def build_shared_grid_analysis(
     poi_year: int | None = None,
     poi_ready: bool = False,
     road_features: List[Dict[str, Any]],
+    road_coord_type: str = "gcj02",
     road_ready: bool = False,
     categories: List[Any] | None = None,
 ) -> Dict[str, Any]:
@@ -866,6 +881,7 @@ def build_shared_grid_analysis(
         pois=pois,
         poi_coord_type=poi_coord_type,
         road_features=road_features,
+        road_coord_type=road_coord_type,
         road_source_ready=road_ready,
         categories=categories,
     )

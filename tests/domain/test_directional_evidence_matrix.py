@@ -83,9 +83,15 @@ def test_directional_matrix_rejects_missing_center_and_non_contiguous_bands():
 def test_metric_service_executes_the_composite_directional_matrix(monkeypatch):
     shared = _shared_grid([_feature("north", 112.98077, 28.22867)])
     service = ProjectSpatialAnalysisService()
+    captured = {}
+
+    def fake_shared_grid(**kwargs):
+        captured.update(kwargs)
+        return shared
+
     monkeypatch.setattr(
         "modules.spatial_action.project_context.build_shared_grid_analysis",
-        lambda **_kwargs: shared,
+        fake_shared_grid,
     )
     monkeypatch.setattr(
         "modules.spatial_action.project_context.build_nightlight_meta_payload",
@@ -116,3 +122,6 @@ def test_metric_service_executes_the_composite_directional_matrix(monkeypatch):
 
     assert result.status == "available"
     assert result.structured_result["directional_evidence_matrix"]["rows"]
+    assert captured["coord_type"] == "wgs84"
+    assert captured["poi_coord_type"] == "wgs84"
+    assert captured["road_coord_type"] == "wgs84"

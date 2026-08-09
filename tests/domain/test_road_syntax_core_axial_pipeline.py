@@ -24,7 +24,12 @@ def _sample_overpass_elements():
         {
             "type": "way",
             "id": 1,
-            "tags": {"highway": "residential"},
+            "tags": {
+                "highway": "residential",
+                "name": "测试路",
+                "ref": "X001",
+                "surface": "asphalt",
+            },
             "geometry": [
                 {"lon": 112.9800, "lat": 28.1900},
                 {"lon": 112.9900, "lat": 28.1900},
@@ -92,6 +97,12 @@ def test_axial_pipeline_sequence_and_flags(monkeypatch):
     assert result.get("summary", {}).get("analysis_engine") == "depthmapxcli-axial"
     orientation = result.get("summary", {}).get("road_orientation_analysis") or {}
     assert orientation.get("dominant_orientation") == "东西向"
+    edge_properties = result["road_edges"]["features"][0]["properties"]
+    assert edge_properties["osm_way_id"] == "1"
+    assert edge_properties["road_name"] == "测试路"
+    assert edge_properties["road_ref"] == "X001"
+    assert edge_properties["highway"] == "residential"
+    assert edge_properties["surface"] == "asphalt"
 
 
 def test_road_orientation_analysis_is_length_weighted():

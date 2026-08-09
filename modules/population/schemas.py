@@ -150,6 +150,8 @@ class PopulationRasterResponse(BaseModel):
 
 class PopulationGridResponse(BaseModel):
     scope_id: str
+    year: str
+    source: str
     cell_count: int = 0
     features: List[Dict[str, Any]] = Field(default_factory=list)
 
