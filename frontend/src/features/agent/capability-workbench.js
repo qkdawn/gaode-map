@@ -126,14 +126,185 @@ const compactRunArtifact = (artifact, direction = '', snapshot = null) => ({
 })
 
 const CAPABILITY_PROMPTS = Object.freeze({
+  'client-decision-spatial-strategy': '围绕当前项目问题，按顺序完成十二个分析方向；每个方向自由组织分析内容。',
   'spatial-business-analyst': '基于当前分析范围、材料和空间分析结果，生成面向下一步决策的专业空间项目报告。',
   'urban-strategy-stage1': '基于当前分析范围、资料和分析结果，执行城市更新第一阶段策划并生成可审计报告。',
   'spatial-programming-matrix': '基于当前项目证据，重点生成空间功能策划决策矩阵，并说明候选功能、排除理由和前置条件。',
   'evidence-audit': '审计当前项目分析的 Claim-Evidence 关系、代理指标边界、冲突与待验证事项。',
 })
 
+const SPATIAL_STRATEGY_STEPS = Object.freeze([
+  { step: 'step_01_policy_site', step_order: 1, label: '政策与场地' },
+  { step: 'step_02_regional_role', step_order: 2, label: '区域角色' },
+  { step: 'step_03_market_flow', step_order: 3, label: '市场与流动' },
+  { step: 'step_04_supply_gap', step_order: 4, label: '供给与空位' },
+  { step: 'step_05_audience_use', step_order: 5, label: '客群与使用' },
+  { step: 'step_06_theme_resources', step_order: 6, label: '主题与资源' },
+  { step: 'step_07_positioning', step_order: 7, label: '项目定位' },
+  { step: 'step_08_product_mix', step_order: 8, label: '产品组合' },
+  { step: 'step_09_spatial_layout', step_order: 9, label: '空间布局' },
+  { step: 'step_10_operating_model', step_order: 10, label: '运营模式' },
+  { step: 'step_11_financial_check', step_order: 11, label: '财务校验' },
+  { step: 'step_12_phasing', step_order: 12, label: '分期实施' },
+])
+
 export function createAgentCapabilityWorkbenchMethods() {
   return {
+    isN8nSpatialStrategyCapability(capability = null) {
+      return text(capability?.id) === 'client-decision-spatial-strategy'
+        || text(capability?.executor_id) === 'n8n-spatial-strategy'
+    },
+    getSpatialStrategyTenantId() {
+      const bootstrap = window.__ANALYSIS_BOOTSTRAP__ && typeof window.__ANALYSIS_BOOTSTRAP__ === 'object'
+        ? window.__ANALYSIS_BOOTSTRAP__
+        : {}
+      return text(bootstrap.tenantId || bootstrap.tenant_id || 'default') || 'default'
+    },
+    getSpatialStrategyAccessGroups() {
+      const bootstrap = window.__ANALYSIS_BOOTSTRAP__ && typeof window.__ANALYSIS_BOOTSTRAP__ === 'object'
+        ? window.__ANALYSIS_BOOTSTRAP__
+        : {}
+      const values = Array.isArray(bootstrap.accessGroups || bootstrap.access_groups)
+        ? bootstrap.accessGroups || bootstrap.access_groups
+        : []
+      return uniqueTextItems(values, 32)
+    },
+    stopN8nSpatialStrategyPolling() {
+      if (this.n8nSpatialStrategyPollHandle) window.clearTimeout(this.n8nSpatialStrategyPollHandle)
+      this.n8nSpatialStrategyPollHandle = null
+    },
+    getN8nSpatialStrategyStepLabel(step = null) {
+      return text(step?.title) || '等待开始'
+    },
+    getN8nSpatialStrategySteps() {
+      const run = this.n8nSpatialStrategyRun || {}
+      return Array.isArray(run.chapters) ? clonePayloadValue(run.chapters) : []
+    },
+    getN8nSpatialStrategyStatusLabel(status = '') {
+      return text(status) || '准备中'
+    },
+    getN8nSpatialStrategyCitationKind(citation = null) {
+      return {
+        project_document: '项目材料',
+        project_data: '项目数据',
+        project_data_record: '项目数据',
+        project_computed_result: '空间数据',
+        knowledge_base: '公开资料',
+      }[text(citation?.source_type)] || '待现场核验'
+    },
+    getN8nSpatialStrategyLiveMessage() {
+      return text(this.n8nSpatialStrategyRun?.message)
+    },
+    isN8nSpatialStrategyStepOpen(stepResult = null) {
+      const status = text(stepResult?.status)
+      return ['正在分析', '需要处理'].includes(status)
+    },
+    getN8nSpatialStrategyFinalSummary() {
+      if (this.n8nSpatialStrategyRun?.status !== '已完成') return null
+      const steps = this.getN8nSpatialStrategySteps()
+      const sections = steps
+        .filter(item => text(item?.content))
+        .map(item => ({
+          number: item.number,
+          label: this.getN8nSpatialStrategyStepLabel(item),
+          summary: text(item.content),
+        }))
+      return {
+        headline: text(this.n8nSpatialStrategyRun?.report?.summary) || '十二章分析已完成。',
+        sections,
+      }
+    },
+    async refreshN8nSpatialStrategyRun(runId = '', { schedule = true } = {}) {
+      const id = text(runId || this.n8nSpatialStrategyRun?.run_id)
+      if (!id) return null
+      this.n8nSpatialStrategyLoading = true
+      this.n8nSpatialStrategyError = ''
+      try {
+        const response = await fetch(`/api/v1/analysis/spatial-strategy/runs/${encodeURIComponent(id)}`, {
+          headers: { 'X-Tenant-Id': this.getSpatialStrategyTenantId() },
+        })
+        if (!response.ok) throw new Error(`空间决策状态请求失败(${response.status})`)
+        const payload = await response.json()
+        this.n8nSpatialStrategyRun = clonePayloadValue(payload)
+        const status = text(payload?.status)
+        if (schedule && ['准备中', '分析中'].includes(status)) {
+          this.stopN8nSpatialStrategyPolling()
+          this.n8nSpatialStrategyPollHandle = window.setTimeout(() => {
+            this.refreshN8nSpatialStrategyRun(id).catch(() => {})
+          }, 2500)
+        } else {
+          this.stopN8nSpatialStrategyPolling()
+        }
+        return this.n8nSpatialStrategyRun
+      } catch (error) {
+        this.n8nSpatialStrategyError = error instanceof Error ? error.message : String(error)
+        return null
+      } finally {
+        this.n8nSpatialStrategyLoading = false
+      }
+    },
+    async runN8nSpatialStrategy() {
+      this.stopN8nSpatialStrategyPolling()
+      this.n8nSpatialStrategyLoading = true
+      this.n8nSpatialStrategyError = ''
+      const historyId = typeof this.getCurrentAgentHistoryId === 'function' ? text(this.getCurrentAgentHistoryId()) : ''
+      const payload = {
+        project_question: text(this.agentInput) || CAPABILITY_PROMPTS['client-decision-spatial-strategy'],
+        history_id: historyId,
+        metadata_filter: historyId ? { history_id: historyId } : {},
+        deliver_to_feishu: this.n8nSpatialStrategyDeliverToFeishu === true,
+      }
+      try {
+        const response = await fetch('/api/v1/analysis/spatial-strategy/runs', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Tenant-Id': this.getSpatialStrategyTenantId(),
+            'X-Access-Groups': this.getSpatialStrategyAccessGroups().join(','),
+          },
+          body: JSON.stringify(payload),
+        })
+        if (!response.ok) throw new Error(`空间决策提交失败(${response.status})`)
+        const accepted = await response.json()
+        this.n8nSpatialStrategyRun = {
+          ...accepted,
+          chapters: SPATIAL_STRATEGY_STEPS.map(item => ({ number: item.step_order, title: item.label, status: '等待分析', content: '' })),
+          progress: { completed_chapters: 0, total_chapters: 12 },
+        }
+        this.n8nSpatialStrategyDeliverToFeishu = false
+        this.agentInput = ''
+        await this.refreshN8nSpatialStrategyRun(accepted.run_id)
+        return accepted
+      } catch (error) {
+        this.n8nSpatialStrategyError = error instanceof Error ? error.message : String(error)
+        return null
+      } finally {
+        this.n8nSpatialStrategyLoading = false
+      }
+    },
+    async resumeN8nSpatialStrategy() {
+      const runId = text(this.n8nSpatialStrategyRun?.run_id)
+      if (!runId || this.n8nSpatialStrategyRun?.status !== '需要处理') return null
+      this.stopN8nSpatialStrategyPolling()
+      this.n8nSpatialStrategyLoading = true
+      this.n8nSpatialStrategyError = ''
+      try {
+        const response = await fetch(`/api/v1/analysis/spatial-strategy/runs/${encodeURIComponent(runId)}/resume`, {
+          method: 'POST',
+          headers: { 'X-Tenant-Id': this.getSpatialStrategyTenantId() },
+        })
+        if (!response.ok) throw new Error(`空间决策恢复失败(${response.status})`)
+        const accepted = await response.json()
+        this.n8nSpatialStrategyRun = { ...this.n8nSpatialStrategyRun, ...accepted, error: '' }
+        await this.refreshN8nSpatialStrategyRun(runId)
+        return accepted
+      } catch (error) {
+        this.n8nSpatialStrategyError = error instanceof Error ? error.message : String(error)
+        return null
+      } finally {
+        this.n8nSpatialStrategyLoading = false
+      }
+    },
     async resolveAnalysisCapabilityIntent(prompt = '') {
       const message = text(prompt)
       if (!message) return null
@@ -853,10 +1024,14 @@ export function createAgentCapabilityWorkbenchMethods() {
         scope: scopeLabel,
         sources: selectedSources,
         parameters: parameters.slice(0, 6),
-        model: typeof this.getAgentSelectedModelName === 'function'
-          ? text(this.getAgentSelectedModelName()) || '未选择模型'
-          : '未选择模型',
-        executor: `${activeCapability.executor_type === 'service' ? '服务' : 'Skill'} · ${text(activeCapability.executor_id) || '未配置'}`,
+        model: this.isN8nSpatialStrategyCapability(activeCapability)
+          ? 'Codex relay（n8n 管理）'
+          : typeof this.getAgentSelectedModelName === 'function'
+            ? text(this.getAgentSelectedModelName()) || '未选择模型'
+            : '未选择模型',
+        executor: this.isN8nSpatialStrategyCapability(activeCapability)
+          ? 'n8n · AN-20 十二步编排'
+          : `${activeCapability.executor_type === 'service' ? '服务' : 'Skill'} · ${text(activeCapability.executor_id) || '未配置'}`,
         estimated_stages: Number(activeCapability.estimated_stages || 0) || 1,
         selected_inputs: selectedInputs,
         risks,
@@ -1015,6 +1190,9 @@ export function createAgentCapabilityWorkbenchMethods() {
         return
       }
       const capabilityInputSelections = this.buildLockedAnalysisCapabilityInputSelections(capability.id)
+      if (this.isN8nSpatialStrategyCapability(capability)) {
+        return this.runN8nSpatialStrategy(capability)
+      }
       if (capability.executor_type === 'service' && capability.executor_id === 'ppt-planning') {
         this.openAgentPptPlanningFromReport({ capabilityInputSelections })
         return

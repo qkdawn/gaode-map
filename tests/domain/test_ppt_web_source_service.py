@@ -221,6 +221,58 @@ def test_web_source_fetches_anysearch_candidates(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer as_sk_test"
 
 
+def test_web_source_search_falls_back_to_exa_after_anysearch_quota_failure(monkeypatch):
+    async def quota_exhausted(*args, **kwargs):
+        raise service.PptWebSourceSearchUnavailable("anysearch_unavailable")
+
+    async def exa_results(*args, **kwargs):
+        return [{
+            "title": "长沙市公共文化服务采购公告",
+            "url": "https://example.gov.cn/procurement",
+            "content": "公开采购分项与金额。",
+        }]
+
+    monkeypatch.setattr(service.settings, "web_search_provider", "anysearch")
+    monkeypatch.setattr(service, "_search_anysearch", quota_exhausted)
+    monkeypatch.setattr(service, "_search_exa", exa_results)
+
+    result = asyncio.run(service._search_public_web("长沙 项目协调员 招聘 薪酬", limit=3))
+
+    assert result[0]["url"] == "https://example.gov.cn/procurement"
+
+
+def test_web_source_search_falls_back_to_exa_after_empty_anysearch_result(monkeypatch):
+    async def no_candidates(*args, **kwargs):
+        return []
+
+    async def exa_results(*args, **kwargs):
+        return [{
+            "title": "长沙市文化服务采购公告",
+            "url": "https://example.gov.cn/service",
+            "content": "公开采购分项。",
+        }]
+
+    monkeypatch.setattr(service.settings, "web_search_provider", "anysearch")
+    monkeypatch.setattr(service, "_search_anysearch", no_candidates)
+    monkeypatch.setattr(service, "_search_exa", exa_results)
+
+    result = asyncio.run(service._search_public_web("长沙 导视系统 采购", limit=3))
+
+    assert result[0]["url"] == "https://example.gov.cn/service"
+
+
+def test_exa_text_blocks_are_normalized_to_search_candidates():
+    candidates = service._exa_candidates([
+        "### 长沙市公共文化服务项目\nURL: https://example.gov.cn/bid\n预算金额和采购范围",
+    ])
+
+    assert candidates == [{
+        "title": "### 长沙市公共文化服务项目",
+        "url": "https://example.gov.cn/bid",
+        "content": "预算金额和采购范围",
+    }]
+
+
 def test_web_source_preview_backfills_open_search_when_trusted_results_are_sparse(monkeypatch):
     async def fake_fetch(term, source):
         return {

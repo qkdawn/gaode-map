@@ -139,7 +139,45 @@
                                         <div class="agent-capability-run-preview-tags"><span v-for="output in preview.outputs" :key="output">{{ output }}</span></div>
                                     </div>
                                 </section>
-                                <section class="agent-capability-run-history" aria-label="运行版本">
+                                <section v-if="isN8nSpatialStrategyCapability(getActiveAnalysisCapability())" class="agent-capability-run-history" aria-label="十二章空间分析">
+                                    <div class="agent-capability-run-history-head">
+                                        <div><strong>分析进度</strong><span>十二章分析完成后形成可直接阅读的项目报告</span></div>
+                                        <div class="agent-capability-run-snapshot-actions">
+                                            <button v-if="n8nSpatialStrategyRun?.run_id && n8nSpatialStrategyRun?.status === '需要处理'" type="button" :disabled="n8nSpatialStrategyLoading" @click="resumeN8nSpatialStrategy().catch(() => {})">从这里继续</button>
+                                            <button v-if="n8nSpatialStrategyRun?.run_id" type="button" :disabled="n8nSpatialStrategyLoading" @click="refreshN8nSpatialStrategyRun().catch(() => {})">刷新状态</button>
+                                        </div>
+                                    </div>
+                                    <div v-if="n8nSpatialStrategyError" class="agent-capability-run-history-state failed">{{ n8nSpatialStrategyError }}</div>
+                                    <div v-else-if="!n8nSpatialStrategyRun" class="agent-capability-run-history-state">当前页面尚未提交十二方向空间分析。</div>
+                                    <article v-else class="agent-capability-run-snapshot" :class="{ failed: n8nSpatialStrategyRun.status === '需要处理' }">
+                                        <header>
+                                            <div><span>当前分析</span><strong>{{ getN8nSpatialStrategyStatusLabel(n8nSpatialStrategyRun.status) }}</strong></div>
+                                        </header>
+                                        <div class="agent-capability-run-preview-grid">
+                                            <span>当前章节<strong>{{ n8nSpatialStrategyRun.current_chapter?.number ? `第 ${n8nSpatialStrategyRun.current_chapter.number} 章 · ${n8nSpatialStrategyRun.current_chapter.title}` : '准备开始' }}</strong></span>
+                                            <span>完成进度<strong>{{ n8nSpatialStrategyRun.progress?.completed_chapters || 0 }} / 12</strong></span>
+                                        </div>
+                                        <p class="agent-capability-run-live-message">{{ getN8nSpatialStrategyLiveMessage() }}</p>
+                                        <details class="agent-capability-run-timeline-disclosure">
+                                            <summary>查看十二章分析进度</summary>
+                                            <div class="agent-capability-run-list agent-capability-run-timeline">
+                                            <details v-for="stepResult in getN8nSpatialStrategySteps()" :key="stepResult.number" class="agent-capability-run-version" :class="{ running: stepResult.status === '正在分析', failed: stepResult.status === '需要处理', completed: stepResult.status === '已完成', pending: stepResult.status === '等待分析' }" :open="isN8nSpatialStrategyStepOpen(stepResult)">
+                                                <summary>
+                                                    <span>{{ stepResult.number }}. {{ getN8nSpatialStrategyStepLabel(stepResult) }}</span>
+                                                    <strong>{{ getN8nSpatialStrategyStatusLabel(stepResult.status) }}</strong>
+                                                </summary>
+                                                <p v-if="stepResult.status === '等待分析'" class="agent-capability-run-step-pending">这一章将在前面的分析完成后开始。</p>
+                                                <p v-else-if="stepResult.content">{{ stepResult.content }}</p>
+                                            </details>
+                                            </div>
+                                        </details>
+                                        <section v-if="getN8nSpatialStrategyFinalSummary()" class="agent-capability-run-final-summary">
+                                            <header><strong>总判断</strong></header>
+                                            <p>{{ getN8nSpatialStrategyFinalSummary().headline }}</p>
+                                        </section>
+                                    </article>
+                                </section>
+                                <section v-else class="agent-capability-run-history" aria-label="运行版本">
                                     <div class="agent-capability-run-history-head">
                                         <div><strong>运行版本</strong><span>按当前分析历史保存</span></div>
                                         <button v-if="selectedAnalysisCapabilityRunId" type="button" @click="clearSelectedAnalysisCapabilityRun">返回当前结果</button>
@@ -277,7 +315,11 @@
                                         </section>
                                     </article>
                                 </section>
-                                <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading || !isAnalysisCapabilityReady(getActiveAnalysisCapability().id)" @click="runAnalysisCapability(getActiveAnalysisCapability())">确认并运行</button>
+                                <label v-if="isN8nSpatialStrategyCapability(getActiveAnalysisCapability())" class="agent-capability-delivery-option">
+                                    <input v-model="n8nSpatialStrategyDeliverToFeishu" type="checkbox" :disabled="n8nSpatialStrategyLoading">
+                                    <span>完成后发送到飞书</span>
+                                </label>
+                                <button type="button" class="agent-capability-run" :disabled="getActiveAnalysisCapability().status !== 'available' || analysisCapabilityReadinessLoading || n8nSpatialStrategyLoading || !isAnalysisCapabilityReady(getActiveAnalysisCapability().id)" @click="runAnalysisCapability(getActiveAnalysisCapability())">{{ n8nSpatialStrategyLoading && isN8nSpatialStrategyCapability(getActiveAnalysisCapability()) ? '正在提交...' : '确认并运行' }}</button>
                             </aside>
                         </div>
                         <section v-if="hasStage1Outcome()" class="agent-stage1-outcome">

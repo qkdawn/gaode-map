@@ -13,7 +13,6 @@ const EVIDENCE_KIND_BY_METHOD = {
   package_summary: 'package_summary',
   package_carrier: 'spatial_carrier',
   package_poi_sample: 'package_item',
-  pageindex_node: 'document_excerpt',
   derived_metric: 'spatial_metric',
   spatial_metric: 'spatial_metric',
   dataset_record: 'dataset_record',

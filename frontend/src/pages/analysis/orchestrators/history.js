@@ -1,11 +1,51 @@
 import {
   buildAnalysisArtifactEnvelope,
   buildFeatureCollectionArtifact,
-  buildMetricLayerArtifact,
   cloneArtifactValue,
 } from '../../../features/history/artifacts.js'
 
 const ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE = 'gcj02'
+const SPATIAL_RECORDS_SCHEMA_VERSION = 'spatial_records/v1'
+const SPATIAL_RECORDS_GEOMETRY_COORD_TYPE = 'wgs84'
+const NIGHTLIGHT_RECORD_UNIT = 'nW/(cm2 sr)'
+
+function buildPopulationArtifactRecords(features = [], fallbackYear = '') {
+  return (Array.isArray(features) ? features : []).map((feature) => {
+    const properties = feature && feature.properties && typeof feature.properties === 'object'
+      ? feature.properties
+      : {}
+    return {
+      cell_id: String(properties.cell_id || ''),
+      geometry: cloneArtifactValue(feature && feature.geometry_wgs84),
+      year: Number(properties.year || fallbackYear || 0) || null,
+      population_total: Number(properties.population_total || 0),
+      age_5_19: Number(properties.age_5_19 || 0),
+      age_30_39: Number(properties.age_30_39 || 0),
+      age_50_64: Number(properties.age_50_64 || 0),
+      source: String(properties.source || ''),
+    }
+  }).filter((record) => record.cell_id && record.geometry && record.geometry.type)
+}
+
+function buildNightlightArtifactRecords(features = [], cells = [], fallbackYear = null, fallbackSource = '') {
+  const cellMap = new Map((Array.isArray(cells) ? cells : []).map((cell) => [String((cell && cell.cell_id) || ''), cell]))
+  return (Array.isArray(features) ? features : []).map((feature) => {
+    const properties = feature && feature.properties && typeof feature.properties === 'object'
+      ? feature.properties
+      : {}
+    const cellId = String(properties.cell_id || '')
+    const cell = cellMap.get(cellId) || {}
+    return {
+      cell_id: cellId,
+      geometry: cloneArtifactValue(feature && feature.geometry_wgs84),
+      year: Number(fallbackYear || 0) || null,
+      radiance: Number(cell.value || 0),
+      unit: NIGHTLIGHT_RECORD_UNIT,
+      has_data: cell.has_data === true,
+      source: String(fallbackSource || ''),
+    }
+  }).filter((record) => record.cell_id && record.geometry && record.geometry.type)
+}
 
 function createAnalysisHistoryOrchestratorMethods() {
   return {
@@ -119,8 +159,12 @@ function createAnalysisHistoryOrchestratorMethods() {
         location: Array.isArray(p && p.location) ? [p.location[0], p.location[1]] : null,
         address: p && p.address ? String(p.address) : '',
         type: p && p.type ? String(p.type) : '',
+        category: p && p.category ? String(p.category) : '',
+        subcategory: p && p.subcategory ? String(p.subcategory) : '',
+        typecode: p && p.typecode ? String(p.typecode) : '',
         adname: p && p.adname ? String(p.adname) : '',
         year: Number.isFinite(Number(p && p.year)) ? Number(p.year) : null,
+        source: this.normalizePoiSource(p && p.source, this.poiSource || 'local'),
         lines: Array.isArray(p && p.lines) ? p.lines : [],
       })).filter((p) => Array.isArray(p.location) && p.location.length === 2)
       const rawPoiResultsByYear = Array.isArray(options && options.poiResultsByYear)
@@ -136,8 +180,12 @@ function createAnalysisHistoryOrchestratorMethods() {
           location: Array.isArray(p && p.location) ? [p.location[0], p.location[1]] : null,
           address: p && p.address ? String(p.address) : '',
           type: p && p.type ? String(p.type) : '',
+          category: p && p.category ? String(p.category) : '',
+          subcategory: p && p.subcategory ? String(p.subcategory) : '',
+          typecode: p && p.typecode ? String(p.typecode) : '',
           adname: p && p.adname ? String(p.adname) : '',
           year: Number.isFinite(Number(p && p.year)) ? Number(p.year) : year,
+          source: this.normalizePoiSource(p && p.source, source),
           lines: Array.isArray(p && p.lines) ? p.lines : [],
         })).filter((p) => Array.isArray(p.location) && p.location.length === 2)
         return {
@@ -386,30 +434,18 @@ function createAnalysisHistoryOrchestratorMethods() {
           year: String(typeof this.getPopulationSelectedYear === 'function' ? this.getPopulationSelectedYear() : (this.populationSelectedYear || '')),
           view: String(this.populationAnalysisView || 'density'),
         }
-        const layer = this.populationLayer && typeof this.populationLayer === 'object' ? this.populationLayer : {}
         const features = Array.isArray(this.populationGrid && this.populationGrid.features)
           ? this.populationGrid.features
           : []
-        const scopeId = String(
-          (this.populationGrid && this.populationGrid.scope_id)
-          || this.populationScopeId
-          || ''
-        )
         const summary = this.cloneArtifactValue((this.populationOverview && this.populationOverview.summary) || {})
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
-            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
-            overview: this.cloneArtifactValue(this.populationOverview || {}),
-            summary,
-            grid: buildFeatureCollectionArtifact({
-              features,
-              scopeId,
-            }),
-            grid_evidence: typeof this.buildAgentPopulationGridEvidence === 'function' ? this.buildAgentPopulationGridEvidence() : {},
-            layer: buildMetricLayerArtifact({ layer, view: params.view, year: params.year }),
+            schema_version: SPATIAL_RECORDS_SCHEMA_VERSION,
+            geometry_coord_type: SPATIAL_RECORDS_GEOMETRY_COORD_TYPE,
             year: params.year,
-            view: params.view,
+            source: String((this.populationGrid && this.populationGrid.source) || ''),
+            records: buildPopulationArtifactRecords(features, params.year),
           },
           summary,
         })
@@ -423,26 +459,20 @@ function createAnalysisHistoryOrchestratorMethods() {
         const features = Array.isArray(this.nightlightGrid && this.nightlightGrid.features)
           ? this.nightlightGrid.features
           : []
-        const scopeId = String(
-          (this.nightlightGrid && this.nightlightGrid.scope_id)
-          || this.nightlightScopeId
-          || ''
-        )
         const summary = this.cloneArtifactValue((this.nightlightOverview && this.nightlightOverview.summary) || {})
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
-            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
-            overview: this.cloneArtifactValue(this.nightlightOverview || {}),
-            summary,
-            grid: buildFeatureCollectionArtifact({
-              features,
-              scopeId,
-            }),
-            layer: buildMetricLayerArtifact({ layer, view: params.view, year: params.year }),
-            raster: this.cloneArtifactValue(this.nightlightRaster || {}),
+            schema_version: SPATIAL_RECORDS_SCHEMA_VERSION,
+            geometry_coord_type: SPATIAL_RECORDS_GEOMETRY_COORD_TYPE,
             year: params.year,
-            view: params.view,
+            source: String((this.nightlightGrid && this.nightlightGrid.source) || ''),
+            records: buildNightlightArtifactRecords(
+              features,
+              Array.isArray(layer.cells) ? layer.cells : [],
+              params.year,
+              String((this.nightlightGrid && this.nightlightGrid.source) || ''),
+            ),
           },
           summary,
         })
@@ -488,7 +518,9 @@ function createAnalysisHistoryOrchestratorMethods() {
         return buildAnalysisArtifactEnvelope({
           params,
           payload: {
-            geometry_coord_type: ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE,
+            schema_version: String(this.roadSyntaxSchemaVersion || SPATIAL_RECORDS_SCHEMA_VERSION),
+            geometry_coord_type: String(this.roadSyntaxGeometryCoordType || SPATIAL_RECORDS_GEOMETRY_COORD_TYPE),
+            render_geometry_coord_type: String(this.roadSyntaxRenderGeometryCoordType || ANALYSIS_ARTIFACT_GEOMETRY_COORD_TYPE),
             summary: this.cloneArtifactValue(this.roadSyntaxSummary || {}),
             diagnostics: this.cloneArtifactValue(this.roadSyntaxDiagnostics || {}),
             roads: buildFeatureCollectionArtifact({ features: roadFeatures }),

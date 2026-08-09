@@ -44,7 +44,7 @@ function analysisAiPayloadFromSource(source = {}) {
       counts: {
         evidence: Number((payload.counts || {}).evidence || meta.count || 0) || 0,
       },
-      policy: '前端只传文档身份与角色；后端按角色读取完整 PageIndex 并构建项目证据档案。',
+      policy: '前端只传文档身份与角色；后端按角色读取带页码定位的完整解析正文。',
     }
   }
   const evidenceNodes = evidenceNodesFromAiPayload(payload).slice(0, 8)

@@ -287,7 +287,7 @@ def _compact_source_for_grouping(source: PptSource) -> Dict[str, Any]:
     meta = source.meta if isinstance(source.meta, dict) else {}
     package = meta.get("package") if isinstance(meta.get("package"), dict) else {}
     document = meta.get("document") if isinstance(meta.get("document"), dict) else {}
-    document_index_preview = _safe_list(meta.get("document_index_preview") or meta.get("documentIndexPreview"))[:8]
+    document_block_preview = _safe_list(meta.get("document_block_preview"))[:8]
     return {
         "id": source.id,
         "type": source.type,
@@ -298,10 +298,10 @@ def _compact_source_for_grouping(source: PptSource) -> Dict[str, Any]:
         "task_key": _clean_text(meta.get("taskKey")),
         "package_summary": _clean_text(package.get("summary"))[:300],
         "package_mode": _clean_text(package.get("package_mode")),
-        "document": _copy_compact_keys(document, ["id", "title", "file_name", "file_type", "document_role", "status", "index_count"]),
-        "document_index_preview": [
-            _copy_compact_keys(_safe_dict(item), ["node_id", "parent_node_id", "title", "level", "summary", "page_start", "page_end"])
-            for item in document_index_preview
+        "document": _copy_compact_keys(document, ["id", "title", "file_name", "file_type", "document_role", "status", "document_block_count"]),
+        "document_block_preview": [
+            _copy_compact_keys(_safe_dict(item), ["block_id", "block_index", "block_type", "section", "text", "page_start", "page_end"])
+            for item in document_block_preview
         ],
     }
 
@@ -780,7 +780,7 @@ def _build_ppt_context_bundle(
         "source_manifest": source_manifest,
         "metric_context": compact_metrics,
         "evidence_context": {
-            "policy": "只传所选来源的紧凑 EvidenceNode；文档使用 PageIndex 节点，资料包/current 分析使用轻量节点。",
+            "policy": "文档使用解析后的原始正文块；其他来源只保留可复核的紧凑证据与定位。",
             "items": evidence_nodes,
             "item_count": len(evidence_nodes),
         },

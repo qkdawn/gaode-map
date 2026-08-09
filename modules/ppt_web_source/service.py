@@ -24,6 +24,7 @@ from modules.ppt_planning.schemas import (
     PptSource,
 )
 from modules.providers.amap.regeo import reverse_geocode
+from modules.spatial_projects.public_web import PublicWebUnavailable, search_public_web as discover_public_web
 from modules.providers.amap.utils.transform_posi import wgs84_to_gcj02
 from modules.web_crawler import WebCrawlerUnavailable, crawl_web_page
 from modules.web_crawler.crawler import clean_visible_text, is_noise_text
@@ -563,6 +564,59 @@ def _anysearch_candidates(markdown: str) -> List[Dict[str, Any]]:
     return candidates
 
 
+def _exa_candidates(content: List[str]) -> List[Dict[str, Any]]:
+    """Normalize Exa MCP text blocks into the shared search-candidate shape."""
+
+    candidates: List[Dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    url_pattern = re.compile(r"https?://[^\s)\]>\",]+")
+
+    def add_candidate(title: Any, url: Any, excerpt: Any = "") -> None:
+        normalized_url = _clean_text(url).rstrip(".,;)")
+        if not normalized_url or normalized_url in seen_urls:
+            return
+        seen_urls.add(normalized_url)
+        candidates.append({
+            "title": _clean_text(title) or normalized_url,
+            "url": normalized_url,
+            "content": _clean_text(excerpt),
+        })
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            url = value.get("url") or value.get("link")
+            if url:
+                add_candidate(
+                    value.get("title") or value.get("name"),
+                    url,
+                    value.get("text") or value.get("summary") or value.get("snippet") or value.get("highlights"),
+                )
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    for block in content:
+        text = _clean_text(block)
+        if not text:
+            continue
+        try:
+            visit(json.loads(text))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for index, line in enumerate(lines):
+            for url in url_pattern.findall(line):
+                prefix = line[:line.find(url)].strip(" -:[]()")
+                if prefix.lower() in {"url", "link", "链接"}:
+                    prefix = ""
+                title = prefix or (lines[index - 1] if index else "")
+                excerpt = " ".join(lines[index + 1:index + 3])
+                add_candidate(title, url, excerpt)
+    return candidates
+
+
 async def _search_anysearch(query: str, *, limit: int) -> List[Dict[str, Any]]:
     headers = {
         "Content-Type": "application/json",
@@ -593,17 +647,38 @@ async def _search_anysearch(query: str, *, limit: int) -> List[Dict[str, Any]]:
     return _anysearch_candidates(text)[: max(1, limit)]
 
 
+async def _search_exa(query: str, *, limit: int) -> List[Dict[str, Any]]:
+    try:
+        response = await discover_public_web(query, "exa", max(1, min(limit, 10)))
+    except PublicWebUnavailable as exc:
+        raise PptWebSourceSearchUnavailable("exa_unavailable") from exc
+    return _exa_candidates(_safe_list(response.get("content")))[: max(1, limit)]
+
+
 async def _search_public_web(query: str, *, limit: int) -> List[Dict[str, Any]]:
     provider = _clean_text(getattr(settings, "web_search_provider", "anysearch")).lower() or "anysearch"
     if provider == "searxng":
         return await _search_searxng(query, limit=limit)
+    if provider == "exa":
+        return await _search_exa(query, limit=limit)
+
     try:
-        return await _search_anysearch(query, limit=limit)
+        candidates = await _search_anysearch(query, limit=limit)
+        if candidates:
+            return candidates
+        logger.warning("AnySearch returned no candidates; falling back to Exa", extra={"query": query})
     except PptWebSourceSearchUnavailable:
-        if _clean_text(getattr(settings, "searxng_base_url", "")):
-            logger.warning("AnySearch unavailable; falling back to configured SearXNG", extra={"query": query})
-            return await _search_searxng(query, limit=limit)
-        raise
+        logger.warning("AnySearch unavailable; falling back to Exa", extra={"query": query})
+
+    try:
+        candidates = await _search_exa(query, limit=limit)
+        if candidates:
+            return candidates
+        logger.warning("Exa returned no candidates", extra={"query": query})
+    except PptWebSourceSearchUnavailable:
+        logger.warning("Exa unavailable", extra={"query": query})
+
+    raise PptWebSourceSearchUnavailable("public_web_search_unavailable")
 
 
 def _candidate_region_score(term: str, candidate: Dict[str, Any]) -> int:

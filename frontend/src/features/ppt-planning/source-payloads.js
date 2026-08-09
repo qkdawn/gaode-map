@@ -627,36 +627,14 @@ export function createPptAiInputBlock({
 }
 
 export function createDocumentAiPayload(sourceId = '', title = '', meta = {}, status = 'pending', count = 0) {
-  const nodes = cloneArray(meta.document_index_preview || meta.documentIndexPreview)
-  const evidence = status === 'ready'
-    ? nodes.slice(0, 40).map((node, index) => {
-      const item = cloneObject(node)
-      return {
-        source_id: sourceId,
-        sourceId,
-        source_title: title,
-        sourceTitle: title,
-        type: 'pageindex_node',
-        title: asText(item.title) || `文档章节 ${index + 1}`,
-        text: asText(item.summary || item.text),
-        citation: item.page_start || item.pageStart ? `PageIndex p.${item.page_start || item.pageStart}` : '',
-        payload: {
-          node_id: asText(item.node_id || item.nodeId),
-          parent_node_id: asText(item.parent_node_id || item.parentNodeId),
-          level: item.level,
-          page_start: item.page_start || item.pageStart,
-          page_end: item.page_end || item.pageEnd,
-        },
-      }
-    }).filter((item) => asText(item.text))
-    : []
+  const blocks = cloneArray(meta.document_block_preview || meta.documentBlockPreview)
   return createPptAiInputBlock({
     sourceId,
     title,
     sourceKind: 'document',
-    evidence,
-    excluded: [{ type: 'document_full_text', reason: '不传文档全文，只传 PageIndex 节点/章节摘要。', count: Number(count || nodes.length || 0) || 0 }],
-    policy: '文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。',
+    evidence: [],
+    excluded: [{ type: 'document_text', reason: '前端仅提交文档身份；后端按 document_id 读取完整解析正文。', count: Number(count || blocks.length || 0) || 0 }],
+    policy: '前端只提交文档身份与角色；后端读取带页码定位的完整解析正文。',
   })
 }
 
@@ -741,9 +719,9 @@ export function normalizeBackendPptDataSource(source = {}, areaId = '') {
   const packageVersion = asText(meta.packageVersion || meta.package_version || pack.package_version)
   const sourceKind = asText(meta.sourceKind) || (asText(source.type) === 'document' || asText(source.id).startsWith('document:') ? 'document' : 'system')
   const sourceId = asText(source.id)
-  const indexPreview = cloneArray(meta.document_index_preview || meta.documentIndexPreview)
+  const blockPreview = cloneArray(meta.document_block_preview || meta.documentBlockPreview)
   const evidenceCount = sourceKind === 'document' && status === 'ready'
-    ? (indexPreview.length || Number(source.count || meta.count || 0) || 0)
+    ? (blockPreview.length || Number(source.count || meta.count || 0) || 0)
     : 0
   const title = asText(source.title) || '未命名来源'
   const persistedAiPayload = cloneObject(meta.aiPayload || meta.ai_payload)
@@ -777,9 +755,9 @@ export function normalizeBackendPptDataSource(source = {}, areaId = '') {
         title,
         sourceKind,
         evidenceCount,
-        excludedType: sourceKind === 'document' ? 'document_full_text' : '',
-        excludedReason: sourceKind === 'document' ? '不传文档全文，只传 PageIndex 章节摘要。' : '',
-        policy: sourceKind === 'document' ? '文档来源已通过 PageIndex 构建 evidence；生成时只发送章节摘要。' : '',
+        excludedType: sourceKind === 'document' ? 'document_text' : '',
+        excludedReason: sourceKind === 'document' ? '前端仅提交文档身份；正文由后端读取。' : '',
+        policy: sourceKind === 'document' ? '后端按 document_id 读取完整解析正文。' : '',
       })),
     },
   }

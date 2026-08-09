@@ -79,6 +79,9 @@ function createAnalysisLifecycleHooks(options = {}) {
       if (typeof this.destroyAllAgentRuns === 'function') {
         this.destroyAllAgentRuns()
       }
+      if (typeof this.stopN8nSpatialStrategyPolling === 'function') {
+        this.stopN8nSpatialStrategyPolling()
+      }
       if (typeof window !== 'undefined') {
         window.removeEventListener('resize', this.resizeAnalysisMap)
       }

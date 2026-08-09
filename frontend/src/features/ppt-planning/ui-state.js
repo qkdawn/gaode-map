@@ -2399,7 +2399,7 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
   const title = asText(document.title || document.file_name || document.fileName || options.title) || '文档资料'
   const label = asText(options.label)
     || (ready
-      ? asText(options.count) ? `PageIndex 章节 ${Number(options.count) || 0} 个` : 'PageIndex 已生成'
+      ? asText(options.count) ? `正文块 ${Number(options.count) || 0} 个` : '正文已解析'
       : status === 'generating' ? '整理中' : '待生成')
   const previousById = new Map(normalized.sources.map((item) => [asText(item.id), item]))
   const previousSourceId = asText(options.previousSourceId || options.previous_source_id)
@@ -2413,27 +2413,7 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
       || (previous && previous.meta && previous.meta.document && previous.meta.document.document_role)
       || (previous && previous.meta && (previous.meta.aiPayload || previous.meta.ai_payload) && (previous.meta.aiPayload || previous.meta.ai_payload).document_role),
   )
-  const indexPreview = cloneArray(options.documentIndexPreview || options.document_index_preview || (previous && previous.meta && previous.meta.document_index_preview))
-  const evidence = ready ? indexPreview.slice(0, 40).map((node, index) => {
-    const item = cloneObject(node)
-    return {
-      source_id: sourceId,
-      sourceId,
-      source_title: title,
-      sourceTitle: title,
-      type: 'pageindex_node',
-      title: asText(item.title) || `文档章节 ${index + 1}`,
-      text: asText(item.summary || item.text),
-      citation: item.page_start || item.pageStart ? `PageIndex p.${item.page_start || item.pageStart}` : '',
-      payload: {
-        node_id: asText(item.node_id || item.nodeId),
-        parent_node_id: asText(item.parent_node_id || item.parentNodeId),
-        level: item.level,
-        page_start: item.page_start || item.pageStart,
-        page_end: item.page_end || item.pageEnd,
-      },
-    }
-  }).filter((item) => asText(item.text)) : []
+  const blockPreview = cloneArray(options.documentBlockPreview || options.document_block_preview || (previous && previous.meta && previous.meta.document_block_preview))
   const aiPayloadBase = {
     version: 'ppt_ai_input_block_v1',
     source_id: sourceId,
@@ -2450,15 +2430,11 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
     metricGaps: [],
     visual_specs: [],
     visualSpecs: [],
-    excluded: [{ type: 'document_full_text', reason: '不传文档全文，只传 PageIndex 节点/章节摘要。', count: Number(options.count || indexPreview.length || 0) || 0 }],
-    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: evidence.length, visual_specs: 0 },
-    policy: '文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。',
+    excluded: [{ type: 'document_text', reason: '前端仅提交文档身份；后端按 document_id 读取完整解析正文。', count: Number(options.count || blockPreview.length || 0) || 0 }],
+    counts: { scope: 0, metrics: 0, metric_gaps: 0, evidence: 0, visual_specs: 0 },
+    policy: '前端只提交文档身份与角色；后端读取带页码定位的完整解析正文。',
   }
-  const evidenceNodes = evidenceNodesFromEvidenceItems(aiPayloadBase, evidence)
-  const aiPayload = {
-    ...aiPayloadBase,
-    evidence_nodes: evidenceNodes,
-  }
+  const aiPayload = aiPayloadBase
   const transport = ready ? createPptTransportFromAiPayload(aiPayload) : cloneObject(previous && previous.meta && previous.meta.transport)
   const nextSource = normalizePptSource({
     ...(previous || {}),
@@ -2481,7 +2457,7 @@ export function upsertPptDocumentSource(state = {}, document = {}, options = {})
       },
       fileName: asText(document.file_name || document.fileName),
       count: Number(options.count ?? (previous && previous.meta && previous.meta.count) ?? 0) || 0,
-      document_index_preview: indexPreview,
+      document_block_preview: blockPreview,
       aiPayload: ready ? aiPayload : cloneObject(previous && previous.meta && previous.meta.aiPayload),
       ai_payload: ready ? aiPayload : cloneObject(previous && previous.meta && previous.meta.ai_payload),
       transport,

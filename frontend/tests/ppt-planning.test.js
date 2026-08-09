@@ -1214,6 +1214,13 @@ test('agent ppt selected source delete does not reuse ppt selected sources witho
 })
 
 test('agent ppt retry document source schedules parse from source panel state', async () => {
+  const originalFetch = globalThis.fetch
+  let publishCalls = 0
+  globalThis.fetch = async (url) => {
+    assert.equal(url, '/api/v1/analysis/knowledge-base/documents')
+    publishCalls += 1
+    return { ok: true, json: async () => ({ accepted: true, status: 'published' }) }
+  }
   const parsed = []
   let refreshCalls = 0
   const ctx = createPptPlanningTestContext({
@@ -1240,11 +1247,16 @@ test('agent ppt retry document source schedules parse from source panel state', 
     ungroupedSourceIds: ['document:doc-1'],
   }))
 
-  await ctx.retryAgentPptPlanningSource('document:doc-1')
+  try {
+    await ctx.retryAgentPptPlanningSource('document:doc-1')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 
   const state = ctx.getAgentActivePptPlanningState()
   const source = state.sources.find((item) => item.id === 'document:doc-1')
   assert.deepEqual(parsed, ['doc-1'])
+  assert.equal(publishCalls, 1)
   assert.equal(refreshCalls, 1)
   assert.equal(source.status, 'generating')
   assert.equal(source.meta.label, '重新解析中')
@@ -2607,7 +2619,13 @@ test('ppt outline waits for package placeholders only when their inputs are read
 test('document upload appears immediately and replaces its placeholder in place', async () => {
   const originalFetch = globalThis.fetch
   let resolveUpload
-  globalThis.fetch = () => new Promise((resolve) => { resolveUpload = resolve })
+  globalThis.fetch = (url) => {
+    if (url === '/documents/upload') {
+      return new Promise((resolve) => { resolveUpload = resolve })
+    }
+    assert.equal(url, '/api/v1/analysis/knowledge-base/documents')
+    return Promise.resolve({ ok: true, json: async () => ({ accepted: true, status: 'published' }) })
+  }
   const ctx = createPptPlanningTestContext({
     requestAgentPptPlanningDocumentParse(documentId) {
       assert.equal(documentId, 'doc-uploaded')
@@ -2644,7 +2662,7 @@ test('document upload appears immediately and replaces its placeholder in place'
   const source = sources.find((item) => item.id === 'document:doc-uploaded')
   assert.ok(source)
   assert.equal(source.status, 'ready')
-  assert.equal(source.meta.label, 'PageIndex 已生成')
+  assert.equal(source.meta.label, '正文已入知识库')
   assert.equal(source.meta.uploadPlaceholder, false)
 })
 

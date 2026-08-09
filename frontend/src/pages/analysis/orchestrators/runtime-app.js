@@ -133,6 +133,9 @@ export function runAnalysisBootstrapApp() {
                           && this.activeStep3Panel === 'agent';
                   },
                   resetAgentPanelState() {
+                      if (typeof this.stopN8nSpatialStrategyPolling === 'function') {
+                          this.stopN8nSpatialStrategyPolling();
+                      }
                       if (typeof this.destroyAllAgentRuns === 'function') {
                           this.destroyAllAgentRuns();
                       }
@@ -178,6 +181,10 @@ export function runAnalysisBootstrapApp() {
                       this.agentToolsLoading = false;
                       this.agentToolsError = '';
                       this.summaryTaskLogTrackers = {};
+                      this.n8nSpatialStrategyRun = null;
+                      this.n8nSpatialStrategyLoading = false;
+                      this.n8nSpatialStrategyError = '';
+                      this.n8nSpatialStrategyDeliverToFeishu = false;
                   },
                   async generateH3Grid() {
                       const rawRing = this.getIsochronePolygonRing();
@@ -2909,6 +2916,13 @@ export function runAnalysisBootstrapApp() {
                       return `ArcGIS-WebGL 数据未就绪（已禁用旧版回退）: payload_invalid(status=${status || 'empty'}, features=${featureCount}, count=${count})`;
                   },
                   applyRoadSyntaxResponseData(data, preferredMetricTab = 'connectivity') {
+                      this.roadSyntaxSchemaVersion = String((data && data.schema_version) || 'spatial_records/v1');
+                      this.roadSyntaxGeometryCoordType = String((data && data.geometry_coord_type) || 'wgs84');
+                      this.roadSyntaxRenderGeometryCoordType = String(
+                          (data && data.render_geometry_coord_type)
+                          || (data && data.summary && data.summary.coord_type)
+                          || 'gcj02'
+                      );
                       this.roadSyntaxRoadFeatures = Array.isArray((data && data.roads && data.roads.features) || [])
                           ? data.roads.features
                           : [];

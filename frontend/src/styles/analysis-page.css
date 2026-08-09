@@ -14032,6 +14032,9 @@ body.agent-ppt-source-menu-open {
 .agent-capability-run-preview.ready { border-left-color: #16a34a; background: #fbfffc; }
 .agent-capability-run-preview.review { border-left-color: #d97706; background: #fffdf7; }
 .agent-capability-run-preview.blocked { border-left-color: #dc2626; background: #fffafa; }
+.agent-capability-delivery-option { display: flex; align-items: center; gap: 8px; min-height: 32px; color: #334155; font-size: 10px; cursor: pointer; }
+.agent-capability-delivery-option input { width: 14px; height: 14px; margin: 0; accent-color: #2563eb; }
+.agent-capability-delivery-option:has(input:disabled) { color: #94a3b8; cursor: default; }
 .agent-capability-run-preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .agent-capability-run-preview-head > div { display: flex; flex-direction: column; gap: 1px; }
 .agent-capability-run-preview-head span { color: #64748b; font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -14086,6 +14089,42 @@ body.agent-ppt-source-menu-open {
 .agent-capability-run-snapshot > header span { color: #64748b; font-size: 9px; }
 .agent-capability-run-snapshot > header strong { color: #334155; font-size: 11px; }
 .agent-capability-run-snapshot > header code { color: #64748b; font-size: 8px; text-align: right; overflow-wrap: anywhere; }
+.agent-capability-run-live-message { margin: 0; padding: 8px 9px; border-left: 3px solid #2563eb; background: #eff6ff; color: #1e3a8a; font-size: 10px; line-height: 1.5; }
+.agent-capability-run-timeline { position: relative; gap: 5px; }
+.agent-capability-run-timeline-disclosure { border: 1px solid #dbe3ec; border-radius: 6px; background: #fff; }
+.agent-capability-run-timeline-disclosure > summary { padding: 8px 10px; color: #334155; font-size: 10px; font-weight: 700; cursor: pointer; }
+.agent-capability-run-timeline-disclosure[open] > summary { border-bottom: 1px solid #e2e8f0; }
+.agent-capability-run-timeline-disclosure > .agent-capability-run-timeline { padding: 8px; }
+.agent-capability-run-timeline::before { content: ''; position: absolute; top: 10px; bottom: 10px; left: 10px; width: 1px; background: #dbe3ec; }
+.agent-capability-run-timeline .agent-capability-run-version { position: relative; z-index: 1; display: block; }
+.agent-capability-run-version.pending { border-left-color: #cbd5e1; background: #f8fafc; }
+.agent-capability-run-version.pending > span, .agent-capability-run-version.pending > strong { color: #94a3b8; }
+.agent-capability-run-version.running { border-left-color: #2563eb; box-shadow: 0 0 0 1px #bfdbfe; }
+.agent-capability-run-version.running > strong { color: #1d4ed8; }
+.agent-capability-run-version.revision_required { border-left-color: #d97706; background: #fffbeb; }
+.agent-capability-run-version > summary { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; min-width: 0; }
+.agent-capability-run-version > summary::-webkit-details-marker { display: none; }
+.agent-capability-run-version > summary::before { content: ''; width: 7px; height: 7px; margin-left: -3px; border: 2px solid #94a3b8; border-radius: 50%; background: #fff; }
+.agent-capability-run-version > summary > span { min-width: 0; color: #334155; font-size: 9px; font-weight: 700; overflow-wrap: anywhere; }
+.agent-capability-run-version > summary > strong { color: #64748b; font-size: 8px; white-space: nowrap; }
+.agent-capability-run-version > summary > small { grid-column: 2 / -1; color: #94a3b8; font-size: 8px; }
+.agent-capability-run-version[open] > summary { padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+.agent-capability-run-version[open] > p { margin: 7px 0 0; color: #475569; font-size: 9px; line-height: 1.55; }
+.agent-capability-run-version[open] > div { margin-top: 7px; }
+.agent-capability-run-version.completed > summary::before { border-color: #16a34a; background: #dcfce7; }
+.agent-capability-run-version.running > summary::before { border-color: #2563eb; background: #dbeafe; }
+.agent-capability-run-version.failed > summary::before { border-color: #dc2626; background: #fee2e2; }
+.agent-capability-run-step-pending { color: #94a3b8 !important; font-style: italic; }
+.agent-capability-run-diagnostics { border-left-color: #d97706; background: #fffbeb; }
+.agent-capability-run-diagnostics span { display: block; color: #92400e; font-size: 9px; line-height: 1.45; }
+.agent-capability-run-final-summary { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #bfdbfe; border-radius: 6px; background: #f8fbff; }
+.agent-capability-run-final-summary > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.agent-capability-run-final-summary > header strong { color: #1e3a8a; font-size: 11px; }
+.agent-capability-run-final-summary > header span { color: #64748b; font-size: 8px; text-align: right; }
+.agent-capability-run-final-summary > p { margin: 0; color: #334155; font-size: 10px; line-height: 1.55; }
+.agent-capability-run-final-section { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 7px; padding-top: 6px; border-top: 1px solid #dbeafe; }
+.agent-capability-run-final-section strong { color: #1d4ed8; font-size: 9px; }
+.agent-capability-run-final-section span { color: #475569; font-size: 9px; line-height: 1.5; }
 .agent-capability-run-snapshot-actions, .agent-capability-run-manifest-actions { display: flex; min-width: 0; flex-direction: column; align-items: flex-end; gap: 5px; }
 .agent-capability-run-snapshot-actions { max-width: 58%; }
 .agent-capability-run-snapshot-actions button, .agent-capability-run-manifest-actions button { border: 1px solid #bfdbfe; border-radius: 4px; background: #eff6ff; color: #1d4ed8; padding: 4px 7px; font-size: 9px; font-weight: 700; cursor: pointer; }

@@ -201,7 +201,7 @@ async def get_ppt_data_source_manifest(area_id: str, conversation_id: str = ""):
                 meta={
                     key: value
                     for key, value in (source.meta or {}).items()
-                    if key not in {"aiPayload", "ai_payload", "document_index_preview", "documentIndexPreview", "transport"}
+                    if key not in {"aiPayload", "ai_payload", "document_block_preview", "transport"}
                 },
             )
             for source in list_ppt_source_manifest(area_id, conversation_id=conversation_id)

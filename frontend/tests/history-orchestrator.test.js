@@ -153,7 +153,21 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
     populationOverview: { summary: { total_population: 100 } },
     populationGrid: {
       scope_id: 'population-grid-scope',
-      features: [{ type: 'Feature', properties: { cell_id: 'p1' } }],
+      source: 'WorldPop',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [[[112.01, 28.01], [112.02, 28.01], [112.01, 28.01]]] },
+        geometry_wgs84: { type: 'Polygon', coordinates: [[[112.00, 28.00], [112.01, 28.00], [112.00, 28.00]]] },
+        properties: {
+          cell_id: 'p1',
+          year: '2026',
+          population_total: 100,
+          age_5_19: 20,
+          age_30_39: 30,
+          age_50_64: 25,
+          source: 'WorldPop',
+        },
+      }],
     },
     populationLayer: { cells: [{ cell_id: 'p1', value: 10 }] },
     buildAgentPopulationGridEvidence() {
@@ -165,9 +179,15 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
     nightlightOverview: { summary: { mean_radiance: 3 } },
     nightlightGrid: {
       scope_id: 'nightlight-grid-scope',
-      features: [{ type: 'Feature', properties: { cell_id: 'n1' } }],
+      source: 'VIIRS 2025',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [[[112.01, 28.01], [112.02, 28.01], [112.01, 28.01]]] },
+        geometry_wgs84: { type: 'Polygon', coordinates: [[[112.00, 28.00], [112.01, 28.00], [112.00, 28.00]]] },
+        properties: { cell_id: 'n1', year: '2026', source: 'WorldPop' },
+      }],
     },
-    nightlightLayer: { cells: [{ cell_id: 'n1', value: 4 }] },
+    nightlightLayer: { cells: [{ cell_id: 'n1', value: 4, has_data: true }] },
     nightlightRaster: { image_url: 'data:image/png;base64,test' },
     roadSyntaxGraphModel: 'segment',
     roadSyntaxMetric: 'choice',
@@ -182,7 +202,7 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
   const nightlight = ctx.buildAnalysisArtifactBundle('nightlight')
   const road = ctx.buildAnalysisArtifactBundle('road_syntax')
 
-  for (const bundle of [raster, h3, population, nightlight, road]) {
+  for (const bundle of [raster, h3]) {
     assert.equal(bundle.payload.geometry_coord_type, 'gcj02')
   }
 
@@ -194,17 +214,39 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
   assert.equal(h3.payload.grid.count, 1)
   assert.equal(h3.payload.grid.resolution, 9)
   assert.equal(h3.payload.year, 2024)
-  assert.equal(population.payload.grid.scope_id, 'population-grid-scope')
-  assert.equal(population.payload.grid.cell_count, 1)
-  assert.equal(population.payload.layer.view, 'density')
-  assert.equal(population.payload.layer.year, '2026')
+  assert.equal(population.payload.schema_version, 'spatial_records/v1')
+  assert.equal(population.payload.geometry_coord_type, 'wgs84')
   assert.equal(population.payload.year, '2026')
-  assert.equal(nightlight.payload.grid.scope_id, 'nightlight-grid-scope')
-  assert.equal(nightlight.payload.grid.cell_count, 1)
-  assert.equal(nightlight.payload.layer.view, 'radiance')
-  assert.equal(nightlight.payload.layer.year, 2025)
+  assert.deepEqual(population.payload.records, [{
+    cell_id: 'p1',
+    geometry: { type: 'Polygon', coordinates: [[[112.00, 28.00], [112.01, 28.00], [112.00, 28.00]]] },
+    year: 2026,
+    population_total: 100,
+    age_5_19: 20,
+    age_30_39: 30,
+    age_50_64: 25,
+    source: 'WorldPop',
+  }])
+  assert.equal(population.payload.summary, undefined)
+  assert.equal(population.payload.grid, undefined)
+  assert.equal(nightlight.payload.schema_version, 'spatial_records/v1')
+  assert.equal(nightlight.payload.geometry_coord_type, 'wgs84')
   assert.equal(nightlight.payload.year, 2025)
+  assert.deepEqual(nightlight.payload.records, [{
+    cell_id: 'n1',
+    geometry: { type: 'Polygon', coordinates: [[[112.00, 28.00], [112.01, 28.00], [112.00, 28.00]]] },
+    year: 2025,
+    radiance: 4,
+    unit: 'nW/(cm2 sr)',
+    has_data: true,
+    source: 'VIIRS 2025',
+  }])
+  assert.equal(nightlight.payload.summary, undefined)
+  assert.equal(nightlight.payload.grid, undefined)
   assert.equal(road.payload.roads.type, 'FeatureCollection')
+  assert.equal(road.payload.schema_version, 'spatial_records/v1')
+  assert.equal(road.payload.geometry_coord_type, 'wgs84')
+  assert.equal(road.payload.render_geometry_coord_type, 'gcj02')
   assert.equal(road.payload.roads.count, 1)
   assert.equal(road.payload.nodes.type, 'FeatureCollection')
   assert.equal(road.payload.nodes.count, 1)

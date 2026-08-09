@@ -155,7 +155,13 @@ function createArtifactBundleContext(overrides = {}) {
     populationOverview: { summary: { total_population: 100 } },
     populationGrid: {
       scope_id: 'population-grid-scope',
-      features: [{ type: 'Feature', properties: { cell_id: 'p1' }, geometry: { type: 'Polygon', coordinates: [] } }],
+      source: 'WorldPop',
+      features: [{
+        type: 'Feature',
+        properties: { cell_id: 'p1', year: '2026', population_total: 100, age_5_19: 20, age_30_39: 30, age_50_64: 25, source: 'WorldPop' },
+        geometry: { type: 'Polygon', coordinates: [] },
+        geometry_wgs84: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112, 28]]] },
+      }],
     },
     populationLayer: {
       scope_id: 'population-layer-scope',
@@ -167,14 +173,23 @@ function createArtifactBundleContext(overrides = {}) {
     nightlightOverview: { summary: { mean_radiance: 3 } },
     nightlightGrid: {
       scope_id: 'nightlight-grid-scope',
-      features: [{ type: 'Feature', properties: { cell_id: 'n1' }, geometry: { type: 'Polygon', coordinates: [] } }],
+      source: 'VIIRS 2025',
+      features: [{
+        type: 'Feature',
+        properties: { cell_id: 'n1' },
+        geometry: { type: 'Polygon', coordinates: [] },
+        geometry_wgs84: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112, 28]]] },
+      }],
     },
     nightlightLayer: {
       scope_id: 'nightlight-layer-scope',
-      cells: [{ cell_id: 'n1', value: 4 }],
+      cells: [{ cell_id: 'n1', value: 4, has_data: true }],
     },
     nightlightRaster: { image_url: 'data:image/png;base64,test' },
     roadSyntaxGraphModel: 'segment',
+    roadSyntaxSchemaVersion: 'spatial_records/v1',
+    roadSyntaxGeometryCoordType: 'wgs84',
+    roadSyntaxRenderGeometryCoordType: 'gcj02',
     transportMode: 'walking',
     roadSyntaxMetric: 'choice',
     roadSyntaxSummary: { road_count: 1 },
@@ -266,32 +281,31 @@ test('history artifact selection uses business year and never falls back across 
   assert.equal(ctx.pickLatestHistoryArtifact(artifacts, 'population').id, 4)
 })
 
-test('buildAnalysisArtifactBundle stores full population nightlight and road datasets', () => {
+test('buildAnalysisArtifactBundle stores canonical raster records and road datasets', () => {
   const ctx = createArtifactBundleContext()
 
   const populationBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'population')
   const nightlightBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'nightlight')
   const roadBundle = historyOrchestratorMethods.buildAnalysisArtifactBundle.call(ctx, 'road_syntax')
 
-  assert.equal(populationBundle.payload.geometry_coord_type, 'gcj02')
-  assert.equal(nightlightBundle.payload.geometry_coord_type, 'gcj02')
-  assert.equal(roadBundle.payload.geometry_coord_type, 'gcj02')
+  assert.equal(populationBundle.payload.geometry_coord_type, 'wgs84')
+  assert.equal(nightlightBundle.payload.geometry_coord_type, 'wgs84')
+  assert.equal(roadBundle.payload.schema_version, 'spatial_records/v1')
+  assert.equal(roadBundle.payload.geometry_coord_type, 'wgs84')
+  assert.equal(roadBundle.payload.render_geometry_coord_type, 'gcj02')
 
-  assert.equal(populationBundle.payload.grid.type, 'FeatureCollection')
-  assert.equal(populationBundle.payload.grid.scope_id, 'population-grid-scope')
-  assert.equal(populationBundle.payload.grid.count, 1)
-  assert.equal(populationBundle.payload.grid.cell_count, 1)
-  assert.equal(populationBundle.payload.grid.features[0].properties.cell_id, 'p1')
-  assert.equal(populationBundle.payload.layer.cells[0].cell_id, 'p1')
-  assert.equal(populationBundle.payload.grid_evidence.evidence_level, 'test_population_grid')
+  assert.equal(populationBundle.payload.schema_version, 'spatial_records/v1')
+  assert.equal(populationBundle.payload.records[0].cell_id, 'p1')
+  assert.equal(populationBundle.payload.records[0].population_total, 100)
+  assert.equal(populationBundle.payload.records[0].age_5_19, 20)
+  assert.equal(populationBundle.payload.grid, undefined)
 
-  assert.equal(nightlightBundle.payload.grid.type, 'FeatureCollection')
-  assert.equal(nightlightBundle.payload.grid.scope_id, 'nightlight-grid-scope')
-  assert.equal(nightlightBundle.payload.grid.count, 1)
-  assert.equal(nightlightBundle.payload.grid.cell_count, 1)
-  assert.equal(nightlightBundle.payload.grid.features[0].properties.cell_id, 'n1')
-  assert.equal(nightlightBundle.payload.layer.cells[0].cell_id, 'n1')
-  assert.equal(nightlightBundle.payload.raster.image_url, 'data:image/png;base64,test')
+  assert.equal(nightlightBundle.payload.schema_version, 'spatial_records/v1')
+  assert.equal(nightlightBundle.payload.records[0].cell_id, 'n1')
+  assert.equal(nightlightBundle.payload.records[0].radiance, 4)
+  assert.equal(nightlightBundle.payload.records[0].unit, 'nW/(cm2 sr)')
+  assert.equal(nightlightBundle.payload.records[0].has_data, true)
+  assert.equal(nightlightBundle.payload.raster, undefined)
 
   assert.equal(roadBundle.payload.roads.type, 'FeatureCollection')
   assert.equal(roadBundle.payload.roads.features[0].properties.road_id, 'r1')

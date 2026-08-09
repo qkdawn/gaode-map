@@ -189,7 +189,7 @@ export function sourceTransportExcludedItems(source = {}) {
 
 export function removeSourceMessage(source = {}) {
   if (isDocumentSource(source)) {
-    return '确认彻底删除该文档来源？文档库里的原文件、解析结果和 PageIndex 索引都会删除。'
+    return '确认彻底删除该文档来源？文档库里的原文件和解析正文都会删除。'
   }
   if (isImageSource(source)) {
     return '确认彻底删除该图片来源？图片文件、OCR 和视觉理解结果都会删除。'

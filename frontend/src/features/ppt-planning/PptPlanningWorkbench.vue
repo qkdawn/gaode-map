@@ -625,11 +625,11 @@ const activeCurrentSourceDetailTabs = computed(() => currentSourceDetailTabs({
 const activeCurrentSourceFirstAvailableTab = computed(() => (
   activeCurrentSourceDetailTabs.value.find((item) => item.available)?.key || 'metrics'
 ))
-const activeDocumentIndexItems = computed(() => {
+const activeDocumentBlockItems = computed(() => {
   const meta = activeDocumentSource.value && activeDocumentSource.value.meta && typeof activeDocumentSource.value.meta === 'object'
     ? activeDocumentSource.value.meta
     : {}
-  const items = meta.document_index_preview || meta.documentIndexPreview
+  const items = meta.document_block_preview || meta.documentBlockPreview
   return Array.isArray(items) ? items.slice(0, 40) : []
 })
 const activePackageDetail = computed(() => normalizePptPackageDetail(activePackageSource.value, {
@@ -1222,7 +1222,7 @@ function handleSourceRowClick(source = {}) {
     return
   }
   if (isDocumentSource(source) && (
-    (Array.isArray((source.meta || {}).document_index_preview) && (source.meta || {}).document_index_preview.length)
+    (Array.isArray((source.meta || {}).document_block_preview) && (source.meta || {}).document_block_preview.length)
   )) {
     openDocumentEvidence(source)
     return
@@ -1842,7 +1842,7 @@ async function confirmSourceDialog() {
                     <button
                       v-if="isDocumentSource(source)"
                       type="button"
-                      :disabled="!(((source.meta && source.meta.document_index_preview) || []).length)"
+                      :disabled="!(((source.meta && source.meta.document_block_preview) || []).length)"
                       @click="openDocumentEvidence(source)">
                       查看结构
                     </button>
@@ -1928,7 +1928,7 @@ async function confirmSourceDialog() {
                 <button
                   v-if="isDocumentSource(source)"
                   type="button"
-                  :disabled="!(((source.meta && source.meta.document_index_preview) || []).length)"
+                  :disabled="!(((source.meta && source.meta.document_block_preview) || []).length)"
                   @click="openDocumentEvidence(source)">
                   查看结构
                 </button>
@@ -3011,30 +3011,30 @@ async function confirmSourceDialog() {
         class="agent-ppt-package-detail agent-ppt-document-evidence-detail"
         role="dialog"
         aria-modal="true"
-        aria-label="PageIndex 文档结构">
+        aria-label="文档正文块">
         <header class="agent-ppt-package-detail-head">
           <div>
-            <span>PageIndex 文档结构</span>
+            <span>文档正文块</span>
             <strong>{{ activeDocumentSource.title }}</strong>
             <small>{{ (activeDocumentSource.meta && activeDocumentSource.meta.label) || '已生成' }}</small>
           </div>
           <button type="button" aria-label="关闭" title="关闭" @click="closeDocumentEvidence">×</button>
         </header>
 
-        <div v-if="activeDocumentIndexItems.length" class="agent-ppt-document-index-list">
+        <div v-if="activeDocumentBlockItems.length" class="agent-ppt-document-index-list">
           <article
-            v-for="(item, index) in activeDocumentIndexItems"
-            :key="`document-index-${item.node_id || item.nodeId || index}`"
+            v-for="(item, index) in activeDocumentBlockItems"
+            :key="`document-block-${item.block_id || item.blockId || index}`"
             class="agent-ppt-document-index-card"
-            :style="{ '--node-depth': Math.max(0, Number(item.level || 0) - 1) }">
+            :style="{ '--node-depth': 0 }">
             <header>
-              <strong>{{ item.title || `章节 ${index + 1}` }}</strong>
+              <strong>{{ item.section || item.title || `正文块 ${index + 1}` }}</strong>
               <span>p.{{ item.page_start || item.pageStart || 1 }}{{ (item.page_end || item.pageEnd) && (item.page_end || item.pageEnd) !== (item.page_start || item.pageStart) ? `-${item.page_end || item.pageEnd}` : '' }}</span>
             </header>
-            <p v-if="item.summary">{{ item.summary }}</p>
+            <p v-if="item.text">{{ item.text }}</p>
           </article>
         </div>
-        <div v-else class="agent-ppt-package-empty">这个文档暂时没有生成 PageIndex 章节结构。</div>
+        <div v-else class="agent-ppt-package-empty">这个文档暂时没有可读取的解析正文。</div>
 
       </section>
     </div>

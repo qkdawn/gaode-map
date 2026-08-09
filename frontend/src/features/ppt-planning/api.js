@@ -283,6 +283,45 @@ export async function uploadDocumentSource(file, title = '', documentRole = '', 
   return response.json()
 }
 
+export async function publishDocumentToKnowledgeBase(
+  documentId = '',
+  { tenantId = '', accessGroups = [], metadata = {} } = {},
+) {
+  const normalizedTenantId = String(tenantId || '').trim()
+  const normalizedAccessGroups = Array.from(new Set(
+    (Array.isArray(accessGroups) ? accessGroups : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean),
+  ))
+  const response = await fetch('/api/v1/analysis/knowledge-base/documents', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Tenant-Id': normalizedTenantId,
+      ...(normalizedAccessGroups.length
+        ? { 'X-Access-Groups': normalizedAccessGroups.join(',') }
+        : {}),
+    },
+    body: JSON.stringify({
+      document_id: String(documentId || '').trim(),
+      visibility: normalizedAccessGroups.length ? 'restricted' : 'public',
+      source_type: 'project_document',
+      metadata: metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {},
+    }),
+  })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    let detail = text
+    try {
+      detail = JSON.parse(text).detail || text
+    } catch (_) {
+      detail = text
+    }
+    throw new Error(detail || `knowledge_base_publish_failed:${response.status}`)
+  }
+  return response.json()
+}
+
 export async function uploadImageSource(file, conversationId = '', historyId = '') {
   const form = new FormData()
   form.append('conversation_id', String(conversationId || ''))

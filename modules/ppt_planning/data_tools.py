@@ -6,6 +6,7 @@ import logging
 import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 
 from shapely.geometry import LineString, MultiLineString, Point, shape
 from shapely.ops import polygonize, unary_union
@@ -15,7 +16,6 @@ from modules.evidence_retrieval import (
     attachment_source_id,
     attachment_source_kind,
     evidence_node_from_attachment_chunk,
-    evidence_node_from_document_index_node,
     evidence_node_payloads_from_nodes,
     evidence_nodes_from_package,
 )
@@ -27,7 +27,7 @@ from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to
 from modules.retrieval.attachments import list_attachments, read_attachment_chunks
 from modules.retrieval.schemas import AttachmentRecord
 from store.ai_database import SessionLocal as AiSessionLocal
-from store.ai_models import Document, DocumentIndexNode
+from store.ai_models import Document, DocumentBlock
 from store.analysis_artifact_repo import analysis_artifact_repo
 from store.history_repo import history_repo
 
@@ -44,6 +44,7 @@ from .schemas import (
     PptPoiQueryResponse,
     PptSource,
 )
+from .system_source_context import build_ppt_transport, build_system_ppt_sources
 
 
 class PptDataAreaNotFound(RuntimeError):
@@ -176,8 +177,8 @@ def _write_ppt_data_package_debug_dump(response: PptDataPackageResponse) -> PptD
 
 SYSTEM_SOURCE_TITLES = {
     "current:scope": "当前等时圈范围",
-    "current:dataset:h3": "H3 / 共享网格",
     "current:dataset:poi": "POI 基础数据",
+    "current:dataset:h3": "H3 / 共享网格",
     "current:analysis:poi_h3": "POI / H3 空间结构分析",
     "current:analysis:nightlight": "夜光强度分析",
     "current:analysis:population": "人口结构分析",
@@ -272,7 +273,7 @@ NIGHTLIFE_EXCLUDED_TERMS = [
     "超级市场",
 ]
 NIGHTLIFE_NEAREST_CELL_TOLERANCE_M = 30.0
-PPT_DOCUMENT_INDEX_PREVIEW_LIMIT = 10
+PPT_DOCUMENT_BLOCK_PREVIEW_LIMIT = 10
 
 
 def _clean_text(value: Any) -> str:
@@ -499,43 +500,43 @@ def _document_source_status(document: Document) -> str:
     return "pending"
 
 
-def _document_source_label(document: Document, index_count: int = 0) -> str:
+def _document_source_label(document: Document, block_count: int = 0) -> str:
     status = _clean_text(document.status)
-    if index_count > 0:
-        return f"章节 {index_count} 个"
+    if block_count > 0:
+        return f"正文块 {block_count} 个"
     if status == "failed":
         return "解析失败"
     if status in {"uploaded", "parsing"}:
         return "待解析"
     if status == "parsed":
-        return "待生成结构"
+        return "解析正文为空"
     return "待处理"
 
 
-def _document_source_availability(status: str, index_count: int = 0) -> str:
+def _document_source_availability(status: str, block_count: int = 0) -> str:
     normalized = _clean_text(status)
     if normalized == "failed":
         return "failed:document_parse_failed"
     if normalized in {"uploaded", "parsing"}:
         return "building:document_parse_pending"
-    if normalized == "parsed" and index_count <= 0:
-        return "empty_evidence:pageindex_empty"
+    if normalized == "parsed" and block_count <= 0:
+        return "empty_document:parsed_blocks_empty"
     if normalized == "parsed":
         return "available"
     return "pending:document_not_ready"
 
 
-def _document_locator_summary(document: Document, index_preview: List[Dict[str, Any]], index_count: int = 0) -> str:
+def _document_locator_summary(document: Document, block_preview: List[Dict[str, Any]], block_count: int = 0) -> str:
     file_name = _clean_text(document.file_name)
     page_values = [
         int(item.get("page_start") or 0)
-        for item in index_preview
+        for item in block_preview
         if int(item.get("page_start") or 0) > 0
     ]
     if page_values:
-        return f"{file_name or '文档'} / 第 {min(page_values)}-{max(page_values)} 页 / PageIndex {index_count} 节"
-    if index_count > 0:
-        return f"{file_name or '文档'} / PageIndex {index_count} 节"
+        return f"{file_name or '文档'} / 第 {min(page_values)}-{max(page_values)} 页 / 正文块 {block_count} 个"
+    if block_count > 0:
+        return f"{file_name or '文档'} / 正文块 {block_count} 个"
     return file_name or "文档"
 
 
@@ -564,63 +565,64 @@ def _evidence_availability(status: str, evidence_count: int, *, empty_reason: st
     return "available"
 
 
-def _compact_document_index_node(node: DocumentIndexNode) -> Dict[str, Any]:
+def _compact_document_block(block: DocumentBlock) -> Dict[str, Any]:
     return {
-        "node_id": _clean_text(node.node_id),
-        "parent_node_id": _clean_text(node.parent_node_id),
-        "title": _clean_text(node.title),
-        "level": int(node.level or 0),
-        "summary": _clean_text(node.summary)[:320],
-        "text": _clean_text(node.text)[:1200],
-        "page_start": int(node.page_start or 1),
-        "page_end": int(node.page_end or node.page_start or 1),
+        "block_id": int(block.id),
+        "block_index": int(block.block_index or 0),
+        "block_type": _clean_text(block.block_type),
+        "section": _clean_text(block.section_title),
+        "text": _clean_text(block.text)[:1200],
+        "page_start": int(block.page_index or 0) + 1,
+        "page_end": int(block.page_index or 0) + 1,
     }
 
 
 def _document_ai_payload(
     source_id: str,
     title: str,
-    index_preview: List[Dict[str, Any]],
+    document_text: str,
     *,
     document_role: str,
-    count: int = 0,
+    block_count: int = 0,
 ) -> Dict[str, Any]:
-    nodes = [
-        evidence_node
-        for index, item in enumerate(index_preview[:40], start=1)
-        for evidence_node in [evidence_node_from_document_index_node(source_id, title, item, index=index)]
-        if evidence_node is not None
-    ]
-    evidence_nodes = evidence_node_payloads_from_nodes(nodes)
-    payload = {
+    full_text = str(document_text or "").strip()
+    return {
         "version": "ppt_ai_input_block_v1",
         "source_id": source_id,
         "title": title,
         "source_kind": "document",
         "document_role": _clean_text(document_role),
-        "included": ["document_identity", "evidence"] if evidence_nodes else ["document_identity"],
+        "included": ["document_identity", "document_full_text"] if full_text else ["document_identity"],
         "scope": None,
         "metrics": [],
         "metric_gaps": [],
-        "evidence_nodes": evidence_nodes,
+        "document_text": full_text,
+        "document_char_count": len(full_text),
+        "document_block_count": int(block_count or 0),
+        "evidence_nodes": [],
         "visual_specs": [],
-        "excluded": [{"type": "document_full_text", "reason": "不传文档全文，只传 PageIndex 节点/章节摘要。", "count": int(count or len(index_preview) or 0)}],
-        "counts": {"scope": 0, "metrics": 0, "metric_gaps": 0, "evidence": len(evidence_nodes), "visual_specs": 0},
-        "policy": "文档来源只通过 PageIndex 节点/章节摘要进入 evidence；不从全文临时抽取。",
+        "excluded": [{"type": "document_binary", "reason": "不传 DOCX/PDF 二进制；直接传解析后的完整原文。"}],
+        "counts": {
+            "scope": 0,
+            "metrics": 0,
+            "metric_gaps": 0,
+            "evidence": 0,
+            "visual_specs": 0,
+            "document_chars": len(full_text),
+            "document_blocks": int(block_count or 0),
+        },
+        "policy": "文档来源直接发送解析后的完整原文块，不以摘要代替正文。",
     }
-    return attach_index_manifest(
-        payload,
-        build_source_index_manifest_payload(
-            source_id=source_id,
-            source_kind="document",
-            native_index_kind="pageindex",
-            node_count=len(evidence_nodes),
-            retrieval_modes=["structure", "keyword"],
-            read_modes=["node_id", "page"],
-            storage_ref={"source_id": source_id, "index_preview_count": len(index_preview), "pageindex_count": int(count or len(index_preview) or 0)},
-            model_versions={"parser": "docling", "indexer": "pageindex"},
-        ),
-    )
+
+
+def _document_full_text(blocks: List[DocumentBlock]) -> tuple[str, int]:
+    parts = [
+        text
+        for block in blocks
+        for text in [str(block.text or "").strip()]
+        if text and text.lower() not in {"list", "group"}
+    ]
+    return "\n\n".join(parts), len(parts)
 
 
 def _package_ai_payload(source_id: str, title: str, package: Dict[str, Any]) -> Dict[str, Any]:
@@ -752,28 +754,28 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
         )
         sources: List[PptDataSourceSummary] = []
         for document in documents:
-            index_rows = (
-                session.query(DocumentIndexNode)
+            block_rows = (
+                session.query(DocumentBlock)
                 .filter_by(document_id=document.id)
-                .order_by(DocumentIndexNode.ordinal.asc(), DocumentIndexNode.id.asc())
+                .order_by(DocumentBlock.page_index.asc(), DocumentBlock.block_index.asc(), DocumentBlock.id.asc())
                 .all()
             )
-            index_count = len([node for node in index_rows if _clean_text(node.node_id) != "root"])
+            document_text, document_block_count = _document_full_text(block_rows)
             status = _document_source_status(document)
-            label = _document_source_label(document, index_count)
-            index_preview = [
-                _compact_document_index_node(node)
-                for node in index_rows
-                if _clean_text(node.node_id) != "root"
-            ][:PPT_DOCUMENT_INDEX_PREVIEW_LIMIT]
+            label = _document_source_label(document, document_block_count)
+            block_preview = [
+                _compact_document_block(block)
+                for block in block_rows
+                if _clean_text(block.text)
+            ][:PPT_DOCUMENT_BLOCK_PREVIEW_LIMIT]
             source_id = f"document:{document.id}"
             title = _clean_text(document.title) or _clean_text(document.file_name) or "文档资料"
             ai_payload = _document_ai_payload(
                 source_id,
                 title,
-                index_preview,
+                document_text,
                 document_role=_clean_text(document.document_role),
-                count=index_count,
+                block_count=document_block_count,
             ) if status == "ready" else {}
             evidence_count = _ai_payload_evidence_count(ai_payload)
             sources.append(
@@ -783,11 +785,11 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
                     title=title,
                     status=status,
                     summary=label,
-                    count=index_count,
+                    count=document_block_count,
                     source_kind="document",
                     evidence_count=evidence_count,
-                    locator_summary=_document_locator_summary(document, index_preview, index_count),
-                    availability=_document_source_availability(_clean_text(document.status), evidence_count),
+                    locator_summary=_document_locator_summary(document, block_preview, document_block_count),
+                    availability=_document_source_availability(_clean_text(document.status), document_block_count),
                     meta={
                         "label": label,
                         "sourceKind": "document",
@@ -798,9 +800,10 @@ def _list_document_ppt_sources() -> List[PptDataSourceSummary]:
                             "file_type": _clean_text(document.file_type),
                             "document_role": _clean_text(document.document_role),
                             "status": _clean_text(document.status),
-                            "index_count": index_count,
+                            "document_char_count": len(document_text),
+                            "document_block_count": document_block_count,
                         },
-                        "document_index_preview": index_preview,
+                        "document_block_preview": block_preview,
                         "aiPayload": ai_payload,
                         "ai_payload": ai_payload,
                     },
@@ -962,42 +965,150 @@ def list_ppt_sources(area_id: str, conversation_id: str = "") -> List[PptDataSou
     params = _safe_dict(detail.get("params"))
     scope_ready = bool(detail.get("polygon") or params.get("drawn_polygon") or params.get("center"))
 
-    sources: List[PptDataSourceSummary] = []
-    for source_id, title in SYSTEM_SOURCE_TITLES.items():
-        if source_id == "current:scope":
-            ready = scope_ready
-            count = 1 if ready else 0
-        elif source_id == "current:dataset:poi":
-            ready = poi_count > 0
-            count = poi_count
-        else:
-            ready = _artifact_ready(area_id, source_id)
-            count = 1 if ready else 0
-        sources.append(
-            PptDataSourceSummary(
-                id=source_id,
-                type="data",
-                title=title,
-                status="ready" if ready else "pending",
-                summary=_source_label(source_id, ready, count),
-                count=count,
-                source_kind="system",
-                evidence_count=count,
-                locator_summary="当前分析范围" if source_id == "current:scope" else f"analysis:{source_id}",
-                availability="available" if ready else "pending:analysis_not_ready",
-                meta={
-                    "label": _source_label(source_id, ready, count),
-                    "sourceKind": "system",
-                    "areaId": _clean_text(area_id),
-                },
-            )
-        )
+    sources = build_system_ppt_sources(_clean_text(area_id), detail, poi_payload)
     sources.extend(_list_document_ppt_sources())
     sources.extend(_list_persisted_ppt_package_sources(area_id))
     sources.extend(_list_persisted_database_ppt_sources(area_id))
     sources.extend(PptDataSourceSummary.model_validate(item) for item in list_persisted_web_sources(area_id))
     sources.extend(_list_image_attachment_ppt_sources(conversation_id))
     return sources
+
+
+def _default_export_source_groups(sources: List[PptDataSourceSummary]) -> List[Dict[str, Any]]:
+    group_specs = {
+        "group:spatial-scope": ("空间范围与网格", {"current:scope", "current:dataset:h3"}),
+        "group:urban-vitality": ("城市活力证据", {"current:dataset:poi", "current:analysis:poi_h3", "current:analysis:nightlight"}),
+        "group:population-demand": ("人群与需求", {"current:analysis:population"}),
+        "group:accessibility": ("交通与可达性", {"current:analysis:road"}),
+    }
+    groups: Dict[str, Dict[str, Any]] = {}
+    for source in sources:
+        source_id = _clean_text(source.id)
+        source_kind = _clean_text(source.source_kind)
+        group_id = ""
+        group_title = ""
+        if source_kind in {"package", "package-placeholder"} or source_id.startswith(("package:", "package-placeholder:")):
+            group_id, group_title = "group:packages", "资料包"
+        elif source_kind == "document" or source_id.startswith("document:"):
+            group_id, group_title = "group:document-evidence", "文档库"
+        elif source_kind == "web":
+            group_id, group_title = "group:web", "联网资料"
+        elif source_kind == "database" or source_id.startswith("database:"):
+            group_id, group_title = "group:database", "数据库源"
+        else:
+            for candidate_id, (candidate_title, source_ids) in group_specs.items():
+                if source_id in source_ids:
+                    group_id, group_title = candidate_id, candidate_title
+                    break
+        if not group_id:
+            continue
+        group = groups.setdefault(group_id, {
+            "id": group_id,
+            "title": group_title,
+            "emoji": "",
+            "sourceIds": [],
+            "collapsed": False,
+            "meta": {"source": "default"},
+        })
+        group["sourceIds"].append(source_id)
+    return list(groups.values())
+
+
+def export_ppt_all_sources_full(area_id: str, conversation_id: str = "") -> Dict[str, Any]:
+    """Return the same complete-source payload used by the PPT download action.
+
+    The browser previously assembled this payload after loading every source.  Keeping
+    the serialization beside ``list_ppt_sources`` lets non-browser consumers obtain
+    the identical raw source objects in one repository pass.
+    """
+
+    normalized_area_id = _clean_text(area_id)
+    if not normalized_area_id:
+        raise PptDataAreaNotFound("area_id_required")
+    exported_at = datetime.now(timezone.utc).isoformat()
+    sources = list_ppt_sources(normalized_area_id, conversation_id=conversation_id)
+    source_groups = _default_export_source_groups(sources)
+    group_by_source_id = {
+        source_id: group
+        for group in source_groups
+        for source_id in group["sourceIds"]
+    }
+    exports: List[Dict[str, Any]] = []
+    for summary in sources:
+        summary_payload = summary.model_dump(mode="json")
+        raw_meta = _safe_dict(summary_payload.get("meta"))
+        ai_payload = _safe_dict(raw_meta.get("aiPayload") or raw_meta.get("ai_payload"))
+        transport = _safe_dict(raw_meta.get("transport")) or build_ppt_transport(ai_payload)
+        source_meta = {
+            "label": _clean_text(raw_meta.get("label")),
+            "sourceKind": _clean_text(raw_meta.get("sourceKind") or summary.source_kind),
+            "areaId": _clean_text(raw_meta.get("areaId")),
+            "aiPayload": ai_payload,
+            "ai_payload": ai_payload,
+            "transport": transport,
+        }
+        full_meta = {
+            **raw_meta,
+            "label": source_meta["label"],
+            "sourceKind": source_meta["sourceKind"],
+            "areaId": source_meta["areaId"],
+            "packageVersion": _clean_text(raw_meta.get("packageVersion") or raw_meta.get("package_version")),
+            "package": _safe_dict(raw_meta.get("package")),
+            "count": int(summary.count or raw_meta.get("count") or 0),
+            "aiPayload": ai_payload,
+            "ai_payload": ai_payload,
+            "transport": transport,
+        }
+        evidence_nodes = [
+            {**node, "summary": _clean_text(node.get("summary"))[:260]}
+            for node in _safe_list(ai_payload.get("evidence_nodes"))
+            if isinstance(node, dict)
+        ]
+        evidence_count = len(evidence_nodes) if ai_payload else int(summary.evidence_count or 0)
+        source_kind = _clean_text(summary.source_kind)
+        locator_summary = ""
+        selected = summary.status == "ready"
+        full_source = {
+            "id": _clean_text(summary.id),
+            "type": _clean_text(summary.type) or "data",
+            "title": _clean_text(summary.title),
+            "status": _clean_text(summary.status) or "pending",
+            "selected": selected,
+            "source_kind": source_kind,
+            "sourceKind": source_kind,
+            "summary": _clean_text(summary.summary),
+            "evidence_count": evidence_count,
+            "evidenceCount": evidence_count,
+            "locator_summary": locator_summary,
+            "locatorSummary": locator_summary,
+            "availability": _clean_text(summary.availability),
+            "meta": full_meta,
+        }
+        group = group_by_source_id.get(_clean_text(summary.id))
+        exports.append({
+            "export_type": "ppt_source_full_export",
+            "version": "v1",
+            "exported_at": exported_at,
+            "source": {**full_source, "meta": source_meta},
+            "group": ({key: group[key] for key in ("id", "title", "emoji")} if group else None),
+            "ai_payload": ai_payload,
+            "transport": transport,
+            "evidence_nodes": evidence_nodes,
+            "full_source": full_source,
+        })
+    return {
+        "export_type": "ppt_all_sources_full_export",
+        "version": "v1",
+        "exported_at": exported_at,
+        "counts": {
+            "total": len(sources),
+            "ready": sum(source.status == "ready" for source in sources),
+            "selected": sum(source.status == "ready" for source in sources),
+            "exported": len(exports),
+        },
+        "source_groups": source_groups,
+        "sources": exports,
+    }
 
 
 def delete_ppt_persisted_source(area_id: str, source_id: str) -> Dict[str, Any]:

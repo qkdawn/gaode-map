@@ -11,6 +11,7 @@ from modules.ppt_planning.data_tools import (
     PptDataSourceNotFound,
     create_ppt_data_package,
     delete_ppt_persisted_source,
+    export_ppt_all_sources_full,
     list_ppt_source_manifest,
     list_ppt_sources,
     query_nearby_poi_points,
@@ -18,7 +19,7 @@ from modules.ppt_planning.data_tools import (
 )
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02
 from modules.ppt_planning.schemas import PptDataPackageRequest, PptDataSourceSummary, PptPoiNearbyRequest, PptPoiQueryRequest
-from store.ai_models import AiBase, Document, DocumentIndexNode
+from store.ai_models import AiBase, Document, DocumentBlock
 
 
 @pytest.fixture(autouse=True)
@@ -35,6 +36,41 @@ def _fake_detail():
         "params": {"center": [112.9, 28.2], "time_min": 35},
         "polygon": [[112.9, 28.2], [112.91, 28.2], [112.91, 28.21]],
     }
+
+
+def test_full_source_export_reads_all_sources_once(monkeypatch):
+    calls = []
+
+    def fake_sources(area_id, conversation_id=""):
+        calls.append((area_id, conversation_id))
+        return [PptDataSourceSummary(
+            id="current:analysis:poi_h3",
+            type="data",
+            title="POI / H3",
+            status="ready",
+            source_kind="system",
+            meta={"aiPayload": {"version": "ppt_ai_input_block_v1", "evidence_nodes": [{"id": "e1"}]}},
+        )]
+
+    monkeypatch.setattr("modules.ppt_planning.data_tools.list_ppt_sources", fake_sources)
+
+    exported = export_ppt_all_sources_full("history-1")
+
+    assert calls == [("history-1", "")]
+    assert exported["export_type"] == "ppt_all_sources_full_export"
+    assert exported["counts"]["exported"] == 1
+    assert exported["sources"][0]["source"]["id"] == "current:analysis:poi_h3"
+    assert exported["sources"][0]["source"]["sourceKind"] == "system"
+    assert exported["sources"][0]["source"]["evidenceCount"] == 1
+    assert exported["sources"][0]["full_source"]["selected"] is True
+    assert "count" not in exported["sources"][0]["full_source"]
+    assert exported["source_groups"][0]["id"] == "group:urban-vitality"
+    assert exported["sources"][0]["group"] == {
+        "id": "group:urban-vitality",
+        "title": "城市活力证据",
+        "emoji": "",
+    }
+    assert exported["sources"][0]["ai_payload"]["evidence_nodes"][0]["id"] == "e1"
 
 
 def test_ppt_source_manifest_filters_only_canonical_source_kind(monkeypatch):
@@ -1025,7 +1061,7 @@ def test_list_ppt_sources_marks_scope_and_poi_ready(monkeypatch):
     assert sources["current:dataset:h3"].availability == "pending:analysis_not_ready"
 
 
-def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
+def test_list_ppt_sources_includes_document_full_text_sources(monkeypatch):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, future=True)
     AiBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
@@ -1044,20 +1080,13 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
             )
         )
         session.add(
-            DocumentIndexNode(
+            DocumentBlock(
                 document_id="doc-1",
-                node_id="n1",
-                parent_node_id="root",
-                title="政策要求",
-                level=1,
-                ordinal=1,
-                start_block_index=0,
-                end_block_index=1,
-                page_start=3,
-                page_end=3,
-                summary="政策要求完善公共服务设施。",
-                text="政策要求完善公共服务设施。",
-                created_at=datetime(2026, 6, 12, 1, 0, 0),
+                page_index=2,
+                block_index=0,
+                block_type="paragraph",
+                text="政策要求完善公共服务设施。项目应保留原有礼堂。",
+                section_title="政策要求",
             )
         )
         session.commit()
@@ -1075,22 +1104,24 @@ def test_list_ppt_sources_includes_document_evidence_sources(monkeypatch):
     assert source.type == "document"
     assert source.status == "ready"
     assert source.count == 1
-    assert source.summary == "章节 1 个"
+    assert source.summary == "正文块 1 个"
     assert source.source_kind == "document"
     assert source.evidence_count == 1
     assert source.availability == "available"
-    assert source.locator_summary == "policy.pdf / 第 3-3 页 / PageIndex 1 节"
+    assert source.locator_summary == "policy.pdf / 第 3-3 页 / 正文块 1 个"
     assert source.meta["sourceKind"] == "document"
     assert source.meta["document"]["document_role"] == "reference_document"
-    assert source.meta["document"]["index_count"] == 1
-    assert source.meta["document_index_preview"][0]["title"] == "政策要求"
+    assert source.meta["document"]["document_block_count"] == 1
+    assert source.meta["document_block_preview"][0]["section"] == "政策要求"
     assert "sourceId" not in source.meta["aiPayload"]
     assert "sourceKind" not in source.meta["aiPayload"]
     assert "metricGaps" not in source.meta["aiPayload"]
     assert "evidenceNodes" not in source.meta["aiPayload"]
     assert "visualSpecs" not in source.meta["aiPayload"]
-    assert source.meta["aiPayload"]["evidence_nodes"][0]["id"] == "document:doc-1:pageindex:n1"
-    assert source.meta["aiPayload"]["evidence_nodes"][0]["kind"] == "document_excerpt"
-    assert source.meta["aiPayload"]["index_manifest"]["native_index_kind"] == "pageindex"
-    assert source.meta["aiPayload"]["index_manifest"]["retrieval_modes"] == ["structure", "keyword"]
+    assert source.meta["aiPayload"]["document_text"] == "政策要求完善公共服务设施。项目应保留原有礼堂。"
+    assert source.meta["aiPayload"]["document_char_count"] == 23
+    assert source.meta["aiPayload"]["document_block_count"] == 1
+    assert source.meta["aiPayload"]["evidence_nodes"] == []
+    assert source.meta["aiPayload"]["included"] == ["document_identity", "document_full_text"]
+    assert "index_manifest" not in source.meta["aiPayload"]
     assert "evidence" not in source.meta["aiPayload"]
