@@ -12,6 +12,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+$env:PYTHONUTF8 = "1"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $FrontendRoot = Join-Path $RepoRoot "frontend"

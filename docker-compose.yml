@@ -22,11 +22,17 @@ x-app-environment: &app-environment
   POPULATION_DATA_DIR: /mapdata/population
   NIGHTLIGHT_DATA_DIR: /mapdata/nightlight/processed
   PYTHONUNBUFFERED: "1"
+  N8N_INTERNAL_WEBHOOK_BASE_URL: http://n8n:5678/webhook
+  N8N_WEBHOOK_API_KEY: ${N8N_WEBHOOK_API_KEY:-local-development-webhook-key-change-before-production}
+  FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+  FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+  FEISHU_CHAT_ID: ${FEISHU_CHAT_ID:-}
 
 x-app-volumes: &app-volumes
   - "${CITY_BOUNDARY_HOST_DIR}:/mapdata/boundaries:ro"
   - "${POPULATION_DATA_HOST_DIR}:/mapdata/population:ro"
   - "${NIGHTLIGHT_DATA_HOST_DIR}:/mapdata/nightlight:ro"
+  - "./runtime:/app/runtime"
 
 x-app-healthcheck: &app-healthcheck
   test:
@@ -55,7 +61,154 @@ x-overpass-environment: &overpass-environment
   OVERPASS_PLANET_PREPROCESS: mv /db/planet.osm.bz2 /db/planet.osm.pbf && osmium cat /db/planet.osm.pbf -o /db/planet.osm.bz2 -f osm.bz2 --overwrite && rm -f /db/planet.osm.pbf
   OVERPASS_RULES_LOAD: "10"
 
+x-n8n-environment: &n8n-environment
+  DB_TYPE: postgresdb
+  DB_POSTGRESDB_HOST: n8n-postgres
+  DB_POSTGRESDB_PORT: "5432"
+  DB_POSTGRESDB_DATABASE: ${N8N_DB_NAME:-n8n}
+  DB_POSTGRESDB_USER: ${N8N_DB_USER:-n8n}
+  DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8n-local-development}
+  EXECUTIONS_MODE: queue
+  QUEUE_BULL_REDIS_HOST: redis
+  QUEUE_BULL_REDIS_PORT: "6379"
+  N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-local-development-change-before-production}
+  N8N_HOST: ${N8N_HOST:-localhost}
+  N8N_LISTEN_ADDRESS: 0.0.0.0
+  N8N_PORT: "5678"
+  N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+  N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678}
+  N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+  OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS: "true"
+  N8N_UNVERIFIED_PACKAGES_ENABLED: "false"
+  N8N_RUNNERS_MODE: external
+  N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:-local-development-runner-token-change-before-production}
+  N8N_RUNNERS_BROKER_LISTEN_ADDRESS: 0.0.0.0
+  N8N_RUNNERS_TASK_TIMEOUT: ${N8N_RUNNERS_TASK_TIMEOUT:-300}
+  N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES: ${N8N_COMPRESSION_NODE_MAX_DECOMPRESSED_SIZE_BYTES:-268435456}
+  N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES: ${N8N_COMPRESSION_NODE_MAX_ZIP_ENTRIES:-1000}
+  N8N_WEBHOOK_API_KEY: ${N8N_WEBHOOK_API_KEY:-local-development-webhook-key-change-before-production}
+  EMBEDDING_API_BASE_URL: ${N8N_EMBEDDING_API_BASE_URL:-http://host.docker.internal:11435}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-jinaai/jina-embeddings-v2-base-zh}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-768}
+  GENERIC_TIMEZONE: Asia/Shanghai
+  TZ: Asia/Shanghai
+  RAG_DB_HOST: rag-postgres
+  RAG_DB_PORT: "5432"
+  RAG_DB_NAME: ${RAG_DB_NAME:-gaode_rag}
+  RAG_DB_USER: ${RAG_DB_USER:-gaode_rag}
+  RAG_DB_PASSWORD: ${RAG_DB_PASSWORD:-rag-local-development}
+  SPATIAL_API_BASE_URL: ${N8N_SPATIAL_API_BASE_URL:-http://host.docker.internal:8000/api/v1}
+  DOCUMENT_API_BASE_URL: ${N8N_DOCUMENT_API_BASE_URL:-http://host.docker.internal:8000}
+  SPATIAL_MCP_URL: ${N8N_SPATIAL_MCP_URL:-http://host.docker.internal:8040/mcp}
+
 services:
+  n8n-postgres:
+    image: postgres:16-alpine
+    container_name: gaode-map-n8n-postgres
+    environment:
+      POSTGRES_DB: ${N8N_DB_NAME:-n8n}
+      POSTGRES_USER: ${N8N_DB_USER:-n8n}
+      POSTGRES_PASSWORD: ${N8N_DB_PASSWORD:-n8n-local-development}
+    volumes:
+      - n8n_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${N8N_DB_USER:-n8n} -d ${N8N_DB_NAME:-n8n}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  rag-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: gaode-map-rag-postgres
+    environment:
+      POSTGRES_DB: ${RAG_DB_NAME:-gaode_rag}
+      POSTGRES_USER: ${RAG_DB_USER:-gaode_rag}
+      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD:-rag-local-development}
+    ports:
+      - "${RAG_DB_HOST_PORT:-15432}:5432"
+    volumes:
+      - rag_postgres_data:/var/lib/postgresql/data
+      - ./docker/rag-db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RAG_DB_USER:-gaode_rag} -d ${RAG_DB_NAME:-gaode_rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: gaode-map-n8n-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - n8n_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION:-2.34.0}
+    container_name: gaode-map-n8n
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment: *n8n-environment
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/bootstrap:ro
+    depends_on:
+      n8n-postgres:
+        condition: service_healthy
+      rag-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5678/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  n8n-worker:
+    image: n8nio/n8n:${N8N_VERSION:-2.34.0}
+    container_name: gaode-map-n8n-worker
+    command: ["worker", "--concurrency=${N8N_WORKER_CONCURRENCY:-5}"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment: *n8n-environment
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/bootstrap:ro
+    depends_on:
+      n8n:
+        condition: service_healthy
+
+  n8n-runners:
+    image: n8nio/runners:${N8N_VERSION:-2.34.0}
+    container_name: gaode-map-n8n-runners
+    environment:
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:-local-development-runner-token-change-before-production}
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n:5679
+      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "15"
+    depends_on:
+      n8n:
+        condition: service_healthy
+
+  n8n-worker-runners:
+    image: n8nio/runners:${N8N_VERSION:-2.34.0}
+    container_name: gaode-map-n8n-worker-runners
+    environment:
+      N8N_RUNNERS_AUTH_TOKEN: ${N8N_RUNNERS_AUTH_TOKEN:-local-development-runner-token-change-before-production}
+      N8N_RUNNERS_TASK_BROKER_URI: http://n8n-worker:5679
+      N8N_RUNNERS_AUTO_SHUTDOWN_TIMEOUT: "15"
+    depends_on:
+      n8n-worker:
+        condition: service_started
+
   search:
     build:
       context: ../search
@@ -87,6 +240,8 @@ services:
         condition: service_started
       overpass:
         condition: service_started
+      n8n:
+        condition: service_healthy
     command: *app-command
     volumes: *app-volumes
     healthcheck: *app-healthcheck
@@ -113,3 +268,9 @@ services:
       - "${OVERPASS_DB_DIR}:/db"
       - "${OVERPASS_SOURCE_DIR}:/osm:ro"
     restart: unless-stopped
+
+volumes:
+  n8n_data:
+  n8n_postgres_data:
+  n8n_redis_data:
+  rag_postgres_data:

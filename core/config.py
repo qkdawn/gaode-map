@@ -14,6 +14,7 @@ ENV_FILE = PROJECT_ROOT / ".env"
 DEFAULT_CHART_OUTPUT_DIR = PROJECT_ROOT / "runtime" / "generated_charts"
 DEFAULT_DOCUMENT_UPLOAD_DIR = PROJECT_ROOT / "runtime" / "documents"
 DEFAULT_ANALYSIS_RUN_STORAGE_DIR = PROJECT_ROOT / "runtime" / "analysis-runs"
+DEFAULT_SPATIAL_STRATEGY_REPORT_DIR = PROJECT_ROOT / "runtime" / "client-decision-spatial-strategy"
 
 
 class Settings(BaseSettings):
@@ -204,6 +205,10 @@ class Settings(BaseSettings):
         self.chart_output_dir = self._normalize_project_path(self.chart_output_dir, DEFAULT_CHART_OUTPUT_DIR)
         self.document_upload_dir = self._normalize_project_path(self.document_upload_dir, DEFAULT_DOCUMENT_UPLOAD_DIR)
         self.analysis_run_storage_dir = self._normalize_project_path(self.analysis_run_storage_dir, DEFAULT_ANALYSIS_RUN_STORAGE_DIR)
+        self.spatial_strategy_report_dir = self._normalize_project_path(
+            self.spatial_strategy_report_dir,
+            DEFAULT_SPATIAL_STRATEGY_REPORT_DIR,
+        )
 
     @staticmethod
     def _normalize_project_path(raw_value: str, default_path: Path) -> str:
@@ -280,7 +285,7 @@ class Settings(BaseSettings):
         validation_alias="AI_THINKING_ENABLED",
         description="是否为 DeepSeek chat completions 启用 thinking mode 并流式展示 reasoning_content",
     )
-    web_search_provider: Literal["anysearch", "searxng"] = Field(
+    web_search_provider: Literal["anysearch", "exa", "searxng"] = Field(
         "anysearch",
         validation_alias="WEB_SEARCH_PROVIDER",
         description="Provider used to discover public-web source candidates.",
@@ -393,6 +398,58 @@ class Settings(BaseSettings):
         validation_alias="EVIDENCE_EMBEDDING_MODEL",
         description="OpenAI-compatible BGE-M3 embedding model for evidence semantic search",
     )
+    n8n_internal_webhook_base_url: str = Field(
+        "",
+        validation_alias="N8N_INTERNAL_WEBHOOK_BASE_URL",
+        description="Server-side n8n production webhook base URL",
+    )
+    n8n_port: int = Field(
+        5678,
+        validation_alias="N8N_PORT",
+        gt=0,
+        le=65535,
+        description="Host-published n8n port used by local backend development",
+    )
+    n8n_webhook_api_key: str = Field(
+        "",
+        validation_alias="N8N_WEBHOOK_API_KEY",
+        description="Shared secret used only by the backend when calling n8n webhooks",
+    )
+    n8n_webhook_timeout_s: float = Field(
+        20.0,
+        validation_alias="N8N_WEBHOOK_TIMEOUT_S",
+        gt=0,
+        description="Timeout for submitting and polling n8n spatial strategy runs",
+    )
+    spatial_mcp_url: str = Field(
+        "http://127.0.0.1:8040/mcp",
+        validation_alias="N8N_SPATIAL_MCP_URL",
+        description="Internal spatial project MCP endpoint used by direction Agents",
+    )
+    spatial_mcp_timeout_s: float = Field(
+        60.0,
+        validation_alias="SPATIAL_MCP_TIMEOUT_S",
+        gt=0,
+        description="Timeout for a single spatial MCP tool call",
+    )
+    spatial_strategy_report_dir: str = Field(
+        str(DEFAULT_SPATIAL_STRATEGY_REPORT_DIR),
+        validation_alias="SPATIAL_STRATEGY_REPORT_DIR",
+        description="Generated spatial strategy report and delivery receipt storage",
+    )
+    feishu_app_id: str = Field("", validation_alias="FEISHU_APP_ID")
+    feishu_app_secret: str = Field("", validation_alias="FEISHU_APP_SECRET")
+    feishu_chat_id: str = Field("", validation_alias="FEISHU_CHAT_ID")
+    feishu_api_root: str = Field(
+        "https://open.feishu.cn/open-apis",
+        validation_alias="FEISHU_API_ROOT",
+    )
+    feishu_timeout_s: float = Field(120.0, validation_alias="FEISHU_TIMEOUT_S", gt=0)
+
+    @property
+    def n8n_webhook_base_url(self) -> str:
+        configured = str(self.n8n_internal_webhook_base_url or "").strip()
+        return configured.rstrip("/") if configured else f"http://127.0.0.1:{self.n8n_port}/webhook"
 
     # 本地历史数据查询服务配置
     local_query_base_url: str = Field(

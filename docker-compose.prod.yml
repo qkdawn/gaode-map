@@ -1,4 +1,25 @@
 services:
+  n8n-postgres:
+    restart: unless-stopped
+
+  rag-postgres:
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped
+
+  n8n:
+    restart: unless-stopped
+
+  n8n-worker:
+    restart: unless-stopped
+
+  n8n-runners:
+    restart: unless-stopped
+
+  n8n-worker-runners:
+    restart: unless-stopped
+
   search:
     restart: unless-stopped
 

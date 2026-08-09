@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ComposeBase = @("-f", "docker-compose.yml")
 $ComposeDev = @("-f", "docker-compose.yml", "-f", "docker-compose.dev.yml")
-$InfraServices = @("search", "valhalla", "overpass")
+$InfraServices = @("search", "valhalla", "overpass", "n8n-postgres", "rag-postgres", "redis", "n8n", "n8n-worker", "n8n-runners", "n8n-worker-runners")
 $LocalServices = @("app", "frontend")
 
 function Invoke-RepoCommand {
@@ -60,7 +60,7 @@ function Get-PortOwner {
 }
 
 Write-Host "Hybrid dev layout"
-Write-Host "  Docker : search, valhalla, overpass"
+Write-Host "  Docker : search, valhalla, overpass, n8n, workers, runners, redis, PostgreSQL"
 Write-Host "  Local  : app(FastAPI), frontend(Vite)"
 Write-Host ""
 
@@ -75,14 +75,14 @@ if ($CheckOnly) {
 
 Write-Host ""
 Write-Host "Docker containers"
-foreach ($name in @("gaode-map-search", "gaode-map-valhalla", "gaode-map-overpass", "gaode-map-app", "gaode-map-frontend-1")) {
+foreach ($name in @("gaode-map-search", "gaode-map-valhalla", "gaode-map-overpass", "gaode-map-n8n", "gaode-map-n8n-worker", "gaode-map-n8n-runners", "gaode-map-n8n-worker-runners", "gaode-map-n8n-postgres", "gaode-map-rag-postgres", "gaode-map-n8n-redis", "gaode-map-app", "gaode-map-frontend-1")) {
     $state = Get-ContainerState $name
     Write-Host ("  {0,-24} {1}" -f $state.Name, $state.Status)
 }
 
 Write-Host ""
 Write-Host "Port ownership"
-foreach ($port in @(8000, 5173, 8001, 8002, 8003)) {
+foreach ($port in @(5678, 5680, 8000, 5173, 8001, 8002, 8003, 15432)) {
     Write-Host ("  {0,-5} {1}" -f $port, (Get-PortOwner $port))
 }
 

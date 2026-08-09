@@ -52,5 +52,6 @@ raganything[all]==1.3.1
 esda>=2.6.0
 libpysal>=4.10.0
 numpy>=1.26.0
+fastembed==0.8.0
 scipy>=1.11.0
 vl-convert-python==1.9.0.post1

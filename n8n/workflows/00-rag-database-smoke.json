@@ -1,0 +1,54 @@
+{
+  "id": "ragDbSmoke000001",
+  "name": "RAG-00 Database Smoke Check",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8f13b407-8028-43f8-a4c5-7dc7556df654",
+      "name": "Run Smoke Check",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT current_database() AS database_name, EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS vector_enabled, to_regclass('public.kb_documents') IS NOT NULL AS documents_ready, to_regprocedure('public.hybrid_search_kb(text,vector,text,text[],text[],text[],text[],jsonb,integer,integer)') IS NOT NULL AS hybrid_search_ready;",
+        "options": {}
+      },
+      "id": "c5ce206e-ebad-4afb-bfd3-12d01e088731",
+      "name": "Check RAG Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": {
+          "id": "rag-postgres",
+          "name": "RAG PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run Smoke Check": {
+      "main": [
+        [
+          {
+            "node": "Check RAG Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "fa752b2d-0147-4652-981b-504ec3682629",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

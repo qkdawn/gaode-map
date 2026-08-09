@@ -6,6 +6,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+$env:PYTHONUTF8 = "1"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RuntimeDir = Join-Path $RepoRoot "runtime"
 $FrontendRoot = Join-Path $RepoRoot "frontend"
@@ -78,6 +82,7 @@ function Set-PublicDbHost {
     $lines = Get-Content -LiteralPath $EnvPath
     $hasDbHost = $false
     $hasDbUrl = $false
+    $hasLocalQueryDbUrl = $false
     $updated = foreach ($line in $lines) {
         if ($line -match '^DB_HOST=') {
             $hasDbHost = $true
@@ -92,6 +97,13 @@ function Set-PublicDbHost {
             } catch {
                 throw "Failed to rewrite DB_URL host. Please check .env DB_URL format."
             }
+        } elseif ($line -match '^LOCAL_QUERY_DB_URL=') {
+            $hasLocalQueryDbUrl = $true
+            $localQueryDbUrl = $line.Substring("LOCAL_QUERY_DB_URL=".Length).Trim()
+            if ($localQueryDbUrl -notmatch '^jdbc:mysql://[^/:?#]+') {
+                throw "Failed to rewrite LOCAL_QUERY_DB_URL host. Please check .env LOCAL_QUERY_DB_URL format."
+            }
+            "LOCAL_QUERY_DB_URL=" + ($localQueryDbUrl -replace '^jdbc:mysql://[^/:?#]+', "jdbc:mysql://$hostClean")
         } else {
             $line
         }
@@ -102,6 +114,9 @@ function Set-PublicDbHost {
     }
     if (-not $hasDbUrl) {
         Write-Warning ".env does not contain DB_URL; only DB_HOST was updated."
+    }
+    if (-not $hasLocalQueryDbUrl) {
+        Write-Warning ".env does not contain LOCAL_QUERY_DB_URL; the local POI query service was not updated."
     }
 
     Set-Content -LiteralPath $EnvPath -Value $updated -Encoding UTF8

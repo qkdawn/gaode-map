@@ -1,0 +1,97 @@
+{
+  "id": "kbIngestWebhook0001",
+  "name": "KB-00 Ingest Document Webhook",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "api/v1/n8n/kb/ingest",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0ec8a4d7-e9f3-44b0-9c07-10953a1f9d6c",
+      "name": "Receive KB Ingest Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [180, 300],
+      "credentials": { "httpHeaderAuth": { "id": "n8n-webhook-client", "name": "n8n Webhook Client" } },
+      "webhookId": "kb-ingest-webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const request = $input.first()?.json ?? {};\nconst body = request.body && typeof request.body === 'object' ? request.body : request;\nconst headers = request.headers && typeof request.headers === 'object' ? request.headers : {};\nconst tenantId = String(headers['x-tenant-id'] ?? headers['X-Tenant-Id'] ?? '').trim();\nconst documentId = String(body.document_id ?? '').trim();\nconst accessGroups = [...new Set(String(headers['x-access-groups'] ?? headers['X-Access-Groups'] ?? '').split(',').map((item) => item.trim()).filter(Boolean))];\nconst errors = [];\nif (!tenantId) errors.push('x-tenant-id is required');\nif (!documentId) errors.push('document_id is required');\nconst visibility = body.visibility === 'public' ? 'public' : 'restricted';\nif (visibility === 'restricted' && accessGroups.length === 0) errors.push('restricted documents require x-access-groups');\nreturn [{ json: {\n  valid: errors.length === 0, errors, document_id: documentId, tenant_id: tenantId, visibility, access_groups: accessGroups,\n  source_type: String(body.source_type ?? 'project_document').trim() || 'project_document',\n  source_url: String(body.source_url ?? '').trim(),\n  decision_steps: Array.isArray(body.decision_steps) ? body.decision_steps : [],\n  project_types: Array.isArray(body.project_types) ? body.project_types : [],\n  geography: Array.isArray(body.geography) ? body.geography : [],\n  metadata: body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata) ? body.metadata : {},\n} }];"
+      },
+      "id": "98c04f7e-2aeb-4b55-80e4-df2c429e4c7c",
+      "name": "Normalize KB Identity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [{ "id": "valid-kb-ingest", "leftValue": "={{ $json.valid }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f88ba52b-999a-42d0-bef2-6a730f77b03a",
+      "name": "KB Request Is Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: false, status: 'invalid_request', detail: $json.errors }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "bf0ee67c-7b07-4bf9-a6a5-674db1bdd65c",
+      "name": "Return KB Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": { "__rl": true, "value": "kbIngestProjectDoc01", "mode": "id" },
+        "workflowInputs": { "mappingMode": "defineBelow", "value": {}, "matchingColumns": [], "schema": [], "attemptToConvertTypes": false, "convertFieldsToString": true },
+        "mode": "once",
+        "options": { "waitForSubWorkflow": true }
+      },
+      "id": "36cbd462-cf52-4716-aedc-10e52ea4c09c",
+      "name": "Ingest And Publish Document",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: true, status: 'published', document_id: $('Normalize KB Identity').first().json.document_id, tenant_id: $('Normalize KB Identity').first().json.tenant_id, result: $json }) }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "4f5314e6-1970-4f55-aec1-9b8b07f93a11",
+      "name": "Return KB Publish Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [1140, 220]
+    }
+  ],
+  "connections": {
+    "Receive KB Ingest Request": { "main": [[{ "node": "Normalize KB Identity", "type": "main", "index": 0 }]] },
+    "Normalize KB Identity": { "main": [[{ "node": "KB Request Is Valid", "type": "main", "index": 0 }]] },
+    "KB Request Is Valid": { "main": [[{ "node": "Ingest And Publish Document", "type": "main", "index": 0 }], [{ "node": "Return KB Validation Error", "type": "main", "index": 0 }]] },
+    "Ingest And Publish Document": { "main": [[{ "node": "Return KB Publish Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "e4e51b00-94ed-4d4c-a42d-c9d6eb0aef02",
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}

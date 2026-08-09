@@ -1,0 +1,73 @@
+{
+  "id": "codexRelayTest001",
+  "name": "LLM-99 Codex Relay Integration Test",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "50de2770-c9ec-4728-a565-134079b32dda",
+      "name": "Run Codex Relay Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { input: 'Reply with exactly OK.', max_output_tokens: 16 } }];"
+      },
+      "id": "70dbca56-cb5b-4487-9936-25fe411bd2e0",
+      "name": "Build Test Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "codexRelayResponse1",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "002242c8-66fd-4334-915d-f2e8b235c5e6",
+      "name": "Call Codex Relay Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const result = $input.first()?.json ?? {};\nif (String(result.output_text ?? '').trim() !== 'OK') throw new Error(`unexpected Codex relay output: ${result.output_text}`);\nif (!result.response_id || !result.model) throw new Error('Codex relay response metadata is incomplete');\nreturn [{ json: { passed: true, model: result.model, output: result.output_text, response_id_present: true } }];"
+      },
+      "id": "6ab223ea-f9e2-4e68-a43f-c2f5a10a5999",
+      "name": "Assert Codex Relay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 300]
+    }
+  ],
+  "connections": {
+    "Run Codex Relay Test": { "main": [[{ "node": "Build Test Request", "type": "main", "index": 0 }]] },
+    "Build Test Request": { "main": [[{ "node": "Call Codex Relay Workflow", "type": "main", "index": 0 }]] },
+    "Call Codex Relay Workflow": { "main": [[{ "node": "Assert Codex Relay", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1f33b866-ed1b-4b47-a1cf-fc9db92fc4dc",
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}

@@ -55,6 +55,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 ## 4. 访问入口
 - `http://localhost:8000/analysis`：分析工作台。开发态代理 Vite，生产态服务构建产物
+- `http://localhost:5678`：n8n 自动化控制面。首次启动需要创建本地 owner 账号
 - `http://localhost:8000/map?...`：常规地图页
 - `http://localhost:8000/docs`：OpenAPI 文档
 - `http://localhost:8000/health`：健康检查
@@ -81,6 +82,44 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 - 数据库：`DB_URL` 保存账号、密码、库名等稳定信息；`DB_HOST` 用于覆盖 `DB_URL` 中的主机地址。数据库公网 IP 是动态地址，启动前按当前可用 IP 更新 `.env` 里的 `DB_HOST`，不要在文档中写死具体 IP。
 - 图表输出目录覆盖：`CHART_OUTPUT_DIR`（可选，默认 `runtime/generated_charts/`）
 - `POST /api/v1/analysis/road-syntax` 不再接受 `depthmap_cli_path`；depthmapX CLI 路径只从 `DEPTHMAPX_CLI_PATH` 或系统 `PATH` 解析。
+
+### n8n、RAG 数据库与 LLM
+- n8n 使用独立的 `n8n-postgres` 保存工作流和执行状态，业务知识与分析运行状态保存到 `rag-postgres`。
+- `rag-postgres` 使用 pgvector，并按文件名顺序执行 `docker/rag-db/init/*.sql`；bootstrap 也会幂等重放这些 schema 文件，已有数据卷不需要手工迁移。
+- n8n main 与 worker 使用 Redis queue mode；二者必须共享同一个 `N8N_ENCRYPTION_KEY`，并分别由 `n8n-runners`/`n8n-worker-runners` 外部 runner sidecar 执行 Code 节点。
+- 本地入口由 `N8N_PORT` 决定（本工作区当前为 `http://localhost:5680`），RAG PostgreSQL 调试端口默认是 `15432`。
+- 生产环境必须替换 `.env.example` 中的 n8n/RAG 密码、加密密钥和 `N8N_WEBHOOK_API_KEY`，并配置真实 `N8N_WEBHOOK_URL`。
+
+首次启动或工作流文件更新后执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/n8n_bootstrap.ps1
+```
+
+脚本会启动 n8n 基础设施、应用 RAG schema、把临时数据库和 Codex relay 凭据加密导入 n8n、导入工作流，并执行数据库 smoke check、发布/召回集成测试和 Codex relay 模型检查。默认从本机 `%USERPROFILE%\\.codex\\config.toml` 与 `auth.json` 读取 Codex CLI 当前的 `openai_base_url`、模型和 `OPENAI_API_KEY`；也可以用 `CODEX_RELAY_BASE_URL`、`CODEX_RELAY_MODEL`、`CODEX_RELAY_API_KEY` 覆盖。临时明文凭据只存在于容器 `/tmp`，导入后立即删除，不进入仓库或日志。
+
+`CSU` 是旧 Agent 配置中的一个 OpenAI-compatible `AI_BASE_URL` 示例，不是 n8n 的必需网关，也不会被新工作流自动调用。n8n 的语言模型边界是 `LLM-00 Codex Relay Responses`：通过 Codex 中转的 `/responses` 接口统一返回文本、工具调用、用量和 `response_id`。`LLM-99 Codex Relay Integration Test` 会以 `OK` 响应验证这条链路。Codex 负责回答和模型重排；`EMB-00` 调用本机 CPU-only FastEmbed 服务生成 768 维中英文向量，语言模型密钥不会交给 embedding 服务。
+
+当前知识库工作流：
+
+- `KB-00 Ingest Document Webhook`：Header Auth 保护的应用入口，校验租户、访问组和文档 ID 后同步调用 `KB-02`；浏览器只调用 FastAPI 的 `POST /api/v1/analysis/knowledge-base/documents`。
+- `EMB-00 CPU Text Embeddings`：统一调用本机 `/api/embed`，固定模型与 768 维输出，并校验批次数量、维度和有限数值。
+- `KB-01 Publish Parsed Source`：校验单一 parsed-document contract，批量生成 chunk embeddings，并在一个事务内幂等发布文档与 chunks。
+- `KB-02 Ingest Project Document`：按 `document_id` 调用文档服务，读取 Docling `DocumentBlock` 原文和页码定位后交给 `KB-01`。
+- `KB-10 Hybrid Retrieve With Citations`：自动生成查询 embedding，执行租户/访问组/元数据过滤、中文词元/FTS/trigram 与 pgvector RRF 召回，调用 `LLM-10` 做 Codex 模型重排，再去重、扩展相邻正文块并返回页码/URL/object key 引用。
+- `RAG-99 Publish And Retrieve Integration Test`：重复发布测试材料，并断言召回、上下文扩展和引用字段完整。
+- `LLM-00 Codex Relay Responses`：调用 Codex 中转 `/responses`，归一化文本、工具调用、用量和引用所需的响应标识。
+- `LLM-10 Codex Rerank Candidates`：把候选正文视为不可信材料，通过严格 JSON schema 返回相关性顺序和理由。
+- `LLM-99 Codex Relay Integration Test`：验证 n8n 能使用本机 Codex relay 配置得到确定的 `OK` 响应。
+- `AN-10 Execute Decision Step`：统一执行检索、结构化分析、引用白名单校验、质量门和 `decision_state` 持久化。
+- `AN-20 Twelve-Step Spatial Strategy`：严格顺序执行政策场地到分期实施的十二个独立决策步骤；前一步质量门未通过时不会启动下一步，异常会把业务运行收敛为 `failed`。
+- `AN-00 Spatial Strategy Webhook`：Header Auth 保护的异步入口，地址为 `POST /webhook/api/v1/n8n/spatial-strategy`，要求 `X-N8N-Client-Key`、`X-Tenant-Id` 和 `project_question`；先创建业务 `run_id` 再进入异步编排，非法输入返回 400。
+- `AN-01 Spatial Strategy Run Status`：按 `run_id` 和租户读取运行状态、十二步进度、结构化输出、诊断与原文引用；不存在或跨租户统一返回 404。
+- `AN-99 Decision Step Integration Test`：验证真实召回、Codex 输出、引用校验和数据库状态持久化。
+
+浏览器不直接持有 `N8N_WEBHOOK_API_KEY`。分析工作台中的“十二步空间决策”能力调用 FastAPI 的 `POST /api/v1/analysis/spatial-strategy/runs`，并轮询 `GET /api/v1/analysis/spatial-strategy/runs/{run_id}`；后端代理再向 n8n 注入密钥、租户和访问组。该能力只保留 n8n 服务执行入口。
+
+`scripts/n8n_bootstrap.ps1` 会在宿主机启动 embedding 服务并等待模型健康后再执行 n8n 集成测试。入库和查询都由 `EMB-00` 使用同一模型编码；模型或维度变化时必须清空旧向量并重建，不能混用不同模型的向量。
 
 ### 人口数据目录
 - 根目录 `.env` 维护本地宿主机目录，例如 `POPULATION_DATA_DIR=E:/PeopleData`、`NIGHTLIGHT_DATA_DIR=E:/NightlightData/processed`

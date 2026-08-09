@@ -1,0 +1,128 @@
+{
+  "id": "codexRelayResponse1",
+  "name": "LLM-00 Codex Relay Responses",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "3151f848-4524-4212-b298-4fc6de0c2daf",
+      "name": "When Called By Agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first()?.json ?? {};\nif (input.input === undefined || input.input === null || input.input === '') {\n  throw new Error('input is required');\n}\nconst request = {\n  model: '__CODEX_RELAY_MODEL__',\n  input: input.input,\n  max_output_tokens: Math.max(16, Math.min(32768, Number(input.max_output_tokens ?? 4096))),\n  store: false,\n};\nif (typeof input.instructions === 'string' && input.instructions.trim()) request.instructions = input.instructions.trim();\nif (Array.isArray(input.tools) && input.tools.length) request.tools = input.tools;\nif (input.tool_choice !== undefined) request.tool_choice = input.tool_choice;\nif (typeof input.parallel_tool_calls === 'boolean') request.parallel_tool_calls = input.parallel_tool_calls;\nif (input.reasoning && typeof input.reasoning === 'object') request.reasoning = input.reasoning;\nif (input.text && typeof input.text === 'object') request.text = input.text;\nif (input.metadata && typeof input.metadata === 'object') request.metadata = input.metadata;\nreturn [{ json: { ...input, request } }];"
+      },
+      "id": "63d671c7-7b83-4259-af3f-6887287a4fe8",
+      "name": "Build Responses Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "__CODEX_RELAY_BASE_URL__/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "78c22ddd-884e-43f3-b6ca-202034354650",
+      "name": "Call Codex Relay",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        740,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "codex-relay",
+          "name": "Codex Relay"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $('Build Responses Request').item.json;\nconst response = $input.first()?.json ?? {};\nconst output = Array.isArray(response.output) ? response.output : [];\nconst outputText = output.flatMap((item) => Array.isArray(item.content) ? item.content : []).filter((item) => item.type === 'output_text').map((item) => String(item.text ?? '')).join('');\nconst toolCalls = output.filter((item) => item.type === 'function_call').map((item) => {\n  let argumentsValue = item.arguments ?? '';\n  try { argumentsValue = JSON.parse(argumentsValue); } catch {}\n  return { call_id: item.call_id, name: item.name, arguments: argumentsValue, status: item.status };\n});\nreturn [{ json: {\n  ...input,\n  response_id: response.id,\n  model: response.model,\n  status: response.status,\n  output_text: outputText,\n  tool_calls: toolCalls,\n  output,\n  usage: response.usage ?? {},\n  error: response.error ?? null,\n} }];"
+      },
+      "id": "fdf0170c-92e8-4169-a49a-a2de41fce942",
+      "name": "Normalize Responses Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "When Called By Agent": {
+      "main": [
+        [
+          {
+            "node": "Build Responses Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Responses Request": {
+      "main": [
+        [
+          {
+            "node": "Call Codex Relay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Codex Relay": {
+      "main": [
+        [
+          {
+            "node": "Normalize Responses Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7434a8d3-92f9-4701-9632-af170d2f1619",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

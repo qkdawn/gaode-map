@@ -1,0 +1,82 @@
+{
+  "id": "kbIngestProjectDoc01",
+  "name": "KB-02 Ingest Project Document",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": { "inputSource": "passthrough" },
+      "id": "2117f959-44ac-4694-8678-293938483001",
+      "name": "When Called By Application",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first()?.json ?? {};\nconst documentId = String(input.document_id ?? '').trim();\nif (!documentId) throw new Error('document_id is required');\nconst stringList = (value) => {\n  if (!Array.isArray(value)) return [];\n  return [...new Set(value.map((item) => String(item ?? '').trim()).filter(Boolean))];\n};\nconst visibility = input.visibility === 'public' ? 'public' : 'restricted';\nconst accessGroups = stringList(input.access_groups);\nif (visibility === 'restricted' && accessGroups.length === 0) {\n  throw new Error('restricted documents require at least one access_group');\n}\nreturn [{ json: {\n  document_id: documentId,\n  options: {\n    tenant_id: String(input.tenant_id ?? 'default').trim() || 'default',\n    visibility,\n    access_groups: accessGroups,\n    source_type: String(input.source_type ?? 'project_document').trim() || 'project_document',\n    source_url: String(input.source_url ?? '').trim(),\n    decision_steps: stringList(input.decision_steps),\n    project_types: stringList(input.project_types),\n    geography: stringList(input.geography),\n    metadata: input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata) ? input.metadata : {},\n  },\n} }];"
+      },
+      "id": "e310e827-ad5e-4ed1-a078-97361c51fe0a",
+      "name": "Normalize Ingestion Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=__DOCUMENT_API_BASE_URL__/documents/{{$json.document_id}}/rag-source",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.options) }}",
+        "options": {
+          "timeout": 600000,
+          "response": { "response": { "responseFormat": "json" } }
+        }
+      },
+      "id": "b5e90c66-ce43-4792-a31d-c80fd3e7992f",
+      "name": "Parse And Build Source Chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [740, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "kbPublishSource0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": { "waitForSubWorkflow": true }
+      },
+      "id": "399e0c72-0998-4753-8ae4-eb95231b2b67",
+      "name": "Publish Parsed Source",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [1000, 300]
+    }
+  ],
+  "connections": {
+    "When Called By Application": { "main": [[{ "node": "Normalize Ingestion Request", "type": "main", "index": 0 }]] },
+    "Normalize Ingestion Request": { "main": [[{ "node": "Parse And Build Source Chunks", "type": "main", "index": 0 }]] },
+    "Parse And Build Source Chunks": { "main": [[{ "node": "Publish Parsed Source", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "137395d8-772e-42a7-bddf-ed11c87a6d08",
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}

@@ -1,0 +1,267 @@
+{
+  "id": "ragIntegration0001",
+  "name": "RAG-99 Publish And Retrieve Integration Test",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "e1c90240-d71e-4505-969f-f58d1fa5ee40",
+      "name": "Run Integration Test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: { document: {\n  source_key: 'n8n-integration-test',\n  title: 'N8N RAG 集成测试材料',\n  source_type: 'test_fixture',\n  source_url: 'https://example.invalid/n8n-rag-test',\n  object_key: 'fixtures/n8n-rag-test.txt',\n  version: 1,\n  checksum: 'n8n-integration-test-v1',\n  tenant_id: 'default',\n  visibility: 'restricted',\n  access_groups: ['planning'],\n  metadata: { fixture: true },\n  chunks: [\n    { ordinal: 0, page_start: 1, page_end: 1, section: '入口策略', content: '项目一期应优先测试步行入口，并记录真实到达方向、过街冲突和拒绝原因。', search_terms: '步行入口 一期 到达方向 过街冲突', decision_steps: [], project_types: [], geography: [] },\n    { ordinal: 1, page_start: 2, page_end: 2, section: '验证边界', content: '该建议是首轮测试参数，不能从POI数量直接外推真实客流或投资回报。', search_terms: '首轮测试 参数 POI 客流 投资回报', decision_steps: [], project_types: [], geography: [] }\n  ]\n} } }];"
+      },
+      "id": "34b26fed-8fa2-4fe1-b33c-e1b4cd7520f5",
+      "name": "Build Test Source",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "kbPublishSource0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "a3d1a86e-5c06-4687-a50e-a4ffc929e34d",
+      "name": "Publish Test Source",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const published = $input.first().json;\nif (!published.published || Number(published.chunk_count) !== 2) throw new Error('publish workflow did not persist both chunks');\nreturn [{ json: {\n  query: '步行入口',\n  tenant_id: 'default',\n  access_groups: ['planning'],\n  decision_steps: ['step_09_spatial_layout'],\n  project_types: ['urban-renewal'],\n  geography: ['demo'],\n  metadata_filter: { fixture: true },\n  candidate_limit: 20,\n  result_limit: 5,\n  context_radius: 1\n} }];"
+      },
+      "id": "61157b10-5167-46f8-98a8-b99dd8d4ef0f",
+      "name": "Build Recall Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "kbHybridRetrieve0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "36241d86-d6f0-4ec8-a34c-081caa880154",
+      "name": "Retrieve Test Evidence",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const result = $input.first().json;\nif (!Array.isArray(result.candidates) || result.candidates.length < 1) throw new Error('hybrid recall returned no direct hit');\nif (!Array.isArray(result.contexts) || result.contexts.length < 2) throw new Error('context expansion did not read adjacent source chunks');\nif (!Array.isArray(result.citations) || result.citations.some((citation) => !citation.citation_id || !citation.title || !citation.page_start)) throw new Error('citation locator is incomplete');\nif (result.retrieval?.rerank?.method !== 'codex-llm' || !result.retrieval.rerank.response_id) throw new Error('Codex model rerank metadata is incomplete');\nreturn [{ json: {\n  passed: true,\n  candidate_count: result.candidates.length,\n  context_count: result.contexts.length,\n  citation_count: result.citations.length,\n  fusion: result.retrieval.fusion,\n  rerank: result.retrieval.rerank.method,\n} }];"
+      },
+      "id": "4e0f251c-9078-4ed4-833b-19e2cc2b5fda",
+      "name": "Assert Cited Retrieval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const allowed = $input.first().json;\nif (!allowed.passed) throw new Error('allowed retrieval assertion did not pass');\nreturn [{ json: {\n  query: '步行入口',\n  tenant_id: 'default',\n  access_groups: ['unauthorized-audit-group'],\n  decision_steps: ['step_09_spatial_layout'],\n  project_types: ['urban-renewal'],\n  geography: ['demo'],\n  metadata_filter: { fixture: true },\n  candidate_limit: 20,\n  result_limit: 5,\n  context_radius: 1\n} }];"
+      },
+      "id": "b74161ab-b565-44ce-890a-d49024407520",
+      "name": "Build Unauthorized Recall",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "kbHybridRetrieve0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "07962739-0160-447e-84ff-94ddbd9a2a52",
+      "name": "Retrieve Without Permission",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [1980, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const result = $input.first().json;\nif (!Array.isArray(result.candidates) || result.candidates.length !== 0) throw new Error('permission filter leaked direct candidates');\nif (!Array.isArray(result.contexts) || result.contexts.length !== 0) throw new Error('permission filter leaked source context');\nif (!Array.isArray(result.citations) || result.citations.length !== 0) throw new Error('permission filter leaked citations');\nif (result.retrieval?.rerank?.method !== 'skipped-no-candidates') throw new Error('empty permission result still invoked model rerank');\nreturn [{ json: {\n  passed: true,\n  permission_isolation: true,\n  candidate_count: 0,\n  context_count: 0,\n  citation_count: 0,\n  rerank: result.retrieval.rerank.method,\n} }];"
+      },
+      "id": "26e14851-69b6-4dc8-bf7a-a4d76c814886",
+      "name": "Assert Permission Isolation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2240, 300]
+    }
+  ],
+  "connections": {
+    "Run Integration Test": {
+      "main": [
+        [
+          {
+            "node": "Build Test Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Test Source": {
+      "main": [
+        [
+          {
+            "node": "Publish Test Source",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish Test Source": {
+      "main": [
+        [
+          {
+            "node": "Build Recall Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Recall Request": {
+      "main": [
+        [
+          {
+            "node": "Retrieve Test Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Test Evidence": {
+      "main": [
+        [
+          {
+            "node": "Assert Cited Retrieval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assert Cited Retrieval": {
+      "main": [
+        [
+          {
+            "node": "Build Unauthorized Recall",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Unauthorized Recall": {
+      "main": [
+        [
+          {
+            "node": "Retrieve Without Permission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Without Permission": {
+      "main": [
+        [
+          {
+            "node": "Assert Permission Isolation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e56cf70e-dddf-4ad0-8ee5-a67a10558eb0",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

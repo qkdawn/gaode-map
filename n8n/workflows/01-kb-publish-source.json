@@ -1,0 +1,106 @@
+{
+  "id": "kbPublishSource0001",
+  "name": "KB-01 Publish Parsed Source",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "0c2f47ac-07a4-4a8f-9afd-21715d8a5cf0",
+      "name": "When Called By Agent",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first()?.json ?? {};\nconst document = input.document ?? input;\nconst chunks = Array.isArray(document.chunks) ? document.chunks : [];\nconst required = ['source_key', 'title', 'source_type', 'checksum'];\nfor (const field of required) {\n  if (typeof document[field] !== 'string' || !document[field].trim()) {\n    throw new Error(`document.${field} is required`);\n  }\n}\nif (chunks.length === 0) throw new Error('document.chunks must contain at least one parsed chunk');\nconst normalizedChunks = chunks.map((chunk, index) => {\n  if (!chunk || typeof chunk.content !== 'string' || !chunk.content.trim()) {\n    throw new Error(`document.chunks[${index}].content is required`);\n  }\n  const ordinal = Number.isInteger(chunk.ordinal) ? chunk.ordinal : index;\n  if (ordinal < 0) throw new Error(`document.chunks[${index}].ordinal must be >= 0`);\n  if (chunk.embedding !== undefined && chunk.embedding !== null && (!Array.isArray(chunk.embedding) || chunk.embedding.length !== 768)) {\n    throw new Error(`document.chunks[${index}].embedding must contain 768 values when provided`);\n  }\n  return {\n    chunk_key: chunk.chunk_key || null,\n    content: chunk.content.trim(),\n    search_terms: String(chunk.search_terms ?? `${chunk.section ?? ''} ${chunk.content}`).trim(),\n    page_start: chunk.page_start ?? null,\n    page_end: chunk.page_end ?? null,\n    section: String(chunk.section ?? ''),\n    ordinal,\n    decision_steps: Array.isArray(chunk.decision_steps) ? chunk.decision_steps : [],\n    project_types: Array.isArray(chunk.project_types) ? chunk.project_types : [],\n    geography: Array.isArray(chunk.geography) ? chunk.geography : [],\n    embedding: chunk.embedding ?? null,\n    metadata: chunk.metadata && typeof chunk.metadata === 'object' ? chunk.metadata : {},\n  };\n});\nreturn [{ json: { document: {\n  source_key: document.source_key.trim(),\n  title: document.title.trim(),\n  source_type: document.source_type.trim(),\n  source_url: String(document.source_url ?? ''),\n  object_key: String(document.object_key ?? ''),\n  version: Number.isInteger(document.version) && document.version > 0 ? document.version : 1,\n  checksum: document.checksum.trim(),\n  tenant_id: String(document.tenant_id ?? 'default'),\n  visibility: document.visibility === 'public' ? 'public' : 'restricted',\n  access_groups: Array.isArray(document.access_groups) ? document.access_groups : [],\n  metadata: document.metadata && typeof document.metadata === 'object' ? document.metadata : {},\n  chunks: normalizedChunks,\n} } }];"
+      },
+      "id": "c2a0b5e6-cda1-4a5d-8de4-e4dcd013b9d1",
+      "name": "Validate Parsed Source",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "ollamaEmbedding0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": { "waitForSubWorkflow": true }
+      },
+      "id": "27f11c6d-e9a3-4be0-9af2-76aad8a0c566",
+      "name": "Embed Source Chunks",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [740, 300]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const source = $('Validate Parsed Source').first().json.document;\nconst result = $input.first()?.json ?? {};\nconst embeddings = Array.isArray(result.embeddings) ? result.embeddings : [];\nif (embeddings.length !== source.chunks.length) throw new Error('chunk embedding count does not match parsed chunks');\nreturn [{ json: { document: {\n  ...source,\n  metadata: { ...source.metadata, embedding_model: result.model, embedding_dimensions: result.dimensions },\n  chunks: source.chunks.map((chunk, index) => ({ ...chunk, embedding: embeddings[index] })),\n} } }];"
+      },
+      "id": "bb010cf9-3463-4629-a206-78eb509cfb74",
+      "name": "Attach Chunk Embeddings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [980, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH payload AS (\n  SELECT $1::jsonb AS value\n), saved_document AS (\n  INSERT INTO kb_documents (source_key, title, source_type, source_url, object_key, status, version, checksum, published_at, metadata, tenant_id, visibility, access_groups)\n  SELECT\n    value->>'source_key', value->>'title', value->>'source_type',\n    COALESCE(value->>'source_url', ''), COALESCE(value->>'object_key', ''),\n    'published', (value->>'version')::integer, value->>'checksum', NOW(),\n    COALESCE(value->'metadata', '{}'::jsonb), COALESCE(value->>'tenant_id', 'default'),\n    COALESCE(value->>'visibility', 'restricted'),\n    ARRAY(SELECT jsonb_array_elements_text(COALESCE(value->'access_groups', '[]'::jsonb)))\n  FROM payload\n  ON CONFLICT (source_key, version) DO UPDATE SET\n    title = EXCLUDED.title, source_type = EXCLUDED.source_type, source_url = EXCLUDED.source_url,\n    object_key = EXCLUDED.object_key, status = 'published', checksum = EXCLUDED.checksum,\n    published_at = NOW(), metadata = EXCLUDED.metadata, tenant_id = EXCLUDED.tenant_id,\n    visibility = EXCLUDED.visibility, access_groups = EXCLUDED.access_groups\n  RETURNING id, source_key, version, status\n), inserted_chunks AS (\n  INSERT INTO kb_chunks (document_id, chunk_key, content, search_terms, page_start, page_end, section, ordinal, decision_steps, project_types, geography, embedding, metadata)\n  SELECT\n    d.id,\n    COALESCE(chunk->>'chunk_key', encode(digest(d.source_key || ':' || d.version || ':' || (chunk->>'ordinal') || ':' || (chunk->>'content'), 'sha256'), 'hex')),\n    chunk->>'content', COALESCE(chunk->>'search_terms', ''), NULLIF(chunk->>'page_start', '')::integer,\n    NULLIF(chunk->>'page_end', '')::integer, COALESCE(chunk->>'section', ''), (chunk->>'ordinal')::integer,\n    ARRAY(SELECT jsonb_array_elements_text(COALESCE(chunk->'decision_steps', '[]'::jsonb))),\n    ARRAY(SELECT jsonb_array_elements_text(COALESCE(chunk->'project_types', '[]'::jsonb))),\n    ARRAY(SELECT jsonb_array_elements_text(COALESCE(chunk->'geography', '[]'::jsonb))),\n    CASE WHEN jsonb_typeof(chunk->'embedding') = 'array' THEN (chunk->>'embedding')::vector(768) ELSE NULL END,\n    COALESCE(chunk->'metadata', '{}'::jsonb)\n  FROM saved_document d\n  CROSS JOIN payload\n  CROSS JOIN LATERAL jsonb_array_elements(payload.value->'chunks') AS chunk\n  ON CONFLICT (document_id, ordinal) DO UPDATE SET\n    chunk_key = EXCLUDED.chunk_key, content = EXCLUDED.content, search_terms = EXCLUDED.search_terms,\n    page_start = EXCLUDED.page_start, page_end = EXCLUDED.page_end, section = EXCLUDED.section,\n    decision_steps = EXCLUDED.decision_steps, project_types = EXCLUDED.project_types,\n    geography = EXCLUDED.geography, embedding = EXCLUDED.embedding, metadata = EXCLUDED.metadata\n  RETURNING id, ordinal\n), removed_stale_chunks AS (\n  DELETE FROM kb_chunks\n  WHERE document_id = (SELECT id FROM saved_document)\n    AND ordinal NOT IN (SELECT ordinal FROM inserted_chunks)\n  RETURNING id\n)\nSELECT d.id AS document_id, d.source_key, d.version, d.status, (SELECT count(*) FROM inserted_chunks)::integer AS chunk_count\nFROM saved_document d;",
+        "options": {
+          "queryReplacement": "={{ [$json.document] }}"
+        }
+      },
+      "id": "03da2a8e-8bfd-48b8-9b80-2c1dc830db67",
+      "name": "Publish Source Transaction",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [1220, 300],
+      "credentials": {
+        "postgres": {
+          "id": "rag-postgres",
+          "name": "RAG PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const row = $input.first()?.json ?? {};\nreturn [{ json: {\n  published: true,\n  document_id: row.document_id,\n  source_key: row.source_key,\n  version: row.version,\n  status: row.status,\n  chunk_count: Number(row.chunk_count ?? 0),\n} }];"
+      },
+      "id": "eb4ff0b1-ec22-49df-9808-120e6b41f1dd",
+      "name": "Return Publish Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1480, 300]
+    }
+  ],
+  "connections": {
+    "When Called By Agent": { "main": [[{ "node": "Validate Parsed Source", "type": "main", "index": 0 }]] },
+    "Validate Parsed Source": { "main": [[{ "node": "Embed Source Chunks", "type": "main", "index": 0 }]] },
+    "Embed Source Chunks": { "main": [[{ "node": "Attach Chunk Embeddings", "type": "main", "index": 0 }]] },
+    "Attach Chunk Embeddings": { "main": [[{ "node": "Publish Source Transaction", "type": "main", "index": 0 }]] },
+    "Publish Source Transaction": { "main": [[{ "node": "Return Publish Result", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "a1c7c35e-7d01-4d6b-95f0-b2b33a3ba26a",
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}
