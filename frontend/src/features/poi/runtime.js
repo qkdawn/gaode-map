@@ -1,6 +1,7 @@
 import { markRaw } from 'vue'
 import { MarkerManager } from '../../map/markers'
 import { FilterPanel } from '../../map/filters'
+import { buildPoiRuntimePoints } from './records.js'
 
     function createAnalysisPoiRuntimeInitialState() {
         return {
@@ -173,7 +174,7 @@ import { FilterPanel } from '../../map/filters'
                 }
                 const bucket = this.fetchSubtypeHitMap[categoryId];
                 (poiList || []).forEach((poi) => {
-                    const typeId = this.resolvePoiTypeId(poi && poi.type);
+                    const typeId = this.resolvePoiTypeId(poi && (poi.typecode || poi.type));
                     if (!typeId) return;
                     bucket[String(typeId)] = true;
                 });
@@ -510,35 +511,13 @@ import { FilterPanel } from '../../map/filters'
                     }
                     return (this.poiCategories[0] && this.poiCategories[0].id) ? this.poiCategories[0].id : 'default';
                 })();
-                let invalidPointCount = 0;
-                const invalidPointSamples = [];
-                const points = (Array.isArray(pois) ? pois : []).map((poi, idx) => {
-                    const loc = this.normalizeLngLat(poi && poi.location, 'poi.runtime.location');
-                    if (!loc) {
-                        invalidPointCount += 1;
-                        if (invalidPointSamples.length < 5) {
-                            invalidPointSamples.push({
-                                idx: idx,
-                                id: (poi && poi.id) || '',
-                                name: (poi && poi.name) || '',
-                                location: this.roadSyntaxSummarizeCoordInput(poi && poi.location)
-                            });
-                        }
-                        return null;
-                    }
-                    const lng = Number(loc[0]);
-                    const lat = Number(loc[1]);
-                    const matchedType = this.resolvePoiTypeId(poi && poi.type) || defaultTypeId;
-                    return {
-                        lng: lng,
-                        lat: lat,
-                        name: poi && poi.name ? poi.name : '',
-                        type: matchedType,
-                        address: poi && poi.address ? poi.address : '',
-                        lines: poi && Array.isArray(poi.lines) ? poi.lines : [],
-                        _pid: (poi && poi.id) || (`p-${idx}`)
-                    };
-                }).filter((poi) => !!poi);
+                const runtimePointResult = buildPoiRuntimePoints(pois, {
+                    defaultTypeId,
+                    normalizeLngLat: this.normalizeLngLat.bind(this),
+                    resolveTypeId: this.resolvePoiTypeId.bind(this),
+                    summarizeCoordInput: this.roadSyntaxSummarizeCoordInput.bind(this),
+                });
+                const { points, invalidPointCount, invalidPointSamples } = runtimePointResult;
                 if (invalidPointCount > 0) {
                     console.warn('[poi-runtime] skipped invalid coordinates', {
                         invalid_count: invalidPointCount,
