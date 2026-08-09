@@ -71,7 +71,6 @@ REQUIRED_FIELDS = {
     "answers_questions",
     "spatial_granularities",
     "supports",
-    "does_not_support",
     "use_when",
     "actionability",
     "followup_metrics",
@@ -140,8 +139,6 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
         status = str(metric.get("implementation_status") or "")
         if status not in ALLOWED_IMPLEMENTATION_STATUSES:
             raise ValueError(f"{metric_id} has unsupported implementation_status: {status}")
-        if status == "not_implemented" and not str(metric.get("implementation_gap") or "").strip():
-            raise ValueError(f"{metric_id} must declare implementation_gap")
         for field in ("name", "family", "definition", "unit"):
             if not str(metric.get(field) or "").strip():
                 raise ValueError(f"{metric_id}.{field} is required")
@@ -152,7 +149,6 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
             "answers_questions",
             "spatial_granularities",
             "supports",
-            "does_not_support",
             "use_when",
             "followup_metrics",
             "valid_comparisons",
@@ -167,7 +163,6 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
             "answers_questions",
             "spatial_granularities",
             "supports",
-            "does_not_support",
             "use_when",
             "valid_comparisons",
             "quality_requirements",
@@ -216,9 +211,9 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
                 raise ValueError(f"{metric_id}.followup_metrics.trigger is required")
 
         baseline = metric.get("comparison_baseline")
-        if not isinstance(baseline, dict) or set(baseline) != {"required", "preferred", "if_missing"}:
+        if not isinstance(baseline, dict) or set(baseline) != {"required", "preferred"}:
             raise ValueError(
-                f"{metric_id}.comparison_baseline must contain required, preferred, if_missing"
+                f"{metric_id}.comparison_baseline must contain required, preferred"
             )
         if not isinstance(baseline["required"], bool):
             raise ValueError(f"{metric_id}.comparison_baseline.required must be boolean")
@@ -227,8 +222,6 @@ def validate_catalog(payload: dict[str, Any], *, repository_root: Path | None = 
         unknown_baselines = sorted(set(baseline["preferred"]) - ALLOWED_BASELINE_TYPES)
         if unknown_baselines:
             raise ValueError(f"{metric_id} has unsupported comparison baselines: {unknown_baselines}")
-        if not str(baseline["if_missing"] or "").strip():
-            raise ValueError(f"{metric_id}.comparison_baseline.if_missing is required")
 
     for metric in metrics:
         unknown_followups = sorted(

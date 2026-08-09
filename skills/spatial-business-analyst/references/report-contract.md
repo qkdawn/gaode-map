@@ -21,7 +21,7 @@ report/state/manifest.json
 
 问题地图的 `payload.status` 使用 `awaiting_confirmation` 或 `confirmed`。已确认的问题地图为专项研究、决策逻辑图、决策清单和章节责任提供同一快照；用户修订后，后续工作从更新后的快照继续。
 
-`decision-logic-map.json` 的 `payload` 使用 `status: ready`，并保存非空 `rules`。每条规则至少含 `id`、`decision_question`、非空 `when`、`judgment`、`action`、`alternatives`、`counterexample`、`evidence_refs`、`limitations`、`validation` 与 `status`；可选 `metric_refs` 的每项含 `result_id`、`tool_id`、`observation`、`comparison_basis`、`decision_effect` 与 `does_not_prove`。它是正式报告各项选择的推理来源，不替代章节正文。
+`decision-logic-map.json` 的 `payload` 使用 `status: ready`，并保存非空 `value_path` 与非空 `rules`。`value_path` 的字段、含义和构建方法由 `value-path.md` 唯一拥有；它至少包含基线、受益者、目标结果、部署样板、输出、结果、影响、假设、介入期、观察期和复制/停止记录。每条规则只记录本节点的决策：`id`、`decision_question`、非空 `when`、`judgment`、`action`、`alternatives`、`counterexample`、`evidence_refs`、`limitations`、`validation` 与 `status`；可选 `metric_refs` 的每项含 `result_id`、`tool_id`、`observation`、`comparison_basis`、`decision_effect` 与 `does_not_prove`。规则通过共同的价值路径解释其必要性，不重复填写项目价值、取舍或资源流向。它是正式报告各项选择的推理来源，不替代章节正文。
 
 ## 审校与接受契约
 
@@ -53,7 +53,7 @@ verdict: accepted | revision_required
 
 ## 正式模式范围
 
-用户要求完整项目报告、正式综合报告或同等深度成果时进入 `formal_comprehensive`。每个专业章节由唯一 Subagent 所有，通常为 1,500-3,000 个中文内容字符；长度带为审校提供阅读信号，接受由双审校 verdict 决定。执行摘要、章节过渡、综合结论与证据审计位于专业章节之外。
+用户要求完整项目报告、正式综合报告或同等深度成果时进入 `formal_comprehensive`。每个专业章节由唯一 Subagent 所有，通常为 1,500-3,000 个中文内容字符；长度带为审校提供阅读信号，接受由双审校 verdict 决定。执行摘要、章节过渡、综合结论与证据审计位于专业章节之外。读者主文的逻辑顺序和章节表达由 `publication-editorial.md` 拥有：它必须由价值路径逐层推出项目角色、定位、部署样板、空间运行边界、运营与一期学习闭环，不能按专业研究分类装配。
 
 ## 条件性建议与推演
 

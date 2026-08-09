@@ -30,6 +30,7 @@ candidate_hypotheses: []
 evidence_needed: []
 disconfirming_evidence: []
 dependencies: []
+research_owner: main_agent | spatial_evidence_research
 status: open | confirmed | removed
 ```
 
@@ -45,6 +46,19 @@ status: open | confirmed | removed
 
 ```yaml
 status: ready
+value_path:
+  baseline:
+  beneficiaries: []
+  desired_outcome:
+  deployable_workflow: {}
+  outputs: []
+  outcomes: []
+  impacts: []
+  assumptions: []
+  intervention_window:
+  outcome_horizon:
+  expansion_or_stop:
+  replication_unit:
 rules:
   - id: R1
     decision_question:
@@ -73,6 +87,7 @@ stakeholders: []
 evidence_refs: []
 disconfirming_evidence_refs: []
 alternatives: []
+value_path_ref:
 current_judgment:
 action:
 validation:

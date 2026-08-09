@@ -56,6 +56,33 @@ def _write_state_bundle(report_dir: Path) -> None:
         "problem_map": {"status": "confirmed", "questions": []},
         "decision_logic_map": {
             "status": "ready",
+            "value_path": {
+                "baseline": "居民对场地的日常使用缺少稳定承接。",
+                "beneficiaries": [
+                    {
+                        "stakeholder": "周边居民",
+                        "current_need": "获得低冲突的日常服务与参与界面。",
+                        "timeframe": "每周日常使用时段",
+                    }
+                ],
+                "desired_outcome": "形成可持续使用并可被运营团队响应的服务闭环。",
+                "deployable_workflow": {
+                    "user": "周边居民",
+                    "trigger": "产生服务或参与需求时",
+                    "service": "完成一次可记录的居民服务与内容参与",
+                    "space": "首期开放的公共界面",
+                    "operator": "项目协调人",
+                    "record": "服务闭合与重复使用记录",
+                },
+                "outputs": ["完成的服务记录和内容单元"],
+                "outcomes": ["稳定使用与协同响应"],
+                "impacts": ["形成可复制的基层治理服务机制"],
+                "assumptions": ["居民愿意在明确规则下持续使用"],
+                "intervention_window": "首期六个月",
+                "outcome_horizon": "首期结束后三个月复核",
+                "expansion_or_stop": "以重复使用、服务闭合和冲突记录决定调整。",
+                "replication_unit": "下一处居民服务空间",
+            },
             "rules": [
                 {
                     "id": "R1",
@@ -289,6 +316,22 @@ def test_rejects_incomplete_decision_logic_rule(tmp_path):
     result = MODULE.validate_report_dir(report_dir)
 
     assert "decision_logic_rule_invalid" in _codes(result.errors)
+
+
+def test_rejects_missing_value_path(tmp_path):
+    report_dir = _write_report(tmp_path)
+    state_path = report_dir / MODULE.STATE_ARTIFACTS["decision_logic_map"]["path"]
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["payload"].pop("value_path")
+    state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    manifest_path = report_dir / MODULE.STATE_MANIFEST_PATH
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"]["decision_logic_map"]["sha256"] = hashlib.sha256(state_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    result = MODULE.validate_report_dir(report_dir)
+
+    assert "value_path_missing" in _codes(result.errors)
 
 
 def test_rejects_legacy_index_schema_version(tmp_path):

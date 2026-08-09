@@ -61,7 +61,7 @@ metrics:
   implementation_status: implemented
 - tool_id: isochrone.reachable_area
   name: 等时圈可达范围
-  purpose: 理论可达空间边界
+  purpose: 网络可达范围
   question_tags:
   - catchment_area
   - scope_definition

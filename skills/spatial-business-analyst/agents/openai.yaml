@@ -9,12 +9,18 @@ dependencies:
   - skill_id: spatial-market-audience-research
     when: formal_problem_map_confirmed
     stage: market_discovery
+  - skill_id: spatial-evidence-research
+    when: confirmed_spatial_evidence_requests
+    stage: decision_evidence
 workflow_stages:
   - stage: preflight
     owner: cultural-tourism-theme-research
     after: project_loaded
   - stage: market_discovery
     owner: spatial-market-audience-research
+    after: problem_map_confirmed
+  - stage: decision_evidence
+    owner: spatial-evidence-research
     after: problem_map_confirmed
   - stage: product_recheck
     owner: spatial-market-audience-research

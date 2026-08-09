@@ -1,11 +1,11 @@
 ---
 name: spatial-business-analyst
-description: 将已保存项目材料、空间范围和可复核指标转成问题地图驱动的中文空间商业决策报告。用于用户要求在确认研究问题后完成定位、空间产品、运营与分期的正式综合分析；单项指标、局部诊断和其他阶段的策略或空间单元设计走各自专用流程。
+description: 将已保存项目材料、空间范围和可复核指标转成以价值路径和部署样板逐层推出的中文空间商业决策报告。用于用户要求在确认研究问题后完成定位、空间产品、运营与分期的正式综合分析；单项指标、局部诊断和其他阶段的策略或空间单元设计走各自专用流程。
 ---
 
 # Spatial Business Analyst
 
-担任问题地图驱动的空间商业决策分析师。正式综合报告先完成项目资源调研，再建立可恢复的项目语义状态并取得用户确认，随后使用 Codex 原生 Subagent、真实项目证据和现行工具形成定位、空间产品、运营与分期判断。简单问答、单项诊断和局部分析保持精简路径；完整项目报告进入 `formal_comprehensive`。
+担任空间商业决策分析师。正式综合报告先建立一条 `价值路径`：为谁解决什么当前问题，一期运行什么样板，留下什么记录决定复制或调整；必要的专业研究由 Codex 原生 Subagent 完成，再以这条路径推出定位、空间产品、运营与分期。每个读者可见段落遵循“要回答的问题 -> 为谁创造什么价值 -> 证据与反证 -> 当前判断 -> 由此限定的下一步问题”。主文先让甲方看清项目价值与一期样板，证据、反证和边界只解释这个方案为何成立及如何调整。简单问答、单项诊断和局部分析保持精简路径；完整项目报告进入 `formal_comprehensive`。
 
 ## Step 0：前置项目资源调研
 
@@ -23,7 +23,7 @@ report/research/cultural-tourism-theme-research.md
 
 ## Step 1：准备材料与问题地图
 
-正式综合报告在这一步先读取 `references/adaptive-report-model.md`、`references/decision-rulebook.md` 与 `references/report-contract.md`，再建立问题地图、决策逻辑图和可恢复状态。
+正式综合报告在这一步先读取 `references/adaptive-report-model.md`、`references/value-path.md`、`references/decision-rulebook.md` 与 `references/report-contract.md`，再建立问题地图、决策逻辑图和可恢复状态。
 
 从已保存项目开始读取授权原件、空间范围、数据集目录和指标目录：
 
@@ -48,7 +48,7 @@ report/state/evidence-summary.json
 report/state/manifest.json
 ~~~
 
-项目语义模型 `project_semantic_model` 记录真实对象和关系；问题地图 `problem_map` 记录当前选择、候选路径、利益与使用冲突、证据需求和反证信号。`decision_logic_map` 以空规则容器进入状态包，确认后将事实、规则、候选路径、反例、指标和改判条件串成可追溯判断。`decision_inventory` 与 `evidence_summary` 以空的对象型 `payload` 容器进入状态包，波次 4 写入决策和证据条目。`problem-map.json` 的状态为 `awaiting_confirmation`。
+项目语义模型 `project_semantic_model` 记录真实对象和关系；问题地图 `problem_map` 记录受益者的当前状态、期望改变、候选路径、利益与使用冲突、证据需求和反证信号。`decision_logic_map` 以空规则与空 `value_path` 容器进入状态包，确认后将事实、价值路径、规则、候选路径、反例、指标和改判条件串成可追溯判断。`decision_inventory` 与 `evidence_summary` 以空的对象型 `payload` 容器进入状态包，波次 4 写入决策和证据条目。`problem-map.json` 的状态为 `awaiting_confirmation`。
 
 ~~~text
 项目理解
@@ -56,11 +56,11 @@ report/state/manifest.json
 
 需要共同确认的问题地图
 1. 当前项目真正需要作出的选择
-2. 材料支持的候选路径及替代路径
-3. 会阻断产品或实施的利益与使用冲突
-4. 材料中的关键对象如何形成空间系统
-5. 推荐方向需要的运营承接能力
-6. 足以推翻、缩减或切换当前假设的证据
+2. 谁的当前使用、服务或治理状态需要改变，以及可观察的目标结果
+3. 材料支持的候选价值路径及替代路径
+4. 材料中的关键对象如何组成一期部署样板
+5. 推荐方向需要的运营承接能力和利益相关者时间节奏
+6. 足以确认、调整或切换当前价值路径的证据
 
 拟开展的证据研究
 - 每个问题对应的专业视角、候选证据和反证来源
@@ -78,33 +78,33 @@ report/state/manifest.json
 
 ## Step 3：完成专项研究并标注证据边界
 
-读取 `references/report-orchestration.md`、`references/specialist-roles.md`、`references/analysis-blueprint-and-tools.md` 与 `references/decision-rulebook.md`。先按规则手册建立“事实/证据 -> 条件判断 -> 候选与反例 -> 当前动作 -> 验证条件”的决策逻辑图，再分派专项研究。所有正式报告完整执行 `$spatial-market-audience-research`：先以 `market_discovery` 建立客群证据，再在定位、空间和运营草案后以 `product_recheck` 完成逐产品校核。市场公开研究覆盖统计、政策规划、文保档案、片区供给、直接及区域竞品、文化机构或机构采购、公开价格与活动；单页失效或一次查询为空时继续改写查询和替换来源。用户要求依据现有资料完成完整但非确证的推演时，按 `report-contract.md` 的条件性建议规则将完整十部分推演写入同一份正式报告。选择空间指标时读取 `references/metric-selection.md`、`references/spatial-inference-rules.md`；多空间对象或再利用项目读取 `references/spatial-unit-programming.md`。先复用持久化指标，只有会改变规则节点的行动时才补充执行。
+读取 `references/report-orchestration.md`、`references/specialist-roles.md`、`references/analysis-blueprint-and-tools.md`、`references/value-path.md` 与 `references/decision-rulebook.md`。先建立价值路径，再按规则手册建立一条有上游和下游依赖的推理主线，再分派专项研究。主线依次判断：目标结果与核心矛盾、项目角色与关键能力、定位与价值承诺、部署样板工作流、空间运行边界、一期部署与学习闭环。每一步必须留下“上游判断、为谁创造的价值、证据与反证、当前判断、替代路径、对下一步的影响”；空间、许可、权益、承载和成本只在塑造部署样板或资源优先级时进入。所有正式报告完整执行 `$spatial-market-audience-research`：先以 `market_discovery` 建立客群证据，再在定位、空间和运营草案后以 `product_recheck` 完成逐产品校核。市场公开研究覆盖统计、政策规划、文保档案、片区供给、直接及区域竞品、文化机构或机构采购、公开价格与活动；一期需要资金决策时，公开价格研究还须形成可追溯的成本基准与条件性启动预算包。单页失效或一次查询为空时继续改写查询和替换来源。用户要求依据现有资料完成完整但非确证的推演时，按 `report-contract.md` 的条件性建议规则在同一份正式报告中比较路径并作出条件性选择。选择空间指标时读取 `references/metric-selection.md`、`references/spatial-inference-rules.md`；新指标按 `spatial_metric_catalog`、`spatial_metric_detail`、`execute_spatial_metric` 依次选择和执行，随后通过 `list_spatial_metric_results` 与 `read_spatial_metric_result` 复用持久化结果。多空间对象或再利用项目读取 `references/spatial-unit-programming.md`。先复用持久化指标，只有会改变规则节点的行动时才补充执行。
 
-将每个问题的来源、比较基准、反证、证据等级和未闭合义务写入证据摘要；每个规则节点必须写明其条件、结论、反例、指标边界和改判条件。对无法由项目材料直接回答的问题，先完成公开网页检索；仍无直接记录时，以可追溯代理、显式假设和验证动作完成条件性推断，不能把缺口变成停止撰写报告的理由。
+将每个问题的来源、比较基准、反证、证据等级和未闭合义务写入证据摘要；每个规则节点只写条件、结论、反例、指标边界、下游影响和改判条件，并回扣同一条 `value_path`。`value_path` 写明基线、受益者、部署样板、输出、结果、影响、假设、介入期、观察期与复制/停止记录。对无法由项目材料直接回答的问题，先完成公开网页检索；仍无直接记录时，以可追溯代理、显式假设和验证动作完成条件性推断，不能把缺口变成停止撰写报告或只交付取证计划的理由。
 
-**完成条件：** 所有适用专项的输出均已形成；每项建议均已标明为直接证据、公开检索证据、代理推断、情景假设或待验证，并包含反证和改判条件。
+**完成条件：** 所有适用专项的输出均已形成；`value_path` 覆盖基线、受益者、部署样板、输出、结果、影响、假设、时间窗口与复制/停止记录；每项建议均已标明为直接证据、公开检索证据、代理推断、情景假设或待验证，并包含反证和改判条件。
 
 ## Step 4：收敛可决策选择
 
-将所有能改变项目路径的规则节点写入 `decision_inventory`。每项重要选择记录候选取舍、证据 ID、反例、能力要求、机会成本和改判条件，并标明“当前建议”“条件性建议”或“暂不建议”；每项只有一个章节所有者。条件性建议必须给出事实输入、假设参数、推演规则、结果范围、失效信号和校准记录。`research_pending`、`conditional_test` 和 `excluded` 保留在逻辑图、证据摘要与取证计划中，并在正式报告中说明其对当前建议的影响。
+将所有能改变项目路径的规则节点写入 `decision_inventory`，按逻辑链顺序而非专业类型排序。每项重要选择只记录候选取舍、证据 ID、反例、能力要求、上游前提、下游影响和改判条件，并标明“当前建议”“条件性建议”或“暂不建议”；它通过 `value_path_ref` 回扣项目级价值路径，每项只有一个章节所有者。项目角色资格不足时必须写出降级路径，例如伴生承接区、线路节点、社区服务设施或产业服务节点，不能为保留宏大定位跳过资格判断。条件性建议必须给出事实输入、假设参数、推演规则、结果范围、失效信号和校准记录；涉及一期投入时，包含条件性启动预算包及其公开来源、口径和询价校准门。`research_pending`、`conditional_test` 和 `excluded` 保留在逻辑图、证据摘要与取证计划中，并在正式报告中说明其对当前建议的影响。
 
 **完成条件：** 决策清单覆盖所有当前选择，每项有唯一所有者与准入证据，依赖关系可由后续章节消费。
 
 ## Step 5：撰写与逐章审校
 
-章节作者读取 `references/quality-gates.md`，按决策所有权撰写 v1。每一版都经过反方审查和分析深度审校；成立意见由同一作者返写，初稿最多两次返写。
+章节作者读取 `references/quality-gates.md` 与 `references/value-path.md`，按决策所有权和逻辑链位置撰写 v1。章节开头先回答本章为谁创造什么改变，随后呈现最少且足够的机制、证据、反证与判断，最后明确它怎样推进部署样板或改变下一选择；标题以项目对象、当前选择或下一步行动命名。每一版都经过反方审查和分析深度审校；成立意见由同一作者返写，初稿最多两次返写。
 
 **完成条件：** 每个接受章节的最新版本同时获得两个 `accepted` verdict；未通过 v3 的章节阻止交付。
 
 ## Step 6：全稿审校与总编裁决
 
-完成逐章接受后，执行跨章反方与深度审校。读取 `references/publication-editorial.md`，将跨章冲突、重复论证和不清楚的决策归属退回唯一章节所有者定向返写。总编必须让资源主题、区位市场竞争、客群行为、定位比较、空间产品、运营分期、产品市场再校核和实施验证门形成读者可见的结论链；专项底稿不能只被压缩成共同风险。
+完成逐章接受后，执行跨章反方与深度审校。读取 `references/publication-editorial.md`，将跨章冲突、重复论证和不清楚的决策归属退回唯一章节所有者定向返写。总编必须让读者顺序看见“目标结果与核心矛盾 -> 项目角色与关键能力 -> 定位与价值承诺 -> 部署样板工作流 -> 空间运行边界 -> 一期部署与学习闭环 -> 复制与扩展决策门”；专项底稿只能作为这些判断的证据，不能反过来决定主文目录。
 
 **完成条件：** 全稿意见均已裁定并闭合；每个重要选择、共同事实和代理边界都有唯一完整正文归属。
 
 ## Step 7：装配正式报告
 
-按 `report-contract.md` 装配 `report/project-report.md`。同时交付 `report/decision-logic-map.md`，用项目事实、规则、候选/反例、当前选择与验证条件说明“为什么走到这一步”。逻辑图不是报告目录，其规则节点须可追溯到状态工件。运行：
+按 `report-contract.md` 装配 `report/project-report.md`。主文先呈现价值路径中的受益者、目标结果和一期部署样板，再逐层推出项目角色、定位、空间、运营和一期资源组合；证据、反证、许可与参数只在改变部署样板或复制决策的位置出现，其余进入证据附录。同时交付 `report/decision-logic-map.md`，用项目事实、价值路径、规则、候选/反例、当前选择与下一步问题说明“为什么走到这一步”。逻辑图不是报告目录，其规则节点须可追溯到状态工件。运行：
 
 ~~~text
 python skills/spatial-business-analyst/scripts/validate_chapter_assembly.py --report-dir <report-directory>
@@ -121,7 +121,7 @@ python skills/spatial-business-analyst/scripts/render_decision_logic_map.py --re
 
 ## Step 9：交付与回归
 
-始终交付 `report/project-report.md` 正式综合报告，并说明当前建议、条件性建议、关键证据、公开检索结果、代理边界、反证和实施前提。只有公开检索仍无法取得的项目级客流、支付、许可、成本、容量或运营记录进入参数、范围、公式和验证计划，不伪装为事实。修改本 Skill 或回归验证时读取 `references/adaptive-forward-tests.md`。
+始终交付 `report/project-report.md` 正式综合报告。报告必须让甲方依次读出：谁的当前状态将改变、项目交付什么可见价值、一期部署样板怎样运行、空间和运营怎样承接、什么记录说明近期结果成立，以及什么条件下复制、扩大、调整或停止。只有公开检索仍无法取得的项目级客流、支付、许可、成本、容量或运营记录进入参数、范围、公式和验证计划，不伪装为事实。修改本 Skill 或回归验证时读取 `references/adaptive-forward-tests.md`。
 
 **完成条件：** 已交付唯一的正式综合报告；读者不会将条件性建议或暂不建议误解为已验证的实施承诺。
 
@@ -142,4 +142,4 @@ python skills/spatial-business-analyst/scripts/render_decision_logic_map.py --re
 
 ## Completion gate
 
-每次完整运行都交付正式综合报告。交付前确认问题地图已确认、状态 manifest 可恢复、`decision_inventory` 覆盖重要选择且具有唯一章节归属、章节双审校与总编裁决已闭合、装配校验通过，以及视觉和导出遵守各自契约。报告必须让读者能一眼区分当前建议、条件性建议和暂不建议，并看到每项条件性建议升级或退出的记录条件。
+每次完整运行都交付正式综合报告。交付前确认问题地图已确认、状态 manifest 可恢复、`decision_inventory` 覆盖重要选择且具有唯一章节归属、价值路径覆盖部署样板与一期学习闭环、章节双审校与总编裁决已闭合、装配校验通过，以及视觉和导出遵守各自契约。报告让读者能一眼区分当前建议、条件性建议和暂不建议，并看到每项条件性建议升级或退出的记录条件；主文以项目方案、部署样板和学习记录组织，研究过程与证据边界服务于相应选择。

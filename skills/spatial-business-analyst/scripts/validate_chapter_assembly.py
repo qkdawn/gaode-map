@@ -225,6 +225,7 @@ def _validate_decision_logic_map(payload: dict[str, Any], result: ValidationResu
     if not isinstance(rules, list) or not rules:
         result.errors.append(Finding("decision_logic_rules_missing", "Decision logic map must contain at least one rule."))
         return
+    _validate_value_path(payload.get("value_path"), result)
     required_fields = {
         "id": str,
         "decision_question": str,
@@ -260,6 +261,34 @@ def _validate_decision_logic_map(payload: dict[str, Any], result: ValidationResu
                 for field_name in required_metric_fields
             ):
                 result.errors.append(Finding("decision_logic_metric_invalid", "Metric references must declare provenance, effect and inference boundary."))
+
+
+def _validate_value_path(value_path: Any, result: ValidationResult) -> None:
+    if not isinstance(value_path, dict):
+        result.errors.append(Finding("value_path_missing", "Decision logic map must contain a value path."))
+        return
+    for field_name in ("baseline", "desired_outcome", "intervention_window", "outcome_horizon", "expansion_or_stop", "replication_unit"):
+        value = value_path.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            result.errors.append(Finding("value_path_invalid", f"Value path field {field_name} must be a non-empty string."))
+    for field_name in ("beneficiaries", "outputs", "outcomes", "impacts", "assumptions"):
+        value = value_path.get(field_name)
+        if not isinstance(value, list) or not value:
+            result.errors.append(Finding("value_path_invalid", f"Value path field {field_name} must be a non-empty list."))
+    beneficiaries = value_path.get("beneficiaries")
+    if isinstance(beneficiaries, list):
+        for beneficiary in beneficiaries:
+            if not isinstance(beneficiary, dict) or any(
+                not isinstance(beneficiary.get(field_name), str) or not beneficiary[field_name].strip()
+                for field_name in ("stakeholder", "current_need", "timeframe")
+            ):
+                result.errors.append(Finding("value_path_invalid", "Every beneficiary must declare stakeholder, current need and timeframe."))
+    workflow = value_path.get("deployable_workflow")
+    if not isinstance(workflow, dict) or any(
+        not isinstance(workflow.get(field_name), str) or not workflow[field_name].strip()
+        for field_name in ("user", "trigger", "service", "space", "operator", "record")
+    ):
+        result.errors.append(Finding("value_path_invalid", "Deployable workflow must declare user, trigger, service, space, operator and record."))
 
 
 REVIEW_FRONTMATTER_RE = re.compile(r"\A---\s*\n(?P<meta>.*?)\n---\s*\n(?P<body>.*)\Z", re.DOTALL)

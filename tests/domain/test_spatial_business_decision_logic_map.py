@@ -25,6 +25,10 @@ def test_renders_rule_chain_with_metric_boundary(tmp_path):
         "state_id": "decision_logic_map",
         "payload": {
             "status": "ready",
+            "value_path": {
+                "desired_outcome": "形成可验证的夜间公共文化服务。",
+                "deployable_workflow": {"service": "小容量夜间文化活动"},
+            },
             "rules": [
                 {
                     "id": "R7",
@@ -60,3 +64,7 @@ def test_renders_rule_chain_with_metric_boundary(tmp_path):
     assert "R7" in svg
     assert "nightlight.sector_profile" in svg
     assert "夜光不证明夜间消费" in svg
+    assert "结论与动作" in svg
+    assert "验证与边界" in svg
+    assert "形成可验证的夜间公共文化服务" in svg
+    assert "小容量夜间文化活动" in svg

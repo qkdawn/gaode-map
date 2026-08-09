@@ -1,20 +1,13 @@
 catalog_version: 2.0.0
 catalog_status: semantic_catalog
 scope: 当前仓库可用、派生或受阻的空间指标语义目录。
-interpretation_policy:
-- 仅有数量、密度、人口、夜光或路网指标时，不直接表述需求、客流、营业额、购买力或投资回报。
-- 比较性指标必须记录比较范围、时间、分类口径、空间分辨率和方法参数。
-- 前端派生指标依赖当前批次数据和前端阈值，不视为后端稳定事实。
-- implementation_status 为 not_implemented 的指标只能作为证据缺口，不得作为现有证据调用或用相似字段替代。
-
 decision_metric_policy:
-  selection_rule: 一个决策问题必须先选择一个互补指标组合，再从组合中执行可用指标；不得按数据集机械罗列指标。
+  selection_rule: 一个决策问题先选择互补指标组合，再从组合中执行可用指标。
   minimum_metric_count: 2
   shared_spatial_unit_required: true
   comparison_required: true
   action_change_required: true
-  missing_data_rule: 缺少组合中的关键直接数据时，明确标记缺口并转为验证条件，不用其他代理指标强行替代。
-  publication_rule: implemented 只表示可以计算；只有完成组合比较、证据可追溯且会改变行动的指标，才进入普通读者报告。
+  publication_rule: 普通读者报告使用完成组合比较、证据可追溯且会改变行动的指标。
 
 decision_metric_bundles:
   - bundle_id: regional-direction
@@ -22,9 +15,8 @@ decision_metric_bundles:
     required_metrics:
       - regional.directional_evidence_matrix
     spatial_contract: 同一共同栅格、八方向和距离带；与共同栅格总体平均比较。
-    synthesis_rule: 设施、人口、夜光和路网必须联合解释；冲突关系本身也是判断，不得把单项最高值写成机会。
+    synthesis_rule: 联合解释设施、人口、夜光和路网的空间关系。
     action_change: 改变现场踏勘顺序、公共界面核验和首期试验方向。
-    cannot_conclude: 客流、消费、营收、ROI或正式连接节点。
 
   - bundle_id: people-scenarios
     decision_question: 哪些人群场景和时段值得先做低容量验证？
@@ -34,9 +26,8 @@ decision_metric_bundles:
       - nightlight.sector_profile
       - poi.grid_density
     spatial_contract: 同一共同栅格和方向/距离带；区域代理与项目内利益相关者约束分开比较。
-    synthesis_rule: 人口提出场景，夜光提出观察时段，POI提供周边供给背景；三者都不能替代访谈、参与和复访数据。
+    synthesis_rule: 人口提出场景，夜光提出观察时段，POI提供周边供给背景。
     action_change: 改变访谈对象、试验时段、活动规模和利益相关者影响核验顺序。
-    cannot_conclude: 已确认客群、偏好、付费意愿或真实客流。
 
   - bundle_id: content-service
     decision_question: 哪些内容或公共服务值得先做可逆小样？
@@ -46,9 +37,8 @@ decision_metric_bundles:
       - population.age_structure
       - grid.opportunity_flag
     spatial_contract: POI、人口和派生空间条件必须在同一共同栅格中比较，并与项目材料明确的空间角色对照。
-    synthesis_rule: 先判断已有供给、类别混合和人群场景是否互补，再形成内容假设；单个类别少不等于市场空白。
+    synthesis_rule: 判断已有供给、类别混合和人群场景是否互补，再形成内容假设。
     action_change: 改变首期内容组合、试验空间和合作方验证顺序。
-    cannot_conclude: 需求缺口、市场饱和、收入或招商规模。
 
   - bundle_id: connection
     decision_question: 哪些道路和周边单元值得优先做连接与人行核验？
@@ -58,29 +48,8 @@ decision_metric_bundles:
       - road.connectivity
       - poi.grid_density
     spatial_contract: 路网指标按同一图模型比较，空间背景按共同栅格对齐，连接节点和人行路径另行核验。
-    synthesis_rule: 整合度、选择度和连通性用于区分到达/穿行/断点条件；POI只提供界面背景，不生成连接节点结论。
+    synthesis_rule: 用整合度、选择度和连通性区分到达、穿行与断点条件，并结合 POI 识别界面特征。
     action_change: 改变道路踏勘、界面记录、连接节点测绘和无障碍核验优先级。
-    cannot_conclude: 实际人流、正式连接节点、步行时间或开放容量。
-
-restricted_metric_use:
-  - metric_id: poi.multi_year_count
-    status: proxy_only
-    rule: 只作数据覆盖和采集差异背景，不直接解释真实开闭店趋势。
-  - metric_id: spatial.global_moran_i_density
-    status: internal_only
-    rule: 只有同时提供位置、空间单元和统计解释时才可作为内部分析；不能单独支撑方向行动。
-  - metric_id: spatial.lisa
-    status: internal_only
-    rule: 必须提供局部位置、类别/变量和显著性口径；当前不能用汇总数字替代空间图示。
-  - metric_id: spatial.gi_star
-    status: internal_only
-    rule: 必须提供热点位置、显著性和统一空间口径；不直接等同于商业热点。
-  - metric_id: nightlight.hotspot_class
-    status: proxy_only
-    rule: 只表示亮度空间分级，不表示夜间客流、消费或经营强度。
-  - metric_id: road.control
-    status: proxy_only
-    rule: 只表示网络结构中的控制关系，不表示人流、车流或连接节点优先级。
 
 metrics:
 - id: poi.count
@@ -111,11 +80,6 @@ metrics:
   supports:
   - 将经 15 分钟 walking 等时圈几何核验的 POI 按真实主类／附属类和互补配套／同类对标角色分别盘点
   - 以连续保存道路网络上的五分钟可达记录补充供给空间关系；道路不可用时仍保留等时圈统计
-  does_not_support:
-  - 实际营业
-  - 客流
-  - 需求强度
-  - 市场饱和
   use_when:
   - facility_supply
   - category_structure
@@ -153,7 +117,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - same_scope_category_share
-    if_missing: 缺少有效 15 分钟 walking 等时圈时返回 unavailable；缺少分析范围、保存道路或连续道路路径时返回 partial，保留等时圈核验统计并省略五分钟值；不生成直线距离或替代性可达数量。
 - id: poi.category_count
   name: POI 分类数量
   family: poi
@@ -185,10 +148,6 @@ metrics:
   supports:
   - 类别供给构成
   - 类别数量分布
-  does_not_support:
-  - 类别需求
-  - 品牌经营质量
-  - 真实业态存续
   use_when:
   - facility_supply
   - category_structure
@@ -222,7 +181,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - same_scope_category_share
-    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
 - id: poi.multi_year_count
   name: POI 多年份数量
   family: poi
@@ -254,10 +212,6 @@ metrics:
     - catchment_id
   supports:
   - 覆盖范围内数量的跨年对照
-  does_not_support:
-  - 未经口径校验的市场增长
-  - 因果变化
-  - 开闭店变化
   use_when:
   - facility_supply
   - category_structure
@@ -291,7 +245,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - same_scope_category_share
-    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
 - id: poi.grid_count
   name: 网格 POI 数量
   family: poi_grid
@@ -318,8 +271,6 @@ metrics:
   supports:
   - 设施空间分布
   - 网格间相对数量比较
-  does_not_support:
-  - 需求或活动强度
   use_when:
   - facility_concentration
   - spatial_mix
@@ -355,7 +306,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.grid_density
   name: POI 网格密度
   family: poi_grid
@@ -391,10 +341,6 @@ metrics:
   supports:
   - 单位面积设施集中程度
   - 网格间规范化比较
-  does_not_support:
-  - 客流
-  - 消费能力
-  - 营收
   use_when:
   - facility_concentration
   - spatial_mix
@@ -428,7 +374,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.category_density
   name: POI 分类密度
   family: poi_grid
@@ -453,9 +398,6 @@ metrics:
     - neighbor_ring
   supports:
   - 类别供给的空间分布
-  does_not_support:
-  - 目标业态需求
-  - 缺口的独立证明
   use_when:
   - facility_concentration
   - spatial_mix
@@ -490,7 +432,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.local_entropy
   name: POI 类别局部熵
   family: poi_grid
@@ -517,10 +458,6 @@ metrics:
   supports:
   - 类别混合程度
   - 单一类别主导与多类别混合的区分
-  does_not_support:
-  - 业态质量
-  - 活跃度
-  - 需求强度
   use_when:
   - facility_concentration
   - spatial_mix
@@ -552,7 +489,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.local_entropy_normalized
   name: 归一化局部熵
   family: poi_grid
@@ -577,9 +513,6 @@ metrics:
     - neighbor_ring
   supports:
   - 同一分类体系下的混合度比较
-  does_not_support:
-  - 多样性质量
-  - 市场成熟度
   use_when:
   - facility_concentration
   - spatial_mix
@@ -615,7 +548,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.lq
   name: POI 类别区位商
   family: poi_grid
@@ -651,10 +583,6 @@ metrics:
   supports:
   - 相对专业化
   - 类别相对优势
-  does_not_support:
-  - 绝对供给充足
-  - 需求存在
-  - 市场饱和
   use_when:
   - facility_concentration
   - spatial_mix
@@ -689,7 +617,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.neighbor_mean_density
   name: 邻域平均 POI 密度
   family: poi_grid
@@ -717,9 +644,6 @@ metrics:
   supports:
   - 局部环境基准
   - 网格相对邻域的高低
-  does_not_support:
-  - 完整市场基准
-  - 客流
   use_when:
   - facility_concentration
   - spatial_mix
@@ -753,7 +677,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.neighbor_mean_entropy
   name: 邻域平均 POI 混合度
   family: poi_grid
@@ -780,8 +703,6 @@ metrics:
     - neighbor_ring
   supports:
   - 邻域类别混合基准
-  does_not_support:
-  - 市场多样性质量
   use_when:
   - facility_concentration
   - spatial_mix
@@ -815,7 +736,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: spatial.neighbor_density_delta
   name: 网格相对邻域密度差
   family: poi_grid
@@ -840,9 +760,6 @@ metrics:
     - neighbor_ring
   supports:
   - 局部高于或低于邻域的识别
-  does_not_support:
-  - 绝对热点
-  - 需求缺口
   use_when:
   - facility_concentration
   - spatial_mix
@@ -878,7 +795,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: spatial.global_moran_i_density
   name: POI 密度全局莫兰指数
   family: spatial_statistics
@@ -900,12 +816,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 识别研究范围整体是否存在显著空间自相关，并决定是否需要继续局部定位。
-  does_not_support:
-  - 局部热点位置
-  - 具体功能分配位置
-  - 聚集原因
-  - 商业成功
-  - 因果关系
   use_when:
   - hotspot_detection
   - spatial_clustering
@@ -938,7 +848,6 @@ metrics:
     preferred:
     - statistical_null_expectation
     - same_source_peer_scope
-    if_missing: 执行同一空间权重与显著性方法下的置换或零假设检验；缺失时只报告描述性分布，不称显著聚集、热点或异常。
 - id: spatial.lisa
   name: 局部莫兰 LISA
   family: spatial_statistics
@@ -970,9 +879,6 @@ metrics:
     - fdr_method
   supports:
   - 局部高高、低低及空间异常候选识别
-  does_not_support:
-  - 热点的业务原因
-  - 需求或客流
   use_when:
   - hotspot_detection
   - spatial_clustering
@@ -1003,7 +909,6 @@ metrics:
     preferred:
     - statistical_null_expectation
     - same_source_peer_scope
-    if_missing: 执行同一空间权重与显著性方法下的置换或零假设检验；缺失时只报告描述性分布，不称显著聚集、热点或异常。
 - id: spatial.gi_star
   name: Getis-Ord Gi* 热点统计
   family: spatial_statistics
@@ -1035,10 +940,6 @@ metrics:
     - fdr_method
   supports:
   - POI 密度局部热点和冷点的统计识别
-  does_not_support:
-  - 经济活跃原因
-  - 客流
-  - 市场机会的独立证明
   use_when:
   - hotspot_detection
   - spatial_clustering
@@ -1067,7 +968,6 @@ metrics:
     preferred:
     - statistical_null_expectation
     - same_source_peer_scope
-    if_missing: 执行同一空间权重与显著性方法下的置换或零假设检验；缺失时只报告描述性分布，不称显著聚集、热点或异常。
 - id: grid.type
   name: 网格四象限分型
   family: grid_derived
@@ -1094,10 +994,6 @@ metrics:
     - neighbor_ring
   supports:
   - 当前分析批次内的结构分组
-  does_not_support:
-  - 跨项目稳定类型
-  - 商业成熟度
-  - 机会的充分证明
   use_when:
   - grid_typology
   - candidate_screening
@@ -1133,7 +1029,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: grid.opportunity_flag
   name: 网格空间条件标记
   family: grid_derived
@@ -1157,10 +1052,6 @@ metrics:
     - neighbor_ring
   supports:
   - 候选网格的规则筛选
-  does_not_support:
-  - 商业机会
-  - 需求缺口
-  - 投资建议
   use_when:
   - grid_typology
   - candidate_screening
@@ -1193,7 +1084,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: population.total
   name: 总人口
   family: population
@@ -1220,10 +1110,6 @@ metrics:
   supports:
   - 人口规模
   - 人口覆盖量
-  does_not_support:
-  - 购买力
-  - 实际客流
-  - 目标客户转化
   use_when:
   - population_scale
   - customer_proxy
@@ -1258,7 +1144,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: population.sex_structure
   name: 性别结构
   family: population
@@ -1287,9 +1172,6 @@ metrics:
     - catchment_id
   supports:
   - 人口性别结构描述
-  does_not_support:
-  - 消费偏好
-  - 经营需求
   use_when:
   - population_scale
   - customer_proxy
@@ -1322,7 +1204,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: population.age_structure
   name: 年龄结构
   family: population
@@ -1351,9 +1232,6 @@ metrics:
   supports:
   - 年龄结构
   - 目标年龄段空间分布
-  does_not_support:
-  - 支付能力
-  - 到访意愿
   use_when:
   - population_scale
   - customer_proxy
@@ -1386,7 +1264,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: population.selected_ratio
   name: 选定人口占比
   family: population
@@ -1413,9 +1290,6 @@ metrics:
     - catchment_id
   supports:
   - 目标人口代理的空间覆盖
-  does_not_support:
-  - 目标客户确认
-  - 消费能力
   use_when:
   - population_scale
   - customer_proxy
@@ -1448,7 +1322,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同数据族、可比年份与同空间聚合的同类范围或历史基准；在此之前只报告人口规模或结构，不作强弱判断。
 - id: nightlight.total_radiance
   name: 夜光总辐亮度
   family: nightlight
@@ -1470,10 +1343,6 @@ metrics:
   supports:
   - 夜间亮度总量代理
   - 区域间相对对照
-  does_not_support:
-  - 销售额
-  - 客流
-  - 夜经济
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1510,7 +1379,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.mean_radiance
   name: 夜光平均辐亮度
   family: nightlight
@@ -1531,8 +1399,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 平均夜间亮度水平
-  does_not_support:
-  - 商业经营表现
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1565,7 +1431,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.max_radiance
   name: 夜光最大辐亮度
   family: nightlight
@@ -1587,9 +1452,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 最高亮度位置识别
-  does_not_support:
-  - 整体活跃度
-  - 客流规模
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1623,7 +1485,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.lit_pixel_ratio
   name: 亮灯像素比例
   family: nightlight
@@ -1644,9 +1505,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 夜间亮度覆盖连续性
-  does_not_support:
-  - 夜间人口
-  - 夜间消费
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1679,7 +1537,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.p90
   name: 夜光 P90
   family: nightlight
@@ -1700,8 +1557,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 高亮区域的相对强度基准
-  does_not_support:
-  - 高值区的具体业态或客流
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1734,7 +1589,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.hotspot_class
   name: 夜光热点等级
   family: nightlight
@@ -1767,9 +1621,6 @@ metrics:
   supports:
   - 夜间亮度分层
   - 高值与低值空间定位
-  does_not_support:
-  - 热点成因
-  - 夜经济证明
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1802,7 +1653,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.hotspot_ratio
   name: 夜光热点网格比例
   family: nightlight
@@ -1823,8 +1673,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 亮度高值覆盖程度
-  does_not_support:
-  - 客流或消费规模
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1857,7 +1705,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.spatial_profile
   name: 夜光空间梯度
   family: nightlight
@@ -1883,9 +1730,6 @@ metrics:
     - band_edges_m
   supports:
   - 亮度核心、扩散和边缘衰减结构
-  does_not_support:
-  - 商业中心成因
-  - 到访路径
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1918,7 +1762,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.sector_profile
   name: 夜光方向分布
   family: nightlight
@@ -1945,8 +1788,6 @@ metrics:
     - radius_m
   supports:
   - 夜光高值方向比较
-  does_not_support:
-  - 方向客流或商业需求
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -1979,7 +1820,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: nightlight.activity_level
   name: 夜间亮度空间分级
   family: nightlight
@@ -2001,8 +1841,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 夜间亮度空间分级
-  does_not_support:
-  - 夜经济、销售、客流的直接证明
   use_when:
   - night_activity_proxy
   - spatial_intensity
@@ -2036,7 +1874,6 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-    if_missing: 建立同传感器、处理方法、时间范围和分辨率的同类范围或历史基准；在此之前只报告辐亮度分布。
 - id: road.network_size
   name: 路网规模
   family: road_syntax
@@ -2063,9 +1900,6 @@ metrics:
     - network_radius_m
   supports:
   - 路网规模和覆盖描述
-  does_not_support:
-  - 实际通行量
-  - 步行客流
   use_when:
   - network_access
   - route_structure
@@ -2101,7 +1935,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.degree
   name: 节点度/平均连接度
   family: road_syntax
@@ -2127,9 +1960,6 @@ metrics:
   supports:
   - 节点直接连接程度
   - 路网连接结构
-  does_not_support:
-  - 道路可达时间
-  - 行人流量
   use_when:
   - network_access
   - route_structure
@@ -2162,7 +1992,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.integration
   name: 路网整合度
   family: road_syntax
@@ -2198,9 +2027,6 @@ metrics:
     - route_id
   supports:
   - 空间位置在路网结构中的相对可达中心性
-  does_not_support:
-  - 实际到访量
-  - 真实步行可达时间
   use_when:
   - network_access
   - route_structure
@@ -2230,7 +2056,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.choice
   name: 路网选择度
   family: road_syntax
@@ -2266,9 +2091,6 @@ metrics:
     - route_id
   supports:
   - 潜在路径穿越性和结构性经过机会
-  does_not_support:
-  - 实际道路流量
-  - 实际步行流量
   use_when:
   - network_access
   - route_structure
@@ -2298,7 +2120,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.connectivity
   name: 路网连通度
   family: road_syntax
@@ -2322,8 +2143,6 @@ metrics:
     - network_radius_m
   supports:
   - 路网连接状况
-  does_not_support:
-  - 真实可达时间或交通量
   use_when:
   - network_access
   - route_structure
@@ -2356,7 +2175,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.control
   name: 路网控制值
   family: road_syntax
@@ -2383,10 +2201,6 @@ metrics:
     - network_radius_m
   supports:
   - 节点或路段对相邻连接的局部控制关系
-  does_not_support:
-  - 实际交通控制
-  - 客流
-  - 管理权属
   use_when:
   - network_access
   - route_structure
@@ -2419,7 +2233,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.mean_depth
   name: 平均深度
   family: road_syntax
@@ -2445,9 +2258,6 @@ metrics:
     - network_radius_m
   supports:
   - 路网结构距离层级的相对描述
-  does_not_support:
-  - 实际步行距离
-  - 实际出行时间
   use_when:
   - network_access
   - route_structure
@@ -2480,7 +2290,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.node_degree
   name: 路网节点度
   family: road_syntax
@@ -2506,9 +2315,6 @@ metrics:
   supports:
   - 节点连接数量
   - 交叉连接结构的基础描述
-  does_not_support:
-  - 道路等级
-  - 实际通行能力
   use_when:
   - network_access
   - route_structure
@@ -2541,7 +2347,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.orientation
   name: 道路方向分布
   family: road_syntax
@@ -2564,10 +2369,6 @@ metrics:
     - network_radius_m
   supports:
   - 路网主导方向和方向结构
-  does_not_support:
-  - 交通流向
-  - 视线方向
-  - 城市风环境
   use_when:
   - network_access
   - route_structure
@@ -2600,7 +2401,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: road.intelligibility
   name: 路网可理解度
   family: road_syntax
@@ -2626,9 +2426,6 @@ metrics:
     - network_radius_m
   supports:
   - 局部连接结构与整体路网结构的关系
-  does_not_support:
-  - 使用者主观认知
-  - 导航成功率
   use_when:
   - network_access
   - route_structure
@@ -2661,7 +2458,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 在同一图模型、半径、过滤和归一化下建立路段或路径对照；在此之前只报告网络内部位置，不作项目优先级判断。
 - id: isochrone.reachable_area
   name: 等时圈可达范围
   family: isochrone
@@ -2693,12 +2489,8 @@ metrics:
     - travel_mode
     - time_minutes
   supports:
-  - 理论可达空间边界
+  - 网络可达范围
   - 不同时间和交通方式的范围比较
-  does_not_support:
-  - 实际到访人数
-  - 实际转化率
-  - 直线半径等价
   use_when:
   - catchment_area
   - travel_time_access
@@ -2733,7 +2525,6 @@ metrics:
     preferred:
     - route_or_spatial_alternative
     - scenario_or_design_alternative
-    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一处起点或时长方案；在此之前只描述可达边界。
 - id: timeseries.population_change
   name: 人口时间变化
   family: timeseries
@@ -2758,10 +2549,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 人口变化方向和变化网格识别
-  does_not_support:
-  - 变化原因
-  - 客流变化
-  - 未来趋势确定性
   use_when:
   - temporal_change
   - trend_comparison
@@ -2795,7 +2582,6 @@ metrics:
     required: true
     preferred:
     - same_scope_previous_period
-    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.population_density_change
   name: 人口密度时间变化
   family: timeseries
@@ -2818,8 +2604,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 人口空间变化热点
-  does_not_support:
-  - 客流或需求变化
   use_when:
   - temporal_change
   - trend_comparison
@@ -2849,7 +2633,6 @@ metrics:
     required: true
     preferred:
     - same_scope_previous_period
-    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.age_shift
   name: 主导年龄段迁移
   family: timeseries
@@ -2872,9 +2655,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 年龄结构变化位置
-  does_not_support:
-  - 人口迁移原因
-  - 消费偏好变化
   use_when:
   - temporal_change
   - trend_comparison
@@ -2904,7 +2684,6 @@ metrics:
     required: true
     preferred:
     - same_scope_previous_period
-    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.nightlight_change
   name: 夜光时间变化
   family: timeseries
@@ -2930,9 +2709,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 夜间亮度增强、减弱和稳定区域识别
-  does_not_support:
-  - 经济增长原因
-  - 销售或客流变化
   use_when:
   - temporal_change
   - trend_comparison
@@ -2962,7 +2738,6 @@ metrics:
     required: true
     preferred:
     - same_scope_previous_period
-    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: timeseries.hotspot_shift
   name: 夜光热点迁移
   family: timeseries
@@ -2988,8 +2763,6 @@ metrics:
     - year_pair
   supports:
   - 夜光热点时序稳定性和迁移
-  does_not_support:
-  - 商业热点或真实夜经济
   use_when:
   - temporal_change
   - trend_comparison
@@ -3019,7 +2792,6 @@ metrics:
     required: true
     preferred:
     - same_scope_previous_period
-    if_missing: 补齐同源、同分类、同空间单元的可比历史期；在此之前不得报告增长、衰退或迁移。
 - id: gwr.nightlight_spatial_model
   name: 夜光局部空间关系模型
   family: gwr
@@ -3048,10 +2820,6 @@ metrics:
     - neighbor_ring
   supports:
   - 解释变量与夜光之间的空间异质关系探索
-  does_not_support:
-  - 因果证明
-  - 需求预测
-  - 投资回报
   use_when:
   - spatial_relationship
   - model_diagnostics
@@ -3085,7 +2853,6 @@ metrics:
     preferred:
     - statistical_null_expectation
     - scenario_or_design_alternative
-    if_missing: 建立同变量、同样本与同带宽政策的全局或替代模型；在此之前只报告模型输出，不解释局部关系改善。
 - id: gwr.model_fit
   name: GWR 拟合诊断
   family: gwr
@@ -3114,9 +2881,6 @@ metrics:
     - neighbor_ring
   supports:
   - 模型拟合程度和误差描述
-  does_not_support:
-  - 模型因果有效
-  - 未来预测可靠
   use_when:
   - spatial_relationship
   - model_diagnostics
@@ -3148,7 +2912,6 @@ metrics:
     preferred:
     - statistical_null_expectation
     - scenario_or_design_alternative
-    if_missing: 建立同变量、同样本与同带宽政策的全局或替代模型；在此之前只报告模型输出，不解释局部关系改善。
 - id: poi.kernel_density
   name: POI 核密度
   family: poi_grid
@@ -3172,10 +2935,6 @@ metrics:
     - neighbor_ring
   supports:
   - 识别 POI 相对集聚位置
-  does_not_support:
-  - 需求强度
-  - 客流
-  - 经营表现
   use_when:
   - facility_concentration
   - spatial_mix
@@ -3211,7 +2970,6 @@ metrics:
     - normalized_spatial_unit
     - same_source_peer_scope
     - same_scope_category_share
-    if_missing: 建立同网格、同年份、同分类与同归一化的邻域或同类范围基准；在此之前只报告范围内分布，不作高低、缺口或机会判断。
 - id: poi.open_close_rate
   name: 开闭店变化与存续率
   family: poi
@@ -3236,8 +2994,6 @@ metrics:
     - catchment_id
   supports:
   - 描述对应空间现象
-  does_not_support:
-  - 未经独立证据验证的因果或经营结论
   use_when:
   - facility_supply
   - category_structure
@@ -3263,14 +3019,12 @@ metrics:
   - category_normalization
   - coverage_check
   source: []
-  implementation_gap: 当前多年份 POI 没有稳定门店实体匹配。
   comparison_baseline:
     required: true
     preferred:
     - same_source_peer_scope
     - same_scope_previous_period
     - same_scope_category_share
-    if_missing: 建立同源、同年、同分类和同范围定义的同类范围或历史基准；在此之前只报告设施清单与范围内构成。
 - id: access.network_reachable_area
   name: 多时间阈值网络可达面积
   family: isochrone
@@ -3293,8 +3047,6 @@ metrics:
     - time_minutes
   supports:
   - 描述对应空间现象
-  does_not_support:
-  - 未经独立证据验证的因果或经营结论
   use_when:
   - catchment_area
   - travel_time_access
@@ -3320,13 +3072,11 @@ metrics:
   - valid_origin
   - geometry_has_area
   source: []
-  implementation_gap: 当前只稳定输出单时间阈值等时圈，尚无批量比较契约。
   comparison_baseline:
     required: true
     preferred:
     - route_or_spatial_alternative
     - scenario_or_design_alternative
-    if_missing: 以相同交通方式、时间阈值和路由引擎建立另一处起点或时长方案；在此之前只描述可达边界。
 
 - id: spatial.thematic_visual
   name: 已归档空间结果专题表达
@@ -3348,9 +3098,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 表达已归档的空间范围、点线面或专题结果
-  does_not_support:
-  - 新的分析数值
-  - 消费、客流、营收或投资回报推断
   use_when:
   - spatial_communication
   - scope_comparison
@@ -3374,10 +3121,8 @@ metrics:
     required: false
     preferred:
     - documented_project_requirement
-    if_missing: 该工具只表达已归档结果；没有可用结果时明确缺图，不生成替代结论。
   source:
   - modules/spatial_action/arcgis_spatial_tools.py
-  implementation_gap: 仅当本机受控 ArcGIS 服务与批准专题模板可用时启用；否则返回 unavailable。
 - id: report.decision_visual
   name: 决策报告图表表达
   family: report_visual
@@ -3397,9 +3142,6 @@ metrics:
     runtime_parameters: []
   supports:
   - 比较、趋势、散点、关系和阶段节奏的报告表达
-  does_not_support:
-  - 新的分析结论
-  - 对代理数据的经营结果外推
   use_when:
   - decision_briefing
   - comparison_communication
@@ -3423,10 +3165,8 @@ metrics:
     required: false
     preferred:
     - documented_project_requirement
-    if_missing: 该工具只解释已有材料；没有可用数据时明确缺图，不以图形暗示结论。
   source:
   - modules/spatial_action/arcgis_spatial_tools.py
-  implementation_gap: 仅当本机受控 ArcGIS 服务与批准图表模板可用时启用；否则返回 unavailable。
 - id: regional.directional_evidence_matrix
   name: 区域方向距离带证据矩阵
   family: regional
@@ -3455,9 +3195,6 @@ metrics:
   supports:
   - 同一共同空间单元内的 POI、人口、夜光与路网条件比较
   - 方向和距离带的踏勘优先级
-  does_not_support:
-  - 客流、消费、营收或投资回报
-  - 到达点或服务范围
   use_when:
   - regional_direction
   - multi_metric_comparison
@@ -3485,7 +3222,6 @@ metrics:
     preferred:
     - all_shared_cells
     - same_distance_band_other_sectors
-    if_missing: 缺少共同网格或任一必要来源时返回 unavailable，不以单源方向结果替代。
   source:
   - modules/spatial_cells/service.py
   - modules/spatial_action/project_context.py
@@ -3529,16 +3265,13 @@ metrics:
           role:
             enum: [complementary_anchor, comparison_supply]
           type_codes:
-            description: 仅可使用当前 POI 快照中真实存在的类别值或 typecode 前缀；同一 typecode 不得出现在多个组。
+            description: 使用当前 POI 快照中真实存在的类别值或 typecode 前缀；同一 typecode 归入唯一组。
           statement_ref:
             required: true
             description: 回指报告中已审校的项目所需配套或同类对标判断；工具不自行生成定位或业态建议。
   supports:
   - 将经 15 分钟 walking 等时圈几何核验的 POI 按真实主类／附属类和互补配套／同类对标角色分别盘点
   - 以连续保存道路网络上的五分钟可达记录补充供给空间关系；道路不可用时仍保留等时圈统计
-  does_not_support:
-  - 项目定位、业态选择、合作对象、客流、消费、营收、市场规模或综合评分
-  - 直线距离、在线路线、真实到访量或支付能力
   use_when:
   - poi_supply_structure
   - complementary_supply
@@ -3574,7 +3307,6 @@ metrics:
     preferred:
     - same_source_peer_scope
     - route_or_spatial_alternative
-    if_missing: 缺少有效 15 分钟 walking 等时圈时返回 unavailable；缺少分析范围、保存道路或连续道路路径时返回 partial，保留等时圈核验统计并省略五分钟值；不生成直线距离或替代性可达数量。
   source:
   - modules/spatial_action/poi_supply_structure.py
   - modules/spatial_action/road_network_routing.py
@@ -3623,9 +3355,6 @@ metrics:
   supports:
   - 在当前 POI 快照与保存路网中识别经连续道路路径计算的近期可达地点
   - 为项目配套与互补锚点、同类与对标供给分别提供可读表格或合并卡片图证据
-  does_not_support:
-  - 合作关系、客流导入、消费转化、经营质量或市场规模
-  - 真实进场量、项目进场节点定案、客流预测或营收
   use_when:
   - poi_accessibility
   - complementary_supply
@@ -3656,7 +3385,6 @@ metrics:
     required: false
     preferred:
     - route_or_spatial_alternative
-    if_missing: 路由不可用、分析范围无效或 POI 不足时返回 unavailable；不以直线距离、速度估算或占位表替代。
   source:
   - modules/spatial_action/focused_poi_accessibility.py
   - modules/spatial_action/road_network_routing.py

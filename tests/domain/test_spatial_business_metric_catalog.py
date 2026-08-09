@@ -27,7 +27,6 @@ REQUIRED_FIELDS = {
     "definition",
     "unit",
     "supports",
-    "does_not_support",
     "answers_questions",
     "spatial_granularities",
     "use_when",
@@ -60,9 +59,10 @@ def test_metric_details_are_complete_and_reference_implemented_sources():
     assert {item["implementation_status"] for item in metrics} <= {"implemented", "not_implemented"}
     for metric in metrics:
         assert REQUIRED_FIELDS <= metric.keys()
-        if metric["implementation_status"] == "not_implemented":
-            assert metric.get("implementation_gap")
-        else:
+        assert "does_not_support" not in metric
+        assert "implementation_gap" not in metric
+        assert "if_missing" not in metric["comparison_baseline"]
+        if metric["implementation_status"] == "implemented":
             for source in metric["source"]:
                 assert (ROOT / source).exists(), f"{metric['id']} source does not exist: {source}"
 
@@ -155,7 +155,7 @@ def test_metric_tool_service_uses_light_catalog_and_loads_real_details_on_reques
     assert detail.compare_by.candidate_targets
     assert detail.compare_by.area_units
     assert detail.interpret_with.combinations
-    assert detail.watch_out.risks
+    assert detail.watch_out.field_checks
     assert detail.unavailable_semantics
 
     directional = tools.detail("regional.directional_evidence_matrix")
@@ -197,7 +197,7 @@ def test_all_metric_details_expose_the_analysis_knowledge_card():
         assert detail.measures.definition and detail.measures.unit
         assert detail.use_for.decision_questions and detail.use_for.action_targets
         assert detail.compare_by.candidate_targets and detail.compare_by.area_units
-        assert detail.interpret_with.combinations and detail.watch_out.risks
+        assert detail.interpret_with.combinations and detail.watch_out.field_checks
 
 
 def test_v4_skill_documents_catalog_detail_execute_result_flow():

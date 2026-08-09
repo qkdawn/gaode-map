@@ -16,7 +16,7 @@ WIDTH = 1840
 MARGIN = 40
 COLUMN_GAP = 18
 COLUMN_WIDTHS = (330, 290, 330, 390, 330)
-HEADER_HEIGHT = 126
+HEADER_HEIGHT = 166
 ROW_GAP = 24
 CARD_PADDING = 18
 TITLE_LINE_HEIGHT = 28
@@ -83,7 +83,7 @@ def _rule_cards(rule: dict[str, Any]) -> list[tuple[str, list[str]]]:
         ("条件与事实", _text_lines(rule.get("when"))),
         (f"{rule.get('id', '规则')} | {rule.get('decision_question', '决策问题')}", _metric_lines(rule)),
         ("候选与反例", _text_lines(rule.get("alternatives")) + _text_lines(f"反例: {rule.get('counterexample', '')}")),
-        ("当前结论与动作", _text_lines(f"结论: {rule.get('judgment', '')}") + _text_lines(f"动作: {rule.get('action', '')}")),
+        ("结论与动作", _text_lines(f"结论: {rule.get('judgment', '')}") + _text_lines(f"动作: {rule.get('action', '')}")),
         ("验证与边界", _text_lines(rule.get("limitations")) + _text_lines(f"验证: {rule.get('validation', '')}")),
     ]
 
@@ -98,6 +98,12 @@ def render(report_dir: Path, output_path: Path | None = None) -> Path:
     rules = logic_map.get("rules")
     if not isinstance(rules, list) or not rules:
         raise ValueError("decision_logic_map_rules_required")
+    value_path = logic_map.get("value_path") if isinstance(logic_map.get("value_path"), dict) else {}
+    workflow = value_path.get("deployable_workflow") if isinstance(value_path.get("deployable_workflow"), dict) else {}
+    value_summary = _text_lines(
+        f"目标结果: {value_path.get('desired_outcome', '未提供')} | 部署样板: {workflow.get('service', '未提供')}",
+        92,
+    )[:2]
 
     output_path = (output_path or report_dir / OUTPUT_PATH).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,9 +131,11 @@ def render(report_dir: Path, output_path: Path | None = None) -> Path:
         '<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#729B8A"/></marker></defs>',
         f'<rect width="{WIDTH}" height="{height}" fill="#F7FAF8"/>',
         f'<text x="{MARGIN}" y="48" class="title">空间商业决策逻辑图</text>',
-        f'<text x="{MARGIN}" y="76" class="subtitle">事实与条件如何推导当前选择；每个节点保留反例、指标边界和验证路径。</text>',
+        f'<text x="{MARGIN}" y="76" class="subtitle">价值路径如何把事实与条件推导为部署样板和当前选择；规则只保留判断、边界与验证。</text>',
     ]
-    columns = ("条件与事实", "判断规则与指标", "候选与反例", "当前结论与动作", "验证与边界")
+    for index, line in enumerate(value_summary):
+        parts.append(f'<text x="{MARGIN}" y="{104 + index * 20}" class="subtitle">{escape(line)}</text>')
+    columns = ("条件与事实", "判断规则与指标", "候选与反例", "结论与动作", "验证与边界")
     x = MARGIN
     for index, label in enumerate(columns):
         parts.append(f'<text x="{x}" y="{HEADER_HEIGHT - 20}" class="column">{label}</text>')

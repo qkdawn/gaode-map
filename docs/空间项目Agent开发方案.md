@@ -132,28 +132,13 @@ RAG 不负责读取 POI、人口、夜光、路网、格网和空间单元明细
 
 MCP 以 Streamable HTTP 方式接入现有 FastAPI 服务，并使用项目级或部署级认证。MCP 适配层调用 `modules/spatial_projects`，不在工具 handler 中实现数据选择和分析规则。
 
-第一批 MCP 工具全部只读：
+Codex 只看到一个只读深工具：
 
 | 工具 | 输入 | 输出 |
 | --- | --- | --- |
-| `list_history_projects` | 历史记录数量 | 历史记录 ID、名称和时间 |
-| `read_history_project` | `history_id` | 分析范围、绑定文档、数据集和版本状态 |
-| `list_history_project_documents` | `history_id` | 文档角色、解析状态和文件信息 |
-| `list_history_project_datasets` | `history_id` | 数据集目录、年份、来源、数量和警告 |
-| `query_history_project_dataset` | `history_id`、数据集、过滤、排序、分页 | 当前页记录、总量、定位和警告 |
-| `aggregate_history_project_dataset` | `history_id`、数据集、分组、指标和过滤 | 受控统计和范围说明 |
-| `read_history_project_dataset_record` | `history_id`、数据集、记录 ID | 单条数据记录、定位和警告 |
-| `search_project_evidence` | 查询词和证据类型 | EvidenceNode 摘要 |
-| `read_project_evidence` | 证据 ID | 可引用的完整证据内容 |
+| `read_client_decision_context` | 可选 `history_id`、可选 `conversation_id` | `ppt_all_sources_full_export/v1` 完整上下文；省略 `history_id` 时自动选择最新项目 |
 
-第二批工具启动异步成果任务：
-
-| 工具 | 前置条件 | 输出 |
-| --- | --- | --- |
-| `start_business_analyst_report` | 锁定快照和明确分析范围 | `run_id`、就绪检查和缺失输入 |
-| `start_spatial_unit_planning` | 锁定快照和确认的空间单元集 | `run_id`、单元覆盖目标和诊断 |
-| `start_client_deck` | 已审定报告或策划成果 | `run_id`、汇报输入和成果目标 |
-| `read_project_run` | `run_id` | 进度、诊断、输入版本和成果引用 |
+工具内部统一读取项目范围、数据集、已保存分析、项目文档、专题资料包、证据节点、年份、来源和质量警告。细粒度查询、指标读取与导出函数保留为领域内部能力，不暴露给 Codex，避免模型承担分页、来源拼装和工具选择策略。
 | `list_project_artifacts` | 项目、快照或运行 | 文件、审批状态和证据关系 |
 
 读取工具标记为只读。启动任务的工具创建受限项目内任务，要求调用方确认项目和快照。MCP 返回紧凑的结构化内容；大文件、地图、完整数据包和 PPT 使用文件引用返回。
@@ -213,12 +198,12 @@ PPT 任务只消费已审定成果和已选资料。它按叙事结构生成逐�
 
 ### 阶段 B：只读 MCP
 
-1. 实现项目、快照、数据集、空间单元和证据的只读 MCP 工具。
+1. 实现返回完整项目决策上下文的单一只读 MCP 工具。
 2. 使用项目配置让 Codex 连接本地 MCP 服务。
-3. 为工具补充认证、项目权限、调用日志、分页和聚合限制。
+3. 为工具补充认证、项目权限、调用日志和返回体完整性检查。
 4. 用 MCP Inspector 与 Codex 验证工具 schema、返回内容和错误状态。
 
-验收：不打开 `/analysis` 时，Codex 可以识别项目、列出数据、查询 POI 或空间单元、读取证据并明确数据缺口。
+验收：不打开 `/analysis` 时，Codex 一次调用即可取得与 PPT 全来源下载一致的项目上下文，并明确数据缺口。
 
 ### 阶段 C：RAG 项目化
 
