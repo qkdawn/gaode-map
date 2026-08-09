@@ -11,7 +11,6 @@ from router.domains import (
     agent_router,
     charting_router,
     documents_router,
-    evidence_retrieval_router,
     export_router,
     gwr_router,
     h3_router,
@@ -28,6 +27,7 @@ from router.domains import (
     spatial_action_router,
     shared_grid_router,
     spatial_projects_router,
+    spatial_strategy_router,
     system_router,
     timeseries_router,
     tools_router,
@@ -38,7 +38,6 @@ router.include_router(system_router)
 router.include_router(agent_router)
 router.include_router(charting_router)
 router.include_router(documents_router)
-router.include_router(evidence_retrieval_router)
 router.include_router(jobs_router)
 router.include_router(map_router)
 router.include_router(poi_router)
@@ -56,6 +55,7 @@ router.include_router(road_router)
 router.include_router(spatial_action_router)
 router.include_router(shared_grid_router)
 router.include_router(spatial_projects_router)
+router.include_router(spatial_strategy_router)
 router.include_router(isochrone_router)
 
 

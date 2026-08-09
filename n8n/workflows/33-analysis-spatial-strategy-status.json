@@ -1,0 +1,197 @@
+{
+  "id": "analysisSpatialStrategyStatus01",
+  "name": "AN-01 Spatial Strategy Run Status",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "api/v1/n8n/spatial-strategy/status",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "9cbb2836-4b64-4d12-aacc-13d829b4f61d",
+      "name": "Receive Run Status Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        180,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "n8n-webhook-client",
+          "name": "n8n Webhook Client"
+        }
+      },
+      "webhookId": "analysis-spatial-strategy-status"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const request = $input.first()?.json ?? {};\nconst headers = request.headers && typeof request.headers === 'object' ? request.headers : {};\nconst query = request.query && typeof request.query === 'object' ? request.query : {};\nconst tenantId = String(headers['x-tenant-id'] ?? headers['X-Tenant-Id'] ?? '').trim();\nconst runId = String(query.run_id ?? '').trim();\nconst validRunId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runId);\nconst errors = [];\nif (!tenantId) errors.push('x-tenant-id is required');\nif (!validRunId) errors.push('run_id must be a UUID');\nreturn [{ json: { valid: errors.length === 0, errors, tenant_id: tenantId, run_id: runId } }];"
+      },
+      "id": "041be263-b1aa-4d28-9671-7182351a8510",
+      "name": "Validate Status Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "valid-status-request",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2574bc9a-dbd8-4755-9656-d1c8e92ac352",
+      "name": "Status Request Is Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'invalid_request', detail: $json.errors }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "1f9899f9-bddf-458c-af39-605503198a7a",
+      "name": "Return Invalid Status Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        900,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH selected_run AS (\n  SELECT * FROM analysis_runs WHERE id = $1::uuid AND tenant_id = $2::text\n), response AS (\n  SELECT jsonb_build_object(\n    'run_id', r.id::text,\n    'history_id', r.history_id,\n    'status', r.status,\n    'current_step', r.current_step,\n    'error', r.error,\n    'created_at', r.created_at,\n    'started_at', r.started_at,\n    'finished_at', r.finished_at,\n    'updated_at', r.updated_at,\n    'progress', jsonb_build_object(\n      'completed_steps', (SELECT COUNT(*) FROM analysis_step_outputs s WHERE s.run_id = r.id AND s.status = 'completed'),\n      'total_steps', 12\n    ),\n    'decision_state', r.decision_state,\n    'report', (\n      SELECT jsonb_build_object(\n        'status', report.status,\n        'markdown', report.markdown,\n        'citations', report.citations,\n        'asset_manifest', report.asset_manifest,\n        'updated_at', report.updated_at\n      )\n      FROM analysis_reports report WHERE report.run_id = r.id\n    ),\n    'steps', COALESCE((\n      SELECT jsonb_agg(jsonb_build_object(\n        'step', s.step,\n        'step_order', s.step_order,\n        'status', s.status,\n        'output', s.output,\n        'updated_at', s.updated_at\n      ) ORDER BY s.step_order)\n      FROM analysis_step_outputs s WHERE s.run_id = r.id\n    ), '[]'::jsonb)\n  ) AS body\n  FROM selected_run r\n)\nSELECT CASE WHEN EXISTS (SELECT 1 FROM response) THEN 200 ELSE 404 END AS http_status,\n  COALESCE((SELECT body FROM response), jsonb_build_object('status', 'not_found', 'detail', 'analysis_run_not_found')) AS body;",
+        "options": {
+          "queryReplacement": "={{ [$json.run_id, $json.tenant_id] }}"
+        }
+      },
+      "id": "13d9063c-5a6e-4f08-a0a4-67be30ce17a8",
+      "name": "Read Tenant Scoped Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        900,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "rag-postgres",
+          "name": "RAG PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ Number($json.http_status || 200) }}"
+        }
+      },
+      "id": "5c1a1a9f-6511-4cf0-9daf-bba701e996a8",
+      "name": "Return Run Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1140,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Receive Run Status Request": {
+      "main": [
+        [
+          {
+            "node": "Validate Status Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Status Request": {
+      "main": [
+        [
+          {
+            "node": "Status Request Is Valid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Request Is Valid": {
+      "main": [
+        [
+          {
+            "node": "Read Tenant Scoped Run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Invalid Status Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Tenant Scoped Run": {
+      "main": [
+        [
+          {
+            "node": "Return Run Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "374619c7-0320-45c1-8f9c-9bbb44497061",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

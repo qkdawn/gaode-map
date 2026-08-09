@@ -1,0 +1,588 @@
+{
+  "id": "analysisDecisionStep01",
+  "name": "AN-10 Execute Decision Step",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "decision-step-already-completed",
+              "leftValue": "={{ $json.decision_state.steps[$json.step_key] !== undefined }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "63c99ba0-fc35-41ed-8644-d26b459c01bd",
+      "name": "Step Already Completed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const retrieval = $input.first()?.json ?? {};\nconst priority = { project_data: 0, project_computed_result: 1, project_document: 2, project_data_record: 3 };\nconst contexts = (Array.isArray(retrieval.contexts) ? retrieval.contexts : []).map((item, index) => ({ item, index })).sort((a, b) => {\n  const priorityDelta = (priority[String(a.item?.source_type)] ?? 9) - (priority[String(b.item?.source_type)] ?? 9);\n  return priorityDelta || a.index - b.index;\n}).map(({ item }) => item);\nreturn [{ json: { ...retrieval, contexts } }];"
+      },
+      "id": "6289d5ba-d52e-46ec-9f27-a78aa984ec69",
+      "name": "Prioritize Project Data Contexts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const state = $('Validate Step Request').first().json;\nconst retrieval = $input.first()?.json ?? {};\nconst projectData = state.project_data && typeof state.project_data === 'object' ? state.project_data : {};\nconst projectCitations = (Array.isArray(projectData.citations) ? projectData.citations : []).filter((item) => item && item.citation_id && item.content);\nconst existingCitations = Array.isArray(retrieval.citations) ? retrieval.citations : [];\nconst citationMap = new Map();\nfor (const item of [...projectCitations, ...existingCitations]) citationMap.set(String(item.citation_id), item);\nconst projectContexts = projectCitations.map((item) => ({\n  chunk_key: String(item.citation_id),\n  citation_id: String(item.citation_id),\n  title: String(item.title ?? item.dataset_id ?? '项目数据'),\n  section: String(item.section ?? item.source_locator ?? ''),\n  page_start: item.page_start ?? null,\n  page_end: item.page_end ?? null,\n  source_url: String(item.source_url ?? ''),\n  content: String(item.content ?? ''),\n  source_type: String(item.source_type ?? 'project_data'),\n  dataset_id: String(item.dataset_id ?? ''),\n  snapshot_id: String(item.snapshot_id ?? ''),\n  complete: item.complete !== false,\n}));\nconst existingContexts = Array.isArray(retrieval.contexts) ? retrieval.contexts : [];\nreturn [{ json: {\n  ...retrieval,\n  citations: [...citationMap.values()],\n  contexts: [...projectContexts, ...existingContexts],\n  project_data_status: String(projectData.status ?? 'unavailable'),\n  project_data_queries: Array.isArray(projectData.queries) ? projectData.queries : [],\n  project_data_warnings: Array.isArray(projectData.warnings) ? projectData.warnings : [],\n} }];"
+      },
+      "id": "1c383607-eb0d-4c61-9c95-3ed5cd88522d",
+      "name": "Attach Project Data To Retrieval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const state = $input.first().json;\nconst output = state.decision_state.steps[state.step_key];\nreturn [{ json: {\n  run_id: state.run_id,\n  step_key: state.step_key,\n  step_order: state.step_order,\n  status: 'completed',\n  output,\n  decision_state: state.decision_state,\n} }];"
+      },
+      "id": "36c5cd2e-843c-4967-818e-334d05e98eaa",
+      "name": "Return Existing Step Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "ef4af7f8-02e4-4b56-8e0b-d448bde8abf1",
+      "name": "When Called By Orchestrator",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $input.first()?.json ?? {};\nfor (const field of ['run_id', 'step_key', 'step_title']) {\n  if (typeof input[field] !== 'string' || !input[field].trim()) throw new Error('missing required field: ' + field);\n}\nif (!/^[0-9a-f-]{36}$/i.test(input.run_id)) throw new Error('run_id must be a UUID');\nconst stepOrder = Number(input.step_order);\nif (!Number.isInteger(stepOrder) || stepOrder < 1 || stepOrder > 12) throw new Error('step_order must be between 1 and 12');\nconst list = (value) => Array.isArray(value) ? value.map(String).filter(Boolean) : [];\nconst decisionState = input.decision_state && typeof input.decision_state === 'object'\n  ? input.decision_state\n  : { steps: {}, evidence_index: {} };\nconst projectQuestion = String(input.project_question ?? input.question ?? '').trim();\nreturn [{ json: {\n  ...input,\n  step_order: stepOrder,\n  tenant_id: String(input.tenant_id ?? 'default'),\n  access_groups: list(input.access_groups),\n  project_types: list(input.project_types),\n  geography: list(input.geography),\n  metadata_filter: input.metadata_filter && typeof input.metadata_filter === 'object' ? input.metadata_filter : {},\n  decision_state: decisionState,\n  project_question: projectQuestion,\n  retrieval_query: [projectQuestion, input.step_title].filter(Boolean).join('\\n'),\n} }];"
+      },
+      "id": "ebcf5a4d-50bc-4fd9-af48-e108b6d8e99a",
+      "name": "Validate Step Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO analysis_step_outputs (run_id, step, step_order, status, input_snapshot, quality_gate, updated_at)\nVALUES ($1::uuid, $2::text, $3::integer, 'running', $4::jsonb, $5::jsonb, NOW())\nON CONFLICT (run_id, step) DO UPDATE SET\n  step_order = EXCLUDED.step_order, status = 'running', input_snapshot = EXCLUDED.input_snapshot,\n  quality_gate = EXCLUDED.quality_gate, updated_at = NOW();\nUPDATE analysis_runs SET status = 'running', current_step = $2::text, started_at = COALESCE(started_at, NOW()), updated_at = NOW()\nWHERE id = $1::uuid;\nSELECT $1::text AS run_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.run_id, $json.step_key, $json.step_order, JSON.stringify({ project_question: $json.project_question, previous_steps: Object.keys($json.decision_state.steps || {}) }), JSON.stringify({})] }}"
+        }
+      },
+      "id": "59ac4e23-98c8-401f-9611-756008e70c68",
+      "name": "Mark Step Running",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        900,
+        380
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "rag-postgres",
+          "name": "RAG PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const state = $('Validate Step Request').first().json;\nreturn [{ json: {\n  query: state.retrieval_query,\n  tenant_id: state.tenant_id,\n  access_groups: state.access_groups,\n  decision_steps: [state.step_key],\n  project_types: state.project_types,\n  geography: state.geography,\n  metadata_filter: state.metadata_filter,\n  candidate_limit: 40,\n  result_limit: 10,\n  context_radius: 1,\n} }];"
+      },
+      "id": "67cc45c4-a796-4892-8134-6c84e46742db",
+      "name": "Build Retrieval Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "kbHybridRetrieve0001",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "e770f145-5bd7-466e-b78a-66918bed1b99",
+      "name": "Retrieve Cited Source Text",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const state = $('Validate Step Request').first().json;\nconst retrieval = $input.first()?.json ?? {};\nconst contexts = (Array.isArray(retrieval.contexts) ? retrieval.contexts : []).slice(0, 12).map((item) => ({\n  title: String(item.title ?? ''),\n  section: String(item.section ?? ''),\n  page_start: item.page_start ?? null,\n  page_end: item.page_end ?? null,\n  source_url: String(item.source_url ?? ''),\n  content: String(item.content ?? '').slice(0, 2500),\n}));\nconst previous = Object.entries(state.decision_state.steps ?? {}).map(([, value]) => ({\n  title: String(value?.title ?? '前一章节'),\n  reader_chapter: String(value?.reader_chapter ?? '').slice(0, 2400),\n}));\nconst schema = {\n  type: 'object',\n  properties: { reader_chapter: { type: 'string', minLength: 1 } },\n  required: ['reader_chapter'],\n  additionalProperties: false,\n};\nconst instructions = [\n  '为当前分析方向撰写一章可直接发表在项目报告中的中文正文。读者是项目甲方、政府决策者、投资人和非技术评审者。',\n  '正文应使用自然标题和普通读者能理解的表达，直接说明判断、依据、候选路径之间的取舍、反证、不确定性、成立条件和待核验事项。内容长度由证据复杂度决定，不套固定短摘要模板。',\n  '数据和证据应在相关判断附近自然说明来源类型与适用边界；不得输出引用 ID、内部文件名、字段名、状态枚举、节点名、工作流名、规则名或任何执行过程说明。',\n  '不得出现 step_01 一类步骤键、decision_state、quality_gate、evidence_index、n8n、UUID、JSON 字段说明或类似工程术语。不要把条件性判断改写成确定事实。',\n  '只返回完整章节正文，不要解释写作过程，不要另附审计数据。',\n  '需要补充事实时，自主调用项目数据工具；工具背后通过 MCP 读取项目数据。',\n  `当前章节：${state.step_title}。`,\n].join('\\n');\nconst userPayload = JSON.stringify({ project_question: state.project_question, chapter_title: state.step_title, previous_chapters: previous, source_context: contexts });\nconst conversationItems = [{ role: 'user', content: [{ type: 'input_text', text: userPayload }] }];\nreturn [{ json: {\n  state,\n  retrieval,\n  instructions,\n  input: conversationItems,\n  conversation_items: conversationItems,\n  max_output_tokens: 5000,\n  reasoning: { effort: 'medium' },\n  agent_turn: 0,\n  parallel_tool_calls: false,\n  tools: [\n    { type: 'function', name: 'project_context', description: 'Read current project context and available datasets.', parameters: { type: 'object', properties: {}, additionalProperties: false } },\n    { type: 'function', name: 'query_data', description: 'Query one project dataset for facts needed by this direction.', parameters: { type: 'object', properties: { dataset_id: { type: 'string' }, operation: { type: 'string', enum: ['records', 'aggregate'] }, filters: { type: 'object' }, spatial: { type: 'object' }, sort: { type: 'object' }, group_by: { type: 'array', items: { type: 'string' } }, metrics: { type: 'array', items: { type: 'object' } }, continue_token: { type: 'string' } }, required: ['dataset_id'], additionalProperties: false } },\n  ],\n  text: { format: { type: 'json_schema', name: 'reader_chapter', strict: true, schema } },\n} }];"
+      },
+      "id": "6232e15e-c92d-4cb6-b80e-664c91d3567b",
+      "name": "Build Structured Decision Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "codexRelayResponse1",
+          "mode": "id"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "mode": "once",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "bc489f25-05d3-4bb4-9c0c-784d956fa932",
+      "name": "Call Codex For Decision",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        1620,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const request = $('Build Structured Decision Request').first().json;\nconst response = $input.first()?.json ?? {};\nlet parsed;\ntry { parsed = JSON.parse(String(response.output_text ?? '')); } catch { throw new Error('reader_chapter_invalid_json'); }\nconst state = request.state;\nconst readerChapter = String(parsed.reader_chapter ?? '').trim();\nconst leakagePatterns = [\n  /step[_-]?\\d{1,2}/i, /decision_state/i, /quality_gate/i, /evidence_index/i, /\\bn8n\\b/i,\n  /(?:node|节点)[ _-]?(?:id|编号)/i, /(?:run|workflow|response)[ _-]?id/i,\n  /\\b(?:queued|running|completed|failed|cancelled|revision_required)\\b/i,\n  /\\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\b/i,\n  /(?:project|result|document):[a-z0-9._:-]{6,}/i, /\\bE\\d{3,}\\b/i,\n  /(?:page|block|chunk)[ _:-]?\\d+/i, /\\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\\b/i,\n  /\\b(?:phase\\s*\\d+|[GDP]\\d+)\\b/i,\n];\nif (!readerChapter) throw new Error('reader_chapter_empty');\nif (leakagePatterns.some((pattern) => pattern.test(readerChapter))) throw new Error('reader_chapter_contains_internal_terms');\nconst evidenceSignals = ['项目材料', '项目数据', '空间数据', '公开资料', '现场', '核验', '证据', '数据显示', '材料显示'];\nif (!evidenceSignals.some((signal) => readerChapter.includes(signal))) throw new Error('reader_chapter_missing_evidence_context');\nconst conditionSignals = ['条件', '前提', '尚未', '不能', '需要', '待核验', '不确定', '若', '如果'];\nif (!conditionSignals.some((signal) => readerChapter.includes(signal))) throw new Error('reader_chapter_missing_conditions');\nconst output = { title: state.step_title, reader_chapter: readerChapter };\nconst nextDecisionState = {\n  ...state.decision_state,\n  steps: { ...(state.decision_state.steps ?? {}), [state.step_key]: output },\n  current_step: state.step_key,\n};\nreturn [{ json: { result: {\n  run_id: state.run_id, step_key: state.step_key, step_order: state.step_order, status: 'completed',\n  output, decision_state: nextDecisionState,\n} } }];"
+      },
+      "id": "71d98402-d5c7-48d2-ad12-1a81456fa24e",
+      "name": "Validate Decision Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1860,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH payload AS (SELECT $1::jsonb AS value), saved_step AS (\n  UPDATE analysis_step_outputs SET status = payload.value->>'status', output = payload.value->'output',\n    citations = '[]'::jsonb, diagnostics = '[]'::jsonb, quality_gate = '{}'::jsonb, updated_at = NOW()\n  FROM payload WHERE run_id = (payload.value->>'run_id')::uuid AND step = payload.value->>'step_key' RETURNING run_id\n), saved_run AS (\n  UPDATE analysis_runs SET current_step = payload.value->>'step_key', decision_state = payload.value->'decision_state',\n    updated_at = NOW()\n  FROM payload WHERE id = (payload.value->>'run_id')::uuid RETURNING id\n) SELECT value AS result FROM payload;",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.result)] }}"
+        }
+      },
+      "id": "7624c939-f05a-4da0-a3d2-21603984828a",
+      "name": "Persist Decision State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2100,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "rag-postgres",
+          "name": "RAG PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{ json: $input.first()?.json?.result ?? {} }];"
+      },
+      "id": "6feea74c-e3fa-42b7-b591-cd47cd5478f7",
+      "name": "Return Step Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        300
+      ]
+    },
+    {
+      "name": "Agent Has Tool Calls",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "agent-has-tool-calls",
+              "leftValue": "={{ Array.isArray($json.tool_calls) && $json.tool_calls.length > 0 }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "position": [
+        1860,
+        180
+      ]
+    },
+    {
+      "name": "Prepare MCP Agent Tool Call",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first()?.json ?? {};\nconst call = Array.isArray(response.tool_calls) ? response.tool_calls[0] : null;\nif (!call?.name || !call?.call_id) throw new Error('invalid_agent_tool_call');\nreturn [{ json: { ...response, mcp_tool_name: String(call.name), mcp_arguments: call.arguments && typeof call.arguments === 'object' ? call.arguments : {}, mcp_call_id: String(call.call_id), agent_turn: Number(response.agent_turn ?? 0) + 1 } }];"
+      },
+      "position": [
+        2100,
+        180
+      ]
+    },
+    {
+      "name": "Call Spatial MCP Tool",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "parameters": {
+        "method": "POST",
+        "url": "=__SPATIAL_API_BASE_URL__/analysis/spatial-strategy/agent-tools/call",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ history_id: $('Build Structured Decision Request').item.json.state.history_id, tool_name: $json.mcp_tool_name, arguments: $json.mcp_arguments }) }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "n8n-webhook-client",
+          "name": "n8n Webhook Client"
+        }
+      },
+      "position": [
+        2340,
+        180
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "name": "Build MCP Agent Follow-up",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prior = $('Prepare MCP Agent Tool Call').item.json;\nconst toolResult = $input.first()?.json ?? {};\nif (Number(prior.agent_turn ?? 0) > 6) throw new Error('agent_tool_turn_limit');\nconst conversationItems = Array.isArray(prior.conversation_items) ? prior.conversation_items : [];\nconst responseItems = Array.isArray(prior.output) ? prior.output : [];\nconst result = toolResult.structured_content ?? toolResult.content ?? toolResult;\nconst normalizedToolResult = {\n  tool_name: String(toolResult.tool_name ?? prior.mcp_tool_name ?? ''),\n  is_error: toolResult.is_error === true,\n  result,\n};\nconst nextItems = [\n  ...conversationItems,\n  ...responseItems,\n  { type: 'function_call_output', call_id: prior.mcp_call_id, output: JSON.stringify(normalizedToolResult) },\n];\nreturn [{ json: { ...prior, input: nextItems, conversation_items: nextItems, output: [] } }];"
+      },
+      "position": [
+        2580,
+        180
+      ]
+    },
+    {
+      "name": "Fail MCP Agent Tool Call",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "throw new Error('spatial_mcp_tool_unavailable');"
+      },
+      "position": [
+        2580,
+        360
+      ]
+    }
+  ],
+  "connections": {
+    "When Called By Orchestrator": {
+      "main": [
+        [
+          {
+            "node": "Validate Step Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Step Request": {
+      "main": [
+        [
+          {
+            "node": "Step Already Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Step Already Completed": {
+      "main": [
+        [
+          {
+            "node": "Return Existing Step Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Step Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Step Running": {
+      "main": [
+        [
+          {
+            "node": "Build Retrieval Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Retrieval Request": {
+      "main": [
+        [
+          {
+            "node": "Retrieve Cited Source Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retrieve Cited Source Text": {
+      "main": [
+        [
+          {
+            "node": "Attach Project Data To Retrieval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Project Data To Retrieval": {
+      "main": [
+        [
+          {
+            "node": "Prioritize Project Data Contexts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prioritize Project Data Contexts": {
+      "main": [
+        [
+          {
+            "node": "Build Structured Decision Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Structured Decision Request": {
+      "main": [
+        [
+          {
+            "node": "Call Codex For Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Codex For Decision": {
+      "main": [
+        [
+          {
+            "node": "Agent Has Tool Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Decision State": {
+      "main": [
+        [
+          {
+            "node": "Return Step Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Decision Output": {
+      "main": [
+        [
+          {
+            "node": "Persist Decision State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent Has Tool Calls": {
+      "main": [
+        [
+          {
+            "node": "Prepare MCP Agent Tool Call",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validate Decision Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare MCP Agent Tool Call": {
+      "main": [
+        [
+          {
+            "node": "Call Spatial MCP Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Spatial MCP Tool": {
+      "main": [
+        [
+          {
+            "node": "Build MCP Agent Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail MCP Agent Tool Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build MCP Agent Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Call Codex For Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "5c427c98-1178-456d-a278-233f53de0da8",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

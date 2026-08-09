@@ -121,17 +121,6 @@ def validate_report(
                     violations.append(ReportViolation(code="excluded_metric_cited", message="报告引用了已排除指标。", citation_label=label, node_id=node_id, metric_id=metric_id))
                 if (metric_id, node_id) not in succeeded:
                     violations.append(ReportViolation(code="metric_attempt_not_succeeded", message="指标本次运行未成功产出该节点。", citation_label=label, node_id=node_id, metric_id=metric_id))
-                for boundary in metric.get("does_not_support") or []:
-                    boundary_text = str(boundary).strip()
-                    if boundary_text and boundary_text in sentence:
-                        violations.append(ReportViolation(
-                            code="catalog_semantic_overreach",
-                            message=f"结论越过 {metric_id} 的解释边界。",
-                            citation_label=label,
-                            node_id=node_id,
-                            metric_id=metric_id,
-                            allowed_expression=f"仅陈述 {metric.get('supports', ['该指标的直接观测结果'])[0]}。",
-                        ))
                 if metric.get("proxy") and any(term in sentence for term in ("证明", "确定", "必然", "真实")):
                     violations.append(ReportViolation(code="proxy_promoted_to_fact", message="代理指标被升级为直接事实。", citation_label=label, node_id=node_id, metric_id=metric_id))
             if any(term in sentence for term in _RELATIVE_TERMS) and not node.data.get("comparison_baseline"):

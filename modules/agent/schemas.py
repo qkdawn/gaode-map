@@ -745,6 +745,22 @@ class AuditResult(BaseModel):
     required_evidence: List[str] = Field(default_factory=list)
 
 
+class SpatialEvidencePacket(BaseModel):
+    """Bounded research memo passed from the data child to a document parent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["completed", "partial", "evidence_gap"]
+    decision_questions: List[str] = Field(min_length=1, max_length=6)
+    observations: List[Dict[str, Any]] = Field(default_factory=list, max_length=12)
+    comparisons: List[Dict[str, Any]] = Field(default_factory=list, max_length=8)
+    evidence_refs: List[str] = Field(default_factory=list, max_length=20)
+    metric_refs: List[Dict[str, Any]] = Field(default_factory=list, max_length=8)
+    limitations: List[str] = Field(default_factory=list, max_length=12)
+    does_not_prove: List[str] = Field(default_factory=list, max_length=12)
+    next_action: str = ""
+
+
 class WorkingMemory(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

@@ -26,6 +26,7 @@ class PlannedSkillDependency:
     skill_id: str
     when: str
     stage: str = "preflight"
+    research_requests: tuple[dict[str, Any], ...] = ()
 
 
 def _text_values(value: Any) -> list[str]:
@@ -71,7 +72,38 @@ def _matches(condition: str, payload: AgentTurnRequest) -> bool:
     if condition == "formal_problem_map_confirmed":
         problem_map = payload.analysis_snapshot.context.get("problem_map")
         return isinstance(problem_map, dict) and str(problem_map.get("status") or "").strip().lower() == "confirmed"
+    if condition == "confirmed_spatial_evidence_requests":
+        return bool(_spatial_evidence_requests(payload))
     return False
+
+
+def _spatial_evidence_requests(payload: AgentTurnRequest) -> tuple[dict[str, Any], ...]:
+    """Extract decision questions expressly delegated to the spatial data child."""
+
+    problem_map = payload.analysis_snapshot.context.get("problem_map")
+    if not isinstance(problem_map, dict) or str(problem_map.get("status") or "").strip().lower() != "confirmed":
+        return ()
+    requests: list[dict[str, Any]] = []
+    for item in problem_map.get("questions") or []:
+        if not isinstance(item, dict):
+            continue
+        dependencies = item.get("dependencies") if isinstance(item.get("dependencies"), list) else []
+        owner = str(item.get("research_owner") or "").strip()
+        if owner != "spatial_evidence_research" and "spatial_evidence_research" not in dependencies:
+            continue
+        question = str(item.get("question") or "").strip()
+        if not question:
+            continue
+        requests.append({
+            "id": str(item.get("id") or f"spatial-evidence-{len(requests) + 1}").strip(),
+            "question": question,
+            "why_decisive": str(item.get("why_decisive") or "").strip(),
+            "evidence_needed": [str(value).strip() for value in item.get("evidence_needed") or [] if str(value).strip()],
+            "disconfirming_evidence": [str(value).strip() for value in item.get("disconfirming_evidence") or [] if str(value).strip()],
+        })
+        if len(requests) == 6:
+            break
+    return tuple(requests)
 
 
 def resolve_skill_dependencies(
@@ -84,11 +116,22 @@ def resolve_skill_dependencies(
     if not skill_id:
         return []
     parent: AgentSkillView = get_agent_skill(skill_id)
-    return [
-        PlannedSkillDependency(skill_id=dependency.skill_id, when=dependency.when, stage=dependency.stage)
-        for dependency in parent.dependencies
-        if _matches(dependency.when, payload)
-    ]
+    dependencies: list[PlannedSkillDependency] = []
+    for dependency in parent.dependencies:
+        if not _matches(dependency.when, payload):
+            continue
+        requests = (
+            _spatial_evidence_requests(payload)
+            if dependency.skill_id == "spatial-evidence-research"
+            else ()
+        )
+        dependencies.append(PlannedSkillDependency(
+            skill_id=dependency.skill_id,
+            when=dependency.when,
+            stage=dependency.stage,
+            research_requests=requests,
+        ))
+    return dependencies
 
 
 def skill_instruction(skill_id: str) -> str:
@@ -106,6 +149,22 @@ def cultural_tourism_child_request(payload: AgentTurnRequest) -> str:
         f"当前项目 history_id：{str(payload.history_id or '').strip() or '未提供'}。"
         "本 Agent 的已注册适配器中，list_scope_datasets/query_scope_dataset/aggregate_scope_dataset/read_scope_record 对应已保存项目数据查询，search_public_web 对应公开网页检索；优先使用这些工具并保留查询参数。"
         "不能把旧的运行时底稿当作本轮完成结果。"
+    )
+
+
+def spatial_evidence_child_request(
+    payload: AgentTurnRequest, *, research_requests: tuple[dict[str, Any], ...],
+) -> str:
+    return (
+        "执行 spatial-evidence-research，作为正式报告主 Agent 的按需数据研究子阶段。"
+        "只能回答下列已确认的决策问题；不得替父级选择定位、产品、业态、投资或一期方案。"
+        f"当前项目 history_id：{str(payload.history_id or '').strip() or '未提供'}。"
+        f"研究请求：{list(research_requests)}。"
+        "自行决定是否读取项目材料、保存数据集、已有指标或公开网页；不得把原始记录、字段名或查询参数转交给父级。"
+        "必须在 ToolLoopResult.artifacts.spatial_evidence_packet 返回严格 JSON："
+        " {status: completed|partial|evidence_gap, decision_questions: [...], observations: [...], comparisons: [...],"
+        " evidence_refs: [...], metric_refs: [...], limitations: [...], does_not_prove: [...], next_action: ...}。"
+        "每项观察写清年份、范围和比较口径；POI、路网、人口、夜光和 H3 不得单独证明客流、支付、收入、ROI、许可或真实承载。"
     )
 
 
@@ -199,5 +258,5 @@ def formal_specialist_request(
         f"当前项目 history_id：{str(payload.history_id or '').strip() or '未提供'}。"
         "必须只消费本轮已确认问题地图与下列本轮上游工件，历史报告只能作为线索，不能冒充本轮产出。"
         f"本轮上游工件：{upstream_artifacts}。"
-        "输出核心判断、数据依据、候选与反例、规划含义、具体动作及证据边界。"
+        "输出核心判断、数据依据、候选与反例、规划含义和具体动作。"
     )

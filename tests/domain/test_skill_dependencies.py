@@ -34,6 +34,19 @@ def _confirmed_payload(text: str) -> AgentTurnRequest:
     return payload
 
 
+def _spatial_evidence_payload(text: str) -> AgentTurnRequest:
+    payload = _confirmed_payload(text)
+    payload.analysis_snapshot.context["problem_map"]["questions"] = [{
+        "id": "Q-access",
+        "question": "项目应优先从哪个入口组织低冲击到达？",
+        "why_decisive": "入口会改变居民边界与一期导视投入。",
+        "evidence_needed": ["连续步行路径", "入口周边供给"],
+        "disconfirming_evidence": ["消防或居民通行限制"],
+        "research_owner": "spatial_evidence_research",
+    }]
+    return payload
+
+
 def _public_web_sources(*, categories=None):
     categories = categories or [
         "统计",
@@ -131,10 +144,35 @@ def test_confirmed_problem_map_status_starts_market_discovery():
     ]
 
 
+def test_confirmed_problem_map_dispatches_only_explicit_spatial_evidence_requests():
+    deps = resolve_skill_dependencies(
+        _spatial_evidence_payload("继续正式报告"),
+        EffectiveExecutionProfile(skill_id="spatial-business-analyst"),
+    )
+
+    assert [(item.skill_id, item.stage) for item in deps] == [
+        ("spatial-market-audience-research", "market_discovery"),
+        ("spatial-evidence-research", "decision_evidence"),
+    ]
+    request = deps[-1].research_requests[0]
+    assert request["id"] == "Q-access"
+    assert request["question"] == "项目应优先从哪个入口组织低冲击到达？"
+    assert "连续步行路径" in request["evidence_needed"]
+
+
 def test_market_research_tool_candidates_cover_public_project_poi_and_scope_evidence():
     candidates = tool_allocation_candidates(get_tool_registry(), agent_role="market_audience_research")
 
     assert {"search_public_web", "read_project_context", "query_current_pois", "list_scope_datasets"}.issubset(candidates)
+
+
+def test_spatial_evidence_child_owns_raw_data_and_document_parent_does_not():
+    registry = get_tool_registry()
+    child = tool_allocation_candidates(registry, agent_role="spatial_evidence_research")
+    parent = tool_allocation_candidates(registry, agent_role="spatial_business_parent")
+
+    assert {"search_public_web", "query_current_pois", "list_scope_datasets", "aggregate_scope_dataset"}.issubset(child)
+    assert not {"search_public_web", "query_current_pois", "list_scope_datasets", "aggregate_scope_dataset"}.intersection(parent)
 
 
 def test_formal_specialist_tool_candidates_are_role_bounded():
@@ -220,6 +258,88 @@ def test_market_discovery_artifact_is_published_before_parent_loop(monkeypatch):
     assert memory.artifacts["market_audience_research"]["recheck_status"] == "pending_parent_drafts"
 
 
+def test_spatial_evidence_memo_is_validated_and_published_before_parent_loop(monkeypatch):
+    calls = []
+
+    async def fake_loop(**kwargs):
+        calls.append(kwargs)
+        if "spatial-evidence-research" in kwargs["system_instruction"]:
+            return ToolLoopResult(
+                status="completed",
+                assistant_summary="入口与连续步行路径证据已整理。",
+                artifacts={"spatial_evidence_packet": {
+                    "status": "partial",
+                    "decision_questions": ["项目应优先从哪个入口组织低冲击到达？"],
+                    "observations": [{"fact": "入口路径需现场核验", "year": "2024", "scope": "项目周边", "comparison_basis": "连续路网"}],
+                    "comparisons": [{"candidate": "主入口", "effect": "unresolved", "reason": "缺少消防核验"}],
+                    "evidence_refs": ["scope_dataset:road_edges"],
+                    "metric_refs": [],
+                    "next_action": "复核入口与消防边界。",
+                }},
+                used_tools=["aggregate_scope_dataset"],
+            )
+        return ToolLoopResult(
+            status="completed",
+            assistant_summary="市场发现已完成",
+            artifacts={"public_web_sources": _public_web_sources()},
+        )
+
+    import modules.agent.runtime as runtime
+
+    monkeypatch.setattr(runtime, "run_langgraph_react_loop", fake_loop)
+    memory = create_working_memory()
+
+    async def emit_thinking(*_args):
+        return None
+
+    error = asyncio.run(
+        _run_required_skill_dependencies(
+            payload=_spatial_evidence_payload("问题地图已确认，继续正式报告"),
+            effective_profile=EffectiveExecutionProfile(skill_id="spatial-business-analyst"),
+            context=build_context_bundle(_payload("x").analysis_snapshot),
+            memory=memory,
+            llm_runtime=None,
+            emit_thinking=emit_thinking,
+        )
+    )
+
+    assert error == ""
+    assert "spatial-evidence-research" in calls[-1]["system_instruction"]
+    assert "研究请求" in calls[-1]["messages"][-1].content
+    packet = memory.artifacts["spatial_evidence_research"]["artifacts"]["spatial_evidence_packet"]
+    assert packet["status"] == "partial"
+    assert packet["next_action"] == "复核入口与消防边界。"
+
+
+def test_spatial_evidence_memo_rejects_unstructured_child_result(monkeypatch):
+    async def fake_loop(**kwargs):
+        if "spatial-evidence-research" in kwargs["system_instruction"]:
+            return ToolLoopResult(status="completed", artifacts={"spatial_evidence_packet": {"status": "completed"}})
+        return ToolLoopResult(status="completed", artifacts={"public_web_sources": _public_web_sources()})
+
+    import modules.agent.runtime as runtime
+
+    monkeypatch.setattr(runtime, "run_langgraph_react_loop", fake_loop)
+    memory = create_working_memory()
+
+    async def emit_thinking(*_args):
+        return None
+
+    error = asyncio.run(
+        _run_required_skill_dependencies(
+            payload=_spatial_evidence_payload("继续正式报告"),
+            effective_profile=EffectiveExecutionProfile(skill_id="spatial-business-analyst"),
+            context=build_context_bundle(_payload("x").analysis_snapshot),
+            memory=memory,
+            llm_runtime=None,
+            emit_thinking=emit_thinking,
+        )
+    )
+
+    assert "未返回合法 spatial_evidence_packet" in error
+    assert "spatial_evidence_research" not in memory.artifacts
+
+
 def test_market_discovery_rejects_partial_public_web_category_coverage(monkeypatch):
     async def fake_loop(**_kwargs):
         return ToolLoopResult(
@@ -300,7 +420,7 @@ def test_formal_specialists_run_in_order_with_independent_tool_allocations(monke
     assert all(memory.artifacts[role]["current_version"] == 1 for role in expected)
 
 
-def test_formal_specialists_require_completed_market_discovery_and_allocator(monkeypatch):
+def test_formal_specialists_require_completed_market_discovery_and_use_bounded_fallback_tools(monkeypatch):
     import modules.agent.runtime as runtime
 
     memory = create_working_memory()
@@ -325,7 +445,15 @@ def test_formal_specialists_require_completed_market_discovery_and_allocator(mon
     async def allocator_failure(**_kwargs):
         raise RuntimeError("allocator unavailable")
 
+    async def fake_loop(**kwargs):
+        role = kwargs["initial_artifacts"]["formal_specialist_role"]
+        artifacts = {"draft": role}
+        if role == "positioning_product":
+            artifacts["product_inventory"] = _product_inventory("PP-01")
+        return ToolLoopResult(status="completed", assistant_summary=f"{role} 完成", artifacts=artifacts)
+
     monkeypatch.setattr(runtime, "run_tool_allocator_with_llm", allocator_failure)
+    monkeypatch.setattr(runtime, "run_langgraph_react_loop", fake_loop)
     error = asyncio.run(
         _run_formal_specialist_roles(
             payload=_payload("继续正式报告"),
@@ -335,8 +463,16 @@ def test_formal_specialists_require_completed_market_discovery_and_allocator(mon
             emit_thinking=emit_thinking,
         )
     )
-    assert "工具授权失败" in error
-    assert "spatial_structure" not in memory.artifacts
+    assert error == ""
+    allocations = memory.artifacts["tool_allocations"]
+    assert set(allocations) == {
+        "spatial_structure",
+        "positioning_product",
+        "spatial_function_programming",
+        "operations_phasing",
+    }
+    assert all(items[0]["allowed_tools"] for items in allocations.values())
+    assert all("受限候选集" in items[0]["rationale"] for items in allocations.values())
 
 
 def test_market_product_recheck_rejects_generic_main_summary_drafts():

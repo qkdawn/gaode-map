@@ -50,6 +50,7 @@ def _frontmatter(path: Path) -> dict[str, Any]:
 
 _PROMPT_DRIVEN_SKILLS = frozenset({
     "cultural-tourism-theme-research",
+    "spatial-evidence-research",
     "spatial-market-audience-research",
     "spatial-business-analyst",
 })

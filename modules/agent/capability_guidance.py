@@ -37,6 +37,7 @@ _ACTIVE_RUN_STATUSES = {"queued", "running", "waiting_for_user"}
 _SUCCESS_RUN_STATUSES = {"completed", "completed_with_warnings"}
 _FAILED_RUN_STATUSES = {"failed", "cancelled"}
 _WORKFLOW_PRIORITY = {
+    "client-decision-spatial-strategy": 5,
     "urban-strategy-stage1": 10,
     "spatial-programming-matrix": 20,
     "ppt-planning": 30,

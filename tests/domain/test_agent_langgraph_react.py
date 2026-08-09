@@ -108,6 +108,30 @@ def test_langgraph_initial_payload_catalogs_business_analyst_skeleton():
     assert catalog["skip_conditions"]["HuffGravityModel"] == ["no candidate site"]
 
 
+def test_langgraph_initial_payload_catalogs_spatial_evidence_memo_for_parent_consumption():
+    registry = get_tool_registry()
+    payload = _initial_payload(
+        question="继续完成正式报告",
+        snapshot=_snapshot_with_scope(),
+        context=build_context_bundle(_snapshot_with_scope()),
+        registry={"read_current_results": registry["read_current_results"]},
+        artifacts={"spatial_evidence_research": {
+            "skill_id": "spatial-evidence-research",
+            "status": "completed",
+            "artifacts": {"spatial_evidence_packet": {
+                "status": "partial",
+                "decision_questions": ["入口如何组织"],
+                "limitations": ["消防边界待核验"],
+                "does_not_prove": ["不证明客流"],
+            }},
+        }},
+    )
+
+    catalog = payload["artifact_catalog"]["spatial_evidence_research"]
+    assert catalog["decision_questions"] == ["入口如何组织"]
+    assert catalog["does_not_prove"] == ["不证明客流"]
+
+
 def test_react_tool_registry_defaults_to_core_analysis_tools():
     selected = select_react_tool_registry(
         get_tool_registry(),

@@ -1,0 +1,135 @@
+{
+  "id": "analysisSpatialStrategyWebhook1",
+  "name": "AN-00 Spatial Strategy Webhook",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "api/v1/n8n/spatial-strategy",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": { "rawBody": false }
+      },
+      "id": "a5dbbfb1-37bd-46aa-8354-31e7f8982f52",
+      "name": "Receive Spatial Strategy Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [180, 300],
+      "credentials": { "httpHeaderAuth": { "id": "n8n-webhook-client", "name": "n8n Webhook Client" } },
+      "webhookId": "analysis-spatial-strategy-webhook"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const request = $input.first()?.json ?? {};\nconst body = request.body && typeof request.body === 'object' ? request.body : request;\nconst headers = request.headers && typeof request.headers === 'object' ? request.headers : {};\nconst tenantId = String(headers['x-tenant-id'] ?? headers['X-Tenant-Id'] ?? '').trim();\nconst question = String(body.project_question ?? '').trim();\nconst resumeRunId = String(body.resume_run_id ?? '').trim();\nconst list = (value) => Array.isArray(value) ? [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))] : [];\nconst accessGroups = [...new Set(String(headers['x-access-groups'] ?? headers['X-Access-Groups'] ?? '').split(',').map((item) => item.trim()).filter(Boolean))];\nconst errors = [];\nif (!tenantId) errors.push('x-tenant-id is required');\nif (!resumeRunId && !question) errors.push('project_question is required');\nif (resumeRunId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(resumeRunId)) errors.push('resume_run_id must be a UUID');\nreturn [{ json: {\n  valid: errors.length === 0,\n  errors,\n  project_question: question,\n  history_id: String(body.history_id ?? '').trim(),\n  resume_run_id: resumeRunId,\n  tenant_id: tenantId,\n  access_groups: accessGroups,\n  project_types: list(body.project_types),\n  geography: list(body.geography),\n  metadata_filter: body.metadata_filter && typeof body.metadata_filter === 'object' && !Array.isArray(body.metadata_filter) ? body.metadata_filter : {},\n  deliver_to_feishu: body.deliver_to_feishu === true,\n  requested_at: new Date().toISOString(),\n} }];"
+      },
+      "id": "f6b43d9c-305b-4ebc-9662-3d2ab04e2d25",
+      "name": "Normalize Trusted Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "valid-spatial-strategy-request",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f7c7e9ce-c7df-4ce1-95d8-702a567c88db",
+      "name": "Request Is Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: false, status: 'invalid_request', detail: $json.errors }) }}",
+        "options": { "responseCode": 400 }
+      },
+      "id": "01b65042-0ce4-42f8-a32f-f3e258259a2b",
+      "name": "Return Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH payload AS (SELECT $1::jsonb AS value), resumed AS (\n  UPDATE analysis_runs SET workflow_execution_id = $2::text, status = 'queued', error = '', finished_at = NULL, updated_at = NOW()\n  FROM payload\n  WHERE id = NULLIF(payload.value->>'resume_run_id', '')::uuid\n    AND tenant_id = payload.value->>'tenant_id' AND status = 'failed'\n  RETURNING id, status, current_step, created_at, request\n), created AS (\n  INSERT INTO analysis_runs (history_id, workflow_execution_id, status, current_step, request, tenant_id, access_groups, decision_state)\n  SELECT COALESCE(value->>'history_id', ''), $2::text, 'queued', 'queued', value,\n    value->>'tenant_id', ARRAY(SELECT jsonb_array_elements_text(value->'access_groups')),\n    jsonb_build_object('steps', '{}'::jsonb, 'evidence_index', '{}'::jsonb, 'conflicts', '[]'::jsonb, 'open_questions', '[]'::jsonb, 'revisions', '[]'::jsonb)\n  FROM payload WHERE COALESCE(value->>'resume_run_id', '') = ''\n  RETURNING id, status, current_step, created_at, request\n)\nSELECT id::text AS run_id, status, current_step, created_at, request FROM resumed\nUNION ALL\nSELECT id::text AS run_id, status, current_step, created_at, request FROM created;",
+        "options": { "queryReplacement": "={{ [JSON.stringify($json), $execution.id] }}" }
+      },
+      "id": "0c4af2ae-52b9-4f75-87a8-a73794eec3b2",
+      "name": "Create Queued Analysis Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [900, 220],
+      "credentials": { "postgres": { "id": "rag-postgres", "name": "RAG PostgreSQL" } }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const submitted = $('Normalize Trusted Request').first().json;\nconst run = $input.first()?.json ?? {};\nconst stored = run.request && typeof run.request === 'object' ? run.request : submitted;\nconst runId = String(run.run_id ?? '').trim();\nif (!runId) throw new Error('analysis_run_not_resumable');\nreturn [{ json: { ...stored, run_id: runId } }];"
+      },
+      "id": "ad49e0ad-3e04-457a-9fd6-d72cbb2b7366",
+      "name": "Build Orchestration Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 220]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": { "__rl": true, "value": "analysisSpatialStrategy1", "mode": "id" },
+        "workflowInputs": { "mappingMode": "defineBelow", "value": {}, "matchingColumns": [], "schema": [], "attemptToConvertTypes": false, "convertFieldsToString": true },
+        "mode": "once",
+        "options": { "waitForSubWorkflow": false }
+      },
+      "id": "b9c51022-0bd9-4c08-bdb7-bfdf4e0e76e3",
+      "name": "Start Async Decision Run",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [1380, 220]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ accepted: true, run_id: $('Create Queued Analysis Run').first().json.run_id, status: 'queued', current_step: 'queued', status_url: '/api/v1/analysis/spatial-strategy/runs/' + $('Create Queued Analysis Run').first().json.run_id }) }}",
+        "options": { "responseCode": 202 }
+      },
+      "id": "3e75124c-4d7f-4f66-9a42-87f55a2bf0f3",
+      "name": "Return Queued Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [1620, 220]
+    }
+  ],
+  "connections": {
+    "Receive Spatial Strategy Request": { "main": [[{ "node": "Normalize Trusted Request", "type": "main", "index": 0 }]] },
+    "Normalize Trusted Request": { "main": [[{ "node": "Request Is Valid", "type": "main", "index": 0 }]] },
+    "Request Is Valid": {
+      "main": [
+        [{ "node": "Create Queued Analysis Run", "type": "main", "index": 0 }],
+        [{ "node": "Return Validation Error", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create Queued Analysis Run": { "main": [[{ "node": "Build Orchestration Request", "type": "main", "index": 0 }]] },
+    "Build Orchestration Request": { "main": [[{ "node": "Start Async Decision Run", "type": "main", "index": 0 }]] },
+    "Start Async Decision Run": { "main": [[{ "node": "Return Queued Response", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "3be77f5b-d07a-43c8-a2fc-e4e7a966e803",
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": []
+}

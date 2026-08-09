@@ -637,7 +637,7 @@ def assess_provenance_bindings(
                     repair_hint=(
                         "指定唯一 artifact ID，或先统一来源日期、样本和坐标口径。"
                         if metadata_conflict
-                        else "使用 PageIndex node ID、精确页码或唯一 artifact ID 重建证据引用。"
+                        else "使用文档块 ID、精确页码或唯一 artifact ID 重建证据引用。"
                     ),
                 )
             )

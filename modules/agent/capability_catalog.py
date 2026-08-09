@@ -99,6 +99,33 @@ class CapabilityReadiness(BaseModel):
 
 _CAPABILITIES = (
     AnalysisCapability(
+        id="client-decision-spatial-strategy",
+        display_name="十二方向空间分析",
+        description="通过 n8n 按顺序分析政策场地、区域角色、市场流动、供给空位、客群、主题、定位、产品、空间、运营、财务与分期。",
+        category="planning",
+        status="available",
+        executor_type="service",
+        executor_id="n8n-spatial-strategy",
+        intent_phrases=[
+            "执行十二方向空间分析",
+            "生成完整空间策略",
+            "运行空间项目决策分析",
+            "执行client decision spatial strategy",
+        ],
+        input_requirements=[
+            CapabilityRequirement(id="project_brief", label="项目问题"),
+            CapabilityRequirement(id="evidence", label="已入库项目材料"),
+        ],
+        output_contract=[
+            "十二方向分析正文",
+        ],
+        supports_resume=True,
+        supports_versions=True,
+        estimated_stages=12,
+        icon="workflow",
+        workspace_kind="full",
+    ),
+    AnalysisCapability(
         id="urban-strategy-stage1",
         display_name="城市更新 Stage 1",
         description="从项目证据形成定位竞争、空间功能决策矩阵、策划报告和设计任务书。",

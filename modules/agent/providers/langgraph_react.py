@@ -112,6 +112,16 @@ def _artifact_catalog(artifacts: Dict[str, Any]) -> Dict[str, Any]:
             "status": str(research.get("status") or ""),
             "summary": str(research.get("summary") or ""),
         }
+    if artifacts.get("spatial_evidence_research"):
+        research = artifacts.get("spatial_evidence_research") if isinstance(artifacts.get("spatial_evidence_research"), dict) else {}
+        packet = research.get("artifacts", {}).get("spatial_evidence_packet", {}) if isinstance(research.get("artifacts"), dict) else {}
+        catalog["spatial_evidence_research"] = {
+            "purpose": "按已确认决策问题完成的空间证据备忘录。报告主 Agent 只消费其中观察、比较和改判动作，不再直接查询底层空间数据或网页。",
+            "status": str(research.get("status") or ""),
+            "decision_questions": list(packet.get("decision_questions") or [])[:6] if isinstance(packet, dict) else [],
+            "limitations": list(packet.get("limitations") or [])[:12] if isinstance(packet, dict) else [],
+            "does_not_prove": list(packet.get("does_not_prove") or [])[:12] if isinstance(packet, dict) else [],
+        }
     if artifacts.get("business_analyst_skeleton"):
         ba_skeleton = artifacts.get("business_analyst_skeleton") if isinstance(artifacts.get("business_analyst_skeleton"), dict) else {}
         selected_skill = ba_skeleton.get("selected_skill") if isinstance(ba_skeleton.get("selected_skill"), dict) else {}

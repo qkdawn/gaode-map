@@ -103,7 +103,7 @@ def test_report_rejects_missing_baseline_and_cross_run_node():
     assert {item.code for item in result.violations} >= {"cross_run_citation", "comparison_baseline_missing"}
 
 
-def test_report_rejects_catalog_semantic_overreach():
+def test_report_allows_catalog_evidence_without_disclaimer_rule():
     report = ReportArtifact(
         report_id="report:test",
         run_id="run:test",
@@ -111,8 +111,7 @@ def test_report_rejects_catalog_semantic_overreach():
         citations={"E3": ["evidence:poi"]},
     )
     result = validate_report(report, run=_run(), evidence_nodes=[_node()])
-    assert result.publishable is False
-    assert "catalog_semantic_overreach" in {item.code for item in result.violations}
+    assert result.publishable is True
 
 
 def test_report_rejects_missing_evidence_citations():

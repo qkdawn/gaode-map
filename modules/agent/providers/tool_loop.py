@@ -53,10 +53,12 @@ _SPATIAL_RESEARCH_TOOL_NAMES = _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_N
 _ROLE_TOOL_CANDIDATES = {
     "cultural_tourism_research": _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES | {"query_current_pois", "search_public_web"},
     "market_audience_research": _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES | {"query_current_pois", "plan_business_analyst_analysis", "search_public_web"},
+    "spatial_evidence_research": _SPATIAL_RESEARCH_TOOL_NAMES | {"search_public_web"},
     "spatial_structure": _SPATIAL_RESEARCH_TOOL_NAMES,
     "positioning_product": _CORE_RESEARCH_TOOL_NAMES | {"query_current_pois"},
     "spatial_function_programming": _SPATIAL_RESEARCH_TOOL_NAMES,
     "operations_phasing": _CORE_RESEARCH_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES,
+    "spatial_business_parent": _CORE_RESEARCH_TOOL_NAMES | _SOURCE_TOOL_NAMES | _REPORT_TOOL_NAMES,
     "main_analysis": _CORE_RESEARCH_TOOL_NAMES | _SOURCE_TOOL_NAMES | _REPORT_TOOL_NAMES | _SCOPE_DATASET_TOOL_NAMES | {"query_current_pois", "plan_business_analyst_analysis", "search_public_web"},
 }
 

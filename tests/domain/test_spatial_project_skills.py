@@ -3,6 +3,7 @@ from pathlib import Path
 import yaml
 
 from modules.agent.skill_catalog import list_agent_skills
+from modules.agent.capability_catalog import get_analysis_capability
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,9 +26,20 @@ def test_spatial_business_analyst_registers_dependency_executor():
     assert [stage.stage for stage in skills["spatial-business-analyst"].workflow_stages] == [
         "preflight",
         "market_discovery",
+        "decision_evidence",
         "product_recheck",
         "visual_editorial",
     ]
+
+
+def test_client_decision_spatial_strategy_is_owned_by_n8n_service():
+    skills = {skill.id: skill for skill in list_agent_skills()}
+    capability = get_analysis_capability("client-decision-spatial-strategy")
+
+    assert "client-decision-spatial-strategy" not in skills
+    assert capability.executor_type == "service"
+    assert capability.executor_id == "n8n-spatial-strategy"
+    assert capability.estimated_stages == 12
 
 
 def test_spatial_business_skill_focuses_on_codex_workflow_and_reader_report():

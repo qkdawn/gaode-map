@@ -1,7 +1,6 @@
 from .agent import router as agent_router
 from .charting import router as charting_router
 from .documents import router as documents_router
-from .evidence_retrieval import router as evidence_retrieval_router
 from .export import router as export_router
 from .gwr import router as gwr_router
 from .h3 import router as h3_router
@@ -18,6 +17,7 @@ from .road import router as road_router
 from .spatial_action import router as spatial_action_router
 from .shared_grid import router as shared_grid_router
 from .spatial_projects import router as spatial_projects_router
+from .spatial_strategy import router as spatial_strategy_router
 from .system import router as system_router
 from .timeseries import router as timeseries_router
 from .tools import router as tools_router
@@ -28,7 +28,6 @@ __all__ = [
     "gwr_router",
     "charting_router",
     "documents_router",
-    "evidence_retrieval_router",
     "h3_router",
     "history_router",
     "isochrone_router",
@@ -43,6 +42,7 @@ __all__ = [
     "spatial_action_router",
     "shared_grid_router",
     "spatial_projects_router",
+    "spatial_strategy_router",
     "system_router",
     "timeseries_router",
     "tools_router",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from contextlib import suppress
 from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List
 
@@ -40,6 +41,8 @@ from .schemas import (
     FirstProductRecheckDecision,
     ProductDraftInventory,
     ToolAllocationDecision,
+    ToolLoopResult,
+    SpatialEvidencePacket,
 )
 from .selected_sources import selected_sources_artifact_from_items
 from .skill_dependencies import (
@@ -47,9 +50,9 @@ from .skill_dependencies import (
     formal_specialist_request,
     market_audience_child_request,
     resolve_skill_dependencies,
+    spatial_evidence_child_request,
     skill_instruction,
 )
-from .tool_adapters.public_web_tools import DEFAULT_CATEGORIES as REQUIRED_MARKET_WEB_CATEGORIES
 from .synthesizer import (
     build_answer_evidence_payload,
     build_answer_fallback,
@@ -62,6 +65,15 @@ StreamEmit = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 
 _VISUAL_SNAPSHOT_LIMIT = 12
 _VISUAL_SNAPSHOT_MAX_DATA_URL_CHARS = 2_500_000
+REQUIRED_MARKET_WEB_CATEGORIES = (
+    "统计",
+    "政策规划",
+    "文保档案",
+    "片区供给",
+    "直接及区域竞品",
+    "文化机构或机构采购",
+    "公开价格与活动",
+)
 
 
 def _visual_snapshot_inputs(payload: AgentTurnRequest) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
@@ -517,10 +529,18 @@ async def _allocate_tools_for_role(
         )
         allowed = [name for name in proposed.allowed_tools if name in candidates]
         if not allowed:
-            raise RuntimeError("工具分派子代理未授予任何有效候选工具")
+            allowed = sorted(candidates)
+            rationale = str(proposed.rationale or "").strip()
+            proposed = proposed.model_copy(update={
+                "rationale": f"{rationale}；未选中具体工具，使用该角色的受限候选集。".lstrip("；"),
+            })
         decision = proposed.model_copy(update={"agent_role": agent_role, "allowed_tools": allowed})
-    except Exception as exc:
-        raise RuntimeError(f"工具分派子代理未完成授权：{agent_role}（{exc}）") from exc
+    except Exception:
+        decision = ToolAllocationDecision(
+            agent_role=agent_role,
+            allowed_tools=sorted(candidates),
+            rationale="工具分派不可用，使用该角色的受限候选集。",
+        )
     allocations = memory.artifacts.setdefault("tool_allocations", {})
     role_allocations = allocations.setdefault(agent_role, [])
     role_allocations.append(decision.model_dump(mode="json"))
@@ -570,6 +590,11 @@ async def _run_required_skill_dependencies(
             artifact_key = "market_audience_research"
             agent_role = "market_audience_research"
             task = "完成项目条件、候选客群、市场母体、竞争/替代供给与需求或公共服务履约的发现研究。"
+        elif dependency.skill_id == "spatial-evidence-research" and stage == "decision_evidence":
+            child_instruction = spatial_evidence_child_request(payload, research_requests=dependency.research_requests)
+            artifact_key = "spatial_evidence_research"
+            agent_role = "spatial_evidence_research"
+            task = "围绕已确认的决策问题按需查询项目材料、空间数据、指标或公开来源，并只输出可被报告消费的证据备忘录。"
         else:
             return f"未注册前置 Skill 执行器：{dependency.skill_id}"
         child_snapshot = payload.analysis_snapshot.model_copy(
@@ -624,6 +649,12 @@ async def _run_required_skill_dependencies(
             coverage_error = _market_public_web_coverage_error(dict(child.artifacts or {}))
             if coverage_error:
                 return coverage_error
+        if artifact_key == "spatial_evidence_research":
+            try:
+                packet = SpatialEvidencePacket.model_validate(child.artifacts.get("spatial_evidence_packet"))
+            except Exception as exc:
+                return f"空间证据研究未返回合法 spatial_evidence_packet：{exc}"
+            child.artifacts["spatial_evidence_packet"] = packet.model_dump(mode="json")
         artifact = {
             "skill_id": dependency.skill_id,
             "status": "completed",
@@ -644,7 +675,7 @@ async def _run_required_skill_dependencies(
             {
                 "phase": "preflight",
                 "title": f"研究阶段完成：{dependency.skill_id}/{stage}",
-                "detail": "已将本轮研究工件交给后续分析；后续阶段复用结论与证据边界，不重复伪造证据。",
+                "detail": "已将本轮研究工件交给后续分析；后续阶段复用结论与来源，不重复伪造证据。",
                 "state": "completed",
             },
             f"dependency-complete:{dependency.skill_id}:{stage}",
@@ -1158,7 +1189,7 @@ async def _run_main_agent_loop(
             memory=memory,
             llm_runtime=llm_runtime,
             agent_role="main_analysis",
-            task="围绕用户当前问题整合项目材料、空间指标、前置研究和必要的公开资料，形成可追溯结论。",
+            task="围绕用户当前问题整合项目材料和已委派研究备忘录，形成可追溯结论。",
             emit_thinking=emit_thinking,
         )
         max_steps_override, max_errors_override = _tool_loop_limits()
@@ -1180,6 +1211,8 @@ async def _run_main_agent_loop(
             )
             if llm_runtime is not None:
                 loop_kwargs["llm_runtime"] = llm_runtime
+            if effective_profile is not None and str(effective_profile.skill_id or "").strip():
+                loop_kwargs["system_instruction"] = skill_instruction(effective_profile.skill_id)
             loop_result = await run_langgraph_react_loop(**loop_kwargs)
             loop_result.artifacts = _new_loop_artifacts(loop_result, main_initial_artifacts)
     except Exception as exc:
