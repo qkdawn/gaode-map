@@ -60,7 +60,7 @@ def test_decision_agent_uses_dynamic_stop_conditions_instead_of_six_turn_limit()
     request = _code("Build Structured Decision Request")
     follow_up = _code("Build MCP Agent Follow-up")
 
-    assert "parallel_tool_calls: false" in request
+    assert "parallel_tool_calls: true" in request
     assert "context_budget_tokens: 24000" in request
     assert "context_reserve_tokens: 6000" in request
     assert "no_new_evidence_limit: 2" in request

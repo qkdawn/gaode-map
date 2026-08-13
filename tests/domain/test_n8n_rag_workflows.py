@@ -134,6 +134,8 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "不强制每章使用" in chapter_code
     assert "提出可能成立的解释或路径" in chapter_code
     assert "替代解释" in chapter_code
+    assert "本章必须推进一个新的决策边界" in chapter_code
+    assert "不要把上游的完整论证重新改写成背景综述" in chapter_code
     assert "decision_brief" in chapter_code
     assert "自由文本，不使用固定模板" in chapter_code
     assert "properties: { decision_brief:" in chapter_code
