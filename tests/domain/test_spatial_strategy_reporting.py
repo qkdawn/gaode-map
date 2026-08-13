@@ -44,6 +44,21 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
             "title": key,
             "reader_chapter": f"第 {index} 个章节说明项目材料、项目数据和空间数据支持的判断。当前条件尚未完全闭合，需要现场核验后再决定下一步。" * 2,
         }
+    steps["step_01_policy_site"]["citations"] = [
+        {
+            "citation_id": "project:source-1",
+            "title": "项目材料原文",
+            "content": "这是项目材料中的可复核原文。",
+            "source_type": "project_document",
+            "source_locator": "项目材料：第 1 页",
+            "dataset_id": "document:1",
+            "snapshot_id": "snapshot-1",
+        }
+    ]
+    steps["step_02_regional_role"]["citations"] = [
+        {"citation_id": "project:source-1", "source_type": "project_document"},
+        {"citation_id": "project:source-2", "title": "空间查询", "source_type": "project_data"},
+    ]
     return SpatialStrategyReportFinalizeRequest(
         run_id=RUN_ID,
         history_id="history-1",
@@ -76,8 +91,41 @@ def test_report_contains_all_twelve_steps_and_deduplicated_citation():
     assert report["markdown"].index("## 总判断") < report["markdown"].index("## 1. 政策与场地")
     assert "第 1 个章节说明项目材料" in report["markdown"]
     assert "### " not in report["markdown"]
-    assert report["citations"] == []
+    assert [citation["citation_id"] for citation in report["citations"]] == [
+        "project:source-1",
+        "project:source-2",
+    ]
+    assert report["citations"][0]["title"] == "项目材料原文"
+    assert report["citations"][1]["title"] == "空间查询"
     assert report["summary"] == "项目应以可验证的空间策略形成首期行动，并以运营反馈决定后续投入。"
+
+
+def test_report_reads_current_step_grouped_evidence_index_without_audit_references():
+    request = _request().model_copy(deep=True)
+    for step in request.decision_state["steps"].values():
+        step.pop("citations", None)
+    request.decision_state["evidence_index"] = {
+        "step_04_supply_gap": [
+            {
+                "citation_id": "project:gap-query",
+                "title": "周边设施空间查询",
+                "source_type": "project_data",
+                "source_locator": "poi:aggregate",
+            }
+        ]
+    }
+
+    report = build_spatial_strategy_report(request)
+
+    assert report["citations"] == [
+        {
+            "label": "E001",
+            "citation_id": "project:gap-query",
+            "title": "周边设施空间查询",
+            "source_type": "project_data",
+            "source_locator": "poi:aggregate",
+        }
+    ]
 
 
 def test_report_store_writes_run_scoped_markdown(tmp_path):

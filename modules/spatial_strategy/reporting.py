@@ -77,20 +77,56 @@ def _project_name(project_context: Mapping[str, Any]) -> str:
     return "项目"
 
 
-def _used_citation_ids(steps: Mapping[str, Any]) -> list[str]:
-    used: list[str] = []
+def _citation_id(value: Any, *, fallback: str = "") -> str:
+    item = _mapping(value)
+    if item:
+        for key in ("citation_id", "chunk_id", "chunk_key", "document_id", "source_locator"):
+            candidate = _text(item.get(key))
+            if candidate:
+                return candidate
+    return _text(value) if not item else _text(fallback)
 
-    def add(values: Any) -> None:
-        for value in _list(values):
-            citation_id = _text(value)
-            if citation_id and citation_id not in used:
-                used.append(citation_id)
 
-    for step in steps.values():
+def _citation_entries(steps: Mapping[str, Any], evidence_index: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Collect the evidence a chapter actually used without imposing a chapter schema."""
+    entries: dict[str, dict[str, Any]] = {}
+
+    def add(value: Any, *, fallback: str = "") -> None:
+        item = _mapping(value)
+        citation_id = _citation_id(item or value, fallback=fallback)
+        if not citation_id:
+            return
+        if item:
+            item = {**item, "citation_id": citation_id}
+        else:
+            item = {"citation_id": citation_id}
+        current = entries.get(citation_id)
+        if current is None:
+            entries[citation_id] = item
+        else:
+            entries[citation_id] = {**item, **current}
+
+    def add_many(value: Any, *, fallback: str = "") -> None:
+        for item in _list(value):
+            add(item, fallback=fallback)
+
+    for step_key, step in steps.items():
         output = _mapping(step)
+        add_many(output.get("citations"), fallback=step_key)
+        # Keep compatibility with the earlier compact reference shape.
         for item in _list(output.get("evidence_used")):
-            add([_mapping(item).get("citation_id")])
-    return used
+            reference = _mapping(item)
+            add(reference.get("citation") or reference.get("citation_id"), fallback=step_key)
+
+    # Current runs keep evidence_index grouped by chapter; older runs may use a
+    # flat citation_id -> record map. Read both forms, but never require either.
+    for key, value in evidence_index.items():
+        if isinstance(value, list):
+            add_many(value, fallback=key)
+        elif isinstance(value, Mapping):
+            add(value, fallback=key)
+
+    return list(entries.values())
 
 
 def _render_step(
@@ -149,17 +185,11 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
     )
 
     evidence_index = _mapping(state.get("evidence_index"))
-    used_ids = _used_citation_ids(steps)
-    missing_citations = [citation_id for citation_id in used_ids if citation_id not in evidence_index]
-    if missing_citations:
-        raise ValueError("report_citations_missing_from_evidence_index:" + ",".join(missing_citations))
-
+    citation_entries = _citation_entries(steps, evidence_index)
     citations: list[dict[str, Any]] = []
-    citation_labels: dict[str, str] = {}
-    for index, citation_id in enumerate(used_ids, 1):
+    for index, citation in enumerate(citation_entries, 1):
+        citation_id = _citation_id(citation)
         label = f"E{index:03d}"
-        citation_labels[citation_id] = label
-        citation = _mapping(evidence_index[citation_id])
         citations.append({"label": label, "citation_id": citation_id, **citation})
 
     project_name = _project_name(request.project_context)
