@@ -38,11 +38,14 @@ const requestNode = decisionSourceForGeneration.nodes.find((node) => node.name =
 if (requestNode) {
   requestNode.parameters.jsCode = requestNode.parameters.jsCode
     .replace("Object.entries(state.decision_state.steps ?? {}).map(([, value]) => ({", "Object.entries(state.decision_state.steps ?? {}).map(([stepKey, value]) => ({")
-    .replace("title: String(value?.title ?? '前一章节'),\n  reader_chapter: String(value?.reader_chapter ?? '').slice(0, 2400),", "step_key: stepKey,\n  step_order: Number(value?.step_order ?? 0),\n  title: String(value?.title ?? '前一章节'),\n  content_available: Boolean(String(value?.reader_chapter ?? '').trim()),")
+    .replace("title: String(value?.title ?? '前一章节'),\n  reader_chapter: String(value?.reader_chapter ?? '').slice(0, 2400),", "step_key: stepKey,\n  step_order: Number(value?.step_order ?? 0),\n  title: String(value?.title ?? '前一章节'),\n  decision_brief: String(value?.decision_brief ?? '').trim(),\n  content_available: Boolean(String(value?.reader_chapter ?? '').trim()),")
     .replace("const schema = {", "const previousChapters = previous.filter((item) => item.content_available && item.step_order < state.step_order);\nconst schema = {")
+    .replace("properties: { reader_chapter: { type: 'string', minLength: 1 } },\n  required: ['reader_chapter'],", "properties: { decision_brief: { type: 'string', minLength: 1 }, reader_chapter: { type: 'string', minLength: 1 } },\n  required: ['decision_brief', 'reader_chapter'],")
     .replace("  tool_result_fingerprints: [],", "  tool_result_fingerprints: [],\n  tool_evidence: [],\n  tool_diagnostics: [],")
     .replace("chapter_title: state.step_title, previous_chapters: previous", "chapter_title: state.step_title, previous_chapters: previousChapters")
-    .replace("  `当前章节：${state.step_title}。`,", "  'previous_chapters 只提供前文的位置和可用性，不包含正文。前文是已完成的分析文段及其阶段性判断；需要承接时，使用 read_previous_chapter 按 step_key 或 step_order 读取完整正文。不要假设没有读取的前文，也不要重复已读取章节已经完成的分析。',\n  `当前章节：${state.step_title}。`,")
+    .replace("const userPayload = JSON.stringify({ project_question: state.project_question, chapter_title: state.step_title, previous_chapters: previousChapters, source_context: contexts });", "const userPayload = JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', chapter_title: state.step_title, research_brief: state.research_brief, previous_decisions: previousChapters, source_context: contexts });")
+    .replace("  '只返回完整章节正文，不要解释写作过程，不要另附审计数据。',", "  '研究过程先于写作：先把当前研究任务改写成一个真正需要作出取舍的问题，提出可能成立的解释或路径，再寻找能够区分它们的证据。不要从已有指标直接跳到建议。',\n  '分析关系和机制：说明对象之间如何发生作用、哪些条件是必要前提、相关性为何可能不是因果。主动寻找至少一种能解释同一现象的替代解释；只有存在真实取舍时才比较方案，不为了形式强行凑选项。',\n  '成稿前做一次自我挑战：当前判断最脆弱的环节是什么，什么事实会推翻它，它对下一章节究竟形成了什么约束。把这段阶段性结论写入 decision_brief，供后续章节直接承接；decision_brief 是自由文本，不使用固定模板。',\n  'reader_chapter 是面向甲方的完整正文，可以自由组织，但应让读者看清问题、关系、取舍和决定，而不只是数据摘要后接建议。只返回 decision_brief 与 reader_chapter。',")
+    .replace("  'previous_chapters 只提供前文的位置和可用性，不包含正文。前文是已完成的分析文段及其阶段性判断；需要承接时，使用 read_previous_chapter 按 step_key 或 step_order 读取完整正文。不要假设没有读取的前文，也不要重复已读取章节已经完成的分析。',\n  `当前章节：${state.step_title}。`,", "  'previous_decisions 包含前文自由表达的阶段性结论。把它们当作待继续检验的上游判断，不当作不可质疑的事实；需要核对完整论证时，再使用 read_previous_chapter。后续结论如果改变上游判断，必须在正文中解释原因。',\n  `当前研究任务：${state.research_brief || state.step_title}。`,")
     .replace("{ type: 'function', name: 'read_project_document', description:", "{ type: 'function', name: 'read_previous_chapter', description: 'Read one completed earlier chapter by step_key or step_order.', parameters: { type: 'object', properties: { step_key: { type: 'string' }, step_order: { type: 'integer', minimum: 1, maximum: 12 } }, additionalProperties: false } },\n    { type: 'function', name: 'read_project_document', description:");
 }
 const followUpNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Build MCP Agent Follow-up');
@@ -100,13 +103,16 @@ if (stepPersistNode) {
 }
 const validationNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Validate Decision Output');
 if (validationNode) {
+  validationNode.parameters.jsCode = validationNode.parameters.jsCode
+    .replace("const evidenceSignals = ['项目材料', '项目数据', '空间数据', '公开资料', '现场', '核验', '证据', '数据显示', '材料显示'];\nif (!evidenceSignals.some((signal) => readerChapter.includes(signal))) throw new Error('reader_chapter_missing_evidence_context');\n", '')
+    .replace("const conditionSignals = ['条件', '前提', '尚未', '不能', '需要', '待核验', '不确定', '若', '如果'];\nif (!conditionSignals.some((signal) => readerChapter.includes(signal))) throw new Error('reader_chapter_missing_conditions');\n", '');
 validationNode.parameters.jsCode = validationNode.parameters.jsCode.replace(
     "const output = { title: state.step_title, reader_chapter: readerChapter };",
-    "const citationSources = [...(Array.isArray(request.retrieval?.citations) ? request.retrieval.citations : []), ...(Array.isArray(response.tool_evidence) ? response.tool_evidence : [])];\nconst citations = citationSources.filter((item) => item && typeof item === 'object').map((item) => ({ ...item, citation_id: String(item.citation_id ?? item.chunk_key ?? item.document_id ?? '').trim(), document_id: String(item.document_id ?? '').trim(), chunk_id: String(item.chunk_id ?? '').trim(), title: String(item.title ?? '').trim(), source_type: String(item.source_type ?? '').trim(), source_url: String(item.source_url ?? '').trim(), page_start: item.page_start ?? null, page_end: item.page_end ?? null, section: String(item.section ?? '').trim() })).filter((item, index, items) => item.citation_id && items.findIndex((candidate) => candidate.citation_id === item.citation_id) === index);\nconst diagnostics = (Array.isArray(response.tool_diagnostics) ? response.tool_diagnostics : []).filter((item) => item && typeof item === 'object');\nconst qualityGate = { evidence_count: citations.length, public_context_count: Array.isArray(request.retrieval?.contexts) ? request.retrieval.contexts.length : 0, project_evidence_count: Array.isArray(response.tool_evidence) ? response.tool_evidence.length : 0, evidence_status: citations.length > 0 ? 'grounded' : 'insufficient_evidence' };\nconst output = { step_key: state.step_key, step_order: state.step_order, title: state.step_title, reader_chapter: readerChapter, citations, diagnostics, quality_gate: qualityGate };",
+    "const decisionBrief = String(parsed.decision_brief ?? '').trim();\nif (!decisionBrief) throw new Error('decision_brief_empty');\nconst citationSources = [...(Array.isArray(request.retrieval?.citations) ? request.retrieval.citations : []), ...(Array.isArray(response.tool_evidence) ? response.tool_evidence : [])];\nconst citations = citationSources.filter((item) => item && typeof item === 'object').map((item) => ({ ...item, citation_id: String(item.citation_id ?? item.chunk_key ?? item.document_id ?? '').trim(), document_id: String(item.document_id ?? '').trim(), chunk_id: String(item.chunk_id ?? '').trim(), title: String(item.title ?? '').trim(), source_type: String(item.source_type ?? '').trim(), source_url: String(item.source_url ?? '').trim(), page_start: item.page_start ?? null, page_end: item.page_end ?? null, section: String(item.section ?? '').trim() })).filter((item, index, items) => item.citation_id && items.findIndex((candidate) => candidate.citation_id === item.citation_id) === index);\nconst diagnostics = (Array.isArray(response.tool_diagnostics) ? response.tool_diagnostics : []).filter((item) => item && typeof item === 'object');\nconst qualityGate = { evidence_count: citations.length, public_context_count: Array.isArray(request.retrieval?.contexts) ? request.retrieval.contexts.length : 0, project_evidence_count: Array.isArray(response.tool_evidence) ? response.tool_evidence.length : 0, evidence_status: citations.length > 0 ? 'grounded' : 'insufficient_evidence' };\nconst output = { step_key: state.step_key, step_order: state.step_order, title: state.step_title, research_brief: String(state.research_brief ?? ''), decision_brief: decisionBrief, reader_chapter: readerChapter, citations, diagnostics, quality_gate: qualityGate };",
   );
   validationNode.parameters.jsCode = validationNode.parameters.jsCode.replace(
     "steps: { ...(state.decision_state.steps ?? {}), [state.step_key]: output },\n  current_step: state.step_key,",
-    "steps: { ...(state.decision_state.steps ?? {}), [state.step_key]: output },\n  evidence_index: { ...(state.decision_state.evidence_index ?? {}), [state.step_key]: output.citations },\n  current_step: state.step_key,",
+    "steps: { ...(state.decision_state.steps ?? {}), [state.step_key]: output },\n  evidence_index: { ...(state.decision_state.evidence_index ?? {}), [state.step_key]: output.citations },\n  research_frame: String(state.research_frame ?? state.decision_state.research_frame ?? ''),\n  current_step: state.step_key,",
   );
 }
 
@@ -213,22 +219,71 @@ graph.connections['领取排队分析任务'] = { main: [[{ node: '展开领取�
 graph.connections['展开领取任务请求'] = { main: [[{ node: '读取项目上下文', type: 'main', index: 0 }]] };
 graph.connections['返回任务已接收'] = { main: [[]] };
 
+const researchFrameNode = codeNode('构建整体研究框架', `const request = $input.first()?.json ?? {};
+const context = request.project_context && typeof request.project_context === 'object' ? request.project_context : {};
+const project = context.project && typeof context.project === 'object' ? context.project : {};
+const documents = Array.isArray(context.documents) ? context.documents.map((item) => ({ document_id: String(item?.document_id ?? ''), title: String(item?.title ?? item?.file_name ?? ''), role: String(item?.document_role ?? '') })) : [];
+const datasets = Array.isArray(context.datasets) ? context.datasets.map((item) => ({ dataset_id: String(item?.dataset_id ?? ''), title: String(item?.title ?? ''), total_count: item?.total_count ?? null })) : [];
+const schema = { type: 'object', properties: { research_frame: { type: 'string', minLength: 1 } }, required: ['research_frame'], additionalProperties: false };
+const instructions = [
+  '你是城市更新项目的首席研究设计师。此时不要写报告、定位或建议，只建立一段供后续十二个分析方向共同使用的研究框架。',
+  '先判断用户真正需要作出的选择是什么，以及哪些事实只是背景、哪些未知会改变选择。提出少量真正互相竞争的解释或路径，并说明需要什么证据才能区分；不要为了形式凑假设。',
+  '明确从政策与场地、区域角色、市场流动、供给、客群、资源主题，到定位、产品、空间、运营、财务和分期之间的关键依赖关系。特别指出最容易发生的因果跳跃和最值得反驳的直觉。',
+  '研究框架是开放式工作备忘录，不是审计表，不使用固定字段、编号模板或预设答案。信息不足时写明应如何判断，不要提前给出结论。',
+].join('\\n');
+return [{ json: {
+  ...request,
+  instructions,
+  input: JSON.stringify({ project_question: request.project_question, project, available_documents: documents, available_datasets: datasets }),
+  max_output_tokens: 2400,
+  reasoning: { effort: 'high' },
+  text: { format: { type: 'json_schema', name: 'research_frame', strict: true, schema } },
+} }];`, [1460, 1660], 'urban-agent-build-research-frame');
+graph.nodes.push(researchFrameNode);
+const researchFrameModel = localizeComponent(responsesSource, {
+  names: {
+    'Build Responses Request': '构建研究框架请求体',
+    'Call Codex Relay': '请求研究框架模型',
+    'Normalize Responses Output': '解析研究框架响应',
+  },
+  idPrefix: 'urban-agent-research-frame-model',
+  anchor: [1700, 1660],
+  triggerName: 'When Called By Agent',
+});
+mergeGraph(graph, researchFrameModel);
+connect(graph, '构建整体研究框架', researchFrameModel.entries[0]);
+const validateResearchFrameNode = codeNode('确认整体研究框架', `const response = $input.first()?.json ?? {};
+let parsed;
+try { parsed = JSON.parse(String(response.output_text ?? '')); } catch { throw new Error('research_frame_invalid_json'); }
+const researchFrame = String(parsed.research_frame ?? '').trim();
+if (!researchFrame) throw new Error('research_frame_empty');
+return [{ json: { ...response, research_frame: researchFrame } }];`, [2460, 1660], 'urban-agent-validate-research-frame');
+graph.nodes.push(validateResearchFrameNode);
+for (const terminal of researchFrameModel.terminals) connect(graph, terminal, '确认整体研究框架');
+
 const queueNode = codeNode('建立十二步分析队列', `const claimed = $input.first()?.json ?? {};
-const request = $('合并项目上下文').first().json;
+const request = $('确认整体研究框架').first().json;
 const steps = [
-  ['step_01_policy_site', '政策与场地'], ['step_02_regional_role', '区域角色'],
-  ['step_03_market_flow', '市场与流动'], ['step_04_supply_gap', '供给与空位'],
-  ['step_05_audience_use', '客群与使用'], ['step_06_theme_resources', '主题与资源'],
-  ['step_07_positioning', '项目定位'], ['step_08_product_mix', '产品组合'],
-  ['step_09_spatial_layout', '空间布局'], ['step_10_operating_model', '运营模式'],
-  ['step_11_financial_check', '财务校验'], ['step_12_phasing', '分期实施'],
+  ['step_01_policy_site', '政策与场地', '项目必须解决的真实公共任务是什么，场地资源、权属、保护、居民和建设条件分别允许或排除哪些路径？'],
+  ['step_02_regional_role', '区域角色', '项目与区域中心、交通节点、景区、商圈、社区和同类设施是什么关系；它有资格承担什么角色，又不应声称什么角色？'],
+  ['step_03_market_flow', '市场与流动', '哪些人可能在什么时间、通过什么到达机制进入项目；区域流量、项目可达性与实际到访之间还缺少哪些因果环节？'],
+  ['step_04_supply_gap', '供给与空位', '周边现有供给、替代方案和竞争项目满足了什么、遗漏了什么；所谓空位是真实未满足需求，还是数据分类与观察范围造成的假象？'],
+  ['step_05_audience_use', '客群与使用', '比较候选客群的服务需要、到达机制、时间预算、替代供给与使用阻碍；分析客群之间的互补和冲突，并判断一期最值得验证谁，而不是给人群贴标签。'],
+  ['step_06_theme_resources', '主题与资源', '哪些真实地方资源之间存在可持续的关系，哪些只是孤立符号；主题能否转化为反复发生的使用和运营机制？'],
+  ['step_07_positioning', '项目定位', '基于上游判断比较可行定位：每种定位为谁创造什么价值、依赖什么能力、与替代供给有何差异，为什么当前选择优于竞争性解释？'],
+  ['step_08_product_mix', '产品组合', '把定位转成可运行的产品组合，解释不同客群、场景和产品之间如何互相导流或争夺资源，并找出一期最小可运行组合。'],
+  ['step_09_spatial_layout', '空间布局', '由真实使用流程和运营责任反推入口、集散、体验、服务、后勤、居民与安全边界；空间关系如何支持或破坏产品承诺？'],
+  ['step_10_operating_model', '运营模式', '谁负责获客、内容、场地、社区协调和数据记录；各方的激励、能力与责任关系能否让一期样板持续运行？'],
+  ['step_11_financial_check', '财务校验', '哪些投入和收入假设真正决定可行性，需求、容量、采购价格与资金条件如何联动；在证据不足时给出条件范围而非伪精确结论。'],
+  ['step_12_phasing', '分期实施', '怎样把当前选择组织为可学习的一期部署；记录什么结果、在什么时间窗判断继续、调整、扩大或停止？'],
 ];
-return steps.map(([step_key, step_title], index) => ({ json: {
+return steps.map(([step_key, step_title, research_brief], index) => ({ json: {
   run_id: String(claimed.run_id ?? request.run_id), tenant_id: request.tenant_id,
   history_id: request.history_id, project_question: request.project_question,
   access_groups: request.access_groups, project_types: request.project_types,
   geography: request.geography, metadata_filter: request.metadata_filter,
-  project_context: request.project_context, step_key, step_title, step_order: index + 1,
+  project_context: request.project_context, research_frame: request.research_frame,
+  step_key, step_title, research_brief, step_order: index + 1,
 } }));`, [1540, 1860], 'urban-agent-build-step-queue');
 const loopNode = {
   parameters: { batchSize: 1, options: {} },
@@ -249,8 +304,9 @@ FROM analysis_runs WHERE id = $1::uuid AND tenant_id = $2::text;`,
 graph.nodes.push(queueNode, loopNode, readStateNode, attachStateNode, readCompleteStateNode);
 // The scheduled consumer has already claimed the run before loading project
 // context; bypass the legacy queued-claim node for that path.
-graph.connections['合并项目上下文'] = { main: [[{ node: '建立十二步分析队列', type: 'main', index: 0 }], [{ node: '记录任务失败', type: 'main', index: 0 }]] };
-graph.connections['认领待执行分析任务'] = { main: [[{ node: '建立十二步分析队列', type: 'main', index: 0 }]] };
+graph.connections['合并项目上下文'] = { main: [[{ node: '构建整体研究框架', type: 'main', index: 0 }], [{ node: '记录任务失败', type: 'main', index: 0 }]] };
+graph.connections['认领待执行分析任务'] = { main: [[{ node: '构建整体研究框架', type: 'main', index: 0 }]] };
+connect(graph, '确认整体研究框架', '建立十二步分析队列');
 connect(graph, '建立十二步分析队列', '逐项执行分析方向');
 graph.connections['逐项执行分析方向'] = { main: [
   [{ node: '读取完整分析状态', type: 'main', index: 0 }],
@@ -283,6 +339,49 @@ mergeGraph(graph, decision);
 connect(graph, '合并当前分析方向状态', decision.entries[0]);
 connect(graph, '复用已完成章节', '逐项执行分析方向');
 connect(graph, '完成当前分析方向', '逐项执行分析方向');
+
+const deepenChapterNode = codeNode('深化章节判断', `const draftResponse = $input.first()?.json ?? {};
+let draft;
+try { draft = JSON.parse(String(draftResponse.output_text ?? '')); } catch { throw new Error('chapter_draft_invalid_json'); }
+const state = draftResponse.state && typeof draftResponse.state === 'object' ? draftResponse.state : {};
+const priorDecisions = Object.values(state.decision_state?.steps ?? {}).filter((item) => item && typeof item === 'object' && Number(item.step_order ?? 0) < Number(state.step_order ?? 0)).map((item) => ({ title: String(item.title ?? ''), decision_brief: String(item.decision_brief ?? '') })).filter((item) => item.decision_brief);
+const evidence = [...(Array.isArray(draftResponse.retrieval?.contexts) ? draftResponse.retrieval.contexts : []), ...(Array.isArray(draftResponse.tool_evidence) ? draftResponse.tool_evidence : [])].map((item) => ({ title: String(item?.title ?? ''), source_type: String(item?.source_type ?? ''), section: String(item?.section ?? ''), content: String(item?.content ?? '').slice(0, 2600) })).filter((item) => item.content).slice(0, 16);
+const schema = { type: 'object', properties: { decision_brief: { type: 'string', minLength: 1 }, reader_chapter: { type: 'string', minLength: 1 } }, required: ['decision_brief', 'reader_chapter'], additionalProperties: false };
+const instructions = [
+  '你是同一章节的资深决策分析师。初稿已经完成，现在只做一次实质性深化，不做格式审计，也不要机械添加小标题。',
+  '重新检查研究问题是否真正被回答；哪些证据只是相关性或代理，是否被误写成需求、客流、支付或因果；对象、客群、空间、产品和运营主体之间的关系是否说清。',
+  '尝试用另一种解释说明同一证据。若替代解释同样成立，应降低结论强度或说明如何区分；若存在真实方案取舍，应解释当前选择为何胜出以及什么事实会改判。没有真实取舍时不要强造选项。',
+  '检查本章是否承接前序判断并对后续选择形成明确约束。客群分析尤其要区分服务对象、使用者、付费者和到达机制，分析客群之间的互补、冲突与替代供给。',
+  '在不增加未经证实事实的前提下重写 decision_brief 和 reader_chapter。保留初稿中成立的具体证据、反证和不确定性；删掉空泛总结。表达形式保持自由。',
+].join('\\n');
+return [{ json: {
+  ...draftResponse,
+  instructions,
+  input: JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', research_brief: state.research_brief, prior_decisions: priorDecisions, evidence, draft }),
+  max_output_tokens: 6000,
+  reasoning: { effort: 'high' },
+  tools: [],
+  tool_choice: 'none',
+  text: { format: { type: 'json_schema', name: 'deepened_decision_chapter', strict: true, schema } },
+} }];`, [4800, 2140], 'urban-agent-deepen-chapter');
+graph.nodes.push(deepenChapterNode);
+const chapterChoiceConnections = graph.connections['章节模型请求工具？']?.main ?? [];
+if (chapterChoiceConnections[1]) chapterChoiceConnections[1] = [{ node: '深化章节判断', type: 'main', index: 0 }];
+graph.connections['章节模型请求工具？'] = { ...(graph.connections['章节模型请求工具？'] ?? {}), main: chapterChoiceConnections };
+
+const deepenModel = localizeComponent(responsesSource, {
+  names: {
+    'Build Responses Request': '构建深化请求体',
+    'Call Codex Relay': '请求深化分析模型',
+    'Normalize Responses Output': '解析深化分析响应',
+  },
+  idPrefix: 'urban-agent-deepen-model',
+  anchor: [5060, 2140],
+  triggerName: 'When Called By Agent',
+});
+mergeGraph(graph, deepenModel);
+connect(graph, '深化章节判断', deepenModel.entries[0]);
+for (const terminal of deepenModel.terminals) connect(graph, terminal, '校验章节正文');
 
 const retrievalNames = {
   'Normalize Recall Request': '规范公共证据检索条件', 'Embed Recall Query': '生成公共证据查询向量',

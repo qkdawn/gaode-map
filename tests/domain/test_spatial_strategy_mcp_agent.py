@@ -1,6 +1,6 @@
 import json
 
-from modules.spatial_strategy.mcp_agent import _compact_project_context_for_agent
+from modules.spatial_strategy.mcp_agent import _compact_project_context_for_agent, read_previous_chapter
 
 
 def test_compact_project_context_preserves_decision_evidence_without_grid_payloads():
@@ -50,3 +50,26 @@ def test_compact_project_context_preserves_decision_evidence_without_grid_payloa
     compacted_without_documents = {**compacted, "documents": []}
     context_without_documents = {**context, "documents": []}
     assert len(json.dumps(compacted_without_documents, ensure_ascii=False)) < len(json.dumps(context_without_documents, ensure_ascii=False)) / 4
+
+
+def test_read_previous_chapter_returns_decision_memory_with_full_text():
+    result = read_previous_chapter(
+        decision_state={
+            "steps": {
+                "step_05_audience_use": {
+                    "step_key": "step_05_audience_use",
+                    "step_order": 5,
+                    "title": "客群与使用",
+                    "research_brief": "比较候选客群及其使用机制。",
+                    "decision_brief": "一期先验证本地家庭与青年共同使用，游客是条件性增量。",
+                    "reader_chapter": "完整客群分析正文。",
+                }
+            }
+        },
+        current_step_order=8,
+        step_key="step_05_audience_use",
+    )
+
+    assert result["decision_brief"] == "一期先验证本地家庭与青年共同使用，游客是条件性增量。"
+    assert result["research_brief"] == "比较候选客群及其使用机制。"
+    assert result["reader_chapter"] == "完整客群分析正文。"

@@ -57,6 +57,26 @@ def test_only_two_formal_generated_workflows_exist():
             assert set(references) <= known_names, (node["name"], references)
 
 
+def test_all_generated_code_nodes_compile_as_javascript():
+    for module_name in ("public-knowledge-base.workflow.mjs", "urban-renewal-agent.workflow.mjs"):
+        workflow = _generated(module_name)
+        snippets = [
+            node["parameters"]["jsCode"]
+            for node in workflow["nodes"]
+            if node["type"] == "n8n-nodes-base.code"
+        ]
+        payload = json.dumps(snippets, ensure_ascii=False)
+        script = "const snippets=" + payload + "; for (const code of snippets) new Function(code);"
+        subprocess.run(
+            ["node", "-"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            input=script,
+        )
+
+
 def test_agent_has_submit_status_and_single_twelve_step_loop():
     workflow = _generated("urban-renewal-agent.workflow.mjs")
     nodes = _nodes(workflow)
@@ -76,6 +96,17 @@ def test_agent_has_submit_status_and_single_twelve_step_loop():
     assert loops[0]["parameters"]["batchSize"] == 1
     queue_code = nodes["建立十二步分析队列"]["parameters"]["jsCode"]
     assert queue_code.count("'step_") == 12
+    assert _targets(workflow, "合并项目上下文") == ["构建整体研究框架"]
+    assert _targets(workflow, "构建整体研究框架") == ["构建研究框架请求体"]
+    assert _targets(workflow, "解析研究框架响应") == ["确认整体研究框架"]
+    assert _targets(workflow, "确认整体研究框架") == ["建立十二步分析队列"]
+    frame_code = nodes["构建整体研究框架"]["parameters"]["jsCode"]
+    assert "真正需要作出的选择" in frame_code
+    assert "不要为了形式凑假设" in frame_code
+    assert "research_frame" in queue_code
+    assert "research_brief" in queue_code
+    assert "一期最值得验证谁，而不是给人群贴标签" in queue_code
+    assert "客群之间的互补和冲突" in queue_code
     assert _targets(workflow, "逐项执行分析方向", 0) == ["读取完整分析状态"]
     assert _targets(workflow, "逐项执行分析方向", 1) == ["读取最新分析状态"]
     assert "逐项执行分析方向" in _targets(workflow, "完成当前分析方向")
@@ -91,7 +122,7 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert _targets(workflow, "检索到候选证据？", 1) == ["跳过空证据重排"]
     assert "skipped-no-candidates" in nodes["跳过空证据重排"]["parameters"]["jsCode"]
 
-    for name in ("请求重排模型", "请求章节分析模型", "请求图件设计模型", "请求报告叙事模型"):
+    for name in ("请求重排模型", "请求章节分析模型", "请求深化分析模型", "请求图件设计模型", "请求报告叙事模型"):
         assert nodes[name]["parameters"]["url"] == "__CODEX_RELAY_BASE_URL__/responses"
         assert nodes[name]["parameters"]["options"]["timeout"] >= 300_000
 
@@ -101,6 +132,12 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "项目文档必须按需读取原文" in chapter_code
     assert "可以使用 Markdown 表格" in chapter_code
     assert "不强制每章使用" in chapter_code
+    assert "提出可能成立的解释或路径" in chapter_code
+    assert "替代解释" in chapter_code
+    assert "decision_brief" in chapter_code
+    assert "自由文本，不使用固定模板" in chapter_code
+    assert "properties: { decision_brief:" in chapter_code
+    assert "evidence_claims" not in chapter_code
     assert "context_budget" in follow_up
     assert "no_new_evidence" in follow_up
     assert "tool_errors" in follow_up
@@ -111,10 +148,17 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "no_new_evidence_limit: 2" in chapter_code
     assert _targets(workflow, "解析章节模型响应") == ["章节模型请求工具？"]
     assert _targets(workflow, "章节模型请求工具？", 0) == ["准备项目工具调用"]
-    assert _targets(workflow, "章节模型请求工具？", 1) == ["校验章节正文"]
+    assert _targets(workflow, "章节模型请求工具？", 1) == ["深化章节判断"]
+    assert _targets(workflow, "深化章节判断") == ["构建深化请求体"]
+    assert _targets(workflow, "解析深化分析响应") == ["校验章节正文"]
+    deepen_code = nodes["深化章节判断"]["parameters"]["jsCode"]
+    assert "另一种解释" in deepen_code
+    assert "不做格式审计" in deepen_code
+    assert "reasoning: { effort: 'high' }" in deepen_code
+    assert "tools: []" in deepen_code
     assert _targets(workflow, "将项目工具结果交回模型") == ["刷新分析任务租约"]
 
-    for name in ("校验当前分析方向", "构建章节分析请求", "请求章节分析模型", "校验章节正文", "保存章节与分析状态", "生成最终报告"):
+    for name in ("构建整体研究框架", "请求研究框架模型", "确认整体研究框架", "校验当前分析方向", "构建章节分析请求", "请求章节分析模型", "深化章节判断", "请求深化分析模型", "校验章节正文", "保存章节与分析状态", "生成最终报告"):
         assert nodes[name]["onError"] == "continueErrorOutput"
         assert "记录任务失败" in _targets(workflow, name, 1)
     assert workflow["settings"]["executionTimeout"] == 14400
@@ -127,6 +171,10 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "tool_evidence: toolEvidence" in follow_up_code
     assert "response.tool_evidence" in validation_code
     assert "evidence_index:" in validation_code
+    assert "decisionBrief" in validation_code
+    assert "decision_brief: decisionBrief" in validation_code
+    assert "reader_chapter_missing_evidence_context" not in validation_code
+    assert "reader_chapter_missing_conditions" not in validation_code
     assert "刷新分析任务租约" in nodes
     assert "刷新报告阶段租约" in nodes
     assert _targets(workflow, "将项目工具结果交回模型") == ["刷新分析任务租约"]
@@ -158,6 +206,10 @@ def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
     assert _targets(workflow, "生成最终报告") == ["需要发送飞书？"]
     assert "/analysis/spatial-strategy/visuals" in nodes["生成项目数据图件"]["parameters"]["url"]
     assert "/analysis/spatial-strategy/reports/deliver" in nodes["生成 Word 报告并发送飞书"]["parameters"]["url"]
+    editorial_code = nodes["构建报告叙事请求"]["parameters"]["jsCode"]
+    assert "decision_brief" in editorial_code
+    assert "不要按十二章顺序逐项摘要" in editorial_code
+    assert "reasoning: { effort: 'medium' }" in editorial_code
 
 
 def test_public_knowledge_base_rejects_project_documents_and_owns_embedding_publish():

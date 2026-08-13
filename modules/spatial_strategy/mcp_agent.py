@@ -145,7 +145,7 @@ def read_previous_chapter(
     step_key: str = "",
     step_order: int | None = None,
 ) -> dict[str, Any]:
-    """Read one completed earlier chapter without placing all chapters in the prompt."""
+    """Read an earlier chapter and its compact decision memory on demand."""
     steps = decision_state.get("steps") if isinstance(decision_state, Mapping) else None
     if not isinstance(steps, Mapping):
         raise ValueError("previous_chapter_state_unavailable")
@@ -175,5 +175,7 @@ def read_previous_chapter(
         "step_key": target_key or str(entry.get("step_key") or ""),
         "step_order": resolved_order,
         "title": str(entry.get("title") or ""),
+        "research_brief": str(entry.get("research_brief") or ""),
+        "decision_brief": str(entry.get("decision_brief") or ""),
         "reader_chapter": chapter,
     }
