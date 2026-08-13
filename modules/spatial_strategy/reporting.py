@@ -125,7 +125,9 @@ def _citation_entries(steps: Mapping[str, Any], evidence_index: Mapping[str, Any
         if isinstance(value, list):
             add_many(value)
         elif isinstance(value, Mapping):
-            add(value, fallback=key)
+            # A grouped chapter entry is not itself a citation. Flat legacy
+            # maps may use the outer key as the citation id.
+            add(value, fallback="" if key in steps else key)
 
     return list(entries.values())
 
