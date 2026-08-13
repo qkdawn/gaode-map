@@ -79,12 +79,13 @@ def _project_name(project_context: Mapping[str, Any]) -> str:
 
 def _citation_id(value: Any, *, fallback: str = "") -> str:
     item = _mapping(value)
-    if item:
+    if isinstance(value, Mapping):
         for key in ("citation_id", "chunk_id", "chunk_key", "document_id", "source_locator"):
             candidate = _text(item.get(key))
             if candidate:
                 return candidate
-    return _text(value) if not item else _text(fallback)
+        return _text(fallback)
+    return _text(value)
 
 
 def _citation_entries(steps: Mapping[str, Any], evidence_index: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -112,17 +113,17 @@ def _citation_entries(steps: Mapping[str, Any], evidence_index: Mapping[str, Any
 
     for step_key, step in steps.items():
         output = _mapping(step)
-        add_many(output.get("citations"), fallback=step_key)
+        add_many(output.get("citations"))
         # Keep compatibility with the earlier compact reference shape.
         for item in _list(output.get("evidence_used")):
             reference = _mapping(item)
-            add(reference.get("citation") or reference.get("citation_id"), fallback=step_key)
+            add(reference.get("citation") or reference.get("citation_id"))
 
     # Current runs keep evidence_index grouped by chapter; older runs may use a
     # flat citation_id -> record map. Read both forms, but never require either.
     for key, value in evidence_index.items():
         if isinstance(value, list):
-            add_many(value, fallback=key)
+            add_many(value)
         elif isinstance(value, Mapping):
             add(value, fallback=key)
 
