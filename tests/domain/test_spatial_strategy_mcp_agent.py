@@ -12,6 +12,10 @@ def test_compact_project_context_preserves_decision_evidence_without_grid_payloa
             "name": "测试项目",
             "scope": [[112.9, 28.2], [113.0, 28.3], [113.1, 28.25]],
         },
+        "documents": [
+            {"document_id": f"doc-{index}", "title": f"项目文档 {index}", "status": "parsed"}
+            for index in range(10)
+        ],
         "datasets": [{"dataset_id": "poi", "total_count": 2_635, "operations": ["records", "aggregate"]}],
         "computed_results": [{
             "result_id": "result:poi.accessibility",
@@ -34,6 +38,8 @@ def test_compact_project_context_preserves_decision_evidence_without_grid_payloa
         "bounds": {"min_lng": 112.9, "min_lat": 28.2, "max_lng": 113.1, "max_lat": 28.3},
     }
     metric = compacted["computed_results"][0]
+    assert len(compacted["documents"]) == 10
+    assert compacted["documents"][-1]["document_id"] == "doc-9"
     assert metric["data"]["summary"] == context["computed_results"][0]["data"]["summary"]
     assert metric["data"]["limitations"] == ["未包含现场步行障碍核验"]
     grid_cells = metric["data"]["structured_result"]["grid_cells"]
@@ -41,4 +47,6 @@ def test_compact_project_context_preserves_decision_evidence_without_grid_payloa
     assert grid_cells["detail_omitted"] is True
     assert len(grid_cells["sample"]) == 8
     assert grid_cells["sample"][0] == {"lng": 112.9, "lat": 28.2, "score": 0}
-    assert len(json.dumps(compacted, ensure_ascii=False)) < len(json.dumps(context, ensure_ascii=False)) / 4
+    compacted_without_documents = {**compacted, "documents": []}
+    context_without_documents = {**context, "documents": []}
+    assert len(json.dumps(compacted_without_documents, ensure_ascii=False)) < len(json.dumps(context_without_documents, ensure_ascii=False)) / 4

@@ -138,7 +138,7 @@ class SpatialStrategyAgentToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     history_id: str = Field(min_length=1, max_length=200)
-    tool_name: Literal["project_context", "query_data"]
+    tool_name: Literal["project_context", "query_data", "read_project_document", "read_previous_chapter"]
     arguments: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("history_id", mode="before")
@@ -159,7 +159,14 @@ class SpatialStrategyVisualRequest(BaseModel):
 class KnowledgeBaseIngestRequest(BaseModel):
     document_id: str = Field(min_length=1)
     visibility: Literal["public", "restricted"] = "restricted"
-    source_type: str = "project_document"
+    source_type: Literal[
+        "knowledge_base",
+        "policy",
+        "planning_guidance",
+        "case_study",
+        "statistics",
+        "research",
+    ] = "knowledge_base"
     source_url: str = ""
     decision_steps: list[str] = Field(default_factory=list)
     project_types: list[str] = Field(default_factory=list)

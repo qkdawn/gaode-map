@@ -96,30 +96,20 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 powershell -ExecutionPolicy Bypass -File scripts/n8n_bootstrap.ps1
 ```
 
-脚本会启动 n8n 基础设施、应用 RAG schema、把临时数据库和 Codex relay 凭据加密导入 n8n、导入工作流，并执行数据库 smoke check、发布/召回集成测试和 Codex relay 模型检查。默认从本机 `%USERPROFILE%\\.codex\\config.toml` 与 `auth.json` 读取 Codex CLI 当前的 `openai_base_url`、模型和 `OPENAI_API_KEY`；也可以用 `CODEX_RELAY_BASE_URL`、`CODEX_RELAY_MODEL`、`CODEX_RELAY_API_KEY` 覆盖。临时明文凭据只存在于容器 `/tmp`，导入后立即删除，不进入仓库或日志。
+脚本会启动 n8n 基础设施、应用 RAG schema、把临时数据库和 Codex relay 凭据加密导入 n8n，并只导入下述两个正式工作流。`N8N_MANAGEMENT_API_KEY` 必须使用本实例 owner 创建的 API Key，bootstrap 只用它按明确 ID 删除本项目的旧工作流，不会执行全量删除。删除旧工作流也会删除它们在 n8n 内的 execution 历史，但 `rag-postgres` 中的分析任务、章节和报告不受影响。默认从本机 `%USERPROFILE%\\.codex\\config.toml` 与 `auth.json` 读取 Codex CLI 当前的 `openai_base_url`、模型和 `OPENAI_API_KEY`；也可以用 `CODEX_RELAY_BASE_URL`、`CODEX_RELAY_MODEL`、`CODEX_RELAY_API_KEY` 覆盖。临时明文凭据只存在于容器 `/tmp`，导入后立即删除，不进入仓库或日志。
 
-`CSU` 是旧 Agent 配置中的一个 OpenAI-compatible `AI_BASE_URL` 示例，不是 n8n 的必需网关，也不会被新工作流自动调用。n8n 的语言模型边界是 `LLM-00 Codex Relay Responses`：通过 Codex 中转的 `/responses` 接口统一返回文本、工具调用、用量和 `response_id`。`LLM-99 Codex Relay Integration Test` 会以 `OK` 响应验证这条链路。Codex 负责回答和模型重排；`EMB-00` 调用本机 CPU-only FastEmbed 服务生成 768 维中英文向量，语言模型密钥不会交给 embedding 服务。
+`CSU` 是旧 Agent 配置中的一个 OpenAI-compatible `AI_BASE_URL` 示例，不是 n8n 的必需网关，也不会被新工作流自动调用。两个正式画布都直接展示 Codex `/responses` 调用、模型重排、CPU-only FastEmbed 的 768 维中英文向量和必要的校验节点，语言模型密钥不会交给 embedding 服务。
 
-当前知识库工作流：
+当前只保留两个正式工作流：
 
-- `KB-00 Ingest Document Webhook`：Header Auth 保护的应用入口，校验租户、访问组和文档 ID 后同步调用 `KB-02`；浏览器只调用 FastAPI 的 `POST /api/v1/analysis/knowledge-base/documents`。
-- `EMB-00 CPU Text Embeddings`：统一调用本机 `/api/embed`，固定模型与 768 维输出，并校验批次数量、维度和有限数值。
-- `KB-01 Publish Parsed Source`：校验单一 parsed-document contract，批量生成 chunk embeddings，并在一个事务内幂等发布文档与 chunks。
-- `KB-02 Ingest Project Document`：按 `document_id` 调用文档服务，读取 Docling `DocumentBlock` 原文和页码定位后交给 `KB-01`。
-- `KB-10 Hybrid Retrieve With Citations`：自动生成查询 embedding，执行租户/访问组/元数据过滤、中文词元/FTS/trigram 与 pgvector RRF 召回，调用 `LLM-10` 做 Codex 模型重排，再去重、扩展相邻正文块并返回页码/URL/object key 引用。
-- `RAG-99 Publish And Retrieve Integration Test`：重复发布测试材料，并断言召回、上下文扩展和引用字段完整。
-- `LLM-00 Codex Relay Responses`：调用 Codex 中转 `/responses`，归一化文本、工具调用、用量和引用所需的响应标识。
-- `LLM-10 Codex Rerank Candidates`：把候选正文视为不可信材料，通过严格 JSON schema 返回相关性顺序和理由。
-- `LLM-99 Codex Relay Integration Test`：验证 n8n 能使用本机 Codex relay 配置得到确定的 `OK` 响应。
-- `AN-10 Execute Decision Step`：统一执行检索、结构化分析、引用白名单校验、质量门和 `decision_state` 持久化。
-- `AN-20 Twelve-Step Spatial Strategy`：严格顺序执行政策场地到分期实施的十二个独立决策步骤；前一步质量门未通过时不会启动下一步，异常会把业务运行收敛为 `failed`。
-- `AN-00 Spatial Strategy Webhook`：Header Auth 保护的异步入口，地址为 `POST /webhook/api/v1/n8n/spatial-strategy`，要求 `X-N8N-Client-Key`、`X-Tenant-Id` 和 `project_question`；先创建业务 `run_id` 再进入异步编排，非法输入返回 400。
-- `AN-01 Spatial Strategy Run Status`：按 `run_id` 和租户读取运行状态、十二步进度、结构化输出、诊断与原文引用；不存在或跨租户统一返回 404。
-- `AN-99 Decision Step Integration Test`：验证真实召回、Codex 输出、引用校验和数据库状态持久化。
+- `城市更新决策支持 Agent`：同一画布包含任务提交、状态查询、项目上下文、十二方向循环、公共知识混合检索、模型重排、章节 Agent、项目原文与空间工具回路、图件、报告和飞书交付。十二方向是循环队列，不复制十二份节点链。入口继续使用 `POST /webhook/api/v1/n8n/spatial-strategy` 和 `GET /webhook/api/v1/n8n/spatial-strategy/status`。
+- `城市更新公共知识库`：同一画布包含 `POST /webhook/api/v1/n8n/kb/ingest`、公共来源校验、原文解析、分块、Embedding 校验和事务发布。只接受政策、规划指引、案例、统计和研究资料；`project_document` 与测试资料会被拒绝。
+
+项目文档不进入 pgvector。Agent 先通过 `project_context` 查看材料目录，需要项目事实时再使用 `read_project_document` 按需读取原文，空间数据则使用 `query_data`。
 
 浏览器不直接持有 `N8N_WEBHOOK_API_KEY`。分析工作台中的“十二步空间决策”能力调用 FastAPI 的 `POST /api/v1/analysis/spatial-strategy/runs`，并轮询 `GET /api/v1/analysis/spatial-strategy/runs/{run_id}`；后端代理再向 n8n 注入密钥、租户和访问组。该能力只保留 n8n 服务执行入口。
 
-`scripts/n8n_bootstrap.ps1` 会在宿主机启动 embedding 服务并等待模型健康后再执行 n8n 集成测试。入库和查询都由 `EMB-00` 使用同一模型编码；模型或维度变化时必须清空旧向量并重建，不能混用不同模型的向量。
+`scripts/n8n_bootstrap.ps1` 会在宿主机启动 embedding 服务并等待模型健康，再运行生成工作流契约测试。公共资料入库和 Agent 查询使用同一模型编码；模型或维度变化时必须清空旧向量并重建，不能混用不同模型的向量。
 
 ### 人口数据目录
 - 根目录 `.env` 维护本地宿主机目录，例如 `POPULATION_DATA_DIR=E:/PeopleData`、`NIGHTLIGHT_DATA_DIR=E:/NightlightData/processed`

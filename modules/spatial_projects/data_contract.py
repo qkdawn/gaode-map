@@ -12,6 +12,7 @@ from modules.spatial_projects.service import SpatialProjectService
 
 SCHEMA_VERSION = "spatial_records/v1"
 MAX_RESULT_SIZE = 500
+MAX_DOCUMENT_BLOCKS = 40
 
 DATASET_SOURCES = {
     "poi": "current:dataset:poi",
@@ -121,31 +122,17 @@ class ProjectDataContractService:
                     "data": deepcopy(summary),
                 })
 
-        for document in self.projects.list_history_project_documents(history_id):
-            dataset_id = f"document:{document['document_id']}"
-            chunks = self._document_chunks(history_id, dataset_id)
-            datasets.append({
-                "dataset_id": dataset_id,
-                "title": document.get("title") or document.get("file_name") or dataset_id,
-                "schema_version": SCHEMA_VERSION,
-                "total_count": len(chunks),
-                "year": None,
-                "coord_type": None,
-                "geometry_type": "",
-                "fields": list(DATASET_SCHEMAS["document"]["fields"]),
-                "units": {},
-                "dataset_checksum": _checksum(chunks),
+        documents = [
+            {
+                "document_id": str(document["document_id"]),
+                "title": document.get("title") or document.get("file_name") or str(document["document_id"]),
+                "file_name": document.get("file_name") or "",
+                "document_role": document.get("document_role") or document.get("role") or "",
                 "status": document.get("status"),
-                "operations": ["records"],
-                "content_mode": "complete_document_blocks",
                 "original_resource_uri": self._document_resource_uri(history_id, str(document["document_id"])),
-                "query_capabilities": {
-                    "filter_fields": list(DATASET_SCHEMAS["document"]["fields"]),
-                    "sort_fields": list(DATASET_SCHEMAS["document"]["fields"]),
-                    "spatial_relations": [],
-                    "spatial_aggregations": [],
-                },
-            })
+            }
+            for document in self.projects.list_history_project_documents(history_id)
+        ]
 
         computed_results.extend(self._persisted_metric_results(history_id))
         return {
@@ -158,6 +145,7 @@ class ProjectDataContractService:
                 "scope": deepcopy(project.get("scope") or {}),
                 "coord_type": "wgs84",
             },
+            "documents": documents,
             "datasets": datasets,
             "computed_results": computed_results,
             "warnings": list(listing.get("warnings") or []),
@@ -177,7 +165,7 @@ class ProjectDataContractService:
         continue_token: str = "",
     ) -> dict[str, Any]:
         normalized_dataset_id = str(dataset_id or "").strip()
-        if normalized_dataset_id not in DATASET_SOURCES and not normalized_dataset_id.startswith("document:"):
+        if normalized_dataset_id not in DATASET_SOURCES:
             raise ValueError("dataset_not_found")
         if operation not in {"records", "aggregate"}:
             raise ValueError("invalid_operation")
@@ -207,34 +195,6 @@ class ProjectDataContractService:
         all_records = self._all_records(history_id, normalized_dataset_id)
         dataset_checksum = _checksum(all_records)
         snapshot_id = f"snapshot:{dataset_checksum.removeprefix('sha256:')}"
-
-        if normalized_dataset_id.startswith("document:"):
-            if operation == "aggregate" or spatial:
-                raise ValueError("document_operation_unsupported")
-            if continue_token:
-                raise ValueError("document_continue_token_unsupported")
-            matched = self._query_documents(all_records, filters or {}, sort or {})
-            full_text = "\n\n".join(str(record.get("text") or "") for record in matched)
-            document_id = normalized_dataset_id.removeprefix("document:")
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "history_id": history_id,
-                "dataset_id": normalized_dataset_id,
-                "operation": operation,
-                "snapshot_id": snapshot_id,
-                "dataset_checksum": dataset_checksum,
-                "result_checksum": _checksum(matched),
-                "total_count": len(matched),
-                "complete": True,
-                "continue_token": None,
-                "records": matched,
-                "full_text": full_text,
-                "full_text_checksum": _checksum(full_text),
-                "content_mode": "complete_document_blocks",
-                "original_resource_uri": self._document_resource_uri(history_id, document_id),
-                "computed_results": [],
-                "warnings": [],
-            }
 
         offset = self._continuation_offset(continue_token, normalized_dataset_id, snapshot_id, query_checksum)
         source_id = DATASET_SOURCES[normalized_dataset_id]
@@ -297,6 +257,60 @@ class ProjectDataContractService:
             "warnings": list(page.get("warnings") or []),
         }
 
+    def read_project_document(
+        self,
+        *,
+        history_id: str,
+        document_id: str,
+        start_block: int = 0,
+        max_blocks: int = 20,
+        page_start: int | None = None,
+        page_end: int | None = None,
+    ) -> dict[str, Any]:
+        """Read verified parsed text from one first-party project document."""
+        normalized_document_id = str(document_id or "").strip()
+        if not normalized_document_id:
+            raise ValueError("document_id_required")
+        if start_block < 0:
+            raise ValueError("start_block_must_be_non_negative")
+        if max_blocks < 1 or max_blocks > MAX_DOCUMENT_BLOCKS:
+            raise ValueError(f"max_blocks_must_be_between_1_and_{MAX_DOCUMENT_BLOCKS}")
+        if page_start is not None and page_start < 1:
+            raise ValueError("page_start_must_be_positive")
+        if page_end is not None and page_end < 1:
+            raise ValueError("page_end_must_be_positive")
+        if page_start is not None and page_end is not None and page_end < page_start:
+            raise ValueError("page_range_invalid")
+
+        all_blocks = self._document_chunks(history_id, normalized_document_id)
+        selected = [
+            block
+            for block in all_blocks
+            if (page_start is None or int(block["page"]) >= page_start)
+            and (page_end is None or int(block["page"]) <= page_end)
+        ]
+        blocks = selected[start_block:start_block + max_blocks]
+        next_start_block = start_block + len(blocks)
+        complete = next_start_block >= len(selected)
+        text = "\n\n".join(str(block.get("text") or "") for block in blocks)
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "history_id": history_id,
+            "document_id": normalized_document_id,
+            "content_mode": "verified_original_text",
+            "original_resource_uri": self._document_resource_uri(history_id, normalized_document_id),
+            "document_checksum": _checksum(all_blocks),
+            "selection_checksum": _checksum(blocks),
+            "total_blocks": len(selected),
+            "start_block": start_block,
+            "returned_blocks": len(blocks),
+            "complete": complete,
+            "next_start_block": None if complete else next_start_block,
+            "blocks": blocks,
+            "text": text,
+            "warnings": [],
+        }
+
     @staticmethod
     def _validate_query_contract(
         *,
@@ -307,8 +321,7 @@ class ProjectDataContractService:
         group_by: list[str] | None,
         metrics: list[dict[str, Any]] | None,
     ) -> None:
-        schema_key = "document" if dataset_id.startswith("document:") else dataset_id
-        fields = set(DATASET_SCHEMAS[schema_key]["fields"])
+        fields = set(DATASET_SCHEMAS[dataset_id]["fields"])
 
         if filters is not None and not isinstance(filters, dict):
             raise ValueError("filters_must_be_object")
@@ -385,8 +398,6 @@ class ProjectDataContractService:
         return [deepcopy(item) for item in values if isinstance(item, dict)]
 
     def _all_records(self, history_id: str, dataset_id: str) -> list[dict[str, Any]]:
-        if dataset_id.startswith("document:"):
-            return self._document_chunks(history_id, dataset_id)
         return self._all_spatial_records(history_id, dataset_id)
 
     def _all_spatial_records(self, history_id: str, dataset_id: str) -> list[dict[str, Any]]:
@@ -408,8 +419,7 @@ class ProjectDataContractService:
                 public[field] = deepcopy(properties.get(field))
         return public
 
-    def _document_chunks(self, history_id: str, dataset_id: str) -> list[dict[str, Any]]:
-        document_id = dataset_id.removeprefix("document:")
+    def _document_chunks(self, history_id: str, document_id: str) -> list[dict[str, Any]]:
         documents = self.projects.list_history_project_documents(history_id)
         document = next((item for item in documents if item.get("document_id") == document_id), None)
         if document is None:
@@ -490,24 +500,3 @@ class ProjectDataContractService:
             "computed_results": result_values if computed else [],
             "warnings": [],
         }
-
-    @staticmethod
-    def _query_documents(records: list[dict[str, Any]], filters: dict[str, Any], sort: dict[str, Any]) -> list[dict[str, Any]]:
-        def matches(record: dict[str, Any]) -> bool:
-            for field, predicate in filters.items():
-                value = record.get(field)
-                if isinstance(predicate, dict):
-                    if "eq" in predicate and value != predicate["eq"]:
-                        return False
-                    if "contains" in predicate and str(predicate["contains"]) not in str(value or ""):
-                        return False
-                elif value != predicate:
-                    return False
-            return True
-
-        selected = [record for record in records if matches(record)]
-        field = str(sort.get("field") or "") if isinstance(sort, dict) else ""
-        if field:
-            reverse = str(sort.get("direction") or "asc").lower() == "desc"
-            selected.sort(key=lambda item: (item.get(field) is None, item.get(field)), reverse=reverse)
-        return selected

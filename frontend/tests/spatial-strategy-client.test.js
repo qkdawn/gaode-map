@@ -2,7 +2,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createAgentCapabilityWorkbenchMethods } from '../src/features/agent/capability-workbench.js'
-import { publishDocumentToKnowledgeBase } from '../src/features/ppt-planning/api.js'
 
 test('spatial strategy panel presents a collapsed reader timeline without engine details', () => {
   const template = readFileSync(new URL('../src/pages/analysis/components/main.html', import.meta.url), 'utf8')
@@ -65,36 +64,6 @@ test('n8n spatial strategy client submits through the backend proxy and polls st
     assert.equal(state.n8nSpatialStrategyDeliverToFeishu, false)
   } finally {
     globalThis.window = previousWindow
-    globalThis.fetch = previousFetch
-  }
-})
-
-test('document publishing sends tenant and access policy outside the RAG payload', async () => {
-  const previousFetch = globalThis.fetch
-  let request = null
-  globalThis.fetch = async (url, options = {}) => {
-    request = { url, options }
-    return {
-      ok: true,
-      json: async () => ({ accepted: true, status: 'published', document_id: 'doc-1', tenant_id: 'tenant-1' }),
-    }
-  }
-  try {
-    await publishDocumentToKnowledgeBase('doc-1', {
-      tenantId: 'tenant-1',
-      accessGroups: ['planning', 'planning', 'finance'],
-      metadata: { history_id: 'history-1' },
-    })
-    assert.equal(request.url, '/api/v1/analysis/knowledge-base/documents')
-    assert.equal(request.options.headers['X-Tenant-Id'], 'tenant-1')
-    assert.equal(request.options.headers['X-Access-Groups'], 'planning,finance')
-    assert.deepEqual(JSON.parse(request.options.body), {
-      document_id: 'doc-1',
-      visibility: 'restricted',
-      source_type: 'project_document',
-      metadata: { history_id: 'history-1' },
-    })
-  } finally {
     globalThis.fetch = previousFetch
   }
 })

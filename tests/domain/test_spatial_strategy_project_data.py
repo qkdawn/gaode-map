@@ -7,10 +7,8 @@ def test_step_project_data_uses_existing_project_datasets_and_stable_citations(m
     project_data._QUERY_CACHE.clear()
     context = {
         "project": {"history_id": "history-1", "name": "测试项目"},
-        "datasets": [
-            {"dataset_id": "document:doc-1", "title": "项目材料", "total_count": 1},
-            {"dataset_id": "poi", "title": "项目 POI", "total_count": 2},
-        ],
+        "documents": [{"document_id": "doc-1", "title": "项目材料"}],
+        "datasets": [{"dataset_id": "poi", "title": "项目 POI", "total_count": 2}],
         "computed_results": [{"result_id": "computed:poi:summary", "data": {"count": 2}}],
         "warnings": [],
     }
@@ -52,8 +50,8 @@ def test_step_project_data_uses_existing_project_datasets_and_stable_citations(m
     result = project_data.read_step_project_data(history_id="history-1", step_key="step_01_policy_site", project_context=context)
 
     assert result["status"] == "success"
-    assert {item["dataset_id"] for item in result["citations"]} == {"computed", "document:doc-1", "poi"}
-    assert any(item["source_type"] == "project_document" for item in result["citations"])
+    assert {item["dataset_id"] for item in result["citations"]} == {"computed", "poi"}
+    assert not any(item["source_type"] == "project_document" for item in result["citations"])
     assert any(item["source_type"] == "project_computed_result" for item in result["citations"])
     assert len([item for item in result["citations"] if item["source_type"] == "project_data_record"]) == 2
     assert any(item.get("operation") == "aggregate" for item in result["citations"])

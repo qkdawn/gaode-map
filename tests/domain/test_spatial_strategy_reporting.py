@@ -14,6 +14,7 @@ from modules.spatial_strategy.reporting import (
     SpatialStrategyReportStore,
     build_spatial_strategy_report,
 )
+from modules.spatial_strategy.docx_export import write_markdown_docx
 from modules.spatial_strategy.schemas import SpatialStrategyReportFinalizeRequest
 
 
@@ -87,11 +88,26 @@ def test_report_store_writes_run_scoped_markdown(tmp_path):
     assert path.read_text(encoding="utf-8") == "# 报告\n"
 
 
+def test_markdown_report_can_be_rendered_as_docx(tmp_path):
+    markdown = tmp_path / "report.md"
+    markdown.write_text("# 报告\n\n## 判断\n\n项目材料支持该方向。\n\n- 条件一\n", encoding="utf-8")
+
+    output = write_markdown_docx(markdown, tmp_path / "report.docx")
+
+    assert output.is_file()
+    assert output.stat().st_size > 1000
+
+
 def test_report_embeds_generated_visual_assets():
     request = _request().model_copy(
         update={
             "visual_assets": [
-                {"kind": "image", "title": "路网与 POI 复合图", "relative_path": "visuals/road-poi-composite.png"},
+                {
+                    "kind": "image",
+                    "title": "路网与 POI 复合图",
+                    "relative_path": "visuals/road-poi-composite.png",
+                    "design": {"caption": "道路与设施关系支持优先改善连接，而不是复制普通商业。"},
+                },
                 {"kind": "table", "title": "项目数据汇总", "markdown": "| 数据集 | 数量 |\n|---|---:|\n| POI | 2 |"},
             ]
         }
@@ -100,6 +116,7 @@ def test_report_embeds_generated_visual_assets():
 
     assert "## 项目数据图件" in report["markdown"]
     assert "![路网与 POI 复合图](visuals/road-poi-composite.png)" in report["markdown"]
+    assert "图注：道路与设施关系支持优先改善连接，而不是复制普通商业。" in report["markdown"]
     assert "| POI | 2 |" in report["markdown"]
 
 
@@ -113,9 +130,11 @@ def test_report_rejects_reader_chapter_internal_language():
         build_spatial_strategy_report(request)
 
 
-def test_feishu_sender_sends_summary_then_markdown_file(tmp_path):
+def test_feishu_sender_sends_summary_then_word_file(tmp_path):
     markdown = tmp_path / "spatial-strategy-report.md"
     markdown.write_text("# 报告\n", encoding="utf-8")
+    document = tmp_path / "spatial-strategy-report.docx"
+    document.write_bytes(b"docx")
     response = lambda payload: httpx.Response(
         200,
         json=payload,
@@ -137,9 +156,12 @@ def test_feishu_sender_sends_summary_then_markdown_file(tmp_path):
         sender.deliver(
             report={"title": "测试报告", "summary": "结论", "citations": [{}]},
             markdown_path=markdown,
+            document_path=document,
         )
     )
 
     assert result["summary_message_id"] == "summary-id"
     assert result["file_message_id"] == "file-id"
+    assert result["file_name"] == "spatial-strategy-report.docx"
+    assert client.post.call_args_list[2].kwargs["data"]["file_name"] == "spatial-strategy-report.docx"
     assert client.post.await_count == 4

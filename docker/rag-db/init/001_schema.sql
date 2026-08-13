@@ -21,18 +21,19 @@ CREATE TABLE IF NOT EXISTS kb_documents (
         CHECK (status IN ('draft', 'parsing', 'review', 'published', 'superseded', 'failed')),
     version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
     checksum TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
     published_at TIMESTAMPTZ,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (source_key, version),
-    UNIQUE (checksum)
+    UNIQUE (tenant_id, source_key, version)
 );
 
 CREATE TABLE IF NOT EXISTS kb_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id UUID NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
-    chunk_key TEXT NOT NULL UNIQUE,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    chunk_key TEXT NOT NULL,
     content TEXT NOT NULL,
     search_terms TEXT NOT NULL DEFAULT '',
     search_vector TSVECTOR GENERATED ALWAYS AS (
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS kb_chunks (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (document_id, ordinal),
+    UNIQUE (tenant_id, chunk_key),
     CHECK (page_end IS NULL OR page_start IS NULL OR page_end >= page_start)
 );
 

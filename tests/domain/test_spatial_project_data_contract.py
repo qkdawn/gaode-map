@@ -115,10 +115,14 @@ def test_context_separates_raw_datasets_and_computed_results(service):
     assert "pagination" not in datasets["poi"]
     assert datasets["poi"]["operations"] == ["records", "aggregate"]
     assert datasets["poi"]["query_capabilities"]["input_coord_types"] == ["wgs84"]
-    assert datasets["document:doc-1"]["total_count"] == 3
-    assert datasets["document:doc-1"]["operations"] == ["records"]
-    assert datasets["document:doc-1"]["content_mode"] == "complete_document_blocks"
-    assert datasets["document:doc-1"]["original_resource_uri"] == "spatial-document://history-1/doc-1/original"
+    assert result["documents"] == [{
+        "document_id": "doc-1",
+        "title": "项目文档",
+        "file_name": "project.docx",
+        "document_role": "",
+        "status": "parsed",
+        "original_resource_uri": "spatial-document://history-1/doc-1/original",
+    }]
     assert {item["result_id"] for item in result["computed_results"]} == {"computed:poi:summary", "metric:direction"}
 
 
@@ -147,10 +151,10 @@ def test_records_can_be_exhausted_with_snapshot_bound_continuation(service, monk
         service.query_data(history_id="history-1", dataset_id="poi", filters={"name": "other"}, continue_token=first["continue_token"])
 
 
-def test_document_chunks_keep_physical_pages_headings_and_locators(service):
-    page = service.query_data(history_id="history-1", dataset_id="document:doc-1")
+def test_project_document_reader_keeps_physical_pages_headings_and_locators(service):
+    page = service.read_project_document(history_id="history-1", document_id="doc-1")
 
-    assert page["records"][1] == {
+    assert page["blocks"][1] == {
         "chunk_id": "chunk:12",
         "document_id": "doc-1",
         "filename": "project.docx",
@@ -160,28 +164,38 @@ def test_document_chunks_keep_physical_pages_headings_and_locators(service):
         "block_type": "paragraph",
         "source_locator": "page:1 block:2",
     }
-    assert page["records"][2]["page"] == 4
-    assert page["records"][2]["source_locator"] == "page:4 block:1"
+    assert page["blocks"][2]["page"] == 4
+    assert page["blocks"][2]["source_locator"] == "page:4 block:1"
     assert page["complete"] is True
-    assert page["continue_token"] is None
-    assert page["content_mode"] == "complete_document_blocks"
+    assert page["next_start_block"] is None
+    assert page["content_mode"] == "verified_original_text"
     assert page["original_resource_uri"] == "spatial-document://history-1/doc-1/original"
-    assert page["full_text"] == "现状建筑\n\n第一页原文\n\n第四页原文"
+    assert page["text"] == "现状建筑\n\n第一页原文\n\n第四页原文"
 
 
-def test_document_query_returns_all_blocks_without_generic_pagination(service, monkeypatch):
-    monkeypatch.setattr(contract_module, "MAX_RESULT_SIZE", 1)
+def test_project_document_reader_supports_explicit_continuation(service):
+    first = service.read_project_document(history_id="history-1", document_id="doc-1", max_blocks=2)
+    second = service.read_project_document(
+        history_id="history-1",
+        document_id="doc-1",
+        start_block=first["next_start_block"],
+        max_blocks=2,
+    )
 
-    result = service.query_data(history_id="history-1", dataset_id="document:doc-1")
+    assert first["total_blocks"] == 3
+    assert first["complete"] is False
+    assert first["next_start_block"] == 2
+    assert second["complete"] is True
+    assert second["blocks"][0]["text"] == "第四页原文"
 
-    assert result["total_count"] == 3
-    assert len(result["records"]) == 3
-    assert result["complete"] is True
-    assert result["continue_token"] is None
+
+def test_query_data_rejects_document_dataset_contract(service):
+    with pytest.raises(ValueError, match="dataset_not_found"):
+        service.query_data(history_id="history-1", dataset_id="document:doc-1")
 
 
-def test_document_query_rejects_continuation_tokens(service):
-    with pytest.raises(ValueError, match="document_continue_token_unsupported"):
+def test_document_dataset_rejects_old_query_contract_even_with_continuation(service):
+    with pytest.raises(ValueError, match="dataset_not_found"):
         service.query_data(
             history_id="history-1",
             dataset_id="document:doc-1",

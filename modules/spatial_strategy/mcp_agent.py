@@ -9,7 +9,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from core.config import settings
 
 
-_ALLOWED_TOOLS = {"project_context", "query_data"}
+_ALLOWED_TOOLS = {"project_context", "query_data", "read_project_document"}
 _AGENT_CONTEXT_LIST_SAMPLE_SIZE = 8
 _AGENT_CONTEXT_MAPPING_LIMIT = 32
 _AGENT_CONTEXT_TEXT_LIMIT = 1_200
@@ -94,12 +94,19 @@ def _compact_agent_value(value: Any, *, depth: int = 0) -> Any:
 def _compact_project_context_for_agent(context: Mapping[str, Any]) -> dict[str, Any]:
     project = context.get("project")
     compact_project = _compact_agent_value(project) if isinstance(project, Mapping) else {}
+    documents = context.get("documents") or []
+    compact_documents = [
+        _compact_agent_value(document)
+        for document in documents
+        if isinstance(document, Mapping)
+    ] if isinstance(documents, (list, tuple)) else []
     if isinstance(project, Mapping):
         compact_project["scope"] = _compact_scope(project.get("scope"))
     return {
         "schema_version": context.get("schema_version"),
         "agent_context_mode": "decision_summary",
         "project": compact_project,
+        "documents": compact_documents,
         "datasets": _compact_agent_value(context.get("datasets") or []),
         "computed_results": _compact_agent_value(context.get("computed_results") or []),
         "warnings": _compact_agent_value(context.get("warnings") or []),
@@ -129,3 +136,44 @@ async def call_spatial_mcp_tool(*, history_id: str, tool_name: str, arguments: d
                 "content": [] if structured_content is not None else _jsonable(getattr(result, "content", [])),
                 "structured_content": structured_content,
             }
+
+
+def read_previous_chapter(
+    *,
+    decision_state: Mapping[str, Any],
+    current_step_order: int,
+    step_key: str = "",
+    step_order: int | None = None,
+) -> dict[str, Any]:
+    """Read one completed earlier chapter without placing all chapters in the prompt."""
+    steps = decision_state.get("steps") if isinstance(decision_state, Mapping) else None
+    if not isinstance(steps, Mapping):
+        raise ValueError("previous_chapter_state_unavailable")
+
+    target_key = str(step_key or "").strip()
+    if target_key:
+        entry = steps.get(target_key)
+    else:
+        target_order = int(step_order or 0)
+        entry = next(
+            (
+                value for value in steps.values()
+                if isinstance(value, Mapping) and int(value.get("step_order") or 0) == target_order
+            ),
+            None,
+        )
+    if not isinstance(entry, Mapping):
+        raise ValueError("previous_chapter_not_found")
+
+    resolved_order = int(entry.get("step_order") or 0)
+    if resolved_order >= int(current_step_order):
+        raise ValueError("previous_chapter_must_be_completed_before_current_step")
+    chapter = str(entry.get("reader_chapter") or "").strip()
+    if not chapter:
+        raise ValueError("previous_chapter_content_unavailable")
+    return {
+        "step_key": target_key or str(entry.get("step_key") or ""),
+        "step_order": resolved_order,
+        "title": str(entry.get("title") or ""),
+        "reader_chapter": chapter,
+    }

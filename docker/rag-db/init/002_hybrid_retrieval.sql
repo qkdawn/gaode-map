@@ -66,6 +66,7 @@ WITH eligible AS MATERIALIZED (
     FROM kb_chunks c
     JOIN kb_documents d ON d.id = c.document_id
     WHERE d.status = 'published'
+      AND d.source_type <> 'project_document'
       AND d.tenant_id = p_tenant_id
       AND (d.source_type <> 'test_fixture' OR COALESCE(p_metadata_filter->>'fixture', '') = 'true')
       AND (

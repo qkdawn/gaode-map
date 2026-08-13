@@ -18,18 +18,18 @@ _QUERY_CACHE_LOCK = RLock()
 _QUERY_CACHE_MAX_SIZE = 96
 
 _STEP_DATASETS: dict[str, tuple[str, ...]] = {
-    "step_01_policy_site": ("document:*", "poi", "road_edges"),
+    "step_01_policy_site": ("poi", "road_edges"),
     "step_02_regional_role": ("poi", "road_edges", "population"),
     "step_03_market_flow": ("poi", "road_edges", "population"),
     "step_04_supply_gap": ("poi",),
     "step_05_audience_use": ("population", "poi", "road_edges"),
-    "step_06_theme_resources": ("document:*", "poi"),
-    "step_07_positioning": ("document:*",),
-    "step_08_product_mix": ("poi", "population", "document:*"),
+    "step_06_theme_resources": ("poi",),
+    "step_07_positioning": (),
+    "step_08_product_mix": ("poi", "population"),
     "step_09_spatial_layout": ("road_edges", "poi", "population", "nightlight"),
-    "step_10_operating_model": ("document:*",),
-    "step_11_financial_check": ("document:*",),
-    "step_12_phasing": ("document:*",),
+    "step_10_operating_model": (),
+    "step_11_financial_check": (),
+    "step_12_phasing": (),
 }
 
 _AGGREGATES: dict[str, tuple[list[str], list[dict[str, str]]]] = {
@@ -140,8 +140,6 @@ def _project_data_citation(
 
 def _dataset_ids(context: dict[str, Any], requested: str) -> list[str]:
     available = [str(item.get("dataset_id") or "") for item in context.get("datasets") or [] if isinstance(item, dict)]
-    if requested == "document:*":
-        return [item for item in available if item.startswith("document:")]
     return [requested] if requested in available else []
 
 
@@ -201,31 +199,6 @@ def _record_citations(history_id: str, dataset_id: str, result: dict[str, Any], 
     return citations
 
 
-def _document_citations(history_id: str, dataset_id: str, result: dict[str, Any], title: str) -> list[dict[str, Any]]:
-    citations = []
-    for record in result.get("records") or []:
-        if not isinstance(record, dict):
-            continue
-        citations.append(
-            _project_data_citation(
-                history_id=history_id,
-                dataset_id=dataset_id,
-                title=str(record.get("filename") or title),
-                content=str(record.get("text") or ""),
-                source_locator=str(record.get("source_locator") or f"{dataset_id}:record:{record.get('chunk_id')}"),
-                source_type="project_document",
-                snapshot_id=str(result.get("snapshot_id") or ""),
-                dataset_checksum=str(result.get("dataset_checksum") or ""),
-                complete=bool(result.get("complete")),
-                document_id=record.get("document_id"),
-                page_start=record.get("page"),
-                page_end=record.get("page"),
-                section=str(record.get("heading") or ""),
-            )
-        )
-    return citations
-
-
 def _computed_result_citations(history_id: str, results: list[Any]) -> list[dict[str, Any]]:
     citations = []
     for index, result in enumerate(results):
@@ -258,7 +231,7 @@ def read_step_project_data(
     citations: list[dict[str, Any]] = []
     queries: list[dict[str, Any]] = []
     warnings = list(context.get("warnings") or [])
-    requested = _STEP_DATASETS.get(str(step_key), ("document:*",))
+    requested = _STEP_DATASETS.get(str(step_key), ())
     citations.extend(_computed_result_citations(resolved, context.get("computed_results") or []))
 
     for requested_dataset in requested:
@@ -279,17 +252,6 @@ def read_step_project_data(
                     or descriptor.get("dataset_checksum")
                     or f"{dataset_id}:{dataset_total_count}"
                 )
-                if dataset_id.startswith("document:"):
-                    result = _query_data_cached(
-                        snapshot_key=snapshot_key,
-                        history_id=resolved,
-                        dataset_id=dataset_id,
-                        operation="records",
-                    )
-                    citations.extend(_document_citations(resolved, dataset_id, result, title))
-                    queries.append({"dataset_id": dataset_id, "operation": "records", "complete": bool(result.get("complete")), "total_count": result.get("total_count")})
-                    continue
-
                 group_by, metrics = _AGGREGATES.get(dataset_id, ([], [{"op": "count", "field": "*", "as": "record_count"}]))
                 aggregate = _query_data_cached(
                     snapshot_key=snapshot_key,

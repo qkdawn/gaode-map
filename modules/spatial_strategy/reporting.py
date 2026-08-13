@@ -15,6 +15,7 @@ import httpx
 from core.config import settings
 
 from .schemas import SpatialStrategyReportDeliveryRequest, SpatialStrategyReportFinalizeRequest
+from .docx_export import write_markdown_docx
 
 
 STEP_TITLES = {
@@ -173,10 +174,13 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
     if visual_assets:
         lines.extend(["## 项目数据图件", ""])
         for asset in visual_assets:
+            caption = _text(asset.get("caption")) or _text(_mapping(asset.get("design")).get("caption"))
             if asset["kind"] == "image":
                 lines.extend([f"### {_text(asset['title'])}", "", f"![{_text(asset['title'])}]({_text(asset['relative_path'])})", ""])
             else:
                 lines.extend([f"### {_text(asset['title'])}", "", _text(asset["markdown"]), ""])
+            if caption:
+                lines.extend([f"图注：{caption}", ""])
 
     for index, step_key in enumerate(STEP_TITLES, 1):
         lines.extend(
@@ -213,6 +217,13 @@ class SpatialStrategyReportStore:
         target = directory / "spatial-strategy-report.md"
         temporary = target.with_suffix(".md.tmp")
         temporary.write_text(_text(report.get("markdown")) + "\n", encoding="utf-8", newline="\n")
+        os.replace(temporary, target)
+        return target
+
+    def write_docx(self, markdown_path: Path, *, title: str = "") -> Path:
+        target = markdown_path.with_suffix(".docx")
+        temporary = target.with_suffix(".docx.tmp")
+        write_markdown_docx(markdown_path, temporary, title=title)
         os.replace(temporary, target)
         return target
 
@@ -266,10 +277,18 @@ class FeishuReportSender:
         self.client = client
         self._token = ""
 
-    async def deliver(self, *, report: Mapping[str, Any], markdown_path: Path, visual_paths: list[Path] | None = None) -> dict[str, Any]:
+    async def deliver(
+        self,
+        *,
+        report: Mapping[str, Any],
+        markdown_path: Path,
+        document_path: Path | None = None,
+        visual_paths: list[Path] | None = None,
+    ) -> dict[str, Any]:
         self._token = await self._tenant_access_token()
         summary_message_id = await self._send_message("text", {"text": self._summary(report)})
-        file_key = await self._upload_file(markdown_path)
+        attachment = document_path or markdown_path
+        file_key = await self._upload_file(attachment)
         file_message_id = await self._send_message("file", {"file_key": file_key})
         visual_message_ids = []
         for path in visual_paths or []:
@@ -279,6 +298,7 @@ class FeishuReportSender:
             "chat_id": self.config.chat_id,
             "summary_message_id": summary_message_id,
             "file_message_id": file_message_id,
+            "file_name": attachment.name,
             "visual_message_ids": visual_message_ids,
             "delivered_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }
@@ -349,7 +369,7 @@ class FeishuReportSender:
                 _text(report.get("title")) or "空间分析报告",
                 "状态：12 / 12 步完成",
                 f"核心结论：{summary or '详见完整报告'}",
-                "完整 Markdown 报告见随后发送的文件。",
+                "完整 Word 报告见随后发送的文件。",
             ]
         )
 
@@ -415,20 +435,27 @@ async def deliver_spatial_strategy_report(
     report_store = store or SpatialStrategyReportStore()
     report = request.model_dump(mode="json")
     markdown_path = report_store.write(report)
+    document_path = report_store.write_docx(markdown_path, title=_text(report.get("title")))
     visual_paths = _visual_paths(report_store, report)
     delivery = report_store.read_delivery(str(request.run_id))
     if delivery is None:
         async with httpx.AsyncClient(timeout=httpx.Timeout(settings.feishu_timeout_s)) as client:
             sender = FeishuReportSender(FeishuConfig.from_settings(), client=client)
-            delivery = await sender.deliver(report=report, markdown_path=markdown_path, visual_paths=visual_paths)
+            delivery = await sender.deliver(
+                report=report,
+                markdown_path=markdown_path,
+                document_path=document_path,
+                visual_paths=visual_paths,
+            )
         report_store.write_delivery(str(request.run_id), delivery)
 
     artifact = {
-        "kind": "markdown_report",
-        "filename": markdown_path.name,
-        "path": str(markdown_path),
-        "media_type": "text/markdown",
-        "sha256": sha256(markdown_path.read_bytes()).hexdigest(),
+        "kind": "docx_report",
+        "filename": document_path.name,
+        "path": str(document_path),
+        "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "sha256": sha256(document_path.read_bytes()).hexdigest(),
+        "markdown_filename": markdown_path.name,
         "visual_assets": report.get("visual_assets", []),
         "delivery": delivery,
     }

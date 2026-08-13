@@ -288,7 +288,7 @@ class AggregateMetricInput(BaseModel):
 
 @mcp.tool()
 def project_context(history_id: str = "") -> dict[str, Any]:
-    """List one project's complete datasets and separate computed results."""
+    """List project identity, first-party documents, spatial datasets, and computed results."""
     normalized_history_id = history_id.strip()
     if not normalized_history_id:
         projects = _call(service.list_history_projects, limit=100)
@@ -313,12 +313,7 @@ def query_data(
     metrics: list[dict[str, Any]] | None = None,
     continue_token: str = "",
 ) -> dict[str, Any]:
-    """Query project data.
-
-    Document datasets return every matching DocumentBlock, a merged full_text value,
-    and the original file resource URI from parsed document blocks. Spatial datasets keep
-    snapshot-bound continuation when their record sets exceed one response.
-    """
+    """Query one spatial dataset with snapshot-bound continuation."""
     return _call(
         data_contract.query_data,
         history_id=history_id,
@@ -330,6 +325,27 @@ def query_data(
         group_by=group_by,
         metrics=metrics,
         continue_token=continue_token,
+    )
+
+
+@mcp.tool()
+def read_project_document(
+    history_id: str,
+    document_id: str,
+    start_block: int = 0,
+    max_blocks: int = 20,
+    page_start: int | None = None,
+    page_end: int | None = None,
+) -> dict[str, Any]:
+    """Read original parsed project text by document and block range; continue until complete is true."""
+    return _call(
+        data_contract.read_project_document,
+        history_id=history_id,
+        document_id=document_id,
+        start_block=start_block,
+        max_blocks=max_blocks,
+        page_start=page_start,
+        page_end=page_end,
     )
 
 

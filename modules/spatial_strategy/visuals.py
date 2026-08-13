@@ -32,6 +32,13 @@ _FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 )
 _DEFAULT_COLORS = ("#2563eb", "#e11d48", "#16a34a", "#ea580c", "#7c3aed", "#0891b2")
+_DATASET_LABELS = {
+    "poi": "城市设施",
+    "road_nodes": "路网节点",
+    "road_edges": "道路网络",
+    "population": "常住人口",
+    "nightlight": "夜光辐亮度",
+}
 _POI_COLORS = {
     "餐饮服务": "#d95d39",
     "购物服务": "#f4a261",
@@ -120,16 +127,23 @@ def _project(
     bounds: tuple[float, float, float, float],
     *,
     right_padding: int = _PADDING,
+    canvas_width: int = _WIDTH,
+    canvas_height: int = _HEIGHT,
 ) -> tuple[float, float]:
     min_x, min_y, max_x, max_y = bounds
     center_latitude = (min_y + max_y) / 2.0
     longitude_scale = max(0.01, math.cos(math.radians(center_latitude)))
-    scale = min(
-        (_WIDTH - _PADDING - right_padding) / ((max_x - min_x) * longitude_scale),
-        (_HEIGHT - 2 * _PADDING) / (max_y - min_y),
-    )
-    x = _PADDING + (point[0] - min_x) * longitude_scale * scale
-    y = _HEIGHT - _PADDING - (point[1] - min_y) * scale
+    projected_width = (max_x - min_x) * longitude_scale
+    projected_height = max_y - min_y
+    frame_width = canvas_width - _PADDING - right_padding
+    frame_height = canvas_height - 2 * _PADDING
+    scale = min(frame_width / projected_width, frame_height / projected_height)
+    used_width = projected_width * scale
+    used_height = projected_height * scale
+    offset_x = _PADDING + (frame_width - used_width) / 2.0
+    offset_y = _PADDING + (frame_height - used_height) / 2.0
+    x = offset_x + (point[0] - min_x) * longitude_scale * scale
+    y = offset_y + (max_y - point[1]) * scale
     return x, y
 
 
@@ -137,28 +151,56 @@ def _projection_metadata(
     bounds: tuple[float, float, float, float],
     *,
     right_padding: int,
+    canvas_width: int = _WIDTH,
+    canvas_height: int = _HEIGHT,
 ) -> dict[str, Any]:
     min_x, min_y, max_x, max_y = bounds
     center_latitude = (min_y + max_y) / 2.0
     longitude_scale = max(0.01, math.cos(math.radians(center_latitude)))
     projected_width = (max_x - min_x) * longitude_scale
     projected_height = max_y - min_y
+    frame_width = canvas_width - _PADDING - right_padding
+    frame_height = canvas_height - 2 * _PADDING
+    scale = min(frame_width / projected_width, frame_height / projected_height)
+    used_width = projected_width * scale
+    used_height = projected_height * scale
     return {
         "method": "local_equirectangular_wgs84",
         "center_latitude": round(center_latitude, 6),
         "projected_extent_aspect_ratio": round(projected_width / projected_height, 6),
         "map_frame_aspect_ratio": round(
-            (_WIDTH - _PADDING - right_padding) / (_HEIGHT - 2 * _PADDING),
+            frame_width / frame_height,
             6,
         ),
         "axis_scale_delta_percent": 0.0,
+        "content_occupancy_ratio": round((used_width * used_height) / (frame_width * frame_height), 6),
+        "canvas_size_px": {"width": canvas_width, "height": canvas_height},
     }
 
 
-def _canvas(title: str, subtitle: str = "") -> tuple[Image.Image, ImageDraw.ImageDraw]:
-    image = Image.new("RGB", (_WIDTH, _HEIGHT), "#f7f8fa")
+def _map_canvas_size(
+    bounds: tuple[float, float, float, float], *, has_side_panel: bool = False
+) -> tuple[int, int]:
+    if has_side_panel:
+        return _WIDTH, _HEIGHT
+    min_x, min_y, max_x, max_y = bounds
+    longitude_scale = max(0.01, math.cos(math.radians((min_y + max_y) / 2.0)))
+    aspect = ((max_x - min_x) * longitude_scale) / (max_y - min_y)
+    if aspect < 0.5:
+        return 900, 1400
+    if aspect < 0.82:
+        return 1200, 1400
+    if aspect > 1.45:
+        return 1600, 1000
+    return 1200, 1200
+
+
+def _canvas(
+    title: str, subtitle: str = "", *, width: int = _WIDTH, height: int = _HEIGHT
+) -> tuple[Image.Image, ImageDraw.ImageDraw]:
+    image = Image.new("RGB", (width, height), "#f7f8fa")
     draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, _WIDTH, 70), fill="#ffffff")
+    draw.rectangle((0, 0, width, 70), fill="#ffffff")
     draw.text((_PADDING, 18), title, fill="#172033", font=_font(32, bold=True))
     if subtitle:
         draw.text((_PADDING, 58), subtitle, fill="#667085", font=_font(16))
@@ -179,6 +221,8 @@ def _save(
     return {
         "kind": "image",
         "title": title,
+        "caption": str((design or {}).get("caption") or ""),
+        "decision_question": str((design or {}).get("decision_question") or ""),
         "filename": filename,
         "path": str(target),
         "relative_path": f"visuals/{filename}",
@@ -491,7 +535,13 @@ def _draw_nightlight_boundaries(
 
 def _wrap_text(value: Any, width: int = 24) -> list[str]:
     text = str(value or "").strip()
-    return [text[index : index + width] for index in range(0, len(text), width)] or [""]
+    lines = [text[index : index + width] for index in range(0, len(text), width)] or [""]
+    leading_punctuation = "，。；：！？、）】》”’"
+    for index in range(1, len(lines)):
+        while lines[index] and lines[index][0] in leading_punctuation:
+            lines[index - 1] += lines[index][0]
+            lines[index] = lines[index][1:]
+    return [line for line in lines if line] or [""]
 
 
 def _draw_panel(
@@ -506,15 +556,19 @@ def _draw_panel(
     left, right = 1050, 1510
     draw.rounded_rectangle((left, top, right, bottom), radius=7, fill="#ffffff", outline="#d0d5dd", width=1)
     draw.text((left + 25, top + 22), title, fill="#172033", font=_font(22, bold=True))
-    y = top + 70
-    for label, value in lines:
-        draw.text((left + 25, y), label, fill="#667085", font=_font(13))
-        for value_line in _wrap_text(value, 26):
-            draw.text((left + 25, y + 22), value_line, fill="#172033", font=_font(16, bold=True))
-            y += 21
-        y += 33
     note_lines = _wrap_text(note, 29)
     note_y = bottom - 30 - len(note_lines) * 19
+    blocks = [(label, _wrap_text(value, 26)) for label, value in lines]
+    block_heights = [43 + len(value_lines) * 21 for _, value_lines in blocks]
+    available_height = max(0, note_y - 25 - (top + 70) - sum(block_heights))
+    gap = available_height / max(1, len(blocks) - 1)
+    y = float(top + 70)
+    for label, value_lines in blocks:
+        draw.text((left + 25, y), label, fill="#667085", font=_font(13))
+        for value_line in value_lines:
+            draw.text((left + 25, y + 22), value_line, fill="#172033", font=_font(16, bold=True))
+            y += 21
+        y += 43 + gap
     draw.line((left + 25, note_y - 14, right - 25, note_y - 14), fill="#e4e7ec", width=1)
     for line in note_lines:
         draw.text((left + 25, note_y), line, fill="#667085", font=_font(13))
@@ -579,8 +633,22 @@ def _road_style(record: Mapping[str, Any]) -> tuple[str, int]:
     return "#98a2b3", 1
 
 
-def _poi_color(record: Mapping[str, Any]) -> str:
-    return _POI_COLORS.get(str(record.get("category") or ""), _POI_COLORS["其他"])
+def _poi_category_palette(records: Iterable[Mapping[str, Any]]) -> dict[str, str]:
+    categories = sorted({str(record.get("category") or "其他") for record in records})
+    palette: dict[str, str] = {}
+    fallback_index = 0
+    for category in categories:
+        if category in _POI_COLORS:
+            palette[category] = _POI_COLORS[category]
+            continue
+        palette[category] = _DEFAULT_COLORS[fallback_index % len(_DEFAULT_COLORS)]
+        fallback_index += 1
+    return palette
+
+
+def _poi_color(record: Mapping[str, Any], palette: Mapping[str, str] | None = None) -> str:
+    category = str(record.get("category") or "其他")
+    return (palette or _POI_COLORS).get(category, _POI_COLORS["其他"])
 
 
 def _named_pois(
@@ -674,6 +742,7 @@ def _evidence_map_asset(
 
     roads = data.get("road_edges", [])
     pois = data.get("poi", [])
+    poi_palette = _poi_category_palette(pois)
     population = data.get("population", [])
     total = sum(len(data[layer["dataset_id"]]) for layer in layers)
     image, draw = _canvas(str(spec["title"]), f"基于完整项目记录 · 共 {total:,} 条 · WGS84 局部等距投影")
@@ -721,7 +790,7 @@ def _evidence_map_asset(
             continue
         x, y = project(point)
         radius = 3 if category in emphasized else 2
-        color = _poi_color(record)
+        color = _poi_color(record, poi_palette)
         if variant == "context_full":
             radius = 2 if category in emphasized else 1
             color = _mix_color(color, "#ffffff", 0.25)
@@ -783,6 +852,7 @@ def _evidence_map_asset(
     if variant == "context_full":
         image = image.resize((2400, 1500), Image.Resampling.LANCZOS)
     saved_design = dict(spec)
+    saved_design["legend_labels"] = [label for _, label in legend_items]
     if variant == "context_full":
         saved_design["data_scope"] = "full_project_records"
         saved_design["output_size_px"] = {"width": 2400, "height": 1500}
@@ -791,10 +861,21 @@ def _evidence_map_asset(
         {"name": item.get("name"), "category": item.get("category")}
         for item in named
     ]
+    if pois:
+        displayed_categories = [category for category, _ in poi_counts.most_common(4)]
+        saved_design["poi_style"] = {
+            "palette": "facility_category_v1",
+            "category_colors": {
+                category: poi_palette[category] for category in displayed_categories
+            },
+            "available_category_count": len(poi_palette),
+            "named_label_count": len(named),
+        }
     if variant == "regional_role":
         saved_design["population_style"] = {
             "field": "population_total",
             "domain": "positive_p5_p95",
+            "palette": "population_blue_v1",
             "min_value": population_low,
             "max_value": population_high,
             "unit": "person",
@@ -809,16 +890,154 @@ def _evidence_map_asset(
     )
 
 
+def _validate_rendered_assets(plan: list[dict[str, Any]], assets: list[dict[str, Any]]) -> None:
+    if len(assets) != len(plan):
+        raise ValueError("visual_render_incomplete")
+    for asset in assets:
+        design = dict(asset.get("design") or {})
+        if len(str(design.get("caption") or "").strip()) < 12:
+            raise ValueError("visual_render_missing_caption")
+        if asset.get("kind") != "image" or design.get("format") != "map":
+            continue
+        projection = dict(design.get("projection") or {})
+        occupancy = _number(projection.get("content_occupancy_ratio"))
+        if occupancy is not None and occupancy < 0.25:
+            raise ValueError("visual_render_excessive_empty_space")
+        legend_labels = [str(label).strip() for label in design.get("legend_labels") or [] if str(label).strip()]
+        if not legend_labels and not design.get("nightlight_style"):
+            raise ValueError("visual_render_missing_legend")
+        if any(label in DATASET_SOURCES for label in legend_labels):
+            raise ValueError("visual_render_exposes_internal_dataset_label")
+        layer_ids = {
+            str(layer.get("dataset_id") or "")
+            for layer in design.get("layers") or []
+            if isinstance(layer, Mapping)
+        }
+        if "poi" in layer_ids:
+            poi_style = dict(design.get("poi_style") or {})
+            category_colors = dict(poi_style.get("category_colors") or {})
+            available_category_count = int(_number(poi_style.get("available_category_count")) or 0)
+            required_distinct_colors = min(2, available_category_count)
+            if (
+                poi_style.get("palette") != "facility_category_v1"
+                or required_distinct_colors < 1
+                or len(set(category_colors.values())) < required_distinct_colors
+            ):
+                raise ValueError("visual_render_missing_poi_category_palette")
+        if "population" in layer_ids:
+            population_style = dict(design.get("population_style") or {})
+            if (
+                population_style.get("domain") != "positive_p5_p95"
+                or population_style.get("palette") != "population_blue_v1"
+                or _number(population_style.get("min_value")) is None
+                or _number(population_style.get("max_value")) is None
+            ):
+                raise ValueError("visual_render_missing_population_color_scale")
+        if "nightlight" in layer_ids:
+            nightlight_style = dict(design.get("nightlight_style") or {})
+            if (
+                nightlight_style.get("palette") != "platform_radiance_v1"
+                or nightlight_style.get("domain") != "positive_p5_p98"
+                or nightlight_style.get("boundary_modes") != ["hotspot", "gradient"]
+            ):
+                raise ValueError("visual_render_missing_nightlight_color_scale")
+
+
 def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
-    layers = [
-        {"dataset_id": dataset_id, "role": role}
-        for dataset_id, role in (("road_edges", "line"), ("poi", "point"), ("population", "polygon"), ("nightlight", "polygon"))
-        if data.get(dataset_id)
-    ]
-    return [
-        {"format": "map", "title": "项目空间数据全景", "rationale": "展示全部可用空间数据", "layers": layers},
-        {"format": "table", "title": "项目全量数据汇总", "rationale": "汇总全部可用数据集", "dataset_id": "", "group_by": "", "metric_op": "count", "metric_field": ""},
-    ]
+    plans: list[dict[str, Any]] = []
+    if data.get("road_edges") and data.get("poi"):
+        plans.append({
+            "format": "map", "map_variant": "context_full", "title": "区域道路与设施关系",
+            "rationale": "识别项目与区域道路、公共文化和交通节点的关系",
+            "decision_question": "项目应承担什么区域角色并改善哪些连接",
+            "caption": "道路与具名设施共同说明项目应补充文化连接和识别，而不是复制普通商业。",
+            "layers": [{"dataset_id": "road_edges", "role": "line"}, {"dataset_id": "poi", "role": "point"}],
+        })
+    if data.get("poi"):
+        plans.append({
+            "format": "chart", "chart_variant": "poi_supply", "title": "周边设施供给结构",
+            "rationale": "比较常规消费与文化公共设施的供给结构",
+            "decision_question": "项目应补哪类供给而不是重复已有商业",
+            "caption": "POI 分类数量用于识别供给结构，支持文化公共服务补位而非普通商业扩张。",
+            "dataset_id": "poi",
+        })
+    if data.get("population"):
+        plans.append({
+            "format": "chart", "chart_variant": "population_profile", "title": "重点年龄人口结构",
+            "rationale": "比较研学、家庭和社区日常使用的人口基础",
+            "decision_question": "首期公共产品应优先服务哪些日常客群",
+            "caption": "重点年龄段人口支持多时段公共使用测试，但不能直接换算项目客流。",
+            "dataset_id": "population",
+        })
+    if data.get("nightlight") and len(plans) < 5:
+        layers = [{"dataset_id": "nightlight", "role": "polygon", "metric_field": "radiance"}]
+        if data.get("road_edges"):
+            layers.insert(0, {"dataset_id": "road_edges", "role": "line"})
+        plans.append({
+            "format": "map", "title": "夜间活动背景与道路骨架",
+            "rationale": "识别夜光热点、衰减边界和道路关系",
+            "decision_question": "项目是否具备延时开放条件以及夜间产品边界",
+            "caption": "夜光只能支持适度延时开放的背景判断，不能证明夜间消费或营业收入。",
+            "layers": layers,
+        })
+    if data.get("road_edges") and len(plans) < 3:
+        plans.append({
+            "format": "map", "title": "道路层级与连接骨架",
+            "rationale": "识别主要道路层级与内部连接关系",
+            "decision_question": "步行接驳和入口识别应优先改善哪些连接",
+            "caption": "道路层级用于判断连接骨架，不等同实测客流或正式入口条件。",
+            "layers": [{"dataset_id": "road_edges", "role": "line"}],
+        })
+    return plans[:5]
+
+
+def _validate_plan_quality(plan: list[dict[str, Any]], data: Mapping[str, list[dict[str, Any]]]) -> None:
+    if not 3 <= len(plan) <= 5:
+        raise ValueError("visual_plan_requires_three_to_five_items")
+    titles: set[str] = set()
+    signatures: set[tuple[Any, ...]] = set()
+    chart_count = 0
+    population_map_count = 0
+    specialized_context_count = 0
+    for item in plan:
+        title = str(item.get("title") or "").strip()
+        rationale = str(item.get("rationale") or "").strip()
+        decision_question = str(item.get("decision_question") or "").strip()
+        caption = str(item.get("caption") or "").strip()
+        if len(title) < 4 or len(rationale) < 8 or len(decision_question) < 8 or len(caption) < 12:
+            raise ValueError("visual_plan_lacks_decision_context")
+        if title in titles:
+            raise ValueError("visual_plan_duplicate_title")
+        titles.add(title)
+        layer_ids = tuple(sorted(str(layer.get("dataset_id") or "") for layer in item.get("layers") or []))
+        if "road_nodes" in layer_ids:
+            raise ValueError("visual_plan_must_not_render_all_road_nodes")
+        signature = (
+            item.get("format"), item.get("map_variant"), item.get("chart_variant"), item.get("dataset_id"),
+            layer_ids, item.get("group_by"), item.get("metric_field"),
+        )
+        if signature in signatures:
+            raise ValueError("visual_plan_duplicate_evidence_view")
+        signatures.add(signature)
+        if item["format"] == "chart":
+            chart_count += 1
+        if item["format"] == "map":
+            has_poi = "poi" in layer_ids
+            has_roads = "road_edges" in layer_ids
+            if has_poi and not has_roads:
+                raise ValueError("visual_plan_poi_map_requires_road_context")
+            if has_poi and not item.get("map_variant"):
+                raise ValueError("visual_plan_poi_map_requires_variant")
+            if "population" in layer_ids:
+                population_map_count += 1
+            if item.get("map_variant") in {"poi_access", "context_full", "regional_role"}:
+                specialized_context_count += 1
+    if population_map_count > 1:
+        raise ValueError("visual_plan_duplicate_population_maps")
+    if (data.get("poi") or data.get("population")) and chart_count < 1:
+        raise ValueError("visual_plan_requires_explanatory_chart")
+    if data.get("poi") and data.get("road_edges") and specialized_context_count < 1:
+        raise ValueError("visual_plan_requires_specialized_context_map")
 
 
 def _normalize_plan(
@@ -826,7 +1045,8 @@ def _normalize_plan(
 ) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     supplied = list(visual_plan or ())
-    for raw in supplied:
+    source_plan = supplied or _plan_defaults(data)
+    for raw in source_plan:
         if not isinstance(raw, Mapping):
             raise ValueError("visual_plan_item_must_be_object")
         visual_format = str(raw.get("format") or "").strip().lower()
@@ -903,7 +1123,8 @@ def _normalize_plan(
                 "metric_field": metric_field,
             }
         )
-    return normalized if supplied else _plan_defaults(data)
+    _validate_plan_quality(normalized, data)
+    return normalized
 
 
 def _map_asset(
@@ -937,29 +1158,56 @@ def _map_asset(
             f"夜光网格 {int(nightlight_style['total_count']):,} · "
             f"P5-P98 稳健色阶 · 热点分级/梯度衰减边界 · 叠加路网"
         )
-    image, draw = _canvas(str(spec["title"]), subtitle)
+    canvas_width, canvas_height = _map_canvas_size(bounds, has_side_panel=bool(nightlight_style))
+    image, draw = _canvas(
+        str(spec["title"]), subtitle, width=canvas_width, height=canvas_height
+    )
     if nightlight_style:
-        draw.rectangle((0, 82, _WIDTH, _HEIGHT), fill="#111827")
+        draw.rectangle((0, 82, canvas_width, canvas_height), fill="#111827")
     right_padding = 590 if nightlight_style else _PADDING
-    project = lambda point: _project(point, bounds, right_padding=right_padding)
-    for layer_index, layer in enumerate(layers):
-        records = data[layer["dataset_id"]]
+    project = lambda point: _project(
+        point,
+        bounds,
+        right_padding=right_padding,
+        canvas_width=canvas_width,
+        canvas_height=canvas_height,
+    )
+    legend_labels: list[str] = []
+    population_domains: dict[str, tuple[float, float]] = {}
+    poi_palette = _poi_category_palette(data.get("poi", []))
+    for layer in layers:
+        dataset_id = layer["dataset_id"]
+        records = data[dataset_id]
         role = layer["role"]
         color = layer["color"]
         metric_field = layer["metric_field"]
-        maximum = max((_number(item.get(metric_field)) or 0 for item in records), default=0) or 1
+        effective_metric = metric_field or ("population_total" if dataset_id == "population" else "")
+        metric_values = [
+            value
+            for value in (_number(item.get(effective_metric)) for item in records)
+            if value is not None and value >= 0
+        ]
+        metric_low = _percentile(metric_values, 5)
+        metric_high = _percentile(metric_values, 95)
+        metric_span = max(metric_high - metric_low, 1e-9)
+        if dataset_id == "population":
+            population_domains[effective_metric] = (metric_low, metric_high)
         for record in records:
             points = _geometry_points(record.get("geometry"))
             if role == "line" and len(points) >= 2:
-                line_color = "#cbd5e1" if nightlight_style and layer["dataset_id"] == "road_edges" else color
-                line_width = 1 if nightlight_style and layer["dataset_id"] == "road_edges" else 2
+                if dataset_id == "road_edges":
+                    line_color, line_width = _road_style(record)
+                else:
+                    line_color, line_width = color, 2
+                if nightlight_style and dataset_id == "road_edges":
+                    line_color, line_width = "#cbd5e1", 1
                 draw.line([project(point) for point in points], fill=line_color, width=line_width)
             elif role == "polygon" and len(points) >= 3:
                 polygon_color = color
                 alpha = 105
-                outline_color = None
+                outline_color = "#ffffff"
                 outline_width = 1
-                if layer["dataset_id"] == "nightlight" and metric_field == "radiance" and nightlight_style:
+                if dataset_id == "nightlight" and metric_field == "radiance" and nightlight_style:
                     value = _number(record.get("radiance")) or 0.0
                     style = radiance_style(
                         value,
@@ -970,8 +1218,15 @@ def _map_asset(
                     polygon_color = str(style["fill_color"])
                     alpha = int(255 * min(0.82, max(0.44, float(style["fill_opacity"]) + 0.16)))
                     outline_color = str(style["stroke_color"])
-                elif metric_field:
-                    alpha = int(45 + 175 * min(1.0, (_number(record.get(metric_field)) or 0) / maximum))
+                elif dataset_id == "population":
+                    value = _number(record.get(effective_metric)) or 0.0
+                    ratio = max(0.0, min(1.0, (value - metric_low) / metric_span))
+                    polygon_color = _mix_color("#edf4f7", "#277da1", ratio)
+                    alpha = 220
+                elif effective_metric:
+                    value = _number(record.get(effective_metric)) or 0.0
+                    ratio = max(0.0, min(1.0, (value - metric_low) / metric_span))
+                    alpha = int(70 + 155 * ratio)
                 overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
                 overlay_draw = ImageDraw.Draw(overlay)
                 projected = [project(point) for point in points]
@@ -983,17 +1238,89 @@ def _map_asset(
                 point = _record_point(record)
                 if point is not None:
                     x, y = project(point)
-                    draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=color)
-        if nightlight_style:
-            continue
-        legend_x = _PADDING + layer_index * 280
-        draw.rectangle((legend_x, _HEIGHT - 48, legend_x + 15, _HEIGHT - 33), fill=color)
-        draw.text((legend_x + 23, _HEIGHT - 52), layer["dataset_id"], fill="#344054", font=_font(15))
+                    point_color = _poi_color(record, poi_palette) if dataset_id == "poi" else color
+                    radius = 2 if dataset_id == "poi" else 3
+                    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=point_color)
+    if not nightlight_style:
+        legend_x = _PADDING
+        legend_y = canvas_height - 54
+        layer_ids = [layer["dataset_id"] for layer in layers]
+        if "population" in layer_ids:
+            metric = next(
+                (layer["metric_field"] or "population_total" for layer in layers if layer["dataset_id"] == "population"),
+                "population_total",
+            )
+            low, high = population_domains.get(metric, (0.0, 0.0))
+            for step in range(5):
+                draw.rectangle(
+                    (legend_x + step * 34, legend_y, legend_x + (step + 1) * 34, legend_y + 16),
+                    fill=_mix_color("#edf4f7", "#277da1", step / 4),
+                )
+            population_label = f"常住人口 {low:,.0f}–{high:,.0f} 人/格"
+            draw.text((legend_x + 182, legend_y - 3), population_label, fill="#344054", font=_font(14))
+            legend_labels.append(population_label)
+            legend_x += 455
+        if "road_edges" in layer_ids:
+            draw.line((legend_x, legend_y + 8, legend_x + 34, legend_y + 8), fill="#475467", width=3)
+            draw.text((legend_x + 44, legend_y - 3), "道路层级", fill="#344054", font=_font(14))
+            legend_labels.append("道路层级")
+            legend_x += 155
+        if "poi" in layer_ids:
+            poi_counts = Counter(str(item.get("category") or "其他") for item in data.get("poi", []))
+            for category, _ in poi_counts.most_common(4):
+                draw.rectangle((legend_x, legend_y, legend_x + 16, legend_y + 16), fill=poi_palette[category])
+                label = category.replace("服务", "")
+                draw.text((legend_x + 23, legend_y - 3), label, fill="#344054", font=_font(14))
+                legend_labels.append(label)
+                legend_x += 145
+        if not legend_labels:
+            for layer in layers:
+                label = _DATASET_LABELS.get(layer["dataset_id"], layer["dataset_id"])
+                draw.rectangle((legend_x, legend_y, legend_x + 16, legend_y + 16), fill=layer["color"])
+                draw.text((legend_x + 23, legend_y - 3), label, fill="#344054", font=_font(14))
+                legend_labels.append(label)
+                legend_x += 180
     if nightlight_style:
         _draw_nightlight_boundaries(draw, data["nightlight"], nightlight_style, project)
         _draw_nightlight_legend(draw, nightlight_style)
     saved_design = dict(spec)
-    saved_design["projection"] = _projection_metadata(bounds, right_padding=right_padding)
+    saved_design["projection"] = _projection_metadata(
+        bounds,
+        right_padding=right_padding,
+        canvas_width=canvas_width,
+        canvas_height=canvas_height,
+    )
+    saved_design["legend_labels"] = legend_labels
+    source_layer_ids = {str(layer["dataset_id"]) for layer in layers}
+    if "poi" in source_layer_ids:
+        poi_counts = Counter(str(item.get("category") or "其他") for item in data.get("poi", []))
+        displayed_categories = [category for category, _ in poi_counts.most_common(4)]
+        saved_design["poi_style"] = {
+            "palette": "facility_category_v1",
+            "category_colors": {
+                category: poi_palette[category] for category in displayed_categories
+            },
+            "available_category_count": len(poi_palette),
+            "named_label_count": 0,
+        }
+    if "population" in source_layer_ids:
+        population_metric = next(
+            (
+                layer["metric_field"] or "population_total"
+                for layer in layers
+                if layer["dataset_id"] == "population"
+            ),
+            "population_total",
+        )
+        population_low, population_high = population_domains.get(population_metric, (0.0, 0.0))
+        saved_design["population_style"] = {
+            "field": population_metric,
+            "domain": "positive_p5_p95",
+            "palette": "population_blue_v1",
+            "min_value": population_low,
+            "max_value": population_high,
+            "unit": "person",
+        }
     if nightlight_style:
         saved_design["nightlight_style"] = {
             "palette": "platform_radiance_v1",
@@ -1048,8 +1375,12 @@ def _poi_supply_chart_asset(
     if not rows:
         return None
     total = len(records)
-    image, draw = _canvas(str(spec["title"]), f"完整 POI {total:,} 条 · 展示全部 {len(rows)} 个一级分类 · 数量与占比")
-    left, right, top, row_height = 330, 1010, 125, 61
+    image, draw = _canvas(
+        str(spec["title"]),
+        f"完整 POI {total:,} 条 · 展示全部 {len(rows)} 个一级分类 · 数量与占比",
+        height=900,
+    )
+    left, right, top, row_height = 330, 920, 125, 61
     maximum = max(value for _, value in rows)
     for row_index, (label, value) in enumerate(rows):
         y = top + row_index * row_height
@@ -1073,7 +1404,7 @@ def _poi_supply_chart_asset(
         lines=lines,
         note="POI数量表示设施供给，不代表营业质量、市场容量、消费额或项目可截获客流。",
         top=125,
-        bottom=850,
+        bottom=820,
     )
     return _save(
         image,
@@ -1102,7 +1433,11 @@ def _population_profile_chart_asset(
     }
     total = totals["总人口"]
     share_total = total or 1.0
-    image, draw = _canvas(str(spec["title"]), f"2026 年人口格网 {len(records):,} 个 · 常住人口代理 · 重点年龄段汇总")
+    image, draw = _canvas(
+        str(spec["title"]),
+        f"2026 年人口格网 {len(records):,} 个 · 常住人口代理 · 重点年龄段汇总",
+        height=900,
+    )
     draw.text((_PADDING, 128), f"{total:,.0f}", fill="#172033", font=_font(64, bold=True))
     draw.text((_PADDING, 204), "范围内常住人口代理", fill="#667085", font=_font(17))
     age_rows = [(label, value) for label, value in totals.items() if label != "总人口"]
@@ -1127,7 +1462,7 @@ def _population_profile_chart_asset(
         lines=lines,
         note="年龄人口是常住人口代理，不等同项目客群、实际到访、付费意愿或收入。",
         top=125,
-        bottom=850,
+        bottom=820,
     )
     return _save(
         image,
@@ -1243,6 +1578,7 @@ def build_spatial_strategy_visuals(
             warnings.append(f"{spec['title']}:source_data_unavailable")
         else:
             assets.append(asset)
+    _validate_rendered_assets(plan, assets)
     descriptors = {
         str(item.get("dataset_id") or ""): item
         for item in (project_context or {}).get("datasets") or []

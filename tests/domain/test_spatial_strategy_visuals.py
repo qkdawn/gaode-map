@@ -6,6 +6,21 @@ from PIL import Image
 from modules.spatial_strategy import visuals
 
 
+def _decision_plan(**values):
+    return {
+        "rationale": "使用完整项目数据检验当前决策判断",
+        "decision_question": "这些空间证据如何改变项目定位和实施选择",
+        "caption": "图中证据用于比较候选路径并说明成立条件，不直接代表客流或收入。",
+        **values,
+    }
+
+
+def test_chinese_wrapping_does_not_orphan_punctuation():
+    assert visuals._wrap_text("项目应改善连接与识别，而非复制普通商业。", 20) == [
+        "项目应改善连接与识别，而非复制普通商业。",
+    ]
+
+
 def test_visual_package_uses_full_project_records_and_writes_pngs(monkeypatch, tmp_path):
     records = {
         "road_nodes": [],
@@ -31,39 +46,38 @@ def test_visual_package_uses_full_project_records_and_writes_pngs(monkeypatch, t
         run_id="31d81c16-1bfc-4bf6-a9e8-cfa36d0a4df2",
         history_id="history-1",
         visual_plan=[
-            {
-                "title": "道路与活动点关系",
-                "format": "map",
-                "rationale": "检查道路与 POI 的空间关系",
-                "dataset_id": "",
-                "layers": [
+            _decision_plan(
+                title="道路与活动点关系",
+                format="map",
+                map_variant="poi_access",
+                dataset_id="",
+                layers=[
                     {"dataset_id": "road_edges", "role": "line", "color": "#2563eb", "metric_field": ""},
                     {"dataset_id": "poi", "role": "point", "color": "#e11d48", "metric_field": ""},
                 ],
-                "group_by": "",
-                "metric_op": "count",
-                "metric_field": "",
-            },
-            {
-                "title": "POI 全量分类",
-                "format": "chart",
-                "rationale": "查看全量 POI 的分类结构",
-                "dataset_id": "poi",
-                "layers": [],
-                "group_by": "category",
-                "metric_op": "count",
-                "metric_field": "",
-            },
-            {
-                "title": "项目全量数据汇总",
-                "format": "table",
-                "rationale": "汇总各数据集记录数",
-                "dataset_id": "",
-                "layers": [],
-                "group_by": "",
-                "metric_op": "count",
-                "metric_field": "",
-            },
+                group_by="",
+                metric_op="count",
+                metric_field="",
+            ),
+            _decision_plan(
+                title="POI 全量分类",
+                format="chart",
+                chart_variant="poi_supply",
+                dataset_id="poi",
+                layers=[],
+                group_by="category",
+                metric_op="count",
+                metric_field="",
+            ),
+            _decision_plan(
+                title="项目全量数据汇总",
+                format="table",
+                dataset_id="",
+                layers=[],
+                group_by="",
+                metric_op="count",
+                metric_field="",
+            ),
         ],
         root=tmp_path,
     )
@@ -118,16 +132,31 @@ def test_nightlight_map_uses_platform_palette_and_hotspot_thresholds(monkeypatch
         run_id="31d81c16-1bfc-4bf6-a9e8-cfa36d0a4df2",
         history_id="history-1",
         project_context={"datasets": [{"dataset_id": "nightlight"}]},
-        visual_plan=[{
-            "title": "夜光热点与梯度",
-            "format": "map",
-            "rationale": "展示夜光梯度与热点",
-            "dataset_id": "nightlight",
-            "layers": [{"dataset_id": "nightlight", "role": "polygon", "color": "#F2C94C", "metric_field": "radiance"}],
-            "group_by": "year",
-            "metric_op": "avg",
-            "metric_field": "radiance",
-        }],
+        visual_plan=[_decision_plan(
+            title="夜光热点与梯度",
+            format="map",
+            dataset_id="nightlight",
+            layers=[{"dataset_id": "nightlight", "role": "polygon", "color": "#F2C94C", "metric_field": "radiance"}],
+            group_by="year",
+            metric_op="avg",
+            metric_field="radiance",
+        ), _decision_plan(
+            title="夜光年度统计",
+            format="chart",
+            dataset_id="nightlight",
+            layers=[],
+            group_by="year",
+            metric_op="avg",
+            metric_field="radiance",
+        ), _decision_plan(
+            title="夜光数据汇总",
+            format="table",
+            dataset_id="nightlight",
+            layers=[],
+            group_by="",
+            metric_op="count",
+            metric_field="",
+        )],
         root=tmp_path,
     )
 
@@ -162,36 +191,36 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
     monkeypatch.setattr(visuals._DATA, "_all_spatial_records", lambda _, dataset_id: records[dataset_id])
 
     plans = [
-        {
-            "title": "设施连接",
-            "format": "map",
-            "map_variant": "poi_access",
-            "layers": [
+        _decision_plan(
+            title="设施连接",
+            format="map",
+            map_variant="poi_access",
+            layers=[
                 {"dataset_id": "road_edges", "role": "line"},
                 {"dataset_id": "poi", "role": "point"},
             ],
-        },
-        {
-            "title": "完整区域关系",
-            "format": "map",
-            "map_variant": "context_full",
-            "layers": [
+        ),
+        _decision_plan(
+            title="完整区域关系",
+            format="map",
+            map_variant="context_full",
+            layers=[
                 {"dataset_id": "road_edges", "role": "line"},
                 {"dataset_id": "poi", "role": "point"},
             ],
-        },
-        {
-            "title": "区域角色",
-            "format": "map",
-            "map_variant": "regional_role",
-            "layers": [
+        ),
+        _decision_plan(
+            title="区域角色",
+            format="map",
+            map_variant="regional_role",
+            layers=[
                 {"dataset_id": "road_edges", "role": "line"},
                 {"dataset_id": "poi", "role": "point"},
                 {"dataset_id": "population", "role": "polygon", "metric_field": "population_total"},
             ],
-        },
-        {"title": "供给结构", "format": "chart", "chart_variant": "poi_supply", "dataset_id": "poi"},
-        {"title": "人口画像", "format": "chart", "chart_variant": "population_profile", "dataset_id": "population"},
+        ),
+        _decision_plan(title="供给结构", format="chart", chart_variant="poi_supply", dataset_id="poi"),
+        _decision_plan(title="人口画像", format="chart", chart_variant="population_profile", dataset_id="population"),
     ]
     package = visuals.build_spatial_strategy_visuals(
         run_id="31d81c16-1bfc-4bf6-a9e8-cfa36d0a4df2",
@@ -204,6 +233,131 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
     assert len(images) == 5
     assert all(Image.open(asset["path"]).size[0] >= 1200 for asset in images)
     assert Image.open(images[1]["path"]).size == (2400, 1500)
+    assert Image.open(images[3]["path"]).size == (1600, 900)
+    assert Image.open(images[4]["path"]).size == (1600, 900)
     assert package["visual_plan"][0]["map_variant"] == "poi_access"
     assert package["visual_plan"][1]["map_variant"] == "context_full"
     assert package["visual_plan"][4]["chart_variant"] == "population_profile"
+    assert images[0]["design"]["poi_style"]["palette"] == "facility_category_v1"
+    assert len(set(images[0]["design"]["poi_style"]["category_colors"].values())) == 2
+    assert images[2]["design"]["population_style"]["palette"] == "population_blue_v1"
+
+
+def test_visual_plan_quality_rejects_poi_without_road_context():
+    plan = [
+        _decision_plan(
+            title="设施散点分布",
+            format="map",
+            map_variant="context_full",
+            layers=[{"dataset_id": "poi", "role": "point"}],
+        ),
+        _decision_plan(title="设施结构统计", format="chart", chart_variant="poi_supply", dataset_id="poi"),
+        _decision_plan(
+            title="设施分类表格",
+            format="table",
+            dataset_id="poi",
+            group_by="category",
+            metric_op="count",
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="visual_plan_poi_map_requires_road_context"):
+        visuals._normalize_plan(plan, {"poi": [], "road_edges": []})
+
+
+def test_adaptive_map_layout_centers_tall_extent_and_uses_chinese_legends(monkeypatch, tmp_path):
+    population = []
+    for index, value in enumerate((600, 900, 1300, 1800)):
+        y0 = 39.88 + index * 0.01
+        population.append({
+            "population_total": value,
+            "age_5_19": value * 0.14,
+            "age_30_39": value * 0.2,
+            "age_50_64": value * 0.22,
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[116.38, y0], [116.39, y0], [116.39, y0 + 0.01], [116.38, y0 + 0.01], [116.38, y0]]],
+            },
+        })
+    records = {
+        "population": population,
+        "road_edges": [{
+            "road_class": "主干路",
+            "geometry": {"type": "LineString", "coordinates": [[116.385, 39.88], [116.385, 39.92]]},
+        }],
+    }
+    monkeypatch.setattr(visuals, "_resolve_history_id", lambda _: "history-1")
+    monkeypatch.setattr(visuals._DATA, "_all_spatial_records", lambda _, dataset_id: records[dataset_id])
+
+    package = visuals.build_spatial_strategy_visuals(
+        run_id="31d81c16-1bfc-4bf6-a9e8-cfa36d0a4df2",
+        history_id="history-1",
+        project_context={"datasets": [{"dataset_id": "population"}, {"dataset_id": "road_edges"}]},
+        visual_plan=[
+            _decision_plan(
+                title="常住人口空间分布",
+                format="map",
+                layers=[{"dataset_id": "population", "role": "polygon", "metric_field": "population_total"}],
+            ),
+            _decision_plan(title="重点年龄人口结构", format="chart", chart_variant="population_profile", dataset_id="population"),
+            _decision_plan(
+                title="道路层级与连接骨架",
+                format="map",
+                layers=[{"dataset_id": "road_edges", "role": "line"}],
+            ),
+        ],
+        root=tmp_path,
+    )
+
+    population_map = package["assets"][0]
+    road_map = package["assets"][2]
+    assert Image.open(population_map["path"]).size == (900, 1400)
+    assert population_map["design"]["projection"]["content_occupancy_ratio"] >= 0.25
+    assert any(label.startswith("常住人口") for label in population_map["design"]["legend_labels"])
+    assert "population" not in population_map["design"]["legend_labels"]
+    assert road_map["design"]["legend_labels"] == ["道路层级"]
+    assert population_map["design"]["population_style"]["domain"] == "positive_p5_p95"
+    assert population_map["design"]["population_style"]["palette"] == "population_blue_v1"
+    assert all(asset["design"]["caption"] for asset in package["assets"])
+
+
+def test_render_quality_rejects_internal_legend_labels_and_missing_color_scales():
+    plan = [_decision_plan(title="空间证据图", format="map")]
+    base_design = {
+        "format": "map",
+        "caption": "该图用于检验空间证据如何改变项目定位和实施选择。",
+        "projection": {"content_occupancy_ratio": 0.8},
+        "layers": [{"dataset_id": "population"}],
+    }
+
+    with pytest.raises(ValueError, match="visual_render_exposes_internal_dataset_label"):
+        visuals._validate_rendered_assets(plan, [{
+            "kind": "image",
+            "design": {**base_design, "legend_labels": ["population"]},
+        }])
+
+    with pytest.raises(ValueError, match="visual_render_missing_population_color_scale"):
+        visuals._validate_rendered_assets(plan, [{
+            "kind": "image",
+            "design": {**base_design, "legend_labels": ["常住人口"]},
+        }])
+
+    with pytest.raises(ValueError, match="visual_render_missing_poi_category_palette"):
+        visuals._validate_rendered_assets(plan, [{
+            "kind": "image",
+            "design": {
+                **base_design,
+                "layers": [{"dataset_id": "poi"}, {"dataset_id": "road_edges"}],
+                "legend_labels": ["餐饮", "科教文化", "道路层级"],
+            },
+        }])
+
+    with pytest.raises(ValueError, match="visual_render_missing_nightlight_color_scale"):
+        visuals._validate_rendered_assets(plan, [{
+            "kind": "image",
+            "design": {
+                **base_design,
+                "layers": [{"dataset_id": "nightlight"}, {"dataset_id": "road_edges"}],
+                "legend_labels": ["夜光辐亮度", "道路层级"],
+            },
+        }])

@@ -98,7 +98,7 @@ for (const fileName of workflowFiles.filter((name) => name.endsWith('.json')).so
 
 const generatorDirectory = '/bootstrap/workflow-generators';
 const generatorFiles = await readdir(generatorDirectory);
-for (const fileName of generatorFiles.filter((name) => name.endsWith('.mjs')).sort()) {
+for (const fileName of generatorFiles.filter((name) => name.endsWith('.workflow.mjs')).sort()) {
   const moduleUrl = `${pathToFileURL(`${generatorDirectory}/${fileName}`).href}?bootstrap=${Date.now()}`;
   const generated = (await import(moduleUrl)).default;
   const workflows = Array.isArray(generated) ? generated : [generated];

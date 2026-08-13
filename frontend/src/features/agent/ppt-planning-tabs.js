@@ -29,7 +29,6 @@ import {
 import {
   cleanupPptVisualArtifacts,
   getJobStatus,
-  publishDocumentToKnowledgeBase,
   uploadDocumentSource,
   uploadImageSource,
 } from '../ppt-planning/api.js'
@@ -912,25 +911,12 @@ export function createAgentPptPlanningTabMethods() {
           ))
           const parseJob = await this.requestAgentPptPlanningDocumentParse(documentId)
           await waitForPptPlanningJob(parseJob && parseJob.job_id)
-          const accessGroups = typeof this.getSpatialStrategyAccessGroups === 'function'
-            ? this.getSpatialStrategyAccessGroups()
-            : []
-          await publishDocumentToKnowledgeBase(documentId, {
-            tenantId: typeof this.getSpatialStrategyTenantId === 'function'
-              ? this.getSpatialStrategyTenantId()
-              : 'default',
-            accessGroups,
-            metadata: {
-              history_id: historyId,
-              document_role: asText(documentRole),
-            },
-          })
           this.updateAgentActivePptPlanningState(upsertPptDocumentSource(
             this.getAgentPptPlanningStateWithSystemSources(),
             document,
             {
               status: 'ready',
-              label: '正文已入知识库',
+              label: '原文解析完成',
               documentRole,
             },
           ))
@@ -1014,18 +1000,6 @@ export function createAgentPptPlanningTabMethods() {
           this.updateAgentActivePptPlanningState(upsertPptDocumentSource(state, { id: documentId, title: source.title }, { status: 'generating', label: '重新解析中' }))
           const parseJob = await this.requestAgentPptPlanningDocumentParse(documentId)
           await waitForPptPlanningJob(parseJob && parseJob.job_id)
-          await publishDocumentToKnowledgeBase(documentId, {
-            tenantId: typeof this.getSpatialStrategyTenantId === 'function'
-              ? this.getSpatialStrategyTenantId()
-              : 'default',
-            accessGroups: typeof this.getSpatialStrategyAccessGroups === 'function'
-              ? this.getSpatialStrategyAccessGroups()
-              : [],
-            metadata: {
-              history_id: asText(context.areaId || context.area_id),
-              document_role: asText(source.meta && source.meta.document_role),
-            },
-          })
           await this.refreshAgentActivePptPlanningDataSources({ autoPackage: false })
           return
         }

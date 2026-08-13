@@ -153,6 +153,27 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 try {
+    $n8nPort = Get-DotEnvValue "N8N_PORT" "5678"
+    $n8nManagementKey = if ($env:N8N_MANAGEMENT_API_KEY) { $env:N8N_MANAGEMENT_API_KEY } else { Get-DotEnvValue "N8N_MANAGEMENT_API_KEY" "" }
+    if (-not $n8nManagementKey) {
+        throw "N8N_MANAGEMENT_API_KEY is required to remove obsolete project workflows safely."
+    }
+    $legacyWorkflowIds = @(
+        "ragDbSmoke000001", "kbPublishSource0001", "kbIngestProjectDoc01", "kbIngestWebhook0001",
+        "ollamaEmbedding0001", "kbHybridRetrieve0001", "codexRelayResponse1", "codexRerankCandidates1",
+        "analysisDecisionStep01", "analysisSpatialStrategyWebhook1", "analysisSpatialStrategyStatus01",
+        "analysisStepTest001", "codexRelayTest001", "ragIntegration0001", "analysisSpatialStrategy1"
+    )
+    $managementHeaders = @{ "X-N8N-API-KEY" = $n8nManagementKey }
+    foreach ($workflowId in $legacyWorkflowIds) {
+        try {
+            Invoke-RestMethod -Method Delete -Uri "http://localhost:$n8nPort/api/v1/workflows/$workflowId" -Headers $managementHeaders -TimeoutSec 20 | Out-Null
+            Write-Host "Removed obsolete n8n workflow $workflowId"
+        } catch {
+            $statusCode = $_.Exception.Response.StatusCode.value__
+            if ($statusCode -ne 404) { throw "Failed to remove obsolete workflow ${workflowId}: $($_.Exception.Message)" }
+        }
+    }
     docker compose exec -T n8n n8n import:credentials --input=/tmp/gaode-n8n-credentials.json
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to import n8n credentials."
@@ -162,27 +183,50 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to import n8n workflows."
     }
+    $workflowInventory = Invoke-RestMethod -Method Get -Uri "http://localhost:$n8nPort/api/v1/workflows?limit=250" -Headers $managementHeaders -TimeoutSec 20
+    $workflowIds = @($workflowInventory.data | ForEach-Object { [string]$_.id })
+    foreach ($requiredId in @("urbanRenewalDecisionSupportAgent", "urbanRenewalPublicKnowledgeBase")) {
+        if ($requiredId -notin $workflowIds) { throw "Required n8n workflow was not imported: $requiredId" }
+    }
+    $remainingLegacyIds = @($legacyWorkflowIds | Where-Object { $_ -in $workflowIds })
+    if ($remainingLegacyIds.Count -gt 0) {
+        throw "Obsolete project workflows still exist: $($remainingLegacyIds -join ', ')"
+    }
 }
 finally {
     docker compose exec -T n8n node /bootstrap/bootstrap/render-bootstrap.mjs --cleanup
 }
 
 if (-not $SkipSmokeCheck) {
-    docker compose exec -T n8n n8n execute --id=ragDbSmoke000001 --rawOutput
+    docker compose exec -T rag-postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT 1 FROM kb_documents LIMIT 0; SELECT 1 FROM analysis_runs LIMIT 0;"'
     if ($LASTEXITCODE -ne 0) {
-        throw "RAG database smoke workflow failed."
+        throw "RAG database smoke check failed."
     }
-
-    docker compose exec -T n8n n8n execute --id=ragIntegration0001 --rawOutput
+    $pythonCommand = Join-Path (Get-Location) ".venv\Scripts\python.exe"
+    $previousPluginSetting = $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD
+    $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+    & $pythonCommand -m pytest tests/domain/test_n8n_rag_workflows.py -q
+    $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = $previousPluginSetting
     if ($LASTEXITCODE -ne 0) {
-        throw "RAG publish and retrieval integration workflow failed."
+        throw "n8n workflow contract tests failed."
     }
 }
 
 if (-not $SkipModelCheck) {
-    docker compose exec -T n8n n8n execute --id=codexRelayTest001 --rawOutput
-    if ($LASTEXITCODE -ne 0) {
-        throw "Codex relay integration workflow failed."
+    $modelCheckHeaders = @{ Authorization = "Bearer $codexApiKey"; "Content-Type" = "application/json" }
+    $modelCheckBody = @{
+        model = $codexModel
+        input = "Reply with OK only."
+        max_output_tokens = 16
+        store = $false
+    } | ConvertTo-Json -Compress
+    try {
+        $modelCheck = Invoke-RestMethod -Method Post -Uri "$($codexBaseUrl.TrimEnd('/'))/responses" -Headers $modelCheckHeaders -Body $modelCheckBody -TimeoutSec 120
+    } catch {
+        throw "Codex Responses model check failed: $($_.Exception.Message)"
+    }
+    if (-not $modelCheck.id -or -not $modelCheck.output) {
+        throw "Codex Responses model check returned an invalid response."
     }
 }
 
@@ -191,11 +235,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to restart n8n services after import."
 }
 
-$n8nPort = "5678"
-if (Test-Path ".env") {
-    $portSetting = Get-Content ".env" | Where-Object { $_ -match '^N8N_PORT=' } | Select-Object -Last 1
-    if ($portSetting) {
-        $n8nPort = ($portSetting -split '=', 2)[1].Trim()
-    }
-}
 Write-Host "n8n bootstrap complete. Editor: http://localhost:$n8nPort"

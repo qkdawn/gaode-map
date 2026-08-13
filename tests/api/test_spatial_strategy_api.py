@@ -155,13 +155,25 @@ def test_publish_document_to_knowledge_base_forwards_tenant_and_groups(monkeypat
         response = client.post(
             "/api/v1/analysis/knowledge-base/documents",
             headers={"X-Tenant-Id": "tenant-1", "X-Access-Groups": "planning,finance"},
-            json={"document_id": "doc-1", "visibility": "restricted"},
+            json={"document_id": "doc-1", "visibility": "restricted", "source_type": "knowledge_base"},
         )
 
     assert response.status_code == 200
     assert response.json()["status"] == "published"
     assert seen["tenant_id"] == "tenant-1"
     assert seen["access_groups"] == ["planning", "finance"]
+    assert seen["payload"].source_type == "knowledge_base"
+
+
+def test_public_knowledge_base_rejects_project_document_source_type():
+    with TestClient(_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/knowledge-base/documents",
+            headers={"X-Tenant-Id": "tenant-1"},
+            json={"document_id": "doc-1", "source_type": "project_document"},
+        )
+
+    assert response.status_code == 422
 
 
 def test_project_context_endpoint_requires_internal_n8n_key(monkeypatch):

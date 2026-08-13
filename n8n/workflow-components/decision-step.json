@@ -40,34 +40,6 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const retrieval = $input.first()?.json ?? {};\nconst priority = { project_data: 0, project_computed_result: 1, project_document: 2, project_data_record: 3 };\nconst contexts = (Array.isArray(retrieval.contexts) ? retrieval.contexts : []).map((item, index) => ({ item, index })).sort((a, b) => {\n  const priorityDelta = (priority[String(a.item?.source_type)] ?? 9) - (priority[String(b.item?.source_type)] ?? 9);\n  return priorityDelta || a.index - b.index;\n}).map(({ item }) => item);\nreturn [{ json: { ...retrieval, contexts } }];"
-      },
-      "id": "6289d5ba-d52e-46ec-9f27-a78aa984ec69",
-      "name": "Prioritize Project Data Contexts",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1320,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const state = $('Validate Step Request').first().json;\nconst retrieval = $input.first()?.json ?? {};\nconst projectData = state.project_data && typeof state.project_data === 'object' ? state.project_data : {};\nconst projectCitations = (Array.isArray(projectData.citations) ? projectData.citations : []).filter((item) => item && item.citation_id && item.content);\nconst existingCitations = Array.isArray(retrieval.citations) ? retrieval.citations : [];\nconst citationMap = new Map();\nfor (const item of [...projectCitations, ...existingCitations]) citationMap.set(String(item.citation_id), item);\nconst projectContexts = projectCitations.map((item) => ({\n  chunk_key: String(item.citation_id),\n  citation_id: String(item.citation_id),\n  title: String(item.title ?? item.dataset_id ?? '项目数据'),\n  section: String(item.section ?? item.source_locator ?? ''),\n  page_start: item.page_start ?? null,\n  page_end: item.page_end ?? null,\n  source_url: String(item.source_url ?? ''),\n  content: String(item.content ?? ''),\n  source_type: String(item.source_type ?? 'project_data'),\n  dataset_id: String(item.dataset_id ?? ''),\n  snapshot_id: String(item.snapshot_id ?? ''),\n  complete: item.complete !== false,\n}));\nconst existingContexts = Array.isArray(retrieval.contexts) ? retrieval.contexts : [];\nreturn [{ json: {\n  ...retrieval,\n  citations: [...citationMap.values()],\n  contexts: [...projectContexts, ...existingContexts],\n  project_data_status: String(projectData.status ?? 'unavailable'),\n  project_data_queries: Array.isArray(projectData.queries) ? projectData.queries : [],\n  project_data_warnings: Array.isArray(projectData.warnings) ? projectData.warnings : [],\n} }];"
-      },
-      "id": "1c383607-eb0d-4c61-9c95-3ed5cd88522d",
-      "name": "Attach Project Data To Retrieval",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1260,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
         "jsCode": "const state = $input.first().json;\nconst output = state.decision_state.steps[state.step_key];\nreturn [{ json: {\n  run_id: state.run_id,\n  step_key: state.step_key,\n  step_order: state.step_order,\n  status: 'completed',\n  output,\n  decision_state: state.decision_state,\n} }];"
       },
       "id": "36c5cd2e-843c-4967-818e-334d05e98eaa",
@@ -176,7 +148,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const state = $('Validate Step Request').first().json;\nconst retrieval = $input.first()?.json ?? {};\nconst contexts = (Array.isArray(retrieval.contexts) ? retrieval.contexts : []).slice(0, 12).map((item) => ({\n  title: String(item.title ?? ''),\n  section: String(item.section ?? ''),\n  page_start: item.page_start ?? null,\n  page_end: item.page_end ?? null,\n  source_url: String(item.source_url ?? ''),\n  content: String(item.content ?? '').slice(0, 2500),\n}));\nconst previous = Object.entries(state.decision_state.steps ?? {}).map(([, value]) => ({\n  title: String(value?.title ?? '前一章节'),\n  reader_chapter: String(value?.reader_chapter ?? '').slice(0, 2400),\n}));\nconst schema = {\n  type: 'object',\n  properties: { reader_chapter: { type: 'string', minLength: 1 } },\n  required: ['reader_chapter'],\n  additionalProperties: false,\n};\nconst instructions = [\n  '为当前分析方向撰写一章可直接发表在项目报告中的中文正文。读者是项目甲方、政府决策者、投资人和非技术评审者。',\n  '正文应使用自然标题和普通读者能理解的表达，直接说明判断、依据、候选路径之间的取舍、反证、不确定性、成立条件和待核验事项。内容长度由证据复杂度决定，不套固定短摘要模板。',\n  '数据和证据应在相关判断附近自然说明来源类型与适用边界；不得输出引用 ID、内部文件名、字段名、状态枚举、节点名、工作流名、规则名或任何执行过程说明。',\n  '不得出现 step_01 一类步骤键、decision_state、quality_gate、evidence_index、n8n、UUID、JSON 字段说明或类似工程术语。不要把条件性判断改写成确定事实。',\n  '只返回完整章节正文，不要解释写作过程，不要另附审计数据。',\n  '需要补充事实时，自主调用项目数据工具；工具背后通过 MCP 读取项目数据。',\n  `当前章节：${state.step_title}。`,\n].join('\\n');\nconst userPayload = JSON.stringify({ project_question: state.project_question, chapter_title: state.step_title, previous_chapters: previous, source_context: contexts });\nconst conversationItems = [{ role: 'user', content: [{ type: 'input_text', text: userPayload }] }];\nreturn [{ json: {\n  state,\n  retrieval,\n  instructions,\n  input: conversationItems,\n  conversation_items: conversationItems,\n  max_output_tokens: 5000,\n  reasoning: { effort: 'medium' },\n  agent_turn: 0,\n  parallel_tool_calls: false,\n  tools: [\n    { type: 'function', name: 'project_context', description: 'Read current project context and available datasets.', parameters: { type: 'object', properties: {}, additionalProperties: false } },\n    { type: 'function', name: 'query_data', description: 'Query one project dataset for facts needed by this direction.', parameters: { type: 'object', properties: { dataset_id: { type: 'string' }, operation: { type: 'string', enum: ['records', 'aggregate'] }, filters: { type: 'object' }, spatial: { type: 'object' }, sort: { type: 'object' }, group_by: { type: 'array', items: { type: 'string' } }, metrics: { type: 'array', items: { type: 'object' } }, continue_token: { type: 'string' } }, required: ['dataset_id'], additionalProperties: false } },\n  ],\n  text: { format: { type: 'json_schema', name: 'reader_chapter', strict: true, schema } },\n} }];"
+        "jsCode": "const state = $('Validate Step Request').first().json;\nconst retrieval = $input.first()?.json ?? {};\nconst contexts = (Array.isArray(retrieval.contexts) ? retrieval.contexts : []).filter((item) => String(item?.source_type ?? '') !== 'project_document').map((item) => ({\n  title: String(item.title ?? ''),\n  section: String(item.section ?? ''),\n  page_start: item.page_start ?? null,\n  page_end: item.page_end ?? null,\n  source_url: String(item.source_url ?? ''),\n  content: String(item.content ?? ''),\n  source_type: String(item.source_type ?? ''),\n}));\nconst previous = Object.entries(state.decision_state.steps ?? {}).map(([, value]) => ({\n  title: String(value?.title ?? '前一章节'),\n  reader_chapter: String(value?.reader_chapter ?? '').slice(0, 2400),\n}));\nconst schema = {\n  type: 'object',\n  properties: { reader_chapter: { type: 'string', minLength: 1 } },\n  required: ['reader_chapter'],\n  additionalProperties: false,\n};\nconst instructions = [\n  '为当前分析方向撰写一章可直接发表在项目报告中的中文正文。读者是项目甲方、政府决策者、投资人和非技术评审者。',\n  '正文应使用自然标题和普通读者能理解的表达，直接说明判断、依据、候选路径之间的取舍、反证、不确定性、成立条件和待核验事项。内容长度由证据复杂度决定，不套固定短摘要模板。',\n  '根据当前问题和证据自主决定分析结构。候选路径、约束条件、指标、责任主体或实施阶段适合横向比较时，可以使用 Markdown 表格；不强制每章使用，也不要为了凑表而重复正文。',\n  '数据和证据应在相关判断附近自然说明来源类型与适用边界；不得输出引用 ID、内部文件名、字段名、状态枚举、节点名、工作流名、规则名或任何执行过程说明。',\n  '不得出现 step_01 一类步骤键、decision_state、quality_gate、evidence_index、n8n、UUID、JSON 字段说明或类似工程术语。不要把条件性判断改写成确定事实。',\n  '只返回完整章节正文，不要解释写作过程，不要另附审计数据。',\n  '需要项目事实时，先用 project_context 盘点项目文档与空间数据，再按当前证据缺口调用 read_project_document 或 query_data。项目文档必须按需读取原文；返回 complete=false 时应使用 next_start_block 继续读取，不得把公共知识库片段当作项目原文。',\n  `当前章节：${state.step_title}。`,\n].join('\\n');\nconst userPayload = JSON.stringify({ project_question: state.project_question, chapter_title: state.step_title, previous_chapters: previous, source_context: contexts });\nconst conversationItems = [{ role: 'user', content: [{ type: 'input_text', text: userPayload }] }];\nreturn [{ json: {\n  state,\n  retrieval,\n  instructions,\n  input: conversationItems,\n  conversation_items: conversationItems,\n  max_output_tokens: 5000,\n  reasoning: { effort: 'medium' },\n  agent_turn: 0,\n  parallel_tool_calls: false,\n  context_budget_tokens: 24000,\n  context_reserve_tokens: 6000,\n  no_new_evidence_limit: 2,\n  stale_tool_turns: 0,\n  tool_call_count: 0,\n  tool_result_fingerprints: [],\n  tool_error_count: 0,\n  tool_error_limit: 2,\n  stop_reason: null,\n  tools: [\n    { type: 'function', name: 'project_context', description: 'Read current project context and available datasets.', parameters: { type: 'object', properties: {}, additionalProperties: false } },\n    { type: 'function', name: 'query_data', description: 'Query one project dataset for facts needed by this direction.', parameters: { type: 'object', properties: { dataset_id: { type: 'string' }, operation: { type: 'string', enum: ['records', 'aggregate'] }, filters: { type: 'object' }, spatial: { type: 'object' }, sort: { type: 'object' }, group_by: { type: 'array', items: { type: 'string' } }, metrics: { type: 'array', items: { type: 'object' } }, continue_token: { type: 'string' } }, required: ['dataset_id'], additionalProperties: false } },\n    { type: 'function', name: 'read_project_document', description: 'Read verified original text from one first-party project document. Continue with next_start_block until complete is true when the needed claim depends on full context.', parameters: { type: 'object', properties: { document_id: { type: 'string' }, start_block: { type: 'integer', minimum: 0 }, max_blocks: { type: 'integer', minimum: 1, maximum: 40 }, page_start: { type: 'integer', minimum: 1 }, page_end: { type: 'integer', minimum: 1 } }, required: ['document_id'], additionalProperties: false } },\n  ],\n  text: { format: { type: 'json_schema', name: 'reader_chapter', strict: true, schema } },\n} }];"
       },
       "id": "6232e15e-c92d-4cb6-b80e-664c91d3567b",
       "name": "Build Structured Decision Request",
@@ -237,7 +209,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH payload AS (SELECT $1::jsonb AS value), saved_step AS (\n  UPDATE analysis_step_outputs SET status = payload.value->>'status', output = payload.value->'output',\n    citations = '[]'::jsonb, diagnostics = '[]'::jsonb, quality_gate = '{}'::jsonb, updated_at = NOW()\n  FROM payload WHERE run_id = (payload.value->>'run_id')::uuid AND step = payload.value->>'step_key' RETURNING run_id\n), saved_run AS (\n  UPDATE analysis_runs SET current_step = payload.value->>'step_key', decision_state = payload.value->'decision_state',\n    updated_at = NOW()\n  FROM payload WHERE id = (payload.value->>'run_id')::uuid RETURNING id\n) SELECT value AS result FROM payload;",
+        "query": "WITH payload AS (SELECT $1::jsonb AS value), saved_step AS (\n  UPDATE analysis_step_outputs SET status = payload.value->>'status', output = payload.value->'output',\n    citations = COALESCE(payload.value->'output'->'citations', '[]'::jsonb), diagnostics = COALESCE(payload.value->'output'->'diagnostics', '[]'::jsonb), quality_gate = COALESCE(payload.value->'output'->'quality_gate', '{}'::jsonb), updated_at = NOW()\n  FROM payload WHERE run_id = (payload.value->>'run_id')::uuid AND step = payload.value->>'step_key' RETURNING run_id\n), saved_run AS (\n  UPDATE analysis_runs SET current_step = payload.value->>'step_key', decision_state = payload.value->'decision_state', heartbeat_at = NOW(), lease_expires_at = NOW() + INTERVAL '15 minutes',\n    updated_at = NOW()\n  FROM payload WHERE id = (payload.value->>'run_id')::uuid RETURNING id\n) SELECT value AS result FROM payload;",
         "options": {
           "queryReplacement": "={{ [JSON.stringify($json.result)] }}"
         }
@@ -310,7 +282,7 @@
       "typeVersion": 2,
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const response = $input.first()?.json ?? {};\nconst call = Array.isArray(response.tool_calls) ? response.tool_calls[0] : null;\nif (!call?.name || !call?.call_id) throw new Error('invalid_agent_tool_call');\nreturn [{ json: { ...response, mcp_tool_name: String(call.name), mcp_arguments: call.arguments && typeof call.arguments === 'object' ? call.arguments : {}, mcp_call_id: String(call.call_id), agent_turn: Number(response.agent_turn ?? 0) + 1 } }];"
+        "jsCode": "const response = $input.first()?.json ?? {};\nconst calls = Array.isArray(response.tool_calls) ? response.tool_calls.filter((call) => call?.name && call?.call_id) : [];\nif (!calls.length) throw new Error('invalid_agent_tool_call');\nif (calls.length !== 1) throw new Error('parallel_agent_tool_calls_not_supported');\nconst first = calls[0];\nreturn [{ json: {\n  ...response,\n  tool_calls: calls,\n  mcp_tool_name: String(first.name),\n  mcp_arguments: first.arguments && typeof first.arguments === 'object' ? first.arguments : {},\n  mcp_call_id: String(first.call_id),\n  agent_turn: Number(response.agent_turn ?? 0) + 1,\n  tool_call_count: Number(response.tool_call_count ?? 0) + 1,\n} }];"
       },
       "position": [
         2100,
@@ -357,7 +329,7 @@
       "typeVersion": 2,
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const prior = $('Prepare MCP Agent Tool Call').item.json;\nconst toolResult = $input.first()?.json ?? {};\nif (Number(prior.agent_turn ?? 0) > 6) throw new Error('agent_tool_turn_limit');\nconst conversationItems = Array.isArray(prior.conversation_items) ? prior.conversation_items : [];\nconst responseItems = Array.isArray(prior.output) ? prior.output : [];\nconst result = toolResult.structured_content ?? toolResult.content ?? toolResult;\nconst normalizedToolResult = {\n  tool_name: String(toolResult.tool_name ?? prior.mcp_tool_name ?? ''),\n  is_error: toolResult.is_error === true,\n  result,\n};\nconst nextItems = [\n  ...conversationItems,\n  ...responseItems,\n  { type: 'function_call_output', call_id: prior.mcp_call_id, output: JSON.stringify(normalizedToolResult) },\n];\nreturn [{ json: { ...prior, input: nextItems, conversation_items: nextItems, output: [] } }];"
+        "jsCode": "const prior = $('Prepare MCP Agent Tool Call').item.json;\nconst toolResult = $input.first()?.json ?? {};\nconst conversationItems = Array.isArray(prior.conversation_items) ? prior.conversation_items : [];\nconst responseItems = Array.isArray(prior.output) ? prior.output : [];\nconst result = toolResult.structured_content ?? toolResult.content ?? toolResult;\nconst normalizedToolResult = {\n  tool_name: String(toolResult.tool_name ?? prior.mcp_tool_name ?? ''),\n  is_error: toolResult.is_error === true,\n  result,\n};\nconst stable = (value) => {\n  if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';\n  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stable(value[key])).join(',') + '}';\n  return JSON.stringify(value);\n};\nconst fingerprint = stable({ tool_name: normalizedToolResult.tool_name, is_error: normalizedToolResult.is_error, result });\nconst fingerprints = Array.isArray(prior.tool_result_fingerprints) ? prior.tool_result_fingerprints : [];\nconst isNewEvidence = !fingerprints.includes(fingerprint);\nconst staleToolTurns = isNewEvidence ? 0 : Number(prior.stale_tool_turns ?? 0) + 1;\nconst toolErrorCount = normalizedToolResult.is_error ? Number(prior.tool_error_count ?? 0) + 1 : 0;\nconst usage = prior.usage && typeof prior.usage === 'object' ? prior.usage : {};\nconst budget = Number(prior.context_budget_tokens ?? 24000);\nconst reserve = Number(prior.context_reserve_tokens ?? 6000);\nconst nextItems = [\n  ...conversationItems,\n  ...responseItems,\n  { type: 'function_call_output', call_id: prior.mcp_call_id, output: JSON.stringify(normalizedToolResult) },\n];\nconst measuredTokens = Number(usage.total_tokens ?? 0);\nconst contextTokens = measuredTokens > 0\n  ? measuredTokens + Math.ceil(JSON.stringify(normalizedToolResult).length / 4)\n  : Math.ceil(JSON.stringify({ input: nextItems, instructions: prior.instructions, tools: prior.tools, text: prior.text }).length / 4);\nconst resolvedStopReason = contextTokens >= Math.max(1, budget - reserve)\n  ? 'context_budget'\n  : toolErrorCount >= Number(prior.tool_error_limit ?? 2)\n    ? 'tool_errors'\n    : staleToolTurns >= Number(prior.no_new_evidence_limit ?? 2)\n    ? 'no_new_evidence'\n    : null;\nreturn [{ json: {\n  ...prior,\n  input: nextItems,\n  conversation_items: nextItems,\n  output: [],\n  usage: { ...usage, estimated_context_tokens: contextTokens },\n  stale_tool_turns: staleToolTurns,\n  tool_error_count: toolErrorCount,\n  tool_result_fingerprints: [...fingerprints, ...(isNewEvidence ? [fingerprint] : [])].slice(-32),\n  stop_reason: resolvedStopReason,\n  tool_choice: resolvedStopReason ? 'none' : undefined,\n  tools: resolvedStopReason ? [] : prior.tools,\n  instructions: resolvedStopReason\n    ? String(prior.instructions ?? '') + '\\n停止条件已满足：' + resolvedStopReason + '。请立即基于已获得的项目证据输出完整 reader_chapter，不要再调用工具。'\n    : prior.instructions,\n} }];"
       },
       "position": [
         2580,
@@ -442,28 +414,6 @@
       ]
     },
     "Retrieve Cited Source Text": {
-      "main": [
-        [
-          {
-            "node": "Attach Project Data To Retrieval",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Attach Project Data To Retrieval": {
-      "main": [
-        [
-          {
-            "node": "Prioritize Project Data Contexts",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Prioritize Project Data Contexts": {
       "main": [
         [
           {

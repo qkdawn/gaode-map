@@ -27,7 +27,7 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
                 return {tool.name: tool.inputSchema for tool in result.tools}
 
     schemas = asyncio.run(exercise())
-    assert list(schemas) == ["project_context", "query_data"]
+    assert list(schemas) == ["project_context", "query_data", "read_project_document"]
     assert schemas["project_context"].get("required", []) == []
     query_schema = schemas["query_data"]
     assert set(query_schema["required"]) == {"history_id", "dataset_id"}
@@ -36,6 +36,9 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     assert "limit" not in query_schema["properties"]
     assert "max_records" not in query_schema["properties"]
     assert query_schema["properties"]["group_by"]["anyOf"][0]["type"] == "array"
+    document_schema = schemas["read_project_document"]
+    assert set(document_schema["required"]) == {"history_id", "document_id"}
+    assert {"start_block", "max_blocks", "page_start", "page_end"}.issubset(document_schema["properties"])
 
 
 def test_complete_data_mcp_outputs_are_objects():
@@ -55,6 +58,7 @@ def test_complete_data_mcp_outputs_are_objects():
     output_schemas = asyncio.run(exercise())
     assert output_schemas["project_context"]["type"] == "object"
     assert output_schemas["query_data"]["type"] == "object"
+    assert output_schemas["read_project_document"]["type"] == "object"
 
 
 def test_project_context_uses_latest_history(monkeypatch):
@@ -114,6 +118,35 @@ def test_query_data_passes_complete_query_contract(monkeypatch):
     assert captured["filters"] == {"road_class": "primary"}
     assert captured["group_by"] == ["road_class", "road_name"]
     assert "max_records" not in captured
+
+
+def test_read_project_document_passes_explicit_range(monkeypatch):
+    captured = {}
+
+    def fake_read(**kwargs):
+        captured.update(kwargs)
+        return {"blocks": [], "complete": True}
+
+    monkeypatch.setattr(mcp_server.data_contract, "read_project_document", fake_read)
+
+    result = mcp_server.read_project_document(
+        "history-1",
+        "doc-1",
+        start_block=20,
+        max_blocks=10,
+        page_start=3,
+        page_end=5,
+    )
+
+    assert result == {"blocks": [], "complete": True}
+    assert captured == {
+        "history_id": "history-1",
+        "document_id": "doc-1",
+        "start_block": 20,
+        "max_blocks": 10,
+        "page_start": 3,
+        "page_end": 5,
+    }
 
 
 def test_call_preserves_unsupported_schema_error_code():
