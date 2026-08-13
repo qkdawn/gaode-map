@@ -104,7 +104,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const state = $('Validate Step Request').first().json;\nreturn [{ json: {\n  query: state.retrieval_query,\n  tenant_id: state.tenant_id,\n  access_groups: state.access_groups,\n  decision_steps: [state.step_key],\n  project_types: state.project_types,\n  geography: state.geography,\n  metadata_filter: state.metadata_filter,\n  candidate_limit: 40,\n  result_limit: 10,\n  context_radius: 1,\n} }];"
+        "jsCode": "const state = $('Validate Step Request').first().json;\nconst previousDecisions = Object.values(state.decision_state?.steps ?? {}).filter((item) => item && typeof item === 'object' && Number(item.step_order ?? 0) < Number(state.step_order ?? 0)).map((item) => String(item.decision_brief ?? '').trim()).filter(Boolean).slice(-4);\nconst query = [state.project_question, state.research_frame, state.step_title, state.research_brief, ...previousDecisions].map((value) => String(value ?? '').trim()).filter(Boolean).join('\\n');\nreturn [{ json: {\n  query,\n  tenant_id: state.tenant_id,\n  access_groups: state.access_groups,\n  // Leave this semantic filter open so relevant policy, cases, and counterevidence\n  // tagged for another stage can still surface. Tenant and visibility filters remain active.\n  decision_steps: [],\n  project_types: state.project_types,\n  geography: state.geography,\n  metadata_filter: state.metadata_filter,\n  candidate_limit: 40,\n  result_limit: 10,\n  context_radius: 1,\n} }];"
       },
       "id": "67cc45c4-a796-4892-8134-6c84e46742db",
       "name": "Build Retrieval Request",

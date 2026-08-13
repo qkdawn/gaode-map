@@ -127,6 +127,10 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
         assert nodes[name]["parameters"]["options"]["timeout"] >= 300_000
 
     chapter_code = nodes["构建章节分析请求"]["parameters"]["jsCode"]
+    retrieval_code = nodes["构建公共证据检索请求"]["parameters"]["jsCode"]
+    assert "state.research_brief" in retrieval_code
+    assert "previousDecisions" in retrieval_code
+    assert "decision_steps: []" in retrieval_code
     follow_up = nodes["将项目工具结果交回模型"]["parameters"]["jsCode"]
     assert all(tool in chapter_code for tool in ("project_context", "query_data", "read_project_document"))
     assert "项目文档必须按需读取原文" in chapter_code
