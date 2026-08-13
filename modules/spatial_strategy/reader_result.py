@@ -148,7 +148,8 @@ def project_run_detail(payload: Mapping[str, Any]) -> SpatialStrategyRunDetail:
     state = _mapping(payload.get("decision_state"))
     plan = state.get("research_plan") if isinstance(state.get("research_plan"), list) else []
     planned_keys = [_text(item.get("step_key")) for item in plan if isinstance(item, Mapping) and _text(item.get("step_key"))]
-    legacy = not planned_keys
+    plan_is_valid = bool(planned_keys)
+    legacy = not plan_is_valid
     ordered_keys = planned_keys or [key for key, _ in CHAPTERS]
     chapter_order = {key: index for index, key in enumerate(ordered_keys, 1)}
     chapter_titles = {

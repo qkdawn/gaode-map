@@ -172,6 +172,15 @@ def _report_visual_assets(value: Any) -> list[dict[str, Any]]:
 def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest) -> dict[str, Any]:
     state = request.decision_state
     steps = _mapping(state.get("steps"))
+    planned = [
+        _text(item.get("step_key"))
+        for item in _list(state.get("research_plan"))
+        if _text(_mapping(item).get("step_key"))
+    ]
+    required_keys = planned or list(STEP_TITLES)
+    missing_steps = [key for key in required_keys if not isinstance(steps.get(key), Mapping) or not _text(_mapping(steps.get(key)).get("reader_chapter"))]
+    if missing_steps:
+        raise ValueError("report_requires_completed_steps:" + ",".join(missing_steps))
     completed_steps = [
         (step_key, _mapping(output))
         for step_key, output in steps.items()

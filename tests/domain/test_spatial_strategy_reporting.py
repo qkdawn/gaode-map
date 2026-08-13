@@ -128,6 +128,20 @@ def test_report_reads_current_step_grouped_evidence_index_without_audit_referenc
     ]
 
 
+def test_report_requires_all_adaptive_plan_nodes():
+    request = _request().model_copy(deep=True)
+    request.decision_state["research_plan"] = [
+        {"step_key": "decision_01", "title": "核心矛盾", "question": "项目真正要改变什么？"},
+        {"step_key": "decision_02", "title": "一期验证", "question": "如何验证？"},
+    ]
+    request.decision_state["steps"] = {
+        "decision_01": {"step_order": 1, "title": "核心矛盾", "reader_chapter": "项目材料支持这一判断。"}
+    }
+
+    with pytest.raises(ValueError, match="decision_02"):
+        build_spatial_strategy_report(request)
+
+
 def test_report_store_writes_run_scoped_markdown(tmp_path):
     store = SpatialStrategyReportStore(tmp_path)
     path = store.write({"run_id": str(RUN_ID), "markdown": "# 报告\n"})
