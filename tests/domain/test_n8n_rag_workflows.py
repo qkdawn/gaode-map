@@ -229,6 +229,10 @@ def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
     assert "完整章节正文会由报告组装器原样保留" in editorial_code
     assert "不要按十二章顺序逐项摘要" in editorial_code
     assert "reasoning: { effort: 'high' }" in editorial_code
+    visual_code = nodes["构建图件设计请求"]["parameters"]["jsCode"]
+    assert "decision_brief" in visual_code
+    assert "evidence_status" not in visual_code
+    assert "evidence_count" not in visual_code
 
 
 def test_public_knowledge_base_rejects_project_documents_and_owns_embedding_publish():
