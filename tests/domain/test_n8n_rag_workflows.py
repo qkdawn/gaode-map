@@ -224,8 +224,11 @@ def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
     assert "/analysis/spatial-strategy/reports/deliver" in nodes["生成 Word 报告并发送飞书"]["parameters"]["url"]
     editorial_code = nodes["构建报告叙事请求"]["parameters"]["jsCode"]
     assert "decision_brief" in editorial_code
+    assert "decision_chain: decisionChain" in editorial_code
+    assert "reader_chapters: completedAnalyses" not in editorial_code
+    assert "完整章节正文会由报告组装器原样保留" in editorial_code
     assert "不要按十二章顺序逐项摘要" in editorial_code
-    assert "reasoning: { effort: 'medium' }" in editorial_code
+    assert "reasoning: { effort: 'high' }" in editorial_code
 
 
 def test_public_knowledge_base_rejects_project_documents_and_owns_embedding_publish():

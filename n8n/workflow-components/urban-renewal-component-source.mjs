@@ -345,13 +345,13 @@ nodes.push({
       jsCode: `const rendered = $input.first()?.json ?? {};
 const request = $('Attach Project Context').first().json;
 const steps = rendered.decision_state?.steps && typeof rendered.decision_state.steps === 'object' ? rendered.decision_state.steps : {};
-const completedAnalyses = Object.entries(steps).map(([, value]) => ({ title: String(value?.title ?? ''), decision_brief: String(value?.decision_brief ?? '').trim(), reader_chapter: String(value?.reader_chapter ?? '').trim() })).filter((item) => item.reader_chapter);
-if (completedAnalyses.length !== 12) throw new Error('report editorial requires twelve completed analyses');
+const decisionChain = Object.entries(steps).map(([stepKey, value]) => ({ step_key: stepKey, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision_brief: String(value?.decision_brief ?? '').trim() })).filter((item) => item.decision_brief).sort((left, right) => left.step_order - right.step_order);
+if (decisionChain.length !== 12) throw new Error('report editorial requires twelve completed analyses');
 const visualAssets = (Array.isArray(rendered.assets) ? rendered.assets : []).map((item) => ({ kind: String(item?.kind ?? ''), title: String(item?.title ?? ''), design: item?.design && typeof item.design === 'object' ? item.design : {} }));
 const schema = { type: 'object', properties: { narrative: { type: 'string', minLength: 1 } }, required: ['narrative'], additionalProperties: false };
 const instructions = [
   '你是空间策略报告的总编，只在十二项客观分析全部完成后工作。读者是项目甲方、政府决策者或投资人；用可信、有判断力且可执行的项目叙事，帮助他们理解并认可证据所支持的方案。',
-  '优先使用每章的 decision_brief 重建完整的决策逻辑：上游判断如何改变后续定位、产品、空间、运营和分期。把十二章已经可直接发表的正文组织成连贯而有吸引力的决策故事，使读者看清项目为何成立、核心取舍、各部分如何相互支撑、实施条件与落地路径。只负责总判断和章节之间的衔接，不重写、压缩或替换任何章节正文。',
+  '输入的 decision_chain 是十二章自由表达的阶段判断，不是审计表。用它重建完整的决策逻辑：上游判断如何改变后续定位、产品、空间、运营和分期。找出真正推动最终选择的依赖关系、冲突与不可逆取舍，而不是复述每章结论。完整章节正文会由报告组装器原样保留，你只负责总判断和章节之间的衔接。',
   '不要按十二章顺序逐项摘要。先找出贯穿全稿的核心矛盾、竞争性解释和最终取舍，再说明选择如何形成、最脆弱的前提是什么、一期用什么记录确认或改判。',
   '重要结论、方案选择和不可行路径应紧邻已有数据、材料、同类案例或反例。证据不完整但足以比较路径时，可以作出尺度相称的明确判断，但必须保留原分析中的证据边界、反证、条件和不确定性。',
   '只能重组和表达输入中已经成立的判断，不得新增事实、数字、案例、承诺或因果关系，不得把条件性结论改写成确定事实，也不得掩盖不利证据。',
@@ -360,9 +360,9 @@ const instructions = [
 return [{ json: {
   ...rendered,
   instructions,
-  input: JSON.stringify({ project_question: request.project_question, research_frame: String(rendered.decision_state?.research_frame ?? ''), project: request.project_context?.project ?? {}, reader_chapters: completedAnalyses, visual_assets: visualAssets }),
+  input: JSON.stringify({ project_question: request.project_question, research_frame: String(rendered.decision_state?.research_frame ?? ''), project: request.project_context?.project ?? {}, decision_chain: decisionChain, visual_assets: visualAssets }),
   max_output_tokens: 3000,
-  reasoning: { effort: 'medium' },
+  reasoning: { effort: 'high' },
   text: { format: { type: 'json_schema', name: 'spatial_report_editorial', strict: true, schema } },
 } }];`,
     },
