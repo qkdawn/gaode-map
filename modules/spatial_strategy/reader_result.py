@@ -58,33 +58,39 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _chapter_number(step_key: str) -> int | None:
+def _chapter_number(step_key: str, chapter_order: Mapping[str, int] | None = None) -> int | None:
+    if chapter_order and step_key in chapter_order:
+        return chapter_order[step_key]
     for index, (candidate, _) in enumerate(CHAPTERS, 1):
         if candidate == step_key:
             return index
     return None
 
 
-def _chapter_title(step_key: str) -> str:
+def _chapter_title(step_key: str, chapter_titles: Mapping[str, str] | None = None) -> str:
+    if chapter_titles and step_key in chapter_titles:
+        return chapter_titles[step_key]
     for candidate, title in CHAPTERS:
         if candidate == step_key:
             return title
     return ""
 
 
-def _reader_message(raw_status: str, current_step: str, completed: int) -> str:
-    current_number = _chapter_number(current_step)
-    current_title = _chapter_title(current_step)
+def _reader_message(raw_status: str, current_step: str, completed: int, total: int, chapter_order: Mapping[str, int] | None = None, chapter_titles: Mapping[str, str] | None = None, *, legacy: bool = False) -> str:
+    current_number = _chapter_number(current_step, chapter_order)
+    current_title = _chapter_title(current_step, chapter_titles)
     if raw_status == "queued":
         return "分析任务已接收，正在准备项目资料。"
     if raw_status == "running" and current_number:
-        return f"正在分析第 {current_number} 章“{current_title}”，已完成 {completed} 章。"
+        if legacy:
+            return f"正在分析第 {current_number} 章“{current_title}”，已完成 {completed} 章。"
+        return f"正在分析第 {current_number} 章“{current_title}”，已完成 {completed} / {total} 个分析方向。"
     if raw_status == "failed" and current_number:
-        if completed >= 12:
-            return "十二章已经完成，但报告整理暂时未通过检查，可从这里继续。"
+        if completed >= total:
+            return "十二章已经完成，但报告整理暂时未通过检查，可从这里继续。" if legacy else "分析方向已经完成，但报告整理暂时未通过检查，可从这里继续。"
         return f"第 {current_number} 章“{current_title}”暂时未完成，前面的结果已保留，可从这里继续。"
     if raw_status == "completed":
-        return "十二章分析已完成，报告可以阅读。"
+        return "十二章分析已完成，报告可以阅读。" if legacy else "分析方向已完成，报告可以阅读。"
     if raw_status == "cancelled":
         return "分析已停止，已完成的章节仍然保留。"
     return "分析状态正在更新。"
@@ -133,15 +139,29 @@ def project_run_detail(payload: Mapping[str, Any]) -> SpatialStrategyRunDetail:
     raw_status = _text(payload.get("status"))
     current_step = _text(payload.get("current_step"))
     progress = _mapping(payload.get("progress"))
-    completed = max(0, min(12, int(progress.get("completed_steps") or 0)))
     raw_steps = payload.get("steps") if isinstance(payload.get("steps"), list) else []
     actual_steps = {
         _text(item.get("step")): _mapping(item)
         for item in raw_steps
         if isinstance(item, Mapping)
     }
+    state = _mapping(payload.get("decision_state"))
+    plan = state.get("research_plan") if isinstance(state.get("research_plan"), list) else []
+    planned_keys = [_text(item.get("step_key")) for item in plan if isinstance(item, Mapping) and _text(item.get("step_key"))]
+    legacy = not planned_keys
+    ordered_keys = planned_keys or [key for key, _ in CHAPTERS]
+    chapter_order = {key: index for index, key in enumerate(ordered_keys, 1)}
+    chapter_titles = {
+        _text(item.get("step_key")): _text(item.get("title"))
+        for item in plan
+        if isinstance(item, Mapping) and _text(item.get("step_key")) and _text(item.get("title"))
+    }
+    total = max(1, min(32, int(progress.get("total_steps") or len(ordered_keys) or 12)))
+    completed = max(0, min(total, int(progress.get("completed_steps") or 0)))
     chapters = []
-    for number, (step_key, title) in enumerate(CHAPTERS, 1):
+    display_keys = ordered_keys
+    for number, step_key in enumerate(display_keys, 1):
+        title = chapter_titles.get(step_key) or _chapter_title(step_key) or _text(actual_steps.get(step_key, {}).get("output", {}).get("title")) or step_key
         actual = actual_steps.get(step_key, {})
         actual_status = _text(actual.get("status")) or "pending"
         if step_key == current_step:
@@ -159,19 +179,19 @@ def project_run_detail(payload: Mapping[str, Any]) -> SpatialStrategyRunDetail:
                 "updated_at": actual.get("updated_at"),
             }
         )
-    current_number = _chapter_number(current_step)
+    current_number = _chapter_number(current_step, chapter_order)
     current_chapter = (
-        {"number": current_number, "title": _chapter_title(current_step)}
+        {"number": current_number, "title": _chapter_title(current_step, chapter_titles) or current_step}
         if current_number
         else None
     )
     return SpatialStrategyRunDetail(
         run_id=_text(payload.get("run_id")),
         status=RUN_STATUS.get(raw_status, "准备中"),
-        message=_reader_message(raw_status, current_step, completed),
+        message=_reader_message(raw_status, current_step, completed, total, chapter_order, chapter_titles, legacy=legacy),
         created_at=payload.get("created_at"),
         updated_at=payload.get("updated_at"),
-        progress={"completed_chapters": completed, "total_chapters": 12},
+        progress={"completed_chapters": completed, "total_chapters": total},
         current_chapter=current_chapter,
         chapters=chapters,
         report=_reader_report(payload.get("report")),

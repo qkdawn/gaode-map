@@ -82,7 +82,7 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
     )
 
 
-def test_report_contains_all_twelve_steps_and_deduplicated_citation():
+def test_report_renders_adaptive_steps_and_deduplicated_citation():
     report = build_spatial_strategy_report(_request())
 
     assert report["title"] == "测试项目空间分析报告"

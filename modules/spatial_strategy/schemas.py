@@ -43,17 +43,17 @@ class SpatialStrategyRunAccepted(BaseModel):
 
 
 class SpatialStrategyProgress(BaseModel):
-    completed_chapters: int = Field(ge=0, le=12)
-    total_chapters: Literal[12] = 12
+    completed_chapters: int = Field(ge=0, le=32)
+    total_chapters: int = Field(ge=1, le=32)
 
 
 class SpatialStrategyCurrentChapter(BaseModel):
-    number: int = Field(ge=1, le=12)
+    number: int = Field(ge=1, le=32)
     title: str
 
 
 class SpatialStrategyReaderChapter(BaseModel):
-    number: int = Field(ge=1, le=12)
+    number: int = Field(ge=1, le=32)
     title: str
     status: ReaderChapterStatus
     content: str = ""

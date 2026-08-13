@@ -67,3 +67,25 @@ def test_reader_projection_distinguishes_report_failure_after_all_chapters():
     result = project_run_detail(payload)
 
     assert result.message == "十二章已经完成，但报告整理暂时未通过检查，可从这里继续。"
+
+
+def test_reader_projection_uses_adaptive_research_plan():
+    payload = _payload()
+    payload["decision_state"] = {
+        "research_plan": [
+            {"step_key": "decision_01", "title": "核心矛盾", "question": "项目真正要改变什么？"},
+            {"step_key": "decision_02", "title": "客群机制", "question": "谁会使用并持续参与？"},
+            {"step_key": "decision_03", "title": "一期验证", "question": "怎样用小规模行动改判？"},
+        ]
+    }
+    payload["current_step"] = "decision_02"
+    payload["progress"] = {"completed_steps": 1, "total_steps": 3}
+    payload["steps"] = [
+        {"step": "decision_01", "step_order": 1, "status": "completed", "output": {"title": "核心矛盾", "reader_chapter": "已完成。"}},
+    ]
+
+    result = project_run_detail(payload)
+
+    assert result.progress.model_dump() == {"completed_chapters": 1, "total_chapters": 3}
+    assert [chapter.title for chapter in result.chapters] == ["核心矛盾", "客群机制", "一期验证"]
+    assert result.current_chapter.model_dump() == {"number": 2, "title": "客群机制"}

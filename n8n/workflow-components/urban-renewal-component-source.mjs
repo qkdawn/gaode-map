@@ -169,7 +169,7 @@ const visualSchema = { type: 'object', properties: {
 }, required: ['title', 'format', 'rationale', 'decision_question', 'caption', 'map_variant', 'chart_variant', 'dataset_id', 'layers', 'group_by', 'metric_op', 'metric_field'], additionalProperties: false };
 const schema = { type: 'object', properties: { visuals: { type: 'array', minItems: 3, maxItems: 5, items: visualSchema } }, required: ['visuals'], additionalProperties: false };
 const instructions = [
-  '你是城市空间分析的图件设计 Agent。阅读十二项分析结论后，为本项目设计 3 到 5 张真正改变决策的数据图或表。',
+  '你是城市空间分析的图件设计 Agent。阅读已经完成的决策分析后，为本项目设计 3 到 5 张真正改变决策的数据图或表。',
   '每张图必须填写 decision_question 和 caption；caption 要说明证据如何改变定位、产品、空间或实施决策，不能只重复标题。',
   '优先使用专用版式：道路+POI 使用 context_full 或 poi_access；人口与公共节点使用 regional_role；供给结构使用 poi_supply；年龄结构使用 population_profile。',
   '禁止仅用 POI 单层绘制全量散点图；POI 地图必须叠加 road_edges。禁止使用 road_nodes 铺满节点。人口空间地图最多一张，第二个人口视觉应使用 population_profile 图表。',
@@ -346,13 +346,13 @@ nodes.push({
 const request = $('Attach Project Context').first().json;
 const steps = rendered.decision_state?.steps && typeof rendered.decision_state.steps === 'object' ? rendered.decision_state.steps : {};
 const decisionChain = Object.entries(steps).map(([stepKey, value]) => ({ step_key: stepKey, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision_brief: String(value?.decision_brief ?? '').trim() })).filter((item) => item.decision_brief).sort((left, right) => left.step_order - right.step_order);
-if (decisionChain.length !== 12) throw new Error('report editorial requires twelve completed analyses');
+if (!decisionChain.length) throw new Error('report editorial requires completed analyses');
 const visualAssets = (Array.isArray(rendered.assets) ? rendered.assets : []).map((item) => ({ kind: String(item?.kind ?? ''), title: String(item?.title ?? ''), design: item?.design && typeof item.design === 'object' ? item.design : {} }));
 const schema = { type: 'object', properties: { narrative: { type: 'string', minLength: 1 } }, required: ['narrative'], additionalProperties: false };
 const instructions = [
-  '你是空间策略报告的总编，只在十二项客观分析全部完成后工作。读者是项目甲方、政府决策者或投资人；用可信、有判断力且可执行的项目叙事，帮助他们理解并认可证据所支持的方案。',
-  '输入的 decision_chain 是十二章自由表达的阶段判断，不是审计表。用它重建完整的决策逻辑：上游判断如何改变后续定位、产品、空间、运营和分期。找出真正推动最终选择的依赖关系、冲突与不可逆取舍，而不是复述每章结论。完整章节正文会由报告组装器原样保留，你只负责总判断和章节之间的衔接。',
-  '不要按十二章顺序逐项摘要。先找出贯穿全稿的核心矛盾、竞争性解释和最终取舍，再说明选择如何形成、最脆弱的前提是什么、一期用什么记录确认或改判。',
+  '你是空间策略报告的总编，只在已经完成的决策分析足以支撑报告时工作。读者是项目甲方、政府决策者或投资人；用可信、有判断力且可执行的项目叙事，帮助他们理解并认可证据所支持的方案。',
+  '输入的 decision_chain 是若干章自由表达的阶段判断，不是审计表。用它重建完整的决策逻辑：上游判断如何改变后续选择。找出真正推动最终选择的依赖关系、冲突与不可逆取舍，而不是复述每章结论。完整章节正文会由报告组装器原样保留，你只负责总判断和章节之间的衔接。',
+  '不要按章节顺序逐项摘要。先找出贯穿全稿的核心矛盾、竞争性解释和最终取舍，再说明选择如何形成、最脆弱的前提是什么、一期用什么记录确认或改判。',
   '重要结论、方案选择和不可行路径应紧邻已有数据、材料、同类案例或反例。证据不完整但足以比较路径时，可以作出尺度相称的明确判断，但必须保留原分析中的证据边界、反证、条件和不确定性。',
   '只能重组和表达输入中已经成立的判断，不得新增事实、数字、案例、承诺或因果关系，不得把条件性结论改写成确定事实，也不得掩盖不利证据。',
   '只输出可直接置于报告开头的决策叙事正文，不输出报告标题或十二章目录。不得输出任何内部步骤键、状态枚举、节点名、工作流名、引用 ID 或规则名。',

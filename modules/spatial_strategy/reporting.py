@@ -138,7 +138,8 @@ def _render_step(
     step_key: str,
     output: Mapping[str, Any],
 ) -> list[str]:
-    title = STEP_TITLES[step_key]
+    raw_title = _text(output.get("title"))
+    title = (STEP_TITLES.get(step_key) if not raw_title or raw_title == step_key else raw_title) or step_key
     chapter = _text(output.get("reader_chapter"))
     return [f"## {index}. {title}", "", chapter, ""]
 
@@ -171,16 +172,17 @@ def _report_visual_assets(value: Any) -> list[dict[str, Any]]:
 def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest) -> dict[str, Any]:
     state = request.decision_state
     steps = _mapping(state.get("steps"))
-    missing_steps = [step_key for step_key in STEP_TITLES if not isinstance(steps.get(step_key), Mapping)]
-    if missing_steps:
-        raise ValueError("report_requires_completed_steps:" + ",".join(missing_steps))
+    completed_steps = [
+        (step_key, _mapping(output))
+        for step_key, output in steps.items()
+        if isinstance(output, Mapping) and _text(output.get("reader_chapter"))
+    ]
+    completed_steps.sort(key=lambda item: (int(item[1].get("step_order", 0) or 0), item[0]))
+    if not completed_steps:
+        raise ValueError("report_requires_completed_steps")
 
-    for step_key in STEP_TITLES:
-        _validate_reader_text(
-            _mapping(steps[step_key]).get("reader_chapter"),
-            field=f"reader_chapter_{step_key}",
-            minimum_length=1,
-        )
+    for step_key, output in completed_steps:
+        _validate_reader_text(output.get("reader_chapter"), field=f"reader_chapter_{step_key}", minimum_length=1)
     editorial_narrative = _validate_reader_text(
         request.editorial_narrative,
         field="editorial_narrative",
@@ -215,12 +217,12 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
             if caption:
                 lines.extend([f"图注：{caption}", ""])
 
-    for index, step_key in enumerate(STEP_TITLES, 1):
+    for index, (step_key, output) in enumerate(completed_steps, 1):
         lines.extend(
             _render_step(
                 index=index,
                 step_key=step_key,
-                output=_mapping(steps[step_key]),
+                output=output,
             )
         )
 
@@ -397,10 +399,13 @@ class FeishuReportSender:
     @staticmethod
     def _summary(report: Mapping[str, Any]) -> str:
         summary = re.sub(r"\s+", " ", _text(report.get("summary")))[:600]
+        state = _mapping(report.get("decision_state"))
+        steps = state.get("steps") if isinstance(state.get("steps"), Mapping) else {}
+        total = len([item for item in steps.values() if isinstance(item, Mapping) and _text(item.get("reader_chapter"))]) or 12
         return "\n".join(
             [
                 _text(report.get("title")) or "空间分析报告",
-                "状态：12 / 12 步完成",
+                f"状态：{total} 个分析方向完成",
                 f"核心结论：{summary or '详见完整报告'}",
                 "完整 Word 报告见随后发送的文件。",
             ]

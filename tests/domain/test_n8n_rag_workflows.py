@@ -77,7 +77,7 @@ def test_all_generated_code_nodes_compile_as_javascript():
         )
 
 
-def test_agent_has_submit_status_and_single_twelve_step_loop():
+def test_agent_has_submit_status_and_adaptive_decision_loop():
     workflow = _generated("urban-renewal-agent.workflow.mjs")
     nodes = _nodes(workflow)
     assert nodes["接收分析任务"]["parameters"]["path"] == "api/v1/n8n/spatial-strategy"
@@ -94,12 +94,14 @@ def test_agent_has_submit_status_and_single_twelve_step_loop():
     loops = [node for node in workflow["nodes"] if node["type"] == "n8n-nodes-base.splitInBatches"]
     assert [node["name"] for node in loops] == ["逐项执行分析方向"]
     assert loops[0]["parameters"]["batchSize"] == 1
-    queue_code = nodes["建立十二步分析队列"]["parameters"]["jsCode"]
-    assert queue_code.count("'step_") == 12
+    queue_code = nodes["建立自适应分析队列"]["parameters"]["jsCode"]
+    assert "candidatePlan" in queue_code
+    assert "fallbackSteps" in queue_code
+    assert "research_plan" in queue_code
     assert _targets(workflow, "合并项目上下文") == ["构建整体研究框架"]
     assert _targets(workflow, "构建整体研究框架") == ["构建研究框架请求体"]
     assert _targets(workflow, "解析研究框架响应") == ["确认整体研究框架"]
-    assert _targets(workflow, "确认整体研究框架") == ["建立十二步分析队列"]
+    assert _targets(workflow, "确认整体研究框架") == ["建立自适应分析队列"]
     frame_code = nodes["构建整体研究框架"]["parameters"]["jsCode"]
     assert "真正需要作出的选择" in frame_code
     assert "不要为了形式凑假设" in frame_code
@@ -232,7 +234,7 @@ def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
     assert "decision_chain: decisionChain" in editorial_code
     assert "reader_chapters: completedAnalyses" not in editorial_code
     assert "完整章节正文会由报告组装器原样保留" in editorial_code
-    assert "不要按十二章顺序逐项摘要" in editorial_code
+    assert "不要按章节顺序逐项摘要" in editorial_code
     assert "reasoning: { effort: 'high' }" in editorial_code
     visual_code = nodes["构建图件设计请求"]["parameters"]["jsCode"]
     assert "decision_brief" in visual_code
