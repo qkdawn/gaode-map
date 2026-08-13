@@ -100,8 +100,8 @@ class CapabilityReadiness(BaseModel):
 _CAPABILITIES = (
     AnalysisCapability(
         id="client-decision-spatial-strategy",
-        display_name="十二方向空间分析",
-        description="通过 n8n 按顺序分析政策场地、区域角色、市场流动、供给空位、客群、主题、定位、产品、空间、运营、财务与分期。",
+        display_name="自适应空间决策分析",
+        description="通过 n8n 先识别项目真正需要作出的决策，再按问题依赖组织证据、关系推理、方案取舍与验证闭环。",
         category="planning",
         status="available",
         executor_type="service",
@@ -117,11 +117,11 @@ _CAPABILITIES = (
             CapabilityRequirement(id="evidence", label="已入库项目材料"),
         ],
         output_contract=[
-            "十二方向分析正文",
+            "自适应决策分析正文",
         ],
         supports_resume=True,
         supports_versions=True,
-        estimated_stages=12,
+        estimated_stages=1,
         icon="workflow",
         workspace_kind="full",
     ),
