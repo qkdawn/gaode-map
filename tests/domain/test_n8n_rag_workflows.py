@@ -165,9 +165,23 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "citations = COALESCE" in nodes["保存章节与分析状态"]["parameters"]["query"]
     assert "heartbeat_at = NOW()" in nodes["标记当前方向执行中"]["parameters"]["query"]
     follow_up_code = nodes["将项目工具结果交回模型"]["parameters"]["jsCode"]
+    tool_prepare_code = nodes["准备项目工具调用"]["parameters"]["jsCode"]
+    tool_http_code = nodes["读取项目原文或空间数据"]["parameters"]["jsonBody"]
+    assert "mcp_request_body" in tool_prepare_code
+    assert "JSON.stringify" in tool_prepare_code
+    assert "return calls.map" in tool_prepare_code
+    assert "parallel_agent_tool_calls_not_supported" not in tool_prepare_code
+    assert "JSON.parse($json.mcp_request_body)" in tool_http_code
+    assert "_decision_state" in tool_prepare_code
+    assert "$('构建章节分析请求').first().json" in tool_prepare_code
+    assert "$('准备项目工具调用').first().json" in follow_up_code
+    assert "const items = $input.all()" in follow_up_code
+    assert "normalizedResults = items.map" in follow_up_code
+    assert ".item.json" not in tool_prepare_code
+    assert ".item.json" not in follow_up_code
     validation_code = nodes["校验章节正文"]["parameters"]["jsCode"]
-    assert "prior.mcp_tool_name === 'read_project_document'" in follow_up_code
-    assert "prior.mcp_tool_name === 'query_data'" in follow_up_code
+    assert "entry.tool_name === 'read_project_document'" in follow_up_code
+    assert "entry.tool_name === 'query_data'" in follow_up_code
     assert "tool_evidence: toolEvidence" in follow_up_code
     assert "response.tool_evidence" in validation_code
     assert "evidence_index:" in validation_code

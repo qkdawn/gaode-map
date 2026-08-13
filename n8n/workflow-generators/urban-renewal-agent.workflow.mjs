@@ -51,35 +51,46 @@ if (requestNode) {
 const followUpNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Build MCP Agent Follow-up');
 if (followUpNode) {
   followUpNode.parameters.jsCode = followUpNode.parameters.jsCode
-    .replace("const normalizedToolResult = {", `const source = result && typeof result === 'object' ? result : {};
-const requested = prior.mcp_arguments && typeof prior.mcp_arguments === 'object' ? prior.mcp_arguments : {};
-const newEvidence = [];
-if (toolResult.is_error !== true && prior.mcp_tool_name === 'project_context') {
-  const snapshotId = String(source.snapshot_id ?? source.context_snapshot_id ?? source.history_id ?? requested.history_id ?? 'offline_snapshot');
-  for (const resultItem of Array.isArray(source.computed_results) ? source.computed_results : []) {
-    if (!resultItem || typeof resultItem !== 'object') continue;
-    const resultId = String(resultItem.result_id ?? resultItem.id ?? resultItem.metric_key ?? resultItem.metric_id ?? '').trim();
-    if (!resultId) continue;
-    newEvidence.push({ citation_id: resultId, document_id: '', title: String(resultItem.title ?? resultItem.name ?? resultItem.metric_key ?? resultId), source_type: 'project_snapshot', source_url: '', source_locator: 'offline_snapshot:' + resultId, page_start: null, page_end: null, section: String(resultItem.metric_key ?? resultItem.metric_id ?? 'computed_result'), dataset_id: String(resultItem.dataset_id ?? ''), snapshot_id: snapshotId, dataset_checksum: String(resultItem.dataset_checksum ?? resultItem.checksum ?? ''), complete: resultItem.complete !== false, content: JSON.stringify(resultItem.data ?? resultItem.result ?? resultItem) });
+    .replace(
+      "const items = $input.all();\nconst prior = $('Prepare MCP Agent Tool Call').first().json;",
+      "const items = $input.all();\nconst preparedItems = typeof $('Prepare MCP Agent Tool Call').all === 'function' ? $('Prepare MCP Agent Tool Call').all() : [{ json: $('Prepare MCP Agent Tool Call').first().json }];\nconst prior = preparedItems[0]?.json ?? {};",
+    )
+    .replace(
+      "const normalizedResults = items.map((item) => {\n  const toolResult = item.json ?? {};\n  return {\n    tool_name: String(toolResult.tool_name ?? ''),\n    call_id: String(toolResult.mcp_call_id ?? ''),",
+      "const normalizedResults = items.map((item, index) => {\n  const itemPrior = preparedItems[index]?.json ?? prior;\n  const toolResult = item.json ?? {};\n  return {\n    tool_name: String(toolResult.tool_name ?? itemPrior.mcp_tool_name ?? ''),\n    call_id: String(toolResult.mcp_call_id ?? itemPrior.mcp_call_id ?? ''),\n    arguments: itemPrior.mcp_arguments && typeof itemPrior.mcp_arguments === 'object' ? itemPrior.mcp_arguments : {},",
+    )
+    .replace("const fingerprints = Array.isArray(prior.tool_result_fingerprints) ? prior.tool_result_fingerprints : [];", `const newEvidence = normalizedResults.flatMap((entry) => {
+  const source = entry.result && typeof entry.result === 'object' ? entry.result : {};
+  const requested = entry.arguments;
+  if (entry.is_error) return [];
+  if (entry.tool_name === 'project_context') {
+    const snapshotId = String(source.snapshot_id ?? source.context_snapshot_id ?? source.history_id ?? requested.history_id ?? 'offline_snapshot');
+    return (Array.isArray(source.computed_results) ? source.computed_results : []).flatMap((resultItem) => {
+      if (!resultItem || typeof resultItem !== 'object') return [];
+      const resultId = String(resultItem.result_id ?? resultItem.id ?? resultItem.metric_key ?? resultItem.metric_id ?? '').trim();
+      if (!resultId) return [];
+      return [{ citation_id: resultId, document_id: '', title: String(resultItem.title ?? resultItem.name ?? resultItem.metric_key ?? resultId), source_type: 'project_snapshot', source_url: '', source_locator: 'offline_snapshot:' + resultId, page_start: null, page_end: null, section: String(resultItem.metric_key ?? resultItem.metric_id ?? 'computed_result'), dataset_id: String(resultItem.dataset_id ?? ''), snapshot_id: snapshotId, dataset_checksum: String(resultItem.dataset_checksum ?? resultItem.checksum ?? ''), complete: resultItem.complete !== false, content: JSON.stringify(resultItem.data ?? resultItem.result ?? resultItem) }];
+    });
   }
-}
-if (toolResult.is_error !== true && prior.mcp_tool_name === 'read_project_document') {
-  for (const block of Array.isArray(source.blocks) ? source.blocks : []) {
-    if (!block || typeof block !== 'object') continue;
-    const page = Number(block.page ?? 0) || null;
-    const locator = String(block.source_locator ?? (page ? 'page:' + page : 'block:' + String(block.chunk_id ?? '')));
-    newEvidence.push({ citation_id: String(block.chunk_id ?? source.selection_checksum ?? source.document_checksum ?? locator), document_id: String(source.document_id ?? requested.document_id ?? ''), title: String(block.filename ?? requested.document_id ?? '项目文档'), source_type: 'project_document', source_url: String(source.original_resource_uri ?? ''), source_locator: locator, page_start: page, page_end: page, section: String(block.heading ?? ''), content: String(block.text ?? '') });
+  if (entry.tool_name === 'read_project_document') {
+    return (Array.isArray(source.blocks) ? source.blocks : []).flatMap((block) => {
+      if (!block || typeof block !== 'object') return [];
+      const page = Number(block.page ?? 0) || null;
+      const locator = String(block.source_locator ?? (page ? 'page:' + page : 'block:' + String(block.chunk_id ?? '')));
+      return [{ citation_id: String(block.chunk_id ?? source.selection_checksum ?? source.document_checksum ?? locator), document_id: String(source.document_id ?? requested.document_id ?? ''), title: String(block.filename ?? requested.document_id ?? '项目文档'), source_type: 'project_document', source_url: String(source.original_resource_uri ?? ''), source_locator: locator, page_start: page, page_end: page, section: String(block.heading ?? ''), content: String(block.text ?? '') }];
+    });
   }
-}
-if (toolResult.is_error !== true && prior.mcp_tool_name === 'query_data') {
-  const datasetId = String(source.dataset_id ?? requested.dataset_id ?? '');
-  const locator = 'project_data:' + datasetId + ':' + String(source.operation ?? requested.operation ?? 'records') + ':' + String(source.result_checksum ?? source.query_checksum ?? source.snapshot_id ?? 'result');
-  newEvidence.push({ citation_id: String(source.result_checksum ?? source.query_checksum ?? source.snapshot_id ?? locator), document_id: '', title: datasetId || '项目空间数据', source_type: 'project_data', source_url: '', source_locator: locator, page_start: null, page_end: null, section: String(source.operation ?? requested.operation ?? 'records'), dataset_id: datasetId, snapshot_id: String(source.snapshot_id ?? ''), dataset_checksum: String(source.dataset_checksum ?? ''), complete: source.complete === true, content: JSON.stringify({ total_count: source.total_count ?? null, records: source.records ?? [], computed_results: source.computed_results ?? [], spatial_diagnostics: source.spatial_diagnostics ?? {}, warnings: source.warnings ?? [] }) });
-}
-const toolEvidence = [...(Array.isArray(prior.tool_evidence) ? prior.tool_evidence : []), ...newEvidence].filter((item, index, items) => item.citation_id && items.findIndex((candidate) => candidate.citation_id === item.citation_id) === index);
-const toolDiagnostics = [...(Array.isArray(prior.tool_diagnostics) ? prior.tool_diagnostics : []), ...(toolResult.is_error === true ? [{ kind: 'tool_error', tool_name: String(prior.mcp_tool_name ?? ''), message: String(toolResult.message ?? toolResult.error ?? 'tool_call_failed') }] : [])];
-const normalizedToolResult = {`)
-    .replace("  tool_result_fingerprints: [...fingerprints, ...(isNewEvidence ? [fingerprint] : [])].slice(-32),", "  tool_result_fingerprints: [...fingerprints, ...(isNewEvidence ? [fingerprint] : [])].slice(-32),\n  tool_evidence: toolEvidence,\n  tool_diagnostics: toolDiagnostics,");
+  if (entry.tool_name === 'query_data') {
+    const datasetId = String(source.dataset_id ?? requested.dataset_id ?? '');
+    const locator = 'project_data:' + datasetId + ':' + String(source.operation ?? requested.operation ?? 'records') + ':' + String(source.result_checksum ?? source.query_checksum ?? source.snapshot_id ?? 'result');
+    return [{ citation_id: String(source.result_checksum ?? source.query_checksum ?? source.snapshot_id ?? locator), document_id: '', title: datasetId || '项目空间数据', source_type: 'project_data', source_url: '', source_locator: locator, page_start: null, page_end: null, section: String(source.operation ?? requested.operation ?? 'records'), dataset_id: datasetId, snapshot_id: String(source.snapshot_id ?? ''), dataset_checksum: String(source.dataset_checksum ?? ''), complete: source.complete === true, content: JSON.stringify({ total_count: source.total_count ?? null, records: source.records ?? [], computed_results: source.computed_results ?? [], spatial_diagnostics: source.spatial_diagnostics ?? {}, warnings: source.warnings ?? [] }) }];
+  }
+  return [];
+});
+const toolEvidence = [...(Array.isArray(prior.tool_evidence) ? prior.tool_evidence : []), ...newEvidence].filter((item, index, collection) => item.citation_id && collection.findIndex((candidate) => candidate.citation_id === item.citation_id) === index);
+const toolDiagnostics = [...(Array.isArray(prior.tool_diagnostics) ? prior.tool_diagnostics : []), ...normalizedResults.filter((entry) => entry.is_error).map((entry) => ({ kind: 'tool_error', tool_name: entry.tool_name, message: String(entry.result?.message ?? entry.result?.error ?? 'tool_call_failed') }))];
+const fingerprints = Array.isArray(prior.tool_result_fingerprints) ? prior.tool_result_fingerprints : [];`)
+    .replace("  tool_result_fingerprints: [...fingerprints, ...newFingerprints].slice(-32),", "  tool_result_fingerprints: [...fingerprints, ...newFingerprints].slice(-32),\n  tool_evidence: toolEvidence,\n  tool_diagnostics: toolDiagnostics,");
 }
 const refreshLeaseNode = postgresNode('刷新分析任务租约', `UPDATE analysis_runs
 SET heartbeat_at = NOW(), lease_expires_at = NOW() + INTERVAL '15 minutes', updated_at = NOW()
@@ -325,16 +336,17 @@ const decisionNames = {
   'Fail MCP Agent Tool Call': '记录项目工具调用失败', 'Validate Decision Output': '校验章节正文',
   'Persist Decision State': '保存章节与分析状态', 'Return Step Result': '完成当前分析方向',
 };
-const toolCallNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Call Spatial MCP Tool');
-if (toolCallNode) {
-  toolCallNode.parameters.jsonBody = toolCallNode.parameters.jsonBody.replace(
-    "arguments: $json.mcp_arguments",
-    "arguments: $json.mcp_tool_name === 'read_previous_chapter' ? { ...$json.mcp_arguments, _decision_state: $('Build Structured Decision Request').item.json.state.decision_state, _current_step_order: $('Build Structured Decision Request').item.json.state.step_order } : $json.mcp_arguments",
-  );
-}
 const decision = localizeComponent(decisionSourceForGeneration, {
   names: decisionNames, idPrefix: 'urban-agent-decision', anchor: [2560, 1940], triggerName: 'When Called By Orchestrator',
 });
+for (const node of decision.nodes) {
+  if (typeof node.parameters?.jsCode !== 'string') continue;
+  node.parameters.jsCode = node.parameters.jsCode
+    .replace("$('Build Structured Decision Request').item.json", "$('Build Structured Decision Request').first().json")
+    .replace("$('Prepare MCP Agent Tool Call').item.json", "$('Prepare MCP Agent Tool Call').first().json")
+    .replace("$('构建章节分析请求').item.json", "$('构建章节分析请求').first().json")
+    .replace("$('准备项目工具调用').item.json", "$('准备项目工具调用').first().json");
+}
 mergeGraph(graph, decision);
 connect(graph, '合并当前分析方向状态', decision.entries[0]);
 connect(graph, '复用已完成章节', '逐项执行分析方向');

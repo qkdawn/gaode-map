@@ -24,7 +24,7 @@ const code = {json.dumps(_code('Build MCP Agent Follow-up'), ensure_ascii=False)
 const prior = {json.dumps(prior, ensure_ascii=False)};
 const toolResult = {json.dumps(tool_result, ensure_ascii=False)};
 const run = new Function('$input', '$', code);
-const output = run({{ first: () => ({{ json: toolResult }}) }}, () => ({{ item: {{ json: prior }} }}));
+const output = run({{ all: () => [{{ json: toolResult }}], first: () => ({{ json: toolResult }}) }}, () => ({{ all: () => [{{ json: prior }}], first: () => ({{ json: prior }}) }}));
 process.stdout.write(JSON.stringify(output[0].json));
 """
     result = subprocess.run(
@@ -91,12 +91,12 @@ def test_dynamic_stop_code_nodes_compile_and_task_completion_exits_tool_loop():
     assert connections[1][0]["node"] == "Validate Decision Output"
 
 
-def test_serial_tool_contract_rejects_multiple_calls_instead_of_dropping_them():
+def test_parallel_tool_contract_preserves_multiple_calls():
     prepare = _code("Prepare MCP Agent Tool Call")
 
-    assert "parallel_agent_tool_calls_not_supported" in prepare
-    assert "calls.length !== 1" in prepare
-    assert "tool_call_count: Number(response.tool_call_count ?? 0) + 1" in prepare
+    assert "return calls.map" in prepare
+    assert "parallel_agent_tool_calls_not_supported" not in prepare
+    assert "tool_call_count: Number(response.tool_call_count ?? 0) + calls.length" in prepare
 
 
 def test_evidence_fingerprint_is_recursive_and_context_estimate_covers_request_state():
