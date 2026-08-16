@@ -35,8 +35,9 @@ CATALOG_VERSION = "2.0.0"
 # Deterministic capabilities exposed to the planning layer.  This is a registry of
 # concrete domain adapters, not a project-specific recommendation list.
 EXECUTABLE_METRIC_IDS = frozenset({
-    "project.document_constraints", "isochrone.reachable_area",
+    "project.document_constraints", "isochrone.reachable_area", "access.network_reachable_area",
     "poi.count", "poi.category_count", "poi.multi_year_count",
+    "poi.open_close_rate",
     "poi.grid_count", "poi.local_entropy", "poi.local_entropy_normalized",
     "poi.neighbor_mean_density", "poi.neighbor_mean_entropy", "poi.lq", "poi.kernel_density",
     "spatial.gi_star", "spatial.lisa", "poi.grid_density",
@@ -1627,6 +1628,19 @@ class ProjectSpatialAnalysisService:
                 parameters=parameters or {},
             )
 
+        if tool_id in {"isochrone.reachable_area", "access.network_reachable_area"}:
+            return self._execute_network_reachable_area(
+                history_id=history_id,
+                history_detail=history_detail,
+                tool_id=tool_id,
+            )
+
+        if tool_id == "poi.open_close_rate":
+            return self._execute_poi_open_close_rate(
+                history_id=history_id,
+                history_detail=history_detail,
+            )
+
         analysis = self.analyze_history_snapshot(
             history_id=history_id,
             history_detail=history_detail,
@@ -1692,6 +1706,176 @@ class ProjectSpatialAnalysisService:
             structured_result=structured,
             input_sources=input_sources,
             limitations=limitations + ["指标结果用于空间条件判断，不能单独外推消费、客流、营收或投资回报。"],
+        )
+
+    def _execute_network_reachable_area(
+        self,
+        *,
+        tool_id: str = "access.network_reachable_area",
+        history_id: str,
+        history_detail: dict[str, Any],
+    ) -> MetricToolExecution:
+        """Report the area of the saved network catchment without rerunning routing.
+
+        The history snapshot is the source of truth for this metric.  A single
+        saved polygon is intentionally reported as one threshold; additional
+        thresholds require additional saved isochrone snapshots and are never
+        approximated from straight-line distance or the project boundary.
+        """
+        scope_geometry = self._project_scope_geometry(history_detail)
+        if scope_geometry is None or scope_geometry.is_empty:
+            return MetricToolExecution(
+                tool_id=tool_id,
+                status="unavailable",
+                summary="当前历史快照没有可计算面积的已保存网络等时圈。",
+                input_sources=["history:isochrone"],
+                limitations=["缺少有效的保存范围几何；不以直线半径或项目边界替代网络可达范围。"],
+            )
+        params = history_detail.get("params") if isinstance(history_detail.get("params"), dict) else {}
+        try:
+            time_min = int(params.get("time_min")) if params.get("time_min") not in (None, "") else None
+        except (TypeError, ValueError):
+            time_min = None
+        mode = str(params.get("mode") or "unknown").strip().lower()
+        if time_min is None or time_min <= 0 or mode not in {"walking", "driving", "cycling", "bicycling", "transit"}:
+            return MetricToolExecution(
+                tool_id=tool_id,
+                status="unavailable",
+                summary="当前保存范围没有可核验的网络等时圈时间阈值和出行方式。",
+                input_sources=["history:isochrone"],
+                limitations=["缺少 time_min 或有效 mode；不把任意项目边界解释为网络可达面积。"],
+            )
+        latitude = float(scope_geometry.centroid.y)
+        # Equirectangular conversion is sufficient for a bounded city-scale
+        # snapshot and keeps the result deterministic without exposing a CRS.
+        km_per_degree_lat = 111.32
+        km_per_degree_lon = km_per_degree_lat * max(0.01, abs(cos(radians(latitude))))
+        area_km2 = float(scope_geometry.area * km_per_degree_lat * km_per_degree_lon)
+        threshold = {
+            "time_min": time_min,
+            "mode": mode,
+            "area_km2": round(area_km2, 6),
+            "record_ref": "history:isochrone",
+        }
+        limitations = [
+            "当前快照只保存一个等时圈阈值；多阈值比较需分别保存对应网络等时圈。",
+            "面积来自已保存网络等时圈，不代表客流、需求或消费规模。",
+        ]
+        return MetricToolExecution(
+            tool_id=tool_id,
+            status="available",
+            summary=(
+                f"已计算保存的 {time_min or '当前'} 分钟 {mode} 网络等时圈面积 "
+                f"{area_km2:.4f} km²。"
+            ),
+            structured_result={
+                "thresholds": [threshold],
+                "available_threshold_count": 1,
+                "area_unit": "km2",
+                "scope_policy": "saved_network_isochrone_only",
+            },
+            input_sources=["history:isochrone"],
+            limitations=limitations,
+        )
+
+    def _execute_poi_open_close_rate(
+        self,
+        *,
+        history_id: str,
+        history_detail: dict[str, Any],
+    ) -> MetricToolExecution:
+        """Match POI snapshots across years and report change rates by interval."""
+        scope_geometry = self._project_scope_geometry(history_detail)
+        if scope_geometry is None or scope_geometry.is_empty:
+            return MetricToolExecution(
+                tool_id="poi.open_close_rate",
+                status="unavailable",
+                summary="当前历史快照没有可用于跨年 POI 对照的保存范围。",
+                input_sources=["current:dataset:poi"],
+                limitations=["缺少有效范围几何，不能判断 POI 是否位于同一分析范围。"],
+            )
+        manifest = self._datasets.list_scope_datasets(history_id)
+        poi_manifest = next(
+            (item for item in manifest.get("datasets") or []
+             if isinstance(item, dict) and item.get("source_id") == "current:dataset:poi"),
+            {},
+        )
+        years = sorted({int(year) for year in poi_manifest.get("available_years") or [] if str(year).isdigit()})
+        if len(years) < 2:
+            return MetricToolExecution(
+                tool_id="poi.open_close_rate",
+                status="unavailable",
+                summary="当前 POI 数据只有一个可用年份，无法计算开店、闭店和存续率。",
+                input_sources=["current:dataset:poi"],
+                limitations=["至少需要两个同源、同口径的 POI 年份快照；不会把单年数量变化称为开闭店率。"],
+            )
+
+        by_year: dict[int, dict[str, dict[str, Any]]] = {}
+        year_counts: dict[int, int] = {}
+        for year in years:
+            records, _, _ = self._datasets.load_scope_records(
+                history_id=history_id,
+                source_id="current:dataset:poi",
+                year=year,
+            )
+            entities: dict[str, dict[str, Any]] = {}
+            for record in records:
+                point = record.geometry
+                if point is None or point.is_empty or not scope_geometry.covers(point):
+                    continue
+                properties = record.properties or {}
+                entity_id = str(properties.get("poi_id") or record.record_id or "").strip()
+                if not entity_id:
+                    name = str(properties.get("name") or record.title or "").strip().lower()
+                    category = str(properties.get("category") or "").strip().lower()
+                    subcategory = str(properties.get("subcategory") or "").strip().lower()
+                    entity_id = f"{name}|{category}|{subcategory}|{point.x:.6f},{point.y:.6f}"
+                entities.setdefault(entity_id, {
+                    "category": str(properties.get("category") or "未标注"),
+                    "subcategory": str(properties.get("subcategory") or "未标注"),
+                })
+            by_year[year] = entities
+            year_counts[year] = len(entities)
+
+        intervals: list[dict[str, Any]] = []
+        for previous_year, current_year in zip(years, years[1:]):
+            previous = by_year[previous_year]
+            current = by_year[current_year]
+            previous_ids, current_ids = set(previous), set(current)
+            retained = previous_ids & current_ids
+            opened = current_ids - previous_ids
+            closed = previous_ids - current_ids
+            denominator = len(previous_ids)
+            intervals.append({
+                "from_year": previous_year,
+                "to_year": current_year,
+                "previous_count": len(previous_ids),
+                "current_count": len(current_ids),
+                "opened_count": len(opened),
+                "closed_count": len(closed),
+                "retained_count": len(retained),
+                "open_rate": round(len(opened) / denominator, 6) if denominator else None,
+                "close_rate": round(len(closed) / denominator, 6) if denominator else None,
+                "retention_rate": round(len(retained) / denominator, 6) if denominator else None,
+                "matching_key": "poi_id_or_record_id_else_name_category_subcategory_coordinate",
+            })
+
+        return MetricToolExecution(
+            tool_id="poi.open_close_rate",
+            status="available",
+            summary=f"已对 {len(years)} 个 POI 年份快照完成 {len(intervals)} 个时间区间的实体匹配。",
+            structured_result={
+                "years": years,
+                "year_counts": year_counts,
+                "intervals": intervals,
+                "scope_policy": "current_saved_scope",
+                "category_values": "descriptive_only",
+            },
+            input_sources=["current:dataset:poi"],
+            limitations=[
+                "开闭店率依赖跨年 POI 实体匹配；采集覆盖、类别编码或坐标变化可能造成匹配误差。",
+                "结果描述设施快照变化，不代表经营质量、客流、收入或市场增长。",
+            ],
         )
 
     def _execute_poi_supply_structure(

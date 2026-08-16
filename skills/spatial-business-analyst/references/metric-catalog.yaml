@@ -2973,8 +2973,12 @@ metrics:
 - id: poi.open_close_rate
   name: 开闭店变化与存续率
   family: poi
-  implementation_status: not_implemented
-  outputs: []
+  implementation_status: implemented
+  outputs:
+  - yearly_poi_counts
+  - interval_open_rate
+  - interval_close_rate
+  - interval_retention_rate
   required_inputs:
   - poi_records
   - scope_geometry
@@ -3018,7 +3022,9 @@ metrics:
   - duplicate_check
   - category_normalization
   - coverage_check
-  source: []
+  source:
+  - modules/spatial_action/project_context.py
+  - modules/scope_datasets/service.py
   comparison_baseline:
     required: true
     preferred:
@@ -3028,8 +3034,10 @@ metrics:
 - id: access.network_reachable_area
   name: 多时间阈值网络可达面积
   family: isochrone
-  implementation_status: not_implemented
-  outputs: []
+  implementation_status: implemented
+  outputs:
+  - threshold_area_rows
+  - saved_threshold_diagnostics
   required_inputs:
   - origin
   - travel_mode
@@ -3071,7 +3079,9 @@ metrics:
   - routing_engine_status
   - valid_origin
   - geometry_has_area
-  source: []
+  source:
+  - modules/spatial_action/project_context.py
+  - modules/scope_datasets/service.py
   comparison_baseline:
     required: true
     preferred:
@@ -3081,7 +3091,7 @@ metrics:
 - id: spatial.thematic_visual
   name: 已归档空间结果专题表达
   family: report_visual
-  implementation_status: not_implemented
+  implementation_status: implemented
   outputs:
   - 安全 SVG 专题图资产
   required_inputs:
@@ -3126,7 +3136,7 @@ metrics:
 - id: report.decision_visual
   name: 决策报告图表表达
   family: report_visual
-  implementation_status: not_implemented
+  implementation_status: implemented
   outputs:
   - 安全 SVG 报告图表资产
   required_inputs:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -21,6 +20,23 @@ class PublicWebUnavailable(RuntimeError):
     """Raised when an external research provider cannot complete a request."""
 
 
+def _timeout_seconds() -> float:
+    timeout_ms = max(1, int(getattr(settings, "anysearch_timeout_ms", 12000) or 12000))
+    return timeout_ms / 1000
+
+
+def _usable_page_text(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return False
+    blocked_markers = (
+        "extract_target_blocked",
+        "extract_fetch_failed",
+        "target is blocked by extract policy",
+    )
+    return not any(marker in normalized for marker in blocked_markers)
+
+
 def _text_blocks(result: Any) -> list[str]:
     return [
         str(getattr(item, "text", "") or "").strip()
@@ -30,9 +46,8 @@ def _text_blocks(result: Any) -> list[str]:
 
 
 async def _call_exa(tool_name: str, arguments: dict[str, Any]) -> list[str]:
-    timeout_seconds = max(1, int(getattr(settings, "anysearch_timeout_ms", 12000) or 12000))
     try:
-        async with streamablehttp_client(EXA_MCP_URL, timeout=timeout_seconds) as (read, write, _):
+        async with streamablehttp_client(EXA_MCP_URL, timeout=_timeout_seconds()) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return _text_blocks(await session.call_tool(tool_name, arguments))
@@ -46,9 +61,8 @@ async def _call_anysearch(tool_name: str, arguments: dict[str, Any]) -> list[str
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool_name, "arguments": arguments}}
-    timeout_seconds = max(1, int(getattr(settings, "anysearch_timeout_ms", 12000) or 12000))
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=_timeout_seconds(), follow_redirects=True, trust_env=False) as client:
             response = await client.post(ANYSEARCH_MCP_URL, json=payload, headers=headers)
             response.raise_for_status()
             content = (response.json().get("result") or {}).get("content") or []
@@ -79,26 +93,46 @@ async def search_public_web(query: str, provider: ProviderName, limit: int) -> d
 async def fetch_public_web_page(urls: list[str], provider: ProviderName, max_characters: int) -> dict[str, Any]:
     if provider == "exa":
         content = await _call_exa("web_fetch_exa", {"urls": urls, "maxCharacters": max_characters})
+        usable = [item for item in content if _usable_page_text(item)]
+        return {
+            "status": "available" if usable else "unavailable",
+            "provider": provider,
+            "urls": urls,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "content": usable,
+            "error": "" if usable else "public_web_fulltext_unavailable",
+            "limitations": ["网页正文需结合发布主体、日期、适用范围与项目原始材料判断，不能单独替代项目级记录。"],
+        }
+
+    pages: list[dict[str, str]] = []
+    failures: list[dict[str, str]] = []
+    for url in urls:
+        try:
+            extracted = await _call_anysearch("extract", {"url": url})
+        except PublicWebUnavailable as exc:
+            failures.append({"url": url, "error": str(exc)})
+            continue
+        usable = [item for item in extracted if _usable_page_text(item)]
+        if usable:
+            pages.append({"url": url, "content": "\n\n".join(usable)[:max_characters]})
+        else:
+            failures.append({"url": url, "error": "public_web_fulltext_unavailable"})
+
+    if pages and failures:
+        status = "partial"
+    elif pages:
+        status = "available"
     else:
-        pages: list[str] = []
-        for url in urls:
-            pages.extend(await _call_anysearch("extract", {"url": url}))
-        content = pages
+        status = "unavailable"
     return {
-        "status": "available",
+        "status": status,
         "provider": provider,
-        "urls": urls,
+        "urls": [page["url"] for page in pages],
         "fetched_at": datetime.now(timezone.utc).isoformat(),
-        "content": content,
+        "content": [page["content"] for page in pages],
+        "pages": pages,
+        "failures": failures,
+        "error": "" if pages else "public_web_fulltext_unavailable",
+        "retryable": not pages,
         "limitations": ["网页正文需结合发布主体、日期、适用范围与项目原始材料判断，不能单独替代项目级记录。"],
     }
-
-
-def run(coroutine: Any) -> dict[str, Any]:
-    """Run provider I/O from the synchronous FastMCP callback boundary."""
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(coroutine)
-    raise RuntimeError("public_web_call_requires_sync_mcp_boundary")

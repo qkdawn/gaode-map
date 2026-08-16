@@ -11,6 +11,7 @@ from PIL import Image, ImageColor, ImageDraw, ImageFont
 from shapely.errors import ShapelyError
 from shapely.geometry import shape as shapely_shape
 from shapely.ops import unary_union
+from sqlalchemy.exc import SQLAlchemyError
 
 from core.config import settings
 from modules.nightlight.analysis import build_gradient_layer_cells, build_hotspot_layer_cells
@@ -1127,6 +1128,27 @@ def _normalize_plan(
     return normalized
 
 
+def _drop_empty_visual_placeholders(
+    visual_plan: Iterable[Mapping[str, Any]] | None,
+) -> tuple[list[Mapping[str, Any]], int]:
+    """Ignore model-generated empty slots while retaining actionable validation errors."""
+    supplied = list(visual_plan or ())
+    filtered: list[Mapping[str, Any]] = []
+    dropped = 0
+    for item in supplied:
+        if (
+            isinstance(item, Mapping)
+            and not str(item.get("format") or "").strip()
+            and not str(item.get("title") or "").strip()
+            and not str(item.get("decision_question") or "").strip()
+            and not str(item.get("caption") or "").strip()
+        ):
+            dropped += 1
+            continue
+        filtered.append(item)
+    return filtered, dropped
+
+
 def _map_asset(
     spec: Mapping[str, Any], data: Mapping[str, list[dict[str, Any]]], directory: Path, index: int
 ) -> dict[str, Any] | None:
@@ -1561,10 +1583,25 @@ def build_spatial_strategy_visuals(
         try:
             # Rendering reads the project's complete stored record set; it never uses paged API results.
             data[dataset_id] = _DATA._all_spatial_records(resolved_history_id, dataset_id)
-        except (LookupError, ValueError) as exc:
+        except (LookupError, ValueError, SQLAlchemyError) as exc:
             warnings.append(f"{dataset_id}:{exc}")
 
-    plan = _normalize_plan(visual_plan, data)
+    filtered_plan, dropped_count = _drop_empty_visual_placeholders(visual_plan)
+    if dropped_count:
+        warnings.append(f"visual_plan_items_dropped:{dropped_count}")
+    if not data:
+        # A report can still be delivered with chapter evidence when the optional
+        # full-record rendering source is temporarily unavailable.
+        warnings.append("visual_render_skipped:no_dataset_records_available")
+        plan = []
+    else:
+        try:
+            plan = _normalize_plan(filtered_plan, data)
+        except ValueError as exc:
+            # A malformed model plan is recoverable: retain the report and use
+            # deterministic plans derived from the datasets actually available.
+            warnings.append(f"visual_plan_replaced:{exc}")
+            plan = _normalize_plan(_plan_defaults(data), data)
     assets = []
     for index, spec in enumerate(plan, start=1):
         visual_format = spec["format"]

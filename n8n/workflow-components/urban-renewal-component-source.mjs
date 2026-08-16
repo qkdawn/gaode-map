@@ -88,32 +88,12 @@ return [{ json: {
     [900, 300],
     'attach-project-context-0000000000000000000',
   ),
-  {
-    ...node(
-      'Claim Queued Analysis Run',
-      'n8n-nodes-base.postgres',
-      {
-        operation: 'executeQuery',
-        query: `UPDATE analysis_runs
-SET workflow_execution_id = $3::text, status = 'running', current_step = 'step_01_policy_site',
-  request = $2::jsonb, started_at = COALESCE(started_at, NOW()), heartbeat_at = NOW(),
-  lease_expires_at = NOW() + INTERVAL '15 minutes', updated_at = NOW()
-WHERE id = $1::uuid AND tenant_id = $4::text AND status = 'queued'
-RETURNING id::text AS run_id, decision_state;`,
-        options: { queryReplacement: '={{ [$json.run_id, JSON.stringify($json), $execution.id, $json.tenant_id] }}' },
-      },
-      [1140, 300],
-      '5800374a-a2ca-4884-923f-fd9c25ec35b5',
-    ),
-    credentials: { postgres: { id: 'rag-postgres', name: 'RAG PostgreSQL' } },
-  },
 ];
 
 const connections = {
   'When Called By API': { main: [[{ node: 'Normalize Analysis Request', type: 'main', index: 0 }]] },
   'Normalize Analysis Request': { main: [[{ node: 'Load Project Context', type: 'main', index: 0 }]] },
   'Load Project Context': { main: [[{ node: 'Attach Project Context', type: 'main', index: 0 }], [{ node: 'Attach Project Context', type: 'main', index: 0 }]] },
-  'Attach Project Context': { main: [[{ node: 'Claim Queued Analysis Run', type: 'main', index: 0 }]] },
 };
 
 const failureNode = {
@@ -244,7 +224,15 @@ for (const candidate of jsonCandidates) {
   try { parsed = JSON.parse(candidate); break; } catch {}
 }
 if (!parsed) return [{ json: { ...request, visual_plan: [], visual_diagnostics: [{ kind: 'visual_model_invalid_json', message: rawOutput.slice(0, 500) }] } }];
-const visuals = Array.isArray(parsed.visuals) ? parsed.visuals.slice(0, 6) : [];
+const suppliedVisuals = Array.isArray(parsed.visuals) ? parsed.visuals.slice(0, 6) : [];
+const visuals = suppliedVisuals.filter((visual) => !(
+  visual && typeof visual === 'object'
+  && !String(visual.format ?? '').trim()
+  && !String(visual.title ?? '').trim()
+  && !String(visual.decision_question ?? '').trim()
+  && !String(visual.caption ?? '').trim()
+));
+const droppedVisualCount = suppliedVisuals.length - visuals.length;
 if (visuals.length < 3 || visuals.length > 5) throw new Error('visual plan requires three to five visuals');
 const availableIds = new Set((request.available_datasets ?? []).map((item) => String(item.dataset_id ?? '')));
 const titles = new Set();
@@ -281,7 +269,9 @@ for (const visual of visuals) {
 if (populationMapCount > 1) throw new Error('visual plan contains duplicate population maps');
 if ((availableIds.has('poi') || availableIds.has('population')) && chartCount < 1) throw new Error('visual plan requires an explanatory chart');
 if (availableIds.has('poi') && availableIds.has('road_edges') && specializedContextCount < 1) throw new Error('visual plan requires a specialized context map');
-return [{ json: { ...request, visual_plan: visuals } }];`,
+const visualDiagnostics = [...(Array.isArray(request.visual_diagnostics) ? request.visual_diagnostics : [])];
+if (droppedVisualCount > 0) visualDiagnostics.push({ kind: 'visual_plan_items_dropped', count: droppedVisualCount });
+return [{ json: { ...request, visual_plan: visuals, visual_diagnostics: visualDiagnostics } }];`,
     },
     [12660, 300],
     'validate-visual-design-00000000000000000000000',
@@ -529,9 +519,6 @@ FROM completed c;`,
   ),
   credentials: { postgres: { id: 'rag-postgres', name: 'RAG PostgreSQL' } },
 });
-connections['Claim Queued Analysis Run'] = {
-  main: [[{ node: 'Build Visual Agent Request', type: 'main', index: 0 }]],
-};
 connections['Build Visual Agent Request'] = {
   main: [
     [{ node: '生成项目数据图件 Agent', type: 'main', index: 0 }],
@@ -630,7 +617,6 @@ function component(nodeNames, idPrefix, anchor = [0, 0], replacements = {}) {
 export const projectContextComponent = component([
   ['Load Project Context', '读取项目上下文'],
   ['Attach Project Context', '合并项目上下文'],
-  ['Claim Queued Analysis Run', '认领待执行分析任务'],
 ], 'urban-agent-context', [0, 0], { 'Normalize Analysis Request': '构建分析执行上下文' });
 
 export const failureHandlingComponent = component([

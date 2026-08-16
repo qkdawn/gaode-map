@@ -111,6 +111,32 @@ def test_visual_plan_rejects_fields_outside_dataset_schema():
         )
 
 
+def test_visual_plan_drops_empty_model_placeholder_and_records_warning(monkeypatch, tmp_path):
+    records = {
+        "road_edges": [{"road_class": "主干路", "length_m": 100, "geometry": {"type": "LineString", "coordinates": [[116.38, 39.90], [116.40, 39.91]]}}],
+        "poi": [{"category": "餐饮", "location": [116.385, 39.902]}],
+    }
+    monkeypatch.setattr(visuals, "_resolve_history_id", lambda _: "history-1")
+    monkeypatch.setattr(visuals._DATA, "_all_spatial_records", lambda _, dataset_id: records[dataset_id])
+    package = visuals.build_spatial_strategy_visuals(
+        run_id="placeholder-run",
+        history_id="history-1",
+        project_context={"datasets": [{"dataset_id": "road_edges"}, {"dataset_id": "poi"}]},
+        visual_plan=[
+            {"title": "", "caption": "", "decision_question": "", "rationale": "模型保留的空槽位"},
+            _decision_plan(title="道路与活动点关系", format="map", map_variant="poi_access", layers=[
+                {"dataset_id": "road_edges", "role": "line"},
+                {"dataset_id": "poi", "role": "point"},
+            ]),
+            _decision_plan(title="设施结构统计", format="chart", chart_variant="poi_supply", dataset_id="poi"),
+            _decision_plan(title="道路数据汇总", format="table", dataset_id="road_edges"),
+        ],
+        root=tmp_path,
+    )
+    assert package["warnings"] == ["visual_plan_items_dropped:1"]
+    assert len(package["visual_plan"]) == 3
+
+
 def test_nightlight_map_uses_platform_palette_and_hotspot_thresholds(monkeypatch, tmp_path):
     cells = []
     for index, radiance in enumerate([1.0, 4.0, 12.0, 30.0, 80.0]):

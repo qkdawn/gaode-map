@@ -221,3 +221,95 @@ def test_project_data_endpoint_reads_history_bound_existing_datasets(monkeypatch
         "step_key": "step_04_supply_gap",
         "project_context": {"project": {"history_id": "history-1"}},
     }
+
+
+def test_graphrag_endpoint_forwards_query_to_isolated_runner(monkeypatch):
+    seen = {}
+
+    def fake_query(payload):
+        seen["payload"] = payload
+        return {
+            "status": "success",
+            "engine": "microsoft_graphrag",
+            "method": payload.method,
+            "answer": "GraphRAG result",
+            "contexts": [],
+            "citations": [],
+        }
+
+    monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
+    monkeypatch.setattr(spatial_strategy, "query_graphrag", fake_query)
+    with TestClient(_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/spatial-strategy/knowledge/graphrag/query",
+            headers={"X-N8N-Client-Key": "internal-key"},
+            json={"query": "Historic Urban Landscape 的操作化方法", "method": "global"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["engine"] == "microsoft_graphrag"
+    assert seen["payload"].query == "Historic Urban Landscape 的操作化方法"
+    assert seen["payload"].method == "global"
+
+
+def test_agent_tool_endpoint_forwards_public_web_tools(monkeypatch):
+    seen = {}
+
+    async def fake_call(*, history_id, tool_name, arguments):
+        seen.update(history_id=history_id, tool_name=tool_name, arguments=arguments)
+        return {
+            "tool_name": tool_name,
+            "is_error": False,
+            "structured_content": {"status": "available", "content": []},
+            "content": [],
+        }
+
+    monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
+    monkeypatch.setattr(spatial_strategy, "call_spatial_mcp_tool", fake_call)
+    with TestClient(_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/spatial-strategy/agent-tools/call",
+            headers={"X-N8N-Client-Key": "internal-key"},
+            json={
+                "history_id": "history-1",
+                "tool_name": "search_public_web",
+                "arguments": {"query": "长沙 历史文化保护 官方", "provider": "anysearch", "limit": 5},
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["tool_name"] == "search_public_web"
+    assert seen == {
+        "history_id": "history-1",
+        "tool_name": "search_public_web",
+        "arguments": {"query": "长沙 历史文化保护 官方", "provider": "anysearch", "limit": 5},
+    }
+
+
+def test_agent_tool_endpoint_accepts_spatial_evidence_tool(monkeypatch):
+    seen = {}
+
+    async def fake_call(*, history_id, tool_name, arguments):
+        seen.update(history_id=history_id, tool_name=tool_name, arguments=arguments)
+        return {"tool_name": tool_name, "is_error": False, "structured_content": {"status": "available"}, "content": []}
+
+    monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
+    monkeypatch.setattr(spatial_strategy, "call_spatial_mcp_tool", fake_call)
+    with TestClient(_app()) as client:
+        response = client.post(
+            "/api/v1/analysis/spatial-strategy/agent-tools/call",
+            headers={"X-N8N-Client-Key": "internal-key"},
+            json={
+                "history_id": "history-1",
+                "tool_name": "analyze_spatial_evidence",
+                "arguments": {"analysis": "scope", "metric_ids": []},
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["tool_name"] == "analyze_spatial_evidence"
+    assert seen == {
+        "history_id": "history-1",
+        "tool_name": "analyze_spatial_evidence",
+        "arguments": {"analysis": "scope", "metric_ids": []},
+    }

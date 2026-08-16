@@ -1,6 +1,7 @@
 from .schemas import (
     KnowledgeBaseIngestAccepted,
     KnowledgeBaseIngestRequest,
+    GraphRAGQueryRequest,
     SpatialStrategyRunAccepted,
     SpatialStrategyRunDetail,
     SpatialStrategyRunRequest,
@@ -29,11 +30,14 @@ from .service import (
 from .reader_result import project_run_accepted, project_run_detail
 from .visuals import build_spatial_strategy_visuals
 from .mcp_agent import call_spatial_mcp_tool, read_previous_chapter
+from .graphrag import GraphRAGQueryError, query_graphrag
 
 __all__ = [
     "SpatialStrategyGatewayError",
+    "GraphRAGQueryError",
     "KnowledgeBaseIngestAccepted",
     "KnowledgeBaseIngestRequest",
+    "GraphRAGQueryRequest",
     "SpatialStrategyRunAccepted",
     "SpatialStrategyRunDetail",
     "SpatialStrategyRunRequest",
@@ -56,6 +60,7 @@ __all__ = [
     "submit_spatial_strategy_run",
     "call_spatial_mcp_tool",
     "read_previous_chapter",
+    "query_graphrag",
     "project_run_accepted",
     "project_run_detail",
 ]

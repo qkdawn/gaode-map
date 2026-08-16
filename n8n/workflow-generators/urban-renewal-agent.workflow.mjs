@@ -14,13 +14,11 @@ import {
   sticky,
 } from './workflow-builder.mjs';
 
-const [submitSource, statusSource, decisionSource, retrievalSource, embeddingSource, rerankSource, responsesSource] = await Promise.all([
+const [submitSource, statusSource, decisionSource, retrievalSource, responsesSource] = await Promise.all([
   readComponent('agent-submit.json'),
   readComponent('agent-status.json'),
   readComponent('decision-step.json'),
-  readComponent('kb-retrieve.json'),
-  readComponent('embedding.json'),
-  readComponent('rerank.json'),
+  readComponent('graphrag-retrieve.json'),
   readComponent('responses.json'),
 ]);
 
@@ -51,55 +49,49 @@ if (requestNode) {
     .replace("  parallel_tool_calls: false,", "  parallel_tool_calls: true,")
     .replace("maximum: 12 } }, additionalProperties: false } },\n    { type: 'function', name: 'read_project_document'", "maximum: 32 } }, additionalProperties: false } },\n    { type: 'function', name: 'read_project_document'")
     .replace("chapter_title: state.step_title, previous_chapters: previous", "chapter_title: state.step_title, previous_chapters: previousChapters")
-    .replace("const userPayload = JSON.stringify({ project_question: state.project_question, chapter_title: state.step_title, previous_chapters: previousChapters, source_context: contexts });", "const userPayload = JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', chapter_title: state.step_title, research_brief: state.research_brief, previous_decisions: previousChapters, source_context: contexts });")
+    .replace("const retrieval = $input.first()?.json ?? {};\nconst contexts =", "const retrieval = $input.first()?.json ?? {};\nconst retrievalStatus = String(retrieval.retrieval?.status ?? retrieval.status ?? 'success');\nconst retrievalWarnings = Array.isArray(retrieval.warnings) ? retrieval.warnings.map((item) => String(item ?? '')).filter(Boolean) : [];\nconst contexts =")
+    .replace("const userPayload = JSON.stringify({ project_question: state.project_question, chapter_title: state.step_title, previous_chapters: previousChapters, source_context: contexts });", "const userPayload = JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', chapter_title: state.step_title, research_brief: state.research_brief, previous_decisions: previousChapters, source_context: contexts, public_knowledge_retrieval: { status: retrievalStatus, warnings: retrievalWarnings } });")
+    .replace("source_context: contexts });", "source_context: contexts, public_knowledge_retrieval: { status: retrievalStatus, warnings: retrievalWarnings } });")
     .replace("  '只返回完整章节正文，不要解释写作过程，不要另附审计数据。',", "  '研究过程先于写作：先把当前研究任务改写成一个真正需要作出判断的问题，提出可能成立的解释或路径，再寻找能够区分它们的证据。不要从已有指标直接跳到建议。',\n  '分析关系和机制：说明对象之间如何发生作用、哪些条件是必要前提、相关性为何可能不是因果。检验是否存在能解释同一现象的替代解释；如果没有有意义的替代解释，说明为什么，而不是为了形式制造方案。',\n  '优先推进一个新的决策边界：把 previous_decisions 当作上游待检验前提，先说明哪些问题已经由上游处理、哪些仍未解决，再把证据用于本章的新选择。如果本章证据不足以改变选择，就明确保留未决边界；不要把上游的完整论证重新改写成背景综述，也不要提前替后续章节完成它们的核心判断。',\n  '成稿前做一次自我挑战：当前判断最脆弱的环节是什么，什么事实会推翻它，它对下一章节究竟形成了什么约束。把这段阶段性结论写入 decision_brief，供后续章节直接承接；decision_brief 是自由文本，不使用固定模板。',\n  'reader_chapter 是面向甲方的完整正文，可以自由组织，但应让读者看清本章新增的问题、关系、取舍和决定，而不只是数据摘要后接建议。只返回 decision_brief 与 reader_chapter。',")
     .replace("  'previous_chapters 只提供前文的位置和可用性，不包含正文。前文是已完成的分析文段及其阶段性判断；需要承接时，使用 read_previous_chapter 按 step_key 或 step_order 读取完整正文。不要假设没有读取的前文，也不要重复已读取章节已经完成的分析。',\n  `当前章节：${state.step_title}。`,", "  'previous_decisions 包含前文自由表达的阶段性结论。把它们当作待继续检验的上游判断，不当作不可质疑的事实；需要核对完整论证时，再使用 read_previous_chapter。后续结论如果改变上游判断，必须在正文中解释原因。',\n  `当前研究任务：${state.research_brief || state.step_title}。`,")
-    .replace("{ type: 'function', name: 'read_project_document', description:", "{ type: 'function', name: 'read_previous_chapter', description: 'Read one completed earlier chapter by step_key or step_order.', parameters: { type: 'object', properties: { step_key: { type: 'string' }, step_order: { type: 'integer', minimum: 1, maximum: 32 } }, additionalProperties: false } },\n    { type: 'function', name: 'read_project_document', description:");
-}
-const followUpNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Build MCP Agent Follow-up');
-if (followUpNode) {
-  followUpNode.parameters.jsCode = followUpNode.parameters.jsCode
+    .replace("{ type: 'function', name: 'read_project_document', description:", "{ type: 'function', name: 'read_previous_chapter', description: 'Read one completed earlier chapter by step_key or step_order.', parameters: { type: 'object', properties: { step_key: { type: 'string' }, step_order: { type: 'integer', minimum: 1, maximum: 32 } }, additionalProperties: false } },\n    { type: 'function', name: 'read_project_document', description:")
     .replace(
-      "const items = $input.all();\nconst prior = $('Prepare MCP Agent Tool Call').first().json;",
-      "const items = $input.all();\nconst preparedItems = typeof $('Prepare MCP Agent Tool Call').all === 'function' ? $('Prepare MCP Agent Tool Call').all() : [{ json: $('Prepare MCP Agent Tool Call').first().json }];\nconst prior = preparedItems[0]?.json ?? {};",
+      "  '正文应使用自然标题和普通读者能理解的表达，直接说明判断、依据、候选路径之间的取舍、反证、不确定性、成立条件和待核验事项。内容长度由证据复杂度决定，不套固定短摘要模板。',",
+      "  '正文应使用自然标题和普通读者能理解的表达，直接说明判断、依据、候选路径之间的取舍、反证、不确定性和成立条件。内容长度由证据复杂度决定，不套固定短摘要模板。',\n  '本次分析的完整边界是当前已经提供的项目文档、POI、人口、路网、夜光、H3 网格及其他可用空间数据。必须基于这些现有证据完成判断，不得把现场踏勘、访谈、产权或文保核验、逐栋建筑测绘、真实客流、付费意愿、运营商承诺等当前不可得信息写成报告的前置门槛。',\n  '对缺失信息采用三种处理：不影响当前尺度判断的直接忽略；会限制判断的，在正文中用一句“当前证据只能支持到 X，不能推出 Y”说明；只有用户明确要求行动计划时，才可把它们列为后续验证建议。默认不要生成“必须补齐证据”“需要进一步核实”的清单，也不要用缺失数据替代本章分析。',\n  '严格区分事实、代理和未知：项目材料或数据库直接提供的是事实；人口、POI、路网、夜光和 H3 等是代理；当前数据无法回答的是未知。未知只降低结论强度，不自动阻塞结论。财务、客群和运营部分应输出现有数据支持的方向、无法计算的变量及其对建议强度的影响，不得假装拥有真实客流、支付或承诺数据。',"
     )
     .replace(
-      "const normalizedResults = items.map((item) => {\n  const toolResult = item.json ?? {};\n  return {\n    tool_name: String(toolResult.tool_name ?? ''),\n    call_id: String(toolResult.mcp_call_id ?? ''),",
-      "const normalizedResults = items.map((item, index) => {\n  const itemPrior = preparedItems[index]?.json ?? prior;\n  const toolResult = item.json ?? {};\n  return {\n    tool_name: String(toolResult.tool_name ?? itemPrior.mcp_tool_name ?? ''),\n    call_id: String(toolResult.mcp_call_id ?? itemPrior.mcp_call_id ?? ''),\n    arguments: itemPrior.mcp_arguments && typeof itemPrior.mcp_arguments === 'object' ? itemPrior.mcp_arguments : {},",
+      "  '空间事实只通过 analyze_spatial_evidence 获取。先用 scope 和空 metric_ids 发现可用指标，再按需选择范围、距离、方向、邻域、排序、关系或个案检查。不得自行重算 GIS 公式、解释原始坐标或要求完整几何。项目文档目录在 project_documents 中，按需使用 read_project_document 读取原文。',",
+      "  '空间事实只通过 analyze_spatial_evidence 获取：你可以自由选择范围、距离、方向、邻域、排序、关系或个案检查，但不得自行重算 GIS 公式、解释原始坐标或要求完整几何。先以 scope 且空 metric_ids 发现可用指标，再按当前分析需要迭代调用。项目文档目录已在 project_documents 中提供，必须按需调用 read_project_document 读取原文；返回 complete=false 时应继续读取。',"
+    );
+  requestNode.parameters.jsCode = requestNode.parameters.jsCode
+    .replace(
+      "  '研究过程先于写作：先把当前研究任务改写成一个真正需要作出判断的问题，提出可能成立的解释或路径，再寻找能够区分它们的证据。不要从已有指标直接跳到建议。',",
+      "  '每个分析方向必须同时使用两条公共证据通道：系统已经通过 GraphRAG 提供论文与 UNESCO/ICOMOS 文件证据；你还必须先调用 search_public_web 检索当前互联网，再对准备使用的候选来源调用 fetch_public_web_page 读取网页全文。搜索摘要只用于发现来源，不能作为事实证据。',\n  '互联网检索词只能包含已经公开的地名、项目名和公共议题。不得把未公开项目文档、住户信息、权属细节、个人信息或其他敏感内容发送给第三方搜索服务。优先政府、统计部门、规划主管部门、交通运营方和项目官网。',\n  '如果 GraphRAG 文献证据入口返回 unavailable，不得编造论文或规范结论；应依靠项目证据和已获取的网页全文继续分析，并明确说明文献证据暂不可用。',\n  '如果互联网搜索或全文抓取不可用，不得编造网页证据；应基于 GraphRAG 文献证据和项目证据继续分析，并在正文中明确最新公开证据尚未取得。',\n  '研究过程先于写作：先把当前研究任务改写成一个真正需要作出判断的问题，提出可能成立的解释或路径，再寻找能够区分它们的证据。不要从已有指标直接跳到建议。',",
     )
-    .replace("const fingerprints = Array.isArray(prior.tool_result_fingerprints) ? prior.tool_result_fingerprints : [];", `const newEvidence = normalizedResults.flatMap((entry) => {
-  const source = entry.result && typeof entry.result === 'object' ? entry.result : {};
-  const requested = entry.arguments;
-  if (entry.is_error) return [];
-  if (entry.tool_name === 'project_context') {
-    const snapshotId = String(source.snapshot_id ?? source.context_snapshot_id ?? source.history_id ?? requested.history_id ?? 'offline_snapshot');
-    return (Array.isArray(source.computed_results) ? source.computed_results : []).flatMap((resultItem) => {
-      if (!resultItem || typeof resultItem !== 'object') return [];
-      const resultId = String(resultItem.result_id ?? resultItem.id ?? resultItem.metric_key ?? resultItem.metric_id ?? '').trim();
-      if (!resultId) return [];
-      return [{ citation_id: resultId, document_id: '', title: String(resultItem.title ?? resultItem.name ?? resultItem.metric_key ?? resultId), source_type: 'project_snapshot', source_url: '', source_locator: 'offline_snapshot:' + resultId, page_start: null, page_end: null, section: String(resultItem.metric_key ?? resultItem.metric_id ?? 'computed_result'), dataset_id: String(resultItem.dataset_id ?? ''), snapshot_id: snapshotId, dataset_checksum: String(resultItem.dataset_checksum ?? resultItem.checksum ?? ''), complete: resultItem.complete !== false, content: JSON.stringify(resultItem.data ?? resultItem.result ?? resultItem) }];
-    });
-  }
-  if (entry.tool_name === 'read_project_document') {
-    return (Array.isArray(source.blocks) ? source.blocks : []).flatMap((block) => {
-      if (!block || typeof block !== 'object') return [];
-      const page = Number(block.page ?? 0) || null;
-      const locator = String(block.source_locator ?? (page ? 'page:' + page : 'block:' + String(block.chunk_id ?? '')));
-      return [{ citation_id: String(block.chunk_id ?? source.selection_checksum ?? source.document_checksum ?? locator), document_id: String(source.document_id ?? requested.document_id ?? ''), title: String(block.filename ?? requested.document_id ?? '项目文档'), source_type: 'project_document', source_url: String(source.original_resource_uri ?? ''), source_locator: locator, page_start: page, page_end: page, section: String(block.heading ?? ''), content: String(block.text ?? '') }];
-    });
-  }
-  if (entry.tool_name === 'query_data') {
-    const datasetId = String(source.dataset_id ?? requested.dataset_id ?? '');
-    const locator = 'project_data:' + datasetId + ':' + String(source.operation ?? requested.operation ?? 'records') + ':' + String(source.result_checksum ?? source.query_checksum ?? source.snapshot_id ?? 'result');
-    return [{ citation_id: String(source.result_checksum ?? source.query_checksum ?? source.snapshot_id ?? locator), document_id: '', title: datasetId || '项目空间数据', source_type: 'project_data', source_url: '', source_locator: locator, page_start: null, page_end: null, section: String(source.operation ?? requested.operation ?? 'records'), dataset_id: datasetId, snapshot_id: String(source.snapshot_id ?? ''), dataset_checksum: String(source.dataset_checksum ?? ''), complete: source.complete === true, content: JSON.stringify({ total_count: source.total_count ?? null, records: source.records ?? [], computed_results: source.computed_results ?? [], spatial_diagnostics: source.spatial_diagnostics ?? {}, warnings: source.warnings ?? [] }) }];
-  }
-  return [];
-});
-const toolEvidence = [...(Array.isArray(prior.tool_evidence) ? prior.tool_evidence : []), ...newEvidence].filter((item, index, collection) => item.citation_id && collection.findIndex((candidate) => candidate.citation_id === item.citation_id) === index);
-const toolDiagnostics = [...(Array.isArray(prior.tool_diagnostics) ? prior.tool_diagnostics : []), ...normalizedResults.filter((entry) => entry.is_error).map((entry) => ({ kind: 'tool_error', tool_name: entry.tool_name, message: String(entry.result?.message ?? entry.result?.error ?? 'tool_call_failed') }))];
-const fingerprints = Array.isArray(prior.tool_result_fingerprints) ? prior.tool_result_fingerprints : [];`)
-    .replace("  tool_result_fingerprints: [...fingerprints, ...newFingerprints].slice(-32),", "  tool_result_fingerprints: [...fingerprints, ...newFingerprints].slice(-32),\n  tool_evidence: toolEvidence,\n  tool_diagnostics: toolDiagnostics,");
+    .replace(
+      "  tool_error_limit: 2,",
+      "  tool_error_limit: 2,\n  public_web_search_attempted: false,\n  public_web_fetch_attempted: false,\n  public_web_candidate_urls: [],\n  tool_choice: { type: 'function', name: 'search_public_web' },",
+    )
+    .replace(
+      "  tools: [\n    { type: 'function', name: 'analyze_spatial_evidence'",
+      "  tools: [\n    { type: 'function', name: 'search_public_web', description: 'Search the current public internet through AnySearch. Use only public place names, public project names, and public issues. Search results are discovery leads and must not be cited until fetched.', parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1 }, provider: { type: 'string', enum: ['anysearch', 'exa'] }, limit: { type: 'integer', minimum: 1, maximum: 10 } }, required: ['query'], additionalProperties: false } },\n    { type: 'function', name: 'fetch_public_web_page', description: 'Fetch full text for selected public-web URLs before using them as evidence.', parameters: { type: 'object', properties: { urls: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string', minLength: 8 } }, provider: { type: 'string', enum: ['anysearch', 'exa'] }, max_characters: { type: 'integer', minimum: 500, maximum: 20000 } }, required: ['urls'], additionalProperties: false } },\n    { type: 'function', name: 'analyze_spatial_evidence'",
+    );
+  requestNode.parameters.jsCode = requestNode.parameters.jsCode
+    .replace(
+      "const userPayload = JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', chapter_title: state.step_title, research_brief: state.research_brief, previous_decisions: previousChapters, source_context: contexts, public_knowledge_retrieval: { status: retrievalStatus, warnings: retrievalWarnings } });",
+      "const projectDocuments = (Array.isArray(state.project_context?.documents) ? state.project_context.documents : []).map((item) => ({ document_id: String(item?.document_id ?? ''), title: String(item?.title ?? item?.file_name ?? ''), document_role: String(item?.document_role ?? ''), status: String(item?.status ?? '') })).filter((item) => item.document_id);\nconst userPayload = JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', chapter_title: state.step_title, research_brief: state.research_brief, previous_decisions: previousChapters, project_documents: projectDocuments, source_context: contexts, public_knowledge_retrieval: { status: retrievalStatus, warnings: retrievalWarnings } });",
+    );
 }
+const toolPrepareNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Prepare MCP Agent Tool Call');
+if (toolPrepareNode?.parameters?.jsCode) {
+  toolPrepareNode.parameters.jsCode = toolPrepareNode.parameters.jsCode.replace(
+    "const toolArguments = mcpToolName === 'read_previous_chapter'\n    ? { ...mcpArguments, _decision_state: state.decision_state, _current_step_order: state.step_order }\n    : mcpArguments;",
+    "const toolArguments = mcpToolName === 'read_previous_chapter'\n    ? { ...mcpArguments, completed_chapters: Object.values(state.decision_state?.steps ?? {}).filter((chapter) => chapter && Number(chapter.step_order ?? 0) < Number(state.step_order ?? 0)), current_step_order: Number(state.step_order ?? 0) }\n    : mcpArguments;",
+  );
+}
+const followUpNode = decisionSourceForGeneration.nodes.find((node) => node.name === "Build MCP Agent Follow-up");
+// Evidence projection lives in the reusable decision-step component.
+if (!followUpNode) throw new Error("follow_up_node_missing");
 const refreshLeaseNode = postgresNode('刷新分析任务租约', `UPDATE analysis_runs
 SET heartbeat_at = NOW(), lease_expires_at = NOW() + INTERVAL '15 minutes', updated_at = NOW()
 WHERE id = $1::uuid AND tenant_id = $2::text AND status = 'running';
@@ -123,11 +115,36 @@ if (stepPersistNode) {
 const validationNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Validate Decision Output');
 if (validationNode) {
   validationNode.parameters.jsCode = validationNode.parameters.jsCode
+    .replace(
+      "let parsed;\ntry { parsed = JSON.parse(String(response.output_text ?? '')); } catch { throw new Error('reader_chapter_invalid_json'); }",
+      `const primaryOutput = String(response.output_text ?? '').trim();
+const fallbackOutput = String(response.fallback_output_text ?? '').trim();
+let parsed;
+let usedFallback = false;
+try {
+  parsed = JSON.parse(primaryOutput);
+} catch {
+  if (!fallbackOutput) {
+    const upstreamMessage = String(response.error?.message ?? response.error ?? 'empty_model_output').slice(0, 240);
+    throw new Error('reader_chapter_model_failed: ' + upstreamMessage);
+  }
+  try {
+    parsed = JSON.parse(fallbackOutput);
+    usedFallback = true;
+  } catch {
+    throw new Error('reader_chapter_invalid_json');
+  }
+}`,
+    )
     .replace("const evidenceSignals = ['项目材料', '项目数据', '空间数据', '公开资料', '现场', '核验', '证据', '数据显示', '材料显示'];\nif (!evidenceSignals.some((signal) => readerChapter.includes(signal))) throw new Error('reader_chapter_missing_evidence_context');\n", '')
     .replace("const conditionSignals = ['条件', '前提', '尚未', '不能', '需要', '待核验', '不确定', '若', '如果'];\nif (!conditionSignals.some((signal) => readerChapter.includes(signal))) throw new Error('reader_chapter_missing_conditions');\n", '');
 validationNode.parameters.jsCode = validationNode.parameters.jsCode.replace(
     "const output = { title: state.step_title, reader_chapter: readerChapter };",
     "const decisionBrief = String(parsed.decision_brief ?? '').trim();\nif (!decisionBrief) throw new Error('decision_brief_empty');\nconst citationSources = [...(Array.isArray(request.retrieval?.citations) ? request.retrieval.citations : []), ...(Array.isArray(response.tool_evidence) ? response.tool_evidence : [])];\nconst citations = citationSources.filter((item) => item && typeof item === 'object').map((item) => ({ ...item, citation_id: String(item.citation_id ?? item.chunk_key ?? item.document_id ?? '').trim(), document_id: String(item.document_id ?? '').trim(), chunk_id: String(item.chunk_id ?? '').trim(), title: String(item.title ?? '').trim(), source_type: String(item.source_type ?? '').trim(), source_url: String(item.source_url ?? '').trim(), page_start: item.page_start ?? null, page_end: item.page_end ?? null, section: String(item.section ?? '').trim() })).filter((item, index, items) => item.citation_id && items.findIndex((candidate) => candidate.citation_id === item.citation_id) === index);\nconst diagnostics = (Array.isArray(response.tool_diagnostics) ? response.tool_diagnostics : []).filter((item) => item && typeof item === 'object');\nconst qualityGate = { evidence_count: citations.length, public_context_count: Array.isArray(request.retrieval?.contexts) ? request.retrieval.contexts.length : 0, project_evidence_count: Array.isArray(response.tool_evidence) ? response.tool_evidence.length : 0, evidence_status: citations.length > 0 ? 'grounded' : 'insufficient_evidence' };\nconst output = { step_key: state.step_key, step_order: state.step_order, title: state.step_title, research_brief: String(state.research_brief ?? ''), decision_brief: decisionBrief, reader_chapter: readerChapter, citations, diagnostics, quality_gate: qualityGate };",
+  );
+  validationNode.parameters.jsCode = validationNode.parameters.jsCode.replace(
+    "const qualityGate = { evidence_count: citations.length, public_context_count: Array.isArray(request.retrieval?.contexts) ? request.retrieval.contexts.length : 0, project_evidence_count: Array.isArray(response.tool_evidence) ? response.tool_evidence.length : 0, evidence_status: citations.length > 0 ? 'grounded' : 'insufficient_evidence' };",
+    "if (usedFallback) diagnostics.push({ kind: 'deepening_model_unavailable', message: String(response.error?.message ?? response.error ?? 'empty_model_output').slice(0, 240) });\nif (response.generation_recovery_error) diagnostics.push({ kind: 'chapter_generation_recovered', message: String(response.generation_recovery_error).slice(0, 240) });\nconst publicContextCount = Array.isArray(request.retrieval?.contexts) ? request.retrieval.contexts.length : 0;\nconst toolEvidence = Array.isArray(response.tool_evidence) ? response.tool_evidence : [];\nconst liveWebFulltextCount = toolEvidence.filter((item) => String(item?.source_type ?? '') === 'public_web_fulltext').length;\nconst projectEvidenceCount = toolEvidence.filter((item) => String(item?.source_type ?? '').startsWith('project_')).length;\nconst liveWebUnavailable = diagnostics.some((item) => ['public_web_unavailable', 'public_web_no_candidates'].includes(String(item?.kind ?? '')));\nconst dualSourceStatus = publicContextCount > 0 && liveWebFulltextCount > 0 ? 'complete' : publicContextCount > 0 ? (liveWebUnavailable ? 'knowledge_base_only_web_unavailable' : 'knowledge_base_only') : liveWebFulltextCount > 0 ? 'live_web_only' : 'no_public_evidence';\nconst qualityGate = { evidence_count: citations.length, public_context_count: publicContextCount, live_web_fulltext_count: liveWebFulltextCount, project_evidence_count: projectEvidenceCount, dual_source_status: dualSourceStatus, evidence_status: citations.length > 0 ? 'grounded' : 'insufficient_evidence', generation_status: response.generation_recovery_error ? 'recovered_after_primary_failure' : 'completed', deepening_status: usedFallback ? 'fallback_to_initial_draft' : 'completed' };",
   );
   validationNode.parameters.jsCode = validationNode.parameters.jsCode.replace(
     "steps: { ...(state.decision_state.steps ?? {}), [state.step_key]: output },\n  current_step: state.step_key,",
@@ -259,10 +276,10 @@ const schema = { type: 'object', properties: {
 }, required: ['research_frame', 'research_plan'], additionalProperties: false };
 const instructions = [
   '你是城市更新项目的首席研究设计师。此时不要写报告、定位或建议，只建立一段开放的研究框架，并列出本项目真正需要作出的决策节点。',
-  '先判断用户真正需要作出的选择是什么，以及哪些事实只是背景、哪些未知会改变选择。提出少量真正互相竞争的解释或路径，并说明需要什么证据才能区分；不要为了形式凑假设。',
+  '先判断用户真正需要作出的选择是什么，以及现有项目文档和空间数据库已经能支持哪些判断。提出少量真正互相竞争的解释或路径，并用现有事实和代理指标区分；不要把当前不可得的调查、访谈、产权或文保核验、真实客流、付费意愿或运营承诺列为研究前置条件，也不要为了形式凑假设。',
   'research_plan 只列会改变项目路径的决策边界，每个节点用自然语言写一个标题和待回答的问题。可以合并、跳过或改写常见的政策、市场、客群、定位、产品、空间、运营、财务和分期视角；不相关的视角不要为了凑数量保留。节点数量由问题复杂度决定，只保留必要的节点并避免重复。节点应能按依赖关系排列，但不要把它写成固定章节模板。',
   '明确节点之间的关键依赖关系，特别指出最容易发生的因果跳跃和最值得反驳的直觉。',
-  '研究框架是开放式工作备忘录，不是审计表，不使用固定字段、编号模板或预设答案。信息不足时写明应如何判断，不要提前给出结论。',
+  '研究框架是开放式工作备忘录，不是审计表，不使用固定字段、编号模板或预设答案。信息不足时只说明它如何限制结论强度；必须继续用现有证据完成尺度相称的条件性判断，不要输出“必须补齐证据”清单。',
 ].join('\\n');
 return [{ json: {
   ...request,
@@ -304,20 +321,6 @@ for (const terminal of researchFrameModel.terminals) connect(graph, terminal, '�
 
 const queueNode = codeNode('建立自适应分析队列', `const claimed = $input.first()?.json ?? {};
 const request = $('确认整体研究框架').first().json;
-const fallbackSteps = [
-  ['step_01_policy_site', '政策与场地', '项目必须解决的真实公共任务是什么，场地资源、权属、保护、居民和建设条件分别允许或排除哪些路径？'],
-  ['step_02_regional_role', '区域角色', '项目与区域中心、交通节点、景区、商圈、社区和同类设施是什么关系；它有资格承担什么角色，又不应声称什么角色？'],
-  ['step_03_market_flow', '市场与流动', '哪些人可能在什么时间、通过什么到达机制进入项目；区域流量、项目可达性与实际到访之间还缺少哪些因果环节？'],
-  ['step_04_supply_gap', '供给与空位', '周边现有供给、替代方案和竞争项目满足了什么、遗漏了什么；所谓空位是真实未满足需求，还是数据分类与观察范围造成的假象？'],
-  ['step_05_audience_use', '客群与使用', '比较候选客群的服务需要、到达机制、时间预算、替代供给与使用阻碍；分析客群之间的互补和冲突，并判断一期最值得验证谁，而不是给人群贴标签。'],
-  ['step_06_theme_resources', '主题与资源', '哪些真实地方资源之间存在可持续的关系，哪些只是孤立符号；主题能否转化为反复发生的使用和运营机制？'],
-  ['step_07_positioning', '项目定位', '基于上游判断比较可行定位：每种定位为谁创造什么价值、依赖什么能力、与替代供给有何差异，为什么当前选择优于竞争性解释？'],
-  ['step_08_product_mix', '产品组合', '把定位转成可运行的产品组合，解释不同客群、场景和产品之间如何互相导流或争夺资源，并找出一期最小可运行组合。'],
-  ['step_09_spatial_layout', '空间布局', '由真实使用流程和运营责任反推入口、集散、体验、服务、后勤、居民与安全边界；空间关系如何支持或破坏产品承诺？'],
-  ['step_10_operating_model', '运营模式', '谁负责获客、内容、场地、社区协调和数据记录；各方的激励、能力与责任关系能否让一期样板持续运行？'],
-  ['step_11_financial_check', '财务校验', '哪些投入和收入假设真正决定可行性，需求、容量、采购价格与资金条件如何联动；在证据不足时给出条件范围而非伪精确结论。'],
-  ['step_12_phasing', '分期实施', '怎样把当前选择组织为可学习的一期部署；记录什么结果、在什么时间窗判断继续、调整、扩大或停止？'],
-];
 const candidatePlan = Array.isArray(request.decision_state?.research_plan) && request.decision_state.research_plan.length
   ? request.decision_state.research_plan
   : (Array.isArray(request.research_plan) ? request.research_plan : []);
@@ -326,7 +329,8 @@ const adaptiveSteps = candidatePlan.map((item, index) => ({
   step_title: String(item?.title ?? '').trim(),
   research_brief: String(item?.question ?? '').trim(),
 })).filter((item) => item.step_title && item.research_brief).slice(0, 32);
-const steps = adaptiveSteps.length ? adaptiveSteps : fallbackSteps.map(([step_key, step_title, research_brief]) => ({ step_key, step_title, research_brief }));
+if (!adaptiveSteps.length) throw new Error('research_plan_empty');
+const steps = adaptiveSteps;
 const researchPlan = steps.map(({ step_key, step_title, research_brief }) => ({ step_key, title: step_title, question: research_brief }));
 return steps.map(({ step_key, step_title, research_brief }, index) => ({ json: {
   run_id: String(claimed.run_id ?? request.run_id), tenant_id: request.tenant_id,
@@ -357,10 +361,7 @@ FROM analysis_runs WHERE id = $1::uuid AND tenant_id = $2::text;`,
   "={{ [$('合并项目上下文').first().json.run_id, $('合并项目上下文').first().json.tenant_id] }}",
   [2060, 1780], 'urban-agent-read-complete-state');
 graph.nodes.push(queueNode, loopNode, readStateNode, attachStateNode, readCompleteStateNode);
-// The scheduled consumer has already claimed the run before loading project
-// context; bypass the legacy queued-claim node for that path.
 graph.connections['合并项目上下文'] = { main: [[{ node: '构建整体研究框架', type: 'main', index: 0 }], [{ node: '记录任务失败', type: 'main', index: 0 }]] };
-graph.connections['认领待执行分析任务'] = { main: [[{ node: '构建整体研究框架', type: 'main', index: 0 }]] };
 connect(graph, '确认整体研究框架', '建立自适应分析队列');
 connect(graph, '建立自适应分析队列', '逐项执行分析方向');
 graph.connections['逐项执行分析方向'] = { main: [
@@ -397,25 +398,37 @@ connect(graph, '复用已完成章节', '逐项执行分析方向');
 connect(graph, '完成当前分析方向', '逐项执行分析方向');
 
 const deepenChapterNode = codeNode('深化章节判断', `const draftResponse = $input.first()?.json ?? {};
-let draft;
-try { draft = JSON.parse(String(draftResponse.output_text ?? '')); } catch { throw new Error('chapter_draft_invalid_json'); }
+const rawDraft = String(draftResponse.output_text ?? '').trim();
+let draft = null;
+try { draft = JSON.parse(rawDraft); } catch {}
+const draftAvailable = Boolean(String(draft?.decision_brief ?? '').trim() && String(draft?.reader_chapter ?? '').trim());
+const primaryFailure = draftAvailable ? '' : String(draftResponse.error?.message ?? draftResponse.error ?? 'empty_or_invalid_chapter_draft').slice(0, 240);
 const state = draftResponse.state && typeof draftResponse.state === 'object' ? draftResponse.state : {};
-const priorDecisions = Object.values(state.decision_state?.steps ?? {}).filter((item) => item && typeof item === 'object' && Number(item.step_order ?? 0) < Number(state.step_order ?? 0)).map((item) => ({ title: String(item.title ?? ''), decision_brief: String(item.decision_brief ?? '') })).filter((item) => item.decision_brief);
-const evidence = [...(Array.isArray(draftResponse.retrieval?.contexts) ? draftResponse.retrieval.contexts : []), ...(Array.isArray(draftResponse.tool_evidence) ? draftResponse.tool_evidence : [])].map((item) => ({ title: String(item?.title ?? ''), source_type: String(item?.source_type ?? ''), section: String(item?.section ?? ''), content: String(item?.content ?? '').slice(0, 2600) })).filter((item) => item.content).slice(0, 16);
+const priorDecisions = Object.values(state.decision_state?.steps ?? {}).filter((item) => item && typeof item === 'object' && Number(item.step_order ?? 0) < Number(state.step_order ?? 0)).map((item) => ({ title: String(item.title ?? ''), decision_brief: String(item.decision_brief ?? '') })).filter((item) => item.decision_brief).slice(-6);
+const evidence = [...(Array.isArray(draftResponse.retrieval?.contexts) ? draftResponse.retrieval.contexts : []), ...(Array.isArray(draftResponse.tool_evidence) ? draftResponse.tool_evidence : [])].map((item) => ({ title: String(item?.title ?? ''), source_type: String(item?.source_type ?? ''), section: String(item?.section ?? ''), content: String(item?.content ?? '').slice(0, 1400) })).filter((item) => item.content).slice(0, 10);
 const schema = { type: 'object', properties: { decision_brief: { type: 'string', minLength: 1 }, reader_chapter: { type: 'string', minLength: 1 } }, required: ['decision_brief', 'reader_chapter'], additionalProperties: false };
-const instructions = [
+const instructions = (draftAvailable ? [
   '你是同一章节的资深决策分析师。初稿已经完成，现在只做一次实质性深化，不做格式审计，也不要机械添加小标题。',
   '重新检查研究问题是否真正被回答；哪些证据只是相关性或代理，是否被误写成需求、客流、支付或因果；对象、客群、空间、产品和运营主体之间的关系是否说清。',
   '尝试用另一种解释说明同一证据。若替代解释同样成立，应降低结论强度或说明如何区分；若存在真实方案取舍，应解释当前选择为何胜出以及什么事实会改判。没有真实取舍时不要强造选项。',
   '检查本章是否承接前序判断并对后续选择形成明确约束。客群分析尤其要区分服务对象、使用者、付费者和到达机制，分析客群之间的互补、冲突与替代供给。',
+  '深化只能重组和解释已经取得的项目材料、空间数据库和公共证据。不得把现场踏勘、访谈、产权或文保核验、真实客流、付费意愿或运营商承诺新增为本章的必需证据；缺失变量只用于降低结论强度，不得把章节改写成待核实清单。',
   '在不增加未经证实事实的前提下重写 decision_brief 和 reader_chapter。保留初稿中成立的具体证据、反证和不确定性；删掉空泛总结。表达形式保持自由。',
-].join('\\n');
+] : [
+  '你是当前章节的恢复分析师。前一成稿请求因网络中断没有返回合法正文，但项目检索、工具证据和前序判断已经保留。现在根据这些材料独立完成本章，不要提及恢复过程。',
+  '先回答 research_brief，区分事实、代理和未知；说明关键对象关系、竞争性解释、当前取舍、最脆弱前提、改判条件及其对下一步的约束。',
+  '不得新增输入中没有的事实、数字、案例或承诺。证据不足时降低结论强度，但仍应完成尺度相称的条件性判断。',
+  '现有项目文档和空间数据库是完整分析边界；未知只说明不能推出什么，不自动转成“必须补齐证据”或“需要进一步核实”的任务。',
+  '输出 decision_brief 与面向甲方的完整 reader_chapter；表达形式自由，不使用内部工程术语。',
+]).join('\\n');
 return [{ json: {
   ...draftResponse,
+  fallback_output_text: draftAvailable ? rawDraft : '',
+  generation_recovery_error: primaryFailure,
   instructions,
-  input: JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', research_brief: state.research_brief, prior_decisions: priorDecisions, evidence, draft }),
-  max_output_tokens: 6000,
-  reasoning: { effort: 'high' },
+  input: JSON.stringify({ project_question: state.project_question, research_frame: state.research_frame || state.decision_state?.research_frame || '', research_brief: state.research_brief, prior_decisions: priorDecisions, evidence, draft: draftAvailable ? draft : null }),
+  max_output_tokens: draftAvailable ? 6000 : 4200,
+  reasoning: { effort: draftAvailable ? 'high' : 'medium' },
   tools: [],
   tool_choice: 'none',
   text: { format: { type: 'json_schema', name: 'deepened_decision_chapter', strict: true, schema } },
@@ -440,35 +453,14 @@ connect(graph, '深化章节判断', deepenModel.entries[0]);
 for (const terminal of deepenModel.terminals) connect(graph, terminal, '校验章节正文');
 
 const retrievalNames = {
-  'Normalize Recall Request': '规范公共证据检索条件', 'Embed Recall Query': '生成公共证据查询向量',
-  'Attach Query Embedding': '合并公共证据查询向量', 'Hybrid Keyword Vector Recall': '混合检索公共证据',
-  'Build Rerank Input': '构建公共证据重排输入', 'Recall Has Candidates': '检索到候选证据？',
-  'Rerank Candidates With Codex': '重排公共证据', 'Skip Empty Rerank': '跳过空证据重排',
-  'Prepare Context Expansion': '准备扩展证据上下文', 'Expand And Read Source Chunks': '读取相邻公共证据原文',
-  'Return Cited Context': '整理可引用公共证据',
+  '构建 GraphRAG 文献问题': '构建 GraphRAG 文献问题',
+  '调用 GraphRAG 文献检索': '调用 GraphRAG 文献检索',
+  '整理 GraphRAG 文献证据': '整理 GraphRAG 文献证据',
 };
 const retrieval = localizeComponent(retrievalSource, {
   names: retrievalNames, idPrefix: 'urban-agent-retrieval', anchor: [3500, 2480], triggerName: 'When Called By Agent',
 });
 replaceNodeWithFragment(graph, '检索公共证据原文', retrieval);
-
-const embeddingNames = {
-  'Build Embedding Request': '构建公共证据向量请求', 'Generate Embeddings': '生成公共证据查询向量',
-  'Validate Embeddings': '校验公共证据查询向量',
-};
-const embedding = localizeComponent(embeddingSource, {
-  names: embeddingNames, idPrefix: 'urban-agent-query-embedding', anchor: [4100, 2480], triggerName: 'When Called By RAG',
-});
-replaceNodeWithFragment(graph, '生成公共证据查询向量', embedding);
-
-const rerankNames = {
-  'Build Rerank Request': '构建模型重排请求', 'Call Codex Responses': '调用公共证据重排模型',
-  'Apply Model Ranking': '应用公共证据排序',
-};
-const rerank = localizeComponent(rerankSource, {
-  names: rerankNames, idPrefix: 'urban-agent-rerank', anchor: [5300, 2420], triggerName: 'When Called By Retrieval',
-});
-replaceNodeWithFragment(graph, '重排公共证据', rerank);
 
 function inlineResponses(targetName, prefix, anchor, labels) {
   const names = {
@@ -479,7 +471,6 @@ function inlineResponses(targetName, prefix, anchor, labels) {
   });
   replaceNodeWithFragment(graph, targetName, fragment);
 }
-inlineResponses('调用公共证据重排模型', 'urban-agent-rerank-model', [5800, 2420], ['构建重排模型请求体', '请求重排模型', '解析重排模型响应']);
 inlineResponses('调用章节分析模型', 'urban-agent-chapter-model', [5000, 1760], ['构建章节模型请求体', '请求章节分析模型', '解析章节模型响应']);
 inlineResponses('调用图件设计模型', 'urban-agent-visual-model', [1800, 3300], ['构建图件模型请求体', '请求图件设计模型', '解析图件模型响应']);
 inlineResponses('调用报告叙事模型', 'urban-agent-editorial-model', [3000, 3300], ['构建叙事模型请求体', '请求报告叙事模型', '解析叙事模型响应']);
@@ -533,16 +524,9 @@ for (const node of graph.nodes) {
   graph.connections[node.name] = { ...(graph.connections[node.name] ?? {}), main };
 }
 
-const legacyClaim = graph.nodes.find((node) => node.name === '认领待执行分析任务');
-if (legacyClaim) {
-  graph.nodes = graph.nodes.filter((node) => node !== legacyClaim);
-  delete graph.connections['认领待执行分析任务'];
-}
-
 for (const node of graph.nodes) {
   if (node.name === '读取项目上下文') node.position = [1120, 1860];
   if (node.name === '合并项目上下文') node.position = [1300, 1860];
-  if (node.name === '认领待执行分析任务') node.position = [1420, 1980];
   if (node.name === '记录任务失败') node.position = [6600, 2200];
 }
 

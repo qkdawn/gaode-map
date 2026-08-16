@@ -63,6 +63,17 @@ def _configured_dimensions() -> int:
     return value
 
 
+def _configured_batch_size() -> int:
+    raw = str(os.getenv("EMBEDDING_BATCH_SIZE") or "32").strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("EMBEDDING_BATCH_SIZE must be an integer") from exc
+    if value < 1:
+        raise RuntimeError("EMBEDDING_BATCH_SIZE must be positive")
+    return value
+
+
 @lru_cache(maxsize=1)
 def _get_model() -> Any:
     from fastembed import TextEmbedding
@@ -74,7 +85,7 @@ def _get_model() -> Any:
 
 def _encode(values: list[str]) -> list[list[float]]:
     try:
-        rows = list(_get_model().embed(values, batch_size=32))
+        rows = list(_get_model().embed(values, batch_size=_configured_batch_size()))
     except Exception as exc:  # inference/download errors are an API readiness failure
         raise HTTPException(status_code=503, detail=f"embedding_model_unavailable:{exc}") from exc
     dimensions = _configured_dimensions()

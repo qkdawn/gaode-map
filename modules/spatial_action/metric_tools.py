@@ -162,11 +162,11 @@ class MetricToolService:
         return details
 
     def catalog(self) -> list[MetricCatalogItem]:
-        catalog = [item.model_copy(deep=True) for _, item in sorted(self._catalog.items())]
-        for item in catalog:
-            if item.tool_id in {"spatial.thematic_visual", "report.decision_visual"}:
-                item.implementation_status = "implemented" if self._visual_tools.is_tool_available(item.tool_id) else "not_implemented"
-        return catalog
+        # Implementation status describes whether this repository has an
+        # execution path.  Runtime bridge readiness belongs in the execution
+        # result, otherwise a temporary ArcGIS outage makes a stable catalog
+        # entry disappear as if the capability had never been built.
+        return [item.model_copy(deep=True) for _, item in sorted(self._catalog.items())]
 
     def _validate_analysis_cards(self) -> None:
         """Fail fast when discovery and detailed analyst knowledge drift apart."""
@@ -335,6 +335,17 @@ class MetricToolService:
         existing = source_index.result(result_id)
         if existing:
             return MetricResult.model_validate({"result_id": result_id, "tool_id": item.tool_id, "tool_version": "catalog-4.1", **existing.payload})
+        if item.tool_id in {"spatial.thematic_visual", "report.decision_visual"}:
+            result = self._execute_visual_metric(
+                item=item,
+                result_id=result_id,
+                history_id=history_id,
+                history_detail=history_detail,
+                source_index=source_index,
+                parameters=normalized_parameters,
+            )
+            self._record_result(source_index, result)
+            return result
         if item.implementation_status != "implemented":
             result = MetricResult(result_id=result_id, tool_id=item.tool_id, tool_version="catalog-4.1", status="unavailable", summary="该工具尚未实现，未生成任何替代数值。", input_sources=input_sources, limitations=["工具实现状态为 not_implemented。"])
             self._record_result(source_index, result)
@@ -366,6 +377,93 @@ class MetricToolService:
         self._record_result(source_index, result)
         self._record_health_summaries(source_index, result)
         return result
+
+    def _execute_visual_metric(
+        self,
+        *,
+        item: MetricCatalogItem,
+        result_id: str,
+        history_id: str,
+        history_detail: dict[str, Any],
+        source_index: SourceIndex,
+        parameters: dict[str, Any],
+    ) -> MetricResult:
+        """Execute the visual adapter when a semantic visual request is supplied.
+
+        The catalog entry is available even when the external Bridge is down;
+        the returned runtime status remains truthful and contains no SVG body.
+        """
+        request = parameters.get("visual_request")
+        if not isinstance(request, dict):
+            status = self._visual_tools.report_status()
+            limitations = list(status.get("limitations") or []) if isinstance(status, dict) else []
+            limitations.append("视觉目录项需要已归档结果和受控 visual_request；空间分析接口不会自行编造图表数据。")
+            return MetricResult(
+                result_id=result_id,
+                tool_id=item.tool_id,
+                tool_version="catalog-4.1",
+                status="unavailable",
+                summary="视觉能力已接入，但当前调用没有提供可审计的视觉请求。",
+                structured_result={"capability_status": status if isinstance(status, dict) else {}},
+                input_sources=[],
+                spatial_scope={"history_id": history_id},
+                limitations=list(dict.fromkeys(str(value) for value in limitations if str(value).strip())),
+            )
+
+        visual = deepcopy(request)
+        visual.setdefault("visual_id", f"metric-{item.tool_id.replace('.', '-')}")
+        visual.setdefault("layout_version", "v1")
+        visual.setdefault("source_note", "来源：已归档分析结果或项目材料。")
+        visual.setdefault("limitation_note", "限制：仅表达已有结果，不产生新的空间或业务结论。")
+        dependency_ids = [str(value) for value in visual.get("required_result_ids") or [] if str(value).strip()]
+        if not dependency_ids:
+            dependency_ids = [str(value) for value in parameters.get("dependency_ids") or [] if str(value).strip()]
+        result_proxy = type("VisualResultProxy", (), {})()
+        result_proxy.result_id = result_id
+        result_proxy.status = "available"
+        result_proxy.asset_ids = []
+        result_proxy.input_sources = dependency_ids
+        result_proxy.spatial_scope = {"history_id": history_id}
+        result_proxy.time_scope = {}
+        try:
+            asset = self._visual_tools.create_report_visual_asset(
+                result=result_proxy,
+                visual=visual,
+                source_index=source_index,
+                dependency_ids=dependency_ids or [result_id],
+                study_scope={"history_id": history_id},
+                input_manifest=parameters.get("input_manifest"),
+            )
+        except (LookupError, TypeError, ValueError) as exc:
+            return MetricResult(
+                result_id=result_id,
+                tool_id=item.tool_id,
+                tool_version="catalog-4.1",
+                status="unavailable",
+                summary="视觉请求未通过受控输入校验。",
+                structured_result={},
+                input_sources=dependency_ids,
+                spatial_scope={"history_id": history_id},
+                limitations=[f"视觉请求不可执行：{type(exc).__name__}。"],
+            )
+        payload = asset.payload if isinstance(asset.payload, dict) else {}
+        return MetricResult(
+            result_id=result_id,
+            tool_id=item.tool_id,
+            tool_version="catalog-4.1",
+            status="available" if asset.status == "available" else "unavailable",
+            summary=str(asset.summary or "视觉资产未生成。"),
+            structured_result={
+                "asset_id": asset.resource_id if asset.status == "available" else "",
+                "filename": str(payload.get("filename") or ""),
+                "bridge_status": str(payload.get("bridge_status") or asset.status),
+                "visual_manifest": _mapping(payload.get("visual_manifest")),
+            },
+            input_sources=dependency_ids,
+            spatial_scope={"history_id": history_id},
+            limitations=[str(value) for value in asset.limitations or []],
+            asset_ids=[asset.resource_id] if asset.status == "available" else [],
+        )
 
     @staticmethod
     def _record_health_summaries(source_index: SourceIndex, result: MetricResult) -> None:

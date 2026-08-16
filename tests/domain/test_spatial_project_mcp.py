@@ -27,18 +27,27 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
                 return {tool.name: tool.inputSchema for tool in result.tools}
 
     schemas = asyncio.run(exercise())
-    assert list(schemas) == ["project_context", "query_data", "read_project_document"]
-    assert schemas["project_context"].get("required", []) == []
-    query_schema = schemas["query_data"]
-    assert set(query_schema["required"]) == {"history_id", "dataset_id"}
-    assert {"operation", "filters", "spatial", "sort", "group_by", "metrics", "continue_token"}.issubset(query_schema["properties"])
-    assert "cursor" not in query_schema["properties"]
-    assert "limit" not in query_schema["properties"]
-    assert "max_records" not in query_schema["properties"]
-    assert query_schema["properties"]["group_by"]["anyOf"][0]["type"] == "array"
+    assert list(schemas) == [
+        "analyze_spatial_evidence",
+        "read_project_document",
+        "read_previous_chapter",
+        "search_public_web",
+        "fetch_public_web_page",
+    ]
+    query_schema = schemas["analyze_spatial_evidence"]
+    assert set(query_schema["required"]) == {"history_id", "analysis"}
+    assert {"metric_ids", "selectors", "distance_bands_m", "neighbor_steps", "rank_order", "top_k", "record_refs"}.issubset(query_schema["properties"])
+    assert "dataset_id" not in query_schema["properties"]
+    assert "geometry" not in query_schema["properties"]
+    assert "coordinates" not in query_schema["properties"]
     document_schema = schemas["read_project_document"]
     assert set(document_schema["required"]) == {"history_id", "document_id"}
     assert {"start_block", "max_blocks", "page_start", "page_end"}.issubset(document_schema["properties"])
+    previous_schema = schemas["read_previous_chapter"]
+    assert set(previous_schema["required"]) == {"history_id", "completed_chapters", "current_step_order"}
+    assert {"step_key", "step_order"}.issubset(previous_schema["properties"])
+    assert set(schemas["search_public_web"]["required"]) == {"history_id", "query"}
+    assert set(schemas["fetch_public_web_page"]["required"]) == {"history_id", "urls"}
 
 
 def test_complete_data_mcp_outputs_are_objects():
@@ -56,68 +65,77 @@ def test_complete_data_mcp_outputs_are_objects():
                 return {tool.name: tool.outputSchema for tool in result.tools}
 
     output_schemas = asyncio.run(exercise())
-    assert output_schemas["project_context"]["type"] == "object"
-    assert output_schemas["query_data"]["type"] == "object"
+    assert output_schemas["analyze_spatial_evidence"]["type"] == "object"
     assert output_schemas["read_project_document"]["type"] == "object"
+    assert output_schemas["read_previous_chapter"]["type"] == "object"
+    assert output_schemas["search_public_web"]["type"] == "object"
+    assert output_schemas["fetch_public_web_page"]["type"] == "object"
 
 
-def test_project_context_uses_latest_history(monkeypatch):
-    monkeypatch.setattr(
-        mcp_server.service,
-        "list_history_projects",
-        lambda limit: [
-            {"history_id": "history-old", "created_at": "2026-01-01T00:00:00Z"},
-            {"history_id": "history-new", "created_at": "2026-07-29T00:00:00Z"},
+def test_read_previous_chapter_mcp_tool_uses_completed_chapter_list(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_require_history_project", lambda history_id: None)
+
+    result = mcp_server.read_previous_chapter(
+        history_id="history-1",
+        completed_chapters=[
+            {
+                "step_key": "step_01_policy_site",
+                "step_order": 1,
+                "title": "政策与场地",
+                "decision_brief": "先核验保护边界。",
+                "reader_chapter": "政策与场地正文。",
+            }
         ],
-    )
-    expected = {"schema_version": "spatial_records/v1", "datasets": []}
-    calls = []
-
-    def fake_context(history_id):
-        calls.append(history_id)
-        return expected
-
-    monkeypatch.setattr(mcp_server.data_contract, "project_context", fake_context)
-
-    result = mcp_server.project_context()
-
-    assert result is expected
-    assert calls == ["history-new"]
-
-
-def test_project_context_uses_explicit_history_without_listing(monkeypatch):
-    monkeypatch.setattr(
-        mcp_server.service,
-        "list_history_projects",
-        lambda limit: (_ for _ in ()).throw(AssertionError("history list should not be read")),
-    )
-    monkeypatch.setattr(mcp_server.data_contract, "project_context", lambda history_id: {"history_id": history_id})
-
-    assert mcp_server.project_context("history-1") == {"history_id": "history-1"}
-
-
-def test_query_data_passes_complete_query_contract(monkeypatch):
-    captured = {}
-
-    def fake_query(**kwargs):
-        captured.update(kwargs)
-        return {"records": [], "computed_results": []}
-
-    monkeypatch.setattr(mcp_server.data_contract, "query_data", fake_query)
-
-    result = mcp_server.query_data(
-        "history-1",
-        "road_edges",
-        filters={"road_class": "primary"},
-        sort={"field": "integration", "direction": "desc"},
-        group_by=["road_class", "road_name"],
+        current_step_order=2,
+        step_key="step_01_policy_site",
     )
 
-    assert result == {"records": [], "computed_results": []}
-    assert captured["dataset_id"] == "road_edges"
-    assert captured["filters"] == {"road_class": "primary"}
-    assert captured["group_by"] == ["road_class", "road_name"]
-    assert "max_records" not in captured
+    assert result["step_key"] == "step_01_policy_site"
+    assert result["reader_chapter"] == "政策与场地正文。"
+
+
+def test_public_web_mcp_tools_await_provider_calls(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_require_history_project", lambda history_id: None)
+
+    async def fake_search(query, provider, limit):
+        return {"status": "available", "provider": provider, "query": query, "limit": limit}
+
+    async def fake_fetch(urls, provider, max_characters):
+        return {
+            "status": "available",
+            "provider": provider,
+            "urls": urls,
+            "max_characters": max_characters,
+        }
+
+    monkeypatch.setattr(mcp_server, "_search_public_web", fake_search)
+    monkeypatch.setattr(mcp_server, "_fetch_public_web_page", fake_fetch)
+
+    async def exercise():
+        search = await mcp_server.search_public_web("history-1", "  长沙县 城市更新  ", limit=20)
+        fetch = await mcp_server.fetch_public_web_page(
+            "history-1",
+            ["https://example.gov.cn/page", "not-a-url"],
+            max_characters=50_000,
+        )
+        return search, fetch
+
+    search, fetch = asyncio.run(exercise())
+
+    assert search == {
+        "status": "available",
+        "provider": "anysearch",
+        "query": "长沙县 城市更新",
+        "limit": 10,
+        "history_id": "history-1",
+    }
+    assert fetch == {
+        "status": "available",
+        "provider": "anysearch",
+        "urls": ["https://example.gov.cn/page"],
+        "max_characters": 20_000,
+        "history_id": "history-1",
+    }
 
 
 def test_read_project_document_passes_explicit_range(monkeypatch):

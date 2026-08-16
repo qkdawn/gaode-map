@@ -187,3 +187,88 @@ def test_moran_without_z_score_preserves_limitation():
     assert data["global_moran_z_score"] is None
     assert data["significance_status"] == "not_available"
     assert data["limitations"]
+
+
+def test_saved_network_reachable_area_uses_only_the_saved_scope():
+    service = ProjectSpatialAnalysisService(datasets=_Datasets(_records()))
+    execution = service.execute_metric_tool(
+        tool_id="access.network_reachable_area",
+        primary_spatial_unit="catchment",
+        history_id="history-adapter-test",
+        history_detail=HISTORY_DETAIL,
+        project_documents={"project_name": "test", "documents": []},
+    )
+    assert execution.status == "available"
+    assert execution.structured_result["available_threshold_count"] == 1
+    assert execution.structured_result["thresholds"][0]["area_km2"] > 0
+    assert "saved_network_isochrone_only" == execution.structured_result["scope_policy"]
+
+
+def test_isochrone_metric_uses_the_same_saved_network_scope_adapter():
+    service = ProjectSpatialAnalysisService(datasets=_Datasets(_records()))
+    execution = service.execute_metric_tool(
+        tool_id="isochrone.reachable_area",
+        primary_spatial_unit="catchment",
+        history_id="history-adapter-test",
+        history_detail=HISTORY_DETAIL,
+        project_documents={"project_name": "test", "documents": []},
+    )
+    assert execution.status == "available"
+    assert execution.tool_id == "isochrone.reachable_area"
+    assert execution.structured_result["thresholds"][0]["mode"] == HISTORY_DETAIL["params"]["mode"]
+    assert execution.structured_result["thresholds"][0]["time_min"] == HISTORY_DETAIL["params"]["time_min"]
+    assert execution.input_sources == ["history:isochrone"]
+    assert execution.limitations
+
+
+class _MultiYearDatasets(_Datasets):
+    def __init__(self, records):
+        super().__init__(records)
+        self._year_records = {
+            2024: [
+                _record("current:dataset:poi", "poi-a", Point(0.01, 0.01), {"poi_id": "stable-a", "category": "food"}),
+                _record("current:dataset:poi", "poi-b", Point(0.02, 0.02), {"poi_id": "stable-b", "category": "retail"}),
+            ],
+            2025: [
+                _record("current:dataset:poi", "poi-a-new", Point(0.01, 0.01), {"poi_id": "stable-a", "category": "food"}),
+                _record("current:dataset:poi", "poi-c", Point(0.03, 0.03), {"poi_id": "stable-c", "category": "medical"}),
+            ],
+        }
+
+    def list_scope_datasets(self, history_id: str):
+        del history_id
+        return {"datasets": [{"source_id": "current:dataset:poi", "status": "ready", "available_years": [2024, 2025]}], "warnings": []}
+
+    def load_scope_records(self, *, history_id: str, source_id: str, year=None, **kwargs):
+        del history_id, kwargs
+        return list(self._year_records.get(int(year), [])), [2024, 2025], int(year)
+
+
+def test_poi_open_close_rate_matches_cross_year_entities_and_reports_rates():
+    service = ProjectSpatialAnalysisService(datasets=_MultiYearDatasets(_records()))
+    execution = service.execute_metric_tool(
+        tool_id="poi.open_close_rate",
+        primary_spatial_unit="scope",
+        history_id="history-adapter-test",
+        history_detail=HISTORY_DETAIL,
+        project_documents={"project_name": "test", "documents": []},
+    )
+    assert execution.status == "available"
+    interval = execution.structured_result["intervals"][0]
+    assert interval["opened_count"] == 1
+    assert interval["closed_count"] == 1
+    assert interval["retained_count"] == 1
+    assert interval["retention_rate"] == 0.5
+
+
+def test_poi_open_close_rate_requires_two_years_without_single_year_fallback():
+    service = ProjectSpatialAnalysisService(datasets=_Datasets(_records()))
+    execution = service.execute_metric_tool(
+        tool_id="poi.open_close_rate",
+        primary_spatial_unit="scope",
+        history_id="history-adapter-test",
+        history_detail=HISTORY_DETAIL,
+        project_documents={"project_name": "test", "documents": []},
+    )
+    assert execution.status == "unavailable"
+    assert "至少需要两个" in execution.limitations[0]

@@ -96,7 +96,8 @@ def test_agent_has_submit_status_and_adaptive_decision_loop():
     assert loops[0]["parameters"]["batchSize"] == 1
     queue_code = nodes["建立自适应分析队列"]["parameters"]["jsCode"]
     assert "candidatePlan" in queue_code
-    assert "fallbackSteps" in queue_code
+    assert "fallbackSteps" not in queue_code
+    assert "if (!adaptiveSteps.length) throw new Error('research_plan_empty')" in queue_code
     assert "research_plan" in queue_code
     assert _targets(workflow, "合并项目上下文") == ["构建整体研究框架"]
     assert _targets(workflow, "构建整体研究框架") == ["构建研究框架请求体"]
@@ -105,10 +106,10 @@ def test_agent_has_submit_status_and_adaptive_decision_loop():
     frame_code = nodes["构建整体研究框架"]["parameters"]["jsCode"]
     assert "真正需要作出的选择" in frame_code
     assert "不要为了形式凑假设" in frame_code
+    assert "现有项目文档和空间数据库已经能支持哪些判断" in frame_code
+    assert "不要输出“必须补齐证据”清单" in frame_code
     assert "research_frame" in queue_code
     assert "research_brief" in queue_code
-    assert "一期最值得验证谁，而不是给人群贴标签" in queue_code
-    assert "客群之间的互补和冲突" in queue_code
     assert _targets(workflow, "逐项执行分析方向", 0) == ["读取完整分析状态"]
     assert _targets(workflow, "逐项执行分析方向", 1) == ["读取最新分析状态"]
     assert "逐项执行分析方向" in _targets(workflow, "完成当前分析方向")
@@ -118,13 +119,14 @@ def test_agent_has_submit_status_and_adaptive_decision_loop():
 def test_agent_inlines_retrieval_responses_and_project_tools():
     workflow = _generated("urban-renewal-agent.workflow.mjs")
     nodes = _nodes(workflow)
-    assert nodes["生成公共证据查询向量"]["parameters"]["url"] == "__EMBEDDING_API_BASE_URL__/api/embed"
-    assert "hybrid_search_kb" in nodes["混合检索公共证据"]["parameters"]["query"]
-    assert nodes["混合检索公共证据"]["alwaysOutputData"] is True
-    assert _targets(workflow, "检索到候选证据？", 1) == ["跳过空证据重排"]
-    assert "skipped-no-candidates" in nodes["跳过空证据重排"]["parameters"]["jsCode"]
+    assert nodes["调用 GraphRAG 文献检索"]["parameters"]["url"] == "=__SPATIAL_API_BASE_URL__/analysis/spatial-strategy/knowledge/graphrag/query"
+    assert nodes["调用 GraphRAG 文献检索"]["parameters"]["options"]["timeout"] == 900000
+    assert "microsoft_graphrag" in nodes["整理 GraphRAG 文献证据"]["parameters"]["jsCode"]
+    assert _targets(workflow, "构建公共证据检索请求") == ["构建 GraphRAG 文献问题"]
+    assert _targets(workflow, "整理 GraphRAG 文献证据") == ["构建章节分析请求"]
+    assert not any(name in nodes for name in ("混合检索公共证据", "生成公共证据查询向量", "重排公共证据"))
 
-    for name in ("请求重排模型", "请求章节分析模型", "请求深化分析模型", "请求图件设计模型", "请求报告叙事模型"):
+    for name in ("请求章节分析模型", "请求深化分析模型", "请求图件设计模型", "请求报告叙事模型"):
         assert nodes[name]["parameters"]["url"] == "__CODEX_RELAY_BASE_URL__/responses"
         assert nodes[name]["parameters"]["options"]["timeout"] >= 300_000
 
@@ -134,11 +136,27 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "previousDecisions" in retrieval_code
     assert "decision_steps: []" in retrieval_code
     follow_up = nodes["将项目工具结果交回模型"]["parameters"]["jsCode"]
-    assert all(tool in chapter_code for tool in ("project_context", "query_data", "read_project_document"))
-    assert "项目文档必须按需读取原文" in chapter_code
+    assert all(tool in chapter_code for tool in (
+        "analyze_spatial_evidence",
+        "read_project_document",
+        "read_previous_chapter",
+        "search_public_web",
+        "fetch_public_web_page",
+    ))
+    assert "project_context'" not in chapter_code
+    assert "query_data'" not in chapter_code
+    assert "project_documents" in chapter_code
+    assert "tool_choice: { type: 'function', name: 'search_public_web' }" in chapter_code
+    assert "搜索摘要只用于发现来源，不能作为事实证据" in chapter_code
+    assert "不得把未公开项目文档、住户信息、权属细节、个人信息" in chapter_code
+    assert "按需使用 read_project_document 读取原文" in chapter_code or "必须按需调用 read_project_document 读取原文" in chapter_code
     assert "可以使用 Markdown 表格" in chapter_code
     assert "不强制每章使用" in chapter_code
     assert "提出可能成立的解释或路径" in chapter_code
+    assert "本次分析的完整边界是当前已经提供的项目文档、POI、人口、路网、夜光、H3 网格" in chapter_code
+    assert "不得把现场踏勘、访谈、产权或文保核验、逐栋建筑测绘、真实客流、付费意愿、运营商承诺" in chapter_code
+    assert "未知只降低结论强度，不自动阻塞结论" in chapter_code
+    assert "默认不要生成“必须补齐证据”“需要进一步核实”的清单" in chapter_code
     assert "替代解释" in chapter_code
     assert "优先推进一个新的决策边界" in chapter_code
     assert "如果没有有意义的替代解释" in chapter_code
@@ -151,10 +169,12 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "no_new_evidence" in follow_up
     assert "tool_errors" in follow_up
     assert "emergency_cap" not in follow_up
-    assert "tool_choice: resolvedStopReason ? 'none' : undefined" in follow_up
+    assert "tool_choice: resolvedStopReason ? 'none' : (nextMandatoryWebTool" in follow_up
     assert "const forceFinal = turn >= 6" not in follow_up
     assert "context_budget_tokens: 24000" in chapter_code
     assert "no_new_evidence_limit: 2" in chapter_code
+    assert "public_knowledge_retrieval" in chapter_code
+    assert "文献证据暂不可用" in chapter_code
     assert _targets(workflow, "解析章节模型响应") == ["章节模型请求工具？"]
     assert _targets(workflow, "章节模型请求工具？", 0) == ["准备项目工具调用"]
     assert _targets(workflow, "章节模型请求工具？", 1) == ["深化章节判断"]
@@ -162,9 +182,14 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert _targets(workflow, "解析深化分析响应") == ["校验章节正文"]
     deepen_code = nodes["深化章节判断"]["parameters"]["jsCode"]
     assert "另一种解释" in deepen_code
+    assert "不得把现场踏勘、访谈、产权或文保核验、真实客流、付费意愿或运营商承诺新增为本章的必需证据" in deepen_code
+    assert "未知只说明不能推出什么，不自动转成“必须补齐证据”或“需要进一步核实”的任务" in deepen_code
     assert "不做格式审计" in deepen_code
-    assert "reasoning: { effort: 'high' }" in deepen_code
+    assert "reasoning: { effort: draftAvailable ? 'high' : 'medium' }" in deepen_code
     assert "tools: []" in deepen_code
+    assert "fallback_output_text" in deepen_code
+    assert "generation_recovery_error" in deepen_code
+    assert "恢复分析师" in deepen_code
     assert _targets(workflow, "将项目工具结果交回模型") == ["刷新分析任务租约"]
 
     for name in ("构建整体研究框架", "请求研究框架模型", "确认整体研究框架", "校验当前分析方向", "构建章节分析请求", "请求章节分析模型", "深化章节判断", "请求深化分析模型", "校验章节正文", "保存章节与分析状态", "生成最终报告"):
@@ -181,7 +206,8 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "return calls.map" in tool_prepare_code
     assert "parallel_agent_tool_calls_not_supported" not in tool_prepare_code
     assert "JSON.parse($json.mcp_request_body)" in tool_http_code
-    assert "_decision_state" in tool_prepare_code
+    assert "completed_chapters" in tool_prepare_code
+    assert "current_step_order" in tool_prepare_code
     assert "$('构建章节分析请求').first().json" in tool_prepare_code
     assert "$('准备项目工具调用').first().json" in follow_up_code
     assert "const items = $input.all()" in follow_up_code
@@ -190,12 +216,23 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert ".item.json" not in follow_up_code
     validation_code = nodes["校验章节正文"]["parameters"]["jsCode"]
     assert "entry.tool_name === 'read_project_document'" in follow_up_code
-    assert "entry.tool_name === 'query_data'" in follow_up_code
+    assert "entry.tool_name === 'analyze_spatial_evidence'" in follow_up_code
+    assert "entry.tool_name === 'fetch_public_web_page'" in follow_up_code
+    assert "source_type: 'public_web_fulltext'" in follow_up_code
+    assert "nextMandatoryWebTool" in follow_up_code
+    assert "public_web_no_candidates" in follow_up_code
     assert "tool_evidence: toolEvidence" in follow_up_code
     assert "response.tool_evidence" in validation_code
     assert "evidence_index:" in validation_code
     assert "decisionBrief" in validation_code
     assert "decision_brief: decisionBrief" in validation_code
+    assert "reader_chapter_model_failed" in validation_code
+    assert "deepening_model_unavailable" in validation_code
+    assert "fallback_to_initial_draft" in validation_code
+    assert "chapter_generation_recovered" in validation_code
+    assert "recovered_after_primary_failure" in validation_code
+    assert "live_web_fulltext_count" in validation_code
+    assert "dual_source_status" in validation_code
     assert "reader_chapter_missing_evidence_context" not in validation_code
     assert "reader_chapter_missing_conditions" not in validation_code
     assert "刷新分析任务租约" in nodes
@@ -240,6 +277,10 @@ def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
     assert "decision_brief" in visual_code
     assert "evidence_status" not in visual_code
     assert "evidence_count" not in visual_code
+    visual_validation_code = nodes["校验图件设计"]["parameters"]["jsCode"]
+    assert "suppliedVisuals.filter" in visual_validation_code
+    assert "visual_plan_items_dropped" in visual_validation_code
+    assert "visuals.length < 3 || visuals.length > 5" in visual_validation_code
 
 
 def test_public_knowledge_base_rejects_project_documents_and_owns_embedding_publish():

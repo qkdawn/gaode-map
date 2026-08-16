@@ -138,12 +138,33 @@ class SpatialStrategyAgentToolRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     history_id: str = Field(min_length=1, max_length=200)
-    tool_name: Literal["project_context", "query_data", "read_project_document", "read_previous_chapter"]
+    tool_name: Literal[
+        "analyze_spatial_evidence",
+        "read_project_document",
+        "read_previous_chapter",
+        "search_public_web",
+        "fetch_public_web_page",
+    ]
     arguments: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("history_id", mode="before")
     @classmethod
     def normalize_agent_tool_history(cls, value: object) -> str:
+        return str(value or "").strip()
+
+
+class GraphRAGQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=12000)
+    method: Literal["global", "local", "drift", "basic"] = "global"
+    response_type: str = Field(default="Multiple paragraphs", min_length=1, max_length=120)
+    community_level: int = Field(default=2, ge=0, le=8)
+    dynamic_community_selection: bool = False
+
+    @field_validator("query", "response_type", mode="before")
+    @classmethod
+    def normalize_graphrag_text(cls, value: object) -> str:
         return str(value or "").strip()
 
 

@@ -183,6 +183,45 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to import n8n workflows."
     }
+
+    # n8n 2.x can import active workflows without rebuilding webhook_entity.
+    # Reconcile the registry from the imported webhook nodes before smoke tests.
+    $webhookRegistrySql = @'
+WITH desired AS (
+  SELECT
+    w.id AS "workflowId",
+    n->>'id' AS node,
+    n->'parameters'->>'path' AS "webhookPath",
+    upper(n->'parameters'->>'httpMethod') AS method,
+    NULLIF(n->>'webhookId', '') AS "webhookId"
+  FROM workflow_entity w
+  CROSS JOIN LATERAL json_array_elements(w.nodes::json) n
+  WHERE w.active
+    AND w.id IN ('urbanRenewalDecisionSupportAgent', 'urbanRenewalPublicKnowledgeBase')
+    AND n->>'type' = 'n8n-nodes-base.webhook'
+)
+INSERT INTO webhook_entity (
+  "webhookPath", method, node, "webhookId", "pathLength", "workflowId"
+)
+SELECT
+  "webhookPath",
+  method,
+  node,
+  "webhookId",
+  cardinality(regexp_split_to_array("webhookPath", '/')),
+  "workflowId"
+FROM desired
+ON CONFLICT ("webhookPath", method) DO UPDATE SET
+  node = EXCLUDED.node,
+  "webhookId" = EXCLUDED."webhookId",
+  "pathLength" = EXCLUDED."pathLength",
+  "workflowId" = EXCLUDED."workflowId";
+'@
+    $webhookRegistrySql | docker compose exec -T n8n-postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to synchronize n8n webhook registry."
+    }
+
     $workflowInventory = Invoke-RestMethod -Method Get -Uri "http://localhost:$n8nPort/api/v1/workflows?limit=250" -Headers $managementHeaders -TimeoutSec 20
     $workflowIds = @($workflowInventory.data | ForEach-Object { [string]$_.id })
     foreach ($requiredId in @("urbanRenewalDecisionSupportAgent", "urbanRenewalPublicKnowledgeBase")) {

@@ -10,7 +10,7 @@ metrics:
   action_targets:
   - program_location
   - route
-  implementation_status: not_implemented
+  implementation_status: implemented
 - tool_id: grid.opportunity_flag
   name: 网格空间条件标记
   purpose: 候选网格的规则筛选
@@ -360,7 +360,7 @@ metrics:
   action_targets:
   - operations
   - program_location
-  implementation_status: not_implemented
+  implementation_status: implemented
 - tool_id: poi.supply_structure
   name: POI 供给结构
   purpose: 将经 15 分钟 walking 等时圈几何核验的 POI 按真实主类／附属类和互补配套／同类对标角色分别盘点
@@ -447,7 +447,7 @@ metrics:
   - analysis_method
   - data_collection
   - operations
-  implementation_status: not_implemented
+  implementation_status: implemented
 - tool_id: road.choice
   name: 路网选择度
   purpose: 潜在路径穿越性和结构性经过机会
@@ -636,7 +636,7 @@ metrics:
   - program_location
   - public_space
   - site_direction
-  implementation_status: not_implemented
+  implementation_status: implemented
 - tool_id: timeseries.age_shift
   name: 主导年龄段迁移
   purpose: 年龄结构变化位置

@@ -14,6 +14,7 @@ from core.config import settings
 from modules.spatial_strategy import (
     KnowledgeBaseIngestAccepted,
     KnowledgeBaseIngestRequest,
+    GraphRAGQueryRequest,
     SpatialStrategyGatewayError,
     SpatialStrategyRunAccepted,
     SpatialStrategyRunDetail,
@@ -34,7 +35,8 @@ from modules.spatial_strategy import (
     ingest_document_to_knowledge_base,
     normalize_access_groups,
     call_spatial_mcp_tool,
-    read_previous_chapter,
+    GraphRAGQueryError,
+    query_graphrag,
     resume_spatial_strategy_run,
     submit_spatial_strategy_run,
 )
@@ -153,19 +155,6 @@ async def call_spatial_strategy_agent_tool(
 ) -> dict:
     _require_n8n_client(x_n8n_client_key)
     try:
-        if payload.tool_name == "read_previous_chapter":
-            arguments = payload.arguments
-            return {
-                "tool_name": payload.tool_name,
-                "is_error": False,
-                "structured_content": read_previous_chapter(
-                    decision_state=arguments.get("_decision_state") or {},
-                    current_step_order=int(arguments.get("_current_step_order") or 0),
-                    step_key=str(arguments.get("step_key") or ""),
-                    step_order=arguments.get("step_order"),
-                ),
-                "content": [],
-            }
         return await call_spatial_mcp_tool(
             history_id=payload.history_id,
             tool_name=payload.tool_name,
@@ -175,6 +164,19 @@ async def call_spatial_strategy_agent_tool(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="spatial_mcp_tool_unavailable") from exc
+
+
+@router.post("/spatial-strategy/knowledge/graphrag/query")
+async def query_public_knowledge_with_graphrag(
+    payload: GraphRAGQueryRequest,
+    x_n8n_client_key: Annotated[str, Header(alias="X-N8N-Client-Key")],
+) -> dict:
+    """Expose one semantic literature-evidence entry to N8N."""
+    _require_n8n_client(x_n8n_client_key)
+    try:
+        return await run_in_threadpool(query_graphrag, payload)
+    except GraphRAGQueryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/spatial-strategy/visuals")

@@ -71,7 +71,7 @@ def test_decision_agent_uses_dynamic_stop_conditions_instead_of_six_turn_limit()
     assert "no_new_evidence" in follow_up
     assert "tool_errors" in follow_up
     assert "emergency_cap" not in follow_up
-    assert "tool_choice: resolvedStopReason ? 'none' : undefined" in follow_up
+    assert "tool_choice: resolvedStopReason ? 'none' : (nextMandatoryWebTool" in follow_up
     assert "tools: resolvedStopReason ? [] : prior.tools" in follow_up
 
 

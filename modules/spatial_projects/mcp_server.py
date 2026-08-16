@@ -30,10 +30,10 @@ from modules.report_visuals.agent_tools import (
 )
 from modules.spatial_projects.service import SpatialProjectService
 from modules.spatial_projects.data_contract import ProjectDataContractService
+from modules.spatial_action.spatial_evidence import SpatialEvidenceService
 from modules.spatial_projects.public_web import (
     PublicWebUnavailable,
     fetch_public_web_page as _fetch_public_web_page,
-    run as _run_public_web,
     search_public_web as _search_public_web,
 )
 from modules.spatial_projects.skill_tools import (
@@ -48,6 +48,7 @@ from modules.spatial_projects.skill_tools import (
     list_metric_results as _list_metric_results,
     read_metric_result as _read_metric_result,
 )
+from modules.spatial_strategy.previous_chapter import read_previous_chapter_from_list
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -210,6 +211,7 @@ mcp = (
     else _StdioMcpFallback("spatial-project")
 )
 data_contract = ProjectDataContractService(projects=service, metric_results=_list_metric_results)
+spatial_evidence = SpatialEvidenceService(projects=service)
 
 
 def _call(callback, **kwargs: Any) -> Any:
@@ -287,44 +289,31 @@ class AggregateMetricInput(BaseModel):
 
 
 @mcp.tool()
-def project_context(history_id: str = "") -> dict[str, Any]:
-    """List project identity, first-party documents, spatial datasets, and computed results."""
-    normalized_history_id = history_id.strip()
-    if not normalized_history_id:
-        projects = _call(service.list_history_projects, limit=100)
-        if isinstance(projects, dict):
-            return projects
-        if not projects:
-            return {"status": "not_found", "error": "history_not_found"}
-        latest = max(projects, key=lambda item: str(item.get("created_at") or ""))
-        normalized_history_id = str(latest.get("history_id") or "").strip()
-    return _call(data_contract.project_context, history_id=normalized_history_id)
-
-
-@mcp.tool()
-def query_data(
+def analyze_spatial_evidence(
     history_id: str,
-    dataset_id: str,
-    operation: Literal["records", "aggregate"] = "records",
-    filters: dict[str, Any] | None = None,
-    spatial: dict[str, Any] | None = None,
-    sort: dict[str, Any] | None = None,
-    group_by: list[str] | None = None,
-    metrics: list[dict[str, Any]] | None = None,
-    continue_token: str = "",
+    analysis: Literal["scope", "distance", "direction", "neighborhood", "rank", "relationship", "inspect"],
+    metric_ids: list[str] | None = None,
+    selectors: list[dict[str, Any]] | None = None,
+    distance_bands_m: list[list[float]] | None = None,
+    neighbor_steps: int = 1,
+    rank_order: Literal["highest", "lowest"] = "highest",
+    top_k: int = 10,
+    record_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Query one spatial dataset with snapshot-bound continuation."""
+    """Analyze current-scope spatial evidence through one semantic, geometry-safe interface."""
     return _call(
-        data_contract.query_data,
+        spatial_evidence.analyze,
         history_id=history_id,
-        dataset_id=dataset_id,
-        operation=operation,
-        filters=filters,
-        spatial=spatial,
-        sort=sort,
-        group_by=group_by,
-        metrics=metrics,
-        continue_token=continue_token,
+        request={
+            "analysis": analysis,
+            "metric_ids": list(metric_ids or []),
+            "selectors": list(selectors or []),
+            "distance_bands_m": distance_bands_m,
+            "neighbor_steps": neighbor_steps,
+            "rank_order": rank_order,
+            "top_k": top_k,
+            "record_refs": list(record_refs or []),
+        },
     )
 
 
@@ -349,6 +338,27 @@ def read_project_document(
     )
 
 
+@mcp.tool()
+def read_previous_chapter(
+    history_id: str,
+    completed_chapters: list[dict[str, Any]],
+    current_step_order: int,
+    step_key: str = "",
+    step_order: int | None = None,
+) -> dict[str, Any]:
+    """Read one completed earlier chapter from the caller's analysis state."""
+    blocked = _require_history_project(history_id)
+    if blocked:
+        return blocked
+    return _call(
+        read_previous_chapter_from_list,
+        completed_chapters=completed_chapters,
+        current_step_order=current_step_order,
+        step_key=step_key,
+        step_order=step_order,
+    )
+
+
 def list_history_projects(limit: int = 100) -> list[dict[str, Any]]:
     """List history-backed spatial projects by identity only; read one for documents and datasets."""
     return _call(service.list_history_projects, limit=limit)
@@ -366,7 +376,8 @@ def _require_history_project(history_id: str) -> dict[str, Any] | None:
     return None
 
 
-def search_public_web(
+@mcp.tool()
+async def search_public_web(
     history_id: str,
     query: str,
     provider: Literal["anysearch", "exa"] = "anysearch",
@@ -383,17 +394,18 @@ def search_public_web(
     if not normalized_query:
         return {"status": "invalid_request", "error": "query_required"}
     try:
-        result = _run_public_web(_search_public_web(normalized_query, provider, max(1, min(limit, 10))))
+        result = await _search_public_web(normalized_query, provider, max(1, min(limit, 10)))
     except PublicWebUnavailable as exc:
         return {"status": "unavailable", "error": str(exc), "retryable": True}
     result["history_id"] = history_id
     return result
 
 
-def fetch_public_web_page(
+@mcp.tool()
+async def fetch_public_web_page(
     history_id: str,
     urls: list[str],
-    provider: Literal["anysearch", "exa"] = "exa",
+    provider: Literal["anysearch", "exa"] = "anysearch",
     max_characters: int = 5000,
 ) -> dict[str, Any]:
     """Read selected public-web pages for one saved project through AnySearch or Exa."""
@@ -404,7 +416,7 @@ def fetch_public_web_page(
     if not normalized_urls:
         return {"status": "invalid_request", "error": "urls_required"}
     try:
-        result = _run_public_web(_fetch_public_web_page(normalized_urls, provider, max(500, min(max_characters, 20000))))
+        result = await _fetch_public_web_page(normalized_urls, provider, max(500, min(max_characters, 20000)))
     except PublicWebUnavailable as exc:
         return {"status": "unavailable", "error": str(exc), "retryable": True}
     result["history_id"] = history_id
