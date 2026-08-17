@@ -1,0 +1,1231 @@
+{
+  "chapters": [
+    {
+      "allowed_tool_ids": [
+        "grid.opportunity_flag",
+        "population.total",
+        "nightlight.spatial_profile",
+        "road.integration",
+        "poi.category_count",
+        "poi.multi_year_count"
+      ],
+      "analysis_approach": {
+        "comparison_design": "使用同一351格共享栅格，以项目中心划分八方向和0—500m、500—1,000m、1,000—1,600m距离带；比较POI密度/类别、人口密度、夜光均值、路网覆盖和有覆盖单元的路网密度/整合度。",
+        "decision_question": "项目周边哪个方向值得先看，为什么？这些空间数据能支持什么，又不能证明什么？",
+        "hypotheses": [
+          "不同方向的设施、日常人口、亮度和道路条件可能不同步，差异应转成踏勘和内容验证，而不是单一机会分数。"
+        ],
+        "synthesis_goal": "形成外部机会、限制和踏勘方向。",
+        "targets": [
+          "project"
+        ]
+      },
+      "authorized_object_ids": [],
+      "authorized_resource_ids": [
+        "scope:history-center-15min-walk",
+        "result:shared-grid:real-v1",
+        "result:directional-fusion:real-v1",
+        "result:poi-category-count:real-v1",
+        "result:poi-multi-year:real-v1",
+        "result:population-total:754f2af64f80c31e",
+        "result:nightlight-profile:real-v1",
+        "result:road-syntax:real-v1"
+      ],
+      "available_result_ids": [
+        "result:shared-grid:real-v1",
+        "result:directional-fusion:real-v1",
+        "result:poi-category-count:real-v1",
+        "result:poi-multi-year:real-v1",
+        "result:population-total:754f2af64f80c31e",
+        "result:nightlight-profile:real-v1",
+        "result:road-syntax:real-v1"
+      ],
+      "chapter_id": "ch01-regional",
+      "dependencies": [],
+      "dependency_boundaries": [],
+      "expected_outputs": [
+        "普通读者判断",
+        "DirectionalEvidenceMatrix方向决策表",
+        "行动与验证条件"
+      ],
+      "goal_ids": [
+        "g-reuse",
+        "g-operation",
+        "g-coexist"
+      ],
+      "order": 10,
+      "required_object_ids": [],
+      "requires_portfolio_check": false,
+      "responsibility": "解释周边 POI、人口、夜光与路网在项目不同方向和距离带上的组合，并把差异转成踏勘与首期内容验证。",
+      "specialist_role": "区域机会分析师",
+      "title": "区域方向与外部机会",
+      "tool_boundaries": [
+        "共享栅格用于空间对齐；POI、人口、夜光和路网不等于客流、消费或经营结果。",
+        "无路网覆盖与低连通性分开解释；入口坐标缺失时只形成踏勘优先级。"
+      ],
+      "metric_bundle": {
+        "bundle_id": "bundle:ch01-regional",
+        "decision_question": "项目周边哪个方向值得先看，为什么？这些空间数据能支持什么，又不能证明什么？",
+        "metrics": [
+          {
+            "metric_id": "metric:ch01-regional:primary",
+            "tool_id": "grid.opportunity_flag",
+            "availability": "available",
+            "evidence_ids": [
+              "scope:history-center-15min-walk",
+              "result:shared-grid:real-v1",
+              "result:directional-fusion:real-v1",
+              "result:poi-category-count:real-v1",
+              "result:poi-multi-year:real-v1",
+              "result:population-total:754f2af64f80c31e",
+              "result:nightlight-profile:real-v1",
+              "result:road-syntax:real-v1"
+            ],
+            "measures": "本章授权范围内的空间或项目证据",
+            "decision_role": "回答本章决策问题的主要比较条件",
+            "combine_with": [
+              "metric:ch01-regional:boundary"
+            ],
+            "comparison_baseline": "使用同一351格共享栅格，以项目中心划分八方向和0—500m、500—1,000m、1,000—1,600m距离带；比较POI密度/类别、人口密度、夜光均值、路网覆盖和有覆盖单元的路网密度/整合度。",
+            "action_change": "改变本章的优先验证顺序或行动强度",
+            "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+          },
+          {
+            "metric_id": "metric:ch01-regional:boundary",
+            "tool_id": "grid.opportunity_flag",
+            "availability": "available",
+            "evidence_ids": [
+              "scope:history-center-15min-walk",
+              "result:shared-grid:real-v1",
+              "result:directional-fusion:real-v1",
+              "result:poi-category-count:real-v1",
+              "result:poi-multi-year:real-v1",
+              "result:population-total:754f2af64f80c31e",
+              "result:nightlight-profile:real-v1",
+              "result:road-syntax:real-v1"
+            ],
+            "measures": "本章的第二类约束或对照证据",
+            "decision_role": "与主要指标共同形成可验证判断",
+            "combine_with": [
+              "metric:ch01-regional:primary"
+            ],
+            "comparison_baseline": "使用同一351格共享栅格，以项目中心划分八方向和0—500m、500—1,000m、1,000—1,600m距离带；比较POI密度/类别、人口密度、夜光均值、路网覆盖和有覆盖单元的路网密度/整合度。",
+            "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+            "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+          }
+        ],
+        "comparison_design": {
+          "observation_universe": "项目研究范围及本章授权对象",
+          "spatial_unit": "本章授权空间对象或共同网格",
+          "comparison_axes": [
+            "项目内部比较",
+            "与共同范围基准比较"
+          ],
+          "baseline": "使用同一351格共享栅格，以项目中心划分八方向和0—500m、500—1,000m、1,000—1,600m距离带；比较POI密度/类别、人口密度、夜光均值、路网覆盖和有覆盖单元的路网密度/整合度。",
+          "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+          "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+          "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+        },
+        "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+        "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+      }
+    },
+    {
+      "allowed_tool_ids": [
+        "project.document_constraints",
+        "population.total"
+      ],
+      "analysis_approach": {
+        "comparison_design": "比较15—34岁、35—59岁、60岁以上三个年龄组，并与项目内约102户居民这一确定利益相关者对照。",
+        "decision_question": "首期应优先验证哪些人群场景和使用时段？",
+        "hypotheses": [
+          "居民日常、青年文化和代际活动需要不同的时段与空间。"
+        ],
+        "synthesis_goal": "形成场景优先级和验证方法。",
+        "targets": [
+          "project",
+          "b-residential-1",
+          "b-residential-2",
+          "b-residential-3"
+        ]
+      },
+      "authorized_object_ids": [],
+      "authorized_resource_ids": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "available_result_ids": [
+        "result:project-constraints:real-v1",
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "chapter_id": "ch02-people",
+      "dependencies": [],
+      "dependency_boundaries": [],
+      "expected_outputs": [
+        "普通读者判断",
+        "决策表",
+        "行动与验证条件"
+      ],
+      "goal_ids": [
+        "g-preserve",
+        "g-coexist",
+        "g-operation"
+      ],
+      "order": 20,
+      "required_object_ids": [],
+      "requires_portfolio_check": false,
+      "responsibility": "把区域人口与现状居民转成待验证使用场景，不把人口直接当作客群。",
+      "specialist_role": "人群与场景分析师",
+      "title": "人群、需求场景与使用时段",
+      "tool_boundaries": [
+        "区域人口不是项目已确认客群或购买力。"
+      ],
+      "metric_bundle": {
+        "bundle_id": "bundle:ch02-people",
+        "decision_question": "首期应优先验证哪些人群场景和使用时段？",
+        "metrics": [
+          {
+            "metric_id": "metric:ch02-people:primary",
+            "tool_id": "project.document_constraints",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:population-total:754f2af64f80c31e"
+            ],
+            "measures": "本章授权范围内的空间或项目证据",
+            "decision_role": "回答本章决策问题的主要比较条件",
+            "combine_with": [
+              "metric:ch02-people:boundary"
+            ],
+            "comparison_baseline": "比较15—34岁、35—59岁、60岁以上三个年龄组，并与项目内约102户居民这一确定利益相关者对照。",
+            "action_change": "改变本章的优先验证顺序或行动强度",
+            "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+          },
+          {
+            "metric_id": "metric:ch02-people:boundary",
+            "tool_id": "population.total",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:population-total:754f2af64f80c31e"
+            ],
+            "measures": "本章的第二类约束或对照证据",
+            "decision_role": "与主要指标共同形成可验证判断",
+            "combine_with": [
+              "metric:ch02-people:primary"
+            ],
+            "comparison_baseline": "比较15—34岁、35—59岁、60岁以上三个年龄组，并与项目内约102户居民这一确定利益相关者对照。",
+            "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+            "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+          }
+        ],
+        "comparison_design": {
+          "observation_universe": "项目研究范围及本章授权对象",
+          "spatial_unit": "本章授权空间对象或共同网格",
+          "comparison_axes": [
+            "项目内部比较",
+            "与共同范围基准比较"
+          ],
+          "baseline": "比较15—34岁、35—59岁、60岁以上三个年龄组，并与项目内约102户居民这一确定利益相关者对照。",
+          "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+          "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+          "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+        },
+        "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+        "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+      }
+    },
+    {
+      "allowed_tool_ids": [
+        "road.integration",
+        "grid.opportunity_flag",
+        "nightlight.spatial_profile",
+        "road.entrance_distance"
+      ],
+      "analysis_approach": {
+        "comparison_design": "将路网结构、POI—路网共位、夜光方向与入口就绪度交叉比较；结构指标只用于筛选踏勘方向。",
+        "decision_question": "项目应优先核验哪些外部联系和内部动线？",
+        "hypotheses": [
+          "东、东南方向值得优先踏勘，但正式入口必须等待红线和坐标。"
+        ],
+        "synthesis_goal": "形成入口、动线和现场核验清单。",
+        "targets": [
+          "entrance-main",
+          "entrance-west",
+          "path-main",
+          "support-service"
+        ]
+      },
+      "authorized_object_ids": [],
+      "authorized_resource_ids": [
+        "scope:history-center-15min-walk",
+        "document:project-extracts",
+        "result:road-syntax:real-v1",
+        "result:poi-road-colocation:real-v1",
+        "result:nightlight-profile:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "available_result_ids": [
+        "result:road-syntax:real-v1",
+        "result:poi-road-colocation:real-v1",
+        "result:nightlight-profile:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "chapter_id": "ch04-connection",
+      "dependencies": [],
+      "dependency_boundaries": [],
+      "expected_outputs": [
+        "普通读者判断",
+        "决策表",
+        "行动与验证条件"
+      ],
+      "goal_ids": [
+        "g-preserve",
+        "g-vision",
+        "g-coexist"
+      ],
+      "order": 30,
+      "required_object_ids": [],
+      "requires_portfolio_check": false,
+      "responsibility": "判断外部联系、入口、主路径和居民动线的核验优先级。",
+      "specialist_role": "空间连接分析师",
+      "title": "空间结构、可达性与对外连接",
+      "tool_boundaries": [
+        "路网和共位候选不能替代项目入口测绘、门禁和消防核验。"
+      ],
+      "metric_bundle": {
+        "bundle_id": "bundle:ch04-connection",
+        "decision_question": "项目应优先核验哪些外部联系和内部动线？",
+        "metrics": [
+          {
+            "metric_id": "metric:ch04-connection:primary",
+            "tool_id": "road.integration",
+            "availability": "available",
+            "evidence_ids": [
+              "scope:history-center-15min-walk",
+              "document:project-extracts",
+              "result:road-syntax:real-v1",
+              "result:poi-road-colocation:real-v1",
+              "result:nightlight-profile:real-v1",
+              "result:coordinate-readiness:real-v1"
+            ],
+            "measures": "本章授权范围内的空间或项目证据",
+            "decision_role": "回答本章决策问题的主要比较条件",
+            "combine_with": [
+              "metric:ch04-connection:boundary"
+            ],
+            "comparison_baseline": "将路网结构、POI—路网共位、夜光方向与入口就绪度交叉比较；结构指标只用于筛选踏勘方向。",
+            "action_change": "改变本章的优先验证顺序或行动强度",
+            "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+          },
+          {
+            "metric_id": "metric:ch04-connection:boundary",
+            "tool_id": "grid.opportunity_flag",
+            "availability": "available",
+            "evidence_ids": [
+              "scope:history-center-15min-walk",
+              "document:project-extracts",
+              "result:road-syntax:real-v1",
+              "result:poi-road-colocation:real-v1",
+              "result:nightlight-profile:real-v1",
+              "result:coordinate-readiness:real-v1"
+            ],
+            "measures": "本章的第二类约束或对照证据",
+            "decision_role": "与主要指标共同形成可验证判断",
+            "combine_with": [
+              "metric:ch04-connection:primary"
+            ],
+            "comparison_baseline": "将路网结构、POI—路网共位、夜光方向与入口就绪度交叉比较；结构指标只用于筛选踏勘方向。",
+            "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+            "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+          }
+        ],
+        "comparison_design": {
+          "observation_universe": "项目研究范围及本章授权对象",
+          "spatial_unit": "本章授权空间对象或共同网格",
+          "comparison_axes": [
+            "项目内部比较",
+            "与共同范围基准比较"
+          ],
+          "baseline": "将路网结构、POI—路网共位、夜光方向与入口就绪度交叉比较；结构指标只用于筛选踏勘方向。",
+          "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+          "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+          "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+        },
+        "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+        "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+      }
+    },
+    {
+      "allowed_tool_ids": [
+        "project.document_constraints",
+        "poi.category_count",
+        "population.total"
+      ],
+      "analysis_approach": {
+        "comparison_design": "把区域设施多样性与年龄场景、居民底线对照，区分可立即试验、需伙伴共创和暂不承诺三类产品。",
+        "decision_question": "首期做什么内容和服务，才能同时验证公共价值与运营可能？",
+        "hypotheses": [
+          "礼堂文化内容、居民服务和小型导览应组合试验。"
+        ],
+        "synthesis_goal": "形成内容组合、频率和责任边界。",
+        "targets": [
+          "b-auditorium",
+          "b-activity",
+          "court-east",
+          "court-middle"
+        ]
+      },
+      "authorized_object_ids": [],
+      "authorized_resource_ids": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:poi-category-count:real-v1",
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "available_result_ids": [
+        "result:project-constraints:real-v1",
+        "result:poi-category-count:real-v1",
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "chapter_id": "ch03-content",
+      "dependencies": [
+        {
+          "dependency_type": "finding",
+          "essential": true,
+          "required_output": "区域机会与代理边界",
+          "upstream_chapter_id": "ch01-regional"
+        },
+        {
+          "dependency_type": "finding",
+          "essential": true,
+          "required_output": "人群场景与时段",
+          "upstream_chapter_id": "ch02-people"
+        }
+      ],
+      "dependency_boundaries": [],
+      "expected_outputs": [
+        "普通读者判断",
+        "决策表",
+        "行动与验证条件"
+      ],
+      "goal_ids": [
+        "g-reuse",
+        "g-operation",
+        "g-coexist",
+        "g-vision"
+      ],
+      "order": 40,
+      "required_object_ids": [],
+      "requires_portfolio_check": false,
+      "responsibility": "根据区域机会和人群场景，选择首期可逆内容组合。",
+      "specialist_role": "文旅与内容运营分析师",
+      "title": "文化内容、公共服务与运营产品",
+      "tool_boundaries": [],
+      "metric_bundle": {
+        "bundle_id": "bundle:ch03-content",
+        "decision_question": "首期做什么内容和服务，才能同时验证公共价值与运营可能？",
+        "metrics": [
+          {
+            "metric_id": "metric:ch03-content:primary",
+            "tool_id": "project.document_constraints",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:poi-category-count:real-v1",
+              "result:population-total:754f2af64f80c31e"
+            ],
+            "measures": "本章授权范围内的空间或项目证据",
+            "decision_role": "回答本章决策问题的主要比较条件",
+            "combine_with": [
+              "metric:ch03-content:boundary"
+            ],
+            "comparison_baseline": "把区域设施多样性与年龄场景、居民底线对照，区分可立即试验、需伙伴共创和暂不承诺三类产品。",
+            "action_change": "改变本章的优先验证顺序或行动强度",
+            "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+          },
+          {
+            "metric_id": "metric:ch03-content:boundary",
+            "tool_id": "poi.category_count",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:poi-category-count:real-v1",
+              "result:population-total:754f2af64f80c31e"
+            ],
+            "measures": "本章的第二类约束或对照证据",
+            "decision_role": "与主要指标共同形成可验证判断",
+            "combine_with": [
+              "metric:ch03-content:primary"
+            ],
+            "comparison_baseline": "把区域设施多样性与年龄场景、居民底线对照，区分可立即试验、需伙伴共创和暂不承诺三类产品。",
+            "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+            "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+          }
+        ],
+        "comparison_design": {
+          "observation_universe": "项目研究范围及本章授权对象",
+          "spatial_unit": "本章授权空间对象或共同网格",
+          "comparison_axes": [
+            "项目内部比较",
+            "与共同范围基准比较"
+          ],
+          "baseline": "把区域设施多样性与年龄场景、居民底线对照，区分可立即试验、需伙伴共创和暂不承诺三类产品。",
+          "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+          "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+          "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+        },
+        "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+        "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+      }
+    },
+    {
+      "allowed_tool_ids": [
+        "project.document_constraints",
+        "road.entrance_distance"
+      ],
+      "analysis_approach": {
+        "comparison_design": "逐一核对13栋建筑、主路径、3个庭院、居民花园、入口和后勤接口；比较建议推进、条件未满足暂缓、本阶段不纳入。",
+        "decision_question": "哪些建筑和空间承载首期策略，哪些必须暂缓或排除？",
+        "hypotheses": [
+          "只启动少量条件清楚、可逆使用的公共空间。"
+        ],
+        "synthesis_goal": "形成完整承载表和组合复核。",
+        "targets": [
+          "project",
+          "b-county",
+          "b-civil",
+          "b-publicity",
+          "b-agriwater",
+          "b-dormitory",
+          "b-auditorium",
+          "b-archive",
+          "b-activity",
+          "b-residential-1",
+          "b-residential-2",
+          "b-residential-3",
+          "b-aux-1",
+          "b-aux-2",
+          "path-main",
+          "court-east",
+          "court-middle",
+          "court-west",
+          "garden-resident",
+          "entrance-main",
+          "entrance-west",
+          "support-service"
+        ]
+      },
+      "authorized_object_ids": [
+        "b-county",
+        "b-civil",
+        "b-publicity",
+        "b-agriwater",
+        "b-dormitory",
+        "b-auditorium",
+        "b-archive",
+        "b-activity",
+        "b-residential-1",
+        "b-residential-2",
+        "b-residential-3",
+        "b-aux-1",
+        "b-aux-2",
+        "path-main",
+        "court-east",
+        "court-middle",
+        "court-west",
+        "garden-resident",
+        "entrance-main",
+        "entrance-west",
+        "support-service"
+      ],
+      "authorized_resource_ids": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "available_result_ids": [
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "chapter_id": "ch05-bearing",
+      "dependencies": [
+        {
+          "dependency_type": "decision",
+          "essential": true,
+          "required_output": "已接受的首期内容组合",
+          "upstream_chapter_id": "ch03-content"
+        },
+        {
+          "dependency_type": "finding",
+          "essential": true,
+          "required_output": "入口与动线边界",
+          "upstream_chapter_id": "ch04-connection"
+        }
+      ],
+      "dependency_boundaries": [],
+      "expected_outputs": [
+        "普通读者判断",
+        "决策表",
+        "行动与验证条件"
+      ],
+      "goal_ids": [
+        "g-preserve",
+        "g-reuse",
+        "g-vision",
+        "g-coexist"
+      ],
+      "order": 50,
+      "required_object_ids": [
+        "b-county",
+        "b-civil",
+        "b-publicity",
+        "b-agriwater",
+        "b-dormitory",
+        "b-auditorium",
+        "b-archive",
+        "b-activity",
+        "b-residential-1",
+        "b-residential-2",
+        "b-residential-3",
+        "b-aux-1",
+        "b-aux-2",
+        "path-main",
+        "court-east",
+        "court-middle",
+        "court-west",
+        "garden-resident",
+        "entrance-main",
+        "entrance-west",
+        "support-service"
+      ],
+      "requires_portfolio_check": true,
+      "responsibility": "把已形成的内容、连接和居民边界落实到全部建筑与关键空间。",
+      "specialist_role": "建筑承载与保护分析师",
+      "title": "建筑与空间单元承载",
+      "tool_boundaries": [],
+      "metric_bundle": {
+        "bundle_id": "bundle:ch05-bearing",
+        "decision_question": "哪些建筑和空间承载首期策略，哪些必须暂缓或排除？",
+        "metrics": [
+          {
+            "metric_id": "metric:ch05-bearing:primary",
+            "tool_id": "project.document_constraints",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:coordinate-readiness:real-v1"
+            ],
+            "measures": "本章授权范围内的空间或项目证据",
+            "decision_role": "回答本章决策问题的主要比较条件",
+            "combine_with": [
+              "metric:ch05-bearing:boundary"
+            ],
+            "comparison_baseline": "逐一核对13栋建筑、主路径、3个庭院、居民花园、入口和后勤接口；比较建议推进、条件未满足暂缓、本阶段不纳入。",
+            "action_change": "改变本章的优先验证顺序或行动强度",
+            "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+          },
+          {
+            "metric_id": "metric:ch05-bearing:boundary",
+            "tool_id": "road.entrance_distance",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:coordinate-readiness:real-v1"
+            ],
+            "measures": "本章的第二类约束或对照证据",
+            "decision_role": "与主要指标共同形成可验证判断",
+            "combine_with": [
+              "metric:ch05-bearing:primary"
+            ],
+            "comparison_baseline": "逐一核对13栋建筑、主路径、3个庭院、居民花园、入口和后勤接口；比较建议推进、条件未满足暂缓、本阶段不纳入。",
+            "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+            "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+          }
+        ],
+        "comparison_design": {
+          "observation_universe": "项目研究范围及本章授权对象",
+          "spatial_unit": "本章授权空间对象或共同网格",
+          "comparison_axes": [
+            "项目内部比较",
+            "与共同范围基准比较"
+          ],
+          "baseline": "逐一核对13栋建筑、主路径、3个庭院、居民花园、入口和后勤接口；比较建议推进、条件未满足暂缓、本阶段不纳入。",
+          "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+          "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+          "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+        },
+        "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+        "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+      }
+    },
+    {
+      "allowed_tool_ids": [
+        "project.document_constraints",
+        "road.entrance_distance",
+        "grid.opportunity_flag"
+      ],
+      "analysis_approach": {
+        "comparison_design": "按0—30天、31—90天、91—180天比较证据成熟度、投入不可逆性和停止成本。",
+        "decision_question": "未来180天如何用真实数据决定继续、调整或停止？",
+        "hypotheses": [
+          "先核验底图与安全，再运行低容量样板，最后依据真实使用和全成本决定扩展。"
+        ],
+        "synthesis_goal": "形成责任、数据、继续条件和停止条件。",
+        "targets": [
+          "project"
+        ]
+      },
+      "authorized_object_ids": [],
+      "authorized_resource_ids": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1",
+        "result:poi-road-colocation:real-v1"
+      ],
+      "available_result_ids": [
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1",
+        "result:poi-road-colocation:real-v1"
+      ],
+      "chapter_id": "ch06-gates",
+      "dependencies": [
+        {
+          "dependency_type": "decision",
+          "essential": true,
+          "required_output": "已接受内容与运营动作",
+          "upstream_chapter_id": "ch03-content"
+        },
+        {
+          "dependency_type": "decision",
+          "essential": true,
+          "required_output": "已接受连接与入口动作",
+          "upstream_chapter_id": "ch04-connection"
+        },
+        {
+          "dependency_type": "decision",
+          "essential": true,
+          "required_output": "已接受建筑承载清单",
+          "upstream_chapter_id": "ch05-bearing"
+        }
+      ],
+      "dependency_boundaries": [],
+      "expected_outputs": [
+        "普通读者判断",
+        "决策表",
+        "行动与验证条件"
+      ],
+      "goal_ids": [
+        "g-operation",
+        "g-preserve",
+        "g-coexist"
+      ],
+      "order": 60,
+      "required_object_ids": [],
+      "requires_portfolio_check": false,
+      "responsibility": "把已接受策略转成0—180天可执行、可停止的验证计划。",
+      "specialist_role": "实施验证分析师",
+      "title": "分期行动与验证闸门",
+      "tool_boundaries": [],
+      "metric_bundle": {
+        "bundle_id": "bundle:ch06-gates",
+        "decision_question": "未来180天如何用真实数据决定继续、调整或停止？",
+        "metrics": [
+          {
+            "metric_id": "metric:ch06-gates:primary",
+            "tool_id": "project.document_constraints",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:coordinate-readiness:real-v1",
+              "result:poi-road-colocation:real-v1"
+            ],
+            "measures": "本章授权范围内的空间或项目证据",
+            "decision_role": "回答本章决策问题的主要比较条件",
+            "combine_with": [
+              "metric:ch06-gates:boundary"
+            ],
+            "comparison_baseline": "按0—30天、31—90天、91—180天比较证据成熟度、投入不可逆性和停止成本。",
+            "action_change": "改变本章的优先验证顺序或行动强度",
+            "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+          },
+          {
+            "metric_id": "metric:ch06-gates:boundary",
+            "tool_id": "road.entrance_distance",
+            "availability": "available",
+            "evidence_ids": [
+              "document:project-extracts",
+              "result:project-constraints:real-v1",
+              "result:coordinate-readiness:real-v1",
+              "result:poi-road-colocation:real-v1"
+            ],
+            "measures": "本章的第二类约束或对照证据",
+            "decision_role": "与主要指标共同形成可验证判断",
+            "combine_with": [
+              "metric:ch06-gates:primary"
+            ],
+            "comparison_baseline": "按0—30天、31—90天、91—180天比较证据成熟度、投入不可逆性和停止成本。",
+            "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+            "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+          }
+        ],
+        "comparison_design": {
+          "observation_universe": "项目研究范围及本章授权对象",
+          "spatial_unit": "本章授权空间对象或共同网格",
+          "comparison_axes": [
+            "项目内部比较",
+            "与共同范围基准比较"
+          ],
+          "baseline": "按0—30天、31—90天、91—180天比较证据成熟度、投入不可逆性和停止成本。",
+          "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+          "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+          "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+        },
+        "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+        "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+      }
+    }
+  ],
+  "project_understanding": {
+    "analysis_objects": [
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "长沙市开福区潘家坪巷片区原长沙县政府旧址更新项目",
+        "notes": "约2万平方米；材料报告13栋建筑，其中8栋保护建筑、3栋住宅及2栋辅助建筑。",
+        "object_id": "project",
+        "object_type": "project_site",
+        "parent_object_id": null,
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "县委楼",
+        "notes": "8栋保护建筑之一；具体结构、面积与消防条件待逐栋核验。",
+        "object_id": "b-county",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "民政楼",
+        "notes": "8栋保护建筑之一；与居民和社区服务的空间关系待现场核验。",
+        "object_id": "b-civil",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "宣教楼",
+        "notes": "8栋保护建筑之一；适合内容与教育功能的判断仍需测绘支持。",
+        "object_id": "b-publicity",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "农水楼",
+        "notes": "8栋保护建筑之一；逐栋面积、结构和现状使用资料不足。",
+        "object_id": "b-agriwater",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "needs_verification"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "历史宿舍楼",
+        "notes": "8栋保护建筑之一；产权、住用状态和居民关系待核验。",
+        "object_id": "b-dormitory",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "needs_verification"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "礼堂",
+        "notes": "8栋保护建筑之一；项目材料明确其集体活动与历史记忆价值。",
+        "object_id": "b-auditorium",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "档案楼",
+        "notes": "8栋保护建筑之一；档案使用、开放等级和环境条件待核验。",
+        "object_id": "b-archive",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "活动中心",
+        "notes": "8栋保护建筑之一；宜优先承接居民日常活动。",
+        "object_id": "b-activity",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "一号住宅楼",
+        "notes": "3栋住宅之一；三栋合计约102户，当前不宜按公共商业空间处理。",
+        "object_id": "b-residential-1",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "二号住宅楼",
+        "notes": "3栋住宅之一；与三号住宅楼之间有居民花园。",
+        "object_id": "b-residential-2",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "三号住宅楼",
+        "notes": "3栋住宅之一；与二号住宅楼之间有居民花园。",
+        "object_id": "b-residential-3",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "一号辅助建筑/简易仓库",
+        "notes": "两栋辅助建筑之一；正式编号、结构和可用性待逐栋确认。",
+        "object_id": "b-aux-1",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "needs_verification"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "二号辅助建筑/简易仓库",
+        "notes": "两栋辅助建筑之一；正式编号、结构和可用性待逐栋确认。",
+        "object_id": "b-aux-2",
+        "object_type": "building",
+        "parent_object_id": "project",
+        "verification_status": "needs_verification"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "约120米主路径",
+        "notes": "项目材料中的主要空间骨架，应优先验证连续步行、无障碍和消防关系。",
+        "object_id": "path-main",
+        "object_type": "path",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "东侧庭院",
+        "notes": "三个东西向庭院之一；具体边界和铺装条件待测绘。",
+        "object_id": "court-east",
+        "object_type": "courtyard",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "中部庭院",
+        "notes": "三个东西向庭院之一；应校核公共活动与居民安宁的关系。",
+        "object_id": "court-middle",
+        "object_type": "courtyard",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "西侧庭院",
+        "notes": "三个东西向庭院之一；靠近居民端，宜承担缓冲。",
+        "object_id": "court-west",
+        "object_type": "courtyard",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "二号与三号住宅楼之间居民花园",
+        "notes": "已形成居民日常使用，应保持居民主导。",
+        "object_id": "garden-resident",
+        "object_type": "garden",
+        "parent_object_id": "project",
+        "verification_status": "confirmed"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "主入口",
+        "notes": "位置和通行制度需正式坐标、门禁与消防资料确认。",
+        "object_id": "entrance-main",
+        "object_type": "entrance",
+        "parent_object_id": "project",
+        "verification_status": "needs_verification"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "西端第二入口候选",
+        "notes": "只作为居民通行候选，尚不能作为公共主入口。",
+        "object_id": "entrance-west",
+        "object_type": "entrance",
+        "parent_object_id": "project",
+        "verification_status": "needs_verification"
+      },
+      {
+        "comparison_role": "decision_object",
+        "coordinates": [],
+        "label": "后勤、消防、门禁接口",
+        "notes": "需专项设计，当前不能以中心点或示意路径替代。",
+        "object_id": "support-service",
+        "object_type": "support",
+        "parent_object_id": "project",
+        "verification_status": "needs_verification"
+      }
+    ],
+    "background": "本项目不是先给13栋建筑逐一填功能，而是先回答旧址更新要守住什么、服务谁、形成什么内容与运营方式，再让建筑和空间单元承载这些策略。当前材料足以支持底线、方向与首期试验，但不足以支持终局招商、收入或投资回报承诺。",
+    "bottom_lines": [
+      "保护建筑先完成测绘、结构、消防和权属核验。",
+      "住宅、居民花园及居民日常通行不因公共开放而被挤占。",
+      "缺少客流、消费、成本和收入数据时，不作招商规模、营收或回报承诺。"
+    ],
+    "business_model_assessment": {
+      "basis": "当前材料未明确稳定付款方、收入结构、经营强度、投资上限和回报要求。",
+      "mode": "undetermined"
+    },
+    "decision_hypotheses": [
+      {
+        "decision_effect": "决定首批内容、建筑数量与活动容量。",
+        "hypothesis": "首期以公共文化、社区服务和低强度文旅体验组合，比直接大规模招商更符合现有证据。",
+        "verification_direction": "用90天真实到访、复访、居民反馈和全成本记录验证。"
+      },
+      {
+        "decision_effect": "决定现场踏勘和入口测绘优先级。",
+        "hypothesis": "东、东南方向更值得优先踏勘外部联系，但不能据此直接确定入口。",
+        "verification_direction": "补齐红线与入口坐标后进行真实路径、门禁和消防校核。"
+      }
+    ],
+    "decision_questions": [
+      "首期优先服务哪些真实使用场景？",
+      "哪些内容和公共服务值得先做低成本试验？",
+      "外部连接和内部动线应先核验什么？",
+      "哪些建筑与空间可以承载首期策略，哪些必须暂缓？",
+      "0—180天用什么数据决定继续、调整或停止？"
+    ],
+    "explicit_goals": [
+      {
+        "goal_id": "g-preserve",
+        "source_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1"
+        ],
+        "statement": "修复安全与设施问题，保护历史建筑，并保障约102户居民正常生活。"
+      },
+      {
+        "goal_id": "g-reuse",
+        "source_ids": [
+          "document:project-extracts"
+        ],
+        "statement": "盘活原长沙县政府旧址，提高闲置空间利用效率。"
+      },
+      {
+        "goal_id": "g-vision",
+        "source_ids": [
+          "document:project-extracts"
+        ],
+        "statement": "以“一路、一院、一园”和礼堂核心空间组织公共活动、居民通行和园区运营。"
+      }
+    ],
+    "goal_tensions": [
+      {
+        "decision_impact": "首期只能选择条件相对清楚、可逆改造的少量空间。",
+        "involved_goal_ids": [
+          "g-reuse",
+          "g-preserve"
+        ],
+        "tension": "提高空间利用率与保护、消防条件之间存在速度张力。"
+      },
+      {
+        "decision_impact": "内容、入口和开放时段必须先低容量验证。",
+        "involved_goal_ids": [
+          "g-operation",
+          "g-coexist"
+        ],
+        "tension": "园区活力与居民安宁之间存在时段、噪声和动线张力。"
+      }
+    ],
+    "inferred_goals": [
+      {
+        "basis": "项目材料同时提出空间盘活、公共活动、文旅联动和居民共生；只有把内容、服务和运营责任一起验证，空间更新才可持续。",
+        "goal_id": "g-operation",
+        "source_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1"
+        ],
+        "statement": "形成可持续的园区运营能力。"
+      },
+      {
+        "basis": "保护建筑、现状居民、礼堂公共记忆和周边区域设施共同要求兼顾外来使用与本地日常。",
+        "goal_id": "g-coexist",
+        "source_ids": [
+          "document:project-extracts",
+          "result:population-total:754f2af64f80c31e",
+          "result:poi-category-count:real-v1"
+        ],
+        "statement": "探索文旅联动、社区服务与居民共生的组合，而不是单一游客商业化。"
+      }
+    ],
+    "key_facts": [
+      "项目材料报告13栋建筑，其中8栋保护建筑、3栋住宅约102户。",
+      "保护建筑面积约13,071.78平方米，项目总面积约20,000平方米。",
+      "15分钟步行背景区2024年有2,635条设施记录、162个类别代码，区域人口约58,201人。"
+    ],
+    "known_boundaries": [
+      "15分钟步行范围以历史中心点生成，不是正式项目红线。",
+      "区域人口、设施、夜光与路网均为背景或代理，不能替代项目客流和经营数据。",
+      "正式边界、入口坐标、逐栋测绘、结构、消防、权属和居民协商仍缺失。"
+    ],
+    "unresolved_objectives": [
+      {
+        "confirmation_required": true,
+        "decision_impact": "会改变招商比例、团队配置和长期运营模式。",
+        "question": "商业经营强度、稳定付款方和收入结构是什么？"
+      },
+      {
+        "confirmation_required": true,
+        "decision_impact": "会改变修缮范围、分期速度和停止条件。",
+        "question": "投资上限、年度成本和回报要求是什么？"
+      },
+      {
+        "confirmation_required": false,
+        "decision_impact": "会改变容量、入口、活动频率和安保方案。",
+        "question": "目标客流、开放时段和居民可接受边界是什么？"
+      }
+    ]
+  },
+  "report_outline": [
+    "项目目标与当前决定",
+    "区域方向与外部机会",
+    "人群、需求场景与使用时段",
+    "文化内容、公共服务与运营产品",
+    "空间结构、可达性与对外连接",
+    "建筑与空间单元承载",
+    "分期行动与验证闸门"
+  ],
+  "run_id": "skill-first-v41-directional-fusion-real-20260718-152435",
+  "schema_version": "4.1",
+  "unanswered_questions": [
+    "谁承担长期运营主体责任？",
+    "居民协商和投诉处理机制如何设置？",
+    "首期预算、修缮范围与年度全成本上限是多少？"
+  ],
+  "visual_plan": [
+    {
+      "asset_id": "asset:regional-function-trend",
+      "chapter_id": "ch01-regional",
+      "decision_question": "设施记录和类别覆盖说明什么？",
+      "owner": "chief_analyst",
+      "placement": "区域机会章节后",
+      "priority": "high",
+      "purpose": "解释周边设施覆盖与年份边界",
+      "required_result_ids": [
+        "result:poi-category-count:real-v1",
+        "result:poi-multi-year:real-v1"
+      ],
+      "required_source_ids": [],
+      "selection_rule": "使用同范围保存结果并标注采集差异",
+      "status": "generated",
+      "visual_id": "v-regional",
+      "visual_semantics": "bar"
+    },
+    {
+      "asset_id": "asset:population-scenarios",
+      "chapter_id": "ch02-people",
+      "decision_question": "哪些人群场景值得先验证？",
+      "owner": "chief_analyst",
+      "placement": "人群场景章节后",
+      "priority": "high",
+      "purpose": "将年龄结构转成场景假设",
+      "required_result_ids": [
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "required_source_ids": [],
+      "selection_rule": "只显示真实人数和待验证场景",
+      "status": "generated",
+      "visual_id": "v-people",
+      "visual_semantics": "bar"
+    },
+    {
+      "asset_id": "asset:connection-strategy",
+      "chapter_id": "ch04-connection",
+      "decision_question": "优先踏勘哪里，为什么不能定入口？",
+      "owner": "chief_analyst",
+      "placement": "连接章节后",
+      "priority": "high",
+      "purpose": "展示结构证据和坐标缺口",
+      "required_result_ids": [
+        "result:road-syntax:real-v1",
+        "result:poi-road-colocation:real-v1",
+        "result:nightlight-profile:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "required_source_ids": [],
+      "selection_rule": "方向证据只形成踏勘优先级",
+      "status": "generated",
+      "visual_id": "v-connection",
+      "visual_semantics": "diagram"
+    },
+    {
+      "asset_id": "asset:directional-opportunity-matrix",
+      "chapter_id": "ch01-regional",
+      "decision_question": "项目周边哪个方向值得先看，为什么？",
+      "owner": "chief_analyst",
+      "placement": "区域方向决策表后",
+      "priority": "high",
+      "purpose": "把同一共享栅格上的POI、人口、夜光和路网差异转成普通读者可读的方向比较",
+      "required_result_ids": [
+        "result:shared-grid:real-v1",
+        "result:directional-fusion:real-v1"
+      ],
+      "required_source_ids": [],
+      "selection_rule": "八方向并列展示，明确数值仅表示空间条件；不生成综合机会分数",
+      "status": "generated",
+      "visual_id": "v-directional-fusion",
+      "visual_semantics": "diagram"
+    }
+  ]
+}

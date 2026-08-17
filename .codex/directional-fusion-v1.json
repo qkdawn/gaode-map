@@ -1,0 +1,6268 @@
+{
+  "schema_version": "directional-fusion.v1",
+  "center_gcj02": [
+    112.98634414425665,
+    28.220763114598597
+  ],
+  "scope_definition": {
+    "grid_type": "shared_grid",
+    "cell_count": 351,
+    "direction_method": "栅格中心点相对项目中心，按八方位划分",
+    "distance_bands": [
+      "0-500m",
+      "500-1000m",
+      "1000-1600m"
+    ]
+  },
+  "comparison_baseline": {
+    "type": "all_shared_cells",
+    "summary": {
+      "cells": 351,
+      "area_km2": 2.6649,
+      "poi_count": 2541,
+      "poi_density": 953.5,
+      "population_density": 16581.2,
+      "nightlight_mean": 66.0,
+      "road_covered_cells": 253,
+      "road_coverage_ratio": 0.721,
+      "road_density_covered_mean": 21.8,
+      "road_integration_covered_mean": 0.663,
+      "top_categories": [
+        [
+          "餐饮",
+          671
+        ],
+        [
+          "购物",
+          562
+        ],
+        [
+          "公司",
+          270
+        ],
+        [
+          "医疗",
+          189
+        ],
+        [
+          "交通",
+          182
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.0,
+        "population_density": 1.0,
+        "nightlight_mean": 1.0,
+        "road_integration_covered_mean": 1.0
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      }
+    }
+  },
+  "thresholds": {
+    "poi_density_p75": 1317.316,
+    "population_density_p75": 19709.806,
+    "nightlight_p75": 69.044,
+    "road_integration_p75_covered": 0.775,
+    "road_connectivity_p25_covered": 0.307
+  },
+  "all_summary": {
+    "cells": 351,
+    "area_km2": 2.6649,
+    "poi_count": 2541,
+    "poi_density": 953.5,
+    "population_density": 16581.2,
+    "nightlight_mean": 66.0,
+    "road_covered_cells": 253,
+    "road_coverage_ratio": 0.721,
+    "road_density_covered_mean": 21.8,
+    "road_integration_covered_mean": 0.663,
+    "top_categories": [
+      [
+        "餐饮",
+        671
+      ],
+      [
+        "购物",
+        562
+      ],
+      [
+        "公司",
+        270
+      ],
+      [
+        "医疗",
+        189
+      ],
+      [
+        "交通",
+        182
+      ]
+    ],
+    "relative_to_overall": {
+      "poi_density": 1.0,
+      "population_density": 1.0,
+      "nightlight_mean": 1.0,
+      "road_integration_covered_mean": 1.0
+    },
+    "signals": {
+      "poi_above_overall": false,
+      "population_above_overall": false,
+      "nightlight_above_overall": true,
+      "road_coverage_available": true,
+      "road_integration_above_overall": true
+    }
+  },
+  "sectors": [
+    {
+      "cells": 59,
+      "area_km2": 0.4479,
+      "poi_count": 392,
+      "poi_density": 875.1,
+      "population_density": 19530.7,
+      "nightlight_mean": 68.4,
+      "road_covered_cells": 42,
+      "road_coverage_ratio": 0.712,
+      "road_density_covered_mean": 36.6,
+      "road_integration_covered_mean": 0.646,
+      "top_categories": [
+        [
+          "餐饮",
+          89
+        ],
+        [
+          "购物",
+          76
+        ],
+        [
+          "公司",
+          51
+        ],
+        [
+          "医疗",
+          35
+        ],
+        [
+          "交通",
+          35
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.92,
+        "population_density": 1.18,
+        "nightlight_mean": 1.04,
+        "road_integration_covered_mean": 0.97
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "N",
+      "label": "北",
+      "distance_band": "0-1600m"
+    },
+    {
+      "cells": 52,
+      "area_km2": 0.3948,
+      "poi_count": 403,
+      "poi_density": 1020.7,
+      "population_density": 16783.9,
+      "nightlight_mean": 71.7,
+      "road_covered_cells": 42,
+      "road_coverage_ratio": 0.808,
+      "road_density_covered_mean": 23.4,
+      "road_integration_covered_mean": 0.627,
+      "top_categories": [
+        [
+          "餐饮",
+          125
+        ],
+        [
+          "购物",
+          86
+        ],
+        [
+          "公司",
+          70
+        ],
+        [
+          "医疗",
+          24
+        ],
+        [
+          "商务住宅",
+          23
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.07,
+        "population_density": 1.01,
+        "nightlight_mean": 1.09,
+        "road_integration_covered_mean": 0.95
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "NE",
+      "label": "东北",
+      "distance_band": "0-1600m"
+    },
+    {
+      "cells": 40,
+      "area_km2": 0.3037,
+      "poi_count": 175,
+      "poi_density": 576.2,
+      "population_density": 14173.4,
+      "nightlight_mean": 68.4,
+      "road_covered_cells": 28,
+      "road_coverage_ratio": 0.7,
+      "road_density_covered_mean": 18.5,
+      "road_integration_covered_mean": 0.647,
+      "top_categories": [
+        [
+          "购物",
+          40
+        ],
+        [
+          "餐饮",
+          34
+        ],
+        [
+          "商务住宅",
+          22
+        ],
+        [
+          "公司",
+          19
+        ],
+        [
+          "政府机构",
+          16
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.6,
+        "population_density": 0.85,
+        "nightlight_mean": 1.04,
+        "road_integration_covered_mean": 0.98
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "E",
+      "label": "东",
+      "distance_band": "0-1600m"
+    },
+    {
+      "cells": 18,
+      "area_km2": 0.1367,
+      "poi_count": 153,
+      "poi_density": 1119.6,
+      "population_density": 14860.0,
+      "nightlight_mean": 60.3,
+      "road_covered_cells": 15,
+      "road_coverage_ratio": 0.833,
+      "road_density_covered_mean": 11.3,
+      "road_integration_covered_mean": 0.72,
+      "top_categories": [
+        [
+          "餐饮",
+          34
+        ],
+        [
+          "购物",
+          25
+        ],
+        [
+          "公司",
+          17
+        ],
+        [
+          "医疗",
+          14
+        ],
+        [
+          "政府机构",
+          14
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.17,
+        "population_density": 0.9,
+        "nightlight_mean": 0.91,
+        "road_integration_covered_mean": 1.09
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "SE",
+      "label": "东南",
+      "distance_band": "0-1600m"
+    },
+    {
+      "cells": 54,
+      "area_km2": 0.41,
+      "poi_count": 583,
+      "poi_density": 1421.9,
+      "population_density": 12264.4,
+      "nightlight_mean": 67.4,
+      "road_covered_cells": 40,
+      "road_coverage_ratio": 0.741,
+      "road_density_covered_mean": 18.9,
+      "road_integration_covered_mean": 0.706,
+      "top_categories": [
+        [
+          "餐饮",
+          163
+        ],
+        [
+          "购物",
+          130
+        ],
+        [
+          "住宿",
+          55
+        ],
+        [
+          "公司",
+          52
+        ],
+        [
+          "医疗",
+          50
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.49,
+        "population_density": 0.74,
+        "nightlight_mean": 1.02,
+        "road_integration_covered_mean": 1.06
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "S",
+      "label": "南",
+      "distance_band": "0-1600m"
+    },
+    {
+      "cells": 38,
+      "area_km2": 0.2885,
+      "poi_count": 201,
+      "poi_density": 696.6,
+      "population_density": 16146.9,
+      "nightlight_mean": 65.2,
+      "road_covered_cells": 24,
+      "road_coverage_ratio": 0.632,
+      "road_density_covered_mean": 15.7,
+      "road_integration_covered_mean": 0.516,
+      "top_categories": [
+        [
+          "餐饮",
+          56
+        ],
+        [
+          "购物",
+          41
+        ],
+        [
+          "政府机构",
+          23
+        ],
+        [
+          "住宿",
+          22
+        ],
+        [
+          "交通",
+          17
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.73,
+        "population_density": 0.97,
+        "nightlight_mean": 0.99,
+        "road_integration_covered_mean": 0.78
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "SW",
+      "label": "西南",
+      "distance_band": "0-1600m"
+    },
+    {
+      "cells": 47,
+      "area_km2": 0.3568,
+      "poi_count": 290,
+      "poi_density": 812.8,
+      "population_density": 18148.6,
+      "nightlight_mean": 57.9,
+      "road_covered_cells": 35,
+      "road_coverage_ratio": 0.745,
+      "road_density_covered_mean": 15.0,
+      "road_integration_covered_mean": 0.688,
+      "top_categories": [
+        [
+          "餐饮",
+          60
+        ],
+        [
+          "购物",
+          58
+        ],
+        [
+          "政府机构",
+          33
+        ],
+        [
+          "公司",
+          25
+        ],
+        [
+          "交通",
+          24
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.85,
+        "population_density": 1.09,
+        "nightlight_mean": 0.88,
+        "road_integration_covered_mean": 1.04
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "W",
+      "label": "西",
+      "distance_band": "0-1600m"
+    },
+    {
+      "cells": 43,
+      "area_km2": 0.3264,
+      "poi_count": 344,
+      "poi_density": 1053.8,
+      "population_density": 19342.5,
+      "nightlight_mean": 63.7,
+      "road_covered_cells": 27,
+      "road_coverage_ratio": 0.628,
+      "road_density_covered_mean": 23.7,
+      "road_integration_covered_mean": 0.764,
+      "top_categories": [
+        [
+          "餐饮",
+          110
+        ],
+        [
+          "购物",
+          106
+        ],
+        [
+          "交通",
+          31
+        ],
+        [
+          "公司",
+          27
+        ],
+        [
+          "医疗",
+          20
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.11,
+        "population_density": 1.17,
+        "nightlight_mean": 0.97,
+        "road_integration_covered_mean": 1.15
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": true,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "NW",
+      "label": "西北",
+      "distance_band": "0-1600m"
+    }
+  ],
+  "distance_bands": [
+    {
+      "cells": 12,
+      "area_km2": 0.0911,
+      "poi_count": 140,
+      "poi_density": 1536.8,
+      "population_density": 20383.0,
+      "nightlight_mean": 67.9,
+      "road_covered_cells": 9,
+      "road_coverage_ratio": 0.75,
+      "road_density_covered_mean": 20.2,
+      "road_integration_covered_mean": 0.764,
+      "top_categories": [
+        [
+          "餐饮",
+          39
+        ],
+        [
+          "公司",
+          27
+        ],
+        [
+          "购物",
+          21
+        ],
+        [
+          "医疗",
+          15
+        ],
+        [
+          "科教文化",
+          12
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.61,
+        "population_density": 1.23,
+        "nightlight_mean": 1.03,
+        "road_integration_covered_mean": 1.15
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "N",
+      "label": "北",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 12,
+      "area_km2": 0.0911,
+      "poi_count": 193,
+      "poi_density": 2118.4,
+      "population_density": 14748.3,
+      "nightlight_mean": 65.9,
+      "road_covered_cells": 8,
+      "road_coverage_ratio": 0.667,
+      "road_density_covered_mean": 23.8,
+      "road_integration_covered_mean": 0.853,
+      "top_categories": [
+        [
+          "公司",
+          65
+        ],
+        [
+          "餐饮",
+          63
+        ],
+        [
+          "购物",
+          19
+        ],
+        [
+          "医疗",
+          12
+        ],
+        [
+          "科教文化",
+          12
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 2.22,
+        "population_density": 0.89,
+        "nightlight_mean": 1.0,
+        "road_integration_covered_mean": 1.29
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "NE",
+      "label": "东北",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 12,
+      "area_km2": 0.0911,
+      "poi_count": 40,
+      "poi_density": 438.9,
+      "population_density": 11319.9,
+      "nightlight_mean": 66.2,
+      "road_covered_cells": 8,
+      "road_coverage_ratio": 0.667,
+      "road_density_covered_mean": 16.6,
+      "road_integration_covered_mean": 0.808,
+      "top_categories": [
+        [
+          "公司",
+          10
+        ],
+        [
+          "购物",
+          7
+        ],
+        [
+          "商务住宅",
+          5
+        ],
+        [
+          "科教文化",
+          5
+        ],
+        [
+          "餐饮",
+          4
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.46,
+        "population_density": 0.68,
+        "nightlight_mean": 1.0,
+        "road_integration_covered_mean": 1.22
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "E",
+      "label": "东",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 4,
+      "area_km2": 0.0304,
+      "poi_count": 51,
+      "poi_density": 1679.0,
+      "population_density": 12362.2,
+      "nightlight_mean": 64.2,
+      "road_covered_cells": 4,
+      "road_coverage_ratio": 1.0,
+      "road_density_covered_mean": 9.2,
+      "road_integration_covered_mean": 0.841,
+      "top_categories": [
+        [
+          "公司",
+          13
+        ],
+        [
+          "餐饮",
+          12
+        ],
+        [
+          "医疗",
+          5
+        ],
+        [
+          "科教文化",
+          5
+        ],
+        [
+          "商务住宅",
+          4
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.76,
+        "population_density": 0.75,
+        "nightlight_mean": 0.97,
+        "road_integration_covered_mean": 1.27
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "SE",
+      "label": "东南",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 12,
+      "area_km2": 0.0911,
+      "poi_count": 123,
+      "poi_density": 1350.1,
+      "population_density": 16141.4,
+      "nightlight_mean": 65.8,
+      "road_covered_cells": 6,
+      "road_coverage_ratio": 0.5,
+      "road_density_covered_mean": 17.4,
+      "road_integration_covered_mean": 0.823,
+      "top_categories": [
+        [
+          "公司",
+          30
+        ],
+        [
+          "餐饮",
+          24
+        ],
+        [
+          "购物",
+          19
+        ],
+        [
+          "医疗",
+          15
+        ],
+        [
+          "住宿",
+          13
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.42,
+        "population_density": 0.97,
+        "nightlight_mean": 1.0,
+        "road_integration_covered_mean": 1.24
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "S",
+      "label": "南",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 12,
+      "area_km2": 0.0911,
+      "poi_count": 61,
+      "poi_density": 669.5,
+      "population_density": 14406.2,
+      "nightlight_mean": 63.3,
+      "road_covered_cells": 4,
+      "road_coverage_ratio": 0.333,
+      "road_density_covered_mean": 17.7,
+      "road_integration_covered_mean": 0.577,
+      "top_categories": [
+        [
+          "餐饮",
+          19
+        ],
+        [
+          "住宿",
+          11
+        ],
+        [
+          "政府机构",
+          10
+        ],
+        [
+          "购物",
+          8
+        ],
+        [
+          "交通",
+          6
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.7,
+        "population_density": 0.87,
+        "nightlight_mean": 0.96,
+        "road_integration_covered_mean": 0.87
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "SW",
+      "label": "西南",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 14,
+      "area_km2": 0.1063,
+      "poi_count": 89,
+      "poi_density": 837.2,
+      "population_density": 18847.8,
+      "nightlight_mean": 59.1,
+      "road_covered_cells": 7,
+      "road_coverage_ratio": 0.5,
+      "road_density_covered_mean": 12.9,
+      "road_integration_covered_mean": 0.785,
+      "top_categories": [
+        [
+          "餐饮",
+          26
+        ],
+        [
+          "购物",
+          20
+        ],
+        [
+          "政府机构",
+          11
+        ],
+        [
+          "商务住宅",
+          9
+        ],
+        [
+          "科教文化",
+          9
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.88,
+        "population_density": 1.14,
+        "nightlight_mean": 0.9,
+        "road_integration_covered_mean": 1.18
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "W",
+      "label": "西",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 12,
+      "area_km2": 0.0911,
+      "poi_count": 87,
+      "poi_density": 955.0,
+      "population_density": 21184.0,
+      "nightlight_mean": 65.5,
+      "road_covered_cells": 7,
+      "road_coverage_ratio": 0.583,
+      "road_density_covered_mean": 19.6,
+      "road_integration_covered_mean": 0.897,
+      "top_categories": [
+        [
+          "餐饮",
+          26
+        ],
+        [
+          "公司",
+          17
+        ],
+        [
+          "购物",
+          15
+        ],
+        [
+          "交通",
+          8
+        ],
+        [
+          "医疗",
+          6
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.0,
+        "population_density": 1.28,
+        "nightlight_mean": 0.99,
+        "road_integration_covered_mean": 1.35
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": true,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "NW",
+      "label": "西北",
+      "distance_band": "0-500m",
+      "distance_start_m": 0.0,
+      "distance_end_m": 500.0
+    },
+    {
+      "cells": 39,
+      "area_km2": 0.2961,
+      "poi_count": 211,
+      "poi_density": 712.6,
+      "population_density": 19117.7,
+      "nightlight_mean": 69.3,
+      "road_covered_cells": 25,
+      "road_coverage_ratio": 0.641,
+      "road_density_covered_mean": 43.4,
+      "road_integration_covered_mean": 0.65,
+      "top_categories": [
+        [
+          "购物",
+          45
+        ],
+        [
+          "餐饮",
+          40
+        ],
+        [
+          "公司",
+          22
+        ],
+        [
+          "政府机构",
+          21
+        ],
+        [
+          "交通",
+          21
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.75,
+        "population_density": 1.15,
+        "nightlight_mean": 1.05,
+        "road_integration_covered_mean": 0.98
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "N",
+      "label": "北",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 37,
+      "area_km2": 0.2809,
+      "poi_count": 205,
+      "poi_density": 729.7,
+      "population_density": 17327.7,
+      "nightlight_mean": 73.2,
+      "road_covered_cells": 31,
+      "road_coverage_ratio": 0.838,
+      "road_density_covered_mean": 23.2,
+      "road_integration_covered_mean": 0.581,
+      "top_categories": [
+        [
+          "购物",
+          67
+        ],
+        [
+          "餐饮",
+          59
+        ],
+        [
+          "商务住宅",
+          19
+        ],
+        [
+          "政府机构",
+          17
+        ],
+        [
+          "交通",
+          15
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.77,
+        "population_density": 1.05,
+        "nightlight_mean": 1.11,
+        "road_integration_covered_mean": 0.88
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "NE",
+      "label": "东北",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 24,
+      "area_km2": 0.1822,
+      "poi_count": 128,
+      "poi_density": 702.5,
+      "population_density": 16015.0,
+      "nightlight_mean": 66.9,
+      "road_covered_cells": 17,
+      "road_coverage_ratio": 0.708,
+      "road_density_covered_mean": 20.4,
+      "road_integration_covered_mean": 0.619,
+      "top_categories": [
+        [
+          "餐饮",
+          30
+        ],
+        [
+          "购物",
+          28
+        ],
+        [
+          "商务住宅",
+          17
+        ],
+        [
+          "医疗",
+          12
+        ],
+        [
+          "政府机构",
+          12
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.74,
+        "population_density": 0.97,
+        "nightlight_mean": 1.01,
+        "road_integration_covered_mean": 0.93
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "E",
+      "label": "东",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 14,
+      "area_km2": 0.1063,
+      "poi_count": 102,
+      "poi_density": 959.8,
+      "population_density": 15574.0,
+      "nightlight_mean": 59.2,
+      "road_covered_cells": 11,
+      "road_coverage_ratio": 0.786,
+      "road_density_covered_mean": 12.1,
+      "road_integration_covered_mean": 0.676,
+      "top_categories": [
+        [
+          "餐饮",
+          22
+        ],
+        [
+          "购物",
+          22
+        ],
+        [
+          "政府机构",
+          12
+        ],
+        [
+          "医疗",
+          9
+        ],
+        [
+          "商务住宅",
+          9
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.01,
+        "population_density": 0.94,
+        "nightlight_mean": 0.9,
+        "road_integration_covered_mean": 1.02
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "SE",
+      "label": "东南",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 39,
+      "area_km2": 0.2961,
+      "poi_count": 421,
+      "poi_density": 1421.7,
+      "population_density": 11180.0,
+      "nightlight_mean": 67.5,
+      "road_covered_cells": 31,
+      "road_coverage_ratio": 0.795,
+      "road_density_covered_mean": 19.3,
+      "road_integration_covered_mean": 0.681,
+      "top_categories": [
+        [
+          "餐饮",
+          129
+        ],
+        [
+          "购物",
+          103
+        ],
+        [
+          "住宿",
+          40
+        ],
+        [
+          "科教文化",
+          33
+        ],
+        [
+          "交通",
+          25
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.49,
+        "population_density": 0.67,
+        "nightlight_mean": 1.02,
+        "road_integration_covered_mean": 1.03
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "S",
+      "label": "南",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 25,
+      "area_km2": 0.1898,
+      "poi_count": 126,
+      "poi_density": 663.8,
+      "population_density": 16828.9,
+      "nightlight_mean": 66.0,
+      "road_covered_cells": 19,
+      "road_coverage_ratio": 0.76,
+      "road_density_covered_mean": 15.0,
+      "road_integration_covered_mean": 0.498,
+      "top_categories": [
+        [
+          "餐饮",
+          31
+        ],
+        [
+          "购物",
+          27
+        ],
+        [
+          "政府机构",
+          13
+        ],
+        [
+          "住宿",
+          11
+        ],
+        [
+          "交通",
+          11
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.7,
+        "population_density": 1.01,
+        "nightlight_mean": 1.0,
+        "road_integration_covered_mean": 0.75
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "SW",
+      "label": "西南",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 28,
+      "area_km2": 0.2125,
+      "poi_count": 168,
+      "poi_density": 790.4,
+      "population_density": 18416.2,
+      "nightlight_mean": 57.5,
+      "road_covered_cells": 24,
+      "road_coverage_ratio": 0.857,
+      "road_density_covered_mean": 16.5,
+      "road_integration_covered_mean": 0.67,
+      "top_categories": [
+        [
+          "购物",
+          35
+        ],
+        [
+          "餐饮",
+          29
+        ],
+        [
+          "政府机构",
+          22
+        ],
+        [
+          "交通",
+          19
+        ],
+        [
+          "住宿",
+          18
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.83,
+        "population_density": 1.11,
+        "nightlight_mean": 0.87,
+        "road_integration_covered_mean": 1.01
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "W",
+      "label": "西",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 31,
+      "area_km2": 0.2353,
+      "poi_count": 257,
+      "poi_density": 1092.0,
+      "population_density": 18629.7,
+      "nightlight_mean": 63.0,
+      "road_covered_cells": 20,
+      "road_coverage_ratio": 0.645,
+      "road_density_covered_mean": 25.1,
+      "road_integration_covered_mean": 0.717,
+      "top_categories": [
+        [
+          "购物",
+          91
+        ],
+        [
+          "餐饮",
+          84
+        ],
+        [
+          "交通",
+          23
+        ],
+        [
+          "商务住宅",
+          16
+        ],
+        [
+          "医疗",
+          14
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.15,
+        "population_density": 1.12,
+        "nightlight_mean": 0.95,
+        "road_integration_covered_mean": 1.08
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": true,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "NW",
+      "label": "西北",
+      "distance_band": "500-1000m",
+      "distance_start_m": 500.0,
+      "distance_end_m": 1000.0
+    },
+    {
+      "cells": 8,
+      "area_km2": 0.0607,
+      "poi_count": 41,
+      "poi_density": 675.1,
+      "population_density": 20265.8,
+      "nightlight_mean": 65.1,
+      "road_covered_cells": 8,
+      "road_coverage_ratio": 1.0,
+      "road_density_covered_mean": 33.6,
+      "road_integration_covered_mean": 0.499,
+      "top_categories": [
+        [
+          "餐饮",
+          10
+        ],
+        [
+          "购物",
+          10
+        ],
+        [
+          "交通",
+          8
+        ],
+        [
+          "医疗",
+          7
+        ],
+        [
+          "商务住宅",
+          3
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.71,
+        "population_density": 1.22,
+        "nightlight_mean": 0.99,
+        "road_integration_covered_mean": 0.75
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "N",
+      "label": "北",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    },
+    {
+      "cells": 3,
+      "area_km2": 0.0228,
+      "poi_count": 5,
+      "poi_density": 219.6,
+      "population_density": 18218.5,
+      "nightlight_mean": 75.4,
+      "road_covered_cells": 3,
+      "road_coverage_ratio": 1.0,
+      "road_density_covered_mean": 23.9,
+      "road_integration_covered_mean": 0.505,
+      "top_categories": [
+        [
+          "餐饮",
+          3
+        ],
+        [
+          "交通",
+          2
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.23,
+        "population_density": 1.1,
+        "nightlight_mean": 1.14,
+        "road_integration_covered_mean": 0.76
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "NE",
+      "label": "东北",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    },
+    {
+      "cells": 4,
+      "area_km2": 0.0304,
+      "poi_count": 7,
+      "poi_density": 230.4,
+      "population_density": 11687.0,
+      "nightlight_mean": 83.9,
+      "road_covered_cells": 3,
+      "road_coverage_ratio": 0.75,
+      "road_density_covered_mean": 13.1,
+      "road_integration_covered_mean": 0.374,
+      "top_categories": [
+        [
+          "购物",
+          5
+        ],
+        [
+          "政府机构",
+          2
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.24,
+        "population_density": 0.7,
+        "nightlight_mean": 1.27,
+        "road_integration_covered_mean": 0.56
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "E",
+      "label": "东",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    },
+    {
+      "cells": 0,
+      "area_km2": 0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 0.0,
+      "nightlight_mean": 0.0,
+      "road_covered_cells": 0,
+      "road_coverage_ratio": 0.0,
+      "road_density_covered_mean": null,
+      "road_integration_covered_mean": null,
+      "top_categories": [],
+      "relative_to_overall": {
+        "poi_density": 0.0,
+        "population_density": 0.0,
+        "nightlight_mean": 0.0,
+        "road_integration_covered_mean": null
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": false,
+        "road_integration_above_overall": false
+      },
+      "sector": "SE",
+      "label": "东南",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    },
+    {
+      "cells": 3,
+      "area_km2": 0.0228,
+      "poi_count": 39,
+      "poi_density": 1712.0,
+      "population_density": 10855.6,
+      "nightlight_mean": 73.1,
+      "road_covered_cells": 3,
+      "road_coverage_ratio": 1.0,
+      "road_density_covered_mean": 18.1,
+      "road_integration_covered_mean": 0.73,
+      "top_categories": [
+        [
+          "医疗",
+          11
+        ],
+        [
+          "餐饮",
+          10
+        ],
+        [
+          "购物",
+          8
+        ],
+        [
+          "公司",
+          4
+        ],
+        [
+          "住宿",
+          2
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.8,
+        "population_density": 0.65,
+        "nightlight_mean": 1.11,
+        "road_integration_covered_mean": 1.1
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": false,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": true
+      },
+      "sector": "S",
+      "label": "南",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    },
+    {
+      "cells": 1,
+      "area_km2": 0.0076,
+      "poi_count": 14,
+      "poi_density": 1844.0,
+      "population_density": 19986.6,
+      "nightlight_mean": 67.9,
+      "road_covered_cells": 1,
+      "road_coverage_ratio": 1.0,
+      "road_density_covered_mean": 22.3,
+      "road_integration_covered_mean": 0.619,
+      "top_categories": [
+        [
+          "餐饮",
+          6
+        ],
+        [
+          "购物",
+          6
+        ],
+        [
+          "医疗",
+          2
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 1.93,
+        "population_density": 1.21,
+        "nightlight_mean": 1.03,
+        "road_integration_covered_mean": 0.93
+      },
+      "signals": {
+        "poi_above_overall": true,
+        "population_above_overall": true,
+        "nightlight_above_overall": true,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "SW",
+      "label": "西南",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    },
+    {
+      "cells": 5,
+      "area_km2": 0.0379,
+      "poi_count": 33,
+      "poi_density": 869.7,
+      "population_density": 14690.9,
+      "nightlight_mean": 56.6,
+      "road_covered_cells": 4,
+      "road_coverage_ratio": 0.8,
+      "road_density_covered_mean": 10.0,
+      "road_integration_covered_mean": 0.627,
+      "top_categories": [
+        [
+          "公司",
+          12
+        ],
+        [
+          "餐饮",
+          5
+        ],
+        [
+          "交通",
+          4
+        ],
+        [
+          "购物",
+          3
+        ],
+        [
+          "住宿",
+          3
+        ]
+      ],
+      "relative_to_overall": {
+        "poi_density": 0.91,
+        "population_density": 0.89,
+        "nightlight_mean": 0.86,
+        "road_integration_covered_mean": 0.95
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": true,
+        "road_integration_above_overall": false
+      },
+      "sector": "W",
+      "label": "西",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    },
+    {
+      "cells": 0,
+      "area_km2": 0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 0.0,
+      "nightlight_mean": 0.0,
+      "road_covered_cells": 0,
+      "road_coverage_ratio": 0.0,
+      "road_density_covered_mean": null,
+      "road_integration_covered_mean": null,
+      "top_categories": [],
+      "relative_to_overall": {
+        "poi_density": 0.0,
+        "population_density": 0.0,
+        "nightlight_mean": 0.0,
+        "road_integration_covered_mean": null
+      },
+      "signals": {
+        "poi_above_overall": false,
+        "population_above_overall": false,
+        "nightlight_above_overall": false,
+        "road_coverage_available": false,
+        "road_integration_above_overall": false
+      },
+      "sector": "NW",
+      "label": "西北",
+      "distance_band": "1000-1600m",
+      "distance_start_m": 1000.0,
+      "distance_end_m": 1600.0
+    }
+  ],
+  "rows": [
+    {
+      "cell_id": "r13_c13",
+      "sector": "NW",
+      "distance_m": 57.5,
+      "poi_count": 17,
+      "poi_density": 2240.7,
+      "population_density": 20025.4,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.833,
+      "road_connectivity": 0.714
+    },
+    {
+      "cell_id": "r14_c13",
+      "sector": "SW",
+      "distance_m": 58.6,
+      "poi_count": 20,
+      "poi_density": 2634.5,
+      "population_density": 20033.5,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c14",
+      "sector": "NE",
+      "distance_m": 65.8,
+      "poi_count": 8,
+      "poi_density": 1053.8,
+      "population_density": 20297.2,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.0,
+      "road_integration": 0.869,
+      "road_connectivity": 0.53
+    },
+    {
+      "cell_id": "r14_c14",
+      "sector": "SE",
+      "distance_m": 66.4,
+      "poi_count": 10,
+      "poi_density": 1318.1,
+      "population_density": 19786.2,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 13.2,
+      "road_integration": 0.895,
+      "road_connectivity": 0.59
+    },
+    {
+      "cell_id": "r13_c12",
+      "sector": "W",
+      "distance_m": 125.4,
+      "poi_count": 4,
+      "poi_density": 526.6,
+      "population_density": 18954.6,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 20.6,
+      "road_integration": 0.799,
+      "road_connectivity": 0.531
+    },
+    {
+      "cell_id": "r14_c12",
+      "sector": "W",
+      "distance_m": 126.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 17876.1,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c15",
+      "sector": "E",
+      "distance_m": 137.2,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14781.7,
+      "nightlight": 64.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.0,
+      "road_integration": 0.861,
+      "road_connectivity": 0.67
+    },
+    {
+      "cell_id": "r14_c15",
+      "sector": "E",
+      "distance_m": 137.2,
+      "poi_count": 30,
+      "poi_density": 3947.1,
+      "population_density": 12480.5,
+      "nightlight": 64.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.0,
+      "road_integration": 0.838,
+      "road_connectivity": 0.63
+    },
+    {
+      "cell_id": "r12_c13",
+      "sector": "N",
+      "distance_m": 142.8,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 20065.2,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.759,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r15_c13",
+      "sector": "S",
+      "distance_m": 144.1,
+      "poi_count": 8,
+      "poi_density": 1053.8,
+      "population_density": 19887.0,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c14",
+      "sector": "N",
+      "distance_m": 146.5,
+      "poi_count": 29,
+      "poi_density": 3820.1,
+      "population_density": 20497.5,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 3.7,
+      "road_integration": 0.9,
+      "road_connectivity": 0.307
+    },
+    {
+      "cell_id": "r15_c14",
+      "sector": "S",
+      "distance_m": 147.3,
+      "poi_count": 24,
+      "poi_density": 3161.4,
+      "population_density": 18537.3,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.904,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r12_c12",
+      "sector": "NW",
+      "distance_m": 181.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 20132.8,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 1.7,
+      "road_integration": 0.759,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r15_c12",
+      "sector": "SW",
+      "distance_m": 182.6,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 17030.3,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c15",
+      "sector": "NE",
+      "distance_m": 189.8,
+      "poi_count": 7,
+      "poi_density": 921.6,
+      "population_density": 16724.3,
+      "nightlight": 65.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 20.7,
+      "road_integration": 0.895,
+      "road_connectivity": 0.631
+    },
+    {
+      "cell_id": "r15_c15",
+      "sector": "SE",
+      "distance_m": 189.9,
+      "poi_count": 18,
+      "poi_density": 2369.7,
+      "population_density": 11840.6,
+      "nightlight": 64.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.893,
+      "road_connectivity": 0.714
+    },
+    {
+      "cell_id": "r13_c11",
+      "sector": "W",
+      "distance_m": 204.1,
+      "poi_count": 6,
+      "poi_density": 789.9,
+      "population_density": 16379.0,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.2,
+      "road_integration": 0.812,
+      "road_connectivity": 0.373
+    },
+    {
+      "cell_id": "r14_c11",
+      "sector": "W",
+      "distance_m": 204.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14967.5,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c16",
+      "sector": "E",
+      "distance_m": 216.2,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 9493.0,
+      "nightlight": 66.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.824,
+      "road_connectivity": 0.397
+    },
+    {
+      "cell_id": "r14_c16",
+      "sector": "E",
+      "distance_m": 216.2,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 5812.4,
+      "nightlight": 66.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.775,
+      "road_connectivity": 0.499
+    },
+    {
+      "cell_id": "r11_c13",
+      "sector": "N",
+      "distance_m": 233.8,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 20729.0,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 32.3,
+      "road_integration": 0.91,
+      "road_connectivity": 0.57
+    },
+    {
+      "cell_id": "r16_c13",
+      "sector": "S",
+      "distance_m": 235.3,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 19928.2,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c14",
+      "sector": "N",
+      "distance_m": 236.2,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 20378.4,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 22.8,
+      "road_integration": 0.972,
+      "road_connectivity": 0.607
+    },
+    {
+      "cell_id": "r16_c14",
+      "sector": "S",
+      "distance_m": 237.1,
+      "poi_count": 30,
+      "poi_density": 3951.7,
+      "population_density": 17845.8,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.8,
+      "road_integration": 0.898,
+      "road_connectivity": 0.641
+    },
+    {
+      "cell_id": "r12_c11",
+      "sector": "NW",
+      "distance_m": 242.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 20529.2,
+      "nightlight": 63.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r15_c11",
+      "sector": "SW",
+      "distance_m": 243.6,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14257.4,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c16",
+      "sector": "NE",
+      "distance_m": 252.9,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 13564.1,
+      "nightlight": 66.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c12",
+      "sector": "NW",
+      "distance_m": 258.9,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 22126.9,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.984,
+      "road_connectivity": 0.531
+    },
+    {
+      "cell_id": "r16_c12",
+      "sector": "SW",
+      "distance_m": 260.6,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 16949.3,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c15",
+      "sector": "NE",
+      "distance_m": 265.3,
+      "poi_count": 22,
+      "poi_density": 2896.3,
+      "population_density": 16160.4,
+      "nightlight": 67.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 48.0,
+      "road_integration": 0.928,
+      "road_connectivity": 0.611
+    },
+    {
+      "cell_id": "r16_c15",
+      "sector": "SE",
+      "distance_m": 265.6,
+      "poi_count": 22,
+      "poi_density": 2896.2,
+      "population_density": 10913.4,
+      "nightlight": 64.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 0.7,
+      "road_integration": 0.893,
+      "road_connectivity": 0.714
+    },
+    {
+      "cell_id": "r13_c10",
+      "sector": "W",
+      "distance_m": 284.6,
+      "poi_count": 15,
+      "poi_density": 1975.9,
+      "population_density": 18676.0,
+      "nightlight": 59.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.804,
+      "road_connectivity": 0.429
+    },
+    {
+      "cell_id": "r14_c10",
+      "sector": "W",
+      "distance_m": 285.1,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 14155.2,
+      "nightlight": 59.9,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r14_c17",
+      "sector": "E",
+      "distance_m": 296.8,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 10869.4,
+      "nightlight": 66.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 1.4,
+      "road_integration": 0.775,
+      "road_connectivity": 0.499
+    },
+    {
+      "cell_id": "r13_c17",
+      "sector": "E",
+      "distance_m": 296.9,
+      "poi_count": 5,
+      "poi_density": 658.6,
+      "population_density": 9056.2,
+      "nightlight": 66.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 20.2,
+      "road_integration": 0.8,
+      "road_connectivity": 0.423
+    },
+    {
+      "cell_id": "r11_c11",
+      "sector": "NW",
+      "distance_m": 304.6,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 10789.5,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.984,
+      "road_connectivity": 0.531
+    },
+    {
+      "cell_id": "r16_c11",
+      "sector": "SW",
+      "distance_m": 306.5,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14308.6,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c10",
+      "sector": "NW",
+      "distance_m": 313.0,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 22609.1,
+      "nightlight": 60.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c16",
+      "sector": "NE",
+      "distance_m": 313.7,
+      "poi_count": 35,
+      "poi_density": 4610.6,
+      "population_density": 12390.7,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.961,
+      "road_connectivity": 0.393
+    },
+    {
+      "cell_id": "r15_c10",
+      "sector": "SW",
+      "distance_m": 314.2,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 12797.5,
+      "nightlight": 59.9,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c17",
+      "sector": "NE",
+      "distance_m": 324.7,
+      "poi_count": 8,
+      "poi_density": 1054.5,
+      "population_density": 11319.0,
+      "nightlight": 66.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r10_c13",
+      "sector": "N",
+      "distance_m": 325.8,
+      "poi_count": 14,
+      "poi_density": 1845.3,
+      "population_density": 21955.2,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r17_c13",
+      "sector": "S",
+      "distance_m": 327.3,
+      "poi_count": 2,
+      "poi_density": 263.3,
+      "population_density": 18041.9,
+      "nightlight": 67.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r10_c14",
+      "sector": "N",
+      "distance_m": 327.7,
+      "poi_count": 31,
+      "poi_density": 4078.8,
+      "population_density": 20959.7,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.5,
+      "road_integration": 0.59,
+      "road_connectivity": 0.305
+    },
+    {
+      "cell_id": "r17_c14",
+      "sector": "S",
+      "distance_m": 328.5,
+      "poi_count": 9,
+      "poi_density": 1186.2,
+      "population_density": 16394.6,
+      "nightlight": 67.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.5,
+      "road_integration": 0.898,
+      "road_connectivity": 0.643
+    },
+    {
+      "cell_id": "r10_c12",
+      "sector": "N",
+      "distance_m": 344.2,
+      "poi_count": 10,
+      "poi_density": 1317.3,
+      "population_density": 22815.4,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r17_c12",
+      "sector": "S",
+      "distance_m": 346.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 16793.2,
+      "nightlight": 67.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r10_c15",
+      "sector": "N",
+      "distance_m": 349.2,
+      "poi_count": 9,
+      "poi_density": 1185.6,
+      "population_density": 16051.6,
+      "nightlight": 67.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 47.4,
+      "road_integration": 0.826,
+      "road_connectivity": 0.432
+    },
+    {
+      "cell_id": "r17_c15",
+      "sector": "S",
+      "distance_m": 349.5,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 11157.9,
+      "nightlight": 65.9,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c10",
+      "sector": "NW",
+      "distance_m": 363.4,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 22384.8,
+      "nightlight": 66.2,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.984,
+      "road_connectivity": 0.531
+    },
+    {
+      "cell_id": "r16_c10",
+      "sector": "SW",
+      "distance_m": 365.4,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 12103.9,
+      "nightlight": 59.9,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c9",
+      "sector": "W",
+      "distance_m": 365.8,
+      "poi_count": 9,
+      "poi_density": 1185.6,
+      "population_density": 21097.8,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.7,
+      "road_integration": 0.794,
+      "road_connectivity": 0.426
+    },
+    {
+      "cell_id": "r14_c9",
+      "sector": "W",
+      "distance_m": 366.2,
+      "poi_count": 19,
+      "poi_density": 2504.3,
+      "population_density": 18167.6,
+      "nightlight": 56.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c17",
+      "sector": "NE",
+      "distance_m": 374.1,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 13937.3,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.9,
+      "road_integration": 0.922,
+      "road_connectivity": 0.44
+    },
+    {
+      "cell_id": "r14_c18",
+      "sector": "E",
+      "distance_m": 378.0,
+      "poi_count": 2,
+      "poi_density": 263.1,
+      "population_density": 17772.9,
+      "nightlight": 66.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c18",
+      "sector": "E",
+      "distance_m": 378.2,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 10233.8,
+      "nightlight": 66.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.798,
+      "road_connectivity": 0.393
+    },
+    {
+      "cell_id": "r10_c11",
+      "sector": "NW",
+      "distance_m": 379.8,
+      "poi_count": 9,
+      "poi_density": 1184.2,
+      "population_density": 22923.4,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r17_c11",
+      "sector": "SW",
+      "distance_m": 381.9,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 12885.0,
+      "nightlight": 67.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r10_c16",
+      "sector": "NE",
+      "distance_m": 387.4,
+      "poi_count": 38,
+      "poi_density": 5005.8,
+      "population_density": 11323.7,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c9",
+      "sector": "W",
+      "distance_m": 388.2,
+      "poi_count": 20,
+      "poi_density": 2634.6,
+      "population_density": 23203.5,
+      "nightlight": 57.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.831,
+      "road_connectivity": 0.405
+    },
+    {
+      "cell_id": "r15_c9",
+      "sector": "W",
+      "distance_m": 389.4,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 14790.9,
+      "nightlight": 56.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c18",
+      "sector": "E",
+      "distance_m": 400.5,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 9176.8,
+      "nightlight": 66.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r9_c13",
+      "sector": "N",
+      "distance_m": 418.2,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 21829.4,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.5,
+      "road_integration": 0.548,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r9_c14",
+      "sector": "N",
+      "distance_m": 419.6,
+      "poi_count": 12,
+      "poi_density": 1578.9,
+      "population_density": 22064.1,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 3.3,
+      "road_integration": 0.548,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r18_c13",
+      "sector": "S",
+      "distance_m": 419.6,
+      "poi_count": 19,
+      "poi_density": 2499.7,
+      "population_density": 14972.6,
+      "nightlight": 67.9,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r18_c14",
+      "sector": "S",
+      "distance_m": 420.6,
+      "poi_count": 17,
+      "poi_density": 2239.3,
+      "population_density": 14695.4,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 26.1,
+      "road_integration": 0.884,
+      "road_connectivity": 0.603
+    },
+    {
+      "cell_id": "r10_c10",
+      "sector": "NW",
+      "distance_m": 428.3,
+      "poi_count": 8,
+      "poi_density": 1053.8,
+      "population_density": 23208.0,
+      "nightlight": 66.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c9",
+      "sector": "NW",
+      "distance_m": 429.9,
+      "poi_count": 17,
+      "poi_density": 2240.8,
+      "population_density": 23368.7,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 35.5,
+      "road_integration": 0.927,
+      "road_connectivity": 0.569
+    },
+    {
+      "cell_id": "r17_c10",
+      "sector": "SW",
+      "distance_m": 430.6,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 12817.5,
+      "nightlight": 66.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 19.7,
+      "road_integration": 0.567,
+      "road_connectivity": 0.441
+    },
+    {
+      "cell_id": "r16_c9",
+      "sector": "SW",
+      "distance_m": 431.7,
+      "poi_count": 19,
+      "poi_density": 2501.3,
+      "population_density": 14271.6,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.3,
+      "road_integration": 0.664,
+      "road_connectivity": 0.359
+    },
+    {
+      "cell_id": "r9_c12",
+      "sector": "N",
+      "distance_m": 432.5,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 21105.5,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r18_c12",
+      "sector": "S",
+      "distance_m": 434.5,
+      "poi_count": 6,
+      "poi_density": 790.8,
+      "population_density": 14135.4,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 6.9,
+      "road_integration": 0.669,
+      "road_connectivity": 0.526
+    },
+    {
+      "cell_id": "r9_c15",
+      "sector": "N",
+      "distance_m": 436.9,
+      "poi_count": 16,
+      "poi_density": 2109.0,
+      "population_density": 16141.1,
+      "nightlight": 67.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 48.8,
+      "road_integration": 0.822,
+      "road_connectivity": 0.414
+    },
+    {
+      "cell_id": "r18_c15",
+      "sector": "S",
+      "distance_m": 437.1,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 11305.8,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.682,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r10_c17",
+      "sector": "NE",
+      "distance_m": 437.7,
+      "poi_count": 10,
+      "poi_density": 1315.7,
+      "population_density": 13959.1,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.4,
+      "road_integration": 0.683,
+      "road_connectivity": 0.29
+    },
+    {
+      "cell_id": "r11_c18",
+      "sector": "NE",
+      "distance_m": 441.5,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14904.6,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.6,
+      "road_integration": 0.899,
+      "road_connectivity": 0.349
+    },
+    {
+      "cell_id": "r13_c8",
+      "sector": "W",
+      "distance_m": 447.2,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 22268.7,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.9,
+      "road_integration": 0.771,
+      "road_connectivity": 0.365
+    },
+    {
+      "cell_id": "r14_c8",
+      "sector": "W",
+      "distance_m": 447.7,
+      "poi_count": 8,
+      "poi_density": 1052.6,
+      "population_density": 20956.9,
+      "nightlight": 56.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r14_c19",
+      "sector": "E",
+      "distance_m": 459.5,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 19374.6,
+      "nightlight": 66.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c19",
+      "sector": "E",
+      "distance_m": 459.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 11805.0,
+      "nightlight": 66.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.794,
+      "road_connectivity": 0.409
+    },
+    {
+      "cell_id": "r9_c11",
+      "sector": "NW",
+      "distance_m": 461.3,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 23264.8,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r18_c11",
+      "sector": "SW",
+      "distance_m": 463.6,
+      "poi_count": 8,
+      "poi_density": 1054.4,
+      "population_density": 12688.1,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 16.1,
+      "road_integration": 0.673,
+      "road_connectivity": 0.42
+    },
+    {
+      "cell_id": "r12_c8",
+      "sector": "W",
+      "distance_m": 465.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 23353.1,
+      "nightlight": 57.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r15_c8",
+      "sector": "W",
+      "distance_m": 467.0,
+      "poi_count": 3,
+      "poi_density": 394.7,
+      "population_density": 19022.3,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.5,
+      "road_integration": 0.684,
+      "road_connectivity": 0.375
+    },
+    {
+      "cell_id": "r18_c16",
+      "sector": "SE",
+      "distance_m": 467.7,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 6917.5,
+      "nightlight": 64.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.682,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r9_c16",
+      "sector": "NE",
+      "distance_m": 467.9,
+      "poi_count": 63,
+      "poi_density": 8304.1,
+      "population_density": 14249.9,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c19",
+      "sector": "E",
+      "distance_m": 478.2,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 4972.2,
+      "nightlight": 66.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r10_c9",
+      "sector": "NW",
+      "distance_m": 485.9,
+      "poi_count": 28,
+      "poi_density": 3688.5,
+      "population_density": 22857.2,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.6,
+      "road_integration": 0.81,
+      "road_connectivity": 0.323
+    },
+    {
+      "cell_id": "r17_c9",
+      "sector": "SW",
+      "distance_m": 488.2,
+      "poi_count": 9,
+      "poi_density": 1184.8,
+      "population_density": 12726.4,
+      "nightlight": 65.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.6,
+      "road_integration": 0.405,
+      "road_connectivity": 0.435
+    },
+    {
+      "cell_id": "r10_c18",
+      "sector": "NE",
+      "distance_m": 496.7,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 18147.5,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 15.3,
+      "road_integration": 0.663,
+      "road_connectivity": 0.426
+    },
+    {
+      "cell_id": "r11_c8",
+      "sector": "NW",
+      "distance_m": 500.9,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 22788.1,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.98,
+      "road_connectivity": 0.685
+    },
+    {
+      "cell_id": "r9_c10",
+      "sector": "NW",
+      "distance_m": 502.0,
+      "poi_count": 24,
+      "poi_density": 3161.6,
+      "population_density": 23607.0,
+      "nightlight": 66.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r16_c8",
+      "sector": "SW",
+      "distance_m": 502.8,
+      "poi_count": 5,
+      "poi_density": 658.6,
+      "population_density": 16917.7,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.5,
+      "road_integration": 0.688,
+      "road_connectivity": 0.317
+    },
+    {
+      "cell_id": "r18_c10",
+      "sector": "SW",
+      "distance_m": 504.4,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 12976.7,
+      "nightlight": 67.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.1,
+      "road_integration": 0.292,
+      "road_connectivity": 0.436
+    },
+    {
+      "cell_id": "r18_c17",
+      "sector": "SE",
+      "distance_m": 509.9,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 8114.1,
+      "nightlight": 64.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 18.6,
+      "road_integration": 0.629,
+      "road_connectivity": 0.421
+    },
+    {
+      "cell_id": "r9_c17",
+      "sector": "NE",
+      "distance_m": 510.4,
+      "poi_count": 6,
+      "poi_density": 789.9,
+      "population_density": 14963.3,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.4,
+      "road_integration": 0.652,
+      "road_connectivity": 0.315
+    },
+    {
+      "cell_id": "r8_c13",
+      "sector": "N",
+      "distance_m": 510.7,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 19069.0,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r8_c14",
+      "sector": "N",
+      "distance_m": 511.9,
+      "poi_count": 11,
+      "poi_density": 1448.2,
+      "population_density": 18781.6,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r19_c13",
+      "sector": "S",
+      "distance_m": 512.2,
+      "poi_count": 19,
+      "poi_density": 2501.2,
+      "population_density": 18652.4,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 14.8,
+      "road_integration": 0.677,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r19_c14",
+      "sector": "S",
+      "distance_m": 512.8,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 18439.7,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.5,
+      "road_integration": 0.898,
+      "road_connectivity": 0.541
+    },
+    {
+      "cell_id": "r11_c19",
+      "sector": "NE",
+      "distance_m": 513.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 11154.2,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.9,
+      "road_integration": 0.903,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r8_c12",
+      "sector": "N",
+      "distance_m": 522.5,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 17444.8,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r19_c12",
+      "sector": "S",
+      "distance_m": 524.4,
+      "poi_count": 8,
+      "poi_density": 1053.8,
+      "population_density": 17542.4,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 8.1,
+      "road_integration": 0.692,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r8_c15",
+      "sector": "N",
+      "distance_m": 526.2,
+      "poi_count": 15,
+      "poi_density": 1976.0,
+      "population_density": 16905.3,
+      "nightlight": 67.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 48.8,
+      "road_integration": 0.822,
+      "road_connectivity": 0.414
+    },
+    {
+      "cell_id": "r19_c15",
+      "sector": "S",
+      "distance_m": 526.5,
+      "poi_count": 30,
+      "poi_density": 3951.7,
+      "population_density": 11397.1,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c7",
+      "sector": "W",
+      "distance_m": 529.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 20571.0,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.1,
+      "road_integration": 0.754,
+      "road_connectivity": 0.33
+    },
+    {
+      "cell_id": "r14_c7",
+      "sector": "W",
+      "distance_m": 529.4,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 18516.7,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 13.7,
+      "road_integration": 0.727,
+      "road_connectivity": 0.418
+    },
+    {
+      "cell_id": "r14_c20",
+      "sector": "E",
+      "distance_m": 541.2,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 17532.1,
+      "nightlight": 65.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 6.9,
+      "road_integration": 0.775,
+      "road_connectivity": 0.499
+    },
+    {
+      "cell_id": "r13_c20",
+      "sector": "E",
+      "distance_m": 541.4,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 13976.6,
+      "nightlight": 65.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 14.7,
+      "road_integration": 0.802,
+      "road_connectivity": 0.371
+    },
+    {
+      "cell_id": "r12_c7",
+      "sector": "W",
+      "distance_m": 544.6,
+      "poi_count": 3,
+      "poi_density": 395.0,
+      "population_density": 23068.3,
+      "nightlight": 57.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r15_c7",
+      "sector": "W",
+      "distance_m": 545.8,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 19279.2,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 14.0,
+      "road_integration": 0.684,
+      "road_connectivity": 0.375
+    },
+    {
+      "cell_id": "r8_c11",
+      "sector": "N",
+      "distance_m": 546.4,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 20431.9,
+      "nightlight": 69.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r19_c11",
+      "sector": "S",
+      "distance_m": 548.8,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 13420.7,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.5,
+      "road_integration": 0.535,
+      "road_connectivity": 0.328
+    },
+    {
+      "cell_id": "r10_c8",
+      "sector": "NW",
+      "distance_m": 549.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 21797.1,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.994,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r9_c9",
+      "sector": "NW",
+      "distance_m": 551.9,
+      "poi_count": 53,
+      "poi_density": 6981.8,
+      "population_density": 23267.9,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.4,
+      "road_integration": 0.809,
+      "road_connectivity": 0.321
+    },
+    {
+      "cell_id": "r19_c16",
+      "sector": "S",
+      "distance_m": 552.0,
+      "poi_count": 26,
+      "poi_density": 3420.7,
+      "population_density": 5342.8,
+      "nightlight": 64.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r8_c16",
+      "sector": "N",
+      "distance_m": 552.2,
+      "poi_count": 22,
+      "poi_density": 2898.1,
+      "population_density": 16960.9,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r17_c8",
+      "sector": "SW",
+      "distance_m": 552.2,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 15505.2,
+      "nightlight": 65.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.0,
+      "road_integration": 0.551,
+      "road_connectivity": 0.319
+    },
+    {
+      "cell_id": "r18_c9",
+      "sector": "SW",
+      "distance_m": 554.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 12656.4,
+      "nightlight": 66.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 26.6,
+      "road_integration": 0.255,
+      "road_connectivity": 0.588
+    },
+    {
+      "cell_id": "r15_c20",
+      "sector": "E",
+      "distance_m": 556.6,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 19368.2,
+      "nightlight": 65.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c20",
+      "sector": "E",
+      "distance_m": 557.2,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 7901.4,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r10_c19",
+      "sector": "NE",
+      "distance_m": 561.3,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 17785.1,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r9_c18",
+      "sector": "NE",
+      "distance_m": 561.8,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 16480.9,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.565,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r11_c7",
+      "sector": "NW",
+      "distance_m": 574.9,
+      "poi_count": 14,
+      "poi_density": 1842.0,
+      "population_density": 22410.0,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.98,
+      "road_connectivity": 0.685
+    },
+    {
+      "cell_id": "r16_c7",
+      "sector": "SW",
+      "distance_m": 576.8,
+      "poi_count": 11,
+      "poi_density": 1449.0,
+      "population_density": 19465.4,
+      "nightlight": 56.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r8_c10",
+      "sector": "NW",
+      "distance_m": 581.2,
+      "poi_count": 7,
+      "poi_density": 921.0,
+      "population_density": 23101.9,
+      "nightlight": 66.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r19_c10",
+      "sector": "SW",
+      "distance_m": 583.8,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 14985.1,
+      "nightlight": 67.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.7,
+      "road_integration": 0.358,
+      "road_connectivity": 0.327
+    },
+    {
+      "cell_id": "r16_c20",
+      "sector": "SE",
+      "distance_m": 586.6,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 19353.1,
+      "nightlight": 65.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c20",
+      "sector": "NE",
+      "distance_m": 587.5,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 9148.0,
+      "nightlight": 73.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.888,
+      "road_connectivity": 0.447
+    },
+    {
+      "cell_id": "r19_c17",
+      "sector": "SE",
+      "distance_m": 588.1,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 7861.0,
+      "nightlight": 64.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.4,
+      "road_integration": 0.61,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r8_c17",
+      "sector": "NE",
+      "distance_m": 588.8,
+      "poi_count": 16,
+      "poi_density": 2105.2,
+      "population_density": 16847.6,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 18.5,
+      "road_integration": 0.591,
+      "road_connectivity": 0.497
+    },
+    {
+      "cell_id": "r7_c13",
+      "sector": "N",
+      "distance_m": 603.2,
+      "poi_count": 3,
+      "poi_density": 395.4,
+      "population_density": 21007.7,
+      "nightlight": 69.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r7_c14",
+      "sector": "N",
+      "distance_m": 604.4,
+      "poi_count": 8,
+      "poi_density": 1052.6,
+      "population_density": 20619.8,
+      "nightlight": 69.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r20_c13",
+      "sector": "S",
+      "distance_m": 604.7,
+      "poi_count": 30,
+      "poi_density": 3946.9,
+      "population_density": 20489.1,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 19.1,
+      "road_integration": 0.623,
+      "road_connectivity": 0.526
+    },
+    {
+      "cell_id": "r20_c14",
+      "sector": "S",
+      "distance_m": 605.2,
+      "poi_count": 6,
+      "poi_density": 790.8,
+      "population_density": 14830.3,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 31.6,
+      "road_integration": 0.853,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r9_c8",
+      "sector": "NW",
+      "distance_m": 608.8,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 22318.5,
+      "nightlight": 63.3,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c6",
+      "sector": "W",
+      "distance_m": 610.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 17470.5,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 22.8,
+      "road_integration": 0.758,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r14_c6",
+      "sector": "W",
+      "distance_m": 611.1,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 16427.0,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 36.9,
+      "road_integration": 0.726,
+      "road_connectivity": 0.422
+    },
+    {
+      "cell_id": "r18_c8",
+      "sector": "SW",
+      "distance_m": 611.6,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 12766.3,
+      "nightlight": 66.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 15.6,
+      "road_integration": 0.499,
+      "road_connectivity": 0.31
+    },
+    {
+      "cell_id": "r7_c12",
+      "sector": "N",
+      "distance_m": 613.3,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 20272.4,
+      "nightlight": 69.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r20_c12",
+      "sector": "S",
+      "distance_m": 615.2,
+      "poi_count": 14,
+      "poi_density": 1844.1,
+      "population_density": 18323.7,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 16.0,
+      "road_integration": 0.548,
+      "road_connectivity": 0.472
+    },
+    {
+      "cell_id": "r7_c15",
+      "sector": "N",
+      "distance_m": 616.5,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 19509.4,
+      "nightlight": 67.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 63.5,
+      "road_integration": 0.804,
+      "road_connectivity": 0.42
+    },
+    {
+      "cell_id": "r20_c15",
+      "sector": "S",
+      "distance_m": 616.8,
+      "poi_count": 41,
+      "poi_density": 5400.6,
+      "population_density": 4283.4,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r10_c7",
+      "sector": "NW",
+      "distance_m": 617.8,
+      "poi_count": 2,
+      "poi_density": 263.1,
+      "population_density": 18721.1,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.994,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r9_c19",
+      "sector": "NE",
+      "distance_m": 619.7,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 18808.6,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r17_c7",
+      "sector": "SW",
+      "distance_m": 620.3,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 17105.6,
+      "nightlight": 65.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r14_c21",
+      "sector": "E",
+      "distance_m": 623.0,
+      "poi_count": 8,
+      "poi_density": 1053.2,
+      "population_density": 19344.4,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 29.8,
+      "road_integration": 0.728,
+      "road_connectivity": 0.576
+    },
+    {
+      "cell_id": "r13_c21",
+      "sector": "E",
+      "distance_m": 623.2,
+      "poi_count": 14,
+      "poi_density": 1842.0,
+      "population_density": 17203.0,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 35.2,
+      "road_integration": 0.719,
+      "road_connectivity": 0.567
+    },
+    {
+      "cell_id": "r12_c6",
+      "sector": "W",
+      "distance_m": 624.3,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 20399.8,
+      "nightlight": 57.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.3,
+      "road_integration": 0.796,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r8_c9",
+      "sector": "NW",
+      "distance_m": 624.8,
+      "poi_count": 22,
+      "poi_density": 2899.9,
+      "population_density": 23664.8,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.4,
+      "road_integration": 0.809,
+      "road_connectivity": 0.321
+    },
+    {
+      "cell_id": "r15_c6",
+      "sector": "W",
+      "distance_m": 625.4,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 16618.7,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.0,
+      "road_integration": 0.72,
+      "road_connectivity": 0.365
+    },
+    {
+      "cell_id": "r19_c9",
+      "sector": "SW",
+      "distance_m": 627.7,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 14301.5,
+      "nightlight": 66.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 13.4,
+      "road_integration": 0.267,
+      "road_connectivity": 0.425
+    },
+    {
+      "cell_id": "r17_c20",
+      "sector": "SE",
+      "distance_m": 628.9,
+      "poi_count": 10,
+      "poi_density": 1317.2,
+      "population_density": 17578.5,
+      "nightlight": 59.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.7,
+      "road_integration": 0.704,
+      "road_connectivity": 0.214
+    },
+    {
+      "cell_id": "r10_c20",
+      "sector": "NE",
+      "distance_m": 630.1,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 15124.3,
+      "nightlight": 73.8,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r7_c11",
+      "sector": "N",
+      "distance_m": 633.8,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 22370.8,
+      "nightlight": 69.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r8_c18",
+      "sector": "NE",
+      "distance_m": 633.9,
+      "poi_count": 18,
+      "poi_density": 2371.2,
+      "population_density": 16274.9,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.3,
+      "road_integration": 0.54,
+      "road_connectivity": 0.642
+    },
+    {
+      "cell_id": "r20_c11",
+      "sector": "S",
+      "distance_m": 636.2,
+      "poi_count": 14,
+      "poi_density": 1844.1,
+      "population_density": 16791.5,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 17.3,
+      "road_integration": 0.499,
+      "road_connectivity": 0.398
+    },
+    {
+      "cell_id": "r15_c21",
+      "sector": "E",
+      "distance_m": 636.4,
+      "poi_count": 5,
+      "poi_density": 657.8,
+      "population_density": 19361.5,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 31.3,
+      "road_integration": 0.682,
+      "road_connectivity": 0.381
+    },
+    {
+      "cell_id": "r12_c21",
+      "sector": "E",
+      "distance_m": 637.1,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 13669.8,
+      "nightlight": 65.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 44.1,
+      "road_integration": 0.694,
+      "road_connectivity": 0.487
+    },
+    {
+      "cell_id": "r20_c16",
+      "sector": "S",
+      "distance_m": 638.8,
+      "poi_count": 38,
+      "poi_density": 4999.4,
+      "population_density": 2739.4,
+      "nightlight": 64.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r7_c16",
+      "sector": "N",
+      "distance_m": 639.0,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 20796.2,
+      "nightlight": 66.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.674,
+      "road_connectivity": 0.714
+    },
+    {
+      "cell_id": "r11_c6",
+      "sector": "W",
+      "distance_m": 650.9,
+      "poi_count": 9,
+      "poi_density": 1186.3,
+      "population_density": 18856.1,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.98,
+      "road_connectivity": 0.685
+    },
+    {
+      "cell_id": "r16_c6",
+      "sector": "W",
+      "distance_m": 652.7,
+      "poi_count": 18,
+      "poi_density": 2371.0,
+      "population_density": 19343.2,
+      "nightlight": 56.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 4.2,
+      "road_integration": 0.723,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r16_c21",
+      "sector": "E",
+      "distance_m": 662.6,
+      "poi_count": 15,
+      "poi_density": 1974.7,
+      "population_density": 18822.5,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.6,
+      "road_integration": 0.709,
+      "road_connectivity": 0.302
+    },
+    {
+      "cell_id": "r11_c21",
+      "sector": "E",
+      "distance_m": 663.8,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 12209.1,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 67.1,
+      "road_integration": 0.742,
+      "road_connectivity": 0.504
+    },
+    {
+      "cell_id": "r7_c10",
+      "sector": "NW",
+      "distance_m": 663.9,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 23188.4,
+      "nightlight": 66.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r20_c10",
+      "sector": "SW",
+      "distance_m": 666.6,
+      "poi_count": 2,
+      "poi_density": 263.3,
+      "population_density": 15572.0,
+      "nightlight": 67.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.3,
+      "road_integration": 0.441,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r20_c17",
+      "sector": "SE",
+      "distance_m": 670.1,
+      "poi_count": 6,
+      "poi_density": 790.3,
+      "population_density": 8874.4,
+      "nightlight": 64.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.3,
+      "road_integration": 0.61,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r7_c17",
+      "sector": "NE",
+      "distance_m": 670.8,
+      "poi_count": 19,
+      "poi_density": 2500.0,
+      "population_density": 18696.4,
+      "nightlight": 66.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.0,
+      "road_integration": 0.648,
+      "road_connectivity": 0.728
+    },
+    {
+      "cell_id": "r9_c7",
+      "sector": "NW",
+      "distance_m": 670.9,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 19776.8,
+      "nightlight": 63.3,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r18_c7",
+      "sector": "SW",
+      "distance_m": 673.8,
+      "poi_count": 17,
+      "poi_density": 2240.6,
+      "population_density": 14383.7,
+      "nightlight": 66.8,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r8_c8",
+      "sector": "NW",
+      "distance_m": 675.5,
+      "poi_count": 5,
+      "poi_density": 658.7,
+      "population_density": 23487.7,
+      "nightlight": 63.3,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r19_c8",
+      "sector": "SW",
+      "distance_m": 678.6,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 14790.6,
+      "nightlight": 66.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 3.6,
+      "road_integration": 0.542,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r18_c20",
+      "sector": "SE",
+      "distance_m": 681.2,
+      "poi_count": 15,
+      "poi_density": 1975.8,
+      "population_density": 15109.0,
+      "nightlight": 58.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.704,
+      "road_connectivity": 0.214
+    },
+    {
+      "cell_id": "r9_c20",
+      "sector": "NE",
+      "distance_m": 682.8,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 17917.4,
+      "nightlight": 73.8,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r8_c19",
+      "sector": "NE",
+      "distance_m": 685.8,
+      "poi_count": 9,
+      "poi_density": 1185.6,
+      "population_density": 18950.0,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.0,
+      "road_integration": 0.493,
+      "road_connectivity": 0.474
+    },
+    {
+      "cell_id": "r10_c6",
+      "sector": "NW",
+      "distance_m": 689.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14473.8,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.994,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r17_c6",
+      "sector": "SW",
+      "distance_m": 691.5,
+      "poi_count": 5,
+      "poi_density": 659.0,
+      "population_density": 17945.7,
+      "nightlight": 65.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c5",
+      "sector": "W",
+      "distance_m": 692.5,
+      "poi_count": 4,
+      "poi_density": 527.2,
+      "population_density": 19977.1,
+      "nightlight": 54.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.5,
+      "road_integration": 0.729,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r14_c5",
+      "sector": "W",
+      "distance_m": 692.9,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 19496.7,
+      "nightlight": 54.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r6_c13",
+      "sector": "N",
+      "distance_m": 695.9,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 23085.7,
+      "nightlight": 70.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r6_c14",
+      "sector": "N",
+      "distance_m": 696.9,
+      "poi_count": 15,
+      "poi_density": 1974.8,
+      "population_density": 20860.5,
+      "nightlight": 70.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r21_c13",
+      "sector": "S",
+      "distance_m": 697.3,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 18778.7,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.634,
+      "road_connectivity": 0.499
+    },
+    {
+      "cell_id": "r21_c14",
+      "sector": "S",
+      "distance_m": 697.8,
+      "poi_count": 6,
+      "poi_density": 789.8,
+      "population_density": 11101.7,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.5,
+      "road_integration": 0.903,
+      "road_connectivity": 0.612
+    },
+    {
+      "cell_id": "r17_c21",
+      "sector": "SE",
+      "distance_m": 700.3,
+      "poi_count": 12,
+      "poi_density": 1578.8,
+      "population_density": 17647.2,
+      "nightlight": 53.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.8,
+      "road_integration": 0.711,
+      "road_connectivity": 0.313
+    },
+    {
+      "cell_id": "r10_c21",
+      "sector": "NE",
+      "distance_m": 701.8,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 14003.6,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 49.0,
+      "road_integration": 0.694,
+      "road_connectivity": 0.477
+    },
+    {
+      "cell_id": "r7_c9",
+      "sector": "NW",
+      "distance_m": 702.3,
+      "poi_count": 49,
+      "poi_density": 6455.0,
+      "population_density": 23780.7,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.4,
+      "road_integration": 0.809,
+      "road_connectivity": 0.321
+    },
+    {
+      "cell_id": "r6_c12",
+      "sector": "N",
+      "distance_m": 704.5,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 23393.7,
+      "nightlight": 70.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r12_c5",
+      "sector": "W",
+      "distance_m": 704.5,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 19128.4,
+      "nightlight": 55.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.0,
+      "road_integration": 0.764,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r14_c22",
+      "sector": "E",
+      "distance_m": 704.8,
+      "poi_count": 3,
+      "poi_density": 395.4,
+      "population_density": 19253.6,
+      "nightlight": 63.7,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r13_c22",
+      "sector": "E",
+      "distance_m": 705.0,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 18918.1,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.9,
+      "road_integration": 0.573,
+      "road_connectivity": 0.325
+    },
+    {
+      "cell_id": "r15_c5",
+      "sector": "W",
+      "distance_m": 705.6,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 18685.4,
+      "nightlight": 54.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 1.1,
+      "road_integration": 0.681,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r21_c12",
+      "sector": "S",
+      "distance_m": 706.5,
+      "poi_count": 9,
+      "poi_density": 1186.2,
+      "population_density": 18378.8,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.2,
+      "road_integration": 0.599,
+      "road_connectivity": 0.521
+    },
+    {
+      "cell_id": "r6_c15",
+      "sector": "N",
+      "distance_m": 707.5,
+      "poi_count": 14,
+      "poi_density": 1845.4,
+      "population_density": 18755.4,
+      "nightlight": 69.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 81.0,
+      "road_integration": 0.799,
+      "road_connectivity": 0.374
+    },
+    {
+      "cell_id": "r21_c15",
+      "sector": "S",
+      "distance_m": 707.7,
+      "poi_count": 49,
+      "poi_density": 6458.1,
+      "population_density": 3480.2,
+      "nightlight": 66.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r7_c18",
+      "sector": "NE",
+      "distance_m": 710.8,
+      "poi_count": 26,
+      "poi_density": 3427.1,
+      "population_density": 17002.8,
+      "nightlight": 66.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.1,
+      "road_integration": 0.615,
+      "road_connectivity": 0.742
+    },
+    {
+      "cell_id": "r15_c22",
+      "sector": "E",
+      "distance_m": 716.7,
+      "poi_count": 8,
+      "poi_density": 1053.8,
+      "population_density": 19021.9,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.1,
+      "road_integration": 0.562,
+      "road_connectivity": 0.374
+    },
+    {
+      "cell_id": "r12_c22",
+      "sector": "E",
+      "distance_m": 717.3,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 15009.8,
+      "nightlight": 65.6,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r6_c11",
+      "sector": "N",
+      "distance_m": 722.4,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 23440.3,
+      "nightlight": 70.4,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r21_c11",
+      "sector": "S",
+      "distance_m": 724.9,
+      "poi_count": 3,
+      "poi_density": 395.4,
+      "population_density": 16910.9,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.2,
+      "road_integration": 0.599,
+      "road_connectivity": 0.521
+    },
+    {
+      "cell_id": "r21_c16",
+      "sector": "S",
+      "distance_m": 727.0,
+      "poi_count": 13,
+      "poi_density": 1712.4,
+      "population_density": 5243.1,
+      "nightlight": 64.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r6_c16",
+      "sector": "N",
+      "distance_m": 727.2,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 20007.0,
+      "nightlight": 69.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c5",
+      "sector": "W",
+      "distance_m": 728.1,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 15492.0,
+      "nightlight": 63.2,
+      "road_covered": true,
+      "road_density_km_per_km2": 29.7,
+      "road_integration": 0.826,
+      "road_connectivity": 0.389
+    },
+    {
+      "cell_id": "r16_c5",
+      "sector": "W",
+      "distance_m": 729.9,
+      "poi_count": 4,
+      "poi_density": 527.2,
+      "population_density": 17988.4,
+      "nightlight": 54.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 29.0,
+      "road_integration": 0.664,
+      "road_connectivity": 0.343
+    },
+    {
+      "cell_id": "r8_c7",
+      "sector": "NW",
+      "distance_m": 732.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 23015.7,
+      "nightlight": 63.3,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r19_c7",
+      "sector": "SW",
+      "distance_m": 735.2,
+      "poi_count": 10,
+      "poi_density": 1317.2,
+      "population_density": 17865.8,
+      "nightlight": 66.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.544,
+      "road_connectivity": 0.302
+    },
+    {
+      "cell_id": "r9_c6",
+      "sector": "NW",
+      "distance_m": 737.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14572.3,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 18.8,
+      "road_integration": 0.773,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r18_c6",
+      "sector": "SW",
+      "distance_m": 739.9,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 18478.4,
+      "nightlight": 66.8,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r11_c22",
+      "sector": "E",
+      "distance_m": 741.2,
+      "poi_count": 11,
+      "poi_density": 1449.9,
+      "population_density": 9606.8,
+      "nightlight": 81.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r19_c20",
+      "sector": "SE",
+      "distance_m": 741.6,
+      "poi_count": 11,
+      "poi_density": 1449.8,
+      "population_density": 18076.9,
+      "nightlight": 58.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.4,
+      "road_integration": 0.703,
+      "road_connectivity": 0.18
+    },
+    {
+      "cell_id": "r8_c20",
+      "sector": "NE",
+      "distance_m": 743.3,
+      "poi_count": 4,
+      "poi_density": 526.3,
+      "population_density": 18179.9,
+      "nightlight": 73.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.4,
+      "road_integration": 0.465,
+      "road_connectivity": 0.305
+    },
+    {
+      "cell_id": "r18_c21",
+      "sector": "SE",
+      "distance_m": 747.7,
+      "poi_count": 10,
+      "poi_density": 1316.4,
+      "population_density": 14980.0,
+      "nightlight": 52.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.702,
+      "road_connectivity": 0.143
+    },
+    {
+      "cell_id": "r7_c8",
+      "sector": "NW",
+      "distance_m": 747.8,
+      "poi_count": 9,
+      "poi_density": 1186.3,
+      "population_density": 23480.4,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r6_c10",
+      "sector": "N",
+      "distance_m": 749.0,
+      "poi_count": 14,
+      "poi_density": 1843.2,
+      "population_density": 19984.4,
+      "nightlight": 65.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 27.4,
+      "road_integration": 0.696,
+      "road_connectivity": 0.296
+    },
+    {
+      "cell_id": "r9_c21",
+      "sector": "NE",
+      "distance_m": 749.4,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 16755.3,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 37.4,
+      "road_integration": 0.639,
+      "road_connectivity": 0.46
+    },
+    {
+      "cell_id": "r21_c10",
+      "sector": "S",
+      "distance_m": 751.7,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 14632.6,
+      "nightlight": 67.3,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r21_c17",
+      "sector": "SE",
+      "distance_m": 754.7,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 13758.8,
+      "nightlight": 64.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.3,
+      "road_integration": 0.61,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r6_c17",
+      "sector": "NE",
+      "distance_m": 755.3,
+      "poi_count": 8,
+      "poi_density": 1053.9,
+      "population_density": 21490.9,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.626,
+      "road_connectivity": 0.518
+    },
+    {
+      "cell_id": "r7_c19",
+      "sector": "NE",
+      "distance_m": 757.5,
+      "poi_count": 5,
+      "poi_density": 659.1,
+      "population_density": 18811.5,
+      "nightlight": 66.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 7.1,
+      "road_integration": 0.632,
+      "road_connectivity": 0.343
+    },
+    {
+      "cell_id": "r10_c5",
+      "sector": "NW",
+      "distance_m": 762.4,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 7116.3,
+      "nightlight": 63.2,
+      "road_covered": true,
+      "road_density_km_per_km2": 41.5,
+      "road_integration": 0.864,
+      "road_connectivity": 0.46
+    },
+    {
+      "cell_id": "r17_c5",
+      "sector": "SW",
+      "distance_m": 764.8,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 16874.6,
+      "nightlight": 66.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 26.1,
+      "road_integration": 0.69,
+      "road_connectivity": 0.305
+    },
+    {
+      "cell_id": "r10_c22",
+      "sector": "NE",
+      "distance_m": 775.4,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 11689.6,
+      "nightlight": 81.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r6_c9",
+      "sector": "NW",
+      "distance_m": 783.2,
+      "poi_count": 6,
+      "poi_density": 790.4,
+      "population_density": 20115.8,
+      "nightlight": 60.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 76.8,
+      "road_integration": 0.672,
+      "road_connectivity": 0.335
+    },
+    {
+      "cell_id": "r15_c4",
+      "sector": "W",
+      "distance_m": 786.1,
+      "poi_count": 12,
+      "poi_density": 1581.7,
+      "population_density": 22047.4,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 13.0,
+      "road_integration": 0.253,
+      "road_connectivity": 0.176
+    },
+    {
+      "cell_id": "r14_c23",
+      "sector": "E",
+      "distance_m": 786.6,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 18000.3,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 8.7,
+      "road_integration": 0.487,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r13_c23",
+      "sector": "E",
+      "distance_m": 786.9,
+      "poi_count": 19,
+      "poi_density": 2499.8,
+      "population_density": 17831.2,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.573,
+      "road_connectivity": 0.325
+    },
+    {
+      "cell_id": "r5_c13",
+      "sector": "N",
+      "distance_m": 788.6,
+      "poi_count": 18,
+      "poi_density": 2368.4,
+      "population_density": 23174.3,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.6,
+      "road_integration": 0.725,
+      "road_connectivity": 0.3
+    },
+    {
+      "cell_id": "r5_c14",
+      "sector": "N",
+      "distance_m": 789.5,
+      "poi_count": 15,
+      "poi_density": 1977.2,
+      "population_density": 16941.2,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 25.2,
+      "road_integration": 0.723,
+      "road_connectivity": 0.331
+    },
+    {
+      "cell_id": "r21_c18",
+      "sector": "SE",
+      "distance_m": 789.9,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 19706.3,
+      "nightlight": 64.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r22_c13",
+      "sector": "S",
+      "distance_m": 790.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 10994.4,
+      "nightlight": 72.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 32.1,
+      "road_integration": 0.715,
+      "road_connectivity": 0.535
+    },
+    {
+      "cell_id": "r22_c14",
+      "sector": "S",
+      "distance_m": 790.3,
+      "poi_count": 8,
+      "poi_density": 1052.5,
+      "population_density": 10683.5,
+      "nightlight": 72.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 44.7,
+      "road_integration": 0.838,
+      "road_connectivity": 0.642
+    },
+    {
+      "cell_id": "r6_c18",
+      "sector": "NE",
+      "distance_m": 791.1,
+      "poi_count": 5,
+      "poi_density": 658.7,
+      "population_density": 19505.6,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.8,
+      "road_integration": 0.568,
+      "road_connectivity": 0.351
+    },
+    {
+      "cell_id": "r8_c6",
+      "sector": "NW",
+      "distance_m": 793.0,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 15638.8,
+      "nightlight": 63.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.8,
+      "road_integration": 0.763,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r5_c12",
+      "sector": "N",
+      "distance_m": 796.2,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 23210.8,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 36.0,
+      "road_integration": 0.71,
+      "road_connectivity": 0.366
+    },
+    {
+      "cell_id": "r19_c6",
+      "sector": "SW",
+      "distance_m": 796.2,
+      "poi_count": 5,
+      "poi_density": 658.6,
+      "population_density": 20070.8,
+      "nightlight": 66.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 15.1,
+      "road_integration": 0.533,
+      "road_connectivity": 0.39
+    },
+    {
+      "cell_id": "r15_c23",
+      "sector": "E",
+      "distance_m": 797.3,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 17609.3,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 6.8,
+      "road_integration": 0.532,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r22_c12",
+      "sector": "S",
+      "distance_m": 798.1,
+      "poi_count": 7,
+      "poi_density": 922.0,
+      "population_density": 10499.9,
+      "nightlight": 72.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.7,
+      "road_integration": 0.746,
+      "road_connectivity": 0.786
+    },
+    {
+      "cell_id": "r5_c15",
+      "sector": "N",
+      "distance_m": 798.9,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 14021.2,
+      "nightlight": 69.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 94.7,
+      "road_integration": 0.77,
+      "road_connectivity": 0.336
+    },
+    {
+      "cell_id": "r7_c7",
+      "sector": "NW",
+      "distance_m": 799.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 21077.5,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r22_c15",
+      "sector": "S",
+      "distance_m": 799.2,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 10811.9,
+      "nightlight": 64.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.756,
+      "road_connectivity": 0.714
+    },
+    {
+      "cell_id": "r19_c21",
+      "sector": "SE",
+      "distance_m": 803.0,
+      "poi_count": 5,
+      "poi_density": 659.0,
+      "population_density": 17908.6,
+      "nightlight": 52.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 1.0,
+      "road_integration": 0.702,
+      "road_connectivity": 0.143
+    },
+    {
+      "cell_id": "r8_c21",
+      "sector": "NE",
+      "distance_m": 805.0,
+      "poi_count": 7,
+      "poi_density": 922.7,
+      "population_density": 17106.4,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 44.2,
+      "road_integration": 0.555,
+      "road_connectivity": 0.47
+    },
+    {
+      "cell_id": "r9_c5",
+      "sector": "NW",
+      "distance_m": 806.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 10350.2,
+      "nightlight": 63.2,
+      "road_covered": true,
+      "road_density_km_per_km2": 15.1,
+      "road_integration": 0.381,
+      "road_connectivity": 0.299
+    },
+    {
+      "cell_id": "r11_c4",
+      "sector": "W",
+      "distance_m": 806.3,
+      "poi_count": 3,
+      "poi_density": 395.0,
+      "population_density": 17920.8,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r16_c4",
+      "sector": "W",
+      "distance_m": 808.1,
+      "poi_count": 14,
+      "poi_density": 1844.2,
+      "population_density": 18878.6,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.574,
+      "road_connectivity": 0.333
+    },
+    {
+      "cell_id": "r18_c5",
+      "sector": "SW",
+      "distance_m": 808.9,
+      "poi_count": 4,
+      "poi_density": 526.6,
+      "population_density": 16516.7,
+      "nightlight": 67.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 17.4,
+      "road_integration": 0.683,
+      "road_connectivity": 0.304
+    },
+    {
+      "cell_id": "r7_c20",
+      "sector": "NE",
+      "distance_m": 809.9,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 18766.9,
+      "nightlight": 74.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r5_c11",
+      "sector": "N",
+      "distance_m": 812.0,
+      "poi_count": 7,
+      "poi_density": 922.2,
+      "population_density": 18890.4,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 77.1,
+      "road_integration": 0.659,
+      "road_connectivity": 0.328
+    },
+    {
+      "cell_id": "r22_c11",
+      "sector": "S",
+      "distance_m": 814.4,
+      "poi_count": 13,
+      "poi_density": 1712.3,
+      "population_density": 8355.4,
+      "nightlight": 72.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 39.4,
+      "road_integration": 0.699,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r22_c16",
+      "sector": "S",
+      "distance_m": 816.1,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 14158.6,
+      "nightlight": 56.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 18.8,
+      "road_integration": 0.7,
+      "road_connectivity": 0.615
+    },
+    {
+      "cell_id": "r5_c16",
+      "sector": "N",
+      "distance_m": 816.4,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 15909.1,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.0,
+      "road_integration": 0.749,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r9_c22",
+      "sector": "NE",
+      "distance_m": 818.8,
+      "poi_count": 10,
+      "poi_density": 1317.3,
+      "population_density": 17185.9,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 28.1,
+      "road_integration": 0.557,
+      "road_connectivity": 0.365
+    },
+    {
+      "cell_id": "r6_c8",
+      "sector": "NW",
+      "distance_m": 824.2,
+      "poi_count": 18,
+      "poi_density": 2371.2,
+      "population_density": 19147.2,
+      "nightlight": 60.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 43.3,
+      "road_integration": 0.626,
+      "road_connectivity": 0.292
+    },
+    {
+      "cell_id": "r6_c19",
+      "sector": "NE",
+      "distance_m": 833.3,
+      "poi_count": 2,
+      "poi_density": 263.3,
+      "population_density": 20407.0,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 31.9,
+      "road_integration": 0.513,
+      "road_connectivity": 0.317
+    },
+    {
+      "cell_id": "r5_c10",
+      "sector": "N",
+      "distance_m": 835.7,
+      "poi_count": 2,
+      "poi_density": 263.3,
+      "population_density": 12721.9,
+      "nightlight": 65.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 65.5,
+      "road_integration": 0.521,
+      "road_connectivity": 0.295
+    },
+    {
+      "cell_id": "r10_c4",
+      "sector": "NW",
+      "distance_m": 837.3,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 14702.0,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 31.1,
+      "road_integration": 0.684,
+      "road_connectivity": 0.483
+    },
+    {
+      "cell_id": "r22_c10",
+      "sector": "S",
+      "distance_m": 838.6,
+      "poi_count": 16,
+      "poi_density": 2105.0,
+      "population_density": 6248.4,
+      "nightlight": 71.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 32.5,
+      "road_integration": 0.729,
+      "road_connectivity": 0.325
+    },
+    {
+      "cell_id": "r17_c4",
+      "sector": "SW",
+      "distance_m": 839.7,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 17604.8,
+      "nightlight": 66.3,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r22_c17",
+      "sector": "S",
+      "distance_m": 840.9,
+      "poi_count": 13,
+      "poi_density": 1710.3,
+      "population_density": 18146.5,
+      "nightlight": 56.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.5,
+      "road_integration": 0.726,
+      "road_connectivity": 0.328
+    },
+    {
+      "cell_id": "r5_c17",
+      "sector": "N",
+      "distance_m": 841.7,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 19105.5,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.626,
+      "road_connectivity": 0.518
+    },
+    {
+      "cell_id": "r7_c6",
+      "sector": "NW",
+      "distance_m": 855.2,
+      "poi_count": 3,
+      "poi_density": 395.0,
+      "population_density": 15610.0,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.5,
+      "road_integration": 0.741,
+      "road_connectivity": 0.305
+    },
+    {
+      "cell_id": "r8_c5",
+      "sector": "NW",
+      "distance_m": 857.4,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 13370.7,
+      "nightlight": 63.2,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r20_c6",
+      "sector": "SW",
+      "distance_m": 858.9,
+      "poi_count": 10,
+      "poi_density": 1318.0,
+      "population_density": 20331.5,
+      "nightlight": 66.8,
+      "road_covered": true,
+      "road_density_km_per_km2": 14.7,
+      "road_integration": 0.358,
+      "road_connectivity": 0.289
+    },
+    {
+      "cell_id": "r19_c5",
+      "sector": "SW",
+      "distance_m": 860.7,
+      "poi_count": 12,
+      "poi_density": 1580.7,
+      "population_density": 18872.8,
+      "nightlight": 67.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 22.1,
+      "road_integration": 0.624,
+      "road_connectivity": 0.392
+    },
+    {
+      "cell_id": "r20_c21",
+      "sector": "SE",
+      "distance_m": 864.7,
+      "poi_count": 24,
+      "poi_density": 3161.3,
+      "population_density": 19355.6,
+      "nightlight": 52.5,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r5_c9",
+      "sector": "NW",
+      "distance_m": 866.5,
+      "poi_count": 6,
+      "poi_density": 790.4,
+      "population_density": 13544.9,
+      "nightlight": 60.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 4.2,
+      "road_integration": 0.162,
+      "road_connectivity": 0.218
+    },
+    {
+      "cell_id": "r7_c21",
+      "sector": "NE",
+      "distance_m": 866.9,
+      "poi_count": 7,
+      "poi_density": 922.1,
+      "population_density": 17255.5,
+      "nightlight": 81.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.5,
+      "road_integration": 0.564,
+      "road_connectivity": 0.472
+    },
+    {
+      "cell_id": "r15_c3",
+      "sector": "W",
+      "distance_m": 866.9,
+      "poi_count": 12,
+      "poi_density": 1579.8,
+      "population_density": 18615.2,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 14.5,
+      "road_integration": 0.397,
+      "road_connectivity": 0.453
+    },
+    {
+      "cell_id": "r14_c24",
+      "sector": "E",
+      "distance_m": 868.6,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 15580.3,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.3,
+      "road_integration": 0.451,
+      "road_connectivity": 0.352
+    },
+    {
+      "cell_id": "r13_c24",
+      "sector": "E",
+      "distance_m": 868.8,
+      "poi_count": 14,
+      "poi_density": 1844.2,
+      "population_density": 15670.7,
+      "nightlight": 63.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 15.6,
+      "road_integration": 0.528,
+      "road_connectivity": 0.345
+    },
+    {
+      "cell_id": "r8_c22",
+      "sector": "NE",
+      "distance_m": 869.9,
+      "poi_count": 17,
+      "poi_density": 2239.5,
+      "population_density": 17802.7,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 42.9,
+      "road_integration": 0.516,
+      "road_connectivity": 0.402
+    },
+    {
+      "cell_id": "r6_c7",
+      "sector": "NW",
+      "distance_m": 871.0,
+      "poi_count": 21,
+      "poi_density": 2768.1,
+      "population_density": 16763.5,
+      "nightlight": 60.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 43.3,
+      "road_integration": 0.626,
+      "road_connectivity": 0.291
+    },
+    {
+      "cell_id": "r22_c18",
+      "sector": "SE",
+      "distance_m": 872.6,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 19713.3,
+      "nightlight": 56.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 4.4,
+      "road_integration": 0.748,
+      "road_connectivity": 0.323
+    },
+    {
+      "cell_id": "r5_c18",
+      "sector": "NE",
+      "distance_m": 873.8,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 19911.0,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 19.5,
+      "road_integration": 0.555,
+      "road_connectivity": 0.362
+    },
+    {
+      "cell_id": "r9_c4",
+      "sector": "NW",
+      "distance_m": 877.2,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 14491.5,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 18.7,
+      "road_integration": 0.032,
+      "road_connectivity": 0.502
+    },
+    {
+      "cell_id": "r12_c24",
+      "sector": "E",
+      "distance_m": 878.9,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 15282.2,
+      "nightlight": 65.6,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r4_c13",
+      "sector": "N",
+      "distance_m": 881.2,
+      "poi_count": 6,
+      "poi_density": 790.0,
+      "population_density": 23015.1,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 43.2,
+      "road_integration": 0.627,
+      "road_connectivity": 0.302
+    },
+    {
+      "cell_id": "r6_c20",
+      "sector": "NE",
+      "distance_m": 881.3,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 20079.7,
+      "nightlight": 75.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 15.0,
+      "road_integration": 0.411,
+      "road_connectivity": 0.379
+    },
+    {
+      "cell_id": "r4_c14",
+      "sector": "N",
+      "distance_m": 882.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 18679.1,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 56.5,
+      "road_integration": 0.627,
+      "road_connectivity": 0.331
+    },
+    {
+      "cell_id": "r23_c13",
+      "sector": "S",
+      "distance_m": 882.7,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 2901.2,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 9.3,
+      "road_integration": 0.526,
+      "road_connectivity": 0.312
+    },
+    {
+      "cell_id": "r23_c14",
+      "sector": "S",
+      "distance_m": 882.9,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 9317.6,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 25.8,
+      "road_integration": 0.895,
+      "road_connectivity": 0.617
+    },
+    {
+      "cell_id": "r11_c3",
+      "sector": "W",
+      "distance_m": 885.2,
+      "poi_count": 9,
+      "poi_density": 1185.6,
+      "population_density": 19556.4,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.727,
+      "road_connectivity": 0.38
+    },
+    {
+      "cell_id": "r16_c3",
+      "sector": "W",
+      "distance_m": 887.0,
+      "poi_count": 11,
+      "poi_density": 1448.1,
+      "population_density": 18211.1,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.574,
+      "road_connectivity": 0.333
+    },
+    {
+      "cell_id": "r4_c12",
+      "sector": "N",
+      "distance_m": 888.0,
+      "poi_count": 7,
+      "poi_density": 922.2,
+      "population_density": 22949.8,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 38.4,
+      "road_integration": 0.625,
+      "road_connectivity": 0.341
+    },
+    {
+      "cell_id": "r23_c12",
+      "sector": "S",
+      "distance_m": 890.0,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 1095.5,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.9,
+      "road_integration": 0.504,
+      "road_connectivity": 0.468
+    },
+    {
+      "cell_id": "r9_c23",
+      "sector": "NE",
+      "distance_m": 890.4,
+      "poi_count": 4,
+      "poi_density": 526.3,
+      "population_density": 18203.9,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.558,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r4_c15",
+      "sector": "N",
+      "distance_m": 890.5,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 11216.7,
+      "nightlight": 69.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 84.4,
+      "road_integration": 0.651,
+      "road_connectivity": 0.305
+    },
+    {
+      "cell_id": "r23_c15",
+      "sector": "S",
+      "distance_m": 890.8,
+      "poi_count": 7,
+      "poi_density": 922.6,
+      "population_density": 16507.1,
+      "nightlight": 64.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.754,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r4_c11",
+      "sector": "N",
+      "distance_m": 902.3,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 16033.4,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 42.0,
+      "road_integration": 0.394,
+      "road_connectivity": 0.238
+    },
+    {
+      "cell_id": "r5_c8",
+      "sector": "NW",
+      "distance_m": 903.6,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 14178.0,
+      "nightlight": 60.6,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r23_c11",
+      "sector": "S",
+      "distance_m": 904.7,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 601.7,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 25.4,
+      "road_integration": 0.554,
+      "road_connectivity": 0.577
+    },
+    {
+      "cell_id": "r23_c16",
+      "sector": "S",
+      "distance_m": 906.1,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 19385.4,
+      "nightlight": 55.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.3,
+      "road_integration": 0.736,
+      "road_connectivity": 0.272
+    },
+    {
+      "cell_id": "r4_c16",
+      "sector": "N",
+      "distance_m": 906.4,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 9570.0,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 86.3,
+      "road_integration": 0.661,
+      "road_connectivity": 0.314
+    },
+    {
+      "cell_id": "r5_c19",
+      "sector": "NE",
+      "distance_m": 912.3,
+      "poi_count": 3,
+      "poi_density": 394.7,
+      "population_density": 20447.0,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 26.0,
+      "road_integration": 0.427,
+      "road_connectivity": 0.339
+    },
+    {
+      "cell_id": "r10_c3",
+      "sector": "W",
+      "distance_m": 913.5,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 17061.2,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 38.5,
+      "road_integration": 0.621,
+      "road_connectivity": 0.448
+    },
+    {
+      "cell_id": "r20_c5",
+      "sector": "SW",
+      "distance_m": 919.1,
+      "poi_count": 7,
+      "poi_density": 921.5,
+      "population_density": 19268.6,
+      "nightlight": 67.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 15.3,
+      "road_integration": 0.554,
+      "road_connectivity": 0.32
+    },
+    {
+      "cell_id": "r6_c6",
+      "sector": "NW",
+      "distance_m": 922.7,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 13948.2,
+      "nightlight": 60.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 32.0,
+      "road_integration": 0.654,
+      "road_connectivity": 0.373
+    },
+    {
+      "cell_id": "r23_c10",
+      "sector": "S",
+      "distance_m": 926.5,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 470.0,
+      "nightlight": 71.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 16.1,
+      "road_integration": 0.48,
+      "road_connectivity": 0.189
+    },
+    {
+      "cell_id": "r7_c22",
+      "sector": "NE",
+      "distance_m": 927.5,
+      "poi_count": 9,
+      "poi_density": 1184.2,
+      "population_density": 15799.0,
+      "nightlight": 81.6,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.5,
+      "road_integration": 0.581,
+      "road_connectivity": 0.423
+    },
+    {
+      "cell_id": "r19_c4",
+      "sector": "SW",
+      "distance_m": 928.1,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 16605.1,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.3,
+      "road_integration": 0.621,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r4_c17",
+      "sector": "N",
+      "distance_m": 929.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 13679.0,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 45.5,
+      "road_integration": 0.658,
+      "road_connectivity": 0.327
+    },
+    {
+      "cell_id": "r6_c21",
+      "sector": "NE",
+      "distance_m": 933.9,
+      "poi_count": 6,
+      "poi_density": 790.4,
+      "population_density": 17746.1,
+      "nightlight": 82.2,
+      "road_covered": true,
+      "road_density_km_per_km2": 32.1,
+      "road_integration": 0.521,
+      "road_connectivity": 0.461
+    },
+    {
+      "cell_id": "r8_c23",
+      "sector": "NE",
+      "distance_m": 937.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 18741.5,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.1,
+      "road_integration": 0.491,
+      "road_connectivity": 0.291
+    },
+    {
+      "cell_id": "r15_c2",
+      "sector": "W",
+      "distance_m": 948.1,
+      "poi_count": 13,
+      "poi_density": 1712.4,
+      "population_density": 17993.5,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.1,
+      "road_integration": 0.439,
+      "road_connectivity": 0.585
+    },
+    {
+      "cell_id": "r13_c25",
+      "sector": "E",
+      "distance_m": 950.7,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 14134.1,
+      "nightlight": 60.2,
+      "road_covered": true,
+      "road_density_km_per_km2": 5.7,
+      "road_integration": 0.51,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r5_c20",
+      "sector": "NE",
+      "distance_m": 956.3,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 19825.7,
+      "nightlight": 75.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 17.0,
+      "road_integration": 0.394,
+      "road_connectivity": 0.35
+    },
+    {
+      "cell_id": "r4_c18",
+      "sector": "NE",
+      "distance_m": 958.5,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 16877.3,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 47.3,
+      "road_integration": 0.629,
+      "road_connectivity": 0.408
+    },
+    {
+      "cell_id": "r12_c25",
+      "sector": "E",
+      "distance_m": 960.0,
+      "poi_count": 5,
+      "poi_density": 658.6,
+      "population_density": 14414.6,
+      "nightlight": 63.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 13.0,
+      "road_integration": 0.45,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r9_c24",
+      "sector": "NE",
+      "distance_m": 963.7,
+      "poi_count": 2,
+      "poi_density": 263.5,
+      "population_density": 17859.0,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.9,
+      "road_integration": 0.558,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r11_c2",
+      "sector": "W",
+      "distance_m": 964.5,
+      "poi_count": 4,
+      "poi_density": 527.2,
+      "population_density": 19404.3,
+      "nightlight": 63.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r16_c2",
+      "sector": "W",
+      "distance_m": 966.4,
+      "poi_count": 14,
+      "poi_density": 1844.1,
+      "population_density": 13961.8,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 23.1,
+      "road_integration": 0.522,
+      "road_connectivity": 0.588
+    },
+    {
+      "cell_id": "r3_c13",
+      "sector": "N",
+      "distance_m": 974.0,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 23083.1,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 4.2,
+      "road_integration": 0.514,
+      "road_connectivity": 0.26
+    },
+    {
+      "cell_id": "r3_c14",
+      "sector": "N",
+      "distance_m": 974.7,
+      "poi_count": 5,
+      "poi_density": 658.7,
+      "population_density": 23138.6,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 14.6,
+      "road_integration": 0.611,
+      "road_connectivity": 0.398
+    },
+    {
+      "cell_id": "r24_c13",
+      "sector": "S",
+      "distance_m": 975.4,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 1725.0,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 17.3,
+      "road_integration": 0.604,
+      "road_connectivity": 0.421
+    },
+    {
+      "cell_id": "r24_c14",
+      "sector": "S",
+      "distance_m": 975.6,
+      "poi_count": 2,
+      "poi_density": 263.1,
+      "population_density": 8892.4,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 32.4,
+      "road_integration": 0.849,
+      "road_connectivity": 0.583
+    },
+    {
+      "cell_id": "r11_c25",
+      "sector": "E",
+      "distance_m": 978.0,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 14628.6,
+      "nightlight": 95.0,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r3_c12",
+      "sector": "N",
+      "distance_m": 980.0,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 22410.0,
+      "nightlight": 70.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.2,
+      "road_integration": 0.514,
+      "road_connectivity": 0.26
+    },
+    {
+      "cell_id": "r24_c12",
+      "sector": "S",
+      "distance_m": 982.1,
+      "poi_count": 1,
+      "poi_density": 131.8,
+      "population_density": 669.6,
+      "nightlight": 73.1,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r3_c15",
+      "sector": "N",
+      "distance_m": 982.5,
+      "poi_count": 10,
+      "poi_density": 1318.2,
+      "population_density": 19587.9,
+      "nightlight": 69.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 11.2,
+      "road_integration": 0.523,
+      "road_connectivity": 0.424
+    },
+    {
+      "cell_id": "r20_c4",
+      "sector": "SW",
+      "distance_m": 982.5,
+      "poi_count": 4,
+      "poi_density": 526.9,
+      "population_density": 19232.8,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 24.3,
+      "road_integration": 0.583,
+      "road_connectivity": 0.319
+    },
+    {
+      "cell_id": "r24_c15",
+      "sector": "S",
+      "distance_m": 982.7,
+      "poi_count": 13,
+      "poi_density": 1712.3,
+      "population_density": 15358.4,
+      "nightlight": 64.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.682,
+      "road_connectivity": 0.571
+    },
+    {
+      "cell_id": "r21_c5",
+      "sector": "SW",
+      "distance_m": 982.8,
+      "poi_count": 11,
+      "poi_density": 1446.3,
+      "population_density": 19626.7,
+      "nightlight": 67.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 9.8,
+      "road_integration": 0.374,
+      "road_connectivity": 0.255
+    },
+    {
+      "cell_id": "r10_c2",
+      "sector": "W",
+      "distance_m": 990.6,
+      "poi_count": 12,
+      "poi_density": 1580.8,
+      "population_density": 17200.3,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.7,
+      "road_integration": 0.966,
+      "road_connectivity": 0.357
+    },
+    {
+      "cell_id": "r17_c2",
+      "sector": "W",
+      "distance_m": 993.1,
+      "poi_count": 7,
+      "poi_density": 922.6,
+      "population_density": 13480.7,
+      "nightlight": 66.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.3,
+      "road_integration": 0.484,
+      "road_connectivity": 0.415
+    },
+    {
+      "cell_id": "r4_c19",
+      "sector": "NE",
+      "distance_m": 993.7,
+      "poi_count": 4,
+      "poi_density": 526.6,
+      "population_density": 17522.5,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 21.7,
+      "road_integration": 0.668,
+      "road_connectivity": 0.344
+    },
+    {
+      "cell_id": "r24_c16",
+      "sector": "S",
+      "distance_m": 996.6,
+      "poi_count": 5,
+      "poi_density": 658.6,
+      "population_density": 18426.7,
+      "nightlight": 55.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.4,
+      "road_integration": 0.554,
+      "road_connectivity": 0.286
+    },
+    {
+      "cell_id": "r3_c16",
+      "sector": "N",
+      "distance_m": 996.8,
+      "poi_count": 4,
+      "poi_density": 526.6,
+      "population_density": 14569.1,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 90.9,
+      "road_integration": 0.576,
+      "road_connectivity": 0.342
+    },
+    {
+      "cell_id": "r8_c24",
+      "sector": "NE",
+      "distance_m": 1007.5,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 18633.6,
+      "nightlight": 81.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.9,
+      "road_integration": 0.449,
+      "road_connectivity": 0.271
+    },
+    {
+      "cell_id": "r3_c17",
+      "sector": "N",
+      "distance_m": 1017.5,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 14579.8,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 43.3,
+      "road_integration": 0.51,
+      "road_connectivity": 0.307
+    },
+    {
+      "cell_id": "r15_c1",
+      "sector": "W",
+      "distance_m": 1029.2,
+      "poi_count": 13,
+      "poi_density": 1712.4,
+      "population_density": 15297.3,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 7.5,
+      "road_integration": 0.399,
+      "road_connectivity": 0.383
+    },
+    {
+      "cell_id": "r13_c26",
+      "sector": "E",
+      "distance_m": 1032.7,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 11475.9,
+      "nightlight": 56.8,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r4_c20",
+      "sector": "NE",
+      "distance_m": 1034.2,
+      "poi_count": 2,
+      "poi_density": 263.6,
+      "population_density": 18459.2,
+      "nightlight": 75.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 17.4,
+      "road_integration": 0.48,
+      "road_connectivity": 0.313
+    },
+    {
+      "cell_id": "r12_c26",
+      "sector": "E",
+      "distance_m": 1041.3,
+      "poi_count": 1,
+      "poi_density": 131.6,
+      "population_density": 11236.3,
+      "nightlight": 62.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 4.8,
+      "road_integration": 0.413,
+      "road_connectivity": 0.354
+    },
+    {
+      "cell_id": "r21_c4",
+      "sector": "SW",
+      "distance_m": 1042.2,
+      "poi_count": 14,
+      "poi_density": 1844.1,
+      "population_density": 19986.6,
+      "nightlight": 67.9,
+      "road_covered": true,
+      "road_density_km_per_km2": 22.3,
+      "road_integration": 0.619,
+      "road_connectivity": 0.304
+    },
+    {
+      "cell_id": "r3_c18",
+      "sector": "N",
+      "distance_m": 1044.4,
+      "poi_count": 5,
+      "poi_density": 658.7,
+      "population_density": 16897.5,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 57.4,
+      "road_integration": 0.575,
+      "road_connectivity": 0.34
+    },
+    {
+      "cell_id": "r16_c1",
+      "sector": "W",
+      "distance_m": 1046.1,
+      "poi_count": 7,
+      "poi_density": 922.6,
+      "population_density": 14487.3,
+      "nightlight": 52.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 10.8,
+      "road_integration": 0.571,
+      "road_connectivity": 0.552
+    },
+    {
+      "cell_id": "r11_c26",
+      "sector": "E",
+      "distance_m": 1057.9,
+      "poi_count": 6,
+      "poi_density": 790.4,
+      "population_density": 12432.0,
+      "nightlight": 108.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 20.8,
+      "road_integration": 0.372,
+      "road_connectivity": 0.424
+    },
+    {
+      "cell_id": "r2_c14",
+      "sector": "N",
+      "distance_m": 1067.5,
+      "poi_count": 20,
+      "poi_density": 2636.4,
+      "population_density": 23184.7,
+      "nightlight": 69.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 28.6,
+      "road_integration": 0.562,
+      "road_connectivity": 0.278
+    },
+    {
+      "cell_id": "r25_c13",
+      "sector": "S",
+      "distance_m": 1068.1,
+      "poi_count": 4,
+      "poi_density": 527.2,
+      "population_density": 5635.4,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 27.1,
+      "road_integration": 0.597,
+      "road_connectivity": 0.488
+    },
+    {
+      "cell_id": "r25_c14",
+      "sector": "S",
+      "distance_m": 1068.3,
+      "poi_count": 15,
+      "poi_density": 1973.4,
+      "population_density": 11270.0,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 25.6,
+      "road_integration": 0.89,
+      "road_connectivity": 0.429
+    },
+    {
+      "cell_id": "r10_c1",
+      "sector": "W",
+      "distance_m": 1068.5,
+      "poi_count": 4,
+      "poi_density": 527.2,
+      "population_density": 15781.0,
+      "nightlight": 63.0,
+      "road_covered": true,
+      "road_density_km_per_km2": 13.0,
+      "road_integration": 0.967,
+      "road_connectivity": 0.347
+    },
+    {
+      "cell_id": "r17_c1",
+      "sector": "W",
+      "distance_m": 1070.9,
+      "poi_count": 2,
+      "poi_density": 263.4,
+      "population_density": 13939.3,
+      "nightlight": 66.3,
+      "road_covered": false,
+      "road_density_km_per_km2": 0.0,
+      "road_integration": 0.0,
+      "road_connectivity": 0.0
+    },
+    {
+      "cell_id": "r2_c15",
+      "sector": "N",
+      "distance_m": 1074.4,
+      "poi_count": 3,
+      "poi_density": 395.2,
+      "population_density": 23211.8,
+      "nightlight": 68.2,
+      "road_covered": true,
+      "road_density_km_per_km2": 14.5,
+      "road_integration": 0.432,
+      "road_connectivity": 0.405
+    },
+    {
+      "cell_id": "r3_c19",
+      "sector": "NE",
+      "distance_m": 1076.9,
+      "poi_count": 3,
+      "poi_density": 394.7,
+      "population_density": 17563.7,
+      "nightlight": 69.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 43.3,
+      "road_integration": 0.584,
+      "road_connectivity": 0.296
+    },
+    {
+      "cell_id": "r2_c16",
+      "sector": "N",
+      "distance_m": 1087.6,
+      "poi_count": 8,
+      "poi_density": 1052.7,
+      "population_density": 19850.1,
+      "nightlight": 67.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 79.0,
+      "road_integration": 0.557,
+      "road_connectivity": 0.354
+    },
+    {
+      "cell_id": "r2_c17",
+      "sector": "N",
+      "distance_m": 1106.8,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 20017.0,
+      "nightlight": 67.5,
+      "road_covered": true,
+      "road_density_km_per_km2": 12.2,
+      "road_integration": 0.408,
+      "road_connectivity": 0.275
+    },
+    {
+      "cell_id": "r16_c0",
+      "sector": "W",
+      "distance_m": 1126.3,
+      "poi_count": 7,
+      "poi_density": 922.6,
+      "population_density": 13949.5,
+      "nightlight": 48.4,
+      "road_covered": true,
+      "road_density_km_per_km2": 8.6,
+      "road_integration": 0.571,
+      "road_connectivity": 0.552
+    },
+    {
+      "cell_id": "r11_c27",
+      "sector": "E",
+      "distance_m": 1138.1,
+      "poi_count": 0,
+      "poi_density": 0.0,
+      "population_density": 11604.3,
+      "nightlight": 108.3,
+      "road_covered": true,
+      "road_density_km_per_km2": 13.7,
+      "road_integration": 0.337,
+      "road_connectivity": 0.288
+    },
+    {
+      "cell_id": "r26_c13",
+      "sector": "S",
+      "distance_m": 1160.8,
+      "poi_count": 20,
+      "poi_density": 2634.3,
+      "population_density": 15658.0,
+      "nightlight": 73.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 1.6,
+      "road_integration": 0.701,
+      "road_connectivity": 0.143
+    },
+    {
+      "cell_id": "r1_c15",
+      "sector": "N",
+      "distance_m": 1166.6,
+      "poi_count": 1,
+      "poi_density": 131.7,
+      "population_density": 23234.5,
+      "nightlight": 56.1,
+      "road_covered": true,
+      "road_density_km_per_km2": 2.8,
+      "road_integration": 0.383,
+      "road_connectivity": 0.226
+    },
+    {
+      "cell_id": "r1_c16",
+      "sector": "N",
+      "distance_m": 1178.8,
+      "poi_count": 2,
+      "poi_density": 263.3,
+      "population_density": 21147.4,
+      "nightlight": 54.7,
+      "road_covered": true,
+      "road_density_km_per_km2": 31.2,
+      "road_integration": 0.569,
+      "road_connectivity": 0.347
+    }
+  ],
+  "limitations": [
+    "同一共享栅格用于对齐来源；POI、人口、夜光和路网描述空间条件，不代表客流、消费、营收或投资回报。",
+    "来源年份和采集口径可能不同，报告必须标注各来源年份；方向结果只用于空间比较和现场核验优先级。"
+  ]
+}

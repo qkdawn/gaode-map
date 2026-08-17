@@ -1,0 +1,223 @@
+{
+  "actions": [
+    {
+      "action": "开展两周居民访谈与三类场景小样测试，分别记录到访原因、时段、停留和反馈。",
+      "action_id": "a21",
+      "derived_from_finding_ids": [
+        "f21",
+        "f22"
+      ],
+      "priority": "high",
+      "responsible_party": "社区工作与运营团队",
+      "timing": "0—30天",
+      "validation_ids": [
+        "v21"
+      ]
+    }
+  ],
+  "chapter_id": "ch02-people",
+  "decision_question": "首期应优先验证哪些人群场景和使用时段？",
+  "decision_tables": [
+    {
+      "columns": [
+        "证据对象",
+        "已知规模",
+        "先验证的场景",
+        "主要边界"
+      ],
+      "evidence_links": [
+        "result:population-total:754f2af64f80c31e",
+        "result:project-constraints:real-v1"
+      ],
+      "finding_ids": [
+        "f21",
+        "f22"
+      ],
+      "rows": [
+        [
+          "35—59岁",
+          "24,298人，41.7%",
+          "工作日家庭事务与社区服务",
+          "不是已确认到访者"
+        ],
+        [
+          "15—34岁",
+          "15,732人，27.0%",
+          "周末文化与共创活动",
+          "不能推断消费能力"
+        ],
+        [
+          "60岁以上",
+          "10,901人，18.7%",
+          "日间友好、休息与代际活动",
+          "需要无障碍和低噪声"
+        ],
+        [
+          "现状居民",
+          "约102户",
+          "居民议事、便民和日常共享",
+          "优先保障生活与通行"
+        ]
+      ],
+      "table_id": "t21",
+      "title": "人群不是标签，而是待验证使用场景"
+    }
+  ],
+  "evidence_links": [
+    "result:population-total:754f2af64f80c31e",
+    "result:project-constraints:real-v1",
+    "document:project-extracts"
+  ],
+  "findings": [
+    {
+      "comparison_baseline": "在同一背景范围内比较三个年龄组人数与占比。",
+      "confidence": "high",
+      "decision_impact": "首期同时设计三类低成本场景测试，不把其中任何一组直接定义为核心客群。",
+      "evidence_links": [
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "finding_id": "f21",
+      "spatial_mechanism": "年龄结构提示工作日家庭事务、青年文化和老年友好可能同时存在，但尚未证明这些人会到项目。",
+      "statement": "背景区约58,201人，其中35—59岁24,298人占41.7%，15—34岁15,732人占27.0%，60岁以上10,901人占18.7%。",
+      "statement_type": "fact",
+      "metric_bundle_id": "bundle:ch02-people",
+      "metric_ids": [
+        "metric:ch02-people:primary",
+        "metric:ch02-people:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch02-people:primary",
+        "metric:ch02-people:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "项目内已记录居民与背景区人口的证据等级比较。",
+      "confidence": "high",
+      "decision_impact": "居民日常服务、安宁边界和协商机制必须先进入首期方案。",
+      "evidence_links": [
+        "result:project-constraints:real-v1",
+        "document:project-extracts"
+      ],
+      "finding_id": "f22",
+      "spatial_mechanism": "居民承受开放带来的通行、噪声和安全影响，权重高于未经验证的外来客群假设。",
+      "statement": "项目内约102户居民是确定的利益相关者，而区域人口只是潜在使用背景。",
+      "statement_type": "fact",
+      "metric_bundle_id": "bundle:ch02-people",
+      "metric_ids": [
+        "metric:ch02-people:primary",
+        "metric:ch02-people:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch02-people:primary",
+        "metric:ch02-people:boundary"
+      ]
+    }
+  ],
+  "limitations": [],
+  "object_decisions": [],
+  "portfolio_check": null,
+  "reader_content": {
+    "narrative_blocks": [
+      {
+        "block_id": "r2-b1",
+        "body": "35—59岁规模最大，可测试工作日家庭事务和社区服务；15—34岁可测试周末文化活动；60岁以上要求无障碍、休息和低噪声。三者都是待验证假设。",
+        "finding_ids": [
+          "f21"
+        ],
+        "heading": "三个年龄组对应三种待验证场景"
+      },
+      {
+        "block_id": "r2-b2",
+        "body": "居民不是“潜在客群”概念，而是日常生活直接受项目影响的人。公共开放必须先明确居民通行、安静时段和投诉响应。",
+        "finding_ids": [
+          "f22"
+        ],
+        "heading": "约102户居民先于外来流量"
+      }
+    ],
+    "opening_finding_ids": [
+      "f21",
+      "f22"
+    ],
+    "opening_judgment": "本项目最确定的人群是现状居民；周边年龄结构只帮助设计不同时间和内容的试验。",
+    "takeaway": "先把人群变成可验证场景，而不是把58,201人写成项目客群。",
+    "takeaway_finding_ids": [
+      "f21",
+      "f22"
+    ]
+  },
+  "responsibility": "把区域人口与现状居民转成待验证使用场景，不把人口直接当作客群。",
+  "run_id": "skill-first-v41-directional-fusion-real-20260718-152435",
+  "schema_version": "4.1",
+  "specialist_role": "人群与场景分析师",
+  "status": "ready",
+  "title": "人群、需求场景与使用时段",
+  "unmet_dependencies": [],
+  "validation_conditions": [
+    {
+      "hypothesis": "居民服务、青年文化和代际活动中至少有两类形成稳定使用。",
+      "method": "每类至少安排两次小样活动并记录真实参与。",
+      "pass_condition": "至少两类场景出现重复参与，且居民投诉可控。",
+      "required_data": "参与人数、居民占比、复访意愿、时段、停留、投诉和组织成本。",
+      "stop_condition": "若活动依赖大量赠送仍无复访，或连续出现居民安宁冲突，则调整内容与时段。",
+      "validation_id": "v21"
+    }
+  ],
+  "version": 1,
+  "metric_bundle": {
+    "bundle_id": "bundle:ch02-people",
+    "decision_question": "首期应优先验证哪些人群场景和使用时段？",
+    "metrics": [
+      {
+        "metric_id": "metric:ch02-people:primary",
+        "tool_id": "project.document_constraints",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:population-total:754f2af64f80c31e"
+        ],
+        "measures": "本章授权范围内的空间或项目证据",
+        "decision_role": "回答本章决策问题的主要比较条件",
+        "combine_with": [
+          "metric:ch02-people:boundary"
+        ],
+        "comparison_baseline": "比较15—34岁、35—59岁、60岁以上三个年龄组，并与项目内约102户居民这一确定利益相关者对照。",
+        "action_change": "改变本章的优先验证顺序或行动强度",
+        "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+      },
+      {
+        "metric_id": "metric:ch02-people:boundary",
+        "tool_id": "population.total",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:population-total:754f2af64f80c31e"
+        ],
+        "measures": "本章的第二类约束或对照证据",
+        "decision_role": "与主要指标共同形成可验证判断",
+        "combine_with": [
+          "metric:ch02-people:primary"
+        ],
+        "comparison_baseline": "比较15—34岁、35—59岁、60岁以上三个年龄组，并与项目内约102户居民这一确定利益相关者对照。",
+        "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+        "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+      }
+    ],
+    "comparison_design": {
+      "observation_universe": "项目研究范围及本章授权对象",
+      "spatial_unit": "本章授权空间对象或共同网格",
+      "comparison_axes": [
+        "项目内部比较",
+        "与共同范围基准比较"
+      ],
+      "baseline": "比较15—34岁、35—59岁、60岁以上三个年龄组，并与项目内约102户居民这一确定利益相关者对照。",
+      "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+      "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+      "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+    },
+    "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+    "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+  }
+}

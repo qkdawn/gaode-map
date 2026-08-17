@@ -1,0 +1,257 @@
+{
+  "actions": [
+    {
+      "action": "补齐正式红线、主入口、西端入口候选、消防与后勤接口坐标，并完成一次联合踏勘。",
+      "action_id": "a41",
+      "derived_from_finding_ids": [
+        "f41",
+        "f42",
+        "f43"
+      ],
+      "priority": "high",
+      "responsible_party": "测绘、设计、物业与居民代表",
+      "timing": "0—30天",
+      "validation_ids": [
+        "v41"
+      ]
+    }
+  ],
+  "chapter_id": "ch04-connection",
+  "decision_question": "项目应优先核验哪些外部联系和内部动线？",
+  "decision_tables": [
+    {
+      "columns": [
+        "证据",
+        "真实结果",
+        "本轮用途",
+        "定案前缺口"
+      ],
+      "evidence_links": [
+        "result:road-syntax:real-v1",
+        "result:poi-road-colocation:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f41",
+        "f42",
+        "f43"
+      ],
+      "rows": [
+        [
+          "路网结构",
+          "1,194边；300高整合；300高选择；780低连通",
+          "筛选强廊道与断点",
+          "真实人流与入口条件"
+        ],
+        [
+          "共位候选",
+          "9个观察区；14个公共界面候选",
+          "安排踏勘清单",
+          "项目红线叠加"
+        ],
+        [
+          "入口就绪度",
+          "正式边界缺失；正式入口0",
+          "明确计算被阻塞",
+          "坐标、门禁、消防、居民分流"
+        ]
+      ],
+      "table_id": "t41",
+      "title": "连接证据如何转成现场任务"
+    }
+  ],
+  "evidence_links": [
+    "result:road-syntax:real-v1",
+    "result:poi-road-colocation:real-v1",
+    "result:coordinate-readiness:real-v1",
+    "result:nightlight-profile:real-v1"
+  ],
+  "findings": [
+    {
+      "comparison_baseline": "在同一背景路网内比较高整合、高选择度与低连通路段数量。",
+      "confidence": "medium",
+      "decision_impact": "现场踏勘先覆盖结构较强廊道与断点，不直接据此布置入口。",
+      "evidence_links": [
+        "result:road-syntax:real-v1"
+      ],
+      "finding_id": "f41",
+      "spatial_mechanism": "路网结构可以筛选更可能承担穿行或到达的廊道，但不能证明项目入口可用。",
+      "statement": "区域路网保存结果含1,194条边、1,138个节点和43.3169公里路段；300段高整合、300段高选择度与780段低连通说明外部结构存在强弱差异。",
+      "statement_type": "proxy",
+      "metric_bundle_id": "bundle:ch04-connection",
+      "metric_ids": [
+        "metric:ch04-connection:primary",
+        "metric:ch04-connection:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch04-connection:primary",
+        "metric:ch04-connection:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "在同一规则网格内比较设施与路网条件叠加的候选单元。",
+      "confidence": "medium",
+      "decision_impact": "把14个候选压缩为现场核验清单，核验后再决定连接策略。",
+      "evidence_links": [
+        "result:poi-road-colocation:real-v1"
+      ],
+      "finding_id": "f42",
+      "spatial_mechanism": "设施与路网同时较强的地方更值得观察公共界面，但缺少项目红线叠加。",
+      "statement": "POI—路网分析识别9个共位观察区和14个公共界面候选，只能用于缩小踏勘范围。",
+      "statement_type": "proxy",
+      "metric_bundle_id": "bundle:ch04-connection",
+      "metric_ids": [
+        "metric:ch04-connection:primary",
+        "metric:ch04-connection:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch04-connection:primary",
+        "metric:ch04-connection:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "将中心点背景范围与正式边界、入口就绪度比较。",
+      "confidence": "high",
+      "decision_impact": "任何入口、开放线路和容量建议都保持候选状态，先补底图。",
+      "evidence_links": [
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_id": "f43",
+      "spatial_mechanism": "没有可确认的入口坐标，就无法计算真实到达、绕行、门禁、消防和居民分流。",
+      "statement": "正式项目边界缺失、正式入口为0，入口距离计算被阻塞。",
+      "statement_type": "fact",
+      "metric_bundle_id": "bundle:ch04-connection",
+      "metric_ids": [
+        "metric:ch04-connection:primary",
+        "metric:ch04-connection:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch04-connection:primary",
+        "metric:ch04-connection:boundary"
+      ]
+    }
+  ],
+  "limitations": [],
+  "object_decisions": [],
+  "portfolio_check": null,
+  "reader_content": {
+    "narrative_blocks": [
+      {
+        "block_id": "r4-b1",
+        "body": "1,194条路网边显示背景区连接条件并不均匀。高整合、高选择度与低连通段应一起看，避免只看主路而忽略最后一段到达障碍。",
+        "finding_ids": [
+          "f41"
+        ],
+        "heading": "路网强弱用于安排现场工作"
+      },
+      {
+        "block_id": "r4-b2",
+        "body": "共位结果只是观察区和公共界面候选。它的作用是缩小现场范围，而不是替代门禁、消防、产权和居民通行判断。",
+        "finding_ids": [
+          "f42"
+        ],
+        "heading": "14个候选不是14个入口"
+      },
+      {
+        "block_id": "r4-b3",
+        "body": "正式边界和入口均未提供，因此报告不会给出虚假的米数、绕行比或入口容量。",
+        "finding_ids": [
+          "f43"
+        ],
+        "heading": "当前最大缺口是正式坐标"
+      }
+    ],
+    "opening_finding_ids": [
+      "f41",
+      "f42",
+      "f43"
+    ],
+    "opening_judgment": "现有数据足以安排踏勘优先级，但正式边界和入口坐标缺失，任何入口结论都不能定案。",
+    "takeaway": "先把“哪里值得看”与“哪里可以开入口”分开。",
+    "takeaway_finding_ids": [
+      "f41",
+      "f42",
+      "f43"
+    ]
+  },
+  "responsibility": "判断外部联系、入口、主路径和居民动线的核验优先级。",
+  "run_id": "skill-first-v41-directional-fusion-real-20260718-152435",
+  "schema_version": "4.1",
+  "specialist_role": "空间连接分析师",
+  "status": "ready",
+  "title": "空间结构、可达性与对外连接",
+  "unmet_dependencies": [],
+  "validation_conditions": [
+    {
+      "hypothesis": "至少一个公共入口和一条居民/后勤分流方案可安全运行。",
+      "method": "叠加正式红线、入口、消防、门禁、坡度和现场障碍，完成分时走线测试。",
+      "pass_condition": "形成一条公众主线、一条居民优先线和一条后勤接口，且责任明确。",
+      "required_data": "正式坐标、步行时间、障碍点、门禁责任、消防意见和居民反馈。",
+      "stop_condition": "若入口与消防、产权或居民通行冲突无法消解，则缩小开放范围或暂停公共开放。",
+      "validation_id": "v41"
+    }
+  ],
+  "version": 1,
+  "metric_bundle": {
+    "bundle_id": "bundle:ch04-connection",
+    "decision_question": "项目应优先核验哪些外部联系和内部动线？",
+    "metrics": [
+      {
+        "metric_id": "metric:ch04-connection:primary",
+        "tool_id": "road.integration",
+        "availability": "available",
+        "evidence_ids": [
+          "scope:history-center-15min-walk",
+          "document:project-extracts",
+          "result:road-syntax:real-v1",
+          "result:poi-road-colocation:real-v1",
+          "result:nightlight-profile:real-v1",
+          "result:coordinate-readiness:real-v1"
+        ],
+        "measures": "本章授权范围内的空间或项目证据",
+        "decision_role": "回答本章决策问题的主要比较条件",
+        "combine_with": [
+          "metric:ch04-connection:boundary"
+        ],
+        "comparison_baseline": "将路网结构、POI—路网共位、夜光方向与入口就绪度交叉比较；结构指标只用于筛选踏勘方向。",
+        "action_change": "改变本章的优先验证顺序或行动强度",
+        "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+      },
+      {
+        "metric_id": "metric:ch04-connection:boundary",
+        "tool_id": "grid.opportunity_flag",
+        "availability": "available",
+        "evidence_ids": [
+          "scope:history-center-15min-walk",
+          "document:project-extracts",
+          "result:road-syntax:real-v1",
+          "result:poi-road-colocation:real-v1",
+          "result:nightlight-profile:real-v1",
+          "result:coordinate-readiness:real-v1"
+        ],
+        "measures": "本章的第二类约束或对照证据",
+        "decision_role": "与主要指标共同形成可验证判断",
+        "combine_with": [
+          "metric:ch04-connection:primary"
+        ],
+        "comparison_baseline": "将路网结构、POI—路网共位、夜光方向与入口就绪度交叉比较；结构指标只用于筛选踏勘方向。",
+        "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+        "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+      }
+    ],
+    "comparison_design": {
+      "observation_universe": "项目研究范围及本章授权对象",
+      "spatial_unit": "本章授权空间对象或共同网格",
+      "comparison_axes": [
+        "项目内部比较",
+        "与共同范围基准比较"
+      ],
+      "baseline": "将路网结构、POI—路网共位、夜光方向与入口就绪度交叉比较；结构指标只用于筛选踏勘方向。",
+      "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+      "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+      "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+    },
+    "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+    "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+  }
+}

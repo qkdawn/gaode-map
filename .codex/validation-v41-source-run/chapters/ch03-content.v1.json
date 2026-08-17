@@ -1,0 +1,262 @@
+{
+  "actions": [
+    {
+      "action": "在礼堂和活动中心设计90天内容日历，每类内容至少两次，并为每次活动设置容量、时段、责任人和成本记录。",
+      "action_id": "a31",
+      "derived_from_finding_ids": [
+        "f31",
+        "f32",
+        "f33"
+      ],
+      "priority": "high",
+      "responsible_party": "运营主体、社区伙伴与文化内容团队",
+      "timing": "31—90天",
+      "validation_ids": [
+        "v31"
+      ]
+    }
+  ],
+  "chapter_id": "ch03-content",
+  "decision_question": "首期做什么内容和服务，才能同时验证公共价值与运营可能？",
+  "decision_tables": [
+    {
+      "columns": [
+        "产品小样",
+        "主要服务场景",
+        "首选载体",
+        "验证重点"
+      ],
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "finding_ids": [
+        "f31",
+        "f32",
+        "f33"
+      ],
+      "rows": [
+        [
+          "历史文化解释",
+          "公众、学校、小团队",
+          "礼堂与东侧庭院",
+          "理解度、停留、组织伙伴"
+        ],
+        [
+          "居民日常服务",
+          "现状居民与家庭",
+          "活动中心",
+          "使用频率、满意度、投诉"
+        ],
+        [
+          "青年文化共创",
+          "15—34岁待验证场景",
+          "礼堂小型时段",
+          "复访、伙伴投入、噪声"
+        ],
+        [
+          "代际活动",
+          "家庭与老年友好场景",
+          "活动中心与中部庭院",
+          "无障碍、重复参与、时段"
+        ]
+      ],
+      "table_id": "t31",
+      "title": "首期内容产品组合"
+    }
+  ],
+  "evidence_links": [
+    "document:project-extracts",
+    "result:project-constraints:real-v1",
+    "result:poi-category-count:real-v1",
+    "result:population-total:754f2af64f80c31e"
+  ],
+  "findings": [
+    {
+      "comparison_baseline": "在13栋建筑中比较材料明确程度、公共记忆价值与现状居民关系。",
+      "confidence": "high",
+      "decision_impact": "首期内容以礼堂小型历史文化活动和活动中心居民服务为双核心。",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1"
+      ],
+      "finding_id": "f31",
+      "spatial_mechanism": "礼堂与活动中心的功能依据来自材料和现有使用关系，比根据楼名猜测其他建筑用途更可靠。",
+      "statement": "项目材料明确礼堂具有集体活动和历史记忆价值，活动中心更适合承接居民日常服务。",
+      "statement_type": "inference",
+      "metric_bundle_id": "bundle:ch03-content",
+      "metric_ids": [
+        "metric:ch03-content:primary",
+        "metric:ch03-content:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch03-content:primary",
+        "metric:ch03-content:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "将162类设施覆盖与三个年龄组场景、约102户居民底线对照。",
+      "confidence": "medium",
+      "decision_impact": "首期产品分为历史文化解释、居民服务、青年共创和代际活动四类小样。",
+      "evidence_links": [
+        "result:poi-category-count:real-v1",
+        "result:population-total:754f2af64f80c31e"
+      ],
+      "finding_id": "f32",
+      "spatial_mechanism": "不同使用场景需要不同频率、容量和空间，不应由一个泛化商业主题覆盖。",
+      "statement": "区域设施类别多样、年龄结构复合，支持“小规模、多场景、分时段”试验，而不支持单一大客流产品。",
+      "statement_type": "inference",
+      "metric_bundle_id": "bundle:ch03-content",
+      "metric_ids": [
+        "metric:ch03-content:primary",
+        "metric:ch03-content:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch03-content:primary",
+        "metric:ch03-content:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "将材料中的空间愿景与缺失的经营约束对照。",
+      "confidence": "high",
+      "decision_impact": "不签大规模长期招商承诺；先用90天样板记录真实使用、组织成本与伙伴投入。",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1"
+      ],
+      "finding_id": "f33",
+      "spatial_mechanism": "没有经营目标和全成本，扩大空间与活动会先增加固定成本，不能证明可持续。",
+      "statement": "商业经营强度、付款方、收入和成本尚未明确，因此首期运营产品必须可撤回、可计数、可核算。",
+      "statement_type": "inference",
+      "metric_bundle_id": "bundle:ch03-content",
+      "metric_ids": [
+        "metric:ch03-content:primary",
+        "metric:ch03-content:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch03-content:primary",
+        "metric:ch03-content:boundary"
+      ]
+    }
+  ],
+  "limitations": [],
+  "object_decisions": [],
+  "portfolio_check": null,
+  "reader_content": {
+    "narrative_blocks": [
+      {
+        "block_id": "r3-b1",
+        "body": "礼堂可承担低容量历史文化活动，活动中心可承担居民议事、便民、亲子和代际活动。两者的依据比其他楼名更充分。",
+        "finding_ids": [
+          "f31"
+        ],
+        "heading": "两个明确载体先起步"
+      },
+      {
+        "block_id": "r3-b2",
+        "body": "历史文化解释、居民服务、青年共创和代际活动分别测试不同人群、时段和组织伙伴。它们可以组合，但不要求一次做大。",
+        "finding_ids": [
+          "f32"
+        ],
+        "heading": "四类内容小样代替一个大主题"
+      },
+      {
+        "block_id": "r3-b3",
+        "body": "付款方、收入目标和成本上限未明确。首期要记录每场活动的人员、复访、投诉、伙伴投入和全成本，避免用热闹代替可持续。",
+        "finding_ids": [
+          "f33"
+        ],
+        "heading": "经营未知就先做可逆试验"
+      }
+    ],
+    "opening_finding_ids": [
+      "f31",
+      "f32",
+      "f33"
+    ],
+    "opening_judgment": "把礼堂和活动中心作为小样载体，先验证真实使用与运营责任，再决定是否扩大到更多建筑。",
+    "takeaway": "首期不是“给每栋楼找业态”，而是先跑通四类可验证内容。",
+    "takeaway_finding_ids": [
+      "f31",
+      "f32",
+      "f33"
+    ]
+  },
+  "responsibility": "根据区域机会和人群场景，选择首期可逆内容组合。",
+  "run_id": "skill-first-v41-directional-fusion-real-20260718-152435",
+  "schema_version": "4.1",
+  "specialist_role": "文旅与内容运营分析师",
+  "status": "ready",
+  "title": "文化内容、公共服务与运营产品",
+  "unmet_dependencies": [],
+  "validation_conditions": [
+    {
+      "hypothesis": "四类内容中至少两类形成可重复使用，并有明确组织责任。",
+      "method": "90天低容量运营样板，逐场记录真实使用和全成本。",
+      "pass_condition": "至少两类内容出现复访或稳定伙伴，居民投诉和安全事件在可控范围。",
+      "required_data": "到访、居民参与、复访、停留、投诉、伙伴投入、人工与维护成本。",
+      "stop_condition": "若内容仅依赖补贴赠送、无复访、责任主体缺失或居民冲突持续，则停止扩容并调整产品。",
+      "validation_id": "v31"
+    }
+  ],
+  "version": 1,
+  "metric_bundle": {
+    "bundle_id": "bundle:ch03-content",
+    "decision_question": "首期做什么内容和服务，才能同时验证公共价值与运营可能？",
+    "metrics": [
+      {
+        "metric_id": "metric:ch03-content:primary",
+        "tool_id": "project.document_constraints",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:poi-category-count:real-v1",
+          "result:population-total:754f2af64f80c31e"
+        ],
+        "measures": "本章授权范围内的空间或项目证据",
+        "decision_role": "回答本章决策问题的主要比较条件",
+        "combine_with": [
+          "metric:ch03-content:boundary"
+        ],
+        "comparison_baseline": "把区域设施多样性与年龄场景、居民底线对照，区分可立即试验、需伙伴共创和暂不承诺三类产品。",
+        "action_change": "改变本章的优先验证顺序或行动强度",
+        "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+      },
+      {
+        "metric_id": "metric:ch03-content:boundary",
+        "tool_id": "poi.category_count",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:poi-category-count:real-v1",
+          "result:population-total:754f2af64f80c31e"
+        ],
+        "measures": "本章的第二类约束或对照证据",
+        "decision_role": "与主要指标共同形成可验证判断",
+        "combine_with": [
+          "metric:ch03-content:primary"
+        ],
+        "comparison_baseline": "把区域设施多样性与年龄场景、居民底线对照，区分可立即试验、需伙伴共创和暂不承诺三类产品。",
+        "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+        "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+      }
+    ],
+    "comparison_design": {
+      "observation_universe": "项目研究范围及本章授权对象",
+      "spatial_unit": "本章授权空间对象或共同网格",
+      "comparison_axes": [
+        "项目内部比较",
+        "与共同范围基准比较"
+      ],
+      "baseline": "把区域设施多样性与年龄场景、居民底线对照，区分可立即试验、需伙伴共创和暂不承诺三类产品。",
+      "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+      "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+      "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+    },
+    "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+    "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+  }
+}

@@ -1,0 +1,863 @@
+{
+  "actions": [
+    {
+      "action": "30天内完成13栋建筑一栋一表、主路径与庭院测绘、正式红线入口和后勤接口底图。",
+      "action_id": "a51",
+      "derived_from_finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "priority": "high",
+      "responsible_party": "业主、测绘、保护、消防和物业团队",
+      "timing": "0—30天",
+      "validation_ids": [
+        "v51"
+      ]
+    }
+  ],
+  "chapter_id": "ch05-bearing",
+  "decision_question": "哪些建筑和空间承载首期策略，哪些必须暂缓或排除？",
+  "decision_tables": [
+    {
+      "columns": [
+        "对象层级",
+        "当前安排",
+        "为什么",
+        "下一步"
+      ],
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "rows": [
+        [
+          "礼堂、活动中心",
+          "首期建议推进",
+          "材料依据最清楚，能承接已验证内容",
+          "完成专项核验后小样运行"
+        ],
+        [
+          "其他保护建筑",
+          "条件未满足，暂缓",
+          "逐栋证据不足，不能按楼名猜用途",
+          "完成一栋一表后再分配"
+        ],
+        [
+          "住宅与居民花园",
+          "本阶段不纳入公共运营",
+          "保障约102户居民生活",
+          "保持居民优先边界"
+        ],
+        [
+          "路径、庭院、入口、后勤",
+          "先定角色再定工程",
+          "正式坐标和专项条件不足",
+          "测绘、消防、门禁和居民协商"
+        ]
+      ],
+      "table_id": "t51",
+      "title": "承载策略的分层原则"
+    }
+  ],
+  "evidence_links": [
+    "document:project-extracts",
+    "result:project-constraints:real-v1",
+    "result:coordinate-readiness:real-v1"
+  ],
+  "findings": [
+    {
+      "comparison_baseline": "比较保护建筑、住宅、辅助建筑与项目整体面积和居民约束。",
+      "confidence": "high",
+      "decision_impact": "首期只选择礼堂、活动中心、主路径和少量庭院作为可逆载体，其余按证据成熟度暂缓或排除。",
+      "evidence_links": [
+        "result:project-constraints:real-v1"
+      ],
+      "finding_id": "f51",
+      "spatial_mechanism": "保护和居住条件决定大多数建筑不能仅凭名称直接分配商业用途。",
+      "statement": "项目材料报告13栋建筑、8栋保护建筑、3栋住宅约102户；保护建筑面积约13,071.78平方米，项目总面积约20,000平方米。",
+      "statement_type": "fact",
+      "metric_bundle_id": "bundle:ch05-bearing",
+      "metric_ids": [
+        "metric:ch05-bearing:primary",
+        "metric:ch05-bearing:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch05-bearing:primary",
+        "metric:ch05-bearing:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "比较各对象材料明确度与启动所需合规条件。",
+      "confidence": "high",
+      "decision_impact": "其他保护建筑不预设业态，完成“一栋一表”后再按已验证内容分配。",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1"
+      ],
+      "finding_id": "f52",
+      "spatial_mechanism": "功能越具体、投入越不可逆，越需要逐栋证据；楼名不构成功能依据。",
+      "statement": "除礼堂、活动中心和主要室外骨架外，多数建筑缺少逐栋测绘、结构、消防、权属和现状使用资料。",
+      "statement_type": "inference",
+      "metric_bundle_id": "bundle:ch05-bearing",
+      "metric_ids": [
+        "metric:ch05-bearing:primary",
+        "metric:ch05-bearing:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch05-bearing:primary",
+        "metric:ch05-bearing:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "将空间愿景与正式坐标、入口和专项条件比较。",
+      "confidence": "high",
+      "decision_impact": "主路径优先作为安全连续骨架；住宅、居民花园和西端保持居民优先。",
+      "evidence_links": [
+        "result:coordinate-readiness:real-v1",
+        "document:project-extracts"
+      ],
+      "finding_id": "f53",
+      "spatial_mechanism": "内部空间角色依赖真实边界、消防、无障碍、门禁与居民分流。",
+      "statement": "正式边界和入口未就绪，主路径、庭院、入口和后勤接口只能先做角色安排，不能形成施工或开放定案。",
+      "statement_type": "fact",
+      "metric_bundle_id": "bundle:ch05-bearing",
+      "metric_ids": [
+        "metric:ch05-bearing:primary",
+        "metric:ch05-bearing:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch05-bearing:primary",
+        "metric:ch05-bearing:boundary"
+      ]
+    }
+  ],
+  "limitations": [
+    "对象用途为首期策略安排，不是施工图或最终招商方案。"
+  ],
+  "object_decisions": [
+    {
+      "decision_id": "d-county",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "当前不得启动不可逆改造或招商。"
+      ],
+      "object_id": "b-county",
+      "object_name": "县委楼",
+      "object_type": "building",
+      "prerequisites": [
+        "逐栋测绘",
+        "结构与消防评估",
+        "权属和现状使用核验",
+        "与运营内容需求匹配"
+      ],
+      "project_role": "后续内容与配套储备",
+      "rationale": "县委楼缺少足够逐栋证据，过早指定业态会制造虚假确定性。",
+      "recommendation_status": "blocked",
+      "recommended_use": "完成核验后再按已验证内容分配，不依据楼名预设用途",
+      "serves": "待确认"
+    },
+    {
+      "decision_id": "d-civil",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "当前不得启动不可逆改造或招商。"
+      ],
+      "object_id": "b-civil",
+      "object_name": "民政楼",
+      "object_type": "building",
+      "prerequisites": [
+        "逐栋测绘",
+        "结构与消防评估",
+        "权属和现状使用核验",
+        "与运营内容需求匹配"
+      ],
+      "project_role": "后续内容与配套储备",
+      "rationale": "民政楼缺少足够逐栋证据，过早指定业态会制造虚假确定性。",
+      "recommendation_status": "blocked",
+      "recommended_use": "完成核验后再按已验证内容分配，不依据楼名预设用途",
+      "serves": "待确认"
+    },
+    {
+      "decision_id": "d-publicity",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "当前不得启动不可逆改造或招商。"
+      ],
+      "object_id": "b-publicity",
+      "object_name": "宣教楼",
+      "object_type": "building",
+      "prerequisites": [
+        "逐栋测绘",
+        "结构与消防评估",
+        "权属和现状使用核验",
+        "与运营内容需求匹配"
+      ],
+      "project_role": "后续内容与配套储备",
+      "rationale": "宣教楼缺少足够逐栋证据，过早指定业态会制造虚假确定性。",
+      "recommendation_status": "blocked",
+      "recommended_use": "完成核验后再按已验证内容分配，不依据楼名预设用途",
+      "serves": "待确认"
+    },
+    {
+      "decision_id": "d-agriwater",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "当前不得启动不可逆改造或招商。"
+      ],
+      "object_id": "b-agriwater",
+      "object_name": "农水楼",
+      "object_type": "building",
+      "prerequisites": [
+        "逐栋测绘",
+        "结构与消防评估",
+        "权属和现状使用核验",
+        "与运营内容需求匹配"
+      ],
+      "project_role": "后续内容与配套储备",
+      "rationale": "农水楼缺少足够逐栋证据，过早指定业态会制造虚假确定性。",
+      "recommendation_status": "blocked",
+      "recommended_use": "完成核验后再按已验证内容分配，不依据楼名预设用途",
+      "serves": "待确认"
+    },
+    {
+      "decision_id": "d-dorm",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "当前不得启动不可逆改造或招商。"
+      ],
+      "object_id": "b-dormitory",
+      "object_name": "历史宿舍楼",
+      "object_type": "building",
+      "prerequisites": [
+        "逐栋测绘",
+        "结构与消防评估",
+        "权属和现状使用核验",
+        "与运营内容需求匹配"
+      ],
+      "project_role": "后续内容与配套储备",
+      "rationale": "历史宿舍楼缺少足够逐栋证据，过早指定业态会制造虚假确定性。",
+      "recommendation_status": "blocked",
+      "recommended_use": "完成核验后再按已验证内容分配，不依据楼名预设用途",
+      "serves": "待确认"
+    },
+    {
+      "decision_id": "d-auditorium",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "b-auditorium",
+      "object_name": "礼堂",
+      "object_type": "building",
+      "prerequisites": [
+        "结构与消防核验",
+        "容量与噪声上限",
+        "明确每场责任人",
+        "采用可撤除设施"
+      ],
+      "project_role": "首期公共文化核心",
+      "rationale": "材料对礼堂的历史记忆和集体活动价值最明确。",
+      "recommendation_status": "planned",
+      "recommended_use": "小规模历史文化解释、公共活动和学校合作试验",
+      "serves": "公众、学校、居民和文化伙伴"
+    },
+    {
+      "decision_id": "d-archive",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "当前不得启动不可逆改造或招商。"
+      ],
+      "object_id": "b-archive",
+      "object_name": "档案楼",
+      "object_type": "building",
+      "prerequisites": [
+        "逐栋测绘",
+        "结构与消防评估",
+        "权属和现状使用核验",
+        "与运营内容需求匹配"
+      ],
+      "project_role": "后续内容与配套储备",
+      "rationale": "档案楼缺少足够逐栋证据，过早指定业态会制造虚假确定性。",
+      "recommendation_status": "blocked",
+      "recommended_use": "完成核验后再按已验证内容分配，不依据楼名预设用途",
+      "serves": "待确认"
+    },
+    {
+      "decision_id": "d-activity",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "b-activity",
+      "object_name": "活动中心",
+      "object_type": "building",
+      "prerequisites": [
+        "居民共创日历",
+        "无障碍与消防核验",
+        "设置安静时段和投诉响应"
+      ],
+      "project_role": "居民日常服务核心",
+      "rationale": "靠近居民日常需求，适合验证高频低强度服务。",
+      "recommendation_status": "planned",
+      "recommended_use": "居民议事、便民、亲子和代际活动",
+      "serves": "现状居民、家庭与社区组织"
+    },
+    {
+      "decision_id": "d-res1",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "b-residential-1",
+      "object_name": "一号住宅楼",
+      "object_type": "building",
+      "prerequisites": [
+        "确认权属和住户",
+        "保障独立通行、消防和安宁边界"
+      ],
+      "project_role": "居民生活底线",
+      "rationale": "三栋住宅合计约102户，公共开放不能挤占生活空间。",
+      "recommendation_status": "excluded",
+      "recommended_use": "保持居住与居民日常使用，不纳入首期公共运营",
+      "serves": "现状居民"
+    },
+    {
+      "decision_id": "d-res2",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "b-residential-2",
+      "object_name": "二号住宅楼",
+      "object_type": "building",
+      "prerequisites": [
+        "确认权属和住户",
+        "保障独立通行、消防和安宁边界"
+      ],
+      "project_role": "居民生活底线",
+      "rationale": "三栋住宅合计约102户，公共开放不能挤占生活空间。",
+      "recommendation_status": "excluded",
+      "recommended_use": "保持居住与居民日常使用，不纳入首期公共运营",
+      "serves": "现状居民"
+    },
+    {
+      "decision_id": "d-res3",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "b-residential-3",
+      "object_name": "三号住宅楼",
+      "object_type": "building",
+      "prerequisites": [
+        "确认权属和住户",
+        "保障独立通行、消防和安宁边界"
+      ],
+      "project_role": "居民生活底线",
+      "rationale": "三栋住宅合计约102户，公共开放不能挤占生活空间。",
+      "recommendation_status": "excluded",
+      "recommended_use": "保持居住与居民日常使用，不纳入首期公共运营",
+      "serves": "现状居民"
+    },
+    {
+      "decision_id": "d-aux1",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "不得假设可直接改造成商业空间。"
+      ],
+      "object_id": "b-aux-1",
+      "object_name": "一号辅助建筑/简易仓库",
+      "object_type": "building",
+      "prerequisites": [
+        "编号与测绘",
+        "结构和合法性核验",
+        "后勤需求清单"
+      ],
+      "project_role": "待核验配套",
+      "rationale": "正式编号、结构、合法性和可用性不足。",
+      "recommendation_status": "blocked",
+      "recommended_use": "核验后再判断后勤、设备、储藏或拆除",
+      "serves": "项目运维"
+    },
+    {
+      "decision_id": "d-aux2",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "不得假设可直接改造成商业空间。"
+      ],
+      "object_id": "b-aux-2",
+      "object_name": "二号辅助建筑/简易仓库",
+      "object_type": "building",
+      "prerequisites": [
+        "编号与测绘",
+        "结构和合法性核验",
+        "后勤需求清单"
+      ],
+      "project_role": "待核验配套",
+      "rationale": "正式编号、结构、合法性和可用性不足。",
+      "recommendation_status": "blocked",
+      "recommended_use": "核验后再判断后勤、设备、储藏或拆除",
+      "serves": "项目运维"
+    },
+    {
+      "decision_id": "d-path",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "path-main",
+      "object_name": "约120米主路径",
+      "object_type": "path",
+      "prerequisites": [
+        "测绘宽度和坡度",
+        "校核消防与无障碍",
+        "明确居民和公众分时边界"
+      ],
+      "project_role": "串联建筑与庭院的基础骨架",
+      "rationale": "先保证连续、安全、可识别，再叠加活动。",
+      "recommendation_status": "planned",
+      "recommended_use": "连续无障碍导览主轴、居民通行与消防骨架",
+      "serves": "居民、公众和运维人员"
+    },
+    {
+      "decision_id": "d-east",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "court-east",
+      "object_name": "东侧庭院",
+      "object_type": "courtyard",
+      "prerequisites": [
+        "核定入口关系和疏散容量",
+        "采用可撤除设施",
+        "设置人数上限"
+      ],
+      "project_role": "公共开放前厅",
+      "rationale": "适合承接首批到达和解释，但需等待入口核验。",
+      "recommendation_status": "planned",
+      "recommended_use": "低容量到达前厅、集合和历史解释",
+      "serves": "公众、学校和导览团队"
+    },
+    {
+      "decision_id": "d-middle",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "court-middle",
+      "object_name": "中部庭院",
+      "object_type": "courtyard",
+      "prerequisites": [
+        "居民共同制定时段",
+        "噪声和人数上限",
+        "投诉响应"
+      ],
+      "project_role": "公共与居民共享区",
+      "rationale": "适合低噪声、分时和预约使用。",
+      "recommendation_status": "planned",
+      "recommended_use": "居民共享、小型工作坊和代际活动",
+      "serves": "居民、社区组织和预约公众"
+    },
+    {
+      "decision_id": "d-west",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "court-west",
+      "object_name": "西侧庭院",
+      "object_type": "courtyard",
+      "prerequisites": [
+        "确认住宅与西端入口边界",
+        "不设置高噪声或夜间活动"
+      ],
+      "project_role": "公共强度缓冲端",
+      "rationale": "靠近居民端，应降低而不是叠加游客活动。",
+      "recommendation_status": "planned",
+      "recommended_use": "安静休憩、居民缓冲与必要通行",
+      "serves": "现状居民"
+    },
+    {
+      "decision_id": "d-garden",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [],
+      "object_id": "garden-resident",
+      "object_name": "二号与三号住宅楼之间居民花园",
+      "object_type": "garden",
+      "prerequisites": [
+        "由居民共同维护",
+        "不纳入公共游线"
+      ],
+      "project_role": "居民专属日常空间",
+      "rationale": "现有日常价值高于对外展示价值。",
+      "recommendation_status": "excluded",
+      "recommended_use": "保持居民自主园艺、休闲和邻里交往",
+      "serves": "现状居民"
+    },
+    {
+      "decision_id": "d-main-entry",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "入口距离和真实绕行尚不可计算。"
+      ],
+      "object_id": "entrance-main",
+      "object_name": "主入口",
+      "object_type": "entrance",
+      "prerequisites": [
+        "正式坐标",
+        "权属与门禁",
+        "消防疏散",
+        "到主路径的无障碍连接"
+      ],
+      "project_role": "公共到达候选",
+      "rationale": "当前没有正式入口坐标，不能定案。",
+      "recommendation_status": "blocked",
+      "recommended_use": "完成坐标、门禁和消防核验后作为受控公共主入口候选",
+      "serves": "公众与预约团队"
+    },
+    {
+      "decision_id": "d-west-entry",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "不得先设为游客入口。"
+      ],
+      "object_id": "entrance-west",
+      "object_name": "西端第二入口候选",
+      "object_type": "entrance",
+      "prerequisites": [
+        "正式坐标",
+        "居民协商",
+        "门禁和消防核验"
+      ],
+      "project_role": "居民优先入口候选",
+      "rationale": "西端靠近住宅，应先保护生活边界。",
+      "recommendation_status": "blocked",
+      "recommended_use": "优先保障居民通行，是否兼作第二入口待协商与专项核验",
+      "serves": "现状居民"
+    },
+    {
+      "decision_id": "d-service",
+      "evidence_links": [
+        "document:project-extracts",
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f51",
+        "f52",
+        "f53"
+      ],
+      "limitations": [
+        "当前接口位置未确认。"
+      ],
+      "object_id": "support-service",
+      "object_name": "后勤、消防、门禁接口",
+      "object_type": "support",
+      "prerequisites": [
+        "专项设计",
+        "物业责任",
+        "垃圾与装卸时段",
+        "消防接口"
+      ],
+      "project_role": "后台保障接口",
+      "rationale": "开放建筑必须有不干扰居民与公众的后台系统。",
+      "recommendation_status": "blocked",
+      "recommended_use": "形成独立后勤、消防、垃圾、设备和装卸接口",
+      "serves": "运营、消防和物业人员"
+    }
+  ],
+  "portfolio_check": {
+    "day_night_balance": "一期以日间和傍晚低强度活动为主，夜间功能不依据夜光代理直接扩大。",
+    "duplicated_functions": "礼堂主责公共文化，活动中心主责居民服务；其他保护建筑暂不分配，避免依据楼名重复设置泛化展陈。",
+    "missing_support_functions": "卫生、储藏、设备、垃圾、装卸、安保和运营后台仍未落实，须结合辅助建筑与专项设计补齐。",
+    "movement_routes": "公众沿主入口—东侧庭院—主路径进入；居民与后勤路线待入口专项确认。",
+    "operational_dependencies": "每个开放建筑必须有运营责任、保洁、安保、消防和内容更新机制。",
+    "phased_activation_logic": "先启用礼堂、活动中心、主路径和东侧庭院的小样；其余保护建筑完成一栋一表并由内容验证结果触发。",
+    "public_space_continuity": "主路径作为连续骨架，但无障碍、消防和夜间照明仍需测绘与专项校核。",
+    "resident_public_conflicts": "住宅、居民花园与西侧庭院应形成安宁边界；礼堂和中庭活动须设置人数、时段和噪声上限。"
+  },
+  "reader_content": {
+    "narrative_blocks": [
+      {
+        "block_id": "r5-b1",
+        "body": "礼堂承接公共文化小样，活动中心承接居民服务，主路径和东侧庭院承担安全到达与低容量活动。这样可以用较小投入验证内容。",
+        "finding_ids": [
+          "f51"
+        ],
+        "heading": "首期只启动少量清楚载体"
+      },
+      {
+        "block_id": "r5-b2",
+        "body": "县委楼、民政楼、宣教楼等名称只能说明历史身份，不能证明结构、消防、权属和运营适配。它们需先完成一栋一表。",
+        "finding_ids": [
+          "f52"
+        ],
+        "heading": "其他保护建筑不按楼名猜用途"
+      },
+      {
+        "block_id": "r5-b3",
+        "body": "住宅和居民花园不纳入首期公共运营；西端入口和后勤接口等待正式坐标、居民协商与专项设计。",
+        "finding_ids": [
+          "f53"
+        ],
+        "heading": "居民端与后勤端必须单独守边界"
+      }
+    ],
+    "opening_finding_ids": [
+      "f51",
+      "f52",
+      "f53"
+    ],
+    "opening_judgment": "13栋建筑都被纳入判断，但只有礼堂、活动中心和主要空间骨架适合进入首期小样；资料不足不是遗漏，而是明确暂缓。",
+    "takeaway": "建筑表放在策略之后：先知道要做什么，再决定谁来承载。",
+    "takeaway_finding_ids": [
+      "f51",
+      "f52",
+      "f53"
+    ]
+  },
+  "responsibility": "把已形成的内容、连接和居民边界落实到全部建筑与关键空间。",
+  "run_id": "skill-first-v41-directional-fusion-real-20260718-152435",
+  "schema_version": "4.1",
+  "specialist_role": "建筑承载与保护分析师",
+  "status": "ready",
+  "title": "建筑与空间单元承载",
+  "unmet_dependencies": [],
+  "validation_conditions": [
+    {
+      "hypothesis": "首期载体具备安全、合法、可逆和可运营条件。",
+      "method": "逐栋核验并对礼堂、活动中心、主路径和东侧庭院做联合评审。",
+      "pass_condition": "首期载体全部通过安全与责任核验，且不占用住宅、居民花园和居民通行。",
+      "required_data": "面积、结构、消防、权属、住用状态、无障碍、容量、修缮成本和责任主体。",
+      "stop_condition": "任一首期载体存在无法控制的结构、消防、权属或居民冲突，则暂缓该载体并缩小样板。",
+      "validation_id": "v51"
+    }
+  ],
+  "version": 1,
+  "metric_bundle": {
+    "bundle_id": "bundle:ch05-bearing",
+    "decision_question": "哪些建筑和空间承载首期策略，哪些必须暂缓或排除？",
+    "metrics": [
+      {
+        "metric_id": "metric:ch05-bearing:primary",
+        "tool_id": "project.document_constraints",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:coordinate-readiness:real-v1"
+        ],
+        "measures": "本章授权范围内的空间或项目证据",
+        "decision_role": "回答本章决策问题的主要比较条件",
+        "combine_with": [
+          "metric:ch05-bearing:boundary"
+        ],
+        "comparison_baseline": "逐一核对13栋建筑、主路径、3个庭院、居民花园、入口和后勤接口；比较建议推进、条件未满足暂缓、本阶段不纳入。",
+        "action_change": "改变本章的优先验证顺序或行动强度",
+        "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+      },
+      {
+        "metric_id": "metric:ch05-bearing:boundary",
+        "tool_id": "road.entrance_distance",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:coordinate-readiness:real-v1"
+        ],
+        "measures": "本章的第二类约束或对照证据",
+        "decision_role": "与主要指标共同形成可验证判断",
+        "combine_with": [
+          "metric:ch05-bearing:primary"
+        ],
+        "comparison_baseline": "逐一核对13栋建筑、主路径、3个庭院、居民花园、入口和后勤接口；比较建议推进、条件未满足暂缓、本阶段不纳入。",
+        "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+        "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+      }
+    ],
+    "comparison_design": {
+      "observation_universe": "项目研究范围及本章授权对象",
+      "spatial_unit": "本章授权空间对象或共同网格",
+      "comparison_axes": [
+        "项目内部比较",
+        "与共同范围基准比较"
+      ],
+      "baseline": "逐一核对13栋建筑、主路径、3个庭院、居民花园、入口和后勤接口；比较建议推进、条件未满足暂缓、本阶段不纳入。",
+      "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+      "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+      "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+    },
+    "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+    "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+  }
+}

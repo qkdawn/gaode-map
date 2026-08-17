@@ -1,0 +1,510 @@
+{
+  "actions": [
+    {
+      "action": "用半天现场踏勘核对南侧公共界面、周边同类内容和到达体验。",
+      "action_id": "a11",
+      "derived_from_finding_ids": [
+        "f14"
+      ],
+      "priority": "high",
+      "responsible_party": "项目策划与空间团队",
+      "timing": "0—30天",
+      "validation_ids": [
+        "v11"
+      ]
+    },
+    {
+      "action": "安排工作日傍晚步行核对东北、东南方向的亮度、人行连续性、入口可见性和居民影响。",
+      "action_id": "a12",
+      "derived_from_finding_ids": [
+        "f15",
+        "f17"
+      ],
+      "priority": "high",
+      "responsible_party": "项目策划与空间团队",
+      "timing": "0—30天",
+      "validation_ids": [
+        "v12"
+      ]
+    },
+    {
+      "action": "先核验北、西北方向的日常到达和社区服务场景，不把统计上的道路整合度直接当作入口结论。",
+      "action_id": "a13",
+      "derived_from_finding_ids": [
+        "f16"
+      ],
+      "priority": "medium",
+      "responsible_party": "空间与居民协同团队",
+      "timing": "0—30天",
+      "validation_ids": [
+        "v13"
+      ]
+    }
+  ],
+  "chapter_id": "ch01-regional",
+  "decision_question": "项目周边哪个方向值得先看，为什么？这些空间数据能支持什么，又不能证明什么？",
+  "decision_tables": [
+    {
+      "columns": [
+        "数据",
+        "真实结果",
+        "可以怎样使用",
+        "不能直接推出"
+      ],
+      "evidence_links": [
+        "result:shared-grid:real-v1",
+        "result:directional-fusion:real-v1",
+        "result:poi-category-count:real-v1",
+        "result:population-total:754f2af64f80c31e",
+        "result:nightlight-profile:real-v1",
+        "result:road-syntax:real-v1"
+      ],
+      "finding_ids": [
+        "f11",
+        "f14",
+        "f15",
+        "f16",
+        "f17"
+      ],
+      "rows": [
+        [
+          "共同空间单元",
+          "351个栅格；2.665平方公里；POI、人口、夜光和路网同一格对齐",
+          "比较项目周边不同方向",
+          "不能替代正式红线和入口测绘"
+        ],
+        [
+          "2024 POI",
+          "已分配2,541个；约953.5个/平方公里；餐饮、购物、公司最多",
+          "看现有功能供给和类别差异",
+          "不能当作客流、消费或项目需求"
+        ],
+        [
+          "2026人口",
+          "共同栅格平均约16,581人/平方公里",
+          "识别日常使用条件和居民核验方向",
+          "不能直接当作项目客群"
+        ],
+        [
+          "2025夜光",
+          "共同栅格平均约66.0；东北约71.7最高",
+          "安排傍晚/夜间现场核验",
+          "不能证明夜间消费"
+        ],
+        [
+          "路网",
+          "253/351个栅格有覆盖；有覆盖栅格整合度均值约0.663",
+          "判断道路覆盖和连接核验优先级",
+          "不能证明入口可用或人行体验"
+        ]
+      ],
+      "table_id": "t11",
+      "title": "这轮数据能支持与不能支持的判断"
+    },
+    {
+      "columns": [
+        "方向",
+        "POI密度（个/平方公里）",
+        "人口密度（人/平方公里）",
+        "夜光均值",
+        "路网覆盖",
+        "有覆盖单元路网密度（公里/平方公里）",
+        "有覆盖单元整合度",
+        "普通语言读法",
+        "首要验证动作"
+      ],
+      "evidence_links": [
+        "result:directional-fusion:real-v1",
+        "result:shared-grid:real-v1"
+      ],
+      "finding_ids": [
+        "f14",
+        "f15",
+        "f16",
+        "f17"
+      ],
+      "rows": [
+        [
+          "北",
+          "875.1",
+          "19,530.7",
+          "68.4",
+          "71.2%",
+          "36.6",
+          "0.646",
+          "人口和道路密度较高，适合日常服务核验",
+          "核对社区到达、安静时段和居民边界"
+        ],
+        [
+          "东北",
+          "1,020.7",
+          "16,783.9",
+          "71.7",
+          "80.8%",
+          "23.4",
+          "0.627",
+          "最亮且功能较多，但道路结构未同步领先",
+          "安排工作日傍晚步行，核对界面连续性"
+        ],
+        [
+          "东",
+          "576.2",
+          "14,173.4",
+          "68.4",
+          "70.0%",
+          "18.5",
+          "0.647",
+          "亮度较高但功能和人口不强，存在解释冲突",
+          "现场确认亮度对应的实际公共界面"
+        ],
+        [
+          "东南",
+          "1,119.6",
+          "14,860.0",
+          "60.3",
+          "83.3%",
+          "11.3",
+          "0.720",
+          "设施存在，但亮度和道路密度不强；条件不同步",
+          "核对夜间可见性、人行连接和是否适合导流"
+        ],
+        [
+          "南",
+          "1,421.9",
+          "12,264.4",
+          "67.4",
+          "74.1%",
+          "18.9",
+          "0.706",
+          "设施最密，但居住人口较低；更像外部功能集中带",
+          "踏勘公共界面、同类设施和到达体验"
+        ],
+        [
+          "西南",
+          "696.6",
+          "16,146.9",
+          "65.2",
+          "63.2%",
+          "15.7",
+          "0.516",
+          "POI较少且道路结构弱，不宜先做主导流方向",
+          "核对最后一段到达和居民边界修复"
+        ],
+        [
+          "西",
+          "812.8",
+          "18,148.6",
+          "57.9",
+          "74.5%",
+          "15.0",
+          "0.688",
+          "人口较高但夜间亮度最低，宜低扰动",
+          "优先核对居民生活和夜间安静边界"
+        ],
+        [
+          "西北",
+          "1,053.8",
+          "19,342.5",
+          "63.7",
+          "62.8%",
+          "23.7",
+          "0.764",
+          "日常使用和道路结构可能叠加，但覆盖不完整",
+          "核对具体道路是否接到项目边界"
+        ]
+      ],
+      "table_id": "t12",
+      "title": "项目周边八个方向：先看哪里，为什么"
+    }
+  ],
+  "evidence_links": [
+    "result:poi-category-count:real-v1",
+    "result:poi-multi-year:real-v1",
+    "result:nightlight-profile:real-v1",
+    "result:shared-grid:real-v1",
+    "result:directional-fusion:real-v1"
+  ],
+  "findings": [
+    {
+      "comparison_baseline": "351个共同栅格的总体平均；POI按栅格面积归一为个/平方公里。",
+      "confidence": "high",
+      "decision_impact": "首期优先验证历史解释、社区服务和小型活动等能与现有餐饮零售错位的组合。",
+      "evidence_links": [
+        "result:shared-grid:real-v1",
+        "result:poi-category-count:real-v1"
+      ],
+      "finding_id": "f11",
+      "spatial_mechanism": "周边功能不是均匀铺开，而是沿不同方向形成不同的类别组合；因此项目应先选择要补充的场景，而不是把所有方向都当成同一个市场。",
+      "statement": "在同一共享栅格范围内，2024年已分配到栅格的POI为2,541个，密度约953.5个/平方公里；餐饮、购物、公司、医疗和交通是数量最多的类别。",
+      "statement_type": "fact",
+      "metric_bundle_id": "bundle:ch01-regional",
+      "metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "南侧八方位汇总与351个共同栅格总体平均比较；同一方向内再按0—500米、500—1,000米、1,000—1,600米拆分。",
+      "confidence": "high",
+      "decision_impact": "把南侧列为公共到达、内容联动和同类设施踏勘的优先方向，但不以此直接决定主入口或夜间营业。",
+      "evidence_links": [
+        "result:directional-fusion:real-v1",
+        "result:shared-grid:real-v1"
+      ],
+      "finding_id": "f14",
+      "spatial_mechanism": "设施供给强但居住人口并不高，说明这里更像需要核验的外部功能集中带，不能把POI密度直接解释成项目客流。",
+      "statement": "项目南侧0—1,600米的POI密度最高，约1,421.9个/平方公里，餐饮、购物、住宿和医疗较集中；但人口密度约12,264人/平方公里，低于共同栅格平均值16,581人/平方公里。",
+      "statement_type": "proxy",
+      "metric_bundle_id": "bundle:ch01-regional",
+      "metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "东北侧与总体平均及其他方向比较；路网整合度只在有路网覆盖的栅格中比较。",
+      "confidence": "medium",
+      "decision_impact": "优先核验东北侧工作日到傍晚的界面连续性、人行路径和可识别性，不把夜光直接写成夜间消费机会。",
+      "evidence_links": [
+        "result:directional-fusion:real-v1",
+        "result:shared-grid:real-v1",
+        "result:nightlight-profile:real-v1"
+      ],
+      "finding_id": "f15",
+      "spatial_mechanism": "东北侧同时表现为较亮、功能较多、道路覆盖较广，但道路结构指标没有同步领先；夜间环境和实际步行连接可能不是同一件事。",
+      "statement": "项目东北侧的夜光均值最高，约71.7；POI密度约1,020.7个/平方公里，路网覆盖约80.8%，但有路网栅格平均整合度约0.627，低于共同栅格平均0.663。",
+      "statement_type": "proxy",
+      "metric_bundle_id": "bundle:ch01-regional",
+      "metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "北侧、西北侧与共同栅格总体平均比较；覆盖率和整合度分开报告。",
+      "confidence": "medium",
+      "decision_impact": "先验证社区服务、日常到达和低强度共享场景；现场若发现道路未连接项目边界，则不把统计上的高整合度转成入口结论。",
+      "evidence_links": [
+        "result:directional-fusion:real-v1",
+        "result:shared-grid:real-v1",
+        "result:population-total:754f2af64f80c31e",
+        "result:road-syntax:real-v1"
+      ],
+      "finding_id": "f16",
+      "spatial_mechanism": "这里更接近日常居住和外部到达条件叠加的方向，但不是每个栅格都有可用路网结果，必须核对道路是否真正接到项目边界。",
+      "statement": "北侧和西北侧人口密度较高，分别约19,531和19,343人/平方公里；西北侧POI密度约1,053.8个/平方公里、路网整合度约0.764，高于总体0.663，但路网覆盖率约62.8%。",
+      "statement_type": "proxy",
+      "metric_bundle_id": "bundle:ch01-regional",
+      "metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "东、东南与共同栅格总体平均及八方向之间比较；夜光仅表示亮度，路网密度只在有覆盖单元中统计。",
+      "confidence": "medium",
+      "decision_impact": "把东、东南作为界面、连接和时段核验方向；在没有人行、入口和时段证据前，不安排高强度导流或夜间经营。",
+      "evidence_links": [
+        "result:directional-fusion:real-v1",
+        "result:shared-grid:real-v1",
+        "result:road-syntax:real-v1",
+        "result:nightlight-profile:real-v1"
+      ],
+      "finding_id": "f17",
+      "spatial_mechanism": "功能、亮度和道路条件并未同步：东侧是亮度较高但功能较少，东南是设施较多但亮度和路网密度较低。冲突本身说明需要现场核验，而不是做单一机会评分。",
+      "statement": "东侧POI密度最低，约576.2个/平方公里，但夜光均值约68.4；东南侧POI密度约1,119.6个/平方公里，路网覆盖率约83.3%，却是夜光最低方向，约60.3，且有路网栅格路网密度约11.3公里/平方公里。",
+      "statement_type": "proxy",
+      "metric_bundle_id": "bundle:ch01-regional",
+      "metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch01-regional:primary",
+        "metric:ch01-regional:boundary"
+      ]
+    }
+  ],
+  "limitations": [
+    "正式项目红线和入口坐标仍缺失，方向结果只能安排踏勘优先级，不能直接定入口。",
+    "POI为2024年、夜光为2025年、人口为保存数据年份2026年；共同栅格完成空间对齐，但不消除年份和采集口径差异。",
+    "POI、人口、夜光与路网描述空间条件，不代表客流、消费、营收或投资回报。"
+  ],
+  "object_decisions": [],
+  "portfolio_check": null,
+  "reader_content": {
+    "narrative_blocks": [
+      {
+        "block_id": "r1-b1",
+        "body": "这次不是只看“周边有多少设施”。我们把351个共同栅格作为同一张底图：每个格子同时记录POI、人口、夜光和路网条件，再按项目中心划分八个方向和三个距离带。这样才能知道某个方向是“设施多但路不好”，还是“人口和道路同时较强”。",
+        "finding_ids": [
+          "f11"
+        ],
+        "heading": "同一批栅格让四类数据可以放在一起看"
+      },
+      {
+        "block_id": "r1-b2",
+        "body": "南侧POI密度约1,421.9个/平方公里，是八个方向中最高的，餐饮、购物、住宿和医疗较集中；但人口密度只有约12,264人/平方公里。它适合优先去看公共界面和周边功能如何与项目衔接，不适合直接写成“南侧客流最大”。",
+        "finding_ids": [
+          "f14"
+        ],
+        "heading": "南侧是设施最集中的方向，但不等于项目客流最高"
+      },
+      {
+        "block_id": "r1-b3",
+        "body": "东北侧夜光均值约71.7，为八方向最高；POI密度也高于总体平均，且约80.8%的栅格有路网覆盖。不过，有路网栅格的整合度反而低于总体平均，说明“亮”不一定等于“好走”。这里最值得做的是工作日傍晚的步行踏勘。",
+        "finding_ids": [
+          "f15"
+        ],
+        "heading": "东北侧最亮，应该在傍晚去看，但不能只看亮度"
+      },
+      {
+        "block_id": "r1-b4",
+        "body": "北侧和西北侧的人口密度都接近1.95万人/平方公里。西北侧POI密度较高、路网整合度也较高，但只有约62.8%的栅格有路网数据。因此可以先验证社区服务、日常到达和低强度共享场景，同时核对道路是否真的接到项目边界。",
+        "finding_ids": [
+          "f16"
+        ],
+        "heading": "北侧和西北侧更像日常使用核验方向"
+      },
+      {
+        "block_id": "r1-b5",
+        "body": "东侧亮度较高但POI和人口不强；东南侧设施较多、道路覆盖较广，却是夜光最低且路网密度偏低的方向；西南侧POI较少、道路整合度最低。它们不是简单的“机会低”，而是提醒项目先补齐人行、界面和时段证据，再决定是否导流。",
+        "finding_ids": [
+          "f17"
+        ],
+        "heading": "东、东南、西南的矛盾不能被平均掉"
+      }
+    ],
+    "opening_finding_ids": [
+      "f14",
+      "f15",
+      "f16",
+      "f17"
+    ],
+    "opening_judgment": "这次空间数据真正帮助项目回答的是“先去哪个方向核验什么”，而不是证明哪一侧一定有客流。把POI、人口、夜光和路网放到同一批栅格后，可以看出不同方向的条件并不同步。",
+    "takeaway": "南侧先看功能集中，东北侧先看傍晚界面，北侧和西北侧先看日常到达；东、东南和西南的冲突或薄弱条件要先核验，不能直接导流。",
+    "takeaway_finding_ids": [
+      "f11",
+      "f14",
+      "f15",
+      "f16",
+      "f17"
+    ]
+  },
+  "responsibility": "解释周边 POI、人口、夜光与路网在项目不同方向和距离带上的组合，并把差异转成踏勘与首期内容验证。",
+  "run_id": "skill-first-v41-directional-fusion-real-20260718-152435",
+  "schema_version": "4.1",
+  "specialist_role": "区域机会分析师",
+  "status": "ready",
+  "title": "区域方向与外部机会",
+  "unmet_dependencies": [],
+  "validation_conditions": [
+    {
+      "hypothesis": "南侧存在可与项目衔接的公共界面和内容互补关系。",
+      "method": "白天现场步行、界面照片、同类设施盘点和入口边界核对。",
+      "pass_condition": "至少形成一个安全、连续、不扰民的公共联系候选，并能说明项目与周边功能的差异。",
+      "required_data": "正式红线、入口候选、步行路径、同类项目和可见性记录。",
+      "stop_condition": "若界面不连续、无法合法到达或内容高度重复，则不以南侧POI密度推动主入口或招商。",
+      "validation_id": "v11"
+    },
+    {
+      "hypothesis": "东北和东南的亮度/设施条件能转化为可步行、可识别的傍晚联系。",
+      "method": "工作日17:30—21:00分段步行记录照度感受、人行障碍、过街、门禁和居民影响。",
+      "pass_condition": "形成一个可解释的傍晚到达路径，且安全、居民边界和运营时段均可接受。",
+      "required_data": "真实入口坐标、道路和人行网络、照明、门禁、消防及居民反馈。",
+      "stop_condition": "若亮度高但无法连续步行或居民影响不可控，则不安排夜间导流。",
+      "validation_id": "v12"
+    },
+    {
+      "hypothesis": "北/西北的高人口和部分路网条件支持低强度日常服务核验。",
+      "method": "白天社区访谈、到达路径记录和重点道路是否连接项目边界的核验。",
+      "pass_condition": "居民认可且至少有一条连续安全路径可以支持低强度服务。",
+      "required_data": "居民出入口、道路连接、无障碍、服务需求和安静时段。",
+      "stop_condition": "若道路未接边界或居民生活受影响，则只保留居民优先使用，不导入公共导流。",
+      "validation_id": "v13"
+    }
+  ],
+  "version": 1,
+  "metric_bundle": {
+    "bundle_id": "bundle:ch01-regional",
+    "decision_question": "项目周边哪个方向值得先看，为什么？这些空间数据能支持什么，又不能证明什么？",
+    "metrics": [
+      {
+        "metric_id": "metric:ch01-regional:primary",
+        "tool_id": "grid.opportunity_flag",
+        "availability": "available",
+        "evidence_ids": [
+          "scope:history-center-15min-walk",
+          "result:shared-grid:real-v1",
+          "result:directional-fusion:real-v1",
+          "result:poi-category-count:real-v1",
+          "result:poi-multi-year:real-v1",
+          "result:population-total:754f2af64f80c31e",
+          "result:nightlight-profile:real-v1",
+          "result:road-syntax:real-v1"
+        ],
+        "measures": "本章授权范围内的空间或项目证据",
+        "decision_role": "回答本章决策问题的主要比较条件",
+        "combine_with": [
+          "metric:ch01-regional:boundary"
+        ],
+        "comparison_baseline": "使用同一351格共享栅格，以项目中心划分八方向和0—500m、500—1,000m、1,000—1,600m距离带；比较POI密度/类别、人口密度、夜光均值、路网覆盖和有覆盖单元的路网密度/整合度。",
+        "action_change": "改变本章的优先验证顺序或行动强度",
+        "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+      },
+      {
+        "metric_id": "metric:ch01-regional:boundary",
+        "tool_id": "grid.opportunity_flag",
+        "availability": "available",
+        "evidence_ids": [
+          "scope:history-center-15min-walk",
+          "result:shared-grid:real-v1",
+          "result:directional-fusion:real-v1",
+          "result:poi-category-count:real-v1",
+          "result:poi-multi-year:real-v1",
+          "result:population-total:754f2af64f80c31e",
+          "result:nightlight-profile:real-v1",
+          "result:road-syntax:real-v1"
+        ],
+        "measures": "本章的第二类约束或对照证据",
+        "decision_role": "与主要指标共同形成可验证判断",
+        "combine_with": [
+          "metric:ch01-regional:primary"
+        ],
+        "comparison_baseline": "使用同一351格共享栅格，以项目中心划分八方向和0—500m、500—1,000m、1,000—1,600m距离带；比较POI密度/类别、人口密度、夜光均值、路网覆盖和有覆盖单元的路网密度/整合度。",
+        "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+        "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+      }
+    ],
+    "comparison_design": {
+      "observation_universe": "项目研究范围及本章授权对象",
+      "spatial_unit": "本章授权空间对象或共同网格",
+      "comparison_axes": [
+        "项目内部比较",
+        "与共同范围基准比较"
+      ],
+      "baseline": "使用同一351格共享栅格，以项目中心划分八方向和0—500m、500—1,000m、1,000—1,600m距离带；比较POI密度/类别、人口密度、夜光均值、路网覆盖和有覆盖单元的路网密度/整合度。",
+      "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+      "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+      "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+    },
+    "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+    "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+  }
+}

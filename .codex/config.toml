@@ -1,0 +1,4 @@
+sandbox_mode = "danger-full-access"
+[mcp_servers.spatial-project]
+command = "python"
+args = ["-m", "modules.spatial_projects.mcp_server"]

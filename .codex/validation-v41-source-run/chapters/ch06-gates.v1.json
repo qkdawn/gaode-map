@@ -1,0 +1,229 @@
+{
+  "actions": [
+    {
+      "action": "建立0—180天单一验证台账，按底图合规、内容使用、居民影响、运营责任和全成本五类记录。",
+      "action_id": "a61",
+      "derived_from_finding_ids": [
+        "f61",
+        "f62"
+      ],
+      "priority": "high",
+      "responsible_party": "业主牵头，设计、运营、物业和居民代表共同负责",
+      "timing": "0—180天",
+      "validation_ids": [
+        "v61"
+      ]
+    }
+  ],
+  "chapter_id": "ch06-gates",
+  "decision_question": "未来180天如何用真实数据决定继续、调整或停止？",
+  "decision_tables": [
+    {
+      "columns": [
+        "阶段",
+        "必须完成",
+        "继续条件",
+        "停止或调整条件"
+      ],
+      "evidence_links": [
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_ids": [
+        "f61",
+        "f62"
+      ],
+      "rows": [
+        [
+          "0—30天",
+          "底图、入口、一栋一表、居民与权属清单",
+          "首期载体通过安全与责任核验",
+          "安全、权属或居民边界无法闭合"
+        ],
+        [
+          "31—90天",
+          "四类内容低容量样板",
+          "至少两类出现重复使用且投诉可控",
+          "无复访、依赖赠送或责任缺失"
+        ],
+        [
+          "91—180天",
+          "全成本与扩展评审",
+          "成本在确认上限内且运营责任稳定",
+          "成本超限、冲突持续或安全事件"
+        ]
+      ],
+      "table_id": "t61",
+      "title": "0—180天决策闸门"
+    }
+  ],
+  "evidence_links": [
+    "result:project-constraints:real-v1",
+    "result:coordinate-readiness:real-v1",
+    "result:poi-road-colocation:real-v1"
+  ],
+  "findings": [
+    {
+      "comparison_baseline": "比较空间概念完整度与实施所需底图、合规和经营证据。",
+      "confidence": "high",
+      "decision_impact": "0—30天优先补底图、合规、居民和责任清单。",
+      "evidence_links": [
+        "result:project-constraints:real-v1",
+        "result:coordinate-readiness:real-v1"
+      ],
+      "finding_id": "f61",
+      "spatial_mechanism": "继续增加概念不会消除基础数据缺口，反而可能提前锁定不可逆投入。",
+      "statement": "当前最关键的阻塞不是缺少更多概念，而是正式边界、入口、逐栋安全权属和运营成本数据未闭合。",
+      "statement_type": "inference",
+      "metric_bundle_id": "bundle:ch06-gates",
+      "metric_ids": [
+        "metric:ch06-gates:primary",
+        "metric:ch06-gates:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch06-gates:primary",
+        "metric:ch06-gates:boundary"
+      ]
+    },
+    {
+      "comparison_baseline": "将区域代理结果与项目级经营数据缺口比较。",
+      "confidence": "high",
+      "decision_impact": "31—90天运行低容量样板；91—180天只在通过闸门后扩大。",
+      "evidence_links": [
+        "result:poi-road-colocation:real-v1",
+        "result:project-constraints:real-v1"
+      ],
+      "finding_id": "f62",
+      "spatial_mechanism": "代理数据适合筛选，真实运营数据才适合决定扩大。",
+      "statement": "现有区域指标只能帮助选择试验方向，最终扩展必须依赖项目自身的真实使用、投诉、安全和全成本记录。",
+      "statement_type": "inference",
+      "metric_bundle_id": "bundle:ch06-gates",
+      "metric_ids": [
+        "metric:ch06-gates:primary",
+        "metric:ch06-gates:boundary"
+      ],
+      "supporting_metric_ids": [
+        "metric:ch06-gates:primary",
+        "metric:ch06-gates:boundary"
+      ]
+    }
+  ],
+  "limitations": [],
+  "object_decisions": [],
+  "portfolio_check": null,
+  "reader_content": {
+    "narrative_blocks": [
+      {
+        "block_id": "r6-b1",
+        "body": "完成红线入口、13栋一栋一表、居民与权属问题、消防和后勤接口。没有这些，任何扩容都没有可靠基础。",
+        "finding_ids": [
+          "f61"
+        ],
+        "heading": "0—30天：先把能不能做查清楚"
+      },
+      {
+        "block_id": "r6-b2",
+        "body": "礼堂、活动中心、主路径和东侧庭院运行低容量样板，逐场记录使用、复访、投诉、安全和全成本。",
+        "finding_ids": [
+          "f62"
+        ],
+        "heading": "31—90天：让少量空间真实运行"
+      },
+      {
+        "block_id": "r6-b3",
+        "body": "只有内容出现重复使用、责任主体稳定、居民冲突可控且全成本可承受，才讨论更多建筑和更高频率。",
+        "finding_ids": [
+          "f61",
+          "f62"
+        ],
+        "heading": "91—180天：只依据闸门扩大"
+      }
+    ],
+    "opening_finding_ids": [
+      "f61",
+      "f62"
+    ],
+    "opening_judgment": "本报告不要求现在决定终局业态，而要求在180天内用真实证据逐步减少不确定性。",
+    "takeaway": "把不确定性变成时间表、责任人和停止条件。",
+    "takeaway_finding_ids": [
+      "f61",
+      "f62"
+    ]
+  },
+  "responsibility": "把已接受策略转成0—180天可执行、可停止的验证计划。",
+  "run_id": "skill-first-v41-directional-fusion-real-20260718-152435",
+  "schema_version": "4.1",
+  "specialist_role": "实施验证分析师",
+  "status": "ready",
+  "title": "分期行动与验证闸门",
+  "unmet_dependencies": [],
+  "validation_conditions": [
+    {
+      "hypothesis": "项目已从空间概念进入可持续小规模运营。",
+      "method": "30天基础核验、90天小样复盘、180天扩展评审。",
+      "pass_condition": "基础核验闭合；至少两类内容重复使用；居民冲突可控；责任主体明确；全成本在业主确认上限内。",
+      "required_data": "一栋一表、入口与消防意见、活动使用、复访、投诉、安全事件、伙伴投入和全成本。",
+      "stop_condition": "任一安全或权属底线不通过，或连续两个复盘周期无重复使用、投诉不可控、责任主体缺失、成本超上限，则停止扩展。",
+      "validation_id": "v61"
+    }
+  ],
+  "version": 1,
+  "metric_bundle": {
+    "bundle_id": "bundle:ch06-gates",
+    "decision_question": "未来180天如何用真实数据决定继续、调整或停止？",
+    "metrics": [
+      {
+        "metric_id": "metric:ch06-gates:primary",
+        "tool_id": "project.document_constraints",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:coordinate-readiness:real-v1",
+          "result:poi-road-colocation:real-v1"
+        ],
+        "measures": "本章授权范围内的空间或项目证据",
+        "decision_role": "回答本章决策问题的主要比较条件",
+        "combine_with": [
+          "metric:ch06-gates:boundary"
+        ],
+        "comparison_baseline": "按0—30天、31—90天、91—180天比较证据成熟度、投入不可逆性和停止成本。",
+        "action_change": "改变本章的优先验证顺序或行动强度",
+        "proxy_boundary": "代理数据不能直接证明客流、消费、收益或正式入口可行性"
+      },
+      {
+        "metric_id": "metric:ch06-gates:boundary",
+        "tool_id": "road.entrance_distance",
+        "availability": "available",
+        "evidence_ids": [
+          "document:project-extracts",
+          "result:project-constraints:real-v1",
+          "result:coordinate-readiness:real-v1",
+          "result:poi-road-colocation:real-v1"
+        ],
+        "measures": "本章的第二类约束或对照证据",
+        "decision_role": "与主要指标共同形成可验证判断",
+        "combine_with": [
+          "metric:ch06-gates:primary"
+        ],
+        "comparison_baseline": "按0—30天、31—90天、91—180天比较证据成熟度、投入不可逆性和停止成本。",
+        "action_change": "改变是否进入现场核验、试点或暂缓的决定",
+        "proxy_boundary": "缺少直接经营和现场数据时不得外推确定性结果"
+      }
+    ],
+    "comparison_design": {
+      "observation_universe": "项目研究范围及本章授权对象",
+      "spatial_unit": "本章授权空间对象或共同网格",
+      "comparison_axes": [
+        "项目内部比较",
+        "与共同范围基准比较"
+      ],
+      "baseline": "按0—30天、31—90天、91—180天比较证据成熟度、投入不可逆性和停止成本。",
+      "assignment_rule": "按保存结果和项目对象的原始空间归属使用，不重新分配无几何记录",
+      "time_alignment": "沿用各结果声明的时间口径并在报告中标注",
+      "missing_coverage_rule": "缺少数据或几何时明确标记，不以其他代理补造"
+    },
+    "synthesis_rule": "两个互补指标共同支持时才形成优先级；不合成为单一机会分数",
+    "missing_data_policy": "缺少直接数据时只提出验证条件，不补造客流、消费、收益或入口结论"
+  }
+}
