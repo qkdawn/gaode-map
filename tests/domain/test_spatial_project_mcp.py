@@ -31,6 +31,7 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
         "analyze_spatial_evidence",
         "read_project_document",
         "read_previous_chapter",
+        "search_literature_evidence",
         "search_public_web",
         "fetch_public_web_page",
     ]
@@ -46,6 +47,9 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     previous_schema = schemas["read_previous_chapter"]
     assert set(previous_schema["required"]) == {"history_id", "completed_chapters", "current_step_order"}
     assert {"step_key", "step_order"}.issubset(previous_schema["properties"])
+    literature_schema = schemas["search_literature_evidence"]
+    assert set(literature_schema["required"]) == {"history_id", "question"}
+    assert {"mode", "top_k"}.issubset(literature_schema["properties"])
     assert set(schemas["search_public_web"]["required"]) == {"history_id", "query"}
     assert set(schemas["fetch_public_web_page"]["required"]) == {"history_id", "urls"}
 
@@ -68,6 +72,7 @@ def test_complete_data_mcp_outputs_are_objects():
     assert output_schemas["analyze_spatial_evidence"]["type"] == "object"
     assert output_schemas["read_project_document"]["type"] == "object"
     assert output_schemas["read_previous_chapter"]["type"] == "object"
+    assert output_schemas["search_literature_evidence"]["type"] == "object"
     assert output_schemas["search_public_web"]["type"] == "object"
     assert output_schemas["fetch_public_web_page"]["type"] == "object"
 
@@ -135,6 +140,31 @@ def test_public_web_mcp_tools_await_provider_calls(monkeypatch):
         "urls": ["https://example.gov.cn/page"],
         "max_characters": 20_000,
         "history_id": "history-1",
+    }
+
+
+def test_literature_mcp_tool_keeps_web_search_separate(monkeypatch):
+    monkeypatch.setattr(mcp_server, "_require_history_project", lambda history_id: None)
+    captured = {}
+
+    def fake_search(**kwargs):
+        captured.update(kwargs)
+        return {"status": "available", "mode": kwargs["mode"], "evidence": []}
+
+    monkeypatch.setattr(mcp_server.literature_evidence, "search", fake_search)
+
+    result = mcp_server.search_literature_evidence(
+        "history-1",
+        "  Historic Urban Landscape  ",
+        mode="synthesis",
+        top_k=8,
+    )
+
+    assert result == {"status": "available", "mode": "synthesis", "evidence": []}
+    assert captured == {
+        "question": "  Historic Urban Landscape  ",
+        "mode": "synthesis",
+        "top_k": 8,
     }
 
 

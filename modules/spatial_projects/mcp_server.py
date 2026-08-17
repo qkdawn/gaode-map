@@ -49,6 +49,7 @@ from modules.spatial_projects.skill_tools import (
     read_metric_result as _read_metric_result,
 )
 from modules.spatial_strategy.previous_chapter import read_previous_chapter_from_list
+from modules.spatial_strategy.literature_evidence import LiteratureEvidenceService
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -212,6 +213,7 @@ mcp = (
 )
 data_contract = ProjectDataContractService(projects=service, metric_results=_list_metric_results)
 spatial_evidence = SpatialEvidenceService(projects=service)
+literature_evidence = LiteratureEvidenceService()
 
 
 def _call(callback, **kwargs: Any) -> Any:
@@ -300,7 +302,7 @@ def analyze_spatial_evidence(
     top_k: int = 10,
     record_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Analyze current-scope spatial evidence through one semantic, geometry-safe interface."""
+    """Return bounded current-scope spatial facts for an analysis selected by the caller."""
     return _call(
         spatial_evidence.analyze,
         history_id=history_id,
@@ -326,7 +328,7 @@ def read_project_document(
     page_start: int | None = None,
     page_end: int | None = None,
 ) -> dict[str, Any]:
-    """Read original parsed project text by document and block range; continue until complete is true."""
+    """Read a bounded window of Docling-parsed project text; continue from next_start_block."""
     return _call(
         data_contract.read_project_document,
         history_id=history_id,
@@ -374,6 +376,29 @@ def _require_history_project(history_id: str) -> dict[str, Any] | None:
     if isinstance(project, dict) and project.get("status") in {"not_found", "invalid_request", "unavailable"}:
         return project
     return None
+
+
+@mcp.tool()
+def search_literature_evidence(
+    history_id: str,
+    question: str,
+    mode: Literal["focused", "synthesis"] = "focused",
+    top_k: int = 6,
+) -> dict[str, Any]:
+    """Search the indexed PDF literature corpus.
+
+    Use focused for fast original-text evidence. Use synthesis only for
+    cross-document comparison or mechanism synthesis. Do not include private
+    project details in the question.
+    """
+    blocked = _require_history_project(history_id)
+    if blocked:
+        return blocked
+    return literature_evidence.search(
+        question=question,
+        mode=mode,
+        top_k=top_k,
+    )
 
 
 @mcp.tool()

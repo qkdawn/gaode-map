@@ -1,15 +1,11 @@
-"""Small CPU embedding service consumed by n8n's EMB-00 workflow.
-
-The HTTP contract intentionally mirrors Ollama's ``/api/embed`` shape so the
-workflow does not know which local inference runtime is used.
-"""
+"""OpenAI-compatible CPU embedding service shared by N8N and GraphRAG."""
 
 from __future__ import annotations
 
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -19,12 +15,12 @@ DEFAULT_MODEL = "jinaai/jina-embeddings-v2-base-zh"
 DEFAULT_DIMENSIONS = 768
 
 
-class EmbedRequest(BaseModel):
+class EmbeddingRequest(BaseModel):
     model: str = DEFAULT_MODEL
     input: str | list[str]
     dimensions: int = Field(default=DEFAULT_DIMENSIONS, ge=1, le=4096)
-    truncate: bool = True
-    keep_alive: str = ""
+    encoding_format: Literal["float"] = "float"
+    user: str | None = None
 
     @field_validator("model", mode="before")
     @classmethod
@@ -41,11 +37,22 @@ class EmbedRequest(BaseModel):
         return normalized if isinstance(value, list) else normalized[0]
 
 
-class EmbedResponse(BaseModel):
+class EmbeddingData(BaseModel):
+    object: Literal["embedding"] = "embedding"
+    embedding: list[float]
+    index: int
+
+
+class EmbeddingUsage(BaseModel):
+    prompt_tokens: int = 0
+    total_tokens: int = 0
+
+
+class EmbeddingResponse(BaseModel):
+    object: Literal["list"] = "list"
+    data: list[EmbeddingData]
     model: str
-    embeddings: list[list[float]]
-    dimensions: int
-    prompt_eval_count: int = 0
+    usage: EmbeddingUsage = Field(default_factory=EmbeddingUsage)
 
 
 def _configured_model() -> str:
@@ -95,7 +102,7 @@ def _encode(values: list[str]) -> list[list[float]]:
     return result
 
 
-app = FastAPI(title="Gaode Map Embedding Service", version="1.0")
+app = FastAPI(title="Gaode Map Embedding Service", version="2.0")
 
 
 @app.get("/live")
@@ -109,17 +116,15 @@ def health() -> dict[str, object]:
     return {"status": "healthy", "model": _configured_model(), "dimensions": _configured_dimensions()}
 
 
-@app.post("/api/embed", response_model=EmbedResponse)
-def embed(request: EmbedRequest) -> EmbedResponse:
+@app.post("/v1/embeddings", response_model=EmbeddingResponse)
+def embed(request: EmbeddingRequest) -> EmbeddingResponse:
     if request.model and request.model != _configured_model():
         raise HTTPException(status_code=400, detail="embedding_model_mismatch")
     if request.dimensions != _configured_dimensions():
         raise HTTPException(status_code=400, detail="embedding_dimensions_mismatch")
     values = request.input if isinstance(request.input, list) else [request.input]
     embeddings = _encode(values)
-    return EmbedResponse(
+    return EmbeddingResponse(
         model=_configured_model(),
-        embeddings=embeddings,
-        dimensions=request.dimensions,
-        prompt_eval_count=0,
+        data=[EmbeddingData(embedding=row, index=index) for index, row in enumerate(embeddings)],
     )

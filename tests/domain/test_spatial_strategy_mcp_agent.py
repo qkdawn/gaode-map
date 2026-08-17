@@ -6,6 +6,7 @@ def test_spatial_strategy_agent_allows_project_and_public_web_tools():
         "analyze_spatial_evidence",
         "read_project_document",
         "read_previous_chapter",
+        "search_literature_evidence",
         "search_public_web",
         "fetch_public_web_page",
     }

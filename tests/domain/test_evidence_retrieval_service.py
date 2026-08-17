@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 from modules.evidence_retrieval import (
     evidence_node_from_attachment_chunk,
-    evidence_node_from_document_index_node,
+    evidence_node_from_document_block,
     evidence_node_from_knowledge_chunk,
     evidence_node_from_node_payload,
     evidence_node_payload_from_node,
@@ -60,14 +61,17 @@ def test_search_evidence_returns_hits_with_score_outside_node():
     assert "score" not in response.hits[0].node.model_dump(mode="json")
 
 
-def test_search_evidence_uses_pageindex_document_tools(monkeypatch):
+def test_search_evidence_uses_document_blocks(monkeypatch):
     monkeypatch.setattr(
-        "modules.evidence_retrieval.service.get_pageindex_document_structure",
-        lambda _document_id: '[{"title":"Public service","node_id":"n1","line_num":5,"summary":"Add public services."}]',
-    )
-    monkeypatch.setattr(
-        "modules.evidence_retrieval.service.get_pageindex_page_content",
-        lambda _document_id, _pages: '[{"page":5,"content":"Add public service facilities."}]',
+        "modules.evidence_index.adapters.document_block.DocumentBlockAdapter._rows",
+        lambda _self: [SimpleNamespace(
+            id=1,
+            page_index=4,
+            block_index=0,
+            block_type="paragraph",
+            section_title="Public service",
+            text="Add public service facilities.",
+        )],
     )
     response = asyncio.run(search_evidence(EvidenceSearchRequest(
         question="public service", source_ids=["document:doc-1"]
@@ -110,9 +114,9 @@ def test_chunk_adapters_emit_unified_nodes():
     assert image.source_ids == ["image:att-1"]
 
 
-def test_document_index_adapter_emits_unified_node():
-    node = evidence_node_from_document_index_node("document:doc-1", "Policy", {
-        "node_id": "n1", "title": "Requirement", "summary": "Add public services.", "page_start": 3, "page_end": 3,
+def test_document_block_adapter_emits_unified_node():
+    node = evidence_node_from_document_block("document:doc-1", "Policy", {
+        "block_id": "b1", "section": "Requirement", "summary": "Add public services.", "content": "Add public services.", "page_start": 3, "page_end": 3,
     })
     assert node is not None
     assert node.kind == "document_excerpt"

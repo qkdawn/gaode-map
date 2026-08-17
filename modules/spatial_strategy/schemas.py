@@ -142,6 +142,7 @@ class SpatialStrategyAgentToolRequest(BaseModel):
         "analyze_spatial_evidence",
         "read_project_document",
         "read_previous_chapter",
+        "search_literature_evidence",
         "search_public_web",
         "fetch_public_web_page",
     ]
@@ -150,21 +151,6 @@ class SpatialStrategyAgentToolRequest(BaseModel):
     @field_validator("history_id", mode="before")
     @classmethod
     def normalize_agent_tool_history(cls, value: object) -> str:
-        return str(value or "").strip()
-
-
-class GraphRAGQueryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    query: str = Field(min_length=1, max_length=12000)
-    method: Literal["global", "local", "drift", "basic"] = "global"
-    response_type: str = Field(default="Multiple paragraphs", min_length=1, max_length=120)
-    community_level: int = Field(default=2, ge=0, le=8)
-    dynamic_community_selection: bool = False
-
-    @field_validator("query", "response_type", mode="before")
-    @classmethod
-    def normalize_graphrag_text(cls, value: object) -> str:
         return str(value or "").strip()
 
 
