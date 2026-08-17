@@ -1,0 +1,11 @@
+{
+  "history_id":"15266dd890faa567070befc1",
+  "status":"zero_visual_accepted",
+  "selected_assets":[],
+  "candidates":[
+    {"template":"poi_supply_structure","result_id":"result:poi.supply_structure:d162d5fa1b886435","statement_ref":"定位与运营章节中的周边供给快照","status":"omitted","reason":"关键决策由保护许可、居民共居与可逆试点决定；且无合法锚点，不修改接受章节。","cannot_prove":["竞争强度","客流","消费","合作关系","定位"]},
+    {"template":"focused_poi_walking_route_map","result_id":"result:poi.focused_accessibility:2edefffe51ffaa8c","statement_ref":"文化站/老干部大学仅为协同线索","status":"omitted","reason":"路线无法验证产权、围墙、无障碍、消防、居民接受度或协同，易造成导流误读。","cannot_prove":["实际进入","客流导入","合作","消费转化"]},
+    {"template":"population_age_structure","result_id":"result:population.age_structure:78afd00ef39121e9","statement_ref":"报告拒绝用住户口径推导社区容量","status":"omitted","reason":"居住背景会与产权/常住口径未核验混淆，不能改变开放与扰民门槛。","cannot_prove":["项目客群","到访","支付能力","容量","需求"]},
+    {"template":"directional_action_priority_matrix","result_id":"regional.directional_evidence_matrix","statement_ref":"首开不以方向圈层代理决定","status":"omitted","reason":"报告未采用方向/距离圈层作为动作依据；插入会提升外围代理指标。","cannot_prove":["真实进场量","客流","消费","实施条件"]}
+  ]
+}

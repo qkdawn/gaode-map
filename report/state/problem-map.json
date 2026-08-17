@@ -1,0 +1,122 @@
+{
+  "state_id": "problem_map",
+  "schema": "spatial-business-problem-map",
+  "snapshot_version": 7,
+  "updated_at": "2026-07-26T14:30:00+08:00",
+  "payload": {
+    "status": "confirmed",
+    "history_id": "15266dd890faa567070befc1",
+    "core_problem": {
+      "confirmed_conditions": [
+        "原长沙县政府原址包含近现代行政建筑、礼堂庭院和仍在居住的三栋宿舍；改造必须同时面对遗产保护与住居连续性。",
+        "项目材料记录了保护、安全、配套、产权与公共空间使用的未闭合条件。",
+        "现有等时圈、POI、人口与路网仅能说明城市背景，尚无真实使用、到达、支付、公共服务履约或运营主体证据。"
+      ],
+      "contradiction": "项目拥有可解释的历史空间，却不能把建筑遗产和周边活力自动等同于文旅需求或高强度商业能力；高强度开放又可能伤害保护要求和住户权益。",
+      "core_decision": "在保护与居民权益不可让渡的前提下，项目应承担何种可持续公共价值，以及以什么低干扰空间、内容和运营机制把这项价值落地。",
+      "research_logic": "先判定项目角色，再验证服务对象和价值需求；随后检验哪些空间、权利边界和组织能力允许该角色成立；最后用可逆试验决定是否扩大。"
+    },
+    "questions": [
+      {
+        "id": "project-role-and-value",
+        "question": "项目应优先成为面向谁的何种城市公共节点：以档案解释和社区服务为主的低频文化场所，还是需要证明自身具备目的地型文商旅承接能力？",
+        "why_decisive": "这是核心矛盾的第一处分叉：角色不清，后续主题、空间和招商会被错误地按“景区”或“商业街”配置。",
+        "candidate_hypotheses": [
+          "以“城中县治”的档案解释与社区共建为候选公共价值，形成低干扰、非默认消费导向的文化节点。",
+          "目的地型消费、夜游和高强度文商旅仅在吸引物、承载、到达和运营能力证据闭合后再参与比较。"
+        ],
+        "evidence_needed": [
+          "项目级历史档案、单体建档与可公开解释范围。",
+          "业主、社区和公共文化主体对项目任务的书面边界与优先级。",
+          "可比文化场所的服务任务、到达机制和运营强度，而非仅比较建筑风格或POI数量。"
+        ],
+        "disconfirming_evidence": [
+          "档案或保护结论不足以支撑公共解释。",
+          "存在经核验的目的地需求、承载和组织能力，足以改变角色比较。"
+        ],
+        "dependencies": [],
+        "status": "open"
+      },
+      {
+        "id": "users-demand-and-value-exchange",
+        "question": "若项目承担候选公共文化/社区服务角色，首要服务对象是谁、他们为何到达、获得何种不可替代价值，并以何种公共服务履约或支付机制持续使用？",
+        "why_decisive": "项目角色必须转化为可观察的使用需求，不能由周边人口、夜光或“文化资源丰富”替代。",
+        "candidate_hypotheses": [
+          "邻里居民、原使用者及其家属、学校或研究团体可能成为预约型解释与共建活动的候选服务对象。",
+          "游客、夜游消费者和餐饮客群不是已确认的目标客群。"
+        ],
+        "evidence_needed": [
+          "分对象访谈、意愿/拒绝记录、可替代供给比较与时间预算。",
+          "试运行中的预约、到达、停留、满意度、投诉和取消原因原始记录。",
+          "公共服务委托、合作机构任务书或可核验的支付意愿/交易记录。"
+        ],
+        "disconfirming_evidence": [
+          "候选对象没有到达机制、无使用意愿或存在更合适替代供给。",
+          "需求时段、规模或行为与保护、居民和安全边界冲突。"
+        ],
+        "dependencies": ["project-role-and-value"],
+        "status": "open"
+      },
+      {
+        "id": "space-rights-and-resident-boundary",
+        "question": "为了实现已验证的服务价值，哪些建筑、庭院与路径可以在何种容量和时段受控使用，哪些必须作为居民、保护或安全边界保留？",
+        "why_decisive": "空间不是先验可出租面积；权属、居民隐私、保护、消防和无障碍共同决定任何服务承诺的上限。",
+        "candidate_hypotheses": [
+          "礼堂、庭院和约120米主路径可在核验后成为候选解释空间。",
+          "宿舍及住户日常空间默认退出游客动线，只在居民逐项同意且有可执行边界时讨论共建。"
+        ],
+        "evidence_needed": [
+          "正式红线、产权和管理权清单。",
+          "单体价值建档、结构消防无障碍和承载核验。",
+          "居民意愿、通行时段、隐私边界、投诉基线及退出机制。"
+        ],
+        "disconfirming_evidence": [
+          "任何空间未获书面许可或安全结论。",
+          "居民拒绝、边界不可执行，或活动造成可验证扰民。"
+        ],
+        "dependencies": ["project-role-and-value", "users-demand-and-value-exchange"],
+        "status": "open"
+      },
+      {
+        "id": "operating-responsibility-and-mechanism",
+        "question": "谁对内容真实性、居民协商、日常维护、安全、预约和资金缺口负责；该机制能否在非高客流前提下持续？",
+        "why_decisive": "项目的真正运营问题不是先列业态，而是确定能承担公共价值和外部性的组织与机制。",
+        "candidate_hypotheses": [
+          "业主、社区、文保/档案主体与专业运营方需要共同构成明确分工，而非由单一招商替代治理。",
+          "高强度餐饮、夜间活动或场地租赁不应在责任、承载和扰民机制缺失时作为现金流假设。"
+        ],
+        "evidence_needed": [
+          "各方权责、预算、许可、保险、维护和投诉响应安排。",
+          "同类低干扰文化场所的成本、人员和服务频次比较。",
+          "候选合作方的能力、任务书和可承担风险范围。"
+        ],
+        "disconfirming_evidence": [
+          "没有主体承担居民协商、维护或安全责任。",
+          "维持机制只能依赖与保护或居民权益冲突的高强度使用。"
+        ],
+        "dependencies": ["users-demand-and-value-exchange", "space-rights-and-resident-boundary"],
+        "status": "open"
+      },
+      {
+        "id": "reversible-pilot-and-phasing",
+        "question": "在关键事实尚未闭合时，首期应以什么可逆、低容量试验同时验证内容价值、居民边界、到达机制和运营责任；什么信号触发扩大、调整或停止？",
+        "why_decisive": "它将不确定性转化为可审计的行动，避免用一次性高投入改造替代需求和治理验证。",
+        "candidate_hypotheses": [
+          "先开展限定空间、预约制、日间、小规模的档案解释或社区共建试验。",
+          "不以夜游、餐饮或大客流活动作为首期开场条件。"
+        ],
+        "evidence_needed": [
+          "书面许可与试验边界。",
+          "预约、到达、使用、投诉、维护成本和居民反馈的统一记录口径。",
+          "扩大、调整、暂停的阈值及责任人。"
+        ],
+        "disconfirming_evidence": [
+          "试验造成安全、保护或居民权益风险。",
+          "连续试验未产生可持续使用或无主体承接。"
+        ],
+        "dependencies": ["project-role-and-value", "users-demand-and-value-exchange", "space-rights-and-resident-boundary", "operating-responsibility-and-mechanism"],
+        "status": "open"
+      }
+    ]
+  }
+}

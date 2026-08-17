@@ -1,0 +1,21 @@
+{
+  "state_id": "project_semantic_model",
+  "schema": "spatial-business-project-semantic-model",
+  "snapshot_version": 1,
+  "updated_at": "2026-07-25T10:00:00+08:00",
+  "payload": {
+    "history_id": "15266dd890faa567070befc1",
+    "project_name": "长沙县政府原址城市更新",
+    "scope": "2024年保存的15分钟步行等时圈仅作为周边研究背景，正式项目边界缺失",
+    "objects": [
+      {"name":"办公楼","role":"一般不可移动文物对象","status":"已官方确认"},
+      {"name":"行政楼","role":"一般不可移动文物对象","status":"已官方确认"},
+      {"name":"礼堂","role":"核心视觉与活动节点候选","status":"材料提出，开放条件待核"},
+      {"name":"县政府门口至党校楼主线","role":"约120米叙事与慢行轴候选","status":"材料提出"},
+      {"name":"三处住宅组团","role":"持续居住与共治对象","status":"材料提出高入住率"},
+      {"name":"华夏路第二入口","role":"次入口候选","status":"材料提出，实施待核"}
+    ],
+    "conflicts": [{"subject":"私产住户","values":["102户","120户"],"effect":"不得推算服务人口、客流或经营规模"}],
+    "constraints":["一般不可移动文物身份不等同于开放许可","居民不整体腾退与安宁权","保护、产权、消防、无障碍、后勤和正式边界未核验"]
+  }
+}

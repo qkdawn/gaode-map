@@ -1,0 +1,102 @@
+{
+  "state_id": "decision_logic_map",
+  "schema": "spatial-business-decision-logic-map",
+  "snapshot_version": 7,
+  "updated_at": "2026-07-26T14:30:00+08:00",
+  "payload": {
+    "status": "ready",
+    "evidence_status": "scenario_ready",
+    "rules": [
+      {
+        "id": "R1",
+        "decision_question": "项目角色与首要价值",
+        "when": [
+          "原始材料确认行政旧址、礼堂庭院与连续居住并存。",
+          "没有项目级到达、支付、客流或高强度运营证据。"
+        ],
+        "judgment": "当前只可比较低干扰的档案解释/社区服务情景；项目尚不能被认定为目的地型文商旅项目。",
+        "action": "将首要工作从招商和业态填充转为核验历史解释、公共任务与居民共建价值。",
+        "alternatives": ["有明确机构任务的预约型解释", "居民优先的协商与公共服务"],
+        "counterexample": "若获得真实持续到达、独特吸引物、许可承载和运营组织的直接证据，才重新比较目的地型路径。",
+        "evidence_refs": ["document:81ed6be77be64fee926ad7a2637ae154", "document:2c0d61f18fa3403c90fb5decbdb3b29b", "report/research/cultural-tourism-theme-research.md", "report/research/spatial-market-audience-research.md"],
+        "metric_refs": [],
+        "limitations": ["历史资源和区域空间背景不能证明市场需求、客流或经营能力。"],
+        "validation": "完成项目级档案核验、业主/社区公共任务确认及机构需求记录。",
+        "status": "conditional"
+      },
+      {
+        "id": "R2",
+        "decision_question": "服务对象与价值交换",
+        "when": [
+          "现住户是已确认权利主体，但其参与意愿和服务需求尚未记录。",
+          "学校、档案文保和研究组织只具备候选机制，缺少任务书、预约与履约证据。"
+        ],
+        "judgment": "不形成已确认外部目标客群；只保留居民、机构研究/学习和低频预约访客作为待验证对象。",
+        "action": "以知情同意、机构任务书、预约签到、到达与服务完成记录作为进入下一轮比较的准入证据。",
+        "alternatives": ["面向住户的非消费性服务", "机构预约的研究/学习任务", "获准后的低频专题访问"],
+        "counterexample": "若候选对象无明确任务、选择替代场所、无法到达或拒绝参与，则停止对应情景。",
+        "evidence_refs": ["report/research/spatial-market-audience-research.md"],
+        "metric_refs": [
+          {"result_id":"result:population.age_structure:78afd00ef39121e9","tool_id":"population.age_structure","observation":"15分钟范围人口代理约58201，仅提供社区服务背景。","comparison_basis":"历史中心点15分钟等时圈，而非项目批准入口或正式红线。","decision_effect":"将验证重点限定为本地服务与机构预约，而非用人口外推客流。","does_not_prove":"目标客群规模、到访、支付或复访。"},
+          {"result_id":"result:poi.supply_structure:d162d5fa1b886435","tool_id":"poi.supply_structure","observation":"范围内已有文化教育、日常餐饮和零售供给。","comparison_basis":"2024年等时圈POI快照。","decision_effect":"避免以补常规供给假设市场空白，优先验证不可替代的档案与协商任务。","does_not_prove":"竞品替代比例、需求缺口或项目收入。"}
+        ],
+        "limitations": ["人口与POI只能支持候选筛选，不能替代访谈、预约、支付或公共服务履约。"],
+        "validation": "WP-01居民基线、WP-03机构任务核验和WP-04预约到达测试完成并保留原始记录。",
+        "status": "conditional"
+      },
+      {
+        "id": "R3",
+        "decision_question": "空间、保护与居民边界",
+        "when": [
+          "礼堂、庭院与主路径是材料中的候选公共解释空间。",
+          "正式红线、产权、单体许可、结构消防无障碍、承载与住户同意均未闭合。"
+        ],
+        "judgment": "任何空间在书面许可与安全结论前均不进入开放承诺；宿舍及住户空间默认退出游客动线。",
+        "action": "先形成开放/受控/不开放清单和居民边界图，再设计容量、时段和路径。",
+        "alternatives": ["获准后的小规模日间预约解释", "仅线上档案解释与不入场服务"],
+        "counterexample": "若许可、结构、消防、隐私或投诉条件不成立，取消线下访问或进一步收缩范围。",
+        "evidence_refs": ["document:81ed6be77be64fee926ad7a2637ae154", "document:2c0d61f18fa3403c90fb5decbdb3b29b", "report/research/cultural-tourism-theme-research.md"],
+        "metric_refs": [],
+        "limitations": ["项目中心点等时圈、路网和POI不等于项目入口、开放边界或空间承载。"],
+        "validation": "WP-02许可与承载准入、WP-01居民知情同意和投诉响应机制通过。",
+        "status": "conditional"
+      },
+      {
+        "id": "R4",
+        "decision_question": "运营责任与持续机制",
+        "when": [
+          "现有材料没有运营主体、预算、人力、预约、收入成本或服务履约记录。",
+          "住居与保护冲突不能由高强度商业活动自动化解。"
+        ],
+        "judgment": "当前不能把餐饮、夜游、演出、场租或招商作为现金流或运营基础；应先验证多主体责任机制。",
+        "action": "建立业主、社区、文保/档案主体和管理方的权责、维护、安全、投诉与服务记录机制。",
+        "alternatives": ["公共服务委托或共建", "有明确任务的低频机构预约"],
+        "counterexample": "若没有主体承担协商、维护与安全，或机制依赖扰民的高强度使用，则停止运营扩张。",
+        "evidence_refs": ["report/research/spatial-market-audience-research.md"],
+        "metric_refs": [],
+        "limitations": ["周边消费、夜光或POI不构成项目预算、收入或成本依据。"],
+        "validation": "WP-05形成责任矩阵并完成一个可复核的服务周期。",
+        "status": "conditional"
+      },
+      {
+        "id": "R5",
+        "decision_question": "首期试验与分期",
+        "when": [
+          "项目事实和空间条件足以提出比较路径，但市场、许可、支付和运营证据未闭合。",
+          "保护和居民权益要求任何失败都可迅速停止且可恢复。"
+        ],
+        "judgment": "采用可逆、日间、预约、小规模试验作为唯一可讨论的首期情景；不进入建设或高投入实施承诺。",
+        "action": "以试验记录同时校准内容价值、到达、居民边界、容量、成本与责任，并以触发条件决定扩大、调整或停止。",
+        "alternatives": ["不开放线下，仅完成档案和治理准备", "许可范围内的单一机构任务试验"],
+        "counterexample": "出现安全、保护、居民权益或持续使用失败信号时，停止线下试验并回到前置核验。",
+        "evidence_refs": ["report/scenario-simulation.md", "report/research/spatial-market-audience-research.md"],
+        "metric_refs": [
+          {"result_id":"result:isochrone.reachable_area:cce3fc22b40a93a6","tool_id":"isochrone.reachable_area","observation":"当前等时圈中心点已规范坐标但无正式项目边界。","comparison_basis":"历史中心点15分钟步行范围。","decision_effect":"要求在批准入口确定后记录真实预约到达，而非使用当前等时圈做入口或客流承诺。","does_not_prove":"项目可达性、实际路线、到访量或消费。"}
+        ],
+        "limitations": ["情景参数不是预测；试验样本不得外推年度客流、收入或ROI。"],
+        "validation": "WP-01至WP-05完成；出现任何安全、保护或扰民触发信号即暂停。",
+        "status": "conditional"
+      }
+    ]
+  }
+}

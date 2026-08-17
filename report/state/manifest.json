@@ -1,0 +1,42 @@
+{
+  "schema": "spatial-business-state-manifest",
+  "snapshot_version": 7,
+  "artifacts": {
+    "project_semantic_model": {
+      "path": "state/project-semantic-model.json",
+      "schema": "spatial-business-project-semantic-model",
+      "snapshot_version": 7,
+      "sha256": "90b219f87c436531a827de52fdb9340b6730e81b1f65b3115cb29e7b96236b46"
+    },
+    "problem_map": {
+      "path": "state/problem-map.json",
+      "schema": "spatial-business-problem-map",
+      "snapshot_version": 7,
+      "sha256": "ad2aa2a9e7c12dc67bae27b17d61a9df7a768cfe9a1c0fa331cecaf5ffaf2ae9"
+    },
+    "decision_logic_map": {
+      "path": "state/decision-logic-map.json",
+      "schema": "spatial-business-decision-logic-map",
+      "snapshot_version": 7,
+      "sha256": "64e7e6f7c78b66464ee4d027ed1b4f62be9c886f6f6250883df42efbd3923ef9"
+    },
+    "decision_inventory": {
+      "path": "state/decision-inventory.json",
+      "schema": "spatial-business-decision-inventory",
+      "snapshot_version": 7,
+      "sha256": "aebaf9ff0beccb9ce032ccc2f1d557f0c16392e175b2110f8ac79b07ea7361bb"
+    },
+    "evidence_summary": {
+      "path": "state/evidence-summary.json",
+      "schema": "spatial-business-evidence-summary",
+      "snapshot_version": 7,
+      "sha256": "431fb46f58077da47706ab22e490a45b369384bf8d91f67013811fa279c11da9"
+    },
+    "working_memory": {
+      "path": "state/working-memory.json",
+      "schema": "spatial-business-working-memory",
+      "snapshot_version": 7,
+      "sha256": "518b3c4c7bfdbe8f69a610a0f02ea0e3a2973a9c03ff5f39ef2c92a4cf832513"
+    }
+  }
+}

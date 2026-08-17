@@ -1,0 +1,11 @@
+{
+  "schema": "spatial-business-chapter-index",
+  "report_mode": "formal_comprehensive",
+  "state_manifest": "state/manifest.json",
+  "chapters": [
+    {"chapter_id":"01-positioning","role":"定位与产品策略","decision_ids":["D1","D4"],"dependencies":[],"status":"accepted","accepted_version":1,"character_count":694,"versions":[{"version":1,"path":"chapters/01-positioning.v1.md","adversarial_review_path":"chapter-reviews/01-positioning.v1.adversarial.md","depth_review_path":"chapter-reviews/01-positioning.v1.depth.md","review_status":"accepted"}]},
+    {"chapter_id":"02-space","role":"空间功能策划","decision_ids":["D2"],"dependencies":["01-positioning"],"status":"accepted","accepted_version":1,"character_count":648,"versions":[{"version":1,"path":"chapters/02-space.v1.md","adversarial_review_path":"chapter-reviews/02-space.v1.adversarial.md","depth_review_path":"chapter-reviews/02-space.v1.depth.md","review_status":"accepted"}]},
+    {"chapter_id":"03-operations","role":"运营策略","decision_ids":["D3"],"dependencies":["01-positioning","02-space"],"status":"accepted","accepted_version":1,"character_count":559,"versions":[{"version":1,"path":"chapters/03-operations.v1.md","adversarial_review_path":"chapter-reviews/03-operations.v1.adversarial.md","depth_review_path":"chapter-reviews/03-operations.v1.depth.md","review_status":"accepted"}]},
+    {"chapter_id":"04-phasing","role":"实施分期","decision_ids":["D5"],"dependencies":["01-positioning","02-space","03-operations"],"status":"accepted","accepted_version":1,"character_count":532,"versions":[{"version":1,"path":"chapters/04-phasing.v1.md","adversarial_review_path":"chapter-reviews/04-phasing.v1.adversarial.md","depth_review_path":"chapter-reviews/04-phasing.v1.depth.md","review_status":"accepted"}]}
+  ]
+}

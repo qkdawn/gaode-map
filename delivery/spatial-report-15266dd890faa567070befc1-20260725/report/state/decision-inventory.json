@@ -1,0 +1,13 @@
+{
+  "state_id":"decision_inventory",
+  "schema":"spatial-business-decision-inventory",
+  "snapshot_version":1,
+  "updated_at":"2026-07-25T10:00:00+08:00",
+  "payload":{"decisions":[
+    {"id":"D1","choice":"首开采用低强度、预约/活动制的遗产公共文化验证，不启动目的地型商业化","owner":"positioning","counterfactual":"居民反对或文保/消防不允许稳定开放则转为更低强度的研究展示或暂停","evidence":["E1","E2","E3","E4"]},
+    {"id":"D2","choice":"以主线、礼堂前节点和非居住优先的院落活动组织试点；华夏路入口只做现场核验","owner":"spatial","counterfactual":"产权/消防/居民通行或实测流线不支持则不开放次入口","evidence":["E2","E3","E5"]},
+    {"id":"D3","choice":"运营先以共治、文化机构协同和活动记录为机制，不做门票/租金收入预测","owner":"operations","counterfactual":"无机构协同或居民接受度低则缩减为季节性预约活动","evidence":["E2","E4","E6"]},
+    {"id":"D4","choice":"外来遗产访客仅作为验证后增长盘，普通培训、文创餐饮与旅游目的地暂不进入首开","owner":"market","counterfactual":"取得持续到访、支付/采购和承载证据后才重新比较","evidence":["E3","E4","E6"]},
+    {"id":"D5","choice":"按核验、可逆试点、条件性固定时段、验证后增长分期推进","owner":"phasing","counterfactual":"许可、共识或真实使用任一缺失时缩减或暂停","evidence":["E2","E4","E6"]}
+  ]}
+}

@@ -1,0 +1,53 @@
+{
+  "state_id": "project_semantic_model",
+  "schema": "spatial-business-project-semantic-model",
+  "snapshot_version": 7,
+  "updated_at": "2026-07-26T14:30:00+08:00",
+  "payload": {
+    "history_id": "15266dd890faa567070befc1",
+    "project_name": "长沙县政府原址城市更新项目",
+    "scope_boundary": "项目正式红线尚未取得；15 分钟步行等时圈仅为城市背景。",
+    "objects": [
+      {
+        "source_name": "长沙县人民政府原址",
+        "semantic_roles": ["spatial_unit", "heritage_asset", "built_asset"],
+        "attributes": {"project_status": "城市更新项目", "evidence_level": "explicit"},
+        "relationships": ["包含行政及配套建筑群、礼堂庭院、三栋宿舍及住户"],
+        "evidence_refs": ["P01", "P02"],
+        "confidence": "explicit"
+      },
+      {
+        "source_name": "行政及配套建筑群",
+        "semantic_roles": ["built_asset", "heritage_asset"],
+        "attributes": {"formal_protection_registration": "待验证", "structural_and_fire_status": "待验证"},
+        "relationships": ["与礼堂庭院、宿舍构成原政府大院空间系统"],
+        "evidence_refs": ["P01", "P02", "R01"],
+        "confidence": "explicit"
+      },
+      {
+        "source_name": "礼堂与庭院",
+        "semantic_roles": ["built_asset", "open_space", "public_anchor"],
+        "attributes": {"public_opening": "待验证"},
+        "relationships": ["位于约 120 米主路径的候选公共解释节点"],
+        "evidence_refs": ["P02", "R02"],
+        "confidence": "explicit"
+      },
+      {
+        "source_name": "三栋宿舍及现住户",
+        "semantic_roles": ["residential_component", "operations_component"],
+        "attributes": {"reported_households": 102, "relocation": "不宜整体搬迁", "resident_consent": "待验证"},
+        "relationships": ["与公共更新内容存在居住权、通行和扰民约束"],
+        "evidence_refs": ["P02", "R03"],
+        "confidence": "explicit"
+      },
+      {
+        "source_name": "县治迁徙与营建线索",
+        "semantic_roles": ["phasing_target"],
+        "attributes": {"archive_verification": "待验证"},
+        "relationships": ["提供建筑群形成、迁治与再利用问题的解释线索"],
+        "evidence_refs": ["P01", "W01", "R05"],
+        "confidence": "inferred"
+      }
+    ]
+  }
+}

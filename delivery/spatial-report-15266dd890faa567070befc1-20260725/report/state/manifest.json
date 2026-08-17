@@ -1,0 +1,10 @@
+{
+  "schema": "spatial-business-state-manifest",
+  "snapshot_version": 1,
+  "artifacts": {
+    "project_semantic_model": {"path":"state/project-semantic-model.json","schema":"spatial-business-project-semantic-model","snapshot_version":1,"sha256":"158fe9d2dd51bcbb84fb39b34eae2eb231b7a26d614800f29492d6159346e52c"},
+    "problem_map": {"path":"state/problem-map.json","schema":"spatial-business-problem-map","snapshot_version":1,"sha256":"3afbafa17ce5cca3e3d17b89d3b394ccbb6378b7edcecfa44ab86d69f13f7132"},
+    "decision_inventory": {"path":"state/decision-inventory.json","schema":"spatial-business-decision-inventory","snapshot_version":1,"sha256":"6252bb669555a1d654ebc5ec042d977eecff116e98b84fa5a7ab209bded78c98"},
+    "evidence_summary": {"path":"state/evidence-summary.json","schema":"spatial-business-evidence-summary","snapshot_version":1,"sha256":"98cb2e916591e43ebb4934651c1df82e4bfbec95f208b4e456b6fc629df6678c"}
+  }
+}

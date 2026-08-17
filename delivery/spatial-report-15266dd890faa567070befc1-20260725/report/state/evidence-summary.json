@@ -1,0 +1,14 @@
+{
+  "state_id":"evidence_summary",
+  "schema":"spatial-business-evidence-summary",
+  "snapshot_version":1,
+  "updated_at":"2026-07-25T10:00:00+08:00",
+  "payload":{"evidence":[
+    {"id":"E1","kind":"official_web","claim":"办公楼、行政楼、礼堂所在旧址被公布为一般不可移动文物","source":"开福区文化旅游体育局，2024-11-11","url":"http://www.kaifu.gov.cn/zfxxgk/fdzdgknr/zdmsxx/ggwhtyfw/202411/t20241112_11651717.html","boundary":"不证明开放许可、保护等级以外事项或市场需求"},
+    {"id":"E2","kind":"project_originals","claim":"一路一院一园、约120米主线、礼堂核心、居民共治及住户口径冲突","source":"3份历史项目原始DOCX","boundary":"愿景和基础情况并非审批、运营或客流证据"},
+    {"id":"E3","kind":"spatial_metric","claim":"2024年15分钟等时圈内文化教育88、日常餐饮358、零售68；5分钟连续道路可达文化教育13、餐饮25、零售7","source":"result:poi.supply_structure:d162d5fa1b886435","boundary":"POI仅表示快照供给"},
+    {"id":"E4","kind":"spatial_metric","claim":"文化站和老干部大学为近端道路模型线索；访客目的地类POI无5分钟连续道路可达结果","source":"result:poi.focused_accessibility:2edefffe51ffaa8c","boundary":"不表示合作、客流或真实步行进入"},
+    {"id":"E5","kind":"spatial_metric","claim":"路网有高整合/选择廊道和连接断点","source":"result:road.connectivity:7f2ad6e8d5aa7a16","boundary":"句法结构不等于实测人流"},
+    {"id":"E6","kind":"spatial_metric","claim":"正式项目边界缺失，等时圈不能替代项目边界","source":"result:isochrone.reachable_area:cce3fc22b40a93a6","boundary":"不能用作容量、法定范围或客流捕获区"}
+  ]}
+}

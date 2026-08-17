@@ -1,0 +1,13 @@
+{
+  "schema": "spatial-business-working-memory",
+  "snapshot_version": 7,
+  "updated_at": "2026-07-26T14:30:00+08:00",
+  "payload": {
+    "project_semantic_model_path": "project-semantic-model.json",
+    "problem_map_path": "problem-map.json",
+    "evidence_summary_path": "evidence-summary.json",
+    "confirmed_problem_chain": ["project-role-and-value", "users-demand-and-value-exchange", "space-rights-and-resident-boundary", "operating-responsibility-and-mechanism", "reversible-pilot-and-phasing"],
+    "evidence_status": "scenario_ready",
+    "delivery_boundary": "交付可复核情景推演与取证/试验计划；不得称为正式定位、目标客群、客流预测、收入预测或实施承诺。"
+  }
+}

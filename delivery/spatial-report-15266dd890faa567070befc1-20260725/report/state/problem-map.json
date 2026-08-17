@@ -1,0 +1,7 @@
+{
+  "state_id":"problem_map",
+  "schema":"spatial-business-problem-map",
+  "snapshot_version":1,
+  "updated_at":"2026-07-25T10:00:00+08:00",
+  "payload":{"status":"confirmed","confirmed_by_user":"确认问题地图","questions":["首期是居民共居的公共文化验证，还是目的地/商业化路径？","保护、产权、消防和开放边界如何限制礼堂及三栋建筑使用？","如何以约120米主线和候选第二入口组织居民与外来使用者？","哪些公共文化协同、外来访客和价值交换证据会扩大、缩减或退出方案？"]}
+}

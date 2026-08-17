@@ -1,0 +1,59 @@
+{
+  "state_id": "evidence_summary",
+  "schema": "spatial-business-evidence-summary",
+  "snapshot_version": 7,
+  "updated_at": "2026-07-26T14:30:00+08:00",
+  "payload": {
+    "overall_status": "scenario_ready",
+    "history_id": "15266dd890faa567070befc1",
+    "decision_status": "不创建正式决策清单；当前可交付情景推演，不能称为正式定位、目标客群、真实客流/收入预测或实施方案。",
+    "scenario_artifact": "report/scenario-simulation.md",
+    "items": [
+      {
+        "id": "heritage-and-permission",
+        "question_ids": ["space-rights-and-resident-boundary"],
+        "sources": ["P01", "P02", "G01", "cultural-tourism-theme-research"],
+        "comparison_basis": "一般不可移动文物身份与项目尚无正式红线、产权、消防结构、无障碍和承载结论之间的差距。",
+        "disconfirming_result": "任何单体或室外空间未获书面许可和安全结论时，均不能纳入公共使用。",
+        "evidence_grade": "D",
+        "closure": "open",
+        "required_workpack": "WP-02",
+        "reentry_condition": "形成可追溯责任主体签署的开放/受控/不开放清单。"
+      },
+      {
+        "id": "narrative-and-project-evidence",
+        "question_ids": ["project-role-and-value"],
+        "sources": ["P01", "P02", "W01", "G01", "cultural-tourism-theme-research"],
+        "comparison_basis": "行政建筑、礼堂、宿舍与迁治线索支持候选叙事；红色、非遗、夜游及餐饮没有项目级事实。",
+        "disconfirming_result": "未获档案或授权口述史验证的主题不得用于产品、招商或传播承诺。",
+        "evidence_grade": "C",
+        "closure": "open",
+        "required_workpack": "档案、单体建档和授权口述史核验",
+        "reentry_condition": "每条公共解释具备可追溯档案或授权材料，并明确适用空间与边界。"
+      },
+      {
+        "id": "resident-rights-and-service",
+        "question_ids": ["space-rights-and-resident-boundary", "operating-responsibility-and-mechanism"],
+        "sources": ["P01", "P02", "spatial-market-audience-research"],
+        "comparison_basis": "持续居住事实与公共参与、开放同意、通行和扰民记录缺失之间的差距。",
+        "disconfirming_result": "住户反对、边界无法执行或投诉无法闭环时，外部活动必须停止。",
+        "evidence_grade": "D",
+        "closure": "open",
+        "required_workpack": "WP-01, WP-05",
+        "reentry_condition": "完成知情同意/拒绝记录、边界图、投诉响应 SLA 和一个完整服务周期记录。"
+      },
+      {
+        "id": "market-and-arrival",
+        "question_ids": ["users-demand-and-value-exchange", "reversible-pilot-and-phasing"],
+        "sources": ["result:population.age_structure:78afd00ef39121e9", "result:poi.supply_structure:d162d5fa1b886435", "result:isochrone.reachable_area:cce3fc22b40a93a6", "spatial-market-audience-research"],
+        "comparison_basis": "区域背景存在人口、设施和道路条件，但没有真实到达、替代供给、预约、支付或公共服务履约记录。",
+        "disconfirming_result": "高强度夜游、娱乐餐饮、团建演出及红色/非遗专项客群与证据、保护和居住约束相冲突，当前排除。",
+        "evidence_grade": "D/E",
+        "closure": "open",
+        "required_workpack": "WP-03, WP-04",
+        "reentry_condition": "取得机构任务书或明确拒绝记录，以及许可范围内的预约、到达、使用和投诉原始记录。"
+      }
+    ],
+    "next_review_date": "2026-09-13"
+  }
+}
