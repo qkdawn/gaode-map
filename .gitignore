@@ -6,6 +6,10 @@ __pycache__/
 .pytest_cache/
 .playwright-cli/
 .runtime_orphans/
+.codex-tmp/
+.vs/
+.workbuddy/
+docs/*.lnk
 *.bak
 *.tmp
 *.log
@@ -17,12 +21,9 @@ frontend/.vite/
 frontend/.cache/
 frontend/*.tsbuildinfo
 static/frontend/
-runtime/generated_charts/
-runtime/analysis-runs/
-runtime/agent_uploads/
-runtime/documents/
-runtime/searxng/
-runtime/tools/
+runtime/
+tmp/
+output/
 /AGENTS.md
 
 # Data

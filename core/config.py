@@ -427,7 +427,7 @@ class Settings(BaseSettings):
         description="Internal spatial project MCP endpoint used by direction Agents",
     )
     spatial_mcp_timeout_s: float = Field(
-        60.0,
+        180.0,
         validation_alias="SPATIAL_MCP_TIMEOUT_S",
         gt=0,
         description="Timeout for a single spatial MCP tool call",
