@@ -1,0 +1,35 @@
+{
+  "project": "isochrone-multi-agent-regional-analysis",
+  "mode": "revise",
+  "text_type": "research_proposal",
+  "language": "zh",
+  "target_reader": "supervisor_and_internal_research_reviewers",
+  "current_round": 2,
+  "scores": [
+    {
+      "round": 1,
+      "stage": "foundation",
+      "score": 8.1,
+      "status": "passed"
+    },
+    {
+      "round": 1,
+      "stage": "proposal",
+      "score": 8.3,
+      "status": "supervisor_facing"
+    },
+    {
+      "round": 2,
+      "stage": "proposal_readability_revision",
+      "score": 8.7,
+      "status": "supervisor_facing"
+    }
+  ],
+  "technical_debts": [
+    "target venue and document template are not specified",
+    "cross-case evaluation dataset has not been fixed",
+    "expert evaluation panel and power analysis are not yet defined",
+    "current feasibility evidence is based on one successful end-to-end run"
+  ],
+  "status": "export"
+}
