@@ -127,6 +127,132 @@ const availableSpatialMetrics = [
 const schema = {`,
   );
 }
+if (buildDecisionRequestNode) {
+  buildDecisionRequestNode.parameters.jsCode = `const state = $input.first()?.json ?? $('Validate Step Request').first().json;
+const decisionUnit = state.decision_unit && typeof state.decision_unit === 'object' ? state.decision_unit : {
+  unit_id: state.step_key,
+  title: state.step_title,
+  question: state.research_brief,
+  depends_on: [],
+  decision_output: state.research_brief,
+  evidence_focus: state.research_brief,
+};
+const previousDecisionMemos = Object.entries(state.decision_state?.steps ?? {}).map(([unitId, value]) => ({
+  unit_id: unitId,
+  step_order: Number(value?.step_order ?? 0),
+  title: String(value?.title ?? ''),
+  decision_output: String(value?.decision_output ?? ''),
+  decision_memo: value?.decision_memo && typeof value.decision_memo === 'object' ? value.decision_memo : null,
+  evidence_directory: {
+    key_facts: Array.isArray(value?.decision_memo?.key_facts) ? value.decision_memo.key_facts : [],
+    named_entities: Array.isArray(value?.decision_memo?.named_entities) ? value.decision_memo.named_entities : [],
+    sources: Array.isArray(value?.citations) ? value.citations.map((item) => ({ title: String(item?.title ?? ''), source_type: String(item?.source_type ?? ''), source_locator: String(item?.source_locator ?? '') })) : [],
+  },
+})).filter((item) => item.decision_memo && item.step_order < Number(state.step_order ?? 0)).sort((left, right) => left.step_order - right.step_order);
+const dependencyIds = new Set(Array.isArray(decisionUnit.depends_on) ? decisionUnit.depends_on.map(String) : []);
+const dependencyMemos = previousDecisionMemos.filter((item) => dependencyIds.has(item.unit_id));
+const projectDocuments = (Array.isArray(state.project_context?.documents) ? state.project_context.documents : []).map((item) => ({
+  document_id: String(item?.document_id ?? ''),
+  title: String(item?.title ?? item?.file_name ?? ''),
+  document_role: String(item?.document_role ?? ''),
+  status: String(item?.status ?? ''),
+})).filter((item) => item.document_id);
+const datasetIds = new Set((Array.isArray(state.project_context?.datasets) ? state.project_context.datasets : []).map((item) => String(item?.dataset_id ?? '')));
+const availableSpatialMetrics = [
+  ...(datasetIds.has('poi') ? ['poi.grid_density', 'poi.local_entropy_normalized', 'poi.lq', 'poi.supply_structure'] : []),
+  ...(datasetIds.has('population') ? ['population.total', 'population.age_structure'] : []),
+  ...(datasetIds.has('nightlight') ? ['nightlight.mean_radiance', 'nightlight.hotspot_ratio', 'nightlight.spatial_profile'] : []),
+  ...(datasetIds.has('road_edges') || datasetIds.has('road_nodes') ? ['road.integration', 'road.choice', 'road.connectivity', 'road.orientation'] : []),
+];
+const nullableString = { type: ['string', 'null'] };
+const nullableInteger = { type: ['integer', 'null'] };
+const argumentsSchema = { type: 'object', properties: {
+  analysis: nullableString,
+  metric_ids: { type: ['array', 'null'], items: { type: 'string' } },
+  selectors: { type: ['array', 'null'], items: { type: 'object', properties: { dimension: { type: 'string' }, values: { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'integer' }] } } }, required: ['dimension', 'values'], additionalProperties: false } },
+  distance_bands_m: { type: ['array', 'null'], items: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' } } },
+  neighbor_steps: nullableInteger,
+  rank_order: nullableString,
+  top_k: nullableInteger,
+  record_refs: { type: ['array', 'null'], items: { type: 'string' } },
+  document_id: nullableString,
+  start_block: nullableInteger,
+  max_blocks: nullableInteger,
+  page_start: nullableInteger,
+  page_end: nullableInteger,
+  question: nullableString,
+  mode: nullableString,
+  query: nullableString,
+  provider: nullableString,
+  limit: nullableInteger,
+  urls: { type: ['array', 'null'], items: { type: 'string' } },
+  max_characters: nullableInteger,
+}, required: ['analysis', 'metric_ids', 'selectors', 'distance_bands_m', 'neighbor_steps', 'rank_order', 'top_k', 'record_refs', 'document_id', 'start_block', 'max_blocks', 'page_start', 'page_end', 'question', 'mode', 'query', 'provider', 'limit', 'urls', 'max_characters'], additionalProperties: false };
+const schema = { type: 'object', properties: {
+  decision: { type: 'string', enum: ['continue', 'finish'] },
+  reason: { type: 'string', minLength: 1, maxLength: 1200 },
+  next_tools: { type: 'array', maxItems: 3, items: { type: 'object', properties: {
+    name: { type: 'string', enum: ['analyze_spatial_evidence', 'read_project_document', 'search_literature_evidence', 'search_public_web', 'fetch_public_web_page'] },
+    arguments: argumentsSchema,
+  }, required: ['name', 'arguments'], additionalProperties: false } },
+}, required: ['decision', 'reason', 'next_tools'], additionalProperties: false };
+const instructions = [
+  '你是独立的证据路由 Agent，只负责判断当前决策单元是否需要继续取证以及选择下一批工具，不形成研究结论，也不写报告。',
+  '当前 decision_unit 明确了本单元独占的 decision_output、前序依赖和 evidence_focus。先判断 dependency_memos 和 previous_decision_memos 中的既有事实能否复用；已经成立的前序结论不应重新查询和重新证明。',
+  'evidence_focus 只描述需要了解什么。你根据问题自主选择项目文档、空间数据库、文献知识库或互联网；没有新的证据需求时直接 finish，不为了遍历工具而调用。',
+  '空间工具提供 scope、distance、direction、neighborhood、rank、relationship 和 inspect 七种分析。聚合模式可识别结构；inspect 能将网格或H3记录展开为其中的具名POI、相交道路和邻近具名对象。是否下钻完全由你根据 decision_output 判断，工具不会替你建议下一步。',
+  '项目原文使用 read_project_document；规划方法、规范和跨案例机制使用 search_literature_evidence；最新公开事实先用 search_public_web 发现，再用 fetch_public_web_page 读取正文；搜索摘要本身不是正式事实。',
+  'continue 时返回一至三个参数已经完整确定、相互独立的请求。依赖上一结果才能确定参数的调用必须跨轮，例如网页搜索到全文读取、指标发现到具体空间分析、聚合记录到inspect、文档当前页到下一页。',
+  'finish 时 next_tools 必须为空。reason 只说明为什么继续取证或为什么现有证据已足够，不输出分析观点。工具不可用时不得假装成功。',
+].join('\n');
+const userPayload = {
+  project_question: state.project_question,
+  research_frame: state.research_frame || state.decision_state?.research_frame || '',
+  decision_unit: decisionUnit,
+  dependency_memos: dependencyMemos,
+  previous_decision_memos: previousDecisionMemos,
+  available_evidence_directory: previousDecisionMemos.map((item) => ({ unit_id: item.unit_id, ...item.evidence_directory })),
+  project_documents: projectDocuments,
+  project_document_prefetch: state.project_document_prefetch ?? null,
+  available_spatial_metrics: availableSpatialMetrics,
+  execution_budget: { max_parallel: 3, remaining_tool_calls: 12 },
+};
+const conversationItems = [{ role: 'user', content: [{ type: 'input_text', text: JSON.stringify(userPayload) }] }];
+return [{ json: {
+  state,
+  instructions,
+  input: conversationItems,
+  conversation_items: conversationItems,
+  initial_context_items: conversationItems,
+  max_output_tokens: 1800,
+  reasoning: { effort: 'low' },
+  agent_turn: 0,
+  parallel_tool_calls: false,
+  context_budget_tokens: 24000,
+  context_reserve_tokens: 6000,
+  no_new_evidence_limit: 2,
+  stale_tool_turns: 0,
+  tool_call_count: 0,
+  tool_call_limit: 12,
+  max_parallel_tools: 3,
+  working_research_brief: { version: 1, cards: [], named_spatial_records: [] },
+  research_result_store: [],
+  tool_request_fingerprints: [],
+  tool_result_fingerprints: [],
+  tool_evidence: [],
+  tool_diagnostics: [],
+  route_diagnostics: [],
+  tool_error_count: 0,
+  tool_error_limit: 2,
+  stop_reason: null,
+  tools: [],
+  tool_choice: 'none',
+  text: { format: { type: 'json_schema', name: 'evidence_route', strict: true, schema } },
+  output: [],
+  output_text: '',
+  tool_calls: [],
+} }];`;
+}
 const selectInitialDocumentNode = decisionSourceForGeneration.nodes.find((node) => node.name === 'Select Initial Project Document');
 if (selectInitialDocumentNode?.parameters?.jsCode) {
   selectInitialDocumentNode.parameters.jsCode = selectInitialDocumentNode.parameters.jsCode.replace(
@@ -209,6 +335,10 @@ const projectNamedSpatialRecords = (highlights) => (Array.isArray(highlights) ? 
     direction: clippedText(item.direction, 40),
     values: item.values && typeof item.values === 'object' ? item.values : {},
     reason: clippedText(item.reason, 160),
+    relation_to_target: item.relation_to_target && typeof item.relation_to_target === 'object' ? {
+      target_record_ref: clippedText(item.relation_to_target.target_record_ref, 360),
+      kind: clippedText(item.relation_to_target.kind, 80),
+    } : undefined,
   }];
 });
 const boundNamedSpatialRecords = (records, characterLimit = 3000, itemLimit = 20) => {
@@ -543,7 +673,7 @@ const statusQueryNode = status.nodes.find((node) => node.name === '读取租户�
 if (statusQueryNode?.parameters?.query) {
   statusQueryNode.parameters.query = statusQueryNode.parameters.query.replace(
     "'total_steps', 12",
-    "'total_steps', COALESCE(jsonb_array_length(r.decision_state->'research_plan'), 12)",
+    "'total_steps', COALESCE(jsonb_array_length(r.decision_state->'decision_units'), 1)",
   );
 }
 mergeGraph(graph, status);
@@ -586,9 +716,9 @@ graph.connections['返回任务已接收'] = { main: [[]] };
 const researchFrameNode = codeNode('构建整体研究框架', `const request = $input.first()?.json ?? {};
 const existingState = request.decision_state && typeof request.decision_state === 'object' ? request.decision_state : {};
 const existingFrame = String(existingState.research_frame ?? '').trim();
-const existingPlan = Array.isArray(existingState.research_plan) ? existingState.research_plan : [];
-if (existingFrame && existingPlan.length) {
-  return [{ json: { ...request, reuse_research_frame: true, output_text: JSON.stringify({ research_frame: existingFrame, research_plan: existingPlan }) } }];
+const existingUnits = Array.isArray(existingState.decision_units) ? existingState.decision_units : [];
+if (existingFrame && existingUnits.length) {
+  return [{ json: { ...request, reuse_research_frame: true, output_text: JSON.stringify({ research_frame: existingFrame, decision_units: existingUnits }) } }];
 }
 const context = request.project_context && typeof request.project_context === 'object' ? request.project_context : {};
 const project = context.project && typeof context.project === 'object' ? context.project : {};
@@ -596,16 +726,21 @@ const documents = Array.isArray(context.documents) ? context.documents.map((item
 const datasets = Array.isArray(context.datasets) ? context.datasets.map((item) => ({ dataset_id: String(item?.dataset_id ?? ''), title: String(item?.title ?? ''), total_count: item?.total_count ?? null })) : [];
 const schema = { type: 'object', properties: {
   research_frame: { type: 'string', minLength: 1 },
-  research_plan: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', properties: {
+  decision_units: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'object', properties: {
+    unit_id: { type: 'string', minLength: 1, maxLength: 64, pattern: '^[a-z][a-z0-9_]*$' },
     title: { type: 'string', minLength: 1 },
     question: { type: 'string', minLength: 1 },
-  }, required: ['title', 'question'], additionalProperties: false } },
-}, required: ['research_frame', 'research_plan'], additionalProperties: false };
+    depends_on: { type: 'array', maxItems: 31, items: { type: 'string', minLength: 1, maxLength: 64 } },
+    decision_output: { type: 'string', minLength: 1 },
+    evidence_focus: { type: 'string', minLength: 1 },
+  }, required: ['unit_id', 'title', 'question', 'depends_on', 'decision_output', 'evidence_focus'], additionalProperties: false } },
+}, required: ['research_frame', 'decision_units'], additionalProperties: false };
 const instructions = [
   '你是城市更新项目的首席研究设计师。此时不要写报告、定位或建议，只建立一段开放的研究框架，并列出本项目真正需要作出的决策节点。',
   '先判断用户真正需要作出的选择是什么，以及现有项目文档和空间数据库已经能支持哪些判断。提出少量真正互相竞争的解释或路径，并用现有事实和代理指标区分；不要为了形式凑假设。',
-  'research_plan 只列会改变项目路径的决策边界，每个节点用自然语言写一个标题和待回答的问题。可以合并、跳过或改写常见的政策、市场、客群、定位、产品、空间、运营、财务和分期视角；不相关的视角不要为了凑数量保留。节点数量由问题复杂度决定，只保留必要的节点并避免重复。节点应能按依赖关系排列，但不要把它写成固定章节模板。',
-  '明确节点之间的关键依赖关系，让后续证据能够逐步缩小候选解释并形成项目选择。',
+  'decision_units 的数量完全由本项目需要作出的真实决策决定。政策、区域角色、市场、供给、客群、主题、定位、产品、空间、运营、财务和分期只是启发，可以合并、跳过、改写或增加项目特有问题，绝不能为了凑数量保留。',
+  '每个单元必须拥有一个不会被其他单元重复证明的 decision_output；后续单元通过 depends_on 把前序判断当作成立前提，并在此基础上产生新的决策增量。按依赖顺序输出，依赖只能指向前面已经出现的 unit_id。',
+  'evidence_focus 只说明需要了解什么，不指定空间、文献、项目文档或互联网工具；具体取证方式由证据路由 Agent 决定。',
   '研究框架是开放式工作备忘录，不是审计表，不使用固定字段、编号模板或预设答案。只围绕现有证据能够回答的项目问题组织研究，不输出缺失信息、不能证明事项或“必须补齐证据”清单。',
 ].join('\\n');
 return [{ json: {
@@ -614,7 +749,7 @@ return [{ json: {
   input: JSON.stringify({ project_question: request.project_question, project, available_documents: documents, available_datasets: datasets }),
   max_output_tokens: 10000,
   reasoning: { effort: 'high' },
-  text: { format: { type: 'json_schema', name: 'research_frame', strict: true, schema } },
+  text: { format: { type: 'json_schema', name: 'decision_units', strict: true, schema } },
 } }];`, [1460, 1660], 'urban-agent-build-research-frame');
 graph.nodes.push(researchFrameNode);
 const reuseResearchFrameNode = {
@@ -667,14 +802,30 @@ if (!parsed) throw new Error('research_frame_invalid_json');
 const existingState = response.decision_state && typeof response.decision_state === 'object' ? response.decision_state : {};
 const researchFrame = String(existingState.research_frame ?? parsed.research_frame ?? '').trim();
 if (!researchFrame) throw new Error('research_frame_empty');
-const parsedPlan = (Array.isArray(parsed.research_plan) ? parsed.research_plan : []).map((item) => ({
+const normalizeUnit = (item) => ({
+  unit_id: String(item?.unit_id ?? '').trim(),
   title: String(item?.title ?? '').trim(),
   question: String(item?.question ?? '').trim(),
-})).filter((item) => item.title && item.question).slice(0, 32);
-const existingPlan = Array.isArray(existingState.research_plan) ? existingState.research_plan.map((item) => ({ title: String(item?.title ?? '').trim(), question: String(item?.question ?? '').trim(), step_key: String(item?.step_key ?? '').trim() })).filter((item) => item.title && item.question) : [];
-const researchPlan = existingPlan.length ? existingPlan : parsedPlan;
-if (!researchPlan.length) throw new Error('research_plan_empty');
-return [{ json: { ...response, research_frame: researchFrame, research_plan: researchPlan } }];`, [2460, 1660], 'urban-agent-validate-research-frame');
+  depends_on: Array.isArray(item?.depends_on) ? [...new Set(item.depends_on.map((value) => String(value ?? '').trim()).filter(Boolean))] : [],
+  decision_output: String(item?.decision_output ?? '').trim(),
+  evidence_focus: String(item?.evidence_focus ?? '').trim(),
+});
+const existingUnits = Array.isArray(existingState.decision_units) ? existingState.decision_units.map(normalizeUnit) : [];
+const parsedUnits = (Array.isArray(parsed.decision_units) ? parsed.decision_units : []).map(normalizeUnit).slice(0, 32);
+const decisionUnits = existingUnits.length ? existingUnits : parsedUnits;
+if (!decisionUnits.length) throw new Error('decision_units_empty');
+const seen = new Set();
+for (const unit of decisionUnits) {
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(unit.unit_id)) throw new Error('decision_unit_id_invalid:' + unit.unit_id);
+  if (seen.has(unit.unit_id)) throw new Error('decision_unit_id_duplicate:' + unit.unit_id);
+  if (!unit.title || !unit.question || !unit.decision_output || !unit.evidence_focus) throw new Error('decision_unit_fields_empty:' + unit.unit_id);
+  for (const dependency of unit.depends_on) {
+    if (dependency === unit.unit_id) throw new Error('decision_unit_self_dependency:' + unit.unit_id);
+    if (!seen.has(dependency)) throw new Error('decision_unit_dependency_must_precede:' + unit.unit_id + ':' + dependency);
+  }
+  seen.add(unit.unit_id);
+}
+return [{ json: { ...response, research_frame: researchFrame, decision_units: decisionUnits } }];`, [2460, 1660], 'urban-agent-validate-research-frame');
 graph.nodes.push(validateResearchFrameNode);
 graph.connections['复用已有研究框架？'] = { main: [
   [{ node: '确认整体研究框架', type: 'main', index: 0 }],
@@ -684,26 +835,34 @@ for (const terminal of researchFrameModel.terminals) connect(graph, terminal, '�
 
 const queueNode = codeNode('建立自适应分析队列', `const claimed = $input.first()?.json ?? {};
 const request = $('确认整体研究框架').first().json;
-const candidatePlan = Array.isArray(request.decision_state?.research_plan) && request.decision_state.research_plan.length
-  ? request.decision_state.research_plan
-  : (Array.isArray(request.research_plan) ? request.research_plan : []);
-const adaptiveSteps = candidatePlan.map((item, index) => ({
-  step_key: String(item?.step_key ?? 'decision_' + String(index + 1).padStart(2, '0')),
+const candidateUnits = Array.isArray(request.decision_state?.decision_units) && request.decision_state.decision_units.length
+  ? request.decision_state.decision_units
+  : (Array.isArray(request.decision_units) ? request.decision_units : []);
+const adaptiveSteps = candidateUnits.map((item) => ({
+  step_key: String(item?.unit_id ?? '').trim(),
   step_title: String(item?.title ?? '').trim(),
   research_brief: String(item?.question ?? '').trim(),
-})).filter((item) => item.step_title && item.research_brief).slice(0, 32);
-if (!adaptiveSteps.length) throw new Error('research_plan_empty');
+  decision_unit: {
+    unit_id: String(item?.unit_id ?? '').trim(),
+    title: String(item?.title ?? '').trim(),
+    question: String(item?.question ?? '').trim(),
+    depends_on: Array.isArray(item?.depends_on) ? item.depends_on.map(String) : [],
+    decision_output: String(item?.decision_output ?? '').trim(),
+    evidence_focus: String(item?.evidence_focus ?? '').trim(),
+  },
+})).filter((item) => item.step_key && item.step_title && item.research_brief).slice(0, 32);
+if (!adaptiveSteps.length) throw new Error('decision_units_empty');
 const steps = adaptiveSteps;
-const researchPlan = steps.map(({ step_key, step_title, research_brief }) => ({ step_key, title: step_title, question: research_brief }));
-return steps.map(({ step_key, step_title, research_brief }, index) => ({ json: {
+const decisionUnits = steps.map((item) => item.decision_unit);
+return steps.map(({ step_key, step_title, research_brief, decision_unit }, index) => ({ json: {
   run_id: String(claimed.run_id ?? request.run_id), tenant_id: request.tenant_id,
   history_id: request.history_id, project_question: request.project_question,
   access_groups: request.access_groups, project_types: request.project_types,
   geography: request.geography, metadata_filter: request.metadata_filter,
   project_context: request.project_context, research_frame: request.research_frame,
-  research_plan: researchPlan,
-  decision_state: { ...(request.decision_state && typeof request.decision_state === 'object' ? request.decision_state : {}), research_frame: request.research_frame, research_plan: researchPlan },
-  step_key, step_title, research_brief, step_order: index + 1,
+  decision_units: decisionUnits,
+  decision_state: { ...(request.decision_state && typeof request.decision_state === 'object' ? request.decision_state : {}), research_frame: request.research_frame, decision_units: decisionUnits },
+  step_key, step_title, research_brief, decision_unit, step_order: index + 1,
 } }));`, [1540, 1860], 'urban-agent-build-step-queue');
 const loopNode = {
   parameters: { batchSize: 1, options: {} },
@@ -717,7 +876,7 @@ const attachStateNode = codeNode('合并当前分析方向状态', `const row = 
 const input = row.step_input && typeof row.step_input === 'object' ? row.step_input : {};
 const stored = row.decision_state && typeof row.decision_state === 'object' ? row.decision_state : {};
 const queued = input.decision_state && typeof input.decision_state === 'object' ? input.decision_state : {};
-return [{ json: { ...input, decision_state: { ...queued, ...stored, research_plan: Array.isArray(stored.research_plan) ? stored.research_plan : queued.research_plan, research_frame: String(stored.research_frame ?? queued.research_frame ?? '') } } }];`,
+return [{ json: { ...input, decision_state: { ...queued, ...stored, decision_units: Array.isArray(stored.decision_units) ? stored.decision_units : queued.decision_units, research_frame: String(stored.research_frame ?? queued.research_frame ?? '') } } }];`,
   [2300, 1940], 'urban-agent-attach-step-state');
 const readCompleteStateNode = postgresNode('读取完整分析状态', `SELECT id::text AS run_id, status, current_step, decision_state
 FROM analysis_runs WHERE id = $1::uuid AND tenant_id = $2::text;`,
@@ -786,12 +945,11 @@ if (!route) {
 }
 if (!['continue', 'finish'].includes(route.decision)) throw new Error('evidence_route_invalid_decision');
 if (!String(route.reason ?? '').trim()) throw new Error('evidence_route_reason_empty');
-const allowed = new Set(['analyze_spatial_evidence', 'read_project_document', 'read_previous_chapter', 'search_literature_evidence', 'search_public_web', 'fetch_public_web_page']);
+const allowed = new Set(['analyze_spatial_evidence', 'read_project_document', 'search_literature_evidence', 'search_public_web', 'fetch_public_web_page']);
 const required = { analyze_spatial_evidence: ['analysis'], read_project_document: ['document_id'], search_literature_evidence: ['question'], search_public_web: ['query'], fetch_public_web_page: ['urls'] };
 const allowedKeys = {
   analyze_spatial_evidence: new Set(['analysis', 'metric_ids', 'selectors', 'distance_bands_m', 'neighbor_steps', 'rank_order', 'top_k', 'record_refs']),
   read_project_document: new Set(['document_id', 'start_block', 'max_blocks', 'page_start', 'page_end']),
-  read_previous_chapter: new Set(['step_key', 'step_order']),
   search_literature_evidence: new Set(['question', 'mode', 'top_k']),
   search_public_web: new Set(['query', 'provider', 'limit']),
   fetch_public_web_page: new Set(['urls', 'provider', 'max_characters']),
@@ -814,7 +972,7 @@ if (route.decision === 'continue') {
     const retryCount = Math.max(0, Number(response.route_format_retry_count ?? 0));
     if (retryCount >= 4) throw new Error('evidence_route_empty_continue_after_retry');
     const priorInput = Array.isArray(response.input) ? response.input : [];
-    const correctedInput = [...priorInput, { role: 'user', content: [{ type: 'input_text', text: '你的 decision=continue，但 next_tools 为空。请重新路由：若仍需取证，返回一至三个参数完整且相互独立的请求；若证据已经足够，返回 decision=finish 且 next_tools=[]。如果当前 research_brief 涉及区域结构、功能差异或机会判断，而 working_research_brief 只有项目文档或 scope 指标目录、尚无 groups/highlights/relationship 等具体空间结果，你必须自行选择一个具体的 analyze_spatial_evidence 模式（例如 rank、relationship、distance、direction、neighborhood 或 inspect）并返回完整参数。不要写研究结论。' }] }];
+    const correctedInput = [...priorInput, { role: 'user', content: [{ type: 'input_text', text: '你的 decision=continue，但 next_tools 为空。请重新路由：若仍需取证，返回一至三个参数完整且相互独立的请求；若当前单元的既有证据已经足够，返回 decision=finish 且 next_tools=[]。具体查什么、是否下钻由你根据 decision_unit、dependency_memos 和 working_research_brief 判断；不要写研究结论。' }] }];
     const routeDiagnostics = [...(Array.isArray(response.route_diagnostics) ? response.route_diagnostics : []), { kind: 'empty_continue_batch_retry', attempt: retryCount + 1 }];
     return [{ json: { ...response, route_retry_required: true, route_format_retry_count: retryCount + 1, route_decision: null, route_diagnostics: routeDiagnostics, input: correctedInput, conversation_items: correctedInput, tool_calls: [], output: [], output_text: '', response_id: '', error: null, tool_choice: 'none' } }];
   }
