@@ -29,7 +29,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "ollamaEmbedding0001",
+          "value": "openAIEmbedding0001",
           "mode": "id"
         },
         "workflowInputs": {

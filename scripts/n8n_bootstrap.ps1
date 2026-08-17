@@ -135,6 +135,19 @@ if (-not ($codexBaseUrl -and $codexModel -and $codexApiKey)) {
     $codexConfig = Get-Content -Raw $codexConfigPath
     $baseMatch = [regex]::Match($codexConfig, '(?m)^openai_base_url\s*=\s*"([^"]+)"')
     $modelMatch = [regex]::Match($codexConfig, '(?m)^model\s*=\s*"([^"]+)"')
+    if (-not $baseMatch.Success) {
+        $providerMatch = [regex]::Match($codexConfig, '(?m)^model_provider\s*=\s*"([^"]+)"')
+        if ($providerMatch.Success) {
+            $providerName = [regex]::Escape($providerMatch.Groups[1].Value)
+            $providerBlock = [regex]::Match(
+                $codexConfig,
+                "(?ms)^\[model_providers\.$providerName\]\s*(.*?)(?=^\[|\z)"
+            )
+            if ($providerBlock.Success) {
+                $baseMatch = [regex]::Match($providerBlock.Groups[1].Value, '(?m)^base_url\s*=\s*"([^"]+)"')
+            }
+        }
+    }
     $codexAuth = Get-Content -Raw $codexAuthPath | ConvertFrom-Json
     if (-not $codexBaseUrl) { $codexBaseUrl = $baseMatch.Groups[1].Value }
     if (-not $codexModel) { $codexModel = $modelMatch.Groups[1].Value }
@@ -155,23 +168,28 @@ if ($LASTEXITCODE -ne 0) {
 try {
     $n8nPort = Get-DotEnvValue "N8N_PORT" "5678"
     $n8nManagementKey = if ($env:N8N_MANAGEMENT_API_KEY) { $env:N8N_MANAGEMENT_API_KEY } else { Get-DotEnvValue "N8N_MANAGEMENT_API_KEY" "" }
-    if (-not $n8nManagementKey) {
-        throw "N8N_MANAGEMENT_API_KEY is required to remove obsolete project workflows safely."
-    }
     $legacyWorkflowIds = @(
         "ragDbSmoke000001", "kbPublishSource0001", "kbIngestProjectDoc01", "kbIngestWebhook0001",
         "ollamaEmbedding0001", "kbHybridRetrieve0001", "codexRelayResponse1", "codexRerankCandidates1",
         "analysisDecisionStep01", "analysisSpatialStrategyWebhook1", "analysisSpatialStrategyStatus01",
         "analysisStepTest001", "codexRelayTest001", "ragIntegration0001", "analysisSpatialStrategy1"
     )
-    $managementHeaders = @{ "X-N8N-API-KEY" = $n8nManagementKey }
-    foreach ($workflowId in $legacyWorkflowIds) {
-        try {
-            Invoke-RestMethod -Method Delete -Uri "http://localhost:$n8nPort/api/v1/workflows/$workflowId" -Headers $managementHeaders -TimeoutSec 20 | Out-Null
-            Write-Host "Removed obsolete n8n workflow $workflowId"
-        } catch {
-            $statusCode = $_.Exception.Response.StatusCode.value__
-            if ($statusCode -ne 404) { throw "Failed to remove obsolete workflow ${workflowId}: $($_.Exception.Message)" }
+    $workflowList = docker compose exec -T n8n n8n list:workflow
+    if ($LASTEXITCODE -ne 0) { throw "Failed to inspect existing n8n workflows." }
+    $existingWorkflowIds = @($workflowList | ForEach-Object { ($_ -split '\|', 2)[0].Trim() } | Where-Object { $_ })
+    $presentLegacyIds = @($legacyWorkflowIds | Where-Object { $_ -in $existingWorkflowIds })
+    if ($presentLegacyIds.Count -gt 0) {
+        if (-not $n8nManagementKey) {
+            throw "N8N_MANAGEMENT_API_KEY is required because obsolete workflows exist: $($presentLegacyIds -join ', ')"
+        }
+        $managementHeaders = @{ "X-N8N-API-KEY" = $n8nManagementKey }
+        foreach ($workflowId in $presentLegacyIds) {
+            try {
+                Invoke-RestMethod -Method Delete -Uri "http://localhost:$n8nPort/api/v1/workflows/$workflowId" -Headers $managementHeaders -TimeoutSec 20 | Out-Null
+                Write-Host "Removed obsolete n8n workflow $workflowId"
+            } catch {
+                throw "Failed to remove obsolete workflow ${workflowId}: $($_.Exception.Message)"
+            }
         }
     }
     docker compose exec -T n8n n8n import:credentials --input=/tmp/gaode-n8n-credentials.json
@@ -222,8 +240,9 @@ ON CONFLICT ("webhookPath", method) DO UPDATE SET
         throw "Failed to synchronize n8n webhook registry."
     }
 
-    $workflowInventory = Invoke-RestMethod -Method Get -Uri "http://localhost:$n8nPort/api/v1/workflows?limit=250" -Headers $managementHeaders -TimeoutSec 20
-    $workflowIds = @($workflowInventory.data | ForEach-Object { [string]$_.id })
+    $workflowList = docker compose exec -T n8n n8n list:workflow
+    if ($LASTEXITCODE -ne 0) { throw "Failed to verify imported n8n workflows." }
+    $workflowIds = @($workflowList | ForEach-Object { ($_ -split '\|', 2)[0].Trim() } | Where-Object { $_ })
     foreach ($requiredId in @("urbanRenewalDecisionSupportAgent", "urbanRenewalPublicKnowledgeBase")) {
         if ($requiredId -notin $workflowIds) { throw "Required n8n workflow was not imported: $requiredId" }
     }

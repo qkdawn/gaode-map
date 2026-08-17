@@ -1,6 +1,6 @@
 {
-  "id": "ollamaEmbedding0001",
-  "name": "EMB-00 CPU Text Embeddings",
+  "id": "openAIEmbedding0001",
+  "name": "EMB-00 OpenAI-Compatible CPU Text Embeddings",
   "active": true,
   "nodes": [
     {
@@ -14,7 +14,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const input = $input.first()?.json ?? {};\nlet texts = Array.isArray(input.texts) ? input.texts : [];\nif (!texts.length && typeof input.text === 'string') texts = [input.text];\nif (!texts.length && typeof input.query === 'string') texts = [input.query];\nif (!texts.length && Array.isArray(input.document?.chunks)) texts = input.document.chunks.map((chunk) => chunk?.content);\ntexts = texts.map((value) => String(value ?? '').trim());\nif (!texts.length || texts.some((value) => !value)) throw new Error('embedding texts must contain non-empty strings');\nconst dimensions = Number('__EMBEDDING_DIMENSIONS__');\nif (!Number.isInteger(dimensions) || dimensions < 1) throw new Error('embedding dimensions must be a positive integer');\nreturn [{ json: {\n  request: {\n    model: '__EMBEDDING_MODEL__',\n    input: texts,\n    dimensions,\n    truncate: true,\n    keep_alive: '10m',\n  },\n  expected_count: texts.length,\n  dimensions,\n} }];"
+        "jsCode": "const input = $input.first()?.json ?? {};\nlet texts = Array.isArray(input.texts) ? input.texts : [];\nif (!texts.length && typeof input.text === 'string') texts = [input.text];\nif (!texts.length && typeof input.query === 'string') texts = [input.query];\nif (!texts.length && Array.isArray(input.document?.chunks)) texts = input.document.chunks.map((chunk) => chunk?.content);\ntexts = texts.map((value) => String(value ?? '').trim());\nif (!texts.length || texts.some((value) => !value)) throw new Error('embedding texts must contain non-empty strings');\nconst dimensions = Number('__EMBEDDING_DIMENSIONS__');\nif (!Number.isInteger(dimensions) || dimensions < 1) throw new Error('embedding dimensions must be a positive integer');\nreturn [{ json: {\n  request: {\n    model: '__EMBEDDING_MODEL__',\n    input: texts,\n    dimensions,\n    encoding_format: 'float',\n  },\n  expected_count: texts.length,\n  dimensions,\n} }];"
       },
       "id": "aa46fa7c-ec53-4b7a-8ed0-49220733da45",
       "name": "Build Embedding Request",
@@ -25,7 +25,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "__EMBEDDING_API_BASE_URL__/api/embed",
+        "url": "__EMBEDDING_API_BASE_URL__/v1/embeddings",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
@@ -47,7 +47,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const response = $input.first()?.json ?? {};\nconst request = $('Build Embedding Request').first().json;\nconst embeddings = Array.isArray(response.embeddings) ? response.embeddings : [];\nif (embeddings.length !== request.expected_count) throw new Error(`embedding count mismatch: expected ${request.expected_count}, got ${embeddings.length}`);\nfor (const [index, embedding] of embeddings.entries()) {\n  if (!Array.isArray(embedding) || embedding.length !== request.dimensions) throw new Error(`embedding[${index}] must contain ${request.dimensions} values`);\n  if (embedding.some((value) => !Number.isFinite(Number(value)))) throw new Error(`embedding[${index}] contains non-finite values`);\n}\nreturn [{ json: {\n  embeddings,\n  model: String(response.model ?? request.request.model),\n  dimensions: request.dimensions,\n  count: embeddings.length,\n  prompt_eval_count: Number(response.prompt_eval_count ?? 0),\n} }];"
+        "jsCode": "const response = $input.first()?.json ?? {};\nconst request = $('Build Embedding Request').first().json;\nconst data = Array.isArray(response.data) ? response.data : [];\nif (String(response.object ?? '') !== 'list') throw new Error('embedding response object must be list');\nif (data.length !== request.expected_count) throw new Error(`embedding count mismatch: expected ${request.expected_count}, got ${data.length}`);\nconst ordered = [...data].sort((left, right) => Number(left?.index) - Number(right?.index));\nconst embeddings = ordered.map((item, index) => {\n  if (Number(item?.index) !== index) throw new Error(`embedding index mismatch at ${index}`);\n  const embedding = item?.embedding;\n  if (!Array.isArray(embedding) || embedding.length !== request.dimensions) throw new Error(`embedding[${index}] must contain ${request.dimensions} values`);\n  if (embedding.some((value) => !Number.isFinite(Number(value)))) throw new Error(`embedding[${index}] contains non-finite values`);\n  return embedding;\n});\nreturn [{ json: {\n  embeddings,\n  model: String(response.model ?? request.request.model),\n  dimensions: request.dimensions,\n  count: embeddings.length,\n  prompt_eval_count: Number(response.usage?.prompt_tokens ?? 0),\n} }];"
       },
       "id": "779a8b90-71e0-432e-971c-931120296fa3",
       "name": "Validate Embeddings",

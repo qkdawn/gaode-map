@@ -88,7 +88,7 @@ def test_agent_has_submit_status_and_adaptive_decision_loop():
     claim_query = nodes["领取排队分析任务"]["parameters"]["query"]
     assert "FOR UPDATE SKIP LOCKED" in claim_query
     assert "status = 'queued' OR (status = 'running' AND lease_expires_at < NOW())" in claim_query
-    assert "lease_expires_at = NOW() + INTERVAL '15 minutes'" in claim_query
+    assert "lease_expires_at = NOW() + INTERVAL '45 minutes'" in claim_query
     assert "$('展开领取任务请求').first()?.json" in nodes["合并项目上下文"]["parameters"]["jsCode"]
 
     loops = [node for node in workflow["nodes"] if node["type"] == "n8n-nodes-base.splitInBatches"]
@@ -100,14 +100,17 @@ def test_agent_has_submit_status_and_adaptive_decision_loop():
     assert "if (!adaptiveSteps.length) throw new Error('research_plan_empty')" in queue_code
     assert "research_plan" in queue_code
     assert _targets(workflow, "合并项目上下文") == ["构建整体研究框架"]
-    assert _targets(workflow, "构建整体研究框架") == ["构建研究框架请求体"]
+    assert _targets(workflow, "构建整体研究框架") == ["复用已有研究框架？"]
+    assert _targets(workflow, "复用已有研究框架？", 0) == ["确认整体研究框架"]
+    assert _targets(workflow, "复用已有研究框架？", 1) == ["构建研究框架请求体"]
     assert _targets(workflow, "解析研究框架响应") == ["确认整体研究框架"]
     assert _targets(workflow, "确认整体研究框架") == ["建立自适应分析队列"]
     frame_code = nodes["构建整体研究框架"]["parameters"]["jsCode"]
     assert "真正需要作出的选择" in frame_code
     assert "不要为了形式凑假设" in frame_code
     assert "现有项目文档和空间数据库已经能支持哪些判断" in frame_code
-    assert "不要输出“必须补齐证据”清单" in frame_code
+    assert "不输出缺失信息、不能证明事项或“必须补齐证据”清单" in frame_code
+    assert "reuse_research_frame" in frame_code
     assert "research_frame" in queue_code
     assert "research_brief" in queue_code
     assert _targets(workflow, "逐项执行分析方向", 0) == ["读取完整分析状态"]
@@ -116,27 +119,34 @@ def test_agent_has_submit_status_and_adaptive_decision_loop():
     assert "逐项执行分析方向" in _targets(workflow, "复用已完成章节")
 
 
-def test_agent_inlines_retrieval_responses_and_project_tools():
+def test_agent_uses_independent_on_demand_evidence_tools():
     workflow = _generated("urban-renewal-agent.workflow.mjs")
     nodes = _nodes(workflow)
-    assert nodes["调用 GraphRAG 文献检索"]["parameters"]["url"] == "=__SPATIAL_API_BASE_URL__/analysis/spatial-strategy/knowledge/graphrag/query"
-    assert nodes["调用 GraphRAG 文献检索"]["parameters"]["options"]["timeout"] == 900000
-    assert "microsoft_graphrag" in nodes["整理 GraphRAG 文献证据"]["parameters"]["jsCode"]
-    assert _targets(workflow, "构建公共证据检索请求") == ["构建 GraphRAG 文献问题"]
-    assert _targets(workflow, "整理 GraphRAG 文献证据") == ["构建章节分析请求"]
-    assert not any(name in nodes for name in ("混合检索公共证据", "生成公共证据查询向量", "重排公共证据"))
+    assert not any(name in nodes for name in (
+        "构建公共证据检索请求",
+        "检索公共证据原文",
+        "构建 GraphRAG 文献问题",
+        "调用 GraphRAG 文献检索",
+        "整理 GraphRAG 文献证据",
+    ))
+    assert _targets(workflow, "标记当前方向执行中") == ["选择首个项目文档"]
+    assert _targets(workflow, "选择首个项目文档") == ["存在项目文档？"]
+    assert _targets(workflow, "存在项目文档？", 0) == ["预读项目文档正文"]
+    assert _targets(workflow, "存在项目文档？", 1) == ["构建证据路由请求"]
+    assert _targets(workflow, "预读项目文档正文") == ["注入项目文档正文"]
+    assert _targets(workflow, "注入项目文档正文") == ["构建证据路由请求"]
 
-    for name in ("请求章节分析模型", "请求深化分析模型", "请求图件设计模型", "请求报告叙事模型"):
+    for name in ("请求章节研究模型", "请求独立章节成稿模型", "请求图件设计模型", "请求报告叙事模型"):
         assert nodes[name]["parameters"]["url"] == "__CODEX_RELAY_BASE_URL__/responses"
         assert nodes[name]["parameters"]["options"]["timeout"] >= 300_000
+    assert nodes["请求证据路由模型"]["parameters"]["url"] == "__CODEX_RELAY_BASE_URL__/responses"
+    assert nodes["请求证据路由模型"]["parameters"]["options"]["timeout"] == 120_000
+    assert nodes["请求证据路由模型"]["maxTries"] == 2
 
-    chapter_code = nodes["构建章节分析请求"]["parameters"]["jsCode"]
-    retrieval_code = nodes["构建公共证据检索请求"]["parameters"]["jsCode"]
-    assert "state.research_brief" in retrieval_code
-    assert "previousDecisions" in retrieval_code
-    assert "decision_steps: []" in retrieval_code
-    follow_up = nodes["将项目工具结果交回模型"]["parameters"]["jsCode"]
+    chapter_code = nodes["构建证据路由请求"]["parameters"]["jsCode"]
+    follow_up = nodes["更新证据简报"]["parameters"]["jsCode"]
     assert all(tool in chapter_code for tool in (
+        "search_literature_evidence",
         "analyze_spatial_evidence",
         "read_project_document",
         "read_previous_chapter",
@@ -146,61 +156,110 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "project_context'" not in chapter_code
     assert "query_data'" not in chapter_code
     assert "project_documents" in chapter_code
-    assert "tool_choice: { type: 'function', name: 'search_public_web' }" in chapter_code
-    assert "搜索摘要只用于发现来源，不能作为事实证据" in chapter_code
-    assert "不得把未公开项目文档、住户信息、权属细节、个人信息" in chapter_code
-    assert "按需使用 read_project_document 读取原文" in chapter_code or "必须按需调用 read_project_document 读取原文" in chapter_code
-    assert "可以使用 Markdown 表格" in chapter_code
-    assert "不强制每章使用" in chapter_code
-    assert "提出可能成立的解释或路径" in chapter_code
-    assert "本次分析的完整边界是当前已经提供的项目文档、POI、人口、路网、夜光、H3 网格" in chapter_code
-    assert "不得把现场踏勘、访谈、产权或文保核验、逐栋建筑测绘、真实客流、付费意愿、运营商承诺" in chapter_code
-    assert "未知只降低结论强度，不自动阻塞结论" in chapter_code
-    assert "默认不要生成“必须补齐证据”“需要进一步核实”的清单" in chapter_code
-    assert "替代解释" in chapter_code
-    assert "优先推进一个新的决策边界" in chapter_code
-    assert "如果没有有意义的替代解释" in chapter_code
-    assert "不要把上游的完整论证重新改写成背景综述" in chapter_code
-    assert "decision_brief" in chapter_code
-    assert "自由文本，不使用固定模板" in chapter_code
-    assert "properties: { decision_brief:" in chapter_code
+    assert "project_document_prefetch" in chapter_code
+    assert "首段正文已经由工作流预读并注入" in chapter_code
+    assert "不能只依据目录" in chapter_code
+    assert "tool_choice: { type: 'function'" not in chapter_code
+    assert "search_public_web 发现来源，再用 fetch_public_web_page" in chapter_code
+    assert "搜索摘要不能作为事实证据" in chapter_code
+    assert "focused 默认快速返回 PDF 原文" in chapter_code
+    assert "不得包含未公开项目细节" in chapter_code
+    assert "涉及项目事实、场地、主题或约束时，必须继续使用 read_project_document 分页读取原文" in chapter_code
+    assert "research_frame:" in chapter_code
+    assert "research_brief: state.research_brief" in chapter_code
+    assert "previous_decisions: previousDecisions" in chapter_code
+    assert "真实客流" not in chapter_code
+    assert "付费意愿" not in chapter_code
+    assert "运营商承诺" not in chapter_code
+    assert "检查工具结果是否足以让后续研究 Agent 回答当前 research_brief" in chapter_code
+    assert "数据目录、字段说明、记录总量和工具可用状态不等于分析结果" in chapter_code
+    assert "evidence_brief 里还没有该类工具的实际结果时，不得仅凭数据目录" in chapter_code
+    assert "scope 且 metric_ids=[] 只是指标发现，永远不构成空间分析结果" in chapter_code
+    assert "必须继续选择一个能返回 groups、highlights 或 relationship 的具体分析" in chapter_code
+    assert "只选择当前研究任务真正需要的工具" in chapter_code
+    assert "不要在路由阶段解释证据关系" in chapter_code
+    assert "不规定后续研究和写作结构" in chapter_code
+    assert "research_summary" not in chapter_code
+    assert "key_findings" not in chapter_code
+    assert "tensions" not in chapter_code
+    assert "ready_to_write" not in chapter_code
+    assert "properties: { decision:" in chapter_code
+    assert "name: 'evidence_route'" in chapter_code
+    assert "initial_context_items" in chapter_code
+    assert "working_research_brief" in chapter_code
+    assert "research_result_store" in chapter_code
     assert "evidence_claims" not in chapter_code
     assert "context_budget" in follow_up
     assert "no_new_evidence" in follow_up
     assert "tool_errors" in follow_up
     assert "emergency_cap" not in follow_up
-    assert "tool_choice: resolvedStopReason ? 'none' : (nextMandatoryWebTool" in follow_up
+    assert "tool_choice: 'none'" in follow_up
+    assert "tool_call_limit" in follow_up
+    assert "next_tools: { type: 'array', maxItems: 3" in chapter_code
+    assert "execution_budget" in chapter_code
+    assert "batch_index" in follow_up
+    assert "search_public_web→fetch_public_web_page" in chapter_code
+    assert "scope→具体指标" in chapter_code
+    assert "rank→inspect" in chapter_code
+    assert "文档分页必须跨轮串行" in chapter_code
+    assert nodes["执行证据工具"]["onError"] == "continueRegularOutput"
+    assert _targets(workflow, "执行证据工具") == ["更新证据简报"]
+    assert "记录项目工具调用失败" not in nodes
+    assert "duplicate_request" in follow_up
+    assert "tool_request_fingerprints" in follow_up
+    assert "projectSpatialValue" in follow_up
+    assert "briefCard" in follow_up
+    assert "compactSpatialResult" in follow_up
+    assert "projectNamedSpatialRecords" in follow_up
+    assert "named_spatial_records" in follow_up
+    assert "named_record_refs" in follow_up
+    assert "candidate = { tool_name: entry.tool_name, call_id: entry.call_id, is_error: entry.is_error, batch_index: entry.batch_index, result: { status:" in follow_up
+    assert "if (entry.tool_name === 'analyze_spatial_evidence')" in follow_up
+    assert "pending_expansions" not in follow_up
+    assert "latest_tool_results" in follow_up
+    assert "function_call_output" not in follow_up
+    assert "nextMandatoryWebTool" not in follow_up
     assert "const forceFinal = turn >= 6" not in follow_up
     assert "context_budget_tokens: 24000" in chapter_code
     assert "no_new_evidence_limit: 2" in chapter_code
-    assert "public_knowledge_retrieval" in chapter_code
-    assert "文献证据暂不可用" in chapter_code
-    assert _targets(workflow, "解析章节模型响应") == ["章节模型请求工具？"]
-    assert _targets(workflow, "章节模型请求工具？", 0) == ["准备项目工具调用"]
-    assert _targets(workflow, "章节模型请求工具？", 1) == ["深化章节判断"]
-    assert _targets(workflow, "深化章节判断") == ["构建深化请求体"]
-    assert _targets(workflow, "解析深化分析响应") == ["校验章节正文"]
-    deepen_code = nodes["深化章节判断"]["parameters"]["jsCode"]
-    assert "另一种解释" in deepen_code
-    assert "不得把现场踏勘、访谈、产权或文保核验、真实客流、付费意愿或运营商承诺新增为本章的必需证据" in deepen_code
-    assert "未知只说明不能推出什么，不自动转成“必须补齐证据”或“需要进一步核实”的任务" in deepen_code
-    assert "不做格式审计" in deepen_code
-    assert "reasoning: { effort: draftAvailable ? 'high' : 'medium' }" in deepen_code
-    assert "tools: []" in deepen_code
-    assert "fallback_output_text" in deepen_code
-    assert "generation_recovery_error" in deepen_code
-    assert "恢复分析师" in deepen_code
-    assert _targets(workflow, "将项目工具结果交回模型") == ["刷新分析任务租约"]
+    assert "public_knowledge_retrieval" not in chapter_code
+    assert "工具不可用时，不得假装取得结果" in chapter_code
+    assert _targets(workflow, "解析证据路由响应") == ["校验证据路由决策"]
+    assert _targets(workflow, "校验证据路由决策") == ["证据路由需要修正？"]
+    assert _targets(workflow, "证据路由需要修正？", 0) == ["构建证据路由请求体"]
+    assert _targets(workflow, "证据路由需要修正？", 1) == ["路由 Agent 请求工具？"]
+    assert _targets(workflow, "路由 Agent 请求工具？", 0) == ["准备证据路由工具调用"]
+    assert _targets(workflow, "路由 Agent 请求工具？", 1) == ["构建章节研究分析请求"]
+    assert _targets(workflow, "构建章节研究分析请求") == ["构建章节研究模型请求体"]
+    assert _targets(workflow, "解析章节研究模型响应") == ["构建独立章节成稿请求"]
+    assert _targets(workflow, "构建独立章节成稿请求") == ["构建独立成稿请求体"]
+    assert _targets(workflow, "解析独立章节成稿响应") == ["校验章节正文"]
+    assert "深化章节判断" not in nodes
+    assert "请求深化分析模型" not in nodes
+    assert _targets(workflow, "更新证据简报") == ["刷新分析任务租约"]
 
-    for name in ("构建整体研究框架", "请求研究框架模型", "确认整体研究框架", "校验当前分析方向", "构建章节分析请求", "请求章节分析模型", "深化章节判断", "请求深化分析模型", "校验章节正文", "保存章节与分析状态", "生成最终报告"):
+    research_code = nodes["构建章节研究分析请求"]["parameters"]["jsCode"]
+    draft_code = nodes["构建独立章节成稿请求"]["parameters"]["jsCode"]
+    assert "evidence_brief: brief" in research_code
+    assert "tools: []" in research_code
+    assert "text: undefined" in research_code
+    assert "reasoning: { effort: 'medium' }" in research_code
+    assert "你不受证据路由 Agent 的简短 JSON、低推理配置或工具调用规则约束" in research_code
+    assert "与本章结论无关的缺失信息、不能证明事项或补数清单直接省略" in research_code
+    assert "research_memo: researchMemo" in draft_code
+    assert "research_handoff" not in draft_code
+    assert "reasoning: { effort: 'high' }" in draft_code
+    assert "与结论无关的缺失信息和“不能证明什么”不写" in draft_code
+
+    for name in ("构建整体研究框架", "请求研究框架模型", "确认整体研究框架", "校验当前分析方向", "构建证据路由请求", "请求证据路由模型", "构建章节研究分析请求", "请求章节研究模型", "构建独立章节成稿请求", "请求独立章节成稿模型", "校验章节正文", "保存章节与分析状态", "生成最终报告"):
         assert nodes[name]["onError"] == "continueErrorOutput"
         assert "记录任务失败" in _targets(workflow, name, 1)
     assert workflow["settings"]["executionTimeout"] == 14400
     assert "citations = COALESCE" in nodes["保存章节与分析状态"]["parameters"]["query"]
     assert "heartbeat_at = NOW()" in nodes["标记当前方向执行中"]["parameters"]["query"]
-    follow_up_code = nodes["将项目工具结果交回模型"]["parameters"]["jsCode"]
-    tool_prepare_code = nodes["准备项目工具调用"]["parameters"]["jsCode"]
-    tool_http_code = nodes["读取项目原文或空间数据"]["parameters"]["jsonBody"]
+    follow_up_code = nodes["更新证据简报"]["parameters"]["jsCode"]
+    tool_prepare_code = nodes["准备证据路由工具调用"]["parameters"]["jsCode"]
+    tool_http_code = nodes["执行证据工具"]["parameters"]["jsonBody"]
     assert "mcp_request_body" in tool_prepare_code
     assert "JSON.stringify" in tool_prepare_code
     assert "return calls.map" in tool_prepare_code
@@ -208,8 +267,8 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "JSON.parse($json.mcp_request_body)" in tool_http_code
     assert "completed_chapters" in tool_prepare_code
     assert "current_step_order" in tool_prepare_code
-    assert "$('构建章节分析请求').first().json" in tool_prepare_code
-    assert "$('准备项目工具调用').first().json" in follow_up_code
+    assert "$('构建证据路由请求').first().json" in tool_prepare_code
+    assert "$('准备证据路由工具调用').first().json" in follow_up_code
     assert "const items = $input.all()" in follow_up_code
     assert "normalizedResults = items.map" in follow_up_code
     assert ".item.json" not in tool_prepare_code
@@ -218,30 +277,54 @@ def test_agent_inlines_retrieval_responses_and_project_tools():
     assert "entry.tool_name === 'read_project_document'" in follow_up_code
     assert "entry.tool_name === 'analyze_spatial_evidence'" in follow_up_code
     assert "entry.tool_name === 'fetch_public_web_page'" in follow_up_code
+    assert "entry.tool_name === 'search_literature_evidence'" in follow_up_code
+    assert "public_knowledge_graphrag" in follow_up_code
     assert "source_type: 'public_web_fulltext'" in follow_up_code
-    assert "nextMandatoryWebTool" in follow_up_code
-    assert "public_web_no_candidates" in follow_up_code
+    assert "nextMandatoryWebTool" not in follow_up_code
+    assert "public_web_no_candidates" not in follow_up_code
     assert "tool_evidence: toolEvidence" in follow_up_code
     assert "response.tool_evidence" in validation_code
-    assert "evidence_index:" in validation_code
+    assert "  evidence_index:" not in validation_code
+    assert "_discardedEvidenceIndex" in validation_code
+    assert "const diagnostics = [];" in validation_code
+    citation_projection = validation_code.split("const citations =", 1)[1].split("const diagnostics =", 1)[0]
+    assert "...item" not in citation_projection
+    assert "content:" not in citation_projection
+    assert "source_locator:" in citation_projection
     assert "decisionBrief" in validation_code
     assert "decision_brief: decisionBrief" in validation_code
     assert "reader_chapter_model_failed" in validation_code
-    assert "deepening_model_unavailable" in validation_code
-    assert "fallback_to_initial_draft" in validation_code
-    assert "chapter_generation_recovered" in validation_code
-    assert "recovered_after_primary_failure" in validation_code
+    assert "deepening_model_unavailable" not in validation_code
+    assert "fallback_to_initial_draft" not in validation_code
+    assert "chapter_generation_recovered" not in validation_code
+    assert "recovered_after_primary_failure" not in validation_code
     assert "live_web_fulltext_count" in validation_code
-    assert "dual_source_status" in validation_code
+    assert "literature_evidence_count" in validation_code
+    assert "dual_source_status" not in validation_code
+    assert "public_context_count" not in validation_code
     assert "reader_chapter_missing_evidence_context" not in validation_code
     assert "reader_chapter_missing_conditions" not in validation_code
     assert "刷新分析任务租约" in nodes
     assert "刷新报告阶段租约" in nodes
-    assert _targets(workflow, "将项目工具结果交回模型") == ["刷新分析任务租约"]
+    assert _targets(workflow, "生成 Word 报告并发送飞书") == ["恢复已发送报告上下文"]
+    assert _targets(workflow, "恢复已发送报告上下文") == ["完成分析任务"]
+    assert _targets(workflow, "更新证据简报") == ["刷新分析任务租约"]
     assert _targets(workflow, "刷新分析任务租约") == ["恢复章节工具上下文"]
-    assert _targets(workflow, "恢复章节工具上下文") == ["构建章节模型请求体"]
+    assert _targets(workflow, "恢复章节工具上下文") == ["构建证据路由请求体"]
     assert _targets(workflow, "刷新报告阶段租约") == ["恢复报告图件上下文"]
     assert _targets(workflow, "恢复报告图件上下文") == ["构建报告叙事请求"]
+
+
+def test_n8n_execution_history_keeps_failures_for_seven_days_only():
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    environment = compose["x-n8n-environment"]
+
+    assert environment["EXECUTIONS_DATA_SAVE_ON_SUCCESS"] == "${N8N_EXECUTIONS_DATA_SAVE_ON_SUCCESS:-none}"
+    assert environment["EXECUTIONS_DATA_SAVE_ON_ERROR"] == "${N8N_EXECUTIONS_DATA_SAVE_ON_ERROR:-all}"
+    assert environment["EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS"] == "${N8N_EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS:-false}"
+    assert environment["EXECUTIONS_DATA_SAVE_ON_PROGRESS"] == "${N8N_EXECUTIONS_DATA_SAVE_ON_PROGRESS:-false}"
+    assert environment["EXECUTIONS_DATA_PRUNE"] == "${N8N_EXECUTIONS_DATA_PRUNE:-true}"
+    assert environment["EXECUTIONS_DATA_MAX_AGE"] == "${N8N_EXECUTIONS_DATA_MAX_AGE:-168}"
 
 
 def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
@@ -292,7 +375,7 @@ def test_public_knowledge_base_rejects_project_documents_and_owns_embedding_publ
     assert "'knowledge_base'" in identity_code
     assert "project_document" in identity_code and "test_fixture" in identity_code
     assert "project_document" in parse_code and "test_fixture" in parse_code
-    assert nodes["生成分块向量"]["parameters"]["url"] == "__EMBEDDING_API_BASE_URL__/api/embed"
+    assert nodes["生成分块向量"]["parameters"]["url"] == "__EMBEDDING_API_BASE_URL__/v1/embeddings"
     validation_code = nodes["校验分块向量"]["parameters"]["jsCode"]
     assert "embedding count mismatch" in validation_code
     assert "contains non-finite values" in validation_code

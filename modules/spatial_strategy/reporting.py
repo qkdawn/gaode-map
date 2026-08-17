@@ -56,6 +56,12 @@ INTERNAL_TERM_PATTERNS = (
     re.compile(r"\b(?:phase\s*\d+|[GDP]\d+)\b", re.IGNORECASE),
 )
 
+UNAVAILABLE_EVIDENCE_PATTERNS = (
+    re.compile(r"客流|人流|付费|经营回报|营业收入|销售额|游客来源|参观人数|停留时间|消费数据|运营数据"),
+    re.compile(r"(?:数据|证据)(?:缺口|不足)|补证"),
+    re.compile(r"(?:需要|仍需|必须|应当).{0,24}(?:验证|调查|核实|核验|补充)"),
+)
+
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
@@ -153,6 +159,24 @@ def _validate_reader_text(value: Any, *, field: str, minimum_length: int = 1) ->
     return text
 
 
+def _current_evidence_only(value: Any) -> str:
+    """Remove sentences whose sole role is to request evidence outside the current run."""
+    output: list[str] = []
+    for line in _text(value).splitlines():
+        if not line.strip():
+            output.append("")
+            continue
+        sentences = re.split(r"(?<=[。！？；])", line)
+        kept = [
+            sentence
+            for sentence in sentences
+            if sentence.strip() and not any(pattern.search(sentence) for pattern in UNAVAILABLE_EVIDENCE_PATTERNS)
+        ]
+        if kept:
+            output.append("".join(kept).strip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
+
+
 def _report_visual_assets(value: Any) -> list[dict[str, Any]]:
     assets: list[dict[str, Any]] = []
     for raw_asset in _list(value):
@@ -182,7 +206,7 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
     if missing_steps:
         raise ValueError("report_requires_completed_steps:" + ",".join(missing_steps))
     completed_steps = [
-        (step_key, _mapping(output))
+        (step_key, {**_mapping(output), "reader_chapter": _current_evidence_only(_mapping(output).get("reader_chapter"))})
         for step_key, output in steps.items()
         if isinstance(output, Mapping) and _text(output.get("reader_chapter"))
     ]
@@ -193,7 +217,7 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
     for step_key, output in completed_steps:
         _validate_reader_text(output.get("reader_chapter"), field=f"reader_chapter_{step_key}", minimum_length=1)
     editorial_narrative = _validate_reader_text(
-        request.editorial_narrative,
+        _current_evidence_only(request.editorial_narrative),
         field="editorial_narrative",
         minimum_length=1,
     )
