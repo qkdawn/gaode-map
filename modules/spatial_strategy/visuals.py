@@ -1106,6 +1106,8 @@ def _normalize_plan(
         chart_variant = str(raw.get("chart_variant") or "").strip()
         if map_variant not in {"", "poi_access", "context_full", "regional_role"}:
             raise ValueError(f"visual_map_variant_invalid:{map_variant}")
+        if any(layer["dataset_id"] == "nightlight" for layer in layers):
+            map_variant = ""
         if chart_variant not in {"", "poi_supply", "population_profile"}:
             raise ValueError(f"visual_chart_variant_invalid:{chart_variant}")
         normalized.append(

@@ -151,26 +151,42 @@ def test_records_can_be_exhausted_with_snapshot_bound_continuation(service, monk
         service.query_data(history_id="history-1", dataset_id="poi", filters={"name": "other"}, continue_token=first["continue_token"])
 
 
-def test_project_document_reader_keeps_physical_pages_headings_and_locators(service):
+def test_project_document_reader_keeps_docling_text_structure(service):
     page = service.read_project_document(history_id="history-1", document_id="doc-1")
 
     assert page["blocks"][1] == {
-        "chunk_id": "chunk:12",
-        "document_id": "doc-1",
-        "filename": "project.docx",
         "page": 1,
         "heading": "现状建筑",
         "text": "第一页原文",
         "block_type": "paragraph",
-        "source_locator": "page:1 block:2",
     }
     assert page["blocks"][2]["page"] == 4
-    assert page["blocks"][2]["source_locator"] == "page:4 block:1"
     assert page["complete"] is True
     assert page["next_start_block"] is None
-    assert page["content_mode"] == "verified_original_text"
-    assert page["original_resource_uri"] == "spatial-document://history-1/doc-1/original"
     assert page["text"] == "现状建筑\n\n第一页原文\n\n第四页原文"
+    assert not {
+        "history_id",
+        "content_mode",
+        "original_resource_uri",
+        "document_checksum",
+        "selection_checksum",
+        "returned_characters",
+        "total_characters",
+        "continuation_reason",
+        "continuation_hint",
+        "warnings",
+    }.intersection(page)
+
+
+def test_project_document_reader_applies_internal_character_budget(service, monkeypatch):
+    monkeypatch.setattr(contract_module, "MAX_DOCUMENT_CHARACTERS", 5)
+
+    page = service.read_project_document(history_id="history-1", document_id="doc-1")
+
+    assert page["text"] == "现状建筑"
+    assert page["returned_blocks"] == 1
+    assert page["complete"] is False
+    assert page["next_start_block"] == 1
 
 
 def test_project_document_reader_supports_explicit_continuation(service):

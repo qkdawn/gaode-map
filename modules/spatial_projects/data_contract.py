@@ -13,6 +13,7 @@ from modules.spatial_projects.service import SpatialProjectService
 SCHEMA_VERSION = "spatial_records/v1"
 MAX_RESULT_SIZE = 500
 MAX_DOCUMENT_BLOCKS = 40
+MAX_DOCUMENT_CHARACTERS = 10000
 
 DATASET_SOURCES = {
     "poi": "current:dataset:poi",
@@ -47,7 +48,7 @@ DATASET_SCHEMAS: dict[str, dict[str, Any]] = {
         "units": {"radiance": "nW/(cm2 sr)"},
     },
     "document": {
-        "fields": ["chunk_id", "document_id", "filename", "page", "heading", "text", "block_type", "source_locator"],
+        "fields": ["page", "heading", "text", "block_type"],
         "geometry_type": "",
     },
 }
@@ -289,18 +290,23 @@ class ProjectDataContractService:
             if (page_start is None or int(block["page"]) >= page_start)
             and (page_end is None or int(block["page"]) <= page_end)
         ]
-        blocks = selected[start_block:start_block + max_blocks]
+        candidate_blocks = selected[start_block:start_block + max_blocks]
+        blocks: list[dict[str, Any]] = []
+        returned_characters = 0
+        for block in candidate_blocks:
+            block_characters = len(str(block.get("text") or ""))
+            # Keep document blocks atomic so tables and paragraphs are never cut
+            # in the middle; continuation starts at the first omitted block.
+            if blocks and returned_characters + block_characters > MAX_DOCUMENT_CHARACTERS:
+                break
+            blocks.append(block)
+            returned_characters += block_characters
         next_start_block = start_block + len(blocks)
         complete = next_start_block >= len(selected)
         text = "\n\n".join(str(block.get("text") or "") for block in blocks)
         return {
             "schema_version": SCHEMA_VERSION,
-            "history_id": history_id,
             "document_id": normalized_document_id,
-            "content_mode": "verified_original_text",
-            "original_resource_uri": self._document_resource_uri(history_id, normalized_document_id),
-            "document_checksum": _checksum(all_blocks),
-            "selection_checksum": _checksum(blocks),
             "total_blocks": len(selected),
             "start_block": start_block,
             "returned_blocks": len(blocks),
@@ -308,7 +314,6 @@ class ProjectDataContractService:
             "next_start_block": None if complete else next_start_block,
             "blocks": blocks,
             "text": text,
-            "warnings": [],
         }
 
     @staticmethod
@@ -426,20 +431,13 @@ class ProjectDataContractService:
             raise LookupError("document_not_found")
         blocks = list_document_blocks(document_id)
         chunks = []
-        page_ordinals: dict[int, int] = {}
         for block in blocks.blocks:
             page = int(block.pageIndex or 0) + 1
-            page_ordinals[page] = page_ordinals.get(page, 0) + 1
-            block_number = page_ordinals[page]
             chunks.append({
-                "chunk_id": f"chunk:{block.id}",
-                "document_id": document_id,
-                "filename": document.get("file_name") or blocks.document.file_name,
                 "page": page,
                 "heading": str(block.sectionTitle or (block.text if block.blockType == "title" else "")),
                 "text": str(block.text or ""),
                 "block_type": str(block.blockType),
-                "source_locator": f"page:{page} block:{block_number}",
             })
         return chunks
 

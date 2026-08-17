@@ -161,6 +161,7 @@ def test_nightlight_map_uses_platform_palette_and_hotspot_thresholds(monkeypatch
         visual_plan=[_decision_plan(
             title="夜光热点与梯度",
             format="map",
+            map_variant="context_full",
             dataset_id="nightlight",
             layers=[{"dataset_id": "nightlight", "role": "polygon", "color": "#F2C94C", "metric_field": "radiance"}],
             group_by="year",
@@ -187,6 +188,7 @@ def test_nightlight_map_uses_platform_palette_and_hotspot_thresholds(monkeypatch
     )
 
     asset = package["assets"][0]
+    assert package["visual_plan"][0]["map_variant"] == ""
     style = asset["design"]["nightlight_style"]
     assert style["palette"] == "platform_radiance_v1"
     assert style["domain"] == "positive_p5_p98"

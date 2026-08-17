@@ -19,7 +19,7 @@ from modules.spatial_action.source_index import SourceIndex
 from modules.spatial_projects.service import SpatialProjectService
 
 
-SCHEMA_VERSION = "spatial_evidence/v1"
+SCHEMA_VERSION = "spatial_evidence/v2"
 DEFAULT_DISTANCE_BANDS_M = ((0.0, 500.0), (500.0, 1000.0), (1000.0, 1600.0))
 DIRECTION_CODES = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 DIRECTION_LABELS = {
@@ -42,6 +42,59 @@ FORBIDDEN_OUTPUT_KEYS = {
     "connection",
     "file_path",
     "path",
+}
+MODEL_RESPONSE_CHAR_LIMIT = 8000
+MODEL_STRING_CHAR_LIMIT = 1200
+MODEL_LIST_ITEM_LIMIT = 20
+
+DATASET_FIELD_CATALOG = {
+    "current:dataset:poi": {
+        "dataset_id": "poi",
+        "identity_fields": ["name", "category", "subcategory", "typecode", "address", "year", "source"],
+        "measure_fields": [],
+    },
+    "current:dataset:h3": {
+        "dataset_id": "h3",
+        "identity_fields": ["h3_id", "year"],
+        "measure_fields": [
+            "poi_count", "density_poi_per_km2", "category_counts", "subcategory_counts",
+            "local_entropy", "neighbor_mean_density", "neighbor_mean_entropy", "lq",
+            "gi_star_z_score", "lisa_i",
+        ],
+    },
+    "current:dataset:poi_grid": {
+        "dataset_id": "poi_grid",
+        "identity_fields": ["cell_id", "year"],
+        "measure_fields": ["poi_count", "density_poi_per_km2", "category_counts", "dominant_category_name"],
+    },
+    "current:dataset:population": {
+        "dataset_id": "population",
+        "identity_fields": ["cell_id", "year", "source"],
+        "measure_fields": ["population_total", "age_5_19", "age_30_39", "age_50_64"],
+    },
+    "current:dataset:nightlight": {
+        "dataset_id": "nightlight",
+        "identity_fields": ["cell_id", "year", "unit", "has_data", "source"],
+        "measure_fields": ["radiance"],
+    },
+    "current:dataset:road_nodes": {
+        "dataset_id": "road_nodes",
+        "identity_fields": ["node_id"],
+        "measure_fields": ["degree"],
+    },
+    "current:dataset:road_edges": {
+        "dataset_id": "road_edges",
+        "identity_fields": ["road_name", "road_class"],
+        "measure_fields": ["length_m", "metrics.integration", "metrics.choice", "metrics.connectivity", "metrics.depth", "metrics.control"],
+    },
+    "current:dataset:road_grid": {
+        "dataset_id": "road_grid",
+        "identity_fields": ["cell_id"],
+        "measure_fields": [
+            "road_length_km", "road_length_km_per_km2", "road_segment_count", "road_choice",
+            "road_integration", "road_connectivity", "road_control", "road_depth",
+        ],
+    },
 }
 
 
@@ -234,6 +287,7 @@ class _SpatialRow:
     direction: str
     area_km2: float
     values: dict[str, float | None]
+    identity: dict[str, Any]
 
 
 class _RecordIndex:
@@ -364,24 +418,29 @@ class SpatialEvidenceService:
             data_status = "ready" if any(source in available for source in source_ids) else "unavailable"
             if catalog_binding and not source_ids:
                 data_status = "ready"
+            supported_analyses = list(binding.supported_analyses) if binding else ["scope"]
+            analysis_profile = (
+                "all"
+                if supported_analyses == list(MetricBinding.__dataclass_fields__["supported_analyses"].default)
+                else ",".join(supported_analyses)
+            )
             metrics.append({
                 "metric_id": metric_id,
-                "label": item.name if item else binding.label,
-                "unit": binding.unit if binding else "catalog_result",
-                "implementation_status": str(getattr(item, "implementation_status", "implemented")) if item else "implemented",
-                "data_status": data_status,
-                "supported_analyses": list(binding.supported_analyses) if binding else ["scope"],
+                "available": data_status == "ready",
+                "analyses": analysis_profile,
             })
         datasets = [
             {
-                "source_id": str(item.get("source_id") or ""),
+                "dataset_id": DATASET_FIELD_CATALOG.get(str(item.get("source_id") or ""), {}).get("dataset_id", ""),
                 "title": str(item.get("title") or ""),
                 "year": item.get("selected_year"),
                 "record_count": int(item.get("record_count") or 0),
                 "status": str(item.get("status") or ""),
+                "identity_fields": DATASET_FIELD_CATALOG.get(str(item.get("source_id") or ""), {}).get("identity_fields", []),
+                "measure_fields": DATASET_FIELD_CATALOG.get(str(item.get("source_id") or ""), {}).get("measure_fields", []),
             }
             for item in project.get("datasets") or []
-            if isinstance(item, Mapping)
+            if isinstance(item, Mapping) and str(item.get("source_id") or "") in DATASET_FIELD_CATALOG
         ]
         return self._response(
             query=query,
@@ -390,11 +449,11 @@ class SpatialEvidenceService:
             metrics=metrics,
             summary={
                 "catalog_metric_count": len(metrics),
-                "available_metric_count": sum(item["data_status"] == "ready" for item in metrics),
+                "available_metric_count": sum(item["available"] for item in metrics),
                 "datasets": datasets,
             },
             coverage={"complete": True, "available_dataset_count": len(available)},
-            limitations=self._common_limitations(query.metric_ids),
+            limitations=[],
             method={"kind": "spatial_evidence_catalog", "scope_policy": "current_saved_scope_only"},
             provenance=self._provenance(project, {}, available),
         )
@@ -499,7 +558,7 @@ class SpatialEvidenceService:
             summary=summary,
             coverage={"complete": all(value == "available" for value in statuses), "metric_statuses": dict(zip(query.metric_ids, statuses))},
             evidence=evidence,
-            limitations=limitations + self._common_limitations(query.metric_ids),
+            limitations=limitations,
             method={
                 "kind": "catalog_scope_strategy",
                 "scope_policy": "current_saved_scope_only",
@@ -519,8 +578,10 @@ class SpatialEvidenceService:
     ) -> dict[str, Any]:
         summary: dict[str, Any] = {}
         evidence: list[dict[str, Any]] = []
+        highlights: list[dict[str, Any]] = []
         used_sources: set[str] = set()
         skipped = 0
+        center = tuple(scope["center_wgs84"])
         for metric_id in query.metric_ids:
             binding = METRIC_BINDINGS[metric_id]
             source_id = self._metric_source(binding, records, query)
@@ -538,17 +599,93 @@ class SpatialEvidenceService:
             if source_id:
                 used_sources.add(source_id)
             evidence.append(self._evidence(project, query, f"metric:{metric_id}", [metric_id], [], summary[metric_id]))
+            remaining = max(0, query.top_k - len(highlights))
+            for record in self._representative_records(binding, records, query)[:remaining]:
+                row = self._row_from_record(record, center, [metric_id])
+                if row is not None:
+                    highlights.append(self._highlight(row, [metric_id], reason=f"{metric_id} 具名记录"))
         return self._response(
             query=query,
             project=project,
             scope=scope,
             metrics=self._metric_descriptors(query.metric_ids),
             summary=summary,
+            highlights=highlights,
             coverage={"complete": skipped == 0, "skipped_value_count": skipped},
             evidence=evidence,
-            limitations=self._common_limitations(query.metric_ids) + warnings,
+            limitations=warnings,
             method={"kind": "current_scope_aggregate", "missing_values": "excluded_not_zero_filled"},
             provenance=self._provenance(project, years, used_sources),
+        )
+
+    def _representative_records(
+        self,
+        binding: MetricBinding,
+        records: Mapping[str, list[ScopeRecord]],
+        query: SpatialEvidenceRequest,
+    ) -> list[ScopeRecord]:
+        if binding.metric_id.startswith("poi.") and records.get(_POI):
+            source_id = _POI
+        elif binding.metric_id.startswith("road.") and records.get(_ROAD_EDGES):
+            source_id = _ROAD_EDGES
+        else:
+            source_id = self._metric_source(binding, records, query)
+        selected = self._selected_records(records.get(source_id, []), query.selectors, source_id)
+
+        def sort_key(record: ScopeRecord) -> tuple[float, str, str]:
+            value = self._direct_record_value(binding, record)
+            if value is None and source_id == _POI and binding.metric_id.startswith("poi."):
+                value = 1.0
+            return (-(value if value is not None else float("-inf")), record.title, record.record_id)
+
+        ordered = sorted(selected, key=sort_key)
+        if source_id not in {_POI, _ROAD_EDGES}:
+            return ordered
+        distinct: list[ScopeRecord] = []
+        seen_names: set[str] = set()
+        identity_field = "name" if source_id == _POI else "road_name"
+        named = [record for record in ordered if str(record.properties.get(identity_field) or "").strip()]
+        for record in named or ordered:
+            name = str(record.properties.get(identity_field) or record.title or record.record_id).strip()
+            identity_key = name.casefold()
+            if identity_key in seen_names:
+                continue
+            seen_names.add(identity_key)
+            distinct.append(record)
+        return distinct
+
+    def _row_from_record(
+        self,
+        record: ScopeRecord,
+        center: tuple[float, float],
+        metric_ids: Sequence[str],
+    ) -> _SpatialRow | None:
+        geometry = record.geometry
+        if geometry is None or geometry.is_empty:
+            return None
+        centroid = geometry.centroid
+        if centroid.is_empty:
+            return None
+        distance, direction = _distance_direction(center, (centroid.x, centroid.y))
+        values: dict[str, float | None] = {}
+        for metric_id in metric_ids:
+            binding = METRIC_BINDINGS[metric_id]
+            value = self._direct_record_value(binding, record) if record.source_id in binding.source_ids else None
+            if value is None and record.source_id == _POI and metric_id.startswith("poi."):
+                value = 1.0
+            values[metric_id] = value
+        return _SpatialRow(
+            record_ref=self._record_ref(record),
+            source_id=record.source_id,
+            record_id=record.record_id,
+            title=record.title,
+            geometry=geometry,
+            centroid=(centroid.x, centroid.y),
+            distance_m=distance,
+            direction=direction,
+            area_km2=_area_km2(geometry),
+            values=values,
+            identity=self._record_identity(record),
         )
 
     def _grouped_result(
@@ -576,6 +713,11 @@ class SpatialEvidenceService:
             self._evidence(project, query, f"group:{group['key']}", query.metric_ids, [], group["values"])
             for group in groups
         ]
+        primary_metric = query.metric_ids[0]
+        representative_rows = sorted(
+            (row for row in rows if row.values.get(primary_metric) is not None),
+            key=lambda row: (-float(row.values[primary_metric]), row.record_ref),
+        )[: query.top_k]
         return self._response(
             query=query,
             project=project,
@@ -583,9 +725,13 @@ class SpatialEvidenceService:
             metrics=self._metric_descriptors(query.metric_ids),
             summary=self._group_payload("overall", rows, query.metric_ids)["values"],
             groups=groups[:32],
+            highlights=[
+                self._highlight(row, query.metric_ids, reason=f"{query.analysis} 中 {primary_metric} 高值记录")
+                for row in representative_rows
+            ],
             coverage=self._row_coverage(rows, query.metric_ids),
             evidence=evidence[:32],
-            limitations=self._common_limitations(query.metric_ids) + warnings,
+            limitations=warnings,
             method={
                 "kind": f"{query.analysis}_grouping",
                 "direction_sectors": 8 if query.analysis == "direction" else None,
@@ -621,7 +767,7 @@ class SpatialEvidenceService:
             highlights=highlights,
             coverage=self._row_coverage(rows, query.metric_ids),
             evidence=evidence,
-            limitations=self._common_limitations(query.metric_ids) + warnings,
+            limitations=warnings,
             method={"kind": "single_metric_rank", "normalization": "none", "combined_score": False},
             provenance=self._provenance(project, years, {row.source_id for row in rows}),
         )
@@ -672,7 +818,7 @@ class SpatialEvidenceService:
             highlights=highlights,
             coverage=self._row_coverage(rows, query.metric_ids),
             evidence=evidence,
-            limitations=self._common_limitations(query.metric_ids) + warnings,
+            limitations=warnings,
             method={"kind": "geometry_adjacency", "neighbor_steps": query.neighbor_steps},
             provenance=self._provenance(project, years, {row.source_id for row in rows}),
         )
@@ -752,7 +898,7 @@ class SpatialEvidenceService:
             relationship=relationship,
             coverage=self._row_coverage(rows, query.metric_ids),
             evidence=evidence,
-            limitations=self._common_limitations(query.metric_ids) + warnings + ["分位共位仅描述空间共同出现，不表示因果关系。"],
+            limitations=warnings + ["分位共位仅描述空间共同出现，不表示因果关系。"],
             method={"kind": "p25_p75_colocation", "correlation": False, "combined_score": False},
             provenance=self._provenance(project, years, {row.source_id for row in rows}),
         )
@@ -788,9 +934,38 @@ class SpatialEvidenceService:
                 record_ref=self._record_ref(record), source_id=record.source_id, record_id=record.record_id,
                 title=record.title, geometry=record.geometry, centroid=(centroid.x, centroid.y), distance_m=distance,
                 direction=direction, area_km2=_area_km2(record.geometry), values=values,
+                identity=self._record_identity(record),
             )
             highlights.append(self._highlight(row, query.metric_ids, reason="指定空间记录"))
             evidence.append(self._evidence(project, query, f"record:{row.record_ref}", query.metric_ids, [row.record_ref], values))
+        remaining = max(0, min(20, query.top_k) - len(highlights))
+        grid_sources = {_H3, _POI_GRID, _POPULATION, _NIGHTLIGHT, _ROAD_GRID}
+        for target in matches:
+            if remaining <= 0 or target.source_id not in grid_sources:
+                continue
+            for related, relation in self._named_relations(target, records, limit=remaining):
+                row = self._row_from_record(related, center, query.metric_ids)
+                if row is None:
+                    continue
+                highlight = self._highlight(row, query.metric_ids, reason="目标单元具名空间关系")
+                highlight["relation_to_target"] = {
+                    "target_record_ref": self._record_ref(target),
+                    "kind": relation,
+                }
+                highlights.append(highlight)
+                evidence.append(
+                    self._evidence(
+                        project,
+                        query,
+                        f"relation:{self._record_ref(target)}:{row.record_ref}",
+                        query.metric_ids,
+                        [self._record_ref(target), row.record_ref],
+                        {"relation": relation, "values": row.values},
+                    )
+                )
+                remaining -= 1
+                if remaining <= 0:
+                    break
         if not highlights:
             return self._unavailable(query, project, "没有找到指定的空间记录。", scope=scope)
         return self._response(
@@ -798,14 +973,88 @@ class SpatialEvidenceService:
             project=project,
             scope=scope,
             metrics=self._metric_descriptors(query.metric_ids),
-            summary={"matched_record_count": len(highlights)},
+            summary={
+                "matched_record_count": len(matches),
+                "related_named_record_count": max(0, len(highlights) - len(matches)),
+            },
             highlights=highlights,
-            coverage={"complete": len(highlights) == len(query.record_refs), "matched_record_count": len(highlights)},
+            coverage={"complete": len(matches) == len(query.record_refs), "matched_record_count": len(matches)},
             evidence=evidence,
-            limitations=self._common_limitations(query.metric_ids) + warnings,
-            method={"kind": "stable_record_lookup", "geometry_returned": False},
+            limitations=warnings,
+            method={
+                "kind": "stable_record_lookup_with_named_relations",
+                "relations": ["contained_poi", "intersecting_road", "nearest_poi", "nearest_road"],
+                "geometry_returned": False,
+            },
             provenance=self._provenance(project, years, {record.source_id for record in matches}),
         )
+
+    def _named_relations(
+        self,
+        target: ScopeRecord,
+        records: Mapping[str, list[ScopeRecord]],
+        *,
+        limit: int,
+    ) -> list[tuple[ScopeRecord, str]]:
+        """Project a grid target to bounded, named POI and road facts."""
+        geometry = target.geometry
+        if geometry is None or geometry.is_empty or limit <= 0:
+            return []
+
+        poi_records = [
+            record
+            for record in records.get(_POI, [])
+            if record.geometry is not None
+            and not record.geometry.is_empty
+            and str(record.properties.get("name") or record.title or "").strip()
+        ]
+        road_records = [
+            record
+            for record in records.get(_ROAD_EDGES, [])
+            if record.geometry is not None
+            and not record.geometry.is_empty
+            and str(record.properties.get("road_name") or record.title or "").strip()
+        ]
+        related: list[tuple[ScopeRecord, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add(record: ScopeRecord, relation: str) -> None:
+            identity = str(
+                record.properties.get("name")
+                or record.properties.get("road_name")
+                or record.title
+                or record.record_id
+            ).strip().casefold()
+            key = (record.source_id, identity)
+            if not identity or key in seen or len(related) >= limit:
+                return
+            seen.add(key)
+            related.append((record, relation))
+
+        for record in sorted(poi_records, key=lambda item: (item.title, item.record_id)):
+            if geometry.intersects(record.geometry):
+                add(record, "contained_poi")
+        for record in sorted(road_records, key=lambda item: (str(item.properties.get("road_name") or item.title), item.record_id)):
+            if geometry.intersects(record.geometry):
+                add(record, "intersecting_road")
+
+        # Fill any remaining response capacity with the closest named context.
+        # This is a deterministic fact projection, not a recommendation to query further.
+        if len(related) < limit:
+            for record in sorted(poi_records, key=lambda item: (geometry.distance(item.geometry), item.title, item.record_id)):
+                if geometry.intersects(record.geometry):
+                    continue
+                add(record, "nearest_poi")
+                if len(related) >= limit:
+                    break
+        if len(related) < limit:
+            for record in sorted(road_records, key=lambda item: (geometry.distance(item.geometry), str(item.properties.get("road_name") or item.title), item.record_id)):
+                if geometry.intersects(record.geometry):
+                    continue
+                add(record, "nearest_road")
+                if len(related) >= limit:
+                    break
+        return related
 
     def _spatial_rows(
         self,
@@ -838,6 +1087,7 @@ class SpatialEvidenceService:
                 record_ref=self._record_ref(base), source_id=base_source, record_id=base.record_id,
                 title=base.title, geometry=geometry, centroid=(centroid.x, centroid.y), distance_m=distance,
                 direction=direction, area_km2=_area_km2(geometry), values=values,
+                identity=self._record_identity(base),
             ))
         return rows
 
@@ -1044,12 +1294,29 @@ class SpatialEvidenceService:
         return {
             "record_ref": row.record_ref,
             "title": row.title,
+            "identity": row.identity,
             "centroid_wgs84": [round(row.centroid[0], 6), round(row.centroid[1], 6)],
             "distance_m": round(row.distance_m, 1),
             "direction": row.direction,
             "values": {metric_id: _rounded(row.values.get(metric_id)) for metric_id in metric_ids},
             "reason": reason,
         }
+
+    @staticmethod
+    def _record_identity(record: ScopeRecord) -> dict[str, Any]:
+        descriptor = DATASET_FIELD_CATALOG.get(record.source_id, {})
+        identity: dict[str, Any] = {
+            "dataset_id": descriptor.get("dataset_id", "spatial_record"),
+            "display_name": record.title,
+        }
+        for field_name in descriptor.get("identity_fields", []):
+            value: Any = record.properties
+            for part in str(field_name).split("."):
+                value = value.get(part) if isinstance(value, Mapping) else None
+            if value not in (None, "", []):
+                identity[str(field_name)] = value
+        cleaned = _safe_value(identity)
+        return cleaned if isinstance(cleaned, dict) else {"display_name": record.title}
 
     @staticmethod
     def _scope_summary(project: Mapping[str, Any], geometry: BaseGeometry, center: tuple[float, float]) -> dict[str, Any]:
@@ -1103,15 +1370,6 @@ class SpatialEvidenceService:
     def _matches_ref(record_ref: str, requested: Sequence[str]) -> bool:
         return record_ref in requested
 
-    @staticmethod
-    def _common_limitations(metric_ids: Sequence[str]) -> list[str]:
-        limitations = ["空间指标用于描述当前数据快照中的相对空间条件，不证明客流、需求、消费、营收或因果关系。"]
-        if any(metric_id.startswith("nightlight.") for metric_id in metric_ids):
-            limitations.append("夜光是夜间活动强度代理，不等于营业额或实际到访量。")
-        if any(metric_id.startswith("road.") for metric_id in metric_ids):
-            limitations.append("路网句法描述潜在连接结构，不等于实测步行量或道路品质。")
-        return limitations
-
     def _evidence(
         self,
         project: Mapping[str, Any],
@@ -1159,7 +1417,7 @@ class SpatialEvidenceService:
             status="unavailable",
             metrics=self._metric_descriptors(query.metric_ids),
             coverage={"complete": False},
-            limitations=[limitation] + self._common_limitations(query.metric_ids),
+            limitations=[limitation],
             method={"kind": query.analysis, "executed": False},
             provenance=self._provenance(project, {}, set()),
         )
@@ -1198,19 +1456,97 @@ class SpatialEvidenceService:
             "method": method or {},
             "provenance": provenance or {},
         }
-        return _safe_value(response)
+        return _bounded_model_response(response)
 
 
-def _safe_value(value: Any) -> Any:
+def _safe_value(value: Any, *, key: str = "") -> Any:
     if isinstance(value, Mapping):
-        return {
-            str(key): _safe_value(item)
-            for key, item in value.items()
-            if str(key).lower() not in FORBIDDEN_OUTPUT_KEYS
-        }
+        result: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            normalized_key = str(raw_key).lower()
+            if normalized_key in FORBIDDEN_OUTPUT_KEYS:
+                continue
+            cleaned = _safe_value(item, key=normalized_key)
+            if cleaned is not _OMIT:
+                result[str(raw_key)] = cleaned
+        return result
     if isinstance(value, (list, tuple)):
-        return [_safe_value(item) for item in value]
+        limit = 80 if key == "metrics" else MODEL_LIST_ITEM_LIMIT
+        cleaned = [_safe_value(item, key=key) for item in list(value)[:limit]]
+        return [item for item in cleaned if item is not _OMIT]
+    if isinstance(value, str):
+        if _looks_like_geometry_string(value):
+            return _OMIT
+        return value[:MODEL_STRING_CHAR_LIMIT]
     return value
+
+
+class _OmitValue:
+    pass
+
+
+_OMIT = _OmitValue()
+
+
+def _looks_like_geometry_string(value: str) -> bool:
+    """Reject serialized GeoJSON/WKT even when it is hidden inside a string."""
+    normalized = value.strip().lower()
+    if not normalized:
+        return False
+    has_geometry_key = any(
+        marker in normalized
+        for marker in ('"geometry"', "'geometry'", '"coordinates"', "'coordinates'", '"features"', "'features'")
+    )
+    has_geometry_type = any(
+        token in normalized
+        for token in ("polygon", "multipolygon", "linestring", "multilinestring", "point", "multipoint")
+    )
+    return (
+        normalized.startswith(("polygon(", "multipolygon(", "linestring(", "multilinestring(", "point(", "multipoint("))
+        or has_geometry_key and has_geometry_type
+        or ('"type"' in normalized or "'type'" in normalized) and has_geometry_type
+        or normalized.startswith(("{\"type\":", "{ 'type':"))
+    )
+
+
+def _bounded_model_response(response: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a spatial result into a small, geometry-free model response."""
+    projected = _safe_value(response)
+    if not isinstance(projected, dict):
+        return {"status": "unavailable", "limitations": ["空间结果投影失败。"]}
+
+    for key, limit in (("groups", 12), ("highlights", 20), ("evidence", 20)):
+        if isinstance(projected.get(key), list):
+            projected[key] = projected[key][:limit]
+    if isinstance(projected.get("evidence"), list):
+        for item in projected["evidence"]:
+            if isinstance(item, dict) and isinstance(item.get("content"), (dict, list)):
+                item["content"] = _safe_value(item["content"])
+
+    def serialized_size() -> int:
+        return len(json.dumps(projected, ensure_ascii=False, separators=(",", ":"), default=str))
+
+    # Trim the least useful payloads first while preserving the response contract.
+    if serialized_size() > MODEL_RESPONSE_CHAR_LIMIT and isinstance(projected.get("evidence"), list):
+        for item in projected["evidence"]:
+            if isinstance(item, dict) and "content" in item:
+                item["content"] = str(item["content"])[:240]
+    if serialized_size() > MODEL_RESPONSE_CHAR_LIMIT and isinstance(projected.get("highlights"), list):
+        projected["highlights"] = projected["highlights"][:10]
+    if serialized_size() > MODEL_RESPONSE_CHAR_LIMIT and isinstance(projected.get("groups"), list):
+        projected["groups"] = projected["groups"][:8]
+    if serialized_size() > MODEL_RESPONSE_CHAR_LIMIT:
+        original_method = projected.get("method") or {}
+        projected["method"] = {
+            key: original_method[key]
+            for key in ("kind", "direction_sectors", "distance_bands_m", "neighbor_steps", "missing_values", "combined_score")
+            if key in original_method
+        }
+        projected["method"].setdefault("kind", "spatial_evidence")
+        projected["provenance"] = {"snapshot_id": str((projected.get("provenance") or {}).get("snapshot_id", ""))}
+    if serialized_size() > MODEL_RESPONSE_CHAR_LIMIT:
+        projected["summary"] = {"message": "空间结果已压缩，请根据已返回的分组和高亮记录判断。"}
+    return projected
 
 
 def _compact_value(value: Any, *, depth: int = 0) -> Any:

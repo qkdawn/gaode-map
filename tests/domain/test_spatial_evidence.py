@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
-from shapely.geometry import Point, box
+from shapely.geometry import LineString, Point, box
 
 from modules.scope_datasets.service import ScopeRecord
 from modules.spatial_action.spatial_evidence import (
@@ -11,6 +12,7 @@ from modules.spatial_action.spatial_evidence import (
     METRIC_BINDINGS,
     SpatialEvidenceRequest,
     SpatialEvidenceService,
+    _bounded_model_response,
 )
 from modules.spatial_action.metric_tools import MetricToolService
 
@@ -19,7 +21,7 @@ def _record(source_id: str, record_id: str, geometry, **properties) -> ScopeReco
     return ScopeRecord(
         source_id=source_id,
         record_id=record_id,
-        title=record_id,
+        title=str(properties.get("name") or properties.get("road_name") or record_id),
         content="",
         properties={"record_id": record_id, **properties},
         raw={},
@@ -86,6 +88,17 @@ def _service():
     population = []
     nightlight = []
     poi = []
+    roads = [
+        _record(
+            "current:dataset:road_edges",
+            "edge-0",
+            LineString([(0.0, 0.0), (0.05, 0.05)]),
+            road_name="测试道路",
+            road_class="secondary",
+            length_m=1000,
+            metrics={"integration": 0.8, "choice": 0.5, "connectivity": 2, "depth": 1.2, "control": 0.4},
+        )
+    ]
     for index in range(25):
         x = (index % 5) * 0.01
         y = (index // 5) * 0.01
@@ -97,6 +110,7 @@ def _service():
         "current:dataset:population": population,
         "current:dataset:nightlight": nightlight,
         "current:dataset:poi": poi,
+        "current:dataset:road_edges": roads,
     })
     return SpatialEvidenceService(projects=projects, metric_catalog=_Catalog())
 
@@ -142,8 +156,57 @@ def test_scope_empty_metrics_discovers_only_available_semantic_metrics():
 
     assert result["status"] == "available"
     assert result["summary"]["available_metric_count"] >= 3
+    assert len(result["metrics"]) == result["summary"]["catalog_metric_count"]
     assert all("source_id" not in item for item in result["metrics"])
-    assert all("data_status" in item and "supported_analyses" in item for item in result["metrics"])
+    assert all("available" in item and "analyses" in item for item in result["metrics"])
+    datasets = {item["dataset_id"]: item for item in result["summary"]["datasets"]}
+    assert "name" in datasets["poi"]["identity_fields"]
+    assert "road_name" in datasets["road_edges"]["identity_fields"]
+    assert "metrics.integration" in datasets["road_edges"]["measure_fields"]
+    assert len(json.dumps(result, ensure_ascii=False)) <= 8_000
+    assert result["schema_version"] == "spatial_evidence/v2"
+    assert "expansion" not in result
+    _assert_no_geometry(result)
+
+
+def test_scope_returns_named_poi_and_road_records_with_semantic_identity():
+    poi = [
+        _record(
+            "current:dataset:poi",
+            "poi-1",
+            Point(0.01, 0.01),
+            name="长沙博物馆",
+            category="科教文化服务",
+            subcategory="博物馆",
+            address="湘江北路",
+            year=2026,
+            source="gaode",
+        )
+    ]
+    roads = [
+        _record(
+            "current:dataset:road_edges",
+            "edge-1",
+            LineString([(0.0, 0.0), (0.03, 0.03)]),
+            road_name="芙蓉北路",
+            road_class="secondary",
+            length_m=1200,
+            metrics={"integration": 0.82},
+        )
+    ]
+    service = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:poi": poi, "current:dataset:road_edges": roads}),
+        metric_catalog=_Catalog(),
+    )
+
+    result = service.analyze(
+        history_id="history-1",
+        request={"analysis": "scope", "metric_ids": ["poi.count", "road.integration"], "top_k": 5},
+    )
+
+    identities = [item["identity"] for item in result["highlights"]]
+    assert any(item.get("name") == "长沙博物馆" and item.get("category") == "科教文化服务" for item in identities)
+    assert any(item.get("road_name") == "芙蓉北路" and item.get("road_class") == "secondary" for item in identities)
     _assert_no_geometry(result)
 
 
@@ -236,6 +299,7 @@ def test_direction_returns_bounded_groups_and_safe_centroids():
     assert result["status"] == "available"
     assert len(result["groups"]) == 8
     assert result["method"]["direction_sectors"] == 8
+    assert "expansion" not in result
     _assert_no_geometry(result)
 
 
@@ -260,6 +324,7 @@ def test_rank_returns_bounded_highlights_without_combined_score():
     assert result["status"] == "available"
     assert len(result["highlights"]) <= 3
     assert result["method"]["combined_score"] is False
+    assert "expansion" not in result
     _assert_no_geometry(result)
 
 
@@ -304,4 +369,45 @@ def test_inspect_accepts_stable_record_reference_only():
     assert result["status"] == "available"
     assert result["highlights"][0]["record_ref"] == "current:dataset:poi/poi-0"
     assert "centroid_wgs84" in result["highlights"][0]
+    assert "expansion" not in result
     _assert_no_geometry(result)
+
+
+def test_inspect_grid_expands_bounded_named_poi_and_road_relations():
+    result = _service().analyze(
+        history_id="history-1",
+        request={
+            "analysis": "inspect",
+            "record_refs": ["current:dataset:population/cell-0"],
+            "top_k": 6,
+        },
+    )
+
+    assert result["status"] == "available"
+    assert result["summary"]["matched_record_count"] == 1
+    assert result["summary"]["related_named_record_count"] >= 2
+    assert len(result["highlights"]) <= 6
+    related = [item for item in result["highlights"] if item.get("relation_to_target")]
+    assert any(item["identity"].get("dataset_id") == "poi" for item in related)
+    assert any(item["identity"].get("road_name") == "测试道路" for item in related)
+    assert {item["relation_to_target"]["kind"] for item in related} & {"contained_poi", "intersecting_road"}
+    assert all(item["relation_to_target"]["target_record_ref"] == "current:dataset:population/cell-0" for item in related)
+    assert result["method"]["kind"] == "stable_record_lookup_with_named_relations"
+    assert "next_request" not in json.dumps(result, ensure_ascii=False)
+    _assert_no_geometry(result)
+
+
+def test_model_projection_removes_serialized_geometry_and_bounds_payload():
+    result = _bounded_model_response({
+        "status": "available",
+        "groups": [{"key": str(index), "values": {"population.total": index}} for index in range(40)],
+        "evidence": [
+            {"evidence_id": "e1", "content": '{"type":"Polygon","coordinates":[[0,0]]}'},
+            {"evidence_id": "e2", "content": "{'unit_id': 'r0_c1', 'geometry': {'type': 'Polygon', 'coordinates': ((112.9, 28.2),)}}"},
+        ],
+        "summary": {"detail": "x" * 20_000},
+    })
+
+    assert len(json.dumps(result, ensure_ascii=False)) <= 8_000
+    _assert_no_geometry(result)
+    assert "coordinates" not in json.dumps(result, ensure_ascii=False).lower()

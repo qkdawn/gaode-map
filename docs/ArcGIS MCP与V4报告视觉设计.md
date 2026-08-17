@@ -164,7 +164,7 @@ GWR 或局部回归只有在样本量、变量数量、共线性、空间单元�
 
 网络能力面向研究范围、道路走廊和区域比较，可表达等时圈、服务区、网络覆盖、目标设施网络距离和路网约束下的区域差异。
 
-在具备已批准的路网数据、出行方式、时间场景和目标设施定义之前，该能力应保持 `not_implemented` 或在执行时返回 `unavailable`；不得使用直线距离或无来源的替代值伪装成网络结果。
+当前仓库已接入保存等时圈面积的网络能力；只有在历史快照包含有效路网范围、出行方式和时间阈值时才返回 `available`，否则返回 `unavailable`。不得使用直线距离、项目边界或无来源的替代值伪装成网络结果。
 
 ### 6.5 `report_chart`
 
@@ -178,12 +178,12 @@ GWR 或局部回归只有在样本量、变量数量、共线性、空间单元�
 
 | V4 目录语义工具 | 对应固定 operation | Bridge 内部批准模板族 | 回答的项目问题 | 初始状态 / 关键约束 |
 | --- | --- | --- | --- | --- |
-| `spatial.thematic_visual` | `thematic_map` | 专题、优先级、热点/冷点、道路结构/覆盖、A/B 或前后比较、区位背景图 | 已有空间结果如何在研究范围内表达，哪些位置或差异需要读者关注？ | 先建设；只能呈现已有结果，不能生成新数值或推荐。 |
+| `spatial.thematic_visual` | `thematic_map` | 专题、优先级、热点/冷点、道路结构/覆盖、A/B 或前后比较、区位背景图 | 已有空间结果如何在研究范围内表达，哪些位置或差异需要读者关注？ | 已接入受控执行器；Bridge、几何快照或结果不满足时返回 `unavailable`，只能呈现已有结果。 |
 | `spatial.overlay_relationship` | `spatial_overlay` | 范围裁切、道路结构与 POI 高值网格共位、候选区与限制区叠加、距离面、密度面、透明栅格/矢量叠加 | 已定义的空间代理、限制条件或覆盖关系在哪里共同出现？ | 按模板实现；空间单元、阈值来源、聚合和最小解释范围固定。 |
 | `spatial.suitability_scenario` | `spatial_overlay` | 适宜性模型、重分类、加权叠加、地形或其他已批准约束面 | 在明确条件、阈值与权重的情景下，哪些区域具有较高空间匹配度？ | 按需且高门槛；权重必须来自用户、项目材料或明确情景假设，并记录敏感性检验状态；不能写成“最赚钱的位置”。 |
 | `spatial.pattern_diagnosis` | `spatial_pattern` | Global Moran’s I、Gi*、LISA、Incremental Spatial Autocorrelation、OLS diagnostics、GWR | 已归档空间变量是否集聚、离散、显著，或存在局部空间关系？ | H3 统计优先收敛；GWR 需严格满足样本、共线性、残差、自相关、带宽及空间单元门槛。 |
 | `spatial.network_context` | `network_context` | 服务区、OD Cost Matrix、覆盖缺口、Location-Allocation、路径/最近设施、网络上下文图 | 研究区、道路走廊或方案之间的网络覆盖、服务可达性和区域差异是什么？ | 后续实现；必须先确认路网数据、许可、方式、时间场景和目标设施定义。 |
-| `report.decision_visual` | `report_chart` | 柱图、折线图、散点图、时间线、关系图和其他已批准的 ArcGIS Pro 图表布局 | 已归档数据如何以非地图视觉清楚解释比较、趋势、构成或关系？ | 先建设；仍由 ArcGIS Pro Layout / 图表布局模板，或等价的固定 ArcMap MXD 布局导出 SVG，不使用独立本地 chart renderer。 |
+| `report.decision_visual` | `report_chart` | 柱图、折线图、散点图、时间线、关系图和其他已批准的 ArcGIS Pro 图表布局 | 已归档数据如何以非地图视觉清楚解释比较、趋势、构成或关系？ | 已接入受控执行器；仍由批准模板导出 SVG，模板或 Bridge 不可用时返回 `unavailable`，不使用独立本地 chart renderer。 |
 
 模板注册表应遵守以下规则：
 
@@ -224,7 +224,7 @@ GWR 或局部回归只有在样本量、变量数量、共线性、空间单元�
 - 叠加、统计和网络结果完整记录来源、范围、限制和不可用语义。
 - ArcGIS 离线、无凭据、输入不足、统计不适用、输出超限或 SVG 不安全时，V4 明确返回 `unavailable` / `failed`，不回退旧 SVG 生成器。
 - 正式 bridge 仅在受控地址监听；健康响应、V4 公开工件和作者侧工具详情均不泄漏本机路径、服务端 trace、供应商参数或执行日志。
-- 当前 bridge 未声明的能力在 V4 指标目录中保持 `not_implemented`，不会被包装成已可执行的 V4 工具。
+- 目录状态表示仓库是否有执行路径；Bridge、数据或输入条件的临时不可用在运行结果中返回 `unavailable`，不得包装成可用数值或虚假 SVG。
 - 相关 domain、API、frontend 测试和 `git diff --check` 通过，提交内容不包含 `runtime/` 或 `static/frontend/` 生成物。
 
 ## 10. 已锁定决策
