@@ -1,11 +1,87 @@
-import requests
 import json
 import logging
-from typing import List, Tuple, Union
-from shapely.geometry import Point, Polygon
+from typing import Iterable, List, Tuple, Union
+
+import requests
+from shapely.geometry import Point, Polygon, shape
+from shapely.geometry.base import BaseGeometry
+
 from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class ValhallaIsochroneUnavailable(RuntimeError):
+    """Valhalla could not return every requested contour without approximation."""
+
+
+def fetch_valhalla_isochrone_contours(
+    center: tuple[float, float],
+    time_bands_min: Iterable[float],
+    mode: str,
+) -> dict[float, BaseGeometry]:
+    """Fetch exact nested Valhalla contours; never use the geometric fallback."""
+    costing_map = {"walking": "pedestrian", "driving": "auto", "bicycling": "bicycle"}
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode not in costing_map:
+        raise ValhallaIsochroneUnavailable("valhalla_isochrone_mode_unsupported")
+    try:
+        lon, lat = float(center[0]), float(center[1])
+        times = sorted({float(value) for value in time_bands_min})
+    except (IndexError, TypeError, ValueError) as exc:
+        raise ValhallaIsochroneUnavailable("valhalla_isochrone_request_invalid") from exc
+    if not times or any(value <= 0 for value in times):
+        raise ValhallaIsochroneUnavailable("valhalla_isochrone_times_invalid")
+
+    payload = {
+        "locations": [{"lat": lat, "lon": lon}],
+        "costing": costing_map[normalized_mode],
+        "contours": [{"time": value} for value in times],
+        "polygons": True,
+    }
+    try:
+        response = requests.post(
+            f"{settings.valhalla_base_url}/isochrone",
+            json=payload,
+            timeout=settings.valhalla_timeout_s,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise ValhallaIsochroneUnavailable("valhalla_isochrone_request_failed") from exc
+
+    features = data.get("features") if isinstance(data, dict) else None
+    if not isinstance(features, list) or not features:
+        raise ValhallaIsochroneUnavailable("valhalla_isochrone_features_missing")
+    contours: dict[float, BaseGeometry] = {}
+    unlabelled: list[BaseGeometry] = []
+    for feature in features:
+        if not isinstance(feature, dict) or not isinstance(feature.get("geometry"), dict):
+            continue
+        try:
+            geometry = shape(feature["geometry"])
+        except (TypeError, ValueError):
+            continue
+        if geometry.is_empty or geometry.geom_type not in {"Polygon", "MultiPolygon"}:
+            continue
+        properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+        raw_time = properties.get("contour", properties.get("time"))
+        try:
+            contour_time = float(raw_time)
+        except (TypeError, ValueError):
+            unlabelled.append(geometry)
+            continue
+        matched = next((value for value in times if abs(value - contour_time) < 1e-6), None)
+        if matched is not None:
+            contours[matched] = geometry
+
+    # Older Valhalla builds may omit contour labels but preserve request order.
+    if len(contours) != len(times) and len(features) == len(times) and len(unlabelled) == len(times):
+        contours = dict(zip(times, unlabelled))
+    missing = [value for value in times if value not in contours]
+    if missing:
+        raise ValhallaIsochroneUnavailable("valhalla_isochrone_contours_incomplete")
+    return {value: contours[value] for value in times}
 
 def _get_fallback_isochrone(center: Point, time_sec: int, mode: str) -> Polygon:
     """
