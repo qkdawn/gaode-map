@@ -6,6 +6,7 @@
 - Analysis 主链路：`/analysis`。开发态由 FastAPI 代理 Vite 源码页面，生产态返回镜像内 `static/frontend/index.html`
 - Legacy：`/analysis-legacy` 已下线
 - 运行时图表产物目录：`runtime/generated_charts/`
+- 当前数据源、Agent 工具、空间分析和 N8N 链路见 [`docs/当前系统能力完整说明.md`](docs/当前系统能力完整说明.md)
 
 ## 2. 目录（核心）
 - `core/`：配置、异常、通用模型；跨业务域共享空间工具集中在 `core/spatial.py`
@@ -102,10 +103,10 @@ powershell -ExecutionPolicy Bypass -File scripts/n8n_bootstrap.ps1
 
 当前只保留两个正式工作流：
 
-- `城市更新决策支持 Agent`：同一画布包含任务提交、状态查询、项目上下文、十二方向循环、公共知识混合检索、模型重排、章节 Agent、项目原文与空间工具回路、图件、报告和飞书交付。十二方向是循环队列，不复制十二份节点链。入口继续使用 `POST /webhook/api/v1/n8n/spatial-strategy` 和 `GET /webhook/api/v1/n8n/spatial-strategy/status`。
+- `城市更新决策支持 Agent`：同一画布包含任务提交、状态查询、动态决策单元、证据路由、受控串并行工具调用、研究备忘录、综合成稿、报告保存和飞书交付。入口继续使用 `POST /webhook/api/v1/n8n/spatial-strategy` 和 `GET /webhook/api/v1/n8n/spatial-strategy/status`。
 - `城市更新公共知识库`：同一画布包含 `POST /webhook/api/v1/n8n/kb/ingest`、公共来源校验、原文解析、分块、Embedding 校验和事务发布。只接受政策、规划指引、案例、统计和研究资料；`project_document` 与测试资料会被拒绝。
 
-项目文档不进入 pgvector。Agent 先通过 `project_context` 查看材料目录，需要项目事实时再使用 `read_project_document` 按需读取原文，空间数据则使用 `query_data`。
+项目文档不进入 pgvector，通过 `read_project_document` 按需分页读取；空间数据统一通过 `analyze_spatial_evidence` 获取；GraphRAG 文献与实时互联网保持独立工具入口。
 
 浏览器不直接持有 `N8N_WEBHOOK_API_KEY`。分析工作台中的“十二步空间决策”能力调用 FastAPI 的 `POST /api/v1/analysis/spatial-strategy/runs`，并轮询 `GET /api/v1/analysis/spatial-strategy/runs/{run_id}`；后端代理再向 n8n 注入密钥、租户和访问组。该能力只保留 n8n 服务执行入口。
 
