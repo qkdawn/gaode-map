@@ -18,21 +18,6 @@ from .schemas import SpatialStrategyReportDeliveryRequest, SpatialStrategyReport
 from .docx_export import write_markdown_docx
 
 
-STEP_TITLES = {
-    "step_01_policy_site": "政策与场地",
-    "step_02_regional_role": "区域角色",
-    "step_03_market_flow": "市场与流动",
-    "step_04_supply_gap": "供给与空位",
-    "step_05_audience_use": "客群与使用",
-    "step_06_theme_resources": "主题与资源",
-    "step_07_positioning": "项目定位",
-    "step_08_product_mix": "产品组合",
-    "step_09_spatial_layout": "空间布局",
-    "step_10_operating_model": "运营模式",
-    "step_11_financial_check": "财务校验",
-    "step_12_phasing": "分期实施",
-}
-
 SOURCE_TYPE_LABELS = {
     "project_data": "项目数据",
     "project_data_record": "项目数据",
@@ -53,7 +38,7 @@ INTERNAL_TERM_PATTERNS = (
     re.compile(r"\bE\d{3,}\b", re.IGNORECASE),
     re.compile(r"(?:page|block|chunk)[ _:-]?\d+", re.IGNORECASE),
     re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", re.IGNORECASE),
-    re.compile(r"\b(?:phase\s*\d+|[GDP]\d+)\b", re.IGNORECASE),
+    re.compile(r"\bphase\s*\d+\b", re.IGNORECASE),
 )
 
 UNAVAILABLE_EVIDENCE_PATTERNS = (
@@ -138,16 +123,10 @@ def _citation_entries(steps: Mapping[str, Any], evidence_index: Mapping[str, Any
     return list(entries.values())
 
 
-def _render_step(
-    *,
-    index: int,
-    step_key: str,
-    output: Mapping[str, Any],
-) -> list[str]:
-    raw_title = _text(output.get("title"))
-    title = (STEP_TITLES.get(step_key) if not raw_title or raw_title == step_key else raw_title) or step_key
-    chapter = _text(output.get("reader_chapter"))
-    return [f"## {index}. {title}", "", chapter, ""]
+def _render_section(*, index: int, section: Mapping[str, Any]) -> list[str]:
+    title = _text(section.get("title")) or f"分析判断 {index}"
+    content = _text(section.get("content"))
+    return [f"## {index}. {title}", "", content, ""]
 
 
 def _validate_reader_text(value: Any, *, field: str, minimum_length: int = 1) -> str:
@@ -196,26 +175,16 @@ def _report_visual_assets(value: Any) -> list[dict[str, Any]]:
 def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest) -> dict[str, Any]:
     state = request.decision_state
     steps = _mapping(state.get("steps"))
-    planned = [
-        _text(item.get("step_key"))
-        for item in _list(state.get("research_plan"))
-        if _text(_mapping(item).get("step_key"))
+    sections = [
+        _mapping(item)
+        for item in _list(state.get("report_sections"))
+        if isinstance(item, Mapping) and _text(item.get("content"))
     ]
-    required_keys = planned or list(STEP_TITLES)
-    missing_steps = [key for key in required_keys if not isinstance(steps.get(key), Mapping) or not _text(_mapping(steps.get(key)).get("reader_chapter"))]
-    if missing_steps:
-        raise ValueError("report_requires_completed_steps:" + ",".join(missing_steps))
-    completed_steps = [
-        (step_key, {**_mapping(output), "reader_chapter": _current_evidence_only(_mapping(output).get("reader_chapter"))})
-        for step_key, output in steps.items()
-        if isinstance(output, Mapping) and _text(output.get("reader_chapter"))
-    ]
-    completed_steps.sort(key=lambda item: (int(item[1].get("step_order", 0) or 0), item[0]))
-    if not completed_steps:
-        raise ValueError("report_requires_completed_steps")
-
-    for step_key, output in completed_steps:
-        _validate_reader_text(output.get("reader_chapter"), field=f"reader_chapter_{step_key}", minimum_length=1)
+    sections.sort(key=lambda item: (int(item.get("section_order", 0) or 0), _text(item.get("section_id"))))
+    if not sections:
+        raise ValueError("report_requires_completed_sections")
+    for index, section in enumerate(sections, 1):
+        _validate_reader_text(section.get("content"), field=f"report_section_{index}", minimum_length=1)
     editorial_narrative = _validate_reader_text(
         _current_evidence_only(request.editorial_narrative),
         field="editorial_narrative",
@@ -250,14 +219,8 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
             if caption:
                 lines.extend([f"图注：{caption}", ""])
 
-    for index, (step_key, output) in enumerate(completed_steps, 1):
-        lines.extend(
-            _render_step(
-                index=index,
-                step_key=step_key,
-                output=output,
-            )
-        )
+    for index, section in enumerate(sections, 1):
+        lines.extend(_render_section(index=index, section=section))
 
     markdown = "\n".join(lines).rstrip() + "\n"
     return {
@@ -433,12 +396,12 @@ class FeishuReportSender:
     def _summary(report: Mapping[str, Any]) -> str:
         summary = re.sub(r"\s+", " ", _text(report.get("summary")))[:600]
         state = _mapping(report.get("decision_state"))
-        steps = state.get("steps") if isinstance(state.get("steps"), Mapping) else {}
-        total = len([item for item in steps.values() if isinstance(item, Mapping) and _text(item.get("reader_chapter"))]) or 12
+        sections = state.get("report_sections") if isinstance(state.get("report_sections"), list) else []
+        total = len([item for item in sections if isinstance(item, Mapping) and _text(item.get("content"))])
         return "\n".join(
             [
                 _text(report.get("title")) or "空间分析报告",
-                f"状态：{total} 个分析方向完成",
+                f"状态：{total} 个报告部分完成",
                 f"核心结论：{summary or '详见完整报告'}",
                 "完整 Word 报告见随后发送的文件。",
             ]

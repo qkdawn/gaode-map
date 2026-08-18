@@ -22,29 +22,17 @@ RUN_ID = UUID("31d81c16-1bfc-4bf6-a9e8-cfa36d0a4df2")
 
 
 def _request() -> SpatialStrategyReportFinalizeRequest:
-    steps = {}
-    for index, key in enumerate(
-        (
-            "step_01_policy_site",
-            "step_02_regional_role",
-            "step_03_market_flow",
-            "step_04_supply_gap",
-            "step_05_audience_use",
-            "step_06_theme_resources",
-            "step_07_positioning",
-            "step_08_product_mix",
-            "step_09_spatial_layout",
-            "step_10_operating_model",
-            "step_11_financial_check",
-            "step_12_phasing",
-        ),
-        1,
-    ):
-        steps[key] = {
-            "title": key,
-            "reader_chapter": f"第 {index} 个章节说明项目材料、项目数据和空间数据支持的判断。当前条件尚未完全闭合，需要现场核验后再决定下一步。" * 2,
-        }
-    steps["step_01_policy_site"]["citations"] = [
+    steps = {
+        "site_role": {
+            "title": "项目与区域角色",
+            "decision_memo": {"decision": "项目承担节点连接角色。"},
+        },
+        "named_connections": {
+            "title": "具名节点连接",
+            "decision_memo": {"decision": "连接具名设施和道路。"},
+        },
+    }
+    steps["site_role"]["citations"] = [
         {
             "citation_id": "project:source-1",
             "title": "项目材料原文",
@@ -55,7 +43,7 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
             "snapshot_id": "snapshot-1",
         }
     ]
-    steps["step_02_regional_role"]["citations"] = [
+    steps["named_connections"]["citations"] = [
         {"citation_id": "project:source-1", "source_type": "project_document"},
         {"citation_id": "project:source-2", "title": "空间查询", "source_type": "project_data"},
     ]
@@ -67,6 +55,29 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
         editorial_narrative="项目应以可验证的空间策略形成首期行动，并以运营反馈决定后续投入。",
         decision_state={
             "steps": steps,
+            "report_sections": [
+                {
+                    "section_id": "regional_role",
+                    "section_order": 1,
+                    "title": "区域角色",
+                    "source_unit_ids": ["site_role"],
+                    "content": "项目材料与空间数据共同表明，项目应承担区域节点连接角色。",
+                },
+                {
+                    "section_id": "named_connections",
+                    "section_order": 2,
+                    "title": "具名连接关系",
+                    "source_unit_ids": ["named_connections"],
+                    "content": "具名设施与道路关系把区域判断落实到具体连接对象。",
+                },
+                {
+                    "section_id": "first_actions",
+                    "section_order": 3,
+                    "title": "首期行动",
+                    "source_unit_ids": ["site_role", "named_connections"],
+                    "content": "首期行动围绕上述连接关系形成可执行组合。",
+                },
+            ],
             "evidence_index": {
                 "project:source-1": {
                     "citation_id": "project:source-1",
@@ -86,10 +97,10 @@ def test_report_renders_adaptive_steps_and_deduplicated_citation():
     report = build_spatial_strategy_report(_request())
 
     assert report["title"] == "测试项目空间分析报告"
-    assert sum(line.startswith("## ") for line in report["markdown"].splitlines()) == 13
+    assert sum(line.startswith("## ") for line in report["markdown"].splitlines()) == 4
     assert "## 总判断" in report["markdown"]
-    assert report["markdown"].index("## 总判断") < report["markdown"].index("## 1. 政策与场地")
-    assert "第 1 个章节说明项目材料" in report["markdown"]
+    assert report["markdown"].index("## 总判断") < report["markdown"].index("## 1. 区域角色")
+    assert "项目应承担区域节点连接角色" in report["markdown"]
     assert "### " not in report["markdown"]
     assert [citation["citation_id"] for citation in report["citations"]] == [
         "project:source-1",
@@ -102,25 +113,13 @@ def test_report_renders_adaptive_steps_and_deduplicated_citation():
 
 def test_report_removes_requests_for_unavailable_evidence():
     request = _request().model_copy(deep=True)
-    request.decision_state["steps"]["step_01_policy_site"]["reader_chapter"] = (
-        "现有数据表明北侧人口与服务设施共同集聚。"
-        "这些数据不能证明真实客流、付费意愿或营业收入。"
-        "因此优先组织北侧与项目入口的连接。"
-        "仍需补充现场调查后再验证。"
-    )
     request.editorial_narrative = (
-        "现有空间关系支持优先改善北侧连接。"
-        "游客来源和运营数据尚未取得。"
+        "现有空间关系支持优先改善北侧连接。游客来源和运营数据尚未取得。"
     )
 
     report = build_spatial_strategy_report(request)
 
-    assert "现有数据表明北侧人口与服务设施共同集聚。" in report["markdown"]
-    assert "因此优先组织北侧与项目入口的连接。" in report["markdown"]
-    assert "真实客流" not in report["markdown"]
-    assert "付费意愿" not in report["markdown"]
-    assert "营业收入" not in report["markdown"]
-    assert "现场调查" not in report["markdown"]
+    assert "现有空间关系支持优先改善北侧连接。" in report["markdown"]
     assert "游客来源" not in report["summary"]
     assert "运营数据" not in report["summary"]
 
@@ -130,7 +129,7 @@ def test_report_reads_current_step_grouped_evidence_index_without_audit_referenc
     for step in request.decision_state["steps"].values():
         step.pop("citations", None)
     request.decision_state["evidence_index"] = {
-        "step_04_supply_gap": [
+        "supply_gap": [
             {
                 "citation_id": "project:gap-query",
                 "title": "周边设施空间查询",
@@ -153,17 +152,11 @@ def test_report_reads_current_step_grouped_evidence_index_without_audit_referenc
     ]
 
 
-def test_report_requires_all_adaptive_plan_nodes():
+def test_report_requires_completed_report_sections():
     request = _request().model_copy(deep=True)
-    request.decision_state["research_plan"] = [
-        {"step_key": "decision_01", "title": "核心矛盾", "question": "项目真正要改变什么？"},
-        {"step_key": "decision_02", "title": "一期验证", "question": "如何验证？"},
-    ]
-    request.decision_state["steps"] = {
-        "decision_01": {"step_order": 1, "title": "核心矛盾", "reader_chapter": "项目材料支持这一判断。"}
-    }
+    request.decision_state["report_sections"] = []
 
-    with pytest.raises(ValueError, match="decision_02"):
+    with pytest.raises(ValueError, match="report_requires_completed_sections"):
         build_spatial_strategy_report(request)
 
 
@@ -207,14 +200,25 @@ def test_report_embeds_generated_visual_assets():
     assert "| POI | 2 |" in report["markdown"]
 
 
-def test_report_rejects_reader_chapter_internal_language():
+def test_report_rejects_report_section_internal_language():
     request = _request().model_copy(deep=True)
-    request.decision_state["steps"]["step_04_supply_gap"]["reader_chapter"] = (
+    request.decision_state["report_sections"][1]["content"] = (
         "step_04_supply_gap 使用 decision_state 和 E001。项目材料尚未闭合，需要现场核验。"
     )
 
     with pytest.raises(ValueError, match="contains_internal_terms"):
         build_spatial_strategy_report(request)
+
+
+def test_report_allows_real_g_numbered_road_names():
+    request = _request().model_copy(deep=True)
+    request.decision_state["report_sections"][0]["content"] = (
+        "项目沿 G318 国道形成东西向联系，应结合现有路口组织慢行接驳。"
+    )
+
+    report = build_spatial_strategy_report(request)
+
+    assert "G318 国道" in report["markdown"]
 
 
 def test_feishu_sender_sends_summary_then_word_file(tmp_path):

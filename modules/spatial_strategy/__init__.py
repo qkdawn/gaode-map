@@ -28,7 +28,7 @@ from .service import (
 )
 from .reader_result import project_run_accepted, project_run_detail
 from .visuals import build_spatial_strategy_visuals
-from .mcp_agent import call_spatial_mcp_tool, read_previous_chapter
+from .mcp_agent import call_spatial_mcp_tool
 
 __all__ = [
     "SpatialStrategyGatewayError",
@@ -55,7 +55,6 @@ __all__ = [
     "resume_spatial_strategy_run",
     "submit_spatial_strategy_run",
     "call_spatial_mcp_tool",
-    "read_previous_chapter",
     "project_run_accepted",
     "project_run_detail",
 ]

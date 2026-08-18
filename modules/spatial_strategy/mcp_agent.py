@@ -2,17 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from core.config import settings
-from .previous_chapter import read_previous_chapter  # noqa: F401
-
-
 _ALLOWED_TOOLS = {
     "analyze_spatial_evidence",
     "read_project_document",
-    "read_previous_chapter",
     "search_literature_evidence",
     "search_public_web",
     "fetch_public_web_page",
@@ -27,6 +24,20 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _direct_mcp_http_client(
+    headers: dict[str, str] | None = None,
+    timeout: httpx.Timeout | None = None,
+    auth: httpx.Auth | None = None,
+) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        headers=headers,
+        timeout=timeout or httpx.Timeout(30.0),
+        auth=auth,
+        follow_redirects=True,
+        trust_env=False,
+    )
+
+
 async def call_spatial_mcp_tool(*, history_id: str, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if tool_name not in _ALLOWED_TOOLS:
         raise ValueError("spatial_mcp_tool_not_allowed")
@@ -35,6 +46,7 @@ async def call_spatial_mcp_tool(*, history_id: str, tool_name: str, arguments: d
     async with streamablehttp_client(
         str(settings.spatial_mcp_url).rstrip("/"),
         timeout=float(settings.spatial_mcp_timeout_s),
+        httpx_client_factory=_direct_mcp_http_client,
     ) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()

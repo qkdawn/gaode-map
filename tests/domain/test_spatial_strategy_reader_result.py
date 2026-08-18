@@ -4,88 +4,106 @@ from modules.spatial_strategy.reader_result import project_run_detail
 
 
 def _payload(status: str = "running") -> dict:
+    decision_units = [
+        {
+            "unit_id": "site_role",
+            "title": "项目与区域角色",
+            "question": "项目在区域中应承担什么角色？",
+            "depends_on": [],
+            "decision_output": "确定区域角色",
+            "evidence_focus": "项目文档与周边空间关系",
+        },
+        {
+            "unit_id": "named_connections",
+            "title": "具名节点连接",
+            "question": "应连接哪些具体设施和道路？",
+            "depends_on": ["site_role"],
+            "decision_output": "确定连接对象",
+            "evidence_focus": "具名 POI、道路和节点关系",
+        },
+        {
+            "unit_id": "first_actions",
+            "title": "首期行动",
+            "question": "首期如何形成最小闭环？",
+            "depends_on": ["named_connections"],
+            "decision_output": "形成首期行动组合",
+            "evidence_focus": "前序判断及项目条件",
+        },
+    ]
     steps = [
         {
-            "step": "step_01_policy_site",
+            "step": "site_role",
             "step_order": 1,
             "status": "completed",
             "output": {
-                "title": "政策与场地",
-                "reader_chapter": "项目材料与项目数据共同表明，当前应先完成安全和权属核验。现有条件尚未闭合，需要现场核验后再决定开放范围。",
+                "title": "项目与区域角色",
+                "decision_memo": {
+                    "decision": "项目应作为区域节点之间的连接载体。",
+                    "reasoning": "项目文档和空间数据支持该判断。",
+                },
             },
             "updated_at": "2026-08-09T08:00:00Z",
         },
     ]
     return {
         "run_id": "00000000-0000-4000-8000-000000000001",
-        "history_id": "internal-history",
         "status": status,
-        "current_step": "step_02_regional_role",
-        "error": "internal_error_code",
+        "current_step": "named_connections",
         "created_at": "2026-08-09T08:00:00Z",
         "updated_at": "2026-08-09T08:01:00Z",
-        "progress": {"completed_steps": 1, "total_steps": 12},
-        "decision_state": {"steps": {}, "evidence_index": {"project:abc123": {}}},
+        "progress": {"completed_steps": 1, "total_steps": 3},
+        "decision_state": {"decision_units": decision_units},
         "steps": steps,
         "report": {
             "status": "ready",
-            "markdown": "# 测试项目空间分析报告\n\n## 总判断\n先核验，再试运营。\n\n## 1. 政策与场地\n正文。\n",
+            "markdown": "# 测试项目空间分析报告\n\n## 总判断\n先连接具名节点，再组织首期行动。\n\n## 1. 区域角色\n正文。\n",
             "citations": [{"citation_id": "project:abc123", "source_type": "project_document"}],
             "asset_manifest": {"visual_assets": []},
         },
     }
 
 
-def test_reader_projection_hides_internal_run_fields_and_maps_chapters():
+def test_reader_projection_uses_dynamic_decision_units():
     result = project_run_detail(_payload())
     data = result.model_dump()
 
     assert data["status"] == "分析中"
-    assert data["message"] == "正在分析第 2 章“区域角色”，已完成 1 章。"
-    assert data["progress"] == {"completed_chapters": 1, "total_chapters": 12}
+    assert data["message"] == "正在分析第 2 个决策单元“具名节点连接”，已完成 1 / 3 个分析单元。"
+    assert data["progress"] == {"completed_chapters": 1, "total_chapters": 3}
     assert data["chapters"][0]["status"] == "已完成"
-    assert data["chapters"][0]["content"].startswith("项目材料与项目数据")
-    assert data["chapters"][1]["title"] == "区域角色"
+    assert data["chapters"][0]["content"].startswith("项目应作为区域节点")
+    assert data["chapters"][1]["title"] == "具名节点连接"
+    assert data["current_chapter"] == {"number": 2, "title": "具名节点连接"}
     assert "decision_state" not in data
     assert "current_step" not in data
-    assert "error" not in data
-    assert data["report"]["summary"] == "先核验，再试运营。"
-    assert data["report"]["evidence_labels"] == ["项目材料"]
+    assert data["report"]["summary"] == "先连接具名节点，再组织首期行动。"
 
 
-def test_reader_projection_turns_failed_run_into_actionable_message():
+def test_reader_projection_turns_failed_unit_into_actionable_message():
     result = project_run_detail(_payload("failed"))
 
     assert result.status == "需要处理"
-    assert result.message == "第 2 章“区域角色”暂时未完成，前面的结果已保留，可从这里继续。"
+    assert result.message == "第 2 个决策单元“具名节点连接”暂时未完成，前面的结果已保留，可从这里继续。"
     assert result.chapters[1].status == "需要处理"
 
 
-def test_reader_projection_distinguishes_report_failure_after_all_chapters():
+def test_reader_projection_distinguishes_report_failure_after_all_units():
     payload = _payload("failed")
-    payload["progress"]["completed_steps"] = 12
+    payload["progress"]["completed_steps"] = 3
     result = project_run_detail(payload)
 
-    assert result.message == "十二章已经完成，但报告整理暂时未通过检查，可从这里继续。"
+    assert result.message == "决策单元已经完成，但报告整理暂时未通过检查，可从这里继续。"
 
 
-def test_reader_projection_uses_adaptive_research_plan():
+def test_reader_projection_has_no_fixed_twelve_unit_fallback():
     payload = _payload()
-    payload["decision_state"] = {
-        "research_plan": [
-            {"step_key": "decision_01", "title": "核心矛盾", "question": "项目真正要改变什么？"},
-            {"step_key": "decision_02", "title": "客群机制", "question": "谁会使用并持续参与？"},
-            {"step_key": "decision_03", "title": "一期验证", "question": "怎样用小规模行动改判？"},
-        ]
-    }
-    payload["current_step"] = "decision_02"
-    payload["progress"] = {"completed_steps": 1, "total_steps": 3}
-    payload["steps"] = [
-        {"step": "decision_01", "step_order": 1, "status": "completed", "output": {"title": "核心矛盾", "reader_chapter": "已完成。"}},
-    ]
+    payload["decision_state"] = {}
+    payload["steps"] = []
+    payload["current_step"] = "planning"
+    payload["progress"] = {"completed_steps": 0, "total_steps": 1}
 
     result = project_run_detail(payload)
 
-    assert result.progress.model_dump() == {"completed_chapters": 1, "total_chapters": 3}
-    assert [chapter.title for chapter in result.chapters] == ["核心矛盾", "客群机制", "一期验证"]
-    assert result.current_chapter.model_dump() == {"number": 2, "title": "客群机制"}
+    assert result.chapters == []
+    assert result.current_chapter is None
+    assert result.progress.total_chapters == 1

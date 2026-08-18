@@ -141,7 +141,6 @@ class SpatialStrategyAgentToolRequest(BaseModel):
     tool_name: Literal[
         "analyze_spatial_evidence",
         "read_project_document",
-        "read_previous_chapter",
         "search_literature_evidence",
         "search_public_web",
         "fetch_public_web_page",
