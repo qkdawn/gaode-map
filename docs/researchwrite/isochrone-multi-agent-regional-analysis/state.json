@@ -29,7 +29,11 @@
     "target venue and document template are not specified",
     "cross-case evaluation dataset has not been fixed",
     "expert evaluation panel and power analysis are not yet defined",
-    "current feasibility evidence is based on one successful end-to-end run"
+    "current feasibility evidence is based on one successful fixed-twelve-step end-to-end run",
+    "the dynamic decision-unit workflow has not completed a database-backed end-to-end acceptance run",
+    "the remote MySQL route is currently blocked by the local VPN/TUN path",
+    "GraphRAG retrieval quality and cross-lingual recall have not been evaluated",
+    "working-brief compression has not been evaluated for named-entity and key-fact retention"
   ],
   "status": "export"
 }
