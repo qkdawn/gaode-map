@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from shapely.geometry import LineString, Point, box
 
+from modules.isochrone.adapter import ValhallaIsochroneUnavailable
 from modules.scope_datasets.service import ScopeRecord
 from modules.spatial_action.spatial_evidence import (
     CATALOG_SCOPE_BINDINGS,
@@ -48,7 +49,7 @@ class _Projects:
         return {
             "history_id": history_id,
             "project_name": "测试项目",
-            "params": {"center": [0.025, 0.025], "coord_type": "wgs84"},
+            "params": {"center": [0.025, 0.025], "coord_type": "wgs84", "mode": "walking", "time_min": 15},
             "scope": {"type": "Polygon", "coordinates": [[[0, 0], [0.05, 0], [0.05, 0.05], [0, 0.05], [0, 0]]]},
             "snapshot": {"snapshot_id": history_id},
             "datasets": [
@@ -112,7 +113,11 @@ def _service():
         "current:dataset:poi": poi,
         "current:dataset:road_edges": roads,
     })
-    return SpatialEvidenceService(projects=projects, metric_catalog=_Catalog())
+    def contours(_center, times, _mode):
+        bounds = {5.0: box(0.02, 0.02, 0.03, 0.03), 10.0: box(0.01, 0.01, 0.04, 0.04), 15.0: box(0.0, 0.0, 0.05, 0.05)}
+        return {float(value): bounds[float(value)] for value in times}
+
+    return SpatialEvidenceService(projects=projects, metric_catalog=_Catalog(), isochrone_contours=contours)
 
 
 def _assert_no_geometry(value):
@@ -130,8 +135,12 @@ def test_request_contract_rejects_mode_specific_invalid_shapes():
         SpatialEvidenceRequest(analysis="rank", metric_ids=["population.total", "nightlight.mean_radiance"])
     with pytest.raises(ValueError, match="neighborhood_requires_metrics_and_record_refs"):
         SpatialEvidenceRequest(analysis="neighborhood", metric_ids=["population.total"])
-    with pytest.raises(ValueError, match="distance_bands_must_be_sorted"):
-        SpatialEvidenceRequest(analysis="distance", metric_ids=["population.total"], distance_bands_m=[[500, 1000], [0, 500]])
+    with pytest.raises(ValueError, match="travel_time_bands_min_must_start_at_zero"):
+        SpatialEvidenceRequest(analysis="accessibility", metric_ids=["population.total"], travel_time_bands_min=[[5, 10], [10, 15]])
+    with pytest.raises(ValueError, match="travel_time_bands_min_only_supported_for_accessibility"):
+        SpatialEvidenceRequest(analysis="scope", travel_time_bands_min=[[0, 5]])
+    with pytest.raises(ValueError, match="Input should be 'scope', 'accessibility'"):
+        SpatialEvidenceRequest(analysis="distance", metric_ids=["population.total"])
     with pytest.raises(ValueError, match="Input should be 'poi.category'"):
         SpatialEvidenceRequest(analysis="scope", selectors=[{"dimension": "database.field", "values": ["x"]}])
     with pytest.raises(ValueError, match="less than or equal to 20"):
@@ -145,9 +154,9 @@ def test_request_contract_rejects_mode_specific_invalid_shapes():
         )
     with pytest.raises(ValueError, match="List should have at most 6 items"):
         SpatialEvidenceRequest(
-            analysis="distance",
+            analysis="accessibility",
             metric_ids=["population.total"],
-            distance_bands_m=[[index * 100, (index + 1) * 100] for index in range(7)],
+            travel_time_bands_min=[[index, index + 1] for index in range(7)],
         )
 
 
@@ -303,16 +312,58 @@ def test_direction_returns_bounded_groups_and_safe_centroids():
     _assert_no_geometry(result)
 
 
-def test_distance_returns_default_bands_and_excludes_geometry():
+def test_accessibility_uses_valhalla_travel_time_bands_and_excludes_geometry():
     result = _service().analyze(
         history_id="history-1",
-        request={"analysis": "distance", "metric_ids": ["population.total"]},
+        request={"analysis": "accessibility", "metric_ids": ["population.total"]},
     )
 
     assert result["status"] == "available"
-    assert [group["key"] for group in result["groups"]] == ["0-500m", "500-1000m", "1000-1600m"]
+    assert [group["key"] for group in result["groups"]] == ["0-5min", "5-10min", "10-15min"]
+    assert result["method"]["travel_time_method"] == "valhalla_nested_isochrone_contours"
+    assert result["provenance"]["travel_time_model"]["provider"] == "valhalla"
+    assert result["provenance"]["travel_time_model"]["exact_point_duration_returned"] is False
+    assert result["coverage"]["classified_spatial_unit_count"] > 0
+    assert all("distance_m" not in item for item in result["highlights"])
+    assert all("travel_time_band_min" in item and item["travel_time_source"] == "valhalla_isochrone_contour" for item in result["highlights"])
     assert result["method"]["missing_values"] == "excluded_not_zero_filled"
     _assert_no_geometry(result)
+
+
+def test_accessibility_rejects_time_bands_beyond_saved_isochrone():
+    with pytest.raises(ValueError, match="travel_time_bands_exceed_saved_isochrone"):
+        _service().analyze(
+            history_id="history-1",
+            request={
+                "analysis": "accessibility",
+                "metric_ids": ["population.total"],
+                "travel_time_bands_min": [[0, 10], [10, 20]],
+            },
+        )
+
+
+def test_accessibility_does_not_fall_back_when_valhalla_is_unavailable():
+    def unavailable(_center, _times, _mode):
+        raise ValhallaIsochroneUnavailable("test_unavailable")
+
+    service = SpatialEvidenceService(
+        projects=_Projects({
+            "current:dataset:population": [
+                _record("current:dataset:population", "cell-1", box(0.02, 0.02, 0.03, 0.03), population_total=100, year=2026)
+            ],
+        }),
+        metric_catalog=_Catalog(),
+        isochrone_contours=unavailable,
+    )
+
+    result = service.analyze(
+        history_id="history-1",
+        request={"analysis": "accessibility", "metric_ids": ["population.total"]},
+    )
+
+    assert result["status"] == "unavailable"
+    assert "Valhalla" in result["limitations"][0]
+    assert "未使用圆形或直线距离回退" in result["limitations"][0]
 
 
 def test_rank_returns_bounded_highlights_without_combined_score():
@@ -390,8 +441,13 @@ def test_inspect_grid_expands_bounded_named_poi_and_road_relations():
     related = [item for item in result["highlights"] if item.get("relation_to_target")]
     assert any(item["identity"].get("dataset_id") == "poi" for item in related)
     assert any(item["identity"].get("road_name") == "测试道路" for item in related)
+    road = next(item for item in related if item["identity"].get("road_name") == "测试道路")
+    assert road["attributes"]["length_m"] == 1000
+    assert road["attributes"]["metrics.integration"] == 0.8
     assert {item["relation_to_target"]["kind"] for item in related} & {"contained_poi", "intersecting_road"}
     assert all(item["relation_to_target"]["target_record_ref"] == "current:dataset:population/cell-0" for item in related)
+    assert all(item["relation_to_target"]["distance_m"] is not None for item in related)
+    assert road["relation_to_target"]["distance_m"] == 0
     assert result["method"]["kind"] == "stable_record_lookup_with_named_relations"
     assert "next_request" not in json.dumps(result, ensure_ascii=False)
     _assert_no_geometry(result)
@@ -404,6 +460,8 @@ def test_model_projection_removes_serialized_geometry_and_bounds_payload():
         "evidence": [
             {"evidence_id": "e1", "content": '{"type":"Polygon","coordinates":[[0,0]]}'},
             {"evidence_id": "e2", "content": "{'unit_id': 'r0_c1', 'geometry': {'type': 'Polygon', 'coordinates': ((112.9, 28.2),)}}"},
+            {"evidence_id": "e3", "content": "C:\\Users\\36144\\runtime\\secret.json"},
+            {"evidence_id": "e4", "content": "postgresql://user:password@db:5432/project"},
         ],
         "summary": {"detail": "x" * 20_000},
     })
@@ -411,3 +469,5 @@ def test_model_projection_removes_serialized_geometry_and_bounds_payload():
     assert len(json.dumps(result, ensure_ascii=False)) <= 8_000
     _assert_no_geometry(result)
     assert "coordinates" not in json.dumps(result, ensure_ascii=False).lower()
+    assert "36144" not in json.dumps(result, ensure_ascii=False)
+    assert "postgresql://" not in json.dumps(result, ensure_ascii=False).lower()

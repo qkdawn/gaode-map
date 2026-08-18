@@ -48,7 +48,6 @@ from modules.spatial_projects.skill_tools import (
     list_metric_results as _list_metric_results,
     read_metric_result as _read_metric_result,
 )
-from modules.spatial_strategy.previous_chapter import read_previous_chapter_from_list
 from modules.spatial_strategy.literature_evidence import LiteratureEvidenceService
 
 try:
@@ -293,10 +292,10 @@ class AggregateMetricInput(BaseModel):
 @mcp.tool()
 def analyze_spatial_evidence(
     history_id: str,
-    analysis: Literal["scope", "distance", "direction", "neighborhood", "rank", "relationship", "inspect"],
+    analysis: Literal["scope", "accessibility", "direction", "neighborhood", "rank", "relationship", "inspect"],
     metric_ids: list[str] | None = None,
     selectors: list[dict[str, Any]] | None = None,
-    distance_bands_m: list[list[float]] | None = None,
+    travel_time_bands_min: list[list[float]] | None = None,
     neighbor_steps: int = 1,
     rank_order: Literal["highest", "lowest"] = "highest",
     top_k: int = 10,
@@ -310,7 +309,7 @@ def analyze_spatial_evidence(
             "analysis": analysis,
             "metric_ids": list(metric_ids or []),
             "selectors": list(selectors or []),
-            "distance_bands_m": distance_bands_m,
+            "travel_time_bands_min": travel_time_bands_min,
             "neighbor_steps": neighbor_steps,
             "rank_order": rank_order,
             "top_k": top_k,
@@ -337,27 +336,6 @@ def read_project_document(
         max_blocks=max_blocks,
         page_start=page_start,
         page_end=page_end,
-    )
-
-
-@mcp.tool()
-def read_previous_chapter(
-    history_id: str,
-    completed_chapters: list[dict[str, Any]],
-    current_step_order: int,
-    step_key: str = "",
-    step_order: int | None = None,
-) -> dict[str, Any]:
-    """Read one completed earlier chapter from the caller's analysis state."""
-    blocked = _require_history_project(history_id)
-    if blocked:
-        return blocked
-    return _call(
-        read_previous_chapter_from_list,
-        completed_chapters=completed_chapters,
-        current_step_order=current_step_order,
-        step_key=step_key,
-        step_order=step_order,
     )
 
 

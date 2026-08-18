@@ -30,23 +30,20 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     assert list(schemas) == [
         "analyze_spatial_evidence",
         "read_project_document",
-        "read_previous_chapter",
         "search_literature_evidence",
         "search_public_web",
         "fetch_public_web_page",
     ]
     query_schema = schemas["analyze_spatial_evidence"]
     assert set(query_schema["required"]) == {"history_id", "analysis"}
-    assert {"metric_ids", "selectors", "distance_bands_m", "neighbor_steps", "rank_order", "top_k", "record_refs"}.issubset(query_schema["properties"])
+    assert {"metric_ids", "selectors", "travel_time_bands_min", "neighbor_steps", "rank_order", "top_k", "record_refs"}.issubset(query_schema["properties"])
+    assert "distance_bands_m" not in query_schema["properties"]
     assert "dataset_id" not in query_schema["properties"]
     assert "geometry" not in query_schema["properties"]
     assert "coordinates" not in query_schema["properties"]
     document_schema = schemas["read_project_document"]
     assert set(document_schema["required"]) == {"history_id", "document_id"}
     assert {"start_block", "max_blocks", "page_start", "page_end"}.issubset(document_schema["properties"])
-    previous_schema = schemas["read_previous_chapter"]
-    assert set(previous_schema["required"]) == {"history_id", "completed_chapters", "current_step_order"}
-    assert {"step_key", "step_order"}.issubset(previous_schema["properties"])
     literature_schema = schemas["search_literature_evidence"]
     assert set(literature_schema["required"]) == {"history_id", "question"}
     assert {"mode", "top_k"}.issubset(literature_schema["properties"])
@@ -71,32 +68,9 @@ def test_complete_data_mcp_outputs_are_objects():
     output_schemas = asyncio.run(exercise())
     assert output_schemas["analyze_spatial_evidence"]["type"] == "object"
     assert output_schemas["read_project_document"]["type"] == "object"
-    assert output_schemas["read_previous_chapter"]["type"] == "object"
     assert output_schemas["search_literature_evidence"]["type"] == "object"
     assert output_schemas["search_public_web"]["type"] == "object"
     assert output_schemas["fetch_public_web_page"]["type"] == "object"
-
-
-def test_read_previous_chapter_mcp_tool_uses_completed_chapter_list(monkeypatch):
-    monkeypatch.setattr(mcp_server, "_require_history_project", lambda history_id: None)
-
-    result = mcp_server.read_previous_chapter(
-        history_id="history-1",
-        completed_chapters=[
-            {
-                "step_key": "step_01_policy_site",
-                "step_order": 1,
-                "title": "政策与场地",
-                "decision_brief": "先核验保护边界。",
-                "reader_chapter": "政策与场地正文。",
-            }
-        ],
-        current_step_order=2,
-        step_key="step_01_policy_site",
-    )
-
-    assert result["step_key"] == "step_01_policy_site"
-    assert result["reader_chapter"] == "政策与场地正文。"
 
 
 def test_public_web_mcp_tools_await_provider_calls(monkeypatch):

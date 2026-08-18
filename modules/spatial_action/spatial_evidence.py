@@ -3,16 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Mapping, Sequence
+from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from shapely.errors import GEOSException
 from shapely.geometry import Point, shape
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import transform
+from shapely.ops import nearest_points, transform
 from shapely.strtree import STRtree
 
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84
+from modules.isochrone.adapter import ValhallaIsochroneUnavailable, fetch_valhalla_isochrone_contours
 from modules.scope_datasets.service import ScopeRecord
 from modules.spatial_action.metric_tools import MetricToolService
 from modules.spatial_action.source_index import SourceIndex
@@ -20,7 +23,8 @@ from modules.spatial_projects.service import SpatialProjectService
 
 
 SCHEMA_VERSION = "spatial_evidence/v2"
-DEFAULT_DISTANCE_BANDS_M = ((0.0, 500.0), (500.0, 1000.0), (1000.0, 1600.0))
+DEFAULT_ISOCHRONE_TIME_MIN = 15.0
+DEFAULT_TRAVEL_TIME_BANDS_MIN = ((0.0, 5.0), (5.0, 10.0), (10.0, 15.0))
 DIRECTION_CODES = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 DIRECTION_LABELS = {
     "N": "北",
@@ -108,10 +112,10 @@ class SpatialEvidenceSelector(BaseModel):
 class SpatialEvidenceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    analysis: Literal["scope", "distance", "direction", "neighborhood", "rank", "relationship", "inspect"]
+    analysis: Literal["scope", "accessibility", "direction", "neighborhood", "rank", "relationship", "inspect"]
     metric_ids: list[str] = Field(default_factory=list, max_length=4)
     selectors: list[SpatialEvidenceSelector] = Field(default_factory=list, max_length=8)
-    distance_bands_m: list[tuple[float, float]] | None = Field(default=None, max_length=6)
+    travel_time_bands_min: list[tuple[float, float]] | None = Field(default=None, max_length=6)
     neighbor_steps: int = Field(default=1, ge=1, le=3)
     rank_order: Literal["highest", "lowest"] = "highest"
     top_k: int = Field(default=10, ge=1, le=20)
@@ -120,7 +124,7 @@ class SpatialEvidenceRequest(BaseModel):
     @model_validator(mode="after")
     def validate_mode(self) -> "SpatialEvidenceRequest":
         count = len(self.metric_ids)
-        if self.analysis in {"distance", "direction"} and not 1 <= count <= 4:
+        if self.analysis in {"accessibility", "direction"} and not 1 <= count <= 4:
             raise ValueError(f"{self.analysis}_requires_1_to_4_metrics")
         if self.analysis == "rank" and count != 1:
             raise ValueError("rank_requires_exactly_1_metric")
@@ -132,11 +136,13 @@ class SpatialEvidenceRequest(BaseModel):
             raise ValueError("inspect_requires_record_refs")
         if self.analysis not in {"neighborhood", "inspect"} and self.record_refs:
             raise ValueError("record_refs_only_supported_for_neighborhood_or_inspect")
-        if self.distance_bands_m:
-            previous_end = -1.0
-            for start, end in self.distance_bands_m:
-                if start < 0 or end <= start or start < previous_end:
-                    raise ValueError("distance_bands_must_be_sorted_non_overlapping_positive_ranges")
+        if self.analysis != "accessibility" and self.travel_time_bands_min:
+            raise ValueError("travel_time_bands_min_only_supported_for_accessibility")
+        if self.travel_time_bands_min:
+            previous_end = 0.0
+            for index, (start, end) in enumerate(self.travel_time_bands_min):
+                if start < 0 or end <= start or (index == 0 and start != 0) or start != previous_end:
+                    raise ValueError("travel_time_bands_min_must_start_at_zero_and_be_contiguous")
                 previous_end = end
         return self
 
@@ -152,7 +158,7 @@ class MetricBinding:
     h3_native: bool = False
     supported_analyses: tuple[str, ...] = (
         "scope",
-        "distance",
+        "accessibility",
         "direction",
         "neighborhood",
         "rank",
@@ -288,6 +294,7 @@ class _SpatialRow:
     area_km2: float
     values: dict[str, float | None]
     identity: dict[str, Any]
+    travel_time_band_min: tuple[float, float] | None = None
 
 
 class _RecordIndex:
@@ -310,10 +317,12 @@ class SpatialEvidenceService:
         *,
         projects: SpatialProjectService | None = None,
         metric_catalog: MetricToolService | None = None,
+        isochrone_contours: Callable[[tuple[float, float], Iterable[float], str], Mapping[float, BaseGeometry]] | None = None,
     ) -> None:
         self._projects = projects or SpatialProjectService()
         self._datasets = self._projects.datasets
         self._metric_catalog = metric_catalog
+        self._isochrone_contours = isochrone_contours or fetch_valhalla_isochrone_contours
 
     def _catalog(self) -> MetricToolService:
         if self._metric_catalog is None:
@@ -390,6 +399,10 @@ class SpatialEvidenceService:
         rows = self._spatial_rows(query, base_source, base_records, records, center, scope_geometry)
         if not rows:
             return self._unavailable(query, project, "当前范围内没有可用于本次分析的空间单元。", scope=scope)
+        if query.analysis == "accessibility":
+            contour_limitation = self._attach_valhalla_time_bands(query, project, rows, center, scope_geometry)
+            if contour_limitation:
+                return self._unavailable(query, project, contour_limitation, scope=scope)
         if query.analysis == "rank":
             return self._rank_result(query, project, scope, rows, years, warnings)
         if query.analysis == "neighborhood":
@@ -698,11 +711,11 @@ class SpatialEvidenceService:
         warnings: list[str],
     ) -> dict[str, Any]:
         groups: list[dict[str, Any]] = []
-        if query.analysis == "distance":
-            bands = tuple(query.distance_bands_m or DEFAULT_DISTANCE_BANDS_M)
+        if query.analysis == "accessibility":
+            bands = self._travel_time_bands(query, project)
             for start, end in bands:
-                members = [row for row in rows if start <= row.distance_m < end]
-                groups.append(self._group_payload(f"{int(start)}-{int(end)}m", members, query.metric_ids))
+                members = [row for row in rows if row.travel_time_band_min == (start, end)]
+                groups.append(self._group_payload(f"{_format_band_value(start)}-{_format_band_value(end)}min", members, query.metric_ids))
         else:
             for direction in DIRECTION_CODES:
                 members = [row for row in rows if row.direction == direction]
@@ -714,31 +727,52 @@ class SpatialEvidenceService:
             for group in groups
         ]
         primary_metric = query.metric_ids[0]
+        grouped_rows = [row for row in rows if query.analysis != "accessibility" or row.travel_time_band_min is not None]
         representative_rows = sorted(
-            (row for row in rows if row.values.get(primary_metric) is not None),
+            (row for row in grouped_rows if row.values.get(primary_metric) is not None),
             key=lambda row: (-float(row.values[primary_metric]), row.record_ref),
         )[: query.top_k]
+        coverage = self._row_coverage(rows, query.metric_ids)
+        if query.analysis == "accessibility":
+            routed_count = sum(row.travel_time_band_min is not None for row in rows)
+            coverage.update({
+                "complete": coverage["complete"] and routed_count == len(rows),
+                "classified_spatial_unit_count": routed_count,
+                "unclassified_spatial_unit_count": len(rows) - routed_count,
+                "unclassified_values": "excluded_not_straight_line_filled",
+            })
+        provenance = self._provenance(project, years, {row.source_id for row in rows})
+        if query.analysis == "accessibility":
+            provenance["travel_time_model"] = {
+                "provider": "valhalla",
+                "mode": self._project_travel_mode(project),
+                "contour_times_min": [end for _, end in self._travel_time_bands(query, project)],
+                "exact_point_duration_returned": False,
+            }
         return self._response(
             query=query,
             project=project,
             scope=scope,
             metrics=self._metric_descriptors(query.metric_ids),
-            summary=self._group_payload("overall", rows, query.metric_ids)["values"],
+            summary=self._group_payload("overall", grouped_rows, query.metric_ids)["values"],
             groups=groups[:32],
             highlights=[
                 self._highlight(row, query.metric_ids, reason=f"{query.analysis} 中 {primary_metric} 高值记录")
                 for row in representative_rows
             ],
-            coverage=self._row_coverage(rows, query.metric_ids),
+            coverage=coverage,
             evidence=evidence[:32],
             limitations=warnings,
             method={
                 "kind": f"{query.analysis}_grouping",
                 "direction_sectors": 8 if query.analysis == "direction" else None,
-                "distance_bands_m": [list(value) for value in (query.distance_bands_m or DEFAULT_DISTANCE_BANDS_M)],
+                "travel_time_bands_min": [list(value) for value in self._travel_time_bands(query, project)] if query.analysis == "accessibility" else None,
+                "travel_mode": self._project_travel_mode(project) if query.analysis == "accessibility" else None,
+                "travel_time_method": "valhalla_nested_isochrone_contours" if query.analysis == "accessibility" else None,
+                "spatial_unit_assignment": "representative_point_first_covering_contour" if query.analysis == "accessibility" else None,
                 "missing_values": "excluded_not_zero_filled",
             },
-            provenance=self._provenance(project, years, {row.source_id for row in rows}),
+            provenance=provenance,
         )
 
     def _rank_result(
@@ -936,7 +970,11 @@ class SpatialEvidenceService:
                 direction=direction, area_km2=_area_km2(record.geometry), values=values,
                 identity=self._record_identity(record),
             )
-            highlights.append(self._highlight(row, query.metric_ids, reason="指定空间记录"))
+            highlight = self._highlight(row, query.metric_ids, reason="指定空间记录")
+            attributes = self._record_attributes(record)
+            if attributes:
+                highlight["attributes"] = attributes
+            highlights.append(highlight)
             evidence.append(self._evidence(project, query, f"record:{row.record_ref}", query.metric_ids, [row.record_ref], values))
         remaining = max(0, min(20, query.top_k) - len(highlights))
         grid_sources = {_H3, _POI_GRID, _POPULATION, _NIGHTLIGHT, _ROAD_GRID}
@@ -948,9 +986,13 @@ class SpatialEvidenceService:
                 if row is None:
                     continue
                 highlight = self._highlight(row, query.metric_ids, reason="目标单元具名空间关系")
+                attributes = self._record_attributes(related)
+                if attributes:
+                    highlight["attributes"] = attributes
                 highlight["relation_to_target"] = {
                     "target_record_ref": self._record_ref(target),
                     "kind": relation,
+                    "distance_m": _geometry_distance_m(target.geometry, related.geometry),
                 }
                 highlights.append(highlight)
                 evidence.append(
@@ -1090,6 +1132,67 @@ class SpatialEvidenceService:
                 identity=self._record_identity(base),
             ))
         return rows
+
+    def _attach_valhalla_time_bands(
+        self,
+        query: SpatialEvidenceRequest,
+        project: Mapping[str, Any],
+        rows: Sequence[_SpatialRow],
+        center: tuple[float, float],
+        scope_geometry: BaseGeometry,
+    ) -> str | None:
+        mode = self._project_travel_mode(project)
+        if mode not in {"walking", "driving", "bicycling"}:
+            return "当前项目没有可供 Valhalla 重建分层等时圈的有效出行方式。"
+        bands = self._travel_time_bands(query, project)
+        params = project.get("params") if isinstance(project.get("params"), Mapping) else {}
+        scope_time_min = _number(params.get("time_min")) or DEFAULT_ISOCHRONE_TIME_MIN
+        if bands[-1][1] > scope_time_min + 1e-9:
+            raise ValueError("travel_time_bands_exceed_saved_isochrone")
+        try:
+            contours = self._isochrone_contours(center, [end for _, end in bands], mode)
+        except (ValhallaIsochroneUnavailable, TypeError, ValueError) as exc:
+            return f"Valhalla 无法返回完整的分层等时圈：{exc}；未使用圆形或直线距离回退。"
+        clipped_contours: dict[float, BaseGeometry] = {}
+        for _, end in bands:
+            geometry = contours.get(end)
+            if geometry is None or geometry.is_empty:
+                return "Valhalla 返回的分层等时圈不完整；未使用圆形或直线距离回退。"
+            clipped = geometry.intersection(scope_geometry)
+            if clipped.is_empty:
+                return "Valhalla 分层等时圈与当前保存范围不相交。"
+            clipped_contours[end] = clipped
+        classified_count = 0
+        for row in rows:
+            point = row.geometry.representative_point()
+            for band in bands:
+                if clipped_contours[band[1]].covers(point):
+                    row.travel_time_band_min = band
+                    classified_count += 1
+                    break
+        if classified_count == 0:
+            return "当前空间单元未落入 Valhalla 分层等时圈；未使用直线距离回退。"
+        return None
+
+    @staticmethod
+    def _project_travel_mode(project: Mapping[str, Any]) -> str:
+        params = project.get("params") if isinstance(project.get("params"), Mapping) else {}
+        mode = str(params.get("mode") or "walking").strip().lower()
+        return {"walk": "walking", "pedestrian": "walking", "cycling": "bicycling", "bicycle": "bicycling", "auto": "driving"}.get(mode, mode)
+
+    @staticmethod
+    def _travel_time_bands(
+        query: SpatialEvidenceRequest,
+        project: Mapping[str, Any],
+    ) -> tuple[tuple[float, float], ...]:
+        if query.travel_time_bands_min:
+            return tuple(query.travel_time_bands_min)
+        params = project.get("params") if isinstance(project.get("params"), Mapping) else {}
+        scope_time_min = _number(params.get("time_min")) or DEFAULT_ISOCHRONE_TIME_MIN
+        if abs(scope_time_min - DEFAULT_ISOCHRONE_TIME_MIN) < 1e-9:
+            return DEFAULT_TRAVEL_TIME_BANDS_MIN
+        step = scope_time_min / 3.0
+        return ((0.0, step), (step, step * 2.0), (step * 2.0, scope_time_min))
 
     def _value_for_unit(self, binding: MetricBinding, unit: BaseGeometry, candidates: Sequence[ScopeRecord]) -> float | None:
         if not candidates:
@@ -1291,16 +1394,21 @@ class SpatialEvidenceService:
 
     @staticmethod
     def _highlight(row: _SpatialRow, metric_ids: Sequence[str], *, reason: str) -> dict[str, Any]:
-        return {
+        payload = {
             "record_ref": row.record_ref,
             "title": row.title,
             "identity": row.identity,
             "centroid_wgs84": [round(row.centroid[0], 6), round(row.centroid[1], 6)],
-            "distance_m": round(row.distance_m, 1),
+            "straight_line_distance_m": round(row.distance_m, 1),
             "direction": row.direction,
             "values": {metric_id: _rounded(row.values.get(metric_id)) for metric_id in metric_ids},
             "reason": reason,
         }
+        if row.travel_time_band_min is not None:
+            payload["travel_time_band_min"] = [round(value, 2) for value in row.travel_time_band_min]
+            payload["travel_time_upper_bound_min"] = round(row.travel_time_band_min[1], 2)
+            payload["travel_time_source"] = "valhalla_isochrone_contour"
+        return payload
 
     @staticmethod
     def _record_identity(record: ScopeRecord) -> dict[str, Any]:
@@ -1319,12 +1427,29 @@ class SpatialEvidenceService:
         return cleaned if isinstance(cleaned, dict) else {"display_name": record.title}
 
     @staticmethod
+    def _record_attributes(record: ScopeRecord) -> dict[str, Any]:
+        """Return only catalogued measures for inspect responses."""
+        descriptor = DATASET_FIELD_CATALOG.get(record.source_id, {})
+        attributes: dict[str, Any] = {}
+        for field_name in descriptor.get("measure_fields", []):
+            value: Any = record.properties
+            for part in str(field_name).split("."):
+                value = value.get(part) if isinstance(value, Mapping) else None
+            if value not in (None, "", []):
+                attributes[str(field_name)] = _compact_value(value)
+        cleaned = _safe_value(attributes)
+        return cleaned if isinstance(cleaned, dict) else {}
+
+    @staticmethod
     def _scope_summary(project: Mapping[str, Any], geometry: BaseGeometry, center: tuple[float, float]) -> dict[str, Any]:
+        params = project.get("params") if isinstance(project.get("params"), Mapping) else {}
         return {
             "scope_ref": "current",
             "scope_type": str((project.get("params") or {}).get("scope_type") or "saved_project_scope"),
             "center_wgs84": [round(center[0], 6), round(center[1], 6)],
             "area_km2": round(_area_km2(geometry), 6),
+            "travel_mode": str(params.get("mode") or "") or None,
+            "time_min": _number(params.get("time_min")),
             "geometry_returned": False,
         }
 
@@ -1475,7 +1600,7 @@ def _safe_value(value: Any, *, key: str = "") -> Any:
         cleaned = [_safe_value(item, key=key) for item in list(value)[:limit]]
         return [item for item in cleaned if item is not _OMIT]
     if isinstance(value, str):
-        if _looks_like_geometry_string(value):
+        if _looks_like_geometry_string(value) or _looks_like_internal_path_or_connection(value):
             return _OMIT
         return value[:MODEL_STRING_CHAR_LIMIT]
     return value
@@ -1509,6 +1634,14 @@ def _looks_like_geometry_string(value: str) -> bool:
     )
 
 
+def _looks_like_internal_path_or_connection(value: str) -> bool:
+    """Reject local paths and connection URLs hidden in free-text fields."""
+    normalized = value.strip()
+    if not normalized:
+        return False
+    if re.match(r"^(?:[A-Za-z]:[\\/]|\\\\|/(?:app|home|tmp|var|Users|mnt)(?:/|$))", normalized):
+        return True
+    return bool(re.match(r"^(?:postgres(?:ql)?|mysql|mariadb|redis|sqlite)://", normalized, re.IGNORECASE))
 def _bounded_model_response(response: Mapping[str, Any]) -> dict[str, Any]:
     """Project a spatial result into a small, geometry-free model response."""
     projected = _safe_value(response)
@@ -1539,7 +1672,7 @@ def _bounded_model_response(response: Mapping[str, Any]) -> dict[str, Any]:
         original_method = projected.get("method") or {}
         projected["method"] = {
             key: original_method[key]
-            for key in ("kind", "direction_sectors", "distance_bands_m", "neighbor_steps", "missing_values", "combined_score")
+            for key in ("kind", "direction_sectors", "travel_time_bands_min", "travel_mode", "travel_time_method", "spatial_unit_assignment", "neighbor_steps", "missing_values", "combined_score")
             if key in original_method
         }
         projected["method"].setdefault("kind", "spatial_evidence")
@@ -1565,7 +1698,7 @@ def _compact_value(value: Any, *, depth: int = 0) -> Any:
 def _number(value: Any) -> float | None:
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except (GEOSException, TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
 
@@ -1597,6 +1730,26 @@ def _distance_direction(origin: tuple[float, float], target: tuple[float, float]
     bearing = math.degrees(math.atan2(dx, dy)) % 360.0
     direction = DIRECTION_CODES[int((bearing + 22.5) // 45.0) % len(DIRECTION_CODES)]
     return distance, direction
+
+
+def _format_band_value(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _geometry_distance_m(left: BaseGeometry, right: BaseGeometry) -> float | None:
+    if left.is_empty or right.is_empty:
+        return None
+    if left.intersects(right):
+        return 0.0
+    try:
+        left_point, right_point = nearest_points(left, right)
+    except (TypeError, ValueError):
+        return None
+    distance, _ = _distance_direction(
+        (float(left_point.x), float(left_point.y)),
+        (float(right_point.x), float(right_point.y)),
+    )
+    return round(distance, 1)
 
 
 def _area_km2(geometry: BaseGeometry | None) -> float:
