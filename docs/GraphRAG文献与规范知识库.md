@@ -27,10 +27,12 @@ python -m venv runtime/graphrag-venv
 pwsh -File scripts/run_graphrag_public_knowledge.ps1 -Mode index
 ```
 
-当前项目默认的语言模型网关是 `https://api.chat.csu.edu.cn/v1`，模型由 `.env` 的
-`AI_MODEL` 决定（当前为 `DeepSeek-V4-Flash`）。Key 只从进程环境或本地 `.env` 读取，
-不会写入 GraphRAG 配置或 Git。该网关如果返回 `403`，应先检查 Key 权限、来源 IP 和网关
-访问策略；不要把 Key 复制到 `settings.yaml`。
+当前工作区的 GraphRAG 完成模型配置为 OpenAI-compatible 网关
+`https://mytokenpi.com/v1` 和 `gpt-5.6-sol`；嵌入模型为本地
+`jinaai/jina-embeddings-v2-base-zh`，通过 `http://127.0.0.1:11435/v1/embeddings`
+调用。Key 只从进程环境或本地 `.env` 读取，不写入 Git、知识库来源清单或本文。
+模型、网关或 Key 变化后应重跑最小连通性测试，并把实际配置记录到对应实验运行中，
+不能把一次中转站故障解释为 GraphRAG 方法失效。
 
 直接维护或诊断 GraphRAG 时可以使用底层命令；章节 Agent 不接触这些实现模式：
 
@@ -41,6 +43,19 @@ pwsh -File scripts/run_graphrag_public_knowledge.ps1 -Mode query -SearchMethod d
 ```
 
 GraphRAG 的模型和 API 地址应在工作区 `settings.yaml` 中配置为项目允许的 OpenAI-compatible endpoint；API key 只通过环境变量提供，不写入 Git 或知识库。
+
+## 当前索引覆盖
+
+`source_manifest.json` 是这批语料的唯一来源清单，登记 18 份 PDF。2026-08-18 使用
+`scripts/verify_graphrag_index.py` 校验当前派生索引，结果为：
+
+- 18 个文档，265 个文本单元；
+- 9,177 个实体，11,939 条关系；
+- 504 个社区，504 份社区报告；
+- 无缺失文档，无未关联文本单元的文档。
+
+该校验只证明来源覆盖和派生表完整，不证明中文问题对英文 PDF 的召回质量，也不证明
+GraphRAG 综合答案正确。跨语言召回、原文覆盖和答案可核验性仍需单独评价。
 
 ## N8N 接入边界
 
