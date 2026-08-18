@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     )
     db_url: str = Field("", validation_alias="DB_URL", description="Database connection string")
     db_host: str = Field("", validation_alias="DB_HOST", description="Database host override")
+    db_bind_address: str = Field(
+        "",
+        validation_alias="DB_BIND_ADDRESS",
+        description="Optional local source address for direct database connections",
+    )
     db_port: int = Field(13306, validation_alias="DB_PORT", description="Database port")
     db_user: str = Field("map_app", validation_alias="DB_USER", description="Database user")
     db_password: str = Field("", validation_alias="DB_PASSWORD", description="Database password")

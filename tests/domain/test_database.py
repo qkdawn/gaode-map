@@ -17,6 +17,7 @@ def test_mysql_engine_uses_short_lived_connections(monkeypatch):
         return SimpleNamespace()
 
     monkeypatch.setattr(database, "create_engine", fake_create_engine)
+    monkeypatch.setattr(database.settings, "db_bind_address", "")
 
     database._build_engine("mysql+pymysql://user:password@example.test:13306/gaode_deploy?charset=utf8mb4")
 
@@ -30,6 +31,21 @@ def test_mysql_engine_uses_short_lived_connections(monkeypatch):
         "read_timeout": 30,
         "write_timeout": 30,
     }
+
+
+def test_mysql_engine_can_bind_to_a_direct_network_interface(monkeypatch):
+    captured = {}
+
+    def fake_create_engine(uri, **kwargs):
+        captured["kwargs"] = kwargs
+        return SimpleNamespace()
+
+    monkeypatch.setattr(database, "create_engine", fake_create_engine)
+    monkeypatch.setattr(database.settings, "db_bind_address", "192.168.3.57")
+
+    database._build_engine("mysql+pymysql://user:password@example.test:13306/gaode_deploy")
+
+    assert captured["kwargs"]["connect_args"]["bind_address"] == "192.168.3.57"
 
 
 def test_init_db_does_not_create_ai_document_schema(monkeypatch):

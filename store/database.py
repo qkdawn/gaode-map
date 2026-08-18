@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _engine_lock = Lock()
 _env_snapshot: tuple[int | None, int | None] | None = None
 _engine_uri = ""
+_engine_bind_address = ""
 _session_factory = sessionmaker(autoflush=False, autocommit=False, future=True)
 
 
@@ -52,6 +53,9 @@ def _build_engine(db_uri: str | None = None):
             "read_timeout": 30,
             "write_timeout": 30,
         }
+        bind_address = str(settings.db_bind_address or "").strip()
+        if bind_address:
+            connect_args["bind_address"] = bind_address
 
     return create_engine(
         effective_db_uri,
@@ -73,7 +77,7 @@ def _env_file_snapshot(path: Path = ENV_FILE) -> tuple[int | None, int | None]:
 
 
 def _refresh_runtime_config_if_needed() -> None:
-    global engine, _engine_uri, _env_snapshot
+    global engine, _engine_uri, _engine_bind_address, _env_snapshot
     next_snapshot = _env_file_snapshot()
     if next_snapshot == _env_snapshot:
         return
@@ -84,12 +88,14 @@ def _refresh_runtime_config_if_needed() -> None:
             return
         reload_settings_from_env()
         next_uri = settings.sqlalchemy_database_uri
-        if next_uri != _engine_uri:
+        next_bind_address = str(settings.db_bind_address or "").strip()
+        if next_uri != _engine_uri or next_bind_address != _engine_bind_address:
             old_engine = engine
             engine = _build_engine(next_uri)
             _session_factory.configure(bind=engine)
             old_engine.dispose()
             _engine_uri = next_uri
+            _engine_bind_address = next_bind_address
             logger.info("数据库配置已热更新，连接池已重建")
         _env_snapshot = next_snapshot
 
@@ -97,6 +103,7 @@ def _refresh_runtime_config_if_needed() -> None:
 engine = _build_engine()
 _session_factory.configure(bind=engine)
 _engine_uri = settings.sqlalchemy_database_uri
+_engine_bind_address = str(settings.db_bind_address or "").strip()
 _env_snapshot = _env_file_snapshot()
 
 
