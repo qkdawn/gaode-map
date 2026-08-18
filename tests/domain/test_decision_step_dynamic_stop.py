@@ -9,6 +9,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
+CORE_AGENT_PROMPT = "基于已有项目材料和空间数据完成用户任务，给出明确判断及行动建议。不要虚构信息；无法完成时直接说明原因。"
 NODE_NAMES = {
     "Build Structured Decision Request": "构建证据路由请求",
     "Prepare MCP Agent Tool Call": "准备证据路由工具调用",
@@ -117,7 +118,6 @@ def _prior(**overrides: object) -> dict:
         "tool_result_fingerprints": [],
         "tool_request_fingerprints": [],
         "stale_tool_turns": 0,
-        "tool_error_count": 0,
         "tool_call_count": 0,
         "tool_call_limit": 12,
         "max_parallel_tools": 3,
@@ -133,15 +133,18 @@ def test_decision_agent_uses_dynamic_stop_conditions_instead_of_six_turn_limit()
     assert "context_budget_tokens: 24000" in request
     assert "context_reserve_tokens: 6000" in request
     assert "no_new_evidence_limit: 2" in request
-    assert "tool_error_limit: 2" in request
-    assert "tool_call_limit: 12" in request
-    assert "max_parallel_tools: 3" in request
-    assert "execution_budget: { max_parallel: 3, remaining_tool_calls: 12 }" in request
+    assert "tool_error_limit: 2" not in request
+    assert "tool_call_limit: Number(state.tool_call_limit ?? 12)" in request
+    assert "max_parallel_tools: Number(state.max_parallel_tools ?? 3)" in request
+    assert "remaining_tool_calls: Math.max(0" in request
+    assert "working_research_brief: state.working_research_brief" in request
+    assert "latest_tool_results: state.latest_tool_results" in request
 
     assert "const forceFinal = turn >= 6" not in follow_up
     assert "context_budget" in follow_up
     assert "no_new_evidence" in follow_up
-    assert "tool_errors" in follow_up
+    assert "evidence_tool_execution_failed" in follow_up
+    assert "tool_errors" not in follow_up
     assert "emergency_cap" not in follow_up
     assert "tool_choice: 'none'" in follow_up
     assert "tool_call_limit" in follow_up
@@ -165,7 +168,7 @@ def test_dynamic_stop_code_nodes_compile_and_task_completion_exits_tool_loop():
     assert connections[0][0]["node"] == "准备证据路由工具调用"
     assert connections[1][0]["node"] == "构建章节研究分析请求"
     assert _workflow()["connections"]["解析证据路由响应"]["main"][0][0]["node"] == "校验证据路由决策"
-    assert _workflow()["connections"]["解析章节研究模型响应"]["main"][0][0]["node"] == "构建独立章节成稿请求"
+    assert _workflow()["connections"]["解析章节研究模型响应"]["main"][0][0]["node"] == "校验决策备忘录"
 
 
 def test_tool_contract_tracks_returned_calls():
@@ -201,7 +204,7 @@ def test_prepare_tool_batch_creates_three_ordered_n8n_items_and_injects_history_
     assert [body["arguments"]["query"] for body in bodies] == ["query-0", "query-1", "query-2"]
 
 
-def test_follow_up_restores_batch_order_and_keeps_successes_when_one_call_fails():
+def test_follow_up_fails_the_batch_when_one_tool_call_fails():
     prior = _prior(tool_call_count=3)
     prepared = [
         {**prior, "batch_index": 2, "mcp_tool_name": "search_literature_evidence", "mcp_call_id": "call-2", "mcp_arguments": {"question": "q"}},
@@ -213,24 +216,8 @@ def test_follow_up_restores_batch_order_and_keeps_successes_when_one_call_fails(
         {"tool_name": "analyze_spatial_evidence", "structured_content": {"status": "available", "analysis": "scope", "summary": "spatial"}},
         {"tool_name": "read_project_document", "error": {"message": "timeout"}},
     ]
-    output = _run_follow_up(prior, results, prepared)
-    payload = json.loads(output["input"][1]["content"][0]["text"])
-
-    assert [item["batch_index"] for item in payload["latest_tool_results"]] == [0, 1, 2]
-    assert [item["tool_name"] for item in payload["latest_tool_results"]] == [
-        "analyze_spatial_evidence",
-        "read_project_document",
-        "search_literature_evidence",
-    ]
-    assert payload["latest_tool_results"][1]["is_error"] is True
-    assert payload["execution_budget"] == {"max_parallel": 3, "remaining_tool_calls": 9}
-    assert output["tool_error_count"] == 0
-    assert output["stop_reason"] is None
-    assert {item["tool_name"] for item in output["research_result_store"]} == {
-        "analyze_spatial_evidence",
-        "read_project_document",
-        "search_literature_evidence",
-    }
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_follow_up(prior, results, prepared)
 
 
 def test_follow_up_clears_stale_model_output():
@@ -501,7 +488,7 @@ def test_evidence_route_finish_is_not_overridden_by_workflow_code(cards: list[di
         },
     )
 
-    assert output["route_retry_required"] is False
+    assert output.get("route_retry_required") is not True
     assert output["route_decision"] == route
     assert output["tool_calls"] == []
 
@@ -513,6 +500,83 @@ def test_evidence_route_rejects_unknown_tool_and_history_id():
     injected = {"decision": "continue", "reason": "x", "next_tools": [{"name": "analyze_spatial_evidence", "arguments": {"analysis": "scope", "history_id": "forbidden"}}]}
     with pytest.raises(subprocess.CalledProcessError):
         _run_input_code("校验证据路由决策", {"output_text": json.dumps(injected)})
+
+
+def test_evidence_route_rejects_nonsemantic_spatial_mode_values():
+    route = {
+        "decision": "continue",
+        "reason": "空间证据",
+        "next_tools": [{
+            "name": "analyze_spatial_evidence",
+            "arguments": {"analysis": "提取POI密度热点"},
+        }],
+    }
+    output = _run_input_code("校验证据路由决策", {"output_text": json.dumps(route, ensure_ascii=False)})
+    assert output["route_retry_required"] is True
+    assert output["route_diagnostics"][0]["message"] == "evidence_route_invalid_analysis"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "diagnostic"),
+    [
+        ({"analysis": "scope", "metric_ids": ["m1", "m2", "m3", "m4", "m5"]}, "evidence_route_invalid_metric_count"),
+        ({"analysis": "accessibility", "metric_ids": []}, "evidence_route_invalid_accessibility_metric_count"),
+        ({"analysis": "rank", "metric_ids": ["m1", "m2"]}, "evidence_route_invalid_rank_metric_count"),
+        ({"analysis": "relationship", "metric_ids": ["m1"]}, "evidence_route_invalid_relationship_metric_count"),
+        ({"analysis": "neighborhood", "metric_ids": ["m1"]}, "evidence_route_invalid_neighborhood_record_refs"),
+        ({"analysis": "inspect"}, "evidence_route_invalid_inspect_record_refs"),
+        ({"analysis": "scope", "top_k": 21}, "evidence_route_invalid_top_k"),
+        ({"analysis": "scope", "neighbor_steps": 0}, "evidence_route_invalid_neighbor_steps"),
+        ({"analysis": "accessibility", "metric_ids": ["m1"], "travel_time_bands_min": [[5, 10], [10, 15]]}, "evidence_route_invalid_travel_time_bands"),
+        ({"analysis": "scope", "travel_time_bands_min": [[0, 5]]}, "evidence_route_invalid_travel_time_bands_for_analysis"),
+        ({"analysis": "rank", "metric_ids": ["m1"], "record_refs": ["cell-1"]}, "evidence_route_invalid_record_refs_for_rank"),
+    ],
+)
+def test_evidence_route_retries_invalid_spatial_contracts(arguments: dict, diagnostic: str):
+    route = {
+        "decision": "continue",
+        "reason": "空间证据",
+        "next_tools": [{"name": "analyze_spatial_evidence", "arguments": arguments}],
+    }
+    output = _run_input_code("校验证据路由决策", {"output_text": json.dumps(route)})
+
+    assert output["route_retry_required"] is True
+    assert output["route_diagnostics"][0]["message"] == diagnostic
+
+
+def test_evidence_route_repairs_repeated_irrelevant_record_refs_after_router_retries():
+    route = {
+        "decision": "continue",
+        "reason": "按步行可达时间比较空间指标",
+        "next_tools": [{
+            "name": "analyze_spatial_evidence",
+            "arguments": {"analysis": "accessibility", "metric_ids": ["population.total"], "record_refs": ["cell-1"]},
+        }],
+    }
+    output = _run_input_code(
+        "校验证据路由决策",
+        {"output_text": json.dumps(route), "route_format_retry_count": 2},
+    )
+
+    assert output.get("route_retry_required") is not True
+    assert "record_refs" not in output["tool_calls"][0]["arguments"]
+    assert output["route_diagnostics"] == [{
+        "kind": "ignored_invalid_record_refs",
+        "analysis": "accessibility",
+        "count": 1,
+    }]
+
+
+def test_evidence_route_allows_scope_metric_discovery_without_metric_ids():
+    route = {
+        "decision": "continue",
+        "reason": "发现可用空间指标",
+        "next_tools": [{"name": "analyze_spatial_evidence", "arguments": {"analysis": "scope"}}],
+    }
+    output = _run_input_code("校验证据路由决策", {"output_text": json.dumps(route)})
+
+    assert output.get("route_retry_required") is not True
+    assert output["tool_calls"][0]["name"] == "analyze_spatial_evidence"
 
 
 def test_evidence_route_returns_missing_arguments_to_router_for_correction():
@@ -625,36 +689,90 @@ def test_budget_trim_diagnostic_is_consumed_once_by_follow_up():
     assert output["route_diagnostics"] == []
 
 
-def test_research_and_writing_are_separate_requests():
+def test_research_synthesis_and_report_writing_are_separate_requests():
     request = _code("Build Structured Decision Request")
     research = _code("构建章节研究分析请求")
-    draft = _code("构建独立章节成稿请求")
+    synthesis = _code("构建跨单元综合请求")
+    report_section = _code("构建报告章节写作请求")
 
     assert "name: 'evidence_route'" in request
     assert "decision: { type: 'string', enum: ['continue', 'finish'] }" in request
     assert "next_tools: { type: 'array', maxItems: 3" in request
+    assert "metric_ids: { type: ['array', 'null'], maxItems: 4" in request
+    assert "record_refs: { type: ['array', 'null'], maxItems: 20" in request
+    assert "travel_time_bands_min: { type: ['array', 'null'], maxItems: 6" in request
+    assert "distance_bands_m" not in request
+    assert "top_k: { type: ['integer', 'null'], minimum: 1, maximum: 20 }" in request
     assert "next_tool:" not in request
     assert "tool_choice: 'none'" in request
-    assert "max_output_tokens: 5000" in request
+    assert "max_output_tokens: 1800" in request
     assert "research_summary" not in request
     assert "key_findings" not in request
     assert "ready_to_write" not in request
     assert "properties: { decision_brief:" not in request
-    assert "不负责形成研究结论" in request
-    assert "不规定后续研究和写作结构" in request
-    assert "evidence_brief" in research
+    assert "不形成研究结论" in request
+    assert "working_research_brief" in research
     assert "tools: []" in research
     assert "reasoning: { effort: 'medium' }" in research
-    assert "text: undefined" in research
-    assert "你不受证据路由 Agent 的简短 JSON、低推理配置或工具调用规则约束" in research
-    assert "working_research_brief" in draft
-    assert "research_memo" in draft
-    assert "research_handoff" not in draft
-    assert "chapter_research_memo_empty" in draft
-    assert "chapter_spatial_expansion_incomplete" not in draft
-    assert "tools: []" in draft
-    assert "reasoning: { effort: 'high' }" in draft
-    assert "name: 'reader_chapter'" in draft
+    assert "name: 'decision_memo'" in research
+    assert CORE_AGENT_PROMPT in research
+    assert "明确判断、关键依据和行动建议" in research
+    assert "Harness" not in research
+    assert "状态码" not in research
+    assert "decision_memos" in synthesis
+    assert "name: 'report_blueprint'" in synthesis
+    assert CORE_AGENT_PROMPT in synthesis
+    assert "owns_claims" not in synthesis
+    assert "must_include_facts" not in synthesis
+    assert "must_include_named_entities" not in synthesis
+    assert "source_analyses" in report_section
+    assert "name: 'report_section'" in report_section
+    assert "reasoning: { effort: 'high' }" in report_section
+    assert CORE_AGENT_PROMPT in report_section
+    assert "忠实保留" not in report_section
+
+
+def test_completed_run_cleanup_keeps_business_outputs_and_removes_tool_bodies():
+    output = _run_input_code(
+        "清理成功执行过程数据",
+        {
+            "decision_state": {
+                "decision_units": [{"unit_id": "regional_role"}],
+                "research_frame": "判断区域角色",
+                "research_result_store": [{"result": {"body": "完整工具正文"}}],
+                "working_research_brief": {"cards": [{"summary": "过程简报"}]},
+                "tool_evidence": [{"content": "空间工具正文"}],
+                "tool_request_fingerprints": ["request-1"],
+                "report_blueprint": {"overall_thesis": "连接多个节点"},
+                "report_sections": [{"section_id": "role", "content": "报告章节"}],
+                "steps": {
+                    "regional_role": {
+                        "decision_memo": {"decision": "项目应成为连接器"},
+                        "citations": [{"title": "项目材料", "source_locator": "page:2", "content": "原文正文"}],
+                    }
+                },
+            },
+            "citations": [
+                {"title": "项目材料", "source_locator": "page:2", "content": "原文正文", "text": "重复正文"}
+            ],
+            "markdown": "# 最终报告",
+        },
+    )
+
+    state = output["decision_state"]
+    assert state["decision_units"] == [{"unit_id": "regional_role"}]
+    assert state["report_blueprint"]["overall_thesis"] == "连接多个节点"
+    assert state["report_sections"][0]["content"] == "报告章节"
+    assert state["steps"]["regional_role"]["decision_memo"]["decision"] == "项目应成为连接器"
+    for key in (
+        "research_result_store",
+        "working_research_brief",
+        "tool_evidence",
+        "tool_request_fingerprints",
+    ):
+        assert key not in state
+    assert "content" not in state["steps"]["regional_role"]["citations"][0]
+    assert output["citations"] == [{"title": "项目材料", "source_locator": "page:2"}]
 
 
 def test_context_budget_stops_tool_loop():
@@ -695,11 +813,9 @@ def test_repeated_evidence_stops_after_configured_stale_limit():
     assert second["tools"] == []
 
 
-def test_repeated_tool_errors_stop_the_loop():
-    output = _run_follow_up(
-        _prior(tool_error_count=1),
-        {"tool_name": "project_context", "is_error": True, "content": "unavailable"},
-    )
-
-    assert output["stop_reason"] == "tool_errors"
-    assert output["tools"] == []
+def test_tool_error_fails_immediately():
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_follow_up(
+            _prior(),
+            {"tool_name": "project_context", "is_error": True, "content": "unavailable"},
+        )

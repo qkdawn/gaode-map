@@ -107,7 +107,8 @@ _CAPABILITIES = (
         executor_type="service",
         executor_id="n8n-spatial-strategy",
         intent_phrases=[
-            "执行十二方向空间分析",
+            "执行自适应空间决策分析",
+            "按项目问题组织空间决策分析",
             "生成完整空间策略",
             "运行空间项目决策分析",
             "执行client decision spatial strategy",

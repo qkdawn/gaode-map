@@ -5,75 +5,6 @@
   "nodes": [
     {
       "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const state = $input.first()?.json ?? {};\nconst documents = (Array.isArray(state.project_context?.documents) ? state.project_context.documents : []).filter((item) => item && item.document_id && ['parsed', 'ready', 'uploaded'].includes(String(item.status ?? '')));\nconst query = [state.project_question, state.research_frame, state.research_brief, state.step_title].filter(Boolean).join(' ').toLowerCase();\nconst terms = query.split(/[^\\p{L}\\p{N}]+/u).filter((term) => term.length > 1);\nconst score = (item) => { const text = [item.title, item.file_name, item.document_role].filter(Boolean).join(' ').toLowerCase(); return terms.reduce((total, term) => total + (text.includes(term) ? 2 : 0), 0) + (String(item.status) === 'parsed' ? 1 : 0); };\nconst selected = documents.slice().sort((left, right) => score(right) - score(left))[0] ?? null;\nreturn [{ json: { ...state, initial_document: selected ? { document_id: String(selected.document_id), title: String(selected.title ?? selected.file_name ?? ''), status: String(selected.status ?? '') } : null } }];"
-      },
-      "id": "a2dd7e5d-5c94-4d12-a0d5-8cc0c01a0011",
-      "name": "Select Initial Project Document",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1140,
-        380
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
-          "conditions": [{ "id": "has-initial-project-document", "leftValue": "={{ Boolean($json.initial_document?.document_id) }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "b6e5c245-33a0-45d9-b0c0-8db4b2500012",
-      "name": "Has Initial Project Document",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        1380,
-        380
-      ]
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "=__SPATIAL_API_BASE_URL__/analysis/spatial-strategy/agent-tools/call",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "httpHeaderAuth",
-        "sendBody": true,
-        "contentType": "json",
-        "specifyBody": "json",
-        "jsonBody": "={{ { history_id: $json.history_id, tool_name: 'read_project_document', arguments: { document_id: $json.initial_document.document_id, start_block: 0, max_blocks: 8 } } }}",
-        "options": { "timeout": 180000, "response": { "response": { "responseFormat": "json" } } }
-      },
-      "id": "c1e7d637-6a61-4f65-9e6f-6d8f3dd00013",
-      "name": "Read Initial Project Document",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1620,
-        300
-      ],
-      "credentials": { "httpHeaderAuth": { "id": "n8n-webhook-client", "name": "n8n Webhook Client" } },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "jsCode": "const response = $input.first()?.json ?? {};\nconst state = $('Select Initial Project Document').first()?.json ?? {};\nconst result = response.structured_content ?? response.content ?? response;\nreturn [{ json: { ...state, project_document_prefetch: result && typeof result === 'object' ? result : { status: 'unavailable', error: 'document_prefetch_failed' } } }];"
-      },
-      "id": "d4a6ae82-0bd0-4d01-b97e-5a1c70f00014",
-      "name": "Attach Initial Project Document",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1860,
-        300
-      ]
-    },
-    {
-      "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
@@ -417,57 +348,6 @@
       ]
     },
     "Mark Step Running": {
-      "main": [
-        [
-          {
-            "node": "Select Initial Project Document",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Select Initial Project Document": {
-      "main": [
-        [
-          {
-            "node": "Has Initial Project Document",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Has Initial Project Document": {
-      "main": [
-        [
-          {
-            "node": "Read Initial Project Document",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Build Structured Decision Request",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read Initial Project Document": {
-      "main": [
-        [
-          {
-            "node": "Attach Initial Project Document",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Attach Initial Project Document": {
       "main": [
         [
           {

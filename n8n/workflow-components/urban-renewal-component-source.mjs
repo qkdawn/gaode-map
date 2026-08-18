@@ -136,7 +136,7 @@ nodes.push({
 const request = $('Attach Project Context').first().json;
 const projectContext = request.project_context && typeof request.project_context === 'object' ? request.project_context : {};
 const steps = completed.decision_state?.steps && typeof completed.decision_state.steps === 'object' ? completed.decision_state.steps : {};
-const completedAnalyses = Object.entries(steps).map(([stepKey, value]) => ({ step_key: stepKey, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision_brief: String(value?.decision_brief ?? '').trim(), reader_chapter: String(value?.reader_chapter ?? '').trim() })).filter((item) => item.reader_chapter).sort((left, right) => left.step_order - right.step_order);
+const completedAnalyses = Object.entries(steps).map(([unitId, value]) => ({ unit_id: unitId, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision: String(value?.decision_memo?.decision ?? '').trim(), key_facts: Array.isArray(value?.decision_memo?.key_facts) ? value.decision_memo.key_facts : [], named_entities: Array.isArray(value?.decision_memo?.named_entities) ? value.decision_memo.named_entities : [] })).filter((item) => item.decision).sort((left, right) => left.step_order - right.step_order);
 const datasets = (Array.isArray(projectContext.datasets) ? projectContext.datasets : []).filter((item) => item && !String(item.dataset_id ?? '').startsWith('document:')).map((item) => ({ dataset_id: String(item.dataset_id ?? ''), title: String(item.title ?? ''), total_count: Number(item.total_count ?? 0), geometry_type: String(item.geometry_type ?? ''), fields: Array.isArray(item.fields) ? item.fields : [] })).filter((item) => item.dataset_id);
 const layerSchema = { type: 'object', properties: { dataset_id: { type: 'string' }, role: { type: 'string', enum: ['line', 'point', 'polygon'] }, color: { type: 'string' }, metric_field: { type: 'string' } }, required: ['dataset_id', 'role', 'color', 'metric_field'], additionalProperties: false };
 const visualSchema = { type: 'object', properties: {
@@ -163,7 +163,7 @@ return [{ json: {
   project_context: projectContext,
   available_datasets: datasets,
   instructions,
-  input: JSON.stringify({ project_question: request.project_question, completed_analyses: completedAnalyses, available_datasets: datasets }),
+   input: JSON.stringify({ project_question: request.project_question, decision_memos: completedAnalyses, available_datasets: datasets }),
   max_output_tokens: 2400,
   reasoning: { effort: 'low' },
   text: { format: { type: 'json_schema', name: 'spatial_visual_design', strict: true, schema } },
@@ -335,13 +335,13 @@ nodes.push({
       jsCode: `const rendered = $input.first()?.json ?? {};
 const request = $('Attach Project Context').first().json;
 const steps = rendered.decision_state?.steps && typeof rendered.decision_state.steps === 'object' ? rendered.decision_state.steps : {};
-const decisionChain = Object.entries(steps).map(([stepKey, value]) => ({ step_key: stepKey, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision_brief: String(value?.decision_brief ?? '').trim() })).filter((item) => item.decision_brief).sort((left, right) => left.step_order - right.step_order);
+const decisionChain = Object.entries(steps).map(([unitId, value]) => ({ unit_id: unitId, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision: String(value?.decision_memo?.decision ?? '').trim(), key_facts: Array.isArray(value?.decision_memo?.key_facts) ? value.decision_memo.key_facts : [], named_entities: Array.isArray(value?.decision_memo?.named_entities) ? value.decision_memo.named_entities : [] })).filter((item) => item.decision).sort((left, right) => left.step_order - right.step_order);
 if (!decisionChain.length) throw new Error('report editorial requires completed analyses');
 const visualAssets = (Array.isArray(rendered.assets) ? rendered.assets : []).map((item) => ({ kind: String(item?.kind ?? ''), title: String(item?.title ?? ''), design: item?.design && typeof item.design === 'object' ? item.design : {} }));
 const schema = { type: 'object', properties: { narrative: { type: 'string', minLength: 1 } }, required: ['narrative'], additionalProperties: false };
 const instructions = [
   '你是空间策略报告的总编，只在已经完成的决策分析足以支撑报告时工作。读者是项目甲方、政府决策者或投资人；用可信、有判断力且可执行的项目叙事，帮助他们理解并认可证据所支持的方案。',
-  '输入的 decision_chain 是若干章自由表达的阶段判断，不是审计表。用它重建完整的决策逻辑：上游判断如何改变后续选择。找出真正推动最终选择的依赖关系、冲突与不可逆取舍，而不是复述每章结论。完整章节正文会由报告组装器原样保留，你只负责总判断和章节之间的衔接。',
+  '输入的 decision_chain 是若干动态决策单元的阶段判断，不是固定章节目录或审计表。用它重建完整的决策逻辑：上游判断如何改变后续选择。找出真正推动最终选择的依赖关系、冲突与不可逆取舍，而不是逐项复述单元结论。',
   '不要按章节顺序逐项摘要。先找出贯穿全稿的核心矛盾、竞争性解释和最终取舍，再说明选择如何由当前证据形成。',
   '重要结论、方案选择和不可行路径应紧邻已有数据、材料、同类案例或反例。只表达当前证据能够支持的尺度；未接入资料不进入总判断，也不衍生额外任务。',
   '只能重组和表达输入中已经成立的判断，不得新增事实、数字、案例、承诺或因果关系，不得把条件性结论改写成确定事实，也不得掩盖不利证据。',
