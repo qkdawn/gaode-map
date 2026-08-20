@@ -89,6 +89,11 @@ class Settings(BaseSettings):
         validation_alias="POSTGRES_DATABASE_URL",
         description="Independent PostgreSQL database URL for AI document and evidence data",
     )
+    spatial_strategy_state_database_url: str = Field(
+        "postgresql+psycopg://gaode_rag:rag-local-development@127.0.0.1:15432/gaode_rag",
+        validation_alias="SPATIAL_STRATEGY_STATE_DATABASE_URL",
+        description="Database containing persisted spatial-strategy runs and completed decisions",
+    )
 
     @property
     def sqlalchemy_database_uri(self) -> str:

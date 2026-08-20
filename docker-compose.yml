@@ -107,6 +107,7 @@ x-n8n-environment: &n8n-environment
   SPATIAL_API_BASE_URL: ${N8N_SPATIAL_API_BASE_URL:-http://host.docker.internal:8000/api/v1}
   DOCUMENT_API_BASE_URL: ${N8N_DOCUMENT_API_BASE_URL:-http://host.docker.internal:8000}
   SPATIAL_MCP_URL: ${N8N_SPATIAL_MCP_URL:-http://host.docker.internal:8040/mcp}
+  SPATIAL_STRATEGY_STATE_DATABASE_URL: ${SPATIAL_STRATEGY_STATE_DOCKER_DATABASE_URL:-postgresql+psycopg://gaode_rag:rag-local-development@rag-postgres:5432/gaode_rag}
 
 services:
   n8n-postgres:

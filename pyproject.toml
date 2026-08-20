@@ -57,6 +57,7 @@ dependencies = [
     "libpysal>=4.10.0",
     "pymysql>=1.1.0",
     "pgvector>=0.3.6",
+    "psycopg[binary]>=3.2,<4",
     "shapely>=2.0.0",
     "rasterio>=1.3.0",
     "pillow>=10.0.0",

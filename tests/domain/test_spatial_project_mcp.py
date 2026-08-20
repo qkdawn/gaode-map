@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from pathlib import Path
 
 import modules.spatial_projects.mcp_server as mcp_server
@@ -10,6 +11,20 @@ from modules.spatial_projects.skill_tools import SpatialBusinessSkillTools
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from sqlalchemy.exc import SQLAlchemyError
+
+
+def test_research_tool_descriptions_define_source_and_search_boundaries():
+    spatial = inspect.getdoc(mcp_server.analyze_spatial_evidence) or ""
+    literature = inspect.getdoc(mcp_server.search_literature_evidence) or ""
+    web_search = inspect.getdoc(mcp_server.search_public_web) or ""
+    web_fetch = inspect.getdoc(mcp_server.fetch_public_web_page) or ""
+
+    assert "scope" in spatial and "inspect" in spatial and "saved spatial snapshot" in spatial
+    assert "methods, precedents, and mechanisms" in literature
+    assert "location, exact object name" in web_search
+    assert "fetch_public_web_page" in web_search
+    assert "official or first-party pages" in web_fetch
+    assert "does not replace project documents or saved spatial records" in web_fetch
 
 
 def test_spatial_project_mcp_exposes_complete_data_tools():
@@ -29,6 +44,7 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     schemas = asyncio.run(exercise())
     assert list(schemas) == [
         "analyze_spatial_evidence",
+        "read_strategy_decisions",
         "read_project_document",
         "search_literature_evidence",
         "search_public_web",
@@ -41,6 +57,7 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     assert "dataset_id" not in query_schema["properties"]
     assert "geometry" not in query_schema["properties"]
     assert "coordinates" not in query_schema["properties"]
+    assert set(schemas["read_strategy_decisions"]["required"]) == {"run_id"}
     document_schema = schemas["read_project_document"]
     assert set(document_schema["required"]) == {"history_id", "document_id"}
     assert {"start_block", "max_blocks", "page_start", "page_end"}.issubset(document_schema["properties"])

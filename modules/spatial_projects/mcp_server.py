@@ -49,6 +49,9 @@ from modules.spatial_projects.skill_tools import (
     read_metric_result as _read_metric_result,
 )
 from modules.spatial_strategy.literature_evidence import LiteratureEvidenceService
+from modules.spatial_strategy.strategy_decisions import (
+    read_strategy_decisions as _read_strategy_decisions,
+)
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -301,7 +304,15 @@ def analyze_spatial_evidence(
     top_k: int = 10,
     record_refs: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Return bounded current-scope spatial facts for an analysis selected by the caller."""
+    """Read authoritative names, geometry, distances, relations, and metrics from the saved spatial snapshot.
+
+    Use scope to discover available metrics and named records; inspect to expand
+    selected record_refs and their nearby named POI or roads; accessibility for
+    travel-time bands; direction for eight-direction comparison; neighborhood
+    for adjacent spatial units; rank for metric extremes; and relationship for
+    multi-metric co-location. Use these results instead of public-web pages for
+    project spatial facts.
+    """
     return _call(
         spatial_evidence.analyze,
         history_id=history_id,
@@ -319,6 +330,12 @@ def analyze_spatial_evidence(
 
 
 @mcp.tool()
+def read_strategy_decisions(run_id: str) -> dict[str, Any]:
+    """Read the completed domain decisions for one spatial-strategy run."""
+    return _read_strategy_decisions(run_id)
+
+
+@mcp.tool()
 def read_project_document(
     history_id: str,
     document_id: str,
@@ -327,7 +344,11 @@ def read_project_document(
     page_start: int | None = None,
     page_end: int | None = None,
 ) -> dict[str, Any]:
-    """Read a bounded window of Docling-parsed project text; continue from next_start_block."""
+    """Read project-specific site, policy, history, ownership, or design facts from a parsed document.
+
+    Read only the blocks or pages needed for the current decision and continue
+    from next_start_block when the returned window is incomplete.
+    """
     return _call(
         data_contract.read_project_document,
         history_id=history_id,
@@ -365,9 +386,10 @@ def search_literature_evidence(
 ) -> dict[str, Any]:
     """Search the indexed PDF literature corpus.
 
-    Use focused for fast original-text evidence. Use synthesis only for
-    cross-document comparison or mechanism synthesis. Do not include private
-    project details in the question.
+    Use this for transferable methods, precedents, and mechanisms rather than
+    project spatial facts. Use focused for fast original-text evidence and
+    synthesis only for cross-document comparison or mechanism synthesis. Do
+    not include private project details in the question.
     """
     blocked = _require_history_project(history_id)
     if blocked:
@@ -388,7 +410,11 @@ async def search_public_web(
 ) -> dict[str, Any]:
     """Discover public-web sources for one saved project through AnySearch or Exa.
 
-    Results are research leads only. Fetch the selected page before citing it as evidence.
+    Use this only when a named place's public attribute can change the current
+    decision, such as an official plan, function, opening status, operator, or
+    public activity. Build a focused query from location, exact object name,
+    and the attribute to confirm. Results are research leads only; call
+    fetch_public_web_page on selected sources before using them.
     """
     blocked = _require_history_project(history_id)
     if blocked:
@@ -411,7 +437,12 @@ async def fetch_public_web_page(
     provider: Literal["anysearch", "exa"] = "anysearch",
     max_characters: int = 5000,
 ) -> dict[str, Any]:
-    """Read selected public-web pages for one saved project through AnySearch or Exa."""
+    """Read selected public-web pages for one saved project through AnySearch or Exa.
+
+    Prefer official or first-party pages whose date and geographic scope match
+    the decision. Use the page only for the public attribute it supports; it
+    does not replace project documents or saved spatial records.
+    """
     blocked = _require_history_project(history_id)
     if blocked:
         return blocked
