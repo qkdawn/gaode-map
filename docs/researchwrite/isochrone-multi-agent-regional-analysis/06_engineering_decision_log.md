@@ -322,3 +322,36 @@ VPN 路由、模型中转站异常、单次超时和一次成功或失败运行�
 - GraphRAG 覆盖校验：`scripts/verify_graphrag_index.py`
 - 工作流契约测试：`tests/domain/test_n8n_rag_workflows.py`
 - 当前工具与执行说明：`docs/N8N十二阶段工具与执行方式.md`
+
+## 11. Agent 提示词收敛与 n8n 验收（2026-08-19）
+
+### 11.1 消费者确认
+
+- `n8n/workflow-generators/urban-renewal-agent.workflow.mjs` 是正式城市更新决策工作流的生成边界；研究框架、证据路由、章节研究、跨单元综合、报告章节和报告叙事的提示词均在这里写入生成工作流。
+- `n8n/workflow-components/decision-step.json` 的旧 `Build Structured Decision Request` 代码只作为生成器输入，随后由生成器整体替换，不是正式工作流的实际提示词消费者。
+- `runtime/n8n-formal-workflows/urbanRenewalDecisionSupportAgent.json` 是本次静态检查的生成结果，不提交到 Git。
+
+### 11.2 提示词变更
+
+- 统一使用“基于已有项目材料和空间数据完成用户任务，给出明确判断及行动建议。不要虚构信息；无法完成时直接说明原因。”作为核心提示。
+- 研究、决策、综合和报告写作提示词只保留任务目标、输入范围和 JSON schema；删除事实/代理/未知分层、证据缺口扩写、内部 memo 逐字继承、工具过程说明和重复自检要求。
+- 报告章节与叙事只面向读者输出判断、依据和行动建议，不要求继承内部 JSON、工具名、状态字段或决策单元编号。
+- 工具执行错误继续由工作流失败分支处理，不转换为正式“证据不足”章节；未新增审计层、DTO、兼容分支或内部词黑名单。
+
+### 11.3 实际运行记录
+
+- 新建运行 `1523c2e6-c20a-4dda-8220-684f7ba4c22e`，首次执行 `8956` 在 `u01` 完成（7 条项目空间证据、5 个具名对象）后，于 `u02` 章节研究模型响应解析阶段被 n8n 进程终止，execution 状态为 `crashed`。
+- 发现并停止上一轮遗留的 FastAPI 状态轮询进程；该进程持续触发状态 Webhook 的 `Cannot read properties of null (reading 'disabled')`，导致 n8n 主进程/worker 反复 `SIGTERM` 和恢复。
+- 将不可恢复的 `running` 记录标记为 `failed` 并保留 `n8n_execution_crashed` 诊断，通过既有 `resume_run_id` 入口重新排队；第二次执行 `8989` 仍在同一阶段被 n8n 外部 `SIGTERM` 中断。该失败属于运行基础设施，不是 Agent 工具错误或报告结论。
+
+### 11.4 验证结果
+
+- `node n8n/workflow-generators/render-formal-workflows.mjs runtime/n8n-formal-workflows` 成功生成正式工作流。
+- `python -m pytest tests/domain/test_n8n_rag_workflows.py tests/domain/test_decision_step_dynamic_stop.py -q` 通过（62 项）。
+- `git diff --check` 通过；生成目录保持为运行时产物，不纳入提交。
+
+## 12. Harness-first 最终改造索引（2026-08-20）
+
+2026-08-20 已完成从项目自建 Agent 运行时到 Codex Harness 原生执行的最终改造。旧证据路由回环、relay、手动 MCP 工具桥、响应解析和项目级重试均已删除；n8n 只保留领域步骤、排队、恢复和持久化。正式 Run `7b8ab959-c0e2-4d29-8168-9688cb4989bf` 已完成 7 个决策单元、综合方案、5 个章节、4 张图件及 11 页 DOCX。
+
+完整架构、文件变更、故障时间线、运行证据、报告评价和剩余限制见：`07_harness_first_agent_refactor_record.md`。
