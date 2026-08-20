@@ -208,7 +208,7 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
         "coordinates": [[[116.38, 39.90], [116.39, 39.90], [116.39, 39.91], [116.38, 39.91], [116.38, 39.90]]],
     }
     records = {
-        "road_edges": [{"road_class": "主干路", "length_m": 1200, "geometry": {"type": "LineString", "coordinates": [[116.38, 39.90], [116.40, 39.91]]}}],
+        "road_edges": [{"road_name": "潘家坪路", "road_class": "主干路", "length_m": 1200, "geometry": {"type": "LineString", "coordinates": [[116.38, 39.90], [116.40, 39.91]]}}],
         "poi": [
             {"category": "餐饮服务", "name": "甲方餐厅", "location": [116.385, 39.902]},
             {"category": "科教文化服务", "name": "城市文化馆", "location": [116.395, 39.907]},
@@ -267,6 +267,9 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
     assert package["visual_plan"][1]["map_variant"] == "context_full"
     assert package["visual_plan"][4]["chart_variant"] == "population_profile"
     assert images[0]["design"]["poi_style"]["palette"] == "facility_category_v1"
+    assert images[0]["design"]["poi_style"]["named_label_count"] == 1
+    assert images[0]["design"]["named_pois"][0]["name"] == "城市文化馆"
+    assert images[0]["design"]["named_roads"] == [{"name": "潘家坪路", "road_class": "主干路"}]
     assert len(set(images[0]["design"]["poi_style"]["category_colors"].values())) == 2
     assert images[2]["design"]["population_style"]["palette"] == "population_blue_v1"
 

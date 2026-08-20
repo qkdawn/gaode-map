@@ -89,7 +89,7 @@ def _reader_report(value: Any) -> dict[str, Any] | None:
     manifest = _mapping(report.get("asset_manifest"))
     visual_assets = manifest.get("visual_assets") if isinstance(manifest.get("visual_assets"), list) else []
     return {
-        "title": title_match.group(1).strip() if title_match else "空间分析报告",
+        "title": title_match.group(1).strip() if title_match else "空间策略与行动方案",
         "summary": _report_summary(markdown),
         "markdown": markdown,
         "evidence_labels": labels,

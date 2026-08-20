@@ -41,13 +41,6 @@ INTERNAL_TERM_PATTERNS = (
     re.compile(r"\bphase\s*\d+\b", re.IGNORECASE),
 )
 
-UNAVAILABLE_EVIDENCE_PATTERNS = (
-    re.compile(r"客流|人流|付费|经营回报|营业收入|销售额|游客来源|参观人数|停留时间|消费数据|运营数据"),
-    re.compile(r"(?:数据|证据)(?:缺口|不足)|补证"),
-    re.compile(r"(?:需要|仍需|必须|应当).{0,24}(?:验证|调查|核实|核验|补充)"),
-)
-
-
 def _text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -60,11 +53,24 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
-def _project_name(project_context: Mapping[str, Any]) -> str:
+def _project_name(project_context: Mapping[str, Any], project_question: str = "") -> str:
     project = _mapping(project_context.get("project"))
     for key in ("project_name", "name", "title"):
-        if _text(project.get(key)):
-            return _text(project[key])
+        candidate = _text(project.get(key))
+        if candidate and not re.search(r"\bPOIs?\b|\d+\s*min\b|\d{2,3}\.\d+\s*[,，]\s*\d{1,2}\.\d+", candidate, re.IGNORECASE):
+            return candidate
+    question_match = re.search(r"(?:完成|分析|针对)?([^，。；]{2,60}?城市更新项目)", _text(project_question))
+    if question_match:
+        return question_match.group(1).lstrip("基于围绕针对")
+    document_names = []
+    for document in _list(project_context.get("documents")):
+        title = re.sub(r"\.(?:docx?|pdf)$", "", _text(_mapping(document).get("title")), flags=re.IGNORECASE)
+        title = re.sub(r"^(?:基于|关于)", "", title)
+        match = re.search(r"([^，。；]{2,60}?城市更新项目)", title)
+        if match:
+            document_names.append(match.group(1))
+    if document_names:
+        return min(document_names, key=len)
     return "项目"
 
 
@@ -79,8 +85,8 @@ def _citation_id(value: Any, *, fallback: str = "") -> str:
     return _text(value)
 
 
-def _citation_entries(steps: Mapping[str, Any], evidence_index: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Collect the evidence a chapter actually used without imposing a chapter schema."""
+def _citation_entries(steps: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Collect citations selected by completed decision analyses."""
     entries: dict[str, dict[str, Any]] = {}
 
     def add(value: Any, *, fallback: str = "") -> None:
@@ -102,23 +108,9 @@ def _citation_entries(steps: Mapping[str, Any], evidence_index: Mapping[str, Any
         for item in _list(value):
             add(item, fallback=fallback)
 
-    for step_key, step in steps.items():
+    for step in steps.values():
         output = _mapping(step)
         add_many(output.get("citations"))
-        # Keep compatibility with the earlier compact reference shape.
-        for item in _list(output.get("evidence_used")):
-            reference = _mapping(item)
-            add(reference.get("citation") or reference.get("citation_id"))
-
-    # Current runs keep evidence_index grouped by chapter; older runs may use a
-    # flat citation_id -> record map. Read both forms, but never require either.
-    for key, value in evidence_index.items():
-        if isinstance(value, list):
-            add_many(value)
-        elif isinstance(value, Mapping):
-            # A grouped chapter entry is not itself a citation. Flat legacy
-            # maps may use the outer key as the citation id.
-            add(value, fallback="" if key in steps else key)
 
     return list(entries.values())
 
@@ -136,24 +128,6 @@ def _validate_reader_text(value: Any, *, field: str, minimum_length: int = 1) ->
     if any(pattern.search(text) for pattern in INTERNAL_TERM_PATTERNS):
         raise ValueError(f"{field}_contains_internal_terms")
     return text
-
-
-def _current_evidence_only(value: Any) -> str:
-    """Remove sentences whose sole role is to request evidence outside the current run."""
-    output: list[str] = []
-    for line in _text(value).splitlines():
-        if not line.strip():
-            output.append("")
-            continue
-        sentences = re.split(r"(?<=[。！？；])", line)
-        kept = [
-            sentence
-            for sentence in sentences
-            if sentence.strip() and not any(pattern.search(sentence) for pattern in UNAVAILABLE_EVIDENCE_PATTERNS)
-        ]
-        if kept:
-            output.append("".join(kept).strip())
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(output)).strip()
 
 
 def _report_visual_assets(value: Any) -> list[dict[str, Any]]:
@@ -186,21 +160,20 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
     for index, section in enumerate(sections, 1):
         _validate_reader_text(section.get("content"), field=f"report_section_{index}", minimum_length=1)
     editorial_narrative = _validate_reader_text(
-        _current_evidence_only(request.editorial_narrative),
+        request.editorial_narrative,
         field="editorial_narrative",
         minimum_length=1,
     )
 
-    evidence_index = _mapping(state.get("evidence_index"))
-    citation_entries = _citation_entries(steps, evidence_index)
+    citation_entries = _citation_entries(steps)
     citations: list[dict[str, Any]] = []
     for index, citation in enumerate(citation_entries, 1):
         citation_id = _citation_id(citation)
         label = f"E{index:03d}"
         citations.append({"label": label, "citation_id": citation_id, **citation})
 
-    project_name = _project_name(request.project_context)
-    title = f"{project_name}空间分析报告"
+    project_name = _project_name(request.project_context, request.project_question)
+    title = f"{project_name}空间策略与行动方案"
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     lines = [
         f"# {title}", "", f"分析问题：{request.project_question}", "",
@@ -400,7 +373,7 @@ class FeishuReportSender:
         total = len([item for item in sections if isinstance(item, Mapping) and _text(item.get("content"))])
         return "\n".join(
             [
-                _text(report.get("title")) or "空间分析报告",
+                _text(report.get("title")) or "空间策略与行动方案",
                 f"状态：{total} 个报告部分完成",
                 f"核心结论：{summary or '详见完整报告'}",
                 "完整 Word 报告见随后发送的文件。",
@@ -437,12 +410,16 @@ async def compose_spatial_strategy_report(
     report_store = store or SpatialStrategyReportStore()
     report = build_spatial_strategy_report(request)
     markdown_path = report_store.write(report)
+    document_path = report_store.write_docx(markdown_path, title=_text(report.get("title")))
     artifact = {
-        "kind": "markdown_report",
-        "filename": markdown_path.name,
-        "path": str(markdown_path),
-        "media_type": "text/markdown",
-        "sha256": sha256(markdown_path.read_bytes()).hexdigest(),
+        "kind": "docx_report",
+        "filename": document_path.name,
+        "path": str(document_path),
+        "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "sha256": sha256(document_path.read_bytes()).hexdigest(),
+        "markdown_filename": markdown_path.name,
+        "markdown_path": str(markdown_path),
+        "markdown_sha256": sha256(markdown_path.read_bytes()).hexdigest(),
         "visual_assets": report.get("visual_assets", []),
     }
     return {**report, "status": "draft", "asset_manifest": artifact, "decision_state": request.decision_state}

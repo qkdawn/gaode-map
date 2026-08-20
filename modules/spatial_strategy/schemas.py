@@ -61,7 +61,7 @@ class SpatialStrategyReaderChapter(BaseModel):
 
 
 class SpatialStrategyReaderReport(BaseModel):
-    title: str = "空间分析报告"
+    title: str = "空间策略与行动方案"
     summary: str = ""
     markdown: str = ""
     evidence_labels: list[str] = Field(default_factory=list)

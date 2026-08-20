@@ -583,11 +583,15 @@ def _draw_context_panel(
     poi_count: int,
     poi_counts: Counter[str],
     named: list[dict[str, Any]],
+    named_roads: list[tuple[dict[str, Any], tuple[float, float]]],
 ) -> None:
     left, right = 1035, 1600
     draw.rectangle((left, 70, right, 1000), fill="#f1efe9")
     draw.text((1080, 118), "区域证据摘要", fill="#172033", font=_font(24, bold=True))
     draw.text((1080, 153), "完整记录 · 不是客流热力图", fill="#667085", font=_font(14))
+    road_names = " / ".join(_road_name(record)[:10] for record, _ in named_roads[:4])
+    if road_names:
+        draw.text((1080, 180), f"具名道路：{road_names}", fill="#475467", font=_font(11))
 
     draw.text((1080, 212), f"{road_count:,}", fill="#1f4e5f", font=_font(39, bold=True))
     draw.text((1080, 258), "路网边", fill="#667085", font=_font(13))
@@ -620,7 +624,7 @@ def _draw_context_panel(
     decision = "以连接、识别和公共文化协作为重点，不复制普通商业供给。"
     for line_index, line in enumerate(_wrap_text(decision, 24)):
         draw.text((1102, decision_top + 22 + line_index * 20), line, fill="#172033", font=_font(14, bold=True))
-    draw.text((1080, 968), "道路结构与 POI 供给均不等同实测客流。", fill="#667085", font=_font(11))
+    draw.text((1080, 968), "道路与设施关系用于选择首期连接、入口识别和公共文化协作重点。", fill="#667085", font=_font(11))
 
 
 def _road_style(record: Mapping[str, Any]) -> tuple[str, int]:
@@ -697,6 +701,53 @@ def _named_pois(
         seen.add(name)
         selected.append(record)
         selected_points.append(point)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _road_name(record: Mapping[str, Any]) -> str:
+    return str(record.get("road_name") or record.get("name") or "").strip()
+
+
+def _named_roads(
+    roads: list[dict[str, Any]],
+    bounds: tuple[float, float, float, float],
+    *,
+    limit: int = 6,
+) -> list[tuple[dict[str, Any], tuple[float, float]]]:
+    center_x = (bounds[0] + bounds[2]) / 2.0
+    center_y = (bounds[1] + bounds[3]) / 2.0
+    longitude_scale = max(0.01, math.cos(math.radians(center_y)))
+    ranked = []
+    for record in roads:
+        name = _road_name(record)
+        points = _geometry_points(record.get("geometry"))
+        if not name or len(points) < 2:
+            continue
+        label_point = points[len(points) // 2]
+        road_class = str(record.get("road_class") or "")
+        priority = 0 if "主干" in road_class or "快速" in road_class else (1 if "次干" in road_class else 2)
+        distance = ((label_point[0] - center_x) * longitude_scale) ** 2 + (label_point[1] - center_y) ** 2
+        length = _number(record.get("length_m")) or 0.0
+        ranked.append((priority, distance, -length, name, record, label_point))
+
+    selected = []
+    seen = set()
+    selected_points: list[tuple[float, float]] = []
+    minimum_separation = 0.001
+    for _, _, _, name, record, label_point in sorted(ranked, key=lambda item: item[:4]):
+        if name in seen:
+            continue
+        if any(
+            ((label_point[0] - other[0]) * longitude_scale) ** 2 + (label_point[1] - other[1]) ** 2
+            < minimum_separation**2
+            for other in selected_points
+        ):
+            continue
+        seen.add(name)
+        selected.append((record, label_point))
+        selected_points.append(label_point)
         if len(selected) >= limit:
             break
     return selected
@@ -781,6 +832,19 @@ def _evidence_map_asset(
         color, width = _road_style(record)
         draw.line([project(point) for point in path], fill=color, width=width)
 
+    named_roads = _named_roads(roads, bounds)
+    for record, label_point in named_roads:
+        x, y = project(label_point)
+        draw.text(
+            (x, y),
+            _road_name(record)[:12],
+            fill="#344054",
+            font=_font(12, bold=True),
+            anchor="mm",
+            stroke_width=3,
+            stroke_fill="#ffffff",
+        )
+
     emphasized = {"科教文化服务", "风景名胜", "交通设施服务", "政府机构及社会团体"}
     for record in pois:
         point = _record_point(record)
@@ -799,7 +863,7 @@ def _evidence_map_asset(
 
     named = _named_pois(pois, bounds)
     poi_counts = Counter(str(record.get("category") or "其他") for record in pois)
-    if variant == "context_full":
+    if variant in {"poi_access", "context_full"}:
         for node_index, record in enumerate(named[:5], start=1):
             point = _record_point(record)
             if point is None:
@@ -811,20 +875,21 @@ def _evidence_map_asset(
         lines = [
             ("道路与设施", f"路网 {len(roads):,} 条 · POI {len(pois):,} 个"),
             ("主要供给", " · ".join(f"{name.replace('服务', '')} {count}" for name, count in poi_counts.most_common(3))),
-            ("近中心具名节点", " / ".join(str(item.get("name") or "")[:12] for item in named[:4])),
+            ("近中心具名节点", " / ".join(f"{index}.{str(item.get('name') or '')[:11]}" for index, item in enumerate(named[:4], 1))),
+            ("具名道路", " / ".join(_road_name(record)[:12] for record, _ in named_roads[:4])),
             ("决策含义", "完整路网用于判断连接关系；项目应改善连接与识别，而非复制普通商业。"),
         ]
-        note = "使用完整项目记录；节点为真实POI，道路结构不等同实测客流，入口与步行连续性仍需现场核验。"
+        note = "使用完整项目记录；道路与具名节点共同确定首期连接、入口识别和步行改善方向。"
     else:
         population_total = sum(_number(record.get("population_total")) or 0.0 for record in population)
         cultural_count = poi_counts.get("科教文化服务", 0) + poi_counts.get("风景名胜", 0)
         lines = [
             ("人口底盘", f"常住人口代理 {population_total:,.0f} · 格网 {len(population):,}"),
             ("文化与公共节点", f"科教文化/风景名胜 {cultural_count:,} 个"),
-            ("近中心具名节点", " / ".join(str(item.get("name") or "")[:12] for item in named[:4])),
+            ("近中心具名节点", " / ".join(f"{index}.{str(item.get('name') or '')[:11]}" for index, item in enumerate(named[:4], 1))),
             ("决策含义", "区域角色应以社区高频使用为底盘，以文化节点协作为增量。"),
         ]
-        note = "人口是常住人口代理，POI是设施供给；二者均不能直接换算项目到访率或收入。"
+        note = "人口与公共设施关系用于选择日常服务对象、主要导入方向和文化协作节点。"
     if variant == "context_full":
         _draw_context_panel(
             draw,
@@ -832,6 +897,7 @@ def _evidence_map_asset(
             poi_count=len(pois),
             poi_counts=poi_counts,
             named=named,
+            named_roads=named_roads,
         )
     else:
         _draw_panel(draw, title="证据读法", lines=lines, note=note)
@@ -861,6 +927,10 @@ def _evidence_map_asset(
     saved_design["named_pois"] = [
         {"name": item.get("name"), "category": item.get("category")}
         for item in named
+    ]
+    saved_design["named_roads"] = [
+        {"name": _road_name(record), "road_class": record.get("road_class")}
+        for record, _ in named_roads
     ]
     if pois:
         displayed_categories = [category for category, _ in poi_counts.most_common(4)]
@@ -967,7 +1037,7 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
             "format": "chart", "chart_variant": "population_profile", "title": "重点年龄人口结构",
             "rationale": "比较研学、家庭和社区日常使用的人口基础",
             "decision_question": "首期公共产品应优先服务哪些日常客群",
-            "caption": "重点年龄段人口支持多时段公共使用测试，但不能直接换算项目客流。",
+            "caption": "重点年龄段人口结构支持把社区日常使用、家庭活动和组织化文化活动配置到不同时段。",
             "dataset_id": "population",
         })
     if data.get("nightlight") and len(plans) < 5:
@@ -978,7 +1048,7 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
             "format": "map", "title": "夜间活动背景与道路骨架",
             "rationale": "识别夜光热点、衰减边界和道路关系",
             "decision_question": "项目是否具备延时开放条件以及夜间产品边界",
-            "caption": "夜光只能支持适度延时开放的背景判断，不能证明夜间消费或营业收入。",
+            "caption": "当前夜间活动背景适合延伸至傍晚，夜间产品应以照明、安全、短时文化活动和安静离场为主。",
             "layers": layers,
         })
     if data.get("road_edges") and len(plans) < 3:
@@ -986,7 +1056,7 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
             "format": "map", "title": "道路层级与连接骨架",
             "rationale": "识别主要道路层级与内部连接关系",
             "decision_question": "步行接驳和入口识别应优先改善哪些连接",
-            "caption": "道路层级用于判断连接骨架，不等同实测客流或正式入口条件。",
+            "caption": "道路层级确定首期导入和步行接驳骨架，并指导入口识别与内部路径的优先改善顺序。",
             "layers": [{"dataset_id": "road_edges", "role": "line"}],
         })
     return plans[:5]

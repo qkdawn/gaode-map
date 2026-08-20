@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from zipfile import ZipFile
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import httpx
 import pytest
+from docx import Document
+from docx.oxml.ns import qn
 
 from modules.spatial_strategy.reporting import (
     FeishuConfig,
     FeishuReportSender,
     SpatialStrategyReportStore,
     build_spatial_strategy_report,
+    compose_spatial_strategy_report,
 )
 from modules.spatial_strategy.docx_export import write_markdown_docx
 from modules.spatial_strategy.schemas import SpatialStrategyReportFinalizeRequest
@@ -44,7 +48,14 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
         }
     ]
     steps["named_connections"]["citations"] = [
-        {"citation_id": "project:source-1", "source_type": "project_document"},
+        {
+            "citation_id": "project:source-1",
+            "title": "项目材料原文",
+            "source_type": "project_document",
+            "source_locator": "项目材料：第 1 页",
+            "dataset_id": "document:1",
+            "snapshot_id": "snapshot-1",
+        },
         {"citation_id": "project:source-2", "title": "空间查询", "source_type": "project_data"},
     ]
     return SpatialStrategyReportFinalizeRequest(
@@ -52,7 +63,7 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
         history_id="history-1",
         project_question="判断项目空间策略",
         project_context={"project": {"name": "测试项目"}},
-        editorial_narrative="项目应以可验证的空间策略形成首期行动，并以运营反馈决定后续投入。",
+        editorial_narrative="项目应以社区日常使用为底盘，以文化协作为增量，先形成连续可达的公共空间骨架。",
         decision_state={
             "steps": steps,
             "report_sections": [
@@ -78,17 +89,6 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
                     "content": "首期行动围绕上述连接关系形成可执行组合。",
                 },
             ],
-            "evidence_index": {
-                "project:source-1": {
-                    "citation_id": "project:source-1",
-                    "title": "项目材料原文",
-                    "content": "这是项目材料中的可复核原文。",
-                    "source_type": "project_document",
-                    "source_locator": "项目材料：第 1 页",
-                    "dataset_id": "document:1",
-                    "snapshot_id": "snapshot-1",
-                }
-            },
         },
     )
 
@@ -96,7 +96,7 @@ def _request() -> SpatialStrategyReportFinalizeRequest:
 def test_report_renders_adaptive_steps_and_deduplicated_citation():
     report = build_spatial_strategy_report(_request())
 
-    assert report["title"] == "测试项目空间分析报告"
+    assert report["title"] == "测试项目空间策略与行动方案"
     assert sum(line.startswith("## ") for line in report["markdown"].splitlines()) == 4
     assert "## 总判断" in report["markdown"]
     assert report["markdown"].index("## 总判断") < report["markdown"].index("## 1. 区域角色")
@@ -108,48 +108,29 @@ def test_report_renders_adaptive_steps_and_deduplicated_citation():
     ]
     assert report["citations"][0]["title"] == "项目材料原文"
     assert report["citations"][1]["title"] == "空间查询"
-    assert report["summary"] == "项目应以可验证的空间策略形成首期行动，并以运营反馈决定后续投入。"
+    assert report["summary"] == "项目应以社区日常使用为底盘，以文化协作为增量，先形成连续可达的公共空间骨架。"
 
 
-def test_report_removes_requests_for_unavailable_evidence():
+def test_report_uses_project_question_when_saved_scope_name_is_generic():
     request = _request().model_copy(deep=True)
-    request.editorial_narrative = (
-        "现有空间关系支持优先改善北侧连接。游客来源和运营数据尚未取得。"
-    )
+    request.project_context["project"]["name"] = "15min - 112.9863,28.2208 - 2635 POIs"
+    request.project_question = "完成长沙县人民政府原址城市更新项目的综合空间分析。"
 
     report = build_spatial_strategy_report(request)
 
-    assert "现有空间关系支持优先改善北侧连接。" in report["markdown"]
-    assert "游客来源" not in report["summary"]
-    assert "运营数据" not in report["summary"]
+    assert report["title"] == "长沙县人民政府原址城市更新项目空间策略与行动方案"
+    assert report["markdown"].startswith("# 长沙县人民政府原址城市更新项目空间策略与行动方案")
 
 
-def test_report_reads_current_step_grouped_evidence_index_without_audit_references():
+def test_report_preserves_strategy_and_specific_implementation_conditions():
     request = _request().model_copy(deep=True)
-    for step in request.decision_state["steps"].values():
-        step.pop("citations", None)
-    request.decision_state["evidence_index"] = {
-        "supply_gap": [
-            {
-                "citation_id": "project:gap-query",
-                "title": "周边设施空间查询",
-                "source_type": "project_data",
-                "source_locator": "poi:aggregate",
-            }
-        ]
-    }
+    request.editorial_narrative = "现有空间关系支持优先改善北侧连接；历史建筑采用可逆改造，消防条件在具体设计中核定。"
 
     report = build_spatial_strategy_report(request)
 
-    assert report["citations"] == [
-        {
-            "label": "E001",
-            "citation_id": "project:gap-query",
-            "title": "周边设施空间查询",
-            "source_type": "project_data",
-            "source_locator": "poi:aggregate",
-        }
-    ]
+    assert "现有空间关系支持优先改善北侧连接" in report["markdown"]
+    assert "历史建筑采用可逆改造" in report["summary"]
+    assert "消防条件在具体设计中核定" in report["summary"]
 
 
 def test_report_requires_completed_report_sections():
@@ -170,12 +151,48 @@ def test_report_store_writes_run_scoped_markdown(tmp_path):
 
 def test_markdown_report_can_be_rendered_as_docx(tmp_path):
     markdown = tmp_path / "report.md"
-    markdown.write_text("# 报告\n\n## 判断\n\n项目材料支持该方向。\n\n- 条件一\n", encoding="utf-8")
+    markdown.write_text(
+        "# 报告\n\n## 判断\n\n项目材料支持**该方向**。\n\n"
+        "1. **条件一**：先核验。\n2. 条件二：再测试。\n\n"
+        "新的清单：\n\n1. 新条件一。\n\n"
+        "| 类型 | 行动 |\n|---|---|\n| 公共服务 | 先测试 |\n",
+        encoding="utf-8",
+    )
 
     output = write_markdown_docx(markdown, tmp_path / "report.docx")
 
     assert output.is_file()
     assert output.stat().st_size > 1000
+    with ZipFile(output) as archive:
+        settings_xml = archive.read("word/settings.xml").decode("utf-8")
+    assert 'w:val="bestFit"' in settings_xml
+    assert 'w:percent="100"' in settings_xml
+    document = Document(output)
+    paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text]
+    assert all("**" not in paragraph.text for paragraph in paragraphs)
+    assert any(run.text == "该方向" and run.bold for paragraph in paragraphs for run in paragraph.runs)
+    assert any(run.text == "条件一" and run.bold for paragraph in paragraphs for run in paragraph.runs)
+    numbered = [paragraph for paragraph in paragraphs if paragraph._p.pPr is not None and paragraph._p.pPr.numPr is not None]
+    assert len(numbered) == 3
+    first_num_id = numbered[0]._p.pPr.numPr.numId.val
+    assert numbered[1]._p.pPr.numPr.numId.val == first_num_id
+    assert numbered[2]._p.pPr.numPr.numId.val != first_num_id
+    table = document.tables[0]
+    assert table.rows[0]._tr.trPr.find(qn("w:tblHeader")) is not None
+    assert all(row._tr.trPr.find(qn("w:cantSplit")) is not None for row in table.rows)
+
+
+def test_compose_report_requires_markdown_and_docx_artifacts(tmp_path):
+    store = SpatialStrategyReportStore(tmp_path)
+
+    result = asyncio.run(compose_spatial_strategy_report(_request(), store=store))
+
+    directory = tmp_path / str(RUN_ID)
+    assert (directory / "spatial-strategy-report.md").is_file()
+    assert (directory / "spatial-strategy-report.docx").is_file()
+    assert result["asset_manifest"]["kind"] == "docx_report"
+    assert result["asset_manifest"]["filename"] == "spatial-strategy-report.docx"
+    assert result["asset_manifest"]["markdown_filename"] == "spatial-strategy-report.md"
 
 
 def test_report_embeds_generated_visual_assets():
