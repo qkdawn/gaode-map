@@ -1,7 +1,4 @@
-param(
-    [switch]$SkipSmokeCheck,
-    [switch]$SkipModelCheck
-)
+param([switch]$SkipSmokeCheck)
 
 $ErrorActionPreference = "Stop"
 
@@ -122,43 +119,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to apply RAG database schema."
 }
 
-$codexBaseUrl = $env:CODEX_RELAY_BASE_URL
-$codexModel = $env:CODEX_RELAY_MODEL
-$codexApiKey = $env:CODEX_RELAY_API_KEY
-
-if (-not ($codexBaseUrl -and $codexModel -and $codexApiKey)) {
-    $codexConfigPath = Join-Path $env:USERPROFILE ".codex\config.toml"
-    $codexAuthPath = Join-Path $env:USERPROFILE ".codex\auth.json"
-    if (-not (Test-Path $codexConfigPath) -or -not (Test-Path $codexAuthPath)) {
-        throw "Codex relay configuration is missing. Set CODEX_RELAY_BASE_URL, CODEX_RELAY_MODEL and CODEX_RELAY_API_KEY."
-    }
-    $codexConfig = Get-Content -Raw $codexConfigPath
-    $baseMatch = [regex]::Match($codexConfig, '(?m)^openai_base_url\s*=\s*"([^"]+)"')
-    $modelMatch = [regex]::Match($codexConfig, '(?m)^model\s*=\s*"([^"]+)"')
-    if (-not $baseMatch.Success) {
-        $providerMatch = [regex]::Match($codexConfig, '(?m)^model_provider\s*=\s*"([^"]+)"')
-        if ($providerMatch.Success) {
-            $providerName = [regex]::Escape($providerMatch.Groups[1].Value)
-            $providerBlock = [regex]::Match(
-                $codexConfig,
-                "(?ms)^\[model_providers\.$providerName\]\s*(.*?)(?=^\[|\z)"
-            )
-            if ($providerBlock.Success) {
-                $baseMatch = [regex]::Match($providerBlock.Groups[1].Value, '(?m)^base_url\s*=\s*"([^"]+)"')
-            }
-        }
-    }
-    $codexAuth = Get-Content -Raw $codexAuthPath | ConvertFrom-Json
-    if (-not $codexBaseUrl) { $codexBaseUrl = $baseMatch.Groups[1].Value }
-    if (-not $codexModel) { $codexModel = $modelMatch.Groups[1].Value }
-    if (-not $codexApiKey) { $codexApiKey = $codexAuth.OPENAI_API_KEY }
-}
-
-$bootstrapPayload = @{
-    codexRelayBaseUrl = $codexBaseUrl
-    codexRelayModel = $codexModel
-    codexRelayApiKey = $codexApiKey
-} | ConvertTo-Json -Compress
+$bootstrapPayload = @{} | ConvertTo-Json -Compress
 
 $bootstrapPayload | docker compose exec -T n8n node /bootstrap/bootstrap/render-bootstrap.mjs
 if ($LASTEXITCODE -ne 0) {
@@ -170,7 +131,7 @@ try {
     $n8nManagementKey = if ($env:N8N_MANAGEMENT_API_KEY) { $env:N8N_MANAGEMENT_API_KEY } else { Get-DotEnvValue "N8N_MANAGEMENT_API_KEY" "" }
     $legacyWorkflowIds = @(
         "ragDbSmoke000001", "kbPublishSource0001", "kbIngestProjectDoc01", "kbIngestWebhook0001",
-        "ollamaEmbedding0001", "kbHybridRetrieve0001", "codexRelayResponse1", "codexRerankCandidates1",
+        "ollamaEmbedding0001", "kbHybridRetrieve0001", "codexRerankCandidates1",
         "analysisDecisionStep01", "analysisSpatialStrategyWebhook1", "analysisSpatialStrategyStatus01",
         "analysisStepTest001", "codexRelayTest001", "ragIntegration0001", "analysisSpatialStrategy1"
     )
@@ -267,24 +228,6 @@ if (-not $SkipSmokeCheck) {
     $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = $previousPluginSetting
     if ($LASTEXITCODE -ne 0) {
         throw "n8n workflow contract tests failed."
-    }
-}
-
-if (-not $SkipModelCheck) {
-    $modelCheckHeaders = @{ Authorization = "Bearer $codexApiKey"; "Content-Type" = "application/json" }
-    $modelCheckBody = @{
-        model = $codexModel
-        input = "Reply with OK only."
-        max_output_tokens = 16
-        store = $false
-    } | ConvertTo-Json -Compress
-    try {
-        $modelCheck = Invoke-RestMethod -Method Post -Uri "$($codexBaseUrl.TrimEnd('/'))/responses" -Headers $modelCheckHeaders -Body $modelCheckBody -TimeoutSec 120
-    } catch {
-        throw "Codex Responses model check failed: $($_.Exception.Message)"
-    }
-    if (-not $modelCheck.id -or -not $modelCheck.output) {
-        throw "Codex Responses model check returned an invalid response."
     }
 }
 

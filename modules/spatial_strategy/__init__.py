@@ -6,7 +6,10 @@ from .schemas import (
     SpatialStrategyRunRequest,
     SpatialStrategyProjectContextRequest,
     SpatialStrategyProjectDataRequest,
-    SpatialStrategyAgentToolRequest,
+    SpatialStrategyHarnessSynthesisRequest,
+    SpatialStrategyHarnessUnitRequest,
+    SpatialStrategyHarnessSectionRequest,
+    SpatialStrategyHarnessVisualRequest,
     SpatialStrategyVisualRequest,
     SpatialStrategyReportFinalizeRequest,
     SpatialStrategyReportDeliveryRequest,
@@ -28,7 +31,13 @@ from .service import (
 )
 from .reader_result import project_run_accepted, project_run_detail
 from .visuals import build_spatial_strategy_visuals
-from .mcp_agent import call_spatial_mcp_tool
+from .harness_synthesis import (
+    SpatialStrategyHarnessError,
+    analyze_strategy_unit,
+    design_strategy_visuals,
+    synthesize_strategy_blueprint,
+    write_strategy_section,
+)
 
 __all__ = [
     "SpatialStrategyGatewayError",
@@ -39,7 +48,10 @@ __all__ = [
     "SpatialStrategyRunRequest",
     "SpatialStrategyProjectContextRequest",
     "SpatialStrategyProjectDataRequest",
-    "SpatialStrategyAgentToolRequest",
+    "SpatialStrategyHarnessSynthesisRequest",
+    "SpatialStrategyHarnessUnitRequest",
+    "SpatialStrategyHarnessSectionRequest",
+    "SpatialStrategyHarnessVisualRequest",
     "SpatialStrategyVisualRequest",
     "SpatialStrategyReportFinalizeRequest",
     "SpatialStrategyReportDeliveryRequest",
@@ -54,7 +66,11 @@ __all__ = [
     "normalize_access_groups",
     "resume_spatial_strategy_run",
     "submit_spatial_strategy_run",
-    "call_spatial_mcp_tool",
+    "SpatialStrategyHarnessError",
+    "synthesize_strategy_blueprint",
+    "analyze_strategy_unit",
+    "write_strategy_section",
+    "design_strategy_visuals",
     "project_run_accepted",
     "project_run_detail",
 ]

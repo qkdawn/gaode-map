@@ -23,14 +23,11 @@ function parseJson(value, label) {
   }
 }
 
-const runtime = parseJson(stdin, 'bootstrap runtime');
+parseJson(stdin, 'bootstrap runtime');
 const replacements = {
   __RAG_DB_NAME__: process.env.RAG_DB_NAME,
   __RAG_DB_USER__: process.env.RAG_DB_USER,
   __RAG_DB_PASSWORD__: process.env.RAG_DB_PASSWORD,
-  __CODEX_RELAY_API_KEY__: runtime.codexRelayApiKey,
-  __CODEX_RELAY_BASE_URL__: String(runtime.codexRelayBaseUrl || '').replace(/\/$/, ''),
-  __CODEX_RELAY_MODEL__: runtime.codexRelayModel,
   __DOCUMENT_API_BASE_URL__: String(process.env.DOCUMENT_API_BASE_URL || '').replace(/\/$/, ''),
   __SPATIAL_API_BASE_URL__: String(process.env.SPATIAL_API_BASE_URL || '').replace(/\/$/, ''),
   __SPATIAL_MCP_URL__: String(process.env.SPATIAL_MCP_URL || '').replace(/\/$/, ''),

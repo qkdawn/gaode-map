@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "decision": { "type": "string", "minLength": 1 },
+    "alternatives_considered": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "key_facts": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "named_entities": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/named_entity" }
+    },
+    "actions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": { "$ref": "#/$defs/action" }
+    }
+  },
+  "required": ["decision", "alternatives_considered", "key_facts", "named_entities", "actions"],
+  "additionalProperties": false,
+  "$defs": {
+    "named_entity": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "entity_type": { "type": "string", "minLength": 1 },
+        "relationship": { "type": "string", "minLength": 1 },
+        "fact": { "type": "string", "minLength": 1 },
+        "record_ref": { "type": ["string", "null"] }
+      },
+      "required": ["name", "entity_type", "relationship", "fact", "record_ref"],
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "minLength": 1 },
+        "target_user": { "type": "string", "minLength": 1 },
+        "location": { "type": "string", "minLength": 1 },
+        "priority": { "type": "string", "minLength": 1 },
+        "intended_effect": { "type": "string", "minLength": 1 }
+      },
+      "required": ["action", "target_user", "location", "priority", "intended_effect"],
+      "additionalProperties": false
+    }
+  }
+}

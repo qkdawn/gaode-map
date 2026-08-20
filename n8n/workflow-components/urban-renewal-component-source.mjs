@@ -117,7 +117,7 @@ const failureNode = {
   RETURNING step.step
 )
 SELECT id::text AS run_id, status, current_step, error, finished_at FROM failed_run;`,
-      options: { queryReplacement: '={{ [String($(\'展开领取任务请求\').first().json.run_id || $(\'合并项目上下文\').first().json.run_id || ""), String($json.error?.message || $json.error || $json.message || JSON.stringify($json))] }}' },
+      options: { queryReplacement: '={{ [String($(\'展开领取任务请求\').first().json.run_id || $(\'合并项目上下文\').first().json.run_id || ""), String($json.error?.message || (typeof $json.error === "string" ? $json.error : JSON.stringify($json.error || {})) || $json.message || JSON.stringify($json))] }}' },
     },
     [12180, 540],
     '15d4ef40-a51a-48d6-b0d1-06049065a187',
@@ -135,67 +135,42 @@ nodes.push({
       jsCode: `const completed = $input.first()?.json ?? {};
 const request = $('Attach Project Context').first().json;
 const projectContext = request.project_context && typeof request.project_context === 'object' ? request.project_context : {};
-const steps = completed.decision_state?.steps && typeof completed.decision_state.steps === 'object' ? completed.decision_state.steps : {};
-const completedAnalyses = Object.entries(steps).map(([unitId, value]) => ({ unit_id: unitId, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision: String(value?.decision_memo?.decision ?? '').trim(), key_facts: Array.isArray(value?.decision_memo?.key_facts) ? value.decision_memo.key_facts : [], named_entities: Array.isArray(value?.decision_memo?.named_entities) ? value.decision_memo.named_entities : [] })).filter((item) => item.decision).sort((left, right) => left.step_order - right.step_order);
-const datasets = (Array.isArray(projectContext.datasets) ? projectContext.datasets : []).filter((item) => item && !String(item.dataset_id ?? '').startsWith('document:')).map((item) => ({ dataset_id: String(item.dataset_id ?? ''), title: String(item.title ?? ''), total_count: Number(item.total_count ?? 0), geometry_type: String(item.geometry_type ?? ''), fields: Array.isArray(item.fields) ? item.fields : [] })).filter((item) => item.dataset_id);
-const layerSchema = { type: 'object', properties: { dataset_id: { type: 'string' }, role: { type: 'string', enum: ['line', 'point', 'polygon'] }, color: { type: 'string' }, metric_field: { type: 'string' } }, required: ['dataset_id', 'role', 'color', 'metric_field'], additionalProperties: false };
-const visualSchema = { type: 'object', properties: {
-  title: { type: 'string' }, format: { type: 'string', enum: ['map', 'chart', 'table'] },
-  rationale: { type: 'string' }, decision_question: { type: 'string' }, caption: { type: 'string' },
-  map_variant: { type: 'string', enum: ['', 'poi_access', 'context_full', 'regional_role'] },
-  chart_variant: { type: 'string', enum: ['', 'poi_supply', 'population_profile'] },
-  dataset_id: { type: 'string' }, layers: { type: 'array', items: layerSchema }, group_by: { type: 'string' },
-  metric_op: { type: 'string', enum: ['count', 'sum', 'avg'] }, metric_field: { type: 'string' },
-}, required: ['title', 'format', 'rationale', 'decision_question', 'caption', 'map_variant', 'chart_variant', 'dataset_id', 'layers', 'group_by', 'metric_op', 'metric_field'], additionalProperties: false };
-const schema = { type: 'object', properties: { visuals: { type: 'array', minItems: 3, maxItems: 5, items: visualSchema } }, required: ['visuals'], additionalProperties: false };
-const instructions = [
-  '你是城市空间分析的图件设计 Agent。阅读已经完成的决策分析后，为本项目设计 3 到 5 张真正改变决策的数据图或表。',
-  '每张图必须填写 decision_question 和 caption；caption 要说明证据如何改变定位、产品、空间或实施决策，不能只重复标题。',
-  '优先使用专用版式：道路+POI 使用 context_full 或 poi_access；人口与公共节点使用 regional_role；供给结构使用 poi_supply；年龄结构使用 population_profile。',
-  '禁止仅用 POI 单层绘制全量散点图；POI 地图必须叠加 road_edges。禁止使用 road_nodes 铺满节点。人口空间地图最多一张，第二个人口视觉应使用 population_profile 图表。',
-  '夜光地图使用 nightlight.radiance，并可叠加 road_edges；道路图使用 road_edges 的道路层级。至少包含一张专用空间关系图和一张图表，避免全部输出数据集分布图。',
-  '渲染器会读取每个指定数据集的完整项目数据包，再进行绘制或聚合。不得要求抽样、截断、AI 绘画或编造空间事实。',
-].join('\\n');
+const blueprint = completed.decision_state?.report_blueprint && typeof completed.decision_state.report_blueprint === 'object' ? completed.decision_state.report_blueprint : {};
+const datasets = (Array.isArray(projectContext.datasets) ? projectContext.datasets : []).filter((item) => item && !String(item.dataset_id ?? '').startsWith('document:') && String(item.dataset_id ?? '') !== 'road_nodes').map((item) => ({ dataset_id: String(item.dataset_id ?? ''), title: String(item.title ?? ''), total_count: Number(item.total_count ?? 0), geometry_type: String(item.geometry_type ?? ''), fields: Array.isArray(item.fields) ? item.fields : [] })).filter((item) => item.dataset_id);
 return [{ json: {
   ...completed,
   history_id: request.history_id,
   project_question: request.project_question,
   project_context: projectContext,
   available_datasets: datasets,
-  instructions,
-   input: JSON.stringify({ project_question: request.project_question, decision_memos: completedAnalyses, available_datasets: datasets }),
-  max_output_tokens: 2400,
-  reasoning: { effort: 'low' },
-  text: { format: { type: 'json_schema', name: 'spatial_visual_design', strict: true, schema } },
+  solution: { recommended_position: blueprint.recommended_position, future_state: blueprint.future_state, change_mechanisms: blueprint.change_mechanisms, target_users: blueprint.target_users, use_scenarios: blueprint.use_scenarios, function_mix: blueprint.function_mix, action_plan: blueprint.action_plan },
 } }];`,
     },
     [11940, 300],
     'build-visual-agent-request-000000000000000000000',
   ),
-  onError: 'continueErrorOutput',
-  retryOnFail: true,
-  maxTries: 2,
-  waitBetweenTries: 5000,
 });
 
 nodes.push({
   ...node(
     '生成项目数据图件 Agent',
-    'n8n-nodes-base.executeWorkflow',
+    'n8n-nodes-base.httpRequest',
     {
-      source: 'database',
-      workflowId: { __rl: true, value: 'codexRelayResponse1', mode: 'id' },
-      workflowInputs: { mappingMode: 'defineBelow', value: {}, matchingColumns: [], schema: [], attemptToConvertTypes: false, convertFieldsToString: true },
-      mode: 'once',
-      options: { waitForSubWorkflow: true },
+      method: 'POST',
+      url: '=__SPATIAL_API_BASE_URL__/analysis/spatial-strategy/harness/design-visuals',
+      authentication: 'genericCredentialType',
+      genericAuthType: 'httpHeaderAuth',
+      sendBody: true,
+      contentType: 'json',
+      specifyBody: 'json',
+      jsonBody: '={{ JSON.stringify({ project_question: $json.project_question, solution: $json.solution, available_datasets: $json.available_datasets }) }}',
+      options: { timeout: 3600000, response: { response: { responseFormat: 'json' } } },
     },
     [12180, 300],
     'generate-visual-agent-000000000000000000000000',
   ),
+  credentials: { httpHeaderAuth: { id: 'n8n-webhook-client', name: 'N8N Webhook Client' } },
   onError: 'continueErrorOutput',
-  retryOnFail: true,
-  maxTries: 2,
-  waitBetweenTries: 5000,
 });
 
 nodes.push({
@@ -206,33 +181,8 @@ nodes.push({
       mode: 'runOnceForAllItems',
       jsCode: `const request = $('Build Visual Agent Request').first().json;
 const response = $input.first()?.json ?? {};
-let parsed;
-const rawOutput = String(response.output_text ?? '').trim();
-if (!rawOutput && response.error) {
-  const upstreamStatus = Number(response.error?.status ?? response.error?.statusCode ?? 0) || 'unknown';
-  const upstreamMessage = String(response.error?.message ?? response.error).slice(0, 500);
-  return [{ json: { ...request, visual_plan: [], visual_diagnostics: [{ kind: 'visual_model_unavailable', status: upstreamStatus, message: upstreamMessage }] } }];
-}
-const jsonCandidates = [rawOutput];
-const fenceMarker = String.fromCharCode(96).repeat(3);
-const fenced = rawOutput.match(new RegExp(fenceMarker + '(?:json)?\\s*([\\s\\S]*?)\\s*' + fenceMarker, 'i'));
-if (fenced?.[1]) jsonCandidates.push(fenced[1].trim());
-const objectStart = rawOutput.indexOf('{');
-const objectEnd = rawOutput.lastIndexOf('}');
-if (objectStart >= 0 && objectEnd > objectStart) jsonCandidates.push(rawOutput.slice(objectStart, objectEnd + 1));
-for (const candidate of jsonCandidates) {
-  try { parsed = JSON.parse(candidate); break; } catch {}
-}
-if (!parsed) return [{ json: { ...request, visual_plan: [], visual_diagnostics: [{ kind: 'visual_model_invalid_json', message: rawOutput.slice(0, 500) }] } }];
-const suppliedVisuals = Array.isArray(parsed.visuals) ? parsed.visuals.slice(0, 6) : [];
-const visuals = suppliedVisuals.filter((visual) => !(
-  visual && typeof visual === 'object'
-  && !String(visual.format ?? '').trim()
-  && !String(visual.title ?? '').trim()
-  && !String(visual.decision_question ?? '').trim()
-  && !String(visual.caption ?? '').trim()
-));
-const droppedVisualCount = suppliedVisuals.length - visuals.length;
+if (response.error || response.detail) throw new Error('codex_harness_failed:' + String(response.error?.message ?? response.detail ?? response.error));
+const visuals = Array.isArray(response.visuals) ? response.visuals : [];
 if (visuals.length < 3 || visuals.length > 5) throw new Error('visual plan requires three to five visuals');
 const availableIds = new Set((request.available_datasets ?? []).map((item) => String(item.dataset_id ?? '')));
 const titles = new Set();
@@ -269,9 +219,7 @@ for (const visual of visuals) {
 if (populationMapCount > 1) throw new Error('visual plan contains duplicate population maps');
 if ((availableIds.has('poi') || availableIds.has('population')) && chartCount < 1) throw new Error('visual plan requires an explanatory chart');
 if (availableIds.has('poi') && availableIds.has('road_edges') && specializedContextCount < 1) throw new Error('visual plan requires a specialized context map');
-const visualDiagnostics = [...(Array.isArray(request.visual_diagnostics) ? request.visual_diagnostics : [])];
-if (droppedVisualCount > 0) visualDiagnostics.push({ kind: 'visual_plan_items_dropped', count: droppedVisualCount });
-return [{ json: { ...request, visual_plan: visuals, visual_diagnostics: visualDiagnostics } }];`,
+return [{ json: { ...request, visual_plan: visuals } }];`,
     },
     [12660, 300],
     'validate-visual-design-00000000000000000000000',
@@ -333,83 +281,16 @@ nodes.push({
     {
       mode: 'runOnceForAllItems',
       jsCode: `const rendered = $input.first()?.json ?? {};
-const request = $('Attach Project Context').first().json;
-const steps = rendered.decision_state?.steps && typeof rendered.decision_state.steps === 'object' ? rendered.decision_state.steps : {};
-const decisionChain = Object.entries(steps).map(([unitId, value]) => ({ unit_id: unitId, step_order: Number(value?.step_order ?? 0), title: String(value?.title ?? ''), decision: String(value?.decision_memo?.decision ?? '').trim(), key_facts: Array.isArray(value?.decision_memo?.key_facts) ? value.decision_memo.key_facts : [], named_entities: Array.isArray(value?.decision_memo?.named_entities) ? value.decision_memo.named_entities : [] })).filter((item) => item.decision).sort((left, right) => left.step_order - right.step_order);
-if (!decisionChain.length) throw new Error('report editorial requires completed analyses');
-const visualAssets = (Array.isArray(rendered.assets) ? rendered.assets : []).map((item) => ({ kind: String(item?.kind ?? ''), title: String(item?.title ?? ''), design: item?.design && typeof item.design === 'object' ? item.design : {} }));
-const schema = { type: 'object', properties: { narrative: { type: 'string', minLength: 1 } }, required: ['narrative'], additionalProperties: false };
-const instructions = [
-  '你是空间策略报告的总编，只在已经完成的决策分析足以支撑报告时工作。读者是项目甲方、政府决策者或投资人；用可信、有判断力且可执行的项目叙事，帮助他们理解并认可证据所支持的方案。',
-  '输入的 decision_chain 是若干动态决策单元的阶段判断，不是固定章节目录或审计表。用它重建完整的决策逻辑：上游判断如何改变后续选择。找出真正推动最终选择的依赖关系、冲突与不可逆取舍，而不是逐项复述单元结论。',
-  '不要按章节顺序逐项摘要。先找出贯穿全稿的核心矛盾、竞争性解释和最终取舍，再说明选择如何由当前证据形成。',
-  '重要结论、方案选择和不可行路径应紧邻已有数据、材料、同类案例或反例。只表达当前证据能够支持的尺度；未接入资料不进入总判断，也不衍生额外任务。',
-  '只能重组和表达输入中已经成立的判断，不得新增事实、数字、案例、承诺或因果关系，不得把条件性结论改写成确定事实，也不得掩盖不利证据。',
-  '只输出可直接置于报告开头的决策叙事正文，不输出报告标题或固定章节目录。不得输出任何内部步骤键、状态枚举、节点名、工作流名、引用 ID 或规则名。',
-].join('\\n');
+const blueprint = rendered.decision_state?.report_blueprint && typeof rendered.decision_state.report_blueprint === 'object' ? rendered.decision_state.report_blueprint : {};
+const editorialNarrative = String(blueprint.executive_summary ?? '').trim();
+if (!editorialNarrative) throw new Error('report_executive_summary_missing');
 return [{ json: {
   ...rendered,
-  instructions,
-  input: JSON.stringify({ project_question: request.project_question, research_frame: String(rendered.decision_state?.research_frame ?? ''), project: request.project_context?.project ?? {}, decision_chain: decisionChain, visual_assets: visualAssets }),
-  max_output_tokens: 3000,
-  reasoning: { effort: 'high' },
-  text: { format: { type: 'json_schema', name: 'spatial_report_editorial', strict: true, schema } },
+  editorial_narrative: editorialNarrative,
 } }];`,
     },
     [13400, 300],
     'build-report-editorial-request-00000000000000000',
-  ),
-  onError: 'continueErrorOutput',
-  retryOnFail: true,
-  maxTries: 2,
-  waitBetweenTries: 5000,
-});
-
-nodes.push({
-  ...node(
-    '生成决策叙事 Agent',
-    'n8n-nodes-base.executeWorkflow',
-    {
-      source: 'database',
-      workflowId: { __rl: true, value: 'codexRelayResponse1', mode: 'id' },
-      workflowInputs: { mappingMode: 'defineBelow', value: {}, matchingColumns: [], schema: [], attemptToConvertTypes: false, convertFieldsToString: true },
-      mode: 'once',
-      options: { waitForSubWorkflow: true },
-    },
-    [13660, 300],
-    'generate-report-editorial-agent-0000000000000000',
-  ),
-  onError: 'continueErrorOutput',
-  retryOnFail: true,
-  maxTries: 2,
-  waitBetweenTries: 5000,
-});
-
-nodes.push({
-  ...node(
-    'Validate Report Editorial',
-    'n8n-nodes-base.code',
-    {
-      mode: 'runOnceForAllItems',
-      jsCode: `const request = $('Build Report Editorial Request').first().json;
-const response = $input.first()?.json ?? {};
-let parsed;
-const rawOutput = String(response.output_text ?? '').trim();
-const editorialDiagnostics = [];
-if (!rawOutput && response.error) editorialDiagnostics.push({ kind: 'report_editorial_model_unavailable', status: Number(response.error?.status ?? 0) || 'unknown', message: String(response.error?.message ?? response.error).slice(0, 500) });
-for (const candidate of [rawOutput, rawOutput.slice(rawOutput.indexOf('{'), rawOutput.lastIndexOf('}') + 1)]) {
-  if (!candidate) continue;
-  try { parsed = JSON.parse(candidate); break; } catch {}
-}
-if (!parsed) return [{ json: { ...request, editorial_narrative: '', editorial_diagnostics: editorialDiagnostics.length ? editorialDiagnostics : [{ kind: 'report_editorial_invalid_json', message: rawOutput.slice(0, 500) }] } }];
-const editorialNarrative = String(parsed.narrative ?? '').trim();
-if (!editorialNarrative) return [{ json: { ...request, editorial_narrative: '', editorial_diagnostics: [{ kind: 'report_editorial_empty' }] } }];
-const leakagePatterns = [/step[_-]?\\d{1,2}/i, /decision_state/i, /quality_gate/i, /evidence_index/i, /\\bn8n\\b/i, /(?:node|节点)[ _-]?(?:id|编号)/i, /(?:run|workflow|response)[ _-]?id/i];
-if (leakagePatterns.some((pattern) => pattern.test(editorialNarrative))) throw new Error('report editorial contains internal terms');
-return [{ json: { ...request, editorial_narrative: editorialNarrative } }];`,
-    },
-    [13900, 300],
-    'validate-report-editorial-00000000000000000000',
   ),
   onError: 'continueErrorOutput',
   retryOnFail: true,
@@ -550,22 +431,7 @@ connections['Return Visual Assets'] = {
   ],
 };
 connections['Build Report Editorial Request'] = {
-  main: [
-    [{ node: '生成决策叙事 Agent', type: 'main', index: 0 }],
-    [{ node: '记录任务失败', type: 'main', index: 0 }],
-  ],
-};
-connections['生成决策叙事 Agent'] = {
-  main: [
-    [{ node: 'Validate Report Editorial', type: 'main', index: 0 }],
-    [{ node: '记录任务失败', type: 'main', index: 0 }],
-  ],
-};
-connections['Validate Report Editorial'] = {
-  main: [
-    [{ node: '编排空间策略报告', type: 'main', index: 0 }],
-    [{ node: '记录任务失败', type: 'main', index: 0 }],
-  ],
+  main: [[{ node: '编排空间策略报告', type: 'main', index: 0 }]],
 };
 connections['编排空间策略报告'] = {
   main: [
@@ -632,9 +498,7 @@ export const visualsComponent = component([
 ], 'urban-agent-visuals', [0, 0], { 'Attach Project Context': '合并项目上下文' });
 
 export const reportComponent = component([
-  ['Build Report Editorial Request', '构建报告叙事请求'],
-  ['生成决策叙事 Agent', '调用报告叙事模型'],
-  ['Validate Report Editorial', '校验报告叙事'],
+  ['Build Report Editorial Request', '准备报告总判断'],
   ['编排空间策略报告', '生成最终报告'],
   ['发送报告到飞书？', '需要发送飞书？'],
   ['生成 Word 报告并发送到飞书', '生成 Word 报告并发送飞书'],

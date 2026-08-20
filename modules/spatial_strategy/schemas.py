@@ -134,23 +134,41 @@ class SpatialStrategyProjectDataRequest(BaseModel):
         return str(value or "").strip()
 
 
-class SpatialStrategyAgentToolRequest(BaseModel):
+class SpatialStrategyHarnessSynthesisRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    history_id: str = Field(min_length=1, max_length=200)
-    tool_name: Literal[
-        "analyze_spatial_evidence",
-        "read_project_document",
-        "search_literature_evidence",
-        "search_public_web",
-        "fetch_public_web_page",
-    ]
-    arguments: dict[str, Any] = Field(default_factory=dict)
+    run_id: UUID
+    project_question: str = Field(min_length=1, max_length=12000)
 
-    @field_validator("history_id", mode="before")
+    @field_validator("project_question", mode="before")
     @classmethod
-    def normalize_agent_tool_history(cls, value: object) -> str:
+    def normalize_project_question(cls, value: object) -> str:
         return str(value or "").strip()
+
+
+class SpatialStrategyHarnessUnitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+    history_id: str = Field(min_length=1, max_length=200)
+    project_question: str = Field(min_length=1, max_length=12000)
+    decision_unit: dict[str, Any]
+
+
+class SpatialStrategyHarnessSectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_question: str = Field(min_length=1, max_length=12000)
+    solution: dict[str, Any]
+    section: dict[str, Any]
+
+
+class SpatialStrategyHarnessVisualRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_question: str = Field(min_length=1, max_length=12000)
+    solution: dict[str, Any]
+    available_datasets: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SpatialStrategyVisualRequest(BaseModel):

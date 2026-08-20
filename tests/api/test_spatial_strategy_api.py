@@ -12,8 +12,6 @@ from modules.spatial_strategy.schemas import (
 )
 from modules.spatial_strategy.service import SpatialStrategyGatewayError
 from router.domains import spatial_strategy
-
-
 def _app() -> FastAPI:
     app = FastAPI()
     app.include_router(spatial_strategy.router)
@@ -235,89 +233,28 @@ def test_legacy_graphrag_endpoint_is_removed(monkeypatch):
     assert response.status_code == 404
 
 
-def test_agent_tool_endpoint_forwards_public_web_tools(monkeypatch):
+def test_harness_synthesis_endpoint_forwards_only_domain_task(monkeypatch):
     seen = {}
 
-    async def fake_call(*, history_id, tool_name, arguments):
-        seen.update(history_id=history_id, tool_name=tool_name, arguments=arguments)
-        return {
-            "tool_name": tool_name,
-            "is_error": False,
-            "structured_content": {"status": "available", "content": []},
-            "content": [],
-        }
+    def fake_synthesize(*, run_id, project_question):
+        seen.update(run_id=run_id, project_question=project_question)
+        return {"recommended_position": "公共文化客厅"}
 
     monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
-    monkeypatch.setattr(spatial_strategy, "call_spatial_mcp_tool", fake_call)
+    monkeypatch.setattr(spatial_strategy, "synthesize_strategy_blueprint", fake_synthesize)
     with TestClient(_app()) as client:
         response = client.post(
-            "/api/v1/analysis/spatial-strategy/agent-tools/call",
+            "/api/v1/analysis/spatial-strategy/harness/synthesize",
             headers={"X-N8N-Client-Key": "internal-key"},
             json={
-                "history_id": "history-1",
-                "tool_name": "search_public_web",
-                "arguments": {"query": "长沙 历史文化保护 官方", "provider": "anysearch", "limit": 5},
+                "run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+                "project_question": "形成未来空间策略",
             },
         )
 
     assert response.status_code == 200
-    assert response.json()["tool_name"] == "search_public_web"
+    assert response.json() == {"recommended_position": "公共文化客厅"}
     assert seen == {
-        "history_id": "history-1",
-        "tool_name": "search_public_web",
-        "arguments": {"query": "长沙 历史文化保护 官方", "provider": "anysearch", "limit": 5},
-    }
-
-
-def test_agent_tool_endpoint_accepts_literature_evidence(monkeypatch):
-    seen = {}
-
-    async def fake_call(*, history_id, tool_name, arguments):
-        seen.update(history_id=history_id, tool_name=tool_name, arguments=arguments)
-        return {"tool_name": tool_name, "is_error": False, "structured_content": {"status": "available"}, "content": []}
-
-    monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
-    monkeypatch.setattr(spatial_strategy, "call_spatial_mcp_tool", fake_call)
-    with TestClient(_app()) as client:
-        response = client.post(
-            "/api/v1/analysis/spatial-strategy/agent-tools/call",
-            headers={"X-N8N-Client-Key": "internal-key"},
-            json={
-                "history_id": "history-1",
-                "tool_name": "search_literature_evidence",
-                "arguments": {"question": "Historic Urban Landscape", "mode": "focused", "top_k": 6},
-            },
-        )
-
-    assert response.status_code == 200
-    assert seen["tool_name"] == "search_literature_evidence"
-    assert seen["arguments"]["mode"] == "focused"
-
-
-def test_agent_tool_endpoint_accepts_spatial_evidence_tool(monkeypatch):
-    seen = {}
-
-    async def fake_call(*, history_id, tool_name, arguments):
-        seen.update(history_id=history_id, tool_name=tool_name, arguments=arguments)
-        return {"tool_name": tool_name, "is_error": False, "structured_content": {"status": "available"}, "content": []}
-
-    monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
-    monkeypatch.setattr(spatial_strategy, "call_spatial_mcp_tool", fake_call)
-    with TestClient(_app()) as client:
-        response = client.post(
-            "/api/v1/analysis/spatial-strategy/agent-tools/call",
-            headers={"X-N8N-Client-Key": "internal-key"},
-            json={
-                "history_id": "history-1",
-                "tool_name": "analyze_spatial_evidence",
-                "arguments": {"analysis": "scope", "metric_ids": []},
-            },
-        )
-
-    assert response.status_code == 200
-    assert response.json()["tool_name"] == "analyze_spatial_evidence"
-    assert seen == {
-        "history_id": "history-1",
-        "tool_name": "analyze_spatial_evidence",
-        "arguments": {"analysis": "scope", "metric_ids": []},
+        "run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+        "project_question": "形成未来空间策略",
     }

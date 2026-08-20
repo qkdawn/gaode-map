@@ -20,7 +20,10 @@ from modules.spatial_strategy import (
     SpatialStrategyRunRequest,
     SpatialStrategyProjectContextRequest,
     SpatialStrategyProjectDataRequest,
-    SpatialStrategyAgentToolRequest,
+    SpatialStrategyHarnessSynthesisRequest,
+    SpatialStrategyHarnessUnitRequest,
+    SpatialStrategyHarnessSectionRequest,
+    SpatialStrategyHarnessVisualRequest,
     SpatialStrategyVisualRequest,
     SpatialStrategyReportFinalizeRequest,
     SpatialStrategyReportDeliveryRequest,
@@ -33,7 +36,11 @@ from modules.spatial_strategy import (
     get_spatial_strategy_run,
     ingest_document_to_knowledge_base,
     normalize_access_groups,
-    call_spatial_mcp_tool,
+    SpatialStrategyHarnessError,
+    synthesize_strategy_blueprint,
+    analyze_strategy_unit,
+    write_strategy_section,
+    design_strategy_visuals,
     resume_spatial_strategy_run,
     submit_spatial_strategy_run,
 )
@@ -145,22 +152,72 @@ async def read_spatial_strategy_project_data(
         raise HTTPException(status_code=503, detail="project_data_source_unavailable") from exc
 
 
-@router.post("/spatial-strategy/agent-tools/call")
-async def call_spatial_strategy_agent_tool(
-    payload: SpatialStrategyAgentToolRequest,
+@router.post("/spatial-strategy/harness/synthesize")
+async def synthesize_spatial_strategy_with_harness(
+    payload: SpatialStrategyHarnessSynthesisRequest,
     x_n8n_client_key: Annotated[str, Header(alias="X-N8N-Client-Key")],
 ) -> dict:
     _require_n8n_client(x_n8n_client_key)
     try:
-        return await call_spatial_mcp_tool(
-            history_id=payload.history_id,
-            tool_name=payload.tool_name,
-            arguments=payload.arguments,
+        return await run_in_threadpool(
+            synthesize_strategy_blueprint,
+            run_id=str(payload.run_id),
+            project_question=payload.project_question,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="spatial_mcp_tool_unavailable") from exc
+    except SpatialStrategyHarnessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/spatial-strategy/harness/analyze-unit")
+async def analyze_spatial_strategy_unit_with_harness(
+    payload: SpatialStrategyHarnessUnitRequest,
+    x_n8n_client_key: Annotated[str, Header(alias="X-N8N-Client-Key")],
+) -> dict:
+    _require_n8n_client(x_n8n_client_key)
+    try:
+        return await run_in_threadpool(
+            analyze_strategy_unit,
+            run_id=str(payload.run_id),
+            history_id=payload.history_id,
+            project_question=payload.project_question,
+            decision_unit=payload.decision_unit,
+        )
+    except SpatialStrategyHarnessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/spatial-strategy/harness/write-section")
+async def write_spatial_strategy_section_with_harness(
+    payload: SpatialStrategyHarnessSectionRequest,
+    x_n8n_client_key: Annotated[str, Header(alias="X-N8N-Client-Key")],
+) -> dict:
+    _require_n8n_client(x_n8n_client_key)
+    try:
+        return await run_in_threadpool(
+            write_strategy_section,
+            project_question=payload.project_question,
+            solution=payload.solution,
+            section=payload.section,
+        )
+    except SpatialStrategyHarnessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/spatial-strategy/harness/design-visuals")
+async def design_spatial_strategy_visuals_with_harness(
+    payload: SpatialStrategyHarnessVisualRequest,
+    x_n8n_client_key: Annotated[str, Header(alias="X-N8N-Client-Key")],
+) -> dict:
+    _require_n8n_client(x_n8n_client_key)
+    try:
+        return await run_in_threadpool(
+            design_strategy_visuals,
+            project_question=payload.project_question,
+            solution=payload.solution,
+            available_datasets=payload.available_datasets,
+        )
+    except SpatialStrategyHarnessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/spatial-strategy/visuals")

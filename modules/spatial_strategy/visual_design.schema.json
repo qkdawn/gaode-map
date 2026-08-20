@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "visuals": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "format": { "type": "string", "enum": ["map", "chart", "table"] },
+          "rationale": { "type": "string" },
+          "decision_question": { "type": "string" },
+          "caption": { "type": "string" },
+          "map_variant": { "type": "string", "enum": ["", "poi_access", "context_full", "regional_role"] },
+          "chart_variant": { "type": "string", "enum": ["", "poi_supply", "population_profile"] },
+          "dataset_id": { "type": "string" },
+          "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
+          "group_by": { "type": "string" },
+          "metric_op": { "type": "string", "enum": ["count", "sum", "avg"] },
+          "metric_field": { "type": "string" }
+        },
+        "required": ["title", "format", "rationale", "decision_question", "caption", "map_variant", "chart_variant", "dataset_id", "layers", "group_by", "metric_op", "metric_field"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["visuals"],
+  "additionalProperties": false,
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "properties": {
+        "dataset_id": { "type": "string" },
+        "role": { "type": "string", "enum": ["line", "point", "polygon"] },
+        "color": { "type": "string" },
+        "metric_field": { "type": "string" }
+      },
+      "required": ["dataset_id", "role", "color", "metric_field"],
+      "additionalProperties": false
+    }
+  }
+}
