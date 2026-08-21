@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import inspect
 from pathlib import Path
+from typing import Annotated
 
 import modules.spatial_projects.mcp_server as mcp_server
 from modules.spatial_projects.mcp_server import _StdioMcpFallback, _call
+from pydantic import Field
 from modules.scope_datasets.service import ScopeDatasetQueryError
 from modules.spatial_projects.skill_tools import SpatialBusinessSkillTools
 from mcp import ClientSession, StdioServerParameters
@@ -14,12 +16,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 
 def test_research_tool_descriptions_define_source_and_search_boundaries():
-    spatial = inspect.getdoc(mcp_server.analyze_spatial_evidence) or ""
+    spatial_agent = inspect.getdoc(mcp_server.analyze_spatial_question) or ""
+    spatial_compute = inspect.getdoc(mcp_server.compute_spatial_evidence) or ""
     literature = inspect.getdoc(mcp_server.search_literature_evidence) or ""
     web_search = inspect.getdoc(mcp_server.search_public_web) or ""
     web_fetch = inspect.getdoc(mcp_server.fetch_public_web_page) or ""
 
-    assert "scope" in spatial and "inspect" in spatial and "saved spatial snapshot" in spatial
+    assert "multiple times" in spatial_agent
+    assert "does not interpret a user question" in spatial_compute
     assert "methods, precedents, and mechanisms" in literature
     assert "location, exact object name" in web_search
     assert "fetch_public_web_page" in web_search
@@ -43,16 +47,21 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
 
     schemas = asyncio.run(exercise())
     assert list(schemas) == [
-        "analyze_spatial_evidence",
+        "compute_spatial_evidence",
+        "analyze_spatial_question",
         "read_strategy_decisions",
         "read_project_document",
         "search_literature_evidence",
         "search_public_web",
         "fetch_public_web_page",
     ]
-    query_schema = schemas["analyze_spatial_evidence"]
+    query_schema = schemas["compute_spatial_evidence"]
     assert set(query_schema["required"]) == {"history_id", "analysis"}
-    assert {"metric_ids", "selectors", "travel_time_bands_min", "neighbor_steps", "rank_order", "top_k", "record_refs"}.issubset(query_schema["properties"])
+    assert {"fact_domains", "evidence_dimensions", "selectors", "travel_time_bands_min", "neighbor_steps", "rank_order", "top_k", "record_refs"}.issubset(query_schema["properties"])
+    assert "metric_ids" not in query_schema["properties"]
+    domains_schema = next(item for item in query_schema["properties"]["fact_domains"]["anyOf"] if item.get("type") == "array")
+    assert set(domains_schema["items"]["enum"]) == {"poi", "population", "nightlight", "road"}
+    assert set(schemas["analyze_spatial_question"]["required"]) == {"history_id", "question"}
     assert "distance_bands_m" not in query_schema["properties"]
     assert "dataset_id" not in query_schema["properties"]
     assert "geometry" not in query_schema["properties"]
@@ -83,7 +92,8 @@ def test_complete_data_mcp_outputs_are_objects():
                 return {tool.name: tool.outputSchema for tool in result.tools}
 
     output_schemas = asyncio.run(exercise())
-    assert output_schemas["analyze_spatial_evidence"]["type"] == "object"
+    assert output_schemas["compute_spatial_evidence"]["type"] == "object"
+    assert output_schemas["analyze_spatial_question"]["type"] == "object"
     assert output_schemas["read_project_document"]["type"] == "object"
     assert output_schemas["search_literature_evidence"]["type"] == "object"
     assert output_schemas["search_public_web"]["type"] == "object"
@@ -216,6 +226,16 @@ def test_fallback_schema_keeps_object_and_array_arguments_structured():
     schema = _StdioMcpFallback._schema(callback)
     assert schema["properties"]["spatial"]["type"] == "object"
     assert schema["properties"]["metrics"]["type"] == "array"
+
+
+def test_fallback_schema_preserves_annotated_constraints():
+    schema = _StdioMcpFallback._annotation_schema(
+        Annotated[list[mcp_server.SpatialEvidenceSelector] | None, Field(max_length=8)]
+    )
+
+    array_schema = next(item for item in schema["anyOf"] if item.get("type") == "array")
+    assert array_schema["maxItems"] == 8
+    assert "$ref" not in str(schema)
 
 
 def test_fallback_reads_resource_templates_with_arbitrary_parameters_and_mime_types():

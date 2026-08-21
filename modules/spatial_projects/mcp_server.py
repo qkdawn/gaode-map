@@ -13,9 +13,9 @@ import os
 import re
 import sys
 import types
-from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Literal, Union, get_args, get_origin, get_type_hints
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 from sqlalchemy.exc import SQLAlchemyError
 
 from modules.documents.service import read_document_source
@@ -30,7 +30,12 @@ from modules.report_visuals.agent_tools import (
 )
 from modules.spatial_projects.service import SpatialProjectService
 from modules.spatial_projects.data_contract import ProjectDataContractService
-from modules.spatial_action.spatial_evidence import SpatialEvidenceService
+from modules.spatial_action.spatial_evidence import (
+    EvidenceDimension,
+    FactDomain,
+    SpatialEvidenceSelector,
+    SpatialEvidenceService,
+)
 from modules.spatial_projects.public_web import (
     PublicWebUnavailable,
     fetch_public_web_page as _fetch_public_web_page,
@@ -105,6 +110,8 @@ class _StdioMcpFallback:
     def _annotation_schema(annotation: Any) -> dict[str, Any]:
         origin = get_origin(annotation)
         args = get_args(annotation)
+        if origin is Annotated:
+            return _StdioMcpFallback._inline_schema_refs(TypeAdapter(annotation).json_schema())
         if origin in {Union, types.UnionType}:
             non_null = [item for item in args if item is not type(None)]
             if len(non_null) == 1:
@@ -124,8 +131,28 @@ class _StdioMcpFallback:
         if origin in {dict} or annotation in {dict, Any}:
             return {"type": "object", "additionalProperties": True}
         if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            return annotation.model_json_schema()
+            return _StdioMcpFallback._inline_schema_refs(annotation.model_json_schema())
         return {"type": "string"}
+
+    @staticmethod
+    def _inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+        definitions = schema.get("$defs") if isinstance(schema.get("$defs"), dict) else {}
+
+        def expand(value: Any) -> Any:
+            if isinstance(value, dict):
+                reference = value.get("$ref")
+                if isinstance(reference, str) and reference.startswith("#/$defs/"):
+                    target = definitions.get(reference.rsplit("/", 1)[-1])
+                    if isinstance(target, dict):
+                        overrides = {key: item for key, item in value.items() if key != "$ref"}
+                        return expand({**target, **overrides})
+                return {key: expand(item) for key, item in value.items() if key != "$defs"}
+            if isinstance(value, list):
+                return [expand(item) for item in value]
+            return value
+
+        expanded = expand(schema)
+        return expanded if isinstance(expanded, dict) else {}
 
     def _tool_list(self) -> dict[str, Any]:
         return {
@@ -218,6 +245,12 @@ spatial_evidence = SpatialEvidenceService(projects=service)
 literature_evidence = LiteratureEvidenceService()
 
 
+def _analyze_spatial_question(*, history_id: str, question: str) -> dict[str, Any]:
+    from modules.spatial_action.spatial_tool_agent import analyze_spatial_question
+
+    return analyze_spatial_question(history_id=history_id, question=question)
+
+
 def _call(callback, **kwargs: Any) -> Any:
     try:
         return callback(**kwargs)
@@ -293,33 +326,39 @@ class AggregateMetricInput(BaseModel):
 
 
 @mcp.tool()
-def analyze_spatial_evidence(
+def compute_spatial_evidence(
     history_id: str,
     analysis: Literal["scope", "accessibility", "direction", "neighborhood", "rank", "relationship", "inspect"],
-    metric_ids: list[str] | None = None,
-    selectors: list[dict[str, Any]] | None = None,
-    travel_time_bands_min: list[list[float]] | None = None,
-    neighbor_steps: int = 1,
+    fact_domains: Annotated[list[FactDomain] | None, Field(max_length=4)] = None,
+    evidence_dimensions: Annotated[list[EvidenceDimension] | None, Field(max_length=8)] = None,
+    selectors: Annotated[list[SpatialEvidenceSelector] | None, Field(max_length=8)] = None,
+    travel_time_bands_min: Annotated[list[tuple[float, float]] | None, Field(max_length=6)] = None,
+    neighbor_steps: Annotated[int, Field(ge=1, le=3)] = 1,
     rank_order: Literal["highest", "lowest"] = "highest",
-    top_k: int = 10,
-    record_refs: list[str] | None = None,
+    top_k: Annotated[int, Field(ge=1, le=20)] = 10,
+    record_refs: Annotated[list[str] | None, Field(max_length=20)] = None,
 ) -> dict[str, Any]:
-    """Read authoritative names, geometry, distances, relations, and metrics from the saved spatial snapshot.
+    """Deterministically compute one spatial operation over selected fact domains.
 
-    Use scope to discover available metrics and named records; inspect to expand
-    selected record_refs and their nearby named POI or roads; accessibility for
-    travel-time bands; direction for eight-direction comparison; neighborhood
-    for adjacent spatial units; rank for metric extremes; and relationship for
-    multi-metric co-location. Use these results instead of public-web pages for
-    project spatial facts.
+    This low-level tool does not interpret a user question or produce a conclusion.
+    POI, population, nightlight, and road are fact domains. Scope, accessibility,
+    direction, neighborhood, rank, relationship, and inspect are operations.
+    Semantic dimensions choose meaning while each domain owns concrete indicators.
+    Rank and relationship require one dimension per fact domain. For persisted
+    continuous road corridors, use road.object=corridor with rank and a movement
+    dimension.
     """
     return _call(
-        spatial_evidence.analyze,
+        spatial_evidence.compute_domains,
         history_id=history_id,
         request={
             "analysis": analysis,
-            "metric_ids": list(metric_ids or []),
-            "selectors": list(selectors or []),
+            "fact_domains": list(fact_domains or []),
+            "evidence_dimensions": list(evidence_dimensions or []),
+            "selectors": [
+                item.model_dump(mode="json") if isinstance(item, BaseModel) else dict(item)
+                for item in selectors or []
+            ],
             "travel_time_bands_min": travel_time_bands_min,
             "neighbor_steps": neighbor_steps,
             "rank_order": rank_order,
@@ -327,6 +366,20 @@ def analyze_spatial_evidence(
             "record_refs": list(record_refs or []),
         },
     )
+
+
+@mcp.tool()
+def analyze_spatial_question(
+    history_id: str,
+    question: Annotated[str, Field(min_length=1, max_length=1000)],
+) -> dict[str, Any]:
+    """Ask the reusable spatial tool agent to decompose and answer a spatial question.
+
+    The agent chooses fact domains, semantic dimensions, and spatial operations;
+    it may call the deterministic tool multiple times and synthesize the facts.
+    Callers do not select metrics or analysis modes.
+    """
+    return _call(_analyze_spatial_question, history_id=history_id, question=question)
 
 
 @mcp.tool()

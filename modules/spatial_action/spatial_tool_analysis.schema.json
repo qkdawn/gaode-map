@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "question": { "type": "string", "minLength": 1 },
+    "subquestions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/subquestion" }
+    },
+    "synthesis": { "type": "string", "minLength": 1 },
+    "spatial_implications": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "unresolved": {
+      "type": "array",
+      "maxItems": 8,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "required": ["question", "subquestions", "synthesis", "spatial_implications", "unresolved"],
+  "additionalProperties": false,
+  "$defs": {
+    "subquestion": {
+      "type": "object",
+      "properties": {
+        "question": { "type": "string", "minLength": 1 },
+        "analysis": {
+          "type": "string",
+          "enum": ["scope", "accessibility", "direction", "neighborhood", "rank", "relationship", "inspect"]
+        },
+        "fact_domains": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "enum": ["poi", "population", "nightlight", "road"]
+          }
+        },
+        "evidence_dimensions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "enum": [
+              "poi.supply",
+              "poi.mix",
+              "poi.category_specialization",
+              "population.scale",
+              "population.profile",
+              "nightlight.intensity",
+              "road.to_movement",
+              "road.through_movement",
+              "road.connectivity",
+              "road.network_density",
+              "road.orientation",
+              "road.quality"
+            ]
+          }
+        },
+        "finding": { "type": "string", "minLength": 1 },
+        "computation_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string", "pattern": "^spatial:.+" }
+        }
+      },
+      "required": ["question", "analysis", "fact_domains", "evidence_dimensions", "finding", "computation_refs"],
+      "additionalProperties": false
+    }
+  }
+}

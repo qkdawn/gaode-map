@@ -116,6 +116,7 @@ def analyze_strategy_unit(
             f"项目材料编号：{history_id}",
             f"当前城市空间决策任务：{unit}",
             "读取已有决策和完成当前判断所需的项目材料与空间数据。把现状转化为明确的未来选择；每项行动说明做什么、服务谁、落在哪里、优先级和预期改变。",
+            "需要空间证据时，把完整空间问题交给 analyze_spatial_question；空间工具 Agent 负责拆分子问题、选择事实域、空间操作和必要语义维度，并执行多次互补计算。当前决策单元不要选择底层指标或计算模式。",
             "工具选择：项目材料用于场地条件，空间工具用于名称、坐标、距离、道路与 POI 关系及指标，文献检索用于方法和案例机制。只有具名对象的公开属性会改变当前判断时才联网，查询使用“所在城市或区县 + 准确名称 + 待确认属性”，并读取选中的原网页；不逐个搜索无关对象。",
             "空间数据包含具名 POI、道路、路径、建筑或地点时，在 named_entities 中保留真实名称、对象类型、空间关系、具体事实和已有记录引用；没有具名数据时返回空数组。",
             "最终只返回符合指定 JSON Schema 的当前决策结果。",
@@ -126,7 +127,7 @@ def analyze_strategy_unit(
         schema_path=DECISION_MEMO_SCHEMA_PATH,
         enabled_tools=[
             "read_strategy_decisions",
-            "analyze_spatial_evidence",
+            "analyze_spatial_question",
             "read_project_document",
             "search_literature_evidence",
             "search_public_web",

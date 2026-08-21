@@ -103,6 +103,9 @@ def test_unit_and_report_prompts_keep_concrete_spatial_objects(monkeypatch):
     )
 
     assert "named_entities" in calls[0]["prompt"]
+    assert "analyze_spatial_question" in calls[0]["prompt"]
+    assert "analyze_spatial_question" in calls[0]["enabled_tools"]
+    assert "analyze_spatial_evidence" not in calls[0]["enabled_tools"]
     assert "真实名称" in calls[0]["prompt"]
     assert "所在城市或区县 + 准确名称 + 待确认属性" in calls[0]["prompt"]
     assert "不逐个搜索无关对象" in calls[0]["prompt"]
