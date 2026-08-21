@@ -182,6 +182,10 @@ def test_population_timeseries_api_returns_series_and_layer(tmp_path):
     assert data["series"][-1]["female_ratio"] > 0
     assert data["series"][-1]["age_group_ratios"]["working_15_64"] > 0
     assert data["series"][-1]["top_age_band_label"]
+    assert data["method"] == {
+        "spatial_aggregation": "intersecting_full_cells",
+        "boundary_cell_policy": "include_full_cell_value",
+    }
     assert data["layer"]["view"] == "population_rate"
     assert data["layer"]["cells"]
     assert data["layer"]["summary"]["increase_count"] > 0
@@ -203,6 +207,7 @@ def test_nightlight_timeseries_api_returns_hotspot_layer(tmp_path):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["series"]) == 3
+    assert data["method"]["spatial_aggregation"] == "intersecting_full_cells"
     assert data["layer"]["view"] == "hotspot_shift"
     assert data["layer"]["legend"]["kind"] == "categorical"
     assert data["layer"]["cells"]

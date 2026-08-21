@@ -38,6 +38,7 @@ class TimeseriesMetaResponse(BaseModel):
 
 class TimeseriesResponse(BaseModel):
     series: List[Dict[str, Any]] = Field(default_factory=list)
+    method: Dict[str, Any] = Field(default_factory=dict)
     periods: List[Dict[str, Any]] = Field(default_factory=list)
     layer: Dict[str, Any] = Field(default_factory=dict)
     insights: List[Dict[str, Any]] = Field(default_factory=list)

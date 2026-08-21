@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, Callable, Literal
 
 from modules.documents.service import list_document_blocks
+from modules.population.registry import age_band_keys
 from modules.spatial_projects.service import SpatialProjectService
 
 
@@ -38,9 +39,15 @@ DATASET_SCHEMAS: dict[str, dict[str, Any]] = {
         "units": {"length_m": "m"},
     },
     "population": {
-        "fields": ["cell_id", "geometry", "year", "population_total", "age_5_19", "age_30_39", "age_50_64", "source"],
+        "fields": [
+            "cell_id", "geometry", "year", "population_total", "male_total", "female_total",
+            "age_total", "age_male", "age_female", "source",
+        ],
         "geometry_type": "Polygon",
-        "units": {"population_total": "person", "age_5_19": "person", "age_30_39": "person", "age_50_64": "person"},
+        "units": {
+            "population_total": "person", "male_total": "person", "female_total": "person",
+            "age_total.*": "person", "age_male.*": "person", "age_female.*": "person",
+        },
     },
     "nightlight": {
         "fields": ["cell_id", "geometry", "year", "radiance", "unit", "has_data", "source"],
@@ -52,6 +59,11 @@ DATASET_SCHEMAS: dict[str, dict[str, Any]] = {
         "geometry_type": "",
     },
 }
+DATASET_SCHEMAS["population"]["fields"].extend(
+    f"age_{sex}.{band}"
+    for sex in ("total", "male", "female")
+    for band in age_band_keys()
+)
 
 _AGGREGATE_OPS = {
     "count",

@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -107,9 +108,14 @@ def test_population_grid_and_layer_alignment(tmp_path):
     assert first_feature["geometry_wgs84"]["type"] == "Polygon"
     properties = first_feature["properties"]
     assert properties["population_total"] > 0
-    assert properties["age_5_19"] > 0
-    assert properties["age_30_39"] > 0
-    assert properties["age_50_64"] > 0
+    assert properties["male_total"] > 0
+    assert properties["female_total"] > 0
+    assert set(properties["age_total"]) == set(age_band_keys())
+    assert set(properties["age_male"]) == set(age_band_keys())
+    assert set(properties["age_female"]) == set(age_band_keys())
+    assert properties["population_total"] == pytest.approx(
+        properties["male_total"] + properties["female_total"]
+    )
     assert properties["source"] == "WorldPop"
 
 

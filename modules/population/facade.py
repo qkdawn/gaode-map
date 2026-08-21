@@ -51,11 +51,14 @@ from .render import (
 
 DEFAULT_ANALYSIS_AGE_BAND = "25"
 POPULATION_RECORD_SOURCE = "WorldPop"
-POPULATION_RECORD_AGE_BANDS = {
-    "age_5_19": ("05", "10", "15"),
-    "age_30_39": ("30", "35"),
-    "age_50_64": ("50", "55", "60"),
-}
+POPULATION_RECORD_REQUIRED_FIELDS = (
+    "population_total",
+    "male_total",
+    "female_total",
+    "age_total",
+    "age_male",
+    "age_female",
+)
 
 
 def _population_year(year: str | None = None) -> str:
@@ -145,33 +148,34 @@ def _compute_population_grid(scope_id: str, geom_wgs84, year: str | None = None)
         write_json(grid_cache_path(scope_id), payload)
         return payload
 
-    age_arrays: dict[str, Any] = {}
-    for field, bands in POPULATION_RECORD_AGE_BANDS.items():
-        combined = None
-        for band in bands:
-            layer = combine_population_layers(data_dir, "total", band, geom_wgs84, safe_year)
-            if layer is None:
-                continue
-            if combined is None:
-                combined = layer
-            else:
-                if combined["shape"] != layer["shape"] or combined["transform"] != layer["transform"]:
-                    raise RuntimeError("population artifact raster alignment mismatch")
-                combined["array"] = np.ma.asarray(combined["array"], dtype=np.float64) + np.ma.asarray(
-                    layer["array"], dtype=np.float64
-                )
-        age_arrays[field] = combined["array"] if combined is not None else None
+    def aligned_array(sex: str, age_band: str):
+        layer = combine_population_layers(data_dir, sex, age_band, geom_wgs84, safe_year)
+        if layer is None:
+            return None
+        if base_data["shape"] != layer["shape"] or base_data["transform"] != layer["transform"]:
+            raise RuntimeError("population artifact raster alignment mismatch")
+        return np.ma.filled(layer["array"], 0.0)
 
-    population_values = np.ma.filled(base_data["array"], 0.0)
-    age_values = {
-        field: np.ma.filled(array, 0.0) if array is not None else None
-        for field, array in age_arrays.items()
-    }
+    male_values = aligned_array("male", "all")
+    female_values = aligned_array("female", "all")
+    age_male_values = {band: aligned_array("male", band) for band in age_band_keys()}
+    age_female_values = {band: aligned_array("female", band) for band in age_band_keys()}
+
     features: list[dict[str, Any]] = []
     for cell in iter_population_cells(base_data["array"], base_data["transform"]):
         row = int(cell["row"])
         col = int(cell["col"])
-        population_total = max(0.0, float(population_values[row, col]))
+        male_total = max(0.0, float(male_values[row, col])) if male_values is not None else 0.0
+        female_total = max(0.0, float(female_values[row, col])) if female_values is not None else 0.0
+        population_total = male_total + female_total
+        age_male = {
+            band: round_float(max(0.0, float(values[row, col])), 6) if values is not None else 0.0
+            for band, values in age_male_values.items()
+        }
+        age_female = {
+            band: round_float(max(0.0, float(values[row, col])), 6) if values is not None else 0.0
+            for band, values in age_female_values.items()
+        }
         features.append(
             {
                 "type": "Feature",
@@ -185,11 +189,14 @@ def _compute_population_grid(scope_id: str, geom_wgs84, year: str | None = None)
                     "centroid_gcj02": cell["centroid_gcj02"],
                     "year": safe_year,
                     "population_total": round_float(population_total, 6),
-                    **{
-                        field: round_float(max(0.0, float(array[row, col])), 6)
-                        if array is not None else 0.0
-                        for field, array in age_values.items()
+                    "male_total": round_float(male_total, 6),
+                    "female_total": round_float(female_total, 6),
+                    "age_total": {
+                        band: round_float(age_male[band] + age_female[band], 6)
+                        for band in age_band_keys()
                     },
+                    "age_male": age_male,
+                    "age_female": age_female,
                     "source": POPULATION_RECORD_SOURCE,
                 },
             }
@@ -217,7 +224,7 @@ def _load_or_compute_population_grid(scope_id: str, geom_wgs84, year: str | None
         and all(
             isinstance(feature, dict)
             and isinstance(feature.get("geometry_wgs84"), dict)
-            and all(key in (feature.get("properties") or {}) for key in ("population_total", *POPULATION_RECORD_AGE_BANDS))
+            and all(key in (feature.get("properties") or {}) for key in POPULATION_RECORD_REQUIRED_FIELDS)
             for feature in features
         )
     ):

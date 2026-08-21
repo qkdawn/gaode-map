@@ -16,7 +16,7 @@ from shapely.geometry import MultiPolygon, Polygon, shape
 from .road_network_routing import RoadNetworkRoute
 
 Coordinate = tuple[float, float]
-FocusedPoiRole = Literal["complementary_anchor", "comparison_supply"]
+FocusedPoiRole = Literal["category_supply", "complementary_anchor", "comparison_supply"]
 FocusedPoiGroupStatus = Literal["available", "omitted"]
 FocusedPoiAccessibilityStatus = Literal["complete", "partial", "omitted", "error"]
 
@@ -106,8 +106,9 @@ class FocusedPoiAccessibilityService:
     """Find nearby POIs using local shortest paths on an injected road snapshot.
 
     Haversine distance only limits the candidate pool to the nearest 2 km.  It
-    is never exposed as a route distance or a duration.  Minutes are derived
-    consistently from the resulting road-network path length at a disclosed
+    is never exposed as a route distance or duration.  Walking distance is the
+    origin access leg, saved-road shortest path and destination access leg;
+    each component remains separately inspectable.  Minutes use a disclosed
     4.5 km/h reference walking speed.
     """
 
@@ -183,7 +184,12 @@ class FocusedPoiAccessibilityService:
             except Exception:
                 failures += 1
                 continue
-            duration_s = route.distance_m / self._walking_speed_m_per_s
+            walking_distance_m = (
+                route.origin_snap_distance_m
+                + route.distance_m
+                + route.destination_snap_distance_m
+            )
+            duration_s = walking_distance_m / self._walking_speed_m_per_s
             if duration_s > self._max_walking_duration_s:
                 continue
             routed.append(RouteVerifiedPoi(
@@ -192,7 +198,7 @@ class FocusedPoiAccessibilityService:
                 poi_type=poi.poi_type,
                 location=destination,
                 address=poi.address,
-                walking_distance_m=route.distance_m,
+                walking_distance_m=walking_distance_m,
                 walking_duration_s=duration_s,
                 route_geometry=route.geometry,
                 route_geometry_status="available",
@@ -204,7 +210,12 @@ class FocusedPoiAccessibilityService:
                 routing_algorithm=route.algorithm,
             ))
         if not routed:
-            return _omitted_group(group, "no_local_road_path")
+            return _omitted_group(
+                group,
+                "no_local_road_path",
+                candidates_considered=len(candidates),
+                route_failures=failures,
+            )
         selected = tuple(sorted(routed, key=lambda poi: (poi.walking_duration_s, poi.walking_distance_m, poi.poi_id))[: self._max_results_per_group])
         return FocusedPoiGroupResult(
             group_id=group.group_id,
@@ -249,7 +260,7 @@ def _centroid_from_analysis_geometry(analysis_geometry: Mapping[str, Any]) -> tu
 
 
 def _validate_group(group: FocusedPoiTypeGroup) -> str | None:
-    if group.role not in {"complementary_anchor", "comparison_supply"}:
+    if group.role not in {"category_supply", "complementary_anchor", "comparison_supply"}:
         return "invalid_role"
     if not str(group.group_id).strip() or not str(group.title).strip():
         return "invalid_group_identity"
@@ -260,7 +271,13 @@ def _validate_group(group: FocusedPoiTypeGroup) -> str | None:
     return None
 
 
-def _omitted_group(group: FocusedPoiTypeGroup, reason: str) -> FocusedPoiGroupResult:
+def _omitted_group(
+    group: FocusedPoiTypeGroup,
+    reason: str,
+    *,
+    candidates_considered: int = 0,
+    route_failures: int = 0,
+) -> FocusedPoiGroupResult:
     return FocusedPoiGroupResult(
         group_id=group.group_id,
         title=group.title,
@@ -268,6 +285,8 @@ def _omitted_group(group: FocusedPoiTypeGroup, reason: str) -> FocusedPoiGroupRe
         status="omitted",
         matched_type_codes=_normalized_type_codes(group.type_codes),
         statement_ref=group.statement_ref,
+        candidates_considered=candidates_considered,
+        route_failures=route_failures,
         omission_reason=reason,
     )
 

@@ -114,6 +114,10 @@ def get_timeseries_joint(polygon: list, coord_type: str = "gcj02", period: str =
     summary = build_summary_from_counts(cells)
     summary.update({"from_year": from_year, "to_year": to_year, "view": "joint_quadrant"})
     return {
+        "method": {
+            "spatial_aggregation": "intersecting_full_cells",
+            "boundary_cell_policy": "include_full_cell_value",
+        },
         "series": [
             {
                 "year": int(year),

@@ -121,6 +121,21 @@ def test_route_geometry_follows_saved_bent_roads_without_straight_line_shortcut(
     assert poi.walking_duration_s == pytest.approx(poi.walking_distance_m / DEFAULT_WALKING_SPEED_M_PER_S)
 
 
+def test_walking_distance_includes_explicit_access_legs_around_the_saved_road_path() -> None:
+    result = FocusedPoiAccessibilityService(_router()).analyze(
+        analysis_geometry=_analysis_polygon(),
+        groups=[_group()],
+        pois=[_poi("offset", "离路门店", "050100", (120.004, 30.0012))],
+    )
+
+    poi = result.groups[0].pois[0]
+    assert poi.destination_snap_distance_m > 20
+    assert poi.walking_distance_m == pytest.approx(
+        poi.origin_snap_distance_m + poi.route_length_m + poi.destination_snap_distance_m
+    )
+    assert poi.route_geometry_status == "available"
+
+
 def test_routes_are_sorted_by_local_network_length_and_limited_to_three() -> None:
     locations = [(120.003, 30.001), (120.004, 30.001), (120.005, 30.001), (120.006, 30.001)]
     result = FocusedPoiAccessibilityService(_router()).analyze(

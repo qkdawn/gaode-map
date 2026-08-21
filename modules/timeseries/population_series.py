@@ -96,7 +96,7 @@ def build_population_series(polygon: list, coord_type: str) -> list[dict[str, An
                 "female_total": round_metric(summary.get("female_total"), 3),
                 "male_ratio": round_metric(summary.get("male_ratio"), 6),
                 "female_ratio": round_metric(summary.get("female_ratio"), 6),
-                "average_density": round_metric(density_summary.get("average_value"), 3),
+                "average_density": round_metric(density_summary.get("average_density_per_km2"), 3),
                 "dominant_age_band": age_structure["top_age_band_label"] or top_age_label(overview),
                 "age_distribution": age_structure["age_distribution"],
                 "age_group_totals": age_structure["age_group_totals"],
@@ -185,6 +185,10 @@ def get_population_timeseries(
     summary.update({"from_year": from_year, "to_year": to_year, "view": safe_view})
     return {
         "series": series,
+        "method": {
+            "spatial_aggregation": "intersecting_full_cells",
+            "boundary_cell_policy": "include_full_cell_value",
+        },
         "periods": build_periods(POPULATION_YEARS),
         "layer": {
             "period": f"{from_year}-{to_year}",

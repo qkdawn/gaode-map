@@ -118,6 +118,10 @@ def get_nightlight_timeseries(
     summary.update({"from_year": from_year, "to_year": to_year, "view": safe_view})
     return {
         "series": series,
+        "method": {
+            "spatial_aggregation": "intersecting_full_cells",
+            "boundary_cell_policy": "include_full_cell_value",
+        },
         "periods": build_periods(NIGHTLIGHT_YEARS),
         "layer": {
             "period": f"{from_year}-{to_year}",

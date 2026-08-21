@@ -2257,7 +2257,7 @@ class ProjectSpatialAnalysisService:
             "status": result.status,
             "origin": list(result.origin) if result.origin else None,
             "routing_algorithm": "local_road_network_shortest_path",
-            "duration_method": "road_network_length_at_4_5_km_per_hour",
+            "duration_method": "origin_access_plus_road_path_plus_destination_access_at_4_5_km_per_hour",
             "groups": [
                 {
                     "group_id": group.group_id,
