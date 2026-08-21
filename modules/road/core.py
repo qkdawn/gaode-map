@@ -27,6 +27,8 @@ from .overpass import (
 )
 from .serialize import build_road_analysis_result, empty_result
 from .grid import build_road_grid
+from .projection import LocalMetricProjection
+from .corridors import build_road_corridors
 from modules.population.service import get_population_grid
 
 OverpassMode = Literal["walking", "bicycling", "driving"]
@@ -145,9 +147,9 @@ def analyze_road_syntax(
             analysis_engine=analysis_engine_label,
             webgl_status="disabled:invalid_output_polygon",
         )
-    context_wgs_poly = _coords_to_wgs84_polygon(polygon, coord_type=coord_type)
-    if context_wgs_poly.is_empty:
-        context_wgs_poly = output_wgs_poly
+    metric_projection = LocalMetricProjection.for_geometry(output_wgs_poly)
+    context_margin_m = max(local_radii, default=0)
+    context_wgs_poly = metric_projection.buffer_wgs84(output_wgs_poly, context_margin_m)
 
     minx, miny, maxx, maxy = context_wgs_poly.bounds
     overpass_query_timeout_s = int(getattr(settings, "overpass_query_timeout_s", 60) or 60)
@@ -359,7 +361,8 @@ def analyze_road_syntax(
         graph_analysed = tmpdir / "03_analysed.graph"
         result_csv = tmpdir / "04_shapegraph_map.csv"
 
-        _write_depthmap_lines_csv(lines_csv, edge_inputs)
+        projected_edge_inputs = [metric_projection.project_edge(edge) for edge in edge_inputs]
+        _write_depthmap_lines_csv(lines_csv, projected_edge_inputs)
 
         _report_progress("depthmap_import", "正在导入 depthmapX 图", step=5)
         _run_depthmap_cmd(
@@ -412,7 +415,7 @@ def analyze_road_syntax(
         with result_csv.open("r", newline="", encoding="utf-8-sig") as handle:
             reader = csv.DictReader(handle)
             fieldnames = list(reader.fieldnames or [])
-            rows = list(reader)
+            rows = [metric_projection.inverse_result_row(row) for row in reader]
 
     if not rows:
         return _empty_result(
@@ -452,7 +455,12 @@ def analyze_road_syntax(
         started_at=started_at,
         report_progress=_report_progress,
     )
+    result.setdefault("summary", {})["analysis_context_margin_m"] = context_margin_m
+    result["summary"]["analysis_crs"] = "local_metric_equirectangular"
     road_edges = (result.get("road_edges") or {}).get("features") or []
+    road_corridors, corridor_summary = build_road_corridors(road_edges)
+    result["road_corridors"] = road_corridors
+    result["summary"]["road_corridors"] = corridor_summary
     try:
         shared_grid = get_population_grid(polygon, coord_type)
         road_grid, road_grid_summary = build_road_grid(road_edges, shared_grid)

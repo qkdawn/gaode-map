@@ -7,7 +7,7 @@ from shapely.strtree import STRtree
 from .geometry import haversine_m, safe_round
 
 
-_METRICS = ("choice", "integration", "connectivity", "control", "depth")
+_METRICS = ("choice", "integration", "nain", "nach", "connectivity", "control", "depth")
 
 
 def _line_length_km(geometry: Any) -> float:
@@ -88,7 +88,11 @@ def build_road_grid(road_edges: List[Dict[str, Any]], population_grid: Dict[str,
             cell["length_km"] += length_km
             cell["segment_count"] += 1
             for metric in _METRICS:
-                value = _finite(props.get(f"{metric}_score"))
+                value = _finite(
+                    props.get(f"{metric}_score")
+                    if metric not in {"nain", "nach"}
+                    else props.get(f"{metric}_global")
+                )
                 if value is not None:
                     weighted_sum, weight = cell["sums"].get(metric, (0.0, 0.0))
                     cell["sums"][metric] = (weighted_sum + length_km * value, weight + length_km)

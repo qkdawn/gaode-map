@@ -1,3 +1,4 @@
+import math
 import time
 
 from shapely.geometry import Polygon
@@ -22,8 +23,10 @@ def _result():
             "y1": "28.191",
             "x2": "112.989",
             "y2": "28.191",
-            "Choice": "2",
-            "Integration [HH]": "3",
+            "T1024 Choice": "2",
+            "T1024 Integration": "3",
+            "T1024 Node Count": "10",
+            "T1024 Total Depth": "20",
             "Connectivity": "1",
         }
     ]
@@ -82,10 +85,75 @@ def test_full_road_records_are_wgs84_and_topologically_closed():
         "control": 0.0,
     }
     assert "integration_global" in properties
+    assert properties["nain_global"] == round(10**1.2 / 20, 8)
+    assert properties["nach_global"] == round(math.log(3) / math.log(23), 8)
+    assert properties["node_count_global"] == 10
+    assert properties["total_depth_global"] == 20
     assert edge["geometry"]["coordinates"] == [[112.981, 28.191], [112.989, 28.191]]
     assert result["nodes"]["features"][0]["geometry"]["type"] == "Point"
+    assert result["summary"]["context_edge_count"] == 1
+    assert result["summary"]["output_edge_count"] == 1
+    assert result["summary"]["quality_diagnostics"]["connected_component_count"] == 1
 
     assert result["roads"]["features"][0]["geometry"]["coordinates"] != edge["geometry"]["coordinates"]
+    RoadSyntaxResponse.model_validate(result)
+
+
+def test_axial_headers_derive_total_depth_from_mean_depth_for_nain_and_nach():
+    polygon = Polygon(
+        [
+            (112.98, 28.19),
+            (112.99, 28.19),
+            (112.99, 28.20),
+            (112.98, 28.20),
+            (112.98, 28.19),
+        ]
+    )
+    row = {
+        "x1": "112.981",
+        "y1": "28.191",
+        "x2": "112.989",
+        "y2": "28.191",
+        "Choice": "2",
+        "Choice R600": "1",
+        "Integration [HH]": "3",
+        "Integration [HH] R600": "2",
+        "Node Count": "10",
+        "Node Count R600": "6",
+        "Mean Depth": "2",
+        "Mean Depth R600": "1.5",
+        "Connectivity": "1",
+    }
+
+    result = build_road_analysis_result(
+        rows=[row],
+        fieldnames=list(row),
+        context_wgs_poly=polygon,
+        output_wgs_poly=polygon,
+        mode="walking",
+        local_radii=[600],
+        requested_local_labels=["r600"],
+        render_metric="choice",
+        include_geojson=True,
+        max_edge_features=None,
+        merge_geojson_edges=False,
+        merge_bucket_step=0.025,
+        use_arcgis_webgl=False,
+        arcgis_timeout_sec=20,
+        arcgis_metric_field=None,
+        analysis_engine_label="depthmapxcli-axial",
+        started_at=time.perf_counter(),
+    )
+
+    properties = result["road_edges"]["features"][0]["properties"]
+    global_total_depth = 2 * (10 - 1)
+    local_total_depth = 1.5 * (6 - 1)
+    assert properties["nain_global"] == round(10**1.2 / global_total_depth, 8)
+    assert properties["nach_global"] == round(math.log(3) / math.log(global_total_depth + 3), 8)
+    assert properties["nain_r600"] == round(6**1.2 / local_total_depth, 8)
+    assert properties["nach_r600"] == round(math.log(2) / math.log(local_total_depth + 3), 8)
+    assert properties["total_depth_global"] == global_total_depth
+    assert properties["total_depth_r600"] == local_total_depth
     RoadSyntaxResponse.model_validate(result)
 
 

@@ -44,6 +44,25 @@ def _is_finite_number(value: Any) -> bool:
         return False
 
 
+def _finite_row_value(row: Dict[str, Any], column: Optional[str]) -> Optional[float]:
+    if not column:
+        return None
+    try:
+        value = float(row.get(column, ""))
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _safe_optional_round(value: Any, digits: int = 8) -> Optional[float]:
+    return safe_round(float(value), digits) if _is_finite_number(value) else None
+
+
+def _rounded_optional_mean(values: List[Any], digits: int = 8) -> Optional[float]:
+    finite = [float(value) for value in values if _is_finite_number(value)]
+    return safe_round(sum(finite) / len(finite), digits) if finite else None
+
+
 def _coord_key(point: List[float], digits: int = 6) -> Tuple[float, float]:
     return (safe_round(float(point[0]), digits), safe_round(float(point[1]), digits))
 
@@ -332,6 +351,8 @@ def empty_result(
             "avg_choice_local": 0.0,
             "avg_integration_by_radius": {label: 0.0 for label in local_labels},
             "avg_choice_by_radius": {label: 0.0 for label in local_labels},
+            "avg_nain_by_radius": {label: None for label in ["global", *local_labels]},
+            "avg_nach_by_radius": {label: None for label in ["global", *local_labels]},
             "radius_labels": local_labels,
             "mode": mode,
             "coord_type": coord_type,
@@ -339,9 +360,22 @@ def empty_result(
             "default_radius_label": default_radius_label,
             "analysis_engine": str(analysis_engine or "depthmapxcli"),
             "road_orientation_analysis": build_road_orientation_analysis([]),
+            "context_edge_count": 0,
+            "output_edge_count": 0,
+            "quality_diagnostics": {
+                "connected_component_count": 0,
+                "largest_component_node_count": 0,
+                "largest_component_node_ratio": 0.0,
+                "dangling_node_count": 0,
+                "intersection_node_count": 0,
+                "boundary_clipped_edge_count": 0,
+                "boundary_clipped_edge_ratio": 0.0,
+                "context_to_output_edge_ratio": 0.0,
+            },
         },
         "top_nodes": [],
         "road_edges": {"type": "FeatureCollection", "features": [], "count": 0},
+        "road_corridors": {"type": "FeatureCollection", "features": [], "count": 0},
         "road_grid": {"type": "FeatureCollection", "features": [], "count": 0},
         "roads": {"type": "FeatureCollection", "features": [], "count": 0},
         "nodes": {"type": "FeatureCollection", "features": [], "count": 0},
@@ -388,6 +422,13 @@ def build_road_analysis_result(
 
     choice_columns = select_metric_columns(fieldnames, "choice", radius_label_from_header)
     integration_columns = select_metric_columns(fieldnames, "integration", radius_label_from_header)
+    node_count_columns = select_metric_columns(fieldnames, "node count", radius_label_from_header)
+    total_depth_columns = select_metric_columns(fieldnames, "total depth", radius_label_from_header)
+    mean_depth_columns = select_metric_columns(
+        [name for name in fieldnames if "harmonic" not in (name or "").strip().lower()],
+        "mean depth",
+        radius_label_from_header,
+    )
     connectivity_columns = select_metric_columns(fieldnames, "connectivity", radius_label_from_header)
     control_col = select_single_metric_column(
         fieldnames,
@@ -412,6 +453,9 @@ def build_road_analysis_result(
     allow_labels.add("global")
     choice_columns = {key: value for key, value in choice_columns.items() if key in allow_labels}
     integration_columns = {key: value for key, value in integration_columns.items() if key in allow_labels}
+    node_count_columns = {key: value for key, value in node_count_columns.items() if key in allow_labels}
+    total_depth_columns = {key: value for key, value in total_depth_columns.items() if key in allow_labels}
+    mean_depth_columns = {key: value for key, value in mean_depth_columns.items() if key in allow_labels}
     connectivity_columns = {key: value for key, value in connectivity_columns.items() if key in allow_labels}
     local_labels = [
         label
@@ -483,6 +527,10 @@ def build_road_analysis_result(
 
         raw_choice: Dict[str, Optional[float]] = {}
         raw_integration: Dict[str, Optional[float]] = {}
+        raw_nain: Dict[str, Optional[float]] = {}
+        raw_nach: Dict[str, Optional[float]] = {}
+        raw_node_count: Dict[str, Optional[float]] = {}
+        raw_total_depth: Dict[str, Optional[float]] = {}
         raw_connectivity: Optional[float] = None
         raw_control: Optional[float] = None
         raw_depth: Optional[float] = None
@@ -504,6 +552,27 @@ def build_road_analysis_result(
             raw_integration[label] = value
             if value is not None and math.isfinite(value):
                 metric_values_integ[label].append(value)
+
+        for label in allow_labels:
+            node_count = _finite_row_value(row, node_count_columns.get(label))
+            total_depth = _finite_row_value(row, total_depth_columns.get(label))
+            raw_node_count[label] = node_count
+            if total_depth is None:
+                mean_depth = _finite_row_value(row, mean_depth_columns.get(label))
+                if node_count is not None and node_count > 1 and mean_depth is not None and mean_depth >= 0:
+                    total_depth = mean_depth * (node_count - 1.0)
+            raw_total_depth[label] = total_depth
+            choice = raw_choice.get(label)
+            raw_nain[label] = (
+                math.pow(node_count, 1.2) / total_depth
+                if node_count is not None and node_count > 0 and total_depth is not None and total_depth > 0
+                else None
+            )
+            raw_nach[label] = (
+                math.log(choice + 1.0) / math.log(total_depth + 3.0)
+                if choice is not None and choice >= 0 and total_depth is not None and total_depth > 0
+                else None
+            )
 
         if connectivity_col:
             try:
@@ -553,6 +622,10 @@ def build_road_analysis_result(
                 "length_m": haversine_m(x1, y1, x2, y2),
                 "raw_choice": raw_choice,
                 "raw_integration": raw_integration,
+                "raw_nain": raw_nain,
+                "raw_nach": raw_nach,
+                "raw_node_count": raw_node_count,
+                "raw_total_depth": raw_total_depth,
                 "raw_connectivity": raw_connectivity,
                 "raw_control": raw_control,
                 "raw_depth": raw_depth,
@@ -563,6 +636,7 @@ def build_road_analysis_result(
     parsed_edges: List[Dict[str, Any]] = []
     neighbor_sets: Dict[Tuple[float, float], set] = {}
     total_length_m = 0.0
+    boundary_clipped_edge_count = 0
     for item in parsed_edges_context:
         line = LineString([(item["x1"], item["y1"]), (item["x2"], item["y2"])])
         if line.is_empty or not prepared_output_poly.intersects(line):
@@ -571,6 +645,14 @@ def build_road_analysis_result(
         if not clipped_seg:
             continue
         x1c, y1c, x2c, y2c = clipped_seg
+        if any(
+            abs(float(before) - float(after)) > 1e-10
+            for before, after in zip(
+                (item["x1"], item["y1"], item["x2"], item["y2"]),
+                (x1c, y1c, x2c, y2c),
+            )
+        ):
+            boundary_clipped_edge_count += 1
         edge = dict(item)
         edge["x1"] = x1c
         edge["y1"] = y1c
@@ -709,6 +791,12 @@ def build_road_analysis_result(
             "intelligibility_score": 0.0,
             "choice_global": safe_round(choice_by_label.get("global", 0.0), 8),
             "integration_global": safe_round(integ_by_label.get("global", 0.0), 8),
+            "choice_raw_global": _safe_optional_round(item["raw_choice"].get("global")),
+            "integration_raw_global": _safe_optional_round(item["raw_integration"].get("global")),
+            "nain_global": _safe_optional_round(item["raw_nain"].get("global")),
+            "nach_global": _safe_optional_round(item["raw_nach"].get("global")),
+            "node_count_global": _safe_optional_round(item["raw_node_count"].get("global")),
+            "total_depth_global": _safe_optional_round(item["raw_total_depth"].get("global")),
             "accessibility_global": safe_round(integ_by_label.get("global", 0.0), 8),
             "rank_quantile_choice": 0.0,
             "rank_quantile_integration": 0.0,
@@ -726,6 +814,12 @@ def build_road_analysis_result(
         for label in local_labels:
             props[f"choice_{label}"] = safe_round(choice_by_label.get(label, 0.0), 8)
             props[f"integration_{label}"] = safe_round(integ_by_label.get(label, 0.0), 8)
+            props[f"choice_raw_{label}"] = _safe_optional_round(item["raw_choice"].get(label))
+            props[f"integration_raw_{label}"] = _safe_optional_round(item["raw_integration"].get(label))
+            props[f"nain_{label}"] = _safe_optional_round(item["raw_nain"].get(label))
+            props[f"nach_{label}"] = _safe_optional_round(item["raw_nach"].get(label))
+            props[f"node_count_{label}"] = _safe_optional_round(item["raw_node_count"].get(label))
+            props[f"total_depth_{label}"] = _safe_optional_round(item["raw_total_depth"].get(label))
             props[f"accessibility_{label}"] = safe_round(integ_by_label.get(label, 0.0), 8)
         if control_score is not None:
             props["control_score"] = safe_round(control_score, 8)
@@ -762,6 +856,21 @@ def build_road_analysis_result(
         )
 
     degree_by_node: Dict[Tuple[float, float], float] = {key: float(len(neighbors)) for key, neighbors in neighbor_sets.items()}
+    remaining_nodes = set(neighbor_sets)
+    component_sizes: List[int] = []
+    while remaining_nodes:
+        start = min(remaining_nodes)
+        remaining_nodes.remove(start)
+        frontier = [start]
+        component_size = 0
+        while frontier:
+            node = frontier.pop()
+            component_size += 1
+            for neighbor in neighbor_sets.get(node, set()):
+                if neighbor in remaining_nodes:
+                    remaining_nodes.remove(neighbor)
+                    frontier.append(neighbor)
+        component_sizes.append(component_size)
     degree_values = [value for value in degree_by_node.values() if math.isfinite(value)]
     degree_bounds = (min(degree_values), max(degree_values)) if degree_values else None
     degree_score_by_node: Dict[Tuple[float, float], float] = {key: norm(value, degree_bounds) for key, value in degree_by_node.items()}
@@ -878,6 +987,14 @@ def build_road_analysis_result(
     depth_valid_count = len(metric_values_depth_raw)
     avg_choice_by_radius = {label: _avg(local_choice_values.get(label, [])) for label in local_labels}
     avg_integration_by_radius = {label: _avg(local_integ_values.get(label, [])) for label in local_labels}
+    avg_nain_by_radius = {
+        label: _rounded_optional_mean([item["raw_nain"].get(label) for item in parsed_edges])
+        for label in ["global", *local_labels]
+    }
+    avg_nach_by_radius = {
+        label: _rounded_optional_mean([item["raw_nach"].get(label) for item in parsed_edges])
+        for label in ["global", *local_labels]
+    }
     avg_choice_local = avg_choice_by_radius.get(default_radius_label, avg_choice_global)
     avg_integration_local = avg_integration_by_radius.get(default_radius_label, avg_integration_global)
 
@@ -970,6 +1087,8 @@ def build_road_analysis_result(
             "avg_choice_local": safe_round(avg_choice_local, 8),
             "avg_integration_by_radius": {label: safe_round(value, 8) for label, value in avg_integration_by_radius.items()},
             "avg_choice_by_radius": {label: safe_round(value, 8) for label, value in avg_choice_by_radius.items()},
+            "avg_nain_by_radius": avg_nain_by_radius,
+            "avg_nach_by_radius": avg_nach_by_radius,
             "radius_labels": local_labels,
             "mode": mode,
             "coord_type": "gcj02",
@@ -977,9 +1096,28 @@ def build_road_analysis_result(
             "default_radius_label": default_radius_label,
             "analysis_engine": analysis_engine_label,
             "road_orientation_analysis": road_orientation_analysis,
+            "context_edge_count": len(parsed_edges_context),
+            "output_edge_count": len(parsed_edges),
+            "quality_diagnostics": {
+                "connected_component_count": len(component_sizes),
+                "largest_component_node_count": max(component_sizes, default=0),
+                "largest_component_node_ratio": safe_round(
+                    max(component_sizes, default=0) / max(1, len(neighbor_sets)), 8
+                ),
+                "dangling_node_count": sum(degree == 1 for degree in degree_by_node.values()),
+                "intersection_node_count": sum(degree >= 3 for degree in degree_by_node.values()),
+                "boundary_clipped_edge_count": boundary_clipped_edge_count,
+                "boundary_clipped_edge_ratio": safe_round(
+                    boundary_clipped_edge_count / max(1, len(parsed_edges)), 8
+                ),
+                "context_to_output_edge_ratio": safe_round(
+                    len(parsed_edges_context) / max(1, len(parsed_edges)), 8
+                ),
+            },
         },
         "top_nodes": [],
         "road_edges": {"type": "FeatureCollection", "features": all_scored_features, "count": len(all_scored_features)},
+        "road_corridors": {"type": "FeatureCollection", "features": [], "count": 0},
         "road_grid": {"type": "FeatureCollection", "features": [], "count": 0},
         "roads": {"type": "FeatureCollection", "features": features_out, "count": len(features_out)},
         "nodes": {"type": "FeatureCollection", "features": node_features, "count": len(node_features)},

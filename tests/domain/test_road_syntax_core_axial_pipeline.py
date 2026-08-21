@@ -1,5 +1,6 @@
 import os
 import sys
+import csv
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
@@ -38,14 +39,6 @@ def _sample_overpass_elements():
     ]
 
 
-def _mock_shapegraph_csv() -> str:
-    return (
-        "x1,y1,x2,y2,Choice,Choice R600,Choice R800,Integration [HH],Integration [HH] R600,"
-        "Integration [HH] R800,Connectivity,Control,Mean Depth\n"
-        "112.9800,28.1900,112.9900,28.1900,1,1,1,1,1,1,2,1,1.5\n"
-    )
-
-
 def _patch_core_runtime(monkeypatch, call_log, fail_axial=False):
     monkeypatch.setattr(core, "_fetch_overpass_elements", lambda _query: _sample_overpass_elements())
     monkeypatch.setattr(core, "_resolve_depthmap_cli_path", lambda: "/usr/local/bin/depthmapXcli")
@@ -59,7 +52,35 @@ def _patch_core_runtime(monkeypatch, call_log, fail_axial=False):
             raise RuntimeError("mock axial failure")
         if mode == "EXPORT":
             out_path = Path(args[args.index("-o") + 1])
-            out_path.write_text(_mock_shapegraph_csv(), encoding="utf-8")
+            with (Path(workdir) / "input_lines.csv").open("r", newline="", encoding="utf-8") as source:
+                source_row = next(csv.DictReader(source))
+            fieldnames = [
+                "x1", "y1", "x2", "y2", "Choice", "Choice R600", "Choice R800",
+                "Integration [HH]", "Integration [HH] R600", "Integration [HH] R800",
+                "Node Count", "Node Count R600", "Node Count R800",
+                "Mean Depth", "Mean Depth R600", "Mean Depth R800",
+                "Connectivity", "Control",
+            ]
+            with out_path.open("w", newline="", encoding="utf-8") as target:
+                writer = csv.DictWriter(target, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerow({
+                    **{key: source_row[key] for key in ("x1", "y1", "x2", "y2")},
+                    "Choice": 1,
+                    "Choice R600": 1,
+                    "Choice R800": 1,
+                    "Integration [HH]": 1,
+                    "Integration [HH] R600": 1,
+                    "Integration [HH] R800": 1,
+                    "Node Count": 10,
+                    "Node Count R600": 6,
+                    "Node Count R800": 8,
+                    "Mean Depth": 2,
+                    "Mean Depth R600": 1.5,
+                    "Mean Depth R800": 1.75,
+                    "Connectivity": 2,
+                    "Control": 1,
+                })
 
     monkeypatch.setattr(core, "_run_depthmap_cmd", _fake_run_depthmap_cmd)
 
@@ -103,6 +124,10 @@ def test_axial_pipeline_sequence_and_flags(monkeypatch):
     assert edge_properties["road_ref"] == "X001"
     assert edge_properties["highway"] == "residential"
     assert edge_properties["surface"] == "asphalt"
+    assert edge_properties["nain_global"] is not None
+    assert edge_properties["nach_global"] is not None
+    assert edge_properties["nain_r600"] is not None
+    assert edge_properties["nach_r600"] is not None
 
 
 def test_road_orientation_analysis_is_length_weighted():

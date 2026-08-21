@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -114,6 +114,10 @@ class RoadSyntaxSummary(BaseModel):
     avg_choice_local: float = 0.0
     avg_integration_by_radius: Dict[str, float] = Field(default_factory=dict)
     avg_choice_by_radius: Dict[str, float] = Field(default_factory=dict)
+    avg_nain_by_radius: Dict[str, Optional[float]] = Field(default_factory=dict)
+    avg_nach_by_radius: Dict[str, Optional[float]] = Field(default_factory=dict)
+    analysis_context_margin_m: int = 0
+    analysis_crs: str = ""
     radius_labels: List[str] = Field(default_factory=list)
     mode: str = "walking"
     coord_type: str = "gcj02"
@@ -121,7 +125,11 @@ class RoadSyntaxSummary(BaseModel):
     default_radius_label: str = "global"
     analysis_engine: str = "depthmapxcli"
     road_orientation_analysis: Dict[str, Any] = Field(default_factory=dict)
+    context_edge_count: int = 0
+    output_edge_count: int = 0
+    quality_diagnostics: Dict[str, Any] = Field(default_factory=dict)
     road_grid: Dict[str, Any] = Field(default_factory=dict)
+    road_corridors: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RoadSyntaxFeatureCollection(BaseModel):
@@ -227,6 +235,7 @@ class RoadSyntaxResponse(BaseModel):
     top_nodes: List[RoadSyntaxNode] = Field(default_factory=list)
     roads: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
     road_edges: RoadSyntaxEdgeFeatureCollection = Field(default_factory=RoadSyntaxEdgeFeatureCollection)
+    road_corridors: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
     road_grid: RoadSyntaxFeatureCollection = Field(default_factory=RoadSyntaxFeatureCollection)
     nodes: RoadSyntaxNodeFeatureCollection = Field(default_factory=RoadSyntaxNodeFeatureCollection)
     diagnostics: RoadSyntaxDiagnostics = Field(default_factory=RoadSyntaxDiagnostics)
