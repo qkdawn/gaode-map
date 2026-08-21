@@ -100,12 +100,18 @@ class FakeScopeDatasetRepository:
                     "records": [
                         {
                             "cell_id": "cell-1", "year": 2024, "population_total": 120,
-                            "age_5_19": 20, "age_30_39": 30, "age_50_64": 25, "source": "worldpop",
+                            "male_total": 58, "female_total": 62,
+                            "age_total": {"05": 20, "30": 30, "50": 25},
+                            "age_male": {"05": 9, "30": 14, "50": 12},
+                            "age_female": {"05": 11, "30": 16, "50": 13}, "source": "worldpop",
                             "geometry": {"type": "Polygon", "coordinates": [[[120, 30], [120.01, 30], [120.01, 30.01], [120, 30.01], [120, 30]]]},
                         },
                         {
                             "cell_id": "cell-2", "year": 2024, "population_total": 80,
-                            "age_5_19": 10, "age_30_39": 20, "age_50_64": 15, "source": "worldpop",
+                            "male_total": 39, "female_total": 41,
+                            "age_total": {"05": 10, "30": 20, "50": 15},
+                            "age_male": {"05": 5, "30": 9, "50": 7},
+                            "age_female": {"05": 5, "30": 11, "50": 8}, "source": "worldpop",
                             "geometry": {"type": "Polygon", "coordinates": [[[120.01, 30], [120.02, 30], [120.02, 30.01], [120.01, 30.01], [120.01, 30]]]},
                         },
                     ],
@@ -141,6 +147,11 @@ class FakeScopeDatasetRepository:
                                     "road_class": "residential",
                                     "from_node": "n1", "to_node": "n2", "length_m": 1000,
                                     "metrics": {"integration": 0.6, "choice": 0.7, "connectivity": 0.8, "depth": 2, "control": 0.4},
+                                    "integration_global": 0.9, "choice_global": 0.8,
+                                    "nain_global": 0.9, "nach_global": 0.8,
+                                    "node_count_global": 12, "total_depth_global": 24,
+                                    "integration_r600": 0.6, "choice_r600": 0.7,
+                                    "integration_r800": 0.75, "choice_r800": 0.72,
                                 },
                             },
                             {
@@ -150,10 +161,36 @@ class FakeScopeDatasetRepository:
                                     "edge_id": "r2", "road_name": "支路", "road_class": "service",
                                     "from_node": "n2", "to_node": "n3", "length_m": 900,
                                     "metrics": {"integration": 0.3, "choice": 0.2, "connectivity": 1, "depth": 3},
+                                    "nain_global": 0.3, "nach_global": 0.2,
+                                    "node_count_global": 8, "total_depth_global": 18,
                                 },
                             },
                         ],
                     },
+                    "road_corridors": {
+                        "type": "FeatureCollection",
+                        "features": [
+                            {
+                                "type": "Feature",
+                                "geometry": {"type": "MultiLineString", "coordinates": [[[120, 30], [120.01, 30]], [[120.01, 30], [120.02, 30]]]},
+                                "properties": {
+                                    "corridor_id": "corridor:main",
+                                    "metric": "nain",
+                                    "metric_field": "nain_global",
+                                    "radius": "global",
+                                    "threshold": 0.7,
+                                    "mean_value": 0.8,
+                                    "max_value": 0.9,
+                                    "edge_count": 2,
+                                    "length_m": 1900,
+                                    "road_names": ["测试路", "支路"],
+                                    "member_edge_ids": ["r1", "r2"],
+                                    "nain_global": 0.8,
+                                },
+                            }
+                        ],
+                    },
+                    "road_grid": {"type": "FeatureCollection", "features": [], "count": 0},
                 },
                 "summary": {},
                 "data_version": "v1",
@@ -172,6 +209,7 @@ def test_scope_dataset_service_lists_normalized_sources():
     assert sources["current:dataset:poi_grid"]["record_count"] == 1
     assert sources["current:dataset:road_edges"]["record_count"] == 2
     assert sources["current:dataset:road_nodes"]["record_count"] == 3
+    assert sources["current:dataset:road_corridors"]["record_count"] == 1
     assert sources["current:dataset:road_grid"]["record_count"] == 0
     assert sources["current:dataset:population"]["time_scope"]["years"] == [2024]
     assert sources["current:dataset:h3"]["grid_type"] == "h3"
@@ -181,6 +219,20 @@ def test_scope_dataset_service_lists_normalized_sources():
     assert sources["current:dataset:population"]["query_capabilities"]["spatial_aggregations"][0]["op"] == "area_weighted_sum"
     road_fields = sources["current:dataset:road_edges"]["query_capabilities"]["filter_fields"]
     assert road_fields == ["edge_id", "from_node", "length_m", "metrics", "record_id", "road_class", "road_name", "to_node"]
+
+
+def test_scope_dataset_service_reads_persisted_road_corridor_records():
+    result = ScopeDatasetService(repository=FakeScopeDatasetRepository()).query_scope_dataset(
+        history_id="history-1",
+        source_id="current:dataset:road_corridors",
+        limit=10,
+    )
+
+    assert result["total_count"] == 1
+    corridor = result["records"][0]
+    assert corridor["record_id"] == "corridor:main"
+    assert corridor["properties"]["member_edge_ids"] == ["r1", "r2"]
+    assert corridor["properties"]["nain_global"] == 0.8
 
 
 def test_scope_dataset_service_queries_road_name_and_classification():
@@ -196,6 +248,11 @@ def test_scope_dataset_service_queries_road_name_and_classification():
     assert queried["total_count"] == 1
     assert queried["records"][0]["properties"]["road_name"] == "测试路"
     assert queried["records"][0]["properties"]["road_class"] == "residential"
+    properties = queried["records"][0]["properties"]
+    assert properties["integration_global"] == 0.9
+    assert properties["choice_global"] == 0.8
+    assert properties["integration_r600"] == 0.6
+    assert properties["choice_r800"] == 0.72
 
 
 def test_scope_dataset_aggregates_by_road_class_and_name():
@@ -370,6 +427,8 @@ def test_scope_dataset_uses_all_road_nodes_and_edges_instead_of_top_nodes():
                         "edge_id": f"e{index}", "road_name": "", "road_class": "local",
                         "from_node": f"n{index}", "to_node": f"n{index + 1}", "length_m": 10,
                         "metrics": {"integration": 0.0, "choice": 0.0, "connectivity": 2, "depth": 0.0},
+                        "nain_global": 0.0, "nach_global": 0.0,
+                        "node_count_global": 2, "total_depth_global": 1,
                     },
                 }
                 for index in range(129)
@@ -381,6 +440,8 @@ def test_scope_dataset_uses_all_road_nodes_and_edges_instead_of_top_nodes():
                     "top_nodes": nodes[:10],
                     "nodes": {"type": "FeatureCollection", "features": nodes},
                     "road_edges": {"type": "FeatureCollection", "features": edges},
+                    "road_corridors": {"type": "FeatureCollection", "features": []},
+                    "road_grid": {"type": "FeatureCollection", "features": []},
                 },
                 "summary": {}, "data_version": "v1", "scope_fingerprint": "scope-a",
             }]
@@ -394,6 +455,27 @@ def test_scope_dataset_uses_all_road_nodes_and_edges_instead_of_top_nodes():
     assert len(nodes["records"]) == 130
     assert edges["total_count"] == 129
     assert len(edges["records"]) == 129
+
+
+@pytest.mark.parametrize("missing_part", ["nain_global", "road_corridors", "road_grid"])
+def test_scope_dataset_rejects_incomplete_new_road_contract(missing_part):
+    class IncompleteRoadRepository(FakeScopeDatasetRepository):
+        def list_analysis_artifacts(self, history_id):
+            artifacts = super().list_analysis_artifacts(history_id)
+            road = next(item for item in artifacts if item.get("artifact_type") == "road_syntax")
+            if missing_part in {"road_corridors", "road_grid"}:
+                road["payload"].pop(missing_part)
+            else:
+                road["payload"]["road_edges"]["features"][0]["properties"].pop(missing_part)
+            return [road]
+
+    with pytest.raises(ScopeDatasetQueryError) as exc_info:
+        ScopeDatasetService(repository=IncompleteRoadRepository()).query_scope_dataset(
+            history_id="history-1",
+            source_id="current:dataset:road_edges",
+        )
+
+    assert exc_info.value.code == "schema_version_unsupported"
 
 
 def test_scope_dataset_rejects_legacy_spatial_artifact_schema():
@@ -534,7 +616,8 @@ def test_scope_dataset_defaults_to_max_year_and_exactly_matches_requested_year()
                                 "cell_id": f"{artifact_type}-{year}-{index}",
                                 "year": year,
                                 "population_total": index,
-                                "age_5_19": 0, "age_30_39": 0, "age_50_64": 0, "source": "test",
+                                "male_total": 0, "female_total": index,
+                                "age_total": {}, "age_male": {}, "age_female": {}, "source": "test",
                                     "geometry": {
                                         "type": "Polygon",
                                         "coordinates": [[

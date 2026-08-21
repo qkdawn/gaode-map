@@ -321,12 +321,18 @@ def test_scope_service_queries_road_grid_as_polygon_source():
                         "geometry_coord_type": "wgs84",
                         "nodes": {"type": "FeatureCollection", "features": []},
                         "road_edges": {"type": "FeatureCollection", "features": []},
+                        "road_corridors": {"type": "FeatureCollection", "features": []},
                         "road_grid": {
                             "type": "FeatureCollection",
                             "features": [
                                 {
                                     "type": "Feature",
-                                    "properties": {"cell_id": "road-cell-1", "road_choice": 0.8},
+                                    "properties": {
+                                        "cell_id": "road-cell-1", "road_has_data": True,
+                                        "road_length_km": 1.0, "road_length_km_per_km2": 4.0,
+                                        "road_nain": 0.7, "road_nach": 0.8, "road_connectivity": 2.0,
+                                        "road_choice": 0.8,
+                                    },
                                     "geometry": {
                                         "type": "Polygon",
                                         "coordinates": [[[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]]],
@@ -412,8 +418,8 @@ def test_scope_service_rejects_versioned_artifact_with_missing_required_fields()
                         "cell_id": "population-cell-1",
                         "year": 2024,
                         "population_total": 100,
-                        "age_5_19": 20,
-                        "age_30_39": 30,
+                        "male_total": 48,
+                        "female_total": 52,
                         "source": "test",
                         "geometry": {
                             "type": "Polygon",
@@ -494,8 +500,16 @@ class _SpatialAggregateRepository:
                     "geometry_coord_type": "wgs84",
                     "year": 2024,
                     "records": [
-                        record("population-a", 0, 0.01, population_total=100, age_5_19=10, age_30_39=20, age_50_64=30),
-                        record("population-b", 0.01, 0.02, population_total=200, age_5_19=20, age_30_39=40, age_50_64=60),
+                        record(
+                            "population-a", 0, 0.01, population_total=100,
+                            male_total=48, female_total=52, age_total={"05": 10},
+                            age_male={"05": 4}, age_female={"05": 6},
+                        ),
+                        record(
+                            "population-b", 0.01, 0.02, population_total=200,
+                            male_total=96, female_total=104, age_total={"05": 20},
+                            age_male={"05": 8}, age_female={"05": 12},
+                        ),
                     ],
                 },
                 "data_version": "v1",
@@ -536,11 +550,15 @@ class _SpatialAggregateRepository:
                                     "edge_id": "road-1", "from_node": "node:1", "to_node": "node:2",
                                     "road_name": "测试路", "road_class": "residential", "length_m": 2220,
                                     "metrics": {"integration": 0.7, "choice": 0.8, "connectivity": 1, "depth": 2, "control": 0.5},
+                                    "nain_global": 0.7, "nach_global": 0.8,
+                                    "node_count_global": 2, "total_depth_global": 2,
                                 },
                                 "geometry": {"type": "LineString", "coordinates": [[0, 0.005], [0.02, 0.005]]},
                             }
                         ]
                     },
+                    "road_corridors": {"type": "FeatureCollection", "features": []},
+                    "road_grid": {"type": "FeatureCollection", "features": []},
                 },
                 "data_version": "v1",
                 "scope_fingerprint": "scope-a",

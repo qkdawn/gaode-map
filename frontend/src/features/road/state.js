@@ -76,6 +76,7 @@
             roadSyntaxRenderGeometryCoordType: 'gcj02',
             roadSyntaxRoadFeatures: [],
             roadSyntaxEdgeFeatures: [],
+            roadSyntaxCorridorFeatures: [],
             roadSyntaxGridFeatures: [],
             roadSyntaxViewMode: 'edges',
             roadSyntaxNodes: [],

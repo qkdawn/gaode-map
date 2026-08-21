@@ -158,7 +158,10 @@ function createArtifactBundleContext(overrides = {}) {
       source: 'WorldPop',
       features: [{
         type: 'Feature',
-        properties: { cell_id: 'p1', year: '2026', population_total: 100, age_5_19: 20, age_30_39: 30, age_50_64: 25, source: 'WorldPop' },
+        properties: {
+          cell_id: 'p1', year: '2026', population_total: 100, male_total: 48, female_total: 52,
+          age_total: { '05': 20 }, age_male: { '05': 9 }, age_female: { '05': 11 }, source: 'WorldPop',
+        },
         geometry: { type: 'Polygon', coordinates: [] },
         geometry_wgs84: { type: 'Polygon', coordinates: [[[112, 28], [112.01, 28], [112, 28]]] },
       }],
@@ -195,6 +198,11 @@ function createArtifactBundleContext(overrides = {}) {
     roadSyntaxSummary: { road_count: 1 },
     roadSyntaxDiagnostics: { status: 'ok' },
     roadSyntaxRoadFeatures: [{ type: 'Feature', properties: { road_id: 'r1' }, geometry: { type: 'LineString', coordinates: [] } }],
+    roadSyntaxCorridorFeatures: [{
+      type: 'Feature',
+      properties: { corridor_id: 'corridor-1', metric: 'nain', radius: 'global', member_edge_ids: ['edge-1', 'edge-2'] },
+      geometry: { type: 'MultiLineString', coordinates: [] },
+    }],
     roadSyntaxNodes: [{ type: 'Feature', properties: { node_id: 'node1' }, geometry: { type: 'Point', coordinates: [0, 0] } }],
     roadSyntaxWebglPayload: { layer: 'road' },
   }
@@ -297,7 +305,7 @@ test('buildAnalysisArtifactBundle stores canonical raster records and road datas
   assert.equal(populationBundle.payload.schema_version, 'spatial_records/v1')
   assert.equal(populationBundle.payload.records[0].cell_id, 'p1')
   assert.equal(populationBundle.payload.records[0].population_total, 100)
-  assert.equal(populationBundle.payload.records[0].age_5_19, 20)
+  assert.equal(populationBundle.payload.records[0].age_total['05'], 20)
   assert.equal(populationBundle.payload.grid, undefined)
 
   assert.equal(nightlightBundle.payload.schema_version, 'spatial_records/v1')
@@ -309,8 +317,46 @@ test('buildAnalysisArtifactBundle stores canonical raster records and road datas
 
   assert.equal(roadBundle.payload.roads.type, 'FeatureCollection')
   assert.equal(roadBundle.payload.roads.features[0].properties.road_id, 'r1')
+  assert.equal(roadBundle.payload.road_corridors.type, 'FeatureCollection')
+  assert.equal(roadBundle.payload.road_corridors.count, 1)
+  assert.equal(roadBundle.payload.road_corridors.features[0].properties.corridor_id, 'corridor-1')
   assert.equal(roadBundle.payload.nodes.type, 'FeatureCollection')
   assert.equal(roadBundle.payload.nodes.features[0].properties.node_id, 'node1')
+})
+
+test('_restoreHistoryRoadResultAsync restores persisted road corridors', async () => {
+  const ctx = createHistoryRestoreContext({
+    historyDetailLoadToken: 1,
+    roadSyntaxGridFeatures: [],
+    roadSyntaxMetricTabs() {
+      return [{ value: 'connectivity' }, { value: 'nain' }]
+    },
+    roadSyntaxDefaultMetric() {
+      return 'connectivity'
+    },
+    roadSyntaxMetricUsesRadius() {
+      return false
+    },
+  })
+  const corridor = {
+    type: 'Feature',
+    properties: { corridor_id: 'corridor-1', metric: 'nain', radius: 'global', member_edge_ids: ['edge-1', 'edge-2'] },
+    geometry: { type: 'MultiLineString', coordinates: [] },
+  }
+
+  const restored = await historyMethods._restoreHistoryRoadResultAsync.call(ctx, {
+    roads: { type: 'FeatureCollection', features: [], count: 0 },
+    road_edges: { type: 'FeatureCollection', features: [], count: 0 },
+    road_corridors: { type: 'FeatureCollection', features: [corridor], count: 1 },
+    road_grid: { type: 'FeatureCollection', features: [], count: 0 },
+    nodes: { type: 'FeatureCollection', features: [], count: 0 },
+    ui: { metric: 'nain', view_mode: 'edges' },
+  }, 1)
+
+  assert.equal(restored, true)
+  assert.equal(ctx.roadSyntaxEdgeFeatures.length, 0)
+  assert.deepEqual(ctx.roadSyntaxCorridorFeatures, [corridor])
+  assert.equal(ctx.roadSyntaxMetric, 'nain')
 })
 
 test('loadHistoryDetail keeps restored history id and history scope source', async () => {

@@ -215,11 +215,17 @@ import {
                 if (token !== this.historyDetailLoadToken) return false;
                 if (!roadResult || typeof roadResult !== 'object') return false;
                 const roads = restoreFeatureCollection(roadResult.roads, false);
+                const roadEdges = restoreFeatureCollection(roadResult.road_edges || roadResult.roads, false);
+                const roadCorridors = restoreFeatureCollection(roadResult.road_corridors, false);
+                const roadGrid = restoreFeatureCollection(roadResult.road_grid, false);
                 const nodes = restoreFeatureCollection(roadResult.nodes, false);
                 const summary = (roadResult.summary && typeof roadResult.summary === 'object') ? roadResult.summary : null;
                 const roadFeatures = Array.isArray(roads && roads.features) ? roads.features : [];
+                const edgeFeatures = Array.isArray(roadEdges && roadEdges.features) ? roadEdges.features : [];
+                const corridorFeatures = Array.isArray(roadCorridors && roadCorridors.features) ? roadCorridors.features : [];
+                const gridFeatures = Array.isArray(roadGrid && roadGrid.features) ? roadGrid.features : [];
                 const nodeFeatures = Array.isArray(nodes && nodes.features) ? nodes.features : [];
-                if (!summary && !roadFeatures.length && !nodeFeatures.length) return false;
+                if (!summary && !roadFeatures.length && !edgeFeatures.length && !corridorFeatures.length && !gridFeatures.length && !nodeFeatures.length) return false;
 
                 const ui = (roadResult.ui && typeof roadResult.ui === 'object') ? roadResult.ui : {};
                 const graphModelRaw = String(ui.graph_model || '').trim().toLowerCase();
@@ -243,8 +249,9 @@ import {
                         ? roadResult.diagnostics
                         : {},
                     roads,
-                    road_edges: (roadResult.road_edges && typeof roadResult.road_edges === 'object') ? roadResult.road_edges : roads,
-                    road_grid: (roadResult.road_grid && typeof roadResult.road_grid === 'object') ? roadResult.road_grid : { type: 'FeatureCollection', features: [], count: 0 },
+                    road_edges: roadEdges,
+                    road_corridors: roadCorridors,
+                    road_grid: roadGrid,
                     nodes,
                     webgl: (roadResult.webgl && typeof roadResult.webgl === 'object') ? roadResult.webgl : null,
                 };
@@ -259,6 +266,9 @@ import {
                     this.applyRoadSyntaxResponseData(payload, preferredMetric);
                 } else {
                     this.roadSyntaxRoadFeatures = roadFeatures;
+                    this.roadSyntaxEdgeFeatures = edgeFeatures;
+                    this.roadSyntaxCorridorFeatures = corridorFeatures;
+                    this.roadSyntaxGridFeatures = gridFeatures;
                     this.roadSyntaxNodes = nodeFeatures;
                     this.roadSyntaxSummary = summary || null;
                     this.roadSyntaxDiagnostics = payload.diagnostics || null;

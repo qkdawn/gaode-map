@@ -19,9 +19,11 @@ function buildPopulationArtifactRecords(features = [], fallbackYear = '') {
       geometry: cloneArtifactValue(feature && feature.geometry_wgs84),
       year: Number(properties.year || fallbackYear || 0) || null,
       population_total: Number(properties.population_total || 0),
-      age_5_19: Number(properties.age_5_19 || 0),
-      age_30_39: Number(properties.age_30_39 || 0),
-      age_50_64: Number(properties.age_50_64 || 0),
+      male_total: Number(properties.male_total || 0),
+      female_total: Number(properties.female_total || 0),
+      age_total: cloneArtifactValue(properties.age_total || {}),
+      age_male: cloneArtifactValue(properties.age_male || {}),
+      age_female: cloneArtifactValue(properties.age_female || {}),
       source: String(properties.source || ''),
     }
   }).filter((record) => record.cell_id && record.geometry && record.geometry.type)
@@ -103,8 +105,14 @@ function createAnalysisHistoryOrchestratorMethods() {
         : []
       const nodeFeatures = Array.isArray(this.roadSyntaxNodes) ? this.roadSyntaxNodes : []
       const edgeFeatures = Array.isArray(this.roadSyntaxEdgeFeatures) ? this.roadSyntaxEdgeFeatures : roadFeatures
+      const corridorFeatures = Array.isArray(this.roadSyntaxCorridorFeatures) ? this.roadSyntaxCorridorFeatures : []
       const gridFeatures = Array.isArray(this.roadSyntaxGridFeatures) ? this.roadSyntaxGridFeatures : []
-      const hasData = roadFeatures.length > 0 || nodeFeatures.length > 0 || !!this.roadSyntaxSummary
+      const hasData = roadFeatures.length > 0
+        || edgeFeatures.length > 0
+        || corridorFeatures.length > 0
+        || gridFeatures.length > 0
+        || nodeFeatures.length > 0
+        || !!this.roadSyntaxSummary
       if (!hasData) return null
 
       return {
@@ -116,6 +124,7 @@ function createAnalysisHistoryOrchestratorMethods() {
           count: roadFeatures.length,
         },
         road_edges: { type: 'FeatureCollection', features: edgeFeatures, count: edgeFeatures.length },
+        road_corridors: { type: 'FeatureCollection', features: corridorFeatures, count: corridorFeatures.length },
         road_grid: { type: 'FeatureCollection', features: gridFeatures, count: gridFeatures.length },
         nodes: {
           type: 'FeatureCollection',
@@ -513,6 +522,7 @@ function createAnalysisHistoryOrchestratorMethods() {
         }
         const roadFeatures = Array.isArray(this.roadSyntaxRoadFeatures) ? this.roadSyntaxRoadFeatures : []
         const edgeFeatures = Array.isArray(this.roadSyntaxEdgeFeatures) ? this.roadSyntaxEdgeFeatures : roadFeatures
+        const corridorFeatures = Array.isArray(this.roadSyntaxCorridorFeatures) ? this.roadSyntaxCorridorFeatures : []
         const gridFeatures = Array.isArray(this.roadSyntaxGridFeatures) ? this.roadSyntaxGridFeatures : []
         const nodeFeatures = Array.isArray(this.roadSyntaxNodes) ? this.roadSyntaxNodes : []
         return buildAnalysisArtifactEnvelope({
@@ -525,6 +535,7 @@ function createAnalysisHistoryOrchestratorMethods() {
             diagnostics: this.cloneArtifactValue(this.roadSyntaxDiagnostics || {}),
             roads: buildFeatureCollectionArtifact({ features: roadFeatures }),
             road_edges: buildFeatureCollectionArtifact({ features: edgeFeatures }),
+            road_corridors: buildFeatureCollectionArtifact({ features: corridorFeatures }),
             road_grid: buildFeatureCollectionArtifact({ features: gridFeatures }),
             nodes: buildFeatureCollectionArtifact({ features: nodeFeatures }),
             webgl: this.cloneArtifactValue(this.roadSyntaxWebglPayload || {}),

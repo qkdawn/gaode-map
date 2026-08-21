@@ -162,9 +162,11 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
           cell_id: 'p1',
           year: '2026',
           population_total: 100,
-          age_5_19: 20,
-          age_30_39: 30,
-          age_50_64: 25,
+          male_total: 48,
+          female_total: 52,
+          age_total: { '05': 20, '30': 30, '50': 25 },
+          age_male: { '05': 9, '30': 14, '50': 12 },
+          age_female: { '05': 11, '30': 16, '50': 13 },
           source: 'WorldPop',
         },
       }],
@@ -193,6 +195,11 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
     roadSyntaxMetric: 'choice',
     roadSyntaxSummary: { road_count: 1 },
     roadSyntaxRoadFeatures: [{ type: 'Feature', properties: { road_id: 'road-1' } }],
+    roadSyntaxCorridorFeatures: [{
+      type: 'Feature',
+      properties: { corridor_id: 'corridor-1', metric: 'nain', radius: 'global', member_edge_ids: ['edge-1', 'edge-2'] },
+      geometry: { type: 'MultiLineString', coordinates: [] },
+    }],
     roadSyntaxNodes: [{ type: 'Feature', properties: { node_id: 'node-1' } }],
   })
 
@@ -222,9 +229,11 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
     geometry: { type: 'Polygon', coordinates: [[[112.00, 28.00], [112.01, 28.00], [112.00, 28.00]]] },
     year: 2026,
     population_total: 100,
-    age_5_19: 20,
-    age_30_39: 30,
-    age_50_64: 25,
+    male_total: 48,
+    female_total: 52,
+    age_total: { '05': 20, '30': 30, '50': 25 },
+    age_male: { '05': 9, '30': 14, '50': 12 },
+    age_female: { '05': 11, '30': 16, '50': 13 },
     source: 'WorldPop',
   }])
   assert.equal(population.payload.summary, undefined)
@@ -248,6 +257,9 @@ test('buildAnalysisArtifactBundle uses normalized dataset payloads', () => {
   assert.equal(road.payload.geometry_coord_type, 'wgs84')
   assert.equal(road.payload.render_geometry_coord_type, 'gcj02')
   assert.equal(road.payload.roads.count, 1)
+  assert.equal(road.payload.road_corridors.type, 'FeatureCollection')
+  assert.equal(road.payload.road_corridors.count, 1)
+  assert.equal(road.payload.road_corridors.features[0].properties.corridor_id, 'corridor-1')
   assert.equal(road.payload.nodes.type, 'FeatureCollection')
   assert.equal(road.payload.nodes.count, 1)
   assert.equal(road.payload.metric, 'choice')
