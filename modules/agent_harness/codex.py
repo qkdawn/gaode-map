@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
@@ -48,6 +48,55 @@ def _mcp_failure(items: list[Any]) -> str:
     return ""
 
 
+def _mcp_tool_calls(items: list[Any]) -> list[dict[str, Any]]:
+    """Extract successful and failed MCP calls into a stable validation shape."""
+
+    calls: list[dict[str, Any]] = []
+    for item in items:
+        payload = _model_payload(item)
+        if payload.get("type") != "mcpToolCall":
+            continue
+        raw_arguments = payload.get("arguments")
+        if raw_arguments is None:
+            raw_arguments = payload.get("input")
+        if isinstance(raw_arguments, str):
+            try:
+                raw_arguments = json.loads(raw_arguments)
+            except json.JSONDecodeError:
+                raw_arguments = {}
+        raw_result = payload.get("result")
+        result_payload: dict[str, Any] = {}
+        if isinstance(raw_result, dict):
+            structured = raw_result.get("structured_content")
+            if structured is None:
+                structured = raw_result.get("structuredContent")
+            if isinstance(structured, dict):
+                result_payload = structured
+            if not result_payload:
+                for content in raw_result.get("content") or []:
+                    if not isinstance(content, dict) or not isinstance(content.get("text"), str):
+                        continue
+                    try:
+                        parsed = json.loads(content["text"])
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(parsed, dict):
+                        result_payload = parsed
+                        break
+        calls.append({
+            "name": str(
+                payload.get("name")
+                or payload.get("tool_name")
+                or payload.get("tool")
+                or ""
+            ),
+            "arguments": raw_arguments if isinstance(raw_arguments, dict) else {},
+            "status": str(payload.get("status") or ""),
+            "result": result_payload,
+        })
+    return calls
+
+
 def _sdk_config(enabled_tools: list[str]) -> CodexConfig:
     tool_allowlist = json.dumps(enabled_tools, ensure_ascii=True, separators=(",", ":"))
     return CodexConfig(
@@ -61,7 +110,14 @@ def _sdk_config(enabled_tools: list[str]) -> CodexConfig:
     )
 
 
-def run_codex(*, prompt: str, schema_path: Path, enabled_tools: list[str]) -> dict:
+def run_codex(
+    *,
+    prompt: str,
+    schema_path: Path,
+    enabled_tools: list[str],
+    tool_call_validator: Callable[[list[dict[str, Any]]], None] | None = None,
+    output_validator: Callable[[dict[str, Any], list[dict[str, Any]]], None] | None = None,
+) -> dict:
     """Run one domain task through Codex Harness with a constrained MCP surface."""
 
     try:
@@ -93,6 +149,15 @@ def run_codex(*, prompt: str, schema_path: Path, enabled_tools: list[str]) -> di
             raise CodexHarnessError("data_source_unavailable")
         raise CodexHarnessError(f"codex_harness_failed: {tool_failure[-1200:]}")
 
+    tool_calls = _mcp_tool_calls(turn.items)
+    if tool_call_validator is not None:
+        try:
+            tool_call_validator(tool_calls)
+        except CodexHarnessError:
+            raise
+        except Exception as exc:
+            raise CodexHarnessError("codex_harness_tool_call_validation_failed") from exc
+
     try:
         result = json.loads(turn.final_response or "")
     except json.JSONDecodeError as exc:
@@ -101,4 +166,11 @@ def run_codex(*, prompt: str, schema_path: Path, enabled_tools: list[str]) -> di
         raise CodexHarnessError("codex_harness_invalid_output")
     if _contains_unavailable_source(result):
         raise CodexHarnessError("data_source_unavailable")
+    if output_validator is not None:
+        try:
+            output_validator(result, tool_calls)
+        except CodexHarnessError:
+            raise
+        except Exception as exc:
+            raise CodexHarnessError("codex_harness_output_validation_failed") from exc
     return result

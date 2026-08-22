@@ -9,7 +9,26 @@ from modules.agent_harness import CodexHarnessError
 
 
 def test_spatial_tool_agent_uses_only_deterministic_spatial_computation(monkeypatch):
-    captured = {}
+    captured = []
+    plan = {
+        "question": "主要公共使用来源和空间联系集中在哪些方向？",
+        "subquestions": [
+            {
+                "question": "人口、设施、夜光与路网的方向分布如何？",
+                "analysis": "direction",
+                "fact_domains": ["population", "poi", "nightlight", "road"],
+                "evidence_dimensions": [
+                    "population.scale", "poi.supply", "nightlight.intensity", "road.to_movement",
+                ],
+            },
+            {
+                "question": "人口与设施高值是否共同出现？",
+                "analysis": "relationship",
+                "fact_domains": ["population", "poi"],
+                "evidence_dimensions": ["population.scale", "poi.supply"],
+            },
+        ],
+    }
     expected = {
         "question": "主要公共使用来源和空间联系集中在哪些方向？",
         "subquestions": [
@@ -38,8 +57,8 @@ def test_spatial_tool_agent_uses_only_deterministic_spatial_computation(monkeypa
     }
 
     def fake_run_codex(**kwargs):
-        captured.update(kwargs)
-        return expected
+        captured.append(kwargs)
+        return plan if len(captured) == 1 else expected
 
     monkeypatch.setattr(spatial_tool_agent, "run_codex", fake_run_codex)
 
@@ -49,18 +68,22 @@ def test_spatial_tool_agent_uses_only_deterministic_spatial_computation(monkeypa
     )
 
     assert result == expected
-    assert captured["enabled_tools"] == ["compute_spatial_evidence"]
-    assert "拆成必要的空间子问题" in captured["prompt"]
-    assert "复杂问题应拆分并进行多次互补计算" in captured["prompt"]
-    assert "不要选择或枚举底层指标" in captured["prompt"]
-    assert "population_age_5_19" not in captured["prompt"]
-    assert "夜光描述夜间活动背景，不替代客流、消费或具体业态" in captured["prompt"]
-    assert "路网结构描述连接、到达潜力和穿行潜力，不等于实际交通量" in captured["prompt"]
-    assert "不要用scope总量回答方向、可达性或局部关系问题" in captured["prompt"]
-    assert "具名对象" in captured["prompt"]
-    assert "已有record_ref调用inspect" in captured["prompt"]
-    assert "history-1" in captured["prompt"]
-    assert captured["schema_path"] == spatial_tool_agent.SPATIAL_ANALYSIS_SCHEMA_PATH
+    assert len(captured) == 2
+    assert captured[0]["enabled_tools"] == []
+    assert captured[1]["enabled_tools"] == ["compute_spatial_evidence"]
+    assert callable(captured[1]["tool_call_validator"])
+    assert callable(captured[1]["output_validator"])
+    assert "拆成必要的空间子问题" in captured[0]["prompt"]
+    assert "不要选择或枚举底层指标" in captured[0]["prompt"]
+    assert "population_age_5_19" not in captured[0]["prompt"]
+    assert "夜光只描述保存等时圈内的亮度构成及空间差异" in captured[0]["prompt"]
+    assert "路网结构描述连接、到达潜力和穿行潜力，不等于实际交通量" in captured[0]["prompt"]
+    assert "具名地点或道路" in captured[1]["prompt"]
+    assert "已有record_ref调用inspect" in captured[1]["prompt"]
+    assert "history-1" in captured[1]["prompt"]
+    assert "问题拆解计划" in captured[1]["prompt"]
+    assert captured[0]["schema_path"] == spatial_tool_agent.SPATIAL_PLAN_SCHEMA_PATH
+    assert captured[1]["schema_path"] == spatial_tool_agent.SPATIAL_ANALYSIS_SCHEMA_PATH
 
 
 def test_spatial_tool_agent_schema_separates_computation_from_synthesis():
@@ -101,3 +124,149 @@ def test_spatial_tool_agent_propagates_harness_failure_as_domain_failure(monkeyp
 
     with pytest.raises(spatial_tool_agent.SpatialToolAgentError, match="data_source_unavailable"):
         spatial_tool_agent.analyze_spatial_question(history_id="history-1", question="方向如何？")
+
+
+def _planned_rank():
+    return {
+        "question": "人口最多的两个网格是哪些？",
+        "subquestions": [{
+            "question": "人口网格按人数从高到低如何排列？",
+            "analysis": "rank",
+            "fact_domains": ["population"],
+            "evidence_dimensions": ["population.scale"],
+            "selectors": [{"dimension": "population.measure", "values": ["count"]}],
+            "rank_order": "highest",
+            "top_k": 2,
+        }],
+    }
+
+
+def _rank_call(*, result_id="spatial:rank-real", top_k=2):
+    return {
+        "name": "compute_spatial_evidence",
+        "arguments": {
+            "history_id": "history-1",
+            "analysis": "rank",
+            "fact_domains": ["population"],
+            "evidence_dimensions": ["population.scale"],
+            "selectors": [{"dimension": "population.measure", "values": ["count"]}],
+            "rank_order": "highest",
+            "top_k": top_k,
+        },
+        "status": "completed",
+        "result": {"result_id": result_id, "status": "available"},
+    }
+
+
+def test_plan_tool_call_validator_enforces_planned_parameters():
+    validator = spatial_tool_agent._plan_tool_call_validator(_planned_rank(), history_id="history-1")
+
+    validator([_rank_call()])
+
+    with pytest.raises(spatial_tool_agent.SpatialToolAgentError, match="spatial_plan_parameter_mismatch:top_k"):
+        validator([_rank_call(top_k=5)])
+    with pytest.raises(spatial_tool_agent.SpatialToolAgentError, match="spatial_plan_without_tool_call"):
+        validator([])
+
+
+def test_plan_tool_call_validator_rejects_unplanned_non_default_parameters():
+    plan = _planned_rank()
+    subquestion = dict(plan["subquestions"][0])
+    subquestion.pop("top_k")
+    subquestion.pop("rank_order")
+    plan["subquestions"] = [subquestion]
+    validator = spatial_tool_agent._plan_tool_call_validator(plan, history_id="history-1")
+    call = _rank_call(top_k=10)
+    call["arguments"].pop("rank_order")
+
+    validator([call])
+
+    call["arguments"]["top_k"] = 5
+    with pytest.raises(spatial_tool_agent.SpatialToolAgentError, match="spatial_plan_parameter_mismatch:top_k"):
+        validator([call])
+
+
+@pytest.mark.parametrize(
+    ("field", "planned", "changed"),
+    [
+        (
+            "selectors",
+            [{"dimension": "population.measure", "values": ["count"]}],
+            [{"dimension": "population.measure", "values": ["density"]}],
+        ),
+        ("travel_time_bands_min", [[0, 5], [5, 10]], [[0, 10]]),
+        ("neighbor_steps", 1, 2),
+        ("rank_order", "highest", "lowest"),
+        ("top_k", 2, 5),
+        ("record_refs", ["population/cell-1"], ["population/cell-2"]),
+    ],
+)
+def test_plan_tool_call_validator_enforces_every_planned_parameter(field, planned, changed):
+    subquestion = {
+        "question": "核对计划参数",
+        "analysis": "rank",
+        "fact_domains": ["population"],
+        "evidence_dimensions": ["population.scale"],
+        field: planned,
+    }
+    plan = {"question": "核对计划参数", "subquestions": [subquestion]}
+    arguments = {
+        "history_id": "history-1",
+        "analysis": "rank",
+        "fact_domains": ["population"],
+        "evidence_dimensions": ["population.scale"],
+        field: planned,
+    }
+    call = {
+        "name": "compute_spatial_evidence",
+        "arguments": arguments,
+        "status": "completed",
+        "result": {"result_id": "spatial:parameter-test", "status": "available"},
+    }
+    validator = spatial_tool_agent._plan_tool_call_validator(plan, history_id="history-1")
+
+    validator([call])
+    call["arguments"][field] = changed
+    with pytest.raises(
+        spatial_tool_agent.SpatialToolAgentError,
+        match=f"spatial_plan_parameter_mismatch:{field}",
+    ):
+        validator([call])
+
+
+def test_plan_tool_call_validator_matches_same_semantics_independent_of_call_order():
+    plan = {
+        "question": "分别返回前三和前五个人口网格",
+        "subquestions": [
+            {**_planned_rank()["subquestions"][0], "top_k": 3},
+            {**_planned_rank()["subquestions"][0], "top_k": 5},
+        ],
+    }
+    validator = spatial_tool_agent._plan_tool_call_validator(plan, history_id="history-1")
+
+    validator([_rank_call(top_k=5), _rank_call(top_k=3)])
+
+
+def test_computation_refs_must_come_from_matching_tool_result():
+    plan = _planned_rank()
+    output = {
+        "question": plan["question"],
+        "subquestions": [{
+            "question": plan["subquestions"][0]["question"],
+            "analysis": "rank",
+            "fact_domains": ["population"],
+            "evidence_dimensions": ["population.scale"],
+            "finding": "两个网格的人口数已返回。",
+            "computation_refs": ["spatial:rank-real"],
+        }],
+        "synthesis": "人口较多网格可供后续检查。",
+        "spatial_implications": [],
+        "unresolved": [],
+    }
+
+    spatial_tool_agent._validate_plan_execution(plan, output)
+    spatial_tool_agent._validate_computation_refs(plan, output, [_rank_call()])
+
+    output["subquestions"][0]["computation_refs"] = ["spatial:invented"]
+    with pytest.raises(spatial_tool_agent.SpatialToolAgentError, match="spatial_computation_ref_mismatch:0"):
+        spatial_tool_agent._validate_computation_refs(plan, output, [_rank_call()])

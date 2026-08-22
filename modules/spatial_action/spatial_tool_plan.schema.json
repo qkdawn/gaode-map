@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "question": { "type": "string", "minLength": 1 },
+    "subquestions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": { "type": "string", "minLength": 1 },
+          "analysis": {
+            "type": "string",
+            "enum": ["scope", "accessibility", "direction", "neighborhood", "rank", "relationship", "inspect"]
+          },
+          "fact_domains": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": { "type": "string", "enum": ["poi", "population", "nightlight", "road"] }
+          },
+          "evidence_dimensions": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "enum": [
+                "poi.supply", "poi.mix", "poi.category_specialization",
+                "population.scale", "population.structure", "population.change",
+                "nightlight.intensity", "nightlight.change",
+                "road.to_movement", "road.through_movement", "road.connectivity",
+                "road.network_density", "road.orientation", "road.quality"
+              ]
+            }
+          },
+          "selectors": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "properties": {
+                "dimension": {
+                  "type": "string",
+                  "enum": [
+                    "poi.category", "poi.subcategory", "population.sex", "population.age_band",
+                    "population.measure", "road.class", "road.radius", "road.object", "year"
+                  ]
+                },
+                "values": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 20,
+                  "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] }
+                }
+              },
+              "required": ["dimension", "values"],
+              "additionalProperties": false
+            }
+          },
+          "travel_time_bands_min": {
+            "type": "array",
+            "maxItems": 6,
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "items": { "type": "number", "minimum": 0 }
+            }
+          },
+          "neighbor_steps": { "type": "integer", "minimum": 1, "maximum": 3 },
+          "rank_order": { "type": "string", "enum": ["highest", "lowest"] },
+          "top_k": { "type": "integer", "minimum": 1, "maximum": 20 },
+          "record_refs": {
+            "type": "array",
+            "maxItems": 20,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "required": ["question", "analysis", "fact_domains", "evidence_dimensions"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["question", "subquestions"],
+  "additionalProperties": false
+}
