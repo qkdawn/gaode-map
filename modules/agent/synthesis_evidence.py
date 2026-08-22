@@ -46,19 +46,20 @@ def build_analysis_evidence(snapshot: AnalysisSnapshot, artifacts: Dict[str, obj
                 limitation="热点只说明空间集聚信号，不代表租金、品牌质量或真实到访强度。",
             )
         )
-    if metrics["target_supply_gap_level"]:
+    if metrics["target_supply_gap_candidates"]:
         evidence.append(
             AgentEvidenceItem(
                 metric="target_supply_gap",
                 value={
                     "place_type": metrics["target_supply_gap_place_type"],
-                    "supply_gap_level": metrics["target_supply_gap_level"],
-                    "gap_mode": metrics["target_supply_gap_mode"],
+                    "candidate_count": metrics["target_supply_gap_candidate_count"],
+                    "max_gap_value": metrics["target_supply_gap_max_gap_value"],
+                    "candidate_zones": metrics["target_supply_gap_candidates"],
                 },
-                interpretation="raw_signal: target supply gap level and gap_mode are available.",
+                interpretation="",
                 source="current_target_supply_gap / current_h3_structure_analysis",
                 confidence="moderate",
-                limitation="缺口指标不能直接推出开店可行性，仍需验证店面条件、竞品质量、租金与动线。",
+                limitation="",
             )
         )
     if metrics["business_place_type"]:

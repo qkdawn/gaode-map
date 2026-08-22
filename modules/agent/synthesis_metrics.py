@@ -11,6 +11,7 @@ from .analysis_extractors import (
     is_population_profile_ready,
     is_road_pattern_ready,
     is_target_supply_gap_ready,
+    project_nightlight_agent_facts,
 )
 from .schemas import AnalysisSnapshot
 
@@ -21,7 +22,11 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
     h3_structure = artifacts.get("current_h3_structure_analysis") if isinstance(artifacts.get("current_h3_structure_analysis"), dict) else {}
     road_pattern = artifacts.get("current_road_pattern_analysis") if isinstance(artifacts.get("current_road_pattern_analysis"), dict) else {}
     population_profile = artifacts.get("current_population_profile_analysis") if isinstance(artifacts.get("current_population_profile_analysis"), dict) else {}
-    nightlight_pattern = artifacts.get("current_nightlight_pattern_analysis") if isinstance(artifacts.get("current_nightlight_pattern_analysis"), dict) else {}
+    nightlight_pattern = (
+        project_nightlight_agent_facts(artifacts.get("current_nightlight_pattern_analysis"))
+        if isinstance(artifacts.get("current_nightlight_pattern_analysis"), dict)
+        else {}
+    )
     business_profile = artifacts.get("current_business_profile") if isinstance(artifacts.get("current_business_profile"), dict) else {}
     commercial_hotspots = artifacts.get("current_commercial_hotspots") if isinstance(artifacts.get("current_commercial_hotspots"), dict) else {}
     target_supply_gap = artifacts.get("current_target_supply_gap") if isinstance(artifacts.get("current_target_supply_gap"), dict) else {}
@@ -75,7 +80,18 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
         "h3_structure_summary": h3_structure.get("summary_text") if is_h3_structure_ready(h3_structure) else None,
         "road_pattern_summary": road_pattern.get("summary_text") if is_road_pattern_ready(road_pattern) else None,
         "population_profile_summary": population_profile.get("summary_text") if is_population_profile_ready(population_profile) else None,
-        "nightlight_pattern_summary": nightlight_pattern.get("summary_text") if is_nightlight_pattern_ready(nightlight_pattern) else None,
+        "nightlight_pattern_summary": (
+            {
+                key: nightlight_pattern.get(key)
+                for key in (
+                    "total_radiance", "mean_radiance", "p90_radiance", "peak_radiance",
+                    "lit_pixel_ratio", "peak_to_edge_ratio", "sector_direction_analysis",
+                )
+                if nightlight_pattern.get(key) not in (None, {}, [])
+            }
+            if is_nightlight_pattern_ready(nightlight_pattern)
+            else None
+        ),
         "business_profile_label": (
             business_profile.get("poi_mix_signal") or business_profile.get("business_profile")
             if is_business_profile_ready(business_profile)
@@ -88,9 +104,8 @@ def build_summary_metrics(snapshot: AnalysisSnapshot, artifacts: Dict[str, objec
         "commercial_hotspot_summary": commercial_hotspots.get("summary_text") if is_commercial_hotspots_ready(commercial_hotspots) else None,
         "core_zone_count": commercial_hotspots.get("core_zone_count") if is_commercial_hotspots_ready(commercial_hotspots) else None,
         "opportunity_zone_count": commercial_hotspots.get("opportunity_zone_count") if is_commercial_hotspots_ready(commercial_hotspots) else None,
-        "target_supply_gap_level": target_supply_gap.get("supply_gap_level") if is_target_supply_gap_ready(target_supply_gap) else None,
-        "target_supply_gap_mode": target_supply_gap.get("gap_mode") if is_target_supply_gap_ready(target_supply_gap) else None,
-        "target_supply_gap_summary": target_supply_gap.get("summary_text") if is_target_supply_gap_ready(target_supply_gap) else None,
+        "target_supply_gap_max_gap_value": target_supply_gap.get("max_gap_value") if is_target_supply_gap_ready(target_supply_gap) else None,
+        "target_supply_gap_candidate_count": target_supply_gap.get("candidate_count") if is_target_supply_gap_ready(target_supply_gap) else 0,
         "target_supply_gap_place_type": target_supply_gap.get("place_type") if is_target_supply_gap_ready(target_supply_gap) else None,
         "target_supply_gap_candidates": target_supply_gap.get("candidate_zones") if is_target_supply_gap_ready(target_supply_gap) else [],
     }

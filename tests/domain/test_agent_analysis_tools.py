@@ -8,6 +8,7 @@ from modules.agent.analysis_extractors import (
     build_population_profile_analysis,
     build_road_pattern_analysis,
     detect_commercial_hotspots,
+    project_nightlight_agent_facts,
 )
 from modules.agent.schemas import AnalysisSnapshot
 from modules.agent.tool_adapters.analysis_tools import (
@@ -81,8 +82,8 @@ def _snapshot() -> AnalysisSnapshot:
                     "peak_radiance": 9.8,
                     "max_distance_km": 1.8,
                     "peak_to_edge_ratio": 2.6,
-                    "economic_activity_intensity_level": "medium_high",
-                    "economic_activity_summary_text": "基于夜间灯光亮度，等时圈内经济活动强度呈现中等偏上水平，亮度高值主要集中在东北与东扇区。",
+                    "brightness_context_level": "medium_high",
+                    "brightness_context_summary_text": "等时圈内夜光亮度背景呈现中等偏上水平，亮度高值主要集中在东北与东扇区。",
                     "sector_direction_analysis": {"dominant_direction": "东北", "secondary_direction": "东"},
                 },
                 "legend_note": "地图轮廓仅表示热点边界",
@@ -113,12 +114,51 @@ def test_read_tools_extract_structured_analysis_from_snapshot():
     assert population["age_distribution_ratios"][0]["age_band_label"] == "25-34岁"
     assert population["age_distribution_ratios"][0]["ratio"] == round(12000 / 54326.544, 6)
     assert population["evidence_ready"] is True
-    assert nightlight["core_hotspot_count"] == 4
-    assert nightlight["economic_activity_intensity_level"] == "medium_high"
-    assert "消费能力" not in nightlight["summary_text"]
-    assert "客流" not in nightlight["summary_text"]
-    assert "白天" not in nightlight["summary_text"]
+    assert nightlight["mean_radiance"] == 3.15
+    assert nightlight["peak_radiance"] == 9.8
+    assert nightlight["peak_to_edge_ratio"] == 2.6
+    assert "core_hotspot_count" not in nightlight
+    assert "brightness_context_level" not in nightlight
+    assert "brightness_context_summary_text" not in nightlight
+    assert "pattern_tags" not in nightlight
     assert nightlight["evidence_ready"] is True
+
+
+def test_nightlight_agent_projection_removes_map_only_classes():
+    projected = project_nightlight_agent_facts({
+        "mean_radiance": 3.2,
+        "p90_radiance": 8.1,
+        "core_hotspot_count": 4,
+        "hotspot_cell_ratio": 0.33,
+        "brightness_context_level": "medium_high",
+        "brightness_context_summary_text": "人工等级说明",
+        "pattern_tags": ["nightlife_core"],
+        "sector_direction_analysis": {
+            "dominant_direction": "东北",
+            "hotspot_count": 3,
+            "sectors": [{
+                "key": "ne",
+                "label": "东北",
+                "cell_count": 5,
+                "mean_radiance": 4.1,
+                "hotspot_count": 2,
+            }],
+        },
+    })
+
+    assert projected == {
+        "mean_radiance": 3.2,
+        "p90_radiance": 8.1,
+        "sector_direction_analysis": {
+            "dominant_direction": "东北",
+            "sectors": [{
+                "key": "ne",
+                "label": "东北",
+                "cell_count": 5,
+                "mean_radiance": 4.1,
+            }],
+        },
+    }
 
 
 def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
@@ -178,7 +218,9 @@ def test_explanation_tools_build_business_hotspot_and_gap_artifacts():
     assert mix["functional_mix_score"] is not None
     assert hotspots["core_zone_count"] >= 1
     assert gap.result["place_type"] == "咖啡厅"
-    assert gap.result["supply_gap_level"] in {"medium", "high"}
+    assert gap.result["max_gap_value"] > 0
+    assert "supply_gap_level" not in gap.result
+    assert "gap_mode" not in gap.result
     assert len(gap.result["candidate_zones"]) >= 1
     assert gap.result["candidate_zones"][0]["approx_address"]
 

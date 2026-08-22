@@ -96,7 +96,11 @@ def _evidence_headline(item: AgentEvidenceItem) -> str:
     if item.metric == "commercial_hotspots" and isinstance(item.value, dict):
         return f"hotspot_mode={item.value.get('hotspot_mode') or '-'}; core_zone_count={item.value.get('core_zone_count') or 0}"
     if item.metric == "target_supply_gap" and isinstance(item.value, dict):
-        return f"{item.value.get('place_type') or '目标业态'}供给缺口 {item.value.get('supply_gap_level') or 'unknown'}"
+        return (
+            f"{item.value.get('place_type') or '目标业态'}候选格 "
+            f"{item.value.get('candidate_count') or 0} 个，最大供需差值 "
+            f"{item.value.get('max_gap_value') if item.value.get('max_gap_value') is not None else '未提供'}"
+        )
     if item.metric == "business_site_advice" and isinstance(item.value, dict):
         return f"目标业态：{item.value.get('place_type') or '未指定'}"
     if item.metric == "poi_count":
@@ -146,8 +150,6 @@ def _detect_conflicts(metrics: Dict[str, object], audit: AuditResult) -> List[st
             conflicts.append("poi_count_ge_20_road_nodes_le_40")
     except (TypeError, ValueError):
         pass
-    if density not in (None, "") and metrics.get("target_supply_gap_level") in {"medium", "high"}:
-        conflicts.append("density_available_target_gap_medium_or_high")
     for item in audit.issues or []:
         text = str(item).strip()
         if text and text not in conflicts:
@@ -262,9 +264,8 @@ def _spatial_structure_block(metrics: Dict[str, object]) -> Dict[str, Any]:
 def _target_supply_gap_block(metrics: Dict[str, object]) -> Dict[str, Any]:
     return {
         "place_type": metrics.get("target_supply_gap_place_type"),
-        "supply_gap_level": metrics.get("target_supply_gap_level"),
-        "gap_mode": metrics.get("target_supply_gap_mode"),
-        "summary": metrics.get("target_supply_gap_summary"),
+        "candidate_count": metrics.get("target_supply_gap_candidate_count"),
+        "max_gap_value": metrics.get("target_supply_gap_max_gap_value"),
         "candidate_zones": metrics.get("target_supply_gap_candidates") or [],
     }
 
@@ -593,7 +594,7 @@ def build_panel_payloads(question: str, snapshot: AnalysisSnapshot, artifacts: D
     one_line_conclusion = {
         "type_tag": str(metrics.get("business_profile_label") or "待补充"),
         "structure_desc": str(metrics.get("commercial_hotspot_summary") or metrics.get("h3_structure_summary") or "待补充"),
-        "value_judgment": str(metrics.get("target_supply_gap_summary") or metrics.get("business_profile_summary") or "待补充"),
+        "value_judgment": str(metrics.get("business_profile_summary") or "待补充"),
     }
     icsc_tags = (
         [str(item).strip() for item in (metrics.get("business_types") or []) if str(item).strip()]
@@ -622,7 +623,7 @@ def build_panel_payloads(question: str, snapshot: AnalysisSnapshot, artifacts: D
         },
         "behavior_inference": {
             "user_profile": metrics.get("business_profile_portrait") or metrics.get("business_profile_label") or "待补充",
-            "consumption_features": metrics.get("business_profile_summary") or metrics.get("target_supply_gap_summary") or "待补充",
+            "consumption_features": metrics.get("business_profile_summary") or "待补充",
             "time_features": metrics.get("nightlight_pattern_summary") or "待补充",
         },
         "evidence_refs": evidence_refs,

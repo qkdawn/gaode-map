@@ -38,8 +38,8 @@ async def analyze_target_supply_gap_from_scope(
         result=payload,
         evidence=[
             {"field": "target_supply_gap.place_type", "value": payload.get("place_type")},
-            {"field": "target_supply_gap.supply_gap_level", "value": payload.get("supply_gap_level")},
-            {"field": "target_supply_gap.gap_mode", "value": payload.get("gap_mode")},
+            {"field": "target_supply_gap.candidate_count", "value": payload.get("candidate_count")},
+            {"field": "target_supply_gap.max_gap_value", "value": payload.get("max_gap_value")},
         ],
         artifacts={
             "current_h3_structure_analysis": h3_structure,

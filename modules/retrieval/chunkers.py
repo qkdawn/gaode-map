@@ -10,13 +10,14 @@ from modules.agent.analysis_extractors import (
     build_poi_structure_analysis,
     build_population_profile_analysis,
     build_road_pattern_analysis,
+    project_nightlight_agent_facts,
 )
 from modules.agent.schemas import AnalysisSnapshot
 
 from .schemas import KnowledgeChunk
 
 
-NIGHTLIGHT_WARNING = "夜光仅作为活力 proxy，不能直接等同客流。"
+NIGHTLIGHT_WARNING = "夜光只描述夜间亮度，不能直接等同客流、消费或营业活动。"
 POI_WARNING = "POI 供给不能直接等同市场需求。"
 POPULATION_WARNING = "人口指标不能直接推断消费能力。"
 ROAD_WARNING = "路网句法不能单独替代选址判断。"
@@ -292,7 +293,11 @@ def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any])
     poi_structure = _safe_dict(artifacts.get("current_poi_structure_analysis")) or build_poi_structure_analysis(snapshot, artifacts)
     h3_structure = _safe_dict(artifacts.get("current_h3_structure_analysis")) or build_h3_structure_analysis(snapshot, artifacts)
     population_profile = _safe_dict(artifacts.get("current_population_profile_analysis")) or build_population_profile_analysis(snapshot, artifacts)
-    nightlight_pattern = _safe_dict(artifacts.get("current_nightlight_pattern_analysis")) or build_nightlight_pattern_analysis(snapshot, artifacts)
+    nightlight_pattern = (
+        project_nightlight_agent_facts(artifacts.get("current_nightlight_pattern_analysis"))
+        if isinstance(artifacts.get("current_nightlight_pattern_analysis"), dict)
+        else build_nightlight_pattern_analysis(snapshot, artifacts)
+    )
     road_pattern = _safe_dict(artifacts.get("current_road_pattern_analysis")) or build_road_pattern_analysis(snapshot, artifacts)
     business_profile = _safe_dict(artifacts.get("current_business_profile")) or analyze_poi_mix(snapshot, artifacts, poi_structure=poi_structure)
 
@@ -357,9 +362,19 @@ def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any])
             chunk_id="session:current:analysis:nightlight.summary",
             kind="analysis",
             domain="nightlight",
-            title="夜光活力摘要",
-            content=_text(nightlight_pattern.get("summary_text")) or _text(nightlight_summary),
-            metrics={**_compact_metrics(nightlight_summary, ["total_radiance", "mean_radiance", "max_radiance", "lit_pixel_ratio"]), **_compact_metrics(nightlight_pattern, ["core_hotspot_count", "hotspot_cell_ratio", "economic_activity_intensity_level", "peak_to_edge_ratio"])},
+            title="夜间亮度事实",
+            content=_text({
+                key: nightlight_pattern.get(key)
+                for key in (
+                    "total_radiance", "mean_radiance", "p90_radiance", "peak_radiance",
+                    "lit_pixel_ratio", "peak_to_edge_ratio", "sector_direction_analysis",
+                )
+                if nightlight_pattern.get(key) not in (None, {}, [])
+            }),
+            metrics={
+                **_compact_metrics(nightlight_summary, ["total_radiance", "mean_radiance", "max_radiance", "lit_pixel_ratio"]),
+                **_compact_metrics(nightlight_pattern, ["p90_radiance", "peak_radiance", "peak_to_edge_ratio"]),
+            },
             source_artifacts=_source_present(artifacts, snapshot, "current_nightlight_summary", "nightlight") + ["current_nightlight_pattern_analysis"],
             warnings=[NIGHTLIGHT_WARNING],
         ),

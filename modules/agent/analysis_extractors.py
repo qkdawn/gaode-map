@@ -131,8 +131,33 @@ def is_nightlight_pattern_ready(payload: Dict[str, Any] | None) -> bool:
     return (
         item.get("total_radiance") is not None
         or item.get("peak_radiance") is not None
-        or (_to_int(item.get("core_hotspot_count"), 0) or 0) > 0
     )
+
+
+def project_nightlight_agent_facts(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Keep the legacy Agent artifact factual and separate from map classes."""
+
+    source = _safe_dict(payload)
+    allowed = {
+        "view", "total_radiance", "mean_radiance", "p90_radiance", "peak_radiance",
+        "lit_pixel_ratio", "valid_pixel_count", "max_distance_km", "peak_to_edge_ratio",
+        "sector_direction_analysis", "evidence_ready", "status",
+    }
+    projected = {key: source[key] for key in allowed if key in source}
+    sector = _safe_dict(projected.get("sector_direction_analysis"))
+    if sector:
+        sector_allowed = {"dominant_direction", "secondary_direction", "dominant_share", "secondary_share"}
+        sector_projected = {key: sector[key] for key in sector_allowed if key in sector}
+        rows = []
+        for row in _safe_list(sector.get("sectors")):
+            if not isinstance(row, dict):
+                continue
+            row_allowed = {"key", "label", "cell_count", "total_radiance", "mean_radiance", "radiance_share"}
+            rows.append({key: row[key] for key in row_allowed if key in row})
+        if rows:
+            sector_projected["sectors"] = rows
+        projected["sector_direction_analysis"] = sector_projected
+    return projected
 
 
 def is_business_profile_ready(payload: Dict[str, Any] | None) -> bool:
@@ -157,8 +182,7 @@ def is_target_supply_gap_ready(payload: Dict[str, Any] | None) -> bool:
     item = _safe_dict(payload)
     if "evidence_ready" in item:
         return bool(item.get("evidence_ready"))
-    gap_mode = str(item.get("gap_mode") or "").strip().lower()
-    return bool(_safe_list(item.get("candidate_zones")) or _safe_list(item.get("gap_zones"))) or gap_mode in {"overall_shortage", "spatial_mismatch"}
+    return bool(_safe_list(item.get("candidate_zones")) or _safe_list(item.get("gap_zones")))
 
 
 def _current_poi_h3_grid(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any]) -> Dict[str, Any]:
@@ -908,27 +932,29 @@ def build_nightlight_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
     mean_radiance = _to_float(summary.get("mean_radiance"), None)
     peak_radiance = _to_float(summary.get("max_radiance"), _to_float(analysis.get("peak_radiance"), None))
     lit_pixel_ratio = _to_float(summary.get("lit_pixel_ratio"), None)
-    core_hotspot_count = _to_int(analysis.get("core_hotspot_count"), 0) or 0
-    hotspot_cell_ratio = _to_float(analysis.get("hotspot_cell_ratio"), None)
     max_distance_km = _to_float(analysis.get("max_distance_km"), None)
     peak_to_edge_ratio = _to_float(analysis.get("peak_to_edge_ratio"), None)
     p90_radiance = _to_float(summary.get("p90_radiance"), None)
-    economic_activity_intensity_level = str(analysis.get("economic_activity_intensity_level") or "").strip()
-    economic_activity_summary_text = str(analysis.get("economic_activity_summary_text") or "").strip()
-    sector_direction_analysis = _safe_dict(analysis.get("sector_direction_analysis"))
-    pattern_tags: List[str] = []
-    if lit_pixel_ratio is not None and lit_pixel_ratio >= 0.8:
-        pattern_tags.append("lit_pixel_ratio_ge_0_80")
-    if core_hotspot_count > 0:
-        pattern_tags.append("core_hotspot_count_gt_0")
-    if peak_to_edge_ratio is not None and peak_to_edge_ratio >= 2:
-        pattern_tags.append("peak_to_edge_ratio_ge_2")
-    if total_radiance is not None or core_hotspot_count > 0:
-        total_text = f"{total_radiance:.1f}" if total_radiance is not None else "-"
-        mean_text = f"{mean_radiance:.2f}" if mean_radiance is not None else "-"
-        summary_text = f"夜光总辐亮 {total_text}，均值 {mean_text}，热点核心 {core_hotspot_count} 个。"
-    else:
-        summary_text = "当前缺少可直接利用的夜光结构结果。"
+    valid_pixel_count = _to_int(summary.get("valid_pixel_count"), None)
+    raw_sector = _safe_dict(analysis.get("sector_direction_analysis"))
+    sector_direction_analysis = {
+        key: raw_sector.get(key)
+        for key in ("dominant_direction", "secondary_direction", "dominant_share", "secondary_share")
+        if raw_sector.get(key) not in (None, "")
+    }
+    sectors = []
+    for row in _safe_list(raw_sector.get("sectors")):
+        if not isinstance(row, dict):
+            continue
+        factual = {
+            key: row.get(key)
+            for key in ("key", "label", "cell_count", "total_radiance", "mean_radiance", "radiance_share")
+            if row.get(key) not in (None, "")
+        }
+        if factual:
+            sectors.append(factual)
+    if sectors:
+        sector_direction_analysis["sectors"] = sectors
     payload = {
         "view": str(panel.get("analysis_view") or snapshot.current_filters.get("nightlight_view") or "").strip(),
         "total_radiance": total_radiance,
@@ -936,18 +962,15 @@ def build_nightlight_pattern_analysis(snapshot: AnalysisSnapshot, artifacts: Dic
         "p90_radiance": p90_radiance,
         "peak_radiance": peak_radiance,
         "lit_pixel_ratio": lit_pixel_ratio,
-        "core_hotspot_count": core_hotspot_count,
-        "hotspot_cell_ratio": hotspot_cell_ratio,
+        "valid_pixel_count": valid_pixel_count,
         "max_distance_km": max_distance_km,
         "peak_to_edge_ratio": peak_to_edge_ratio,
-        "economic_activity_intensity_level": economic_activity_intensity_level,
-        "economic_activity_summary_text": economic_activity_summary_text,
         "sector_direction_analysis": sector_direction_analysis,
-        "pattern_tags": pattern_tags,
-        "summary_text": summary_text,
-        "legend_note": str(panel.get("legend_note") or "").strip(),
     }
-    return _with_analysis_status(payload, ready=is_nightlight_pattern_ready(payload))
+    return _with_analysis_status(
+        project_nightlight_agent_facts(payload),
+        ready=is_nightlight_pattern_ready(payload),
+    )
 
 
 def analyze_poi_mix(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any], poi_structure: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -1062,66 +1085,40 @@ def analyze_target_supply_gap(
         for item in build_h3_gap_rows_for_target(snapshot, artifacts, target_label=place_type, limit=10)
     ]
     gap_rows = target_gap_rows or [_safe_dict(item) for item in _safe_list(h3_structure.get("gap_rows"))]
-    opportunity_count = _to_int(h3_structure.get("opportunity_count"), 0) or 0
-    if gap_rows and opportunity_count <= 0:
-        opportunity_count = sum(
-            1
-            for row in gap_rows
-            if (_to_float(row.get("gap_score"), 0.0) or 0.0) > 0.25
-            and (_to_float(row.get("demand_pct"), 0.0) or 0.0) >= 0.6
-        )
     max_gap = 0.0
     if gap_rows:
         max_gap = max(_to_float(row.get("gap_score"), 0.0) or 0.0 for row in gap_rows)
     gap_zones = [
         {
             "h3_id": str(row.get("h3_id") or ""),
-            "label": str(row.get("gap_zone_label") or "").strip(),
             "gap_score": _to_float(row.get("gap_score"), None),
             "demand_pct": _to_float(row.get("demand_pct"), None),
             "supply_pct": _to_float(row.get("supply_pct"), None),
         }
         for row in gap_rows[:5]
     ]
-    candidate_zones = _target_candidate_zones(snapshot, artifacts, gap_zones)
-    poi_summary = artifacts.get("current_poi_summary") if isinstance(artifacts.get("current_poi_summary"), dict) else snapshot.poi_summary
-    poi_summary = _safe_dict(poi_summary)
-    targeted_summary = bool(str(poi_summary.get("types") or "").strip() or str(poi_summary.get("keywords") or "").strip())
-    targeted_count = _to_int(poi_summary.get("total"), None)
-
-    if opportunity_count >= 3 or max_gap >= 0.45:
-        supply_gap_level = "high"
-    elif opportunity_count >= 1 or max_gap >= 0.25:
-        supply_gap_level = "medium"
-    else:
-        supply_gap_level = "low"
-
-    if targeted_summary and targeted_count is not None and targeted_count <= 5:
-        gap_mode = "overall_shortage"
-    elif opportunity_count > 0:
-        gap_mode = "spatial_mismatch"
-    else:
-        gap_mode = "unclear"
+    raw_candidates = _target_candidate_zones(snapshot, artifacts, gap_zones)
+    candidate_zones = [
+        {
+            key: zone.get(key)
+            for key in (
+                "h3_id", "approx_address", "display_title", "center_point",
+                "gap_score", "demand_pct", "supply_pct", "population", "population_total",
+            )
+            if zone.get(key) not in (None, "")
+        }
+        for zone in raw_candidates
+    ]
 
     target_label = str(place_type or h3_structure.get("target_category_label") or h3_structure.get("target_category") or "").strip()
-    evidence_summary = (
-        f"目标业态 `{target_label or '未指定'}` 当前缺口判断基于 H3 gap 结果，机会区 {opportunity_count} 个，最大 gap {max_gap:.2f}。"
-        if gap_rows
-        else "当前缺少可直接利用的 H3 gap 结果，只能给出弱判断。"
-    )
     payload = {
         "place_type": target_label,
-        "supply_gap_level": supply_gap_level,
-        "gap_mode": gap_mode,
+        "candidate_count": len(candidate_zones),
+        "max_gap_value": max_gap if gap_rows else None,
         "gap_zones": gap_zones,
         "candidate_zones": candidate_zones,
-        "evidence_summary": evidence_summary,
-        "summary_text": (
-            f"place_type={target_label or '-'}; supply_gap_level={supply_gap_level}; "
-            f"gap_mode={gap_mode}; candidate_zone_count={len(candidate_zones)}."
-        ),
     }
-    return _with_analysis_status(payload, ready=bool(gap_rows or candidate_zones or gap_mode in {"overall_shortage", "spatial_mismatch"}))
+    return _with_analysis_status(payload, ready=bool(gap_rows or candidate_zones))
 
 
 def _append_rule_hit(
