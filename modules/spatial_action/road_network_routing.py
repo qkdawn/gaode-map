@@ -172,7 +172,8 @@ class LocalRoadNetworkRouter:
 
         graph = {node: list(arcs) for node, arcs in self._graph.items()}
         origin_node = self._attach(graph, origin_snap, "origin")
-        distances = _dijkstra_distances(graph, origin_node, max_distance_m=float(max_distance_m))
+        road_budget_m = max(0.0, float(max_distance_m) - origin_snap.distance_m)
+        distances = _dijkstra_distances(graph, origin_node, max_distance_m=road_budget_m)
         result: list[float | None] = []
         for index, destination in enumerate(destinations):
             try:
@@ -192,13 +193,14 @@ class LocalRoadNetworkRouter:
                 else None
             )
             candidates = [
-                distance
+                origin_snap.distance_m + distance + destination_snap.distance_m
                 for distance in (
                     start_distance + destination_snap.position_m if start_distance is not None else None,
                     end_distance + (destination_snap.edge.length_m - destination_snap.position_m) if end_distance is not None else None,
                     direct_same_edge,
                 )
-                if distance is not None and distance <= max_distance_m + 1e-6
+                if distance is not None
+                and origin_snap.distance_m + distance + destination_snap.distance_m <= max_distance_m + 1e-6
             ]
             result.append(round(float(min(candidates)), 3) if candidates else None)
         return result

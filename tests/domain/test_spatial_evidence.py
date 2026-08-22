@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from shapely.geometry import LineString, Point, box
+from shapely.geometry import LineString, MultiPolygon, Point, box, mapping
 
 from modules.isochrone.adapter import ValhallaIsochroneUnavailable
 from modules.population.registry import age_band_keys
@@ -132,64 +132,61 @@ def _service():
             nach_r800=0.05,
         )
     ]
-    projects = _Projects({
-        "current:dataset:population": population,
-        "current:dataset:nightlight": nightlight,
-        "current:dataset:poi": poi,
-        "current:dataset:road_edges": roads,
-    })
+    def population_for_year(year, factor):
+        rows = []
+        for record in population:
+            properties = dict(record.properties)
+            properties.pop("record_id", None)
+            properties.update({
+                "year": year,
+                "population_total": properties["population_total"] * factor,
+                "male_total": properties["male_total"] * factor,
+                "female_total": properties["female_total"] * factor,
+                "age_total": {key: value * factor for key, value in properties["age_total"].items()},
+                "age_male": {key: value * factor for key, value in properties["age_male"].items()},
+                "age_female": {key: value * factor for key, value in properties["age_female"].items()},
+            })
+            rows.append(_record(record.source_id, record.record_id, record.geometry, **properties))
+        return rows
+
+    population_by_year = {
+        2024: population_for_year(2024, 0.8),
+        2025: population_for_year(2025, 0.9),
+        2026: population_for_year(2026, 1.0),
+    }
+    nightlight_by_year = {
+        year: [
+            _record(
+                record.source_id,
+                record.record_id,
+                record.geometry,
+                radiance=float(record.properties["radiance"]) * factor,
+                year=year,
+            )
+            for record in nightlight
+        ]
+        for year, factor in ((2023, 0.7), (2024, 0.85), (2025, 1.0))
+    }
+    projects = _Projects(
+        {
+            "current:dataset:population": population,
+            "current:dataset:nightlight": nightlight,
+            "current:dataset:poi": poi,
+            "current:dataset:road_edges": roads,
+        },
+        records_by_year={
+            "current:dataset:population": population_by_year,
+            "current:dataset:nightlight": nightlight_by_year,
+        },
+    )
 
     def contours(_center, times, _mode):
         bounds = {5.0: box(0.02, 0.02, 0.03, 0.03), 10.0: box(0.01, 0.01, 0.04, 0.04), 15.0: box(0, 0, 0.05, 0.05)}
         return {float(value): bounds[float(value)] for value in times}
 
-    def population_timeseries(_polygon, _coord_type, _period, _view):
-        def age_distribution(total):
-            per_band = total / len(age_band_keys())
-            return [
-                {
-                    "age_band": band,
-                    "age_band_label": band,
-                    "total": per_band,
-                    "male": per_band * 0.49,
-                    "female": per_band * 0.51,
-                    "ratio": 1 / len(age_band_keys()),
-                }
-                for band in age_band_keys()
-            ]
-
-        return {
-            "series": [
-                {
-                    "year": "2024", "total_population": 1000, "male_total": 490, "female_total": 510,
-                    "male_ratio": 0.49, "female_ratio": 0.51, "average_density": 100,
-                    "age_distribution": age_distribution(1000),
-                    "age_group_totals": {"child_0_14": 150, "working_15_64": 700, "senior_65_plus": 150},
-                    "age_group_ratios": {"child_0_14": 0.15, "working_15_64": 0.7, "senior_65_plus": 0.15},
-                    "top_age_band": "35", "top_age_band_label": "35-39岁",
-                },
-                {
-                    "year": "2025", "total_population": 1050, "male_total": 515, "female_total": 535,
-                    "male_ratio": 0.490476, "female_ratio": 0.509524, "average_density": 105,
-                    "age_distribution": age_distribution(1050),
-                    "age_group_totals": {"child_0_14": 150, "working_15_64": 730, "senior_65_plus": 170},
-                    "age_group_ratios": {"child_0_14": 0.142857, "working_15_64": 0.695238, "senior_65_plus": 0.161905},
-                    "top_age_band": "35", "top_age_band_label": "35-39岁",
-                },
-                {
-                    "year": "2026", "total_population": 1100, "male_total": 540, "female_total": 560,
-                    "male_ratio": 0.490909, "female_ratio": 0.509091, "average_density": 110,
-                    "age_distribution": age_distribution(1100),
-                    "age_group_totals": {"child_0_14": 150, "working_15_64": 750, "senior_65_plus": 200},
-                    "age_group_ratios": {"child_0_14": 0.136364, "working_15_64": 0.681818, "senior_65_plus": 0.181818},
-                    "top_age_band": "35", "top_age_band_label": "35-39岁",
-                },
-            ],
-            "layer": {"summary": {"cell_count": 25, "class_counts": {"increase": 20, "stable": 5}}},
-        }
-
-    def nightlight_layer(_polygon, _coord_type, *, view):
-        assert view == "hotspot"
+    def nightlight_layer(_polygon, _coord_type, *, year, view):
+        assert year == 2025
+        assert view == "radiance"
         return {
             "year": 2025,
             "summary": {
@@ -201,7 +198,7 @@ def _service():
                 "emerging_hotspot_count": 3, "low_light_count": 4,
                 "hotspot_cell_ratio": 0.4, "peak_radiance": 30,
                 "peak_cell_id": "light-24", "peak_to_edge_ratio": 2.5,
-                "economic_activity_intensity_level": "high",
+                "brightness_context_level": "high",
                 "sector_direction_analysis": {
                     "dominant_direction": "北", "secondary_direction": "东",
                     "dominant_share": 0.3, "secondary_share": 0.2,
@@ -223,7 +220,6 @@ def _service():
         projects=projects,
         metric_catalog=_Catalog(),
         isochrone_contours=contours,
-        population_timeseries=population_timeseries,
         nightlight_layer=nightlight_layer,
         nightlight_timeseries=nightlight_timeseries,
     )
@@ -258,14 +254,52 @@ def test_request_contract_rejects_invalid_shapes():
         )
     with pytest.raises(ValueError, match="population_sex_must_be"):
         SpatialEvidenceSelector(dimension="population.sex", values=["unknown"])
+    with pytest.raises(ValueError, match="population_sex_requires_exactly_1_value"):
+        SpatialEvidenceSelector(dimension="population.sex", values=["male", "female"])
     with pytest.raises(ValueError, match="population_age_band_unsupported"):
         SpatialEvidenceSelector(dimension="population.age_band", values=["18"])
+    with pytest.raises(ValueError, match="population_age_band_requires_exactly_1_value"):
+        SpatialEvidenceSelector(dimension="population.age_band", values=["65", "70"])
+    with pytest.raises(ValueError, match="population_sex_requires_exactly_1_value"):
+        SpatialDomainComputationRequest(
+            analysis="direction",
+            fact_domains=["population"],
+            selectors=[
+                {"dimension": "population.sex", "values": ["male"]},
+                {"dimension": "population.sex", "values": ["female"]},
+            ],
+        )
+    with pytest.raises(ValueError, match="population_age_band_requires_exactly_1_value"):
+        SpatialEvidenceRequest(
+            analysis="direction",
+            metric_ids=["population.total"],
+            selectors=[
+                {"dimension": "population.age_band", "values": ["65"]},
+                {"dimension": "population.age_band", "values": ["70"]},
+            ],
+        )
+    with pytest.raises(ValueError, match="population_measure_unsupported"):
+        SpatialEvidenceSelector(dimension="population.measure", values=["median"])
+    with pytest.raises(ValueError, match="population_share_requires_selected_subgroup"):
+        SpatialDomainComputationRequest(
+            analysis="rank",
+            fact_domains=["population"],
+            selectors=[{"dimension": "population.measure", "values": ["share"]}],
+        )
     with pytest.raises(ValueError, match="road_radius_requires_exactly_1_value"):
         SpatialEvidenceSelector(dimension="road.radius", values=["600", "800"])
-    with pytest.raises(ValueError, match="poi_category_requires_exactly_one_value"):
-        SpatialEvidenceSelector(dimension="poi.category", values=["餐饮", "购物"])
+    with pytest.raises(ValueError, match="poi_category_requires_one_or_two_values"):
+        SpatialEvidenceSelector(dimension="poi.category", values=["餐饮", "购物", "住宿"])
+    with pytest.raises(ValueError, match="poi_categories_must_be_distinct"):
+        SpatialEvidenceSelector(dimension="poi.category", values=["餐饮", "餐饮服务"])
     with pytest.raises(ValueError, match="poi_category_unsupported"):
         SpatialEvidenceSelector(dimension="poi.category", values=["不存在的业态"])
+    with pytest.raises(ValueError, match="two_poi_categories_only_supported_for_poi_relationship"):
+        SpatialDomainComputationRequest(
+            analysis="direction",
+            fact_domains=["poi"],
+            selectors=[{"dimension": "poi.category", "values": ["餐饮", "购物"]}],
+        )
 
 
 def test_scope_discovers_four_fact_domains_without_metric_menu():
@@ -278,7 +312,7 @@ def test_scope_discovers_four_fact_domains_without_metric_menu():
     assert "evidence_dimensions" not in result
 
 
-def test_population_default_uses_total_population_only():
+def test_population_direction_returns_target_population_and_structure_by_sector():
     service = _service()
     result = service.compute_domains(
         history_id="history-1",
@@ -286,8 +320,19 @@ def test_population_default_uses_total_population_only():
     )
 
     assert result["status"] == "available"
-    assert result["used_metric_ids"] == ["population.total"]
-    assert set(result["domain_results"][0]["summary"]) == {"population.total"}
+    assert result["used_metric_ids"] == ["population.total", "population.profile"]
+    computation = result["domain_results"][0]
+    assert computation["method"]["kind"] == "population_distribution_direction"
+    assert "semantics" not in computation["method"]
+    assert "dominant_distribution_direction" in computation["summary"]
+    assert "dominant_direction" not in computation["summary"]
+    assert len(computation["groups"]) == 8
+    assert sum(group["target_population_share"] for group in computation["groups"]) == pytest.approx(1.0, abs=2e-6)
+    assert all(len(group["age_distribution"]) == 20 for group in computation["groups"])
+    distribution = computation["summary"]["distribution"]
+    assert len(distribution["weighted_center_wgs84"]) == 2
+    assert distribution["standard_deviation_ellipse"]["major_axis_standard_distance_m"] > 0
+    assert distribution["standard_deviation_ellipse"]["minor_axis_standard_distance_m"] > 0
     assert service._datasets.load_calls == ["current:dataset:population"]
 
 
@@ -298,31 +343,49 @@ def test_population_scope_profile_uses_one_saved_snapshot_for_all_age_and_sex_va
     )
 
     assert result["status"] == "available"
-    assert result["used_metric_ids"] == ["population.profile", "population.temporal_profile"]
-    profile = result["domain_results"][0]["summary"]["population.profile"]
+    assert result["used_metric_ids"] == ["population.profile"]
+    profile = result["domain_results"][0]["summary"]["population"]
     assert len(profile["age_distribution"]) == 20
     assert {row["age_band"] for row in profile["age_distribution"]} == set(age_band_keys())
     assert profile["sex_totals"]["total"] == pytest.approx(2800.0)
     assert profile["sex_totals"]["male"] + profile["sex_totals"]["female"] == pytest.approx(2800.0)
+    assert profile["density_person_per_km2"] > 0
+    assert sum(row["share"] for row in profile["age_distribution"]) == pytest.approx(
+        sum(row["total"] for row in profile["age_distribution"]) / profile["total_population"]
+    )
+    assert "limitations" not in result["domain_results"][0]
 
-    temporal = result["domain_results"][1]
+    change_result = _service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "scope",
+            "fact_domains": ["population"],
+            "evidence_dimensions": ["population.change"],
+        },
+    )
+    temporal = change_result["domain_results"][0]
     assert temporal["status"] == "available"
     assert [row["year"] for row in temporal["summary"]["series"]] == ["2024", "2025", "2026"]
     assert all(len(row["age_distribution"]) == 20 for row in temporal["summary"]["series"])
     assert temporal["coverage"]["age_band_count_by_year"] == {"2024": 20, "2025": 20, "2026": 20}
     assert temporal["coverage"]["complete"] is True
     assert temporal["summary"]["change_2024_2026"]["total_population"] == {
-        "from": 1000.0,
-        "to": 1100.0,
-        "delta": 100.0,
-        "rate": 0.1,
+        "from": 2240.0,
+        "to": 2800.0,
+        "delta": 560.0,
+        "rate": 0.25,
     }
-    assert temporal["summary"]["change_2024_2026"]["age_group_ratio"]["senior_65_plus"]["percentage_point_delta"] == pytest.approx(3.1818)
-    assert temporal["summary"]["spatial_change"] == {"cell_count": 25, "class_counts": {"increase": 20, "stable": 5}}
-    assert temporal["method"]["spatial_aggregation"] == "intersecting_full_cells"
+    assert temporal["summary"]["change_2024_2026"]["age_group_ratio"]["senior_65_plus"]["percentage_point_delta"] == pytest.approx(0)
+    assert temporal["summary"]["spatial_change"] == {
+        "cell_count": 25,
+        "class_counts": {"increase": 25},
+        "cell_matching": "stable_record_id_intersection",
+    }
+    assert temporal["method"]["spatial_aggregation"] == "geometry_intersection_aggregation"
+    assert temporal["method"]["boundary_cell_policy"] == "allocate_extensive_values_by_intersection_fraction"
 
 
-def test_scope_sum_includes_full_value_of_boundary_intersecting_cell():
+def test_scope_sum_allocates_boundary_cell_by_intersection_area():
     population = [
         _record(
             "current:dataset:population",
@@ -340,12 +403,60 @@ def test_scope_sum_includes_full_value_of_boundary_intersecting_cell():
         request={"analysis": "scope", "metric_ids": ["population.total"]},
     )
 
-    assert result["summary"]["population.total"] == 100
-    assert result["method"]["spatial_aggregation"] == "intersecting_full_cells"
-    assert result["method"]["boundary_cell_policy"] == "include_full_cell_value"
+    assert result["summary"]["population.total"] == pytest.approx(25)
+    assert result["method"]["spatial_aggregation"] == "geometry_intersection_aggregation"
+    assert result["method"]["boundary_cell_policy"] == "allocate_extensive_values_by_intersection_fraction"
 
 
-def test_nightlight_scope_runs_one_layer_and_one_timeseries_call():
+def test_population_change_allocates_boundary_cells_across_complete_multipolygon():
+    scope_geometry = MultiPolygon([
+        box(0.0, 0.0, 0.01, 0.01),
+        box(0.04, 0.04, 0.05, 0.05),
+    ])
+
+    def yearly_records(year, factor):
+        return [
+            _record(
+                "current:dataset:population", "west", box(-0.01, -0.01, 0.01, 0.01),
+                **{**_population_properties(0), "year": year, "population_total": 100 * factor},
+            ),
+            _record(
+                "current:dataset:population", "east", box(0.04, 0.04, 0.06, 0.06),
+                **{**_population_properties(0), "year": year, "population_total": 200 * factor},
+            ),
+        ]
+
+    records_by_year = {2024: yearly_records(2024, 1.0), 2026: yearly_records(2026, 2.0)}
+    projects = _Projects(
+        {"current:dataset:population": records_by_year[2026]},
+        records_by_year={"current:dataset:population": records_by_year},
+    )
+    base_read = projects.read_history_project
+
+    def read_history_project(history_id):
+        project = base_read(history_id)
+        project["scope"] = mapping(scope_geometry)
+        return project
+
+    projects.read_history_project = read_history_project
+    temporal = SpatialEvidenceService(
+        projects=projects,
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "scope",
+            "fact_domains": ["population"],
+            "evidence_dimensions": ["population.change"],
+        },
+    )["domain_results"][0]
+
+    assert [row["total_population"] for row in temporal["summary"]["series"]] == pytest.approx([75, 150])
+    assert temporal["summary"]["change_2024_2026"]["total_population"]["delta"] == pytest.approx(75)
+    assert temporal["method"]["scope_geometry"] == "complete_polygon_or_multipolygon"
+
+
+def test_nightlight_intensity_scope_runs_current_layer_without_timeseries():
     calls = {"layer": 0, "timeseries": 0}
 
     def layer(*_args, **_kwargs):
@@ -354,7 +465,7 @@ def test_nightlight_scope_runs_one_layer_and_one_timeseries_call():
             "year": 2025,
             "summary": {"total_radiance": 100, "mean_radiance": 4, "max_radiance": 12, "p90_radiance": 8, "lit_pixel_ratio": 0.75, "valid_pixel_count": 25},
             "analysis": {
-                "economic_activity_intensity_level": "medium",
+                "brightness_context_level": "medium",
                 "hotspot_cell_ratio": 0.2,
                 "sector_direction_analysis": {"dominant_direction": "北", "dominant_share": 0.4},
             },
@@ -378,13 +489,52 @@ def test_nightlight_scope_runs_one_layer_and_one_timeseries_call():
         request={"analysis": "scope", "fact_domains": ["nightlight"]},
     )
 
-    assert calls == {"layer": 1, "timeseries": 1}
+    assert calls == {"layer": 1, "timeseries": 0}
     assert result["coverage"]["computation_count"] == 1
-    assert result["used_metric_ids"][-2:] == ["nightlight.activity_level", "nightlight.temporal_profile"]
+    assert result["used_metric_ids"][-2:] == ["nightlight.spatial_profile", "nightlight.sector_profile"]
     summary = result["domain_results"][0]["summary"]
-    assert summary["activity_background"]["level"] == "medium"
-    assert summary["temporal"]["change_2023_2025"]["total_radiance"]["delta"] == 20
+    assert summary["brightness_profile"]["dominant_direction"] == "北"
+    assert "brightness_context" not in summary
+    assert "temporal" not in summary
     assert result["domain_results"][0]["method"]["current_layer_calls"] == 1
+
+
+def test_population_selector_is_preserved_in_public_result_context():
+    result = _service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "direction",
+            "fact_domains": ["population"],
+            "evidence_dimensions": ["population.scale"],
+            "selectors": [
+                {"dimension": "population.sex", "values": ["female"]},
+                {"dimension": "population.age_band", "values": ["65"]},
+            ],
+        },
+    )
+
+    expected = [
+        {"dimension": "population.sex", "values": ["female"]},
+        {"dimension": "population.age_band", "values": ["65"]},
+    ]
+    assert result["selectors"] == expected
+    assert result["domain_results"][0]["selectors"] == expected
+
+
+def test_unavailable_result_preserves_factual_reason_without_limitations():
+    result = _service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "inspect",
+            "fact_domains": ["population"],
+            "record_refs": ["current:dataset:population/missing"],
+        },
+    )
+
+    assert result["status"] == "unavailable"
+    assert result["unavailable_reasons"]
+    assert result["domain_results"][0]["unavailable_reason"]
+    assert "limitations" not in result["domain_results"][0]
 
 
 def test_population_sex_and_age_selectors_resolve_hidden_internal_metric():
@@ -401,9 +551,13 @@ def test_population_sex_and_age_selectors_resolve_hidden_internal_metric():
     )
 
     assert result["status"] == "available"
-    assert result["used_metric_ids"] == ["population.age.65.female"]
-    assert [item["dimension"] for item in result["evidence_dimensions"]] == ["population.scale"]
-    assert result["domain_results"][0]["summary"]["population.age.65.female"] > 0
+    assert result["used_metric_ids"] == ["population.age.65.female", "population.profile"]
+    assert [item["dimension"] for item in result["evidence_dimensions"]] == [
+        "population.scale", "population.structure",
+    ]
+    computation = result["domain_results"][0]
+    assert computation["summary"]["target_metric_id"] == "population.age.65.female"
+    assert sum(group["target_population"] for group in computation["groups"]) > 0
 
 
 def test_all_population_age_and_sex_bindings_are_registered_internally():
@@ -414,6 +568,258 @@ def test_all_population_age_and_sex_bindings_are_registered_internally():
             assert binding.fields == (f"age_{sex}.{band}",)
     assert METRIC_BINDINGS["population.male"].fields == ("male_total",)
     assert METRIC_BINDINGS["population.female"].fields == ("female_total",)
+
+
+def test_population_accessibility_returns_incremental_cumulative_and_structure():
+    result = _service().compute_domains(
+        history_id="history-1",
+        request={"analysis": "accessibility", "fact_domains": ["population"]},
+    )
+
+    computation = result["domain_results"][0]
+    assert computation["method"]["kind"] == "population_accessibility"
+    assert [group["time_band_min"] for group in computation["groups"]] == [
+        [0.0, 5.0], [5.0, 10.0], [10.0, 15.0],
+    ]
+    incremental = [group["incremental_population"] for group in computation["groups"]]
+    cumulative = [item["population"] for item in computation["summary"]["cumulative"]]
+    assert cumulative[-1] == pytest.approx(sum(incremental))
+    assert cumulative == sorted(cumulative)
+    assert all(len(group["structure"]["age_distribution"]) == 20 for group in computation["groups"])
+    assert all(set(group["structure"]["age_groups"]) == {
+        "child_0_14", "working_15_64", "senior_65_plus",
+    } for group in computation["groups"])
+
+
+def test_population_rank_neighborhood_and_inspect_use_population_semantics():
+    service = _service()
+    ranked = service.compute_domains(
+        history_id="history-1",
+        request={"analysis": "rank", "fact_domains": ["population"], "top_k": 2},
+    )["domain_results"][0]
+    target_ref = ranked["highlights"][0]["record_ref"]
+
+    assert ranked["method"]["kind"] == "population_grid_rank"
+    assert ranked["highlights"][0]["target_population"] >= ranked["highlights"][1]["target_population"]
+
+    neighborhood = service.compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "neighborhood",
+            "fact_domains": ["population"],
+            "record_refs": [target_ref],
+        },
+    )["domain_results"][0]
+    assert neighborhood["method"]["kind"] == "population_grid_neighborhood_comparison"
+    assert neighborhood["method"]["comparison"] == "descriptive_target_vs_neighbors"
+    assert "target" in neighborhood["groups"][0]
+    assert "neighbors" in neighborhood["groups"][0]
+    assert "comparison" in neighborhood["groups"][0]
+
+    inspected = service.compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "inspect",
+            "fact_domains": ["population"],
+            "record_refs": [target_ref],
+        },
+    )["domain_results"][0]
+    assert inspected["method"]["kind"] == "population_grid_inspect"
+    assert inspected["highlights"][0]["population"]["age_distribution"]
+    assert inspected["highlights"][0]["year"] == 2026
+    assert inspected["highlights"][0]["population"]["density_person_per_km2"] > 0
+    assert "neighborhood" in inspected["highlights"][0]
+
+
+@pytest.mark.parametrize(
+    ("measure", "selectors", "expected_unit"),
+    [
+        ("count", [], "person"),
+        ("density", [], "person_per_km2"),
+        (
+            "share",
+            [
+                {"dimension": "population.sex", "values": ["female"]},
+                {"dimension": "population.age_band", "values": ["65"]},
+            ],
+            "ratio",
+        ),
+    ],
+)
+def test_population_rank_explicitly_distinguishes_count_density_and_share(
+    measure,
+    selectors,
+    expected_unit,
+):
+    result = _service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "rank",
+            "fact_domains": ["population"],
+            "selectors": [
+                *selectors,
+                {"dimension": "population.measure", "values": [measure]},
+            ],
+            "top_k": 3,
+        },
+    )["domain_results"][0]
+
+    assert result["summary"]["rank_measure"] == measure
+    assert result["summary"]["rank_unit"] == expected_unit
+    assert [row["rank_value"] for row in result["highlights"]] == sorted(
+        (row["rank_value"] for row in result["highlights"]),
+        reverse=True,
+    )
+    assert all(row["rank_measure"] == measure for row in result["highlights"])
+
+
+def test_population_neighborhood_compares_target_with_adjacent_grid_mean():
+    population = [
+        _record(
+            "current:dataset:population",
+            "target",
+            box(0.0, 0.0, 0.01, 0.01),
+            **{**_population_properties(0), "population_total": 100.0},
+        ),
+        _record(
+            "current:dataset:population",
+            "neighbor",
+            box(0.01, 0.0, 0.02, 0.01),
+            **{**_population_properties(0), "population_total": 40.0},
+        ),
+        _record(
+            "current:dataset:population",
+            "outside",
+            box(0.03, 0.03, 0.04, 0.04),
+            **{**_population_properties(0), "population_total": 500.0},
+        ),
+    ]
+    result = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:population": population}),
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "neighborhood",
+            "fact_domains": ["population"],
+            "record_refs": ["current:dataset:population/target"],
+        },
+    )["domain_results"][0]
+
+    group = result["groups"][0]
+    assert group["neighbor_count"] == 1
+    assert group["target"]["target_population"] == pytest.approx(100.0)
+    assert group["neighbors"]["target_population_mean_per_grid"] == pytest.approx(40.0)
+    assert group["comparison"]["target_population_delta_from_neighbor_mean"] == pytest.approx(60.0)
+    assert group["comparison"]["target_to_neighbor_mean_ratio"] == pytest.approx(2.5)
+    assert group["focus_continuity"]["target_is_focus_grid"] is False
+    assert group["focus_continuity"]["continuous_focus_area"] is False
+
+
+def test_population_neighborhood_connects_only_adjacent_focus_grids():
+    values = [100.0, 100.0, 10.0, 10.0]
+    geometries = [
+        box(0.0, 0.0, 0.01, 0.01),
+        box(0.01, 0.0, 0.02, 0.01),
+        box(0.03, 0.0, 0.04, 0.01),
+        box(0.03, 0.02, 0.04, 0.03),
+    ]
+    population = [
+        _record(
+            "current:dataset:population", f"cell-{index}", geometry,
+            **{**_population_properties(0), "population_total": value},
+        )
+        for index, (geometry, value) in enumerate(zip(geometries, values))
+    ]
+    result = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:population": population}),
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "neighborhood",
+            "fact_domains": ["population"],
+            "record_refs": ["current:dataset:population/cell-0"],
+        },
+    )["domain_results"][0]
+
+    continuity = result["groups"][0]["focus_continuity"]
+    assert continuity["target_is_focus_grid"] is True
+    assert continuity["connected_focus_grid_count"] == 2
+    assert continuity["connected_focus_population"] == pytest.approx(200)
+    assert continuity["continuous_focus_area"] is True
+    assert result["method"]["focus_rule"] == "descriptive_saved_isochrone_p75"
+
+
+def test_population_relationship_reports_descriptive_mismatch_without_significance():
+    result = _service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "relationship",
+            "fact_domains": ["population", "nightlight"],
+            "evidence_dimensions": ["population.scale", "nightlight.intensity"],
+        },
+    )
+
+    computation = result["domain_results"][0]
+    assert "kind" not in computation["method"]
+    assert computation["highlights"] == []
+    assert computation["evidence"] == []
+    assert computation["relationship"]["unit_values"]
+    assert "pattern_counts" not in computation["relationship"]
+    assert set(computation["relationship"]["distributions"]) == {
+        "population.total",
+        "nightlight.mean_radiance",
+    }
+    assert all(
+        item["record_ref"] and set(item["values"]) == {"population.total", "nightlight.mean_radiance"}
+        for item in computation["relationship"]["unit_values"]
+    )
+
+
+def test_population_relationship_uses_boundary_allocated_population_values():
+    geometries = [
+        box(0.0, 0.0, 0.01, 0.01),
+        box(0.01, 0.0, 0.02, 0.01),
+        box(0.02, 0.0, 0.03, 0.01),
+        box(0.04, 0.04, 0.06, 0.06),
+    ]
+    populations = [10.0, 20.0, 30.0, 100.0]
+    population_records = [
+        _record(
+            "current:dataset:population", f"population-{index}", geometry,
+            **{**_population_properties(0), "population_total": value},
+        )
+        for index, (geometry, value) in enumerate(zip(geometries, populations))
+    ]
+    nightlight_records = [
+        _record(
+            "current:dataset:nightlight", f"nightlight-{index}", geometry,
+            radiance=float(index + 1), year=2026,
+        )
+        for index, geometry in enumerate(geometries)
+    ]
+    result = SpatialEvidenceService(
+        projects=_Projects({
+            "current:dataset:population": population_records,
+            "current:dataset:nightlight": nightlight_records,
+        }),
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "relationship",
+            "fact_domains": ["population", "nightlight"],
+            "evidence_dimensions": ["population.scale", "nightlight.intensity"],
+        },
+    )["domain_results"][0]
+
+    boundary = next(
+        row for row in result["relationship"]["unit_values"]
+        if row["record_ref"] == "current:dataset:population/population-3"
+    )
+    assert boundary["values"]["population.total"] == pytest.approx(25.0)
+    assert result["relationship"]["distributions"]["population.total"]["p75"] <= 30.0
 
 
 def test_semantic_road_metrics_expose_only_normalized_movement_measures():
@@ -468,6 +874,28 @@ def test_road_scope_reads_persisted_results_once_and_reports_all_radii():
     assert computation["summary"]["core_background"]["core"]["edge_count"] == 1
 
 
+def test_road_scope_returns_only_the_selected_semantic_dimension():
+    service = _service()
+    result = service.compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "scope",
+            "fact_domains": ["road"],
+            "evidence_dimensions": ["road.to_movement"],
+        },
+    )
+
+    computation = result["domain_results"][0]
+    assert result["used_metric_ids"] == ["road.nain"]
+    assert computation["evidence_dimensions"] == ["road.to_movement"]
+    assert set(computation["summary"]) == {
+        "radius_profiles", "core_background", "continuous_corridors",
+    }
+    assert set(computation["summary"]["radius_profiles"][0]) == {"radius", "nain"}
+    assert "nach_p75" not in computation["summary"]["core_background"]
+    assert service._datasets.load_calls == ["current:dataset:road_edges"]
+
+
 def test_road_scope_preserves_no_road_grid_metrics_as_null_not_zero():
     roads = [
         _record(
@@ -501,7 +929,7 @@ def test_road_scope_preserves_no_road_grid_metrics_as_null_not_zero():
     assert coverage["metric_valid_cell_count"] == {
         "road_nain": 1, "road_nach": 1, "road_connectivity": 1,
     }
-    assert coverage["no_road_metric_semantics"] == "null_not_zero"
+    assert "no_road_metric_semantics" not in coverage
 
 
 def test_poi_category_count_is_unique_category_count_not_record_count():
@@ -517,6 +945,108 @@ def test_poi_category_count_is_unique_category_count_not_record_count():
     )
 
     assert result["summary"]["poi.category_count"] == 2
+
+
+def test_poi_direction_returns_eight_sector_supply_and_equal_weight_ellipse():
+    result = _service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "direction",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply", "poi.mix"],
+        },
+    )
+
+    computation = result["domain_results"][0]
+    assert computation["method"]["kind"] == "poi_direction_distribution"
+    assert computation["method"]["spatial_universe"] == "saved_isochrone"
+    assert len(computation["groups"]) == 8
+    assert sum(group["poi_count"] for group in computation["groups"]) == 25
+    assert sum(group["poi_share"] for group in computation["groups"]) == pytest.approx(1.0)
+    distribution = computation["summary"]["distribution"]
+    assert len(distribution["weighted_center_wgs84"]) == 2
+    assert distribution["standard_deviation_ellipse"]["major_axis_standard_distance_m"] > 0
+    assert "weight_semantics" not in distribution
+
+
+def test_poi_relationship_uses_directional_clq_for_two_selected_categories():
+    records = [
+        _record("current:dataset:poi", "food-west", Point(0.001, 0.025), name="西侧餐饮", category="餐饮服务"),
+        _record("current:dataset:poi", "shop-1", Point(0.002, 0.025), name="商店一", category="购物服务"),
+        _record("current:dataset:poi", "shop-2", Point(0.0021, 0.025), name="商店二", category="购物服务"),
+        _record("current:dataset:poi", "shop-3", Point(0.0022, 0.025), name="商店三", category="购物服务"),
+        _record("current:dataset:poi", "food-east", Point(0.012, 0.025), name="东侧餐饮", category="餐饮服务"),
+    ]
+    result = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:poi": records}),
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "relationship",
+            "fact_domains": ["poi"],
+            "selectors": [{"dimension": "poi.category", "values": ["餐饮", "购物"]}],
+        },
+    )
+
+    computation = result["domain_results"][0]
+    directed = computation["relationship"]["directed_colocation"]
+    assert result["used_metric_ids"] == ["poi.category_colocation_quotient"]
+    assert computation["method"]["kind"] == "poi_category_colocation_quotient"
+    assert computation["method"]["spatial_universe"] == "saved_isochrone"
+    assert computation["method"]["significance_test"] is False
+    assert directed[0]["source_category"]["label"] == "餐饮"
+    assert directed[0]["neighbor_category"]["label"] == "购物"
+    assert directed[0]["clq"] == pytest.approx(4 / 3)
+    assert directed[1]["source_category"]["label"] == "购物"
+    assert directed[1]["clq"] == 0
+    assert all("current:dataset:poi/" in item["source_record_ref"] for item in computation["named_spatial_objects"])
+    _assert_no_geometry(result)
+
+
+def test_poi_inspect_expands_inside_and_nearest_named_facilities_within_isochrone():
+    cell = _record(
+        "current:dataset:h3",
+        "inspect-cell",
+        box(0, 0, 0.01, 0.01),
+        h3_id="inspect-cell",
+        poi_count=1,
+        density_poi_per_km2=10,
+    )
+    pois = [
+        _record(
+            "current:dataset:poi", "inside", Point(0.004, 0.004),
+            name="格内餐厅", category="餐饮服务", subcategory="中餐馆",
+        ),
+        _record(
+            "current:dataset:poi", "nearest", Point(0.014, 0.004),
+            name="邻近商店", category="购物服务", subcategory="商场",
+        ),
+        _record(
+            "current:dataset:poi", "outside", Point(0.08, 0.08),
+            name="圈外设施", category="住宿服务", subcategory="酒店",
+        ),
+    ]
+    result = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:h3": [cell], "current:dataset:poi": pois}),
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "inspect",
+            "fact_domains": ["poi"],
+            "record_refs": ["current:dataset:h3/inspect-cell"],
+        },
+    )
+
+    computation = result["domain_results"][0]
+    assert computation["method"]["kind"] == "poi_grid_inspect"
+    assert computation["groups"][0]["poi_count"] == 1
+    assert computation["groups"][0]["category_structure"][0]["label"] == "餐饮"
+    assert [item["name"] for item in computation["named_spatial_objects"]] == ["格内餐厅", "邻近商店"]
+    assert [item["relation"] for item in computation["named_spatial_objects"]] == [
+        "inside_target", "nearest_in_scope",
+    ]
 
 
 def _poi_lq_service():
@@ -596,7 +1126,7 @@ def test_selected_poi_category_lq_uses_standard_formula_for_every_nonempty_cell(
     assert "lq_category" not in str(computation)
 
 
-def test_poi_neighborhood_uses_all_persisted_local_statistics_without_recomputing():
+def test_poi_neighborhood_compares_in_scope_h3_and_expands_named_facilities():
     cells = [
         _record(
             "current:dataset:h3",
@@ -630,6 +1160,20 @@ def test_poi_neighborhood_uses_all_persisted_local_statistics_without_recomputin
     projects = _Projects(
         {
             "current:dataset:h3": cells,
+            "current:dataset:poi": [
+                _record(
+                    "current:dataset:poi", "target-food", Point(0.004, 0.004),
+                    name="目标餐厅", category="餐饮服务", subcategory="中餐馆",
+                ),
+                _record(
+                    "current:dataset:poi", "target-shop", Point(0.006, 0.006),
+                    name="目标商店", category="购物服务", subcategory="商场",
+                ),
+                _record(
+                    "current:dataset:poi", "neighbor-food", Point(0.014, 0.004),
+                    name="邻格餐厅", category="餐饮服务", subcategory="中餐馆",
+                ),
+            ],
             "current:dataset:poi_grid": [
                 _record(
                     "current:dataset:poi_grid",
@@ -668,9 +1212,6 @@ def test_poi_neighborhood_uses_all_persisted_local_statistics_without_recomputin
         "poi.grid_density",
         "poi.neighbor_mean_density",
         "spatial.neighbor_density_delta",
-        "spatial.gi_star",
-        "spatial.lisa",
-        "spatial.lisa_z",
         "poi.local_entropy",
         "poi.neighbor_mean_entropy",
     ]
@@ -678,23 +1219,17 @@ def test_poi_neighborhood_uses_all_persisted_local_statistics_without_recomputin
         "poi.grid_density": 100.0,
         "poi.neighbor_mean_density": 70.0,
         "spatial.neighbor_density_delta": 30.0,
-        "spatial.gi_star": 2.4,
-        "spatial.lisa": 0.7,
-        "spatial.lisa_z": 1.9,
         "poi.local_entropy": 0.8,
         "poi.neighbor_mean_entropy": 0.6,
     }
-    assert computation["summary"]["density_spatial_autocorrelation"] == {
-        "global_moran_i": 0.42,
-        "global_moran_z_score": 3.1,
-        "significance_status": "available",
-        "statistic_scope": "all_persisted_h3_cells",
-        "spatial_unit_count": 2,
-        "poi_count_in_spatial_units": 15,
-    }
-    assert computation["method"]["local_statistics"] == "persisted_h3_spatial_statistics"
-    assert computation["method"]["spatial_statistics_recomputed"] is False
-    assert projects.datasets.load_calls == ["current:dataset:h3"]
+    context = computation["groups"][0]["poi_context"]
+    assert context["target"]["poi_count"] == 2
+    assert context["neighbors"]["poi_count"] == 1
+    assert context["comparison"]["poi_count_delta_from_neighbor_mean"] == 1
+    assert {item["name"] for item in context["named_facilities"]} == {"目标餐厅", "目标商店", "邻格餐厅"}
+    assert "comparison_semantics" not in computation["summary"]
+    assert computation["method"]["comparison"] == "descriptive_target_vs_neighbors"
+    assert projects.datasets.load_calls == ["current:dataset:poi", "current:dataset:h3"]
 
 
 def test_zero_density_h3_keeps_zero_neighbor_delta_instead_of_missing():
@@ -729,7 +1264,7 @@ def test_zero_density_h3_keeps_zero_neighbor_delta_instead_of_missing():
     values = result["domain_results"][0]["highlights"][0]["values"]
     assert values["poi.grid_density"] == 0
     assert values["spatial.neighbor_density_delta"] == -25
-    assert not any("spatial.neighbor_density_delta" in item for item in result["domain_results"][0]["limitations"])
+    assert "limitations" not in result["domain_results"][0]
 
 
 def test_poi_scope_remains_compact_and_does_not_add_local_statistics():
@@ -743,6 +1278,34 @@ def test_poi_scope_remains_compact_and_does_not_add_local_statistics():
     ]
     assert "spatial.gi_star" not in str(result)
     assert "spatial.lisa" not in str(result)
+    profile = result["domain_results"][0]
+    assert profile["summary"]["supply"]["poi_count"] == 25
+    assert profile["summary"]["supply"]["categories"] == [{
+        "key": "group-7", "label": "餐饮", "count": 25, "share": 1.0,
+    }]
+    assert profile["summary"]["mix"]["shannon_entropy"] == 0
+    assert profile["method"]["spatial_universe"] == "saved_isochrone"
+
+
+def test_poi_scope_structure_excludes_points_outside_saved_isochrone():
+    records = [
+        _record("current:dataset:poi", "food", Point(0.01, 0.01), category="餐饮服务"),
+        _record("current:dataset:poi", "shop", Point(0.02, 0.02), category="购物服务"),
+        _record("current:dataset:poi", "outside", Point(0.06, 0.02), category="餐饮服务"),
+    ]
+    result = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:poi": records}),
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={"analysis": "scope", "fact_domains": ["poi"]},
+    )
+
+    summary = result["domain_results"][0]["summary"]
+    assert summary["supply"]["poi_count"] == 2
+    assert {row["label"]: row["count"] for row in summary["supply"]["categories"]} == {"餐饮": 1, "购物": 1}
+    assert summary["mix"]["shannon_entropy"] == pytest.approx(0.693147)
+    assert summary["mix"]["normalized_shannon_entropy"] == 1.0
 
 
 def test_poi_scope_adds_persisted_snapshot_counts_without_claiming_open_close_change():
@@ -782,7 +1345,7 @@ def test_poi_scope_adds_persisted_snapshot_counts_without_claiming_open_close_ch
     assert temporal["method"]["entity_change_computed"] is False
     assert temporal["method"]["snapshot_counts_only"] is True
     assert "poi.multi_year_count" in result["used_metric_ids"]
-    assert any("不能直接解释为开闭店" in item for item in temporal["limitations"])
+    assert "limitations" not in temporal
 
 
 def test_internal_category_lq_rejects_missing_category_selector():
@@ -869,7 +1432,9 @@ def test_selected_poi_category_accessibility_routes_over_persisted_road_results(
     assert result["used_metric_ids"] == ["poi.focused_accessibility"]
     assert computation["summary"]["selected_category"] == {"key": "group-7", "label": "餐饮"}
     assert computation["summary"]["origin_wgs84"] == pytest.approx(origin)
-    assert computation["summary"]["route_verified_poi_count"] == 1
+    assert computation["summary"]["reachable_poi_count"] == 1
+    assert computation["summary"]["named_facility_count"] == 1
+    assert computation["summary"]["cumulative_reachable_count"][-1] == {"minutes": 15.0, "count": 1}
     assert computation["named_spatial_objects"] == [{
         "record_ref": "current:dataset:poi/food-1",
         "object_type": "poi",
@@ -894,6 +1459,137 @@ def test_selected_poi_category_accessibility_routes_over_persisted_road_results(
     _assert_no_geometry(result)
 
 
+def _equal_weight_accessibility_service():
+    road = _record(
+        "current:dataset:road_edges",
+        "main-road",
+        LineString([(0.0, 0.025), (0.05, 0.025)]),
+        road_name="供需测试道路",
+    )
+    facilities = [
+        _record(
+            "current:dataset:poi",
+            "clinic-west",
+            Point(0.020, 0.025),
+            name="西侧诊所",
+            category="医疗保健服务",
+            typecode="090100",
+        ),
+        _record(
+            "current:dataset:poi",
+            "clinic-east",
+            Point(0.022, 0.025),
+            name="东侧诊所",
+            category="医疗保健服务",
+            typecode="090100",
+        ),
+    ]
+    population = [
+        _record(
+            "current:dataset:population",
+            "demand-west",
+            box(0.0205, 0.0245, 0.0215, 0.0255),
+            population_total=100,
+            year=2026,
+        ),
+        _record(
+            "current:dataset:population",
+            "demand-east",
+            box(0.0395, 0.0245, 0.0405, 0.0255),
+            population_total=300,
+            year=2026,
+        ),
+    ]
+
+    def contours(_center, times, _mode):
+        return {float(value): box(0, 0, 0.05, 0.05) for value in times}
+
+    return SpatialEvidenceService(
+        projects=_Projects({
+            "current:dataset:poi": facilities,
+            "current:dataset:population": population,
+            "current:dataset:road_edges": [road],
+        }),
+        metric_catalog=_Catalog(),
+        isochrone_contours=contours,
+    )
+
+
+def test_poi_population_accessibility_returns_equal_weight_supply_demand_index():
+    result = _equal_weight_accessibility_service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "accessibility",
+            "fact_domains": ["poi", "population"],
+            "evidence_dimensions": ["poi.supply", "population.scale"],
+            "selectors": [{"dimension": "poi.category", "values": ["医疗"]}],
+        },
+    )
+
+    computation = next(
+        item
+        for item in result["domain_results"]
+        if item["method"]["kind"] == "equal_weight_supply_demand_accessibility"
+    )
+    assert computation["status"] == "available"
+    assert "facility_weight_semantics" not in computation["summary"]
+    assert computation["summary"]["equal_weight_facility_count"] == 2
+    assert computation["summary"]["total_population"] == pytest.approx(400)
+    assert computation["summary"]["bands"][-1][
+        "population_weighted_mean_facilities_per_1000_residents"
+    ] == pytest.approx(5.0)
+    assert computation["method"]["output_unit"] == "equal_weight_facilities_per_1000_residents"
+    assert computation["coverage"]["within_max_catchment_pair_count"] == 2
+    assert [item["population"] for item in computation["highlights"]] == [300, 100]
+    assert computation["highlights"][0]["facilities_per_1000_residents"] == 0
+    _assert_no_geometry(result)
+
+
+def test_selected_poi_accessibility_counts_all_routes_but_limits_named_facilities():
+    roads = [
+        _record(
+            "current:dataset:road_edges",
+            "road",
+            LineString([(0.02, 0.025), (0.03, 0.025)]),
+            road_name="中心道路",
+        )
+    ]
+    pois = [
+        _record(
+            "current:dataset:poi",
+            f"food-{index}",
+            Point(0.025 + index * 0.001, 0.025),
+            name=f"餐厅 {index}",
+            category="餐饮服务",
+            typecode="050101",
+        )
+        for index in range(1, 5)
+    ]
+    result = SpatialEvidenceService(
+        projects=_Projects({
+            "current:dataset:poi": pois,
+            "current:dataset:road_edges": roads,
+        }),
+        metric_catalog=_Catalog(),
+    ).compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "accessibility",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply"],
+            "selectors": [{"dimension": "poi.category", "values": ["餐饮"]}],
+            "top_k": 3,
+        },
+    )
+
+    computation = result["domain_results"][0]
+    assert computation["summary"]["reachable_poi_count"] == 4
+    assert computation["summary"]["named_facility_count"] == 3
+    assert len(computation["named_spatial_objects"]) == 3
+    assert computation["summary"]["cumulative_reachable_count"][-1] == {"minutes": 15.0, "count": 4}
+    assert "count_semantics" not in computation["method"]
+
+
 def test_poi_accessibility_without_category_keeps_standard_isochrone_supply_analysis():
     service, projects, isochrone_calls, _ = _focused_accessibility_service()
 
@@ -907,8 +1603,10 @@ def test_poi_accessibility_without_category_keeps_standard_isochrone_supply_anal
     )
 
     computation = result["domain_results"][0]
-    assert result["used_metric_ids"] == ["poi.grid_density"]
+    assert result["used_metric_ids"] == ["poi.count"]
     assert computation["method"]["kind"] == "accessibility_intersection_aggregation"
+    assert [group["key"] for group in computation["groups"]] == ["within-5min", "within-10min", "within-15min"]
+    assert [group["values"]["poi.count"] for group in computation["groups"]] == [2.0, 2.0, 2.0]
     assert isochrone_calls == [(5.0, 10.0, 15.0)]
     assert projects.datasets.load_calls == ["current:dataset:poi"]
 
@@ -928,12 +1626,12 @@ def test_selected_poi_category_accessibility_omits_disconnected_paths_without_fa
 
     computation = result["domain_results"][0]
     assert result["status"] == "unavailable"
-    assert computation["summary"]["route_verified_poi_count"] == 0
+    assert computation["summary"]["reachable_poi_count"] == 0
     assert computation["summary"]["route_status"] == "unavailable"
     assert computation["summary"]["omission_reason"] == "no_local_road_path"
     assert computation["named_spatial_objects"] == []
     assert isochrone_calls == []
-    assert "直线距离或模拟路径" in computation["limitations"][0]
+    assert "limitations" not in computation
 
 
 def test_rank_and_inspect_reproduce_same_population_value():
@@ -960,7 +1658,7 @@ def test_rank_and_inspect_reproduce_same_population_value():
 
     inspected_highlight = inspected["domain_results"][0]["highlights"][0]
     assert inspected_highlight["record_ref"] == highlight["record_ref"]
-    assert inspected_highlight["values"]["population.total"] == highlight["values"]["population.total"]
+    assert inspected_highlight["target_population"] == highlight["target_population"]
     assert inspected["domain_results"][0]["named_spatial_objects"][0]["record_ref"] == highlight["record_ref"]
 
 
@@ -1402,9 +2100,9 @@ def test_road_poi_relationship_uses_shared_grid_colocation_only():
 
     computation = result["domain_results"][0]
     assert computation["relationship"]["spatial_unit_count"] == 25
-    assert computation["relationship"]["pattern_counts"]["joint_high"] > 0
-    assert computation["method"]["kind"] == "p25_p75_colocation"
-    assert any("不表示因果关系" in value for value in computation["limitations"])
+    assert computation["relationship"]["unit_values"]
+    assert "pattern_counts" not in computation["relationship"]
+    assert "limitations" not in computation
 
 
 def test_accessibility_does_not_fabricate_when_valhalla_is_unavailable():
@@ -1419,7 +2117,7 @@ def test_accessibility_does_not_fabricate_when_valhalla_is_unavailable():
     )
 
     assert result["status"] == "unavailable"
-    assert result["limitations"]
+    assert "limitations" not in result
 
 
 def test_model_projection_removes_geometry_and_bounds_payload():
@@ -1441,6 +2139,53 @@ def test_model_projection_removes_geometry_and_bounds_payload():
     _assert_no_geometry(projected)
     assert len(str(projected)) < 9000
     assert projected["summary"]
+
+
+def test_model_projection_preserves_reproducibility_identity_when_compacted():
+    payload = {
+        "result_id": "spatial:test-large",
+        "status": "available",
+        "summary": {f"fact_{index}": "x" * 1200 for index in range(40)},
+        "method": {"kind": "test"},
+        "provenance": {
+            "snapshot_id": "snapshot-1",
+            "source_ids": ["current:dataset:nightlight"],
+            "selected_years": {"current:dataset:nightlight": 2025},
+            "data_versions": {
+                "current:dataset:nightlight": {
+                    "data_version": "viirs-v2",
+                    "selected_year": 2025,
+                    "resolution": 500,
+                },
+            },
+            "result_checksum": "sha256:abc",
+        },
+    }
+
+    projected = _bounded_model_response(payload)
+
+    assert projected["provenance"] == payload["provenance"]
+
+
+def test_provenance_falls_back_to_dataset_selected_year():
+    project = {
+        "history_id": "history-1",
+        "snapshot": {"snapshot_id": "snapshot-1"},
+        "datasets": [{
+            "source_id": "current:dataset:population",
+            "selected_year": 2025,
+            "data_version": "worldpop-v1",
+        }],
+    }
+
+    provenance = SpatialEvidenceService._provenance(
+        project,
+        {},
+        {"current:dataset:population"},
+    )
+
+    assert provenance["selected_years"] == {"current:dataset:population": 2025}
+    assert provenance["data_versions"]["current:dataset:population"]["data_version"] == "worldpop-v1"
 
 
 def test_internal_metrics_are_not_second_public_dimension_catalog():

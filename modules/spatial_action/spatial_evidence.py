@@ -10,7 +10,7 @@ from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from shapely.errors import GEOSException
-from shapely.geometry import Point, mapping, shape
+from shapely.geometry import Polygon, mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, transform
 from shapely.strtree import STRtree
@@ -24,19 +24,37 @@ from modules.road.metrics import build_road_orientation_analysis
 from modules.scope_datasets.service import ScopeRecord
 from modules.spatial_action.focused_poi_accessibility import (
     DEFAULT_WALKING_SPEED_M_PER_S,
+    EqualWeightFacility,
+    EqualWeightSupplyDemandAccessibilityService,
     FocusedPoiAccessibilityService,
     FocusedPoiCandidate,
     FocusedPoiTypeGroup,
+    PopulationDemandPoint,
 )
 from modules.spatial_action.metric_tools import MetricToolService
+from modules.spatial_action.nightlight_evidence import (
+    build_nightlight_accessibility_profile,
+    build_nightlight_change_profile,
+    build_nightlight_direction_profile,
+    build_nightlight_inspect_profile,
+    build_nightlight_neighborhood_profile,
+    build_nightlight_rank_profile,
+    build_nightlight_scope_profile,
+)
+from modules.spatial_action.poi_evidence import (
+    build_poi_category_colocation_profile,
+    build_poi_direction_profile,
+    build_poi_inspect_profile,
+    build_poi_neighborhood_profile,
+    build_poi_scope_profile,
+)
 from modules.spatial_action.road_network_routing import LocalRoadNetworkRouter, RoadNetworkRoutingUnavailable
 from modules.spatial_action.source_index import SourceIndex
 from modules.spatial_projects.service import SpatialProjectService
-from modules.timeseries.population_series import get_population_timeseries
 from modules.timeseries.nightlight_series import get_nightlight_timeseries
 
 
-SCHEMA_VERSION = "spatial_evidence/v7"
+SCHEMA_VERSION = "spatial_evidence/v10"
 DEFAULT_ISOCHRONE_TIME_MIN = 15.0
 DEFAULT_TRAVEL_TIME_BANDS_MIN = ((0.0, 5.0), (5.0, 10.0), (10.0, 15.0))
 DIRECTION_CODES = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
@@ -52,9 +70,10 @@ DIRECTION_LABELS = {
 }
 POPULATION_AGE_BANDS = tuple(age_band_keys())
 POPULATION_SEXES = ("total", "male", "female")
+POPULATION_MEASURES = ("count", "density", "share")
 SELECTOR_DIMENSIONS = {
     "poi.category", "poi.subcategory", "population.sex",
-    "population.age_band", "road.class", "road.radius", "road.object", "year",
+    "population.age_band", "population.measure", "road.class", "road.radius", "road.object", "year",
 }
 NamedPoiRole = Literal["regional_anchor", "comparable_supply", "daily_service"]
 _POI_ROLE_CATEGORIES: dict[NamedPoiRole, tuple[str, ...]] = {
@@ -90,6 +109,17 @@ FORBIDDEN_OUTPUT_KEYS = {
     "featurecollection",
     "database",
     "connection",
+    "limitations",
+    "interpretation",
+    "interpretation_basis",
+    "semantics",
+    "comparison_semantics",
+    "weight_semantics",
+    "facility_weight_semantics",
+    "count_semantics",
+    "capacity_semantics",
+    "time_series_semantics",
+    "no_road_metric_semantics",
     "file_path",
     "path",
 }
@@ -131,13 +161,22 @@ def _resolve_poi_category(value: Any) -> tuple[str, str] | None:
 
 
 def _selected_poi_category(selectors: Sequence[Any]) -> tuple[str, str] | None:
+    categories = _selected_poi_categories(selectors)
+    return categories[0] if len(categories) == 1 else None
+
+
+def _selected_poi_categories(selectors: Sequence[Any]) -> tuple[tuple[str, str], ...]:
     values = [
         value
         for selector in selectors
         if getattr(selector, "dimension", None) == "poi.category"
         for value in getattr(selector, "values", ())
     ]
-    return _resolve_poi_category(values[0]) if len(values) == 1 else None
+    return tuple(
+        category
+        for value in values
+        if (category := _resolve_poi_category(value)) is not None
+    )
 
 DATASET_FIELD_CATALOG = {
     "current:dataset:poi": {
@@ -209,13 +248,13 @@ class SpatialEvidenceSelector(BaseModel):
 
     dimension: Literal[
         "poi.category", "poi.subcategory", "population.sex",
-        "population.age_band", "road.class", "road.radius", "road.object", "year",
+        "population.age_band", "population.measure", "road.class", "road.radius", "road.object", "year",
     ]
     values: list[str | int] = Field(
         min_length=1,
         max_length=20,
         description=(
-            "筛选值。poi.category 使用一个主业态；支持公司、旅游、交通、商务住宅、自然、购物、"
+            "筛选值。poi.category 通常使用一个主业态；POI 类别关系问题使用两个主业态。支持公司、旅游、交通、商务住宅、自然、购物、"
             "餐饮、体育、医疗、住宿、政府机构、科教文化及其高德主类名称。"
         ),
     )
@@ -223,15 +262,29 @@ class SpatialEvidenceSelector(BaseModel):
     @model_validator(mode="after")
     def validate_domain_values(self) -> "SpatialEvidenceSelector":
         values = [str(value).strip().lower() for value in self.values]
-        if self.dimension == "population.sex" and not set(values) <= set(POPULATION_SEXES):
-            raise ValueError("population_sex_must_be_total_male_or_female")
-        if self.dimension == "population.age_band" and not set(values) <= {"all", *POPULATION_AGE_BANDS}:
-            raise ValueError("population_age_band_unsupported")
+        if self.dimension == "population.sex":
+            if len(values) != 1:
+                raise ValueError("population_sex_requires_exactly_1_value")
+            if not set(values) <= set(POPULATION_SEXES):
+                raise ValueError("population_sex_must_be_total_male_or_female")
+        if self.dimension == "population.age_band":
+            if len(values) != 1:
+                raise ValueError("population_age_band_requires_exactly_1_value")
+            if not set(values) <= {"all", *POPULATION_AGE_BANDS}:
+                raise ValueError("population_age_band_unsupported")
+        if self.dimension == "population.measure":
+            if len(values) != 1:
+                raise ValueError("population_measure_requires_exactly_1_value")
+            if values[0] not in POPULATION_MEASURES:
+                raise ValueError("population_measure_unsupported")
         if self.dimension == "poi.category":
-            if len(self.values) != 1:
-                raise ValueError("poi_category_requires_exactly_one_value")
-            if _resolve_poi_category(self.values[0]) is None:
+            if not 1 <= len(self.values) <= 2:
+                raise ValueError("poi_category_requires_one_or_two_values")
+            categories = [_resolve_poi_category(value) for value in self.values]
+            if any(category is None for category in categories):
                 raise ValueError("poi_category_unsupported")
+            if len(set(categories)) != len(categories):
+                raise ValueError("poi_categories_must_be_distinct")
         if self.dimension == "road.radius":
             if len(values) != 1:
                 raise ValueError("road_radius_requires_exactly_1_value")
@@ -243,6 +296,20 @@ class SpatialEvidenceSelector(BaseModel):
             if values[0] not in {"segment", "corridor", "grid"}:
                 raise ValueError("road_object_unsupported")
         return self
+
+
+def _validate_population_selector_cardinality(selectors: Sequence[SpatialEvidenceSelector]) -> None:
+    for dimension, error in (
+        ("population.sex", "population_sex_requires_exactly_1_value"),
+        ("population.age_band", "population_age_band_requires_exactly_1_value"),
+    ):
+        value_count = sum(
+            len(selector.values)
+            for selector in selectors
+            if selector.dimension == dimension
+        )
+        if value_count > 1:
+            raise ValueError(error)
 
 
 class NamedRecordQuery(BaseModel):
@@ -267,8 +334,10 @@ EvidenceDimension = Literal[
     "poi.mix",
     "poi.category_specialization",
     "population.scale",
-    "population.profile",
+    "population.structure",
+    "population.change",
     "nightlight.intensity",
+    "nightlight.change",
     "road.to_movement",
     "road.through_movement",
     "road.connectivity",
@@ -294,6 +363,13 @@ class SpatialDomainComputationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode(self) -> "SpatialDomainComputationRequest":
+        _validate_population_selector_cardinality(self.selectors)
+        poi_categories = _selected_poi_categories(self.selectors)
+        poi_category_relationship = (
+            self.analysis == "relationship"
+            and self.fact_domains == ["poi"]
+            and len(poi_categories) == 2
+        )
         if len(set(self.fact_domains)) != len(self.fact_domains):
             raise ValueError("fact_domains_must_be_unique")
         if len(set(self.evidence_dimensions)) != len(self.evidence_dimensions):
@@ -302,9 +378,27 @@ class SpatialDomainComputationRequest(BaseModel):
             raise ValueError(f"{self.analysis}_requires_fact_domains")
         if self.analysis == "rank" and len(self.fact_domains) != 1:
             raise ValueError("rank_requires_exactly_1_fact_domain")
-        if self.analysis == "relationship" and not 2 <= len(self.fact_domains) <= 4:
+        if (
+            self.analysis == "relationship"
+            and not poi_category_relationship
+            and not 2 <= len(self.fact_domains) <= 4
+        ):
             raise ValueError("relationship_requires_2_to_4_fact_domains")
-        if self.analysis in {"rank", "relationship"} and len(self.evidence_dimensions) != len(self.fact_domains):
+        if len(poi_categories) == 2 and not poi_category_relationship:
+            raise ValueError("two_poi_categories_only_supported_for_poi_relationship")
+        if poi_category_relationship and self.evidence_dimensions not in ([], ["poi.supply"]):
+            raise ValueError("poi_category_relationship_requires_poi_supply_dimension")
+        allow_default_population_rank = (
+            self.analysis == "rank"
+            and self.fact_domains == ["population"]
+            and not self.evidence_dimensions
+        )
+        if (
+            self.analysis in {"rank", "relationship"}
+            and len(self.evidence_dimensions) != len(self.fact_domains)
+            and not allow_default_population_rank
+            and not poi_category_relationship
+        ):
             raise ValueError(f"{self.analysis}_requires_one_dimension_per_fact_domain")
         if self.analysis == "neighborhood" and (not self.fact_domains or not self.record_refs):
             raise ValueError("neighborhood_requires_fact_domains_and_record_refs")
@@ -314,6 +408,20 @@ class SpatialDomainComputationRequest(BaseModel):
             raise ValueError("record_refs_only_supported_for_neighborhood_or_inspect")
         if self.analysis != "accessibility" and self.travel_time_bands_min:
             raise ValueError("travel_time_bands_min_only_supported_for_accessibility")
+        population_measures = {
+            str(value).strip().lower()
+            for selector in self.selectors
+            if selector.dimension == "population.measure"
+            for value in selector.values
+        }
+        if population_measures and (self.analysis != "rank" or self.fact_domains != ["population"]):
+            raise ValueError("population_measure_only_supported_for_population_rank")
+        if "share" in population_measures and not any(
+            selector.dimension in {"population.sex", "population.age_band"}
+            and any(str(value).strip().lower() not in {"all", "total"} for value in selector.values)
+            for selector in self.selectors
+        ):
+            raise ValueError("population_share_requires_selected_subgroup")
         selected_poi_category = _selected_poi_category(self.selectors)
         if self.analysis == "accessibility" and "poi" in self.fact_domains and selected_poi_category is not None:
             explicit_poi_dimensions = {
@@ -346,7 +454,7 @@ class SpatialDomainComputationRequest(BaseModel):
         }:
             raise ValueError("road_grid_rank_dimension_unsupported")
         selected_domains = set(self.fact_domains)
-        if self.analysis in {"rank", "relationship"}:
+        if self.analysis in {"rank", "relationship"} and self.evidence_dimensions:
             dimension_domains = [str(dimension).split(".", 1)[0] for dimension in self.evidence_dimensions]
             if set(dimension_domains) != selected_domains or len(set(dimension_domains)) != len(dimension_domains):
                 raise ValueError(f"{self.analysis}_requires_one_dimension_per_fact_domain")
@@ -380,6 +488,9 @@ class SpatialEvidenceRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_mode(self) -> "SpatialEvidenceRequest":
+        _validate_population_selector_cardinality(self.selectors)
+        if len(_selected_poi_categories(self.selectors)) > 1:
+            raise ValueError("two_poi_categories_require_domain_relationship_request")
         count = len(self.metric_ids)
         if self.analysis in {"accessibility", "direction"} and not 1 <= count <= 64:
             raise ValueError(f"{self.analysis}_requires_1_to_64_metrics")
@@ -397,6 +508,22 @@ class SpatialEvidenceRequest(BaseModel):
             raise ValueError("named_record_queries_only_supported_for_inspect")
         if self.analysis != "accessibility" and self.travel_time_bands_min:
             raise ValueError("travel_time_bands_min_only_supported_for_accessibility")
+        population_measures = {
+            str(value).strip().lower()
+            for selector in self.selectors
+            if selector.dimension == "population.measure"
+            for value in selector.values
+        }
+        if population_measures and self.analysis != "rank":
+            raise ValueError("population_measure_only_supported_for_population_rank")
+        if population_measures and not all(metric_id.startswith("population.") for metric_id in self.metric_ids):
+            raise ValueError("population_measure_requires_population_metric")
+        if "share" in population_measures and not any(
+            selector.dimension in {"population.sex", "population.age_band"}
+            and any(str(value).strip().lower() not in {"all", "total"} for value in selector.values)
+            for selector in self.selectors
+        ):
+            raise ValueError("population_share_requires_selected_subgroup")
         _validate_travel_time_bands(self.travel_time_bands_min)
         return self
 
@@ -482,7 +609,7 @@ METRIC_BINDINGS = {
         _binding("poi.grid_density", "POI 网格密度", "places/km2", [_POI_GRID, _H3, _POI], ["density_poi_per_km2", "density"], "mean"),
         _binding("poi.category_density", "POI 分类密度", "places/km2", [_POI_GRID, _H3, _POI], ["__category_density__"], "mean"),
         _binding("population.total", "总人口", "person", [_POPULATION], ["population_total"], "sum"),
-        _binding("population.profile", "人口规模、性别与年龄结构", "profile", [_POPULATION], ["population_total"], "sum", supported=["scope"]),
+        _binding("population.profile", "人口规模、性别与年龄结构", "profile", [_POPULATION], ["population_total"], "sum"),
         _binding("population.male", "男性总人口", "person", [_POPULATION], ["male_total"], "sum"),
         _binding("population.female", "女性总人口", "person", [_POPULATION], ["female_total"], "sum"),
         *[
@@ -551,7 +678,7 @@ CATALOG_SCOPE_BINDINGS = {
         CatalogScopeBinding("nightlight.hotspot_ratio", (_NIGHTLIGHT,)),
         CatalogScopeBinding("nightlight.spatial_profile", (_NIGHTLIGHT,)),
         CatalogScopeBinding("nightlight.sector_profile", (_NIGHTLIGHT,)),
-        CatalogScopeBinding("nightlight.activity_level", (_NIGHTLIGHT,)),
+        CatalogScopeBinding("nightlight.brightness_context", (_NIGHTLIGHT,)),
         CatalogScopeBinding("road.node_degree", (_ROAD_NODES, _ROAD_EDGES, _ROAD_GRID)),
         CatalogScopeBinding("road.orientation", (_ROAD_EDGES, _ROAD_GRID)),
         CatalogScopeBinding("road.intelligibility", (_ROAD_EDGES, _ROAD_GRID)),
@@ -608,9 +735,14 @@ EVIDENCE_DIMENSION_BINDINGS: dict[EvidenceDimension, EvidenceDimensionBinding] =
             "poi.category_specialization", "poi", "业态专业化", "指定 POI 类别的区位商",
             _ALL_SPATIAL_ANALYSES,
         ),
-        EvidenceDimensionBinding("population.scale", "population", "人口规模", "人口规模或所选年龄性别人口", _ALL_SPATIAL_ANALYSES),
-        EvidenceDimensionBinding("population.profile", "population", "人口结构", "人口年龄、性别和时序结构", ("scope", "inspect")),
-        EvidenceDimensionBinding("nightlight.intensity", "nightlight", "夜间亮度", "夜间亮度强度及空间分布", _ALL_SPATIAL_ANALYSES),
+        EvidenceDimensionBinding("population.scale", "population", "人口规模", "等时圈内人口规模或所选年龄性别人群", _ALL_SPATIAL_ANALYSES),
+        EvidenceDimensionBinding("population.structure", "population", "人口结构", "等时圈内年龄与性别结构", ("scope", "accessibility", "direction", "neighborhood", "rank", "inspect")),
+        EvidenceDimensionBinding("population.change", "population", "人口变化", "等时圈内人口规模与结构的年份变化", ("scope",)),
+        EvidenceDimensionBinding("nightlight.intensity", "nightlight", "夜间亮度", "保存等时圈内的亮度构成及空间差异", _ALL_SPATIAL_ANALYSES),
+        EvidenceDimensionBinding(
+            "nightlight.change", "nightlight", "夜光变化", "等时圈内年度亮度增减、中心迁移和局部变化",
+            ("scope", "direction", "neighborhood", "rank", "inspect"),
+        ),
         EvidenceDimensionBinding("road.to_movement", "road", "到达潜力", "指定网络半径的标准化角度整合度 NAIN", _ALL_SPATIAL_ANALYSES),
         EvidenceDimensionBinding("road.through_movement", "road", "穿行潜力", "指定网络半径的标准化角度选择度 NACH", _ALL_SPATIAL_ANALYSES),
         EvidenceDimensionBinding("road.connectivity", "road", "局部连接", "道路的直接拓扑连接", _ALL_SPATIAL_ANALYSES),
@@ -638,15 +770,15 @@ FACT_DOMAIN_CAPABILITIES: dict[FactDomain, FactDomainCapability] = {
             "人口规模、年龄结构及其空间覆盖",
             (_POPULATION,),
             _ALL_SPATIAL_ANALYSES,
-            ("population.scale", "population.profile"),
+            ("population.scale", "population.structure", "population.change"),
         ),
         FactDomainCapability(
             "nightlight",
-            "夜光与夜间活动背景",
-            "夜间亮度强度、梯度和方向背景，不替代真实活动或消费",
+            "等时圈内夜间亮度",
+            "保存等时圈内的亮度构成、可达分带、方向、邻域和跨域错位，不替代真实活动或消费",
             (_NIGHTLIGHT,),
             _ALL_SPATIAL_ANALYSES,
-            ("nightlight.intensity",),
+            ("nightlight.intensity", "nightlight.change"),
         ),
         FactDomainCapability(
             "road",
@@ -669,13 +801,17 @@ DEFAULT_DIMENSIONS: dict[FactDomain, dict[str, tuple[EvidenceDimension, ...]]] =
         "direction": ("poi.supply", "poi.mix"),
         "neighborhood": ("poi.supply", "poi.mix"),
         "inspect": ("poi.supply", "poi.mix"),
+        "rank": ("poi.supply",),
+        "relationship": ("poi.supply",),
     },
     "population": {
-        "scope": ("population.profile",),
-        "accessibility": ("population.scale",),
-        "direction": ("population.scale",),
-        "neighborhood": ("population.scale",),
-        "inspect": ("population.scale",),
+        "scope": ("population.scale", "population.structure"),
+        "accessibility": ("population.scale", "population.structure"),
+        "direction": ("population.scale", "population.structure"),
+        "neighborhood": ("population.scale", "population.structure"),
+        "rank": ("population.scale",),
+        "relationship": ("population.scale",),
+        "inspect": ("population.scale", "population.structure"),
     },
     "nightlight": {
         "scope": ("nightlight.intensity",),
@@ -683,6 +819,8 @@ DEFAULT_DIMENSIONS: dict[FactDomain, dict[str, tuple[EvidenceDimension, ...]]] =
         "direction": ("nightlight.intensity",),
         "neighborhood": ("nightlight.intensity",),
         "inspect": ("nightlight.intensity",),
+        "rank": ("nightlight.intensity",),
+        "relationship": ("nightlight.intensity",),
     },
     "road": {
         "scope": (
@@ -693,7 +831,18 @@ DEFAULT_DIMENSIONS: dict[FactDomain, dict[str, tuple[EvidenceDimension, ...]]] =
         "direction": ("road.to_movement", "road.through_movement", "road.connectivity", "road.network_density"),
         "neighborhood": ("road.to_movement", "road.through_movement", "road.connectivity"),
         "inspect": (),
+        "rank": ("road.to_movement",),
+        "relationship": ("road.to_movement",),
     },
+}
+
+ROAD_SCOPE_METRIC_IDS: dict[EvidenceDimension, tuple[str, ...]] = {
+    "road.to_movement": ("road.nain",),
+    "road.through_movement": ("road.nach",),
+    "road.connectivity": ("road.connectivity",),
+    "road.network_density": ("road.network_size", "road.network_density"),
+    "road.orientation": ("road.orientation",),
+    "road.quality": ("road.quality",),
 }
 
 
@@ -734,7 +883,6 @@ class SpatialEvidenceService:
         projects: SpatialProjectService | None = None,
         metric_catalog: MetricToolService | None = None,
         isochrone_contours: Callable[[tuple[float, float], Iterable[float], str], Mapping[float, BaseGeometry]] | None = None,
-        population_timeseries: Callable[[list, str, str, str], Mapping[str, Any]] | None = None,
         nightlight_layer: Callable[..., Mapping[str, Any]] | None = None,
         nightlight_timeseries: Callable[[list, str, str, str], Mapping[str, Any]] | None = None,
     ) -> None:
@@ -742,7 +890,6 @@ class SpatialEvidenceService:
         self._datasets = self._projects.datasets
         self._metric_catalog = metric_catalog
         self._isochrone_contours = isochrone_contours or fetch_valhalla_isochrone_contours
-        self._population_timeseries = population_timeseries or get_population_timeseries
         self._nightlight_layer = nightlight_layer or get_nightlight_layer
         self._nightlight_timeseries = nightlight_timeseries or get_nightlight_timeseries
 
@@ -812,7 +959,54 @@ class SpatialEvidenceService:
             ) or DEFAULT_DIMENSIONS.get(domain, {}).get(domain_query.analysis, ())
             for domain in domain_query.fact_domains
         }
-        if domain_query.analysis == "relationship":
+        equal_weight_balance_requested = (
+            domain_query.analysis == "accessibility"
+            and {"poi", "population"} <= set(domain_query.fact_domains)
+            and _selected_poi_category(domain_query.selectors) is not None
+            and "poi.supply" in selected_dimensions["poi"]
+            and "population.scale" in selected_dimensions["population"]
+        )
+        if equal_weight_balance_requested:
+            computations.append(self._equal_weight_supply_demand_profile(
+                history_id=normalized_history_id,
+                project=project,
+                available=available,
+                request=domain_query,
+            ))
+            used_metric_ids.append("poi.population_equal_weight_accessibility")
+        nightlight_semantic_operation = (
+            len(domain_query.fact_domains) == 1
+            and domain_query.fact_domains[0] == "nightlight"
+            and domain_query.analysis in {"accessibility", "direction", "neighborhood", "rank", "inspect"}
+        )
+        poi_category_relationship = (
+            domain_query.analysis == "relationship"
+            and domain_query.fact_domains == ["poi"]
+            and len(_selected_poi_categories(domain_query.selectors)) == 2
+        )
+        if poi_category_relationship:
+            computations.append(self._poi_category_relationship_profile(
+                history_id=normalized_history_id,
+                project=project,
+                available=available,
+                request=domain_query,
+            ))
+            used_metric_ids.append("poi.category_colocation_quotient")
+        elif nightlight_semantic_operation:
+            for dimension in selected_dimensions["nightlight"]:
+                computations.append(self._nightlight_operation_profile(
+                    normalized_history_id,
+                    project,
+                    available,
+                    domain_query,
+                    (dimension,),
+                ))
+                used_metric_ids.append(
+                    "nightlight.change_profile"
+                    if dimension == "nightlight.change"
+                    else "nightlight.semantic_profile"
+                )
+        elif domain_query.analysis == "relationship":
             dimensions = [dimension for domain in domain_query.fact_domains for dimension in selected_dimensions[domain]]
             metrics = [
                 metric
@@ -826,38 +1020,118 @@ class SpatialEvidenceService:
             execute([domain], [dimension], self._dimension_metric_ids(dimension, "rank", domain_query.selectors))
         elif domain_query.analysis == "scope":
             for domain in domain_query.fact_domains:
+                if domain == "poi":
+                    poi_dimensions = selected_dimensions[domain]
+                    profile_dimensions = tuple(
+                        dimension
+                        for dimension in poi_dimensions
+                        if dimension in {"poi.supply", "poi.mix"}
+                    )
+                    if profile_dimensions:
+                        computations.append(self._poi_scope_profile(
+                            project,
+                            normalized_history_id,
+                            available,
+                            profile_dimensions,
+                            domain_query.selectors,
+                        ))
+                        if "poi.supply" in profile_dimensions:
+                            used_metric_ids.extend(["poi.count", "poi.category_count", "poi.grid_density"])
+                        if "poi.mix" in profile_dimensions:
+                            used_metric_ids.append("poi.local_entropy")
+                    if "poi.category_specialization" in poi_dimensions:
+                        execute(
+                            [domain],
+                            ["poi.category_specialization"],
+                            self._dimension_metric_ids(
+                                "poi.category_specialization",
+                                "scope",
+                                domain_query.selectors,
+                            ),
+                        )
+                    temporal_profile = self._poi_temporal_profile(normalized_history_id, project)
+                    if temporal_profile is not None:
+                        computations.append(temporal_profile)
+                        used_metric_ids.append("poi.multi_year_count")
+                    continue
                 if domain == "nightlight":
-                    computations.append(self._nightlight_scope_profile(project))
-                    used_metric_ids.extend([
-                        "nightlight.total_radiance", "nightlight.mean_radiance", "nightlight.max_radiance",
-                        "nightlight.p90", "nightlight.lit_pixel_ratio", "nightlight.hotspot_profile",
-                        "nightlight.direction_profile", "nightlight.activity_level", "nightlight.temporal_profile",
-                    ])
+                    nightlight_dimensions = selected_dimensions[domain]
+                    if "nightlight.intensity" in nightlight_dimensions:
+                        nightlight_result = self._nightlight_scope_profile(
+                            project,
+                            normalized_history_id,
+                            available,
+                        )
+                        nightlight_result["evidence_dimensions"] = ["nightlight.intensity"]
+                        computations.append(_bounded_model_response(nightlight_result))
+                        used_metric_ids.extend([
+                            "nightlight.total_radiance", "nightlight.mean_radiance", "nightlight.max_radiance",
+                            "nightlight.p90", "nightlight.lit_pixel_ratio", "nightlight.spatial_profile",
+                            "nightlight.sector_profile",
+                        ])
+                    if "nightlight.change" in nightlight_dimensions:
+                        computations.append(self._nightlight_operation_profile(
+                            normalized_history_id,
+                            project,
+                            available,
+                            domain_query,
+                            ("nightlight.change",),
+                        ))
+                        used_metric_ids.append("nightlight.change_profile")
                     continue
                 if domain == "road":
-                    computations.append(self._road_scope_profile(project, normalized_history_id, available))
-                    used_metric_ids.extend([
-                        "road.network_size", "road.nain", "road.nach", "road.connectivity",
-                        "road.orientation", "road.quality",
-                    ])
+                    road_dimensions = selected_dimensions[domain]
+                    computations.append(self._road_scope_profile(
+                        project,
+                        normalized_history_id,
+                        available,
+                        road_dimensions,
+                    ))
+                    used_metric_ids.extend(
+                        metric_id
+                        for dimension in road_dimensions
+                        for metric_id in ROAD_SCOPE_METRIC_IDS[dimension]
+                    )
+                    continue
+                if domain == "population":
+                    population_dimensions = selected_dimensions[domain]
+                    current_dimensions = tuple(
+                        dimension for dimension in population_dimensions if dimension != "population.change"
+                    )
+                    if current_dimensions:
+                        metrics = (
+                            ("population.profile",)
+                            if "population.structure" in current_dimensions
+                            else self._dimension_metric_ids("population.scale", "scope", domain_query.selectors)
+                        )
+                        execute([domain], current_dimensions, metrics)
+                    if "population.change" in population_dimensions:
+                        computations.append(self._population_temporal_profile(normalized_history_id, project))
+                        used_metric_ids.append("population.temporal_profile")
                     continue
                 for dimension in selected_dimensions[domain]:
                     metrics = self._dimension_metric_ids(dimension, "scope", domain_query.selectors)
                     if metrics:
                         execute([domain], [dimension], metrics)
-                if domain == "poi":
-                    temporal_profile = self._poi_temporal_profile(normalized_history_id, project)
-                    if temporal_profile is not None:
-                        computations.append(temporal_profile)
-                        used_metric_ids.append("poi.multi_year_count")
-                if "population.profile" in selected_dimensions[domain]:
-                    computations.append(self._population_temporal_profile(project, domain_query))
-                    used_metric_ids.append("population.temporal_profile")
         elif domain_query.analysis == "inspect" and not domain_query.fact_domains:
             execute([], [], [])
         else:
             for domain in domain_query.fact_domains:
                 dimensions = selected_dimensions[domain]
+                if (
+                    domain == "poi"
+                    and _POI in available
+                    and domain_query.analysis in {"direction", "inspect"}
+                ):
+                    computations.append(self._poi_operation_profile(
+                        history_id=normalized_history_id,
+                        project=project,
+                        available=available,
+                        request=domain_query,
+                        dimensions=dimensions,
+                    ))
+                    used_metric_ids.append(f"poi.{domain_query.analysis}_profile")
+                    continue
                 if (
                     domain_query.analysis == "accessibility"
                     and domain == "poi"
@@ -879,20 +1153,36 @@ class SpatialEvidenceService:
                 ]
                 execute([domain], dimensions, metrics)
 
+        selector_payload = [selector.model_dump(mode="json") for selector in domain_query.selectors]
+        for item in computations:
+            item.setdefault("selectors", selector_payload)
+            if str(item.get("status") or "") in {"unavailable", "failed"} and not item.get("unavailable_reason"):
+                reasons = item.get("limitations") if isinstance(item.get("limitations"), list) else []
+                first_reason = next((str(reason).strip() for reason in reasons if str(reason).strip()), "")
+                if first_reason:
+                    item["unavailable_reason"] = first_reason
         statuses = [str(item.get("status") or "unavailable") for item in computations]
+        unavailable_reasons = list(dict.fromkeys(
+            str(item.get("unavailable_reason") or "").strip()
+            for item in computations
+            if str(item.get("unavailable_reason") or "").strip()
+        ))
         status = "available" if statuses and all(value == "available" for value in statuses) else (
             "partial" if any(value == "available" for value in statuses) else "unavailable"
         )
         snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
+        data_identity = spatial_data_identity(project)
         return _bounded_model_response({
             "schema_version": SCHEMA_VERSION,
             "result_id": "spatial:" + _digest({
                 "schema_version": SCHEMA_VERSION,
                 "snapshot_id": snapshot_id,
+                "data_identity": data_identity,
                 "request": domain_query.model_dump(mode="json"),
             })[:24],
             "status": status,
             "analysis": domain_query.analysis,
+            "selectors": selector_payload,
             "fact_domains": [self._domain_descriptor(domain, available) for domain in domain_query.fact_domains],
             "evidence_dimensions": [
                 self._dimension_descriptor(dimension)
@@ -906,6 +1196,7 @@ class SpatialEvidenceService:
                 "computation_count": len(computations),
                 "available_computation_count": sum(value == "available" for value in statuses),
             },
+            "unavailable_reasons": unavailable_reasons,
             "limitations": [
                 limitation
                 for item in computations
@@ -914,6 +1205,93 @@ class SpatialEvidenceService:
             ],
             "method": {"kind": "domain_owned_spatial_evidence", "internal_metrics_hidden": True},
             "provenance": self._provenance(project, {}, available),
+        })
+
+    def _poi_category_relationship_profile(
+        self,
+        *,
+        history_id: str,
+        project: Mapping[str, Any],
+        available: set[str],
+        request: SpatialDomainComputationRequest,
+    ) -> dict[str, Any]:
+        categories = _selected_poi_categories(request.selectors)
+        scope_geometry, center = self._scope_geometry(project)
+        snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
+        base = {
+            "schema_version": SCHEMA_VERSION,
+            "result_id": "spatial:" + _digest({
+                "snapshot_id": snapshot_id,
+                "kind": "poi_category_colocation",
+                "categories": categories,
+            })[:24],
+            "analysis": "relationship",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply"],
+        }
+        if scope_geometry is None or center is None or _POI not in available:
+            return {
+                **base,
+                "status": "unavailable",
+                "summary": {},
+                "relationship": {},
+                "coverage": {"complete": False},
+                "limitations": ["当前项目没有可用于等时圈内 POI 类别关系分析的保存范围或 POI 快照。"],
+                "method": {"kind": "poi_category_colocation_quotient", "executed": False},
+                "provenance": {"snapshot_id": snapshot_id},
+            }
+        records, years, warnings = self._load_records(history_id, {_POI})
+        profile = build_poi_category_colocation_profile(
+            records.get(_POI, []),
+            scope_geometry,
+            categories,
+            named_pair_limit=request.top_k,
+        )
+        category_pair = profile["category_pair"]
+        has_both_categories = all(int(item.get("poi_count") or 0) > 0 for item in category_pair)
+        has_quotients = all(item.get("clq") is not None for item in profile["directed_colocation"])
+        status = "available" if has_both_categories and has_quotients else "unavailable"
+        limitations = [
+            *warnings,
+            "CLQ 仅描述等时圈内两类 POI 的最近邻共位倾向，不表示因果、客流或统计显著性。",
+            "CLQ 可能非对称，因此分别返回两个方向；最近邻等距时按目标类别占比分摊。",
+        ]
+        if not has_both_categories:
+            limitations.append("所选两个 POI 类别必须在当前保存等时圈内都至少存在一个点。")
+        return _bounded_model_response({
+            **base,
+            "status": status,
+            "summary": {
+                "category_pair": category_pair,
+                "categorized_poi_count": profile["categorized_poi_count"],
+                "uncategorized_poi_count": profile["uncategorized_poi_count"],
+            },
+            "groups": profile["directed_colocation"],
+            "relationship": {
+                "kind": "directed_category_colocation",
+                "directed_colocation": profile["directed_colocation"],
+            },
+            "named_spatial_objects": profile["named_nearest_pairs"],
+            "coverage": {
+                "complete": status == "available" and profile["uncategorized_poi_count"] == 0,
+                "categorized_poi_count": profile["categorized_poi_count"],
+                "uncategorized_poi_count": profile["uncategorized_poi_count"],
+                "selected_category_counts": {
+                    item["key"]: item["poi_count"]
+                    for item in category_pair
+                },
+            },
+            "limitations": limitations,
+            "method": {
+                "kind": "poi_category_colocation_quotient",
+                "spatial_universe": "saved_isochrone",
+                "neighbor_rule": "nearest_other_poi_with_fractional_tie_handling",
+                "formula": "P(nearest_neighbor_is_B_given_source_is_A)/(N_B/(N-1))",
+                "directional": True,
+                "significance_test": False,
+                "internal_method_selected_by": "poi_domain_executor",
+            },
+            "provenance": self._provenance(project, years, {_POI}),
         })
 
     def _dimension_metric_ids(
@@ -928,10 +1306,9 @@ class SpatialEvidenceService:
                     "poi.grid_density",
                     "poi.neighbor_mean_density",
                     "spatial.neighbor_density_delta",
-                    "spatial.gi_star",
-                    "spatial.lisa",
-                    "spatial.lisa_z",
                 )
+            if analysis == "accessibility":
+                return ("poi.count",)
             return ("poi.count", "poi.category_count", "poi.grid_density") if analysis == "scope" else ("poi.grid_density",)
         if dimension == "poi.mix":
             if analysis in {"neighborhood", "inspect"}:
@@ -941,8 +1318,10 @@ class SpatialEvidenceService:
             if _selected_poi_category(selectors) is None:
                 raise ValueError("poi_category_specialization_requires_poi_category")
             return ("poi.category_lq",)
-        if dimension == "population.profile":
-            return ("population.profile",) if analysis == "scope" else ("population.total",)
+        if dimension == "population.structure":
+            return ("population.profile",)
+        if dimension == "population.change":
+            return ()
         if dimension == "population.scale":
             selected = self._population_metric_ids(selectors)
             if analysis in {"rank", "relationship"} and len(selected) > 1:
@@ -956,6 +1335,8 @@ class SpatialEvidenceService:
                     "nightlight.hotspot_ratio", "nightlight.spatial_profile", "nightlight.sector_profile",
                 )
             return ("nightlight.mean_radiance",)
+        if dimension == "nightlight.change":
+            return ()
         if dimension in {"road.to_movement", "road.through_movement"}:
             radius_selected = bool(self._selector_values(selectors, "road.radius"))
             if dimension == "road.to_movement":
@@ -1013,12 +1394,13 @@ class SpatialEvidenceService:
                 "analysis": "accessibility",
                 "summary": {
                     "selected_category": {"key": category_key, "label": category_label},
-                    "route_verified_poi_count": 0,
+                    "reachable_poi_count": 0,
+                    "cumulative_reachable_count": [],
                     **dict(details or {}),
                 },
                 "groups": [],
                 "named_spatial_objects": [],
-                "coverage": {"complete": False, "route_verified_poi_count": 0},
+                "coverage": {"complete": False, "reachable_poi_count": 0},
                 "limitations": [reason],
                 "method": {
                     "kind": "route_verified_poi_accessibility",
@@ -1040,7 +1422,13 @@ class SpatialEvidenceService:
             return unavailable("当前项目没有可用于本地路网计算的 Polygon 或 MultiPolygon 范围。")
 
         records, years, warnings = self._load_records(history_id, required_sources)
-        poi_records = records.get(_POI, [])
+        poi_records = [
+            record
+            for record in records.get(_POI, [])
+            if record.geometry is not None
+            and not record.geometry.is_empty
+            and scope_geometry.covers(record.geometry)
+        ]
         road_records = records.get(_ROAD_EDGES, [])
         if not poi_records or not road_records:
             return unavailable("专项 POI 可达性需要非空的 POI 与路网持久化结果。")
@@ -1078,10 +1466,16 @@ class SpatialEvidenceService:
             default=DEFAULT_ISOCHRONE_TIME_MIN,
         )
         max_duration_s = max_minutes * 60.0
+        reporting_minutes = tuple(
+            float(end)
+            for _, end in (request.travel_time_bands_min or DEFAULT_TRAVEL_TIME_BANDS_MIN)
+        )
         result = FocusedPoiAccessibilityService(
             router,
             max_candidate_distance_m=max_duration_s * DEFAULT_WALKING_SPEED_M_PER_S,
             max_walking_duration_s=max_duration_s,
+            max_results_per_group=request.top_k,
+            reporting_minutes=reporting_minutes,
         ).analyze(
             analysis_geometry=mapping(scope_geometry),
             groups=[FocusedPoiTypeGroup(
@@ -1114,14 +1508,25 @@ class SpatialEvidenceService:
         ]
         candidates_considered = group.candidates_considered if group is not None else 0
         route_failures = group.route_failures if group is not None else 0
+        reachable_count = group.reachable_poi_count if group is not None else 0
+        cumulative_counts = [
+            {"minutes": minutes, "count": count}
+            for minutes, count in (group.reachable_count_by_minutes if group is not None else ())
+        ]
         omission_reason = group.omission_reason if group is not None else result.error_reason
         if not named_objects:
+            outside_time_limit_count = group.outside_time_limit_count if group is not None else 0
             return unavailable(
-                "所选业态没有形成沿已持久化路网的可达路径；未使用直线距离或模拟路径替代。",
+                (
+                    "所选业态没有设施能在请求时间内沿已持久化路网到达。"
+                    if omission_reason == "no_reachable_poi_within_time"
+                    else "所选业态没有形成沿已持久化路网的可达路径；未使用直线距离或模拟路径替代。"
+                ),
                 details={
                     "route_status": "unavailable",
                     "candidates_considered": candidates_considered,
                     "route_failures": route_failures,
+                    "outside_time_limit_count": outside_time_limit_count,
                     "omission_reason": omission_reason,
                 },
             )
@@ -1137,22 +1542,29 @@ class SpatialEvidenceService:
             "summary": {
                 "selected_category": {"key": category_key, "label": category_label},
                 "origin_wgs84": [round(float(result.origin[0]), 6), round(float(result.origin[1]), 6)] if result.origin else None,
-                "route_verified_poi_count": len(named_objects),
+                "reachable_poi_count": reachable_count,
+                "cumulative_reachable_count": cumulative_counts,
+                "named_facility_count": len(named_objects),
                 "candidates_considered": candidates_considered,
                 "route_failures": route_failures,
+                "outside_time_limit_count": group.outside_time_limit_count if group is not None else 0,
                 "max_walking_time_min": max_minutes,
                 "route_status": "available",
+                "facility_weight_semantics": "one_equal_weight_per_facility",
             },
             "groups": [{
                 "category": {"key": category_key, "label": category_label},
                 "status": "available",
                 "matched_typecodes": list(group.matched_type_codes) if group is not None else [],
-                "route_verified_poi_count": len(named_objects),
+                "reachable_poi_count": reachable_count,
+                "cumulative_reachable_count": cumulative_counts,
+                "named_facility_count": len(named_objects),
             }],
             "named_spatial_objects": named_objects,
             "coverage": {
-                "complete": True,
-                "route_verified_poi_count": len(named_objects),
+                "complete": route_failures == 0,
+                "reachable_poi_count": reachable_count,
+                "named_facility_count": len(named_objects),
                 "candidates_considered": candidates_considered,
                 "route_failures": route_failures,
             },
@@ -1176,12 +1588,376 @@ class SpatialEvidenceService:
                 "local_route_graph_built": True,
                 "persisted_result_reads": [_POI, _ROAD_EDGES],
                 "route_geometry_returned": False,
+                "spatial_universe": "saved_isochrone",
+                "count_semantics": "all_route_verified_facilities_not_named_sample_count",
             },
             "provenance": self._provenance(project, years, set(records)),
             "fact_domains": ["poi"],
             "evidence_dimensions": ["poi.supply"],
             "year": years.get(_POI),
         }
+
+    def _equal_weight_supply_demand_profile(
+        self,
+        *,
+        history_id: str,
+        project: Mapping[str, Any],
+        available: set[str],
+        request: SpatialDomainComputationRequest,
+    ) -> dict[str, Any]:
+        """Compare equal-weight facilities with reachable population demand."""
+
+        selected_category = _selected_poi_category(request.selectors)
+        if selected_category is None:
+            raise ValueError("equal_weight_accessibility_requires_one_poi_category")
+        category_key, category_label = selected_category
+        required_sources = {_POI, _POPULATION, _ROAD_EDGES}
+        scope_geometry, center = self._scope_geometry(project)
+        snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
+
+        def unavailable(reason: str, *, details: Mapping[str, Any] | None = None) -> dict[str, Any]:
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "result_id": "spatial:" + _digest({
+                    "snapshot_id": snapshot_id,
+                    "kind": "equal_weight_supply_demand_accessibility",
+                    "category": selected_category,
+                })[:24],
+                "status": "unavailable",
+                "analysis": "accessibility",
+                "fact_domains": ["poi", "population"],
+                "evidence_dimensions": ["poi.supply", "population.scale"],
+                "summary": {
+                    "selected_category": {"key": category_key, "label": category_label},
+                    **dict(details or {}),
+                },
+                "groups": [],
+                "coverage": {"complete": False, **dict(details or {})},
+                "limitations": [reason],
+                "method": {
+                    "kind": "equal_weight_supply_demand_accessibility",
+                    "executed": False,
+                    "facility_weight_semantics": "one_equal_weight_per_facility",
+                    "spatial_universe": "saved_isochrone",
+                },
+                "provenance": {"snapshot_id": snapshot_id},
+            }
+
+        missing_sources = sorted(required_sources - available)
+        if missing_sources:
+            return unavailable("等权供需可达分析缺少已持久化数据源：" + "、".join(missing_sources) + "。")
+        if scope_geometry is None or center is None:
+            return unavailable("当前项目没有可用于等权供需可达分析的保存等时圈。")
+
+        records, years, warnings = self._load_records(history_id, required_sources)
+        selected_facility_records = [
+            record
+            for record in self._selected_records(records.get(_POI, []), request.selectors, _POI)
+            if record.geometry is not None
+            and not record.geometry.is_empty
+            and scope_geometry.covers(record.geometry)
+        ]
+        if not selected_facility_records:
+            return unavailable("所选 POI 类别在当前保存等时圈内没有设施。")
+        facilities = [
+            EqualWeightFacility(
+                facility_id=self._record_ref(record),
+                name=str(record.properties.get("name") or record.title or record.record_id),
+                location=(float(record.geometry.centroid.x), float(record.geometry.centroid.y)),
+            )
+            for record in selected_facility_records
+        ]
+
+        demand_points = []
+        for record in records.get(_POPULATION, []):
+            if record.geometry is None or record.geometry.is_empty:
+                continue
+            clipped = record.geometry.intersection(scope_geometry)
+            if clipped.is_empty or not self._has_measure_overlap(record.geometry, scope_geometry):
+                continue
+            population = self._population_target_value([record], clipped, "population.total")
+            if population is None or population <= 0:
+                continue
+            point = clipped.centroid
+            demand_points.append(PopulationDemandPoint(
+                demand_id=self._record_ref(record),
+                location=(float(point.x), float(point.y)),
+                population=float(population),
+            ))
+        if not demand_points:
+            return unavailable("当前保存等时圈内没有可用于等权供需分析的正值人口需求格网。")
+
+        road_records = records.get(_ROAD_EDGES, [])
+        try:
+            router = LocalRoadNetworkRouter(
+                record.geometry
+                for record in road_records
+                if record.geometry is not None and not record.geometry.is_empty
+            )
+        except RoadNetworkRoutingUnavailable as exc:
+            return unavailable(f"已持久化路网无法建立等权供需可达路径网络：{exc}。")
+        reporting_minutes = tuple(
+            float(end)
+            for _, end in (request.travel_time_bands_min or DEFAULT_TRAVEL_TIME_BANDS_MIN)
+        )
+        try:
+            profile = EqualWeightSupplyDemandAccessibilityService(router).analyze(
+                facilities=facilities,
+                demand_points=demand_points,
+                reporting_minutes=reporting_minutes,
+                demand_result_limit=request.top_k,
+            )
+        except ValueError as exc:
+            return unavailable(str(exc))
+        if profile["within_max_catchment_pair_count"] <= 0:
+            return unavailable(
+                "设施与人口格网之间没有能在请求最大时间内由当前保存路网验证的组合，未使用直线距离替代。",
+                details={
+                    "facility_count": len(facilities),
+                    "population_unit_count": len(demand_points),
+                    "route_pair_count": profile["route_pair_count"],
+                },
+            )
+        complete = profile["failed_facility_origins"] == 0
+        limitations = [
+            *warnings,
+            "所有设施按一个等权单位计算；结果用于比较相对供需可达差异。",
+            "人口为 WorldPop 格网估计，并按与保存等时圈的面积交叠比例分配，不是逐户实测。",
+        ]
+        if not complete:
+            limitations.append("部分设施起点无法接入保存路网；对应组合按不可达处理，未用直线距离补齐。")
+        return _bounded_model_response({
+            "schema_version": SCHEMA_VERSION,
+            "result_id": "spatial:" + _digest({
+                "snapshot_id": snapshot_id,
+                "kind": "equal_weight_supply_demand_accessibility",
+                "category": selected_category,
+                "bands": reporting_minutes,
+            })[:24],
+            "status": "available",
+            "analysis": "accessibility",
+            "fact_domains": ["poi", "population"],
+            "evidence_dimensions": ["poi.supply", "population.scale"],
+            "summary": {
+                "selected_category": {"key": category_key, "label": category_label},
+                "facility_count": profile["facility_count"],
+                "population_unit_count": profile["population_unit_count"],
+                "total_population": profile["total_population"],
+                "equal_weight_facility_count": profile["equal_weight_facility_count"],
+                "supply_basis": "equal_weight_facility_proxy",
+                "facility_weight_semantics": "one_equal_weight_per_facility",
+                "bands": profile["bands"],
+            },
+            "groups": profile["bands"],
+            "named_spatial_objects": [
+                {**item, "object_type": "facility"}
+                for item in profile["facilities"][: request.top_k]
+            ],
+            "highlights": profile["demand_units"],
+            "coverage": {
+                "complete": complete,
+                "route_pair_count": profile["route_pair_count"],
+                "within_max_catchment_pair_count": profile["within_max_catchment_pair_count"],
+                "failed_facility_origins": profile["failed_facility_origins"],
+            },
+            "limitations": limitations,
+            "method": {
+                "kind": "equal_weight_supply_demand_accessibility",
+                "spatial_universe": "saved_isochrone",
+                "routing_algorithm": "saved_local_road_network_shortest_path",
+                "walking_speed_km_h": 4.5,
+                "step_1": "one_equal_facility_weight/sum(reachable_population)",
+                "step_2": "sum(reachable_facility_supply_demand_ratios)",
+                "catchments": "cumulative_requested_time_band_endpoints",
+                "output_unit": "equal_weight_facilities_per_1000_residents",
+                "facility_weight_semantics": "one_equal_weight_per_facility",
+                "internal_method_selected_by": "poi_domain_executor",
+            },
+            "provenance": self._provenance(project, years, required_sources),
+            "year": {
+                "poi": years.get(_POI),
+                "population": years.get(_POPULATION),
+            },
+        })
+
+    def _poi_scope_profile(
+        self,
+        project: Mapping[str, Any],
+        history_id: str,
+        available: set[str],
+        dimensions: Sequence[EvidenceDimension],
+        selectors: Sequence[SpatialEvidenceSelector],
+    ) -> dict[str, Any]:
+        scope_geometry, _ = self._scope_geometry(project)
+        snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
+        if scope_geometry is None or scope_geometry.is_empty or _POI not in available:
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "status": "unavailable",
+                "analysis": "scope",
+                "summary": {},
+                "coverage": {"complete": False},
+                "limitations": ["当前项目没有可用于等时圈内 POI 分析的保存范围或 POI 快照。"],
+                "method": {"kind": "poi_isochrone_scope_profile", "executed": False},
+                "provenance": {"snapshot_id": snapshot_id},
+                "fact_domains": ["poi"],
+                "evidence_dimensions": list(dimensions),
+            }
+        sources = {_POI}
+        if "poi.mix" in dimensions and _H3 in available:
+            sources.add(_H3)
+        records, years, warnings = self._load_records(history_id, sources)
+        selected_pois = self._selected_records(records.get(_POI, []), selectors, _POI)
+        profile = build_poi_scope_profile(
+            selected_pois,
+            scope_geometry,
+            h3_records=records.get(_H3, []),
+        )
+        summary: dict[str, Any] = {}
+        if "poi.supply" in dimensions:
+            summary["supply"] = {
+                key: profile[key]
+                for key in (
+                    "poi_count", "area_km2", "density_poi_per_km2", "category_count",
+                    "categorized_poi_count", "uncategorized_poi_count", "categories", "subcategories",
+                )
+            }
+        if "poi.mix" in dimensions:
+            summary["mix"] = profile["mix"]
+        return _bounded_model_response({
+            "schema_version": SCHEMA_VERSION,
+            "result_id": "spatial:" + _digest({
+                "snapshot_id": snapshot_id,
+                "kind": "poi_isochrone_scope_profile",
+                "dimensions": list(dimensions),
+            })[:24],
+            "status": "available",
+            "analysis": "scope",
+            "summary": summary,
+            "coverage": {
+                "complete": profile["uncategorized_poi_count"] == 0,
+                "poi_count": profile["poi_count"],
+                "categorized_poi_count": profile["categorized_poi_count"],
+                "uncategorized_poi_count": profile["uncategorized_poi_count"],
+            },
+            "limitations": [*warnings, "POI 描述设施供给，不代表客流、消费或设施容量。"],
+            "method": {
+                "kind": "poi_isochrone_scope_profile",
+                "spatial_universe": "saved_isochrone",
+                "point_inclusion": "saved_isochrone_covers_poi_point",
+                "entropy_scope": "all_categorized_pois_within_saved_isochrone",
+                "internal_metrics_hidden": True,
+            },
+            "provenance": self._provenance(project, years, sources),
+            "fact_domains": ["poi"],
+            "evidence_dimensions": list(dimensions),
+        })
+
+    def _poi_operation_profile(
+        self,
+        *,
+        history_id: str,
+        project: Mapping[str, Any],
+        available: set[str],
+        request: SpatialDomainComputationRequest,
+        dimensions: Sequence[EvidenceDimension],
+    ) -> dict[str, Any]:
+        scope_geometry, center = self._scope_geometry(project)
+        if scope_geometry is None or center is None or _POI not in available:
+            return self._unavailable(
+                SpatialEvidenceRequest(
+                    analysis=request.analysis,
+                    metric_ids=["poi.count"],
+                    record_refs=request.record_refs,
+                ),
+                project,
+                "当前项目没有可用于等时圈内 POI 分析的保存范围或 POI 快照。",
+            )
+        sources = {_POI}
+        if request.analysis == "inspect":
+            sources.update({_H3, _POI_GRID} & available)
+        records, years, warnings = self._load_records(history_id, sources)
+        selected_pois = self._selected_records(records.get(_POI, []), request.selectors, _POI)
+        selected_pois = [
+            record
+            for record in selected_pois
+            if record.geometry is not None and scope_geometry.covers(record.geometry)
+        ]
+        query = SpatialEvidenceRequest(
+            analysis=request.analysis,
+            metric_ids=["poi.count"],
+            record_refs=request.record_refs,
+        )
+        if request.analysis == "direction":
+            profile = build_poi_direction_profile(selected_pois, scope_geometry, center)
+            result = self._response(
+                query=query,
+                project=project,
+                scope=self._scope_summary(project, scope_geometry, center),
+                summary=profile["summary"],
+                groups=profile["groups"],
+                coverage={
+                    "complete": bool(selected_pois),
+                    "poi_count": len(selected_pois),
+                    "direction_count": len(profile["groups"]),
+                },
+                evidence=[],
+                limitations=[*warnings, "POI 方向分布按设施等权计算，不代表设施容量、客流或服务能力。"],
+                method={
+                    "kind": "poi_direction_distribution",
+                    "spatial_universe": "saved_isochrone",
+                    "sector_count": 8,
+                    "weight_semantics": "equal_weight_facility_proxy",
+                },
+                provenance=self._provenance(project, years, {_POI}),
+            )
+            result["fact_domains"] = ["poi"]
+            result["evidence_dimensions"] = list(dimensions)
+            return _bounded_model_response(result)
+
+        target_records = [
+            record
+            for source_id in (_H3, _POI_GRID)
+            for record in records.get(source_id, [])
+            if self._matches_ref(self._record_ref(record), request.record_refs)
+            and record.geometry is not None
+            and self._has_measure_overlap(record.geometry, scope_geometry)
+        ]
+        profile = build_poi_inspect_profile(
+            targets=target_records,
+            poi_records=selected_pois,
+            scope_geometry=scope_geometry,
+            named_limit=request.top_k,
+        )
+        if not target_records:
+            return self._unavailable(query, project, "指定 record_refs 不是当前等时圈内可检查的 POI 网格。")
+        named_objects = [
+            {**facility, "object_type": "poi"}
+            for facility in profile["named_facilities"]
+        ]
+        result = self._response(
+            query=query,
+            project=project,
+            scope=self._scope_summary(project, scope_geometry, center),
+            summary=profile["summary"],
+            groups=profile["groups"],
+            named_spatial_objects=named_objects,
+            coverage={
+                "complete": len(target_records) == len(request.record_refs),
+                "matched_target_count": len(target_records),
+            },
+            evidence=[],
+            limitations=[*warnings, "具名设施仅来自当前保存等时圈内 POI 快照。"],
+            method={
+                "kind": "poi_grid_inspect",
+                "spatial_universe": "saved_isochrone",
+                "facility_expansion": "inside_target_then_nearest_in_scope",
+            },
+            provenance=self._provenance(project, years, sources),
+        )
+        result["fact_domains"] = ["poi"]
+        result["evidence_dimensions"] = list(dimensions)
+        return _bounded_model_response(result)
 
     @staticmethod
     def _focused_poi_candidate(record: ScopeRecord) -> FocusedPoiCandidate | None:
@@ -1263,8 +2039,8 @@ class SpatialEvidenceService:
 
     def _population_temporal_profile(
         self,
+        history_id: str,
         project: Mapping[str, Any],
-        query: SpatialDomainComputationRequest,
     ) -> dict[str, Any]:
         scope_geometry, _ = self._scope_geometry(project)
         if scope_geometry is None or scope_geometry.is_empty:
@@ -1278,15 +2054,53 @@ class SpatialEvidenceService:
                 "method": {"kind": "population_temporal_profile", "executed": False},
                 "provenance": {},
                 "fact_domains": ["population"],
-                "evidence_dimensions": ["population.profile"],
+                "evidence_dimensions": ["population.change"],
             }
-        polygon = max(
-            list(scope_geometry.geoms) if scope_geometry.geom_type == "MultiPolygon" else [scope_geometry],
-            key=lambda geometry: geometry.area,
+
+        descriptor = next(
+            (
+                item
+                for item in project.get("datasets") or []
+                if isinstance(item, Mapping) and str(item.get("source_id") or "") == _POPULATION
+            ),
+            {},
         )
-        coordinates = [[float(x), float(y)] for x, y in polygon.exterior.coords]
+        available_years = sorted({
+            int(year)
+            for year in descriptor.get("available_years") or []
+            if str(year).isdigit() and 2024 <= int(year) <= 2026
+        })
+        if len(available_years) < 2:
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "status": "unavailable",
+                "analysis": "scope",
+                "summary": {},
+                "coverage": {"complete": False, "year_count": len(available_years)},
+                "limitations": ["人口时序没有形成至少两个可比较年份。"],
+                "method": {"kind": "population_temporal_profile", "executed": False},
+                "provenance": {},
+                "fact_domains": ["population"],
+                "evidence_dimensions": ["population.change"],
+            }
+
+        records_by_year: dict[int, list[ScopeRecord]] = {}
         try:
-            raw = self._population_timeseries(coordinates, "wgs84", "2024-2026", "population_delta")
+            for year in available_years:
+                records, _, selected_year = self._datasets.load_scope_records(
+                    history_id=history_id,
+                    source_id=_POPULATION,
+                    year=year,
+                    require_geometry_metadata=True,
+                )
+                if int(selected_year) == year:
+                    records_by_year[year] = [
+                        record
+                        for record in records
+                        if record.geometry is not None
+                        and not record.geometry.is_empty
+                        and self._has_measure_overlap(record.geometry, scope_geometry)
+                    ]
         except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
             return {
                 "schema_version": SCHEMA_VERSION,
@@ -1298,47 +2112,13 @@ class SpatialEvidenceService:
                 "method": {"kind": "population_temporal_profile", "executed": False},
                 "provenance": {},
                 "fact_domains": ["population"],
-                "evidence_dimensions": ["population.profile"],
+                "evidence_dimensions": ["population.change"],
             }
-        series = []
-        for item in raw.get("series", []):
-            if not isinstance(item, Mapping) or str(item.get("year") or "") not in {"2024", "2025", "2026"}:
-                continue
-            age_totals = item.get("age_group_totals") if isinstance(item.get("age_group_totals"), Mapping) else {}
-            age_ratios = item.get("age_group_ratios") if isinstance(item.get("age_group_ratios"), Mapping) else {}
-            age_distribution = [
-                {
-                    "age_band": str(row.get("age_band") or ""),
-                    "age_band_label": str(row.get("age_band_label") or row.get("age_band") or ""),
-                    "total": _rounded(_number(row.get("total"))),
-                    "male": _rounded(_number(row.get("male"))),
-                    "female": _rounded(_number(row.get("female"))),
-                    "ratio": _rounded(_number(row.get("ratio"))),
-                }
-                for row in item.get("age_distribution") or []
-                if isinstance(row, Mapping) and str(row.get("age_band") or "") in POPULATION_AGE_BANDS
-            ]
-            series.append({
-                "year": str(item.get("year")),
-                "total_population": _rounded(_number(item.get("total_population"))),
-                "male_total": _rounded(_number(item.get("male_total"))),
-                "female_total": _rounded(_number(item.get("female_total"))),
-                "male_ratio": _rounded(_number(item.get("male_ratio"))),
-                "female_ratio": _rounded(_number(item.get("female_ratio"))),
-                "average_density": _rounded(_number(item.get("average_density"))),
-                "age_distribution": age_distribution,
-                "age_group_totals": {
-                    key: _rounded(_number(age_totals.get(key)))
-                    for key in ("child_0_14", "working_15_64", "senior_65_plus")
-                },
-                "age_group_ratios": {
-                    key: _rounded(_number(age_ratios.get(key)))
-                    for key in ("child_0_14", "working_15_64", "senior_65_plus")
-                },
-                "top_age_band": str(item.get("top_age_band") or "") or None,
-                "top_age_band_label": str(item.get("top_age_band_label") or item.get("dominant_age_band") or "") or None,
-            })
-        series.sort(key=lambda item: item["year"])
+
+        series = [
+            self._population_temporal_series_item(year, records_by_year[year], scope_geometry)
+            for year in sorted(records_by_year)
+        ]
         if len(series) < 2:
             return {
                 "schema_version": SCHEMA_VERSION,
@@ -1350,9 +2130,10 @@ class SpatialEvidenceService:
                 "method": {"kind": "population_temporal_profile", "executed": False},
                 "provenance": {},
                 "fact_domains": ["population"],
-                "evidence_dimensions": ["population.profile"],
+                "evidence_dimensions": ["population.change"],
             }
         first, last = series[0], series[-1]
+        period = f"{first['year']}-{last['year']}"
 
         def change(field: str) -> dict[str, float | None]:
             before = _number(first.get(field))
@@ -1372,55 +2153,128 @@ class SpatialEvidenceService:
                 "to": _rounded(after),
                 "percentage_point_delta": _rounded((after - before) * 100 if before is not None and after is not None else None),
             }
-        layer = raw.get("layer") if isinstance(raw.get("layer"), Mapping) else {}
-        layer_summary = layer.get("summary") if isinstance(layer.get("summary"), Mapping) else {}
+        spatial_change = self._population_spatial_change(
+            records_by_year[int(first["year"])],
+            records_by_year[int(last["year"])],
+            scope_geometry,
+        )
         summary = {
-            "period": "2024-2026",
+            "period": period,
             "series": series,
-            "change_2024_2026": {
+            f"change_{first['year']}_{last['year']}": {
                 "total_population": change("total_population"),
                 "male_total": change("male_total"),
                 "female_total": change("female_total"),
                 "average_density": change("average_density"),
                 "age_group_ratio": age_ratio_change,
             },
-            "spatial_change": {
-                "cell_count": int(layer_summary.get("cell_count") or 0),
-                "class_counts": dict(layer_summary.get("class_counts") or {}),
-            },
+            "spatial_change": spatial_change,
         }
         snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
         return _bounded_model_response({
             "schema_version": SCHEMA_VERSION,
-            "result_id": "spatial:" + _digest({"snapshot_id": snapshot_id, "kind": "population_temporal_profile", "period": "2024-2026"})[:24],
+            "result_id": "spatial:" + _digest({"snapshot_id": snapshot_id, "kind": "population_temporal_profile", "period": period})[:24],
             "status": "available",
             "analysis": "scope",
             "summary": summary,
             "coverage": {
-                "complete": all(len(item["age_distribution"]) == len(POPULATION_AGE_BANDS) for item in series),
+                "complete": (
+                    len(series) == len(available_years)
+                    and all(len(item["age_distribution"]) == len(POPULATION_AGE_BANDS) for item in series)
+                ),
                 "year_count": len(series),
                 "age_band_count_by_year": {
                     item["year"]: len(item["age_distribution"])
                     for item in series
                 },
-                "spatial_unit_count": summary["spatial_change"]["cell_count"],
+                "spatial_unit_count": spatial_change["cell_count"],
             },
             "limitations": [],
             "method": {
                 "kind": "population_temporal_profile",
-                "period": "2024-2026",
-                "spatial_change_view": "population_delta",
-                "spatial_aggregation": "intersecting_full_cells",
-                "boundary_cell_policy": "include_full_cell_value",
+                "period": period,
+                "spatial_change_view": "allocated_population_delta_for_stable_cells",
+                "spatial_aggregation": "geometry_intersection_aggregation",
+                "boundary_cell_policy": "allocate_extensive_values_by_intersection_fraction",
+                "scope_geometry": "complete_polygon_or_multipolygon",
                 "internal_metrics_hidden": True,
             },
             "provenance": {
                 "snapshot_id": snapshot_id,
-                "source_ids": ["population:raster:2024", "population:raster:2025", "population:raster:2026"],
+                "source_ids": [_POPULATION],
+                "selected_years": {_POPULATION: sorted(records_by_year)},
             },
             "fact_domains": ["population"],
-            "evidence_dimensions": ["population.profile"],
+            "evidence_dimensions": ["population.change"],
         })
+
+    def _population_temporal_series_item(
+        self,
+        year: int,
+        records: Sequence[ScopeRecord],
+        scope_geometry: BaseGeometry,
+    ) -> dict[str, Any]:
+        profile = self._population_profile_for_geometry(records, scope_geometry)
+        age_distribution = [
+            {
+                "age_band": item["age_band"],
+                "age_band_label": item["age_band_label"],
+                "total": item["total"],
+                "male": item["male"],
+                "female": item["female"],
+                "ratio": item["share"],
+            }
+            for item in profile["age_distribution"]
+        ]
+        top_age = max(age_distribution, key=lambda item: float(item.get("total") or 0.0), default=None)
+        return {
+            "year": str(year),
+            "total_population": profile["total_population"],
+            "male_total": profile["sex_totals"]["male"],
+            "female_total": profile["sex_totals"]["female"],
+            "male_ratio": profile["sex_ratios"]["male"],
+            "female_ratio": profile["sex_ratios"]["female"],
+            "average_density": profile["density_person_per_km2"],
+            "age_distribution": age_distribution,
+            "age_group_totals": {
+                key: value["population"] for key, value in profile["age_groups"].items()
+            },
+            "age_group_ratios": {
+                key: value["share"] for key, value in profile["age_groups"].items()
+            },
+            "top_age_band": top_age["age_band"] if top_age else None,
+            "top_age_band_label": top_age["age_band_label"] if top_age else None,
+        }
+
+    def _population_spatial_change(
+        self,
+        first_records: Sequence[ScopeRecord],
+        last_records: Sequence[ScopeRecord],
+        scope_geometry: BaseGeometry,
+    ) -> dict[str, Any]:
+        def allocated(records: Sequence[ScopeRecord]) -> dict[str, float]:
+            values: dict[str, float] = {}
+            for record in records:
+                clipped = record.geometry.intersection(scope_geometry)
+                if clipped.is_empty:
+                    continue
+                value = self._population_target_value([record], clipped, "population.total")
+                if value is not None:
+                    values[record.record_id] = float(value)
+            return values
+
+        first_values = allocated(first_records)
+        last_values = allocated(last_records)
+        common_ids = sorted(set(first_values) & set(last_values))
+        class_counts = Counter()
+        for record_id in common_ids:
+            delta = last_values[record_id] - first_values[record_id]
+            class_counts["increase" if delta > 1e-9 else "decrease" if delta < -1e-9 else "stable"] += 1
+        return {
+            "cell_count": len(common_ids),
+            "class_counts": dict(class_counts),
+            "cell_matching": "stable_record_id_intersection",
+        }
 
     def _poi_temporal_profile(
         self,
@@ -1506,60 +2360,271 @@ class SpatialEvidenceService:
             "evidence_dimensions": ["poi.supply"],
         }
 
-    def _nightlight_scope_profile(self, project: Mapping[str, Any]) -> dict[str, Any]:
-        """Build one bounded nightlight result from one current layer and one time series."""
+    def _nightlight_operation_profile(
+        self,
+        history_id: str,
+        project: Mapping[str, Any],
+        available: set[str],
+        request: SpatialDomainComputationRequest,
+        dimensions: Sequence[EvidenceDimension],
+    ) -> dict[str, Any]:
+        """Run the nightlight question semantic for one spatial operation."""
+
+        scope_geometry, center = self._scope_geometry(project)
+        if scope_geometry is None or center is None or _NIGHTLIGHT not in available:
+            return self._nightlight_unavailable(
+                project,
+                "当前项目没有可用于等时圈内夜光分析的保存范围或夜光快照。",
+                analysis=request.analysis,
+            )
+        records, years, warnings = self._load_records(history_id, {_NIGHTLIGHT})
+        nightlight_records = records.get(_NIGHTLIGHT, [])
+        if not nightlight_records:
+            return self._nightlight_unavailable(
+                project,
+                "当前夜光快照没有可用于空间比较的有效单元。",
+                analysis=request.analysis,
+            )
+
+        if dimensions == ("nightlight.change",):
+            descriptor = next(
+                (
+                    item
+                    for item in project.get("datasets") or []
+                    if isinstance(item, Mapping) and str(item.get("source_id") or "") == _NIGHTLIGHT
+                ),
+                {},
+            )
+            available_years = sorted({
+                int(year)
+                for year in descriptor.get("available_years") or []
+                if str(year).isdigit() and 2023 <= int(year) <= 2025
+            })
+            records_by_year: dict[int, list[ScopeRecord]] = {}
+            for year in available_years:
+                yearly, _, selected_year = self._datasets.load_scope_records(
+                    history_id=history_id,
+                    source_id=_NIGHTLIGHT,
+                    year=year,
+                    require_geometry_metadata=True,
+                )
+                if int(selected_year) == year:
+                    records_by_year[year] = yearly
+            profile = build_nightlight_change_profile(
+                records_by_year,
+                scope_geometry,
+                center,
+                analysis=request.analysis,
+                record_refs=request.record_refs,
+                neighbor_steps=request.neighbor_steps,
+                rank_order=request.rank_order,
+                top_k=request.top_k,
+            )
+            if profile["summary"].get("year_count", 0) < 2:
+                return self._nightlight_unavailable(
+                    project,
+                    "夜光变化需要至少两个可比较年度快照。",
+                    analysis=request.analysis,
+                )
+            if request.analysis == "neighborhood" and not profile["groups"]:
+                return self._nightlight_unavailable(
+                    project,
+                    "指定的夜光格网记录不存在或不在保存等时圈内。",
+                    analysis=request.analysis,
+                )
+            if request.analysis == "inspect" and not profile["highlights"]:
+                return self._nightlight_unavailable(
+                    project,
+                    "指定的夜光格网记录不存在或不在可比较年度的共同格网中。",
+                    analysis=request.analysis,
+                )
+            change_query = SpatialEvidenceRequest(
+                analysis=request.analysis,
+                metric_ids=["nightlight.mean_radiance"],
+                record_refs=request.record_refs,
+            )
+            result = self._response(
+                query=change_query,
+                project=project,
+                scope=self._scope_summary(project, scope_geometry, center),
+                summary=profile["summary"],
+                groups=profile["groups"],
+                highlights=profile["highlights"],
+                coverage={
+                    "complete": True,
+                    "year_count": len(records_by_year),
+                    "matched_cell_count": profile["summary"]["matched_cell_count"],
+                },
+                evidence=[],
+                limitations=["结果只描述已保存年度间的亮度增减、中心迁移和局部变化。"],
+                method={
+                    "kind": "nightlight_descriptive_change",
+                    "spatial_universe": "saved_isochrone",
+                    "cell_matching": "stable_cell_id_intersection",
+                },
+                provenance=self._provenance(project, {_NIGHTLIGHT: available_years}, {_NIGHTLIGHT}),
+            )
+            result["fact_domains"] = ["nightlight"]
+            result["evidence_dimensions"] = ["nightlight.change"]
+            return _bounded_model_response(result)
+
+        if request.analysis == "accessibility":
+            band_geometries, limitation = self._accessibility_band_geometries(
+                SpatialEvidenceRequest(
+                    analysis="accessibility",
+                    metric_ids=["nightlight.mean_radiance"],
+                    travel_time_bands_min=request.travel_time_bands_min,
+                ),
+                project,
+                center,
+                scope_geometry,
+            )
+            if limitation:
+                return self._nightlight_unavailable(project, limitation, analysis=request.analysis)
+            profile = build_nightlight_accessibility_profile(nightlight_records, scope_geometry, band_geometries)
+            groups = profile["groups"]
+            summary = profile["summary"]
+            method = {
+                "kind": "nightlight_accessibility_bands",
+                "spatial_universe": "saved_isochrone",
+                "travel_time_method": "valhalla_nested_isochrone_contours",
+                "incremental_bands": True,
+            }
+            coverage = {"complete": bool(groups), "spatial_unit_count": summary.get("valid_cell_count", 0)}
+        elif request.analysis == "direction":
+            profile = build_nightlight_direction_profile(nightlight_records, scope_geometry, center)
+            groups = profile["groups"]
+            summary = profile["summary"]
+            method = {
+                "kind": "nightlight_direction_profile",
+                "spatial_universe": "saved_isochrone",
+                "sector_count": 8,
+                "boundary_cell_policy": "split_by_sector_intersection_area",
+            }
+            coverage = {
+                "complete": bool(groups),
+                "spatial_unit_count": summary.get("valid_cell_count", 0),
+            }
+        elif request.analysis == "neighborhood":
+            profile = build_nightlight_neighborhood_profile(
+                nightlight_records,
+                scope_geometry,
+                request.record_refs,
+                neighbor_steps=request.neighbor_steps,
+            )
+            groups = profile["groups"]
+            summary = profile["summary"]
+            if summary["target_count"] == 0:
+                return self._nightlight_unavailable(
+                    project,
+                    "指定的夜光格网记录不存在或不在保存等时圈内。",
+                    analysis=request.analysis,
+                )
+            method = {"kind": "nightlight_local_contrast"}
+            coverage = {"complete": summary["target_count"] == len(request.record_refs), "target_count": summary["target_count"]}
+        elif request.analysis == "rank":
+            profile = build_nightlight_rank_profile(
+                nightlight_records,
+                scope_geometry,
+                center,
+                rank_order=request.rank_order,
+                top_k=request.top_k,
+            )
+            groups = []
+            summary = profile["summary"]
+            highlights = profile["highlights"]
+            method = {"kind": "nightlight_cell_rank", "combined_score": False}
+            coverage = {"complete": bool(highlights), "valid_cell_count": summary["valid_cell_count"]}
+        else:
+            profile = build_nightlight_inspect_profile(
+                nightlight_records,
+                scope_geometry,
+                center,
+                request.record_refs,
+            )
+            groups = []
+            summary = profile["summary"]
+            highlights = profile["highlights"]
+            if summary["matched_record_count"] == 0:
+                return self._nightlight_unavailable(
+                    project,
+                    "指定的夜光格网记录不存在或不在保存等时圈内。",
+                    analysis=request.analysis,
+                )
+            method = {"kind": "nightlight_cell_inspect"}
+            coverage = {"complete": summary["matched_record_count"] == len(request.record_refs), "matched_record_count": summary["matched_record_count"]}
+
+        if request.analysis not in {"rank", "inspect"}:
+            highlights = []
+        evidence = [
+            self._evidence(project, SpatialEvidenceRequest(
+                analysis=request.analysis,
+                metric_ids=["nightlight.mean_radiance"],
+                record_refs=request.record_refs,
+            ), f"nightlight:{request.analysis}:{index}", ["nightlight.mean_radiance"], [], item)
+            for index, item in enumerate(groups[:20])
+        ]
+        result = self._response(
+            query=SpatialEvidenceRequest(
+                analysis=request.analysis,
+                metric_ids=["nightlight.mean_radiance"],
+                record_refs=request.record_refs,
+            ),
+            project=project,
+            scope=self._scope_summary(project, scope_geometry, center),
+            summary=summary,
+            groups=groups,
+            highlights=highlights,
+            coverage=coverage,
+            evidence=evidence,
+            limitations=[*warnings, "夜光仅描述亮度及其空间差异，不代表真实客流、消费或营业。"],
+            method=method,
+            provenance=self._provenance(project, years, {_NIGHTLIGHT}),
+        )
+        result["fact_domains"] = ["nightlight"]
+        result["evidence_dimensions"] = list(dimensions)
+        return _bounded_model_response(result)
+
+    def _nightlight_scope_profile(
+        self,
+        project: Mapping[str, Any],
+        history_id: str,
+        available: set[str],
+    ) -> dict[str, Any]:
+        """Build current-year nightlight facts inside the saved isochrone."""
 
         scope_geometry, _ = self._scope_geometry(project)
         if scope_geometry is None or scope_geometry.is_empty:
             return self._nightlight_unavailable(project, "当前项目没有可用于夜光分析的保存范围。")
-        polygon = max(
-            list(scope_geometry.geoms) if scope_geometry.geom_type == "MultiPolygon" else [scope_geometry],
-            key=lambda geometry: geometry.area,
+        records, years, record_warnings = self._load_records(history_id, {_NIGHTLIGHT} & available)
+        spatial_distribution = build_nightlight_scope_profile(
+            records.get(_NIGHTLIGHT, []),
+            scope_geometry,
         )
-        coordinates = [[float(x), float(y)] for x, y in polygon.exterior.coords]
+        coordinates = _polygon_payload(scope_geometry)
+        selected_year = years.get(_NIGHTLIGHT)
         try:
-            layer = self._nightlight_layer(coordinates, "wgs84", view="hotspot")
-            temporal = self._nightlight_timeseries(coordinates, "wgs84", "2023-2025", "radiance_delta")
+            layer = self._nightlight_layer(coordinates, "wgs84", year=selected_year, view="radiance")
         except (LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
             return self._nightlight_unavailable(
                 project,
-                f"2023–2025 夜光领域计算失败：{type(exc).__name__}。",
+                f"夜光领域计算失败：{type(exc).__name__}。",
             )
 
+        layer_year = int(_number(layer.get("year")) or 0) or None
+        if selected_year is not None and layer_year != int(selected_year):
+            return self._nightlight_unavailable(
+                project,
+                f"实时夜光图层年份 {layer_year or '未知'} 与保存快照年份 {selected_year} 不一致。",
+            )
         raw_summary = layer.get("summary") if isinstance(layer.get("summary"), Mapping) else {}
         raw_analysis = layer.get("analysis") if isinstance(layer.get("analysis"), Mapping) else {}
         raw_sector = raw_analysis.get("sector_direction_analysis")
         sector = raw_sector if isinstance(raw_sector, Mapping) else {}
-        series = []
-        for item in temporal.get("series", []):
-            if not isinstance(item, Mapping):
-                continue
-            year = int(_number(item.get("year")) or 0)
-            if year not in {2023, 2024, 2025}:
-                continue
-            series.append({
-                "year": year,
-                "total_radiance": _rounded(_number(item.get("total_radiance"))),
-                "mean_radiance": _rounded(_number(item.get("mean_radiance"))),
-                "max_radiance": _rounded(_number(item.get("max_radiance"))),
-                "p90_radiance": _rounded(_number(item.get("p90_radiance"))),
-                "lit_pixel_ratio": _rounded(_number(item.get("lit_pixel_ratio"))),
-            })
-        series.sort(key=lambda item: item["year"])
-
-        def change(field: str) -> dict[str, float | None]:
-            before = _number(series[0].get(field)) if series else None
-            after = _number(series[-1].get(field)) if series else None
-            delta = after - before if before is not None and after is not None else None
-            rate = delta / before if delta is not None and before not in (None, 0) else None
-            return {"from": _rounded(before), "to": _rounded(after), "delta": _rounded(delta), "rate": _rounded(rate)}
-
-        temporal_layer = temporal.get("layer") if isinstance(temporal.get("layer"), Mapping) else {}
-        temporal_summary = temporal_layer.get("summary") if isinstance(temporal_layer.get("summary"), Mapping) else {}
-        activity_level = str(raw_analysis.get("economic_activity_intensity_level") or "").strip() or None
         summary = {
+            "spatial_distribution": spatial_distribution,
             "snapshot": {
-                "year": int(_number(layer.get("year")) or 0) or None,
+                "year": layer_year,
                 "total_radiance": _rounded(_number(raw_summary.get("total_radiance"))),
                 "mean_radiance": _rounded(_number(raw_summary.get("mean_radiance"))),
                 "max_radiance": _rounded(_number(raw_summary.get("max_radiance"))),
@@ -1567,12 +2632,7 @@ class SpatialEvidenceService:
                 "lit_pixel_ratio": _rounded(_number(raw_summary.get("lit_pixel_ratio"))),
                 "valid_pixel_count": int(_number(raw_summary.get("valid_pixel_count")) or 0),
             },
-            "spatial_pattern": {
-                "core_hotspot_count": int(_number(raw_analysis.get("core_hotspot_count")) or 0),
-                "secondary_hotspot_count": int(_number(raw_analysis.get("secondary_hotspot_count")) or 0),
-                "emerging_hotspot_count": int(_number(raw_analysis.get("emerging_hotspot_count")) or 0),
-                "low_light_count": int(_number(raw_analysis.get("low_light_count")) or 0),
-                "hotspot_cell_ratio": _rounded(_number(raw_analysis.get("hotspot_cell_ratio"))),
+            "brightness_profile": {
                 "peak_radiance": _rounded(_number(raw_analysis.get("peak_radiance"))),
                 "peak_cell_id": str(raw_analysis.get("peak_cell_id") or "") or None,
                 "peak_to_edge_ratio": _rounded(_number(raw_analysis.get("peak_to_edge_ratio"))),
@@ -1581,67 +2641,56 @@ class SpatialEvidenceService:
                 "dominant_share": _rounded(_number(sector.get("dominant_share"))),
                 "secondary_share": _rounded(_number(sector.get("secondary_share"))),
             },
-            "activity_background": {
-                "level": activity_level,
-                "semantics": "nightlight_brightness_proxy_not_observed_activity",
-            },
-            "temporal": {
-                "period": "2023-2025",
-                "series": series,
-                "change_2023_2025": {
-                    field: change(field)
-                    for field in (
-                        "total_radiance", "mean_radiance", "max_radiance",
-                        "p90_radiance", "lit_pixel_ratio",
-                    )
-                },
-                "spatial_change": {
-                    "cell_count": int(_number(temporal_summary.get("cell_count")) or 0),
-                    "class_counts": dict(temporal_summary.get("class_counts") or {}),
-                },
-            },
         }
+        quality = spatial_distribution.get("quality_diagnostics")
+        quality_limitation = quality.get("limitation") if isinstance(quality, Mapping) else None
         snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
         return _bounded_model_response({
             "schema_version": SCHEMA_VERSION,
-            "result_id": "spatial:" + _digest({"snapshot_id": snapshot_id, "kind": "nightlight_scope_profile", "period": "2023-2025"})[:24],
+            "result_id": "spatial:" + _digest({"snapshot_id": snapshot_id, "kind": "nightlight_scope_profile", "year": layer_year})[:24],
             "status": "available",
             "analysis": "scope",
             "summary": summary,
             "coverage": {
-                "complete": bool(series),
-                "year_count": len(series),
-                "spatial_unit_count": summary["temporal"]["spatial_change"]["cell_count"],
+                "complete": bool(layer_year) and bool(spatial_distribution.get("valid_cell_count")),
+                "spatial_unit_count": int(spatial_distribution.get("valid_cell_count") or 0),
             },
-            "limitations": ["夜光活动等级仅是亮度空间背景代理，不代表真实客流、消费、营业或具体业态。"],
+            "limitations": [
+                *record_warnings,
+                "夜光仅描述等时圈内当前年份亮度及其空间差异，不代表真实客流、消费、营业或具体业态。",
+                *([str(quality_limitation)] if quality_limitation else []),
+            ],
             "method": {
                 "kind": "nightlight_scope_profile",
+                "spatial_universe": "saved_isochrone",
+                "persisted_cell_profile": bool(spatial_distribution["valid_cell_count"]),
                 "current_layer_calls": 1,
-                "timeseries_calls": 1,
-                "period": "2023-2025",
-                "spatial_aggregation": "intersecting_full_cells",
-                "boundary_cell_policy": "include_full_cell_value",
+                "spatial_aggregation": "area_weighted_intersection",
+                "boundary_cell_policy": "clip_cells_to_saved_isochrone",
                 "internal_metrics_hidden": True,
             },
-            "provenance": {
-                "snapshot_id": snapshot_id,
-                "source_ids": ["nightlight:raster:2023", "nightlight:raster:2024", "nightlight:raster:2025"],
-            },
+            "provenance": self._provenance(project, years, {_NIGHTLIGHT}),
             "fact_domains": ["nightlight"],
             "evidence_dimensions": ["nightlight.intensity"],
         })
 
     @staticmethod
-    def _nightlight_unavailable(project: Mapping[str, Any], limitation: str) -> dict[str, Any]:
+    def _nightlight_unavailable(
+        project: Mapping[str, Any],
+        limitation: str,
+        *,
+        analysis: str = "scope",
+    ) -> dict[str, Any]:
         snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
         return {
             "schema_version": SCHEMA_VERSION,
             "status": "unavailable",
-            "analysis": "scope",
+            "unavailable_reason": limitation,
+            "analysis": analysis,
             "summary": {},
             "coverage": {"complete": False},
             "limitations": [limitation],
-            "method": {"kind": "nightlight_scope_profile", "executed": False},
+            "method": {"kind": "nightlight_semantic_operation", "executed": False},
             "provenance": {"snapshot_id": snapshot_id},
             "fact_domains": ["nightlight"],
             "evidence_dimensions": ["nightlight.intensity"],
@@ -1652,17 +2701,34 @@ class SpatialEvidenceService:
         project: Mapping[str, Any],
         history_id: str,
         available: set[str],
+        dimensions: Sequence[EvidenceDimension],
     ) -> dict[str, Any]:
-        """Summarize one persisted road run without invoking the road model again."""
+        """Read only the selected parts of one persisted road result."""
 
-        road_sources = {_ROAD_EDGES, _ROAD_CORRIDORS, _ROAD_NODES, _ROAD_GRID} & available
+        selected = tuple(dict.fromkeys(dimensions))
+        movement_dimensions = {
+            dimension for dimension in selected
+            if dimension in {"road.to_movement", "road.through_movement"}
+        }
+        required_sources = {_ROAD_EDGES}
+        if movement_dimensions:
+            required_sources.add(_ROAD_CORRIDORS)
+        if "road.connectivity" in selected:
+            required_sources.add(_ROAD_NODES)
+        if "road.network_density" in selected:
+            required_sources.add(_ROAD_GRID)
+        road_sources = required_sources & available
         records, _, warnings = self._load_records(history_id, road_sources)
         edges = records.get(_ROAD_EDGES, [])
         nodes = records.get(_ROAD_NODES, [])
         grid = records.get(_ROAD_GRID, [])
         corridors = records.get(_ROAD_CORRIDORS, [])
         if not edges:
-            return self._road_unavailable(project, "当前项目没有可读取的已持久化路网线段结果。")
+            return self._road_unavailable(
+                project,
+                "当前项目没有可读取的已持久化路网线段结果。",
+                selected,
+            )
 
         dataset_summaries = {
             str(item.get("source_id") or ""): item.get("summary")
@@ -1670,7 +2736,7 @@ class SpatialEvidenceService:
             if isinstance(item, Mapping) and isinstance(item.get("summary"), Mapping)
         }
         source_summary = dataset_summaries.get(_ROAD_EDGES) or dataset_summaries.get(_ROAD_GRID) or {}
-        radii = self._road_available_radii(edges)
+        radii = self._road_available_radii(edges) if movement_dimensions else []
         radius_profiles = []
         for radius in radii:
             suffix = "global" if radius == "global" else f"r{radius}"
@@ -1682,19 +2748,24 @@ class SpatialEvidenceService:
                 value for record in edges
                 if (value := _number(record.properties.get(f"nach_{suffix}"))) is not None
             ]
-            radius_profiles.append({
-                "radius": radius,
-                "nain": self._distribution(nain_values, len(edges)),
-                "nach": self._distribution(nach_values, len(edges)),
-            })
+            profile: dict[str, Any] = {"radius": radius}
+            if "road.to_movement" in movement_dimensions:
+                profile["nain"] = self._distribution(nain_values, len(edges))
+            if "road.through_movement" in movement_dimensions:
+                profile["nach"] = self._distribution(nach_values, len(edges))
+            radius_profiles.append(profile)
 
         default_profile = next((item for item in radius_profiles if item["radius"] == "global"), None)
         if default_profile is None and radius_profiles:
             default_profile = radius_profiles[0]
-        core_background = self._road_core_background(edges, str(default_profile["radius"])) if default_profile else {}
+        core_background = (
+            self._road_core_background(edges, str(default_profile["radius"]), movement_dimensions)
+            if default_profile
+            else {}
+        )
 
-        orientation = source_summary.get("road_orientation_analysis")
-        if not isinstance(orientation, Mapping) or not orientation:
+        orientation = source_summary.get("road_orientation_analysis") if "road.orientation" in selected else {}
+        if "road.orientation" in selected and (not isinstance(orientation, Mapping) or not orientation):
             orientation = build_road_orientation_analysis([
                 {
                     "type": "Feature",
@@ -1704,7 +2775,11 @@ class SpatialEvidenceService:
                 for record in edges
                 if record.geometry is not None and not record.geometry.is_empty
             ])
-        orientation_rows = orientation.get("orientation_rows") if isinstance(orientation.get("orientation_rows"), list) else []
+        orientation_rows = (
+            orientation.get("orientation_rows")
+            if isinstance(orientation, Mapping) and isinstance(orientation.get("orientation_rows"), list)
+            else []
+        )
 
         covered_grid = [
             record for record in grid
@@ -1722,26 +2797,55 @@ class SpatialEvidenceService:
             value for record in edges
             if (value := self._direct_record_value(METRIC_BINDINGS["road.connectivity"], record)) is not None
         ]
-        summary = {
-            "network": {
-                "edge_count": len(edges),
-                "node_count": len(nodes) or int(_number(source_summary.get("node_count")) or 0),
-                "network_length_km": _rounded(network_length_km),
-                "mean_connectivity": _rounded(sum(connectivity) / len(connectivity) if connectivity else None),
-            },
-            "radius_profiles": radius_profiles,
-            "core_background": core_background,
-            "continuous_corridors": {
-                "corridor_count": len(corridors),
-                "by_metric": {
-                    metric: sum(str(record.properties.get("metric") or "") == metric for record in corridors)
-                    for metric in ("nain", "nach")
+        summary: dict[str, Any] = {}
+        if "road.connectivity" in selected or "road.network_density" in selected:
+            network: dict[str, Any] = {"edge_count": len(edges)}
+            if "road.connectivity" in selected:
+                network.update({
+                    "node_count": len(nodes) or int(_number(source_summary.get("node_count")) or 0),
+                    "mean_connectivity": _rounded(sum(connectivity) / len(connectivity) if connectivity else None),
+                })
+            if "road.network_density" in selected:
+                density_values = [
+                    value for record in grid
+                    if (value := _number(record.properties.get("road_length_km_per_km2"))) is not None
+                ]
+                network.update({
+                    "network_length_km": _rounded(network_length_km),
+                    "density": self._distribution(density_values, len(grid)),
+                })
+            summary["network"] = network
+        if movement_dimensions:
+            selected_corridors = [
+                record for record in corridors
+                if (
+                    str(record.properties.get("metric") or "") == "nain"
+                    and "road.to_movement" in movement_dimensions
+                ) or (
+                    str(record.properties.get("metric") or "") == "nach"
+                    and "road.through_movement" in movement_dimensions
+                )
+            ]
+            summary.update({
+                "radius_profiles": radius_profiles,
+                "core_background": core_background,
+                "continuous_corridors": {
+                    "corridor_count": len(selected_corridors),
+                    "by_metric": {
+                        metric: sum(str(record.properties.get("metric") or "") == metric for record in selected_corridors)
+                        for metric in (
+                            ["nain"] if movement_dimensions == {"road.to_movement"}
+                            else ["nach"] if movement_dimensions == {"road.through_movement"}
+                            else ["nain", "nach"]
+                        )
+                    },
+                    "total_length_km": _rounded(sum(
+                        _number(record.properties.get("length_m")) or 0.0 for record in selected_corridors
+                    ) / 1000.0),
                 },
-                "total_length_km": _rounded(sum(
-                    _number(record.properties.get("length_m")) or 0.0 for record in corridors
-                ) / 1000.0),
-            },
-            "orientation": {
+            })
+        if "road.orientation" in selected:
+            summary["orientation"] = {
                 "dominant": str(orientation.get("dominant_orientation") or "") or None,
                 "secondary": str(orientation.get("secondary_orientation") or "") or None,
                 "rows": [
@@ -1754,15 +2858,17 @@ class SpatialEvidenceService:
                     for row in orientation_rows[:8]
                     if isinstance(row, Mapping)
                 ],
-            },
-            "grid_coverage": {
+            }
+        if "road.network_density" in selected:
+            summary["grid_coverage"] = {
                 "cell_count": len(grid),
                 "covered_cell_count": len(covered_grid),
                 "no_road_cell_count": max(0, len(grid) - len(covered_grid)),
                 "metric_valid_cell_count": grid_metric_valid,
                 "no_road_metric_semantics": "null_not_zero",
-            },
-            "quality": {
+            }
+        if "road.quality" in selected:
+            summary["quality"] = {
                 "analysis_engine": str(source_summary.get("analysis_engine") or "depthmapx_persisted_result"),
                 "analysis_context_margin_m": _rounded(_number(source_summary.get("analysis_context_margin_m"))),
                 "context_edge_count": int(_number(source_summary.get("context_edge_count")) or 0),
@@ -1776,17 +2882,20 @@ class SpatialEvidenceService:
                     if isinstance(source_summary.get("quality_diagnostics"), Mapping)
                     else {}
                 ),
-            },
-        }
+            }
         snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
         return _bounded_model_response({
             "schema_version": SCHEMA_VERSION,
-            "result_id": "spatial:" + _digest({"snapshot_id": snapshot_id, "kind": "road_scope_profile"})[:24],
+            "result_id": "spatial:" + _digest({
+                "snapshot_id": snapshot_id,
+                "kind": "road_scope_profile",
+                "dimensions": selected,
+            })[:24],
             "status": "available",
             "analysis": "scope",
             "summary": summary,
             "coverage": {
-                "complete": bool(radius_profiles),
+                "complete": bool(summary),
                 "edge_count": len(edges),
                 "grid_cell_count": len(grid),
                 "covered_grid_cell_count": len(covered_grid),
@@ -1797,11 +2906,11 @@ class SpatialEvidenceService:
                 "road_model_executed": False,
                 "persisted_result_reads": sorted(road_sources),
                 "missing_values": "excluded_not_zero_filled",
-                "core_network_rule": "edge_nain_or_nach_at_or_above_same_radius_p75",
+                "core_network_rule": "selected_movement_metric_at_or_above_same_radius_p75" if movement_dimensions else "not_requested",
             },
             "provenance": {"snapshot_id": snapshot_id, "source_ids": sorted(road_sources)},
             "fact_domains": ["road"],
-            "evidence_dimensions": list(FACT_DOMAIN_CAPABILITIES["road"].dimensions),
+            "evidence_dimensions": list(selected),
         })
 
     @staticmethod
@@ -1830,7 +2939,11 @@ class SpatialEvidenceService:
         }
 
     @staticmethod
-    def _road_core_background(edges: Sequence[ScopeRecord], radius: str) -> dict[str, Any]:
+    def _road_core_background(
+        edges: Sequence[ScopeRecord],
+        radius: str,
+        dimensions: set[EvidenceDimension],
+    ) -> dict[str, Any]:
         suffix = "global" if radius == "global" else f"r{radius}"
         rows = []
         for record in edges:
@@ -1843,10 +2956,12 @@ class SpatialEvidenceService:
         nach_values = [value for _, _, value in rows if value is not None]
         nain_p75 = _quantile(nain_values, 0.75) if nain_values else None
         nach_p75 = _quantile(nach_values, 0.75) if nach_values else None
+        use_nain = "road.to_movement" in dimensions
+        use_nach = "road.through_movement" in dimensions
         core = [
             record for record, nain, nach in rows
-            if (nain is not None and nain_p75 is not None and nain >= nain_p75)
-            or (nach is not None and nach_p75 is not None and nach >= nach_p75)
+            if (use_nain and nain is not None and nain_p75 is not None and nain >= nain_p75)
+            or (use_nach and nach is not None and nach_p75 is not None and nach >= nach_p75)
         ]
         core_ids = {record.record_id for record in core}
         background = [record for record, _, _ in rows if record.record_id not in core_ids]
@@ -1859,16 +2974,23 @@ class SpatialEvidenceService:
                 ) / 1000.0),
             }
 
-        return {
+        result = {
             "radius": radius,
-            "nain_p75": _rounded(nain_p75),
-            "nach_p75": _rounded(nach_p75),
             "core": payload(core),
             "background": payload(background),
         }
+        if use_nain:
+            result["nain_p75"] = _rounded(nain_p75)
+        if use_nach:
+            result["nach_p75"] = _rounded(nach_p75)
+        return result
 
     @staticmethod
-    def _road_unavailable(project: Mapping[str, Any], limitation: str) -> dict[str, Any]:
+    def _road_unavailable(
+        project: Mapping[str, Any],
+        limitation: str,
+        dimensions: Sequence[EvidenceDimension],
+    ) -> dict[str, Any]:
         snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
         return {
             "schema_version": SCHEMA_VERSION,
@@ -1880,7 +3002,7 @@ class SpatialEvidenceService:
             "method": {"kind": "persisted_road_scope_profile", "road_model_executed": False},
             "provenance": {"snapshot_id": snapshot_id},
             "fact_domains": ["road"],
-            "evidence_dimensions": list(FACT_DOMAIN_CAPABILITIES["road"].dimensions),
+            "evidence_dimensions": list(dimensions),
         }
 
     @staticmethod
@@ -1984,6 +3106,25 @@ class SpatialEvidenceService:
                 return _bounded_model_response(result)
             return result
 
+        if (
+            query.metric_ids
+            and all(metric_id.startswith("population.") for metric_id in query.metric_ids)
+            and (
+                "population.profile" in query.metric_ids
+                or query.analysis in {"rank", "neighborhood", "inspect"}
+            )
+        ):
+            return self._population_semantic_result(
+                query=query,
+                project=project,
+                scope=scope,
+                records=records,
+                years=years,
+                warnings=warnings,
+                center=center,
+                scope_geometry=scope_geometry,
+            )
+
         if query.analysis == "scope":
             return with_named_pois(
                 self._scope_result(query, project, scope, records, years, warnings, scope_geometry)
@@ -2016,7 +3157,7 @@ class SpatialEvidenceService:
         if query.analysis == "rank":
             return with_named_pois(self._rank_result(query, project, scope, rows, years, warnings))
         if query.analysis == "neighborhood":
-            return with_named_pois(self._neighborhood_result(query, project, scope, rows, years, warnings))
+            return with_named_pois(self._neighborhood_result(query, project, scope, rows, records, years, warnings))
         if query.analysis == "relationship":
             return with_named_pois(self._relationship_result(query, project, scope, rows, years, warnings))
         return with_named_pois(self._grouped_result(query, project, scope, rows, years, warnings))
@@ -2035,7 +3176,6 @@ class SpatialEvidenceService:
         metric_ids.extend(metric_id for metric_id in METRIC_BINDINGS if metric_id not in catalog)
         for metric_id in metric_ids:
             binding = METRIC_BINDINGS.get(metric_id)
-            item = catalog.get(metric_id)
             catalog_binding = CATALOG_SCOPE_BINDINGS.get(metric_id)
             source_ids = binding.source_ids if binding else (catalog_binding.source_ids if catalog_binding else ())
             data_status = "ready" if any(source in available for source in source_ids) else "unavailable"
@@ -2260,8 +3400,8 @@ class SpatialEvidenceService:
             method={
                 "kind": "scope_intersection_aggregation",
                 "scope_policy": "saved_scope_geometry_only",
-                "spatial_aggregation": "intersecting_full_cells",
-                "boundary_cell_policy": "include_full_cell_value",
+                "spatial_aggregation": "geometry_intersection_aggregation",
+                "boundary_cell_policy": "allocate_extensive_values_by_intersection_fraction",
                 "line_aggregation": "intersection_length_or_length_weighted",
                 "missing_values": "excluded_not_zero_filled",
             },
@@ -2279,24 +3419,660 @@ class SpatialEvidenceService:
         population_total = total(METRIC_BINDINGS["population.total"])
         male_total = total(METRIC_BINDINGS["population.male"])
         female_total = total(METRIC_BINDINGS["population.female"])
+        age_distribution = [
+            {
+                "age_band": band,
+                "age_band_label": get_age_band_label(band),
+                "total": _rounded(total(METRIC_BINDINGS[f"population.age.{band}.total"])),
+                "male": _rounded(total(METRIC_BINDINGS[f"population.age.{band}.male"])),
+                "female": _rounded(total(METRIC_BINDINGS[f"population.age.{band}.female"])),
+            }
+            for band in POPULATION_AGE_BANDS
+        ]
+        age_groups = {
+            "child_0_14": sum(float(item["total"] or 0.0) for item in age_distribution if int(item["age_band"]) < 15),
+            "working_15_64": sum(float(item["total"] or 0.0) for item in age_distribution if 15 <= int(item["age_band"]) < 65),
+            "senior_65_plus": sum(float(item["total"] or 0.0) for item in age_distribution if int(item["age_band"]) >= 65),
+        }
+        area_km2 = _area_km2(geometry)
+        for item in age_distribution:
+            value = float(item["total"] or 0.0)
+            item["share"] = _rounded(value / population_total if population_total > 0 else None)
         return {
             "total_population": _rounded(population_total),
+            "area_km2": _rounded(area_km2),
+            "density_person_per_km2": _rounded(population_total / area_km2 if area_km2 > 0 else None),
             "sex_totals": {
                 "total": _rounded(population_total),
                 "male": _rounded(male_total),
                 "female": _rounded(female_total),
             },
-            "age_distribution": [
-                {
-                    "age_band": band,
-                    "age_band_label": get_age_band_label(band),
-                    "total": _rounded(total(METRIC_BINDINGS[f"population.age.{band}.total"])),
-                    "male": _rounded(total(METRIC_BINDINGS[f"population.age.{band}.male"])),
-                    "female": _rounded(total(METRIC_BINDINGS[f"population.age.{band}.female"])),
+            "sex_ratios": {
+                "male": _rounded(male_total / population_total if population_total > 0 else None),
+                "female": _rounded(female_total / population_total if population_total > 0 else None),
+            },
+            "age_groups": {
+                key: {
+                    "population": _rounded(value),
+                    "share": _rounded(value / population_total if population_total > 0 else None),
                 }
-                for band in POPULATION_AGE_BANDS
-            ],
+                for key, value in age_groups.items()
+            },
+            "age_distribution": age_distribution,
         }
+
+    def _population_semantic_result(
+        self,
+        *,
+        query: SpatialEvidenceRequest,
+        project: Mapping[str, Any],
+        scope: dict[str, Any],
+        records: Mapping[str, list[ScopeRecord]],
+        years: Mapping[str, int | None],
+        warnings: list[str],
+        center: tuple[float, float],
+        scope_geometry: BaseGeometry,
+    ) -> dict[str, Any]:
+        population_records = self._selected_records(records.get(_POPULATION, []), query.selectors, _POPULATION)
+        population_records = [
+            record for record in population_records
+            if self._has_measure_overlap(record.geometry, scope_geometry)
+        ]
+        if not population_records:
+            return self._unavailable(query, project, "当前等时圈内没有可用人口格网。", scope=scope)
+        target_metric_id = self._population_target_metric_id(query.selectors)
+        if query.analysis == "scope":
+            profile = self._population_profile_for_geometry(population_records, scope_geometry)
+            profile["target_population"] = self._population_target_value(
+                population_records, scope_geometry, target_metric_id
+            )
+            profile["target_metric_id"] = target_metric_id
+            return self._population_response(
+                query, project, scope, years, warnings,
+                summary={"population": profile},
+                coverage={"complete": True, "spatial_unit_count": len(population_records)},
+                method={"kind": "population_scope", "boundary_cell_policy": "intersection_area_fraction"},
+            )
+        if query.analysis == "accessibility":
+            return self._population_accessibility_result(
+                query, project, scope, population_records, years, warnings,
+                center, scope_geometry, target_metric_id,
+            )
+        if query.analysis == "direction":
+            groups = []
+            scope_target_population = float(
+                self._population_target_value(population_records, scope_geometry, target_metric_id) or 0.0
+            )
+            for direction, geometry in self._population_direction_geometries(center, scope_geometry):
+                profile = self._population_profile_for_geometry(population_records, geometry)
+                compact = self._compact_population_profile(profile)
+                target_population = self._population_target_value(
+                    population_records, geometry, target_metric_id
+                )
+                compact["target_population"] = target_population
+                compact["target_population_share"] = _rounded(
+                    float(target_population or 0.0) / scope_target_population
+                    if scope_target_population > 0
+                    else None
+                )
+                groups.append({"key": direction, "label": DIRECTION_LABELS[direction], **compact})
+            dominant = max(groups, key=lambda item: float(item.get("target_population") or 0.0), default=None)
+            return self._population_response(
+                query, project, scope, years, warnings,
+                summary={
+                    "target_metric_id": target_metric_id,
+                    "dominant_distribution_direction": dominant["key"] if dominant else None,
+                    "dominant_distribution_direction_label": dominant["label"] if dominant else None,
+                    "distribution": self._population_directional_distribution(
+                        population_records,
+                        scope_geometry,
+                        target_metric_id,
+                    ),
+                },
+                groups=groups,
+                coverage={"complete": True, "direction_count": len(groups)},
+                method={
+                    "kind": "population_distribution_direction",
+                    "allocation": "sector_intersection_area_fraction",
+                    "semantics": "residential_population_location_not_observed_travel_origin",
+                },
+            )
+        if query.analysis == "rank":
+            rank_measure = self._population_rank_measure(query.selectors)
+            ranked = []
+            for record in population_records:
+                geometry = record.geometry.intersection(scope_geometry)
+                target_population = self._population_target_value([record], geometry, target_metric_id)
+                profile = self._population_profile_for_geometry([record], geometry)
+                total_population = float(profile.get("total_population") or 0.0)
+                area_km2 = float(profile.get("area_km2") or 0.0)
+                rank_value = (
+                    float(target_population or 0.0)
+                    if rank_measure == "count"
+                    else float(target_population or 0.0) / area_km2
+                    if rank_measure == "density" and area_km2 > 0
+                    else float(target_population or 0.0) / total_population
+                    if rank_measure == "share" and total_population > 0
+                    else 0.0
+                )
+                ranked.append((rank_value, record, profile, target_population))
+            ranked.sort(key=lambda item: item[0], reverse=query.rank_order == "highest")
+            highlights = [
+                {
+                    "record_ref": self._record_ref(record),
+                    "title": record.title,
+                    "identity": self._record_identity(record),
+                    "target_metric_id": target_metric_id,
+                    "target_population": _rounded(target_population),
+                    "target_density_person_per_km2": _rounded(
+                        float(target_population or 0.0) / float(profile.get("area_km2") or 0.0)
+                        if float(profile.get("area_km2") or 0.0) > 0
+                        else None
+                    ),
+                    "target_share_of_grid_population": _rounded(
+                        float(target_population or 0.0) / float(profile.get("total_population") or 0.0)
+                        if float(profile.get("total_population") or 0.0) > 0
+                        else None
+                    ),
+                    "rank_measure": rank_measure,
+                    "rank_value": _rounded(rank_value),
+                    "population": self._compact_population_profile(profile, include_age_distribution=False),
+                    "reason": f"按{self._population_rank_measure_label(rank_measure)}"
+                    + ("从高到低" if query.rank_order == "highest" else "从低到高")
+                    + "排列的人口网格",
+                }
+                for rank_value, record, profile, target_population in ranked[: query.top_k]
+            ]
+            return self._population_response(
+                query, project, scope, years, warnings,
+                summary={
+                    "target_metric_id": target_metric_id,
+                    "rank_order": query.rank_order,
+                    "rank_measure": rank_measure,
+                    "rank_unit": self._population_rank_measure_unit(rank_measure),
+                },
+                highlights=highlights,
+                coverage={"complete": True, "spatial_unit_count": len(population_records)},
+                method={"kind": "population_grid_rank", "boundary_cell_policy": "intersection_area_fraction"},
+            )
+        if query.analysis == "neighborhood":
+            return self._population_neighborhood_semantic_result(
+                query, project, scope, population_records, years, warnings,
+                scope_geometry, target_metric_id,
+            )
+        if query.analysis == "inspect":
+            selected = [
+                record for record in population_records
+                if self._matches_ref(self._record_ref(record), query.record_refs)
+            ][:20]
+            highlights = []
+            for record in selected:
+                geometry = record.geometry.intersection(scope_geometry)
+                profile = self._population_profile_for_geometry([record], geometry)
+                adjacent = self._population_adjacent_records(record, population_records, steps=1)
+                adjacent_values = [
+                    float(self._population_target_value(
+                        [neighbor], neighbor.geometry.intersection(scope_geometry), target_metric_id
+                    ) or 0.0)
+                    for neighbor in adjacent
+                ]
+                target_population = self._population_target_value([record], geometry, target_metric_id)
+                neighbor_mean = sum(adjacent_values) / len(adjacent_values) if adjacent_values else None
+                highlights.append({
+                    "record_ref": self._record_ref(record),
+                    "title": record.title,
+                    "identity": self._record_identity(record),
+                    "target_metric_id": target_metric_id,
+                    "year": record.properties.get("year") or record.time_scope.get("year") or years.get(_POPULATION),
+                    "target_population": target_population,
+                    "population": profile,
+                    "neighborhood": {
+                        "adjacent_grid_count": len(adjacent),
+                        "neighbor_mean_target_population": _rounded(neighbor_mean),
+                        "target_delta_from_neighbor_mean": _rounded(
+                            float(target_population or 0.0) - neighbor_mean
+                            if neighbor_mean is not None
+                            else None
+                        ),
+                    },
+                    "reason": "指定人口网格明细",
+                })
+            if not highlights:
+                return self._unavailable(query, project, "没有找到指定的人口网格。", scope=scope)
+            return self._population_response(
+                query, project, scope, years, warnings,
+                summary={"matched_record_count": len(highlights), "target_metric_id": target_metric_id},
+                highlights=highlights,
+                named_spatial_objects=[
+                    {
+                        "record_ref": item["record_ref"],
+                        "title": item["title"],
+                        "identity": item["identity"],
+                    }
+                    for item in highlights
+                ],
+                coverage={"complete": len(highlights) == len(query.record_refs)},
+                method={"kind": "population_grid_inspect", "boundary_cell_policy": "intersection_area_fraction"},
+            )
+        return self._unavailable(query, project, "人口结构不支持该空间操作。", scope=scope)
+
+    def _population_accessibility_result(
+        self,
+        query: SpatialEvidenceRequest,
+        project: Mapping[str, Any],
+        scope: dict[str, Any],
+        population_records: Sequence[ScopeRecord],
+        years: Mapping[str, int | None],
+        warnings: list[str],
+        center: tuple[float, float],
+        scope_geometry: BaseGeometry,
+        target_metric_id: str,
+    ) -> dict[str, Any]:
+        band_geometries, limitation = self._accessibility_band_geometries(
+            query, project, center, scope_geometry
+        )
+        if limitation:
+            return self._unavailable(query, project, limitation, scope=scope)
+        reachable_geometry: BaseGeometry | None = None
+        for _, geometry in band_geometries:
+            reachable_geometry = geometry if reachable_geometry is None else reachable_geometry.union(geometry)
+        if reachable_geometry is None or reachable_geometry.is_empty:
+            return self._unavailable(query, project, "分层等时圈内没有可计算的人口范围。", scope=scope)
+        reachable_profile = self._population_profile_for_geometry(population_records, reachable_geometry)
+        reachable_total = float(reachable_profile.get("total_population") or 0.0)
+        groups = []
+        cumulative = []
+        cumulative_geometry: BaseGeometry | None = None
+        for band, geometry in band_geometries:
+            profile = self._population_profile_for_geometry(population_records, geometry)
+            incremental = float(profile.get("total_population") or 0.0)
+            cumulative_geometry = geometry if cumulative_geometry is None else cumulative_geometry.union(geometry)
+            cumulative_profile = self._population_profile_for_geometry(population_records, cumulative_geometry)
+            key = f"{_format_band_value(band[0])}-{_format_band_value(band[1])}min"
+            groups.append({
+                "key": key,
+                "time_band_min": [band[0], band[1]],
+                "incremental_population": _rounded(incremental),
+                "share_of_reachable_population": _rounded(incremental / reachable_total if reachable_total > 0 else None),
+                "target_population": self._population_target_value(population_records, geometry, target_metric_id),
+                "structure": self._compact_population_profile(profile),
+            })
+            cumulative.append({
+                "time_min": band[1],
+                "population": cumulative_profile.get("total_population"),
+                "target_population": self._population_target_value(
+                    population_records, cumulative_geometry, target_metric_id
+                ),
+            })
+        return self._population_response(
+            query, project, scope, years, warnings,
+            summary={
+                "target_metric_id": target_metric_id,
+                "reachable_population": reachable_profile,
+                "cumulative": cumulative,
+            },
+            groups=groups,
+            coverage={"complete": True, "band_count": len(groups), "geometry_coverage": "disjoint_bands"},
+            method={
+                "kind": "population_accessibility",
+                "travel_time_method": "valhalla_nested_isochrone_contours",
+                "population_allocation": "intersection_area_fraction",
+            },
+        )
+
+    def _population_neighborhood_semantic_result(
+        self,
+        query: SpatialEvidenceRequest,
+        project: Mapping[str, Any],
+        scope: dict[str, Any],
+        population_records: Sequence[ScopeRecord],
+        years: Mapping[str, int | None],
+        warnings: list[str],
+        scope_geometry: BaseGeometry,
+        target_metric_id: str,
+    ) -> dict[str, Any]:
+        targets = [
+            record for record in population_records
+            if self._matches_ref(self._record_ref(record), query.record_refs)
+        ]
+        if not targets:
+            return self._unavailable(query, project, "指定 record_refs 不属于当前等时圈人口网格。", scope=scope)
+        population_by_ref = {
+            self._record_ref(record): float(
+                self._population_target_value(
+                    [record],
+                    record.geometry.intersection(scope_geometry),
+                    target_metric_id,
+                ) or 0.0
+            )
+            for record in population_records
+        }
+        focus_threshold = _quantile(list(population_by_ref.values()), 0.75)
+        focus_records = [
+            record
+            for record in population_records
+            if population_by_ref[self._record_ref(record)] > 0
+            and population_by_ref[self._record_ref(record)] >= focus_threshold
+        ]
+        focus_refs = {self._record_ref(record) for record in focus_records}
+        groups = []
+        for target in targets[:20]:
+            neighbors = self._population_adjacent_records(
+                target,
+                population_records,
+                steps=query.neighbor_steps,
+            )
+            target_geometry = target.geometry.intersection(scope_geometry)
+            target_profile = self._population_profile_for_geometry([target], target_geometry)
+            target_population = self._population_target_value([target], target_geometry, target_metric_id)
+            neighbor_values = [
+                float(self._population_target_value(
+                    [neighbor],
+                    neighbor.geometry.intersection(scope_geometry),
+                    target_metric_id,
+                ) or 0.0)
+                for neighbor in neighbors
+            ]
+            neighbor_geometry: BaseGeometry | None = None
+            for neighbor in neighbors:
+                clipped = neighbor.geometry.intersection(scope_geometry)
+                neighbor_geometry = clipped if neighbor_geometry is None else neighbor_geometry.union(clipped)
+            neighbor_profile = (
+                self._population_profile_for_geometry(neighbors, neighbor_geometry)
+                if neighbor_geometry is not None and not neighbor_geometry.is_empty
+                else self._population_profile_for_geometry([], Polygon())
+            )
+            neighbor_mean = sum(neighbor_values) / len(neighbor_values) if neighbor_values else None
+            target_density = float(target_profile.get("density_person_per_km2") or 0.0)
+            neighbor_density = float(neighbor_profile.get("density_person_per_km2") or 0.0)
+            target_ref = self._record_ref(target)
+            connected_focus_records = (
+                self._population_focus_component(target, focus_records, scope_geometry)
+                if target_ref in focus_refs
+                else []
+            )
+            groups.append({
+                "key": target_ref,
+                "neighbor_count": len(neighbors),
+                "target_metric_id": target_metric_id,
+                "target": {
+                    "target_population": target_population,
+                    "population": self._compact_population_profile(target_profile),
+                },
+                "neighbors": {
+                    "grid_count": len(neighbors),
+                    "target_population_total": _rounded(sum(neighbor_values)),
+                    "target_population_mean_per_grid": _rounded(neighbor_mean),
+                    "population": self._compact_population_profile(neighbor_profile),
+                },
+                "comparison": {
+                    "target_population_delta_from_neighbor_mean": _rounded(
+                        float(target_population or 0.0) - neighbor_mean
+                        if neighbor_mean is not None
+                        else None
+                    ),
+                    "target_to_neighbor_mean_ratio": _rounded(
+                        float(target_population or 0.0) / neighbor_mean
+                        if neighbor_mean and neighbor_mean > 0
+                        else None
+                    ),
+                    "density_delta_person_per_km2": _rounded(
+                        target_density - neighbor_density
+                        if neighbors
+                        else None
+                    ),
+                },
+                "focus_continuity": {
+                    "target_is_focus_grid": target_ref in focus_refs,
+                    "focus_threshold": _rounded(focus_threshold),
+                    "connected_focus_grid_count": len(connected_focus_records),
+                    "connected_focus_population": _rounded(sum(
+                        population_by_ref[self._record_ref(record)]
+                        for record in connected_focus_records
+                    )),
+                    "continuous_focus_area": len(connected_focus_records) > 1,
+                },
+            })
+        return self._population_response(
+            query, project, scope, years, warnings,
+            summary={
+                "target_count": len(targets),
+                "neighbor_steps": query.neighbor_steps,
+                "focus_grid_count": len(focus_records),
+                "focus_threshold": _rounded(focus_threshold),
+            },
+            groups=groups,
+            coverage={"complete": True, "target_count": len(targets)},
+            method={
+                "kind": "population_grid_neighborhood_comparison",
+                "adjacency": "grid_geometry",
+                "comparison": "descriptive_target_vs_neighbors",
+                "focus_rule": "descriptive_saved_isochrone_p75",
+                "statistical_significance": "not_computed",
+            },
+        )
+
+    def _population_response(
+        self,
+        query: SpatialEvidenceRequest,
+        project: Mapping[str, Any],
+        scope: dict[str, Any],
+        years: Mapping[str, int | None],
+        warnings: Sequence[str],
+        *,
+        summary: Mapping[str, Any],
+        coverage: Mapping[str, Any],
+        method: Mapping[str, Any],
+        groups: Sequence[Mapping[str, Any]] = (),
+        highlights: Sequence[Mapping[str, Any]] = (),
+        named_spatial_objects: Sequence[Mapping[str, Any]] = (),
+    ) -> dict[str, Any]:
+        return self._response(
+            query=query,
+            project=project,
+            scope=scope,
+            metrics=self._metric_descriptors(query.metric_ids),
+            summary=dict(summary),
+            groups=list(groups),
+            highlights=list(highlights),
+            named_spatial_objects=list(named_spatial_objects),
+            coverage=dict(coverage),
+            evidence=[],
+            limitations=list(warnings) + [
+                "人口格网内部按均匀分布假设进行相交面积分配。",
+                "人口来自 WorldPop 格网模型估计，并非逐户实测；不代表实际到访、客流或消费。",
+            ],
+            method={**method, "spatial_universe": "saved_isochrone"},
+            provenance=self._provenance(project, years, {_POPULATION}),
+        )
+
+    @classmethod
+    def _population_target_metric_id(cls, selectors: Sequence[SpatialEvidenceSelector]) -> str:
+        return next(iter(cls._population_metric_ids(selectors)), "population.total")
+
+    def _population_target_value(
+        self,
+        records: Sequence[ScopeRecord],
+        geometry: BaseGeometry,
+        metric_id: str,
+    ) -> float | None:
+        return _rounded(self._metric_value_for_geometry(METRIC_BINDINGS[metric_id], records, geometry))
+
+    @staticmethod
+    def _compact_population_profile(
+        profile: Mapping[str, Any],
+        *,
+        include_age_distribution: bool = True,
+    ) -> dict[str, Any]:
+        compact = {
+            "total_population": profile.get("total_population"),
+            "area_km2": profile.get("area_km2"),
+            "density_person_per_km2": profile.get("density_person_per_km2"),
+            "sex_totals": profile.get("sex_totals"),
+            "sex_ratios": profile.get("sex_ratios"),
+            "age_groups": profile.get("age_groups"),
+        }
+        if include_age_distribution:
+            compact["age_distribution"] = [
+                {
+                    "age_band": item.get("age_band"),
+                    "population": item.get("total"),
+                    "share": item.get("share"),
+                }
+                for item in profile.get("age_distribution") or []
+                if isinstance(item, Mapping)
+            ]
+        return compact
+
+    def _population_adjacent_records(
+        self,
+        target: ScopeRecord,
+        population_records: Sequence[ScopeRecord],
+        *,
+        steps: int,
+    ) -> list[ScopeRecord]:
+        members = {self._record_ref(target): target}
+        frontier = [target]
+        for _ in range(steps):
+            next_frontier = []
+            for candidate in population_records:
+                candidate_ref = self._record_ref(candidate)
+                if candidate_ref in members:
+                    continue
+                if any(
+                    item.geometry.buffer(1e-12).intersects(candidate.geometry.buffer(1e-12))
+                    for item in frontier
+                ):
+                    members[candidate_ref] = candidate
+                    next_frontier.append(candidate)
+            frontier = next_frontier
+        members.pop(self._record_ref(target), None)
+        return list(members.values())
+
+    def _population_focus_component(
+        self,
+        target: ScopeRecord,
+        focus_records: Sequence[ScopeRecord],
+        scope_geometry: BaseGeometry,
+    ) -> list[ScopeRecord]:
+        focus_by_ref = {self._record_ref(record): record for record in focus_records}
+        target_ref = self._record_ref(target)
+        if target_ref not in focus_by_ref:
+            return []
+        component = {target_ref: focus_by_ref[target_ref]}
+        frontier = [focus_by_ref[target_ref]]
+        while frontier:
+            current = frontier.pop()
+            current_geometry = current.geometry.intersection(scope_geometry)
+            for candidate_ref, candidate in focus_by_ref.items():
+                if candidate_ref in component:
+                    continue
+                candidate_geometry = candidate.geometry.intersection(scope_geometry)
+                if current_geometry.buffer(1e-12).intersects(candidate_geometry.buffer(1e-12)):
+                    component[candidate_ref] = candidate
+                    frontier.append(candidate)
+        return list(component.values())
+
+    @classmethod
+    def _population_rank_measure(cls, selectors: Sequence[SpatialEvidenceSelector]) -> str:
+        return next(iter(cls._selector_values(selectors, "population.measure")), "count")
+
+    @staticmethod
+    def _population_rank_measure_label(measure: str) -> str:
+        return {"count": "人数", "density": "人口密度", "share": "所选人群占比"}[measure]
+
+    @staticmethod
+    def _population_rank_measure_unit(measure: str) -> str:
+        return {"count": "person", "density": "person_per_km2", "share": "ratio"}[measure]
+
+    def _population_directional_distribution(
+        self,
+        records: Sequence[ScopeRecord],
+        scope_geometry: BaseGeometry,
+        metric_id: str,
+    ) -> dict[str, Any]:
+        origin = scope_geometry.centroid
+        lon0 = float(origin.x)
+        lat0 = float(origin.y)
+        radius_m = 6_371_008.8
+        longitude_scale = math.cos(math.radians(lat0))
+        samples: list[tuple[float, float, float]] = []
+        for record in records:
+            clipped = record.geometry.intersection(scope_geometry)
+            if clipped.is_empty:
+                continue
+            weight = float(self._population_target_value([record], clipped, metric_id) or 0.0)
+            if weight <= 0:
+                continue
+            point = clipped.centroid
+            x = radius_m * math.radians(float(point.x) - lon0) * longitude_scale
+            y = radius_m * math.radians(float(point.y) - lat0)
+            samples.append((x, y, weight))
+        total_weight = sum(weight for _, _, weight in samples)
+        if total_weight <= 0:
+            return {
+                "target_metric_id": metric_id,
+                "weighted_center_wgs84": None,
+                "standard_deviation_ellipse": None,
+                "weighted_cell_count": 0,
+            }
+        mean_x = sum(x * weight for x, _, weight in samples) / total_weight
+        mean_y = sum(y * weight for _, y, weight in samples) / total_weight
+        variance_x = sum(weight * (x - mean_x) ** 2 for x, _, weight in samples) / total_weight
+        variance_y = sum(weight * (y - mean_y) ** 2 for _, y, weight in samples) / total_weight
+        covariance_xy = sum(
+            weight * (x - mean_x) * (y - mean_y)
+            for x, y, weight in samples
+        ) / total_weight
+        trace = variance_x + variance_y
+        delta = math.sqrt(max(0.0, (variance_x - variance_y) ** 2 + 4.0 * covariance_xy ** 2))
+        major_variance = max(0.0, (trace + delta) / 2.0)
+        minor_variance = max(0.0, (trace - delta) / 2.0)
+        if abs(covariance_xy) > 1e-12:
+            vector_x = major_variance - variance_y
+            vector_y = covariance_xy
+        elif variance_x >= variance_y:
+            vector_x, vector_y = 1.0, 0.0
+        else:
+            vector_x, vector_y = 0.0, 1.0
+        orientation = math.degrees(math.atan2(vector_x, vector_y)) % 180.0
+        center_lon = lon0 + math.degrees(mean_x / (radius_m * longitude_scale))
+        center_lat = lat0 + math.degrees(mean_y / radius_m)
+        return {
+            "target_metric_id": metric_id,
+            "weighted_center_wgs84": [round(center_lon, 6), round(center_lat, 6)],
+            "standard_deviation_ellipse": {
+                "major_axis_standard_distance_m": round(math.sqrt(major_variance), 1),
+                "minor_axis_standard_distance_m": round(math.sqrt(minor_variance), 1),
+                "orientation_degrees_clockwise_from_north": round(orientation, 1),
+            },
+            "weighted_cell_count": len(samples),
+            "total_weight": _rounded(total_weight),
+        }
+
+    @staticmethod
+    def _population_direction_geometries(
+        center: tuple[float, float],
+        scope_geometry: BaseGeometry,
+    ) -> list[tuple[str, BaseGeometry]]:
+        min_x, min_y, max_x, max_y = scope_geometry.bounds
+        radius = max(math.hypot(x - center[0], y - center[1]) for x, y in (
+            (min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y),
+        )) * 4.0
+        angles = {"E": 0.0, "NE": 45.0, "N": 90.0, "NW": 135.0, "W": 180.0, "SW": 225.0, "S": 270.0, "SE": 315.0}
+        result = []
+        for direction in DIRECTION_CODES:
+            angle = angles[direction]
+            low = math.radians(angle - 22.5)
+            high = math.radians(angle + 22.5)
+            sector = Polygon([
+                center,
+                (center[0] + math.cos(low) * radius, center[1] + math.sin(low) * radius),
+                (center[0] + math.cos(high) * radius, center[1] + math.sin(high) * radius),
+                center,
+            ])
+            result.append((direction, sector.intersection(scope_geometry)))
+        return result
 
     def _representative_records(
         self,
@@ -2457,12 +4233,21 @@ class SpatialEvidenceService:
         project: Mapping[str, Any],
         scope: dict[str, Any],
         rows: list[_SpatialRow],
+        records: Mapping[str, list[ScopeRecord]],
         years: Mapping[str, int | None],
         warnings: list[str],
     ) -> dict[str, Any]:
         targets = [row for row in rows if self._matches_ref(row.record_ref, query.record_refs)]
         groups = []
         highlights = []
+        named_spatial_objects: list[dict[str, Any]] = []
+        scope_geometry, _ = self._scope_geometry(project)
+        source_records = {
+            self._record_ref(record): record
+            for values in records.values()
+            for record in values
+        }
+        selected_pois = self._selected_records(records.get(_POI, []), query.selectors, _POI)
         for target in targets[:20]:
             neighborhood = {target.record_ref: target}
             frontier = [target]
@@ -2479,6 +4264,33 @@ class SpatialEvidenceService:
             payload = self._group_payload(target.record_ref, members, query.metric_ids)
             payload["target_values"] = dict(target.values)
             payload["neighbor_count"] = max(0, len(members) - 1)
+            target_record = source_records.get(target.record_ref)
+            if (
+                target_record is not None
+                and target.source_id == _H3
+                and scope_geometry is not None
+                and selected_pois
+            ):
+                neighbor_records = [
+                    record
+                    for member in members
+                    if member.record_ref != target.record_ref
+                    if (record := source_records.get(member.record_ref)) is not None
+                ]
+                poi_context = build_poi_neighborhood_profile(
+                    target=target_record,
+                    neighbors=neighbor_records,
+                    poi_records=selected_pois,
+                    scope_geometry=scope_geometry,
+                    named_limit=query.top_k,
+                )
+                payload["poi_context"] = poi_context
+                for facility in poi_context["named_facilities"]:
+                    named_spatial_objects.append({
+                        **facility,
+                        "object_type": "poi",
+                        "target_record_ref": target.record_ref,
+                    })
             groups.append(payload)
             highlights.append(self._highlight(target, query.metric_ids, reason=f"{query.neighbor_steps}级邻域目标"))
         if not targets:
@@ -2488,20 +4300,12 @@ class SpatialEvidenceService:
             for group in groups
         ]
         coverage = self._row_coverage(rows, query.metric_ids)
-        summary: dict[str, Any] = {"target_count": len(targets), "neighbor_steps": query.neighbor_steps}
-        if any(row.source_id == _H3 for row in rows):
-            h3_summary = self._dataset_summary(project, _H3)
-            moran_i = _number(h3_summary.get("global_moran_i_density"))
-            moran_z = _number(h3_summary.get("global_moran_z_score"))
-            if moran_i is not None:
-                summary["density_spatial_autocorrelation"] = {
-                    "global_moran_i": moran_i,
-                    "global_moran_z_score": moran_z,
-                    "significance_status": "available" if moran_z is not None else "not_available",
-                    "statistic_scope": "all_persisted_h3_cells",
-                    "spatial_unit_count": int(_number(h3_summary.get("grid_count")) or len(rows)),
-                    "poi_count_in_spatial_units": int(_number(h3_summary.get("poi_count")) or 0),
-                }
+        summary: dict[str, Any] = {
+            "target_count": len(targets),
+            "neighbor_steps": query.neighbor_steps,
+            "spatial_universe": "saved_isochrone",
+            "comparison_semantics": "target_h3_vs_in_scope_neighbors",
+        }
         return self._response(
             query=query,
             project=project,
@@ -2510,14 +4314,21 @@ class SpatialEvidenceService:
             summary=summary,
             groups=groups,
             highlights=highlights,
+            named_spatial_objects=named_spatial_objects[:20],
             coverage=coverage,
             evidence=evidence,
             limitations=warnings + self._row_coverage_limitations(coverage),
             method={
-                "kind": "road_edge_topology" if rows and rows[0].source_id == _ROAD_EDGES else "geometry_adjacency",
+                "kind": (
+                    "road_edge_topology"
+                    if rows and rows[0].source_id == _ROAD_EDGES
+                    else "h3_k_ring_or_geometry_adjacency"
+                    if rows and rows[0].source_id == _H3
+                    else "geometry_adjacency"
+                ),
                 "neighbor_steps": query.neighbor_steps,
-                "local_statistics": "persisted_h3_spatial_statistics" if rows and rows[0].source_id == _H3 else None,
-                "spatial_statistics_recomputed": False,
+                "spatial_universe": "saved_isochrone",
+                "comparison": "descriptive_target_vs_neighbors",
             },
             provenance=self._provenance(project, years, {row.source_id for row in rows}),
         )
@@ -2552,45 +4363,33 @@ class SpatialEvidenceService:
         warnings: list[str],
     ) -> dict[str, Any]:
         complete = [row for row in rows if all(row.values.get(metric_id) is not None for metric_id in query.metric_ids)]
-        if len(complete) < 20:
+        if not complete:
             return self._unavailable(
                 query,
                 project,
-                f"共同有效空间单元只有 {len(complete)} 个，少于关系分析要求的 20 个。",
+                "当前等时圈内没有同时包含所选事实的共同空间单元。",
                 scope=scope,
             )
-        thresholds = {
-            metric_id: {
-                "p25": _quantile([float(row.values[metric_id]) for row in complete], 0.25),
-                "p75": _quantile([float(row.values[metric_id]) for row in complete], 0.75),
-            }
-            for metric_id in query.metric_ids
-        }
-        patterns = {"joint_high": [], "joint_low": [], "conflict": [], "middle": []}
-        for row in complete:
-            states = []
-            for metric_id in query.metric_ids:
-                value = float(row.values[metric_id])
-                threshold = thresholds[metric_id]
-                states.append("high" if value >= threshold["p75"] else "low" if value <= threshold["p25"] else "middle")
-            pattern = "joint_high" if all(state == "high" for state in states) else "joint_low" if all(state == "low" for state in states) else "conflict" if "high" in states and "low" in states else "middle"
-            patterns[pattern].append(row)
         relationship = {
             "spatial_unit_count": len(complete),
-            "thresholds": thresholds,
-            "pattern_counts": {key: len(value) for key, value in patterns.items()},
-            "correlation_computed": False,
-            "combined_score_computed": False,
+            "distributions": {
+                metric_id: self._distribution(
+                    [self._row_metric_value(row, metric_id) for row in complete],
+                    len(complete),
+                )
+                for metric_id in query.metric_ids
+            },
+            "unit_values": [
+                {
+                    "record_ref": row.record_ref,
+                    "values": {
+                        metric_id: _rounded(self._row_metric_value(row, metric_id))
+                        for metric_id in query.metric_ids
+                    },
+                }
+                for row in complete[:80]
+            ],
         }
-        highlighted = (patterns["joint_high"] + patterns["conflict"] + patterns["joint_low"])[: query.top_k]
-        highlights = [
-            self._highlight(row, query.metric_ids, reason=next(key for key, values in patterns.items() if row in values))
-            for row in highlighted
-        ]
-        evidence = [
-            self._evidence(project, query, f"relationship:{key}", query.metric_ids, [row.record_ref for row in values[: query.top_k]], {"count": len(values)})
-            for key, values in patterns.items()
-        ]
         coverage = self._row_coverage(rows, query.metric_ids)
         return self._response(
             query=query,
@@ -2598,16 +4397,19 @@ class SpatialEvidenceService:
             scope=scope,
             metrics=self._metric_descriptors(query.metric_ids),
             summary={"common_valid_cell_count": len(complete)},
-            highlights=highlights,
             relationship=relationship,
             coverage=coverage,
-            evidence=evidence,
+            evidence=[],
             limitations=(
                 warnings
                 + self._row_coverage_limitations(coverage)
-                + ["分位共位仅描述空间共同出现，不表示因果关系。"]
+                + ["返回共同空间单元的数值事实，不生成高低共位类别或因果判断。"]
             ),
-            method={"kind": "p25_p75_colocation", "correlation": False, "combined_score": False},
+            method={
+                "correlation": False,
+                "combined_score": False,
+                "spatial_universe": "saved_isochrone",
+            },
             provenance=self._provenance(project, years, {row.source_id for row in rows}),
         )
 
@@ -2989,12 +4791,17 @@ class SpatialEvidenceService:
                     )
                     aggregation_factors[metric_id] = (
                         self._geometry_overlap_fraction(geometry, scope_geometry)
-                        if binding.aggregate == "sum" and geometry.geom_type in {"LineString", "MultiLineString"}
+                        if binding.aggregate == "sum" and geometry.geom_type not in {"Point", "MultiPoint"}
                         else 1.0
                     )
                 else:
                     candidates = indexes.get(source_id, _RecordIndex([])).query(clipped_geometry)
-                    values[metric_id] = self._value_for_unit(binding, clipped_geometry, candidates)
+                    values[metric_id] = self._value_for_unit(
+                        binding,
+                        clipped_geometry,
+                        candidates,
+                        allocate_areal_overlap=binding.metric_id.startswith("population."),
+                    )
                     aggregation_factors[metric_id] = 1.0
             rows.append(_SpatialRow(
                 record_ref=self._record_ref(base), source_id=base_source, record_id=base.record_id,
@@ -3046,6 +4853,11 @@ class SpatialEvidenceService:
 
         groups: list[dict[str, Any]] = []
         evidence: list[dict[str, Any]] = []
+        cumulative_poi_counts = {
+            metric_id: 0.0
+            for metric_id in query.metric_ids
+            if metric_id == "poi.count"
+        }
         for band_index, (band, geometry) in enumerate(band_geometries):
             values = {
                 metric_id: self._accessibility_metric_value(
@@ -3056,15 +4868,29 @@ class SpatialEvidenceService:
                 )
                 for metric_id, (binding, selected) in selected_by_metric.items()
             }
-            key = f"{_format_band_value(band[0])}-{_format_band_value(band[1])}min"
+            for metric_id in cumulative_poi_counts:
+                cumulative_poi_counts[metric_id] += float(values.get(metric_id) or 0.0)
+                values[metric_id] = round(cumulative_poi_counts[metric_id], 6)
+            cumulative_poi_mode = bool(cumulative_poi_counts) and len(cumulative_poi_counts) == len(query.metric_ids)
+            key = (
+                f"within-{_format_band_value(band[1])}min"
+                if cumulative_poi_mode
+                else f"{_format_band_value(band[0])}-{_format_band_value(band[1])}min"
+            )
             group = {
                 "key": key,
-                "spatial_unit_count": sum(
-                    self._has_measure_overlap(record.geometry, geometry)
-                    for record in base_records
+                "spatial_unit_count": (
+                    int(values["poi.count"])
+                    if cumulative_poi_mode
+                    else sum(
+                        self._has_measure_overlap(record.geometry, geometry)
+                        for record in base_records
+                    )
                 ),
                 "values": values,
             }
+            if cumulative_poi_mode:
+                group["cumulative_time_min"] = band[1]
             groups.append(group)
             evidence.append(self._evidence(project, query, f"group:{key}", query.metric_ids, [], values))
 
@@ -3099,8 +4925,6 @@ class SpatialEvidenceService:
             for _, selected in selected_by_metric.values()
             for record in selected
         })
-        project_params = project.get("params") if isinstance(project.get("params"), Mapping) else {}
-        scope_time_min = _number(project_params.get("time_min")) or DEFAULT_ISOCHRONE_TIME_MIN
         provenance["travel_time_model"] = {
             "provider": "valhalla",
             "mode": self._project_travel_mode(project),
@@ -3136,6 +4960,7 @@ class SpatialEvidenceService:
                 "outer_band_boundary": "requested_valhalla_contour_clipped_to_saved_project_scope",
                 "allocation_assumptions": allocation_assumptions,
                 "missing_values": "excluded_not_zero_filled",
+                "poi_count_mode": "cumulative_within_time" if cumulative_poi_counts else None,
             },
             provenance=provenance,
         )
@@ -3236,29 +5061,16 @@ class SpatialEvidenceService:
                 for record in covered
             ]
             return self._aggregate_values(binding, [value for value in values if value is not None])
-        areal_records = [
-            record
-            for record in records
-            if record.geometry is not None
+        if records and all(
+            record.geometry is not None
             and record.geometry.geom_type in {"Polygon", "MultiPolygon"}
-            and self._has_measure_overlap(record.geometry, geometry)
-        ]
-        if areal_records and len(areal_records) == len(records):
-            values = [
-                (value, float(record.geometry.area))
-                for record in areal_records
-                if (value := self._direct_record_value(binding, record)) is not None
-            ]
-            if not values:
-                return None
-            numeric = [value for value, _ in values]
-            if binding.aggregate in {"sum", "max", "p90", "ratio_positive"}:
-                return self._aggregate_values(binding, numeric)
-            total_area = sum(area for _, area in values)
-            return (
-                sum(value * area for value, area in values) / total_area
-                if total_area > 0
-                else self._aggregate_values(binding, numeric)
+            for record in records
+        ):
+            return self._value_for_unit(
+                binding,
+                geometry,
+                records,
+                allocate_areal_overlap=True,
             )
         return self._value_for_unit(binding, geometry, records)
 
@@ -3476,6 +5288,11 @@ class SpatialEvidenceService:
                 required.update(source_id for source_id in binding.source_ids if source_id in available)
         if query.named_poi_roles:
             required.add(_POI)
+        if (
+            query.analysis == "neighborhood"
+            and any(metric_id.startswith("poi.") or metric_id == "spatial.neighbor_density_delta" for metric_id in query.metric_ids)
+        ):
+            required.add(_POI)
         if query.analysis == "inspect":
             referenced_sources = {
                 source_id
@@ -3661,12 +5478,16 @@ class SpatialEvidenceService:
         return next((source_id for source_id in binding.source_ids if records.get(source_id)), "")
 
     @staticmethod
+    def _row_metric_value(row: _SpatialRow, metric_id: str) -> float:
+        return float(row.values[metric_id]) * row.aggregation_factors.get(metric_id, 1.0)
+
+    @staticmethod
     def _group_payload(key: str, rows: Sequence[_SpatialRow], metric_ids: Sequence[str]) -> dict[str, Any]:
         values = {}
         for metric_id in metric_ids:
             binding = METRIC_BINDINGS[metric_id]
             numeric = [
-                float(row.values[metric_id]) * row.aggregation_factors.get(metric_id, 1.0)
+                SpatialEvidenceService._row_metric_value(row, metric_id)
                 for row in rows
                 if row.values.get(metric_id) is not None
             ]
@@ -3735,7 +5556,13 @@ class SpatialEvidenceService:
         return limitations
 
     @staticmethod
-    def _highlight(row: _SpatialRow, metric_ids: Sequence[str], *, reason: str) -> dict[str, Any]:
+    def _highlight(
+        row: _SpatialRow,
+        metric_ids: Sequence[str],
+        *,
+        reason: str,
+        apply_aggregation_factors: bool = False,
+    ) -> dict[str, Any]:
         payload = {
             "record_ref": row.record_ref,
             "title": row.title,
@@ -3743,7 +5570,16 @@ class SpatialEvidenceService:
             "centroid_wgs84": [round(row.centroid[0], 6), round(row.centroid[1], 6)],
             "straight_line_distance_m": round(row.distance_m, 1),
             "direction": row.direction,
-            "values": {metric_id: _rounded(row.values.get(metric_id)) for metric_id in metric_ids},
+            "values": {
+                metric_id: _rounded(
+                    SpatialEvidenceService._row_metric_value(row, metric_id)
+                    if apply_aggregation_factors
+                    else row.values.get(metric_id)
+                )
+                if row.values.get(metric_id) is not None
+                else None
+                for metric_id in metric_ids
+            },
             "reason": reason,
         }
         return payload
@@ -3868,14 +5704,48 @@ class SpatialEvidenceService:
         }
 
     @staticmethod
-    def _provenance(project: Mapping[str, Any], years: Mapping[str, int | None], source_ids: Iterable[str]) -> dict[str, Any]:
+    def _provenance(
+        project: Mapping[str, Any],
+        years: Mapping[str, int | Sequence[int] | None],
+        source_ids: Iterable[str],
+    ) -> dict[str, Any]:
         snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
         sources = sorted(source_id for source_id in source_ids if source_id)
+        datasets_by_source = {
+            str(item.get("source_id")): item
+            for item in project.get("datasets") or []
+            if isinstance(item, Mapping) and str(item.get("source_id") or "") in sources
+        }
+        data_versions = {
+            source_id: {
+                str(key): item[key]
+                for key in (
+                    "version", "dataset_version", "data_version", "selected_year",
+                    "snapshot_id", "unit", "resolution", "available_years",
+                )
+                if item.get(key) not in (None, "")
+            }
+            for source_id, item in datasets_by_source.items()
+        }
+        selected_years = {
+            source_id: (
+                years[source_id]
+                if source_id in years and years[source_id] is not None
+                else datasets_by_source.get(source_id, {}).get("selected_year")
+            )
+            for source_id in sources
+        }
         return {
             "snapshot_id": snapshot_id,
             "source_ids": sources,
-            "selected_years": {source_id: years.get(source_id) for source_id in sources},
-            "result_checksum": "sha256:" + _digest({"snapshot_id": snapshot_id, "sources": sources, "years": dict(years)}),
+            "selected_years": selected_years,
+            "data_versions": data_versions,
+            "result_checksum": "sha256:" + _digest({
+                "snapshot_id": snapshot_id,
+                "sources": sources,
+                "years": selected_years,
+                "data_versions": data_versions,
+            }),
         }
 
     def _unavailable(
@@ -3891,6 +5761,7 @@ class SpatialEvidenceService:
             project=project,
             scope=scope or {},
             status="unavailable",
+            unavailable_reason=limitation,
             metrics=self._metric_descriptors(query.metric_ids),
             coverage={"complete": False},
             limitations=[limitation],
@@ -3905,6 +5776,7 @@ class SpatialEvidenceService:
         project: Mapping[str, Any],
         scope: dict[str, Any],
         status: Literal["available", "unavailable", "failed"] = "available",
+        unavailable_reason: str = "",
         metrics: list[dict[str, Any]] | None = None,
         summary: dict[str, Any] | None = None,
         groups: list[dict[str, Any]] | None = None,
@@ -3943,6 +5815,8 @@ class SpatialEvidenceService:
             })[:24],
             "status": status,
             "analysis": query.analysis,
+            "selectors": [selector.model_dump(mode="json") for selector in query.selectors],
+            "unavailable_reason": unavailable_reason,
             "scope": scope,
             "metrics": metric_payload,
             "summary": summary or {},
@@ -4019,9 +5893,15 @@ def _looks_like_internal_path_or_connection(value: str) -> bool:
     return bool(re.match(r"^(?:postgres(?:ql)?|mysql|mariadb|redis|sqlite)://", normalized, re.IGNORECASE))
 def _bounded_model_response(response: Mapping[str, Any]) -> dict[str, Any]:
     """Project a spatial result into a small, geometry-free model response."""
-    projected = _safe_value(response)
+    source = dict(response)
+    if str(source.get("status") or "") in {"unavailable", "failed"} and not source.get("unavailable_reason"):
+        limitations = source.get("limitations") if isinstance(source.get("limitations"), list) else []
+        first_reason = next((str(item).strip() for item in limitations if str(item).strip()), "")
+        if first_reason:
+            source["unavailable_reason"] = first_reason
+    projected = _safe_value(source)
     if not isinstance(projected, dict):
-        return {"status": "unavailable", "limitations": ["空间结果投影失败。"]}
+        return {"status": "unavailable"}
 
     for key, limit in (("groups", 12), ("highlights", 20), ("named_spatial_objects", 20), ("evidence", 20)):
         if isinstance(projected.get(key), list):
@@ -4063,7 +5943,7 @@ def _bounded_model_response(response: Mapping[str, Any]) -> dict[str, Any]:
             if key in original_method
         }
         projected["method"].setdefault("kind", "spatial_evidence")
-        projected["provenance"] = {"snapshot_id": str((projected.get("provenance") or {}).get("snapshot_id", ""))}
+        projected["provenance"] = _compact_provenance(projected.get("provenance"))
     if serialized_size() > MODEL_RESPONSE_CHAR_LIMIT and projected.get("summary"):
         projected["summary"] = _compact_summary_for_model(projected["summary"])
         projected["evidence"] = []
@@ -4081,6 +5961,181 @@ def _bounded_model_response(response: Mapping[str, Any]) -> dict[str, Any]:
     return projected
 
 
+def _compact_provenance(value: Any) -> dict[str, Any]:
+    provenance = value if isinstance(value, Mapping) else {}
+    data_versions = provenance.get("data_versions") if isinstance(provenance.get("data_versions"), Mapping) else {}
+    compact_versions = {
+        str(source_id): {
+            str(key): item[key]
+            for key in (
+                "version", "dataset_version", "data_version", "selected_year",
+                "snapshot_id", "unit", "resolution", "available_years",
+            )
+            if isinstance(item, Mapping) and item.get(key) not in (None, "")
+        }
+        for source_id, item in data_versions.items()
+    }
+    return {
+        "snapshot_id": str(provenance.get("snapshot_id") or ""),
+        "source_ids": list(provenance.get("source_ids") or []),
+        "selected_years": dict(provenance.get("selected_years") or {}),
+        "data_versions": compact_versions,
+        "result_checksum": str(provenance.get("result_checksum") or ""),
+    }
+
+
+_AGENT_RESULT_DROP_KEYS = {
+    "evidence",
+    "limitations",
+    "interpretation",
+    "interpretation_basis",
+    "semantics",
+    "comparison_semantics",
+    "weight_semantics",
+    "facility_weight_semantics",
+    "count_semantics",
+    "capacity_semantics",
+    "time_series_semantics",
+    "no_road_metric_semantics",
+    "used_metric_ids",
+    "metrics",
+    "metric_id",
+    "metric_ids",
+    "target_metric_id",
+    "tool_id",
+    "tool_version",
+    "pattern_counts",
+    "dimension_labels",
+    "question_semantics",
+    "correlation_computed",
+    "combined_score_computed",
+    "classification_basis",
+    "conflict",
+    "joint_high",
+    "joint_low",
+    "high_low",
+    "low_high",
+    "reason",
+    "source_locator",
+    "source_type",
+    "brightness_pattern",
+    "brightness_context",
+    "brightness_context_level",
+    "brightness_context_summary_text",
+    "brightness_class",
+    "hotspot_class",
+}
+
+
+_AGENT_FACT_KEY_ALIASES = {
+    "clq": "colocation_ratio",
+    "poi.count": "poi_count",
+    "poi.category_count": "category_count",
+    "poi.grid_count": "poi_count",
+    "poi.grid_density": "poi_density_per_km2",
+    "poi.category_density": "poi_density_per_km2",
+    "poi.local_entropy": "shannon_entropy",
+    "poi.neighbor_mean_density": "neighbor_mean_density_per_km2",
+    "poi.neighbor_mean_entropy": "neighbor_mean_entropy",
+    "poi.category_lq": "category_specialization_ratio",
+    "spatial.neighbor_density_delta": "neighbor_density_delta_per_km2",
+    "population.total": "population_count",
+    "population.profile": "population_profile",
+    "population.male": "population_count",
+    "population.female": "population_count",
+    "nightlight.mean_radiance": "mean_radiance",
+    "nightlight.total_radiance": "total_radiance",
+    "nightlight.max_radiance": "max_radiance",
+    "nightlight.p90": "p90_radiance",
+    "nightlight.lit_pixel_ratio": "lit_pixel_ratio",
+    "road.network_size": "road_length_m",
+    "road.network_density": "road_density_km_per_km2",
+    "road.connectivity": "connectivity",
+    "road.control": "control",
+    "road.mean_depth": "mean_depth",
+    "road.degree": "degree",
+    "road.nain": "to_movement",
+    "road.nach": "through_movement",
+    "road.nain.selected_radius": "to_movement",
+    "road.nach.selected_radius": "through_movement",
+}
+
+
+def _agent_fact_key(raw_key: Any) -> str | None:
+    key = str(raw_key)
+    normalized = key.lower()
+    if normalized.startswith("population.age."):
+        return "population_count"
+    if normalized in {"spatial.gi_star", "spatial.lisa", "spatial.lisa_z"}:
+        return None
+    return _AGENT_FACT_KEY_ALIASES.get(normalized, key)
+
+_AGENT_METHOD_FACT_KEYS = {
+    "spatial_universe",
+    "travel_time_bands_min",
+    "travel_mode",
+    "spatial_unit_assignment",
+    "spatial_aggregation",
+    "neighbor_steps",
+    "period",
+    "cell_matching",
+    "point_inclusion",
+    "output_unit",
+    "walking_speed_km_h",
+    "missing_values",
+    "extensive_metric_allocation",
+    "population_allocation",
+}
+
+
+def _agent_public_projection(value: Any, *, key: str = "") -> Any:
+    """Keep the Agent-facing contract factual while hiding executor internals."""
+
+    if isinstance(value, Mapping):
+        if key == "method":
+            return {
+                str(raw_key): _agent_public_projection(item, key=str(raw_key).lower())
+                for raw_key, item in value.items()
+                if str(raw_key).lower() in _AGENT_METHOD_FACT_KEYS
+            }
+        projected: dict[str, Any] = {}
+        for raw_key, item in value.items():
+            normalized_key = str(raw_key).lower()
+            if normalized_key in _AGENT_RESULT_DROP_KEYS:
+                continue
+            public_key = _agent_fact_key(raw_key)
+            if public_key is None:
+                continue
+            public_value = _agent_public_projection(item, key=normalized_key)
+            if public_key in projected and projected[public_key] != public_value:
+                existing = projected[public_key]
+                projected[public_key] = (
+                    [*existing, public_value]
+                    if isinstance(existing, list)
+                    else [existing, public_value]
+                )
+            else:
+                projected[public_key] = public_value
+        return projected
+    if isinstance(value, (list, tuple)):
+        if key == "fact_domains":
+            return [
+                _agent_public_projection(item.get("domain"), key="domain")
+                if isinstance(item, Mapping) and item.get("domain") is not None
+                else _agent_public_projection(item, key=key)
+                for item in value
+            ]
+        if key == "evidence_dimensions":
+            return [
+                _agent_public_projection(item.get("dimension"), key="dimension")
+                if isinstance(item, Mapping) and item.get("dimension") is not None
+                else _agent_public_projection(item, key=key)
+                for item in value
+            ]
+        return [_agent_public_projection(item, key=key) for item in value]
+    return value
+
+
 def _compact_summary_for_model(value: Any, *, depth: int = 0) -> Any:
     """Keep decision-bearing summary fields while bounding verbose nested payloads."""
 
@@ -4092,7 +6147,7 @@ def _compact_summary_for_model(value: Any, *, depth: int = 0) -> Any:
         return str(value)[:160] if isinstance(value, str) else value
     if isinstance(value, Mapping):
         priority = (
-            "status", "year", "period", "level", "snapshot", "spatial_pattern", "activity_background",
+            "status", "year", "period", "level", "snapshot", "brightness_pattern", "brightness_context",
             "temporal", "series", "change_2023_2025", "change_2024_2026", "spatial_change",
             "summary", "analysis", "result_id", "tool_id", "tool_version",
         )
@@ -4149,6 +6204,38 @@ def _compact_value(value: Any, *, depth: int = 0) -> Any:
     return value
 
 
+def _dataset_available_years(project: Mapping[str, Any], source_id: str) -> list[int]:
+    descriptor = next(
+        (
+            item
+            for item in project.get("datasets") or []
+            if isinstance(item, Mapping) and str(item.get("source_id") or "") == source_id
+        ),
+        {},
+    )
+    return sorted({
+        int(year)
+        for year in descriptor.get("available_years") or []
+        if str(year).isdigit()
+    })
+
+
+def _polygon_payload(geometry: BaseGeometry) -> list:
+    polygons = (
+        [geometry]
+        if isinstance(geometry, Polygon)
+        else [part for part in getattr(geometry, "geoms", ()) if isinstance(part, Polygon)]
+    )
+    rings = [
+        [[float(x), float(y)] for x, y in polygon.exterior.coords]
+        for polygon in polygons
+        if not polygon.is_empty
+    ]
+    if not rings:
+        raise ValueError("scope_geometry_requires_polygon")
+    return rings[0] if len(rings) == 1 else rings
+
+
 def _number(value: Any) -> float | None:
     try:
         number = float(value)
@@ -4159,6 +6246,28 @@ def _number(value: Any) -> float | None:
 
 def _rounded(value: float | None) -> float | None:
     return round(float(value), 6) if value is not None else None
+
+
+def spatial_data_identity(project: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return the stable dataset identity used for result reproducibility."""
+
+    identity: list[dict[str, Any]] = []
+    for item in project.get("datasets") or []:
+        if not isinstance(item, Mapping):
+            continue
+        source_id = str(item.get("source_id") or "").strip()
+        if not source_id:
+            continue
+        row: dict[str, Any] = {"source_id": source_id}
+        for key in (
+            "version", "dataset_version", "data_version", "selected_year",
+            "snapshot_id", "unit", "resolution", "available_years",
+            "record_count", "checksum", "artifact_id",
+        ):
+            if item.get(key) not in (None, ""):
+                row[key] = item[key]
+        identity.append(row)
+    return sorted(identity, key=lambda item: str(item["source_id"]))
 
 
 def _quantile(values: Sequence[float], quantile: float) -> float:
@@ -4228,6 +6337,7 @@ __all__ = [
     "FactDomain",
     "METRIC_BINDINGS",
     "SCHEMA_VERSION",
+    "spatial_data_identity",
     "SpatialDomainComputationRequest",
     "SpatialEvidenceRequest",
     "SpatialEvidenceSelector",

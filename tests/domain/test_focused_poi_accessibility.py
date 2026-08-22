@@ -15,7 +15,7 @@ from modules.spatial_action.focused_poi_accessibility import (
     FocusedPoiTypeGroup,
 )
 from modules.spatial_action.project_context import ProjectSpatialAnalysisService
-from modules.spatial_action.road_network_routing import LocalRoadNetworkRouter, RoadNetworkRoutingUnavailable, build_route_map_context
+from modules.spatial_action.road_network_routing import LocalRoadNetworkRouter, build_route_map_context
 
 
 @dataclass
@@ -46,6 +46,16 @@ def _road_lines(*, include_far: bool = False) -> list[LineString]:
         # This curved branch proves the emitted geometry retains real road bends.
         LineString([(120.003, 30.001), (120.0032, 30.0014), (120.0034, 30.0018), (120.0038, 30.002)]),
     ]
+
+
+def test_bulk_reachable_distances_include_both_road_access_legs() -> None:
+    router = LocalRoadNetworkRouter([LineString([(120.0, 30.0), (120.002, 30.0)])])
+    origin = (120.0, 30.0005)
+    destination = (120.001, 30.0005)
+
+    assert router.reachable_distances(origin, [destination], max_distance_m=200) == [None]
+    distance = router.reachable_distances(origin, [destination], max_distance_m=300)[0]
+    assert distance == pytest.approx(207.5, abs=3)
 
 
 def _router(*, include_far: bool = False) -> RecordingLocalRouter:
@@ -146,6 +156,8 @@ def test_routes_are_sorted_by_local_network_length_and_limited_to_three() -> Non
     group = result.groups[0]
     assert [poi.poi_id for poi in group.pois] == ["p0", "p1", "p2"]
     assert len(group.pois) == 3
+    assert group.reachable_poi_count == 4
+    assert group.reachable_count_by_minutes[-1] == (15.0, 4)
     assert [poi.walking_distance_m for poi in group.pois] == sorted(poi.walking_distance_m for poi in group.pois)
     assert all(poi.walking_duration_s <= 15 * 60 for poi in group.pois)
 
@@ -201,7 +213,8 @@ def test_filters_out_pois_beyond_two_kilometres_and_omits_routes_over_fifteen_mi
         pois=[_poi("late", "超时点", "050100", (120.013, 30.001))],
     )
     assert long_route.status == "omitted"
-    assert long_route.groups[0].omission_reason == "no_local_road_path"
+    assert long_route.groups[0].omission_reason == "no_reachable_poi_within_time"
+    assert long_route.groups[0].outside_time_limit_count == 1
 
 
 def _scope_record(*, source_id: str, record_id: str, title: str, geometry, raw: dict, properties: dict | None = None) -> ScopeRecord:

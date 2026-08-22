@@ -8,12 +8,12 @@ calls a remote routing provider and never fabricates a straight-line route.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import asin, cos, radians, sin, sqrt
+from math import asin, cos, isfinite, radians, sin, sqrt
 from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from shapely.geometry import MultiPolygon, Polygon, shape
 
-from .road_network_routing import RoadNetworkRoute
+from .road_network_routing import RoadNetworkRoute, RoadNetworkRoutingUnavailable
 
 Coordinate = tuple[float, float]
 FocusedPoiRole = Literal["category_supply", "complementary_anchor", "comparison_supply"]
@@ -21,8 +21,8 @@ FocusedPoiGroupStatus = Literal["available", "omitted"]
 FocusedPoiAccessibilityStatus = Literal["complete", "partial", "omitted", "error"]
 
 MAX_FOCUSED_POI_GROUPS = 4
-MAX_ROUTE_VERIFIED_POIS_PER_GROUP = 3
-DEFAULT_ROUTE_CANDIDATES_PER_GROUP = 30
+DEFAULT_ROUTE_VERIFIED_POIS_PER_GROUP = 3
+MAX_ROUTE_VERIFIED_POIS_PER_GROUP = 20
 DEFAULT_MAX_CANDIDATE_DISTANCE_M = 2_000.0
 DEFAULT_MAX_WALKING_DURATION_S = 15 * 60.0
 DEFAULT_WALKING_SPEED_M_PER_S = 1.25  # 4.5 km/h; transparent presentation convention.
@@ -32,6 +32,16 @@ class LocalRoadRouter(Protocol):
     """The minimum local-road routing contract needed by this domain service."""
 
     def route(self, origin: Coordinate, destination: Coordinate) -> RoadNetworkRoute: ...
+
+
+class LocalRoadReachabilityRouter(Protocol):
+    def reachable_distances(
+        self,
+        origin: Coordinate,
+        destinations: Sequence[Coordinate],
+        *,
+        max_distance_m: float,
+    ) -> list[float | None]: ...
 
 
 @dataclass(frozen=True)
@@ -88,6 +98,9 @@ class FocusedPoiGroupResult:
     pois: tuple[RouteVerifiedPoi, ...] = ()
     candidates_considered: int = 0
     route_failures: int = 0
+    reachable_poi_count: int = 0
+    reachable_count_by_minutes: tuple[tuple[float, int], ...] = ()
+    outside_time_limit_count: int = 0
     omission_reason: str | None = None
 
 
@@ -100,6 +113,151 @@ class FocusedPoiAccessibilityResult:
     groups: tuple[FocusedPoiGroupResult, ...]
     error_reason: str | None = None
     diagnostics: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class EqualWeightFacility:
+    facility_id: str
+    name: str
+    location: Coordinate
+
+
+@dataclass(frozen=True)
+class PopulationDemandPoint:
+    demand_id: str
+    location: Coordinate
+    population: float
+
+
+class EqualWeightSupplyDemandAccessibilityService:
+    """Compare relative facility supply against population over one saved road graph."""
+
+    def __init__(
+        self,
+        router: LocalRoadReachabilityRouter,
+        *,
+        walking_speed_m_per_s: float = DEFAULT_WALKING_SPEED_M_PER_S,
+    ) -> None:
+        self._router = router
+        self._walking_speed_m_per_s = max(0.1, float(walking_speed_m_per_s))
+
+    def analyze(
+        self,
+        *,
+        facilities: Sequence[EqualWeightFacility],
+        demand_points: Sequence[PopulationDemandPoint],
+        reporting_minutes: Sequence[float],
+        demand_result_limit: int = 20,
+    ) -> dict[str, Any]:
+        facilities = tuple(facilities)
+        demand_points = tuple(item for item in demand_points if item.population > 0 and isfinite(item.population))
+        minutes = tuple(sorted({float(value) for value in reporting_minutes if float(value) > 0}))
+        if not facilities or not demand_points or not minutes:
+            raise ValueError("equal_weight_accessibility_requires_facilities_population_and_time_bands")
+
+        max_distance_m = minutes[-1] * 60.0 * self._walking_speed_m_per_s
+        destinations = [item.location for item in demand_points]
+        distance_rows: list[list[float | None]] = []
+        failed_facility_origins = 0
+        for facility in facilities:
+            try:
+                distances = self._router.reachable_distances(
+                    facility.location,
+                    destinations,
+                    max_distance_m=max_distance_m,
+                )
+            except RoadNetworkRoutingUnavailable:
+                distances = [None] * len(demand_points)
+                failed_facility_origins += 1
+            if len(distances) != len(demand_points):
+                distances = [None] * len(demand_points)
+                failed_facility_origins += 1
+            distance_rows.append(distances)
+
+        band_results = []
+        max_band_scores: list[float] = []
+        max_band_facility_rows: list[dict[str, Any]] = []
+        for threshold_min in minutes:
+            threshold_m = threshold_min * 60.0 * self._walking_speed_m_per_s
+            facility_supply_ratios: list[float | None] = []
+            facility_rows = []
+            for facility, distances in zip(facilities, distance_rows):
+                reachable_population = sum(
+                    demand.population
+                    for demand, distance in zip(demand_points, distances)
+                    if distance is not None and distance <= threshold_m
+                )
+                ratio = 1.0 / reachable_population if reachable_population > 0 else None
+                facility_supply_ratios.append(ratio)
+                facility_rows.append({
+                    "record_ref": facility.facility_id,
+                    "name": facility.name,
+                    "equal_weight": 1,
+                    "reachable_population": round(reachable_population, 6),
+                    "facility_supply_per_1000_residents": round(ratio * 1000.0, 6) if ratio is not None else None,
+                })
+            demand_scores_per_1000 = [
+                sum(
+                    ratio
+                    for ratio, distances in zip(facility_supply_ratios, distance_rows)
+                    if ratio is not None
+                    and distances[demand_index] is not None
+                    and distances[demand_index] <= threshold_m
+                ) * 1000.0
+                for demand_index in range(len(demand_points))
+            ]
+            total_population = sum(item.population for item in demand_points)
+            population_weighted_mean = (
+                sum(item.population * score for item, score in zip(demand_points, demand_scores_per_1000)) / total_population
+                if total_population > 0
+                else None
+            )
+            band_results.append({
+                "minutes": threshold_min,
+                "reachable_facility_count": sum(ratio is not None for ratio in facility_supply_ratios),
+                "served_population_unit_count": sum(score > 0 for score in demand_scores_per_1000),
+                "population_weighted_mean_facilities_per_1000_residents": (
+                    round(population_weighted_mean, 9)
+                    if population_weighted_mean is not None
+                    else None
+                ),
+                "minimum_facilities_per_1000_residents": round(min(demand_scores_per_1000), 9),
+                "maximum_facilities_per_1000_residents": round(max(demand_scores_per_1000), 9),
+            })
+            if threshold_min == minutes[-1]:
+                max_band_scores = demand_scores_per_1000
+                max_band_facility_rows = facility_rows
+
+        demand_rows = [
+            {
+                "record_ref": demand.demand_id,
+                "population": round(demand.population, 6),
+                "facilities_per_1000_residents": round(score, 9),
+                "reachable_facility_count": sum(
+                    distance_rows[facility_index][demand_index] is not None
+                    for facility_index in range(len(facilities))
+                ),
+            }
+            for demand_index, (demand, score) in enumerate(zip(demand_points, max_band_scores))
+        ]
+        demand_rows.sort(key=lambda item: (item["facilities_per_1000_residents"], item["record_ref"]))
+        within_max_catchment_pair_count = sum(
+            distance is not None
+            for distances in distance_rows
+            for distance in distances
+        )
+        return {
+            "facility_count": len(facilities),
+            "population_unit_count": len(demand_points),
+            "total_population": round(sum(item.population for item in demand_points), 6),
+            "equal_weight_facility_count": len(facilities),
+            "bands": band_results,
+            "facilities": max_band_facility_rows,
+            "demand_units": demand_rows[: max(1, int(demand_result_limit))],
+            "route_pair_count": len(facilities) * len(demand_points),
+            "within_max_catchment_pair_count": within_max_catchment_pair_count,
+            "failed_facility_origins": failed_facility_origins,
+        }
 
 
 class FocusedPoiAccessibilityService:
@@ -117,19 +275,29 @@ class FocusedPoiAccessibilityService:
         router: LocalRoadRouter,
         *,
         max_groups: int = MAX_FOCUSED_POI_GROUPS,
-        max_candidates_per_group: int = DEFAULT_ROUTE_CANDIDATES_PER_GROUP,
-        max_results_per_group: int = MAX_ROUTE_VERIFIED_POIS_PER_GROUP,
+        max_candidates_per_group: int | None = None,
+        max_results_per_group: int = DEFAULT_ROUTE_VERIFIED_POIS_PER_GROUP,
         max_candidate_distance_m: float = DEFAULT_MAX_CANDIDATE_DISTANCE_M,
         max_walking_duration_s: float = DEFAULT_MAX_WALKING_DURATION_S,
         walking_speed_m_per_s: float = DEFAULT_WALKING_SPEED_M_PER_S,
+        reporting_minutes: Sequence[float] = (5.0, 10.0, 15.0),
     ) -> None:
         self._router = router
         self._max_groups = min(MAX_FOCUSED_POI_GROUPS, max(1, int(max_groups)))
-        self._max_candidates_per_group = max(1, int(max_candidates_per_group))
+        self._max_candidates_per_group = (
+            max(1, int(max_candidates_per_group))
+            if max_candidates_per_group is not None
+            else None
+        )
         self._max_results_per_group = min(MAX_ROUTE_VERIFIED_POIS_PER_GROUP, max(1, int(max_results_per_group)))
         self._max_candidate_distance_m = max(1.0, float(max_candidate_distance_m))
         self._max_walking_duration_s = max(1.0, float(max_walking_duration_s))
         self._walking_speed_m_per_s = max(0.1, float(walking_speed_m_per_s))
+        self._reporting_minutes = tuple(sorted({
+            float(value)
+            for value in reporting_minutes
+            if float(value) > 0 and float(value) * 60 <= self._max_walking_duration_s
+        }))
 
     def analyze(
         self,
@@ -174,9 +342,12 @@ class FocusedPoiAccessibilityService:
         ]
         if not matched:
             return _omitted_group(group, "no_matching_pois")
-        candidates = sorted(matched, key=lambda item: (_haversine_m(origin, item[1]), item[0].poi_id, item[0].name))[: self._max_candidates_per_group]
+        candidates = sorted(matched, key=lambda item: (_haversine_m(origin, item[1]), item[0].poi_id, item[0].name))
+        if self._max_candidates_per_group is not None:
+            candidates = candidates[: self._max_candidates_per_group]
         routed: list[RouteVerifiedPoi] = []
         failures = 0
+        outside_time_limit = 0
         for poi, destination in candidates:
             try:
                 route = self._router.route(origin, destination)
@@ -191,6 +362,7 @@ class FocusedPoiAccessibilityService:
             )
             duration_s = walking_distance_m / self._walking_speed_m_per_s
             if duration_s > self._max_walking_duration_s:
+                outside_time_limit += 1
                 continue
             routed.append(RouteVerifiedPoi(
                 poi_id=poi.poi_id,
@@ -212,9 +384,10 @@ class FocusedPoiAccessibilityService:
         if not routed:
             return _omitted_group(
                 group,
-                "no_local_road_path",
+                "no_reachable_poi_within_time" if outside_time_limit else "no_local_road_path",
                 candidates_considered=len(candidates),
                 route_failures=failures,
+                outside_time_limit_count=outside_time_limit,
             )
         selected = tuple(sorted(routed, key=lambda poi: (poi.walking_duration_s, poi.walking_distance_m, poi.poi_id))[: self._max_results_per_group])
         return FocusedPoiGroupResult(
@@ -227,6 +400,12 @@ class FocusedPoiAccessibilityService:
             pois=selected,
             candidates_considered=len(candidates),
             route_failures=failures,
+            reachable_poi_count=len(routed),
+            reachable_count_by_minutes=tuple(
+                (minutes, sum(poi.walking_duration_s <= minutes * 60 for poi in routed))
+                for minutes in self._reporting_minutes
+            ),
+            outside_time_limit_count=outside_time_limit,
         )
 
 
@@ -277,6 +456,7 @@ def _omitted_group(
     *,
     candidates_considered: int = 0,
     route_failures: int = 0,
+    outside_time_limit_count: int = 0,
 ) -> FocusedPoiGroupResult:
     return FocusedPoiGroupResult(
         group_id=group.group_id,
@@ -287,6 +467,7 @@ def _omitted_group(
         statement_ref=group.statement_ref,
         candidates_considered=candidates_considered,
         route_failures=route_failures,
+        outside_time_limit_count=outside_time_limit_count,
         omission_reason=reason,
     )
 
