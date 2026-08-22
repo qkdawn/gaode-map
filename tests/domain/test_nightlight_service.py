@@ -121,7 +121,7 @@ def test_nightlight_grid_layer_and_raster_alignment(tmp_path):
     assert layer["analysis"]["core_hotspot_count"] == 2
     assert abs(float(layer["analysis"]["hotspot_cell_ratio"]) - 0.4375) < 1e-6
     assert float(layer["analysis"]["peak_to_edge_ratio"]) > 1.0
-    assert layer["analysis"]["economic_activity_summary_text"].startswith("基于夜间灯光亮度")
+    assert layer["analysis"]["brightness_context_summary_text"].startswith("等时圈内夜光亮度背景")
 
 
 def test_nightlight_hotspot_layer_builds_categorical_classes(tmp_path):
@@ -140,8 +140,8 @@ def test_nightlight_hotspot_layer_builds_categorical_classes(tmp_path):
     assert layer["analysis"]["emerging_hotspot_count"] == 3
     assert abs(float(layer["analysis"]["hotspot_cell_ratio"]) - 0.4375) < 1e-6
     assert float(layer["analysis"]["peak_radiance"]) == 16.0
-    assert layer["analysis"]["economic_activity_intensity_level"] in {"medium_high", "high"}
-    assert layer["analysis"]["economic_activity_summary_text"].startswith("基于夜间灯光亮度")
+    assert layer["analysis"]["brightness_context_level"] in {"medium_high", "high"}
+    assert layer["analysis"]["brightness_context_summary_text"].startswith("等时圈内夜光亮度背景")
     assert layer["analysis"]["sector_direction_analysis"]["sectors"]
     assert all(cell.get("class_key") in {"core_hotspot", "secondary_hotspot", "emerging_hotspot", "transition", "low_light"} for cell in layer["cells"])
     assert any(str(cell["label"]).startswith("核心热点") for cell in layer["cells"])

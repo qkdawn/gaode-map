@@ -1820,7 +1820,7 @@ metrics:
     - same_source_peer_scope
     - same_scope_previous_period
     - normalized_spatial_unit
-- id: nightlight.activity_level
+- id: nightlight.brightness_context
   name: 夜间亮度空间分级
   family: nightlight
   implementation_status: implemented
@@ -1831,7 +1831,7 @@ metrics:
   - nightlight_dataset
   - scope_geometry
   - dataset_year
-  definition: 根据平均辐亮度、P90、亮灯比例、热点比例和峰边比组合打分得到的夜光代理等级。
+  definition: 根据平均辐亮度、P90、亮灯比例、高亮格比例和峰边比组合得到的等时圈夜光亮度背景等级；不解释为经济活动等级。
   unit: varies
   answers_questions:
   - 哪些夜间亮度空间差异值得核查项目方向、时段或运营场景？

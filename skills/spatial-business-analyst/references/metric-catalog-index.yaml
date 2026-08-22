@@ -71,7 +71,7 @@ metrics:
   - program_location
   - route
   implementation_status: implemented
-- tool_id: nightlight.activity_level
+- tool_id: nightlight.brightness_context
   name: 夜间亮度空间分级
   purpose: 夜间亮度空间分级
   question_tags:

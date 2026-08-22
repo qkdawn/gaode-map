@@ -12,7 +12,7 @@ from core.config import settings
 from .analysis import (
     build_gradient_layer_cells,
     build_hotspot_layer_cells,
-    enrich_economic_activity_analysis,
+    enrich_brightness_context_analysis,
 )
 from .aggregate import aggregate_clip_to_target_cells
 from .common import (
@@ -157,7 +157,7 @@ def _build_complete_layer_analysis(
 
     _merge_payload(gradient_analysis if isinstance(gradient_analysis, dict) else {})
     _merge_payload(hotspot_analysis if isinstance(hotspot_analysis, dict) else {})
-    return enrich_economic_activity_analysis(
+    return enrich_brightness_context_analysis(
         summary,
         analysis,
         aggregated_cells,

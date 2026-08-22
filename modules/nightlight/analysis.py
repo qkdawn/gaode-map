@@ -74,8 +74,8 @@ def _empty_analysis_payload() -> dict[str, Any]:
         "middle_band_count": 0,
         "fringe_band_count": 0,
         "peak_to_edge_ratio": 0.0,
-        "economic_activity_intensity_level": "low",
-        "economic_activity_summary_text": "当前缺少可直接利用的夜间经济活动强度证据。",
+        "brightness_context_level": "low",
+        "brightness_context_summary_text": "当前范围缺少可直接利用的夜光亮度背景数据。",
         "sector_direction_analysis": _empty_sector_direction_analysis(),
     }
 
@@ -183,7 +183,7 @@ def build_sector_direction_analysis(
     }
 
 
-def classify_economic_activity_intensity(
+def classify_brightness_context(
     summary: dict[str, Any],
     analysis: dict[str, Any],
 ) -> str:
@@ -216,7 +216,7 @@ def classify_economic_activity_intensity(
     return "low"
 
 
-def economic_activity_level_label(level: str) -> str:
+def brightness_context_level_label(level: str) -> str:
     return {
         "high": "高",
         "medium_high": "中等偏上",
@@ -225,7 +225,7 @@ def economic_activity_level_label(level: str) -> str:
     }.get(str(level or ""), "偏低")
 
 
-def enrich_economic_activity_analysis(
+def enrich_brightness_context_analysis(
     summary: dict[str, Any],
     analysis: dict[str, Any],
     aggregated_cells: list[AggregatedNightlightCell],
@@ -238,15 +238,15 @@ def enrich_economic_activity_analysis(
         center_gcj02=center_gcj02,
         hotspot_cell_ids=hotspot_cell_ids,
     )
-    level = classify_economic_activity_intensity(summary or {}, payload)
+    level = classify_brightness_context(summary or {}, payload)
     dominant = str(sector_analysis.get("dominant_direction") or "")
     secondary = str(sector_analysis.get("secondary_direction") or "")
     direction_text = f"，亮度高值主要集中在{dominant}" + (f"与{secondary}扇区" if secondary else "扇区") if dominant else ""
     payload.update(
         {
-            "economic_activity_intensity_level": level,
-            "economic_activity_summary_text": (
-                f"基于夜间灯光亮度，等时圈内经济活动强度呈现{economic_activity_level_label(level)}水平{direction_text}。"
+            "brightness_context_level": level,
+            "brightness_context_summary_text": (
+                f"等时圈内夜光亮度背景呈现{brightness_context_level_label(level)}水平{direction_text}。"
             ),
             "sector_direction_analysis": sector_analysis,
         }
