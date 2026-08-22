@@ -7,6 +7,7 @@ when deploying the same server for a remote MCP client.
 
 import argparse
 import base64
+from collections import OrderedDict
 import inspect
 import json
 import os
@@ -35,7 +36,10 @@ from modules.spatial_action.spatial_evidence import (
     FactDomain,
     SpatialEvidenceSelector,
     SpatialEvidenceService,
+    _agent_public_projection,
+    spatial_data_identity,
 )
+from modules.spatial_action.spatial_evidence_results import spatial_evidence_result_store
 from modules.spatial_projects.public_web import (
     PublicWebUnavailable,
     fetch_public_web_page as _fetch_public_web_page,
@@ -242,6 +246,8 @@ mcp = (
 )
 data_contract = ProjectDataContractService(projects=service, metric_results=_list_metric_results)
 spatial_evidence = SpatialEvidenceService(projects=service)
+_SPATIAL_EVIDENCE_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_SPATIAL_EVIDENCE_CACHE_LIMIT = 128
 literature_evidence = LiteratureEvidenceService()
 
 
@@ -341,31 +347,101 @@ def compute_spatial_evidence(
     """Deterministically compute one spatial operation over selected fact domains.
 
     This low-level tool does not interpret a user question or produce a conclusion.
-    POI, population, nightlight, and road are fact domains. Scope, accessibility,
-    direction, neighborhood, rank, relationship, and inspect are operations.
-    Semantic dimensions choose meaning while each domain owns concrete indicators.
-    Rank and relationship require one dimension per fact domain. For persisted
-    continuous road corridors, use road.object=corridor with rank and a movement
-    dimension.
+    Use scope for range facts and domain availability; accessibility for travel-time
+    bands; direction for eight-direction groups; neighborhood for adjacent units;
+    rank for one-domain extremes; relationship for cross-domain co-location or a
+    relationship between two explicitly selected POI categories; and inspect for
+    referenced records. POI, population, nightlight, and road are fact
+    domains; accessibility, neighborhood, relationship, and inspect are operations,
+    not domains. Semantic dimensions choose the meaning while each domain continues
+    to own concrete indicators, fields, and aggregation. Rank and relationship require
+    one dimension per fact domain so road arrival and through-movement are never
+    silently substituted for each other.
+    For POI LQ, provide exactly one poi.category selector; without one, the POI
+    domain returns supply and mix evidence but does not compute an unspecified LQ.
+    For a relationship between two POI categories, use one POI fact domain,
+    poi.supply, and exactly two poi.category values; the POI executor owns the
+    concrete directional point-pattern method. For POI-population accessibility,
+    use both fact domains and one POI category. The executor treats facilities as
+    equal-weight supply and compares their road-reachable coverage against population;
+    the result is relative accessibility, not observed facility capacity.
+    For persisted continuous road corridors, use road.object=corridor with rank and
+    a road.to_movement or road.through_movement dimension.
+    For population, scope returns the population within the saved isochrone,
+    accessibility returns incremental and cumulative travel-time populations,
+    direction returns residential-population distribution sectors, not observed travel origins;
+    rank returns the largest population grids,
+    neighborhood tests contiguous service areas, relationship describes
+    population-to-supply or context mismatch, and inspect expands selected grids.
+    Population structure is summarized internally; statistical significance is not
+    part of these descriptive isochrone operations.
     """
-    return _call(
+    request_payload = {
+        "analysis": analysis,
+        "fact_domains": list(fact_domains or []),
+        "evidence_dimensions": list(evidence_dimensions or []),
+        "selectors": [
+            item.model_dump(mode="json") if isinstance(item, BaseModel) else dict(item)
+            for item in selectors or []
+        ],
+        "travel_time_bands_min": travel_time_bands_min,
+        "neighbor_steps": neighbor_steps,
+        "rank_order": rank_order,
+        "top_k": top_k,
+        "record_refs": list(record_refs or []),
+    }
+    project = _call(service.read_history_project, history_id=history_id)
+    data_identity = (
+        spatial_data_identity(project)
+        if isinstance(project, dict) and project.get("status") not in {"not_found", "invalid_request", "unavailable"}
+        else []
+    )
+    cache_key = json.dumps(
+        {"history_id": history_id, "data_identity": data_identity, "request": request_payload},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    cached = _SPATIAL_EVIDENCE_CACHE.get(cache_key)
+    if cached is not None:
+        _SPATIAL_EVIDENCE_CACHE.move_to_end(cache_key)
+        if str(cached.get("result_id") or "").startswith("spatial:"):
+            spatial_evidence_result_store.persist(history_id=history_id, result=cached)
+        return json.loads(json.dumps(cached, ensure_ascii=False, default=str))
+
+    result = _call(
         spatial_evidence.compute_domains,
         history_id=history_id,
-        request={
-            "analysis": analysis,
-            "fact_domains": list(fact_domains or []),
-            "evidence_dimensions": list(evidence_dimensions or []),
-            "selectors": [
-                item.model_dump(mode="json") if isinstance(item, BaseModel) else dict(item)
-                for item in selectors or []
-            ],
-            "travel_time_bands_min": travel_time_bands_min,
-            "neighbor_steps": neighbor_steps,
-            "rank_order": rank_order,
-            "top_k": top_k,
-            "record_refs": list(record_refs or []),
-        },
+        request=request_payload,
     )
+    if isinstance(result, dict):
+        result = _agent_public_projection(result)
+    if isinstance(result, dict) and str(result.get("result_id") or "").startswith("spatial:"):
+        spatial_evidence_result_store.persist(history_id=history_id, result=result)
+    if isinstance(result, dict):
+        _SPATIAL_EVIDENCE_CACHE[cache_key] = json.loads(
+            json.dumps(result, ensure_ascii=False, default=str)
+        )
+        _SPATIAL_EVIDENCE_CACHE.move_to_end(cache_key)
+        while len(_SPATIAL_EVIDENCE_CACHE) > _SPATIAL_EVIDENCE_CACHE_LIMIT:
+            _SPATIAL_EVIDENCE_CACHE.popitem(last=False)
+    return result
+
+
+@mcp.tool()
+def read_spatial_evidence_result(history_id: str, result_id: str) -> dict[str, Any]:
+    """Read one persisted spatial computation by its computation_refs result id.
+
+    This is a read-only lookup. It never reruns spatial computation and only returns
+    a result stored for the same analysis history.
+    """
+    result = _call(
+        spatial_evidence_result_store.read,
+        history_id=history_id,
+        result_id=result_id,
+    )
+    return _agent_public_projection(result) if isinstance(result, dict) else result
 
 
 @mcp.tool()

@@ -5,6 +5,7 @@ import inspect
 from pathlib import Path
 from typing import Annotated
 
+import pytest
 import modules.spatial_projects.mcp_server as mcp_server
 from modules.spatial_projects.mcp_server import _StdioMcpFallback, _call
 from pydantic import Field
@@ -13,6 +14,13 @@ from modules.spatial_projects.skill_tools import SpatialBusinessSkillTools
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from sqlalchemy.exc import SQLAlchemyError
+
+
+@pytest.fixture(autouse=True)
+def _clear_spatial_evidence_cache():
+    mcp_server._SPATIAL_EVIDENCE_CACHE.clear()
+    yield
+    mcp_server._SPATIAL_EVIDENCE_CACHE.clear()
 
 
 def test_research_tool_descriptions_define_source_and_search_boundaries():
@@ -48,6 +56,7 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     schemas = asyncio.run(exercise())
     assert list(schemas) == [
         "compute_spatial_evidence",
+        "read_spatial_evidence_result",
         "analyze_spatial_question",
         "read_strategy_decisions",
         "read_project_document",
@@ -77,6 +86,201 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     assert set(schemas["fetch_public_web_page"]["required"]) == {"history_id", "urls"}
 
 
+def test_fallback_schema_preserves_annotated_constraints():
+    schema = _StdioMcpFallback._annotation_schema(
+        Annotated[list[mcp_server.SpatialEvidenceSelector] | None, Field(max_length=8)]
+    )
+
+    array_schema = next(item for item in schema["anyOf"] if item.get("type") == "array")
+    assert array_schema["maxItems"] == 8
+    selector_schema = array_schema["items"]
+    assert set(selector_schema["properties"]["dimension"]["enum"]) == {
+        "poi.category", "poi.subcategory", "population.sex", "population.age_band", "population.measure",
+        "road.class", "road.radius", "road.object", "year",
+    }
+    assert "$ref" not in str(schema)
+
+
+def test_spatial_agent_wrapper_accepts_only_project_and_question(monkeypatch):
+    captured = {}
+
+    def fake_agent(**kwargs):
+        captured.update(kwargs)
+        return {"question": kwargs["question"], "subquestions": []}
+
+    monkeypatch.setattr(mcp_server, "_analyze_spatial_question", fake_agent)
+
+    result = mcp_server.analyze_spatial_question("history-1", "主要联系方向在哪里？")
+
+    assert captured == {"history_id": "history-1", "question": "主要联系方向在哪里？"}
+    assert result["question"] == "主要联系方向在哪里？"
+
+
+def test_deterministic_spatial_wrapper_does_not_forward_question(monkeypatch):
+    captured = {}
+
+    def fake_compute(**kwargs):
+        captured.update(kwargs)
+        return {"status": "available"}
+
+    monkeypatch.setattr(mcp_server.spatial_evidence, "compute_domains", fake_compute)
+
+    result = mcp_server.compute_spatial_evidence(
+        history_id="history-1",
+        analysis="direction",
+        fact_domains=["population", "nightlight"],
+        evidence_dimensions=["population.scale", "nightlight.intensity"],
+        selectors=[{"dimension": "population.sex", "values": ["female"]}],
+    )
+
+    assert result == {"status": "available"}
+    assert captured["history_id"] == "history-1"
+    assert captured["request"]["analysis"] == "direction"
+    assert captured["request"]["selectors"] == [
+        {"dimension": "population.sex", "values": ["female"]},
+    ]
+    assert "question" not in captured["request"]
+
+
+def test_compute_spatial_evidence_persists_addressable_result(monkeypatch):
+    captured = {}
+    expected = {
+        "result_id": "spatial:test-result",
+        "status": "available",
+        "selectors": [{"dimension": "population.sex", "values": ["female"]}],
+        "analysis": "scope",
+    }
+
+    monkeypatch.setattr(mcp_server.spatial_evidence, "compute_domains", lambda **_kwargs: expected)
+    monkeypatch.setattr(
+        mcp_server.spatial_evidence_result_store,
+        "persist",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    assert mcp_server.compute_spatial_evidence("history-1", "scope") == expected
+    assert captured == {"history_id": "history-1", "result": expected}
+
+
+def test_read_spatial_evidence_result_is_read_only(monkeypatch):
+    captured = {}
+    expected = {"result_id": "spatial:test-result", "status": "available"}
+
+    def fake_read(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(mcp_server.spatial_evidence_result_store, "read", fake_read)
+
+    assert mcp_server.read_spatial_evidence_result("history-1", "spatial:test-result") == expected
+    assert captured == {"history_id": "history-1", "result_id": "spatial:test-result"}
+
+
+def test_read_spatial_evidence_result_projects_internal_fields(monkeypatch):
+    raw = {
+        "result_id": "spatial:test-result",
+        "status": "available",
+        "selectors": [{"dimension": "population.sex", "values": ["female"]}],
+        "used_metric_ids": ["spatial.gi_star"],
+        "limitations": ["internal diagnostic"],
+        "method": {
+            "kind": "internal_algorithm",
+            "routing_algorithm": "internal-router",
+            "spatial_universe": "saved_isochrone",
+        },
+        "relationship": {
+            "pattern_counts": {"joint_high": 1},
+            "conflict": "population_high_nightlight_low",
+            "joint_high": ["cell/1"],
+            "unit_values": [{
+                "record_ref": "cell/1",
+                "values": {
+                    "population.total": 120,
+                    "nightlight.mean_radiance": 4.2,
+                },
+            }],
+        },
+        "metrics": [{"metric_id": "population.total"}],
+        "brightness_context_level": "high",
+        "hotspot_class": "core_hotspot",
+        "equal_weight_facility_count": 3,
+        "provenance": {
+            "snapshot_id": "snapshot-1",
+            "selected_years": {"current:dataset:population": 2025},
+            "data_versions": {"current:dataset:population": {"data_version": "worldpop-v1"}},
+        },
+        "evidence": [{
+            "metric_ids": ["population.total"],
+            "source_locator": "spatial_evidence:snapshot:relationship:joint_high",
+        }],
+        "fact_domains": [{"domain": "population", "label": "人口", "description": "internal"}],
+        "evidence_dimensions": [{"dimension": "population.scale", "label": "人口规模", "description": "internal"}],
+    }
+    monkeypatch.setattr(mcp_server.spatial_evidence_result_store, "read", lambda **_kwargs: raw)
+
+    result = mcp_server.read_spatial_evidence_result("history-1", "spatial:test-result")
+
+    assert "used_metric_ids" not in result
+    assert "limitations" not in result
+    assert "kind" not in result["method"]
+    assert "routing_algorithm" not in result["method"]
+    assert result["method"]["spatial_universe"] == "saved_isochrone"
+    assert "pattern_counts" not in result["relationship"]
+    assert result["relationship"]["unit_values"][0]["values"] == {
+        "population_count": 120,
+        "mean_radiance": 4.2,
+    }
+    assert "metrics" not in result
+    assert "evidence" not in result
+    assert "joint_high" not in str(result)
+    assert "conflict" not in result["relationship"]
+    assert "brightness_context_level" not in result
+    assert "hotspot_class" not in result
+    assert result["equal_weight_facility_count"] == 3
+    assert result["provenance"]["selected_years"] == {"current:dataset:population": 2025}
+    assert result["provenance"]["data_versions"]["current:dataset:population"]["data_version"] == "worldpop-v1"
+    assert result["fact_domains"] == ["population"]
+    assert result["evidence_dimensions"] == ["population.scale"]
+    assert result["selectors"] == [{"dimension": "population.sex", "values": ["female"]}]
+
+
+def test_compute_spatial_evidence_reuses_same_data_identity_and_invalidates_on_version(monkeypatch):
+    state = {"version": "v1", "calls": 0}
+
+    def project(**_kwargs):
+        return {
+            "history_id": "history-cache",
+            "datasets": [{
+                "source_id": "current:dataset:population",
+                "status": "ready",
+                "data_version": state["version"],
+                "selected_year": 2025,
+            }],
+        }
+
+    def compute(**_kwargs):
+        state["calls"] += 1
+        return {
+            "result_id": f"spatial:cache-{state['version']}",
+            "status": "available",
+            "analysis": "scope",
+        }
+
+    monkeypatch.setattr(mcp_server.service, "read_history_project", project)
+    monkeypatch.setattr(mcp_server.spatial_evidence, "compute_domains", compute)
+    monkeypatch.setattr(mcp_server.spatial_evidence_result_store, "persist", lambda **_kwargs: None)
+
+    first = mcp_server.compute_spatial_evidence("history-cache", "scope", ["population"], ["population.scale"])
+    second = mcp_server.compute_spatial_evidence("history-cache", "scope", ["population"], ["population.scale"])
+    assert first == second
+    assert state["calls"] == 1
+
+    state["version"] = "v2"
+    third = mcp_server.compute_spatial_evidence("history-cache", "scope", ["population"], ["population.scale"])
+    assert third["result_id"] == "spatial:cache-v2"
+    assert state["calls"] == 2
+
+
 def test_complete_data_mcp_outputs_are_objects():
     async def exercise() -> dict:
         root = Path(__file__).resolve().parents[2]
@@ -93,6 +297,7 @@ def test_complete_data_mcp_outputs_are_objects():
 
     output_schemas = asyncio.run(exercise())
     assert output_schemas["compute_spatial_evidence"]["type"] == "object"
+    assert output_schemas["read_spatial_evidence_result"]["type"] == "object"
     assert output_schemas["analyze_spatial_question"]["type"] == "object"
     assert output_schemas["read_project_document"]["type"] == "object"
     assert output_schemas["search_literature_evidence"]["type"] == "object"
@@ -226,16 +431,6 @@ def test_fallback_schema_keeps_object_and_array_arguments_structured():
     schema = _StdioMcpFallback._schema(callback)
     assert schema["properties"]["spatial"]["type"] == "object"
     assert schema["properties"]["metrics"]["type"] == "array"
-
-
-def test_fallback_schema_preserves_annotated_constraints():
-    schema = _StdioMcpFallback._annotation_schema(
-        Annotated[list[mcp_server.SpatialEvidenceSelector] | None, Field(max_length=8)]
-    )
-
-    array_schema = next(item for item in schema["anyOf"] if item.get("type") == "array")
-    assert array_schema["maxItems"] == 8
-    assert "$ref" not in str(schema)
 
 
 def test_fallback_reads_resource_templates_with_arbitrary_parameters_and_mime_types():
