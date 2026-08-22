@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from ..analysis_extractors import (
     analyze_poi_mix,
+    build_area_character_facts,
     build_nightlight_pattern_analysis,
     build_poi_structure_analysis,
     build_population_profile_analysis,
     build_road_pattern_analysis,
-    infer_area_character_labels,
-    score_site_candidates,
+    build_site_candidate_facts,
 )
 from ..policy_table import resolve_policy
 from ..schemas import AnalysisSnapshot, ToolResult
@@ -19,30 +19,13 @@ from .capability_tools import (
     analyze_poi_structure,
     analyze_spatial_structure,
     get_area_data_bundle,
-    infer_area_labels,
+    build_area_facts,
 )
 from .result_tools import read_current_results
 from .scope_tools import extract_scope_polygon
 
 
-def _pack_evidence_chain(*items: tuple[str, Any, str, str]) -> List[Dict[str, Any]]:
-    chain: List[Dict[str, Any]] = []
-    for tool_name, metric_value, rule_or_reason, confidence in items:
-        if metric_value in (None, "", [], {}):
-            continue
-        chain.append(
-            {
-                "tool_name": tool_name,
-                "metric": tool_name,
-                "value": metric_value,
-                "rule_or_reason": rule_or_reason,
-                "confidence": confidence,
-            }
-        )
-    return chain
-
-
-async def run_area_character_pack(
+async def run_area_fact_pack(
     *,
     arguments: Dict[str, Any],
     snapshot: AnalysisSnapshot,
@@ -76,7 +59,7 @@ async def run_area_character_pack(
         )
     if data_bundle.status == "failed":
         return ToolResult(
-            tool_name="run_area_character_pack",
+            tool_name="run_area_fact_pack",
             status="failed",
             result={
                 "policy_key": policy["policy_key"],
@@ -92,56 +75,40 @@ async def run_area_character_pack(
     local_artifacts.update(poi_result.artifacts or {})
     spatial_result = await analyze_spatial_structure(arguments={}, snapshot=snapshot, artifacts=local_artifacts, question=question)
     local_artifacts.update(spatial_result.artifacts or {})
-    labels_result = await infer_area_labels(arguments={}, snapshot=snapshot, artifacts=local_artifacts, question=question)
-    local_artifacts.update(labels_result.artifacts or {})
+    facts_result = await build_area_facts(arguments={}, snapshot=snapshot, artifacts=local_artifacts, question=question)
+    local_artifacts.update(facts_result.artifacts or {})
 
     poi_structure = build_poi_structure_analysis(snapshot, local_artifacts)
     business_profile = analyze_poi_mix(snapshot, local_artifacts, poi_structure=poi_structure)
     population_profile = build_population_profile_analysis(snapshot, local_artifacts)
     nightlight_pattern = build_nightlight_pattern_analysis(snapshot, local_artifacts)
     road_pattern = build_road_pattern_analysis(snapshot, local_artifacts)
-    labels = infer_area_character_labels(
+    facts = build_area_character_facts(
         snapshot,
         local_artifacts,
         poi_structure=poi_structure,
         business_profile=business_profile,
         population_profile=population_profile,
-        nightlight_pattern=nightlight_pattern,
         road_pattern=road_pattern,
     )
 
-    evidence_chain = _pack_evidence_chain(
-        ("analyze_poi_structure", poi_structure.get("dominant_categories"), "POI 主导业态结构", "strong" if poi_structure.get("evidence_ready") else "weak"),
-        ("analyze_spatial_structure", spatial_result.result.get("distribution_pattern"), "空间结构与多核/单核判断", "moderate"),
-        ("infer_area_labels", labels.get("rule_hits"), "规则标签命中", labels.get("confidence") or "weak"),
-        ("population_profile", population_profile.get("top_age_band"), "人口主年龄段", "moderate"),
-        ("nightlight_pattern", nightlight_pattern.get("core_hotspot_count"), "夜间活力核心数量", "moderate"),
-        ("road_pattern", road_pattern.get("node_count"), "路网节点规模", "moderate"),
-    )
     payload = {
-        "character_tags": labels.get("character_tags") or [],
-        "dominant_functions": labels.get("dominant_functions") or business_profile.get("dominant_functions") or [],
-        "activity_period": labels.get("activity_period") or "全天均衡",
-        "crowd_traits": labels.get("crowd_traits") or [],
-        "spatial_temperament": labels.get("spatial_temperament") or "",
-        "evidence_chain": evidence_chain,
-        "confidence": labels.get("confidence") or "weak",
+        "facts": facts,
         "policy_key": policy["policy_key"],
         "policy_params": policy,
         "analysis_mode": str(arguments.get("analysis_mode") or "district_summary"),
-        "summary_text": labels.get("summary_text") or "",
         "data_readiness": dict(local_artifacts.get("current_data_readiness") or {}),
     }
     return ToolResult(
-        tool_name="run_area_character_pack",
+        tool_name="run_area_fact_pack",
         status="success",
         result=payload,
-        evidence=(data_bundle.evidence or []) + (poi_result.evidence or []) + (spatial_result.evidence or []) + (labels_result.evidence or []),
-        warnings=(data_bundle.warnings or []) + (poi_result.warnings or []) + (spatial_result.warnings or []) + (labels_result.warnings or []),
+        evidence=(data_bundle.evidence or []) + (poi_result.evidence or []) + (spatial_result.evidence or []) + (facts_result.evidence or []),
+        warnings=(data_bundle.warnings or []) + (poi_result.warnings or []) + (spatial_result.warnings or []) + (facts_result.warnings or []),
         artifacts={
             **local_artifacts,
-            "area_character_pack": payload,
-            "current_area_character_labels": labels,
+            "area_fact_pack": payload,
+            "current_area_character_facts": facts,
         },
     )
 
@@ -183,7 +150,6 @@ async def run_site_selection_pack(
             "resolution": arguments.get("resolution") or policy.get("h3_resolution"),
             "include_mode": arguments.get("include_mode") or policy.get("include_mode"),
             "min_overlap_ratio": arguments.get("min_overlap_ratio") or policy.get("min_overlap_ratio"),
-            "neighbor_ring": arguments.get("neighbor_ring") or policy.get("neighbor_ring"),
             "mode": arguments.get("mode") or policy.get("mode"),
         },
         snapshot=snapshot,
@@ -214,36 +180,20 @@ async def run_site_selection_pack(
     )
     local_artifacts.update(gap_result.artifacts or {})
     population_profile = build_population_profile_analysis(snapshot, local_artifacts)
-    nightlight_pattern = build_nightlight_pattern_analysis(snapshot, local_artifacts)
     road_pattern = build_road_pattern_analysis(snapshot, local_artifacts)
-    scoring = score_site_candidates(
+    candidate_facts = build_site_candidate_facts(
         snapshot,
         local_artifacts,
         target_supply_gap=gap_result.result,
         population_profile=population_profile,
-        nightlight_pattern=nightlight_pattern,
         road_pattern=road_pattern,
     )
-    evidence_chain = _pack_evidence_chain(
-        ("run_business_site_advice", business_result.result.get("poi_count"), "目标业态基础供给样本", "moderate"),
-        ("analyze_target_supply_gap", gap_result.result.get("candidate_zones"), "H3 缺口与候选格提取", "moderate" if gap_result.result.get("candidate_zones") else "weak"),
-        ("score_site_candidates", scoring.get("ranking"), "程序化评分排序", scoring.get("confidence") or "weak"),
-        ("population_profile", population_profile.get("total_population"), "人口支撑", "moderate"),
-        ("nightlight_pattern", nightlight_pattern.get("core_hotspot_count"), "夜间活力", "moderate"),
-        ("road_pattern", road_pattern.get("node_count"), "可达性", "moderate"),
-    )
     payload = {
-        "candidate_sites": scoring.get("candidate_sites") or [],
-        "ranking": scoring.get("ranking") or [],
-        "strengths": scoring.get("strengths") or [],
-        "risks": scoring.get("risks") or [],
-        "not_recommended_reason": scoring.get("not_recommended_reason") or "",
-        "evidence_chain": evidence_chain,
-        "confidence": scoring.get("confidence") or "weak",
+        "candidate_sites": candidate_facts.get("candidate_sites") or [],
+        "candidate_count": candidate_facts.get("candidate_count") or 0,
         "policy_key": policy["policy_key"],
         "policy_params": policy,
         "place_type": resolved_place_type or gap_result.result.get("place_type") or str(arguments.get("place_type") or "").strip(),
-        "summary_text": scoring.get("summary_text") or gap_result.result.get("summary_text") or "",
     }
     return ToolResult(
         tool_name="run_site_selection_pack",
@@ -255,6 +205,6 @@ async def run_site_selection_pack(
             **local_artifacts,
             "site_selection_pack": payload,
             "current_target_supply_gap": gap_result.result,
-            "current_site_candidate_scores": scoring,
+            "current_site_candidate_facts": candidate_facts,
         },
     )

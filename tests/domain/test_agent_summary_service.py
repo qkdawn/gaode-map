@@ -16,7 +16,6 @@ from modules.agent.summary_service import (
     _generate_summary_pack_with_llm,
     _tourism_payload_size_summary,
     _build_summary_llm_payload,
-    _normalize_area_judgment_reasoning,
     _validate_summary_pack_payload,
     _validate_tourism_cross_analysis_payload,
     evaluate_summary_readiness,
@@ -60,8 +59,8 @@ def _structured_artifacts():
         "current_nightlight_pattern_analysis": {
             "summary_text": "夜间活跃度中等偏弱。",
             "total_radiance": 120.0,
-            "economic_activity_intensity_level": "medium_high",
-            "economic_activity_summary_text": "基于夜间灯光亮度，等时圈内经济活动强度呈现中等偏上水平，亮度高值主要集中在东北与东扇区。",
+            "brightness_context_level": "medium_high",
+            "brightness_context_summary_text": "等时圈内夜光亮度背景呈现中等偏上水平，亮度高值主要集中在东北与东扇区。",
             "sector_direction_analysis": {
                 "dominant_direction": "东北",
                 "secondary_direction": "东",
@@ -84,8 +83,10 @@ def _structured_artifacts():
             "summary_text": "以餐饮和日常消费为主。",
             "business_types": ["餐饮主导", "购物配套较强"],
         },
-        "current_area_character_labels": {
-            "character_tags": ["社区消费", "餐饮配套"],
+        "current_area_character_facts": {
+            "poi": {"top_categories": [{"category": "餐饮", "count": 40}]},
+            "population": {"total_population": 3200},
+            "road": {"node_count": 90},
         },
         "current_commercial_hotspots": {
             "hotspot_mode": "multi_core",
@@ -1179,7 +1180,7 @@ def test_generate_summary_pack_marks_llm_unavailable(monkeypatch):
         return SimpleNamespace(status="success", warnings=[], artifacts={}, error="")
 
     monkeypatch.setattr("modules.agent.summary_service.ensure_area_data_readiness", fake_ensure)
-    monkeypatch.setattr("modules.agent.summary_service.run_area_character_pack", fake_pack)
+    monkeypatch.setattr("modules.agent.summary_service.run_area_fact_pack", fake_pack)
     monkeypatch.setattr(
         "modules.agent.summary_service._derive_structured_status",
         lambda snapshot, artifacts: {"missing_tasks": [], "artifacts": _structured_artifacts()},
@@ -1238,7 +1239,7 @@ def test_generate_summary_pack_rejects_invalid_llm_payload(monkeypatch):
         return {}
 
     monkeypatch.setattr("modules.agent.summary_service.ensure_area_data_readiness", fake_ensure)
-    monkeypatch.setattr("modules.agent.summary_service.run_area_character_pack", fake_pack)
+    monkeypatch.setattr("modules.agent.summary_service.run_area_fact_pack", fake_pack)
     monkeypatch.setattr(
         "modules.agent.summary_service._derive_structured_status",
         lambda snapshot, artifacts: {"missing_tasks": [], "artifacts": _structured_artifacts()},
@@ -1280,7 +1281,7 @@ def test_generate_summary_pack_returns_new_schema(monkeypatch):
         return _valid_summary_pack_new_schema()
 
     monkeypatch.setattr("modules.agent.summary_service.ensure_area_data_readiness", fake_ensure)
-    monkeypatch.setattr("modules.agent.summary_service.run_area_character_pack", fake_pack)
+    monkeypatch.setattr("modules.agent.summary_service.run_area_fact_pack", fake_pack)
     monkeypatch.setattr(
         "modules.agent.summary_service._derive_structured_status",
         lambda snapshot, artifacts: {"missing_tasks": [], "artifacts": _structured_artifacts()},
@@ -1362,28 +1363,6 @@ def test_generate_summary_pack_records_tourism_exception(monkeypatch):
     assert "tourism_cross_analysis" not in result
 
 
-def test_consumption_vitality_rewrites_to_direction_orientation_template():
-    source_payload = _build_summary_llm_payload(_request().analysis_snapshot, _structured_artifacts())
-    normalized = _normalize_area_judgment_reasoning(
-        {
-            "consumption_vitality": {
-                "section_key": "consumption_vitality",
-                "title": "经济活动强度",
-                "reasoning": "夜间经济活动强度偏弱，暂不能据此判断全天候经济活动表现。",
-            }
-        },
-        source_payload,
-    )
-
-    economic_reasoning = normalized["consumption_vitality"]["reasoning"]
-    assert economic_reasoning.startswith("nightlight_level=中等偏上")
-    assert "nightlight_direction=东北及东" in economic_reasoning
-    assert "road_orientation=东西向,东北-西南向" in economic_reasoning
-    assert "direction_orientation_consistency=dominant_direction_matches_orientation" in economic_reasoning
-    for token in ["消费能力", "客流", "营业额", "白天活跃", "日间消费", "全天候经济活动"]:
-        assert token not in economic_reasoning
-
-
 def test_stream_generate_summary_pack_emits_section_events(monkeypatch):
     async def fake_ensure(**_):
         return _ready_payload()
@@ -1408,7 +1387,7 @@ def test_stream_generate_summary_pack_emits_section_events(monkeypatch):
         return ["解释结论依据", "展开业态建议", "转为执行清单"]
 
     monkeypatch.setattr("modules.agent.summary_service.ensure_area_data_readiness", fake_ensure)
-    monkeypatch.setattr("modules.agent.summary_service.run_area_character_pack", fake_pack)
+    monkeypatch.setattr("modules.agent.summary_service.run_area_fact_pack", fake_pack)
     monkeypatch.setattr(
         "modules.agent.summary_service._derive_structured_status",
         lambda snapshot, artifacts: {"missing_tasks": [], "artifacts": _structured_artifacts()},

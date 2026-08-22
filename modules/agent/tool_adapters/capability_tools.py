@@ -4,12 +4,12 @@ from typing import Any, Awaitable, Callable, Dict, List
 
 from ..analysis_extractors import (
     analyze_poi_mix,
+    build_area_character_facts,
     build_h3_structure_analysis,
     build_nightlight_pattern_analysis,
     build_poi_structure_analysis,
     build_population_profile_analysis,
     build_road_pattern_analysis,
-    infer_area_character_labels,
 )
 from ..policy_table import resolve_policy
 from ..schemas import AnalysisSnapshot, ToolResult
@@ -399,7 +399,11 @@ async def analyze_spatial_structure(
         result={
             "distribution_pattern": h3_structure.get("distribution_pattern"),
             "population_view": population_profile.get("summary_text"),
-            "nightlight_view": nightlight_pattern.get("summary_text"),
+            "nightlight_facts": {
+                key: nightlight_pattern.get(key)
+                for key in ("total_radiance", "mean_radiance", "p90_radiance", "peak_radiance", "lit_pixel_ratio", "peak_to_edge_ratio", "sector_direction_analysis")
+                if nightlight_pattern.get(key) not in (None, {})
+            },
             "road_view": road_pattern.get("summary_text"),
             "summary_text": (
                 f"H3: {h3_structure.get('distribution_pattern') or 'unknown'}; "
@@ -409,7 +413,7 @@ async def analyze_spatial_structure(
         evidence=[
             {"field": "h3.structure.distribution_pattern", "value": h3_structure.get("distribution_pattern")},
             {"field": "population.profile.top_age_band", "value": population_profile.get("top_age_band")},
-            {"field": "nightlight.pattern.core_hotspot_count", "value": nightlight_pattern.get("core_hotspot_count")},
+            {"field": "nightlight.mean_radiance", "value": nightlight_pattern.get("mean_radiance")},
             {"field": "road.pattern.node_count", "value": road_pattern.get("node_count")},
         ],
         artifacts={
@@ -421,7 +425,7 @@ async def analyze_spatial_structure(
     )
 
 
-async def infer_area_labels(
+async def build_area_facts(
     *,
     arguments: Dict[str, Any],
     snapshot: AnalysisSnapshot,
@@ -434,29 +438,25 @@ async def infer_area_labels(
     population_profile = build_population_profile_analysis(snapshot, artifacts)
     nightlight_pattern = build_nightlight_pattern_analysis(snapshot, artifacts)
     road_pattern = build_road_pattern_analysis(snapshot, artifacts)
-    payload = infer_area_character_labels(
+    payload = build_area_character_facts(
         snapshot,
         artifacts,
         poi_structure=poi_structure,
         business_profile=business_profile,
         population_profile=population_profile,
-        nightlight_pattern=nightlight_pattern,
         road_pattern=road_pattern,
     )
     return ToolResult(
-        tool_name="infer_area_labels",
+        tool_name="build_area_facts",
         status="success",
         result=payload,
-        evidence=[
-            {"field": "area.character_tags", "value": payload.get("character_tags")},
-            {"field": "area.rule_hits", "value": payload.get("rule_hits")},
-        ],
+        evidence=[{"field": "area.fact_pack", "value": payload}],
         artifacts={
             "current_poi_structure_analysis": poi_structure,
             "current_business_profile": business_profile,
             "current_population_profile_analysis": population_profile,
             "current_nightlight_pattern_analysis": nightlight_pattern,
             "current_road_pattern_analysis": road_pattern,
-            "current_area_character_labels": payload,
+            "current_area_character_facts": payload,
         },
     )

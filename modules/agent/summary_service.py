@@ -15,9 +15,10 @@ from .analysis_extractors import (
     build_population_profile_analysis,
     build_road_pattern_analysis,
     detect_commercial_hotspots,
-    infer_area_character_labels,
+    build_area_character_facts,
     is_h3_structure_ready,
     is_nightlight_pattern_ready,
+    project_nightlight_agent_facts,
     is_poi_structure_ready,
     is_population_profile_ready,
     is_road_pattern_ready,
@@ -33,7 +34,7 @@ from .providers.client import invoke_json_role as _invoke_json_role, is_llm_enab
 from .prompt_registry import build_prompt_snapshot, get_prompt_config
 from .synthesizer import build_citations, build_summary_panel_payloads
 from .tool_adapters.capability_tools import ensure_area_data_readiness
-from .tool_adapters.scenario_tools import run_area_character_pack
+from .tool_adapters.scenario_tools import run_area_fact_pack
 
 _DIMENSION_ORDER = ["poi", "h3", "population", "nightlight", "road"]
 _DIMENSION_TO_TASK = {
@@ -43,12 +44,12 @@ _DIMENSION_TO_TASK = {
     "nightlight": "nightlight",
     "road": "road_syntax",
 }
-_STRUCTURED_TASK_ORDER = ["poi_structure", "spatial_structure", "area_labels"]
+_STRUCTURED_TASK_ORDER = ["poi_structure", "spatial_structure", "area_facts"]
 _PHASE_ORDER = ["precheck", "fetch_missing", "derive_analysis", "analysis_started"]
 _SUMMARY_SECTION_SPECS = [
     ("spatial_structure", "空间结构"),
     ("poi_structure", "POI结构"),
-    ("consumption_vitality", "经济活动强度"),
+    ("consumption_vitality", "夜间亮度背景"),
     ("business_support", "业态承接"),
 ]
 _SPATIAL_DIMENSION_SPECS = [
@@ -125,7 +126,7 @@ def _derive_structured_status(snapshot: Any, artifacts: Dict[str, Any]) -> Dict[
         else build_population_profile_analysis(snapshot, artifacts)
     )
     nightlight_pattern = (
-        dict(artifacts.get("current_nightlight_pattern_analysis") or {})
+        project_nightlight_agent_facts(artifacts.get("current_nightlight_pattern_analysis"))
         if isinstance(artifacts.get("current_nightlight_pattern_analysis"), dict)
         else build_nightlight_pattern_analysis(snapshot, artifacts)
     )
@@ -139,16 +140,15 @@ def _derive_structured_status(snapshot: Any, artifacts: Dict[str, Any]) -> Dict[
         if isinstance(artifacts.get("current_business_profile"), dict)
         else analyze_poi_mix(snapshot, artifacts, poi_structure=poi_structure)
     )
-    area_labels = (
-        dict(artifacts.get("current_area_character_labels") or {})
-        if isinstance(artifacts.get("current_area_character_labels"), dict)
-        else infer_area_character_labels(
+    area_facts = (
+        dict(artifacts.get("current_area_character_facts") or {})
+        if isinstance(artifacts.get("current_area_character_facts"), dict)
+        else build_area_character_facts(
             snapshot,
             artifacts,
             poi_structure=poi_structure,
             business_profile=business_profile,
             population_profile=population_profile,
-            nightlight_pattern=nightlight_pattern,
             road_pattern=road_pattern,
         )
     )
@@ -163,8 +163,8 @@ def _derive_structured_status(snapshot: Any, artifacts: Dict[str, Any]) -> Dict[
         and is_road_pattern_ready(road_pattern)
     ):
         missing_tasks.append("spatial_structure")
-    if not bool((area_labels.get("character_tags") or [])):
-        missing_tasks.append("area_labels")
+    if not any(isinstance(area_facts.get(key), dict) and area_facts.get(key) for key in ("poi", "population", "road")):
+        missing_tasks.append("area_facts")
 
     return {
         "missing_tasks": missing_tasks,
@@ -175,7 +175,7 @@ def _derive_structured_status(snapshot: Any, artifacts: Dict[str, Any]) -> Dict[
             "current_nightlight_pattern_analysis": nightlight_pattern,
             "current_road_pattern_analysis": road_pattern,
             "current_business_profile": business_profile,
-            "current_area_character_labels": area_labels,
+            "current_area_character_facts": area_facts,
         },
     }
 
@@ -272,10 +272,7 @@ def _normalize_summary_section_key(value: Any) -> str:
         "业态结构": "poi_structure",
         "POI占比": "poi_structure",
         "consumption_vitality": "consumption_vitality",
-        "消费活力": "consumption_vitality",
-        "商业活力": "consumption_vitality",
-        "经济活动强度": "consumption_vitality",
-        "夜间经济活动强度": "consumption_vitality",
+        "夜间亮度背景": "consumption_vitality",
         "business_support": "business_support",
         "业态承接": "business_support",
         "业态支撑": "business_support",
@@ -320,165 +317,6 @@ def _normalize_spatial_dimensions(items: Any) -> List[Dict[str, str]]:
     return normalized
 
 
-def _should_rewrite_section_reasoning(key: str, text: str) -> bool:
-    content = _clean_text(text)
-    if not content:
-        return True
-    if key == "consumption_vitality" and any(
-        token in content
-        for token in ("消费能力", "客流", "营业额", "白天活跃", "日间消费", "消费强度", "消费活力", "全天候经济活动")
-    ):
-        return True
-    descriptive_openers = {
-        "poi_structure": ("POI构成", "POI结构"),
-        "consumption_vitality": ("夜光模式", "夜间灯光", "经济活动强度", "夜间经济活动强度", "消费活力"),
-        "business_support": ("路网条件", "路网结构", "空间条件"),
-    }
-    if any(content.startswith(prefix) for prefix in descriptive_openers.get(key, ())):
-        return True
-    if any(token in content for token in ("反映了", "揭示了", "提供了", "体现了", "呈现了")):
-        judgment_tokens = ("主导", "偏", "较强", "较弱", "明显", "有限", "集中", "分散", "承接", "活跃", "不足", "更像", "适合")
-        return not any(token in content for token in judgment_tokens)
-    return False
-
-
-_ECONOMIC_ACTIVITY_LEVEL_LABELS = {
-    "high": "高",
-    "medium_high": "中等偏上",
-    "medium": "中等",
-    "low": "偏低",
-}
-
-_DIRECTION_TO_ROAD_AXES = {
-    "东": {"东西向"},
-    "西": {"东西向"},
-    "北": {"南北向"},
-    "南": {"南北向"},
-    "东北": {"东北-西南向"},
-    "西南": {"东北-西南向"},
-    "西北": {"西北-东南向"},
-    "东南": {"西北-东南向"},
-}
-
-
-def _economic_activity_level_label(value: Any) -> str:
-    text = _clean_text(value)
-    if not text:
-        return "unknown"
-    return _ECONOMIC_ACTIVITY_LEVEL_LABELS.get(text, text)
-
-
-def _direction_phrase(dominant: str, secondary: str) -> str:
-    if dominant and secondary:
-        return f"{dominant}及{secondary}"
-    return dominant or secondary
-
-
-def _orientation_phrase(dominant: str, secondary: str) -> str:
-    if dominant and secondary:
-        return f"road_orientation={dominant},{secondary}"
-    if dominant:
-        return f"road_orientation={dominant}"
-    if secondary:
-        return f"road_orientation={secondary}"
-    return ""
-
-
-def _direction_matches_orientation(direction: str, orientation: str) -> bool:
-    return bool(direction and orientation and orientation in _DIRECTION_TO_ROAD_AXES.get(direction, set()))
-
-
-def _classify_direction_orientation_consistency(
-    dominant_direction: str,
-    secondary_direction: str,
-    dominant_orientation: str,
-    secondary_orientation: str,
-) -> tuple[str, str]:
-    orientations = [item for item in [dominant_orientation, secondary_orientation] if item]
-    if dominant_direction and any(_direction_matches_orientation(dominant_direction, item) for item in orientations):
-        return "dominant_direction_matches_orientation", "match"
-    if secondary_direction and any(_direction_matches_orientation(secondary_direction, item) for item in orientations):
-        return "secondary_direction_matches_orientation", "partial_match"
-    return "direction_orientation_no_match", "no_match"
-
-
-def _build_economic_activity_direction_judgment(source_payload: Dict[str, Any]) -> str:
-    nightlight = source_payload.get("nightlight_pattern") if isinstance(source_payload.get("nightlight_pattern"), dict) else {}
-    road = source_payload.get("road_pattern") if isinstance(source_payload.get("road_pattern"), dict) else {}
-    sector = nightlight.get("sector_direction_analysis") if isinstance(nightlight.get("sector_direction_analysis"), dict) else {}
-    orientation = road.get("road_orientation_analysis") if isinstance(road.get("road_orientation_analysis"), dict) else {}
-
-    level = _economic_activity_level_label(nightlight.get("economic_activity_intensity_level"))
-    dominant_direction = _clean_text(sector.get("dominant_direction"))
-    secondary_direction = _clean_text(sector.get("secondary_direction"))
-    dominant_orientation = _clean_text(orientation.get("dominant_orientation"))
-    secondary_orientation = _clean_text(orientation.get("secondary_orientation"))
-    direction_text = _direction_phrase(dominant_direction, secondary_direction)
-
-    if not direction_text:
-        return ""
-    first = f"nightlight_level={level}; nightlight_direction={direction_text}."
-    road_text = _orientation_phrase(dominant_orientation, secondary_orientation)
-    if not road_text:
-        return first
-    consistency, influence = _classify_direction_orientation_consistency(
-        dominant_direction,
-        secondary_direction,
-        dominant_orientation,
-        secondary_orientation,
-    )
-    return f"{first} {road_text}; direction_orientation_consistency={consistency}; consistency_signal={influence}."
-
-
-def _build_poi_structure_judgment(source_payload: Dict[str, Any]) -> str:
-    poi = source_payload.get("poi_structure") if isinstance(source_payload.get("poi_structure"), dict) else {}
-    tags = [str(item).strip() for item in (poi.get("structure_tags") or []) if str(item).strip()]
-    dominant = [str(item).strip() for item in (poi.get("dominant_categories") or []) if str(item).strip()]
-    return f"dominant_categories={','.join(dominant) or '-'}; structure_tags={','.join(tags) or '-'}."
-
-
-def _build_consumption_vitality_judgment(source_payload: Dict[str, Any]) -> str:
-    nightlight = source_payload.get("nightlight_pattern") if isinstance(source_payload.get("nightlight_pattern"), dict) else {}
-    direction_judgment = _build_economic_activity_direction_judgment(source_payload)
-    if direction_judgment:
-        return direction_judgment
-    summary_text = _clean_text(nightlight.get("economic_activity_summary_text"))
-    if summary_text:
-        return summary_text
-    pattern_tags = [str(item).strip() for item in (nightlight.get("pattern_tags") or []) if str(item).strip()]
-    core_hotspot_count = int(nightlight.get("core_hotspot_count") or 0)
-    return f"core_hotspot_count={core_hotspot_count}; pattern_tags={','.join(pattern_tags) or '-'}."
-
-
-def _build_business_support_judgment(source_payload: Dict[str, Any]) -> str:
-    road = source_payload.get("road_pattern") if isinstance(source_payload.get("road_pattern"), dict) else {}
-    connectivity = _clean_text(((road.get("connectivity") or {}).get("signal")))
-    access = _clean_text(((road.get("access") or {}).get("signal")))
-    readability = _clean_text(((road.get("readability") or {}).get("signal")))
-    return f"connectivity_signal={connectivity or '-'}; access_signal={access or '-'}; readability_signal={readability or '-'}."
-
-
-def _normalize_area_judgment_reasoning(pack: Dict[str, Any], source_payload: Dict[str, Any]) -> Dict[str, Any]:
-    normalized = dict(pack or {})
-    for key, _ in _SUMMARY_SECTION_SPECS:
-        row = dict(normalized.get(key) or {}) if isinstance(normalized.get(key), dict) else {}
-        if not row:
-            continue
-        reasoning = _clean_text(row.get("reasoning"))
-        if key == "poi_structure" and _should_rewrite_section_reasoning(key, reasoning):
-            row["reasoning"] = _build_poi_structure_judgment(source_payload)
-        elif key == "consumption_vitality" and _should_rewrite_section_reasoning(key, reasoning):
-            row["reasoning"] = _build_consumption_vitality_judgment(source_payload)
-        elif key == "business_support" and _should_rewrite_section_reasoning(key, reasoning):
-            row["reasoning"] = _build_business_support_judgment(source_payload)
-        normalized[key] = row
-    return normalized
-
-
-def _normalize_secondary_reasoning_with_judgment(pack: Dict[str, Any], source_payload: Dict[str, Any]) -> Dict[str, Any]:
-    return _normalize_area_judgment_reasoning(pack, source_payload)
-
-
 def _build_section_generation_prompt(section_key: str) -> str:
     title = _section_title_for(section_key)
     base = (
@@ -503,12 +341,10 @@ def _build_section_generation_prompt(section_key: str) -> str:
     focus_rules = {
         "poi_structure": "只写主导业态、占比结构和功能特征，要写成判断句，不要写成“反映了/体现了”。",
         "consumption_vitality": (
-            "只写夜间经济活动强度，不写消费能力、客流、营业额、白天活跃或日间消费。"
+            "只基于夜间亮度事实形成判断，不把夜光直接等同经济活动，也不写消费能力、客流、营业额或白天活跃。"
             "优先使用 nightlight_pattern.sector_direction_analysis 与 road_pattern.road_orientation_analysis，"
-            "按“夜光高值方位 × 路网走向一致性”写判断："
-            "从空间分布来看，等时圈内夜间经济活动整体处于{强度水平}，高值区域主要集中在{夜光主导方位}及{夜光次主导方位}方向。"
-            "区域道路以{路网主导走向}为主，{路网次主导走向}为辅。"
-            "两者在空间上呈现{一致性等级}关系，表明交通廊道对夜间经济活动的空间引导作用{影响强度}。"
+            "根据夜光方向、辐亮度数值和路网走向写有边界的判断："
+            "说明亮度高值主要方向及其与路网方向的空间关系；缺少证据时直接说明。"
             "缺少路网或夜光方位时只描述可用夜光证据，不要硬凑一致性。"
         ),
         "business_support": "只使用路网与空间条件 raw signal，不规定判断顺序，不替模型预设承接结论。",
@@ -622,7 +458,7 @@ def _build_section_generation_payload(section_key: str, source_payload: Dict[str
         return {
             **common,
             "spatial_structure": dict(source_payload.get("spatial_structure") or {}),
-            "area_labels": list(source_payload.get("area_labels") or []),
+            "area_facts": dict(source_payload.get("area_facts") or {}),
         }
     if section_key == "poi_structure":
         return {
@@ -782,10 +618,10 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
     poi_structure = artifacts.get("current_poi_structure_analysis") if isinstance(artifacts.get("current_poi_structure_analysis"), dict) else {}
     h3_structure = artifacts.get("current_h3_structure_analysis") if isinstance(artifacts.get("current_h3_structure_analysis"), dict) else {}
     population_profile = artifacts.get("current_population_profile_analysis") if isinstance(artifacts.get("current_population_profile_analysis"), dict) else {}
-    nightlight_pattern = artifacts.get("current_nightlight_pattern_analysis") if isinstance(artifacts.get("current_nightlight_pattern_analysis"), dict) else {}
+    nightlight_pattern = project_nightlight_agent_facts(artifacts.get("current_nightlight_pattern_analysis")) if isinstance(artifacts.get("current_nightlight_pattern_analysis"), dict) else {}
     road_pattern = artifacts.get("current_road_pattern_analysis") if isinstance(artifacts.get("current_road_pattern_analysis"), dict) else {}
     business_profile = artifacts.get("current_business_profile") if isinstance(artifacts.get("current_business_profile"), dict) else {}
-    area_labels = artifacts.get("current_area_character_labels") if isinstance(artifacts.get("current_area_character_labels"), dict) else {}
+    area_facts = artifacts.get("current_area_character_facts") if isinstance(artifacts.get("current_area_character_facts"), dict) else {}
     commercial_hotspots = _current_commercial_hotspots(snapshot, artifacts, h3_structure)
     h3_summary = _current_poi_h3_summary(snapshot, artifacts)
     h3_raw = dict(snapshot.h3 or {}) if isinstance(getattr(snapshot, "h3", {}), dict) else {}
@@ -856,16 +692,14 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
             "top_age_band": _clean_text(population_profile.get("top_age_band")),
         },
         "nightlight_pattern": {
-            "summary_text": _clean_text(nightlight_pattern.get("summary_text")),
             "total_radiance": nightlight_pattern.get("total_radiance"),
             "mean_radiance": nightlight_pattern.get("mean_radiance"),
             "p90_radiance": nightlight_pattern.get("p90_radiance"),
+            "peak_radiance": nightlight_pattern.get("peak_radiance"),
             "lit_pixel_ratio": nightlight_pattern.get("lit_pixel_ratio"),
-            "core_hotspot_count": nightlight_pattern.get("core_hotspot_count"),
-            "economic_activity_intensity_level": _clean_text(nightlight_pattern.get("economic_activity_intensity_level")),
-            "economic_activity_summary_text": _clean_text(nightlight_pattern.get("economic_activity_summary_text")),
+            "valid_pixel_count": nightlight_pattern.get("valid_pixel_count"),
+            "peak_to_edge_ratio": nightlight_pattern.get("peak_to_edge_ratio"),
             "sector_direction_analysis": dict(nightlight_pattern.get("sector_direction_analysis") or {}),
-            "pattern_tags": list(nightlight_pattern.get("pattern_tags") or []),
         },
         "road_pattern": {
             "summary_text": _clean_text(road_pattern.get("summary_text")),
@@ -898,11 +732,11 @@ def _build_summary_llm_payload(snapshot: Any, artifacts: Dict[str, Any]) -> Dict
             "road_orientation_analysis": dict(road_pattern.get("road_orientation_analysis") or {}),
             "pattern_tags": list(road_pattern.get("pattern_tags") or []),
         },
-        "area_labels": list(area_labels.get("character_tags") or []),
+        "area_facts": dict(area_facts),
         "raw_evidence": {
             "poi_frontend_analysis": dict(frontend.get("poi") or {}),
             "population": population_raw,
-            "nightlight": dict(snapshot.nightlight or {}),
+            "nightlight": dict(nightlight_pattern),
             "shared_grid": dict(shared_grid or {}),
             "poi_h3_evidence": dict(poi_h3_evidence or {}),
         },
@@ -1050,7 +884,6 @@ async def _generate_summary_pack_with_llm(snapshot: Any, artifacts: Dict[str, An
                 section,
                 checks=_required_field_checks(section, ["section_key", "title", "reasoning"]),
             )
-    normalized = _normalize_area_judgment_reasoning(normalized, source_payload)
     validated = _validate_summary_pack_payload(normalized, icsc_tags=icsc_tags, evidence_refs=evidence_refs)
     if validated:
         try:
@@ -1141,7 +974,7 @@ def _build_headline_section_payload(source_payload: Dict[str, Any]) -> Dict[str,
         "population_profile": dict(source_payload.get("population_profile") or {}),
         "nightlight_pattern": dict(source_payload.get("nightlight_pattern") or {}),
         "road_pattern": dict(source_payload.get("road_pattern") or {}),
-        "area_labels": list(source_payload.get("area_labels") or []),
+        "area_facts": dict(source_payload.get("area_facts") or {}),
     }
 
 
@@ -1153,7 +986,7 @@ def _build_profile_section_payload(section_key: str, source_payload: Dict[str, A
         "population_profile": dict(source_payload.get("population_profile") or {}),
         "nightlight_pattern": dict(source_payload.get("nightlight_pattern") or {}),
         "road_pattern": dict(source_payload.get("road_pattern") or {}),
-        "area_labels": list(source_payload.get("area_labels") or []),
+        "area_facts": dict(source_payload.get("area_facts") or {}),
     }
     if section_key == "behavior_inference":
         payload["spatial_structure"] = dict(source_payload.get("spatial_structure") or {})
@@ -1174,7 +1007,7 @@ def _build_followup_questions_payload(source_payload: Dict[str, Any], summary_pa
         "behavior_inference": dict(summary_pack.get("behavior_inference") or {}),
         "icsc_tags": list(summary_pack.get("icsc_tags") or []),
         "business_profile": dict(source_payload.get("business_profile") or {}),
-        "area_labels": list(source_payload.get("area_labels") or []),
+        "area_facts": dict(source_payload.get("area_facts") or {}),
     }
 
 
@@ -1415,7 +1248,7 @@ def _build_tourism_cross_analysis_payload(source_payload: Dict[str, Any], summar
         "spatial_evidence": {
             "spatial_structure": dict(source_payload.get("spatial_structure") or {}),
             "road_pattern": dict(source_payload.get("road_pattern") or {}),
-            "area_labels": list(source_payload.get("area_labels") or []),
+            "area_facts": dict(source_payload.get("area_facts") or {}),
             "shared_grid": compact_shared_grid,
         },
         "guardrails": {
@@ -1671,7 +1504,7 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
             yield _build_stream_event("status", {"phase": "fetch_missing", "phases": list(phases)})
             phases.append("derive_analysis")
             yield _build_stream_event("status", {"phase": "derive_analysis", "phases": list(phases)})
-            pack_result = await run_area_character_pack(
+            pack_result = await run_area_fact_pack(
                 arguments={},
                 snapshot=payload.analysis_snapshot,
                 artifacts=artifacts,
@@ -1753,8 +1586,6 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                         snapshot = _pop_prompt_snapshot(section_payload)
                         if snapshot:
                             prompt_snapshots[section_key] = snapshot
-                        section_pack = _normalize_area_judgment_reasoning({section_key: section_payload}, source_payload)
-                        section_payload = dict(section_pack.get(section_key) or section_payload)
                         for chunk in _chunk_text_for_stream(_clean_text(section_payload.get("reasoning"))):
                             yield _build_stream_event("section_delta", {"key": section_key, "delta": chunk})
                         summary_pack[section_key] = section_payload
@@ -1863,7 +1694,7 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                     icsc_tags=list(summary_pack.get("icsc_tags") or []),
                     evidence_refs=list(summary_pack.get("evidence_refs") or []),
                 )
-                normalized_pack = _normalize_area_judgment_reasoning(validated, source_payload) if validated else {}
+                normalized_pack = dict(validated) if validated else {}
                 if normalized_pack:
                     if summary_pack.get("followup_questions"):
                         normalized_pack["followup_questions"] = list(summary_pack.get("followup_questions") or [])
@@ -1948,7 +1779,7 @@ async def stream_generate_summary_pack(payload: AgentSummaryRequest) -> AsyncIte
                 "data_readiness": {
                     "checked": True,
                     "ready": False,
-                    "missing_tasks": ["poi_grid", "population", "nightlight", "road_syntax", "poi_structure", "spatial_structure", "area_labels"],
+                    "missing_tasks": ["poi_grid", "population", "nightlight", "road_syntax", "poi_structure", "spatial_structure", "area_facts"],
                     "reused": [],
                     "fetched": [],
                 },
@@ -1990,7 +1821,7 @@ async def evaluate_summary_readiness(payload: AgentSummaryRequest) -> AgentSumma
             data_readiness={
                 "checked": False,
                 "ready": False,
-                "missing_tasks": ["poi_grid", "population", "nightlight", "road_syntax", "poi_structure", "spatial_structure", "area_labels"],
+                "missing_tasks": ["poi_grid", "population", "nightlight", "road_syntax", "poi_structure", "spatial_structure", "area_facts"],
                 "reused": [],
                 "fetched": [],
             },
@@ -2031,7 +1862,7 @@ async def generate_summary_pack(payload: AgentSummaryRequest) -> AgentSummaryGen
         }
         if normalized["ready"]:
             phases.append("derive_analysis")
-            pack_result = await run_area_character_pack(
+            pack_result = await run_area_fact_pack(
                 arguments={},
                 snapshot=payload.analysis_snapshot,
                 artifacts=artifacts,
@@ -2160,7 +1991,7 @@ async def generate_summary_pack(payload: AgentSummaryRequest) -> AgentSummaryGen
             data_readiness={
                 "checked": True,
                 "ready": False,
-                "missing_tasks": ["poi_grid", "population", "nightlight", "road_syntax", "poi_structure", "spatial_structure", "area_labels"],
+                "missing_tasks": ["poi_grid", "population", "nightlight", "road_syntax", "poi_structure", "spatial_structure", "area_facts"],
                 "reused": [],
                 "fetched": [],
             },

@@ -1121,245 +1121,95 @@ def analyze_target_supply_gap(
     return _with_analysis_status(payload, ready=bool(gap_rows or candidate_zones))
 
 
-def _append_rule_hit(
-    hits: List[Dict[str, Any]],
-    *,
-    rule_id: str,
-    label: str,
-    evidence_metrics: List[str],
-    threshold_hit: str,
-    confidence: str,
-) -> None:
-    hits.append(
-        {
-            "rule_id": rule_id,
-            "label": label,
-            "evidence_metrics": evidence_metrics,
-            "threshold_hit": threshold_hit,
-            "confidence": confidence,
-        }
-    )
-
-
-def infer_area_character_labels(
+def build_area_character_facts(
     snapshot: AnalysisSnapshot,
     artifacts: Dict[str, Any],
     *,
     poi_structure: Dict[str, Any] | None = None,
     business_profile: Dict[str, Any] | None = None,
     population_profile: Dict[str, Any] | None = None,
-    nightlight_pattern: Dict[str, Any] | None = None,
     road_pattern: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     poi_structure = poi_structure or build_poi_structure_analysis(snapshot, artifacts)
-    business_profile = business_profile or analyze_poi_mix(snapshot, artifacts, poi_structure=poi_structure)
+    del business_profile
     population_profile = population_profile or build_population_profile_analysis(snapshot, artifacts)
-    nightlight_pattern = nightlight_pattern or build_nightlight_pattern_analysis(snapshot, artifacts)
     road_pattern = road_pattern or build_road_pattern_analysis(snapshot, artifacts)
-
-    dining_ratio = _to_float(poi_structure.get("dining_ratio"), 0.0) or 0.0
-    culture_ratio = _to_float(poi_structure.get("culture_ratio"), 0.0) or 0.0
-    office_ratio = _to_float(poi_structure.get("office_ratio"), 0.0) or 0.0
-    total_population = _to_float(population_profile.get("total_population"), None)
-    top_age_band = str(population_profile.get("top_age_band") or "").strip()
-    density_level = str(population_profile.get("density_level") or "").strip()
-    core_hotspot_count = _to_int(nightlight_pattern.get("core_hotspot_count"), 0) or 0
-    total_radiance = _to_float(nightlight_pattern.get("total_radiance"), None)
-    peak_to_edge_ratio = _to_float(nightlight_pattern.get("peak_to_edge_ratio"), None)
-    node_count = _to_int(road_pattern.get("node_count"), 0) or 0
-    edge_count = _to_int(road_pattern.get("edge_count"), 0) or 0
-    business_label = str(business_profile.get("poi_mix_signal") or "").strip()
-
-    rule_hits: List[Dict[str, Any]] = []
-    character_tags: List[str] = []
-
-    if dining_ratio >= 0.28 and core_hotspot_count >= 1 and ((peak_to_edge_ratio or 0.0) >= 2.0 or (total_radiance or 0.0) >= 1000):
-        _append_rule_hit(
-            rule_hits,
-            rule_id="night_economic_activity_cluster",
-            label="dining_nightlight_threshold_hit",
-            evidence_metrics=["poi.dining_ratio", "nightlight.core_hotspot_count", "nightlight.peak_to_edge_ratio"],
-            threshold_hit=f"餐饮占比 {dining_ratio:.2f}，夜间热点 {core_hotspot_count} 个，中心亮度比 {peak_to_edge_ratio or 0.0:.2f}",
-            confidence="strong",
-        )
-        character_tags.append("dining_nightlight_threshold_hit")
-
-    if culture_ratio >= 0.08 and (total_population or 0.0) >= 20000 and node_count >= 1500 and edge_count >= node_count:
-        _append_rule_hit(
-            rule_hits,
-            rule_id="community_service_cluster",
-            label="culture_population_road_threshold_hit",
-            evidence_metrics=["poi.culture_ratio", "population.total_population", "road.node_count", "road.edge_count"],
-            threshold_hit=f"科教文化占比 {culture_ratio:.2f}，人口 {total_population or 0.0:.0f}，路网节点 {node_count}",
-            confidence="moderate",
-        )
-        character_tags.append("culture_population_road_threshold_hit")
-
-    if office_ratio >= 0.12 and node_count >= 1500 and top_age_band in {"25-34岁", "35-44岁"} and ((total_radiance or 0.0) >= 800 or density_level in {"high", "medium"}):
-        _append_rule_hit(
-            rule_hits,
-            rule_id="business_oriented_cluster",
-            label="office_road_population_nightlight_threshold_hit",
-            evidence_metrics=["poi.office_ratio", "road.node_count", "population.top_age_band", "nightlight.total_radiance"],
-            threshold_hit=f"商务占比 {office_ratio:.2f}，主年龄段 {top_age_band or '-'}，夜光总辐亮 {total_radiance or 0.0:.1f}",
-            confidence="moderate",
-        )
-        character_tags.append("office_road_population_nightlight_threshold_hit")
-
-    if not character_tags and business_label:
-        character_tags.append(business_label)
-
-    dominant_functions = [str(item) for item in (business_profile.get("dominant_functions") or []) if str(item).strip()][:3]
-    crowd_traits: List[str] = []
-    if top_age_band:
-        crowd_traits.append(f"年龄主段 {top_age_band}")
-    if total_population is not None:
-        crowd_traits.append(f"人口基盘约 {total_population:.0f}")
-    if density_level in {"high", "medium"}:
-        crowd_traits.append(f"居住密度 {density_level}")
-
-    if core_hotspot_count >= 1 or (total_radiance or 0.0) >= 800:
-        activity_period = "nightlight_signal_strong"
-    elif (total_radiance or 0.0) > 0 or (peak_to_edge_ratio or 0.0) > 0:
-        activity_period = "nightlight_signal_moderate"
-    else:
-        activity_period = "nightlight_signal_weak"
-
-    if node_count >= 2000 and edge_count >= node_count:
-        spatial_temperament = "road_node_count_ge_2000_edge_ge_node"
-    elif node_count >= 500:
-        spatial_temperament = "road_node_count_ge_500"
-    else:
-        spatial_temperament = "road_node_count_lt_500"
-
-    confidence = "strong" if any(item.get("confidence") == "strong" for item in rule_hits) else ("moderate" if rule_hits else "weak")
     return {
-        "character_tags": character_tags,
-        "dominant_functions": dominant_functions,
-        "activity_period": activity_period,
-        "crowd_traits": crowd_traits,
-        "spatial_temperament": spatial_temperament,
-        "rule_hits": rule_hits,
-        "confidence": confidence,
-        "summary_text": (
-            f"character_tags={','.join(character_tags) or '-'}; "
-            f"dominant_functions={','.join(dominant_functions) or '-'}."
-        ),
+        "poi": {
+            "top_categories": [
+                {
+                    "category": str(item.get("label") or ""),
+                    "count": _to_int(item.get("count"), 0) or 0,
+                    "ratio": _to_float(item.get("ratio"), 0.0) or 0.0,
+                }
+                for item in _safe_list(poi_structure.get("top_categories"))[:8]
+                if isinstance(item, dict)
+            ],
+            "category_ratios": {
+                key: _to_float(poi_structure.get(f"{key}_ratio"), 0.0) or 0.0
+                for key in ("dining", "shopping", "lodging", "office", "culture")
+            },
+        },
+        "population": {
+            "total_population": _to_float(population_profile.get("total_population"), None),
+            "male_ratio": _to_float(population_profile.get("male_ratio"), None),
+            "female_ratio": _to_float(population_profile.get("female_ratio"), None),
+            "top_age_band": str(population_profile.get("top_age_band") or "").strip() or None,
+            "top_age_band_population": _to_float(population_profile.get("top_age_band_population"), None),
+            "top_age_band_ratio": _to_float(population_profile.get("top_age_band_ratio"), None),
+            "age_distribution": list(population_profile.get("age_distribution_ratios") or []),
+        },
+        "road": {
+            "node_count": _to_int(road_pattern.get("node_count"), 0) or 0,
+            "edge_count": _to_int(road_pattern.get("edge_count"), 0) or 0,
+            "total_length_km": _to_float(road_pattern.get("total_length_km"), None),
+            "avg_connectivity": _to_float(road_pattern.get("avg_connectivity"), None),
+        },
     }
 
 
-def score_site_candidates(
+def build_site_candidate_facts(
     snapshot: AnalysisSnapshot,
     artifacts: Dict[str, Any],
     *,
     target_supply_gap: Dict[str, Any] | None = None,
     population_profile: Dict[str, Any] | None = None,
-    nightlight_pattern: Dict[str, Any] | None = None,
     road_pattern: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     target_supply_gap = target_supply_gap or analyze_target_supply_gap(snapshot, artifacts, place_type="")
     population_profile = population_profile or build_population_profile_analysis(snapshot, artifacts)
-    nightlight_pattern = nightlight_pattern or build_nightlight_pattern_analysis(snapshot, artifacts)
     road_pattern = road_pattern or build_road_pattern_analysis(snapshot, artifacts)
 
     candidates = [_safe_dict(item) for item in _safe_list(target_supply_gap.get("candidate_zones"))]
     total_population = _to_float(population_profile.get("total_population"), 0.0) or 0.0
-    density_level = str(population_profile.get("density_level") or "").strip()
-    core_hotspot_count = _to_int(nightlight_pattern.get("core_hotspot_count"), 0) or 0
-    peak_to_edge_ratio = _to_float(nightlight_pattern.get("peak_to_edge_ratio"), 0.0) or 0.0
     node_count = _to_int(road_pattern.get("node_count"), 0) or 0
     edge_count = _to_int(road_pattern.get("edge_count"), 0) or 0
 
-    ranked: List[Dict[str, Any]] = []
+    candidate_facts: List[Dict[str, Any]] = []
     for index, zone in enumerate(candidates[:5]):
-        gap_score = _to_float(zone.get("gap_score"), 0.0) or 0.0
-        demand_pct = _to_float(zone.get("demand_pct"), 0.0) or 0.0
-        supply_pct = _to_float(zone.get("supply_pct"), 0.0) or 0.0
-        supply_gap_score = max(0.0, min(100.0, 35 + gap_score * 90 + max(demand_pct - supply_pct, 0.0) * 50))
-
-        population_score = 45.0
-        if total_population >= 30000:
-            population_score += 25.0
-        elif total_population >= 10000:
-            population_score += 15.0
-        if density_level == "high":
-            population_score += 10.0
-        elif density_level == "medium":
-            population_score += 5.0
-
-        vitality_score = min(100.0, 35 + core_hotspot_count * 12 + peak_to_edge_ratio * 10)
-        access_score = min(100.0, 30 + min(node_count / 80.0, 45.0) + (10.0 if edge_count >= node_count and node_count > 0 else 0.0))
-        total_score = round(
-            supply_gap_score * 0.4
-            + population_score * 0.2
-            + vitality_score * 0.2
-            + access_score * 0.2,
-            1,
-        )
-
-        strengths: List[str] = []
-        risks: List[str] = []
-        if supply_gap_score >= 70:
-            strengths.append("supply_gap_score_ge_70")
-        if vitality_score >= 60:
-            strengths.append("vitality_score_ge_60")
-        if access_score >= 60:
-            strengths.append("access_score_ge_60")
-        if population_score >= 60:
-            strengths.append("population_score_ge_60")
-
-        if supply_pct >= 0.6:
-            risks.append("supply_pct_ge_0_60")
-        if core_hotspot_count <= 0:
-            risks.append("core_hotspot_count_eq_0")
-        if node_count < 500:
-            risks.append("road_node_count_lt_500")
-        if total_population < 8000:
-            risks.append("total_population_lt_8000")
-
-        ranked.append(
+        candidate_facts.append(
             {
-                "rank": index + 1,
+                "source_order": index + 1,
                 "h3_id": str(zone.get("h3_id") or ""),
                 "approx_address": str(zone.get("approx_address") or zone.get("display_title") or "").strip(),
                 "display_title": str(zone.get("display_title") or zone.get("approx_address") or "").strip(),
-                "total_score": total_score,
-                "scores": {
-                    "supply_gap": round(supply_gap_score, 1),
-                    "population_support": round(population_score, 1),
-                    "vitality": round(vitality_score, 1),
-                    "accessibility": round(access_score, 1),
+                "supply_demand": {
+                    "gap_value": _to_float(zone.get("gap_score"), None),
+                    "demand_share": _to_float(zone.get("demand_pct"), None),
+                    "supply_share": _to_float(zone.get("supply_pct"), None),
                 },
-                "strengths": strengths,
-                "risks": risks,
-                "reason_summary": str(zone.get("reason_summary") or "").strip(),
+                "population_context": {
+                    "scope_population": total_population,
+                    "cell_population": _to_float(zone.get("population"), _to_float(zone.get("population_total"), None)),
+                },
+                "road_context": {
+                    "scope_node_count": node_count,
+                    "scope_edge_count": edge_count,
+                },
             }
         )
-    ranked.sort(key=lambda item: (-float(item.get("total_score") or 0.0), int(item.get("rank") or 999)))
-    for index, item in enumerate(ranked):
-        item["rank"] = index + 1
 
     return {
-        "candidate_sites": ranked,
-        "ranking": [
-            {
-                "rank": int(item.get("rank") or 0),
-                "title": str(item.get("display_title") or item.get("approx_address") or "").strip(),
-                "total_score": float(item.get("total_score") or 0.0),
-            }
-            for item in ranked
-        ],
-        "strengths": ranked[0].get("strengths") if ranked else [],
-        "risks": ranked[0].get("risks") if ranked else ["candidate_zone_count_eq_0"],
-        "not_recommended_reason": (
-            "candidate_zone_count_eq_0"
-            if not ranked
-            else "low_rank_has_lower_supply_access_or_vitality_score"
-        ),
-        "confidence": "moderate" if ranked else "weak",
-        "summary_text": (
-            f"candidate_count={len(ranked)}; top_candidate={ranked[0]['display_title']}."
-            if ranked
-            else "candidate_count=0."
-        ),
+        "candidate_count": len(candidate_facts),
+        "candidate_sites": candidate_facts,
     }
