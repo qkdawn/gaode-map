@@ -16,11 +16,11 @@ def test_generate_site_selection_pack_calls_tool_with_place_type(monkeypatch):
         return ToolResult(
             tool_name="run_site_selection_pack",
             status="success",
-            result={"candidate_sites": [{"rank": 1}], "ranking": [{"rank": 1}], "confidence": "moderate"},
+            result={"candidate_sites": [{"source_order": 1}]},
             artifacts={
-                "site_selection_pack": {"candidate_sites": [{"rank": 1}], "ranking": [{"rank": 1}], "confidence": "moderate"},
+                "site_selection_pack": {"candidate_sites": [{"source_order": 1}]},
                 "current_target_supply_gap": {"place_type": "咖啡店"},
-                "current_site_candidate_scores": {"confidence": "moderate"},
+                "current_site_candidate_facts": {"candidate_count": 1},
             },
             warnings=["population_missing"],
         )
@@ -51,17 +51,20 @@ def test_generate_site_selection_pack_calls_tool_with_place_type(monkeypatch):
     assert received["arguments"]["year"] == 2020
     assert received["artifacts"] == {}
     assert response.status == "success"
-    assert response.site_selection_pack["ranking"][0]["rank"] == 1
-    assert response.site_selection_pack["strategy"] == "supply_gap"
-    assert response.site_selection_pack["scenario"] == "commuter"
-    assert response.site_selection_pack["candidate_sites"][0]["positioning"]
-    assert response.site_selection_pack["candidate_sites"][0]["next_validation_steps"]
-    assert response.site_selection_pack["overall_verdict"] in {"suitable", "cautious", "not_recommended"}
+    assert response.site_selection_pack["candidate_sites"][0]["source_order"] == 1
+    assert response.site_selection_pack["request_context"] == {
+        "place_type": "咖啡店",
+        "strategy": "supply_gap",
+        "scenario": "commuter",
+    }
+    assert "overall_verdict" not in response.site_selection_pack
+    assert "ranking" not in response.site_selection_pack
+    assert response.current_site_candidate_facts == {"candidate_count": 1}
     assert response.current_target_supply_gap["place_type"] == "咖啡店"
     assert response.warnings == ["population_missing"]
 
 
-def test_generate_site_selection_pack_returns_low_confidence_without_candidates(monkeypatch):
+def test_generate_site_selection_pack_does_not_invent_verdict_without_candidates(monkeypatch):
     async def fake_run_site_selection_pack(*, arguments, snapshot, artifacts, question):
         del arguments, snapshot, artifacts, question
         return ToolResult(
@@ -69,9 +72,6 @@ def test_generate_site_selection_pack_returns_low_confidence_without_candidates(
             status="success",
             result={
                 "candidate_sites": [],
-                "ranking": [],
-                "confidence": "weak",
-                "not_recommended_reason": "当前缺少足够候选区证据",
             },
             artifacts={},
         )
@@ -84,9 +84,10 @@ def test_generate_site_selection_pack_returns_low_confidence_without_candidates(
     response = asyncio.run(generate_site_selection_pack(AgentSiteSelectionRequest(place_type="咖啡店")))
 
     assert response.status == "success"
-    assert response.site_selection_pack["overall_verdict"] == "not_recommended"
-    assert response.site_selection_pack["avoid_areas"] == []
-    assert response.site_selection_pack["not_recommended_reason"] == "当前缺少足够候选区证据"
+    assert response.site_selection_pack["candidate_sites"] == []
+    assert "overall_verdict" not in response.site_selection_pack
+    assert "avoid_areas" not in response.site_selection_pack
+    assert "not_recommended_reason" not in response.site_selection_pack
 
 
 def test_generate_site_selection_pack_returns_failed_for_missing_place_type():

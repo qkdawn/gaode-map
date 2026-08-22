@@ -230,7 +230,7 @@ class AgentSiteSelectionResponse(BaseModel):
     status: Literal["success", "failed"] = "success"
     site_selection_pack: Dict[str, Any] = Field(default_factory=dict)
     current_target_supply_gap: Dict[str, Any] = Field(default_factory=dict)
-    current_site_candidate_scores: Dict[str, Any] = Field(default_factory=dict)
+    current_site_candidate_facts: Dict[str, Any] = Field(default_factory=dict)
     warnings: List[str] = Field(default_factory=list)
     error: str = ""
 

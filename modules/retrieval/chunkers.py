@@ -402,7 +402,7 @@ def build_analysis_chunks(snapshot: AnalysisSnapshot, artifacts: Dict[str, Any])
             title="选址候选点摘要",
             content=" ".join([_text(site_selection.get("summary_text")), _text(candidates[:5])]),
             metrics={"candidate_count": len(candidates), "candidates": candidates[:5]},
-            source_artifacts=[key for key in ("site_selection_pack", "current_target_supply_gap", "current_site_candidate_scores") if artifacts.get(key)],
+            source_artifacts=[key for key in ("site_selection_pack", "current_target_supply_gap", "current_site_candidate_facts") if artifacts.get(key)],
             warnings=[POI_WARNING, NIGHTLIGHT_WARNING, POPULATION_WARNING, ROAD_WARNING],
         )
     )
