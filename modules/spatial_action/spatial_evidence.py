@@ -54,7 +54,11 @@ from modules.spatial_projects.service import SpatialProjectService
 from modules.timeseries.nightlight_series import get_nightlight_timeseries
 
 
-SCHEMA_VERSION = "spatial_evidence/v10"
+# v18 changes named POI candidate selection to preserve category coverage and
+# prefer role-specific facilities within each category.
+# Keep earlier artifacts immutable and give the new semantics a distinct
+# deterministic identity instead of reusing results produced by v11-v17.
+SCHEMA_VERSION = "spatial_evidence/v18"
 DEFAULT_ISOCHRONE_TIME_MIN = 15.0
 DEFAULT_TRAVEL_TIME_BANDS_MIN = ((0.0, 5.0), (5.0, 10.0), (10.0, 15.0))
 DIRECTION_CODES = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
@@ -154,6 +158,12 @@ def _poi_category_catalog() -> dict[str, tuple[str, str]]:
 
 
 _POI_CATEGORY_CATALOG = _poi_category_catalog()
+
+
+def supported_poi_category_labels() -> tuple[str, ...]:
+    """Return the stable POI category labels accepted by spatial selectors."""
+
+    return tuple(sorted({label for _group_id, label in _POI_CATEGORY_CATALOG.values()}))
 
 
 def _resolve_poi_category(value: Any) -> tuple[str, str] | None:
@@ -360,6 +370,7 @@ class SpatialDomainComputationRequest(BaseModel):
     rank_order: Literal["highest", "lowest"] = "highest"
     top_k: int = Field(default=10, ge=1, le=20)
     record_refs: list[str] = Field(default_factory=list, max_length=20)
+    named_poi_roles: list[NamedPoiRole] = Field(default_factory=list, max_length=3)
 
     @model_validator(mode="after")
     def validate_mode(self) -> "SpatialDomainComputationRequest":
@@ -406,6 +417,10 @@ class SpatialDomainComputationRequest(BaseModel):
             raise ValueError("inspect_requires_record_refs")
         if self.analysis not in {"neighborhood", "inspect"} and self.record_refs:
             raise ValueError("record_refs_only_supported_for_neighborhood_or_inspect")
+        if self.named_poi_roles and "poi" not in self.fact_domains:
+            raise ValueError("named_poi_roles_require_poi_domain")
+        if "comparable_supply" in self.named_poi_roles and not poi_categories:
+            raise ValueError("comparable_supply_requires_poi_category_selector")
         if self.analysis != "accessibility" and self.travel_time_bands_min:
             raise ValueError("travel_time_bands_min_only_supported_for_accessibility")
         population_measures = {
@@ -903,6 +918,7 @@ class SpatialEvidenceService:
         *,
         history_id: str,
         request: SpatialDomainComputationRequest | Mapping[str, Any],
+        project: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Compute domain profiles without exposing the internal metric catalog."""
 
@@ -914,7 +930,7 @@ class SpatialEvidenceService:
         normalized_history_id = str(history_id or "").strip()
         if not normalized_history_id:
             raise ValueError("history_id_required")
-        project = self._projects.read_history_project(normalized_history_id)
+        project = dict(project) if isinstance(project, Mapping) else self._projects.read_history_project(normalized_history_id)
         available = {
             str(item.get("source_id") or "")
             for item in project.get("datasets") or []
@@ -944,8 +960,9 @@ class SpatialEvidenceService:
                 rank_order=domain_query.rank_order,
                 top_k=domain_query.top_k,
                 record_refs=domain_query.record_refs,
+                named_poi_roles=domain_query.named_poi_roles,
             )
-            result = self.analyze(history_id=normalized_history_id, request=request_payload)
+            result = self.analyze(history_id=normalized_history_id, request=request_payload, project=project)
             result["fact_domains"] = list(domains)
             result["evidence_dimensions"] = list(dimensions)
             computations.append(result)
@@ -1170,16 +1187,10 @@ class SpatialEvidenceService:
         status = "available" if statuses and all(value == "available" for value in statuses) else (
             "partial" if any(value == "available" for value in statuses) else "unavailable"
         )
-        snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
-        data_identity = spatial_data_identity(project)
-        return _bounded_model_response({
+        result_id = spatial_domain_result_id(project, domain_query)
+        response = {
             "schema_version": SCHEMA_VERSION,
-            "result_id": "spatial:" + _digest({
-                "schema_version": SCHEMA_VERSION,
-                "snapshot_id": snapshot_id,
-                "data_identity": data_identity,
-                "request": domain_query.model_dump(mode="json"),
-            })[:24],
+            "result_id": result_id,
             "status": status,
             "analysis": domain_query.analysis,
             "selectors": selector_payload,
@@ -1205,7 +1216,17 @@ class SpatialEvidenceService:
             ],
             "method": {"kind": "domain_owned_spatial_evidence", "internal_metrics_hidden": True},
             "provenance": self._provenance(project, {}, available),
-        })
+        }
+        if domain_query.named_poi_roles and _POI in available:
+            records, _, _ = self._load_records(normalized_history_id, {_POI})
+            _scope_geometry, center = self._scope_geometry(project)
+            if center is not None:
+                response["named_poi_candidates"] = self._named_poi_candidates(
+                    domain_query,
+                    records,
+                    center,
+                )
+        return _bounded_model_response(response)
 
     def _poi_category_relationship_profile(
         self,
@@ -3034,12 +3055,13 @@ class SpatialEvidenceService:
         *,
         history_id: str,
         request: SpatialEvidenceRequest | Mapping[str, Any],
+        project: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_history_id = str(history_id or "").strip()
         if not normalized_history_id:
             raise ValueError("history_id_required")
         query = request if isinstance(request, SpatialEvidenceRequest) else SpatialEvidenceRequest.model_validate(request)
-        project = self._projects.read_history_project(normalized_history_id)
+        project = dict(project) if isinstance(project, Mapping) else self._projects.read_history_project(normalized_history_id)
         scope_geometry, center = self._scope_geometry(project)
         if scope_geometry is None:
             return self._unavailable(query, project, "当前项目没有可用的保存范围。")
@@ -4645,6 +4667,12 @@ class SpatialEvidenceService:
             while ranked and len(selected) < limit:
                 def diversified_key(item: ScopeRecord) -> tuple[Any, ...]:
                     base = self._named_poi_sort_key(item, role, selectors, center)
+                    if role in {"regional_anchor", "daily_service"}:
+                        return (
+                            str(item.properties.get("category") or "") in seen_categories,
+                            self._poi_direction(item, center) in seen_directions,
+                            *base,
+                        )
                     return (
                         base[0],
                         base[1],
@@ -4701,7 +4729,7 @@ class SpatialEvidenceService:
         role: NamedPoiRole,
         selectors: Sequence[SpatialEvidenceSelector],
         center: tuple[float, float],
-    ) -> tuple[int, int, int, float, str, str]:
+    ) -> tuple[int, int, int, int, float, str, str]:
         category = str(record.properties.get("category") or "")
         typecode = str(record.properties.get("typecode") or "")
         category_order = _POI_ROLE_CATEGORIES[role]
@@ -4716,11 +4744,71 @@ class SpatialEvidenceService:
         return (
             selector_rank if role == "comparable_supply" else 0,
             min(category_rank, typecode_rank),
+            self._named_poi_role_quality(record, role),
             identity_rank,
             distance,
             str(record.properties.get("name") or record.title or "").casefold(),
             record.record_id,
         )
+
+    @staticmethod
+    def _named_poi_role_quality(record: ScopeRecord, role: NamedPoiRole) -> int:
+        """Prefer actual public-facing facilities over generic category matches."""
+
+        if role == "comparable_supply":
+            return 0
+        category = str(record.properties.get("category") or "")
+        text = " ".join(
+            str(value or "")
+            for value in (
+                record.properties.get("subcategory"),
+                record.properties.get("name"),
+                record.title,
+            )
+        )
+        preferred: dict[str, tuple[str, ...]] = {
+            "交通设施服务": ("地铁", "火车站", "公交", "客运", "机场", "港口", "码头"),
+            "风景名胜": ("遗址", "纪念", "博物", "景区"),
+            "科教文化服务": ("学校", "小学", "中学", "大学", "幼儿园", "图书馆", "博物馆", "文化馆", "展览馆"),
+            "政府机构及社会团体": ("政府机关", "公共服务中心", "居民委员会", "社区委员会", "街道办"),
+            "医疗保健服务": ("综合医院", "社区卫生", "卫生院", "诊所", "药房", "药店", "急救"),
+            "购物服务": ("便民商店", "便利店", "超市", "市场", "菜场"),
+            "体育休闲服务": ("体育场", "运动场", "体育馆", "健身"),
+            "生活服务": ("生活服务", "家政", "维修", "洗衣", "养老"),
+        }
+        if role == "daily_service":
+            preferred["科教文化服务"] = ("学校", "小学", "中学", "大学", "幼儿园", "图书馆")
+        discouraged = [
+            "停车场",
+            "出入口",
+            "医疗美容",
+            "培训机构",
+            "建设中",
+            "风景名胜相关",
+            "设计院",
+            "建筑设计",
+            "传媒有限公司",
+            "商会",
+            "协会",
+        ]
+        if role == "daily_service":
+            discouraged.append("博物馆")
+        name = str(record.properties.get("name") or record.title or "")
+        typecode = str(record.properties.get("typecode") or "")
+        if category == "风景名胜" and typecode.startswith("1102"):
+            return 0 if any(term in name for term in ("寺", "遗址", "故居", "纪念")) else 1
+        if role == "daily_service" and category == "科教文化服务":
+            if "建设中" in text:
+                return 2
+            if any(term in text for term in ("小学", "中学", "大学")):
+                return 0
+            if "幼儿园" in text:
+                return 1
+        if any(keyword in text for keyword in discouraged):
+            return 2
+        if any(keyword in text for keyword in preferred.get(category, ())):
+            return 0
+        return 1
 
     def _named_poi_payload(
         self,
@@ -6329,6 +6417,26 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def spatial_domain_result_id(
+    project: Mapping[str, Any],
+    request: SpatialDomainComputationRequest | Mapping[str, Any],
+) -> str:
+    """Return the stable identity for one domain computation without executing it."""
+
+    domain_query = (
+        request
+        if isinstance(request, SpatialDomainComputationRequest)
+        else SpatialDomainComputationRequest.model_validate(request)
+    )
+    snapshot_id = str((project.get("snapshot") or {}).get("snapshot_id") or project.get("history_id") or "")
+    return "spatial:" + _digest({
+        "schema_version": SCHEMA_VERSION,
+        "snapshot_id": snapshot_id,
+        "data_identity": spatial_data_identity(project),
+        "request": domain_query.model_dump(mode="json"),
+    })[:24]
+
+
 __all__ = [
     "CATALOG_SCOPE_BINDINGS",
     "EVIDENCE_DIMENSION_BINDINGS",
@@ -6336,10 +6444,12 @@ __all__ = [
     "EvidenceDimension",
     "FactDomain",
     "METRIC_BINDINGS",
+    "NamedPoiRole",
     "SCHEMA_VERSION",
     "spatial_data_identity",
     "SpatialDomainComputationRequest",
     "SpatialEvidenceRequest",
     "SpatialEvidenceSelector",
     "SpatialEvidenceService",
+    "spatial_domain_result_id",
 ]

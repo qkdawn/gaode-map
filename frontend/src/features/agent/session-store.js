@@ -10,22 +10,9 @@ import {
   cloneAgentSessionRecord,
   deriveAgentSessionPreview,
   deriveAgentSessionTitle,
-  normalizeAgentAction,
-  normalizeAgentBoundaryItem,
-  normalizeAgentCounterpoint,
-  normalizeAgentDecision,
-  normalizeAgentDecisionEvidence,
-  normalizeAgentPanelPreloadNotes,
-  normalizeAgentPlanEnvelope,
   normalizeAgentSessionSummary,
   sortAgentSessions,
 } from './normalizers.js'
-import {
-  hasAgentExecutionTraceContent,
-  hasAgentPlanContent,
-  shouldExpandAgentProcessSection,
-} from './derived.js'
-import { cloneAnalysisTaskConfirmation } from './analysis-task-registry.js'
 import { getAnalysisWorkspaceTabsFromState } from './analysis-workspace-tabs.js'
 
 function createAgentSessionStoreMethods() {
@@ -224,20 +211,6 @@ function createAgentSessionStoreMethods() {
       this.agentInput = String(session.input || '')
       this.agentSessionHydrating = !!options.hydrating
       this.agentStatus = String(session.status || 'idle')
-      this.agentStage = String(session.stage || 'gating')
-      this.agentAnswer = String(session.answer || (session.output && session.output.answer) || '')
-      this.agentExecutionTrace = cloneArray(session.executionTrace)
-      const conversationProfile = cloneObject(session.conversationExecutionProfile)
-      if (asText(conversationProfile.model_profile_id)) {
-        this.agentSelectedModelProfileId = asText(conversationProfile.model_profile_id)
-      }
-      this.agentPinnedSkillId = asText(conversationProfile.pinned_skill_id)
-      this.agentSelectedSkillId = this.agentPinnedSkillId
-      this.agentSkillScope = this.agentPinnedSkillId ? 'conversation' : 'turn'
-      this.agentUsedTools = cloneArray(session.usedTools)
-      this.agentCitations = cloneArray(session.citations)
-      this.agentResearchNotes = cloneArray(session.researchNotes)
-      this.agentAuditIssues = cloneArray(session.auditIssues)
       this.agentPanelPayloads = cloneObject(session.panelPayloads)
       if (typeof this.syncAgentSummaryReadinessFromPanelPayload === 'function') {
         this.syncAgentSummaryReadinessFromPanelPayload(this.agentPanelPayloads)
@@ -245,43 +218,18 @@ function createAgentSessionStoreMethods() {
       if (typeof this.syncSummaryTaskBoardFromPanelPayload === 'function') {
         this.syncSummaryTaskBoardFromPanelPayload(this.agentPanelPayloads)
       }
-      this.agentClarificationQuestion = String(session.clarificationQuestion || '')
-      this.agentClarificationOptions = cloneArray(session.clarificationOptions)
-      this.agentClarificationDraft = ''
-      this.agentClarificationSubmitting = false
-      this.agentRiskPrompt = String(session.riskPrompt || '')
-      this.agentPendingTaskConfirmation = cloneAnalysisTaskConfirmation(session.pendingTaskConfirmation)
       this.agentError = String(session.error || '')
-      this.agentContextSummary = cloneObject(session.contextSummary)
-      this.agentPlan = normalizeAgentPlanEnvelope(session.plan)
-      this.agentPlanExpanded = shouldExpandAgentProcessSection(this.agentStatus, {
-        hasContent: hasAgentPlanContent(this.agentPlan),
-      })
-      this.agentTraceExpanded = shouldExpandAgentProcessSection(this.agentStatus, {
-        hasContent: hasAgentExecutionTraceContent(this.agentExecutionTrace),
-      })
-      this.agentRiskConfirmations = cloneArray(session.riskConfirmations)
       this.agentMessages = cloneArray(session.messages)
-      this.agentThinkingTimeline = cloneArray(session.thinkingTimeline)
+      this.agentActivityItems = cloneArray(session.activityItems)
       this.agentSummaryLoading = false
       this.agentSummaryGenerating = false
       this.agentSummaryProgressPhase = ''
       this.agentLoading = false
-      this.agentReasoningBlocks = []
       this.agentStreamingMessageId = ''
       this.agentStreamState = 'idle'
       this.agentStreamStartedAt = 0
       this.agentStreamElapsedTick = 0
       this.agentStreamElapsedTimer = null
-      this.agentPanelPreloadNotes = normalizeAgentPanelPreloadNotes(session.panelPreloadNotes)
-      this.agentPreloadedPanelKeys = cloneArray(session.preloadedPanelKeys)
-      this.agentThinkingExpanded = shouldExpandAgentProcessSection(this.agentStatus, {
-        hasContent: !!(
-          this.agentThinkingTimeline.length
-          || hasAgentPlanContent(this.agentPlan)
-          || hasAgentExecutionTraceContent(this.agentExecutionTrace)
-        ),
-      })
       if (!options.keepDetailLoadingId) {
         this.agentSessionDetailLoadingId = ''
       }
@@ -327,8 +275,6 @@ function createAgentSessionStoreMethods() {
     },
     mergeAgentSessionDetail(detail) {
       const existing = this.findAgentSession(detail && detail.id)
-      const detailOutput = detail && detail.output && typeof detail.output === 'object' ? detail.output : {}
-      const detailPanelPayloads = cloneObject(detailOutput.panel_payloads || detailOutput.panelPayloads || (existing && existing.panelPayloads))
       const session = createAgentSessionRecord({
         ...existing,
         id: detail && detail.id,
@@ -336,15 +282,7 @@ function createAgentSessionStoreMethods() {
         preview: detail && detail.preview,
         historyId: (detail && (detail.history_id || detail.historyId)) || (existing && existing.historyId),
         status: detail && detail.status,
-        stage: detail && detail.stage,
-        input: detail && detail.input,
-        output: detail && detail.output,
-        panelPayloads: detailPanelPayloads,
-        diagnostics: detail && detail.diagnostics,
-        contextSummary: detail && detail.context_summary,
-        plan: detail && detail.plan,
-        riskConfirmations: detail && detail.risk_confirmations,
-        conversationExecutionProfile: detail && detail.conversation_execution_profile,
+        panelPayloads: cloneObject(existing && existing.panelPayloads),
         messages: detail && detail.messages,
         isPinned: !!(detail && detail.is_pinned),
         persisted: true,
@@ -395,9 +333,6 @@ function createAgentSessionStoreMethods() {
           : (messages.length ? fallbackTitle : clampText(existing && existing.title, 60) || '新报告'),
         preview: deriveAgentSessionPreview({
           error: this.agentError,
-          riskPrompt: this.agentRiskPrompt,
-          clarificationQuestion: this.agentClarificationQuestion,
-          answer: this.agentAnswer,
           messages,
         }),
         updatedAt: new Date().toISOString(),
@@ -410,40 +345,8 @@ function createAgentSessionStoreMethods() {
           ? asText(options.panelKind)
           : asText(existing && existing.panelKind),
         status: String(this.agentStatus || 'idle'),
-        stage: String(this.agentStage || 'gating'),
-        input: String(this.agentInput || ''),
-        output: {
-          answer: this.agentAnswer,
-          clarificationQuestion: this.agentClarificationQuestion,
-          clarificationOptions: this.agentClarificationOptions,
-          riskPrompt: this.agentRiskPrompt,
-          panelPayloads,
-        },
-        diagnostics: {
-          executionTrace: this.agentExecutionTrace,
-          usedTools: this.agentUsedTools,
-          citations: this.agentCitations,
-          researchNotes: this.agentResearchNotes,
-          auditIssues: this.agentAuditIssues,
-          planningSummary: asText(
-            (existing && existing.diagnostics && (existing.diagnostics.planningSummary || existing.diagnostics.planning_summary))
-            || (this.agentPlan && this.agentPlan.summary),
-          ),
-          auditSummary: asText(existing && existing.diagnostics && (existing.diagnostics.auditSummary || existing.diagnostics.audit_summary)),
-          latencyMs: cloneObject(existing && existing.diagnostics && (existing.diagnostics.latencyMs || existing.diagnostics.latency_ms)),
-          thinkingTimeline: this.agentThinkingTimeline,
-          error: this.agentError,
-        },
-        conversationExecutionProfile: {
-          model_profile_id: asText(this.agentSelectedModelProfileId),
-          pinned_skill_id: this.agentSkillScope === 'conversation' ? asText(this.agentPinnedSkillId || this.agentSelectedSkillId) : '',
-        },
-        contextSummary: this.agentContextSummary,
-        plan: this.agentPlan,
-        riskConfirmations: this.agentRiskConfirmations,
-        pendingTaskConfirmation: cloneAnalysisTaskConfirmation(this.agentPendingTaskConfirmation),
-        panelPreloadNotes: this.agentPanelPreloadNotes,
-        preloadedPanelKeys: this.agentPreloadedPanelKeys,
+        error: this.agentError,
+        activityItems: this.agentActivityItems,
         panelPayloads,
         messages,
         isPinned: Object.prototype.hasOwnProperty.call(options || {}, 'isPinned')
@@ -528,11 +431,6 @@ function createAgentSessionStoreMethods() {
       return this.mergeAgentSessionDetail(detail)
     },
     ensureAgentPanelReady() {
-      if (!this.agentCapabilitiesLoaded && !this.agentCapabilitiesLoading && typeof this.loadAgentCapabilities === 'function') {
-        this.loadAgentCapabilities().catch((err) => {
-          console.warn('Agent capabilities load failed', err)
-        })
-      }
       const activeId = this.getActiveAgentSessionId()
       if (activeId) {
         const existing = this.findAgentSession(activeId)
@@ -558,9 +456,6 @@ function createAgentSessionStoreMethods() {
     },
     startNewAgentReportSession() {
       this.agentWorkspaceView = 'report'
-      if (typeof this.clearAgentComposerMode === 'function') {
-        this.clearAgentComposerMode()
-      }
       this.syncCurrentAgentSession()
       const session = this.createAgentSession()
       this.updateAgentSessions([session, ...this.agentSessions], { loaded: this.agentSessionsLoaded })

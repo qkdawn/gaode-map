@@ -18,8 +18,6 @@ from .stats import (
     compute_neighbor_metrics,
     has_density_variance,
     new_local_spatial_stat,
-    normalize_neighbor_ring,
-    ring_to_arcgis_knn,
     safe_float,
     safe_round,
 )
@@ -33,10 +31,7 @@ def analyze_h3_grid(
     min_overlap_ratio: float = 0.0,
     pois: Optional[List[Dict[str, Any]]] = None,
     poi_coord_type: Literal["gcj02", "wgs84"] = "gcj02",
-    neighbor_ring: int = 1,
     use_arcgis: bool = False,
-    arcgis_neighbor_ring: int = 1,
-    arcgis_knn_neighbors: Optional[int] = None,
     arcgis_timeout_sec: int = 240,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
@@ -108,12 +103,12 @@ def analyze_h3_grid(
         },
     )
     compute_cell_metrics(stats_by_cell, resolution=resolution)
-    neighbor_ring = normalize_neighbor_ring(neighbor_ring, default=1)
-    compute_neighbor_metrics(stats_by_cell, neighbor_ring=neighbor_ring)
+    compute_neighbor_metrics(stats_by_cell)
 
     arcgis_status: Optional[str] = None
+    spatial_statistics_method: Dict[str, Any] = {}
     arcgis_report_maps: Dict[str, Dict[str, Any]] = {}
-    global_moran_i: Optional[float] = compute_global_moran_i(stats_by_cell, neighbor_ring=neighbor_ring)
+    global_moran_i: Optional[float] = compute_global_moran_i(stats_by_cell)
     global_moran_z_score: Optional[float] = None
     local_spatial_stats = {cell_id: new_local_spatial_stat() for cell_id in stats_by_cell.keys()}
 
@@ -129,8 +124,6 @@ def analyze_h3_grid(
             )
         arcgis_status = "ArcGIS未启用，返回原生统计结果"
     elif has_density_variance(stats_by_cell):
-        arcgis_ring = normalize_neighbor_ring(arcgis_neighbor_ring, default=neighbor_ring)
-        arcgis_knn = int(arcgis_knn_neighbors or ring_to_arcgis_knn(arcgis_ring))
         report(
             "arcgis_prepare",
             "正在准备 ArcGIS 空间统计",
@@ -160,7 +153,6 @@ def analyze_h3_grid(
             arcgis_result = run_h3_arcgis_analysis(
                 features=features,
                 stats_by_cell=stats_by_cell,
-                knn_neighbors=arcgis_knn,
                 timeout_sec=arcgis_timeout_sec,
             )
         except RuntimeError as exc:
@@ -174,6 +166,7 @@ def analyze_h3_grid(
                 arcgis_result.get("cells") or [],
             )
             arcgis_status = str(arcgis_result.get("status") or "ArcGIS计算完成")
+            spatial_statistics_method = dict(arcgis_result.get("method") or {})
     else:
         for stat in local_spatial_stats.values():
             stat.update(
@@ -197,6 +190,7 @@ def analyze_h3_grid(
             "poi_count": assigned_poi_count,
             "arcgis_enabled": bool(use_arcgis),
             "arcgis_status": arcgis_status,
+            "spatial_statistics_method": spatial_statistics_method,
         },
     )
     density_values: List[float] = []
@@ -271,6 +265,7 @@ def analyze_h3_grid(
             "global_moran_z_score": global_moran_z_score,
             "analysis_engine": "arcgis",
             "arcgis_status": arcgis_status,
+            "spatial_statistics_method": spatial_statistics_method,
             "arcgis_report_maps": arcgis_report_maps,
             "gi_render_meta": build_gi_render_meta(),
             "lisa_render_meta": build_lisa_render_meta(lisa_i_stats),

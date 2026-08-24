@@ -147,23 +147,14 @@ export function runAnalysisBootstrapApp() {
                       this.agentInput = '';
                       this.agentLoading = false;
                       this.agentStatus = 'idle';
-                      this.agentAnswer = '';
-                      this.agentExecutionTrace = [];
-                      this.agentUsedTools = [];
-                      this.agentCitations = [];
-                      this.agentResearchNotes = [];
-                      this.agentClarificationQuestion = '';
-                      this.agentRiskPrompt = '';
                       this.agentError = '';
-                      this.agentRiskConfirmations = [];
                       this.agentMessages = [];
-                      this.agentThinkingTimeline = [];
+                      this.agentActivityItems = [];
                       this.agentStreamingMessageId = '';
                       this.agentStreamState = 'idle';
                       this.agentStreamStartedAt = 0;
                       this.agentStreamElapsedTick = 0;
                       this.agentStreamElapsedTimer = null;
-                      this.agentThinkingExpanded = false;
                       this.agentSessions = [];
                       this.agentSessionsLoaded = false;
                       this.agentSessionsLoading = false;
@@ -721,6 +712,9 @@ export function runAnalysisBootstrapApp() {
                           this.roadSyntaxStatus = '';
                           this.roadSyntaxSummary = null;
                           this.roadSyntaxRoadFeatures = [];
+                          this.roadSyntaxEdgeFeatures = [];
+                          this.roadSyntaxCorridorFeatures = [];
+                          this.roadSyntaxGridFeatures = [];
                           this.roadSyntaxNodes = [];
                           this.roadSyntaxDiagnostics = null;
                           this.roadSyntaxScatterPointsCache = [];
@@ -2929,6 +2923,9 @@ export function runAnalysisBootstrapApp() {
                       this.roadSyntaxEdgeFeatures = Array.isArray((data && data.road_edges && data.road_edges.features) || [])
                           ? data.road_edges.features
                           : this.roadSyntaxRoadFeatures;
+                      this.roadSyntaxCorridorFeatures = Array.isArray((data && data.road_corridors && data.road_corridors.features) || [])
+                          ? data.road_corridors.features
+                          : [];
                       this.roadSyntaxGridFeatures = Array.isArray((data && data.road_grid && data.road_grid.features) || [])
                           ? data.road_grid.features
                           : [];
@@ -3017,6 +3014,7 @@ export function runAnalysisBootstrapApp() {
                           this.roadSyntaxSummary = null;
                           this.roadSyntaxRoadFeatures = [];
                           this.roadSyntaxEdgeFeatures = [];
+                          this.roadSyntaxCorridorFeatures = [];
                           this.roadSyntaxGridFeatures = [];
                           this.roadSyntaxNodes = [];
                           this.roadSyntaxDiagnostics = null;
@@ -3098,6 +3096,7 @@ export function runAnalysisBootstrapApp() {
                           this.roadSyntaxSummary = null;
                           this.roadSyntaxRoadFeatures = [];
                           this.roadSyntaxEdgeFeatures = [];
+                          this.roadSyntaxCorridorFeatures = [];
                           this.roadSyntaxGridFeatures = [];
                           this.roadSyntaxNodes = [];
                           this.roadSyntaxDiagnostics = null;

@@ -86,12 +86,10 @@ function buildPoiGridParamBundle(ctx = {}) {
       coord_type: 'gcj02',
       poi_coord_type: 'gcj02',
       year,
-      neighbor_ring: toNumber(ctx.h3NeighborRing, 1),
     },
     hex: {
       grid_type: 'h3',
       h3_resolution: toNumber(ctx.h3GridResolution, 10),
-      neighbor_ring: toNumber(ctx.h3NeighborRing, 1),
       include_mode: includeMode,
       min_overlap_ratio: includeMode === 'intersects' ? toNumber(ctx.h3GridMinOverlapRatio, 0) : 0,
     },
@@ -141,7 +139,6 @@ function buildPoiRasterGridParamBundle(ctx = {}) {
     poi_coord_type: 'gcj02',
     cell_id_source: 'population_nightlight_shared_cell_id',
     coord_type: 'gcj02',
-    neighbor_ring: toNumber(ctx.h3NeighborRing, 1),
   }
   return createBundle({
     taskKey: 'poi_raster_grid',
@@ -177,7 +174,6 @@ function buildPoiH3GridParamBundle(ctx = {}) {
     poi_years: year ? [year] : [],
     poi_coord_type: 'gcj02',
     h3_resolution: toNumber(ctx.h3GridResolution, 10),
-    neighbor_ring: toNumber(ctx.h3NeighborRing, 1),
     include_mode: includeMode,
     min_overlap_ratio: includeMode === 'intersects' ? toNumber(ctx.h3GridMinOverlapRatio, 0) : 0,
   }

@@ -947,10 +947,11 @@ def _poi_iteration_context_too_large_result(
 
 def _nightlight_iteration_prompt() -> str:
     return (
-        "你是商业地理与夜光遥感分析助手。"
-        "请基于近三年夜光序列、热点迁移分类和年度快照元信息，判断区域夜间经济活动的热点变化和迁移趋势。"
+        "你是夜光遥感空间分析助手。"
+        "请基于近三年逐年辐亮度、亮度加权中心迁移和年度快照元信息，分析等时圈内夜间亮度的变化与空间迁移。"
         "只输出 JSON 对象，字段必须为 headline, trend_summary, hotspot_migration, risk_or_opportunity。"
-        "不要编造未给出的方向、道路或商圈名称；证据不足时明确说明趋势信号有限。不要输出 markdown。"
+        "不要把夜光直接解释为客流、消费、营业或经济活动，不要编造未给出的方向、道路或商圈名称；"
+        "证据不足时明确说明可比较年份或共同格网不足。不要输出 markdown。"
     )
 
 

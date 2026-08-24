@@ -171,7 +171,6 @@
                             h3_resolution: Number(this.h3GridResolution || 0) || null,
                             include_mode: String(this.h3GridIncludeMode || ''),
                             min_overlap_ratio: Number(this.h3GridMinOverlapRatio || 0),
-                            neighbor_ring: Number(this.h3NeighborRing || 0) || null,
                         },
                         evidence: typeof this.buildAgentPoiH3Evidence === 'function' ? this.buildAgentPoiH3Evidence() : {},
                         error: '',
@@ -189,7 +188,6 @@
                         poi_year: Number.isFinite(safeYear) && safeYear > 0 ? safeYear : null,
                         shared_grid: {
                             grid_type: 'shared_raster',
-                            neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
                         },
                     },
                     evidence: typeof this.buildAgentPoiRasterGridEvidence === 'function' ? this.buildAgentPoiRasterGridEvidence() : {},
@@ -901,7 +899,6 @@
                 let calculationCompleted = false;
                 try {
                     const polygon = this.getIsochronePolygonPayload();
-                    const neighborRing = Math.max(1, Math.min(3, Math.round(this._toNumber(this.h3NeighborRing, 1))));
                     const res = await fetch('/api/v1/analysis/pois/grid-metrics', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -912,8 +909,6 @@
                             poi_coord_type: 'gcj02',
                             categories: this.getPoiGridCategoryPayload(),
                             year: this.getPoiRasterGridYear(),
-                            neighbor_ring: neighborRing,
-                            arcgis_neighbor_ring: neighborRing,
                             arcgis_export_image: true,
                             arcgis_timeout_sec: 240,
                             run_id: progressRunId,

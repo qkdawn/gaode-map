@@ -80,10 +80,12 @@ def test_full_road_records_are_wgs84_and_topologically_closed():
     assert properties["metrics"] == {
         "integration": properties["integration_score"],
         "choice": properties["choice_score"],
-        "connectivity": properties["connectivity_score"],
+        "connectivity": 1.0,
         "depth": 0.0,
         "control": 0.0,
     }
+    assert properties["connectivity_score"] == 0.0
+    assert result["summary"]["avg_connectivity"] == 1.0
     assert "integration_global" in properties
     assert properties["nain_global"] == round(10**1.2 / 20, 8)
     assert properties["nach_global"] == round(math.log(3) / math.log(23), 8)
@@ -154,6 +156,52 @@ def test_axial_headers_derive_total_depth_from_mean_depth_for_nain_and_nach():
     assert properties["nach_r600"] == round(math.log(2) / math.log(local_total_depth + 3), 8)
     assert properties["total_depth_global"] == global_total_depth
     assert properties["total_depth_r600"] == local_total_depth
+    RoadSyntaxResponse.model_validate(result)
+
+
+def test_missing_connectivity_remains_null_instead_of_becoming_a_zero_score():
+    polygon = Polygon(
+        [
+            (112.98, 28.19),
+            (112.99, 28.19),
+            (112.99, 28.20),
+            (112.98, 28.20),
+            (112.98, 28.19),
+        ]
+    )
+    row = {
+        "x1": "112.981",
+        "y1": "28.191",
+        "x2": "112.989",
+        "y2": "28.191",
+        "T1024 Choice": "2",
+        "T1024 Integration": "3",
+    }
+
+    result = build_road_analysis_result(
+        rows=[row],
+        fieldnames=list(row),
+        context_wgs_poly=polygon,
+        output_wgs_poly=polygon,
+        mode="walking",
+        local_radii=[],
+        requested_local_labels=[],
+        render_metric="choice",
+        include_geojson=True,
+        max_edge_features=None,
+        merge_geojson_edges=False,
+        merge_bucket_step=0.025,
+        use_arcgis_webgl=False,
+        arcgis_timeout_sec=20,
+        arcgis_metric_field=None,
+        analysis_engine_label="test",
+        started_at=time.perf_counter(),
+    )
+
+    properties = result["road_edges"]["features"][0]["properties"]
+    assert properties["metrics"]["connectivity"] is None
+    assert properties["connectivity_score"] is None
+    assert result["summary"]["avg_connectivity"] is None
     RoadSyntaxResponse.model_validate(result)
 
 

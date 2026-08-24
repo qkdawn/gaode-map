@@ -8,7 +8,7 @@ test('spatial strategy panel presents a collapsed reader timeline without engine
 
   assert.match(template, /<strong>分析进度<\/strong>/)
   assert.match(template, /<details class="agent-capability-run-timeline-disclosure">/)
-  assert.match(template, /查看十二章分析进度/)
+  assert.match(template, /查看 11 章策略进度/)
   assert.doesNotMatch(template, />n8n Run</)
   assert.doesNotMatch(template, />执行引擎</)
   assert.doesNotMatch(template, />引用方式</)

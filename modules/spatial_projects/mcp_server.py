@@ -7,6 +7,7 @@ when deploying the same server for a remote MCP client.
 
 import argparse
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 import inspect
 import json
@@ -14,6 +15,7 @@ import os
 import re
 import sys
 import types
+from threading import Lock
 from typing import Annotated, Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -34,10 +36,12 @@ from modules.spatial_projects.data_contract import ProjectDataContractService
 from modules.spatial_action.spatial_evidence import (
     EvidenceDimension,
     FactDomain,
+    NamedPoiRole,
     SpatialEvidenceSelector,
     SpatialEvidenceService,
     _agent_public_projection,
     spatial_data_identity,
+    spatial_domain_result_id,
 )
 from modules.spatial_action.spatial_evidence_results import spatial_evidence_result_store
 from modules.spatial_projects.public_web import (
@@ -58,8 +62,8 @@ from modules.spatial_projects.skill_tools import (
     read_metric_result as _read_metric_result,
 )
 from modules.spatial_strategy.literature_evidence import LiteratureEvidenceService
-from modules.spatial_strategy.strategy_decisions import (
-    read_strategy_decisions as _read_strategy_decisions,
+from modules.spatial_strategy.strategy_chapters import (
+    read_strategy_chapters as _read_strategy_chapters,
 )
 
 try:
@@ -140,13 +144,15 @@ class _StdioMcpFallback:
 
     @staticmethod
     def _inline_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+        """Inline local Pydantic definitions inside one fallback tool parameter."""
         definitions = schema.get("$defs") if isinstance(schema.get("$defs"), dict) else {}
 
         def expand(value: Any) -> Any:
             if isinstance(value, dict):
                 reference = value.get("$ref")
                 if isinstance(reference, str) and reference.startswith("#/$defs/"):
-                    target = definitions.get(reference.rsplit("/", 1)[-1])
+                    name = reference.rsplit("/", 1)[-1]
+                    target = definitions.get(name)
                     if isinstance(target, dict):
                         overrides = {key: item for key, item in value.items() if key != "$ref"}
                         return expand({**target, **overrides})
@@ -248,13 +254,37 @@ data_contract = ProjectDataContractService(projects=service, metric_results=_lis
 spatial_evidence = SpatialEvidenceService(projects=service)
 _SPATIAL_EVIDENCE_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _SPATIAL_EVIDENCE_CACHE_LIMIT = 128
+_SPATIAL_EVIDENCE_CACHE_LOCK = Lock()
 literature_evidence = LiteratureEvidenceService()
 
 
-def _analyze_spatial_question(*, history_id: str, question: str) -> dict[str, Any]:
+def _persistable_spatial_result(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and str(value.get("result_id") or "").startswith("spatial:")
+        and str(value.get("status") or "") in {"available", "partial"}
+    )
+
+
+def _persist_spatial_result(history_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Persist one deterministic computation under its stable result ID."""
+
+    return spatial_evidence_result_store.persist(history_id=history_id, result=result)
+
+
+def _analyze_spatial_question(
+    *,
+    history_id: str,
+    question: str,
+    evidence_executor: Any = None,
+) -> dict[str, Any]:
     from modules.spatial_action.spatial_tool_agent import analyze_spatial_question
 
-    return analyze_spatial_question(history_id=history_id, question=question)
+    return analyze_spatial_question(
+        history_id=history_id,
+        question=question,
+        evidence_executor=evidence_executor,
+    )
 
 
 def _call(callback, **kwargs: Any) -> Any:
@@ -268,13 +298,8 @@ def _call(callback, **kwargs: Any) -> Any:
         if code != str(exc):
             response["message"] = str(exc)
         return response
-    except SQLAlchemyError:
-        return {
-            "status": "unavailable",
-            "error": "data_source_unavailable",
-            "retryable": True,
-            "limitations": ["项目数据源当前不可用，未执行或读取本次请求。"],
-        }
+    except SQLAlchemyError as exc:
+        raise RuntimeError("data_source_unavailable") from exc
 
 
 class GeoJSONGeometryInput(BaseModel):
@@ -331,6 +356,77 @@ class AggregateMetricInput(BaseModel):
         return payload
 
 
+def _compute_spatial_evidence_request(
+    *,
+    history_id: str,
+    request_payload: dict[str, Any],
+    project: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute one normalized request, reusing a batch's shared project read."""
+    if project is None:
+        project = _call(service.read_history_project, history_id=history_id)
+    data_identity = (
+        spatial_data_identity(project)
+        if isinstance(project, dict) and project.get("status") not in {"not_found", "invalid_request", "unavailable"}
+        else []
+    )
+    cache_key = json.dumps(
+        {"history_id": history_id, "data_identity": data_identity, "request": request_payload},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    with _SPATIAL_EVIDENCE_CACHE_LOCK:
+        cached = _SPATIAL_EVIDENCE_CACHE.get(cache_key)
+        if cached is not None:
+            _SPATIAL_EVIDENCE_CACHE.move_to_end(cache_key)
+    if cached is not None:
+        if _persistable_spatial_result(cached):
+            cached = _persist_spatial_result(history_id, cached)
+        return json.loads(json.dumps(cached, ensure_ascii=False, default=str))
+
+    if isinstance(project, dict) and project.get("status") not in {"not_found", "invalid_request", "unavailable"}:
+        result_id = spatial_domain_result_id(project, request_payload)
+        try:
+            persisted = spatial_evidence_result_store.read(
+                history_id=history_id,
+                result_id=result_id,
+            )
+        except LookupError:
+            persisted = None
+        if persisted is not None:
+            projected = _agent_public_projection(persisted)
+            with _SPATIAL_EVIDENCE_CACHE_LOCK:
+                _SPATIAL_EVIDENCE_CACHE[cache_key] = json.loads(
+                    json.dumps(projected, ensure_ascii=False, default=str)
+                )
+                _SPATIAL_EVIDENCE_CACHE.move_to_end(cache_key)
+                while len(_SPATIAL_EVIDENCE_CACHE) > _SPATIAL_EVIDENCE_CACHE_LIMIT:
+                    _SPATIAL_EVIDENCE_CACHE.popitem(last=False)
+            return projected
+
+    result = _call(
+        spatial_evidence.compute_domains,
+        history_id=history_id,
+        request=request_payload,
+        project=project,
+    )
+    if isinstance(result, dict):
+        result = _agent_public_projection(result)
+    if _persistable_spatial_result(result):
+        result = _persist_spatial_result(history_id, result)
+    if isinstance(result, dict) and str(result.get("status") or "") in {"available", "partial"}:
+        with _SPATIAL_EVIDENCE_CACHE_LOCK:
+            _SPATIAL_EVIDENCE_CACHE[cache_key] = json.loads(
+                json.dumps(result, ensure_ascii=False, default=str)
+            )
+            _SPATIAL_EVIDENCE_CACHE.move_to_end(cache_key)
+            while len(_SPATIAL_EVIDENCE_CACHE) > _SPATIAL_EVIDENCE_CACHE_LIMIT:
+                _SPATIAL_EVIDENCE_CACHE.popitem(last=False)
+    return result
+
+
 @mcp.tool()
 def compute_spatial_evidence(
     history_id: str,
@@ -343,6 +439,7 @@ def compute_spatial_evidence(
     rank_order: Literal["highest", "lowest"] = "highest",
     top_k: Annotated[int, Field(ge=1, le=20)] = 10,
     record_refs: Annotated[list[str] | None, Field(max_length=20)] = None,
+    named_poi_roles: Annotated[list[NamedPoiRole] | None, Field(max_length=3)] = None,
 ) -> dict[str, Any]:
     """Deterministically compute one spatial operation over selected fact domains.
 
@@ -389,44 +486,74 @@ def compute_spatial_evidence(
         "rank_order": rank_order,
         "top_k": top_k,
         "record_refs": list(record_refs or []),
+        "named_poi_roles": list(named_poi_roles or []),
     }
-    project = _call(service.read_history_project, history_id=history_id)
-    data_identity = (
-        spatial_data_identity(project)
-        if isinstance(project, dict) and project.get("status") not in {"not_found", "invalid_request", "unavailable"}
-        else []
-    )
-    cache_key = json.dumps(
-        {"history_id": history_id, "data_identity": data_identity, "request": request_payload},
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    cached = _SPATIAL_EVIDENCE_CACHE.get(cache_key)
-    if cached is not None:
-        _SPATIAL_EVIDENCE_CACHE.move_to_end(cache_key)
-        if str(cached.get("result_id") or "").startswith("spatial:"):
-            spatial_evidence_result_store.persist(history_id=history_id, result=cached)
-        return json.loads(json.dumps(cached, ensure_ascii=False, default=str))
-
-    result = _call(
-        spatial_evidence.compute_domains,
+    return _compute_spatial_evidence_request(
         history_id=history_id,
-        request=request_payload,
+        request_payload=request_payload,
     )
-    if isinstance(result, dict):
-        result = _agent_public_projection(result)
-    if isinstance(result, dict) and str(result.get("result_id") or "").startswith("spatial:"):
-        spatial_evidence_result_store.persist(history_id=history_id, result=result)
-    if isinstance(result, dict):
-        _SPATIAL_EVIDENCE_CACHE[cache_key] = json.loads(
-            json.dumps(result, ensure_ascii=False, default=str)
+
+
+class SpatialEvidenceBatchRequest(BaseModel):
+    """One independent, already-planned spatial computation in a batch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    analysis: Literal["scope", "accessibility", "direction", "neighborhood", "rank", "relationship", "inspect"]
+    fact_domains: Annotated[list[FactDomain] | None, Field(max_length=4)] = None
+    evidence_dimensions: Annotated[list[EvidenceDimension] | None, Field(max_length=8)] = None
+    selectors: Annotated[list[SpatialEvidenceSelector] | None, Field(max_length=8)] = None
+    travel_time_bands_min: Annotated[list[tuple[float, float]] | None, Field(max_length=6)] = None
+    neighbor_steps: Annotated[int, Field(ge=1, le=3)] = 1
+    rank_order: Literal["highest", "lowest"] = "highest"
+    top_k: Annotated[int, Field(ge=1, le=20)] = 10
+    record_refs: Annotated[list[str] | None, Field(max_length=20)] = None
+    named_poi_roles: Annotated[list[NamedPoiRole] | None, Field(max_length=3)] = None
+
+
+@mcp.tool()
+def compute_spatial_evidence_batch(
+    history_id: str,
+    requests: Annotated[list[SpatialEvidenceBatchRequest], Field(min_length=1, max_length=8)],
+) -> dict[str, Any]:
+    """Compute independent spatial evidence requests concurrently.
+
+    Requests must not depend on another request's record references. The result
+    preserves request order and exposes each computation's persisted result_id.
+    Use the single-request tool for dependent inspect or neighborhood follow-ups.
+    """
+
+    normalized_history_id = str(history_id or "").strip()
+    if not normalized_history_id:
+        raise ValueError("history_id_required")
+    payloads = [
+        (item if isinstance(item, SpatialEvidenceBatchRequest) else SpatialEvidenceBatchRequest.model_validate(item))
+        .model_dump(mode="json", exclude_none=True)
+        for item in requests
+    ]
+    project = _call(service.read_history_project, history_id=normalized_history_id)
+
+    def compute(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(project, dict) or project.get("status") in {"not_found", "invalid_request", "unavailable"}:
+            # Preserve the public single-request seam for missing histories and
+            # lightweight adapters; normal persisted runs reuse the shared project.
+            return compute_spatial_evidence(history_id=normalized_history_id, **payload)
+        return _compute_spatial_evidence_request(
+            history_id=normalized_history_id,
+            request_payload=payload,
+            project=project,
         )
-        _SPATIAL_EVIDENCE_CACHE.move_to_end(cache_key)
-        while len(_SPATIAL_EVIDENCE_CACHE) > _SPATIAL_EVIDENCE_CACHE_LIMIT:
-            _SPATIAL_EVIDENCE_CACHE.popitem(last=False)
-    return result
+
+    with ThreadPoolExecutor(max_workers=min(8, len(payloads)), thread_name_prefix="spatial-evidence") as executor:
+        results = list(executor.map(compute, payloads))
+    statuses = [str(item.get("status") or "unavailable") for item in results]
+    return {
+        "status": "available" if results and all(value == "available" for value in statuses) else (
+            "partial" if any(value == "available" for value in statuses) else "unavailable"
+        ),
+        "history_id": normalized_history_id,
+        "results": results,
+    }
 
 
 @mcp.tool()
@@ -451,27 +578,75 @@ def analyze_spatial_question(
 ) -> dict[str, Any]:
     """Ask the reusable spatial tool agent to decompose and answer a spatial question.
 
-    The agent chooses fact domains, semantic dimensions, and spatial operations;
-    it may call the deterministic tool multiple times and synthesize the facts.
-    Callers do not select metrics or analysis modes.
+    The agent supplies the spatial knowledge: it chooses fact domains, semantic
+    dimensions, and spatial operations; it may call the deterministic tool multiple times and
+    synthesizes the returned facts. Callers do not select metrics or analysis modes.
     """
     return _call(_analyze_spatial_question, history_id=history_id, question=question)
 
 
 @mcp.tool()
-def read_strategy_decisions(run_id: str) -> dict[str, Any]:
-    """Read the completed domain decisions for one spatial-strategy run."""
-    return _read_strategy_decisions(run_id)
+def read_strategy_chapters(
+    run_id: str,
+    unit_ids: Annotated[list[str], Field(min_length=1, max_length=11)],
+) -> dict[str, Any]:
+    """Read exactly the requested completed chapters from one strategy run."""
+    return _read_strategy_chapters(run_id, unit_ids)
+
+
+@mcp.tool()
+def project_context(history_id: str) -> dict[str, Any]:
+    """Read one project's identity, document directory, dataset directory, and computed results."""
+    context = _call(data_contract.project_context, history_id=history_id)
+    if not isinstance(context, dict) or context.get("status") in {"not_found", "invalid_request", "unavailable"}:
+        return context
+    computed_results = []
+    candidates = list(context.get("computed_results") or [])
+    candidates.extend(
+        spatial_evidence_result_store.list_references(history_id=history_id, limit=16)
+    )
+    seen_result_ids: set[str] = set()
+    for result in candidates:
+        if not isinstance(result, dict):
+            continue
+        result_id = str(result.get("result_id") or "").strip()
+        if result_id in seen_result_ids:
+            continue
+        if result_id == "computed:population:summary":
+            seen_result_ids.add(result_id)
+            computed_results.append({
+                "result_id": result_id,
+                "title": "当前项目人口格网确定性汇总",
+                "result_type": str(result.get("result_type") or "dataset_summary"),
+                "dataset_ids": list(result.get("dataset_ids") or []),
+                "year": result.get("year"),
+                "method": str(result.get("method") or ""),
+                "data": result.get("data") if isinstance(result.get("data"), dict) else {},
+                "source_type": "project_dataset_summary",
+                "source_locator": result_id,
+            })
+            continue
+        if not result_id.startswith("spatial:"):
+            continue
+        seen_result_ids.add(result_id)
+        computed_results.append({
+            "result_id": result_id,
+            "status": str(result.get("status") or ""),
+            "analysis": str(result.get("analysis") or result.get("tool_id") or ""),
+            "fact_domains": list(result.get("fact_domains") or []),
+            "evidence_dimensions": list(result.get("evidence_dimensions") or []),
+        })
+    return {**context, "computed_results": computed_results}
 
 
 @mcp.tool()
 def read_project_document(
     history_id: str,
     document_id: str,
-    start_block: int = 0,
-    max_blocks: int = 20,
-    page_start: int | None = None,
-    page_end: int | None = None,
+    start_block: Annotated[int, Field(ge=0)] = 0,
+    max_blocks: Annotated[int, Field(ge=1, le=40)] = 20,
+    page_start: Annotated[int | None, Field(ge=1)] = None,
+    page_end: Annotated[int | None, Field(ge=1)] = None,
 ) -> dict[str, Any]:
     """Read project-specific site, policy, history, ownership, or design facts from a parsed document.
 

@@ -196,10 +196,7 @@ async def analyze_h3_metrics(payload: H3MetricsRequest):
             min_overlap_ratio=payload.min_overlap_ratio,
             pois=poi_payload,
             poi_coord_type=payload.poi_coord_type,
-            neighbor_ring=payload.neighbor_ring,
             use_arcgis=True,
-            arcgis_neighbor_ring=payload.arcgis_neighbor_ring,
-            arcgis_knn_neighbors=None,
             arcgis_timeout_sec=payload.arcgis_timeout_sec,
             progress_callback=_progress_callback,
         )

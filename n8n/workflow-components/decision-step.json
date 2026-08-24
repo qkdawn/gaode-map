@@ -1,5 +1,5 @@
 {
-  "name": "Spatial Strategy Decision Step",
+  "name": "Spatial Strategy Chapter Step",
   "nodes": [
     {
       "parameters": { "inputSource": "passthrough" },
@@ -12,7 +12,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const input = $input.first()?.json ?? {};\nfor (const field of ['run_id', 'history_id', 'step_key', 'step_title', 'project_question']) {\n  if (typeof input[field] !== 'string' || !input[field].trim()) throw new Error('missing required field: ' + field);\n}\nif (!/^[0-9a-f-]{36}$/i.test(input.run_id)) throw new Error('run_id must be a UUID');\nconst stepOrder = Number(input.step_order);\nif (!Number.isInteger(stepOrder) || stepOrder < 1 || stepOrder > 7) throw new Error('step_order must be between 1 and 7');\nconst decisionState = input.decision_state && typeof input.decision_state === 'object' ? input.decision_state : { steps: {} };\nreturn [{ json: { ...input, step_order: stepOrder, decision_state: { ...decisionState, steps: decisionState.steps && typeof decisionState.steps === 'object' ? decisionState.steps : {} } } }];"
+        "jsCode": "const input = $input.first()?.json ?? {};\nfor (const field of ['run_id', 'history_id', 'step_key', 'step_title', 'project_question']) {\n  if (typeof input[field] !== 'string' || !input[field].trim()) throw new Error('missing required field: ' + field);\n}\nif (!/^[0-9a-f-]{36}$/i.test(input.run_id)) throw new Error('run_id must be a UUID');\nconst stepOrder = Number(input.step_order);\nif (!Number.isInteger(stepOrder) || stepOrder < 1 || stepOrder > 11) throw new Error('step_order must be between 1 and 11');\nconst candidate = input.existing_output && typeof input.existing_output === 'object' ? input.existing_output : null;\nconst keys = candidate ? Object.keys(candidate).sort() : [];\nconst content = String(candidate?.content ?? '').trim();\nconst reusable = candidate\n  && JSON.stringify(keys) === JSON.stringify(['citations', 'content', 'title', 'unit_id'])\n  && String(candidate.unit_id ?? '').trim() === input.step_key\n  && String(candidate.title ?? '').trim() === input.step_title\n  && content\n  && !content.startsWith('无法生成本章节')\n  && !content.startsWith('无法完成本章节')\n  && Array.isArray(candidate.citations);\nconst existingOutput = reusable ? { unit_id: input.step_key, title: input.step_title, content, citations: candidate.citations } : null;\nreturn [{ json: { ...input, step_order: stepOrder, existing_output: existingOutput } }];"
       },
       "id": "decision-step-validate",
       "name": "Validate Step Request",
@@ -27,7 +27,7 @@
           "conditions": [
             {
               "id": "decision-step-already-completed",
-              "leftValue": "={{ $json.decision_state.steps[$json.step_key] !== undefined }}",
+              "leftValue": "={{ $json.existing_output !== null }}",
               "rightValue": true,
               "operator": { "type": "boolean", "operation": "true", "singleValue": true }
             }
@@ -45,7 +45,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const state = $input.first().json;\nconst output = state.decision_state.steps[state.step_key];\nreturn [{ json: { run_id: state.run_id, step_key: state.step_key, step_order: state.step_order, status: 'completed', output, decision_state: state.decision_state } }];"
+        "jsCode": "const state = $input.first().json;\nreturn [{ json: { run_id: state.run_id, step_key: state.step_key, step_order: state.step_order, status: 'completed', output: state.existing_output } }];"
       },
       "id": "decision-step-reuse",
       "name": "Return Existing Step Result",
@@ -89,7 +89,7 @@
     {
       "parameters": {
         "mode": "runOnceForAllItems",
-        "jsCode": "const state = $('Validate Step Request').first().json;\nconst memo = $input.first()?.json ?? {};\nif (memo.error || memo.detail) throw new Error('codex_harness_failed:' + String(memo.error?.message ?? memo.detail ?? memo.error));\nconst actions = Array.isArray(memo.actions) ? memo.actions : [];\nif (!String(memo.decision ?? '').trim() || !actions.length) throw new Error('decision_memo_required_content_missing');\nconst unit = state.decision_unit;\nconst output = { unit_id: String(unit.unit_id), step_key: state.step_key, step_order: state.step_order, title: String(unit.title), question: String(unit.question), depends_on: Array.isArray(unit.depends_on) ? unit.depends_on : [], decision_output: String(unit.decision_output ?? ''), evidence_focus: String(unit.evidence_focus ?? ''), decision_memo: { decision: String(memo.decision), alternatives_considered: Array.isArray(memo.alternatives_considered) ? memo.alternatives_considered : [], key_facts: Array.isArray(memo.key_facts) ? memo.key_facts : [], named_entities: Array.isArray(memo.named_entities) ? memo.named_entities : [], actions }, citations: [], diagnostics: [] };\nconst current = state.decision_state && typeof state.decision_state === 'object' ? state.decision_state : {};\nconst next = { ...current, steps: { ...(current.steps ?? {}), [state.step_key]: output }, research_frame: state.research_frame, decision_units: state.decision_units, current_step: state.step_key };\nreturn [{ json: { result: { run_id: state.run_id, step_key: state.step_key, step_order: state.step_order, status: 'completed', output, decision_state: next } } }];"
+        "jsCode": "const state = $('Validate Step Request').first().json;\nconst result = $input.first()?.json ?? {};\nif (result.error || result.detail) throw new Error('codex_harness_failed:' + String(result.error?.message ?? result.detail ?? result.error));\nconst keys = Object.keys(result).sort();\nconst expectedKeys = ['citations', 'content', 'title', 'unit_id'];\nif (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) throw new Error('strategy_chapter_contract_mismatch');\nconst unitId = String(result.unit_id ?? '').trim();\nconst title = String(result.title ?? '').trim();\nconst content = String(result.content ?? '').trim();\nif (unitId !== state.step_key || title !== state.step_title || !content || !Array.isArray(result.citations)) throw new Error('strategy_chapter_identity_mismatch');\nconst output = { unit_id: unitId, title, content, citations: result.citations };\nreturn [{ json: { result: { run_id: state.run_id, step_key: state.step_key, step_order: state.step_order, status: 'completed', output } } }];"
       },
       "id": "decision-step-result",
       "name": "Validate Decision Output",
@@ -100,7 +100,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH payload AS (SELECT $1::jsonb AS value), saved_step AS (\n  UPDATE analysis_step_outputs SET status = payload.value->>'status', output = payload.value->'output', citations = COALESCE(payload.value->'output'->'citations', '[]'::jsonb), diagnostics = COALESCE(payload.value->'output'->'diagnostics', '[]'::jsonb), updated_at = NOW()\n  FROM payload WHERE run_id = (payload.value->>'run_id')::uuid AND step = payload.value->>'step_key' RETURNING run_id\n), saved_run AS (\n  UPDATE analysis_runs AS run SET current_step = payload.value->>'step_key', decision_state = jsonb_set(COALESCE(run.decision_state, '{}'::jsonb) || COALESCE(payload.value->'decision_state', '{}'::jsonb), '{steps}', COALESCE(run.decision_state->'steps', '{}'::jsonb) || COALESCE(payload.value->'decision_state'->'steps', '{}'::jsonb), true), heartbeat_at = NOW(), lease_expires_at = NOW() + INTERVAL '6 hours', updated_at = NOW()\n  FROM payload WHERE id = (payload.value->>'run_id')::uuid RETURNING id\n) SELECT value AS result FROM payload;",
+        "query": "WITH payload AS (SELECT $1::jsonb AS value), saved_step AS (\n  UPDATE analysis_step_outputs SET status = payload.value->>'status', output = payload.value->'output', citations = payload.value->'output'->'citations', diagnostics = '[]'::jsonb, updated_at = NOW()\n  FROM payload WHERE run_id = (payload.value->>'run_id')::uuid AND step = payload.value->>'step_key' RETURNING run_id\n), saved_run AS (\n  UPDATE analysis_runs AS run SET current_step = payload.value->>'step_key', heartbeat_at = NOW(), lease_expires_at = NOW() + INTERVAL '6 hours', updated_at = NOW()\n  FROM payload WHERE id = (payload.value->>'run_id')::uuid RETURNING id\n) SELECT value AS result FROM payload;",
         "options": { "queryReplacement": "={{ [JSON.stringify($json.result)] }}" }
       },
       "id": "decision-step-persist",

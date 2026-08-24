@@ -130,11 +130,11 @@ def _make_default_configs() -> Dict[str, PromptConfig]:
         ),
         "consumption_vitality": PromptConfig(
             prompt_key="consumption_vitality",
-            title="经济活动强度",
+            title="夜间亮度背景",
             system_prompt=(
-                "你是一名商业地理与城市空间分析师。现在只生成经济活动强度判断卡片，必须输出 JSON，不要输出 markdown。"
-                "JSON 结构固定为：{\"section_key\":\"consumption_vitality\",\"title\":\"经济活动强度\",\"reasoning\":\"...\"}。"
-                "只基于夜光、方位和路网 raw signal 生成解释；不写消费能力、客流、营业额或白天活跃；不套用固定判断路径。"
+                "你是一名城市空间分析师。现在只生成夜间亮度背景判断卡片，必须输出 JSON，不要输出 markdown。"
+                "JSON 结构固定为：{\"section_key\":\"consumption_vitality\",\"title\":\"夜间亮度背景\",\"reasoning\":\"...\"}。"
+                "只基于夜光数值、方向和路网 raw signal 生成有边界的判断；不把夜光直接等同经济活动，不写消费能力、客流、营业额或白天活跃。"
             ),
             payload_note=_default_payload_note("summary_section_consumption_vitality", "summary_pack_v1"),
             output_schema=_schema(
@@ -321,15 +321,16 @@ def _make_default_configs() -> Dict[str, PromptConfig]:
             prompt_key="nightlight_iteration",
             title="夜光多年迭代",
             system_prompt=(
-                "你是商业地理与夜光遥感分析助手。请基于 nightlight_iteration_v1 证据包中的 years、series、hotspot_shift、"
-                "insights 和 snapshot_refs 判断区域夜间经济活动的热点变化和迁移趋势。"
+                "你是夜光遥感空间分析助手。请基于 nightlight_iteration_v1 证据包中的 years、series、hotspot_shift、"
+                "insights 和 snapshot_refs 判断等时圈内夜间亮度的变化和亮度加权中心迁移。"
                 "只输出 JSON 对象，字段必须为 headline, trend_summary, hotspot_migration, risk_or_opportunity。"
                 "headline 必须是一句话趋势判断；trend_summary 说明总辐亮、均值、P90 或点亮占比的主要变化；"
-                "hotspot_migration 只能使用 hotspot_shift 和 insights 中已有信号；risk_or_opportunity 说明机会或风险。不要输出 markdown。"
+                "hotspot_migration 只能使用 hotspot_shift 和 insights 中已有数值信号；risk_or_opportunity 说明待分析的空间含义。"
+                "不要把夜光直接解释为客流、消费、营业或经济活动。不要输出 markdown。"
             ),
             payload_note=(
                 'User payload: {"task":"nightlight_iteration_change","evidence": nightlight_iteration_v1 证据包}。'
-                "evidence 只包含年度夜光统计、热点迁移摘要、规则洞察和快照引用状态；不包含图片 base64、完整栅格、地图底图或前端 UI 状态。"
+                "evidence 只包含年度夜光统计、亮度中心迁移、数值变化和快照引用状态；不包含图片 base64、完整栅格、地图底图或前端 UI 状态。"
             ),
             output_schema=_schema(
                 {

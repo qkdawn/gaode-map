@@ -18,6 +18,7 @@ def test_mysql_engine_uses_short_lived_connections(monkeypatch):
 
     monkeypatch.setattr(database, "create_engine", fake_create_engine)
     monkeypatch.setattr(database.settings, "db_bind_address", "")
+    monkeypatch.setattr(database.settings, "db_io_timeout_s", 120)
 
     database._build_engine("mysql+pymysql://user:password@example.test:13306/gaode_deploy?charset=utf8mb4")
 
@@ -28,8 +29,8 @@ def test_mysql_engine_uses_short_lived_connections(monkeypatch):
     assert captured["kwargs"]["max_overflow"] == 5
     assert captured["kwargs"]["connect_args"] == {
         "connect_timeout": 5,
-        "read_timeout": 30,
-        "write_timeout": 30,
+        "read_timeout": 120,
+        "write_timeout": 120,
     }
 
 
@@ -56,6 +57,7 @@ def test_init_db_does_not_create_ai_document_schema(monkeypatch):
     monkeypatch.setattr(database, "_ensure_poi_results_schema", lambda: called.append("poi_results"))
     monkeypatch.setattr(database, "_ensure_analysis_artifacts_schema", lambda: called.append("analysis_artifacts"))
     monkeypatch.setattr(database, "_drop_legacy_analysis_artifact_versions", lambda: called.append("drop_legacy_run_artifacts"))
+    monkeypatch.setattr(database, "_drop_legacy_agent_model_profiles", lambda: called.append("drop_legacy_agent_model_profiles"))
     monkeypatch.setattr(database, "_ensure_spatial_projects_schema", lambda: called.append("spatial_projects"))
 
     database.init_db()
@@ -66,8 +68,36 @@ def test_init_db_does_not_create_ai_document_schema(monkeypatch):
         "poi_results",
         "analysis_artifacts",
         "drop_legacy_run_artifacts",
+        "drop_legacy_agent_model_profiles",
         "spatial_projects",
     ]
+
+
+def test_drop_legacy_agent_model_profiles(monkeypatch):
+    statements = []
+
+    class FakeInspector:
+        def has_table(self, table_name):
+            return table_name == "agent_model_profiles"
+
+    class FakeConnection:
+        def execute(self, statement):
+            statements.append(str(statement))
+
+    class FakeBegin:
+        def __enter__(self):
+            return FakeConnection()
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(database, "_refresh_runtime_config_if_needed", lambda: None)
+    monkeypatch.setattr(database, "inspect", lambda engine: FakeInspector())
+    monkeypatch.setattr(database, "engine", SimpleNamespace(begin=lambda: FakeBegin()))
+
+    database._drop_legacy_agent_model_profiles()
+
+    assert statements == ["DROP TABLE agent_model_profiles"]
 
 
 def test_poi_results_schema_creates_history_sort_index(monkeypatch):

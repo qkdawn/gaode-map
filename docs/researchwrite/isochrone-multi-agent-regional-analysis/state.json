@@ -4,7 +4,7 @@
   "text_type": "research_proposal",
   "language": "zh",
   "target_reader": "supervisor_and_internal_research_reviewers",
-  "current_round": 2,
+  "current_round": 3,
   "scores": [
     {
       "round": 1,
@@ -23,17 +23,25 @@
       "stage": "proposal_readability_revision",
       "score": 8.7,
       "status": "supervisor_facing"
+    },
+    {
+      "round": 3,
+      "stage": "agent_research_scope_revision",
+      "score": 8.8,
+      "status": "supervisor_facing"
     }
   ],
   "technical_debts": [
     "target venue and document template are not specified",
+    "T1-T5 task instances and ground-truth annotations have not been fixed",
+    "matched B0-B3 baselines and ablations have not been executed",
     "cross-case evaluation dataset has not been fixed",
     "expert evaluation panel and power analysis are not yet defined",
-    "current feasibility evidence is based on one successful fixed-twelve-step end-to-end run",
-    "the dynamic decision-unit workflow has not completed a database-backed end-to-end acceptance run",
-    "the remote MySQL route is currently blocked by the local VPN/TUN path",
+    "current complex-task feasibility evidence is based on one successful twelve-decision-unit end-to-end run",
+    "normal conversation quality and tool-selection accuracy have not been evaluated",
+    "normal conversation still exposes low-level scope dataset query and aggregation tools instead of the shared semantic spatial-evidence entry",
     "GraphRAG retrieval quality and cross-lingual recall have not been evaluated",
-    "working-brief compression has not been evaluated for named-entity and key-fact retention"
+    "cross-output consistency among answers, decisions, figures, and reports has not been evaluated"
   ],
   "status": "export"
 }

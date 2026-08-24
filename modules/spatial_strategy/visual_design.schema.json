@@ -9,6 +9,10 @@
       "items": {
         "type": "object",
         "properties": {
+          "section_id": {
+            "type": "string",
+            "enum": ["project_basis", "regional_role", "supply_gap", "audience_use", "theme_resources", "positioning", "product_mix", "spatial_layout", "operating_model", "investment_operation", "phasing"]
+          },
           "title": { "type": "string" },
           "format": { "type": "string", "enum": ["map", "chart", "table"] },
           "rationale": { "type": "string" },
@@ -20,9 +24,14 @@
           "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
           "group_by": { "type": "string" },
           "metric_op": { "type": "string", "enum": ["count", "sum", "avg"] },
-          "metric_field": { "type": "string" }
+          "metric_field": { "type": "string" },
+          "named_record_refs": {
+            "type": "array",
+            "maxItems": 12,
+            "items": { "type": "string", "pattern": "^current:dataset:poi/.+" }
+          }
         },
-        "required": ["title", "format", "rationale", "decision_question", "caption", "map_variant", "chart_variant", "dataset_id", "layers", "group_by", "metric_op", "metric_field"],
+        "required": ["section_id", "title", "format", "rationale", "decision_question", "caption", "map_variant", "chart_variant", "dataset_id", "layers", "group_by", "metric_op", "metric_field", "named_record_refs"],
         "additionalProperties": false
       }
     }

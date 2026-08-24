@@ -1,4 +1,6 @@
 sandbox_mode = "danger-full-access"
-[mcp_servers.spatial-project]
-command = "python"
+[mcp_servers.spatial_project]
+command = ".venv/Scripts/python.exe"
 args = ["-m", "modules.spatial_projects.mcp_server"]
+tool_timeout_sec = 1200
+startup_timeout_sec = 120

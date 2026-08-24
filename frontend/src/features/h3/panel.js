@@ -5,7 +5,6 @@
             h3GridCount: 0,
             h3GridResolution: 10,
             h3GridIncludeMode: 'intersects',
-            h3NeighborRing: 1,
             h3GridMinOverlapRatio: 0.15,
             h3ParamsSubTab: 'grid',
             h3ArcgisReportMapLoadError: false,
@@ -2177,8 +2176,6 @@
                 let calculationCompleted = false;
                 try {
                     const polygon = this.getIsochronePolygonPayload();
-                    const neighborRing = Math.max(1, Math.min(3, Math.round(this._toNumber(this.h3NeighborRing, 1))));
-                    this.h3NeighborRing = neighborRing;
                     const analysisPois = this._buildH3AnalysisPois();
                     if (!analysisPois.length) {
                         throw new Error('当前“分析POI”配置下无可计算样本，请先在参数页勾选至少一个有数据的POI分类');
@@ -2192,9 +2189,7 @@
                         min_overlap_ratio: this.h3GridIncludeMode === 'intersects' ? this.h3GridMinOverlapRatio : 0,
                         pois: analysisPois,
                         poi_coord_type: 'gcj02',
-                        neighbor_ring: neighborRing,
                         use_arcgis: true,
-                        arcgis_neighbor_ring: neighborRing,
                         arcgis_timeout_sec: 240,
                         run_id: progressRunId,
                     };

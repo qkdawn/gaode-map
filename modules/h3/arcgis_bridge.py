@@ -66,7 +66,6 @@ def _build_rows(features: List[Dict[str, Any]], stats_by_cell: Dict[str, Dict[st
 def run_arcgis_h3_analysis(
     features: List[Dict[str, Any]],
     stats_by_cell: Dict[str, Dict[str, Any]],
-    knn_neighbors: int = 8,
     timeout_sec: int = 240,
 ) -> Dict[str, Any]:
     if not settings.arcgis_bridge_enabled:
@@ -87,7 +86,6 @@ def run_arcgis_h3_analysis(
     bridge_timeout = max(int(settings.arcgis_bridge_timeout_s or 300), int(timeout_sec or 240))
     payload: Dict[str, Any] = {
         "rows": rows,
-        "knn_neighbors": int(max(1, min(64, int(knn_neighbors)))),
         "timeout_sec": int(max(30, int(timeout_sec))),
         "run_id": run_id,
     }
@@ -144,6 +142,7 @@ def run_arcgis_h3_analysis(
     return {
         "cells": cells,
         "global_moran": global_moran,
+        "method": body.get("method") or {},
         "status": status_text,
     }
 

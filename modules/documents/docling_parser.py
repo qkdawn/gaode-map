@@ -20,10 +20,37 @@ def parse_document_with_docling(file_path: str) -> List[ParsedDocumentBlock]:
     except Exception as exc:
         raise RuntimeError("docling_unavailable") from exc
 
-    result = DocumentConverter().convert(Path(file_path))
+    path = Path(file_path)
+    try:
+        result = DocumentConverter().convert(path)
+    except Exception:
+        if path.suffix.lower() != ".pdf":
+            raise
+        return _parse_text_pdf(path)
     document = getattr(result, "document", result)
     raw_blocks = list(_iter_docling_blocks(document))
     return _normalize_blocks(raw_blocks)
+
+
+def _parse_text_pdf(path: Path) -> List[ParsedDocumentBlock]:
+    from pypdf import PdfReader
+
+    blocks: List[ParsedDocumentBlock] = []
+    for page_index, page in enumerate(PdfReader(str(path)).pages):
+        text = str(page.extract_text() or "").strip()
+        if not text:
+            continue
+        blocks.append(
+            ParsedDocumentBlock(
+                page_index=page_index,
+                block_index=len(blocks),
+                block_type="paragraph",
+                text=text,
+            )
+        )
+    if not blocks:
+        raise RuntimeError("parsed_document_empty")
+    return blocks
 
 
 def _iter_docling_blocks(document: Any) -> Iterable[dict[str, Any]]:

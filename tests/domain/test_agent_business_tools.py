@@ -142,7 +142,7 @@ def test_run_business_site_advice_chains_l1_tools(monkeypatch):
         del arguments, snapshot, artifacts, question
         calls.append(("road", {}))
         return ToolResult(
-            tool_name="compute_road_syntax_from_scope",
+            tool_name="read_persisted_road_syntax",
             status="success",
             artifacts={"current_road_summary": {"node_count": 5, "edge_count": 6}},
         )
@@ -151,7 +151,7 @@ def test_run_business_site_advice_chains_l1_tools(monkeypatch):
     monkeypatch.setattr(business_tools, "compute_h3_metrics_from_scope_and_pois", fake_h3)
     monkeypatch.setattr(business_tools, "compute_population_overview_from_scope", fake_population)
     monkeypatch.setattr(business_tools, "compute_nightlight_overview_from_scope", fake_nightlight)
-    monkeypatch.setattr(business_tools, "compute_road_syntax_from_scope", fake_road)
+    monkeypatch.setattr(business_tools, "read_persisted_road_syntax", fake_road)
 
     snapshot = _snapshot_with_scope()
     artifacts = {"scope_polygon": snapshot.scope["polygon"]}
@@ -289,7 +289,7 @@ def test_run_business_site_advice_infers_target_from_descriptive_place_type(monk
     monkeypatch.setattr(business_tools, "compute_h3_metrics_from_scope_and_pois", fake_h3)
     monkeypatch.setattr(business_tools, "compute_population_overview_from_scope", fake_optional)
     monkeypatch.setattr(business_tools, "compute_nightlight_overview_from_scope", fake_optional)
-    monkeypatch.setattr(business_tools, "compute_road_syntax_from_scope", fake_optional)
+    monkeypatch.setattr(business_tools, "read_persisted_road_syntax", fake_optional)
 
     snapshot = _snapshot_with_scope()
     result = asyncio.run(
@@ -330,7 +330,7 @@ def test_run_business_site_advice_degrades_optional_tool_failure(monkeypatch):
     monkeypatch.setattr(business_tools, "compute_h3_metrics_from_scope_and_pois", fake_h3)
     monkeypatch.setattr(business_tools, "compute_population_overview_from_scope", fake_failed)
     monkeypatch.setattr(business_tools, "compute_nightlight_overview_from_scope", fake_failed)
-    monkeypatch.setattr(business_tools, "compute_road_syntax_from_scope", fake_failed)
+    monkeypatch.setattr(business_tools, "read_persisted_road_syntax", fake_failed)
 
     snapshot = _snapshot_with_scope()
     result = asyncio.run(
@@ -362,7 +362,7 @@ def test_compute_h3_metrics_uses_keyword_arguments(monkeypatch):
     snapshot = _snapshot_with_scope()
     result = asyncio.run(
         h3_tools.compute_h3_metrics_from_scope_and_pois(
-            arguments={"resolution": 10, "neighbor_ring": 1},
+            arguments={"resolution": 10},
             snapshot=snapshot,
             artifacts={"scope_polygon": snapshot.scope["polygon"], "current_pois": []},
             question="计算 H3",
@@ -375,32 +375,40 @@ def test_compute_h3_metrics_uses_keyword_arguments(monkeypatch):
     assert "progress_callback" not in seen
 
 
-def test_compute_road_syntax_uses_keyword_arguments(monkeypatch):
-    seen = {}
-
-    def fake_analyze_road_syntax(**kwargs):
-        seen.update(kwargs)
-        return {"summary": {"node_count": 0, "edge_count": 0, "avg_choice": None}}
-
-    monkeypatch.setattr(road_tools, "analyze_road_syntax", fake_analyze_road_syntax)
-
+def test_road_adapter_reads_persisted_result_without_running_analysis():
     snapshot = _snapshot_with_scope()
     result = asyncio.run(
-        road_tools.compute_road_syntax_from_scope(
-            arguments={"mode": "walking"},
+        road_tools.read_persisted_road_syntax(
+            arguments={},
             snapshot=snapshot,
-            artifacts={"scope_polygon": snapshot.scope["polygon"]},
-            question="计算路网",
+            artifacts={
+                "current_road": {"summary": {"node_count": 12, "edge_count": 15, "avg_choice": 0.4}},
+                "current_road_summary": {"node_count": 12, "edge_count": 15, "avg_choice": 0.4},
+            },
+            question="读取路网",
         )
     )
 
     assert result.status == "success"
-    assert seen["polygon"] == snapshot.scope["polygon"]
-    assert seen["arcgis_timeout_sec"] == 60
-    assert "progress_callback" not in seen
+    assert result.result == {"node_count": 12, "edge_count": 15}
+    assert "未重新运行 depthmapX" in result.warnings[0]
 
 
-def test_run_area_character_pack_returns_tags_and_evidence_chain(monkeypatch):
+def test_road_adapter_fails_when_no_persisted_result_exists():
+    result = asyncio.run(
+        road_tools.read_persisted_road_syntax(
+            arguments={},
+            snapshot=_snapshot_with_scope(),
+            artifacts={},
+            question="读取路网",
+        )
+    )
+
+    assert result.status == "failed"
+    assert result.error == "road_analysis_not_persisted"
+
+
+def test_run_area_fact_pack_returns_reviewable_facts(monkeypatch):
     async def fake_bundle(*, arguments, snapshot, artifacts, question):
         del arguments, snapshot, artifacts, question
         return ToolResult(

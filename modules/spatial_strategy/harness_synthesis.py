@@ -1,103 +1,172 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
+from typing import Any, Callable
+
+from modules.agent_harness import CodexHarnessError, run_codex
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-HARNESS_RUNTIME_ROOT = PROJECT_ROOT / "runtime" / "codex-harness"
-BLUEPRINT_SCHEMA_PATH = Path(__file__).with_name("report_blueprint.schema.json")
-CORE_PROMPT = "基于已有项目材料和空间数据完成用户任务，给出明确判断及行动建议。不要虚构信息；无法完成时直接说明原因。"
-DECISION_MEMO_SCHEMA_PATH = Path(__file__).with_name("decision_memo.schema.json")
-REPORT_SECTION_SCHEMA_PATH = Path(__file__).with_name("report_section.schema.json")
+CHAPTER_SCHEMA_PATH = Path(__file__).with_name("strategy_chapter.schema.json")
 VISUAL_DESIGN_SCHEMA_PATH = Path(__file__).with_name("visual_design.schema.json")
+CORE_PROMPT = "基于已有项目材料和空间数据完成用户任务，给出明确判断及行动建议。不要虚构信息；无法完成时直接说明原因。"
+STRATEGY_UNIT_IDS = (
+    "project_basis",
+    "regional_role",
+    "supply_gap",
+    "audience_use",
+    "theme_resources",
+    "positioning",
+    "product_mix",
+    "spatial_layout",
+    "operating_model",
+    "investment_operation",
+    "phasing",
+)
+_FAILED_TOOL_STATUSES = {
+    "data_source_unavailable",
+    "failed",
+    "invalid_request",
+    "not_found",
+    "partial",
+    "unavailable",
+}
+_FAILED_CHAPTER_PREFIXES = (
+    "无法生成本章节",
+    "无法完成本章节",
+)
+_DEMOGRAPHIC_SUMMARY_REF = "computed:population:summary"
 
 
 class SpatialStrategyHarnessError(RuntimeError):
     pass
 
 
-def _prompt(*, run_id: str, project_question: str) -> str:
-    return "\n".join(
-        [
-            CORE_PROMPT,
-            "这是城市空间策略的综合阶段，不写正式报告正文。",
-            f"项目任务：{project_question}",
-            f"运行编号：{run_id}",
-            "先调用 spatial-project MCP 的 read_strategy_decisions，只传入上述运行编号，读取已经完成的领域决策。",
-            "在这些决策之间完成取舍和整合：比较至少三个候选定位，选择一个推荐定位；明确未来空间与使用状态、优先使用者、使用场景、产品与运营组合、空间改变机制、首期行动和后续分期。",
-            "保留会改变方案选择的具名 POI、道路、路径、建筑和地点，并在相关判断中使用其名称、空间关系、距离或指标，不用笼统方位替代已有的具体对象。",
-            "刚性条件应转化为分区、分时、独立流线或可逆改造等具体响应；未来客群和使用场景是策略选择，不要求现状数据证明其必然发生。",
-            "以项目准备创造的未来状态和可实施空间项目包为主体。产权、保护、结构和消防核定只写入直接受其影响的行动，不得代替角色、客群、场景、空间配置或首期项目包。",
-            "五个章节依次为：项目未来角色与总体判断；优先使用者及未来使用场景；产品和运营组合；入口、路径、建筑、院落与住宅界面的空间策略；首期项目包、实施顺序与预期改变。",
-            "最终只返回符合指定 JSON Schema 的综合蓝图。",
-        ]
-    )
+def _tool_name(value: Any) -> str:
+    name = str(value or "").rsplit(".", 1)[-1]
+    return name.rsplit("__", 1)[-1] or "unknown_tool"
 
 
-def _run_codex(*, prompt: str, schema_path: Path, enabled_tools: list[str]) -> dict:
-    codex = shutil.which("codex")
-    if not codex:
-        raise SpatialStrategyHarnessError("codex_harness_unavailable")
-
-    HARNESS_RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="run-", dir=HARNESS_RUNTIME_ROOT) as directory:
-        output_path = Path(directory) / "result.json"
-        enabled_tools_config = "mcp_servers.spatial-project.enabled_tools=" + json.dumps(enabled_tools)
-        completed = subprocess.run(
-            [
-                codex,
-                "-a",
-                "never",
-                "exec",
-                "--ephemeral",
-                "--color",
-                "never",
-                "--sandbox",
-                "danger-full-access",
-                "--cd",
-                str(PROJECT_ROOT),
-                "--disable",
-                "tool_suggest",
-                "-c",
-                enabled_tools_config,
-                "--output-schema",
-                str(schema_path),
-                "--output-last-message",
-                str(output_path),
-                "-",
-            ],
-            cwd=PROJECT_ROOT,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
-            check=False,
+def _run_codex(
+    *,
+    prompt: str,
+    schema_path: Path,
+    enabled_tools: list[str],
+    tool_call_validator: Callable[[list[dict[str, Any]]], None] | None = None,
+    output_validator: Callable[[dict[str, Any], list[dict[str, Any]]], None] | None = None,
+) -> dict:
+    try:
+        return run_codex(
+            prompt=prompt,
+            schema_path=schema_path,
+            enabled_tools=enabled_tools,
+            tool_call_validator=tool_call_validator,
+            output_validator=output_validator,
         )
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "codex_exec_failed").strip()[-1200:]
-            raise SpatialStrategyHarnessError(f"codex_harness_failed: {detail}")
-        try:
-            result = json.loads(output_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise SpatialStrategyHarnessError("codex_harness_invalid_output") from exc
-        if not isinstance(result, dict):
-            raise SpatialStrategyHarnessError("codex_harness_invalid_output")
-        return result
+    except CodexHarnessError as exc:
+        raise SpatialStrategyHarnessError(str(exc)) from exc
 
 
-def synthesize_strategy_blueprint(*, run_id: str, project_question: str) -> dict:
-    return _run_codex(
-        prompt=_prompt(run_id=run_id, project_question=project_question),
-        schema_path=BLUEPRINT_SCHEMA_PATH,
-        enabled_tools=["read_strategy_decisions"],
-    )
+def _failed_tool_result(value: Any) -> tuple[str, str] | None:
+    if isinstance(value, dict):
+        status = str(value.get("status") or "").strip().casefold()
+        error = str(value.get("error") or "").strip().casefold()
+        if status in _FAILED_TOOL_STATUSES:
+            return status, "$.status"
+        if error in _FAILED_TOOL_STATUSES:
+            return error, "$.error"
+    return None
+
+
+def _validate_strategy_tool_results(calls: list[dict[str, Any]]) -> None:
+    for index, call in enumerate(calls):
+        name = _tool_name(call.get("name"))
+        if call.get("_recoverable_validation_failure"):
+            if any(
+                _tool_name(later.get("name")) == name
+                and str(later.get("status") or "") not in {"failed", "declined"}
+                and not _failed_tool_result(later.get("result"))
+                for later in calls[index + 1 :]
+            ):
+                continue
+            raise SpatialStrategyHarnessError(
+                f"strategy_tool_failed:{name}:invalid_request"
+            )
+        failure = _failed_tool_result(call.get("result"))
+        if failure:
+            status, path = failure
+            raise SpatialStrategyHarnessError(
+                f"strategy_tool_failed:{name}:{status}:{path}"
+            )
+
+
+def _strategy_tool_validator(
+    *,
+    run_id: str,
+    history_id: str | None = None,
+    required_chapter_ids: list[str],
+):
+    def validate(calls: list[dict[str, Any]]) -> None:
+        if history_id:
+            for call in calls:
+                arguments = call.get("arguments")
+                if not isinstance(arguments, dict) or "history_id" not in arguments:
+                    continue
+                if str(arguments.get("history_id") or "").strip() != history_id:
+                    raise SpatialStrategyHarnessError(
+                        f"strategy_tool_history_scope_mismatch:{_tool_name(call.get('name'))}"
+                    )
+        _validate_strategy_tool_results(calls)
+        chapter_calls = [
+            call
+            for call in calls
+            if _tool_name(call.get("name")) == "read_strategy_chapters"
+            and not call.get("_recoverable_validation_failure")
+        ]
+        if not required_chapter_ids:
+            if chapter_calls:
+                raise SpatialStrategyHarnessError("strategy_chapter_read_not_allowed")
+            return
+        if len(chapter_calls) != 1:
+            raise SpatialStrategyHarnessError("strategy_chapter_read_count_invalid")
+        arguments = chapter_calls[0].get("arguments")
+        if not isinstance(arguments, dict):
+            raise SpatialStrategyHarnessError("strategy_chapter_read_arguments_invalid")
+        actual_ids = arguments.get("unit_ids")
+        if (
+            str(arguments.get("run_id") or "").strip() != run_id
+            or actual_ids != required_chapter_ids
+        ):
+            raise SpatialStrategyHarnessError("strategy_chapter_read_scope_mismatch")
+
+    return validate
+
+
+def _chapter_output_validator(unit_id: str, title: str):
+    def validate(output: dict[str, Any], _calls: list[dict[str, Any]]) -> None:
+        if str(output.get("unit_id") or "").strip() != unit_id:
+            raise SpatialStrategyHarnessError("strategy_chapter_unit_id_mismatch")
+        if str(output.get("title") or "").strip() != title:
+            raise SpatialStrategyHarnessError("strategy_chapter_title_mismatch")
+        content = str(output.get("content") or "").strip()
+        if not content:
+            raise SpatialStrategyHarnessError("strategy_chapter_content_missing")
+        if content.startswith(_FAILED_CHAPTER_PREFIXES):
+            raise SpatialStrategyHarnessError("strategy_chapter_generation_failed")
+        citations = output.get("citations")
+        if not isinstance(citations, list):
+            raise SpatialStrategyHarnessError("strategy_chapter_citations_invalid")
+        if unit_id != "audience_use" and any(
+            str(citation.get("record_ref") or citation.get("source_locator") or "").strip()
+            == _DEMOGRAPHIC_SUMMARY_REF
+            for citation in citations
+            if isinstance(citation, dict)
+        ):
+            raise SpatialStrategyHarnessError(
+                "strategy_chapter_demographic_evidence_not_owned"
+            )
+
+    return validate
 
 
 def analyze_strategy_unit(
@@ -107,62 +176,123 @@ def analyze_strategy_unit(
     project_question: str,
     decision_unit: dict,
 ) -> dict:
-    unit = json.dumps(decision_unit, ensure_ascii=False)
+    unit_id = str(decision_unit.get("unit_id") or "").strip()
+    title = str(decision_unit.get("title") or "").strip()
+    if unit_id not in STRATEGY_UNIT_IDS or not title:
+        raise SpatialStrategyHarnessError("strategy_unit_invalid")
+    depends_on = [
+        str(item).strip()
+        for item in decision_unit.get("depends_on", [])
+        if str(item).strip()
+    ]
+    if any(item not in STRATEGY_UNIT_IDS for item in depends_on):
+        raise SpatialStrategyHarnessError("strategy_unit_dependency_invalid")
+    task = {
+        key: decision_unit[key]
+        for key in (
+            "unit_id",
+            "title",
+            "question",
+            "depends_on",
+            "decision_output",
+            "evidence_focus",
+            "spatial_questions",
+        )
+        if key in decision_unit
+    }
+    prior_instruction = (
+        "本章没有前序章节，不要调用 read_strategy_chapters。"
+        if not depends_on
+        else "调用一次 read_strategy_chapters，只读取这些前序章节："
+        + json.dumps(depends_on, ensure_ascii=False)
+        + "。"
+    )
     prompt = "\n".join(
         [
             CORE_PROMPT,
             f"项目任务：{project_question}",
             f"运行编号：{run_id}",
             f"项目材料编号：{history_id}",
-            f"当前城市空间决策任务：{unit}",
-            "读取已有决策和完成当前判断所需的项目材料与空间数据。把现状转化为明确的未来选择；每项行动说明做什么、服务谁、落在哪里、优先级和预期改变。",
-            "需要空间证据时，把完整空间问题交给 analyze_spatial_question；空间工具 Agent 负责拆分子问题、选择事实域、空间操作和必要语义维度，并执行多次互补计算。当前决策单元不要选择底层指标或计算模式。",
-            "工具选择：项目材料用于场地条件，空间工具用于名称、坐标、距离、道路与 POI 关系及指标，文献检索用于方法和案例机制。只有具名对象的公开属性会改变当前判断时才联网，查询使用“所在城市或区县 + 准确名称 + 待确认属性”，并读取选中的原网页；不逐个搜索无关对象。",
-            "空间数据包含具名 POI、道路、路径、建筑或地点时，在 named_entities 中保留真实名称、对象类型、空间关系、具体事实和已有记录引用；没有具名数据时返回空数组。",
-            "最终只返回符合指定 JSON Schema 的当前决策结果。",
+            f"所有项目工具的 history_id 必须严格使用 {history_id}，不得缩写、改写或使用 run_id。",
+            "当前章节任务：" + json.dumps(task, ensure_ascii=False),
+            prior_instruction,
+            (
+                "使用 project_context 读取项目、材料和数据目录。按当前章节的 spatial_questions 把完整问题交给 analyze_spatial_question；该工具会自动复用相同的稳定计算。只对当前任务需要的 spatial: 引用调用 read_spatial_evidence_result。"
+                if task.get("spatial_questions")
+                else "使用 project_context 读取项目、材料和数据目录。本章没有新增空间问题，只消费前序章节和项目材料，不调用空间计算或空间结果读取工具。"
+            ),
+            "前序章节只用于继承已完成判断。本章只写当前任务新增的判断、取舍和行动，不复述前序章节的数据、比例、假设表或验证表。",
+            (
+                "人口总量、年龄结构及其引用只由客群与使用章节持有。本章可继承客群结论，但不重复人口数字，也不在 citations 中复制 computed:population:summary。"
+                if unit_id != "audience_use"
+                else "本章负责人口总量、年龄结构及其客群含义；统一使用项目目录中的确定性人口汇总。"
+            ),
+            "直接撰写可交付的 Markdown 章节正文。章节内容按当前任务自由组织，先给明确判断，再写依据、取舍和行动建议；不要描述 Agent、Harness、工具调用、工作流或执行过程。",
+            "工具或数据读取失败时不要生成章节；不要把失败改写成证据不足、降级定位或待核验结论。citations 只填写工具真实返回的来源定位，不虚构来源。",
+            f"最终只返回 unit_id={unit_id}、title={title}、content、citations 四个字段。",
+        ]
+    )
+    enabled_tools = ["project_context"]
+    if task.get("spatial_questions"):
+        enabled_tools.extend([
+            "analyze_spatial_question",
+            "read_spatial_evidence_result",
+        ])
+    if depends_on:
+        enabled_tools.insert(0, "read_strategy_chapters")
+    if unit_id in {
+        "project_basis",
+        "theme_resources",
+        "positioning",
+        "product_mix",
+        "spatial_layout",
+        "operating_model",
+        "investment_operation",
+        "phasing",
+    }:
+        enabled_tools.append("read_project_document")
+    if unit_id in {"theme_resources", "positioning", "product_mix"}:
+        enabled_tools.append("search_literature_evidence")
+    return _run_codex(
+        prompt=prompt,
+        schema_path=CHAPTER_SCHEMA_PATH,
+        enabled_tools=enabled_tools,
+        tool_call_validator=_strategy_tool_validator(
+            run_id=run_id,
+            history_id=history_id,
+            required_chapter_ids=depends_on,
+        ),
+        output_validator=_chapter_output_validator(unit_id, title),
+    )
+
+
+def design_strategy_visuals(*, run_id: str, project_question: str, visual_task: str) -> dict:
+    prompt = "\n".join(
+        [
+            CORE_PROMPT,
+            "为城市空间策略报告设计3到5张数据图或表。每张图只回答一个决策问题，并紧邻对应章节。",
+            f"运行编号：{run_id}",
+            f"项目任务：{project_question}",
+            f"图件任务：{visual_task}",
+            "调用一次 read_strategy_chapters，读取这11个已完成章节："
+            + json.dumps(STRATEGY_UNIT_IDS, ensure_ascii=False)
+            + "。再按需读取项目目录和空间结果。图件解释已有章节判断，不重新提出总体方案。",
+            "只使用项目目录中存在的 dataset_id。需要标注具名 POI 时，只使用章节 citations 中已有的 record_ref。不要根据名称、距离或关键词重新判断节点重要性。",
+            "地图若包含 poi 图层，必须同时包含 road_edges 图层并设置 map_variant；没有道路上下文时不要设计 POI 地图，改用不含 poi 的地图、图表或表格。",
+            "工具或数据读取失败时不要生成图件方案。最终只返回符合指定 JSON Schema 的图件方案。",
         ]
     )
     return _run_codex(
         prompt=prompt,
-        schema_path=DECISION_MEMO_SCHEMA_PATH,
+        schema_path=VISUAL_DESIGN_SCHEMA_PATH,
         enabled_tools=[
-            "read_strategy_decisions",
+            "read_strategy_chapters",
+            "project_context",
             "analyze_spatial_question",
-            "read_project_document",
-            "search_literature_evidence",
-            "search_public_web",
-            "fetch_public_web_page",
+            "read_spatial_evidence_result",
         ],
+        tool_call_validator=_strategy_tool_validator(
+            run_id=run_id,
+            required_chapter_ids=list(STRATEGY_UNIT_IDS),
+        ),
     )
-
-
-def write_strategy_section(*, project_question: str, solution: dict, section: dict) -> dict:
-    prompt = "\n".join(
-        [
-            CORE_PROMPT,
-            "只撰写一个正式报告章节。输出判断、依据和行动建议，不描述 Agent、工具、工作流或执行过程。",
-            f"项目任务：{project_question}",
-            "已选方案：" + json.dumps(solution, ensure_ascii=False),
-            "本章任务：" + json.dumps(section, ensure_ascii=False),
-            "正文直接说明服务谁、形成什么使用方式、做什么、放在哪里、何时实施以及预期改变什么；不重复其他章节。",
-            "相关依据已有具名 POI、道路、路径、建筑或地点时，正文使用其真实名称和具体距离或指标，不退化为只有方向和汇总数量的描述。",
-            "最终只返回符合指定 JSON Schema 的章节。",
-        ]
-    )
-    return _run_codex(prompt=prompt, schema_path=REPORT_SECTION_SCHEMA_PATH, enabled_tools=[])
-
-
-def design_strategy_visuals(*, project_question: str, solution: dict, available_datasets: list[dict]) -> dict:
-    prompt = "\n".join(
-        [
-            CORE_PROMPT,
-            "为已选城市空间方案设计3到5张数据图或表，只呈现能够解释定位选择、空间配置或行动顺序的现有项目数据。",
-            f"项目任务：{project_question}",
-            "已选方案：" + json.dumps(solution, ensure_ascii=False),
-            "可用数据：" + json.dumps(available_datasets, ensure_ascii=False),
-            "只使用可用数据列表中的 dataset_id。每张图的 caption 直接说明数据支持哪项方案选择或行动；不写待验证说明，不生成现有数据无法支持的建筑级图件。",
-            "同时存在 poi 和 road_edges 时，至少设计一张 poi_access 或 context_full 地图，用具名 POI 和道路名称说明连接关系。",
-            "最终只返回符合指定 JSON Schema 的图件方案。",
-        ]
-    )
-    return _run_codex(prompt=prompt, schema_path=VISUAL_DESIGN_SCHEMA_PATH, enabled_tools=[])

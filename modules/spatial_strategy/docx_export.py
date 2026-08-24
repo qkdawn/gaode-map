@@ -4,10 +4,11 @@ import re
 from pathlib import Path
 
 from docx import Document
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 
 
 _IMAGE_RE = re.compile(r"^!\[([^]]*)\]\(([^)]+)\)$")
@@ -17,15 +18,18 @@ _NUMBER_RE = re.compile(r"^\s*(\d+)[.)]\s+(.+?)\s*$")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 
 
-def _set_font(style, name: str = "Microsoft YaHei", size: int = 10) -> None:
+def _set_font(style, name: str = "Calibri", size: int = 11, *, color: str = "000000") -> None:
     style.font.name = name
     style.font.size = Pt(size)
+    style.font.color.rgb = RGBColor.from_string(color)
     rpr = style._element.get_or_add_rPr()
     fonts = rpr.rFonts
     if fonts is None:
         fonts = OxmlElement("w:rFonts")
         rpr.append(fonts)
-    fonts.set(qn("w:eastAsia"), name)
+    fonts.set(qn("w:ascii"), name)
+    fonts.set(qn("w:hAnsi"), name)
+    fonts.set(qn("w:eastAsia"), "Microsoft YaHei")
 
 
 def _add_page_number(paragraph) -> None:
@@ -103,23 +107,89 @@ def _set_table_row_pagination(row, *, repeat_header: bool = False) -> None:
         properties.append(header)
 
 
+def _set_cell_margins(cell, *, top: int = 80, bottom: int = 80, start: int = 120, end: int = 120) -> None:
+    properties = cell._tc.get_or_add_tcPr()
+    margins = properties.first_child_found_in("w:tcMar")
+    if margins is None:
+        margins = OxmlElement("w:tcMar")
+        properties.append(margins)
+    for side, value in (("top", top), ("bottom", bottom), ("start", start), ("end", end)):
+        node = margins.find(qn(f"w:{side}"))
+        if node is None:
+            node = OxmlElement(f"w:{side}")
+            margins.append(node)
+        node.set(qn("w:w"), str(value))
+        node.set(qn("w:type"), "dxa")
+
+
+def _table_widths(rows: list[list[str]], total: int = 9360) -> list[int]:
+    width = max(len(row) for row in rows)
+    weights = []
+    for column in range(width):
+        longest = max((len(row[column].strip()) if column < len(row) else 0 for row in rows), default=1)
+        weights.append(max(10, min(longest, 42)))
+    minimum = 1200
+    remaining = total - minimum * width
+    weight_total = sum(weights)
+    result = [minimum + int(remaining * weight / weight_total) for weight in weights]
+    result[-1] += total - sum(result)
+    return result
+
+
+def _apply_table_geometry(table, widths: list[int]) -> None:
+    properties = table._tbl.tblPr
+    table_width = properties.first_child_found_in("w:tblW")
+    table_width.set(qn("w:w"), str(sum(widths)))
+    table_width.set(qn("w:type"), "dxa")
+    indent = properties.first_child_found_in("w:tblInd")
+    if indent is None:
+        indent = OxmlElement("w:tblInd")
+        properties.append(indent)
+    indent.set(qn("w:w"), "120")
+    indent.set(qn("w:type"), "dxa")
+    layout = properties.first_child_found_in("w:tblLayout")
+    if layout is None:
+        layout = OxmlElement("w:tblLayout")
+        properties.append(layout)
+    layout.set(qn("w:type"), "fixed")
+    grid = table._tbl.tblGrid
+    for child in list(grid):
+        grid.remove(child)
+    for value in widths:
+        column = OxmlElement("w:gridCol")
+        column.set(qn("w:w"), str(value))
+        grid.append(column)
+    for row in table.rows:
+        for index, cell in enumerate(row.cells):
+            cell.width = Inches(widths[index] / 1440)
+            tc_width = cell._tc.get_or_add_tcPr().get_or_add_tcW()
+            tc_width.set(qn("w:w"), str(widths[index]))
+            tc_width.set(qn("w:type"), "dxa")
+            _set_cell_margins(cell)
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+
+
 def _add_table(document: Document, rows: list[list[str]]) -> None:
     if not rows:
         return
     width = max(len(row) for row in rows)
     table = document.add_table(rows=1, cols=width)
     table.style = "Light Shading Accent 1"
+    table.autofit = False
     _set_table_row_pagination(table.rows[0], repeat_header=True)
     for index, value in enumerate(rows[0]):
         cell = table.rows[0].cells[index]
         cell.text = ""
         _add_inline_markdown(cell.paragraphs[0], value.strip())
+        for run in cell.paragraphs[0].runs:
+            run.bold = True
     for row in rows[2:] if len(rows) > 1 and all(set(cell.strip()) <= {"-", ":", " "} for cell in rows[1]) else rows[1:]:
         cells = table.add_row().cells
         _set_table_row_pagination(table.rows[-1])
         for index, value in enumerate(row):
             cells[index].text = ""
             _add_inline_markdown(cells[index].paragraphs[0], value.strip())
+    _apply_table_geometry(table, _table_widths(rows))
 
 
 def _resolve_image(base_dir: Path, raw_path: str) -> Path | None:
@@ -133,20 +203,64 @@ def write_markdown_docx(markdown_path: Path, output_path: Path, *, title: str = 
     markdown = markdown_path.read_text(encoding="utf-8")
     document = Document()
     section = document.sections[0]
-    section.top_margin = Inches(0.7)
-    section.bottom_margin = Inches(0.7)
-    section.left_margin = Inches(0.85)
-    section.right_margin = Inches(0.85)
+    section.page_width = Inches(8.5)
+    section.page_height = Inches(11)
+    section.top_margin = Inches(1)
+    section.bottom_margin = Inches(1)
+    section.left_margin = Inches(1)
+    section.right_margin = Inches(1)
+    section.header_distance = Inches(0.492)
+    section.footer_distance = Inches(0.492)
     _set_document_zoom(document)
-    _set_font(document.styles["Normal"], size=10)
-    for style_name, size in (("Title", 20), ("Heading 1", 15), ("Heading 2", 12), ("Heading 3", 11)):
-        _set_font(document.styles[style_name], size=size)
+    normal = document.styles["Normal"]
+    _set_font(normal, size=11)
+    normal.paragraph_format.space_before = Pt(0)
+    normal.paragraph_format.space_after = Pt(6)
+    normal.paragraph_format.line_spacing = 1.10
+    style_tokens = {
+        "Title": (22, "0B2545", 0, 16),
+        "Heading 1": (16, "2E74B5", 12, 6),
+        "Heading 2": (13, "2E74B5", 10, 5),
+        "Heading 3": (12, "1F4D78", 8, 4),
+    }
+    for style_name, (size, color, before, after) in style_tokens.items():
+        style = document.styles[style_name]
+        _set_font(style, size=size, color=color)
+        style.font.bold = True
+        style.paragraph_format.space_before = Pt(before)
+        style.paragraph_format.space_after = Pt(after)
+        style.paragraph_format.keep_with_next = True
+    for list_style_name in ("List Bullet", "List Number"):
+        list_style = document.styles[list_style_name]
+        _set_font(list_style, size=11)
+        list_style.paragraph_format.left_indent = Inches(0.5)
+        list_style.paragraph_format.first_line_indent = Inches(-0.25)
+        list_style.paragraph_format.space_after = Pt(8)
+        list_style.paragraph_format.line_spacing = 1.167
+
+    header = section.header.paragraphs[0]
+    header.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    header.paragraph_format.space_after = Pt(0)
+    header_run = header.add_run("城市更新空间策略")
+    header_run.font.name = "Calibri"
+    header_rpr = header_run._element.get_or_add_rPr()
+    header_fonts = header_rpr.rFonts
+    if header_fonts is None:
+        header_fonts = OxmlElement("w:rFonts")
+        header_rpr.append(header_fonts)
+    header_fonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    header_run.font.size = Pt(8.5)
+    header_run.font.color.rgb = RGBColor.from_string("68727D")
 
     footer = section.footer.paragraphs[0]
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer.add_run("第 ")
+    footer_run = footer.add_run("第 ")
+    footer_run.font.size = Pt(8.5)
+    footer_run.font.color.rgb = RGBColor.from_string("68727D")
     _add_page_number(footer)
-    footer.add_run(" 页")
+    footer_end = footer.add_run(" 页")
+    footer_end.font.size = Pt(8.5)
+    footer_end.font.color.rgb = RGBColor.from_string("68727D")
 
     lines = markdown.splitlines()
     index = 0

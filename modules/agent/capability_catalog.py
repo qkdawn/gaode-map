@@ -100,15 +100,15 @@ class CapabilityReadiness(BaseModel):
 _CAPABILITIES = (
     AnalysisCapability(
         id="client-decision-spatial-strategy",
-        display_name="自适应空间决策分析",
-        description="通过 n8n 先识别项目真正需要作出的决策，再按问题依赖组织证据、关系推理、方案取舍与验证闭环。",
+        display_name="空间策略与行动方案",
+        description="通过 n8n 按依赖执行 11 个策略章节，把项目材料和空间数据转成定位、客群、产品、空间、运营与分期行动方案。",
         category="planning",
         status="available",
         executor_type="service",
         executor_id="n8n-spatial-strategy",
         intent_phrases=[
-            "执行自适应空间决策分析",
-            "按项目问题组织空间决策分析",
+            "生成空间策略与行动方案",
+            "执行十一章空间策略分析",
             "生成完整空间策略",
             "运行空间项目决策分析",
             "执行client decision spatial strategy",
@@ -118,7 +118,9 @@ _CAPABILITIES = (
             CapabilityRequirement(id="evidence", label="已入库项目材料"),
         ],
         output_contract=[
-            "自适应决策分析正文",
+            "11 章空间策略报告",
+            "3 至 5 张数据图件",
+            "Markdown 与 DOCX 文件",
         ],
         supports_resume=True,
         supports_versions=True,

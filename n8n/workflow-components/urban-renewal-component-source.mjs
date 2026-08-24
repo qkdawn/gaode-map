@@ -135,15 +135,12 @@ nodes.push({
       jsCode: `const completed = $input.first()?.json ?? {};
 const request = $('Attach Project Context').first().json;
 const projectContext = request.project_context && typeof request.project_context === 'object' ? request.project_context : {};
-const blueprint = completed.decision_state?.report_blueprint && typeof completed.decision_state.report_blueprint === 'object' ? completed.decision_state.report_blueprint : {};
-const datasets = (Array.isArray(projectContext.datasets) ? projectContext.datasets : []).filter((item) => item && !String(item.dataset_id ?? '').startsWith('document:') && String(item.dataset_id ?? '') !== 'road_nodes').map((item) => ({ dataset_id: String(item.dataset_id ?? ''), title: String(item.title ?? ''), total_count: Number(item.total_count ?? 0), geometry_type: String(item.geometry_type ?? ''), fields: Array.isArray(item.fields) ? item.fields : [] })).filter((item) => item.dataset_id);
 return [{ json: {
   ...completed,
   history_id: request.history_id,
   project_question: request.project_question,
   project_context: projectContext,
-  available_datasets: datasets,
-  solution: { recommended_position: blueprint.recommended_position, future_state: blueprint.future_state, change_mechanisms: blueprint.change_mechanisms, target_users: blueprint.target_users, use_scenarios: blueprint.use_scenarios, function_mix: blueprint.function_mix, action_plan: blueprint.action_plan },
+  visual_task: '为11个策略章节选择3到5张最能解释方案取舍的数据图或表，并指定每张图所属策略单元。',
 } }];`,
     },
     [11940, 300],
@@ -163,7 +160,7 @@ nodes.push({
       sendBody: true,
       contentType: 'json',
       specifyBody: 'json',
-      jsonBody: '={{ JSON.stringify({ project_question: $json.project_question, solution: $json.solution, available_datasets: $json.available_datasets }) }}',
+      jsonBody: '={{ JSON.stringify({ run_id: $json.run_id, project_question: $json.project_question, visual_task: $json.visual_task }) }}',
       options: { timeout: 3600000, response: { response: { responseFormat: 'json' } } },
     },
     [12180, 300],
@@ -184,13 +181,14 @@ const response = $input.first()?.json ?? {};
 if (response.error || response.detail) throw new Error('codex_harness_failed:' + String(response.error?.message ?? response.detail ?? response.error));
 const visuals = Array.isArray(response.visuals) ? response.visuals : [];
 if (visuals.length < 3 || visuals.length > 5) throw new Error('visual plan requires three to five visuals');
-const availableIds = new Set((request.available_datasets ?? []).map((item) => String(item.dataset_id ?? '')));
+const availableIds = new Set((request.project_context?.datasets ?? []).map((item) => String(item.dataset_id ?? '')));
+const sectionIds = new Set(['project_basis', 'regional_role', 'supply_gap', 'audience_use', 'theme_resources', 'positioning', 'product_mix', 'spatial_layout', 'operating_model', 'investment_operation', 'phasing']);
 const titles = new Set();
 const signatures = new Set();
 let chartCount = 0;
-let populationMapCount = 0;
 let specializedContextCount = 0;
 for (const visual of visuals) {
+  if (!sectionIds.has(String(visual.section_id ?? ''))) throw new Error('visual plan section is invalid');
   const title = String(visual.title ?? '').trim();
   const rationale = String(visual.rationale ?? '').trim();
   const decisionQuestion = String(visual.decision_question ?? '').trim();
@@ -209,14 +207,11 @@ for (const visual of visuals) {
   if (format === 'map') {
     const hasPoi = layerIds.includes('poi');
     const hasRoad = layerIds.includes('road_edges');
-    const hasPopulation = layerIds.includes('population');
     if (hasPoi && !hasRoad) throw new Error('poi map requires road context');
     if (hasPoi && !String(visual.map_variant ?? '')) throw new Error('poi map requires a decision map variant');
-    if (hasPopulation) populationMapCount += 1;
     if (['poi_access', 'context_full', 'regional_role'].includes(String(visual.map_variant ?? ''))) specializedContextCount += 1;
   }
 }
-if (populationMapCount > 1) throw new Error('visual plan contains duplicate population maps');
 if ((availableIds.has('poi') || availableIds.has('population')) && chartCount < 1) throw new Error('visual plan requires an explanatory chart');
 if (availableIds.has('poi') && availableIds.has('road_edges') && specializedContextCount < 1) throw new Error('visual plan requires a specialized context map');
 return [{ json: { ...request, visual_plan: visuals } }];`,
@@ -263,11 +258,10 @@ nodes.push({
       mode: 'runOnceForAllItems',
       jsCode: `const request = $('Validate Visual Design').first().json;
 const rendered = $input.first()?.json ?? {};
-if (Array.isArray(request.visual_diagnostics) && request.visual_diagnostics.length > 0 && rendered.status !== 'ready') {
-  return [{ json: { ...request, status: 'ready', assets: [], visual_diagnostics: request.visual_diagnostics } }];
-}
 if (rendered.status !== 'ready') throw new Error('project visual rendering failed');
-return [{ json: { ...request, ...rendered, assets: Array.isArray(rendered.assets) ? rendered.assets : [] } }];`,
+const assets = Array.isArray(rendered.assets) ? rendered.assets : [];
+if (assets.length < 3 || assets.length > 5) throw new Error('project visual rendering requires three to five assets');
+return [{ json: { ...request, ...rendered, assets } }];`,
     },
     [13140, 300],
     'return-visual-assets-000000000000000000000000',
@@ -281,12 +275,12 @@ nodes.push({
     {
       mode: 'runOnceForAllItems',
       jsCode: `const rendered = $input.first()?.json ?? {};
-const blueprint = rendered.decision_state?.report_blueprint && typeof rendered.decision_state.report_blueprint === 'object' ? rendered.decision_state.report_blueprint : {};
-const editorialNarrative = String(blueprint.executive_summary ?? '').trim();
-if (!editorialNarrative) throw new Error('report_executive_summary_missing');
+const chapters = Array.isArray(rendered.chapters) ? rendered.chapters : [];
+const expectedIds = ['project_basis', 'regional_role', 'supply_gap', 'audience_use', 'theme_resources', 'positioning', 'product_mix', 'spatial_layout', 'operating_model', 'investment_operation', 'phasing'];
+if (chapters.length !== expectedIds.length || chapters.some((chapter, index) => String(chapter?.unit_id ?? '') !== expectedIds[index])) throw new Error('report_requires_ordered_strategy_chapters');
 return [{ json: {
   ...rendered,
-  editorial_narrative: editorialNarrative,
+  chapters,
 } }];`,
     },
     [13400, 300],
@@ -315,9 +309,8 @@ nodes.push({
         history_id: $('Attach Project Context').first().json.history_id,
         project_question: $('Attach Project Context').first().json.project_question,
         project_context: $('Attach Project Context').first().json.project_context,
-        decision_state: $json.decision_state,
+        chapters: $json.chapters,
         visual_assets: $json.assets ?? [],
-        editorial_narrative: $json.editorial_narrative,
       }) }}`,
       options: { timeout: 600000, response: { response: { responseFormat: 'json' } } },
     },
@@ -361,7 +354,7 @@ nodes.push({
       sendBody: true,
       contentType: 'json',
       specifyBody: 'json',
-      jsonBody: '={{ JSON.stringify({ run_id: $json.run_id, title: $json.title, summary: $json.summary, markdown: $json.markdown, citations: $json.citations, decision_state: $json.decision_state, visual_assets: $json.visual_assets ?? [] }) }}',
+      jsonBody: '={{ JSON.stringify({ run_id: $json.run_id, title: $json.title, summary: $json.summary, markdown: $json.markdown, citations: $json.citations, chapters: $json.chapters, visual_assets: $json.visual_assets ?? [] }) }}',
       options: { timeout: 600000, response: { response: { responseFormat: 'json' } } },
     },
     [14640, 220],
@@ -498,7 +491,7 @@ export const visualsComponent = component([
 ], 'urban-agent-visuals', [0, 0], { 'Attach Project Context': '合并项目上下文' });
 
 export const reportComponent = component([
-  ['Build Report Editorial Request', '准备报告总判断'],
+  ['Build Report Editorial Request', '准备顺序组装报告'],
   ['编排空间策略报告', '生成最终报告'],
   ['发送报告到飞书？', '需要发送飞书？'],
   ['生成 Word 报告并发送到飞书', '生成 Word 报告并发送飞书'],

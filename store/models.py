@@ -173,21 +173,6 @@ class AnalysisRunRecord(Base):
     )
 
 
-class AgentModelProfile(Base):
-    __tablename__ = "agent_model_profiles"
-
-    id = Column(String(64), primary_key=True)
-    display_name = Column(String(120), nullable=False)
-    provider = Column(String(32), nullable=False)
-    base_url = Column(String(512), nullable=False)
-    model_name = Column(String(160), nullable=False)
-    api_key_ciphertext = Column(Text, nullable=False, default="")
-    enabled = Column(Boolean, nullable=False, default=True, index=True)
-    is_default = Column(Boolean, nullable=False, default=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-
-
 class AgentSession(Base):
     """
     AI 面板历史记录
@@ -196,6 +181,7 @@ class AgentSession(Base):
     __tablename__ = "agent_sessions"
 
     id = Column(String(128), primary_key=True)
+    codex_thread_id = Column(String(128), nullable=False, unique=True, index=True)
     title = Column(String(255), nullable=False, default="")
     preview = Column(Text, nullable=False, default="")
     status = Column(String(64), nullable=False, default="idle")
@@ -203,7 +189,6 @@ class AgentSession(Base):
     panel_kind = Column(String(64), nullable=False, index=True)
     is_pinned = Column(Boolean, nullable=False, default=False, index=True)
     pinned_at = Column(DateTime, nullable=True)
-    snapshot = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 

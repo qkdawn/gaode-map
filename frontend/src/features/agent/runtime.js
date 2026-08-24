@@ -4,47 +4,15 @@ import {
   cloneArray,
   cloneObject,
   cloneRecordMap,
-  completeActiveThinkingItemsInList,
   consumeSseStream,
   createAgentRunState,
   deriveAgentSessionPreview,
   deriveAgentSessionTitle,
-  hasAgentMessageProcessContent,
-  mergeAgentThinkingTimeline,
-  normalizeAgentAction,
-  normalizeAgentBoundaryItem,
-  normalizeAgentCounterpoint,
-  normalizeAgentDecision,
-  normalizeAgentDecisionEvidence,
-  normalizeAgentMessageProcess,
-  normalizeAgentPanelPreloadNotes,
-  normalizeAgentPlanEnvelope,
-  normalizeAgentPlanThinkingItem,
-  normalizeAgentProducedArtifacts,
-  normalizeAgentReasoningDelta,
-  normalizeAgentStatusThinkingItem,
-  normalizeAgentSubmitThinkingItem,
   normalizeAgentThinkingItem,
-  normalizeAgentToolSummary,
-  normalizeAgentTraceThinkingItem,
-  normalizeAgentTurnPayload,
-  normalizeAgentWaitingThinkingItem,
-  upsertReasoningDeltaInList,
   upsertThinkingItemInList,
 } from './normalizers.js'
-import {
-  buildAgentPlanChecklist,
-  buildAgentToolCallItems,
-  hasAgentExecutionTraceContent,
-  hasAgentPlanContent,
-  shouldExpandAgentProcessSection,
-} from './derived.js'
-import {
-  buildAnalysisTaskConfirmationFromTurn,
-  cloneAnalysisTaskConfirmation,
-} from './analysis-task-registry.js'
 import { ANALYSIS_WORKSPACE_TAB_KIND } from './workspace-kinds.js'
-import { postMainLoopStream } from './main-loop-request.js'
+import { postConversationTurnStream } from './conversation-request.js'
 import {
   buildAgentAnalysisSnapshot as buildAgentAnalysisSnapshotPayload,
   buildAgentPoiGridEvidence as buildAgentPoiGridEvidencePayload,
@@ -181,181 +149,54 @@ function createAgentRuntimeMethods() {
     },
     syncActiveAgentRuntimeView(sessionId = '') {
       const nextId = this.getActiveAgentSessionId(sessionId)
-      if (!nextId) {
-        this.agentLoading = false
-        this.agentStreamState = 'idle'
-        this.agentStreamStartedAt = 0
-        this.agentStreamElapsedTick = 0
-        this.agentStreamElapsedTimer = null
-        this.agentStreamingMessageId = ''
-        this.agentReasoningBlocks = []
-        this.agentPanelPreloadNotes = []
-        this.agentPreloadedPanelKeys = []
-        this.agentPanelPayloads = {}
-        this.agentPendingTaskConfirmation = null
-        this.agentTurnAbortController = null
-        return
-      }
-      const runState = this.getAgentRunState(nextId)
-      if (!runState) {
-        const session = this.findAgentSession(nextId) || {
-          status: this.agentStatus,
-          thinkingTimeline: this.agentThinkingTimeline,
-          plan: this.agentPlan,
-          executionTrace: this.agentExecutionTrace,
-          panelPreloadNotes: this.agentPanelPreloadNotes,
-          preloadedPanelKeys: this.agentPreloadedPanelKeys,
-          panelPayloads: this.agentPanelPayloads,
-        }
-        const hasPlan = hasAgentPlanContent(session && session.plan)
-        const hasTrace = hasAgentExecutionTraceContent(session && session.executionTrace)
-        const hasProcessContent = !!(
-          (Array.isArray(session && session.thinkingTimeline) && session.thinkingTimeline.length)
-          || hasPlan
-          || hasTrace
-          || (Array.isArray(this.agentReasoningBlocks) && this.agentReasoningBlocks.length)
-        )
-        const shouldPreserveElapsed = !!(
-          session
-          && ['answered', 'failed', 'requires_risk_confirmation'].includes(asText(session.status))
-          && Number(this.agentStreamStartedAt || 0) > 0
-        )
-        const shouldPreserveReasoning = !!(
-          session
-          && ['answered', 'failed', 'requires_risk_confirmation'].includes(asText(session.status))
-          && Array.isArray(this.agentReasoningBlocks)
-          && this.agentReasoningBlocks.length > 0
-        )
-        this.agentLoading = false
-        this.agentStreamState = 'idle'
-        if (!shouldPreserveElapsed) {
-          this.agentStreamStartedAt = 0
-          this.agentStreamElapsedTick = 0
-        }
-        this.agentStreamElapsedTimer = null
-        this.agentStreamingMessageId = ''
-        if (!shouldPreserveReasoning) {
-          this.agentReasoningBlocks = []
-        }
-        this.agentPanelPreloadNotes = normalizeAgentPanelPreloadNotes(session && session.panelPreloadNotes)
-        this.agentPreloadedPanelKeys = cloneArray(session && session.preloadedPanelKeys)
-        this.agentPanelPayloads = cloneObject(session && session.panelPayloads)
-        this.agentPendingTaskConfirmation = cloneAnalysisTaskConfirmation(session && session.pendingTaskConfirmation)
-        this.agentThinkingExpanded = shouldExpandAgentProcessSection(session && session.status, {
-          hasContent: hasProcessContent,
-        })
-        this.agentPlanExpanded = shouldExpandAgentProcessSection(session && session.status, {
-          hasContent: hasPlan,
-        })
-        this.agentTraceExpanded = shouldExpandAgentProcessSection(session && session.status, {
-          hasContent: hasTrace,
-        })
-        this.agentTurnAbortController = null
-        return
-      }
-      this.agentLoading = !!runState.loading
-      this.agentStreamState = asText(runState.streamState || 'idle') || 'idle'
-      this.agentStreamStartedAt = Number(runState.startedAt || 0) || 0
-      this.agentStreamElapsedTick = Number(runState.elapsedTick || runState.startedAt || 0) || 0
-      this.agentStreamElapsedTimer = runState.elapsedTimer || null
-      this.agentStreamingMessageId = asText(runState.streamingMessageId)
-      this.agentReasoningBlocks = cloneArray(runState.reasoningBlocks)
-      this.agentPanelPreloadNotes = normalizeAgentPanelPreloadNotes(runState.panelPreloadNotes)
-      this.agentPreloadedPanelKeys = cloneArray(runState.preloadedPanelKeys)
-      this.agentTurnAbortController = runState.abortController || null
-      if (runState.loading && (this.agentThinkingTimeline.length || this.agentReasoningBlocks.length || this.agentExecutionTrace.length || hasAgentPlanContent(this.agentPlan))) {
-        this.agentThinkingExpanded = true
-      }
-      if (runState.loading && hasAgentPlanContent(this.agentPlan)) {
-        this.agentPlanExpanded = true
-      }
-      if (runState.loading && hasAgentExecutionTraceContent(this.agentExecutionTrace)) {
-        this.agentTraceExpanded = true
-      }
+      const runState = nextId ? this.getAgentRunState(nextId) : null
+      const session = nextId ? this.findAgentSession(nextId) : null
+      this.agentLoading = !!(runState && runState.loading)
+      this.agentStreamState = asText((runState && runState.streamState) || 'idle') || 'idle'
+      this.agentStreamStartedAt = Number((runState && runState.startedAt) || 0) || 0
+      this.agentStreamElapsedTick = Number((runState && (runState.elapsedTick || runState.startedAt)) || 0) || 0
+      this.agentStreamElapsedTimer = (runState && runState.elapsedTimer) || null
+      this.agentStreamingMessageId = asText(runState && runState.streamingMessageId)
+      this.agentTurnAbortController = (runState && runState.abortController) || null
+      this.agentPanelPayloads = cloneObject(session && session.panelPayloads)
+      this.agentActivityItems = cloneArray(session && session.activityItems)
     },
     resetAgentStreamingState(sessionId = '') {
       const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId) {
-        this.agentTurnAbortController = null
-        this.agentStreamingMessageId = ''
-        this.agentStreamState = 'idle'
-        this.agentStreamStartedAt = 0
-        this.agentStreamElapsedTick = 0
-        this.agentThinkingExpanded = false
-        this.agentPlanExpanded = false
-        this.agentTraceExpanded = false
-        this.agentPanelPreloadNotes = []
-        this.agentPreloadedPanelKeys = []
-        return
-      }
+      if (!targetSessionId) return
       this.setAgentRunState(targetSessionId, {
         loading: false,
         streamState: 'idle',
         startedAt: 0,
         elapsedTick: 0,
         streamingMessageId: '',
-        reasoningBlocks: [],
-        panelPreloadNotes: [],
-        preloadedPanelKeys: [],
-        pendingQuestion: '',
       })
     },
     startAgentThinkingTimer(sessionId = '') {
       const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId) {
-        this.agentStreamStartedAt = Date.now()
-        this.agentStreamElapsedTick = this.agentStreamStartedAt
-        if (typeof window === 'undefined' || typeof window.setInterval !== 'function') {
-          return
-        }
-        this.agentStreamElapsedTimer = window.setInterval(() => {
-          this.agentStreamElapsedTick = Date.now()
-          this.updateAgentWaitingProcessFallback()
-        }, 1000)
-        return
-      }
+      if (!targetSessionId) return
       const runState = this.getAgentRunState(targetSessionId) || createAgentRunState()
       if (runState.elapsedTimer && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
         window.clearInterval(runState.elapsedTimer)
       }
       const startedAt = Date.now()
-      const nextState = {
-        startedAt,
-        elapsedTick: startedAt,
-      }
+      const patch = { startedAt, elapsedTick: startedAt }
       if (typeof window !== 'undefined' && typeof window.setInterval === 'function') {
-        nextState.elapsedTimer = window.setInterval(() => {
-          const activeRunState = this.getAgentRunState(targetSessionId)
-          if (!activeRunState || !activeRunState.loading) {
-            if (typeof window.clearInterval === 'function' && activeRunState && activeRunState.elapsedTimer) {
-              window.clearInterval(activeRunState.elapsedTimer)
-            }
-            return
-          }
+        patch.elapsedTimer = window.setInterval(() => {
+          const current = this.getAgentRunState(targetSessionId)
+          if (!current || !current.loading) return
           this.setAgentRunState(targetSessionId, { elapsedTick: Date.now() })
-          if (targetSessionId === asText(this.activeAgentSessionId)) {
-            this.updateAgentWaitingProcessFallback(targetSessionId)
-          }
         }, 1000)
       }
-      this.setAgentRunState(targetSessionId, nextState)
+      this.setAgentRunState(targetSessionId, patch)
     },
     stopAgentThinkingTimer(sessionId = '') {
       const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId) {
-        if (this.agentStreamElapsedTimer && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
-          window.clearInterval(this.agentStreamElapsedTimer)
-        }
-        this.agentStreamElapsedTimer = null
-        return
-      }
-      const runState = this.getAgentRunState(targetSessionId)
+      const runState = targetSessionId ? this.getAgentRunState(targetSessionId) : null
       if (runState && runState.elapsedTimer && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
         window.clearInterval(runState.elapsedTimer)
       }
-      if (runState) {
-        this.setAgentRunState(targetSessionId, { elapsedTimer: null })
-      }
+      if (runState) this.setAgentRunState(targetSessionId, { elapsedTimer: null })
     },
     getAgentReportThreadElement() {
       return (this.$refs && this.$refs.agentReportThreadBody) || null
@@ -403,20 +244,6 @@ function createAgentRuntimeMethods() {
       const nearBottom = this.isAgentReportThreadNearBottom()
       this.setAgentAutoScrollLock(!nearBottom, { sessionId: targetSessionId, sticky: nearBottom })
     },
-    upsertAgentThinkingItem(seed = {}) {
-      this.agentThinkingTimeline = upsertThinkingItemInList(this.agentThinkingTimeline, seed)
-      return this.agentThinkingTimeline
-    },
-    upsertAgentTraceThinkingItem(seed = {}) {
-      return this.upsertAgentThinkingItem(normalizeAgentTraceThinkingItem(seed))
-    },
-    upsertAgentReasoningDelta(seed = {}) {
-      this.agentReasoningBlocks = upsertReasoningDeltaInList(this.agentReasoningBlocks, seed)
-      return this.agentReasoningBlocks
-    },
-    clearAgentReasoningBlocks() {
-      this.agentReasoningBlocks = []
-    },
     scrollAgentThreadToLatest(options = {}) {
       const body = this.getAgentReportThreadElement()
       if (!body) return
@@ -441,230 +268,12 @@ function createAgentRuntimeMethods() {
       if (!force && runState.autoScrollLocked && !runState.autoScrollSticky) return
       this.scrollAgentThreadToLatest({ behavior: force ? 'auto' : 'smooth' })
     },
-    markAgentSubmitProcessReady() {
-      this.agentThinkingTimeline = upsertThinkingItemInList(
-        completeActiveThinkingItemsInList(this.agentThinkingTimeline, 'frontend-submit-request'),
-        normalizeAgentSubmitThinkingItem('completed'),
-      )
-    },
-    completeAgentActiveProcessSteps(excludeId = '') {
-      this.agentThinkingTimeline = completeActiveThinkingItemsInList(this.agentThinkingTimeline, excludeId)
-    },
-    updateAgentWaitingProcessFallback(sessionId = '') {
-      const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId) {
-        if (!this.agentLoading || this.agentStreamState !== 'connecting') return
-        const startedAt = Number(this.agentStreamStartedAt || 0)
-        if (!startedAt) return
-        const hasBackendStep = cloneArray(this.agentThinkingTimeline)
-          .some((item) => {
-            const id = asText(item && item.id)
-            return id && id !== 'stream-connect' && !id.startsWith('frontend-')
-          })
-        if (hasBackendStep) return
-        const elapsedSeconds = Math.floor((Number(this.agentStreamElapsedTick || Date.now()) - startedAt) / 1000)
-        if (elapsedSeconds < 3) return
-        this.markAgentSubmitProcessReady()
-        const item = normalizeAgentWaitingThinkingItem(elapsedSeconds)
-        this.completeAgentActiveProcessSteps(item.id)
-        this.upsertAgentThinkingItem(item)
-        return
-      }
-      const runState = this.getAgentRunState(targetSessionId)
-      if (!runState || !runState.loading) return
-      const elapsedMs = Number(runState.elapsedTick || Date.now()) - Number(runState.startedAt || Date.now())
-      if (elapsedMs <= 0) return
-      const elapsedSeconds = Math.max(1, Math.floor(elapsedMs / 1000))
-      const steps = cloneArray(this.agentThinkingTimeline)
-      const hasBackendStep = steps.some((item) => !String((item && item.id) || '').startsWith('frontend-'))
-      if (hasBackendStep) return
-      const fallbackItem = normalizeAgentWaitingThinkingItem(elapsedSeconds)
-      this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-        ...session,
-        status: 'running',
-        thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, fallbackItem),
-      }))
-    },
     getAgentThinkingElapsedLabel() {
       const startedAt = Number(this.agentStreamStartedAt || 0)
       if (!startedAt) return ''
       const tick = Number(this.agentStreamElapsedTick || startedAt)
       const seconds = Math.max(1, Math.floor((tick - startedAt) / 1000))
       return `${seconds}s`
-    },
-    resolvePanelPreloadTarget(trace = {}) {
-      const toolName = asText(trace.tool_name || trace.toolName)
-      const artifacts = normalizeAgentProducedArtifacts(trace)
-      const hasArtifact = (expected) => artifacts.includes(expected)
-      if (
-        toolName === 'fetch_pois_in_scope'
-        || hasArtifact('current_pois')
-        || hasArtifact('current_poi_summary')
-      ) {
-        return { key: 'poi', label: '已预加载 POI 面板内容' }
-      }
-      if (
-        toolName === 'compute_h3_metrics_from_scope_and_pois'
-        || hasArtifact('current_h3_structure_analysis')
-        || hasArtifact('current_poi_h3_summary')
-        || hasArtifact('current_poi_h3_grid')
-        || hasArtifact('current_poi_h3_charts')
-      ) {
-        return { key: 'h3', label: '已预加载 POI H3 面板内容' }
-      }
-      if (
-        toolName === 'compute_population_overview_from_scope'
-        || hasArtifact('current_population_profile_analysis')
-        || hasArtifact('population_overview')
-      ) {
-        return { key: 'population', label: '已预加载人口面板数据' }
-      }
-      if (
-        toolName === 'compute_nightlight_overview_from_scope'
-        || hasArtifact('current_nightlight_pattern_analysis')
-        || hasArtifact('nightlight_overview')
-      ) {
-        return { key: 'nightlight', label: '已预加载夜光面板数据' }
-      }
-      if (
-        toolName === 'compute_road_syntax_from_scope'
-        || hasArtifact('current_road_pattern_analysis')
-        || hasArtifact('road_syntax_summary')
-      ) {
-        return { key: 'syntax', label: '已预加载路网面板展示' }
-      }
-      return null
-    },
-    hasAgentPreloadedPanel(key = '', sessionId = '') {
-      const targetKey = asText(key)
-      if (!targetKey) return false
-      const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!targetSessionId) return cloneArray(this.agentPreloadedPanelKeys).includes(targetKey)
-      const runState = this.getAgentRunState(targetSessionId)
-      if (!runState) return cloneArray(this.agentPreloadedPanelKeys).includes(targetKey)
-      return cloneArray(runState.preloadedPanelKeys).includes(targetKey)
-    },
-    recordAgentPanelPreload(target = null, sessionId = '') {
-      const key = asText(target && target.key)
-      const label = asText(target && target.label)
-      const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      if (!key || !label) return
-      if (!targetSessionId) {
-        if (this.hasAgentPreloadedPanel(key)) return
-        this.agentPreloadedPanelKeys = [...cloneArray(this.agentPreloadedPanelKeys), key]
-        this.agentPanelPreloadNotes = [
-          ...normalizeAgentPanelPreloadNotes(this.agentPanelPreloadNotes),
-          { key, label },
-        ]
-        return
-      }
-      if (this.hasAgentPreloadedPanel(key, targetSessionId)) return
-      const runState = this.getAgentRunState(targetSessionId) || createAgentRunState()
-      const nextPanelPreloadNotes = [
-        ...normalizeAgentPanelPreloadNotes(runState.panelPreloadNotes),
-        { key, label },
-      ]
-      const nextPreloadedPanelKeys = [...cloneArray(runState.preloadedPanelKeys), key]
-      this.setAgentRunState(targetSessionId, {
-        panelPreloadNotes: nextPanelPreloadNotes,
-        preloadedPanelKeys: nextPreloadedPanelKeys,
-      })
-      this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-        ...session,
-        panelPreloadNotes: nextPanelPreloadNotes,
-        preloadedPanelKeys: nextPreloadedPanelKeys,
-      }))
-    },
-    async preloadAgentPanelContent(target = null) {
-      const key = asText(target && target.key)
-      if (!key) return false
-      if (key === 'poi') {
-        if (typeof this.updatePoiCharts === 'function') {
-          this.updatePoiCharts()
-        }
-        if (typeof this.resizePoiChart === 'function') {
-          if (typeof this.$nextTick === 'function') {
-            this.$nextTick(() => {
-              this.resizePoiChart()
-            })
-          } else {
-            this.resizePoiChart()
-          }
-        }
-        return true
-      }
-      if (key === 'h3') {
-        if (typeof this.ensureH3ReadyForAgentTarget === 'function') {
-          const restored = await this.ensureH3ReadyForAgentTarget(this.getAgentActivePanelPayloads(), { allowCompute: false })
-          if (!restored && typeof this.ensureH3PanelEntryState === 'function') {
-            this.ensureH3PanelEntryState()
-          }
-        } else if (typeof this.ensureH3PanelEntryState === 'function') {
-          this.ensureH3PanelEntryState()
-        }
-        if (typeof this.restoreH3GridDisplayOnEnter === 'function') {
-          this.restoreH3GridDisplayOnEnter()
-        }
-        if (typeof this.updateH3Charts === 'function') {
-          this.updateH3Charts()
-        }
-        if (typeof this.updateDecisionCards === 'function') {
-          this.updateDecisionCards()
-        }
-        return true
-      }
-      if (key === 'population') {
-        if (typeof this.ensurePopulationPanelEntryState === 'function') {
-          await this.ensurePopulationPanelEntryState()
-          return true
-        }
-        return false
-      }
-      if (key === 'nightlight') {
-        if (typeof this.ensureNightlightPanelEntryState === 'function') {
-          await this.ensureNightlightPanelEntryState()
-          return true
-        }
-        return false
-      }
-      if (key === 'syntax') {
-        if (!this.roadSyntaxSummary) return false
-        const metricTabs = (typeof this.roadSyntaxMetricTabs === 'function')
-          ? this.roadSyntaxMetricTabs().map((tab) => asText(tab && tab.value)).filter(Boolean)
-          : ['connectivity', 'control', 'depth', 'choice', 'integration', 'intelligibility']
-        const defaultMetric = typeof this.roadSyntaxDefaultMetric === 'function'
-          ? asText(this.roadSyntaxDefaultMetric())
-          : 'connectivity'
-        const preferredMetric = asText(this.roadSyntaxLastMetricTab || this.roadSyntaxMetric || defaultMetric)
-        const targetMetric = metricTabs.includes(preferredMetric) ? preferredMetric : defaultMetric
-        if (typeof this.setRoadSyntaxMainTab === 'function') {
-          this.setRoadSyntaxMainTab(targetMetric, { refresh: false, syncMetric: true })
-        }
-        if (typeof this.renderRoadSyntaxByMetric === 'function') {
-          await this.renderRoadSyntaxByMetric(targetMetric)
-        }
-        return true
-      }
-      return false
-    },
-    async maybePreloadPanelForAgentTool(trace = {}, sessionId = '') {
-      const targetSessionId = this.getActiveAgentSessionId(sessionId)
-      const normalizedTrace = cloneObject(trace)
-      const status = asText(normalizedTrace.status)
-      if (status !== 'success') return false
-      const target = this.resolvePanelPreloadTarget(normalizedTrace)
-      if (!target) return false
-      if (targetSessionId && this.hasAgentPreloadedPanel(target.key, targetSessionId)) return false
-      if (!targetSessionId && this.hasAgentPreloadedPanel(target.key)) return false
-      try {
-        const didPreload = await this.preloadAgentPanelContent(target)
-        if (!didPreload) return false
-        this.recordAgentPanelPreload(target, targetSessionId)
-        return true
-      } catch (err) {
-        console.warn(`Agent panel preload failed for ${target.key}`, err)
-        return false
-      }
     },
     getCurrentAgentHistoryId() {
       return asText(this.currentHistoryRecordId)
@@ -835,82 +444,6 @@ function createAgentRuntimeMethods() {
     buildAgentAnalysisSnapshot() {
       return buildAgentAnalysisSnapshotPayload(this)
     },
-    extractAgentRiskToolName(prompt = '') {
-      const match = String(prompt || '').match(/`([^`]+)`/)
-      return match ? String(match[1] || '').trim() : ''
-    },
-    buildAgentSessionRequestPayload(session = null, overrides = {}) {
-      const current = session || this.syncCurrentAgentSession() || this.findAgentSession(this.activeAgentSessionId)
-      const merged = {
-        ...(current || {}),
-        ...overrides,
-      }
-      const messages = cloneArray(merged.messages)
-      const titleSource = asText(merged.titleSource) || 'fallback'
-      const title = ['user', 'ai'].includes(titleSource)
-        ? (clampText(merged.title, 60) || deriveAgentSessionTitle(messages))
-        : (clampText(merged.title, 60) || deriveAgentSessionTitle(messages))
-      return {
-        title,
-        history_id: asText(merged.historyId) || this.getCurrentAgentHistoryId(),
-        panel_kind: asText(merged.panelKind),
-        preview: clampText(merged.preview, 120) || deriveAgentSessionPreview(merged),
-        status: asText(merged.status || 'idle') || 'idle',
-        stage: asText(merged.stage || 'gating') || 'gating',
-        is_pinned: Object.prototype.hasOwnProperty.call(overrides || {}, 'isPinned')
-          ? !!overrides.isPinned
-          : !!merged.isPinned,
-        input: String(merged.input || ''),
-        messages: messages.map((item) => this.serializeAgentMessageForSession(item)),
-        output: {
-          answer: String(merged.answer || ''),
-          clarification_question: String(merged.clarificationQuestion || ''),
-          clarification_options: cloneArray(merged.clarificationOptions).map((item) => asText(item)).filter(Boolean),
-          risk_prompt: String(merged.riskPrompt || ''),
-          panel_payloads: cloneObject(merged.panelPayloads),
-        },
-        diagnostics: {
-          execution_trace: cloneArray(merged.executionTrace),
-          used_tools: cloneArray(merged.usedTools),
-          citations: cloneArray(merged.citations),
-          research_notes: cloneArray(merged.researchNotes),
-          audit_issues: cloneArray(merged.auditIssues),
-          planning_summary: String((merged.diagnostics && merged.diagnostics.planningSummary) || (merged.plan && merged.plan.summary) || ''),
-          audit_summary: String((merged.diagnostics && merged.diagnostics.auditSummary) || ''),
-          latency_ms: cloneObject(merged.diagnostics && merged.diagnostics.latencyMs),
-          thinking_timeline: cloneArray(merged.thinkingTimeline),
-          error: String(merged.error || ''),
-        },
-        context_summary: cloneObject(merged.contextSummary),
-        plan: {
-          steps: cloneArray(merged.plan && merged.plan.steps),
-          summary: String((merged.plan && merged.plan.summary) || ''),
-        },
-        risk_confirmations: cloneArray(merged.riskConfirmations),
-        conversation_execution_profile: cloneObject(merged.conversationExecutionProfile || {
-          model_profile_id: asText(this.agentSelectedModelProfileId),
-          pinned_skill_id: this.agentSkillScope === 'conversation' ? asText(this.agentPinnedSkillId || this.agentSelectedSkillId) : '',
-        }),
-      }
-    },
-    async putAgentSession(sessionId = '', overrides = {}) {
-      const nextId = asText(sessionId)
-      if (!nextId) {
-        throw new Error('missing agent session id')
-      }
-      const session = this.findAgentSession(nextId)
-      const body = this.buildAgentSessionRequestPayload(session, overrides)
-      const res = await fetch(`/api/v1/analysis/agent/sessions/${encodeURIComponent(nextId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        throw new Error(`/api/v1/analysis/agent/sessions/${nextId} PUT 失败(${res.status})`)
-      }
-      const detail = await res.json()
-      return this.mergeAgentSessionDetail(detail)
-    },
     async patchAgentSessionMetadata(sessionId = '', payload = {}) {
       const nextId = asText(sessionId)
       if (!nextId) {
@@ -927,84 +460,13 @@ function createAgentRuntimeMethods() {
       const detail = await res.json()
       return this.mergeAgentSessionDetail(detail)
     },
-    buildAgentAssistantFallbackContent(turn = {}) {
-      const output = turn && turn.output ? turn.output : {}
-      return asText(output.answer || output.clarificationQuestion || output.riskPrompt) || '已完成分析'
-    },
-    buildAgentTurnProcessSnapshot(seed = {}) {
-      const runState = this.getAgentRunState(seed.sessionId) || createAgentRunState()
-      const startedAtMs = Number(seed.startedAt || runState.startedAt || this.agentStreamStartedAt || 0) || 0
-      const completedAtMs = Number(seed.completedAt || Date.now()) || Date.now()
-      return normalizeAgentMessageProcess({
-        turnId: asText(seed.turnId || runState.streamingMessageId) || `agent-turn-${completedAtMs.toString(36)}`,
-        status: asText(seed.status || this.agentStatus),
-        stage: asText(seed.stage || this.agentStage),
-        startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : '',
-        completedAt: new Date(completedAtMs).toISOString(),
-        elapsedMs: startedAtMs ? Math.max(0, completedAtMs - startedAtMs) : 0,
-        thinkingTimeline: cloneArray(seed.thinkingTimeline),
-        executionTrace: cloneArray(seed.executionTrace),
-        plan: normalizeAgentPlanEnvelope(seed.plan),
-        pendingTaskConfirmation: cloneObject(seed.pendingTaskConfirmation),
-        executionProfile: cloneObject(seed.executionProfile),
-      })
-    },
-    getCanonicalAssistantMessage(messages = []) {
-      const rows = cloneArray(messages)
-      for (let index = rows.length - 1; index >= 0; index -= 1) {
-        const message = rows[index]
-        if (asText(message && message.role) === 'assistant') return cloneObject(message)
-      }
-      return null
-    },
-    mergeAssistantProcessIntoMessage(message = {}, process = {}) {
-      const merged = {
-        role: asText(message && message.role) || 'assistant',
-        content: String((message && message.content) || ''),
-      }
-      const id = asText(message && message.id)
-      if (id) merged.id = id
-      const existingProcess = normalizeAgentMessageProcess(message && message.process)
-      const overlayProcess = normalizeAgentMessageProcess(process)
-      if (hasAgentMessageProcessContent(overlayProcess)) {
-        merged.process = overlayProcess
-      } else if (hasAgentMessageProcessContent(existingProcess)) {
-        merged.process = existingProcess
-      }
-      return merged
-    },
-    buildAgentAssistantMessageFromTurn(turn = {}, process = {}) {
-      const message = this.getCanonicalAssistantMessage(turn.messages) || {
-        role: 'assistant',
-        content: this.buildAgentAssistantFallbackContent(turn),
-      }
-      return this.mergeAssistantProcessIntoMessage(message, process)
-    },
-    buildAgentMessagesFromTurn(turn = {}, fallbackMessages = [], process = {}) {
-      return [
-        ...cloneArray(fallbackMessages),
-        this.buildAgentAssistantMessageFromTurn(turn, process),
-      ]
-    },
-    serializeAgentMessageForSession(message = {}) {
-      const row = {
-        role: asText(message && message.role) || 'user',
-        content: String((message && message.content) || ''),
-      }
-      const process = normalizeAgentMessageProcess(message && message.process)
-      if (hasAgentMessageProcessContent(process)) {
-        row.process = process
-      }
-      return row
-    },
     buildTurnContext(options = {}) {
       const panelKind = asText(options && options.panelKind)
         || (typeof this.getAgentActiveTopTab === 'function' ? asText(this.getAgentActiveTopTab().kind) : '')
         || 'followup'
       const target = (options && options.target) || null
       const rawQuestion = String((options && options.prompt) || this.agentInput || '').trim()
-      const requestQuestion = rawQuestion
-      if (!rawQuestion || !requestQuestion || this.agentSessionHydrating) return null
+      if (!rawQuestion || this.agentSessionHydrating) return null
       const activeSessionId = this.getActiveAgentSessionId(this.activeAgentSessionId)
       if (this.agentLoading || (activeSessionId && this.isAgentSessionRunning(activeSessionId))) return null
       this.ensureAgentPanelReady()
@@ -1016,9 +478,6 @@ function createAgentRuntimeMethods() {
       const wasPersisted = !!(currentSession && currentSession.persisted)
       const historyId = this.getCurrentAgentHistoryId()
       const requestAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null
-      const requestRiskConfirmations = Array.isArray(options && options.riskConfirmations)
-        ? options.riskConfirmations
-        : this.agentRiskConfirmations
       let baseMessages = cloneArray((currentSession && currentSession.messages) || [])
       if (!baseMessages.length && typeof this.getAgentActiveFollowupTab === 'function') {
         const activeFollowupTab = this.getAgentActiveFollowupTab()
@@ -1031,14 +490,9 @@ function createAgentRuntimeMethods() {
         baseMessages = cloneArray(this.agentMessages)
       }
       const nextMessages = [...baseMessages, { role: 'user', content: rawQuestion }]
-      const requestMessages = [
-        ...baseMessages,
-        { role: 'user', content: requestQuestion },
-      ]
       return {
-        question: requestQuestion,
+        question: rawQuestion,
         rawQuestion,
-        requestMessages,
         panelKind,
         target,
         currentSession,
@@ -1046,14 +500,6 @@ function createAgentRuntimeMethods() {
         wasPersisted,
         historyId,
         requestAbortController,
-        requestRiskConfirmations,
-        executionProfile: {
-          model_profile_id: asText(this.agentSelectedModelProfileId),
-          skill_id: Object.hasOwn(options || {}, 'executionSkillId')
-            ? asText(options.executionSkillId)
-            : asText(this.agentSelectedSkillId || this.agentPinnedSkillId),
-          skill_scope: this.agentSkillScope === 'conversation' ? 'conversation' : 'turn',
-        },
         nextMessages,
       }
     },
@@ -1073,21 +519,10 @@ function createAgentRuntimeMethods() {
           return null
         }
       }
-      const explicitTargetCapabilityId = asText(options && options.targetCapabilityId)
-      const prompt = asText((options && options.prompt) || this.agentInput)
-      if (!explicitTargetCapabilityId && !this.agentSelectedSkillId && !this.agentPinnedSkillId && prompt && typeof this.routeAnalysisCapabilityIntent === 'function') {
-        const routed = await this.routeAnalysisCapabilityIntent(prompt)
-        if (routed) return routed
-      }
-      const isDeepAnalysisRequested = asText((options && options.mode) || this.agentComposerMode) === 'deep'
-      if (activeKind === ANALYSIS_WORKSPACE_TAB_KIND && !isDeepAnalysisRequested && !this.agentSelectedSkillId && !this.agentPinnedSkillId && typeof this.submitAgentAnalysisQuickAsk === 'function') {
-        return this.submitAgentAnalysisQuickAsk(options)
-      }
       const panelKind = ANALYSIS_WORKSPACE_TAB_KIND
       return this.submitMainAgentTurn({
         ...options,
         panelKind,
-        mode: 'deep',
       })
     },
     async consumeTurnStream(res, handler) {
@@ -2791,7 +2226,7 @@ function createAgentRuntimeMethods() {
       if (this.activeAgentSessionId) {
         this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
           ...session,
-          thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, preparingItem),
+          activityItems: upsertThinkingItemInList(session.activityItems, preparingItem),
         }))
       }
 
@@ -2820,7 +2255,7 @@ function createAgentRuntimeMethods() {
         if (this.activeAgentSessionId) {
           this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
             ...session,
-            thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, completedItem),
+            activityItems: upsertThinkingItemInList(session.activityItems, completedItem),
           }))
         }
         return cloneArray(validSnapshots)
@@ -2841,21 +2276,10 @@ function createAgentRuntimeMethods() {
         if (this.activeAgentSessionId) {
           this.updateAgentSessionSnapshot(this.activeAgentSessionId, (session) => ({
             ...session,
-            thinkingTimeline: upsertThinkingItemInList(session.thinkingTimeline, failedItem),
+            activityItems: upsertThinkingItemInList(session.activityItems, failedItem),
           }))
         }
         return []
-      }
-    },
-    async commitTurnResult(turnContext = {}, finalResponse = null) {
-      const targetSessionId = asText(turnContext.targetSessionId)
-      this.stopAgentThinkingTimer(targetSessionId)
-      if (!turnContext.wasPersisted && String((finalResponse || {}).status || '') === 'answered') {
-        try {
-          await this.loadAgentSessionDetail(targetSessionId)
-        } catch (detailErr) {
-          console.warn('Agent session detail load failed after first streamed turn', detailErr)
-        }
       }
     },
     syncUiAfterTurn(turnContext = {}) {
@@ -2866,13 +2290,12 @@ function createAgentRuntimeMethods() {
         this.clearAgentRunState(targetSessionId)
       }
       if (targetSessionId === asText(this.activeAgentSessionId)) {
-        this.agentClarificationSubmitting = false
         this.syncActiveAgentRuntimeView(targetSessionId)
       }
     },
     async submitMainAgentTurn(options = {}) {
       const turnContext = this.buildTurnContext(options)
-      if (!turnContext) return
+      if (!turnContext) return null
       const {
         question,
         rawQuestion,
@@ -2881,9 +2304,11 @@ function createAgentRuntimeMethods() {
         wasPersisted,
         historyId,
         requestAbortController,
-        requestRiskConfirmations,
         nextMessages,
       } = turnContext
+      const streamingMessageId = `codex-message-${Date.now().toString(36)}`
+      let assistantText = ''
+      let completed = false
       this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
         ...session,
         panelKind,
@@ -2891,366 +2316,157 @@ function createAgentRuntimeMethods() {
         snapshotLoaded: true,
         historyId,
         input: '',
-        messages: nextMessages,
+        messages: [...cloneArray(nextMessages), {
+          id: streamingMessageId,
+          role: 'assistant',
+          content: '',
+        }],
         answer: '',
-        executionTrace: [],
-        usedTools: [],
-        citations: [],
-        researchNotes: [],
-        auditIssues: [],
-        clarificationQuestion: '',
-        clarificationOptions: [],
-        pendingTaskConfirmation: null,
-        riskPrompt: '',
         error: '',
-        contextSummary: {},
-        plan: normalizeAgentPlanEnvelope(),
-        riskConfirmations: cloneArray(requestRiskConfirmations),
-        panelPreloadNotes: [],
-        preloadedPanelKeys: [],
         status: 'running',
-        stage: 'gating',
-        thinkingTimeline: [normalizeAgentSubmitThinkingItem('active')],
+        activityItems: [normalizeAgentThinkingItem({
+          id: 'codex-turn',
+          phase: 'executing',
+          title: 'Codex 正在分析',
+          detail: '正在读取项目数据并组织回答。',
+          state: 'active',
+        })],
       }))
       this.setAgentRunState(targetSessionId, {
         abortController: requestAbortController,
         loading: true,
         streamState: 'connecting',
-        streamingMessageId: `agent-stream-${Date.now().toString(36)}`,
-        reasoningBlocks: [],
-        panelPreloadNotes: [],
-        preloadedPanelKeys: [],
-        pendingQuestion: rawQuestion || question,
-        autoScrollLocked: false,
-        autoScrollSticky: true,
-        autoScrollThresholdPx: 24,
+        streamingMessageId,
       })
-      this.agentTurnAbortController = targetSessionId === asText(this.activeAgentSessionId) ? requestAbortController : null
+      this.agentTurnAbortController = requestAbortController
       this.agentInput = ''
-      this.agentClarificationDraft = ''
-      this.agentClarificationSubmitting = false
-      this.agentThinkingExpanded = true
-      this.agentPlanExpanded = true
-      this.agentTraceExpanded = true
       this.startAgentThinkingTimer(targetSessionId)
       try {
-        if (targetSessionId === asText(this.activeAgentSessionId)) {
-          this.maybeAutoScrollAgentThread({ sessionId: targetSessionId, force: true })
-        }
-
-        const res = await postMainLoopStream(this, turnContext, options || {})
-        let finalResponse = null
-        await this.consumeTurnStream(res, ({ type, payload }) => {
-          const markStreamActive = () => {
+        const response = await postConversationTurnStream(this, turnContext, options || {})
+        await this.consumeTurnStream(response, ({ type, payload }) => {
+          if (type === 'thread') {
+            this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+              ...session,
+              persisted: true,
+            }))
+            return
+          }
+          if (type === 'turn_started') {
             this.setAgentRunState(targetSessionId, { streamState: 'streaming' })
-            if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
-            }
-          }
-          if (type === 'meta') {
-            const effective = payload && payload.effective_execution_profile
-            if (effective) this.agentActiveExecutionProfile = { ...effective }
             return
           }
-          if (type === 'status') {
-            const item = normalizeAgentStatusThinkingItem(payload)
+          if (type === 'message_delta') {
+            assistantText += String((payload && payload.delta) || '')
             this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
               ...session,
-              stage: asText(payload && payload.stage) || session.stage || 'gating',
-              status: 'running',
-              thinkingTimeline: upsertThinkingItemInList(
-                completeActiveThinkingItemsInList(
-                  upsertThinkingItemInList(session.thinkingTimeline, normalizeAgentSubmitThinkingItem('completed')),
-                  item.id,
-                ),
-                item,
-              ),
+              messages: cloneArray(session.messages).some((message) => asText(message && message.id) === streamingMessageId)
+                ? cloneArray(session.messages).map((message) => (
+                  asText(message && message.id) === streamingMessageId
+                    ? { ...message, content: assistantText }
+                    : message
+                ))
+                : [...cloneArray(session.messages), {
+                  id: streamingMessageId,
+                  role: 'assistant',
+                  content: assistantText,
+                }],
             }))
-            markStreamActive()
-            if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.agentThinkingExpanded = true
-            }
+            this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
             return
           }
-          if (type === 'thinking') {
-            const item = normalizeAgentThinkingItem(payload)
+          if (type === 'item_started' && payload && payload.type === 'mcpToolCall') {
+            const toolName = asText(payload.tool) || '空间数据工具'
             this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
               ...session,
-              status: 'running',
-              thinkingTimeline: upsertThinkingItemInList(
-                completeActiveThinkingItemsInList(
-                  upsertThinkingItemInList(session.thinkingTimeline, normalizeAgentSubmitThinkingItem('completed')),
-                  item.id,
-                ),
-                item,
-              ),
+              activityItems: [normalizeAgentThinkingItem({
+                id: asText(payload.id) || `mcp-${toolName}`,
+                phase: 'executing',
+                title: `调用 ${toolName}`,
+                detail: '正在通过 spatial-project MCP 读取项目事实。',
+                state: 'active',
+              })],
             }))
-            markStreamActive()
-            if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.agentThinkingExpanded = true
-            }
             return
           }
-          if (type === 'plan') {
-            const nextPlan = normalizeAgentPlanEnvelope(payload)
-            const planItem = normalizeAgentPlanThinkingItem(payload)
-            const currentSessionSnapshot = this.findAgentSession(targetSessionId)
-            const hadPlan = !!(
-              currentSessionSnapshot
-              && currentSessionSnapshot.plan
-              && cloneArray(currentSessionSnapshot.plan.steps).length
-            )
-            this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-              ...session,
-              status: 'running',
-              plan: nextPlan,
-              thinkingTimeline: upsertThinkingItemInList(
-                completeActiveThinkingItemsInList(session.thinkingTimeline, planItem.id),
-                planItem,
-              ),
-            }))
-            if (!hadPlan && nextPlan.steps.length && targetSessionId === asText(this.activeAgentSessionId)) {
-              this.agentPlanExpanded = true
-            }
-            markStreamActive()
-            if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.agentThinkingExpanded = true
-              this.agentTraceExpanded = true
-            }
-            return
-          }
-          if (type === 'reasoning_delta') {
-            const runState = this.getAgentRunState(targetSessionId) || createAgentRunState()
-            this.setAgentRunState(targetSessionId, {
-              reasoningBlocks: upsertReasoningDeltaInList(runState.reasoningBlocks, payload),
-              streamState: 'streaming',
-            })
-            if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
-            }
-            return
-          }
-          if (type === 'trace') {
-            const item = normalizeAgentTraceThinkingItem(payload)
-            this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-              ...session,
-              status: 'running',
-              thinkingTimeline: upsertThinkingItemInList(
-                completeActiveThinkingItemsInList(
-                  upsertThinkingItemInList(session.thinkingTimeline, normalizeAgentSubmitThinkingItem('completed')),
-                  item.id,
-                ),
-                item,
-              ),
-              executionTrace: [...cloneArray(session.executionTrace), cloneObject(payload)],
-            }))
-            this.maybePreloadPanelForAgentTool(payload, targetSessionId).then((didPreload) => {
-              if (didPreload) {
-                if (targetSessionId === asText(this.activeAgentSessionId)) {
-                  this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
-                }
-              }
-            })
-            markStreamActive()
-            if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.agentThinkingExpanded = true
+          if (type === 'item_completed' && payload) {
+            if (payload.type === 'agentMessage' && payload.text) {
+              assistantText = String(payload.text)
+              this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+                ...session,
+                messages: cloneArray(session.messages).some((message) => asText(message && message.id) === streamingMessageId)
+                  ? cloneArray(session.messages).map((message) => (
+                    asText(message && message.id) === streamingMessageId
+                      ? { ...message, content: assistantText }
+                      : message
+                  ))
+                  : [...cloneArray(session.messages), {
+                    id: streamingMessageId,
+                    role: 'assistant',
+                    content: assistantText,
+                  }],
+              }))
+            } else if (payload.type === 'mcpToolCall') {
+              this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
+                ...session,
+                activityItems: cloneArray(session.activityItems).map((item) => (
+                  asText(item && item.id) === asText(payload.id)
+                    ? { ...item, state: payload.error ? 'failed' : 'completed' }
+                    : item
+                )),
+              }))
             }
             return
           }
           if (type === 'error') {
-            const errorMessage = asText(payload && payload.message)
-            const item = normalizeAgentStatusThinkingItem({
-              stage: 'failed',
-              message: errorMessage,
-            })
-            this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
-              ...session,
-              status: 'failed',
-              stage: 'failed',
-              error: errorMessage,
-              thinkingTimeline: upsertThinkingItemInList(
-                completeActiveThinkingItemsInList(session.thinkingTimeline, item.id),
-                item,
-              ),
-            }))
-            this.setAgentRunState(targetSessionId, { streamState: 'failed' })
-            if (targetSessionId === asText(this.activeAgentSessionId)) {
-              this.agentThinkingExpanded = false
-              this.agentPlanExpanded = false
-              this.agentTraceExpanded = false
-            }
-            return
+            throw new Error(asText(payload && payload.message) || 'Codex App Server 执行失败')
           }
-          if (type !== 'final') return
-
-          const responsePayload = payload && typeof payload === 'object' ? payload.response || {} : {}
-          finalResponse = responsePayload
-          const turn = normalizeAgentTurnPayload(responsePayload)
-          const nextStatus = asText(responsePayload.status || 'answered') || 'answered'
-          const nextStage = asText(responsePayload.stage || turn.stage || 'answered') || 'answered'
-          const pendingTaskConfirmation = nextStatus === 'answered'
-            ? buildAnalysisTaskConfirmationFromTurn(this, turn)
-            : null
-          const currentSessionSnapshot = this.findAgentSession(targetSessionId) || {}
-          let nextThinkingTimeline = mergeAgentThinkingTimeline(
-            cloneArray(currentSessionSnapshot.thinkingTimeline),
-            cloneArray(turn.diagnostics.thinkingTimeline),
-          )
-          if (['answered', 'failed'].includes(nextStatus)) {
-            const finalStatusItem = normalizeAgentStatusThinkingItem({
-              stage: nextStatus === 'answered' ? 'answered' : 'failed',
-              message: turn.diagnostics.error,
-            })
-            nextThinkingTimeline = upsertThinkingItemInList(
-              completeActiveThinkingItemsInList(nextThinkingTimeline, finalStatusItem.id),
-              finalStatusItem,
-            )
+          if (type !== 'turn_completed') return
+          if (asText(payload && payload.status) !== 'completed') {
+            throw new Error(asText(payload && payload.error) || `Codex turn ${asText(payload && payload.status) || 'failed'}`)
           }
-          const assistantProcess = nextStatus === 'answered'
-            ? this.buildAgentTurnProcessSnapshot({
-              sessionId: targetSessionId,
-              status: nextStatus,
-              stage: nextStage,
-              thinkingTimeline: nextThinkingTimeline,
-              executionTrace: turn.diagnostics.executionTrace,
-              plan: turn.plan,
-              executionProfile: responsePayload.effective_execution_profile || this.agentActiveExecutionProfile,
-              pendingTaskConfirmation,
-            })
-            : null
-          const finalMessages = nextStatus === 'answered'
-            ? this.buildAgentMessagesFromTurn(turn, nextMessages, assistantProcess)
-            : cloneArray(nextMessages)
+          completed = true
           this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
             ...session,
-            panelKind,
             persisted: true,
-            snapshotLoaded: true,
-            status: nextStatus,
-            stage: nextStage,
-            answer: String(turn.output.answer || ''),
-            executionTrace: cloneArray(turn.diagnostics.executionTrace),
-            usedTools: cloneArray(turn.diagnostics.usedTools),
-            citations: cloneArray(turn.diagnostics.citations),
-            researchNotes: cloneArray(turn.diagnostics.researchNotes),
-            auditIssues: cloneArray(turn.diagnostics.auditIssues),
-            thinkingTimeline: nextThinkingTimeline,
-            diagnostics: {
-              ...cloneObject(session.diagnostics),
-              ...cloneObject(turn.diagnostics),
-              latencyMs: cloneObject(turn.diagnostics.latencyMs),
-            },
-            clarificationQuestion: String(turn.output.clarificationQuestion || ''),
-            clarificationOptions: cloneArray(turn.output.clarificationOptions),
-            pendingTaskConfirmation,
-            riskPrompt: String(turn.output.riskPrompt || ''),
-            error: String(turn.diagnostics.error || ''),
-            contextSummary: cloneObject(turn.contextSummary),
-            plan: normalizeAgentPlanEnvelope(turn.plan),
-            panelPayloads: (() => {
-              const mergedPayloads = {
-                ...cloneObject(session.panelPayloads),
-                ...cloneObject(turn.output.panelPayloads),
-              }
-              if (session.panelPayloads && session.panelPayloads.summary_pack) {
-                mergedPayloads.summary_pack = cloneObject(session.panelPayloads.summary_pack)
-              }
-              if (typeof this.buildAgentTabsUiState === 'function') {
-                mergedPayloads.agent_tabs = this.buildAgentTabsUiState()
-              }
-              return mergedPayloads
-            })(),
-            messages: nextStatus === 'answered' ? cloneArray(finalMessages) : cloneArray(session.messages),
-            riskConfirmations: nextStatus === 'answered' ? [] : cloneArray(requestRiskConfirmations),
+            status: 'answered',
+            messages: cloneArray(session.messages).filter((message) => (
+              asText(message && message.id) !== streamingMessageId || !!asText(message && message.content)
+            )),
+            activityItems: cloneArray(session.activityItems).map((item) => ({
+              ...item,
+              state: item.state === 'active' ? 'completed' : item.state,
+            })),
           }))
-          if (targetSessionId === asText(this.activeAgentSessionId) && turn.output.panelPayloads && turn.output.panelPayloads.h3_result) {
-            this.preloadAgentPanelContent({ key: 'h3', label: '已预加载 H3 面板内容' }).catch((err) => {
-              console.warn('Agent H3 hydrate after final failed', err)
-            })
-          }
-          this.setAgentRunState(targetSessionId, {
-            streamState: nextStatus === 'failed' ? 'failed' : 'completed',
-          })
-          if (targetSessionId === asText(this.activeAgentSessionId)) {
-            this.agentClarificationDraft = ''
-            this.agentClarificationSubmitting = false
-            if (nextStatus === 'requires_risk_confirmation') {
-              this.agentThinkingExpanded = Array.isArray(nextThinkingTimeline) && nextThinkingTimeline.length > 0
-              this.agentPlanExpanded = hasAgentPlanContent(turn.plan)
-              this.agentTraceExpanded = hasAgentExecutionTraceContent(turn.diagnostics.executionTrace)
-            } else {
-              this.agentThinkingExpanded = false
-              this.agentPlanExpanded = false
-              this.agentTraceExpanded = false
-            }
-            this.maybeAutoScrollAgentThread({ sessionId: targetSessionId })
-          }
+          this.setAgentRunState(targetSessionId, { streamState: 'completed' })
         })
-        if (!finalResponse) {
-          throw new Error('Agent 流式执行未返回最终结果')
-        }
-        await this.commitTurnResult(turnContext, finalResponse)
-        if (asText(this.agentComposerMode) === 'deep' && typeof this.clearAgentComposerMode === 'function') {
-          this.agentComposerMode = ''
-          this.closeAgentComposerMenu()
-        }
-      } catch (err) {
-        if (err && (err.name === 'AbortError' || String(err.message || '').includes('aborted'))) {
-          this.stopAgentThinkingTimer(targetSessionId)
+        if (!completed) throw new Error('Codex turn 未返回完成事件')
+        if (!wasPersisted) await this.loadAgentSessionSummaries(true)
+        return { status: 'answered', answer: assistantText }
+      } catch (error) {
+        if (error && (error.name === 'AbortError' || String(error.message || '').toLowerCase().includes('aborted'))) {
           this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
             ...session,
-            input: rawQuestion || question,
             status: 'idle',
-            stage: 'gating',
-            answer: '',
-            executionTrace: [],
-            usedTools: [],
-            citations: [],
-            researchNotes: [],
-            auditIssues: [],
-            clarificationQuestion: '',
-            clarificationOptions: [],
-            pendingTaskConfirmation: null,
-            riskPrompt: '',
-            error: '',
-            contextSummary: cloneObject(session.contextSummary),
-            plan: normalizeAgentPlanEnvelope(),
-            thinkingTimeline: [],
+            input: rawQuestion || question,
+            messages: cloneArray(session.messages).filter((message) => asText(message && message.id) !== streamingMessageId),
+            activityItems: [],
           }))
-          if (targetSessionId === asText(this.activeAgentSessionId)) {
-            this.agentInput = rawQuestion || question
-            this.agentClarificationDraft = ''
-            this.agentClarificationSubmitting = false
-          }
-          return
+          this.agentInput = rawQuestion || question
+          return null
         }
-        console.error(err)
-        const item = normalizeAgentStatusThinkingItem({
-          stage: 'failed',
-          message: 'Agent 执行失败: ' + (err && err.message ? err.message : String(err)),
-        })
+        const message = `Agent 执行失败: ${error && error.message ? error.message : String(error)}`
         this.updateAgentSessionSnapshot(targetSessionId, (session) => ({
           ...session,
           status: 'failed',
-          stage: 'failed',
-          error: 'Agent 执行失败: ' + (err && err.message ? err.message : String(err)),
-          thinkingTimeline: upsertThinkingItemInList(
-            completeActiveThinkingItemsInList(session.thinkingTimeline, item.id),
-            item,
-          ),
+          error: message,
+          messages: cloneArray(session.messages).filter((item) => (
+            asText(item && item.id) !== streamingMessageId || !!asText(item && item.content)
+          )),
+          activityItems: [],
         }))
         this.setAgentRunState(targetSessionId, { streamState: 'failed' })
-        if (targetSessionId === asText(this.activeAgentSessionId)) {
-          this.agentClarificationSubmitting = false
-          this.agentThinkingExpanded = false
-          this.agentPlanExpanded = false
-          this.agentTraceExpanded = false
-        }
+        return null
       } finally {
-        if (turnContext.executionProfile && turnContext.executionProfile.skill_scope === 'turn') {
-          this.agentSelectedSkillId = this.agentPinnedSkillId || ''
-          this.agentSkillScope = this.agentPinnedSkillId ? 'conversation' : 'turn'
-        }
         this.syncUiAfterTurn(turnContext)
       }
     },
@@ -3263,15 +2479,6 @@ function createAgentRuntimeMethods() {
       } catch (_) {
         // Ignore abort errors from already-settled controllers.
       }
-    },
-    async confirmAgentRiskAndRetry() {
-      const toolName = this.extractAgentRiskToolName(this.agentRiskPrompt)
-      if (!toolName) return
-      this.agentRiskConfirmations = [toolName]
-      await this.submitMainAgentTurn({
-        prompt: this.agentInput || (this.agentMessages.length ? this.agentMessages[this.agentMessages.length - 1].content : ''),
-        riskConfirmations: [toolName],
-      })
     },
   }
 }

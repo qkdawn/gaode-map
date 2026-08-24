@@ -10,16 +10,6 @@ function normalizeAgentPanelKind(value) {
   return asText(value).toLowerCase()
 }
 
-function stableAgentHash(value) {
-  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '')
-  let hash = 2166136261
-  for (let index = 0; index < text.length; index += 1) {
-    hash ^= text.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(36)
-}
-
 function normalizeAgentThinkingItem(seed = {}) {
   return {
     id: asText(seed.id) || `thinking-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -46,214 +36,21 @@ function upsertThinkingItemInList(items = [], seed = {}) {
   return nextTimeline
 }
 
-function completeActiveThinkingItemsInList(items = [], excludeId = '') {
-  const skipId = asText(excludeId)
-  return cloneArray(items).map((item) => {
-    const normalized = normalizeAgentThinkingItem(item)
-    if (normalized.id === skipId || normalized.state !== 'active') return normalized
-    return { ...normalized, state: 'completed' }
-  })
-}
-
-function normalizeAgentTraceThinkingItem(seed = {}) {
-  const toolName = asText(seed.tool_name || seed.toolName || 'unknown_tool')
-  const status = asText(seed.status)
-  const state = status === 'success' ? 'completed' : (['failed', 'blocked', 'skipped'].includes(status) ? 'failed' : 'active')
-  const titleStatus = {
-    start: '开始调用',
-    success: '执行成功',
-    failed: '执行失败',
-    blocked: '等待确认',
-    skipped: '已跳过',
-  }[status] || status || '执行中'
-  const items = []
-  const argumentsSummary = asText(seed.arguments_summary || seed.argumentsSummary)
-  const resultSummary = asText(seed.result_summary || seed.resultSummary)
-  const evidenceCount = seed.evidence_count ?? seed.evidenceCount
-  const warningCount = seed.warning_count ?? seed.warningCount
-  const producedArtifacts = cloneArray(seed.produced_artifacts || seed.producedArtifacts).map((item) => asText(item)).filter(Boolean)
-  if (argumentsSummary) items.push(`参数：${argumentsSummary}`)
-  if (resultSummary) items.push(`结果：${resultSummary}`)
-  if (evidenceCount !== undefined && evidenceCount !== null && String(evidenceCount) !== '') items.push(`证据：${evidenceCount} 条`)
-  if (warningCount !== undefined && warningCount !== null && Number(warningCount) > 0) items.push(`警告：${warningCount} 条`)
-  if (producedArtifacts.length) items.push(`产物：${producedArtifacts.slice(0, 6).join('、')}`)
-  return normalizeAgentThinkingItem({
-    id: asText(seed.id || seed.call_id || seed.callId) || `trace:${toolName}`,
-    phase: 'executing',
-    title: `${titleStatus} ${toolName}`,
-    detail: asText(seed.message || seed.reason),
-    displayText: asText(seed.displayText || seed.display_text),
-    resultSummary,
-    items,
-    meta: {
-      toolName,
-      status,
-      callId: asText(seed.call_id || seed.callId),
-    },
-    state,
-  })
-}
-
-function normalizeAgentReasoningDelta(seed = {}) {
-  return {
-    id: asText(seed.id) || 'agent-reasoning',
-    phase: asText(seed.phase),
-    title: asText(seed.title) || '模型思考',
-    delta: String(seed.delta || ''),
-    state: asText(seed.state || 'active') || 'active',
-  }
-}
-
-function upsertReasoningDeltaInList(items = [], seed = {}) {
-  const item = normalizeAgentReasoningDelta(seed)
-  const nextBlocks = cloneArray(items)
-  const existingIndex = nextBlocks.findIndex((entry) => asText(entry && entry.id) === item.id)
-  if (existingIndex >= 0) {
-    const current = nextBlocks[existingIndex] || {}
-    nextBlocks.splice(existingIndex, 1, {
-      ...current,
-      id: item.id,
-      phase: item.phase || current.phase || '',
-      title: item.title || current.title || '模型思考',
-      content: String(current.content || '') + item.delta,
-      state: item.state || current.state || 'active',
-    })
-  } else if (item.delta || item.state !== 'completed') {
-    nextBlocks.push({
-      id: item.id,
-      phase: item.phase,
-      title: item.title,
-      content: item.delta,
-      state: item.state,
-    })
-  }
-  return nextBlocks
-}
-
-function normalizeAgentPlanStep(seed = {}) {
-  return {
-    tool_name: asText(seed.tool_name || seed.toolName),
-    arguments: cloneObject(seed.arguments),
-    reason: asText(seed.reason),
-    evidence_goal: asText(seed.evidence_goal || seed.evidenceGoal),
-    expected_artifacts: cloneArray(seed.expected_artifacts || seed.expectedArtifacts).map((item) => asText(item)).filter(Boolean),
-    optional: !!seed.optional,
-  }
-}
-
-function normalizeAgentPlanEnvelope(seed = {}) {
-  return {
-    steps: cloneArray(seed.steps).map((item) => normalizeAgentPlanStep(item)).filter((item) => item.tool_name),
-    summary: asText(seed.summary),
-  }
-}
-
-function hasAgentPlanEnvelopeContent(plan = {}) {
-  const normalized = normalizeAgentPlanEnvelope(plan)
-  return !!(normalized.steps.length || normalized.summary)
-}
-
-function normalizeAgentMessageProcess(seed = {}) {
-  const raw = seed && typeof seed === 'object' ? seed : {}
-  const plan = normalizeAgentPlanEnvelope(raw.plan)
-  const pendingTaskConfirmation = cloneObject(raw.pendingTaskConfirmation || raw.pending_task_confirmation)
-  const executionProfile = cloneObject(raw.executionProfile || raw.execution_profile)
-  return {
-    turnId: asText(raw.turnId || raw.turn_id),
-    status: asText(raw.status),
-    stage: asText(raw.stage),
-    startedAt: asText(raw.startedAt || raw.started_at),
-    completedAt: asText(raw.completedAt || raw.completed_at),
-    elapsedMs: Math.max(0, Number(raw.elapsedMs ?? raw.elapsed_ms ?? 0) || 0),
-    thinkingTimeline: cloneArray(raw.thinkingTimeline || raw.thinking_timeline)
-      .map((item) => normalizeAgentThinkingItem(item)),
-    executionTrace: cloneArray(raw.executionTrace || raw.execution_trace),
-    plan,
-    pendingTaskConfirmation,
-    executionProfile,
-  }
-}
-
-function hasAgentMessageProcessContent(process = {}) {
-  const normalized = normalizeAgentMessageProcess(process)
-  return !!(
-    normalized.thinkingTimeline.length
-    || normalized.executionTrace.length
-    || hasAgentPlanEnvelopeContent(normalized.plan)
-    || Object.keys(normalized.pendingTaskConfirmation || {}).length
-    || Object.keys(normalized.executionProfile || {}).length
-  )
-}
-
 function normalizeAgentMessage(seed = {}) {
   const raw = seed && typeof seed === 'object' ? seed : {}
-  const processSeed = raw.process || raw.agentProcess || raw.agent_process || (raw.meta && (raw.meta.process || raw.meta.agent_process)) || {}
-  const process = normalizeAgentMessageProcess(processSeed)
   const message = {
     role: asText(raw.role) || 'user',
     content: String(raw.content || ''),
   }
   const id = asText(raw.id || raw.messageId || raw.message_id)
   if (id) message.id = id
-  if (hasAgentMessageProcessContent(process)) {
-    message.process = process
-  }
   return message
 }
 
 function normalizeAgentMessages(items = []) {
   return cloneArray(items)
     .map((item) => normalizeAgentMessage(item))
-    .filter((item) => item.content || hasAgentMessageProcessContent(item.process))
-}
-
-function normalizeAgentDecision(seed = {}) {
-  return {
-    summary: asText(seed.summary),
-    mode: asText(seed.mode || 'judgment') || 'judgment',
-    strength: asText(seed.strength || 'weak') || 'weak',
-    canAct: !!(seed.canAct || seed.can_act),
-  }
-}
-
-function normalizeAgentDecisionEvidence(seed = {}) {
-  return {
-    key: asText(seed.key || seed.metric),
-    metric: asText(seed.metric),
-    headline: asText(seed.headline),
-    value: seed && Object.prototype.hasOwnProperty.call(seed, 'value') ? seed.value : null,
-    interpretation: asText(seed.interpretation),
-    source: asText(seed.source),
-    confidence: asText(seed.confidence || 'weak') || 'weak',
-    limitation: asText(seed.limitation),
-    supports: cloneArray(seed.supports).map((item) => asText(item)).filter(Boolean),
-    isKey: !!(seed.isKey || seed.is_key),
-  }
-}
-
-function normalizeAgentCounterpoint(seed = {}) {
-  return {
-    kind: asText(seed.kind || 'boundary') || 'boundary',
-    title: asText(seed.title),
-    detail: asText(seed.detail),
-  }
-}
-
-function normalizeAgentAction(seed = {}) {
-  return {
-    title: asText(seed.title),
-    detail: asText(seed.detail),
-    condition: asText(seed.condition),
-    target: asText(seed.target),
-    prompt: asText(seed.prompt),
-  }
-}
-
-function normalizeAgentBoundaryItem(seed = {}) {
-  return {
-    title: asText(seed.title),
-    detail: asText(seed.detail),
-  }
+    .filter((item) => item.content)
 }
 
 function normalizeAgentPanelPreloadNote(seed = {}) {
@@ -267,104 +64,6 @@ function normalizeAgentPanelPreloadNotes(items = []) {
   return cloneArray(items)
     .map((item) => normalizeAgentPanelPreloadNote(item))
     .filter((item) => item.key && item.label)
-}
-
-function normalizeAgentProducedArtifacts(seed = {}) {
-  return cloneArray(seed.produced_artifacts || seed.producedArtifacts)
-    .map((item) => asText(item))
-    .filter(Boolean)
-}
-
-function normalizeAgentStatusThinkingItem(seed = {}) {
-  const stage = asText(seed.stage)
-  const mapping = {
-    gating: ['门卫判断', '正在判断你的问题是否清晰、当前范围是否能直接开始分析。'],
-    clarifying: ['生成追问', '还缺少关键信息，正在整理最关键的补充问题。'],
-    planning: ['工具判断', '正在判断这轮最该先调什么工具，以及还缺哪些证据。'],
-    executing: ['执行工具', '正在执行工具调用并收集证据。'],
-    assess: ['证据检查', '正在检查这些证据够不够真正回答你的问题。'],
-    synthesizing: ['综合分析', '正在把现有证据整理成自然回答。'],
-    answered: ['回答生成完成', '已生成最终回答。'],
-    requires_clarification: ['需要补充信息', '还差关键信息，补充后才能继续分析。'],
-    requires_risk_confirmation: ['等待风险确认', '需要确认后继续执行。'],
-    failed: ['处理失败', asText(seed.message) || 'Agent 执行失败。'],
-  }
-  const [title, detail] = mapping[stage] || ['更新状态', asText(seed.label || stage) || 'Agent 状态已更新。']
-  return normalizeAgentThinkingItem({
-    id: `status-${stage || 'unknown'}`,
-    phase: stage || 'status',
-    title,
-    detail,
-    state: ['answered'].includes(stage)
-      ? 'completed'
-      : (['failed', 'requires_clarification'].includes(stage) ? 'failed' : 'active'),
-  })
-}
-
-function normalizeAgentSubmitThinkingItem(state = 'active') {
-  return normalizeAgentThinkingItem({
-    id: 'frontend-submit-request',
-    phase: 'connecting',
-    title: '提交请求',
-    detail: state === 'completed' ? '问题已经发给 AI 了，正在等它开始处理。' : '正在提交问题，并等待 AI 接收请求。',
-    state,
-  })
-}
-
-function normalizeAgentWaitingThinkingItem(elapsedSeconds = 0) {
-  const seconds = Number(elapsedSeconds || 0)
-  if (seconds >= 30) {
-    return normalizeAgentThinkingItem({
-      id: 'frontend-wait-backend',
-      phase: 'connecting',
-      title: '等待后端首个进度事件',
-      detail: '请求已经发出，但后端还没推来第一条真实进度。这里一旦收到门卫判断、规划、工具执行或审计事件，就会立刻切换成真实步骤。',
-      state: 'active',
-    })
-  }
-  if (seconds >= 12) {
-    return normalizeAgentThinkingItem({
-      id: 'frontend-wait-backend',
-      phase: 'connecting',
-      title: '等待后端首个进度事件',
-      detail: '后端已收到请求，正在准备返回第一条真实步骤。',
-      state: 'active',
-    })
-  }
-  return normalizeAgentThinkingItem({
-    id: 'frontend-wait-backend',
-    phase: 'connecting',
-    title: '等待后端首个进度事件',
-    detail: '正在等待后端返回第一条真实进度。',
-    state: 'active',
-  })
-}
-
-function normalizeAgentPlanThinkingItem(seed = {}) {
-  const normalizedPlan = normalizeAgentPlanEnvelope(seed)
-  const previewItems = normalizedPlan.steps
-    .slice(0, 4)
-    .map((step) => asText(step.reason || step.tool_name))
-    .filter(Boolean)
-  return normalizeAgentThinkingItem({
-    id: `plan-envelope-${stableAgentHash({
-      steps: normalizedPlan.steps.map((step) => step.tool_name),
-      summary: normalizedPlan.summary,
-    })}`,
-    phase: 'planning',
-    title: '已列出本轮步骤',
-    detail: normalizedPlan.summary || '已生成待执行的分析步骤。',
-    items: previewItems,
-    state: 'completed',
-  })
-}
-
-function mergeAgentThinkingTimeline(liveItems = [], finalItems = []) {
-  let merged = cloneArray(liveItems)
-  cloneArray(finalItems).forEach((item) => {
-    merged = upsertThinkingItemInList(merged, item)
-  })
-  return cloneArray(merged)
 }
 
 function parseSseChunk(rawChunk = '') {
@@ -419,120 +118,6 @@ async function consumeSseStream(response, onEvent) {
   }
 }
 
-function normalizeAgentTurnPayload(seed = {}) {
-  const rawOutput = seed.output && typeof seed.output === 'object' ? seed.output : {}
-  const rawDiagnostics = seed.diagnostics && typeof seed.diagnostics === 'object' ? seed.diagnostics : {}
-  const rawContextSummary = (seed.contextSummary && typeof seed.contextSummary === 'object')
-    ? seed.contextSummary
-    : ((seed.context_summary && typeof seed.context_summary === 'object') ? seed.context_summary : {})
-  const rawPlan = seed.plan && typeof seed.plan === 'object' ? seed.plan : {}
-  const output = {
-    answer: asText(
-      Object.prototype.hasOwnProperty.call(seed, 'answer')
-        ? seed.answer
-        : rawOutput.answer,
-    ),
-    clarificationQuestion: asText(
-      Object.prototype.hasOwnProperty.call(seed, 'clarificationQuestion')
-        ? seed.clarificationQuestion
-        : (Object.prototype.hasOwnProperty.call(seed, 'clarification_question')
-          ? seed.clarification_question
-          : rawOutput.clarification_question),
-    ),
-    clarificationOptions: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'clarificationOptions')
-        ? seed.clarificationOptions
-        : (Object.prototype.hasOwnProperty.call(seed, 'clarification_options')
-          ? seed.clarification_options
-          : rawOutput.clarification_options),
-    ).map((item) => asText(item)).filter(Boolean),
-    riskPrompt: asText(
-      Object.prototype.hasOwnProperty.call(seed, 'riskPrompt')
-        ? seed.riskPrompt
-        : (Object.prototype.hasOwnProperty.call(seed, 'risk_prompt')
-          ? seed.risk_prompt
-          : rawOutput.risk_prompt),
-    ),
-    panelPayloads: cloneObject(
-      Object.prototype.hasOwnProperty.call(seed, 'panelPayloads')
-        ? seed.panelPayloads
-        : (rawOutput.panel_payloads || rawOutput.panelPayloads),
-    ),
-  }
-  const diagnostics = {
-    executionTrace: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'executionTrace')
-        ? seed.executionTrace
-        : (rawDiagnostics.execution_trace || rawDiagnostics.executionTrace),
-    ),
-    usedTools: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'usedTools')
-        ? seed.usedTools
-        : (rawDiagnostics.used_tools || rawDiagnostics.usedTools),
-    ),
-    citations: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'citations')
-        ? seed.citations
-        : rawDiagnostics.citations,
-    ),
-    researchNotes: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'researchNotes')
-        ? seed.researchNotes
-        : (rawDiagnostics.research_notes || rawDiagnostics.researchNotes),
-    ),
-    auditIssues: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'auditIssues')
-        ? seed.auditIssues
-        : (rawDiagnostics.audit_issues || rawDiagnostics.auditIssues),
-    ),
-    planningSummary: asText(
-      Object.prototype.hasOwnProperty.call(seed, 'planningSummary')
-        ? seed.planningSummary
-        : (rawDiagnostics.planning_summary || rawDiagnostics.planningSummary),
-    ),
-    auditSummary: asText(
-      Object.prototype.hasOwnProperty.call(seed, 'auditSummary')
-        ? seed.auditSummary
-        : (rawDiagnostics.audit_summary || rawDiagnostics.auditSummary),
-    ),
-    latencyMs: cloneObject(
-      Object.prototype.hasOwnProperty.call(seed, 'latencyMs')
-        ? seed.latencyMs
-        : (rawDiagnostics.latency_ms || rawDiagnostics.latencyMs),
-    ),
-    thinkingTimeline: cloneArray(
-      Object.prototype.hasOwnProperty.call(seed, 'thinkingTimeline')
-        ? seed.thinkingTimeline
-        : (rawDiagnostics.thinking_timeline || rawDiagnostics.thinkingTimeline),
-    )
-      .map((item) => normalizeAgentThinkingItem(item)),
-    error: asText(
-      Object.prototype.hasOwnProperty.call(seed, 'error')
-        ? seed.error
-        : rawDiagnostics.error,
-    ),
-  }
-  return {
-    status: asText(seed.status),
-    stage: asText(seed.stage || rawOutput.stage || seed.status),
-    output,
-    diagnostics,
-    contextSummary: cloneObject(rawContextSummary),
-    plan: normalizeAgentPlanEnvelope(rawPlan),
-    messages: normalizeAgentMessages(seed.messages),
-  }
-}
-
-function stripMirroredSummaryAssistantMessage(messages = [], answer = '') {
-  const rows = cloneArray(messages)
-  const summary = asText(answer)
-  if (!summary || !rows.length) return rows
-  const last = rows[rows.length - 1]
-  if (!last || asText(last.role) !== 'assistant') return rows
-  if (asText(last.content) !== summary) return rows
-  return rows.slice(0, -1)
-}
-
 function toTimestamp(value) {
   const ts = Date.parse(String(value || ''))
   return Number.isFinite(ts) ? ts : 0
@@ -540,12 +125,12 @@ function toTimestamp(value) {
 
 function buildAgentPreviewCandidate(session = null) {
   if (!session || typeof session !== 'object') return ''
+  const messages = normalizeAgentMessages(session.messages)
+  const lastMessage = messages.length ? messages[messages.length - 1] : null
   return [
     asText(session.preview),
     asText(session.error),
-    asText(session.riskPrompt),
-    asText(session.clarificationQuestion),
-    asText(session.answer || (session.output && session.output.answer)),
+    asText(lastMessage && lastMessage.content),
   ].find(Boolean) || ''
 }
 
@@ -580,7 +165,6 @@ function deriveAgentSessionPreview(session = null) {
 
 function createAgentSessionRecord(seed = {}) {
   const nowIso = new Date().toISOString()
-  const turn = normalizeAgentTurnPayload(seed)
   const messages = normalizeAgentMessages(seed.messages)
   const titleSource = asText(seed.titleSource || seed.title_source || 'fallback') || 'fallback'
   const panelKind = normalizeAgentPanelKind(seed.panelKind || seed.panel_kind)
@@ -593,30 +177,11 @@ function createAgentSessionRecord(seed = {}) {
     createdAt: asText(seed.createdAt || nowIso),
     pinnedAt: asText(seed.pinnedAt),
     status: asText(seed.status || 'idle'),
-    stage: asText(seed.stage || turn.stage || 'gating'),
-    input: String(seed.input || ''),
-    output: cloneObject(turn.output),
-    answer: String(turn.output.answer || ''),
-    diagnostics: cloneObject(turn.diagnostics),
-    contextSummary: cloneObject(turn.contextSummary),
-    plan: cloneObject(turn.plan),
-    executionTrace: cloneArray(turn.diagnostics.executionTrace),
-    usedTools: cloneArray(turn.diagnostics.usedTools),
-    citations: cloneArray(turn.diagnostics.citations),
-    researchNotes: cloneArray(turn.diagnostics.researchNotes),
-    auditIssues: cloneArray(turn.diagnostics.auditIssues),
-    thinkingTimeline: cloneArray(turn.diagnostics.thinkingTimeline),
-    clarificationQuestion: String(turn.output.clarificationQuestion || ''),
-    clarificationOptions: cloneArray(turn.output.clarificationOptions),
-    riskPrompt: String(turn.output.riskPrompt || ''),
-    error: String(turn.diagnostics.error || ''),
-    riskConfirmations: cloneArray(seed.riskConfirmations || seed.risk_confirmations),
-    panelPreloadNotes: normalizeAgentPanelPreloadNotes(seed.panelPreloadNotes),
-    conversationExecutionProfile: cloneObject(seed.conversationExecutionProfile || seed.conversation_execution_profile),
-    preloadedPanelKeys: cloneArray(seed.preloadedPanelKeys).map((item) => asText(item)).filter(Boolean),
-    pendingTaskConfirmation: cloneObject(seed.pendingTaskConfirmation || seed.pending_task_confirmation),
+    error: asText(seed.error),
     messages,
-    panelPayloads: cloneObject(turn.output.panelPayloads),
+    activityItems: cloneArray(seed.activityItems || seed.activity_items)
+      .map((item) => normalizeAgentThinkingItem(item)),
+    panelPayloads: cloneObject(seed.panelPayloads),
     isPinned: !!seed.isPinned,
     persisted: !!seed.persisted,
     snapshotLoaded: !!seed.snapshotLoaded,
@@ -636,29 +201,10 @@ function createAgentSessionPlaceholderRecord(session = null) {
   const base = session && typeof session === 'object' ? session : {}
   return createAgentSessionRecord({
     ...base,
-    input: '',
-    executionTrace: [],
-    usedTools: [],
-    citations: [],
-    researchNotes: [],
-    answer: '',
-    clarificationQuestion: '',
-    clarificationOptions: [],
-    riskPrompt: '',
     error: '',
-    riskConfirmations: [],
-    pendingTaskConfirmation: null,
     messages: [],
-    output: {
-      answer: '',
-      clarificationQuestion: '',
-      clarificationOptions: [],
-      riskPrompt: '',
-      panelPayloads: {},
-    },
-    diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], latencyMs: {}, error: '' },
-    contextSummary: {},
-    plan: { steps: [], summary: '' },
+    activityItems: [],
+    panelPayloads: {},
     snapshotLoaded: false,
   })
 }
@@ -667,16 +213,8 @@ function cloneAgentSessionRecord(session = null) {
   if (!session || typeof session !== 'object') return null
   return createAgentSessionRecord({
     ...session,
-    executionTrace: cloneArray(session.executionTrace),
-    usedTools: cloneArray(session.usedTools),
-    citations: cloneArray(session.citations),
-    researchNotes: cloneArray(session.researchNotes),
-    thinkingTimeline: cloneArray(session.thinkingTimeline),
-    riskConfirmations: cloneArray(session.riskConfirmations),
-    panelPreloadNotes: normalizeAgentPanelPreloadNotes(session.panelPreloadNotes),
-    preloadedPanelKeys: cloneArray(session.preloadedPanelKeys),
-    pendingTaskConfirmation: cloneObject(session.pendingTaskConfirmation),
     messages: cloneArray(session.messages),
+    activityItems: cloneArray(session.activityItems),
     panelPayloads: cloneObject(session.panelPayloads),
   })
 }
@@ -711,16 +249,6 @@ function createAgentRunState(seed = {}) {
     elapsedTick: Number(seed.elapsedTick ?? seed.elapsed_tick ?? 0) || 0,
     elapsedTimer: seed.elapsedTimer || null,
     streamingMessageId: asText(seed.streamingMessageId || seed.streaming_message_id),
-    reasoningBlocks: cloneArray(seed.reasoningBlocks).map((item) => ({
-      id: asText(item && item.id) || 'agent-reasoning',
-      phase: asText(item && item.phase),
-      title: asText(item && item.title) || '模型思考',
-      content: String((item && item.content) || ''),
-      state: asText(item && item.state) || 'active',
-    })),
-    panelPreloadNotes: normalizeAgentPanelPreloadNotes(seed.panelPreloadNotes),
-    preloadedPanelKeys: cloneArray(seed.preloadedPanelKeys).map((item) => asText(item)).filter(Boolean),
-    pendingQuestion: String(seed.pendingQuestion || ''),
     autoScrollLocked: !!seed.autoScrollLocked,
     autoScrollSticky: Object.prototype.hasOwnProperty.call(seed, 'autoScrollSticky')
       ? !!seed.autoScrollSticky
@@ -763,36 +291,14 @@ export {
   cloneArray,
   cloneObject,
   cloneRecordMap,
-  stableAgentHash,
   normalizeAgentThinkingItem,
   upsertThinkingItemInList,
-  completeActiveThinkingItemsInList,
-  normalizeAgentTraceThinkingItem,
-  normalizeAgentReasoningDelta,
-  upsertReasoningDeltaInList,
-  normalizeAgentPlanStep,
-  normalizeAgentPlanEnvelope,
-  normalizeAgentMessageProcess,
-  hasAgentMessageProcessContent,
   normalizeAgentMessage,
   normalizeAgentMessages,
-  normalizeAgentDecision,
-  normalizeAgentDecisionEvidence,
-  normalizeAgentCounterpoint,
-  normalizeAgentAction,
-  normalizeAgentBoundaryItem,
   normalizeAgentPanelPreloadNote,
   normalizeAgentPanelPreloadNotes,
-  normalizeAgentProducedArtifacts,
-  normalizeAgentStatusThinkingItem,
-  normalizeAgentSubmitThinkingItem,
-  normalizeAgentWaitingThinkingItem,
-  normalizeAgentPlanThinkingItem,
-  mergeAgentThinkingTimeline,
   parseSseChunk,
   consumeSseStream,
-  normalizeAgentTurnPayload,
-  stripMirroredSummaryAssistantMessage,
   toTimestamp,
   buildAgentPreviewCandidate,
   sortAgentSessions,

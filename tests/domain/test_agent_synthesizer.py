@@ -1,6 +1,5 @@
 import json
 
-from modules.agent.providers.prompts import synthesizer_system_prompt
 from modules.agent.schemas import AgentTurnOutput, AnalysisSnapshot, AuditResult, ToolResult
 from modules.agent.synthesizer import (
     build_analysis_evidence,
@@ -449,13 +448,3 @@ def test_answer_payload_does_not_add_analysis_expression_brief():
 
     assert "analysis_expression_brief" not in payload
     assert payload["project_evidence_dossier"]["evidence"]
-
-
-def test_synthesizer_prompt_keeps_expression_rules_without_brief_contract():
-    prompt = synthesizer_system_prompt()
-
-    assert "analysis_expression_brief" not in prompt
-    assert "事实、空间观察、解释性推断、行动建议和证据缺口" in prompt
-    assert "设计愿景只能写成目标状态" in prompt
-    assert "冲突口径必须并列说明" in prompt
-    assert "潜力巨大" in prompt

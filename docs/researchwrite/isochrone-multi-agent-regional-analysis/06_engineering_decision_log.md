@@ -36,7 +36,7 @@ VPN 路由、模型中转站异常、单次超时和一次成功或失败运行�
 
 | 证据源 | 模型侧入口 | 当前边界 |
 | --- | --- | --- |
-| 空间数据库 | `analyze_spatial_evidence` | POI、人口、路网、夜光、H3；内部完成空间计算，只返回受限事实 |
+| 空间数据库 | `analyze_spatial_question` | 空间工具 Agent 拆分问题并综合多次确定性空间计算 |
 | 文献知识库 | `search_literature_evidence` | GraphRAG 的 `focused` 原文检索与 `synthesis` 跨文档综合 |
 | 项目文档 | `read_project_document` | Docling 解析后分页读取原文 |
 | 实时互联网 | `search_public_web`、`fetch_public_web_page` | 搜索用于发现，网页全文才可进入证据上下文 |
@@ -81,7 +81,7 @@ VPN 路由、模型中转站异常、单次超时和一次成功或失败运行�
 
 **根因**：原空间响应偏重聚合结果；POI 名称、类别、地址、道路名称和道路等级没有稳定进入模型工作上下文，结果压缩还可能进一步丢失具名对象。
 
-**选择**：`analyze_spatial_evidence` 保留七种通用语义：`scope`、`accessibility`、`direction`、`neighborhood`、`rank`、`relationship` 和 `inspect`。其中 `inspect` 可展开具名 POI、相交道路和邻近对象。工作简报单独保留最多二十条具名空间记录，`decision_memo.named_entities` 和蓝图 `must_include_named_entities` 继续把关键名称传给写作 Agent。
+**当时选择，现已被 3.10 的双层接口取代**：旧 `analyze_spatial_evidence` 以一个模型入口同时承载七种空间关系和具名对象展开。当前七种关系已下沉到确定性 `compute_spatial_evidence`，由 `analyze_spatial_question` 空间工具 Agent 按问题调用；`decision_memo.named_entities` 仍负责把最终选定名称传给后续阶段。
 
 **边界**：名称存在不等于设施真实运营、道路适合改造或关系具有因果性。具名化提高可核对性与项目可读性，但其质量仍需抽样核验。
 
@@ -135,7 +135,7 @@ VPN 路由、模型中转站异常、单次超时和一次成功或失败运行�
 
 **原表现**：旧模型侧工具 `project_context` 和 `query_data` 暴露过多数据契约、范围和字段细节，并且 H3、POI 规则栅格与路网共享栅格的能力不一致。
 
-**选择**：模型侧只公开 `analyze_spatial_evidence`。`history_id` 由 N8N 注入，模型不能提交数据库标识、任意 Polygon、坐标系或原始字段名。空间服务内部根据点、面状栅格、H3 和路网策略完成包含、距离、面积加权、相交长度与共享分析单元对齐。模型响应递归剔除几何、坐标数组、数据库连接和本地文件路径。
+**当前选择（2026-08-21）**：业务 Agent 只使用 `analyze_spatial_question`，提交项目标识和完整空间问题。可复用空间工具 Agent 通过 Codex Harness 拆分子问题、选择证据域和空间关系，并多次调用只对它可见的 `compute_spatial_evidence`。底层工具不接收 `question`，不返回问题复述或自然语言结论；空间服务内部根据点、面状栅格、H3 和路网策略完成包含、距离、面积加权、相交长度与共享分析单元对齐，并递归剔除几何、坐标数组、数据库连接和本地文件路径。
 
 **论文含义**：深接口的研究价值应通过工具调用正确率、空间数值一致率和上下文成本检验，而非只凭“接口更少”判断。
 
@@ -265,7 +265,7 @@ VPN 路由、模型中转站异常、单次超时和一次成功或失败运行�
 | 每章前置 GraphRAG | 无关检索和固定成本 | 文献按需调用 |
 | 强制首次互联网搜索和双通道 | 混淆证据类型，可能无关 | 文献与互联网独立按需 |
 | 同一语料并行维护旧 RAG 和 GraphRAG | 两套事实链和维护成本 | 一个 GraphRAG 派生索引 |
-| 模型直接使用 `project_context/query_data` | 泄漏字段和空间实现 | 单一深接口 `analyze_spatial_evidence` |
+| 模型直接使用 `project_context/query_data` | 泄漏字段和空间实现 | 空间工具 Agent `analyze_spatial_question` + 确定性 `compute_spatial_evidence` |
 | 空间工具硬编码 `next_request` | 数据层侵入研究策略 | 独立证据路由 Agent |
 | 每轮只调用一个工具 | 独立请求被无效串行化 | 每批最多三个独立请求 |
 | 一次把完整 PDF 送入模型 | 上下文不可控 | Docling 分页 |
@@ -321,7 +321,7 @@ VPN 路由、模型中转站异常、单次超时和一次成功或失败运行�
 - GraphRAG 来源清单：`runtime/graphrag-public-knowledge/source_manifest.json`
 - GraphRAG 覆盖校验：`scripts/verify_graphrag_index.py`
 - 工作流契约测试：`tests/domain/test_n8n_rag_workflows.py`
-- 当前工具与执行说明：`docs/N8N十二阶段工具与执行方式.md`
+- 当前系统、方法增量与论文主线：`docs/论文写作_当前系统全景与已完成工作.md`
 
 ## 11. Agent 提示词收敛与 n8n 验收（2026-08-19）
 

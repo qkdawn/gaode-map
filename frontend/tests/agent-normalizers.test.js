@@ -2,52 +2,57 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  cloneAgentSessionRecord,
+  createAgentRunState,
+  createAgentSessionRecord,
   deriveAgentSessionPreview,
   deriveAgentSessionTitle,
   normalizeAgentSessionSummary,
-  normalizeAgentTurnPayload,
 } from '../src/features/agent/normalizers.js'
 
-test('normalizeAgentTurnPayload normalizes structured agent response fields', () => {
-  const normalized = normalizeAgentTurnPayload({
-    status: 'requires_clarification',
-    output: {
-      clarification_question: '你希望这里最终怎么展示？',
-      clarification_options: ['问题+建议回答', '只显示真实追问'],
-      panel_payloads: { poi_result: { total: 12 } },
-      decision: { summary: '先补充目标再继续', mode: 'judgment', strength: 'moderate', can_act: false },
-    },
-    diagnostics: {
-      execution_trace: [{ tool_name: 'read_current_scope', status: 'success' }],
-      thinking_timeline: [{ id: 'thinking-1', title: '输入检查完成', state: 'completed' }],
-      planning_summary: '先读范围，再追问缺口',
-    },
-    plan: {
-      steps: [{ tool_name: 'read_current_scope', reason: '读取当前分析范围' }],
-      summary: '先读范围，再追问缺口',
-    },
+test('conversation session keeps only product metadata, messages, activity, and local panel payloads', () => {
+  const session = createAgentSessionRecord({
+    id: 'session-1',
+    status: 'running',
+    messages: [{ id: 'user-1', role: 'user', content: '分析这个范围', process: { plan: {} } }],
+    activityItems: [{ id: 'mcp-1', title: '调用 read_project', state: 'active' }],
+    panelPayloads: { summary_pack: { title: '区域总结' } },
+    executionTrace: [{ tool_name: 'legacy' }],
+    plan: { steps: [{ tool_name: 'legacy' }] },
   })
 
-  assert.equal(normalized.status, 'requires_clarification')
-  assert.equal(normalized.output.clarificationQuestion, '你希望这里最终怎么展示？')
-  assert.deepEqual(normalized.output.clarificationOptions, ['问题+建议回答', '只显示真实追问'])
-  assert.equal(normalized.output.panelPayloads.poi_result.total, 12)
-  assert.equal(normalized.diagnostics.executionTrace[0].tool_name, 'read_current_scope')
-  assert.equal(normalized.diagnostics.thinkingTimeline[0].id, 'thinking-1')
-  assert.equal(normalized.plan.steps[0].tool_name, 'read_current_scope')
+  assert.equal(session.messages[0].process, undefined)
+  assert.equal(session.activityItems[0].id, 'mcp-1')
+  assert.equal(session.panelPayloads.summary_pack.title, '区域总结')
+  assert.equal(session.executionTrace, undefined)
+  assert.equal(session.plan, undefined)
+  assert.deepEqual(cloneAgentSessionRecord(session), session)
 })
 
-test('deriveAgentSessionPreview prefers answer text and deriveAgentSessionTitle prefers first user message', () => {
+test('deriveAgentSessionPreview prefers the latest message and title prefers the first user message', () => {
   const session = {
     messages: [
       { role: 'user', content: '总结这个区域的商业特征' },
       { role: 'assistant', content: '这里以社区商业为主' },
     ],
-    answer: '这里以社区商业为主',
   }
 
   assert.equal(deriveAgentSessionPreview(session), '这里以社区商业为主')
   assert.equal(deriveAgentSessionTitle(session.messages), '总结这个区域的商业特征')
+})
+
+test('run state excludes reasoning and panel preload shadow-runtime state', () => {
+  const state = createAgentRunState({
+    loading: true,
+    reasoningBlocks: [{ content: 'legacy reasoning' }],
+    panelPreloadNotes: [{ key: 'poi', label: 'POI' }],
+    pendingQuestion: 'legacy question',
+  })
+
+  assert.equal(state.loading, true)
+  assert.equal(state.reasoningBlocks, undefined)
+  assert.equal(state.panelPreloadNotes, undefined)
+  assert.equal(state.pendingQuestion, undefined)
 })
 
 test('normalizeAgentSessionSummary keeps persisted metadata and existing snapshot flags', () => {

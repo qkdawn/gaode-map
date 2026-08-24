@@ -157,28 +157,15 @@ def cell_area_km2(cell_id: str, resolution: int) -> float:
     return 0.0
 
 
-def neighbors(cell_id: str, ring_size: int) -> List[str]:
+def neighbors(cell_id: str) -> List[str]:
     try:
         if hasattr(h3, "grid_disk"):
-            return list(h3.grid_disk(cell_id, ring_size))
+            return list(h3.grid_disk(cell_id, 1))
         if hasattr(h3, "k_ring"):
-            return list(h3.k_ring(cell_id, ring_size))
+            return list(h3.k_ring(cell_id, 1))
     except Exception:
         return []
     return []
-
-
-def normalize_neighbor_ring(ring_size: Any, default: int = 1) -> int:
-    try:
-        ring = int(float(ring_size))
-    except Exception:
-        ring = int(default)
-    return max(1, min(3, ring))
-
-
-def ring_to_arcgis_knn(ring_size: Any) -> int:
-    ring = normalize_neighbor_ring(ring_size, default=1)
-    return int(3 * ring * (ring + 1))
 
 
 def has_density_variance(stats_by_cell: Dict[str, Dict[str, Any]], tol: float = 1e-12) -> bool:
@@ -260,13 +247,13 @@ def compute_cell_metrics(stats_by_cell: Dict[str, Dict[str, Any]], resolution: i
         stats["local_entropy"] = float(shannon_entropy(stats["category_counts"]))
 
 
-def compute_neighbor_metrics(stats_by_cell: Dict[str, Dict[str, Any]], neighbor_ring: int = 1) -> None:
+def compute_neighbor_metrics(stats_by_cell: Dict[str, Dict[str, Any]]) -> None:
     cell_ids = list(stats_by_cell.keys())
     if not cell_ids:
         return
     cell_set = set(cell_ids)
     for cell_id in cell_ids:
-        neighbor_ids = [nid for nid in neighbors(cell_id, neighbor_ring) if nid in cell_set and nid != cell_id]
+        neighbor_ids = [nid for nid in neighbors(cell_id) if nid in cell_set and nid != cell_id]
         neighbor_count = int(len(neighbor_ids))
         stats = stats_by_cell[cell_id]
         stats["neighbor_count"] = neighbor_count
@@ -287,7 +274,6 @@ def compute_neighbor_metrics(stats_by_cell: Dict[str, Dict[str, Any]], neighbor_
 def compute_global_moran_i(
     stats_by_cell: Dict[str, Dict[str, Any]],
     value_key: str = "density_poi_per_km2",
-    neighbor_ring: int = 1,
 ) -> Optional[float]:
     cell_ids = list(stats_by_cell.keys())
     n = len(cell_ids)
@@ -303,7 +289,7 @@ def compute_global_moran_i(
     s0 = 0
     cell_set = set(cell_ids)
     for cell_id in cell_ids:
-        cell_neighbors = [nid for nid in neighbors(cell_id, neighbor_ring) if nid in cell_set and nid != cell_id]
+        cell_neighbors = [nid for nid in neighbors(cell_id) if nid in cell_set and nid != cell_id]
         for neighbor_id in cell_neighbors:
             numerator += (values[cell_id] - mean_value) * (values[neighbor_id] - mean_value)
             s0 += 1

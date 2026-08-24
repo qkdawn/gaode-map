@@ -4,7 +4,20 @@ import {
   cloneArray,
   cloneObject,
 } from './normalizers.js'
-import { postContextAsk, serializeContextAskTarget } from './context-ask-request.js'
+
+function serializeContextAskTarget(target = {}) {
+  const source = target && typeof target === 'object' ? target : {}
+  return {
+    type: asText(source.type) || 'report_section',
+    id: asText(source.id),
+    title: asText(source.title),
+    source: asText(source.source) || 'report',
+    summary: asText(source.summary),
+    evidence: cloneArray(source.evidence),
+    artifact_refs: cloneArray(source.artifact_refs).map((item) => asText(item)).filter(Boolean),
+    payload: cloneObject(source.payload),
+  }
+}
 
 export function createAgentContextAskUiMethods() {
   return {
@@ -57,7 +70,7 @@ export function createAgentContextAskUiMethods() {
       if (!this.contextAskMessages.length || options.resetMessages) {
         this.contextAskMessages = [{
           role: 'assistant',
-          content: `我会围绕“${normalized.title}”解释，不会离开当前区域上下文。`,
+          content: `我会在当前 Codex 会话中围绕“${normalized.title}”继续分析。`,
           evidence: [],
           citations: [],
           warnings: [],
@@ -85,19 +98,6 @@ export function createAgentContextAskUiMethods() {
       this.contextAskSize = { width, height }
       return this.contextAskSize
     },
-    buildContextAskFallbackAnswer(question = '', targetSeed = null) {
-      const target = this.normalizeContextAskTarget(targetSeed || this.contextAskTarget)
-      const summary = asText(target.summary) || '当前对象没有完整自然语言摘要，需要结合右侧证据和图表继续核对。'
-      const evidenceCount = cloneArray(target.evidence).length
-      const refsCount = cloneArray(target.artifact_refs).length
-      const basis = evidenceCount ? `已有 ${evidenceCount} 条证据可参考` : '当前上下文没有传入结构化证据'
-      const refs = refsCount ? `，并关联 ${refsCount} 个产物引用` : ''
-      return [
-        `针对“${target.title}”：${summary}`,
-        `你的问题是“${asText(question) || '请解释这个判断'}”。${basis}${refs}。`,
-        '不确定性：这个回答只解释当前点击对象，不会重新跑工具；如果原始数据缺失或证据链较弱，需要回到报告证据抽屉复核。',
-      ].join('\n')
-    },
     async submitContextAskQuestion(question = '') {
       const text = asText(question || this.contextAskDraft).trim()
       if (!text || this.contextAskLoading) return null
@@ -112,32 +112,36 @@ export function createAgentContextAskUiMethods() {
       ]
       this.contextAskLoading = true
       try {
-        const data = await postContextAsk({
-          conversation_id: this.getActiveAgentSessionId ? this.getActiveAgentSessionId() : asText(this.activeAgentSessionId),
-          history_id: asText(this.getCurrentAgentHistoryId && this.getCurrentAgentHistoryId()),
-          question: text,
-          analysis_snapshot: this.buildAgentAnalysisSnapshot ? this.buildAgentAnalysisSnapshot() : {},
-          target: serializeContextAskTarget(target),
+        const data = await this.submitMainAgentTurn({
+          prompt: text,
+          panelKind: 'analysis',
+          mapContext: {
+            context_target: serializeContextAskTarget(target),
+          },
         })
+        if (!data || !asText(data.answer)) {
+          throw new Error(asText(this.agentError) || 'App Server 未返回结果')
+        }
         const assistant = {
           role: 'assistant',
-          content: asText(data.answer) || this.buildContextAskFallbackAnswer(text, target),
-          evidence: cloneArray(data.evidence),
-          citations: cloneArray(data.citations),
-          warnings: cloneArray(data.warnings),
+          content: asText(data.answer),
+          evidence: [],
+          citations: [],
+          warnings: [],
         }
         this.contextAskMessages = [...cloneArray(this.contextAskMessages), assistant]
         return assistant
       } catch (error) {
+        const message = `Codex 追问失败：${asText(error && error.message) || 'App Server 未返回结果'}`
         const assistant = {
           role: 'assistant',
-          content: this.buildContextAskFallbackAnswer(text, target),
-          evidence: cloneArray(target.evidence),
-          citations: cloneArray(target.artifact_refs),
-          warnings: ['AI 解释接口暂不可用，已返回本地规则解释。'],
+          content: message,
+          evidence: [],
+          citations: [],
+          warnings: [],
         }
         this.contextAskMessages = [...cloneArray(this.contextAskMessages), assistant]
-        this.contextAskError = asText(error && error.message)
+        this.contextAskError = message
         return assistant
       } finally {
         this.contextAskLoading = false
@@ -195,25 +199,24 @@ export function createAgentContextAskUiMethods() {
       const source = candidate && typeof candidate === 'object'
         ? candidate
         : (this.getAgentSiteSelectionSelectedCandidate ? this.getAgentSiteSelectionSelectedCandidate() : {})
-      const evidenceChain = this.getAgentSiteSelectionEvidenceChain ? this.getAgentSiteSelectionEvidenceChain() : []
       return this.normalizeContextAskTarget({
         type: 'site_candidate',
         id: asText(source.h3Id || source.h3_id || source.title) || 'site-candidate',
-        title: asText(source.title) || `候选 ${source.rank || ''}`.trim() || '候选点',
+        title: asText(source.title) || `候选 ${source.sourceOrder || ''}`.trim() || '候选点',
         source: 'site_selection',
-        summary: asText(source.reason) || cloneArray(source.whySuitable).join('；') || cloneArray(source.strengths).join('；'),
-        evidence: evidenceChain,
+        summary: `供需差值 ${Number(source.gapValue || 0)}，需求份额 ${Number(source.demandShare || 0)}，供给份额 ${Number(source.supplyShare || 0)}`,
+        evidence: [],
         artifact_refs: [asText(source.h3Id || source.h3_id)].filter(Boolean),
         payload: {
-          rank: Number(source.rank || 0) || 0,
+          sourceOrder: Number(source.sourceOrder || 0) || 0,
           h3Id: asText(source.h3Id || source.h3_id),
-          score: Number(source.totalScore || source.total_score || 0) || 0,
-          reason: asText(source.reason),
-          strengths: cloneArray(source.strengths).map((item) => asText(item)).filter(Boolean),
-          risks: cloneArray(source.risks).map((item) => asText(item)).filter(Boolean),
-          whySuitable: cloneArray(source.whySuitable || source.why_suitable).map((item) => asText(item)).filter(Boolean),
-          validationSteps: cloneArray(source.nextValidationSteps || source.next_validation_steps).map((item) => asText(item)).filter(Boolean),
-          evidence_chain: evidenceChain,
+          gapValue: Number(source.gapValue || 0) || 0,
+          demandShare: Number(source.demandShare || 0) || 0,
+          supplyShare: Number(source.supplyShare || 0) || 0,
+          cellPopulation: Number(source.cellPopulation || 0) || 0,
+          scopePopulation: Number(source.scopePopulation || 0) || 0,
+          roadNodeCount: Number(source.roadNodeCount || 0) || 0,
+          roadEdgeCount: Number(source.roadEdgeCount || 0) || 0,
         },
       })
     },

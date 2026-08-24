@@ -146,6 +146,7 @@ class FakeScopeDatasetRepository:
                                     "road_name": "测试路",
                                     "road_class": "residential",
                                     "from_node": "n1", "to_node": "n2", "length_m": 1000,
+                                    "connectivity_score": 0.0,
                                     "metrics": {"integration": 0.6, "choice": 0.7, "connectivity": 0.8, "depth": 2, "control": 0.4},
                                     "integration_global": 0.9, "choice_global": 0.8,
                                     "nain_global": 0.9, "nach_global": 0.8,
@@ -160,6 +161,7 @@ class FakeScopeDatasetRepository:
                                 "properties": {
                                     "edge_id": "r2", "road_name": "支路", "road_class": "service",
                                     "from_node": "n2", "to_node": "n3", "length_m": 900,
+                                    "connectivity_score": 1.0,
                                     "metrics": {"integration": 0.3, "choice": 0.2, "connectivity": 1, "depth": 3},
                                     "nain_global": 0.3, "nach_global": 0.2,
                                     "node_count_global": 8, "total_depth_global": 18,
@@ -218,7 +220,7 @@ def test_scope_dataset_service_lists_normalized_sources():
     assert sources["current:dataset:population"]["query_capabilities"]["spatial_ready"] is True
     assert sources["current:dataset:population"]["query_capabilities"]["spatial_aggregations"][0]["op"] == "area_weighted_sum"
     road_fields = sources["current:dataset:road_edges"]["query_capabilities"]["filter_fields"]
-    assert road_fields == ["edge_id", "from_node", "length_m", "metrics", "record_id", "road_class", "road_name", "to_node"]
+    assert road_fields == ["connectivity_score", "edge_id", "from_node", "length_m", "metrics", "record_id", "road_class", "road_name", "to_node"]
 
 
 def test_scope_dataset_service_reads_persisted_road_corridor_records():
@@ -426,6 +428,7 @@ def test_scope_dataset_uses_all_road_nodes_and_edges_instead_of_top_nodes():
                     "properties": {
                         "edge_id": f"e{index}", "road_name": "", "road_class": "local",
                         "from_node": f"n{index}", "to_node": f"n{index + 1}", "length_m": 10,
+                        "connectivity_score": 0.0,
                         "metrics": {"integration": 0.0, "choice": 0.0, "connectivity": 2, "depth": 0.0},
                         "nain_global": 0.0, "nach_global": 0.0,
                         "node_count_global": 2, "total_depth_global": 1,

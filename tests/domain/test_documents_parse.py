@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from modules.documents.docling_parser import _normalize_blocks
+from modules.documents.docling_parser import _normalize_blocks, _parse_text_pdf, parse_document_with_docling
 from modules.documents.service import (
     build_document_rag_source,
     DocumentNotFound,
@@ -110,6 +110,45 @@ def test_docling_blocks_normalize_titles_paragraphs_and_markdown_tables():
     assert blocks[1].section_title == "项目背景"
     assert blocks[2].page_index == 1
     assert blocks[2].text == "| 指标 | 值 |\n| --- | --- |\n| POI | 3996 |"
+
+
+def test_docling_parser_preserves_chinese_project_document_text(tmp_path):
+    from docx import Document as WordDocument
+
+    source = tmp_path / "项目材料.docx"
+    document = WordDocument()
+    document.add_heading("项目基本情况", level=1)
+    document.add_paragraph("现有建筑、院落、路径和居民条件是本次分析的直接输入。")
+    document.save(source)
+
+    blocks = parse_document_with_docling(str(source))
+
+    text = "\n".join(item.text for item in blocks)
+    assert "项目基本情况" in text
+    assert "现有建筑、院落、路径和居民条件" in text
+    assert "�" not in text
+
+
+def test_text_pdf_fallback_preserves_pages_and_chinese(tmp_path):
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfgen.canvas import Canvas
+
+    source = tmp_path / "项目建议书.pdf"
+    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+    canvas = Canvas(str(source))
+    canvas.setFont("STSong-Light", 12)
+    canvas.drawString(72, 760, "第一页：项目概况与建筑清单")
+    canvas.showPage()
+    canvas.setFont("STSong-Light", 12)
+    canvas.drawString(72, 760, "第二页：实施计划与运营分析")
+    canvas.save()
+
+    blocks = _parse_text_pdf(source)
+
+    assert [item.page_index for item in blocks] == [0, 1]
+    assert "项目概况与建筑清单" in blocks[0].text
+    assert "实施计划与运营分析" in blocks[1].text
 
 
 def test_schedule_document_parse_creates_parse_job(monkeypatch):

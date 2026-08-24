@@ -7,7 +7,16 @@ from shapely.strtree import STRtree
 from .geometry import haversine_m, safe_round
 
 
-_METRICS = ("choice", "integration", "nain", "nach", "connectivity", "control", "depth")
+_METRICS = (
+    "choice",
+    "integration",
+    "nain",
+    "nach",
+    "connectivity",
+    "connectivity_score",
+    "control",
+    "depth",
+)
 
 
 def _line_length_km(geometry: Any) -> float:
@@ -39,6 +48,17 @@ def _finite(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) else None
+
+
+def _edge_metric(properties: Dict[str, Any], metric: str) -> float | None:
+    if metric == "connectivity":
+        metrics = properties.get("metrics") if isinstance(properties.get("metrics"), dict) else {}
+        return _finite(metrics.get("connectivity"))
+    if metric == "connectivity_score":
+        return _finite(properties.get("connectivity_score"))
+    if metric in {"nain", "nach"}:
+        return _finite(properties.get(f"{metric}_global"))
+    return _finite(properties.get(f"{metric}_score"))
 
 
 def _candidate_indices(tree: STRtree, line: Any, geometry_indices: Dict[int, int]) -> Iterable[int]:
@@ -88,11 +108,7 @@ def build_road_grid(road_edges: List[Dict[str, Any]], population_grid: Dict[str,
             cell["length_km"] += length_km
             cell["segment_count"] += 1
             for metric in _METRICS:
-                value = _finite(
-                    props.get(f"{metric}_score")
-                    if metric not in {"nain", "nach"}
-                    else props.get(f"{metric}_global")
-                )
+                value = _edge_metric(props, metric)
                 if value is not None:
                     weighted_sum, weight = cell["sums"].get(metric, (0.0, 0.0))
                     cell["sums"][metric] = (weighted_sum + length_km * value, weight + length_km)

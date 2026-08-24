@@ -63,6 +63,13 @@ def test_poi_grid_metrics_api_shape(monkeypatch):
         return {
             "status": "ArcGIS shared api test double completed",
             "global_moran": {"i": 0.35, "z_score": 2.1},
+            "method": {
+                "analysis_crs_wkid": 32631,
+                "conceptualization": "CONTIGUITY_EDGES_CORNERS",
+                "spatial_weights_kind": "QUEEN_CONTIGUITY",
+                "neighbor_order": 1,
+                "neighbor_count_distribution": {"3": 4, "5": 4, "8": 1},
+            },
             "cells": [
                 {"h3_id": "r0_c0", "gi_z_score": 1.1, "lisa_i": 0.07, "lisa_z_score": 0.31},
                 {"h3_id": "r1_c1", "gi_z_score": -0.6, "lisa_i": -0.03, "lisa_z_score": -0.22},
@@ -88,8 +95,6 @@ def test_poi_grid_metrics_api_shape(monkeypatch):
             {"id": "food", "name": "餐饮", "types": "050000"},
             {"id": "retail", "name": "购物", "types": "060000"},
         ],
-        "neighbor_ring": 1,
-        "arcgis_neighbor_ring": 1,
         "arcgis_export_image": True,
         "arcgis_timeout_sec": 240,
     }
@@ -102,6 +107,13 @@ def test_poi_grid_metrics_api_shape(monkeypatch):
     assert data["summary"]["grid_count"] == len(data["grid"]["features"])
     assert data["summary"]["poi_count"] == 3
     assert data["summary"]["arcgis_status"] == "ArcGIS shared api test double completed"
+    assert data["summary"]["spatial_statistics_method"] == {
+        "analysis_crs_wkid": 32631,
+        "conceptualization": "CONTIGUITY_EDGES_CORNERS",
+        "spatial_weights_kind": "QUEEN_CONTIGUITY",
+        "neighbor_order": 1,
+        "neighbor_count_distribution": {"3": 4, "5": 4, "8": 1},
+    }
     assert data["summary"]["arcgis_image_url_gi"] == "https://example.test/api-gi.png"
     assert data["summary"]["arcgis_image_url_lisa"] == "https://example.test/api-lisa.png"
     props = [feature["properties"] for feature in data["grid"]["features"]]
@@ -138,8 +150,6 @@ def test_poi_grid_metrics_progress_api(monkeypatch):
         "pois": [{"id": "1", "location": [0.2, 0.2], "type": "050100"}],
         "poi_coord_type": "gcj02",
         "categories": [{"id": "food", "name": "餐饮", "types": "050000"}],
-        "neighbor_ring": 1,
-        "arcgis_neighbor_ring": 1,
         "arcgis_export_image": True,
         "arcgis_timeout_sec": 240,
         "run_id": run_id,

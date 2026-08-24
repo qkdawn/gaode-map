@@ -54,7 +54,6 @@ def test_poi_count_consistency():
         min_overlap_ratio=0.0,
         pois=_sample_pois_gcj02(),
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     grid = result["grid"]
     assigned = sum((f.get("properties", {}).get("poi_count") or 0) for f in grid["features"])
@@ -70,7 +69,6 @@ def test_h3_grid_preserves_subcategory_counts():
         min_overlap_ratio=0.0,
         pois=[{**poi, "type": "type-050700"} for poi in _sample_pois_gcj02()],
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     non_empty_cells = [f for f in result["grid"]["features"] if (f.get("properties", {}).get("poi_count") or 0) > 0]
     assert non_empty_cells
@@ -90,7 +88,6 @@ def test_single_category_entropy_zero():
         min_overlap_ratio=0.0,
         pois=one_poi,
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     non_empty_cells = [f for f in result["grid"]["features"] if (f.get("properties", {}).get("poi_count") or 0) > 0]
     assert len(non_empty_cells) > 0
@@ -107,7 +104,6 @@ def test_empty_poi_input():
         min_overlap_ratio=0.0,
         pois=[],
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     assert result["summary"]["poi_count"] == 0
     assert result["summary"]["avg_density_poi_per_km2"] == 0.0
@@ -123,7 +119,6 @@ def test_neighbor_metrics_fields_exist():
         min_overlap_ratio=0.0,
         pois=_sample_pois_gcj02(),
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     for feature in result["grid"]["features"]:
         props = feature["properties"]
@@ -141,7 +136,6 @@ def test_moran_i_is_none_or_finite():
         min_overlap_ratio=0.0,
         pois=_sample_pois_gcj02(),
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     moran = result["summary"]["global_moran_i_density"]
     assert moran is None or isinstance(moran, float)
@@ -156,7 +150,6 @@ def test_spatial_structure_fields_exist():
         min_overlap_ratio=0.0,
         pois=_sample_pois_gcj02(),
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     props_list = [f.get("properties", {}) for f in result["grid"]["features"]]
     assert props_list
@@ -188,7 +181,6 @@ def test_summary_contains_descriptive_render_meta():
         min_overlap_ratio=0.0,
         pois=[],
         poi_coord_type="gcj02",
-        neighbor_ring=1,
     )
     summary = result.get("summary", {})
     gi_meta = summary.get("gi_render_meta") or {}

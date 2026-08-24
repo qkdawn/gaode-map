@@ -1,4 +1,4 @@
-from modules.agent.providers import llm_provider
+from modules.agent.providers import client as llm_provider
 
 
 def test_is_llm_enabled_uses_registry(monkeypatch):

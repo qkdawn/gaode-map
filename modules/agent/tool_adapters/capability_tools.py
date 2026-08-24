@@ -18,7 +18,7 @@ from .nightlight_tools import compute_nightlight_overview_from_scope
 from .poi_tools import fetch_pois_in_scope
 from .population_tools import compute_population_overview_from_scope
 from .result_tools import read_current_results
-from .road_tools import compute_road_syntax_from_scope
+from .road_tools import read_persisted_road_syntax
 from .scope_tools import read_current_scope
 
 ToolAdapter = Callable[..., Awaitable[ToolResult]]
@@ -192,7 +192,7 @@ async def ensure_area_data_readiness(
         "h3": "compute_h3_metrics_from_scope_and_pois",
         "population": "compute_population_overview_from_scope",
         "nightlight": "compute_nightlight_overview_from_scope",
-        "road": "compute_road_syntax_from_scope",
+        "road": "read_persisted_road_syntax",
     }
     if not auto_fetch:
         for dimension_key in _DIMENSION_KEYS:
@@ -242,7 +242,6 @@ async def ensure_area_data_readiness(
                 "resolution": int(arguments.get("resolution") or policy.get("h3_resolution") or 10),
                 "include_mode": str(arguments.get("include_mode") or policy.get("include_mode") or "intersects"),
                 "min_overlap_ratio": float(arguments.get("min_overlap_ratio") or policy.get("min_overlap_ratio") or 0.0),
-                "neighbor_ring": int(arguments.get("neighbor_ring") or policy.get("neighbor_ring") or 1),
             },
         ),
         (
@@ -259,9 +258,9 @@ async def ensure_area_data_readiness(
         ),
         (
             "road",
-            "compute_road_syntax_from_scope",
-            compute_road_syntax_from_scope,
-            {"mode": str(arguments.get("mode") or policy.get("mode") or "walking")},
+            "read_persisted_road_syntax",
+            read_persisted_road_syntax,
+            {},
         ),
     ]
 

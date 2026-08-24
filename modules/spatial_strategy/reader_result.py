@@ -142,10 +142,7 @@ def project_run_detail(payload: Mapping[str, Any]) -> SpatialStrategyRunDetail:
             elif raw_status == "running" and actual_status == "pending":
                 actual_status = "running"
         output = _mapping(actual.get("output"))
-        memo = _mapping(output.get("decision_memo"))
-        content = _text(memo.get("decision"))
-        if _text(memo.get("reasoning")):
-            content = (content + "\n\n" + _text(memo.get("reasoning"))).strip()
+        content = _text(output.get("content"))
         chapters.append(
             {
                 "number": number,

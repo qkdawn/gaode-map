@@ -20,7 +20,7 @@ from modules.evidence_retrieval import (
     evidence_nodes_from_package,
 )
 from modules.evidence_index import SOURCE_INDEX_MANIFEST_ARTIFACT_TYPE, attach_index_manifest, build_source_index_manifest_payload, persist_source_index_manifest
-from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
+from modules.agent.providers.client import invoke_json_role as _invoke_json_role, is_llm_enabled
 from modules.population.service import get_population_grid
 from modules.ppt_database.service import list_persisted_database_sources
 from modules.providers.amap.utils.transform_posi import gcj02_to_wgs84, wgs84_to_gcj02

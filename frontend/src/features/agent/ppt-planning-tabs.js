@@ -1,6 +1,5 @@
 import { asText, cloneArray, cloneObject } from './normalizers.js'
 import { getAnalysisTaskDefinition } from './analysis-task-registry.js'
-import { createAgentAnalysisAskMethods } from './analysis-ask.js'
 import { createAgentPptApiAdapterMethods } from './ppt-api-adapters.js'
 import { createAgentPptGenerationFlowMethods } from './ppt-generation-flow.js'
 import { normalizePptGenerationErrorMessage } from './ppt-generation-errors.js'
@@ -722,7 +721,6 @@ export function createAgentPptPlanningTabMethods() {
     getAgentPptPlanningSourceSummary() {
       return getPptSourceSummary(this.getAgentPptPlanningStateWithSystemSources())
     },
-    ...createAgentAnalysisAskMethods(),
     getAgentPptPlanningActiveSlide() {
       return getActiveDeckSlideBrief(this.getAgentActivePptPlanningState()) || {}
     },

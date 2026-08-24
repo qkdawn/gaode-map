@@ -36,11 +36,10 @@ def _payload(status: str = "running") -> dict:
             "step_order": 1,
             "status": "completed",
             "output": {
+                "unit_id": "site_role",
                 "title": "项目与区域角色",
-                "decision_memo": {
-                    "decision": "项目应作为区域节点之间的连接载体。",
-                    "reasoning": "项目文档和空间数据支持该判断。",
-                },
+                "content": "项目应作为区域节点之间的连接载体。",
+                "citations": [],
             },
             "updated_at": "2026-08-09T08:00:00Z",
         },

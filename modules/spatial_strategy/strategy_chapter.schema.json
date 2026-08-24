@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "unit_id": {
+      "type": "string",
+      "enum": [
+        "project_basis",
+        "regional_role",
+        "supply_gap",
+        "audience_use",
+        "theme_resources",
+        "positioning",
+        "product_mix",
+        "spatial_layout",
+        "operating_model",
+        "investment_operation",
+        "phasing"
+      ]
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "content": { "type": "string", "minLength": 1 },
+    "citations": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "properties": {
+          "citation_id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "source_type": { "type": "string", "minLength": 1 },
+          "source_locator": { "type": "string" },
+          "record_ref": { "type": ["string", "null"] }
+        },
+        "required": ["citation_id", "title", "source_type", "source_locator", "record_ref"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["unit_id", "title", "content", "citations"],
+  "additionalProperties": false
+}

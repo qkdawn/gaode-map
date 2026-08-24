@@ -81,6 +81,32 @@ class SpatialStrategyRunDetail(BaseModel):
     report: SpatialStrategyReaderReport | None = None
 
 
+class SpatialStrategyChapter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: Literal[
+        "project_basis",
+        "regional_role",
+        "supply_gap",
+        "audience_use",
+        "theme_resources",
+        "positioning",
+        "product_mix",
+        "spatial_layout",
+        "operating_model",
+        "investment_operation",
+        "phasing",
+    ]
+    title: str = Field(min_length=1, max_length=80)
+    content: str = Field(min_length=1)
+    citations: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("title", "content", mode="before")
+    @classmethod
+    def normalize_chapter_text(cls, value: object) -> str:
+        return str(value or "").strip()
+
+
 class SpatialStrategyReportFinalizeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -88,11 +114,10 @@ class SpatialStrategyReportFinalizeRequest(BaseModel):
     history_id: str = ""
     project_question: str = Field(min_length=1, max_length=12000)
     project_context: dict[str, Any] = Field(default_factory=dict)
-    decision_state: dict[str, Any] = Field(default_factory=dict)
+    chapters: list[SpatialStrategyChapter]
     visual_assets: list[dict[str, Any]] = Field(default_factory=list)
-    editorial_narrative: str = Field(min_length=1, max_length=50000)
 
-    @field_validator("history_id", "project_question", "editorial_narrative", mode="before")
+    @field_validator("history_id", "project_question", mode="before")
     @classmethod
     def normalize_report_text(cls, value: object) -> str:
         return str(value or "").strip()
@@ -104,7 +129,7 @@ class SpatialStrategyReportDeliveryRequest(BaseModel):
     summary: str = ""
     markdown: str = Field(min_length=1)
     citations: list[dict[str, Any]] = Field(default_factory=list)
-    decision_state: dict[str, Any] = Field(default_factory=dict)
+    chapters: list[SpatialStrategyChapter] = Field(default_factory=list)
     visual_assets: list[dict[str, Any]] = Field(default_factory=list)
 
     @field_validator("title", "summary", "markdown", mode="before")
@@ -134,18 +159,6 @@ class SpatialStrategyProjectDataRequest(BaseModel):
         return str(value or "").strip()
 
 
-class SpatialStrategyHarnessSynthesisRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: UUID
-    project_question: str = Field(min_length=1, max_length=12000)
-
-    @field_validator("project_question", mode="before")
-    @classmethod
-    def normalize_project_question(cls, value: object) -> str:
-        return str(value or "").strip()
-
-
 class SpatialStrategyHarnessUnitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -155,20 +168,12 @@ class SpatialStrategyHarnessUnitRequest(BaseModel):
     decision_unit: dict[str, Any]
 
 
-class SpatialStrategyHarnessSectionRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    project_question: str = Field(min_length=1, max_length=12000)
-    solution: dict[str, Any]
-    section: dict[str, Any]
-
-
 class SpatialStrategyHarnessVisualRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    run_id: UUID
     project_question: str = Field(min_length=1, max_length=12000)
-    solution: dict[str, Any]
-    available_datasets: list[dict[str, Any]] = Field(default_factory=list)
+    visual_task: str = Field(min_length=1, max_length=12000)
 
 
 class SpatialStrategyVisualRequest(BaseModel):

@@ -76,57 +76,6 @@ def test_all_generated_code_nodes_compile_as_javascript():
         )
 
 
-def test_report_section_validator_executes_with_request_state():
-    workflow = _generated("urban-renewal-agent.workflow.mjs")
-    code = _nodes(workflow)["校验报告章节正文"]["parameters"]["jsCode"]
-    request = {
-        "run_id": "37a0ff5a-f861-4338-9439-76467bbe1006",
-        "tenant_id": "default",
-        "section_order": 1,
-        "section": {"section_id": "section_01", "title": "功能结构判断"},
-        "state": {"report_sections": []},
-    }
-    response = {
-        "section_id": "section_01",
-        "title": "功能结构判断",
-        "content": "北部与南部各有一个高密度集聚，形成双中心结构。",
-    }
-    script = f"""
-const code = {json.dumps(code, ensure_ascii=False)};
-const request = {json.dumps(request, ensure_ascii=False)};
-const response = {json.dumps(response, ensure_ascii=False)};
-const $input = {{ first: () => ({{ json: response }}) }};
-const $ = () => ({{ first: () => ({{ json: request }}) }});
-const result = new Function('$input', '$', code)($input, $);
-process.stdout.write(JSON.stringify(result));
-"""
-    completed = subprocess.run(
-        ["node", "-"], cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8", input=script,
-    )
-    result = json.loads(completed.stdout)
-    section = result[0]["json"]["decision_state"]["report_sections"][0]
-    assert section["section_id"] == "section_01"
-    assert "source_unit_ids" not in section
-
-
-def test_report_section_validator_rejects_missing_domain_output():
-    workflow = _generated("urban-renewal-agent.workflow.mjs")
-    code = _nodes(workflow)["校验报告章节正文"]["parameters"]["jsCode"]
-    request = {"section": {"section_id": "section_01", "title": "功能结构判断"}, "state": {"report_sections": []}}
-    script = f"""
-const code = {json.dumps(code, ensure_ascii=False)};
-const request = {json.dumps(request, ensure_ascii=False)};
-const $input = {{ first: () => ({{ json: {{}} }}) }};
-const $ = () => ({{ first: () => ({{ json: request }}) }});
-try {{ new Function('$input', '$', code)($input, $); }}
-catch (error) {{ process.stdout.write(String(error.message)); }}
-"""
-    completed = subprocess.run(
-        ["node", "-"], cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8", input=script,
-    )
-    assert completed.stdout == "report_section_identity_mismatch"
-
-
 def test_agent_has_submit_status_and_fixed_decision_chain():
     workflow = _generated("urban-renewal-agent.workflow.mjs")
     nodes = _nodes(workflow)
@@ -139,15 +88,25 @@ def test_agent_has_submit_status_and_fixed_decision_chain():
     assert "lease_expires_at = NOW() + INTERVAL '6 hours'" in claim_query
 
     loops = [node for node in workflow["nodes"] if node["type"] == "n8n-nodes-base.splitInBatches"]
-    assert [node["name"] for node in loops] == ["逐项执行分析方向", "逐节生成统一报告"]
+    assert [node["name"] for node in loops] == ["逐项执行分析方向"]
     frame_code = nodes["构建整体研究框架"]["parameters"]["jsCode"]
     validator = nodes["确认整体研究框架"]["parameters"]["jsCode"]
     expected = (
-        "current_structure", "future_role", "users_and_scenarios", "spatial_mechanisms",
-        "product_and_operation", "first_phase_actions", "phasing",
+        "project_basis", "regional_role", "supply_gap", "audience_use", "theme_resources",
+        "positioning", "product_mix", "spatial_layout", "operating_model", "investment_operation", "phasing",
     )
     for unit_id in expected:
         assert unit_id in frame_code
+    assert "skill_id" not in frame_code
+    assert "client-decision-" not in frame_code
+    assert "market_flow" not in frame_code
+    assert "client-decision-market-flow" not in frame_code
+    assert "项目材料与项目基础" in frame_code
+    assert "当前项目已提供的原始材料" in frame_code
+    assert "相对投入强弱" in frame_code
+    assert frame_code.count("人口总量与年龄结构") == 1
+    assert "推导居民日常复访、机构预约等行为、时段与付费意愿假设" in frame_code
+    assert "项目任务与场地能力" not in frame_code
     assert "decision_units_must_follow_strategy_chain" in validator
     assert _targets(workflow, "合并项目上下文") == ["构建整体研究框架"]
     assert _targets(workflow, "构建整体研究框架") == ["确认整体研究框架"]
@@ -169,8 +128,6 @@ def test_agent_delegates_model_and_tool_runtime_to_codex_harness():
 
     endpoints = {
         "调用 Codex Harness 分析单元": "harness/analyze-unit",
-        "调用 Codex Harness 综合方案": "harness/synthesize",
-        "调用 Codex Harness 撰写章节": "harness/write-section",
         "调用 Codex Harness 设计图件": "harness/design-visuals",
     }
     for name, endpoint in endpoints.items():
@@ -183,9 +140,8 @@ def test_agent_delegates_model_and_tool_runtime_to_codex_harness():
     unit_body = nodes["调用 Codex Harness 分析单元"]["parameters"]["jsonBody"]
     assert all(field in unit_body for field in ("run_id", "history_id", "project_question", "decision_unit"))
     assert all(field not in unit_body for field in ("tool_calls", "response_id", "conversation_items", "retry"))
-    synthesis_body = nodes["调用 Codex Harness 综合方案"]["parameters"]["jsonBody"]
-    assert "run_id" in synthesis_body and "project_question" in synthesis_body
-    assert "decision_state" not in synthesis_body
+    assert "调用 Codex Harness 综合方案" not in nodes
+    assert "调用 Codex Harness 撰写章节" not in nodes
     assert not (ROOT / "n8n" / "workflow-components" / "responses.json").exists()
     assert "codexRelayResponse1" not in (ROOT / "scripts" / "n8n_bootstrap.ps1").read_text(encoding="utf-8")
 
@@ -202,17 +158,16 @@ def test_agent_prompts_use_one_minimal_domain_contract():
     assert "输出前自检" not in harness_source
     assert "逐字继承" not in harness_source
 
-    section_request = _nodes(workflow)["构建报告章节写作请求"]["parameters"]["jsCode"]
-    assert "solution" in section_request and "current_section" in section_request
-    assert all(term not in section_request for term in ("source_unit_ids", "memo.reasoning", "tool_name", "node_id"))
-    summary_code = _nodes(workflow)["准备报告总判断"]["parameters"]["jsCode"]
-    assert "blueprint.executive_summary" in summary_code
+    report_code = _nodes(workflow)["准备顺序组装报告"]["parameters"]["jsCode"]
+    assert "report_requires_ordered_strategy_chapters" in report_code
+    assert "blueprint" not in report_code
 
 
 def test_n8n_execution_history_keeps_failures_for_seven_days_only():
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     environment = compose["x-n8n-environment"]
 
+    assert environment["EXECUTIONS_TIMEOUT_MAX"] == "${N8N_EXECUTIONS_TIMEOUT_MAX:-14400}"
     assert environment["EXECUTIONS_DATA_SAVE_ON_SUCCESS"] == "${N8N_EXECUTIONS_DATA_SAVE_ON_SUCCESS:-none}"
     assert environment["EXECUTIONS_DATA_SAVE_ON_ERROR"] == "${N8N_EXECUTIONS_DATA_SAVE_ON_ERROR:-all}"
     assert environment["EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS"] == "${N8N_EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS:-false}"
@@ -228,23 +183,25 @@ def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
     queue_query = nodes["创建或恢复分析任务"]["parameters"]["query"]
     assert "resume_run_id must be a UUID" in submit_code
     assert "resumed AS" in queue_query and "status = 'failed'" in queue_query
-    assert "jsonb_build_object('steps', '{}'::jsonb)" in queue_query
+    assert "'{}'::jsonb" in queue_query
     assert "heartbeat_at = NULL" in queue_query
     assert "lease_expires_at = NULL" in queue_query
     assert "DELETE FROM analysis_step_outputs" not in queue_query
 
+    validation_code = nodes["校验当前分析方向"]["parameters"]["jsCode"]
     completed_condition = nodes["当前方向已完成？"]["parameters"]["conditions"]["conditions"][0]["leftValue"]
-    assert "decision_state.steps[$json.step_key] !== undefined" in completed_condition
+    assert "Object.keys(candidate).sort()" in validation_code
+    assert "['citations', 'content', 'title', 'unit_id']" in validation_code
+    assert "candidate.unit_id" in validation_code and "candidate.title" in validation_code
+    assert "无法生成本章节" in validation_code and "无法完成本章节" in validation_code
+    assert "Array.isArray(candidate.citations)" in validation_code
+    assert "existing_output !== null" in completed_condition
     assert _targets(workflow, "当前方向已完成？", 0) == ["复用已完成章节"]
     assert _targets(workflow, "当前方向已完成？", 1) == ["标记当前方向执行中"]
     assert "step.status = 'completed'" in nodes["读取最新分析状态"]["parameters"]["query"]
     assert "ON CONFLICT (run_id, step) DO UPDATE" in nodes["标记当前方向执行中"]["parameters"]["query"]
-    assert _targets(workflow, "读取完整分析状态") == ["检查综合方案恢复状态"]
-    assert _targets(workflow, "综合方案已完成？", 0) == ["检查报告章节恢复状态"]
-    assert _targets(workflow, "综合方案已完成？", 1) == ["构建跨单元综合请求"]
-    assert _targets(workflow, "报告章节已完成？", 0) == ["构建图件设计请求"]
-    assert _targets(workflow, "报告章节已完成？", 1) == ["展开报告章节队列"]
-    assert "!completedIds.has" in nodes["展开报告章节队列"]["parameters"]["jsCode"]
+    assert _targets(workflow, "读取完整分析状态") == ["构建图件设计请求"]
+    assert "jsonb_agg(step.output ORDER BY step.step_order" in nodes["读取完整分析状态"]["parameters"]["query"]
 
     status_query = nodes["读取租户范围任务状态"]["parameters"]["query"]
     assert "FROM analysis_reports report WHERE report.run_id = r.id" in status_query
@@ -252,32 +209,40 @@ def test_agent_resume_status_persistence_and_report_contracts_remain_intact():
     assert "INSERT INTO analysis_reports" in nodes["完成分析任务"]["parameters"]["query"]
     assert _targets(workflow, "生成最终报告") == ["规范化最终报告响应"]
     normalize_report_code = nodes["规范化最终报告响应"]["parameters"]["jsCode"]
+    assert "report_compose_failed" in normalize_report_code
     assert "final_report_markdown_missing" in normalize_report_code
     assert "final_report_docx_missing" in normalize_report_code
     assert "current.body" not in normalize_report_code and "current.data" not in normalize_report_code
 
-    section_writer_code = nodes["构建报告章节写作请求"]["parameters"]["jsCode"]
-    for field in ("judgment:", "current_basis:", "future_goal:", "actions:", "intended_effect:"):
-        assert field in section_writer_code
-    for internal in ("source_analyses", "sourceMemos", "memo.reasoning", "source_unit_ids", "completed_sections"):
-        assert internal not in section_writer_code
-    assert "named_entities: Array.isArray(blueprint.named_entities)" in section_writer_code
-    section_body = nodes["调用 Codex Harness 撰写章节"]["parameters"]["jsonBody"]
-    assert "project_question" in section_body and "solution" in section_body and "section" in section_body
-    assert "decision_state" not in section_body
-    assert "report_section_identity_mismatch" in nodes["校验报告章节正文"]["parameters"]["jsCode"]
+    assert "调用 Codex Harness 撰写章节" not in nodes
+    compose_body = nodes["生成最终报告"]["parameters"]["jsonBody"]
+    assert "chapters" in compose_body
+    assert "decision_state" not in compose_body
 
     assert "/analysis/spatial-strategy/visuals" in nodes["生成项目数据图件"]["parameters"]["url"]
     assert "/analysis/spatial-strategy/reports/deliver" in nodes["生成 Word 报告并发送飞书"]["parameters"]["url"]
     visual_code = nodes["构建图件设计请求"]["parameters"]["jsCode"]
-    assert "solution:" in visual_code
-    assert "action_plan: blueprint.action_plan" in visual_code
-    assert "named_entities: Array.isArray(blueprint.named_entities)" in visual_code
+    assert "solution:" not in visual_code
+    assert "available_datasets" not in visual_code
+    assert "visual_task" in visual_code
     assert "decision_memos" not in visual_code
-    assert "String(item.dataset_id ?? '') !== 'road_nodes'" in visual_code
     visual_validation_code = nodes["校验图件设计"]["parameters"]["jsCode"]
     assert "Array.isArray(response.visuals)" in visual_validation_code
     assert "visuals.length < 3 || visuals.length > 5" in visual_validation_code
+    assert "duplicate population maps" not in visual_validation_code
+    for unit_id in (
+        "project_basis", "regional_role", "supply_gap", "audience_use", "theme_resources",
+        "positioning", "product_mix", "spatial_layout", "operating_model", "investment_operation", "phasing",
+    ):
+        assert unit_id in visual_validation_code
+    for removed_section_id in (
+        "overall_decision_chain", "regional_gap", "positioning_choice", "audience_and_use",
+        "resource_to_product", "operation_and_investment", "first_phase_and_phasing",
+    ):
+        assert removed_section_id not in visual_validation_code
+    visual_return_code = nodes["整理项目图件"]["parameters"]["jsCode"]
+    assert "assets.length < 3 || assets.length > 5" in visual_return_code
+    assert "assets: []" not in visual_return_code
 
 
 def test_public_knowledge_base_rejects_project_documents_and_owns_embedding_publish():

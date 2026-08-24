@@ -26,8 +26,8 @@ def test_build_road_grid_uses_clipped_length_and_weighted_metrics():
         _cell("empty", [[2, 0], [3, 0], [3, 1], [2, 1], [2, 0]]),
     ]}
     edges = [
-        _edge([[0, 0.5], [2, 0.5]], choice_score=0.2, integration_score=0.4, connectivity_score=0.6),
-        _edge([[0, 0.25], [1, 0.25]], choice_score=0.8, integration_score=0.6, connectivity_score=0.4),
+        _edge([[0, 0.5], [2, 0.5]], choice_score=0.2, integration_score=0.4, connectivity_score=0.6, metrics={"connectivity": 4.0}),
+        _edge([[0, 0.25], [1, 0.25]], choice_score=0.8, integration_score=0.6, connectivity_score=0.4, metrics={"connectivity": 2.0}),
     ]
 
     result, summary = build_road_grid(edges, grid)
@@ -38,7 +38,13 @@ def test_build_road_grid_uses_clipped_length_and_weighted_metrics():
     assert props["a"]["road_has_data"] is True
     assert props["a"]["road_segment_count"] == 2
     assert props["a"]["road_choice"] == pytest.approx(0.5, abs=1e-5)
+    assert props["a"]["road_connectivity"] == pytest.approx(3.0, abs=2e-5)
+    assert props["a"]["road_connectivity_score"] == pytest.approx(0.5, abs=2e-5)
     assert props["b"]["road_segment_count"] == 1
     assert props["b"]["road_choice"] == pytest.approx(0.2, abs=1e-5)
+    assert props["b"]["road_connectivity"] == pytest.approx(4.0, abs=1e-5)
+    assert props["b"]["road_connectivity_score"] == pytest.approx(0.6, abs=1e-5)
     assert props["empty"]["road_has_data"] is False
     assert props["empty"]["road_choice"] is None
+    assert props["empty"]["road_connectivity"] is None
+    assert props["empty"]["road_connectivity_score"] is None

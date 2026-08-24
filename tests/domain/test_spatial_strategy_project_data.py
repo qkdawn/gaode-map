@@ -47,7 +47,7 @@ def test_step_project_data_uses_existing_project_datasets_and_stable_citations(m
             }
 
     monkeypatch.setattr(project_data, "_DATA", FakeData())
-    result = project_data.read_step_project_data(history_id="history-1", step_key="step_01_policy_site", project_context=context)
+    result = project_data.read_step_project_data(history_id="history-1", step_key="project_basis", project_context=context)
 
     assert result["status"] == "success"
     assert {item["dataset_id"] for item in result["citations"]} == {"computed", "poi"}
@@ -59,7 +59,7 @@ def test_step_project_data_uses_existing_project_datasets_and_stable_citations(m
     assert any(call["operation"] == "aggregate" and call["dataset_id"] == "poi" for call in calls)
 
     initial_call_count = len(calls)
-    project_data.read_step_project_data(history_id="history-1", step_key="step_04_supply_gap", project_context=context)
+    project_data.read_step_project_data(history_id="history-1", step_key="supply_gap", project_context=context)
     assert len(calls) == initial_call_count
 
 
@@ -78,7 +78,7 @@ def test_large_dataset_keeps_aggregate_and_does_not_emit_partial_records(monkeyp
             return {"complete": True, "total_count": 3, "computed_results": [{"poi_count": 201}]}
 
     monkeypatch.setattr(project_data, "_DATA", FakeData())
-    result = project_data.read_step_project_data(history_id="history-1", step_key="step_04_supply_gap", project_context=context)
+    result = project_data.read_step_project_data(history_id="history-1", step_key="supply_gap", project_context=context)
 
     assert len(result["citations"]) == 1
     assert result["citations"][0]["operation"] == "aggregate"

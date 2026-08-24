@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import secrets
 from typing import Annotated
 from uuid import UUID
@@ -20,9 +21,7 @@ from modules.spatial_strategy import (
     SpatialStrategyRunRequest,
     SpatialStrategyProjectContextRequest,
     SpatialStrategyProjectDataRequest,
-    SpatialStrategyHarnessSynthesisRequest,
     SpatialStrategyHarnessUnitRequest,
-    SpatialStrategyHarnessSectionRequest,
     SpatialStrategyHarnessVisualRequest,
     SpatialStrategyVisualRequest,
     SpatialStrategyReportFinalizeRequest,
@@ -37,15 +36,14 @@ from modules.spatial_strategy import (
     ingest_document_to_knowledge_base,
     normalize_access_groups,
     SpatialStrategyHarnessError,
-    synthesize_strategy_blueprint,
     analyze_strategy_unit,
-    write_strategy_section,
     design_strategy_visuals,
     resume_spatial_strategy_run,
     submit_spatial_strategy_run,
 )
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/analysis", tags=["spatial-strategy"])
 
 
@@ -65,8 +63,6 @@ def _require_n8n_client(raw_value: str) -> None:
     supplied = str(raw_value or "").strip()
     if not expected or not supplied or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="n8n_client_authentication_failed")
-
-
 @router.post(
     "/spatial-strategy/runs",
     response_model=SpatialStrategyRunAccepted,
@@ -99,6 +95,7 @@ async def read_spatial_strategy_run(
         )
     except SpatialStrategyGatewayError as exc:
         _raise_gateway_error(exc)
+
 
 
 @router.post(
@@ -152,22 +149,6 @@ async def read_spatial_strategy_project_data(
         raise HTTPException(status_code=503, detail="project_data_source_unavailable") from exc
 
 
-@router.post("/spatial-strategy/harness/synthesize")
-async def synthesize_spatial_strategy_with_harness(
-    payload: SpatialStrategyHarnessSynthesisRequest,
-    x_n8n_client_key: Annotated[str, Header(alias="X-N8N-Client-Key")],
-) -> dict:
-    _require_n8n_client(x_n8n_client_key)
-    try:
-        return await run_in_threadpool(
-            synthesize_strategy_blueprint,
-            run_id=str(payload.run_id),
-            project_question=payload.project_question,
-        )
-    except SpatialStrategyHarnessError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
 @router.post("/spatial-strategy/harness/analyze-unit")
 async def analyze_spatial_strategy_unit_with_harness(
     payload: SpatialStrategyHarnessUnitRequest,
@@ -183,23 +164,12 @@ async def analyze_spatial_strategy_unit_with_harness(
             decision_unit=payload.decision_unit,
         )
     except SpatialStrategyHarnessError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-@router.post("/spatial-strategy/harness/write-section")
-async def write_spatial_strategy_section_with_harness(
-    payload: SpatialStrategyHarnessSectionRequest,
-    x_n8n_client_key: Annotated[str, Header(alias="X-N8N-Client-Key")],
-) -> dict:
-    _require_n8n_client(x_n8n_client_key)
-    try:
-        return await run_in_threadpool(
-            write_strategy_section,
-            project_question=payload.project_question,
-            solution=payload.solution,
-            section=payload.section,
+        logger.warning(
+            "Spatial strategy unit failed: run_id=%s unit_id=%s error=%s",
+            payload.run_id,
+            str(payload.decision_unit.get("unit_id") or ""),
+            exc,
         )
-    except SpatialStrategyHarnessError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -212,11 +182,16 @@ async def design_spatial_strategy_visuals_with_harness(
     try:
         return await run_in_threadpool(
             design_strategy_visuals,
+            run_id=str(payload.run_id),
             project_question=payload.project_question,
-            solution=payload.solution,
-            available_datasets=payload.available_datasets,
+            visual_task=payload.visual_task,
         )
     except SpatialStrategyHarnessError as exc:
+        logger.warning(
+            "Spatial strategy visual design failed: run_id=%s error=%s",
+            payload.run_id,
+            exc,
+        )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

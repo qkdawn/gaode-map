@@ -10,7 +10,7 @@ from .h3_tools import compute_h3_metrics_from_scope_and_pois
 from .nightlight_tools import compute_nightlight_overview_from_scope
 from .poi_tools import fetch_pois_in_scope
 from .population_tools import compute_population_overview_from_scope
-from .road_tools import compute_road_syntax_from_scope
+from .road_tools import read_persisted_road_syntax
 
 ToolAdapter = Callable[..., Awaitable[ToolResult]]
 
@@ -39,7 +39,7 @@ def _friendly_optional_tool_warning(tool_name: str, error: str = "") -> str:
     labels = {
         "compute_population_overview_from_scope": "人口数据",
         "compute_nightlight_overview_from_scope": "夜间灯光数据",
-        "compute_road_syntax_from_scope": "路网可达性数据",
+        "read_persisted_road_syntax": "已保存路网句法数据",
     }
     label = labels.get(tool_name, tool_name)
     suffix = "，已降级继续"
@@ -263,7 +263,6 @@ async def run_business_site_advice(
         "resolution": int(arguments.get("resolution") or snapshot.current_filters.get("h3_resolution") or 10),
         "include_mode": str(arguments.get("include_mode") or "intersects"),
         "min_overlap_ratio": float(arguments.get("min_overlap_ratio") or 0.0),
-        "neighbor_ring": int(arguments.get("neighbor_ring") or 1),
     }
     h3_result = await _run_child_tool(
         runner=compute_h3_metrics_from_scope_and_pois,
@@ -310,13 +309,9 @@ async def run_business_site_advice(
             {"coord_type": str(arguments.get("coord_type") or "gcj02"), "year": arguments.get("year")},
         ),
         (
-            "compute_road_syntax_from_scope",
-            compute_road_syntax_from_scope,
-            {
-                "mode": str(arguments.get("mode") or ""),
-                "graph_model": str(arguments.get("graph_model") or ""),
-                "highway_filter": str(arguments.get("highway_filter") or ""),
-            },
+            "read_persisted_road_syntax",
+            read_persisted_road_syntax,
+            {},
         ),
     ]
     for tool_name, runner, child_arguments in optional_steps:

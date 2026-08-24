@@ -1,5 +1,7 @@
 # 城市区域策划 Agent 与第一阶段报告链路设计
 
+> 当前架构覆盖说明（2026-08-22）：本文中的 `context-ask`、`main-loop/stream` 和 LangGraph ReAct 描述是历史方案。当前普通对话和空间策略报告都使用官方 Python `openai-codex` SDK；普通对话保持可恢复 thread，报告链使用 `n8n -> agent_harness -> Codex SDK -> spatial-project MCP` 的临时 thread。n8n 仍只负责业务编排、阶段持久化、恢复和交付。
+
 ## 1. 结论
 
 可以把当前问答链路抽出来，在独立工作区中基于“全来源导出包 + 项目任务书”复建一套专业城市策划团队式工作流，并产出城市分析第一阶段文档。

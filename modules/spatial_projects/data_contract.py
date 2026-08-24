@@ -100,6 +100,30 @@ def _continuation_decode(value: str) -> dict[str, Any]:
     return payload
 
 
+def _population_summary(records: list[dict[str, Any]], base: Any) -> dict[str, Any]:
+    summary = deepcopy(base) if isinstance(base, dict) else {}
+
+    def total(field: str) -> float:
+        return sum(float(record.get(field) or 0.0) for record in records)
+
+    summary.update({
+        "cell_count": len(records),
+        "population_total": total("population_total"),
+        "male_total": total("male_total"),
+        "female_total": total("female_total"),
+        "age_total": {
+            band: sum(
+                float(age_values.get(band) or 0.0)
+                for record in records
+                for age_values in [record.get("age_total")]
+                if isinstance(age_values, dict)
+            )
+            for band in age_band_keys()
+        },
+    })
+    return summary
+
+
 class ProjectDataContractService:
     """Expose complete project facts behind two small MCP operations."""
 
@@ -114,7 +138,15 @@ class ProjectDataContractService:
 
     def project_context(self, history_id: str) -> dict[str, Any]:
         project = self.projects.read_history_project(history_id)
-        listing = self.projects.list_history_project_datasets(history_id)
+        # read_history_project already carries the immutable dataset and
+        # document directories. Reuse them here so the MCP context call does
+        # not reload every artifact before it loads the records for checksums.
+        listing = {
+            "datasets": project.get("datasets") or [],
+            "warnings": project.get("warnings") or [],
+        }
+        if not project.get("datasets"):
+            listing = self.projects.list_history_project_datasets(history_id)
         listed = {item["source_id"]: item for item in listing.get("datasets", [])}
         datasets = []
         computed_results = []
@@ -125,6 +157,8 @@ class ProjectDataContractService:
             records = self._all_spatial_records(history_id, dataset_id)
             datasets.append(self._descriptor(dataset_id, metadata, records))
             summary = metadata.get("summary")
+            if dataset_id == "population":
+                summary = _population_summary(records, summary)
             if isinstance(summary, dict) and summary:
                 computed_results.append({
                     "result_id": f"computed:{dataset_id}:summary",
@@ -135,6 +169,9 @@ class ProjectDataContractService:
                     "data": deepcopy(summary),
                 })
 
+        raw_documents = project.get("documents")
+        if not isinstance(raw_documents, list):
+            raw_documents = self.projects.list_history_project_documents(history_id)
         documents = [
             {
                 "document_id": str(document["document_id"]),
@@ -144,7 +181,7 @@ class ProjectDataContractService:
                 "status": document.get("status"),
                 "original_resource_uri": self._document_resource_uri(history_id, str(document["document_id"])),
             }
-            for document in self.projects.list_history_project_documents(history_id)
+            for document in raw_documents
         ]
 
         computed_results.extend(self._persisted_metric_results(history_id))

@@ -506,33 +506,26 @@ test('capability execution is blocked until readiness locks its inputs', async (
   assert.match(ctx.getAnalysisCapabilityReadinessError('urban-strategy-stage1'), /锁定能力输入/)
 })
 
-test('running a Skill capability selects its executor for the current turn', async () => {
-  const selected = []
+test('running a capability delegates the domain request to Codex', async () => {
   const submitted = []
-  const skill = { id: 'urban-strategy-stage1', display_name: '城市区域策划第一阶段' }
   const ctx = createContext({
-    agentSkills: [skill],
     analysisCapabilityReadiness: { 'urban-strategy-stage1': { status: 'ready', input_resolutions: [] } },
-    loadAgentCapabilities: async () => {},
-    chooseAgentSkill: value => selected.push(value),
     submitAgentComposer: async value => submitted.push(value),
   })
   await ctx.runAnalysisCapability({ id: 'urban-strategy-stage1', status: 'available', executor_type: 'skill', executor_id: 'urban-strategy-stage1' })
-  assert.deepEqual(selected, [skill])
   assert.equal(ctx.agentWorkspaceView, 'report')
   assert.match(submitted[0].prompt, /第一阶段策划/)
+  assert.equal(submitted[0].targetCapabilityId, 'urban-strategy-stage1')
 })
 
-test('running a capability never falls back to plain Agent when its Skill is missing', async () => {
+test('running a capability does not depend on the removed local Skill registry', async () => {
   let submitted = false
   const ctx = createContext({
     analysisCapabilityReadiness: { 'urban-strategy-stage1': { status: 'ready', input_resolutions: [] } },
-    loadAgentCapabilities: async () => {},
     submitAgentComposer: async () => { submitted = true },
   })
   await ctx.runAnalysisCapability({ id: 'urban-strategy-stage1', status: 'available', executor_type: 'skill', executor_id: 'urban-strategy-stage1' })
-  assert.equal(submitted, false)
-  assert.match(ctx.analysisCapabilitiesError, /Skill 当前不可用/)
+  assert.equal(submitted, true)
 })
 
 test('PPT capability reuses the existing planning workbench', async () => {
@@ -1448,7 +1441,7 @@ test('run preview presents the exact readiness-locked execution contract', () =>
 
   assert.equal(preview.status, 'ready')
   assert.equal(preview.scope, '当前地图多边形 · 4 个顶点')
-  assert.equal(preview.model, 'DeepSeek Chat')
+  assert.equal(preview.model, 'Codex App Server')
   assert.equal(preview.executor, 'Skill · urban-strategy-stage1')
   assert.equal(preview.estimated_stages, 4)
   assert.deepEqual(preview.sources.map(item => item.title), ['项目任务书'])
@@ -1764,9 +1757,8 @@ test('unavailable future capability contract is searchable and explains activati
   assert.deepEqual(ctx.getFilteredAnalysisCapabilities().map(item => item.id), ['future-market-model'])
 })
 
-test('composer checks explicit capability intent before falling back to chat execution', () => {
+test('composer sends ordinary input directly to the native Codex conversation', () => {
   const runtime = fs.readFileSync(new URL('../src/features/agent/runtime.js', import.meta.url), 'utf8')
-  assert.match(runtime, /await this\.routeAnalysisCapabilityIntent\(prompt\)/)
-  assert.match(runtime, /if \(routed\) return routed/)
-  assert.match(runtime, /!explicitTargetCapabilityId/)
+  assert.match(runtime, /return this\.submitMainAgentTurn\(\{/)
+  assert.doesNotMatch(runtime, /await this\.routeAnalysisCapabilityIntent\(/)
 })

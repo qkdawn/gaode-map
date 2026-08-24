@@ -26,19 +26,25 @@ SOURCE_TYPE_LABELS = {
     "knowledge_base": "公开资料",
 }
 
+STRATEGY_CHAPTERS = (
+    ("project_basis", "项目材料与项目基础"),
+    ("regional_role", "项目类型与区域角色"),
+    ("supply_gap", "具名供给与服务空位"),
+    ("audience_use", "客群与使用"),
+    ("theme_resources", "地方资源与共同机制"),
+    ("positioning", "候选定位比较"),
+    ("product_mix", "场景与产品组合"),
+    ("spatial_layout", "空间组织与具体落位"),
+    ("operating_model", "运营组织与合作关系"),
+    ("investment_operation", "投入与运营判断"),
+    ("phasing", "首期闭环与后续分期"),
+)
+
 INTERNAL_TERM_PATTERNS = (
-    re.compile(r"step[_-]?\d{1,2}", re.IGNORECASE),
-    re.compile(r"decision_state|quality_gate|evidence_index", re.IGNORECASE),
+    re.compile(r"decision_state|run_id", re.IGNORECASE),
     re.compile(r"\bn8n\b", re.IGNORECASE),
-    re.compile(r"(?:node|节点)[ _-]?(?:id|编号)", re.IGNORECASE),
-    re.compile(r"(?:run|workflow|response)[ _-]?id", re.IGNORECASE),
-    re.compile(r"\b(?:queued|running|completed|failed|cancelled|revision_required)\b", re.IGNORECASE),
     re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b", re.IGNORECASE),
-    re.compile(r"(?:project|result|document):[a-z0-9._:-]{6,}", re.IGNORECASE),
-    re.compile(r"\bE\d{3,}\b", re.IGNORECASE),
-    re.compile(r"(?:page|block|chunk)[ _:-]?\d+", re.IGNORECASE),
-    re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", re.IGNORECASE),
-    re.compile(r"\bphase\s*\d+\b", re.IGNORECASE),
+    re.compile(r"(?:Agent|Harness|工具调用)", re.IGNORECASE),
 )
 
 def _text(value: Any) -> str:
@@ -59,9 +65,13 @@ def _project_name(project_context: Mapping[str, Any], project_question: str = ""
         candidate = _text(project.get(key))
         if candidate and not re.search(r"\bPOIs?\b|\d+\s*min\b|\d{2,3}\.\d+\s*[,，]\s*\d{1,2}\.\d+", candidate, re.IGNORECASE):
             return candidate
-    question_match = re.search(r"(?:完成|分析|针对)?([^，。；]{2,60}?城市更新项目)", _text(project_question))
+    question = _text(project_question)
+    question_match = re.search(r"(?:完成|分析|针对|围绕)\s*([^，。；]{2,60}?城市更新项目)", question)
     if question_match:
-        return question_match.group(1).lstrip("基于围绕针对")
+        return question_match.group(1)
+    question_match = re.search(r"([^，。；]{2,60}?城市更新项目)", question)
+    if question_match:
+        return re.sub(r"^(?:基于已有项目材料和空间数据|基于|围绕|针对)", "", question_match.group(1))
     document_names = []
     for document in _list(project_context.get("documents")):
         title = re.sub(r"\.(?:docx?|pdf)$", "", _text(_mapping(document).get("title")), flags=re.IGNORECASE)
@@ -85,8 +95,8 @@ def _citation_id(value: Any, *, fallback: str = "") -> str:
     return _text(value)
 
 
-def _citation_entries(steps: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Collect citations selected by completed decision analyses."""
+def _citation_entries(chapters: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Collect citations from the persisted chapter products."""
     entries: dict[str, dict[str, Any]] = {}
 
     def add(value: Any, *, fallback: str = "") -> None:
@@ -108,16 +118,117 @@ def _citation_entries(steps: Mapping[str, Any]) -> list[dict[str, Any]]:
         for item in _list(value):
             add(item, fallback=fallback)
 
-    for step in steps.values():
-        output = _mapping(step)
-        add_many(output.get("citations"))
+    for chapter in chapters:
+        add_many(chapter.get("citations"))
 
     return list(entries.values())
 
 
+_LOCAL_CITATION_LABEL = re.compile(r"^[A-Z]\d+$")
+_BRACKETED_CITATION = re.compile(r"(?:\[|【)([A-Z]\d+)(?:\]|】)")
+
+
+def _citation_identity(value: Any) -> str:
+    item = _mapping(value)
+    citation_id = _citation_id(item or value)
+    if citation_id and not _LOCAL_CITATION_LABEL.fullmatch(citation_id):
+        return citation_id
+    return (
+        _text(item.get("source_locator"))
+        or _text(item.get("record_ref"))
+        or citation_id
+    )
+
+
+def _globalize_chapter_citations(
+    chapters: list[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Replace chapter-local citation labels with one report-wide namespace."""
+    identities: dict[str, dict[str, Any]] = {}
+    labels: dict[str, str] = {}
+    normalized_chapters: list[dict[str, Any]] = []
+
+    for chapter in chapters:
+        local_labels: dict[str, str] = {}
+        for raw_citation in _list(chapter.get("citations")):
+            citation = _mapping(raw_citation)
+            local_label = _citation_id(citation or raw_citation)
+            identity = _citation_identity(citation or raw_citation)
+            if not local_label or not identity:
+                continue
+            previous = local_labels.get(local_label)
+            if previous is not None and previous != identity:
+                raise ValueError(f"chapter_citation_label_conflict:{local_label}")
+            local_labels[local_label] = identity
+            if identity not in identities:
+                identities[identity] = citation or {"citation_id": identity}
+                labels[identity] = str(len(labels) + 1)
+
+        missing: set[str] = set()
+
+        def replace(match: re.Match[str]) -> str:
+            local_label = match.group(1)
+            identity = local_labels.get(local_label)
+            if identity is None:
+                missing.add(local_label)
+                return match.group(0)
+            return f"[{labels[identity]}]"
+
+        content = _BRACKETED_CITATION.sub(replace, _text(chapter.get("content")))
+        if missing:
+            raise ValueError(
+                "chapter_citation_mapping_missing:" + ",".join(sorted(missing))
+            )
+        normalized_chapters.append({**chapter, "content": content})
+
+    citations = []
+    for identity, citation in identities.items():
+        source_citation_id = _citation_id(citation)
+        citations.append(
+            {
+                **citation,
+                "label": labels[identity],
+                "citation_id": identity,
+                "source_citation_id": source_citation_id,
+            }
+        )
+    return normalized_chapters, citations
+
+
+def _render_citation_sources(citations: list[Mapping[str, Any]]) -> list[str]:
+    if not citations:
+        return []
+    lines = ["## 参考来源", ""]
+    for citation in citations:
+        label = _text(citation.get("label"))
+        title = _text(citation.get("title")) or "未命名来源"
+        locator = _text(citation.get("source_locator"))
+        source_url = _text(citation.get("source_url"))
+        location = source_url or locator
+        suffix = f"；{location}" if location else ""
+        lines.extend([f"- [{label}] {title}{suffix}", ""])
+    return lines
+
+
+def _normalized_section_content(content: Any, title: str) -> str:
+    lines = _text(content).splitlines()
+    first_content_index = next((index for index, line in enumerate(lines) if line.strip()), None)
+    if first_content_index is not None:
+        heading = re.match(r"^#{1,6}\s+(.+?)\s*$", lines[first_content_index].strip())
+        if heading:
+            heading_title = re.sub(r"^\d+[.、]\s*", "", heading.group(1)).strip()
+            if heading_title == title.strip():
+                del lines[first_content_index]
+    normalized = []
+    for line in lines:
+        heading = re.match(r"^#{1,3}\s+(.+?)\s*$", line.strip())
+        normalized.append(f"### {heading.group(1).strip()}" if heading else line)
+    return "\n".join(normalized).strip()
+
+
 def _render_section(*, index: int, section: Mapping[str, Any]) -> list[str]:
     title = _text(section.get("title")) or f"分析判断 {index}"
-    content = _text(section.get("content"))
+    content = _normalized_section_content(section.get("content"), title)
     return [f"## {index}. {title}", "", content, ""]
 
 
@@ -146,44 +257,62 @@ def _report_visual_assets(value: Any) -> list[dict[str, Any]]:
     return assets
 
 
+def _positioning_summary(chapters: list[Mapping[str, Any]]) -> str:
+    positioning = next(
+        chapter for chapter in chapters if _text(chapter.get("unit_id")) == "positioning"
+    )
+    content = _text(positioning.get("content"))
+    for block in re.split(r"\n\s*\n", content):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        prose = " ".join(line for line in lines if not re.match(r"^#{1,6}\s+", line))
+        if prose:
+            return prose[:1200]
+    raise ValueError("positioning_chapter_summary_missing")
+
+
 def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest) -> dict[str, Any]:
-    state = request.decision_state
-    steps = _mapping(state.get("steps"))
-    sections = [
-        _mapping(item)
-        for item in _list(state.get("report_sections"))
-        if isinstance(item, Mapping) and _text(item.get("content"))
-    ]
-    sections.sort(key=lambda item: (int(item.get("section_order", 0) or 0), _text(item.get("section_id"))))
-    if not sections:
-        raise ValueError("report_requires_completed_sections")
-    for index, section in enumerate(sections, 1):
-        _validate_reader_text(section.get("content"), field=f"report_section_{index}", minimum_length=1)
-    editorial_narrative = _validate_reader_text(
-        request.editorial_narrative,
-        field="editorial_narrative",
+    chapters = [chapter.model_dump(mode="json") for chapter in request.chapters]
+    expected_ids = [unit_id for unit_id, _title in STRATEGY_CHAPTERS]
+    chapter_ids = [_text(chapter.get("unit_id")) for chapter in chapters]
+    if chapter_ids != expected_ids:
+        raise ValueError("report_requires_ordered_strategy_chapters")
+    for index, (chapter, (_unit_id, expected_title)) in enumerate(
+        zip(chapters, STRATEGY_CHAPTERS, strict=True),
+        1,
+    ):
+        if _text(chapter.get("title")) != expected_title:
+            raise ValueError(f"report_chapter_{index}_title_mismatch")
+        _validate_reader_text(
+            chapter.get("content"),
+            field=f"report_chapter_{index}",
+            minimum_length=1,
+        )
+
+    chapters, citations = _globalize_chapter_citations(chapters)
+    summary = _validate_reader_text(
+        _positioning_summary(chapters),
+        field="positioning_summary",
         minimum_length=1,
     )
-
-    citation_entries = _citation_entries(steps)
-    citations: list[dict[str, Any]] = []
-    for index, citation in enumerate(citation_entries, 1):
-        citation_id = _citation_id(citation)
-        label = f"E{index:03d}"
-        citations.append({"label": label, "citation_id": citation_id, **citation})
 
     project_name = _project_name(request.project_context, request.project_question)
     title = f"{project_name}空间策略与行动方案"
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     lines = [
-        f"# {title}", "", f"分析问题：{request.project_question}", "",
-        "## 总判断", "", editorial_narrative, "",
+        f"# {title}", "", f"**分析问题：**{request.project_question}", "",
+        "## 总判断", "", summary, "",
     ]
 
     visual_assets = _report_visual_assets(request.visual_assets)
-    if visual_assets:
-        lines.extend(["## 项目数据图件", ""])
+    if not 3 <= len(visual_assets) <= 5:
+        raise ValueError("report_requires_three_to_five_visuals")
+
+    def append_visuals(section_id: str) -> None:
         for asset in visual_assets:
+            design = _mapping(asset.get("design"))
+            asset_section_id = _text(asset.get("section_id")) or _text(design.get("section_id"))
+            if asset_section_id != section_id:
+                continue
             caption = _text(asset.get("caption")) or _text(_mapping(asset.get("design")).get("caption"))
             if asset["kind"] == "image":
                 lines.extend([f"### {_text(asset['title'])}", "", f"![{_text(asset['title'])}]({_text(asset['relative_path'])})", ""])
@@ -192,8 +321,11 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
             if caption:
                 lines.extend([f"图注：{caption}", ""])
 
-    for index, section in enumerate(sections, 1):
-        lines.extend(_render_section(index=index, section=section))
+    for index, chapter in enumerate(chapters, 1):
+        lines.extend(_render_section(index=index, section=chapter))
+        append_visuals(_text(chapter.get("unit_id")))
+
+    lines.extend(_render_citation_sources(citations))
 
     markdown = "\n".join(lines).rstrip() + "\n"
     return {
@@ -203,7 +335,8 @@ def build_spatial_strategy_report(request: SpatialStrategyReportFinalizeRequest)
         "generated_at": generated_at,
         "markdown": markdown,
         "citations": citations,
-        "summary": editorial_narrative,
+        "summary": summary,
+        "chapters": chapters,
         "visual_assets": visual_assets,
     }
 
@@ -368,13 +501,12 @@ class FeishuReportSender:
     @staticmethod
     def _summary(report: Mapping[str, Any]) -> str:
         summary = re.sub(r"\s+", " ", _text(report.get("summary")))[:600]
-        state = _mapping(report.get("decision_state"))
-        sections = state.get("report_sections") if isinstance(state.get("report_sections"), list) else []
-        total = len([item for item in sections if isinstance(item, Mapping) and _text(item.get("content"))])
+        chapters = report.get("chapters") if isinstance(report.get("chapters"), list) else []
+        total = len([item for item in chapters if isinstance(item, Mapping) and _text(item.get("content"))])
         return "\n".join(
             [
                 _text(report.get("title")) or "空间策略与行动方案",
-                f"状态：{total} 个报告部分完成",
+                f"状态：{total} 个策略章节完成",
                 f"核心结论：{summary or '详见完整报告'}",
                 "完整 Word 报告见随后发送的文件。",
             ]
@@ -395,7 +527,7 @@ async def finalize_spatial_strategy_report(
             summary=report["summary"],
             markdown=report["markdown"],
             citations=report["citations"],
-            decision_state=request.decision_state,
+            chapters=request.chapters,
             visual_assets=report["visual_assets"],
         ),
         store=report_store,
@@ -422,7 +554,7 @@ async def compose_spatial_strategy_report(
         "markdown_sha256": sha256(markdown_path.read_bytes()).hexdigest(),
         "visual_assets": report.get("visual_assets", []),
     }
-    return {**report, "status": "draft", "asset_manifest": artifact, "decision_state": request.decision_state}
+    return {**report, "status": "draft", "asset_manifest": artifact}
 
 
 def _visual_paths(report_store: SpatialStrategyReportStore, report: Mapping[str, Any]) -> list[Path]:

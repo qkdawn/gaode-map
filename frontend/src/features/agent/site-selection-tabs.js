@@ -5,21 +5,10 @@ import {
   cloneAgentSessionRecord,
   cloneObject,
   consumeSseStream,
-  createAgentSessionRecord,
-  hasAgentMessageProcessContent,
-  normalizeAgentMessageProcess,
   normalizeAgentPanelPreloadNotes,
   normalizeAgentToolSummary,
   sortAgentSessions,
 } from './normalizers.js'
-import {
-  buildAgentPlanChecklist,
-  buildAgentToolCallItems,
-  hasAgentExecutionTraceContent,
-  hasAgentPlanContent,
-  shouldShowAgentProcessLiveStatus,
-  shouldShowAgentProcessToggle,
-} from './derived.js'
 import {
   buildAnalysisTaskConfirmation,
   cloneAnalysisTaskConfirmation,
@@ -158,9 +147,7 @@ export function createAgentSiteSelectionTabMethods() {
       const pack = this.getAgentSiteSelectionPack()
       return !!(
         cloneArray(pack.candidate_sites).length
-        || cloneArray(pack.ranking).length
-        || asText(pack.summary_text)
-        || asText(pack.not_recommended_reason)
+        || Number(pack.candidate_count || 0) > 0
       )
     },
     isAgentSiteSelectionRunning() {
@@ -370,7 +357,7 @@ export function createAgentSiteSelectionTabMethods() {
           panelPayloads: {
             site_selection_pack: pack,
             current_target_supply_gap: data.current_target_supply_gap || {},
-            current_site_candidate_scores: data.current_site_candidate_scores || {},
+            current_site_candidate_facts: data.current_site_candidate_facts || {},
           },
           ui: {
             target_type: targetType,
@@ -398,110 +385,42 @@ export function createAgentSiteSelectionTabMethods() {
     getAgentSiteSelectionCandidates() {
       const pack = this.getAgentSiteSelectionPack()
       return cloneArray(pack.candidate_sites).slice(0, 5).map((item, index) => {
-        const scoreParts = item && typeof item.scores === 'object' ? item.scores : {}
+        const supplyDemand = item && typeof item.supply_demand === 'object' ? item.supply_demand : {}
+        const populationContext = item && typeof item.population_context === 'object' ? item.population_context : {}
+        const roadContext = item && typeof item.road_context === 'object' ? item.road_context : {}
         const center = item && typeof item.center_point === 'object' ? item.center_point : {}
         const lng = Number(center.lng ?? center.longitude)
         const lat = Number(center.lat ?? center.latitude)
         const coordinate = Number.isFinite(lng) && Number.isFinite(lat) ? `${lng.toFixed(5)}, ${lat.toFixed(5)}` : ''
         return {
-          rank: Number(item.rank || index + 1) || index + 1,
+          sourceOrder: Number(item.source_order || index + 1) || index + 1,
           h3Id: asText(item.h3_id || item.h3Id),
           title: asText(item.display_title || item.approx_address || item.label) || `候选${index + 1}`,
           approxAddress: asText(item.approx_address),
           coordinate,
-          positioning: asText(item.positioning) || this.getAgentSiteSelectionFallbackPositioning(),
-          totalScore: Number(item.total_score ?? item.totalScore ?? 0) || 0,
-          gapScore: Number(item.gap_score ?? item.gapScore ?? scoreParts.supply_gap ?? 0) || 0,
-          populationScore: Number(scoreParts.population_support ?? scoreParts.population ?? item.population_score ?? item.populationScore ?? 0) || 0,
-          vitalityScore: Number(scoreParts.vitality ?? item.vitality_score ?? item.vitalityScore ?? 0) || 0,
-          roadScore: Number(scoreParts.accessibility ?? scoreParts.road ?? item.road_score ?? item.roadScore ?? 0) || 0,
-          reason: asText(item.reason_summary || item.reason || item.summary),
-          whySuitable: cloneArray(item.why_suitable || item.whySuitable).map((entry) => asText(entry)).filter(Boolean),
-          nextValidationSteps: cloneArray(item.next_validation_steps || item.nextValidationSteps).map((entry) => asText(entry)).filter(Boolean),
-          strengths: cloneArray(item.strengths).map((entry) => asText(entry)).filter(Boolean),
-          risks: cloneArray(item.risks).map((entry) => asText(entry)).filter(Boolean),
+          gapValue: Number(supplyDemand.gap_value ?? 0) || 0,
+          demandShare: Number(supplyDemand.demand_share ?? 0) || 0,
+          supplyShare: Number(supplyDemand.supply_share ?? 0) || 0,
+          cellPopulation: Number(populationContext.cell_population ?? 0) || 0,
+          scopePopulation: Number(populationContext.scope_population ?? 0) || 0,
+          roadNodeCount: Number(roadContext.scope_node_count ?? 0) || 0,
+          roadEdgeCount: Number(roadContext.scope_edge_count ?? 0) || 0,
         }
       })
-    },
-    getAgentSiteSelectionFallbackPositioning() {
-      const state = this.getAgentSiteSelectionState()
-      const scenario = this.getAgentSiteSelectionScenarioOptions().find((item) => item.value === state.scenario)
-      const strategy = this.getAgentSiteSelectionStrategyOptions().find((item) => item.value === state.strategy)
-      const target = this.inferAgentSiteSelectionTargetType() || '门店'
-      return `${scenario ? scenario.label : '通勤快取'}型${target} · ${strategy ? strategy.label : '综合评估'}`
-    },
-    getAgentSiteSelectionVerdict() {
-      const pack = this.getAgentSiteSelectionPack()
-      const verdict = asText(pack.overall_verdict || pack.overallVerdict)
-      const labelMap = { suitable: '适合优先验证', cautious: '谨慎预筛', not_recommended: '暂不建议' }
-      return {
-        key: verdict || 'cautious',
-        label: labelMap[verdict] || labelMap.cautious,
-        text: asText(pack.verdict_text || pack.verdictText || pack.summary_text || pack.not_recommended_reason) || 'candidate_site_result_unavailable',
-      }
-    },
-    getAgentSiteSelectionRankingRows() {
-      return cloneArray(this.getAgentSiteSelectionPack().ranking).slice(0, 5).map((item, index) => ({
-        rank: Number(item.rank || index + 1) || index + 1,
-        title: asText(item.title) || `候选${index + 1}`,
-        totalScore: Number(item.total_score ?? item.totalScore ?? 0) || 0,
-      }))
     },
     getAgentSiteSelectionSelectedCandidate() {
       const candidates = this.getAgentSiteSelectionCandidates()
       const selectedH3Id = this.getAgentSiteSelectionState().selectedH3Id
       return candidates.find((item) => item.h3Id && item.h3Id === selectedH3Id) || candidates[0] || null
     },
-    getAgentSiteSelectionSelectedWhySuitable() {
-      const candidate = this.getAgentSiteSelectionSelectedCandidate()
-      if (!candidate) return []
-      const points = [...candidate.whySuitable, ...candidate.strengths]
-      if (!points.length && candidate.reason) points.push(candidate.reason)
-      return points.filter(Boolean).slice(0, 4)
+    formatAgentSiteSelectionNumber(value = 0) {
+      const number = Number(value || 0)
+      if (!Number.isFinite(number)) return '0'
+      return Math.abs(number) >= 10 ? number.toFixed(0) : number.toFixed(2)
     },
-    getAgentSiteSelectionSelectedValidationSteps() {
-      const candidate = this.getAgentSiteSelectionSelectedCandidate()
-      if (!candidate) return []
-      if (candidate.nextValidationSteps.length) return candidate.nextValidationSteps.slice(0, 5)
-      return [
-        '现场复核临街可见度、门面开口和动线方向',
-        '观察早晚高峰人流与停留情况',
-        '核对租金、面积和周边同类店经营状态',
-      ]
-    },
-    getAgentSiteSelectionAvoidAreas() {
-      const pack = this.getAgentSiteSelectionPack()
-      return cloneArray(pack.avoid_areas || pack.avoidAreas).slice(0, 3).map((item, index) => ({
-        rank: index + 1,
-        h3Id: asText(item.h3_id || item.h3Id),
-        title: asText(item.title || item.display_title || item.approx_address) || `不建议网格 ${index + 1}`,
-        reason: asText(item.reason || item.not_recommended_reason) || '综合风险较高，暂不作为优先看点。',
-        score: Number(item.score ?? item.total_score ?? 0) || 0,
-      }))
-    },
-    getAgentSiteSelectionEvidenceChain() {
-      return cloneArray(this.getAgentSiteSelectionPack().evidence_chain).map((item, index) => ({
-        key: asText(item.tool_name || item.metric) || `evidence-${index}`,
-        toolName: asText(item.tool_name) || '-',
-        value: this.formatAgentSiteSelectionValue(item.value),
-        reason: asText(item.rule_or_reason || item.reason),
-        confidence: asText(item.confidence) || 'weak',
-      }))
-    },
-    formatAgentSiteSelectionValue(value) {
-      if (Array.isArray(value)) return value.length ? `${value.length} 项` : '无'
-      if (value && typeof value === 'object') return Object.keys(value).length ? '已生成' : '无'
-      return asText(value) || '无'
-    },
-    formatAgentSiteSelectionScore(value = 0) {
-      const score = Number(value || 0)
-      if (!Number.isFinite(score)) return '0'
-      return score >= 10 ? score.toFixed(0) : score.toFixed(2)
-    },
-    getAgentSiteSelectionConfidenceLabel(value = '') {
-      const key = asText(value)
-      const mapping = { strong: '强', moderate: '中', weak: '弱' }
-      return mapping[key] || key || '弱'
+    formatAgentSiteSelectionRatio(value = 0) {
+      const ratio = Number(value || 0)
+      return Number.isFinite(ratio) ? `${(ratio * 100).toFixed(1)}%` : '-'
     },
     async onAgentSiteSelectionCandidateClick(candidate = null) {
       const h3Id = asText(candidate && (candidate.h3Id || candidate.h3_id))

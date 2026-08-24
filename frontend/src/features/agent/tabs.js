@@ -6,23 +6,11 @@ import {
   cloneObject,
   consumeSseStream,
   createAgentSessionRecord,
-  hasAgentMessageProcessContent,
-  normalizeAgentMessageProcess,
-  normalizeAgentPanelPreloadNotes,
   normalizeAgentToolSummary,
   sortAgentSessions,
 } from './normalizers.js'
 import {
-  buildAgentPlanChecklist,
-  buildAgentToolCallItems,
-  hasAgentExecutionTraceContent,
-  hasAgentPlanContent,
-  shouldShowAgentProcessLiveStatus,
-  shouldShowAgentProcessToggle,
-} from './derived.js'
-import {
   buildAnalysisTaskConfirmation,
-  cloneAnalysisTaskConfirmation,
   focusAnalysisTaskPanel,
   getAnalysisTaskDefinition,
   getAnalysisTaskDefinitions,
@@ -115,78 +103,30 @@ export function createAgentTabsMethods() {
       return {
         input: String(normalized.input || ''),
         status: String(normalized.status || 'idle'),
-        stage: String(normalized.stage || 'gating'),
-        answer: String(normalized.answer || ''),
         messages: cloneArray(normalized.messages),
-        executionTrace: cloneArray(normalized.executionTrace),
-        usedTools: cloneArray(normalized.usedTools),
-        citations: cloneArray(normalized.citations),
-        researchNotes: cloneArray(normalized.researchNotes),
-        auditIssues: cloneArray(normalized.auditIssues),
-        clarificationQuestion: String(normalized.clarificationQuestion || ''),
-        clarificationOptions: cloneArray(normalized.clarificationOptions),
-        riskPrompt: String(normalized.riskPrompt || ''),
         error: String(normalized.error || ''),
-        contextSummary: cloneObject(normalized.contextSummary),
-        plan: cloneObject(normalized.plan || { steps: [], summary: '' }),
         panelPayloads: cloneObject(normalized.panelPayloads),
-        panelPreloadNotes: cloneArray(normalized.panelPreloadNotes),
-        preloadedPanelKeys: cloneArray(normalized.preloadedPanelKeys),
-        thinkingTimeline: cloneArray(normalized.thinkingTimeline),
-        pendingTaskConfirmation: cloneObject(normalized.pendingTaskConfirmation),
-        riskConfirmations: cloneArray(normalized.riskConfirmations),
+        activityItems: cloneArray(normalized.activityItems),
       }
     },
     buildAgentFollowupThreadFromCurrentState() {
       return this.createAgentFollowupThreadState({
         input: this.agentInput,
         status: this.agentStatus,
-        stage: this.agentStage,
-        answer: this.agentAnswer,
         messages: this.agentMessages,
-        executionTrace: this.agentExecutionTrace,
-        usedTools: this.agentUsedTools,
-        citations: this.agentCitations,
-        researchNotes: this.agentResearchNotes,
-        auditIssues: this.agentAuditIssues,
-        clarificationQuestion: this.agentClarificationQuestion,
-        clarificationOptions: this.agentClarificationOptions,
-        riskPrompt: this.agentRiskPrompt,
         error: this.agentError,
-        contextSummary: this.agentContextSummary,
-        plan: this.agentPlan,
         panelPayloads: this.agentPanelPayloads,
-        panelPreloadNotes: this.agentPanelPreloadNotes,
-        preloadedPanelKeys: this.agentPreloadedPanelKeys,
-        thinkingTimeline: this.agentThinkingTimeline,
-        pendingTaskConfirmation: this.agentPendingTaskConfirmation,
-        riskConfirmations: this.agentRiskConfirmations,
+        activityItems: this.agentActivityItems,
       })
     },
     applyAgentFollowupThreadToCurrentState(thread = null) {
       const state = this.createAgentFollowupThreadState(thread || {})
       this.agentInput = String(state.input || '')
       this.agentStatus = String(state.status || 'idle')
-      this.agentStage = String(state.stage || 'gating')
-      this.agentAnswer = String(state.answer || '')
       this.agentMessages = cloneArray(state.messages)
-      this.agentExecutionTrace = cloneArray(state.executionTrace)
-      this.agentUsedTools = cloneArray(state.usedTools)
-      this.agentCitations = cloneArray(state.citations)
-      this.agentResearchNotes = cloneArray(state.researchNotes)
-      this.agentAuditIssues = cloneArray(state.auditIssues)
-      this.agentClarificationQuestion = String(state.clarificationQuestion || '')
-      this.agentClarificationOptions = cloneArray(state.clarificationOptions)
-      this.agentRiskPrompt = String(state.riskPrompt || '')
       this.agentError = String(state.error || '')
-      this.agentContextSummary = cloneObject(state.contextSummary)
-      this.agentPlan = cloneObject(state.plan)
       this.agentPanelPayloads = cloneObject(state.panelPayloads)
-      this.agentPanelPreloadNotes = normalizeAgentPanelPreloadNotes(state.panelPreloadNotes)
-      this.agentPreloadedPanelKeys = cloneArray(state.preloadedPanelKeys)
-      this.agentThinkingTimeline = cloneArray(state.thinkingTimeline)
-      this.agentPendingTaskConfirmation = cloneAnalysisTaskConfirmation(state.pendingTaskConfirmation)
-      this.agentRiskConfirmations = cloneArray(state.riskConfirmations)
+      this.agentActivityItems = cloneArray(state.activityItems)
     },
     getAgentActiveTopTab() {
       const tabs = this.ensureAgentTabs(false)
@@ -658,24 +598,7 @@ export function createAgentTabsMethods() {
       }
       return tabId
     },
-    toggleAgentComposerMenu() {
-      this.agentComposerMenuOpen = !this.agentComposerMenuOpen
-    },
-    closeAgentComposerMenu() {
-      this.agentComposerMenuOpen = false
-    },
-    selectAgentComposerMode(mode = '') {
-      const normalized = asText(mode) === 'deep' ? 'deep' : ''
-      this.agentComposerMode = normalized
-      this.closeAgentComposerMenu()
-      return normalized
-    },
-    clearAgentComposerMode() {
-      this.agentComposerMode = ''
-      this.closeAgentComposerMenu()
-    },
     startAgentComposerNewReportSession() {
-      this.clearAgentComposerMode()
       this.startNewAgentReportSession()
     },
     createAgentFollowupTab(options = {}) {

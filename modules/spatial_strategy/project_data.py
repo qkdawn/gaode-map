@@ -9,6 +9,7 @@ from typing import Any
 
 from modules.spatial_projects.data_contract import ProjectDataContractService
 from modules.spatial_projects.service import SpatialProjectService
+from modules.population.registry import age_band_keys
 
 
 _PROJECTS = SpatialProjectService()
@@ -18,18 +19,17 @@ _QUERY_CACHE_LOCK = RLock()
 _QUERY_CACHE_MAX_SIZE = 96
 
 _STEP_DATASETS: dict[str, tuple[str, ...]] = {
-    "step_01_policy_site": ("poi", "road_edges"),
-    "step_02_regional_role": ("poi", "road_edges", "population"),
-    "step_03_market_flow": ("poi", "road_edges", "population"),
-    "step_04_supply_gap": ("poi",),
-    "step_05_audience_use": ("population", "poi", "road_edges"),
-    "step_06_theme_resources": ("poi",),
-    "step_07_positioning": (),
-    "step_08_product_mix": ("poi", "population"),
-    "step_09_spatial_layout": ("road_edges", "poi", "population", "nightlight"),
-    "step_10_operating_model": (),
-    "step_11_financial_check": (),
-    "step_12_phasing": (),
+    "project_basis": ("poi", "road_edges"),
+    "regional_role": ("poi", "road_edges", "population"),
+    "supply_gap": ("poi",),
+    "audience_use": ("population", "poi", "road_edges"),
+    "theme_resources": ("poi",),
+    "positioning": (),
+    "product_mix": ("poi", "population"),
+    "spatial_layout": ("road_edges", "poi", "population", "nightlight"),
+    "operating_model": (),
+    "investment_operation": (),
+    "phasing": (),
 }
 
 _AGGREGATES: dict[str, tuple[list[str], list[dict[str, str]]]] = {
@@ -46,9 +46,13 @@ _AGGREGATES: dict[str, tuple[list[str], list[dict[str, str]]]] = {
         [
             {"op": "count", "field": "*", "as": "cell_count"},
             {"op": "sum", "field": "population_total", "as": "population_total"},
-            {"op": "sum", "field": "age_5_19", "as": "age_5_19"},
-            {"op": "sum", "field": "age_30_39", "as": "age_30_39"},
-            {"op": "sum", "field": "age_50_64", "as": "age_50_64"},
+            {"op": "sum", "field": "male_total", "as": "male_total"},
+            {"op": "sum", "field": "female_total", "as": "female_total"},
+            *[
+                {"op": "sum", "field": f"age_{sex}.{band}", "as": f"age_{sex}_{band}"}
+                for sex in ("total", "male", "female")
+                for band in age_band_keys()
+            ],
         ],
     ),
     "nightlight": (

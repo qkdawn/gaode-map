@@ -1,124 +1,372 @@
 from __future__ import annotations
 
 import json
-import subprocess
 
-import modules.spatial_strategy.harness_synthesis as harness_synthesis
+import pytest
+
+from modules.spatial_strategy import harness_synthesis
 
 
-def test_harness_synthesis_delegates_tool_loop_and_structured_output(monkeypatch):
+def _chapter(unit_id: str, title: str) -> dict:
+    return {
+        "unit_id": unit_id,
+        "title": title,
+        "content": "明确判断。\n\n### 行动\n\n实施首期动作。",
+        "citations": [],
+    }
+
+
+def test_chapter_schema_is_the_only_four_field_unit_contract():
+    schema = json.loads(harness_synthesis.CHAPTER_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    assert set(schema["properties"]) == {"unit_id", "title", "content", "citations"}
+    assert set(schema["required"]) == {"unit_id", "title", "content", "citations"}
+    assert schema["additionalProperties"] is False
+    serialized = json.dumps(schema)
+    assert "decision_result" not in serialized
+    assert "decision_memo" not in serialized
+    assert "report_blueprint" not in serialized
+
+
+def test_harness_uses_codex_normalized_mcp_server_identifier():
+    from modules.agent_harness import codex as codex_harness
+
+    config = codex_harness._sdk_config(["project_context"])
+    overrides = "\n".join(config.config_overrides)
+
+    assert "mcp_servers.spatial_project.enabled_tools" in overrides
+    assert "mcp_servers.spatial-project" not in overrides
+
+
+def test_unit_writes_delivery_chapter_and_reads_only_declared_dependencies(monkeypatch):
     captured = {}
 
-    def fake_run(command, **kwargs):
-        captured.update(command=command, kwargs=kwargs)
-        output_path = command[command.index("--output-last-message") + 1]
-        with open(output_path, "w", encoding="utf-8") as handle:
-            json.dump({"recommended_position": "公共文化客厅"}, handle, ensure_ascii=False)
-        return subprocess.CompletedProcess(command, 0, "", "")
+    def fake_run_codex(**kwargs):
+        captured.update(kwargs)
+        output = _chapter("audience_use", "客群与使用")
+        calls = [{
+            "name": "read_strategy_chapters",
+            "arguments": {
+                "run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+                "unit_ids": ["supply_gap"],
+            },
+            "status": "completed",
+            "result": {"chapters": [_chapter("supply_gap", "具名供给与服务空位")]},
+        }]
+        kwargs["tool_call_validator"](calls)
+        kwargs["output_validator"](output, calls)
+        return output
 
-    monkeypatch.setattr(harness_synthesis.shutil, "which", lambda _name: "codex")
-    monkeypatch.setattr(harness_synthesis.subprocess, "run", fake_run)
+    monkeypatch.setattr(harness_synthesis, "run_codex", fake_run_codex)
 
-    result = harness_synthesis.synthesize_strategy_blueprint(
+    result = harness_synthesis.analyze_strategy_unit(
         run_id="7b8ab959-c0e2-4d29-8168-9688cb4989bf",
-        project_question="形成未来空间策略",
+        history_id="history-1",
+        project_question="形成空间策略",
+        decision_unit={
+            "unit_id": "audience_use",
+            "title": "客群与使用",
+            "question": "优先服务谁",
+            "depends_on": ["supply_gap"],
+            "decision_output": "明确客群和使用情境",
+            "evidence_focus": "人口与服务",
+            "spatial_questions": ["日常服务关系如何"],
+        },
     )
 
-    assert result == {"recommended_position": "公共文化客厅"}
-    command = captured["command"]
-    assert command[:4] == ["codex", "-a", "never", "exec"]
-    assert "--ephemeral" in command
-    assert "--output-schema" in command
-    assert "tool_suggest" in command
-    assert "mcp_servers.spatial-project.enabled_tools" in " ".join(command)
-    assert "max_output_tokens" not in " ".join(command)
-    assert "--model" not in command
-    prompt = captured["kwargs"]["input"]
-    assert "read_strategy_decisions" in prompt
-    assert "具名 POI、道路、路径" in prompt
-    assert "7b8ab959-c0e2-4d29-8168-9688cb4989bf" in prompt
-    assert "decision_inputs" not in prompt
-    assert "decision_memo" not in prompt
-    assert "工具调用失败后重试" not in prompt
+    assert result == _chapter("audience_use", "客群与使用")
+    assert captured["schema_path"] == harness_synthesis.CHAPTER_SCHEMA_PATH
+    assert "read_strategy_chapters" in captured["enabled_tools"]
+    assert '["supply_gap"]' in captured["prompt"]
+    assert "直接撰写可交付的 Markdown 章节正文" in captured["prompt"]
+    assert "只写当前任务新增的判断" in captured["prompt"]
+    assert "computed:population:summary" not in captured["prompt"]
+    assert "市场流向" not in captured["prompt"]
 
 
-def test_harness_failure_is_a_run_failure(monkeypatch):
-    monkeypatch.setattr(harness_synthesis.shutil, "which", lambda _name: "codex")
-    monkeypatch.setattr(
-        harness_synthesis.subprocess,
-        "run",
-        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "network unavailable"),
-    )
-
-    try:
-        harness_synthesis.synthesize_strategy_blueprint(run_id="run", project_question="task")
-    except harness_synthesis.SpatialStrategyHarnessError as exc:
-        assert "network unavailable" in str(exc)
-    else:
-        raise AssertionError("Codex failure must propagate")
-
-
-def test_harness_output_directory_is_owned_by_project_runtime():
-    assert harness_synthesis.HARNESS_RUNTIME_ROOT == harness_synthesis.PROJECT_ROOT / "runtime" / "codex-harness"
-
-
-def test_blueprint_schema_contains_domain_output_without_unit_provenance():
-    schema = json.loads(harness_synthesis.BLUEPRINT_SCHEMA_PATH.read_text(encoding="utf-8"))
-
-    assert schema["properties"]["sections"]["minItems"] == 5
-    section = schema["properties"]["sections"]["items"]
-    assert "current_basis" in section["properties"]
-    assert "future_goal" in section["properties"]
-    assert "named_entities" in schema["properties"]
-    named_entity = schema["$defs"]["named_entity"]
-    assert named_entity["required"] == ["name", "entity_type", "relationship", "fact"]
-    assert "source_unit_ids" not in section["properties"]
-    assert "decision_state" not in json.dumps(schema)
-
-
-def test_unit_and_report_prompts_keep_concrete_spatial_objects(monkeypatch):
-    calls = []
+def test_first_unit_cannot_read_other_chapters(monkeypatch):
+    captured = {}
 
     def fake_run_codex(**kwargs):
-        calls.append(kwargs)
-        return {}
+        captured.update(kwargs)
+        return _chapter("project_basis", "项目材料与项目基础")
 
-    monkeypatch.setattr(harness_synthesis, "_run_codex", fake_run_codex)
-
+    monkeypatch.setattr(harness_synthesis, "run_codex", fake_run_codex)
     harness_synthesis.analyze_strategy_unit(
         run_id="7b8ab959-c0e2-4d29-8168-9688cb4989bf",
         history_id="history-1",
-        project_question="形成未来空间策略",
-        decision_unit={"unit_id": "current_structure", "title": "现状结构"},
+        project_question="形成空间策略",
+        decision_unit={
+            "unit_id": "project_basis",
+            "title": "项目材料与项目基础",
+            "question": "材料说明什么",
+            "depends_on": [],
+        },
     )
-    harness_synthesis.write_strategy_section(
-        project_question="形成未来空间策略",
-        solution={"named_entities": [{"name": "潘家坪路"}]},
-        section={"section_id": "spatial_layout"},
+
+    assert "read_strategy_chapters" not in captured["enabled_tools"]
+    assert "不要调用 read_strategy_chapters" in captured["prompt"]
+
+
+def test_unit_without_spatial_questions_cannot_reopen_spatial_results(monkeypatch):
+    captured = {}
+
+    def fake_run_codex(**kwargs):
+        captured.update(kwargs)
+        return _chapter("positioning", "候选定位比较")
+
+    monkeypatch.setattr(harness_synthesis, "run_codex", fake_run_codex)
+    harness_synthesis.analyze_strategy_unit(
+        run_id="7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+        history_id="history-1",
+        project_question="形成空间策略",
+        decision_unit={
+            "unit_id": "positioning",
+            "title": "候选定位比较",
+            "question": "选择哪个定位",
+            "depends_on": ["regional_role", "supply_gap", "audience_use", "theme_resources"],
+            "spatial_questions": [],
+        },
     )
+
+    assert "read_strategy_chapters" in captured["enabled_tools"]
+    assert "analyze_spatial_question" not in captured["enabled_tools"]
+    assert "read_spatial_evidence_result" not in captured["enabled_tools"]
+    assert "本章没有新增空间问题" in captured["prompt"]
+    assert "不在 citations 中复制 computed:population:summary" in captured["prompt"]
+
+
+@pytest.mark.parametrize("status", ["invalid_request", "not_found", "unavailable", "partial", "failed", "data_source_unavailable"])
+def test_completed_tool_failure_status_stops_the_strategy_run(status):
+    with pytest.raises(
+        harness_synthesis.SpatialStrategyHarnessError,
+        match=rf"strategy_tool_failed:project_context:{status}:\$\.status",
+    ):
+        harness_synthesis._validate_strategy_tool_results(
+            [{"name": "project_context", "status": "completed", "result": {"status": status}}]
+        )
+
+
+def test_nested_catalog_status_does_not_turn_a_successful_tool_call_into_failure():
+    harness_synthesis._validate_strategy_tool_results(
+        [{
+            "name": "mcp__spatial_project__project_context",
+            "status": "completed",
+            "result": {
+                "computed_results": [
+                    {"status": "available"},
+                    {"status": "not_found"},
+                ]
+            },
+        }]
+    )
+
+
+def test_recovered_argument_validation_failure_is_ignored():
+    harness_synthesis._validate_strategy_tool_results(
+        [
+            {
+                "name": "analyze_spatial_question",
+                "status": "failed",
+                "result": {"status": "invalid_request"},
+                "_recoverable_validation_failure": True,
+            },
+            {
+                "name": "analyze_spatial_question",
+                "status": "completed",
+                "result": {"status": "available"},
+            },
+        ]
+    )
+
+
+def test_unrecovered_argument_validation_failure_stops_the_run():
+    with pytest.raises(harness_synthesis.SpatialStrategyHarnessError, match="invalid_request"):
+        harness_synthesis._validate_strategy_tool_results(
+            [{
+                "name": "analyze_spatial_question",
+                "status": "failed",
+                "result": {"status": "invalid_request"},
+                "_recoverable_validation_failure": True,
+            }]
+        )
+
+
+def test_chapter_identity_is_enforced():
+    validator = harness_synthesis._chapter_output_validator("audience_use", "客群与使用")
+
+    with pytest.raises(harness_synthesis.SpatialStrategyHarnessError, match="unit_id_mismatch"):
+        validator(_chapter("supply_gap", "客群与使用"), [])
+    with pytest.raises(harness_synthesis.SpatialStrategyHarnessError, match="title_mismatch"):
+        validator(_chapter("audience_use", "其他标题"), [])
+
+
+def test_only_audience_chapter_owns_demographic_summary_citation():
+    citation = {
+        "citation_id": "C1",
+        "title": "人口汇总",
+        "source_type": "project_dataset_summary",
+        "source_locator": "computed:population:summary",
+        "record_ref": "computed:population:summary",
+    }
+    audience = _chapter("audience_use", "客群与使用")
+    audience["citations"] = [citation]
+    harness_synthesis._chapter_output_validator("audience_use", "客群与使用")(
+        audience, []
+    )
+
+    product = _chapter("product_mix", "场景与产品组合")
+    product["citations"] = [citation]
+    with pytest.raises(
+        harness_synthesis.SpatialStrategyHarnessError,
+        match="demographic_evidence_not_owned",
+    ):
+        harness_synthesis._chapter_output_validator(
+            "product_mix", "场景与产品组合"
+        )(product, [])
+
+
+def test_population_spatial_evidence_remains_available_outside_audience_chapter():
+    output = _chapter("supply_gap", "具名供给与服务空位")
+    output["citations"] = [{
+        "citation_id": "S1",
+        "title": "人口与供给空间关系",
+        "source_type": "spatial_evidence_result",
+        "source_locator": "spatial:population-supply-gap",
+        "record_ref": "spatial:population-supply-gap",
+    }]
+
+    harness_synthesis._chapter_output_validator(
+        "supply_gap", "具名供给与服务空位"
+    )(output, [])
+
+
+@pytest.mark.parametrize("content", [
+    "无法生成本章节：空间工具执行失败。",
+    "无法完成本章节：项目材料读取失败。",
+])
+def test_failure_explanation_is_not_a_deliverable_chapter(content):
+    validator = harness_synthesis._chapter_output_validator("audience_use", "客群与使用")
+    output = _chapter("audience_use", "客群与使用")
+    output["content"] = content
+
+    with pytest.raises(harness_synthesis.SpatialStrategyHarnessError, match="generation_failed"):
+        validator(output, [])
+
+
+def test_visual_design_reads_all_chapters_once_without_blueprint(monkeypatch):
+    captured = {}
+
+    def fake_run_codex(**kwargs):
+        captured.update(kwargs)
+        kwargs["tool_call_validator"]([{
+            "name": "read_strategy_chapters",
+            "arguments": {
+                "run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+                "unit_ids": list(harness_synthesis.STRATEGY_UNIT_IDS),
+            },
+            "status": "completed",
+            "result": {"chapters": []},
+        }])
+        return {"visuals": []}
+
+    monkeypatch.setattr(harness_synthesis, "run_codex", fake_run_codex)
     harness_synthesis.design_strategy_visuals(
-        project_question="形成未来空间策略",
-        solution={"named_entities": [{"name": "潘家坪路"}]},
-        available_datasets=[{"dataset_id": "poi"}, {"dataset_id": "road_edges"}],
+        run_id="7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+        project_question="形成空间策略",
+        visual_task="设计图件",
     )
 
-    assert "named_entities" in calls[0]["prompt"]
-    assert "analyze_spatial_question" in calls[0]["prompt"]
-    assert "analyze_spatial_question" in calls[0]["enabled_tools"]
-    assert "analyze_spatial_evidence" not in calls[0]["enabled_tools"]
-    assert "真实名称" in calls[0]["prompt"]
-    assert "所在城市或区县 + 准确名称 + 待确认属性" in calls[0]["prompt"]
-    assert "不逐个搜索无关对象" in calls[0]["prompt"]
-    assert "不退化为只有方向和汇总数量" in calls[1]["prompt"]
-    assert "至少设计一张 poi_access 或 context_full" in calls[2]["prompt"]
+    assert captured["enabled_tools"].count("read_strategy_chapters") == 1
+    assert "read_strategy_blueprint" not in captured["enabled_tools"]
+    assert "read_strategy_decisions" not in captured["enabled_tools"]
+    assert "这11个已完成章节" in captured["prompt"]
+    assert "poi 图层，必须同时包含 road_edges 图层" in captured["prompt"]
 
 
-def test_decision_schema_preserves_named_objects_without_harness_state():
-    schema = json.loads(harness_synthesis.DECISION_MEMO_SCHEMA_PATH.read_text(encoding="utf-8"))
+def test_unit_dependency_reader_rejects_full_history_scope():
+    validator = harness_synthesis._strategy_tool_validator(
+        run_id="7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+        required_chapter_ids=["supply_gap"],
+    )
+    with pytest.raises(harness_synthesis.SpatialStrategyHarnessError, match="scope_mismatch"):
+        validator([{
+            "name": "read_strategy_chapters",
+            "arguments": {
+                "run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+                "unit_ids": list(harness_synthesis.STRATEGY_UNIT_IDS),
+            },
+            "status": "completed",
+            "result": {"chapters": []},
+        }])
 
-    assert "named_entities" in schema["required"]
-    named_entity = schema["$defs"]["named_entity"]
-    assert named_entity["required"] == ["name", "entity_type", "relationship", "fact", "record_ref"]
-    serialized = json.dumps(schema)
-    for runtime_field in ("tool_name", "response_id", "call_id", "retry_count"):
-        assert runtime_field not in serialized
+
+def test_unit_rejects_project_tool_call_for_another_history():
+    validator = harness_synthesis._strategy_tool_validator(
+        run_id="7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+        history_id="history-1",
+        required_chapter_ids=[],
+    )
+
+    with pytest.raises(
+        harness_synthesis.SpatialStrategyHarnessError,
+        match="strategy_tool_history_scope_mismatch:project_context",
+    ):
+        validator([{
+            "name": "mcp__spatial_project__project_context",
+            "arguments": {"history_id": "wrong-history"},
+            "status": "completed",
+            "result": {"status": "not_found"},
+        }])
+
+
+def test_harness_preserves_domain_validation_failure_detail(monkeypatch, tmp_path):
+    from modules.agent_harness import codex as codex_harness
+
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(json.dumps({"type": "object"}), encoding="utf-8")
+
+    class FakeTurn:
+        items = []
+        final_response = "{}"
+
+    class FakeThread:
+        def run(self, *_args, **_kwargs):
+            return FakeTurn()
+
+    class FakeCodex:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def thread_start(self, **_kwargs):
+            return FakeThread()
+
+    monkeypatch.setattr(codex_harness, "Codex", FakeCodex)
+
+    def reject(_calls):
+        raise RuntimeError("strategy_tool_failed:read_project_document:not_found:$.status")
+
+    with pytest.raises(
+        codex_harness.CodexHarnessError,
+        match=r"strategy_tool_failed:read_project_document:not_found:\$\.status",
+    ):
+        codex_harness.run_codex(
+            prompt="task",
+            schema_path=schema_path,
+            enabled_tools=[],
+            tool_call_validator=reject,
+        )
+
+
+def test_visual_schema_uses_strategy_unit_ids():
+    schema = json.loads(harness_synthesis.VISUAL_DESIGN_SCHEMA_PATH.read_text(encoding="utf-8"))
+    section_ids = schema["properties"]["visuals"]["items"]["properties"]["section_id"]["enum"]
+
+    assert section_ids == list(harness_synthesis.STRATEGY_UNIT_IDS)
+    assert "audience_use" in section_ids

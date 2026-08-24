@@ -88,8 +88,6 @@ class PoiGridMetricsRequest(BaseModel):
     poi_coord_type: Literal["gcj02", "wgs84"] = Field(default="gcj02", description="POI coordinate type")
     categories: List[PoiCategoryRequest] = Field(default_factory=list, description="Selected POI categories")
     year: Optional[int] = Field(default=None, description="Optional POI data year")
-    neighbor_ring: int = Field(default=1, ge=1, le=3, description="Shared-grid Moore neighbor ring")
-    arcgis_neighbor_ring: int = Field(default=1, ge=1, le=3, description="ArcGIS ring mapped to shared-grid KNN(8/24/48)")
     arcgis_export_image: bool = Field(default=True, description="Whether to export ArcGIS structure preview image")
     arcgis_timeout_sec: int = Field(default=240, ge=30, le=1800, description="ArcGIS bridge timeout in seconds")
     run_id: Optional[str] = Field(default=None, description="Reserved run id field for frontend parity with H3")
@@ -105,9 +103,15 @@ class PoiGridMetricsGrid(BaseModel):
     features: List[GridFeature] = Field(default_factory=list)
 
 
+class PoiGridMetricsSummary(H3AnalysisSummary):
+    arcgis_image_url: Optional[str] = None
+    arcgis_image_url_gi: Optional[str] = None
+    arcgis_image_url_lisa: Optional[str] = None
+
+
 class PoiGridMetricsResponse(BaseModel):
     grid: PoiGridMetricsGrid
-    summary: H3AnalysisSummary
+    summary: PoiGridMetricsSummary
     charts: H3AnalysisCharts
 
 

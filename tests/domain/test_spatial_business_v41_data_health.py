@@ -345,8 +345,8 @@ def test_nightlight_evidence_keeps_only_brightness_pattern_semantics(monkeypatch
             "summary": {"mean_radiance": 7.5, "valid_pixel_count": 2},
             "analysis": {
                 "core_hotspot_count": 2,
-                "economic_activity_intensity_level": "high",
-                "economic_activity_summary_text": "夜间经济活动很强。",
+                "brightness_context_level": "high",
+                "brightness_context_summary_text": "夜光亮度背景较高。",
                 "sector_direction_analysis": {"dominant_direction": "东"},
             },
             "cells": [],
@@ -371,6 +371,7 @@ def test_nightlight_evidence_keeps_only_brightness_pattern_semantics(monkeypatch
     evidence = next(item for item in analysis.evidence_nodes if item["id"] == "evidence:nightlight:scope-profile")
     nightlight_analysis = evidence["data"]["analysis"]
     assert nightlight_analysis["core_hotspot_count"] == 2
+    assert nightlight_analysis["brightness_context_level"] == "high"
     assert nightlight_analysis["night_brightness_spatial_level"] == "high"
     assert nightlight_analysis["night_brightness_distribution_note"] == "夜间亮度高值相对集中于东方向。"
     assert not any("economic_activity" in key for key in nightlight_analysis)

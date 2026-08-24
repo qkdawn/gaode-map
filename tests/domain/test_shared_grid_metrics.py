@@ -34,33 +34,36 @@ def _grid(size):
     return {"scope_id": f"scope-{size}", "cell_count": len(features), "features": features}
 
 
-def test_shared_grid_neighbor_rings_follow_rectangular_moore_rule(monkeypatch):
+def test_shared_grid_uses_first_order_queen_neighbors(monkeypatch):
     monkeypatch.setattr(spatial_cell_service, "get_population_grid", lambda *args, **kwargs: _grid(7))
 
-    result_ring_1 = spatial_cell_service.analyze_shared_grid(polygon=[], pois=[], neighbor_ring=1)
-    result_ring_2 = spatial_cell_service.analyze_shared_grid(polygon=[], pois=[], neighbor_ring=2)
-    result_ring_3 = spatial_cell_service.analyze_shared_grid(polygon=[], pois=[], neighbor_ring=3)
+    result = spatial_cell_service.analyze_shared_grid(polygon=[], pois=[])
 
-    def _props(result):
-        rows = {
-            item["properties"]["cell_id"]: item["properties"]
-            for item in result["grid"]["features"]
-        }
-        return rows["r3_c3"]
+    rows = {
+        item["properties"]["cell_id"]: item["properties"]
+        for item in result["grid"]["features"]
+    }
 
-    assert _props(result_ring_1)["neighbor_count"] == 8
-    assert _props(result_ring_2)["neighbor_count"] == 24
-    assert _props(result_ring_3)["neighbor_count"] == 48
+    assert rows["r0_c0"]["neighbor_count"] == 3
+    assert rows["r0_c3"]["neighbor_count"] == 5
+    assert rows["r3_c3"]["neighbor_count"] == 8
 
 
 def test_shared_grid_metrics_align_with_h3_shape_and_arcgis_writeback(monkeypatch):
     monkeypatch.setattr(spatial_cell_service, "get_population_grid", lambda *args, **kwargs: _grid(3))
 
     def _fake_arcgis(**kwargs):
-        assert kwargs["knn_neighbors"] == 8
         return {
             "status": "ArcGIS shared grid test double completed",
             "global_moran": {"i": 0.42, "z_score": 2.7},
+            "method": {
+                "input_crs_wkid": 4326,
+                "analysis_crs_wkid": 32649,
+                "conceptualization": "CONTIGUITY_EDGES_CORNERS",
+                "spatial_weights_kind": "QUEEN_CONTIGUITY",
+                "neighbor_order": 1,
+                "neighbor_count_distribution": {"3": 4, "5": 4, "8": 1},
+            },
             "cells": [
                 {"h3_id": "r0_c0", "gi_z_score": 1.5, "lisa_i": 0.11, "lisa_z_score": 0.51},
                 {"h3_id": "r1_c1", "gi_z_score": -0.8, "lisa_i": -0.09, "lisa_z_score": -0.41},
@@ -85,8 +88,6 @@ def test_shared_grid_metrics_align_with_h3_shape_and_arcgis_writeback(monkeypatc
             PoiCategoryRequest(id="food", name="餐饮", types="050000"),
             PoiCategoryRequest(id="retail", name="购物", types="060000"),
         ],
-        neighbor_ring=1,
-        arcgis_neighbor_ring=1,
     )
 
     assert set(result.keys()) == {"grid", "summary", "charts"}
@@ -102,6 +103,14 @@ def test_shared_grid_metrics_align_with_h3_shape_and_arcgis_writeback(monkeypatc
     assert result["summary"]["arcgis_image_url_lisa"] == "https://example.test/shared-lisa.png"
     assert result["summary"]["global_moran_i_density"] == 0.42
     assert result["summary"]["global_moran_z_score"] == 2.7
+    assert result["summary"]["spatial_statistics_method"] == {
+        "input_crs_wkid": 4326,
+        "analysis_crs_wkid": 32649,
+        "conceptualization": "CONTIGUITY_EDGES_CORNERS",
+        "spatial_weights_kind": "QUEEN_CONTIGUITY",
+        "neighbor_order": 1,
+        "neighbor_count_distribution": {"3": 4, "5": 4, "8": 1},
+    }
     assert result["summary"]["gi_render_meta"]["mode"] == "fixed_z"
     assert result["summary"]["lisa_render_meta"]["mode"] == "stddev"
     assert "category_distribution" in result["charts"]

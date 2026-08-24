@@ -383,7 +383,6 @@ function createAnalysisHistoryOrchestratorMethods() {
           cell_id_source: 'population_nightlight_shared_cell_id',
           source: this.normalizePoiSource ? this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local') : String(this.resultDataSource || this.poiDataSource || ''),
           year: Number(this.getPoiRasterGridYear ? this.getPoiRasterGridYear() : (this.poiYearSource || this.resultPoiYear)) || null,
-          neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
         }
         const features = Array.isArray(this.poiGridFeatures) ? this.poiGridFeatures : []
         return buildAnalysisArtifactEnvelope({
@@ -410,7 +409,6 @@ function createAnalysisHistoryOrchestratorMethods() {
         const features = Array.isArray(this.h3AnalysisGridFeatures) ? this.h3AnalysisGridFeatures : []
         const params = {
           resolution: Number(this.h3GridResolution || 0) || 10,
-          neighbor_ring: Number(this.h3NeighborRing || 0) || 1,
           include_mode: String(this.h3GridIncludeMode || 'intersects'),
           min_overlap_ratio: String(this.h3GridIncludeMode || '') === 'intersects' ? Number(this.h3GridMinOverlapRatio || 0) || 0 : 0,
           source: this.normalizePoiSource ? this.normalizePoiSource(this.resultDataSource || this.poiDataSource, 'local') : String(this.resultDataSource || this.poiDataSource || ''),

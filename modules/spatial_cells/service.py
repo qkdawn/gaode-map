@@ -155,21 +155,7 @@ def _shannon_entropy(counts: Dict[str, int]) -> float:
     return float(entropy)
 
 
-def _normalized_ring(value: Any, default: int = 1) -> int:
-    try:
-        ring = int(float(value))
-    except Exception:
-        ring = int(default)
-    return max(1, min(3, ring))
-
-
-def _shared_ring_to_arcgis_knn(value: Any) -> int:
-    ring = _normalized_ring(value, default=1)
-    return {1: 8, 2: 24, 3: 48}.get(ring, 8)
-
-
-def _build_shared_neighbor_map(cells: List[Dict[str, Any]], ring: int) -> Dict[str, List[str]]:
-    normalized_ring = _normalized_ring(ring, default=1)
+def _build_shared_neighbor_map(cells: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     coord_to_id: Dict[Tuple[int, int], str] = {}
     for cell in cells:
         row = int(cell.get("row", -1))
@@ -188,11 +174,9 @@ def _build_shared_neighbor_map(cells: List[Dict[str, Any]], ring: int) -> Dict[s
             neighbor_map[cell_id] = []
             continue
         neighbors: List[str] = []
-        for dr in range(-normalized_ring, normalized_ring + 1):
-            for dc in range(-normalized_ring, normalized_ring + 1):
+        for dr in range(-1, 2):
+            for dc in range(-1, 2):
                 if dr == 0 and dc == 0:
-                    continue
-                if max(abs(dr), abs(dc)) > normalized_ring:
                     continue
                 neighbor_id = coord_to_id.get((row + dr, col + dc))
                 if neighbor_id:
@@ -201,8 +185,8 @@ def _build_shared_neighbor_map(cells: List[Dict[str, Any]], ring: int) -> Dict[s
     return neighbor_map
 
 
-def _compute_shared_neighbor_metrics(cells: List[Dict[str, Any]], neighbor_ring: int) -> Dict[str, List[str]]:
-    neighbor_map = _build_shared_neighbor_map(cells, neighbor_ring)
+def _compute_shared_neighbor_metrics(cells: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    neighbor_map = _build_shared_neighbor_map(cells)
     cell_by_id = {str(cell.get("cell_id") or ""): cell for cell in cells}
     for cell in cells:
         cell_id = str(cell.get("cell_id") or "")
@@ -585,8 +569,6 @@ def analyze_shared_grid(
     poi_coord_type: str = "gcj02",
     categories: List[Any] | None = None,
     year: int | None = None,
-    neighbor_ring: int = 1,
-    arcgis_neighbor_ring: int = 1,
     arcgis_export_image: bool = True,
     arcgis_timeout_sec: int = 240,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -615,7 +597,6 @@ def analyze_shared_grid(
 
     report("aggregate_poi", "正在聚合 POI 到 POI 专项网格", 2, total_steps, {"grid_count": len(cells), "arcgis_enabled": True})
     poi_metrics = apply_poi_cell_metrics(cells, pois or [], poi_coord_type=poi_coord_type, categories=categories)
-    neighbor_ring = _normalized_ring(neighbor_ring, default=1)
     report(
         "compute_metrics",
         "正在计算密度、熵和邻域指标",
@@ -627,16 +608,16 @@ def analyze_shared_grid(
             "arcgis_enabled": True,
         },
     )
-    neighbor_map = _compute_shared_neighbor_metrics(cells, neighbor_ring)
+    neighbor_map = _compute_shared_neighbor_metrics(cells)
     global_moran_i = _compute_shared_global_moran_i(cells, neighbor_map)
     global_moran_z_score: Optional[float] = None
     arcgis_status: Optional[str] = None
+    spatial_statistics_method: Dict[str, Any] = {}
     arcgis_image_url: Optional[str] = None
     arcgis_image_url_gi: Optional[str] = None
     arcgis_image_url_lisa: Optional[str] = None
 
     if _has_density_variance(cells):
-        arcgis_knn = _shared_ring_to_arcgis_knn(arcgis_neighbor_ring or neighbor_ring)
         report(
             "arcgis_prepare",
             "正在准备 ArcGIS 结构分析输入",
@@ -645,7 +626,7 @@ def analyze_shared_grid(
             {
                 "grid_count": len(cells),
                 "poi_count": int(poi_metrics.get("assigned_poi_count") or 0),
-                "arcgis_knn": arcgis_knn,
+                "spatial_weights_kind": "QUEEN_CONTIGUITY",
                 "arcgis_enabled": True,
             },
         )
@@ -664,7 +645,7 @@ def analyze_shared_grid(
             {
                 "grid_count": len(cells),
                 "poi_count": int(poi_metrics.get("assigned_poi_count") or 0),
-                "arcgis_knn": arcgis_knn,
+                "spatial_weights_kind": "QUEEN_CONTIGUITY",
                 "arcgis_enabled": True,
             },
         )
@@ -672,7 +653,6 @@ def analyze_shared_grid(
             arcgis_result = run_h3_arcgis_analysis(
                 features=base_features,
                 stats_by_cell=stats_by_cell,
-                knn_neighbors=arcgis_knn,
                 timeout_sec=arcgis_timeout_sec,
                 export_image=arcgis_export_image,
             )
@@ -689,6 +669,7 @@ def analyze_shared_grid(
             cell["gi_star_value"] = stats.get("gi_star_value")
             cell["gi_star_z_score"] = stats.get("gi_star_z_score")
         arcgis_status = str(arcgis_result.get("status") or "ArcGIS计算完成")
+        spatial_statistics_method = dict(arcgis_result.get("method") or {})
         arcgis_image_url = arcgis_result.get("image_url")
         arcgis_image_url_gi = arcgis_result.get("image_url_gi") or arcgis_image_url
         arcgis_image_url_lisa = arcgis_result.get("image_url_lisa")
@@ -749,6 +730,7 @@ def analyze_shared_grid(
             "global_moran_z_score": global_moran_z_score,
             "analysis_engine": "arcgis",
             "arcgis_status": arcgis_status,
+            "spatial_statistics_method": spatial_statistics_method,
             "arcgis_image_url": arcgis_image_url,
             "arcgis_image_url_gi": arcgis_image_url_gi,
             "arcgis_image_url_lisa": arcgis_image_url_lisa,
@@ -799,7 +781,7 @@ def build_unified_spatial_cells(
         }
 
     poi_metrics = apply_poi_cell_metrics(cells, pois or [], poi_coord_type=poi_coord_type, categories=categories)
-    _compute_shared_neighbor_metrics(cells, 1)
+    _compute_shared_neighbor_metrics(cells)
     population_layer = get_population_layer(polygon, coord_type, population_year, scope_id=grid.get("scope_id"), view="density")
     apply_layer_cell_values(cells, population_layer, "population_density")
     nightlight_layer = get_nightlight_layer(polygon=polygon, coord_type=coord_type, year=nightlight_year, view="radiance")

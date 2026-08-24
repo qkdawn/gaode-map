@@ -39,7 +39,7 @@ def test_client_decision_spatial_strategy_is_owned_by_n8n_service():
     assert "client-decision-spatial-strategy" not in skills
     assert capability.executor_type == "service"
     assert capability.executor_id == "n8n-spatial-strategy"
-    assert capability.display_name == "自适应空间决策分析"
+    assert capability.display_name == "空间策略与行动方案"
     assert capability.estimated_stages == 1
 
 

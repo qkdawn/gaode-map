@@ -70,9 +70,25 @@
           "minItems": 1,
           "maxItems": 20,
           "items": { "type": "string", "pattern": "^spatial:.+" }
+        },
+        "named_poi_roles": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "enum": ["regional_anchor", "comparable_supply", "daily_service"]
+          }
+        },
+        "follow_up_operations": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "enum": ["inspect", "neighborhood"]
+          }
         }
       },
-      "required": ["question", "analysis", "fact_domains", "evidence_dimensions", "finding", "computation_refs"],
+      "required": ["question", "analysis", "fact_domains", "evidence_dimensions", "finding", "computation_refs", "follow_up_operations"],
       "additionalProperties": false
     }
   }

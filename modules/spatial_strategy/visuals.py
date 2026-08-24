@@ -5,7 +5,7 @@ import math
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 from shapely.errors import ShapelyError
@@ -221,6 +221,7 @@ def _save(
     image.save(target, format="PNG", optimize=True)
     return {
         "kind": "image",
+        "section_id": str((design or {}).get("section_id") or ""),
         "title": title,
         "caption": str((design or {}).get("caption") or ""),
         "decision_question": str((design or {}).get("decision_question") or ""),
@@ -610,7 +611,7 @@ def _draw_context_panel(
         draw.rounded_rectangle((1235, y + 2, 1235 + bar_width, y + 17), radius=3, fill=color)
         draw.text((1490, y - 1), f"{count:,}", fill="#475467", font=_font(12))
 
-    draw.text((1080, 578), "重点核验节点", fill="#344054", font=_font(15, bold=True))
+    draw.text((1080, 578), "方案关联节点", fill="#344054", font=_font(15, bold=True))
     for index, record in enumerate(named[:5], start=1):
         y = 615 + (index - 1) * 50
         draw.ellipse((1080, y, 1102, y + 22), fill="#ffffff", outline="#c44b2f", width=2)
@@ -658,49 +659,27 @@ def _poi_color(record: Mapping[str, Any], palette: Mapping[str, str] | None = No
 
 def _named_pois(
     pois: list[dict[str, Any]],
-    bounds: tuple[float, float, float, float],
+    record_refs: Iterable[str],
     *,
     limit: int = 7,
 ) -> list[dict[str, Any]]:
-    center_x = (bounds[0] + bounds[2]) / 2.0
-    center_y = (bounds[1] + bounds[3]) / 2.0
-    longitude_scale = max(0.01, math.cos(math.radians(center_y)))
-    preferred = {"科教文化服务", "风景名胜", "医疗保健服务", "政府机构及社会团体", "交通设施服务"}
-    strategic_terms = ("文化馆", "博物馆", "文物", "考古", "古开福寺", "开福寺文化", "文化长廊", "文化服务中心", "综合文化")
-    public_terms = ("公园", "广场", "社区", "公共服务中心", "医院", "地铁站", "公交站", "研究所", "图书馆")
-    excluded_terms = (
-        "停车", "车场", "出入口", "入口", "出口", "充电", "卫生间", "酒店", "植发", "医美", "美容",
-        "口腔", "自习室", "钢琴", "培训", "早教", "餐厅", "饭", "咖啡", "火锅", "寿司",
-    )
-    ranked = []
-    for record in pois:
-        point = _record_point(record)
-        name = str(record.get("name") or "").strip()
-        category = str(record.get("category") or "")
-        if point is None or not name or category not in preferred or any(term in name for term in excluded_terms):
-            continue
-        distance = ((point[0] - center_x) * longitude_scale) ** 2 + (point[1] - center_y) ** 2
-        priority = 0 if any(term in name for term in strategic_terms) else (1 if any(term in name for term in public_terms) else 2)
-        ranked.append((priority, distance, name, record))
-    seen = set()
+    by_ref = {
+        str(record.get("record_ref") or f"current:dataset:poi/{record.get('poi_id') or ''}"): record
+        for record in pois
+        if _record_point(record) is not None and str(record.get("name") or "").strip()
+    }
     selected = []
-    selected_points: list[tuple[float, float]] = []
-    minimum_separation = 0.00055
-    for _, _, name, record in sorted(ranked, key=lambda item: (item[0], item[1], item[2])):
-        if name in seen:
+    seen: set[str] = set()
+    for raw_ref in record_refs:
+        record_ref = str(raw_ref or "").strip()
+        record = by_ref.get(record_ref)
+        if record is None:
             continue
-        point = _record_point(record)
-        if point is None:
+        identity = str(record.get("poi_id") or record_ref)
+        if identity in seen:
             continue
-        if any(
-            ((point[0] - other[0]) * longitude_scale) ** 2 + (point[1] - other[1]) ** 2
-            < minimum_separation**2
-            for other in selected_points
-        ):
-            continue
-        seen.add(name)
+        seen.add(identity)
         selected.append(record)
-        selected_points.append(point)
         if len(selected) >= limit:
             break
     return selected
@@ -861,7 +840,15 @@ def _evidence_map_asset(
             color = _mix_color(color, "#ffffff", 0.25)
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color, outline="#ffffff" if radius == 3 else color)
 
-    named = _named_pois(pois, bounds)
+    named = _named_pois(pois, spec.get("named_record_refs") or [])
+    requested_named_refs = list(spec.get("named_record_refs") or [])
+    if requested_named_refs and len(named) != len(set(requested_named_refs)):
+        found_refs = {
+            str(item.get("record_ref") or f"current:dataset:poi/{item.get('poi_id') or ''}")
+            for item in named
+        }
+        missing = [record_ref for record_ref in requested_named_refs if record_ref not in found_refs]
+        raise ValueError("visual_named_record_refs_not_found:" + ",".join(missing))
     poi_counts = Counter(str(record.get("category") or "其他") for record in pois)
     if variant in {"poi_access", "context_full"}:
         for node_index, record in enumerate(named[:5], start=1):
@@ -875,7 +862,7 @@ def _evidence_map_asset(
         lines = [
             ("道路与设施", f"路网 {len(roads):,} 条 · POI {len(pois):,} 个"),
             ("主要供给", " · ".join(f"{name.replace('服务', '')} {count}" for name, count in poi_counts.most_common(3))),
-            ("近中心具名节点", " / ".join(f"{index}.{str(item.get('name') or '')[:11]}" for index, item in enumerate(named[:4], 1))),
+            ("方案关联节点", " / ".join(f"{index}.{str(item.get('name') or '')[:11]}" for index, item in enumerate(named[:4], 1))),
             ("具名道路", " / ".join(_road_name(record)[:12] for record, _ in named_roads[:4])),
             ("决策含义", "完整路网用于判断连接关系；项目应改善连接与识别，而非复制普通商业。"),
         ]
@@ -886,7 +873,7 @@ def _evidence_map_asset(
         lines = [
             ("人口底盘", f"常住人口代理 {population_total:,.0f} · 格网 {len(population):,}"),
             ("文化与公共节点", f"科教文化/风景名胜 {cultural_count:,} 个"),
-            ("近中心具名节点", " / ".join(f"{index}.{str(item.get('name') or '')[:11]}" for index, item in enumerate(named[:4], 1))),
+            ("方案关联节点", " / ".join(f"{index}.{str(item.get('name') or '')[:11]}" for index, item in enumerate(named[:4], 1))),
             ("决策含义", "区域角色应以社区高频使用为底盘，以文化节点协作为增量。"),
         ]
         note = "人口与公共设施关系用于选择日常服务对象、主要导入方向和文化协作节点。"
@@ -1018,6 +1005,7 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
     plans: list[dict[str, Any]] = []
     if data.get("road_edges") and data.get("poi"):
         plans.append({
+            "section_id": "regional_role",
             "format": "map", "map_variant": "context_full", "title": "区域道路与设施关系",
             "rationale": "识别项目与区域道路、公共文化和交通节点的关系",
             "decision_question": "项目应承担什么区域角色并改善哪些连接",
@@ -1026,6 +1014,7 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
         })
     if data.get("poi"):
         plans.append({
+            "section_id": "supply_gap",
             "format": "chart", "chart_variant": "poi_supply", "title": "周边设施供给结构",
             "rationale": "比较常规消费与文化公共设施的供给结构",
             "decision_question": "项目应补哪类供给而不是重复已有商业",
@@ -1034,10 +1023,11 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
         })
     if data.get("population"):
         plans.append({
+            "section_id": "audience_use",
             "format": "chart", "chart_variant": "population_profile", "title": "重点年龄人口结构",
-            "rationale": "比较研学、家庭和社区日常使用的人口基础",
-            "decision_question": "首期公共产品应优先服务哪些日常客群",
-            "caption": "重点年龄段人口结构支持把社区日常使用、家庭活动和组织化文化活动配置到不同时段。",
+            "rationale": "展示当前范围人口底盘，推导分年龄客群的行为、时段和付费假设及验证设计",
+            "decision_question": "年龄结构支持提出哪些客群使用与付费假设",
+            "caption": "年龄结构用于推导行为、使用时段和付费意愿假设；这些是假设而非已观测事实，需通过访谈、预约、到场和价格测试验证。",
             "dataset_id": "population",
         })
     if data.get("nightlight") and len(plans) < 5:
@@ -1045,6 +1035,7 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
         if data.get("road_edges"):
             layers.insert(0, {"dataset_id": "road_edges", "role": "line"})
         plans.append({
+            "section_id": "investment_operation",
             "format": "map", "title": "夜间活动背景与道路骨架",
             "rationale": "识别夜光热点、衰减边界和道路关系",
             "decision_question": "项目是否具备延时开放条件以及夜间产品边界",
@@ -1053,6 +1044,7 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
         })
     if data.get("road_edges") and len(plans) < 3:
         plans.append({
+            "section_id": "spatial_layout",
             "format": "map", "title": "道路层级与连接骨架",
             "rationale": "识别主要道路层级与内部连接关系",
             "decision_question": "步行接驳和入口识别应优先改善哪些连接",
@@ -1063,6 +1055,11 @@ def _plan_defaults(data: Mapping[str, list[dict[str, Any]]]) -> list[dict[str, A
 
 
 def _validate_plan_quality(plan: list[dict[str, Any]], data: Mapping[str, list[dict[str, Any]]]) -> None:
+    section_ids = {
+        "project_basis", "regional_role", "supply_gap", "audience_use",
+        "theme_resources", "positioning", "product_mix", "spatial_layout",
+        "operating_model", "investment_operation", "phasing",
+    }
     if not 3 <= len(plan) <= 5:
         raise ValueError("visual_plan_requires_three_to_five_items")
     titles: set[str] = set()
@@ -1071,6 +1068,8 @@ def _validate_plan_quality(plan: list[dict[str, Any]], data: Mapping[str, list[d
     population_map_count = 0
     specialized_context_count = 0
     for item in plan:
+        if str(item.get("section_id") or "") not in section_ids:
+            raise ValueError("visual_plan_section_invalid")
         title = str(item.get("title") or "").strip()
         rationale = str(item.get("rationale") or "").strip()
         decision_question = str(item.get("decision_question") or "").strip()
@@ -1180,9 +1179,21 @@ def _normalize_plan(
             map_variant = ""
         if chart_variant not in {"", "poi_supply", "population_profile"}:
             raise ValueError(f"visual_chart_variant_invalid:{chart_variant}")
+        named_record_refs = [
+            str(value).strip()
+            for value in raw.get("named_record_refs") or []
+            if str(value).strip()
+        ]
+        if any(not value.startswith("current:dataset:poi/") for value in named_record_refs):
+            raise ValueError("visual_named_record_ref_invalid")
+        if named_record_refs and (
+            visual_format != "map" or not any(layer["dataset_id"] == "poi" for layer in layers)
+        ):
+            raise ValueError("visual_named_record_refs_require_poi_map")
         normalized.append(
             {
                 "format": visual_format,
+                "section_id": str(raw.get("section_id") or "").strip(),
                 "title": title,
                 "rationale": str(raw.get("rationale") or "").strip(),
                 "decision_question": str(raw.get("decision_question") or "").strip(),
@@ -1194,6 +1205,7 @@ def _normalize_plan(
                 "group_by": group_by,
                 "metric_op": metric_op,
                 "metric_field": metric_field,
+                "named_record_refs": list(dict.fromkeys(named_record_refs))[:12],
             }
         )
     _validate_plan_quality(normalized, data)
@@ -1519,11 +1531,21 @@ def _population_profile_chart_asset(
     records = data.get("population", [])
     if not records:
         return None
+
+    def age_sum(bands: Sequence[str]) -> float:
+        return sum(
+            _number(value) or 0.0
+            for item in records
+            for band in bands
+            for age_totals in [item.get("age_total")]
+            for value in [age_totals.get(band) if isinstance(age_totals, Mapping) else None]
+        )
+
     totals = {
         "总人口": sum(_number(item.get("population_total")) or 0.0 for item in records),
-        "5–19岁": sum(_number(item.get("age_5_19")) or 0.0 for item in records),
-        "30–39岁": sum(_number(item.get("age_30_39")) or 0.0 for item in records),
-        "50–64岁": sum(_number(item.get("age_50_64")) or 0.0 for item in records),
+        "5–19岁": age_sum(("05", "10", "15")),
+        "30–39岁": age_sum(("30", "35")),
+        "50–64岁": age_sum(("50", "55", "60")),
     }
     total = totals["总人口"]
     share_total = total or 1.0
@@ -1545,26 +1567,33 @@ def _population_profile_chart_asset(
         draw.rounded_rectangle((_PADDING, y + 72, _PADDING + width, y + 112), radius=4, fill=color)
 
     lines = [
-        ("青少年使用", "5–19岁支持研学、亲子学习与学校合作测试。"),
-        ("成年复访", "30–39岁支持公共课程、家庭活动和内容消费测试。"),
-        ("社区日常", "50–64岁支持社区课程、银龄活动与志愿参与测试。"),
-        ("决策含义", "首期产品应覆盖多时段公共使用，而非押注单一游客客群。"),
+        ("5–19岁", "课后、周末和研学陪伴假设；以家庭访谈和报名测试验证。"),
+        ("30–39岁", "亲子协同、下班后或周末使用及内容付费假设；以时段预约和价格测试验证。"),
+        ("50–64岁", "工作日白天、社区文化活动和低门槛付费假设；以社群招募和试运营验证。"),
+        ("使用边界", "年龄结构支持初步推导，结论由真实报名、到场和支付行为更新。"),
     ]
     _draw_panel(
         draw,
-        title="人口底盘如何改变产品",
+        title="从人口结构到客群假设",
         lines=lines,
-        note="年龄人口是常住人口代理，不等同项目客群、实际到访、付费意愿或收入。",
+        note="年龄人口是常住人口代理；行为、时段和付费判断均为待验证假设，不是已观测事实。",
         top=125,
         bottom=820,
     )
+    safe_caption = "年龄结构用于推导行为、使用时段和付费意愿假设；这些是假设而非已观测事实，需通过访谈、预约、到场和价格测试验证。"
     return _save(
         image,
         directory,
         _filename(index, "chart", str(spec["title"])),
         str(spec["title"]),
         source_datasets=_source_manifest(data, ["population"]),
-        design={**dict(spec), "values": totals, "unit": "person", "interpretation": "resident_population_proxy"},
+        design={
+            **dict(spec),
+            "caption": safe_caption,
+            "values": totals,
+            "unit": "person",
+            "interpretation": "audience_behavior_hypotheses",
+        },
     )
 
 
@@ -1622,6 +1651,7 @@ def _table_asset(spec: Mapping[str, Any], data: Mapping[str, list[dict[str, Any]
         sources = list(data)
     return {
         "kind": "table",
+        "section_id": str(spec.get("section_id") or ""),
         "title": str(spec["title"]),
         "markdown": "\n".join(lines),
         "source_datasets": _source_manifest(data, sources),
@@ -1651,6 +1681,7 @@ def build_spatial_strategy_visuals(
     directory.mkdir(parents=True, exist_ok=True)
     data: dict[str, list[dict[str, Any]]] = {}
     warnings: list[str] = []
+    declared_datasets = bool((project_context or {}).get("datasets"))
     for dataset_id in _available_dataset_ids(project_context):
         try:
             # Rendering reads the project's complete stored record set; it never uses paged API results.
@@ -1658,22 +1689,20 @@ def build_spatial_strategy_visuals(
         except (LookupError, ValueError, SQLAlchemyError) as exc:
             warnings.append(f"{dataset_id}:{exc}")
 
+    if declared_datasets and warnings:
+        raise ValueError("visual_source_records_unavailable:" + ";".join(warnings))
+
     filtered_plan, dropped_count = _drop_empty_visual_placeholders(visual_plan)
     if dropped_count:
         warnings.append(f"visual_plan_items_dropped:{dropped_count}")
     if not data:
-        # A report can still be delivered with chapter evidence when the optional
-        # full-record rendering source is temporarily unavailable.
-        warnings.append("visual_render_skipped:no_dataset_records_available")
-        plan = []
-    else:
-        try:
-            plan = _normalize_plan(filtered_plan, data)
-        except ValueError as exc:
-            # A malformed model plan is recoverable: retain the report and use
-            # deterministic plans derived from the datasets actually available.
-            warnings.append(f"visual_plan_replaced:{exc}")
-            plan = _normalize_plan(_plan_defaults(data), data)
+        raise ValueError("visual_source_records_unavailable:no_dataset_records_available")
+    try:
+        plan = _normalize_plan(filtered_plan, data)
+    except ValueError as exc:
+        # Model layout choices can be replaced, but data access failures above cannot.
+        warnings.append(f"visual_plan_replaced:{exc}")
+        plan = _normalize_plan(_plan_defaults(data), data)
     assets = []
     for index, spec in enumerate(plan, start=1):
         visual_format = spec["format"]

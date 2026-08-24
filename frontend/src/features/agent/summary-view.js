@@ -6,20 +6,10 @@ import {
   cloneObject,
   consumeSseStream,
   createAgentSessionRecord,
-  hasAgentMessageProcessContent,
-  normalizeAgentMessageProcess,
   normalizeAgentPanelPreloadNotes,
   normalizeAgentToolSummary,
   sortAgentSessions,
 } from './normalizers.js'
-import {
-  buildAgentPlanChecklist,
-  buildAgentToolCallItems,
-  hasAgentExecutionTraceContent,
-  hasAgentPlanContent,
-  shouldShowAgentProcessLiveStatus,
-  shouldShowAgentProcessToggle,
-} from './derived.js'
 import {
   buildAnalysisTaskConfirmation,
   cloneAnalysisTaskConfirmation,
@@ -114,7 +104,7 @@ export function createAgentSummaryViewMethods() {
       const sectionOrder = [
         ['spatial_structure', '空间结构'],
         ['poi_structure', 'POI结构'],
-        ['consumption_vitality', '经济活动强度'],
+        ['consumption_vitality', '夜间亮度背景'],
         ['business_support', '业态承接'],
       ]
       const mapped = sectionOrder.map(([sectionKey, fallbackTitle]) => {
@@ -248,7 +238,7 @@ export function createAgentSummaryViewMethods() {
         road_syntax: '路网与可达性分析',
         poi_structure: 'POI结构分析',
         spatial_structure: '空间结构分析',
-        area_labels: '区域标签推断',
+        area_facts: '区域空间事实',
       }
       return mapping[key] || key || '-'
     },
@@ -273,7 +263,7 @@ export function createAgentSummaryViewMethods() {
         road_syntax: ['road_syntax'],
         poi_structure: ['poi_h3_grid'],
         spatial_structure: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'],
-        area_labels: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'],
+        area_facts: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'],
       }
       return cloneArray(mapping[key] || [])
     },
@@ -1073,13 +1063,7 @@ export function createAgentSummaryViewMethods() {
         historyId: this.getCurrentAgentHistoryId(),
         panelKind: 'commercial_summary',
         status: 'idle',
-        stage: 'gating',
-        output: {
-          panelPayloads: payloads,
-        },
-        diagnostics: { executionTrace: [], usedTools: [], citations: [], researchNotes: [], auditIssues: [], thinkingTimeline: [], error: '' },
-        contextSummary: {},
-        plan: { steps: [], summary: '' },
+        panelPayloads: payloads,
         persisted: false,
         snapshotLoaded: true,
         titleSource: 'fallback',
@@ -1089,13 +1073,6 @@ export function createAgentSummaryViewMethods() {
       this.agentWorkspaceView = 'report'
       this.agentInput = ''
       this.agentStatus = 'idle'
-      this.agentStage = 'gating'
-      this.agentAnswer = ''
-      this.agentExecutionTrace = []
-      this.agentUsedTools = []
-      this.agentCitations = []
-      this.agentResearchNotes = []
-      this.agentAuditIssues = []
       this.agentMessages = []
       this.agentPanelPayloads = payloads
       this.agentSummaryReadiness = readiness
@@ -1237,7 +1214,7 @@ export function createAgentSummaryViewMethods() {
         { key: 'tags', title: '商业类型标签（ICSC）', layout: 'tags', taskKeys: ['poi_h3_grid'] },
         { key: 'spatial_structure', title: '空间结构', layout: 'panel', taskKeys: ['poi_h3_grid', 'population', 'nightlight', 'road_syntax'] },
         { key: 'poi_structure', title: 'POI结构', layout: 'panel', taskKeys: ['poi_h3_grid'] },
-        { key: 'consumption_vitality', title: '经济活动强度', layout: 'panel', taskKeys: ['nightlight'] },
+        { key: 'consumption_vitality', title: '夜间亮度背景', layout: 'panel', taskKeys: ['nightlight'] },
         { key: 'business_support', title: '业态承接', layout: 'panel', taskKeys: ['poi_h3_grid', 'road_syntax'] },
         { key: 'user_profile', title: '用户画像', layout: 'list', taskKeys: ['population'] },
         { key: 'behavior', title: '商业行为推断', layout: 'list', taskKeys: ['nightlight', 'road_syntax'] },
@@ -1539,21 +1516,8 @@ export function createAgentSummaryViewMethods() {
           historyId: this.getCurrentAgentHistoryId(),
           panelKind: 'commercial_summary',
           status: 'answered',
-          stage: 'answered',
-          input: '',
           messages: [],
-          answer: '',
-          executionTrace: this.agentExecutionTrace,
-          usedTools: this.agentUsedTools,
-          citations: this.agentCitations,
-          researchNotes: this.agentResearchNotes,
-          auditIssues: this.agentAuditIssues,
-          clarificationQuestion: '',
-          clarificationOptions: [],
-          riskPrompt: '',
           error: '',
-          contextSummary: this.agentContextSummary,
-          plan: this.agentPlan,
           panelPayloads: this.agentPanelPayloads,
           persisted: true,
           snapshotLoaded: true,
@@ -1564,22 +1528,12 @@ export function createAgentSummaryViewMethods() {
           { loaded: this.agentSessionsLoaded },
         )
         this.applyAgentSessionSnapshot(summarySession)
-        const synced = this.syncCurrentAgentSession({
-          persisted: true,
+        this.syncCurrentAgentSession({
+          persisted: false,
           status: 'answered',
           historyId: this.getCurrentAgentHistoryId(),
           panelKind: 'commercial_summary',
         })
-        const sessionId = asText((synced && synced.id) || summarySession.id)
-        if (sessionId) {
-          await this.putAgentSession(sessionId, {
-            status: 'answered',
-            persisted: true,
-            historyId: this.getCurrentAgentHistoryId(),
-            panelKind: 'commercial_summary',
-          })
-        }
-        await this.loadAgentSessionSummaries(true)
       } catch (err) {
         const message = err && err.message ? err.message : String(err)
         this.agentSummaryError = message

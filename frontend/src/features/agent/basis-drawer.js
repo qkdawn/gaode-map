@@ -5,21 +5,10 @@ import {
   cloneAgentSessionRecord,
   cloneObject,
   consumeSseStream,
-  createAgentSessionRecord,
-  hasAgentMessageProcessContent,
-  normalizeAgentMessageProcess,
   normalizeAgentPanelPreloadNotes,
   normalizeAgentToolSummary,
   sortAgentSessions,
 } from './normalizers.js'
-import {
-  buildAgentPlanChecklist,
-  buildAgentToolCallItems,
-  hasAgentExecutionTraceContent,
-  hasAgentPlanContent,
-  shouldShowAgentProcessLiveStatus,
-  shouldShowAgentProcessToggle,
-} from './derived.js'
 import {
   buildAnalysisTaskConfirmation,
   cloneAnalysisTaskConfirmation,
@@ -91,7 +80,7 @@ export function createAgentBasisDrawerMethods() {
       const source = payload && typeof payload === 'object' ? payload : {}
       const sourceType = asText(source.sourceType || source.source_type || 'rule')
       const defaultPrompt = sourceType === 'rule'
-        ? '该结论由规则模板生成，未调用 AI'
+        ? ''
         : '当前结果没有可追溯的 AI prompt。'
       return {
         title: asText(source.title) || '生成依据',
@@ -346,7 +335,7 @@ export function createAgentBasisDrawerMethods() {
         || this.roadSyntaxSummary
         || {},
       )
-      const areaLabels = cloneObject(payloads.current_area_character_labels || {})
+      const areaFacts = cloneObject(payloads.current_area_character_facts || {})
       return {
         task: 'summary_pack_generation',
         evidence_version: 'summary_pack_v1',
@@ -385,14 +374,13 @@ export function createAgentBasisDrawerMethods() {
           dominant_age_band: populationProfile.dominant_age_band,
         },
         nightlight_pattern: {
-          summary_text: nightlightPattern.summary_text || nightlightSummary.summary_text,
-          economic_activity_summary_text: nightlightPattern.economic_activity_summary_text || nightlightSummary.economic_activity_summary_text,
-          economic_activity_intensity_level: nightlightPattern.economic_activity_intensity_level || nightlightSummary.economic_activity_intensity_level,
           total_radiance: nightlightPattern.total_radiance ?? nightlightSummary.total_radiance,
           mean_radiance: nightlightPattern.mean_radiance ?? nightlightSummary.mean_radiance,
           p90_radiance: nightlightPattern.p90_radiance ?? nightlightSummary.p90_radiance,
+          peak_radiance: nightlightPattern.peak_radiance ?? nightlightSummary.peak_radiance,
           lit_pixel_ratio: nightlightPattern.lit_pixel_ratio ?? nightlightSummary.lit_pixel_ratio,
-          core_hotspot_count: nightlightPattern.core_hotspot_count ?? nightlightSummary.core_hotspot_count,
+          valid_pixel_count: nightlightPattern.valid_pixel_count ?? nightlightSummary.valid_pixel_count,
+          peak_to_edge_ratio: nightlightPattern.peak_to_edge_ratio ?? nightlightSummary.peak_to_edge_ratio,
           sector_direction_analysis: cloneObject(nightlightPattern.sector_direction_analysis || nightlightSummary.sector_direction_analysis || {}),
         },
         road_pattern: {
@@ -402,14 +390,7 @@ export function createAgentBasisDrawerMethods() {
           readability_signal: roadPattern.readability_signal || roadSummary.readability_signal,
           road_orientation_analysis: cloneObject(roadPattern.road_orientation_analysis || roadSummary.road_orientation_analysis || {}),
         },
-        area_labels: cloneArray(areaLabels.character_tags || areaLabels.area_labels || []),
-        guardrails: {
-          write_business_judgment_not_data_description: true,
-          no_raw_metric_recital_as_headline: true,
-          user_profile_must_describe_people: true,
-          behavior_inference_must_describe_usage: true,
-          no_invented_facts: true,
-        },
+        area_facts: areaFacts,
       }
     },
     getAgentSummarySectionPrompt(sectionKey = '') {
@@ -467,16 +448,16 @@ export function createAgentBasisDrawerMethods() {
       if (key === 'headline' || key === 'consumption_vitality' || key === 'behavior_inference' || key === 'business_support' || key === 'tourism_cross_analysis') {
         const nightlight = evidence.nightlight_pattern || {}
         const road = evidence.road_pattern || {}
-        this.appendBasisField(fields, 'economic_activity_intensity_level', '经济活动强度等级', nightlight.economic_activity_intensity_level)
         this.appendBasisField(fields, 'total_radiance', '总辐亮', nightlight.total_radiance)
         this.appendBasisField(fields, 'mean_radiance', '平均辐亮', nightlight.mean_radiance)
         this.appendBasisField(fields, 'p90_radiance', 'P90 辐亮', nightlight.p90_radiance)
         this.appendBasisField(fields, 'lit_pixel_ratio', '点亮占比', nightlight.lit_pixel_ratio)
+        this.appendBasisField(fields, 'peak_to_edge_ratio', '峰值边缘比', nightlight.peak_to_edge_ratio)
         this.appendBasisField(fields, 'sector_direction_analysis', '夜光扇区方位', nightlight.sector_direction_analysis)
         this.appendBasisField(fields, 'road_orientation_analysis', '路网方位', this.summarizeRoadOrientationAnalysis(road.road_orientation_analysis))
         this.appendBasisField(fields, 'road_pattern_summary', '路网摘要', road.summary_text)
       }
-      this.appendBasisField(fields, 'area_labels', '区域标签', evidence.area_labels)
+      this.appendBasisField(fields, 'area_facts', '区域空间事实', evidence.area_facts)
       return fields.filter((field) => this.hasBasisFieldValue(field.value))
     },
     buildAgentSummaryBasisPayload(item = null) {
@@ -494,20 +475,8 @@ export function createAgentBasisDrawerMethods() {
         title: `${asText(section.title) || '区域总结'}依据`,
         currentConclusion: asText(section.reasoning),
         fields,
-        rules: key === 'consumption_vitality'
-          ? [
-            '夜光作为等时圈内夜间经济活动和建成活动强度的代理变量。',
-            '强弱主要参考 total_radiance、mean_radiance、p90_radiance、lit_pixel_ratio、热点核心数量与峰值边缘比。',
-            '空间表述优先使用 8 扇区夜光统计；道路表述使用长度加权路网方位。',
-            '比较夜光高值方位与路网主导/次主导方位，形成一致、部分一致或不一致判断。',
-          ]
-          : [
-            '区域总结由后端汇总当前已完成的结构化分析结果生成。',
-            '结论会经过后端字段校验与敏感推断改写，避免超出已有证据。',
-          ],
-        template: key === 'consumption_vitality'
-          ? '从空间分布来看，等时圈内夜间经济活动整体处于{强度水平}，高值区域主要集中在{夜光高值方向/区域}。区域道路以{主导路网走向}为主，{次主导路网走向}为辅。两者在空间上呈现{一致性关系}，表明交通对经济活动分布具有{影响程度}。'
-          : '根据{面板结构化字段}生成{结论标题}，并将主要证据压缩为一段可汇报文字。',
+        rules: [],
+        template: '',
         aiPrompt: promptDisplay.aiPrompt,
         aiPromptPayloadNote: promptDisplay.aiPromptPayloadNote,
         outputSchema: promptDisplay.outputSchema,
@@ -529,28 +498,24 @@ export function createAgentBasisDrawerMethods() {
       const summary = cloneObject((this.nightlightOverview && this.nightlightOverview.summary) || (this.nightlightLayer && this.nightlightLayer.summary) || {})
       const analysis = cloneObject((this.nightlightLayer && this.nightlightLayer.analysis) || {})
       const summaryRows = typeof this.getNightlightSummaryRows === 'function' ? this.getNightlightSummaryRows() : []
+      const sector = cloneObject(analysis.sector_direction_analysis || summary.sector_direction_analysis || {})
       const conclusion = asText(
-        analysis.economic_activity_summary_text
-        || summary.economic_activity_summary_text
-        || '基于夜间灯光亮度，展示等时圈内夜间经济活动强度、热点集中度与空间梯度。',
+        `mean_radiance=${analysis.mean_radiance ?? summary.mean_radiance ?? '-'}; `
+        + `lit_pixel_ratio=${analysis.lit_pixel_ratio ?? summary.lit_pixel_ratio ?? '-'}; `
+        + `dominant_direction=${sector.dominant_direction || '-'}.`,
       )
       return {
         title: '夜光分析指标说明',
         currentConclusion: conclusion,
         fields: [
           ...summaryRows.map((row) => ({ key: row.key, label: row.label, value: row.value })),
-          { key: 'economic_activity_intensity_level', label: '经济活动强度等级', value: analysis.economic_activity_intensity_level || summary.economic_activity_intensity_level },
-          { key: 'sector_direction_analysis', label: '扇区方位统计', value: analysis.sector_direction_analysis || summary.sector_direction_analysis },
-          { key: 'core_hotspot_count', label: '热点核心数量', value: analysis.core_hotspot_count },
+          { key: 'p90_radiance', label: '夜光 P90', value: analysis.p90_radiance ?? summary.p90_radiance },
+          { key: 'sector_direction_analysis', label: '扇区方位数值', value: sector },
           { key: 'peak_to_edge_ratio', label: '峰值边缘比', value: analysis.peak_to_edge_ratio },
         ],
-        rules: [
-          '夜光只作为夜间经济活动与建成活动强度代理，不推断白天消费、客流、营业额或消费能力。',
-          '强度等级由总辐亮、均值、P90、点亮占比、热点数量和空间梯度共同判断。',
-          '扇形方位按等时圈中心划分 8 个方向，统计各方向总辐亮、均值、热点数量和占比。',
-        ],
-        template: '基于夜间灯光亮度，等时圈内经济活动强度呈现{强度水平}，高值区域主要集中在{主要方位}，热点集中度为{集中度描述}。',
-        aiPrompt: '未调用 AI。该抽屉展示夜光算法指标说明：总辐亮、均值、P90、点亮占比、热点核心、峰值边缘比与 8 扇区方位统计均来自前端/后端结构化计算结果。',
+        rules: [],
+        template: '',
+        aiPrompt: '',
         rawInput: {
           summary,
           analysis,
@@ -563,8 +528,8 @@ export function createAgentBasisDrawerMethods() {
       const summary = cloneObject(this.roadSyntaxSummary || {})
       const orientation = cloneObject(summary.road_orientation_analysis || {})
       return {
-        title: '路网分析指标说明',
-        currentConclusion: '按当前等时圈内路网结构展示道路规模、空间句法指标与长度加权道路方位。',
+        title: '路网分析数据',
+        currentConclusion: '',
         fields: [
           { key: 'node_count', label: '节点数量', value: summary.node_count },
           { key: 'edge_count', label: '边数量', value: summary.edge_count },
@@ -573,13 +538,9 @@ export function createAgentBasisDrawerMethods() {
           { key: 'metric', label: '当前指标', value: this.roadSyntaxMetric || this.roadSyntaxLastMetricTab },
           { key: 'radius', label: '分析半径', value: this.roadSyntaxRadius },
         ],
-        rules: [
-          '路网方位从 LineString 几何计算道路段方向，并按道路长度加权。',
-          '轴向归类为东西向、南北向、东北-西南向、西北-东南向。',
-          '长度占比最高的是主导方位，第二高的是次主导方位，用于和夜光高值方向做空间一致性对照。',
-        ],
-        template: '区域道路以{主导路网走向}为主，{次主导路网走向}为辅；与夜光高值方向呈现{一致性关系}。',
-        aiPrompt: '未调用 AI。该抽屉展示路网算法指标说明：节点、边、道路长度、空间句法指标与长度加权道路方位均来自结构化计算结果。',
+        rules: [],
+        template: '',
+        aiPrompt: '',
         rawInput: {
           summary,
           diagnostics: {

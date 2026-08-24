@@ -480,7 +480,6 @@ function buildAgentAnalysisSnapshot(ctx = {}) {
     current_filters: {
       poi_source: ctx.poiDataSource || '',
       h3_resolution: Number(ctx.h3GridResolution || 0) || 0,
-      h3_neighbor_ring: Number(ctx.h3NeighborRing || 0) || 0,
       road_metric: String(ctx.roadSyntaxMetric || ''),
       population_view: String(ctx.populationAnalysisView || ''),
       nightlight_view: String(ctx.nightlightAnalysisView || ''),

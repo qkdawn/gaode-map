@@ -333,8 +333,7 @@ def _build_metrics(
         ("mean_radiance", "夜光均值", "", _first_number(night_summary.get("mean_radiance"), night_summary.get("mean")), "nightlight.summary.mean_radiance"),
         ("max_radiance", "夜光峰值", "", _first_number(night_summary.get("max_radiance"), night_summary.get("max")), "nightlight.summary.max_radiance"),
         ("lit_pixel_ratio", "亮光像元占比", "%", night_summary.get("lit_pixel_ratio"), "nightlight.summary.lit_pixel_ratio"),
-        ("core_hotspot_count", "核心热点数", "个", night_summary.get("core_hotspot_count"), "nightlightLayer.analysis.core_hotspot_count"),
-        ("hotspot_cell_ratio", "热点格占比", "%", night_summary.get("hotspot_cell_ratio"), "nightlightLayer.analysis.hotspot_cell_ratio"),
+        ("p90_radiance", "夜光 P90", "", night_summary.get("p90_radiance"), "nightlightLayer.analysis.p90_radiance"),
         ("peak_to_edge_ratio", "峰边比", "", night_summary.get("peak_to_edge_ratio"), "nightlightLayer.analysis.peak_to_edge_ratio"),
         ("gradient_decay", "梯度/衰减类指标", "", night_summary.get("peak_to_edge_ratio"), "nightlightLayer.analysis.peak_to_edge_ratio"),
     )

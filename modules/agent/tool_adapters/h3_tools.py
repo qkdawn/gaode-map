@@ -71,11 +71,7 @@ async def compute_h3_metrics_from_scope_and_pois(
         min_overlap_ratio=float(arguments.get("min_overlap_ratio") or 0.0),
         pois=pois,
         poi_coord_type="gcj02",
-        neighbor_ring=int(arguments.get("neighbor_ring") or 1),
         use_arcgis=False,
-        arcgis_neighbor_ring=1,
-        arcgis_knn_neighbors=None,
-        arcgis_export_image=False,
         arcgis_timeout_sec=240,
     )
     summary = result.get("summary") or {}

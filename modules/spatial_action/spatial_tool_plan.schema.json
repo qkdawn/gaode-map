@@ -76,9 +76,38 @@
             "type": "array",
             "maxItems": 20,
             "items": { "type": "string", "minLength": 1 }
+          },
+          "named_poi_roles": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "string",
+              "enum": ["regional_anchor", "comparable_supply", "daily_service"]
+            }
+          },
+          "follow_up_operations": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "string",
+              "enum": ["inspect", "neighborhood"]
+            }
           }
         },
-        "required": ["question", "analysis", "fact_domains", "evidence_dimensions"],
+        "required": [
+          "question",
+          "analysis",
+          "fact_domains",
+          "evidence_dimensions",
+          "selectors",
+          "travel_time_bands_min",
+          "neighbor_steps",
+          "rank_order",
+          "top_k",
+          "record_refs",
+          "named_poi_roles",
+          "follow_up_operations"
+        ],
         "additionalProperties": false
       }
     }

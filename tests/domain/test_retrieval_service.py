@@ -52,7 +52,7 @@ def _snapshot() -> AnalysisSnapshot:
                 "analysis": {
                     "core_hotspot_count": 4,
                     "hotspot_cell_ratio": 0.33,
-                    "economic_activity_summary_text": "基于夜间灯光亮度，等时圈内经济活动强度呈现中等偏上水平。",
+                    "brightness_context_summary_text": "等时圈内夜光亮度背景呈现中等偏上水平。",
                 }
             },
             "road": {"regression": {"r2": 0.62}},

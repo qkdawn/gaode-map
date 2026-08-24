@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PIL import Image
 
@@ -8,9 +10,11 @@ from modules.spatial_strategy import visuals
 
 def _decision_plan(**values):
     return {
+        "section_id": "supply_gap",
         "rationale": "使用完整项目数据检验当前决策判断",
         "decision_question": "这些空间证据如何改变项目定位和实施选择",
         "caption": "图中证据用于比较候选路径并说明成立条件，不直接代表客流或收入。",
+        "named_record_refs": [],
         **values,
     }
 
@@ -108,6 +112,23 @@ def test_visual_plan_rejects_fields_outside_dataset_schema():
                 }
             ],
             {"poi": []},
+        )
+
+
+def test_visual_package_fails_when_project_records_cannot_be_loaded(monkeypatch, tmp_path):
+    monkeypatch.setattr(visuals, "_resolve_history_id", lambda _: "history-1")
+
+    def unavailable(_history_id, dataset_id):
+        raise LookupError(f"{dataset_id}_unavailable")
+
+    monkeypatch.setattr(visuals._DATA, "_all_spatial_records", unavailable)
+
+    with pytest.raises(ValueError, match="visual_source_records_unavailable:poi:poi_unavailable"):
+        visuals.build_spatial_strategy_visuals(
+            run_id="failed-visual-run",
+            history_id="history-1",
+            project_context={"datasets": [{"dataset_id": "poi"}]},
+            root=tmp_path,
         )
 
 
@@ -210,10 +231,14 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
     records = {
         "road_edges": [{"road_name": "潘家坪路", "road_class": "主干路", "length_m": 1200, "geometry": {"type": "LineString", "coordinates": [[116.38, 39.90], [116.40, 39.91]]}}],
         "poi": [
-            {"category": "餐饮服务", "name": "甲方餐厅", "location": [116.385, 39.902]},
-            {"category": "科教文化服务", "name": "城市文化馆", "location": [116.395, 39.907]},
+            {"poi_id": "food-1", "category": "餐饮服务", "name": "甲方餐厅", "location": [116.385, 39.902]},
+            {"poi_id": "culture-1", "category": "科教文化服务", "name": "城市文化馆", "location": [116.395, 39.907]},
         ],
-        "population": [{"population_total": 1200, "age_5_19": 200, "age_30_39": 300, "age_50_64": 180, "geometry": polygon}],
+        "population": [{
+            "population_total": 1200,
+            "age_total": {"05": 70, "10": 65, "15": 65, "30": 150, "35": 150, "50": 60, "55": 60, "60": 60},
+            "geometry": polygon,
+        }],
     }
     monkeypatch.setattr(visuals, "_resolve_history_id", lambda _: "history-1")
     monkeypatch.setattr(visuals._DATA, "_all_spatial_records", lambda _, dataset_id: records[dataset_id])
@@ -223,6 +248,7 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
             title="设施连接",
             format="map",
             map_variant="poi_access",
+            named_record_refs=["current:dataset:poi/culture-1"],
             layers=[
                 {"dataset_id": "road_edges", "role": "line"},
                 {"dataset_id": "poi", "role": "point"},
@@ -232,6 +258,7 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
             title="完整区域关系",
             format="map",
             map_variant="context_full",
+            named_record_refs=["current:dataset:poi/culture-1"],
             layers=[
                 {"dataset_id": "road_edges", "role": "line"},
                 {"dataset_id": "poi", "role": "point"},
@@ -241,6 +268,7 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
             title="区域角色",
             format="map",
             map_variant="regional_role",
+            named_record_refs=["current:dataset:poi/culture-1"],
             layers=[
                 {"dataset_id": "road_edges", "role": "line"},
                 {"dataset_id": "poi", "role": "point"},
@@ -266,12 +294,29 @@ def test_visual_variants_render_evidence_templates(monkeypatch, tmp_path):
     assert package["visual_plan"][0]["map_variant"] == "poi_access"
     assert package["visual_plan"][1]["map_variant"] == "context_full"
     assert package["visual_plan"][4]["chart_variant"] == "population_profile"
+    population_profile = images[4]
+    assert "付费意愿假设" in population_profile["design"]["caption"]
+    assert "价格测试" in population_profile["design"]["caption"]
+    assert population_profile["design"]["interpretation"] == "audience_behavior_hypotheses"
     assert images[0]["design"]["poi_style"]["palette"] == "facility_category_v1"
     assert images[0]["design"]["poi_style"]["named_label_count"] == 1
     assert images[0]["design"]["named_pois"][0]["name"] == "城市文化馆"
     assert images[0]["design"]["named_roads"] == [{"name": "潘家坪路", "road_class": "主干路"}]
     assert len(set(images[0]["design"]["poi_style"]["category_colors"].values())) == 2
     assert images[2]["design"]["population_style"]["palette"] == "population_blue_v1"
+
+
+def test_named_pois_only_use_decision_record_refs():
+    pois = [
+        {"poi_id": "ordinary", "name": "最近设施", "category": "生活服务", "location": [116.39, 39.90]},
+        {"poi_id": "selected", "name": "决策节点", "category": "科教文化服务", "location": [116.40, 39.91]},
+    ]
+
+    assert visuals._named_pois(pois, ["current:dataset:poi/selected"]) == [pois[1]]
+    assert visuals._named_pois(pois, []) == []
+    source = Path(visuals.__file__).read_text(encoding="utf-8")
+    assert "古开福寺" not in source
+    assert "strategic_terms" not in source
 
 
 def test_visual_plan_quality_rejects_poi_without_road_context():
@@ -302,9 +347,11 @@ def test_adaptive_map_layout_centers_tall_extent_and_uses_chinese_legends(monkey
         y0 = 39.88 + index * 0.01
         population.append({
             "population_total": value,
-            "age_5_19": value * 0.14,
-            "age_30_39": value * 0.2,
-            "age_50_64": value * 0.22,
+            "age_total": {
+                "05": value * 0.04, "10": value * 0.05, "15": value * 0.05,
+                "30": value * 0.1, "35": value * 0.1,
+                "50": value * 0.07, "55": value * 0.07, "60": value * 0.08,
+            },
             "geometry": {
                 "type": "Polygon",
                 "coordinates": [[[116.38, y0], [116.39, y0], [116.39, y0 + 0.01], [116.38, y0 + 0.01], [116.38, y0]]],

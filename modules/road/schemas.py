@@ -99,7 +99,10 @@ class RoadSyntaxSummary(BaseModel):
     avg_closeness: float = 0.0
     avg_choice: float = 0.0
     avg_accessibility_global: float = 0.0
-    avg_connectivity: float = 0.0
+    avg_connectivity: Optional[float] = Field(
+        None,
+        description="Mean raw depthmapX Connectivity; null when the source column is unavailable",
+    )
     avg_control: float = 0.0
     avg_depth: float = 0.0
     control_source_column: str = ""
@@ -146,7 +149,10 @@ class RoadSyntaxEdgeGeometry(BaseModel):
 class RoadSyntaxEdgeMetrics(BaseModel):
     integration: float
     choice: float
-    connectivity: float
+    connectivity: Optional[float] = Field(
+        None,
+        description="Raw depthmapX Connectivity, not the normalized display score",
+    )
     depth: float
     control: float
 
@@ -161,6 +167,12 @@ class RoadSyntaxEdgeProperties(BaseModel):
     road_class: str
     length_m: float
     metrics: RoadSyntaxEdgeMetrics
+    connectivity_score: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Min-max normalized Connectivity used only for display; null when Connectivity is unavailable",
+    )
 
 
 class RoadSyntaxEdgeFeature(BaseModel):

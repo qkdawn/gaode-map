@@ -145,14 +145,12 @@ class AnalysisArtifactRepo:
             return []
         session: Session = SessionLocal()
         try:
-            query = session.query(AnalysisArtifact.id).filter_by(history_id=normalized_history_id)
+            query = session.query(AnalysisArtifact).filter_by(history_id=normalized_history_id)
             if artifact_type:
                 query = query.filter_by(artifact_type=str(artifact_type).strip())
             if params_hash:
                 query = query.filter_by(params_hash=str(params_hash).strip())
-            id_rows = query.order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc()).all()
-            record_ids = [int(row[0] if isinstance(row, tuple) else getattr(row, "id", row)) for row in id_rows]
-            records = [session.get(AnalysisArtifact, record_id) for record_id in record_ids]
+            records = query.order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc()).all()
             payloads = [_artifact_payload(record) for record in records if record is not None]
             return sorted(
                 payloads,
@@ -163,6 +161,49 @@ class AnalysisArtifactRepo:
                 ),
                 reverse=True,
             )
+        finally:
+            session.close()
+
+    def list_summaries(
+        self,
+        history_id: str,
+        *,
+        artifact_type: str,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Read a bounded artifact index without loading the stored payload column."""
+
+        normalized_history_id = str(history_id or "").strip()
+        normalized_type = str(artifact_type or "").strip()
+        normalized_limit = max(1, min(int(limit), 100))
+        if not normalized_history_id or not normalized_type:
+            return []
+        session: Session = SessionLocal()
+        try:
+            rows = (
+                session.query(
+                    AnalysisArtifact.id,
+                    AnalysisArtifact.params,
+                    AnalysisArtifact.summary,
+                    AnalysisArtifact.updated_at,
+                )
+                .filter_by(
+                    history_id=normalized_history_id,
+                    artifact_type=normalized_type,
+                )
+                .order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc())
+                .limit(normalized_limit)
+                .all()
+            )
+            return [
+                {
+                    "id": row.id,
+                    "params": _clone_json_payload(row.params if isinstance(row.params, dict) else {}),
+                    "summary": _clone_json_payload(row.summary if isinstance(row.summary, dict) else {}),
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                }
+                for row in rows
+            ]
         finally:
             session.close()
 
@@ -180,6 +221,35 @@ class AnalysisArtifactRepo:
             if record is None:
                 return None
             return _artifact_payload(record)
+        finally:
+            session.close()
+
+    def get_by_params_hash(
+        self,
+        history_id: str,
+        *,
+        artifact_type: str,
+        params_hash: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Read one immutable artifact by its stable identity parameters."""
+
+        normalized_history_id = str(history_id or "").strip()
+        normalized_type = str(artifact_type or "").strip()
+        normalized_hash = str(params_hash or "").strip()
+        if not normalized_history_id or not normalized_type or not normalized_hash:
+            return None
+        session: Session = SessionLocal()
+        try:
+            record = (
+                session.query(AnalysisArtifact)
+                .filter_by(
+                    history_id=normalized_history_id,
+                    artifact_type=normalized_type,
+                    params_hash=normalized_hash,
+                )
+                .first()
+            )
+            return _artifact_payload(record) if record is not None else None
         finally:
             session.close()
 

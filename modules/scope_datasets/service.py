@@ -63,11 +63,12 @@ DATASET_FILTER_FIELDS = {
         "to_node",
         "length_m",
         "metrics",
+        "connectivity_score",
     },
     "current:dataset:road_corridors": {
         "record_id", "corridor_id", "metric", "radius", "edge_count", "length_m", "road_names",
     },
-    "current:dataset:road_grid": {"record_id", "cell_id", "feature_kind", "road_has_data", "road_length_km", "road_length_km_per_km2", "road_choice", "road_integration", "road_nain", "road_nach", "road_connectivity", "road_control", "road_depth"},
+    "current:dataset:road_grid": {"record_id", "cell_id", "feature_kind", "road_has_data", "road_length_km", "road_length_km_per_km2", "road_choice", "road_integration", "road_nain", "road_nach", "road_connectivity", "road_connectivity_score", "road_control", "road_depth"},
 }
 
 DATASET_SPATIAL_CAPABILITIES = {
@@ -451,17 +452,65 @@ class ScopeDatasetRepository:
         finally:
             session.close()
 
-    def list_analysis_artifacts(self, history_id: str) -> List[Dict[str, Any]]:
+    def list_analysis_artifacts(
+        self,
+        history_id: str,
+        *,
+        artifact_types: Iterable[str] | None = None,
+    ) -> List[Dict[str, Any]]:
         session: Session = SessionLocal()
         try:
-            id_rows = (
-                session.query(AnalysisArtifact.id)
-                .filter_by(history_id=str(history_id or "").strip())
-                .order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc())
-                .all()
-            )
-            record_ids = [int(row[0] if isinstance(row, tuple) else getattr(row, "id", row)) for row in id_rows]
-            rows = [session.get(AnalysisArtifact, record_id) for record_id in record_ids]
+            # Read the artifact projection in one query. The previous id-then-get
+            # loop issued one round trip per artifact, which made every spatial
+            # evidence request pay an avoidable N+1 latency cost.
+            try:
+                query = (
+                    session.query(
+                        AnalysisArtifact.id,
+                        AnalysisArtifact.artifact_type,
+                        AnalysisArtifact.slot_key,
+                        AnalysisArtifact.params,
+                        AnalysisArtifact.payload,
+                        AnalysisArtifact.summary,
+                        AnalysisArtifact.data_version,
+                        AnalysisArtifact.scope_fingerprint,
+                        AnalysisArtifact.updated_at,
+                    )
+                    .filter_by(history_id=str(history_id or "").strip())
+                )
+            except (AssertionError, TypeError):
+                # Keep compatibility with minimal repository doubles that only
+                # implement the historical id-then-get seam.
+                id_rows = (
+                    session.query(AnalysisArtifact.id)
+                    .filter_by(history_id=str(history_id or "").strip())
+                    .order_by(AnalysisArtifact.updated_at.desc(), AnalysisArtifact.id.desc())
+                    .all()
+                )
+                record_ids = [int(row[0]) for row in id_rows]
+                rows = [session.get(AnalysisArtifact, record_id) for record_id in record_ids]
+                return [
+                    {
+                        "id": row.id,
+                        "artifact_type": row.artifact_type,
+                        "slot_key": row.slot_key,
+                        "params": row.params if isinstance(row.params, dict) else {},
+                        "payload": row.payload if isinstance(row.payload, dict) else {},
+                        "summary": row.summary if isinstance(row.summary, dict) else {},
+                        "data_version": row.data_version,
+                        "scope_fingerprint": row.scope_fingerprint,
+                        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                    }
+                    for row in rows
+                    if row is not None
+                ]
+            normalized_types = sorted({_as_text(item) for item in (artifact_types or ()) if _as_text(item)})
+            if normalized_types:
+                query = query.filter(AnalysisArtifact.artifact_type.in_(normalized_types))
+            # Sorting large JSON projections in MySQL can exhaust the server's
+            # sort buffer. Consumers already apply deterministic artifact sorting
+            # after filtering, so fetch rows without an SQL ORDER BY here.
+            rows = query.all()
             return [
                 {
                     "id": row.id,
@@ -475,7 +524,6 @@ class ScopeDatasetRepository:
                     "updated_at": row.updated_at.isoformat() if row.updated_at else "",
                 }
                 for row in rows
-                if row is not None
             ]
         finally:
             session.close()
@@ -567,12 +615,34 @@ class ScopeDatasetService:
     def from_saved_snapshot(cls, path: Any) -> "ScopeDatasetService":
         return cls(repository=SavedProjectSnapshotRepository.from_json_path(path))
 
+    def _list_analysis_artifacts(
+        self,
+        history_id: str,
+        *,
+        artifact_types: Iterable[str] | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Read relevant artifacts while retaining the small repository seam used by tests."""
+        try:
+            return self.repository.list_analysis_artifacts(history_id, artifact_types=artifact_types)
+        except TypeError as exc:
+            if "artifact_types" not in str(exc):
+                raise
+            return self.repository.list_analysis_artifacts(history_id)
+
     def list_scope_datasets(self, history_id: str) -> Dict[str, Any]:
         normalized_history_id = _as_text(history_id)
         if not normalized_history_id:
             return {"datasets": [], "warnings": ["history_id_required"]}
         poi_rows = self.repository.list_poi_results(normalized_history_id)
-        artifacts = self.repository.list_analysis_artifacts(normalized_history_id)
+        artifacts = self._list_analysis_artifacts(
+            normalized_history_id,
+            artifact_types=set(ARTIFACT_SOURCE_MAP) | {"road_syntax"},
+        )
+        allowed_artifact_types = set(ARTIFACT_SOURCE_MAP) | {"road_syntax"}
+        artifacts = [
+            item for item in artifacts
+            if _as_text(item.get("artifact_type")) in allowed_artifact_types
+        ]
         datasets = []
         if poi_rows:
             years = available_business_years(row.get("year") for row in poi_rows)
@@ -1294,13 +1364,22 @@ class ScopeDatasetService:
             years = available_business_years(row.get("year") for row in rows)
             selected_year = resolve_business_year(years, year)
             return self._poi_records(history_id, year=selected_year), years, selected_year
+        artifact_types = {
+            artifact_type
+            for artifact_type, mapped_source in ARTIFACT_SOURCE_MAP.items()
+            if mapped_source == normalized_source_id
+        }
+        if normalized_source_id in {"current:dataset:road_nodes", "current:dataset:road_corridors", "current:dataset:road_grid"}:
+            artifact_types.add("road_syntax")
+        all_artifacts = self._list_analysis_artifacts(
+            history_id,
+            artifact_types=artifact_types,
+        )
+        # Legacy repository adapters may not support server-side type filters.
         all_artifacts = [
             item
-            for item in self.repository.list_analysis_artifacts(history_id)
-            if (
-                ARTIFACT_SOURCE_MAP.get(_as_text(item.get("artifact_type"))) == normalized_source_id
-                or (_as_text(item.get("artifact_type")) == "road_syntax" and normalized_source_id in {"current:dataset:road_nodes", "current:dataset:road_corridors", "current:dataset:road_grid"})
-            )
+            for item in all_artifacts
+            if _as_text(item.get("artifact_type")) in artifact_types
         ]
         poi_rows = self.repository.list_poi_results(history_id) if normalized_source_id in {"current:dataset:h3", "current:dataset:poi_grid"} else []
         artifacts, years, selected_year = self._select_artifacts(
@@ -1538,7 +1617,7 @@ class ScopeDatasetService:
             node_required = {"node_id", "degree"}
             edge_required = {
                 "edge_id", "road_name", "road_class", "from_node", "to_node", "length_m", "metrics",
-                "nain_global", "nach_global", "node_count_global", "total_depth_global",
+                "connectivity_score", "nain_global", "nach_global", "node_count_global", "total_depth_global",
             }
             metric_required = {"integration", "choice", "connectivity", "depth"}
             node_features = payload["nodes"]["features"]
@@ -1591,7 +1670,7 @@ class ScopeDatasetService:
             )
             grid_required = {
                 "cell_id", "road_has_data", "road_length_km", "road_length_km_per_km2",
-                "road_nain", "road_nach", "road_connectivity",
+                "road_nain", "road_nach", "road_connectivity", "road_connectivity_score",
             }
             valid_grid = all(
                 isinstance(feature, dict)
@@ -1807,6 +1886,7 @@ class ScopeDatasetService:
                     "from_node": _clone_json(props.get("from_node")),
                     "to_node": _clone_json(props.get("to_node")),
                     "length_m": props.get("length_m"),
+                    "connectivity_score": _clone_json(props.get("connectivity_score")),
                     "metrics": {
                         field: _clone_json(raw_metrics.get(field))
                         for field in ("integration", "choice", "connectivity", "depth", "control")

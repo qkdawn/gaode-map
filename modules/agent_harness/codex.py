@@ -17,12 +17,15 @@ class CodexHarnessError(RuntimeError):
 
 def _contains_unavailable_source(value: object) -> bool:
     if isinstance(value, dict):
-        if value.get("error") == "data_source_unavailable":
+        # Only structured error/status fields represent a provider failure.
+        # A model may legitimately mention the literal token in an
+        # `unresolved` explanation after one recoverable sub-call failed.
+        if value.get("error") == "data_source_unavailable" or value.get("status") == "data_source_unavailable":
             return True
         return any(_contains_unavailable_source(item) for item in value.values())
     if isinstance(value, list):
         return any(_contains_unavailable_source(item) for item in value)
-    return value == "data_source_unavailable"
+    return False
 
 
 def _model_payload(value: Any) -> dict[str, Any]:
@@ -32,6 +35,33 @@ def _model_payload(value: Any) -> dict[str, Any]:
 
 
 def _mcp_failure(items: list[Any]) -> str:
+    """Return only unrecoverable MCP failures from a completed turn.
+
+    Codex may retry a tool call after the server rejects its arguments.  Those
+    validation failures are part of the normal tool-call correction loop; a
+    later successful call in the same turn is sufficient evidence of recovery.
+    Transport, permission, and data-source failures still terminate the turn.
+    """
+
+    recoverable_markers = (
+        "invalid_request",
+        "validation errors for",
+        "validation error",
+        "value error,",
+        "field required",
+        "extra inputs are not permitted",
+    )
+
+    def _result_text(payload: dict[str, Any]) -> str:
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            return ""
+        texts: list[str] = []
+        for content in result.get("content") or []:
+            if isinstance(content, dict) and isinstance(content.get("text"), str):
+                texts.append(content["text"])
+        return "\n".join(texts)
+
     for item in items:
         payload = _model_payload(item)
         if payload.get("type") != "mcpToolCall":
@@ -44,7 +74,11 @@ def _mcp_failure(items: list[Any]) -> str:
             detail = str(error.get("message") or error.get("code") or "")
         else:
             detail = str(error or "")
-        return detail.strip() or "mcp_tool_failed"
+        detail = detail.strip() or _result_text(payload).strip()
+        normalized = detail.casefold()
+        if any(marker in normalized for marker in recoverable_markers):
+            continue
+        return detail or "mcp_tool_failed"
     return ""
 
 
@@ -66,6 +100,7 @@ def _mcp_tool_calls(items: list[Any]) -> list[dict[str, Any]]:
                 raw_arguments = {}
         raw_result = payload.get("result")
         result_payload: dict[str, Any] = {}
+        raw_result_text: list[str] = []
         if isinstance(raw_result, dict):
             structured = raw_result.get("structured_content")
             if structured is None:
@@ -76,6 +111,7 @@ def _mcp_tool_calls(items: list[Any]) -> list[dict[str, Any]]:
                 for content in raw_result.get("content") or []:
                     if not isinstance(content, dict) or not isinstance(content.get("text"), str):
                         continue
+                    raw_result_text.append(content["text"])
                     try:
                         parsed = json.loads(content["text"])
                     except json.JSONDecodeError:
@@ -83,6 +119,8 @@ def _mcp_tool_calls(items: list[Any]) -> list[dict[str, Any]]:
                     if isinstance(parsed, dict):
                         result_payload = parsed
                         break
+        raw_text = "\n".join(raw_result_text)
+        status = str(payload.get("status") or "")
         calls.append({
             "name": str(
                 payload.get("name")
@@ -91,8 +129,25 @@ def _mcp_tool_calls(items: list[Any]) -> list[dict[str, Any]]:
                 or ""
             ),
             "arguments": raw_arguments if isinstance(raw_arguments, dict) else {},
-            "status": str(payload.get("status") or ""),
+            "status": status,
             "result": result_payload,
+            # Internal validator hint.  It is deliberately not a persisted
+            # domain field; it only lets a same-turn retry drop a rejected
+            # argument set before semantic call matching.
+            "_recoverable_validation_failure": (
+                status in {"failed", "declined"}
+                and any(
+                    marker in raw_text.casefold()
+                    for marker in (
+                        "invalid_request",
+                        "validation errors for",
+                        "validation error",
+                        "value error,",
+                        "field required",
+                        "extra inputs are not permitted",
+                    )
+                )
+            ),
         })
     return calls
 
@@ -104,8 +159,15 @@ def _sdk_config(enabled_tools: list[str]) -> CodexConfig:
         env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         config_overrides=(
             "features.tool_suggest=false",
-            f"mcp_servers.spatial-project.enabled_tools={tool_allowlist}",
-            "mcp_servers.spatial-project.required=true",
+            # The strategy harness owns a single domain MCP surface. Disable
+            # user-level UI/browser MCPs inherited by the Codex runtime so a
+            # domain turn cannot drift into unrelated tool loops.
+            "mcp_servers.node_repl.enabled=false",
+            "mcp_servers.pencil.enabled=false",
+            f"mcp_servers.spatial_project.enabled_tools={tool_allowlist}",
+            "mcp_servers.spatial_project.required=true",
+            "mcp_servers.spatial_project.tool_timeout_sec=1200",
+            "mcp_servers.spatial_project.startup_timeout_sec=120",
         ),
     )
 
@@ -156,7 +218,11 @@ def run_codex(
         except CodexHarnessError:
             raise
         except Exception as exc:
-            raise CodexHarnessError("codex_harness_tool_call_validation_failed") from exc
+            detail = str(exc).strip()
+            raise CodexHarnessError(
+                "codex_harness_tool_call_validation_failed"
+                + (f":{detail}" if detail else "")
+            ) from exc
 
     try:
         result = json.loads(turn.final_response or "")
@@ -172,5 +238,9 @@ def run_codex(
         except CodexHarnessError:
             raise
         except Exception as exc:
-            raise CodexHarnessError("codex_harness_output_validation_failed") from exc
+            detail = str(exc).strip()
+            raise CodexHarnessError(
+                "codex_harness_output_validation_failed"
+                + (f":{detail}" if detail else "")
+            ) from exc
     return result

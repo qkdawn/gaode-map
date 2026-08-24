@@ -66,6 +66,14 @@ def _mock_arcgis_success(monkeypatch):
         return {
             "status": "ArcGIS test double completed",
             "global_moran": {"i": 0.397161, "z_score": 2.4},
+            "method": {
+                "input_crs_wkid": 4326,
+                "analysis_crs_wkid": 32651,
+                "conceptualization": "CONTIGUITY_EDGES_CORNERS",
+                "spatial_weights_kind": "QUEEN_CONTIGUITY",
+                "neighbor_order": 1,
+                "neighbor_count_distribution": {"2": 6, "3": 12, "6": 4},
+            },
             "cells": cells,
         }
 
@@ -100,7 +108,6 @@ def test_h3_metrics_api_shape(monkeypatch):
         "min_overlap_ratio": 0.0,
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
-        "neighbor_ring": 1,
         "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
@@ -111,6 +118,14 @@ def test_h3_metrics_api_shape(monkeypatch):
     assert data["grid"]["type"] == "FeatureCollection"
     assert data["summary"]["grid_count"] == len(data["grid"]["features"])
     assert data["summary"]["analysis_engine"] == "arcgis"
+    assert data["summary"]["spatial_statistics_method"] == {
+        "input_crs_wkid": 4326,
+        "analysis_crs_wkid": 32651,
+        "conceptualization": "CONTIGUITY_EDGES_CORNERS",
+        "spatial_weights_kind": "QUEEN_CONTIGUITY",
+        "neighbor_order": 1,
+        "neighbor_count_distribution": {"2": 6, "3": 12, "6": 4},
+    }
     assert data["summary"].get("gi_render_meta", {}).get("mode") == "fixed_z"
     assert data["summary"].get("lisa_render_meta", {}).get("mode") == "stddev"
     assert "gi_z_stats" in data["summary"]
@@ -134,7 +149,6 @@ def test_h3_metrics_progress_api_roundtrip(monkeypatch):
         "min_overlap_ratio": 0.0,
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
-        "neighbor_ring": 1,
         "run_id": run_id,
         "use_arcgis": True,
     }
@@ -174,7 +188,6 @@ def test_h3_metrics_poi_count_consistency(monkeypatch):
         "min_overlap_ratio": 0.0,
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
-        "neighbor_ring": 1,
         "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
@@ -194,7 +207,6 @@ def test_h3_metrics_grid_count_changes_with_threshold(monkeypatch):
         "include_mode": "intersects",
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
-        "neighbor_ring": 1,
         "use_arcgis": True,
     }
     loose = client.post("/api/v1/analysis/h3-metrics", json={**base_payload, "min_overlap_ratio": 0.0})
@@ -217,7 +229,6 @@ def test_h3_metrics_spatial_structure_fields(monkeypatch):
         "min_overlap_ratio": 0.0,
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
-        "neighbor_ring": 1,
         "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)
@@ -251,7 +262,6 @@ def test_h3_metrics_legacy_significance_payload_is_ignored(monkeypatch):
         "min_overlap_ratio": 0.0,
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
-        "neighbor_ring": 1,
         "moran_permutations": 99,
         "significance_alpha": 0.1,
         "moran_seed": 1,
@@ -281,7 +291,6 @@ def test_h3_metrics_arcgis_failure_returns_502_without_native_fallback(monkeypat
         "min_overlap_ratio": 0.0,
         "pois": _sample_pois_gcj02(),
         "poi_coord_type": "gcj02",
-        "neighbor_ring": 1,
         "use_arcgis": True,
     }
     resp = client.post("/api/v1/analysis/h3-metrics", json=payload)

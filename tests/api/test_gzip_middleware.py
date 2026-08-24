@@ -16,14 +16,14 @@ def _build_test_app() -> FastAPI:
     app.add_middleware(
         SelectiveGZipMiddleware,
         minimum_size=100,
-        excluded_paths={"/api/v1/analysis/agent/main-loop/stream"},
+        excluded_paths={"/api/v1/analysis/agent/conversations/turns/stream"},
     )
 
     @app.get("/json")
     async def json_route():
         return JSONResponse({"content": "x" * 200})
 
-    @app.get("/api/v1/analysis/agent/main-loop/stream")
+    @app.get("/api/v1/analysis/agent/conversations/turns/stream")
     async def excluded_path_route():
         return PlainTextResponse("x" * 200, media_type="text/plain")
 
@@ -55,7 +55,7 @@ def test_regular_json_response_keeps_gzip():
 
 
 def test_excluded_path_bypasses_gzip_even_when_large():
-    response = _request("/api/v1/analysis/agent/main-loop/stream")
+    response = _request("/api/v1/analysis/agent/conversations/turns/stream")
     assert response.status_code == 200
     assert response.headers.get("content-encoding") is None
     assert response.text == "x" * 200
@@ -67,3 +67,14 @@ def test_event_stream_response_bypasses_gzip():
     assert response.headers.get("content-encoding") is None
     assert response.headers.get("content-type", "").startswith("text/event-stream")
     assert "event: status" in response.text
+
+
+def test_main_app_excludes_only_current_conversation_stream():
+    from main import app
+
+    middleware = next(
+        item for item in app.user_middleware if item.cls is SelectiveGZipMiddleware
+    )
+    assert middleware.kwargs["excluded_paths"] == {
+        "/api/v1/analysis/agent/conversations/turns/stream"
+    }

@@ -1,50 +1,33 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Dict
-
-from modules.road.core import analyze_road_syntax
 
 from ..schemas import AnalysisSnapshot, ToolResult
 
 
-async def compute_road_syntax_from_scope(
+async def read_persisted_road_syntax(
     *,
     arguments: Dict[str, Any],
     snapshot: AnalysisSnapshot,
     artifacts: Dict[str, Any],
     question: str,
 ) -> ToolResult:
-    del question
-    polygon = artifacts.get("scope_polygon") or []
-    if not polygon:
+    del arguments, question
+    result = artifacts.get("current_road")
+    if not isinstance(result, dict) or not result:
+        result = snapshot.road if isinstance(snapshot.road, dict) else {}
+    summary = artifacts.get("current_road_summary")
+    if not isinstance(summary, dict) or not summary:
+        summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    if not result or not summary:
         return ToolResult(
-            tool_name="compute_road_syntax_from_scope",
+            tool_name="read_persisted_road_syntax",
             status="failed",
-            warnings=["缺少分析范围，无法计算路网句法"],
-            error="missing_scope_polygon",
+            warnings=["当前分析尚未持久化路网句法结果；请先完成正式路网分析任务。"],
+            error="road_analysis_not_persisted",
         )
-    result = await asyncio.to_thread(
-        analyze_road_syntax,
-        polygon=polygon,
-        coord_type="gcj02",
-        mode=str(arguments.get("mode") or snapshot.context.get("mode") or "walking"),
-        graph_model=str(arguments.get("graph_model") or "segment"),
-        highway_filter=str(arguments.get("highway_filter") or "all"),
-        include_geojson=False,
-        max_edge_features=None,
-        radii_m=None,
-        metric="choice",
-        tulip_bins=None,
-        merge_geojson_edges=True,
-        merge_bucket_step=0.025,
-        use_arcgis_webgl=False,
-        arcgis_timeout_sec=60,
-        arcgis_metric_field=None,
-    )
-    summary = result.get("summary") or {}
     return ToolResult(
-        tool_name="compute_road_syntax_from_scope",
+        tool_name="read_persisted_road_syntax",
         status="success",
         result={
             "node_count": int(summary.get("node_count") or 0),
@@ -59,4 +42,5 @@ async def compute_road_syntax_from_scope(
             "current_road": result,
             "current_road_summary": summary,
         },
+        warnings=["已复用当前持久化路网句法结果，未重新运行 depthmapX。"],
     )

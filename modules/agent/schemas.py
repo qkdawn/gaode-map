@@ -46,19 +46,9 @@ AgentStage = Literal[
     "requires_risk_confirmation",
     "failed",
 ]
-PersistedAgentStatus = Literal[
-    "idle",
-    "running",
-    "answered",
-    "requires_clarification",
-    "requires_risk_confirmation",
-    "failed",
-]
 ToolStatus = Literal["success", "failed", "skipped"]
 ExecutionTraceStatus = Literal["success", "failed", "skipped", "blocked"]
 ToolLoopStatus = Literal["completed", "requires_risk_confirmation", "failed"]
-AgentSessionTitleSource = Literal["user", "ai", "fallback"]
-AgentTurnStreamEventType = Literal["meta", "status", "thinking", "reasoning_delta", "trace", "plan", "final", "error"]
 AgentSummaryStreamEventType = Literal[
     "status",
     "section_start",
@@ -77,7 +67,6 @@ class AgentMessage(BaseModel):
 
     role: Literal["system", "user", "assistant"] = "user"
     content: str = ""
-    process: "AgentMessageProcess" = Field(default_factory=lambda: AgentMessageProcess())
 
 
 class AnalysisSnapshot(BaseModel):
@@ -155,13 +144,6 @@ class EffectiveExecutionProfile(BaseModel):
     skill_scope: Literal["turn", "conversation"] = "turn"
 
 
-class ConversationExecutionProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    model_profile_id: str = ""
-    pinned_skill_id: str = ""
-
-
 class CapabilityInputSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -231,42 +213,6 @@ class AgentSiteSelectionResponse(BaseModel):
     site_selection_pack: Dict[str, Any] = Field(default_factory=dict)
     current_target_supply_gap: Dict[str, Any] = Field(default_factory=dict)
     current_site_candidate_facts: Dict[str, Any] = Field(default_factory=dict)
-    warnings: List[str] = Field(default_factory=list)
-    error: str = ""
-
-
-class ContextAskTarget(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    type: Literal["report_section", "trend_chart", "trend_metric", "site_candidate", "analysis_sources", "analysis_run"] = "report_section"
-    id: str = ""
-    title: str = ""
-    source: Literal["report", "iteration", "site_selection", "analysis", "analysis_run"] = "report"
-    summary: str = ""
-    evidence: List[Any] = Field(default_factory=list)
-    artifact_refs: List[str] = Field(default_factory=list)
-    payload: Dict[str, Any] = Field(default_factory=dict)
-
-
-class AgentContextAskRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    conversation_id: str = ""
-    history_id: str = ""
-    model_profile_id: str = ""
-    question: str = ""
-    analysis_snapshot: AnalysisSnapshot = Field(default_factory=AnalysisSnapshot)
-    target: ContextAskTarget = Field(default_factory=ContextAskTarget)
-    require_ai: bool = False
-
-
-class AgentContextAskResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal["success", "failed"] = "success"
-    answer: str = ""
-    evidence: List[Any] = Field(default_factory=list)
-    citations: List[Any] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     error: str = ""
 
@@ -838,13 +784,6 @@ class AgentThinkingItem(BaseModel):
         return value
 
 
-class AgentTurnStreamEvent(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    type: AgentTurnStreamEventType
-    payload: Dict[str, Any] = Field(default_factory=dict)
-
-
 class AgentSummaryStreamEvent(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -857,45 +796,6 @@ class AgentPlanEnvelope(BaseModel):
 
     steps: List[PlanStep] = Field(default_factory=list)
     summary: str = ""
-
-
-class AgentMessageProcess(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    turn_id: str = ""
-    status: str = ""
-    stage: str = ""
-    started_at: str = ""
-    completed_at: str = ""
-    elapsed_ms: int = 0
-    thinking_timeline: List[AgentThinkingItem] = Field(default_factory=list)
-    execution_trace: List[ExecutionTraceItem] = Field(default_factory=list)
-    plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
-    pending_task_confirmation: Dict[str, Any] = Field(default_factory=dict)
-    execution_profile: EffectiveExecutionProfile = Field(default_factory=EffectiveExecutionProfile)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_aliases(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        value = dict(value)
-        aliases = {
-            "turnId": "turn_id",
-            "startedAt": "started_at",
-            "completedAt": "completed_at",
-            "elapsedMs": "elapsed_ms",
-            "thinkingTimeline": "thinking_timeline",
-            "executionTrace": "execution_trace",
-            "pendingTaskConfirmation": "pending_task_confirmation",
-        }
-        for source, target in aliases.items():
-            if target not in value and source in value:
-                value[target] = value.get(source)
-        return value
-
-
-AgentMessage.model_rebuild()
 
 
 class AgentTurnResponse(BaseModel):
@@ -952,58 +852,3 @@ class AgentTurnResponse(BaseModel):
     @property
     def research_notes(self) -> List[str]:
         return list(self.diagnostics.research_notes or [])
-
-
-class AgentSessionSummary(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    id: str
-    title: str = ""
-    preview: str = ""
-    status: PersistedAgentStatus = "idle"
-    history_id: str = ""
-    is_pinned: bool = False
-    title_source: AgentSessionTitleSource = "fallback"
-    panel_kind: str = ""
-    created_at: str = ""
-    updated_at: str = ""
-    pinned_at: Optional[str] = None
-
-
-class AgentSessionSnapshotRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str = ""
-    preview: str = ""
-    status: PersistedAgentStatus = "idle"
-    stage: AgentStage = "gating"
-    history_id: str = ""
-    panel_kind: str = ""
-    is_pinned: Optional[bool] = None
-    input: str = ""
-    messages: List[AgentMessage] = Field(default_factory=list)
-    output: AgentTurnOutput = Field(default_factory=AgentTurnOutput)
-    diagnostics: AgentTurnDiagnostics = Field(default_factory=AgentTurnDiagnostics)
-    context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
-    plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
-    risk_confirmations: List[str] = Field(default_factory=list)
-    conversation_execution_profile: ConversationExecutionProfile = Field(default_factory=ConversationExecutionProfile)
-
-
-class AgentSessionMetadataPatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: Optional[str] = None
-    is_pinned: Optional[bool] = None
-
-
-class AgentSessionDetail(AgentSessionSummary):
-    stage: AgentStage = "gating"
-    input: str = ""
-    messages: List[AgentMessage] = Field(default_factory=list)
-    output: AgentTurnOutput = Field(default_factory=AgentTurnOutput)
-    diagnostics: AgentTurnDiagnostics = Field(default_factory=AgentTurnDiagnostics)
-    context_summary: AgentContextSummary = Field(default_factory=AgentContextSummary)
-    plan: AgentPlanEnvelope = Field(default_factory=AgentPlanEnvelope)
-    risk_confirmations: List[str] = Field(default_factory=list)
-    conversation_execution_profile: ConversationExecutionProfile = Field(default_factory=ConversationExecutionProfile)

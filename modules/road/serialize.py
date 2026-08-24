@@ -749,7 +749,11 @@ def build_road_analysis_result(
         default_choice = choice_by_label.get(default_radius_label, choice_by_label.get("global", 0.0))
         default_integ = integ_by_label.get(default_radius_label, integ_by_label.get("global", 0.0))
         raw_connectivity = item.get("raw_connectivity")
-        connectivity_score = norm(raw_connectivity, conn_bounds)
+        connectivity_score = (
+            norm(float(raw_connectivity), conn_bounds)
+            if _is_finite_number(raw_connectivity) and conn_bounds is not None
+            else None
+        )
         raw_control = item.get("raw_control")
         control_score = norm(float(raw_control), control_bounds) if raw_control is not None and control_bounds is not None and math.isfinite(float(raw_control)) else None
         raw_depth = item.get("raw_depth")
@@ -779,14 +783,14 @@ def build_road_analysis_result(
             "metrics": {
                 "integration": safe_round(default_integ, 8),
                 "choice": safe_round(default_choice, 8),
-                "connectivity": safe_round(connectivity_score, 8),
+                "connectivity": _safe_optional_round(raw_connectivity),
                 "depth": safe_round(depth_score if depth_score is not None else 0.0, 8),
                 "control": safe_round(control_score if control_score is not None else 0.0, 8),
             },
             "choice_score": safe_round(default_choice, 8),
             "integration_score": safe_round(default_integ, 8),
             "accessibility_score": safe_round(default_integ, 8),
-            "connectivity_score": safe_round(connectivity_score, 8),
+            "connectivity_score": _safe_optional_round(connectivity_score),
             "degree_score": 0.0,
             "intelligibility_score": 0.0,
             "choice_global": safe_round(choice_by_label.get("global", 0.0), 8),
@@ -886,9 +890,9 @@ def build_road_analysis_result(
     intelligibility_y: List[float] = []
     for scored in scored_edges:
         props = ((scored.get("feature") or {}).get("properties") or {})
-        connectivity_value = float(props.get("connectivity_score", 0.0))
-        integration_value = float(props.get("integration_global", 0.0))
-        if math.isfinite(connectivity_value) and math.isfinite(integration_value):
+        connectivity_value = _safe_optional_round(props.get("connectivity_score"))
+        integration_value = _safe_optional_round(props.get("integration_global"))
+        if connectivity_value is not None and integration_value is not None:
             intelligibility_x.append(connectivity_value)
             intelligibility_y.append(integration_value)
     intelligibility_corr = pearson_corr(intelligibility_x, intelligibility_y)
@@ -921,11 +925,12 @@ def build_road_analysis_result(
         degree_2 = float(degree_score_by_node.get(key2, 0.0))
         degree_score = max(0.0, min(1.0, (degree_1 + degree_2) / 2.0))
         props = ((scored.get("feature") or {}).get("properties") or {})
-        connectivity_score = float(props.get("connectivity_score", degree_score))
-        if not math.isfinite(connectivity_score):
-            connectivity_score = degree_score
-        connectivity_score = max(0.0, min(1.0, connectivity_score))
-        props["connectivity_score"] = safe_round(connectivity_score, 8)
+        persisted_connectivity_score = props.get("connectivity_score")
+        props["connectivity_score"] = (
+            safe_round(max(0.0, min(1.0, float(persisted_connectivity_score))), 8)
+            if _is_finite_number(persisted_connectivity_score)
+            else None
+        )
         props["degree_score"] = safe_round(degree_score, 8)
         props["intelligibility_score"] = safe_round(intelligibility_corr, 8)
         choice_rank = percentile_rank(choice_sorted, _resolve_rank_metric(props, "choice"))
@@ -980,7 +985,7 @@ def build_road_analysis_result(
 
     avg_choice_global = _avg(global_choice_values)
     avg_integration_global = _avg(global_integ_values)
-    avg_connectivity_value = _avg(global_conn_values_raw) if global_conn_values_raw else avg_degree
+    avg_connectivity_value = _avg(global_conn_values_raw) if global_conn_values_raw else None
     avg_control_value = _avg(global_control_values)
     avg_depth_value = _avg(global_depth_values)
     control_valid_count = len(metric_values_control_raw)
@@ -1072,7 +1077,7 @@ def build_road_analysis_result(
             "avg_closeness": safe_round(avg_integration_global, 8),
             "avg_choice": safe_round(avg_choice_global, 8),
             "avg_accessibility_global": safe_round(avg_integration_global, 8),
-            "avg_connectivity": safe_round(avg_connectivity_value, 8),
+            "avg_connectivity": _safe_optional_round(avg_connectivity_value),
             "avg_control": safe_round(avg_control_value, 8),
             "avg_depth": safe_round(avg_depth_value, 8),
             "control_source_column": str(control_col_source or ""),

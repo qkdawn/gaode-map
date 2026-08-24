@@ -207,7 +207,7 @@ def test_project_data_endpoint_reads_history_bound_existing_datasets(monkeypatch
             headers={"X-N8N-Client-Key": "internal-key"},
             json={
                 "history_id": "history-1",
-                "step_key": "step_04_supply_gap",
+                "step_key": "supply_gap",
                 "project_context": {"project": {"history_id": "history-1"}},
             },
         )
@@ -216,7 +216,7 @@ def test_project_data_endpoint_reads_history_bound_existing_datasets(monkeypatch
     assert response.json()["queries"][0]["dataset_id"] == "poi"
     assert seen == {
         "history_id": "history-1",
-        "step_key": "step_04_supply_gap",
+        "step_key": "supply_gap",
         "project_context": {"project": {"history_id": "history-1"}},
     }
 
@@ -233,28 +233,50 @@ def test_legacy_graphrag_endpoint_is_removed(monkeypatch):
     assert response.status_code == 404
 
 
-def test_harness_synthesis_endpoint_forwards_only_domain_task(monkeypatch):
+def test_harness_unit_endpoint_forwards_only_domain_task(monkeypatch):
     seen = {}
 
-    def fake_synthesize(*, run_id, project_question):
-        seen.update(run_id=run_id, project_question=project_question)
-        return {"recommended_position": "公共文化客厅"}
+    def fake_analyze(*, run_id, history_id, project_question, decision_unit):
+        seen.update(run_id=run_id, history_id=history_id, project_question=project_question, decision_unit=decision_unit)
+        return {"unit_id": "audience_use", "title": "客群与使用", "content": "居民日常使用优先。", "citations": []}
 
     monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
-    monkeypatch.setattr(spatial_strategy, "synthesize_strategy_blueprint", fake_synthesize)
+    monkeypatch.setattr(spatial_strategy, "analyze_strategy_unit", fake_analyze)
     with TestClient(_app()) as client:
         response = client.post(
-            "/api/v1/analysis/spatial-strategy/harness/synthesize",
+            "/api/v1/analysis/spatial-strategy/harness/analyze-unit",
             headers={"X-N8N-Client-Key": "internal-key"},
             json={
                 "run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+                "history_id": "history-1",
                 "project_question": "形成未来空间策略",
+                "decision_unit": {"unit_id": "audience_use", "title": "客群与使用"},
             },
         )
 
     assert response.status_code == 200
-    assert response.json() == {"recommended_position": "公共文化客厅"}
+    assert response.json()["unit_id"] == "audience_use"
     assert seen == {
         "run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf",
+        "history_id": "history-1",
         "project_question": "形成未来空间策略",
+        "decision_unit": {"unit_id": "audience_use", "title": "客群与使用"},
     }
+
+
+def test_removed_harness_blueprint_and_section_endpoints_return_not_found(monkeypatch):
+    monkeypatch.setattr(spatial_strategy.settings, "n8n_webhook_api_key", "internal-key")
+    with TestClient(_app()) as client:
+        synthesis = client.post(
+            "/api/v1/analysis/spatial-strategy/harness/synthesize",
+            headers={"X-N8N-Client-Key": "internal-key"},
+            json={"run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf", "project_question": "任务"},
+        )
+        section = client.post(
+            "/api/v1/analysis/spatial-strategy/harness/write-section",
+            headers={"X-N8N-Client-Key": "internal-key"},
+            json={"run_id": "7b8ab959-c0e2-4d29-8168-9688cb4989bf", "project_question": "任务", "section": {}},
+        )
+
+    assert synthesis.status_code == 404
+    assert section.status_code == 404

@@ -29,22 +29,7 @@ from modules.agent.capability_intent import (
     CapabilityIntentResolution,
     resolve_capability_intent,
 )
-from modules.agent.runtime import stream_main_agent_loop
-from modules.agent.execution_service import agent_capabilities, prepare_agent_turn
-from modules.agent.model_profiles import (
-    AgentModelProfileCreate,
-    AgentModelProfilePatch,
-    AgentModelProfileTestRequest,
-    AgentModelProfileTestResponse,
-    AgentModelProfileView,
-    create_model_profile,
-    delete_model_profile,
-    test_model_profile,
-    update_model_profile,
-)
 from modules.agent.schemas import (
-    AgentContextAskRequest,
-    AgentContextAskResponse,
     AgentIterationNightlightRequest,
     AgentIterationNightlightResponse,
     AgentIterationPoiBuildRequest,
@@ -57,15 +42,8 @@ from modules.agent.schemas import (
     AgentToolSummary,
     AgentSummaryReadinessResponse,
     AgentSummaryRequest,
-    AgentTurnStreamEvent,
-    AgentSessionDetail,
-    AgentSessionMetadataPatchRequest,
-    AgentSessionSnapshotRequest,
-    AgentSessionSummary,
     AgentTurnRequest,
-    AgentTurnResponse,
 )
-from modules.agent.context_ask_service import answer_context_ask, stream_context_ask
 from modules.agent.iteration_change_service import (
     generate_nightlight_iteration_analysis,
     generate_poi_iteration_analysis,
@@ -83,16 +61,14 @@ from modules.agent.summary_service import (
     stream_generate_summary_pack,
 )
 from modules.agent.site_selection_service import generate_site_selection_pack
-from modules.agent.session_service import (
-    delete_agent_session,
-    get_agent_session_detail,
-    list_agent_sessions,
-    persist_streamed_main_agent_loop_response,
-    update_agent_session_metadata,
-    upsert_agent_session,
-)
 from modules.agent.tool_service import list_agent_tools
-from store.agent_session_repo import agent_session_repo
+from modules.agent_conversation import (
+    ConversationSessionDetail,
+    ConversationSessionMetadataPatch,
+    ConversationSessionSummary,
+    ConversationTurnRequest,
+    codex_conversation_service,
+)
 from store.analysis_run_storage import AnalysisRunStorageError
 from store.history_repo import history_repo
 
@@ -100,21 +76,12 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _encode_sse(event: AgentTurnStreamEvent) -> str:
-    return f"event: {event.type}\ndata: {json.dumps(event.payload, ensure_ascii=False)}\n\n"
+def _encode_sse(event_type: str, payload: dict) -> str:
+    return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _encode_summary_sse(event: AgentSummaryStreamEvent) -> str:
     return f"event: {event.type}\ndata: {json.dumps(event.payload, ensure_ascii=False)}\n\n"
-
-
-def _encode_context_ask_sse(event_type: str, payload: dict) -> str:
-    return f"event: {event_type}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-
-@router.get("/api/v1/analysis/agent/capabilities")
-async def get_agent_capabilities():
-    return await run_in_threadpool(agent_capabilities)
 
 
 @router.get(
@@ -191,96 +158,13 @@ async def post_analysis_capability_readiness(
         ) from exc
 
 
-@router.post(
-    "/api/v1/analysis/agent/model-profiles", response_model=AgentModelProfileView
-)
-async def post_agent_model_profile(payload: AgentModelProfileCreate):
-    return await run_in_threadpool(create_model_profile, payload)
-
-
-@router.patch(
-    "/api/v1/analysis/agent/model-profiles/{profile_id}",
-    response_model=AgentModelProfileView,
-)
-async def patch_agent_model_profile(profile_id: str, payload: AgentModelProfilePatch):
-    return await run_in_threadpool(update_model_profile, profile_id, payload)
-
-
-@router.delete("/api/v1/analysis/agent/model-profiles/{profile_id}", status_code=204)
-async def remove_agent_model_profile(profile_id: str):
-    await run_in_threadpool(delete_model_profile, profile_id)
-
-
-@router.post(
-    "/api/v1/analysis/agent/model-profiles/test",
-    response_model=AgentModelProfileTestResponse,
-)
-async def test_agent_model_profile(payload: AgentModelProfileTestRequest):
-    return await test_model_profile(payload)
-
-
-@router.post("/api/v1/analysis/agent/main-loop/stream")
-async def run_agent_main_loop_stream(request: Request, payload: AgentTurnRequest):
-    try:
-        prepared = await run_in_threadpool(
-            prepare_agent_turn, payload, agent_session_repo
-        )
-    except AnalysisRunStorageError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    payload = prepared.payload
-
+@router.post("/api/v1/analysis/agent/conversations/turns/stream")
+async def stream_conversation_turn(request: Request, payload: ConversationTurnRequest):
     async def event_stream():
-        bootstrap_events = [
-            AgentTurnStreamEvent(
-                type="status",
-                payload={"stage": "gating", "label": "门卫判断"},
-            ),
-            AgentTurnStreamEvent(
-                type="thinking",
-                payload={
-                    "id": "router-bootstrap-gating",
-                    "phase": "gating",
-                    "title": "门卫判断",
-                    "detail": "后端已收到请求，正在进入门卫判断。",
-                    "state": "active",
-                },
-            ),
-        ]
-        for bootstrap in bootstrap_events:
-            if await request.is_disconnected():
-                return
-            yield _encode_sse(bootstrap)
-        generator = stream_main_agent_loop(
-            payload,
-            llm_runtime=prepared.runtime,
-            effective_profile=prepared.effective_profile,
-            skill_id=prepared.effective_profile.skill_id,
-        )
-        try:
-            async for event in generator:
-                if await request.is_disconnected():
-                    break
-                outgoing = event
-                if event.type == "final":
-                    response = AgentTurnResponse(
-                        **(event.payload or {}).get("response", {})
-                    )
-                    persisted = await persist_streamed_main_agent_loop_response(
-                        payload,
-                        response,
-                        agent_session_repo,
-                        logger=logger,
-                        conversation_profile=prepared.conversation_profile,
-                    )
-                    outgoing = AgentTurnStreamEvent(
-                        type="final",
-                        payload={"response": persisted.model_dump(mode="json")},
-                    )
-                yield _encode_sse(outgoing)
-        finally:
-            await generator.aclose()
+        async for event_type, event_payload in codex_conversation_service.stream_turn(
+            request, payload
+        ):
+            yield _encode_sse(event_type, event_payload)
 
     return StreamingResponse(
         event_stream(),
@@ -292,9 +176,12 @@ async def run_agent_main_loop_stream(request: Request, payload: AgentTurnRequest
     )
 
 
-@router.get("/api/v1/analysis/agent/sessions", response_model=List[AgentSessionSummary])
+@router.get(
+    "/api/v1/analysis/agent/sessions",
+    response_model=List[ConversationSessionSummary],
+)
 async def get_agent_sessions():
-    return await run_in_threadpool(list_agent_sessions, agent_session_repo)
+    return await run_in_threadpool(codex_conversation_service.list_sessions)
 
 
 @router.post(
@@ -305,37 +192,6 @@ async def run_agent_site_selection(payload: AgentSiteSelectionRequest):
     if response.status == "failed" and response.error == "missing_place_type":
         raise HTTPException(status_code=400, detail="missing_place_type")
     return response
-
-
-@router.post(
-    "/api/v1/analysis/agent/context-ask", response_model=AgentContextAskResponse
-)
-async def run_agent_context_ask(payload: AgentContextAskRequest):
-    return await answer_context_ask(payload)
-
-
-@router.post("/api/v1/analysis/agent/context-ask/stream")
-async def run_agent_context_ask_stream(
-    request: Request, payload: AgentContextAskRequest
-):
-    async def event_stream():
-        generator = stream_context_ask(payload)
-        try:
-            async for event_type, event_payload in generator:
-                if await request.is_disconnected():
-                    break
-                yield _encode_context_ask_sse(event_type, event_payload)
-        finally:
-            await generator.aclose()
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 @router.get("/api/v1/analysis/agent/tools", response_model=List[AgentToolSummary])
@@ -421,34 +277,23 @@ async def post_agent_iteration_poi_build(payload: AgentIterationPoiBuildRequest)
 
 
 @router.get(
-    "/api/v1/analysis/agent/sessions/{session_id}", response_model=AgentSessionDetail
+    "/api/v1/analysis/agent/sessions/{session_id}",
+    response_model=ConversationSessionDetail,
 )
 async def get_agent_session(session_id: str):
-    return await run_in_threadpool(
-        get_agent_session_detail, session_id, agent_session_repo
-    )
-
-
-@router.put(
-    "/api/v1/analysis/agent/sessions/{session_id}", response_model=AgentSessionDetail
-)
-async def put_agent_session(session_id: str, payload: AgentSessionSnapshotRequest):
-    return await run_in_threadpool(
-        upsert_agent_session, session_id, payload, agent_session_repo
-    )
+    return await codex_conversation_service.get_session(session_id)
 
 
 @router.patch(
-    "/api/v1/analysis/agent/sessions/{session_id}", response_model=AgentSessionDetail
+    "/api/v1/analysis/agent/sessions/{session_id}",
+    response_model=ConversationSessionDetail,
 )
 async def patch_agent_session(
-    session_id: str, payload: AgentSessionMetadataPatchRequest
+    session_id: str, payload: ConversationSessionMetadataPatch
 ):
-    return await run_in_threadpool(
-        update_agent_session_metadata, session_id, payload, agent_session_repo
-    )
+    return await codex_conversation_service.update_session(session_id, payload)
 
 
 @router.delete("/api/v1/analysis/agent/sessions/{session_id}")
 async def remove_agent_session(session_id: str):
-    return await run_in_threadpool(delete_agent_session, session_id, agent_session_repo)
+    return await codex_conversation_service.delete_session(session_id)

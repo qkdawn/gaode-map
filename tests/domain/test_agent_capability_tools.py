@@ -37,7 +37,7 @@ def test_ensure_area_data_readiness_readonly_does_not_compute(monkeypatch):
     monkeypatch.setattr(capability_tools, "compute_h3_metrics_from_scope_and_pois", fake_compute)
     monkeypatch.setattr(capability_tools, "compute_population_overview_from_scope", fake_compute)
     monkeypatch.setattr(capability_tools, "compute_nightlight_overview_from_scope", fake_compute)
-    monkeypatch.setattr(capability_tools, "compute_road_syntax_from_scope", fake_compute)
+    monkeypatch.setattr(capability_tools, "read_persisted_road_syntax", fake_compute)
 
     result = asyncio.run(
         capability_tools.ensure_area_data_readiness(
@@ -65,6 +65,5 @@ def test_ensure_area_data_readiness_readonly_does_not_compute(monkeypatch):
     assert skipped_tools == {
         "compute_h3_metrics_from_scope_and_pois",
         "compute_population_overview_from_scope",
-        "compute_road_syntax_from_scope",
+        "read_persisted_road_syntax",
     }
-

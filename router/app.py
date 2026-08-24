@@ -6,7 +6,6 @@ from modules.isochrone.service import (
     _build_scope_sample_points,
     build_debug_isochrone_samples as _build_debug_isochrone_samples,
 )
-from modules.road.core import analyze_road_syntax
 from router.domains import (
     agent_router,
     charting_router,

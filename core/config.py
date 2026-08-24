@@ -78,6 +78,13 @@ class Settings(BaseSettings):
         validation_alias="DB_BIND_ADDRESS",
         description="Optional local source address for direct database connections",
     )
+    db_io_timeout_s: int = Field(
+        120,
+        ge=30,
+        le=600,
+        validation_alias="DB_IO_TIMEOUT_S",
+        description="Read/write timeout for database operations, including complete spatial artifacts",
+    )
     db_port: int = Field(13306, validation_alias="DB_PORT", description="Database port")
     db_user: str = Field("map_app", validation_alias="DB_USER", description="Database user")
     db_password: str = Field("", validation_alias="DB_PASSWORD", description="Database password")

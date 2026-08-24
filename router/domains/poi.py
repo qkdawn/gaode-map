@@ -164,8 +164,6 @@ async def build_poi_grid_metrics(payload: PoiGridMetricsRequest):
             poi_coord_type=payload.poi_coord_type,
             categories=payload.categories,
             year=payload.year,
-            neighbor_ring=payload.neighbor_ring,
-            arcgis_neighbor_ring=payload.arcgis_neighbor_ring,
             arcgis_export_image=payload.arcgis_export_image,
             arcgis_timeout_sec=payload.arcgis_timeout_sec,
             progress_callback=_progress_callback,

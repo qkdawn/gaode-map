@@ -48,7 +48,7 @@ EXECUTABLE_METRIC_IDS = frozenset({
     "nightlight.total_radiance", "nightlight.mean_radiance", "nightlight.max_radiance",
     "nightlight.lit_pixel_ratio", "nightlight.p90", "nightlight.hotspot_class",
     "nightlight.hotspot_ratio", "nightlight.spatial_profile", "nightlight.sector_profile",
-    "nightlight.activity_level", "regional.directional_evidence_matrix",
+    "nightlight.brightness_context", "regional.directional_evidence_matrix",
     "poi.focused_accessibility", "poi.supply_structure",
 })
 
@@ -351,7 +351,7 @@ class ProjectSpatialAnalysisService:
             "nightlight.hotspot_ratio",
             "nightlight.spatial_profile",
             "nightlight.sector_profile",
-            "nightlight.activity_level",
+            "nightlight.brightness_context",
         }
         if selected & nightlight_metrics:
             polygon = history_detail.get("polygon")
@@ -367,8 +367,8 @@ class ProjectSpatialAnalysisService:
                             "evidence:nightlight:scope-profile",
                             ["current:dataset:nightlight"],
                             sorted(selected & nightlight_metrics),
-                            "区域夜间灯光强度与空间形态代理",
-                            "夜间灯光用于描述夜间活动强度与空间分布代理；它不能证明项目客流、营业额或特定业态需求。",
+                            "区域夜光亮度背景与空间形态",
+                            "夜光只描述亮度背景及其空间分布；它不能证明项目客流、营业额、消费或特定业态需求。",
                             {
                                 "year": layer.get("year"),
                                 "summary": layer.get("summary"),
@@ -1136,7 +1136,7 @@ class ProjectSpatialAnalysisService:
             "spatial.lisa": ("density", "poi_density", "poi_count", "value"),
             "road.integration": ("integration", "integration_score", "road_integration"),
             "road.choice": ("choice", "choice_score", "road_choice"),
-            "road.connectivity": ("connectivity", "connectivity_score", "road_connectivity"),
+            "road.connectivity": ("metrics", "road_connectivity"),
             "road.mean_depth": ("mean_depth", "depth", "depth_score", "road_depth"),
             "road.intelligibility": ("intelligibility_score", "connectivity_score"),
             "road.degree": ("degree_score",),
@@ -1246,27 +1246,14 @@ class ProjectSpatialAnalysisService:
 
     @staticmethod
     def _nightlight_spatial_analysis(layer: dict[str, Any]) -> dict[str, Any]:
-        """Expose nightlight as a brightness pattern, never as economic activity.
-
-        The shared nightlight module also powers legacy experiences that use
-        economic-activity labels.  The Spatial Business Analyst must keep its
-        proxy boundary at the domain edge, so its reusable evidence contains
-        only brightness distribution, hotspots, gradients, and directionality.
-        """
+        """Expose numerical nightlight facts without map-only classifications."""
         analysis = _mapping(layer.get("analysis"))
-        safe = {
-            key: value
-            for key, value in analysis.items()
-            if not str(key).startswith("economic_activity_")
+        allowed = {
+            "total_radiance", "mean_radiance", "p90_radiance", "peak_radiance",
+            "max_radiance", "lit_pixel_ratio", "valid_pixel_count", "max_distance_km",
+            "peak_to_edge_ratio", "sector_direction_analysis",
         }
-        level = analysis.get("economic_activity_intensity_level")
-        if level not in (None, ""):
-            safe["night_brightness_spatial_level"] = str(level)
-        sector = _mapping(analysis.get("sector_direction_analysis"))
-        direction = str(sector.get("dominant_direction") or "").strip()
-        if direction:
-            safe["night_brightness_distribution_note"] = f"夜间亮度高值相对集中于{direction}方向。"
-        return safe
+        return {key: analysis[key] for key in allowed if analysis.get(key) not in (None, "", {}, [])}
 
     @staticmethod
     def _raster_status(*, valid_cell_count: int, total_cell_count: int) -> tuple[str, float, float]:
@@ -1363,10 +1350,15 @@ class ProjectSpatialAnalysisService:
     @staticmethod
     def _numeric_record_value(record: ScopeRecord, tool_id: str) -> float:
         properties = record.properties or {}
+        if tool_id == "road.connectivity":
+            metrics = properties.get("metrics") if isinstance(properties.get("metrics"), dict) else {}
+            raw_connectivity = _number(metrics.get("connectivity"))
+            if raw_connectivity is not None:
+                return raw_connectivity
         metric_candidates = {
             "road.integration": ("road_integration", "integration_score", "integration_global"),
             "road.choice": ("road_choice", "choice_score", "choice_global"),
-            "road.connectivity": ("road_connectivity", "connectivity_score"),
+            "road.connectivity": ("road_connectivity",),
             "road.mean_depth": ("road_depth", "depth_score", "depth_global"),
             "road.degree": ("degree_score",),
             "road.node_degree": ("road_connectivity", "connectivity_score"),
@@ -2268,6 +2260,12 @@ class ProjectSpatialAnalysisService:
                     "statement_ref": group.statement_ref,
                     "candidates_considered": group.candidates_considered,
                     "route_failures": group.route_failures,
+                    "reachable_poi_count": group.reachable_poi_count,
+                    "cumulative_reachable_count": [
+                        {"minutes": minutes, "count": count}
+                        for minutes, count in group.reachable_count_by_minutes
+                    ],
+                    "outside_time_limit_count": group.outside_time_limit_count,
                     "omission_reason": group.omission_reason,
                     "pois": [
                         {

@@ -1,5 +1,7 @@
 # 技术执行型分析 Agent 开发计划
 
+> 历史方案说明（2026-08-22）：本文主体记录早期自研 Agent runtime 计划，不是当前实现规范。普通对话已删除项目自研 gate、planner、LangGraph tool loop、auditor、finalizer、memory、quick/deep 和 `context-ask`，统一采用 `/analysis -> openai-codex Python SDK -> Codex App Server -> spatial-project MCP`。完整空间策略报告采用 `n8n -> modules/agent_harness -> openai-codex Python SDK -> spatial-project MCP`，每次领域任务使用临时 thread。以下旧状态机、API 和模块设计不得作为新增实现依据。
+
 ## 1. 目标定位
 
 本项目的 AI 模块不是通用聊天机器人，也不是只做解释的分析副驾，而是服务于 `/analysis` 工作台的技术执行型分析 Agent。

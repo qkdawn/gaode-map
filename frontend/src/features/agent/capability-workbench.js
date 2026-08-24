@@ -126,7 +126,7 @@ const compactRunArtifact = (artifact, direction = '', snapshot = null) => ({
 })
 
 const CAPABILITY_PROMPTS = Object.freeze({
-  'client-decision-spatial-strategy': '围绕当前项目问题，按顺序完成十二个分析方向；每个方向自由组织分析内容。',
+  'client-decision-spatial-strategy': '围绕当前项目问题，按顺序完成十一个分析方向；每个方向自由组织分析内容。',
   'spatial-business-analyst': '基于当前分析范围、材料和空间分析结果，生成面向下一步决策的专业空间项目报告。',
   'urban-strategy-stage1': '基于当前分析范围、资料和分析结果，执行城市更新第一阶段策划并生成可审计报告。',
   'spatial-programming-matrix': '基于当前项目证据，重点生成空间功能策划决策矩阵，并说明候选功能、排除理由和前置条件。',
@@ -136,16 +136,15 @@ const CAPABILITY_PROMPTS = Object.freeze({
 const SPATIAL_STRATEGY_STEPS = Object.freeze([
   { step: 'step_01_policy_site', step_order: 1, label: '政策与场地' },
   { step: 'step_02_regional_role', step_order: 2, label: '区域角色' },
-  { step: 'step_03_market_flow', step_order: 3, label: '市场与流动' },
-  { step: 'step_04_supply_gap', step_order: 4, label: '供给与空位' },
-  { step: 'step_05_audience_use', step_order: 5, label: '客群与使用' },
-  { step: 'step_06_theme_resources', step_order: 6, label: '主题与资源' },
-  { step: 'step_07_positioning', step_order: 7, label: '项目定位' },
-  { step: 'step_08_product_mix', step_order: 8, label: '产品组合' },
-  { step: 'step_09_spatial_layout', step_order: 9, label: '空间布局' },
-  { step: 'step_10_operating_model', step_order: 10, label: '运营模式' },
-  { step: 'step_11_financial_check', step_order: 11, label: '财务校验' },
-  { step: 'step_12_phasing', step_order: 12, label: '分期实施' },
+  { step: 'step_03_supply_gap', step_order: 3, label: '供给与空位' },
+  { step: 'step_04_audience_use', step_order: 4, label: '客群与使用' },
+  { step: 'step_05_theme_resources', step_order: 5, label: '主题与资源' },
+  { step: 'step_06_positioning', step_order: 6, label: '项目定位' },
+  { step: 'step_07_product_mix', step_order: 7, label: '产品组合' },
+  { step: 'step_08_spatial_layout', step_order: 8, label: '空间布局' },
+  { step: 'step_09_operating_model', step_order: 9, label: '运营模式' },
+  { step: 'step_10_financial_check', step_order: 10, label: '财务校验' },
+  { step: 'step_11_phasing', step_order: 11, label: '分期实施' },
 ])
 
 export function createAgentCapabilityWorkbenchMethods() {
@@ -210,7 +209,7 @@ export function createAgentCapabilityWorkbenchMethods() {
           summary: text(item.content),
         }))
       return {
-        headline: text(this.n8nSpatialStrategyRun?.report?.summary) || '十二章分析已完成。',
+        headline: text(this.n8nSpatialStrategyRun?.report?.summary) || '11 章空间策略已完成。',
         sections,
       }
     },
@@ -364,7 +363,6 @@ export function createAgentCapabilityWorkbenchMethods() {
       if (typeof this.selectStep3Panel === 'function') this.selectStep3Panel('agent')
       this.agentWorkspaceView = 'capabilities'
       this.closeAgentSessionMenu()
-      this.loadAgentCapabilities()
       this.loadAnalysisCapabilities().catch(() => {})
       this.loadAnalysisCapabilityOverview(true).catch(() => {})
       this.loadAnalysisRuns().catch(() => {})
@@ -976,7 +974,6 @@ export function createAgentCapabilityWorkbenchMethods() {
       if (Number(context.time_min) > 0) addParameter('时间阈值', `${Number(context.time_min)} 分钟`)
       addParameter('数据来源', context.source || filters.poi_source)
       if (Number(filters.h3_resolution) > 0) addParameter('H3 分辨率', filters.h3_resolution)
-      if (Number(filters.h3_neighbor_ring) > 0) addParameter('邻域圈层', filters.h3_neighbor_ring)
       addParameter('路网指标', filters.road_metric)
       addParameter('人口视图', filters.population_view)
       addParameter('夜光视图', filters.nightlight_view)
@@ -1025,12 +1022,10 @@ export function createAgentCapabilityWorkbenchMethods() {
         sources: selectedSources,
         parameters: parameters.slice(0, 6),
         model: this.isN8nSpatialStrategyCapability(activeCapability)
-          ? 'Codex relay（n8n 管理）'
-          : typeof this.getAgentSelectedModelName === 'function'
-            ? text(this.getAgentSelectedModelName()) || '未选择模型'
-            : '未选择模型',
+          ? 'Codex Harness（SDK）'
+          : 'Codex App Server',
         executor: this.isN8nSpatialStrategyCapability(activeCapability)
-          ? 'n8n · AN-20 十二步编排'
+          ? 'n8n · 11 章策略编排'
           : `${activeCapability.executor_type === 'service' ? '服务' : 'Skill'} · ${text(activeCapability.executor_id) || '未配置'}`,
         estimated_stages: Number(activeCapability.estimated_stages || 0) || 1,
         selected_inputs: selectedInputs,
@@ -1197,13 +1192,6 @@ export function createAgentCapabilityWorkbenchMethods() {
         this.openAgentPptPlanningFromReport({ capabilityInputSelections })
         return
       }
-      await this.loadAgentCapabilities()
-      const skill = (this.agentSkills || []).find(item => item.id === capability.executor_id)
-      if (!skill) {
-        this.analysisCapabilitiesError = '该分析能力的 Skill 当前不可用，请刷新能力目录或检查 Skill 注册。'
-        return
-      }
-      this.chooseAgentSkill(skill)
       this.agentWorkspaceView = 'report'
       await this.submitAgentComposer({
         prompt: CAPABILITY_PROMPTS[capability.id] || capability.description,

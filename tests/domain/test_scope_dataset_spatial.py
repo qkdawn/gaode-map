@@ -331,6 +331,7 @@ def test_scope_service_queries_road_grid_as_polygon_source():
                                         "cell_id": "road-cell-1", "road_has_data": True,
                                         "road_length_km": 1.0, "road_length_km_per_km2": 4.0,
                                         "road_nain": 0.7, "road_nach": 0.8, "road_connectivity": 2.0,
+                                        "road_connectivity_score": 0.6,
                                         "road_choice": 0.8,
                                     },
                                     "geometry": {
@@ -549,6 +550,7 @@ class _SpatialAggregateRepository:
                                 "properties": {
                                     "edge_id": "road-1", "from_node": "node:1", "to_node": "node:2",
                                     "road_name": "测试路", "road_class": "residential", "length_m": 2220,
+                                    "connectivity_score": 0.0,
                                     "metrics": {"integration": 0.7, "choice": 0.8, "connectivity": 1, "depth": 2, "control": 0.5},
                                     "nain_global": 0.7, "nach_global": 0.8,
                                     "node_count_global": 2, "total_depth_global": 2,

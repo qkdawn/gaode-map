@@ -300,6 +300,19 @@ def test_request_contract_rejects_invalid_shapes():
             fact_domains=["poi"],
             selectors=[{"dimension": "poi.category", "values": ["餐饮", "购物"]}],
         )
+    with pytest.raises(ValueError, match="named_poi_roles_require_poi_domain"):
+        SpatialDomainComputationRequest(
+            analysis="rank",
+            fact_domains=["population"],
+            named_poi_roles=["regional_anchor"],
+        )
+    with pytest.raises(ValueError, match="comparable_supply_requires_poi_category_selector"):
+        SpatialDomainComputationRequest(
+            analysis="rank",
+            fact_domains=["poi"],
+            evidence_dimensions=["poi.supply"],
+            named_poi_roles=["comparable_supply"],
+        )
 
 
 def test_scope_discovers_four_fact_domains_without_metric_menu():
@@ -310,6 +323,74 @@ def test_scope_discovers_four_fact_domains_without_metric_menu():
     assert result["summary"]["domain_count"] == 4
     assert "metrics" not in result
     assert "evidence_dimensions" not in result
+
+
+def test_domain_result_returns_requested_named_poi_candidates():
+    result = _service().compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "rank",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply"],
+            "named_poi_roles": ["regional_anchor", "daily_service"],
+        },
+    )
+
+    assert set(result["named_poi_candidates"]) == {"regional_anchor", "daily_service"}
+
+
+def test_regional_anchor_candidates_cover_categories_before_repeating_transport():
+    poi = [
+        _record("current:dataset:poi", "parking-1", Point(0.025, 0.025), category="交通设施服务", subcategory="停车场", name="近侧停车场"),
+        _record("current:dataset:poi", "parking-2", Point(0.026, 0.025), category="交通设施服务", subcategory="停车场", name="另一处停车场"),
+        _record("current:dataset:poi", "park-1", Point(0.027, 0.025), category="风景名胜", subcategory="公园广场", name="近侧社区公园"),
+        _record("current:dataset:poi", "temple-1", Point(0.03, 0.025), category="风景名胜", subcategory="寺庙", name="古开福寺"),
+    ]
+    service = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:poi": poi}),
+        metric_catalog=_Catalog(),
+    )
+
+    result = service.compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "rank",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply"],
+            "named_poi_roles": ["regional_anchor"],
+            "top_k": 2,
+        },
+    )
+
+    names = [item["name"] for item in result["named_poi_candidates"]["regional_anchor"]]
+    assert names == ["近侧停车场", "古开福寺"]
+
+
+def test_daily_service_candidates_cover_education_before_repeating_medical():
+    poi = [
+        _record("current:dataset:poi", "clinic-1", Point(0.025, 0.025), category="医疗保健服务", subcategory="药房", name="近侧药房"),
+        _record("current:dataset:poi", "clinic-2", Point(0.026, 0.025), category="医疗保健服务", subcategory="药房", name="另一处药房"),
+        _record("current:dataset:poi", "training-1", Point(0.027, 0.025), category="科教文化服务", subcategory="培训机构", name="近侧培训机构"),
+        _record("current:dataset:poi", "school-1", Point(0.03, 0.025), category="科教文化服务", subcategory="学校", name="紫凤小学"),
+    ]
+    service = SpatialEvidenceService(
+        projects=_Projects({"current:dataset:poi": poi}),
+        metric_catalog=_Catalog(),
+    )
+
+    result = service.compute_domains(
+        history_id="history-1",
+        request={
+            "analysis": "rank",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply"],
+            "named_poi_roles": ["daily_service"],
+            "top_k": 2,
+        },
+    )
+
+    names = [item["name"] for item in result["named_poi_candidates"]["daily_service"]]
+    assert names == ["近侧药房", "紫凤小学"]
 
 
 def test_population_direction_returns_target_population_and_structure_by_sector():

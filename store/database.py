@@ -48,10 +48,11 @@ def _build_engine(db_uri: str | None = None):
     except Exception:
         drivername = ""
     if "pymysql" in drivername:
+        io_timeout_s = max(30, int(settings.db_io_timeout_s or 120))
         connect_args = {
             "connect_timeout": 5,
-            "read_timeout": 30,
-            "write_timeout": 30,
+            "read_timeout": io_timeout_s,
+            "write_timeout": io_timeout_s,
         }
         bind_address = str(settings.db_bind_address or "").strip()
         if bind_address:
@@ -120,12 +121,14 @@ def _ensure_agent_sessions_schema() -> None:
         return
 
     columns = {item.get("name") for item in inspector.get_columns("agent_sessions")}
-    if {"history_id", "panel_kind"}.issubset(columns):
+    required_columns = {"history_id", "panel_kind", "codex_thread_id"}
+    obsolete_columns = {"snapshot"}
+    if required_columns.issubset(columns) and not obsolete_columns.intersection(columns):
         for index in AgentSession.__table__.indexes:
             index.create(bind=engine, checkfirst=True)
         return
 
-    logger.warning("agent_sessions 缺少面板历史字段，将按新结构重建并丢弃旧 AI 历史")
+    logger.warning("agent_sessions 不是 Codex thread 会话结构，将重建并丢弃旧 AI 历史")
     AgentSession.__table__.drop(bind=engine, checkfirst=True)
     AgentSession.__table__.create(bind=engine, checkfirst=True)
 
@@ -249,6 +252,14 @@ def _drop_legacy_analysis_artifact_versions() -> None:
             conn.execute(text("DROP TABLE analysis_artifact_versions"))
 
 
+def _drop_legacy_agent_model_profiles() -> None:
+    """Remove model selection state superseded by the Codex App Server runtime."""
+    _refresh_runtime_config_if_needed()
+    if inspect(engine).has_table("agent_model_profiles"):
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE agent_model_profiles"))
+
+
 def init_db() -> None:
     """
     创建表结构（幂等）。
@@ -264,5 +275,6 @@ def init_db() -> None:
     _ensure_poi_results_schema()
     _ensure_analysis_artifacts_schema()
     _drop_legacy_analysis_artifact_versions()
+    _drop_legacy_agent_model_profiles()
     _ensure_spatial_projects_schema()
     logger.info("数据库初始化完成")

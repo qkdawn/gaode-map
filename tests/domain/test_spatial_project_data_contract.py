@@ -126,6 +126,22 @@ def test_context_separates_raw_datasets_and_computed_results(service):
     assert {item["result_id"] for item in result["computed_results"]} == {"computed:poi:summary", "metric:direction"}
 
 
+def test_context_builds_population_and_age_totals_from_the_same_records():
+    records = [
+        {"population_total": 120, "male_total": 62, "female_total": 58, "age_total": {"05": 20, "30": 30}},
+        {"population_total": 80, "male_total": 38, "female_total": 42, "age_total": {"05": 10, "30": 15}},
+    ]
+
+    summary = contract_module._population_summary(records, {"source": "WorldPop"})
+
+    assert summary["cell_count"] == 2
+    assert summary["population_total"] == 200
+    assert summary["male_total"] == 100
+    assert summary["female_total"] == 100
+    assert summary["age_total"]["05"] == 30
+    assert summary["age_total"]["30"] == 45
+
+
 def test_records_can_be_exhausted_with_snapshot_bound_continuation(service, monkeypatch):
     monkeypatch.setattr(contract_module, "MAX_RESULT_SIZE", 2)
     first = service.query_data(history_id="history-1", dataset_id="poi")

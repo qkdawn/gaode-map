@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from pathlib import Path
+import sys
+import threading
+import time
 from typing import Annotated
 
 import pytest
@@ -30,7 +34,7 @@ def test_research_tool_descriptions_define_source_and_search_boundaries():
     web_search = inspect.getdoc(mcp_server.search_public_web) or ""
     web_fetch = inspect.getdoc(mcp_server.fetch_public_web_page) or ""
 
-    assert "multiple times" in spatial_agent
+    assert "decompose" in spatial_agent and "multiple times" in spatial_agent
     assert "does not interpret a user question" in spatial_compute
     assert "methods, precedents, and mechanisms" in literature
     assert "location, exact object name" in web_search
@@ -43,7 +47,7 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     async def exercise() -> dict[str, dict]:
         root = Path(__file__).resolve().parents[2]
         params = StdioServerParameters(
-            command="python",
+            command=sys.executable,
             args=["-m", "modules.spatial_projects.mcp_server"],
             cwd=str(root),
         )
@@ -51,14 +55,16 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
             async with ClientSession(*streams) as session:
                 await session.initialize()
                 result = await session.list_tools()
-                return {tool.name: tool.inputSchema for tool in result.tools}
+        return {tool.name: tool.inputSchema for tool in result.tools}
 
     schemas = asyncio.run(exercise())
     assert list(schemas) == [
         "compute_spatial_evidence",
+        "compute_spatial_evidence_batch",
         "read_spatial_evidence_result",
         "analyze_spatial_question",
-        "read_strategy_decisions",
+        "read_strategy_chapters",
+        "project_context",
         "read_project_document",
         "search_literature_evidence",
         "search_public_web",
@@ -66,19 +72,58 @@ def test_spatial_project_mcp_exposes_complete_data_tools():
     ]
     query_schema = schemas["compute_spatial_evidence"]
     assert set(query_schema["required"]) == {"history_id", "analysis"}
-    assert {"fact_domains", "evidence_dimensions", "selectors", "travel_time_bands_min", "neighbor_steps", "rank_order", "top_k", "record_refs"}.issubset(query_schema["properties"])
+    assert {"fact_domains", "evidence_dimensions", "selectors", "travel_time_bands_min", "neighbor_steps", "rank_order", "top_k", "record_refs", "named_poi_roles"}.issubset(query_schema["properties"])
     assert "metric_ids" not in query_schema["properties"]
+    assert "question" not in query_schema["properties"]
+    batch_schema = schemas["compute_spatial_evidence_batch"]
+    assert set(batch_schema["required"]) == {"history_id", "requests"}
+    assert batch_schema["properties"]["requests"]["maxItems"] == 8
     domains_schema = next(item for item in query_schema["properties"]["fact_domains"]["anyOf"] if item.get("type") == "array")
+    assert domains_schema["maxItems"] == 4
     assert set(domains_schema["items"]["enum"]) == {"poi", "population", "nightlight", "road"}
-    assert set(schemas["analyze_spatial_question"]["required"]) == {"history_id", "question"}
+    dimensions_schema = next(item for item in query_schema["properties"]["evidence_dimensions"]["anyOf"] if item.get("type") == "array")
+    assert {"road.to_movement", "road.through_movement", "road.connectivity", "road.network_density"} <= set(dimensions_schema["items"]["enum"])
+    selectors_schema = next(item for item in query_schema["properties"]["selectors"]["anyOf"] if item.get("type") == "array")
+    assert selectors_schema["maxItems"] == 8
+    selector_ref = selectors_schema["items"]["$ref"].rsplit("/", 1)[-1]
+    selector_schema = query_schema["$defs"][selector_ref]
+    assert set(selector_schema["properties"]["dimension"]["enum"]) == {
+        "poi.category", "poi.subcategory", "population.sex", "population.age_band", "population.measure",
+        "road.class", "road.radius", "road.object", "year",
+    }
+    assert selector_schema["properties"]["values"]["minItems"] == 1
+    assert selector_schema["properties"]["values"]["maxItems"] == 20
+    bands_schema = next(item for item in query_schema["properties"]["travel_time_bands_min"]["anyOf"] if item.get("type") == "array")
+    assert bands_schema["maxItems"] == 6
+    assert bands_schema["items"]["minItems"] == bands_schema["items"]["maxItems"] == 2
+    assert query_schema["properties"]["neighbor_steps"]["minimum"] == 1
+    assert query_schema["properties"]["neighbor_steps"]["maximum"] == 3
+    assert query_schema["properties"]["top_k"]["minimum"] == 1
+    assert query_schema["properties"]["top_k"]["maximum"] == 20
+    record_refs_schema = next(item for item in query_schema["properties"]["record_refs"]["anyOf"] if item.get("type") == "array")
+    assert record_refs_schema["maxItems"] == 20
     assert "distance_bands_m" not in query_schema["properties"]
     assert "dataset_id" not in query_schema["properties"]
     assert "geometry" not in query_schema["properties"]
     assert "coordinates" not in query_schema["properties"]
-    assert set(schemas["read_strategy_decisions"]["required"]) == {"run_id"}
+    assert set(schemas["analyze_spatial_question"]["required"]) == {"history_id", "question"}
+    assert set(schemas["analyze_spatial_question"]["properties"]) == {"history_id", "question"}
+    assert set(schemas["read_spatial_evidence_result"]["required"]) == {"history_id", "result_id"}
+    assert set(schemas["read_strategy_chapters"]["required"]) == {"run_id", "unit_ids"}
+    assert schemas["read_strategy_chapters"]["properties"]["unit_ids"]["maxItems"] == 11
+    assert set(schemas["project_context"]["required"]) == {"history_id"}
     document_schema = schemas["read_project_document"]
     assert set(document_schema["required"]) == {"history_id", "document_id"}
     assert {"start_block", "max_blocks", "page_start", "page_end"}.issubset(document_schema["properties"])
+    assert document_schema["properties"]["start_block"]["minimum"] == 0
+    assert document_schema["properties"]["max_blocks"]["minimum"] == 1
+    assert document_schema["properties"]["max_blocks"]["maximum"] == 40
+    for field in ("page_start", "page_end"):
+        integer_schema = next(
+            item for item in document_schema["properties"][field]["anyOf"]
+            if item.get("type") == "integer"
+        )
+        assert integer_schema["minimum"] == 1
     literature_schema = schemas["search_literature_evidence"]
     assert set(literature_schema["required"]) == {"history_id", "question"}
     assert {"mode", "top_k"}.issubset(literature_schema["properties"])
@@ -112,7 +157,9 @@ def test_spatial_agent_wrapper_accepts_only_project_and_question(monkeypatch):
 
     result = mcp_server.analyze_spatial_question("history-1", "主要联系方向在哪里？")
 
-    assert captured == {"history_id": "history-1", "question": "主要联系方向在哪里？"}
+    assert captured["history_id"] == "history-1"
+    assert captured["question"] == "主要联系方向在哪里？"
+    assert captured["evidence_executor"] is mcp_server._execute_deterministic_spatial_plan
     assert result["question"] == "主要联系方向在哪里？"
 
 
@@ -128,9 +175,10 @@ def test_deterministic_spatial_wrapper_does_not_forward_question(monkeypatch):
     result = mcp_server.compute_spatial_evidence(
         history_id="history-1",
         analysis="direction",
-        fact_domains=["population", "nightlight"],
-        evidence_dimensions=["population.scale", "nightlight.intensity"],
+        fact_domains=["poi", "population"],
+        evidence_dimensions=["poi.supply", "population.scale"],
         selectors=[{"dimension": "population.sex", "values": ["female"]}],
+        named_poi_roles=["regional_anchor"],
     )
 
     assert result == {"status": "available"}
@@ -139,7 +187,32 @@ def test_deterministic_spatial_wrapper_does_not_forward_question(monkeypatch):
     assert captured["request"]["selectors"] == [
         {"dimension": "population.sex", "values": ["female"]},
     ]
-    assert "question" not in captured["request"]
+    assert captured["request"]["named_poi_roles"] == ["regional_anchor"]
+
+
+def test_spatial_plan_bridge_strips_internal_question(monkeypatch):
+    captured = {}
+
+    def fake_batch(history_id, requests):
+        captured["history_id"] = history_id
+        captured["requests"] = requests
+        return {"status": "available", "results": []}
+
+    monkeypatch.setattr(mcp_server, "compute_spatial_evidence_batch", fake_batch)
+    result = mcp_server._execute_deterministic_spatial_plan(
+        "history-1",
+        [{
+            "question": "内部问题描述",
+            "analysis": "accessibility",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply"],
+        }],
+    )
+
+    assert result["status"] == "available"
+    assert captured["history_id"] == "history-1"
+    assert captured["requests"][0].analysis == "accessibility"
+    assert not hasattr(captured["requests"][0], "question")
 
 
 def test_compute_spatial_evidence_persists_addressable_result(monkeypatch):
@@ -155,11 +228,38 @@ def test_compute_spatial_evidence_persists_addressable_result(monkeypatch):
     monkeypatch.setattr(
         mcp_server.spatial_evidence_result_store,
         "persist",
-        lambda **kwargs: captured.update(kwargs),
+        lambda **kwargs: captured.update(kwargs) or kwargs["result"],
     )
 
     assert mcp_server.compute_spatial_evidence("history-1", "scope") == expected
     assert captured == {"history_id": "history-1", "result": expected}
+
+
+def test_compute_spatial_evidence_batch_runs_requests_concurrently(monkeypatch):
+    thread_ids = set()
+
+    def fake_compute(**kwargs):
+        thread_ids.add(threading.get_ident())
+        time.sleep(0.05)
+        return {
+            "result_id": f"spatial:{kwargs['analysis']}",
+            "status": "available",
+            "analysis": kwargs["analysis"],
+        }
+
+    monkeypatch.setattr(mcp_server, "compute_spatial_evidence", fake_compute)
+
+    result = mcp_server.compute_spatial_evidence_batch(
+        "history-1",
+        [
+            {"analysis": "scope", "fact_domains": ["poi"], "evidence_dimensions": ["poi.supply"]},
+            {"analysis": "direction", "fact_domains": ["population"], "evidence_dimensions": ["population.scale"]},
+        ],
+    )
+
+    assert result["status"] == "available"
+    assert [item["analysis"] for item in result["results"]] == ["scope", "direction"]
+    assert len(thread_ids) == 2
 
 
 def test_read_spatial_evidence_result_is_read_only(monkeypatch):
@@ -268,7 +368,11 @@ def test_compute_spatial_evidence_reuses_same_data_identity_and_invalidates_on_v
 
     monkeypatch.setattr(mcp_server.service, "read_history_project", project)
     monkeypatch.setattr(mcp_server.spatial_evidence, "compute_domains", compute)
-    monkeypatch.setattr(mcp_server.spatial_evidence_result_store, "persist", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        mcp_server.spatial_evidence_result_store,
+        "persist",
+        lambda **kwargs: kwargs["result"],
+    )
 
     first = mcp_server.compute_spatial_evidence("history-cache", "scope", ["population"], ["population.scale"])
     second = mcp_server.compute_spatial_evidence("history-cache", "scope", ["population"], ["population.scale"])
@@ -281,11 +385,70 @@ def test_compute_spatial_evidence_reuses_same_data_identity_and_invalidates_on_v
     assert state["calls"] == 2
 
 
+def test_compute_spatial_evidence_reuses_persisted_result_before_computation(monkeypatch):
+    project = {
+        "history_id": "history-persisted",
+        "snapshot": {"snapshot_id": "snapshot-1"},
+        "datasets": [{
+            "source_id": "current:dataset:population",
+            "status": "ready",
+            "data_version": "v1",
+            "selected_year": 2025,
+        }],
+    }
+    request = {
+        "analysis": "scope",
+        "fact_domains": ["population"],
+        "evidence_dimensions": ["population.scale"],
+        "selectors": [],
+        "travel_time_bands_min": None,
+        "neighbor_steps": 1,
+        "rank_order": "highest",
+        "top_k": 10,
+        "record_refs": [],
+    }
+    result_id = mcp_server.spatial_domain_result_id(project, request)
+    persisted = {
+        "schema_version": "spatial_evidence/v18",
+        "result_id": result_id,
+        "status": "available",
+        "analysis": "scope",
+        "fact_domains": ["population"],
+        "evidence_dimensions": ["population.scale"],
+    }
+
+    monkeypatch.setattr(mcp_server.service, "read_history_project", lambda **_kwargs: project)
+    monkeypatch.setattr(
+        mcp_server.spatial_evidence_result_store,
+        "read",
+        lambda **kwargs: persisted if kwargs["result_id"] == result_id else None,
+    )
+    monkeypatch.setattr(
+        mcp_server.spatial_evidence,
+        "compute_domains",
+        lambda **_kwargs: pytest.fail("persisted result should avoid computation"),
+    )
+    monkeypatch.setattr(
+        mcp_server.spatial_evidence_result_store,
+        "persist",
+        lambda **_kwargs: pytest.fail("persisted result should not be written again"),
+    )
+
+    result = mcp_server.compute_spatial_evidence(
+        "history-persisted",
+        "scope",
+        ["population"],
+        ["population.scale"],
+    )
+
+    assert result["result_id"] == result_id
+
+
 def test_complete_data_mcp_outputs_are_objects():
     async def exercise() -> dict:
         root = Path(__file__).resolve().parents[2]
         params = StdioServerParameters(
-            command="python",
+            command=sys.executable,
             args=["-m", "modules.spatial_projects.mcp_server"],
             cwd=str(root),
         )
@@ -299,10 +462,87 @@ def test_complete_data_mcp_outputs_are_objects():
     assert output_schemas["compute_spatial_evidence"]["type"] == "object"
     assert output_schemas["read_spatial_evidence_result"]["type"] == "object"
     assert output_schemas["analyze_spatial_question"]["type"] == "object"
+    assert output_schemas["read_strategy_chapters"]["type"] == "object"
+    assert output_schemas["project_context"]["type"] == "object"
     assert output_schemas["read_project_document"]["type"] == "object"
     assert output_schemas["search_literature_evidence"]["type"] == "object"
     assert output_schemas["search_public_web"]["type"] == "object"
     assert output_schemas["fetch_public_web_page"]["type"] == "object"
+
+
+def test_agent_project_context_keeps_only_readable_spatial_result_references(monkeypatch):
+    monkeypatch.setattr(
+        mcp_server.data_contract,
+        "project_context",
+        lambda history_id: {
+            "project": {"history_id": history_id},
+            "documents": [],
+            "datasets": [],
+            "computed_results": [
+                {"result_id": "computed:poi:summary", "data": {"large": "payload"}},
+                {
+                    "result_id": "computed:population:summary",
+                    "result_type": "dataset_summary",
+                    "dataset_ids": ["population"],
+                    "year": 2026,
+                    "method": "persisted_analysis_summary",
+                    "data": {"cell_count": 439, "population_total": 71614.99, "age_total": {"05": 3400}},
+                },
+                {"result_id": "metric:direction", "data": {"large": "payload"}},
+                {
+                    "result_id": "spatial:available",
+                    "status": "available",
+                    "analysis": "direction",
+                    "fact_domains": ["poi"],
+                    "evidence_dimensions": ["poi.supply"],
+                    "summary": {"large": "payload"},
+                },
+                {
+                    "result_id": "spatial:unavailable",
+                    "status": "unavailable",
+                    "tool_id": "spatial_evidence",
+                    "data": {"large": "payload"},
+                },
+            ],
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        mcp_server.spatial_evidence_result_store,
+        "list_references",
+        lambda **_kwargs: [],
+    )
+
+    result = mcp_server.project_context("history-1")
+
+    assert result["computed_results"] == [
+        {
+            "result_id": "computed:population:summary",
+            "title": "当前项目人口格网确定性汇总",
+            "result_type": "dataset_summary",
+            "dataset_ids": ["population"],
+            "year": 2026,
+            "method": "persisted_analysis_summary",
+            "data": {"cell_count": 439, "population_total": 71614.99, "age_total": {"05": 3400}},
+            "source_type": "project_dataset_summary",
+            "source_locator": "computed:population:summary",
+        },
+        {
+            "result_id": "spatial:available",
+            "status": "available",
+            "analysis": "direction",
+            "fact_domains": ["poi"],
+            "evidence_dimensions": ["poi.supply"],
+        },
+        {
+            "result_id": "spatial:unavailable",
+            "status": "unavailable",
+            "analysis": "spatial_evidence",
+            "fact_domains": [],
+            "evidence_dimensions": [],
+        },
+    ]
+    assert "payload" not in json.dumps(result)
 
 
 def test_public_web_mcp_tools_await_provider_calls(monkeypatch):
@@ -500,14 +740,9 @@ def test_persisted_metric_results_are_read_without_execution():
     assert read["result"]["data"] == {"value": 12}
 
 
-def test_database_failures_return_retryable_mcp_envelope():
-    response = _call(lambda: (_ for _ in ()).throw(SQLAlchemyError("connection lost")))
-    assert response == {
-        "status": "unavailable",
-        "error": "data_source_unavailable",
-        "retryable": True,
-        "limitations": ["项目数据源当前不可用，未执行或读取本次请求。"],
-    }
+def test_database_failures_propagate_as_tool_failures():
+    with pytest.raises(RuntimeError, match="data_source_unavailable"):
+        _call(lambda: (_ for _ in ()).throw(SQLAlchemyError("connection lost")))
 
 
 def test_document_resource_tool_returns_mcp_resource_link(monkeypatch):
@@ -533,7 +768,7 @@ def test_document_resource_tool_returns_mcp_resource_link(monkeypatch):
 def test_spatial_project_mcp_registers_original_document_resource_template():
     async def exercise():
         root = Path(__file__).resolve().parents[2]
-        params = StdioServerParameters(command="python", args=["-m", "modules.spatial_projects.mcp_server"], cwd=str(root))
+        params = StdioServerParameters(command=sys.executable, args=["-m", "modules.spatial_projects.mcp_server"], cwd=str(root))
         async with stdio_client(params) as streams:
             async with ClientSession(*streams) as session:
                 await session.initialize()

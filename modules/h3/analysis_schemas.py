@@ -38,22 +38,9 @@ class H3MetricsRequest(BaseModel):
         "gcj02",
         description="Coordinate system of POI locations",
     )
-    neighbor_ring: int = Field(1, ge=1, le=3, description="Neighbor ring size for neighborhood metrics")
     use_arcgis: bool = Field(
         True,
         description="Deprecated. ArcGIS engine is always used and this field is ignored.",
-    )
-    arcgis_neighbor_ring: int = Field(
-        1,
-        ge=1,
-        le=3,
-        description="Neighbor ring size for ArcGIS path; mapped to KNN(1->6,2->18,3->36)",
-    )
-    arcgis_knn_neighbors: Optional[int] = Field(
-        None,
-        ge=1,
-        le=64,
-        description="Optional KNN input; currently ignored because ring is authoritative.",
     )
     arcgis_timeout_sec: int = Field(
         240,
@@ -76,6 +63,7 @@ class H3AnalysisSummary(BaseModel):
     global_moran_z_score: Optional[float] = None
     analysis_engine: Literal["arcgis"] = "arcgis"
     arcgis_status: Optional[str] = None
+    spatial_statistics_method: Dict[str, Any] = Field(default_factory=dict)
     arcgis_report_maps: Dict[str, Any] = Field(default_factory=dict)
     gi_render_meta: Dict[str, Any] = Field(default_factory=dict)
     lisa_render_meta: Dict[str, Any] = Field(default_factory=dict)

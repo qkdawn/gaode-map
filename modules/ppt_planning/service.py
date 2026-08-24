@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from core.config import settings
-from modules.agent.providers.llm_provider import _invoke_json_role, is_llm_enabled
+from modules.agent.providers.client import invoke_json_role as _invoke_json_role, is_llm_enabled
 from modules.agent.providers.chat_parser import LlmJsonParseError, extract_json_object
 from modules.evidence_retrieval import SourceRecord, evidence_node_from_node_payload
 

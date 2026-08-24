@@ -5,7 +5,6 @@ import modules.agent.tool_definitions.source_evidence as source_evidence_tools
 from modules.agent.context_ask_compaction import compact_evidence_nodes
 from modules.agent.selected_sources import evidence_count_from_item, evidence_nodes_from_item, selected_sources_summary_from_items, source_records_from_items
 from modules.agent.tool_definitions.source_evidence import read_selected_source_evidence_node, search_selected_source_evidence
-from modules.agent.providers.tool_call_execution import execute_tool_call_step
 from modules.agent.schemas import AnalysisSnapshot, ExecutionTraceItem, PlanStep
 from modules.agent.executor import validate_tool_arguments
 from modules.agent.tools import get_tool_registry
@@ -266,27 +265,6 @@ def test_read_selected_source_evidence_node_rejects_unselected_source_id():
     assert result.status == "failed"
     assert result.error == "source_id_not_selected"
     assert "source_id_not_selected:web:not-selected" in result.warnings
-
-
-def test_governance_blocked_tool_call_keeps_result_failed_and_trace_blocked():
-    registry = get_tool_registry()
-    step = PlanStep(tool_name="compute_road_syntax_from_scope", reason="需要路网句法")
-
-    execution = asyncio.run(
-        execute_tool_call_step(
-            registered_tool=registry.get("compute_road_syntax_from_scope"),
-            step=step,
-            snapshot=AnalysisSnapshot(scope={"polygon": [[1, 1], [1, 2], [2, 2], [1, 1]]}),
-            artifacts={},
-            question="为什么这里路网差",
-            governance_mode="guarded",
-            confirmed_tools=[],
-        )
-    )
-
-    assert execution.trace.status == "failed"
-    assert execution.result.status == "failed"
-    assert execution.result.error == "unknown_tool:compute_road_syntax_from_scope"
 
 
 def test_resolve_type_info_supports_aliases_for_site_advice():
